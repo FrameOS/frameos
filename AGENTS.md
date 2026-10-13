@@ -186,6 +186,11 @@
   column on the cloud. Frames get it in the share JSON and hand it to
   `frameos.fetchImage(url, {colors})`. The editor is the Assets panel's
   (`ColorEditorModal`, preview math in `utils/assetColors/preview.ts`).
+- The album scene has three builders (the SPA's, and `POST /api/photos/scene`
+  on each plane); `docs/photo-album-scene.json` is the scene they all must
+  build, and all three tests compare with it. Change one, change all three.
+  The photos MCP tools (same names on both servers) gate every write on
+  `confirm`: a frame playing a shared album shows the change.
 - Cloud uploads are scanned before anything is stored (hash list,
   PhotoDNA), and a configured scanner that fails stores nothing. Not OpenAI
   moderation: it scores `sexual/minors` on text only. Any new table holding photo objects goes into

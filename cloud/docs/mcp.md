@@ -74,6 +74,7 @@ How it plugs in (`src/lib/api-tokens.ts`):
 | `GET /api/account/scenes/{id}` | One scene: summary, every version with the listing and image digests it recorded, the latest version's images, preview/share URLs. |
 | `POST /api/scenes/lint` | `{scenes}` → `{ok, errors, warnings}`: the AI's delivery gate (shape, app keywords, deep lint). |
 | `POST /api/scenes/render` | `{scene_id\|scenes, version?, scene?, width?, height?, time_zone?, settings?, states?, format?}` → PNG (or JSON with `png_base64`, logs, errors, state). |
+| `POST /api/photos/scene` | `{path, seconds?, order?, fit?, name?}` → `{scene, share}`: the scene that plays a photo folder, with its share link (`docs/photos.md`; the backend has it too). |
 
 ### Server-side rendering
 
@@ -128,7 +129,7 @@ real client. `GET` and `DELETE` answer 405: there is nothing to stream or end.
 
 ### Tools
 
-Around 70 tools in five groups; every one documents its parameters. Read-only
+Around 80 tools in six groups; every one documents its parameters. Read-only
 tools are annotated `readOnlyHint`, destructive ones `destructiveHint` and
 take `confirm: true` — as does every tool that changes what a physical frame
 does, shows or stores (`frame_scene_install`, `frame_scene_update`,
@@ -136,7 +137,8 @@ does, shows or stores (`frame_scene_install`, `frame_scene_update`,
 `frame_settings_update`,
 `frame_schedule_set`, `frame_command_send`, `frame_reboot`, `frame_restart`,
 the `frame_asset_*` writes, `frame_assets_sync_fonts`,
-`frame_service_settings_enable`, `frame_firmware_update`). A test enumerates
+`frame_service_settings_enable`, `frame_firmware_update`,
+`photo_album_install`, every photo library write and `photo_share_create`). A test enumerates
 the tools by annotation and name and fails when one of them lacks the
 literal. The server's
 instructions tell the model to treat every tool result as untrusted data and
@@ -184,6 +186,19 @@ a frame's logs must not be able to talk an agent into installing something.
   each of the last three publishes one; position 0 is the cover),
   `scene_render`, `scene_lint`.
 - **store** — `store_browse`, `store_scene_get`, `store_scene_report`.
+- **photos** — the account's library (`docs/photos.md`, "MCP"; the names
+  match the backend's): `photos_status`, `photos_list`, `photo_get` (the
+  thumbnail, else the file), `photo_upload` (base64, or a URL fetched through
+  the host's `fetchExternal` — the SSRF-guarded one in the hosted endpoint —
+  and held to `max_upload_bytes`; sent in the upload route's 4 MiB chunks and
+  scanned like any upload), `photo_folder_create`, `photos_move`,
+  `photo_rename`, `photos_delete`, `photo_colors_set`, `photo_shares_list`,
+  `photo_share_create`, `photo_share_delete`, and `photo_album_install`
+  (`POST /api/photos/scene`, then what `frame_scene_install` does with raw
+  JSON: a private scene, added to the frame). The writes are gated: a frame
+  playing a shared album shows the folder as it is at its next photo. An
+  upload through the MCP has no browser to make its thumbnail, so the
+  library shows the photo itself for it.
 - **ai** — `ai_scene_chat` (follows the NDJSON turn up to `wait_seconds`,
   then `apply`: none / new_scene / save_version), `ai_turn_wait`,
   `ai_turn_cancel`, `ai_chats_list`, `ai_chat_get`, `ai_chat_delete`. The

@@ -22,11 +22,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.frame import Frame, server_scheme_for_frame
 from app.models.photo_share import PhotoShare
 from app.redis import get_redis
 from app.tenancy import current_project_id
 from app.utils import photos
 from app.utils.asset_headers import inert_asset_headers
+from app.utils.photo_album_scene import DEFAULT_SECONDS, FIT_VALUES, ORDER_VALUES, build_photo_album_scene
 from app.utils.rate_limit import hit_rate_limit
 from app.utils.request_ip import client_ip_for_request
 from app.utils.upload_limits import read_body_limited
@@ -65,6 +67,19 @@ class PhotoColorsBody(BaseModel):
     # Any JSON: the shape is checked by hand, so a wrong one is the
     # contract's 400 rather than FastAPI's 422.
     colors: Any = None
+
+
+class PhotoSceneBody(BaseModel):
+    path: str
+    # Checked by hand too, for the contract's 400s.
+    frame_id: Any = None
+    name: Any = None
+    seconds: Any = None
+    order: Any = None
+    fit: Any = None
+
+
+MAX_SCENE_NAME_LENGTH = 256
 
 
 async def _ready_root(project_id: int) -> Path:
@@ -231,13 +246,20 @@ async def photos_shares(db: Session = Depends(get_db)):
 
 @api_project.post("/photos/shares")
 async def photos_create_share(data: PhotoPathBody, db: Session = Depends(get_db)):
-    if data.path == "":
+    return {"share": photos.share_json(await _folder_share(db, data.path))}
+
+
+async def _folder_share(db: Session, path: str) -> PhotoShare:
+    """The folder's link, made now unless it already has one."""
+    if path == "":
         raise _bad_request("Share a folder, not the whole library")
-    rel = photos.validate_path(data.path)
+    rel = photos.validate_path(path)
     project_id = current_project_id()
     root = await _ready_root(project_id)
     folder = photos.disk_path(root, rel)
     if not await asyncio.to_thread(folder.is_dir):
+        if await asyncio.to_thread(folder.is_file):
+            raise _bad_request("Share a folder, not a file")
         raise _not_found("Folder not found")
     share = (
         db.query(PhotoShare)
@@ -250,7 +272,52 @@ async def photos_create_share(data: PhotoPathBody, db: Session = Depends(get_db)
         db.add(share)
         db.commit()
         db.refresh(share)
-    return {"share": photos.share_json(share)}
+    return share
+
+
+def _frame_origin(frame: Frame) -> str:
+    """The address this frame reaches the backend at (the SPA's shareUrlForFrame)."""
+    host = (frame.server_host or "").strip()
+    if not host:
+        raise _bad_request("This frame does not know the address of this backend. Set it in the frame settings.")
+    scheme = "https" if server_scheme_for_frame(frame) == "https" else "http"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    port = f":{frame.server_port}" if frame.server_port else ""
+    return f"{scheme}://{host}{port}"
+
+
+@api_project.post("/photos/scene")
+async def photos_album_scene(data: PhotoSceneBody, db: Session = Depends(get_db)):
+    """A ready scene that plays the folder on one frame, with the folder's
+    share link in it (made now if it has none). Installing it is the frame
+    routes' business."""
+    seconds = DEFAULT_SECONDS if data.seconds is None else data.seconds
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not 0 < seconds < float("inf"):
+        raise _bad_request("seconds must be a positive number")
+    order = "random" if data.order is None else data.order
+    if order not in ORDER_VALUES:
+        raise _bad_request(f"order must be one of {', '.join(ORDER_VALUES)}")
+    fit = "cover" if data.fit is None else data.fit
+    if fit not in FIT_VALUES:
+        raise _bad_request(f"fit must be one of {', '.join(FIT_VALUES)}")
+    if data.name is not None and (not isinstance(data.name, str) or len(data.name) > MAX_SCENE_NAME_LENGTH):
+        raise _bad_request(f"name must be text of at most {MAX_SCENE_NAME_LENGTH} characters")
+    if isinstance(data.frame_id, bool) or not isinstance(data.frame_id, int):
+        raise _bad_request("frame_id is required: the scene's link is the address that frame uses to reach the backend")
+    frame = db.query(Frame).filter_by(project_id=current_project_id(), id=data.frame_id).first()
+    if frame is None:
+        raise _not_found("Frame not found")
+    origin = _frame_origin(frame)
+    share = await _folder_share(db, data.path)
+    scene = build_photo_album_scene(
+        name=(data.name or "").strip() or photos.base_name(share.path),
+        album_url=origin + photos.share_url(share.token),
+        seconds=seconds,
+        order=order,
+        fit=fit,
+    )
+    return {"scene": scene, "share": photos.share_json(share)}
 
 
 @api_project.delete("/photos/shares/{token}")

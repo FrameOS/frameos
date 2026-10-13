@@ -1,0 +1,165 @@
+{
+  "about": "The scene an album plays on a frame (docs/photos.md, \"Installing photo scenes\"). Three builders make it: the SPA (frontend/src/scenes/photos/photoAlbumScene.ts), the backend (backend/app/utils/photo_album_scene.py) and the cloud (cloud/apps/auth-web/src/lib/photos/album-scene.ts). Each test builds `input` and compares it with `scene` after the same normalization: node ids become `ref` (type:keyword), edge and scene ids go, and the bundled app keeps its origin, its keys and its file names. Change a builder, change all three and this file.",
+  "input": {
+    "name": "Summer 2026",
+    "albumUrl": "https://frames.example/api/photos/shared/pk_fixture",
+    "seconds": 600,
+    "order": "newest",
+    "fit": "contain"
+  },
+  "scene": {
+    "name": "Summer 2026",
+    "settings": {
+      "backgroundColor": "#000000",
+      "refreshInterval": 600,
+      "execution": "interpreted"
+    },
+    "fields": [
+      {
+        "name": "seconds",
+        "role": "refreshInterval",
+        "label": "Seconds to show one photo",
+        "type": "float",
+        "persist": "disk",
+        "access": "public",
+        "value": "600"
+      },
+      {
+        "name": "order",
+        "label": "Order",
+        "type": "select",
+        "options": [
+          { "value": "random", "label": "Shuffle" },
+          { "value": "sequential", "label": "By name" },
+          { "value": "newest", "label": "Newest first" },
+          { "value": "oldest", "label": "Oldest first" }
+        ],
+        "persist": "disk",
+        "access": "public",
+        "value": "newest"
+      },
+      {
+        "name": "fit",
+        "label": "Fit",
+        "type": "select",
+        "options": [
+          { "value": "cover", "label": "Fill the screen" },
+          { "value": "contain", "label": "Show the whole photo" }
+        ],
+        "persist": "disk",
+        "access": "public",
+        "value": "contain"
+      },
+      {
+        "name": "photoIndex",
+        "label": "Position in the album",
+        "type": "integer",
+        "persist": "disk",
+        "access": "private",
+        "value": "0"
+      }
+    ],
+    "nodes": [
+      {
+        "ref": "event:render",
+        "type": "event",
+        "data": { "keyword": "render" },
+        "position": { "x": -320, "y": 120 }
+      },
+      {
+        "ref": "app:render/image",
+        "type": "app",
+        "data": { "keyword": "render/image", "config": {} },
+        "position": { "x": 200, "y": 140 }
+      },
+      {
+        "ref": "app:photoAlbum",
+        "type": "app",
+        "data": {
+          "keyword": "photoAlbum",
+          "config": {
+            "album": "https://frames.example/api/photos/shared/pk_fixture",
+            "counterStateKey": "photoIndex"
+          },
+          "cache": { "enabled": false }
+        },
+        "position": { "x": -260, "y": -200 }
+      },
+      {
+        "ref": "app:logic/nextSleepDuration",
+        "type": "app",
+        "data": { "keyword": "logic/nextSleepDuration", "config": {} },
+        "position": { "x": 640, "y": 140 }
+      },
+      {
+        "ref": "state:seconds",
+        "type": "state",
+        "data": { "keyword": "seconds" },
+        "position": { "x": 560, "y": 40 }
+      },
+      {
+        "ref": "state:order",
+        "type": "state",
+        "data": { "keyword": "order" },
+        "position": { "x": -520, "y": -140 }
+      },
+      {
+        "ref": "state:fit",
+        "type": "state",
+        "data": { "keyword": "fit" },
+        "position": { "x": 120, "y": 40 }
+      }
+    ],
+    "edges": [
+      {
+        "source": "event:render",
+        "sourceHandle": "next",
+        "target": "app:render/image",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "source": "app:photoAlbum",
+        "sourceHandle": "fieldOutput",
+        "target": "app:render/image",
+        "targetHandle": "fieldInput/image",
+        "type": "codeNodeEdge"
+      },
+      {
+        "source": "app:render/image",
+        "sourceHandle": "next",
+        "target": "app:logic/nextSleepDuration",
+        "targetHandle": "prev",
+        "type": "appNodeEdge"
+      },
+      {
+        "source": "state:seconds",
+        "sourceHandle": "fieldOutput",
+        "target": "app:logic/nextSleepDuration",
+        "targetHandle": "fieldInput/duration",
+        "type": "codeNodeEdge"
+      },
+      {
+        "source": "state:order",
+        "sourceHandle": "fieldOutput",
+        "target": "app:photoAlbum",
+        "targetHandle": "fieldInput/order",
+        "type": "codeNodeEdge"
+      },
+      {
+        "source": "state:fit",
+        "sourceHandle": "fieldOutput",
+        "target": "app:render/image",
+        "targetHandle": "fieldInput/placement",
+        "type": "codeNodeEdge"
+      }
+    ],
+    "apps": {
+      "photoAlbum": {
+        "origin": "repo/apps/code/photoAlbum",
+        "keys": ["cache", "category", "description", "fields", "name", "origin", "output", "sources", "version"],
+        "files": ["app.ts", "config.json"]
+      }
+    }
+  }
+}

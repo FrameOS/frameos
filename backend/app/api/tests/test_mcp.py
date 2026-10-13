@@ -1,16 +1,21 @@
 """`POST /api/mcp`: the JSON-RPC surface, the tool catalogue's confirm
 gate, and a few tools end to end against the real routes (in-process)."""
 import base64
+import io
 import json
 
+import httpx
 import pytest
+from PIL import Image
 from sqlalchemy.orm import Session
 
 from app.mcp.protocol import match_uri_template
 from app.mcp.registry import SchemaError, validate_value
+from app.mcp.tools import photos as photo_tools
 from app.mcp.tools.frames import duplicate_scenes
 from app.models import new_frame
 from app.models.frame import Frame
+from app.utils import photos as photos_utils
 
 # Every tool that changes what a physical frame does, shows or stores, or
 # removes something, takes `confirm`. Adding one means adding it here too.
@@ -35,6 +40,15 @@ GATED_TOOLS = {
     "frame_scene_update",
     "frame_stop",
     "frame_update",
+    "photo_album_install",
+    "photo_colors_set",
+    "photo_folder_create",
+    "photo_rename",
+    "photo_share_create",
+    "photo_share_delete",
+    "photo_upload",
+    "photos_delete",
+    "photos_move",
     "scene_delete",
 }
 
@@ -344,6 +358,132 @@ async def test_api_tokens_drive_the_mcp(async_client, db: Session, redis):
     tokens = result_json(await call(async_client, "api_tokens_list", headers=read_only))
     assert tokens["can_create"] is False
     assert len(tokens["api_tokens"]) == 2
+
+
+def jpeg(width: int = 64, height: int = 48) -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (width, height), (30, 120, 200)).save(buffer, format="JPEG")
+    return buffer.getvalue()
+
+
+@pytest.fixture
+def photo_library(tmp_path, monkeypatch):
+    monkeypatch.setenv("FRAMEOS_PHOTOS_DIR", str(tmp_path / "photos"))
+    monkeypatch.delenv("FRAMEOS_PHOTOS_ALLOW_EPHEMERAL", raising=False)
+    monkeypatch.delenv("HASSIO_TOKEN", raising=False)
+    monkeypatch.setattr(photos_utils, "_running_in_docker", lambda: False)
+
+
+@pytest.mark.asyncio
+async def test_photos_tools_against_the_real_routes(async_client, db: Session, redis, photo_library, monkeypatch):
+    # Small chunks, so one photo takes several upload requests.
+    monkeypatch.setattr(photo_tools, "CHUNK_BYTES", 200)
+    photo = jpeg()
+    assert len(photo) > 400
+
+    assert result_json(await call(async_client, "photos_status"))["ready"] is True
+
+    no_confirm = (await rpc(async_client, "tools/call", {"name": "photo_upload", "arguments": {"filename": "a.jpg", "content_base64": ""}})).json()
+    assert no_confirm["error"]["code"] == -32602
+
+    folder = result_json(await call(async_client, "photo_folder_create", {"confirm": True, "path": "Summer 2026"}))
+    assert folder["entry"]["kind"] == "folder"
+
+    uploaded = result_json(await call(async_client, "photo_upload", {
+        "confirm": True, "folder": "Summer 2026", "filename": "beach.jpg", "content_base64": base64.b64encode(photo).decode(),
+    }))
+    assert uploaded["entry"]["path"] == "Summer 2026/beach.jpg"
+    assert (uploaded["entry"]["width"], uploaded["entry"]["height"], uploaded["entry"]["size"]) == (64, 48, len(photo))
+
+    both = await call(async_client, "photo_upload", {"confirm": True, "filename": "x.jpg", "content_base64": "", "url": "https://example.com/x.jpg"})
+    assert both.get("isError") is True
+
+    listed = result_json(await call(async_client, "photos_list", {"path": "Summer 2026"}))
+    assert [entry["name"] for entry in listed["entries"]] == ["beach.jpg"]
+    root = result_json(await call(async_client, "photos_list"))
+    assert root["entries"][0]["items"] == 1
+
+    thumb = await call(async_client, "photo_get", {"path": "Summer 2026/beach.jpg"})
+    assert [item["type"] for item in thumb["content"]] == ["text", "image"]
+    assert "thumbnail" in thumb["content"][0]["text"]
+    original = await call(async_client, "photo_get", {"path": "Summer 2026/beach.jpg", "original": True})
+    assert base64.b64decode(original["content"][1]["data"]) == photo
+
+    colored = result_json(await call(async_client, "photo_colors_set", {
+        "confirm": True, "path": "Summer 2026/beach.jpg", "colors": {"exposure": 0.3, "saturation": 20},
+    }))
+    assert colored["entry"]["colors"] == {"exposure": 0.3, "saturation": 20}
+
+    renamed = result_json(await call(async_client, "photo_rename", {"confirm": True, "path": "Summer 2026/beach.jpg", "name": "sea.jpg"}))
+    assert renamed["entry"]["colors"] == {"exposure": 0.3, "saturation": 20}
+
+    shared = result_json(await call(async_client, "photo_share_create", {"confirm": True, "path": "Summer 2026"}))
+    token = shared["share"]["token"]
+    assert result_json(await call(async_client, "photo_shares_list"))["shares"][0]["token"] == token
+
+    frame = await new_frame(db, redis, "Kitchen", "localhost", "10.0.0.5")
+    installed = result_json(await call(async_client, "photo_album_install", {
+        "confirm": True, "frame_id": frame.id, "path": "Summer 2026", "seconds": 600, "order": "newest", "deploy": "none",
+    }))
+    assert installed["share"]["token"] == token
+    assert installed["deploy"] == "none"
+    scenes = frame_row(db, frame.id).scenes
+    assert [scene["name"] for scene in scenes] == ["Summer 2026"]
+    assert installed["installed"] == [{"id": scenes[0]["id"], "name": "Summer 2026"}]
+    album = next(node for node in scenes[0]["nodes"] if node["data"]["keyword"] == "photoAlbum")
+    assert album["data"]["config"]["album"] == f"http://10.0.0.5:{frame.server_port}/api/photos/shared/{token}"
+    assert set(scenes[0]["apps"]["photoAlbum"]["sources"]) == {"app.ts", "config.json"}
+
+    missing_frame = await call(async_client, "photo_album_install", {"confirm": True, "frame_id": frame.id + 100, "path": "Summer 2026"})
+    assert missing_frame.get("isError") is True
+    assert "404" in result_text(missing_frame)
+
+    moved = result_json(await call(async_client, "photos_move", {"confirm": True, "paths": ["Summer 2026/sea.jpg"], "to": ""}))
+    assert moved["moved"] == [{"from": "Summer 2026/sea.jpg", "to": "sea.jpg"}]
+
+    assert result_json(await call(async_client, "photo_share_delete", {"confirm": True, "token": token})) == {"deleted": True}
+    assert result_json(await call(async_client, "photos_delete", {"confirm": True, "paths": ["sea.jpg", "Summer 2026"]})) == {"deleted": 2}
+    assert result_json(await call(async_client, "photos_list"))["entries"] == []
+
+
+@pytest.mark.asyncio
+async def test_photo_upload_from_a_url(async_client, photo_library, monkeypatch):
+    photo = jpeg()
+    hits: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        hits.append(str(request.url))
+        if request.url.path == "/old/sunset glow.jpg":
+            return httpx.Response(302, headers={"location": "/new/sunset%20glow.jpg"})
+        if request.url.path == "/new/sunset glow.jpg":
+            return httpx.Response(200, content=photo, headers={"content-type": "image/jpeg"})
+        if request.url.path == "/to-metadata":
+            return httpx.Response(302, headers={"location": "http://169.254.169.254/latest"})
+        if request.url.path == "/huge.jpg":
+            return httpx.Response(200, content=b"x" * 2000)
+        return httpx.Response(404)
+
+    monkeypatch.setattr(photo_tools, "_outbound_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+
+    uploaded = result_json(await call(async_client, "photo_upload", {
+        "confirm": True, "folder": "Web", "url": "http://127.0.0.1/old/sunset%20glow.jpg",
+    }))
+    assert uploaded["entry"]["path"] == "Web/sunset glow.jpg"
+    assert uploaded["entry"]["size"] == len(photo)
+    assert hits == ["http://127.0.0.1/old/sunset%20glow.jpg", "http://127.0.0.1/new/sunset%20glow.jpg"]
+
+    # Every hop passes the backend's outbound check, redirects included.
+    blocked = await call(async_client, "photo_upload", {"confirm": True, "url": "http://127.0.0.1/to-metadata", "filename": "a.jpg"})
+    assert blocked.get("isError") is True
+    assert "link-local" in result_text(blocked)
+    assert not any("169.254" in hit for hit in hits)
+
+    monkeypatch.setattr(photo_tools, "MAX_UPLOAD_BYTES", 1000)
+    too_big = await call(async_client, "photo_upload", {"confirm": True, "url": "http://127.0.0.1/huge.jpg"})
+    assert too_big.get("isError") is True
+    assert "over" in result_text(too_big)
+    gone = await call(async_client, "photo_upload", {"confirm": True, "url": "http://127.0.0.1/nope.jpg"})
+    assert "404" in result_text(gone)
 
 
 def test_duplicate_scenes_rewrites_references():

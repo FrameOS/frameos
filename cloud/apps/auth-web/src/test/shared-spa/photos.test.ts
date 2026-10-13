@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { buildPhotoAlbumScene as buildCloudPhotoAlbumScene } from "../../lib/photos/album-scene";
 import {
   isPhotoPathInside,
   parentPhotoPath,
@@ -227,5 +229,67 @@ describe("photo colors", () => {
       width: FULL_FIDELITY_MAX_SIDE,
       height: (FULL_FIDELITY_MAX_SIDE * 3) / 4,
     });
+  });
+});
+
+// docs/photo-album-scene.json pins the SPA's builder, the cloud's (POST
+// /api/photos/scene) and the backend's (test_photos.py) to one scene.
+describe("the photo album scene fixture", () => {
+  type Built = {
+    apps?: Record<string, { origin?: string; sources?: Record<string, string> }>;
+    edges: { source: string; sourceHandle?: string | null; target: string; targetHandle?: string | null; type?: string }[];
+    fields?: unknown;
+    name: string;
+    nodes: { data: Record<string, unknown>; id: string; position: unknown; type?: string }[];
+    settings?: unknown;
+  };
+
+  const fixture = JSON.parse(
+    readFileSync(new URL("../../../../../../docs/photo-album-scene.json", import.meta.url), "utf8"),
+  ) as {
+    input: { albumUrl: string; fit: "cover" | "contain"; name: string; order: "newest"; seconds: number };
+    scene: unknown;
+  };
+
+  function normalized(scene: Built) {
+    const refs = new Map(scene.nodes.map((node) => [node.id, `${node.type}:${String(node.data.keyword)}`]));
+    const app = scene.apps?.photoAlbum ?? {};
+    return {
+      name: scene.name,
+      settings: scene.settings,
+      fields: scene.fields,
+      nodes: scene.nodes.map((node) => ({
+        ref: refs.get(node.id),
+        type: node.type,
+        data: node.data,
+        position: node.position,
+      })),
+      edges: scene.edges.map((edge) => ({
+        source: refs.get(edge.source),
+        sourceHandle: edge.sourceHandle,
+        target: refs.get(edge.target),
+        targetHandle: edge.targetHandle,
+        type: edge.type,
+      })),
+      apps: {
+        photoAlbum: {
+          origin: app.origin,
+          keys: Object.keys(app).sort(),
+          files: Object.keys(app.sources ?? {}).sort(),
+        },
+      },
+    };
+  }
+
+  it("is what the SPA builds", () => {
+    const scene = buildPhotoAlbumScene(fixture.input) as unknown as Built;
+    expect(normalized(scene)).toEqual(fixture.scene);
+  });
+
+  it("is what the cloud's scene route builds, with the same app", () => {
+    const scene = buildCloudPhotoAlbumScene(fixture.input) as unknown as Built;
+    expect(normalized(scene)).toEqual(fixture.scene);
+    const spa = buildPhotoAlbumScene(fixture.input) as unknown as Built;
+    expect(scene.apps?.photoAlbum?.sources).toEqual(spa.apps?.photoAlbum?.sources);
   });
 });

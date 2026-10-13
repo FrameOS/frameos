@@ -204,7 +204,7 @@ everything in them, and so do the share links pointing at or below them.
 - `POST /api/photos/shares` with `{"path": "Summer 2026"}` →
   `{"share": Share}`. A folder has at most one link, so this returns the
   existing one if there is one. The path must be an existing folder, not the
-  root.
+  root: 400 for the root or a file, 404 when nothing is there.
 - `DELETE /api/photos/shares/{token}` → `{"deleted": true}`.
 
 ```json
@@ -221,6 +221,32 @@ frames use to reach it, so it returns `/api/photos/shared/<token>` and the
 SPA puts the frame's `server_scheme://server_host:server_port` in front.
 
 Tokens are `pk_` plus at least 32 URL-safe random characters.
+
+### `POST /api/photos/scene`
+
+```json
+{"path": "Summer 2026", "seconds": 3600, "order": "random", "fit": "cover", "name": "Summer", "frame_id": 4}
+```
+
+→ `{"scene": Scene, "share": Share}`: a ready scene that plays the folder
+(see Installing photo scenes), with the folder's share link in it. The link
+is made now when the folder has none, as `POST /api/photos/shares` would.
+Installing the scene is up to the caller (the frame routes, or the MCP's
+`photo_album_install`).
+
+- `path`: an existing folder, not the root (400 for the root or a file, 404
+  when nothing is there).
+- `seconds`: how long each photo stays, a positive number, default 3600.
+- `order`: `random` (default), `sequential`, `newest` or `oldest`.
+- `fit`: `cover` (default) or `contain`.
+- `name`: the scene's name, at most 256 characters; default the folder's
+  name.
+- `frame_id`: backend only, and required there: the link in the scene is the
+  address that frame uses to reach the backend (its `server_scheme`,
+  `server_host` and `server_port`), so 404 for a frame of another project and
+  400 for a frame without a server host. The cloud's links are absolute and
+  it ignores the key.
+- A bad option is a 400, checked before anything is shared.
 
 ## Share routes (what frames call)
 
@@ -385,3 +411,27 @@ share link, builds a scene around `repo/apps/code/photoAlbum` with the link in
 the app node's config, and installs it like any other scene (the frame's
 scenes list; the deploy follows). Settings: how long each photo stays, the
 order, and how a photo fits the screen.
+
+The scene: a `render` event into `render/image`, whose image comes from the
+photoAlbum app node (`album` and `counterStateKey: "photoIndex"` in its
+config, the app's config and sources in the scene's `apps.photoAlbum`), then
+`logic/nextSleepDuration`. Its fields are `seconds` (the refresh interval),
+`order` and `fit` (public, saved to disk, wired into the app and the
+placement) and `photoIndex` (private, saved to disk: the frame's place in the
+album). Three builders make it: the SPA's (no round trip), the backend's and
+the cloud's (both behind `POST /api/photos/scene`).
+`docs/photo-album-scene.json` holds the scene they must all build; the SPA's
+and the cloud's tests (`shared-spa/photos.test.ts`) and the backend's
+(`test_photos.py`) compare with it.
+
+## MCP
+
+Both MCP servers (`docs/mcp.md`, `cloud/docs/mcp.md`) have the same photos
+tools: `photos_status`, `photos_list`, `photo_get` (the thumbnail, or the
+file with `original`), `photo_upload` (base64 or a URL the server downloads,
+sent in the upload route's chunks), `photo_folder_create`, `photos_move`,
+`photo_rename`, `photos_delete`, `photo_colors_set`, `photo_shares_list`,
+`photo_share_create`, `photo_share_delete` and `photo_album_install`
+(`POST /api/photos/scene`, then the frame's own install). Every write takes
+`confirm: true`, because a frame playing a shared album shows the change on
+its next photo, and sharing makes a folder readable by anyone with the link.

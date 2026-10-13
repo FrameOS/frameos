@@ -11,8 +11,12 @@ from urllib.parse import quote
 import pytest
 from PIL import Image
 
+from app.models import new_frame
 from app.models.photo_share import PhotoShare
 from app.utils import photos as photos_utils
+from app.utils.photo_album_scene import build_photo_album_scene
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 @pytest.fixture(autouse=True)
@@ -671,7 +675,8 @@ async def test_share_links(async_client):
 
     assert (await async_client.post("/api/photos/shares", json={"path": ""})).status_code == 400
     assert (await async_client.post("/api/photos/shares", json={"path": "Nope"})).status_code == 404
-    assert (await async_client.post("/api/photos/shares", json={"path": "file.jpg"})).status_code == 404
+    # A file is a 400, as on the cloud; only a missing path is a 404.
+    assert (await async_client.post("/api/photos/shares", json={"path": "file.jpg"})).status_code == 400
     assert (await async_client.post("/api/photos/shares", json={"path": "../x"})).status_code == 400
 
     response = await async_client.get("/api/photos/shares")
@@ -1002,3 +1007,153 @@ async def test_share_routes_carry_the_colors(async_client, no_auth_client, redis
     # The sidecar itself is not a photo a link serves.
     response = await no_auth_client.get(f"/api/photos/shared/{token}/file", params={"path": "a.jpg.frameos.json"})
     assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Album scenes (POST /api/photos/scene, docs/photo-album-scene.json)
+# ---------------------------------------------------------------------------
+
+
+def normalized_album_scene(scene: dict) -> dict:
+    """docs/photo-album-scene.json's normalization: ids out, refs in."""
+    refs = {node["id"]: f"{node['type']}:{node['data']['keyword']}" for node in scene["nodes"]}
+    app = scene["apps"]["photoAlbum"]
+    return {
+        "name": scene["name"],
+        "settings": scene["settings"],
+        "fields": scene["fields"],
+        "nodes": [
+            {"ref": refs[node["id"]], "type": node["type"], "data": node["data"], "position": node["position"]}
+            for node in scene["nodes"]
+        ],
+        "edges": [
+            {
+                "source": refs[edge["source"]],
+                "sourceHandle": edge["sourceHandle"],
+                "target": refs[edge["target"]],
+                "targetHandle": edge["targetHandle"],
+                "type": edge["type"],
+            }
+            for edge in scene["edges"]
+        ],
+        "apps": {"photoAlbum": {"origin": app["origin"], "keys": sorted(app), "files": sorted(app["sources"])}},
+    }
+
+
+def test_album_scene_matches_the_fixture():
+    fixture = json.loads((REPO_ROOT / "docs" / "photo-album-scene.json").read_text())
+    given = fixture["input"]
+    scene = build_photo_album_scene(
+        name=given["name"],
+        album_url=given["albumUrl"],
+        seconds=given["seconds"],
+        order=given["order"],
+        fit=given["fit"],
+    )
+    assert normalized_album_scene(scene) == fixture["scene"]
+    # Exactly as the SPA writes it, numbers included.
+    assert json.dumps(scene["settings"]["refreshInterval"]) == "600"
+    ids = [scene["id"], *(node["id"] for node in scene["nodes"]), *(edge["id"] for edge in scene["edges"])]
+    assert len(set(ids)) == len(ids)
+    app_dir = REPO_ROOT / "repo" / "apps" / "code" / "photoAlbum"
+    assert scene["apps"]["photoAlbum"]["sources"] == {
+        name: (app_dir / name).read_text() for name in fixture["scene"]["apps"]["photoAlbum"]["files"]
+    }
+    # Each scene gets its own copy of the app.
+    again = build_photo_album_scene(name="x", album_url="y", seconds=1.5, order="random", fit="cover")
+    again["apps"]["photoAlbum"]["sources"]["app.ts"] = ""
+    assert scene["apps"]["photoAlbum"]["sources"]["app.ts"]
+    assert again["fields"][0]["value"] == "1.5"
+
+
+@pytest.mark.asyncio
+async def test_album_scene_route(async_client, no_auth_client, db, redis):
+    root = library(async_client)
+    write(root, "Summer 2026/a.jpg", jpeg_bytes())
+    frame = await new_frame(db, redis, "Kitchen", "localhost", "10.0.0.5")
+    frame.server_port = 8989
+    frame.server_scheme = "http"
+    db.commit()
+
+    response = await async_client.post(
+        "/api/photos/scene",
+        json={"path": "Summer 2026", "frame_id": frame.id, "seconds": 600, "order": "newest", "fit": "contain"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    token = body["share"]["token"]
+    assert body["share"]["path"] == "Summer 2026"
+    assert body["share"]["url"] == f"/api/photos/shared/{token}"
+    scene = body["scene"]
+    normalized = normalized_album_scene(scene)
+    album = next(node for node in normalized["nodes"] if node["ref"] == "app:photoAlbum")
+    assert album["data"]["config"] == {
+        "album": f"http://10.0.0.5:8989/api/photos/shared/{token}",
+        "counterStateKey": "photoIndex",
+    }
+    assert scene["name"] == "Summer 2026"
+    assert scene["settings"]["refreshInterval"] == 600
+    assert [field["value"] for field in scene["fields"]] == ["600", "newest", "contain", "0"]
+    # The link the scene carries plays.
+    assert (await no_auth_client.get(f"/api/photos/shared/{token}")).json()["count"] == 1
+
+    # The folder keeps one link; defaults and a name of one's own.
+    again = (await async_client.post(
+        "/api/photos/scene", json={"path": "Summer 2026", "frame_id": frame.id, "name": " Beach "}
+    )).json()
+    assert again["share"]["token"] == token
+    assert (await share(async_client, "Summer 2026"))["token"] == token
+    assert db.query(PhotoShare).count() == 1
+    assert again["scene"]["name"] == "Beach"
+    assert again["scene"]["settings"]["refreshInterval"] == 3600
+    assert [field["value"] for field in again["scene"]["fields"]] == ["3600", "random", "cover", "0"]
+    assert again["scene"]["id"] != scene["id"]
+
+    # The address is the frame's: https and an IPv6 literal.
+    frame.server_host = "fd00::5"
+    frame.server_scheme = "https"
+    frame.server_port = 8443
+    db.commit()
+    ipv6 = (await async_client.post("/api/photos/scene", json={"path": "Summer 2026", "frame_id": frame.id})).json()
+    album_node = next(node for node in ipv6["scene"]["nodes"] if node["data"]["keyword"] == "photoAlbum")
+    assert album_node["data"]["config"]["album"] == f"https://[fd00::5]:8443/api/photos/shared/{token}"
+
+
+@pytest.mark.asyncio
+async def test_album_scene_route_refusals(async_client, db, redis):
+    root = library(async_client)
+    write(root, "Summer/a.jpg", jpeg_bytes())
+    frame = await new_frame(db, redis, "Kitchen", "localhost", "10.0.0.5")
+
+    async def post(**body):
+        return await async_client.post("/api/photos/scene", json={"path": "Summer", "frame_id": frame.id, **body})
+
+    for bad in (
+        {"seconds": 0},
+        {"seconds": -5},
+        {"seconds": "60"},
+        {"seconds": True},
+        {"order": "upside-down"},
+        {"order": ["random"]},
+        {"fit": "stretch"},
+        {"name": 5},
+        {"name": "x" * 257},
+        {"frame_id": None},
+        {"frame_id": str(frame.id)},
+        {"path": ""},
+        {"path": "../etc"},
+        {"path": "Summer/a.jpg"},
+    ):
+        response = await post(**bad)
+        assert response.status_code == 400, (bad, response.text)
+    assert (await post(frame_id=frame.id + 1000)).status_code == 404
+    assert (await post(path="Nope")).status_code == 404
+    # Nothing was shared by the refusals.
+    assert db.query(PhotoShare).count() == 0
+
+    frame.server_host = ""
+    db.commit()
+    response = await post()
+    assert response.status_code == 400
+    assert "address" in response.json()["detail"]
+    assert db.query(PhotoShare).count() == 0

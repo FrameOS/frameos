@@ -27,6 +27,7 @@ import { POST as postDelete } from "../../../app/api/photos/delete/route";
 import { POST as postFolders } from "../../../app/api/photos/folders/route";
 import { POST as postMove } from "../../../app/api/photos/move/route";
 import { POST as postRename } from "../../../app/api/photos/rename/route";
+import { POST as postScene } from "../../../app/api/photos/scene/route";
 import { GET as getShared } from "../../../app/api/photos/shared/[token]/route";
 import { GET as getSharedFile } from "../../../app/api/photos/shared/[token]/file/route";
 import { GET as getSharedPhoto } from "../../../app/api/photos/shared/[token]/photo/route";
@@ -860,6 +861,89 @@ describe("photo library: share links", () => {
       tokenParams(empty.token),
     );
     expect(await response.json()).toEqual({ count: 0, index: 3, photo: null });
+  });
+});
+
+describe("photo library: album scenes", () => {
+  type SceneNode = { data: { config?: unknown; keyword: string } };
+  type SceneAnswer = {
+    scene: {
+      apps: { photoAlbum: { origin: string; sources: Record<string, string> } };
+      fields: { value: string }[];
+      id: string;
+      name: string;
+      nodes: SceneNode[];
+      settings: { refreshInterval: number };
+    };
+    share: { path: string; token: string; url: string };
+  };
+
+  it("builds a scene that plays the folder, with the folder's one share link", async () => {
+    const accountId = await signIn();
+    await upload("Summer 2026", "a.png", png(10, 10, "scene"));
+    const response = await postScene(
+      postJson("/api/photos/scene", { fit: "contain", order: "newest", path: "Summer 2026", seconds: 600 }),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as SceneAnswer;
+    expect(body.share).toMatchObject({ path: "Summer 2026" });
+    expect(body.share.url).toBe(`${baseUrl}/api/photos/shared/${body.share.token}`);
+    const album = body.scene.nodes.find((node) => node.data.keyword === "photoAlbum");
+    expect(album?.data.config).toEqual({ album: body.share.url, counterStateKey: "photoIndex" });
+    expect(body.scene.name).toBe("Summer 2026");
+    expect(body.scene.settings).toEqual({ backgroundColor: "#000000", execution: "interpreted", refreshInterval: 600 });
+    expect(body.scene.fields.map((field) => field.value)).toEqual(["600", "newest", "contain", "0"]);
+    expect(body.scene.apps.photoAlbum.origin).toBe("repo/apps/code/photoAlbum");
+    expect(Object.keys(body.scene.apps.photoAlbum.sources).sort()).toEqual(["app.ts", "config.json"]);
+
+    // One link per folder: the one POST /shares hands out, made (and audited) once.
+    const again = (await (
+      await postScene(postJson("/api/photos/scene", { frame_id: 7, name: " Beach ", path: "Summer 2026" }))
+    ).json()) as SceneAnswer;
+    expect(again.share.token).toBe(body.share.token);
+    expect((await share("Summer 2026")).token).toBe(body.share.token);
+    expect(again.scene.name).toBe("Beach");
+    expect(again.scene.settings.refreshInterval).toBe(3600);
+    expect(again.scene.fields.map((field) => field.value)).toEqual(["3600", "random", "cover", "0"]);
+    expect(again.scene.id).not.toBe(body.scene.id);
+    const audited = await db
+      .select({ eventType: auditEvents.eventType })
+      .from(auditEvents)
+      .where(and(eq(auditEvents.accountId, accountId), eq(auditEvents.eventType, "photos.share_created")));
+    expect(audited).toHaveLength(1);
+
+    // The link in the scene plays.
+    signOut();
+    const listing = await getShared(get(`/api/photos/shared/${body.share.token}`), tokenParams(body.share.token));
+    expect(((await listing.json()) as { count: number }).count).toBe(1);
+  });
+
+  it("refuses bad options, files, missing folders and the root, sharing nothing", async () => {
+    const accountId = await signIn();
+    await upload("Summer", "a.png", png(10, 10, "scene-refusals"));
+    const cases: [Record<string, unknown>, number][] = [
+      [{ seconds: 0 }, 400],
+      [{ seconds: -5 }, 400],
+      [{ seconds: "60" }, 400],
+      [{ seconds: true }, 400],
+      [{ order: "upside-down" }, 400],
+      [{ order: ["random"] }, 400],
+      [{ fit: "stretch" }, 400],
+      [{ name: 5 }, 400],
+      [{ name: "x".repeat(257) }, 400],
+      [{ path: "" }, 400],
+      [{ path: "../etc" }, 400],
+      [{ path: "Summer/a.png" }, 400],
+      [{ path: "Nope" }, 404],
+    ];
+    for (const [overrides, status] of cases) {
+      const response = await postScene(postJson("/api/photos/scene", { path: "Summer", ...overrides }));
+      expect(response.status, JSON.stringify(overrides)).toBe(status);
+    }
+    expect(await db.select().from(photoShares).where(eq(photoShares.accountId, accountId))).toEqual([]);
+    expect((await postScene(postJson("/api/photos/scene", { path: "Summer" }, null))).status).toBe(403);
+    signOut();
+    expect((await postScene(postJson("/api/photos/scene", { path: "Summer" }))).status).toBe(401);
   });
 });
 

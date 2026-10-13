@@ -33,7 +33,9 @@ export interface PhotoAlbumSceneOptions {
 
 /** A scene that shows one photo of an album per render: render event →
  * render/image fed by the photoAlbum app, then sleep for `seconds`. The link
- * sits in the app node's config, out of the public state. */
+ * sits in the app node's config, out of the public state. The backend and the
+ * cloud build the same scene for `POST /api/photos/scene`;
+ * docs/photo-album-scene.json pins all three. */
 export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScene {
   const sources = embeddedRepoAppSources[PHOTO_ALBUM_APP_ORIGIN]
   if (!sources) {
