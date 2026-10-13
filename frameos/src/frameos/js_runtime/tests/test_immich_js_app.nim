@@ -18,8 +18,11 @@ let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 
 ## Mock Immich on a thread. The URL prefix selects the server's shape:
-## /legacy has no POST /api/search/random (older servers), /nomemories
-## answers 404 to /api/memories.
+## /legacy has no POST /api/search/random (older servers), /v2 is an Immich
+## before 3.2 (no structured search filter; album mode reads the album
+## timeline), /nomemories answers 404 to /api/memories. Otherwise it is
+## Immich 3.3. The album's "shared-1" photo is owned by another user: the flat
+## albumIds search, which filters by owner, never returns it.
 var mockPort: Port
 var mockThread: Thread[void]
 
@@ -48,6 +51,8 @@ proc mockImmichLoop() {.thread.} =
     "people": [{"name": "Alice"}, {"name": ""}]}"""
   let favorite = """{"id": "fav-1", "type": "IMAGE", "originalFileName": "fav.jpg", "isFavorite": true}"""
   let video = """{"id": "vid-1", "type": "VIDEO", "originalFileName": "clip.mp4"}"""
+  let shared = """{"id": "shared-1", "type": "IMAGE", "originalFileName": "theirs.jpg", "ownerId": "partner-less",
+    "exifInfo": {"make": "Pixel"}}"""
 
   while true:
     var client: Socket
@@ -83,10 +88,14 @@ proc mockImmichLoop() {.thread.} =
       client.reply("200 OK", "text/plain", "")
       break
     var legacy = false
+    var v2 = false
     var noMemories = false
     if path.startsWith("/legacy/"):
       legacy = true
       path = path[7..^1]
+    elif path.startsWith("/v2/"):
+      v2 = true
+      path = path[3..^1]
     elif path.startsWith("/nomemories/"):
       noMemories = true
       path = path[11..^1]
@@ -94,17 +103,38 @@ proc mockImmichLoop() {.thread.} =
       client.reply("401 Unauthorized", "application/json", """{"message":"Invalid API key"}""")
       continue
 
-    if path == "/api/search/random" and httpMethod == "POST":
+    if path == "/api/server/version":
+      if legacy:
+        client.reply("404 Not Found", "application/json", """{"message":"Cannot GET /api/server/version"}""")
+      elif v2:
+        client.reply("200 OK", "application/json", """{"major": 2, "minor": 5, "patch": 0}""")
+      else:
+        client.reply("200 OK", "application/json", """{"major": 3, "minor": 3, "patch": 1}""")
+    elif path == "/api/search/random" and httpMethod == "POST":
       if legacy:
         client.reply("404 Not Found", "application/json", """{"message":"Cannot POST /api/search/random"}""")
-      elif body.contains("\"albumIds\":[\"empty-album\"]"):
+      elif body.contains("empty-album"):
         client.reply("200 OK", "application/json", "[]")
-      elif body.contains("\"albumIds\":[\"not-a-uuid\"]"):
+      elif body.contains("not-a-uuid"):
         client.reply("400 Bad Request", "application/json", """{"message":["each value in albumIds must be a UUID"]}""")
+      elif body.contains("\"filter\":{\"type\":{\"eq\":\"IMAGE\"},\"albumIds\":{\"any\":[\"album-1\"]}}"):
+        client.reply("200 OK", "application/json", "[" & shared & "]")
       elif body.contains("\"isFavorite\":true"):
         client.reply("200 OK", "application/json", "[" & favorite & "]")
       else:
         client.reply("200 OK", "application/json", "[" & asset & "]")
+    elif path.startsWith("/api/timeline/buckets?albumId="):
+      if legacy:
+        client.reply("404 Not Found", "application/json", """{"message":"Cannot GET /api/timeline/buckets"}""")
+      elif path.endsWith("=empty-album"):
+        client.reply("200 OK", "application/json", "[]")
+      else:
+        client.reply("200 OK", "application/json", """[{"timeBucket": "2024-05-01", "count": 3}]""")
+    elif path.startsWith("/api/timeline/bucket?albumId=album-1&timeBucket=2024-05-01"):
+      client.reply("200 OK", "application/json",
+        """{"id": ["vid-1", "shared-1", "vid-2"], "isImage": [false, true, false], "ownerId": ["me", "partner-less", "me"]}""")
+    elif path == "/api/assets/shared-1":
+      client.reply("200 OK", "application/json", shared)
     elif path.startsWith("/api/assets/random"):
       client.reply("200 OK", "application/json", "[" & asset & "," & video & "," & favorite & "]")
     elif path.startsWith("/api/memories?for="):
@@ -203,7 +233,8 @@ suite "immich code app":
     let h = newHarness(mockBase())
     let album = h.render(%*{"mode": "album", "albumId": " album-1 ", "metadataStateKey": "photo"})
     check album.kind == fkImage and album.asImage().width == 5
-    check h.logged("Immich random search (album album-1)")
+    check h.scene.state["photo"]["id"].getStr() == "shared-1"
+    check h.logged("Immich album search (album album-1, all owners): HTTP 200, 1 image candidate(s)")
 
     let favorites = h.render(%*{"mode": "favorites", "metadataStateKey": "photo"})
     check favorites.kind == fkImage
@@ -213,6 +244,19 @@ suite "immich code app":
     let person = h.render(%*{"mode": "random", "personId": "person-9"})
     check person.kind == fkImage
     check h.logged("Immich random search (person person-9)")
+
+  test "album mode before Immich 3.2 reads the album timeline, every owner's photos":
+    let h = newHarness(mockBase() & "/v2")
+    let album = h.render(%*{"mode": "album", "albumId": "album-1", "metadataStateKey": "photo"})
+    check album.kind == fkImage and album.asImage().width == 5
+    check h.scene.state["photo"]["id"].getStr() == "shared-1"
+    check h.scene.state["photo"]["originalFileName"].getStr() == "theirs.jpg"
+    check h.scene.state["photo"]["make"].getStr() == "Pixel"
+    check h.logged("Immich album timeline (album album-1, bucket 2024-05-01): HTTP 200, 1 image candidate(s)")
+
+    let empty = newHarness(mockBase() & "/v2")
+    check empty.render(%*{"mode": "album", "albumId": "empty-album"}).kind == fkImage
+    check empty.errorLogged("This album contains no images")
 
   test "memories mode asks for the bare local date and falls back to random":
     let h = newHarness(mockBase())

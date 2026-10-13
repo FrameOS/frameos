@@ -33,6 +33,42 @@ export function todayIso(now: Date = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
 }
 
+// The flat search fields (albumIds, personIds, ...) AND an owner filter: only
+// the key's user and their timeline partners. A shared album's photos owned by
+// anyone else never match. Immich 3.2's structured `filter` searches an album
+// whole (access-checked), so album mode uses it there and the album timeline
+// before that.
+export function albumSearchBody(albumId: string): Record<string, unknown> {
+  return { size: 1, withExif: true, withPeople: true, filter: { type: { eq: 'IMAGE' }, albumIds: { any: [albumId] } } }
+}
+
+export function supportsFilterSearch(version: unknown): boolean {
+  const v = version as { major?: unknown; minor?: unknown } | null
+  if (!v || typeof v.major !== 'number' || typeof v.minor !== 'number') return false
+  return v.major > 3 || (v.major === 3 && v.minor >= 2)
+}
+
+// Pick a bucket weighted by its asset count.
+export function pickTimeBucket(buckets: unknown, random = Math.random()): string {
+  if (!Array.isArray(buckets)) return ''
+  const valid = buckets.filter((b) => b && typeof b.timeBucket === 'string' && typeof b.count === 'number' && b.count > 0)
+  const total = valid.reduce((sum, b) => sum + b.count, 0)
+  let target = random * total
+  for (const b of valid) {
+    if (target < b.count) return b.timeBucket
+    target -= b.count
+  }
+  return valid.length ? valid[valid.length - 1].timeBucket : ''
+}
+
+// A time bucket is columnar: parallel arrays, `isImage` beside `id`.
+export function bucketImageIds(bucket: unknown): string[] {
+  const b = bucket as { id?: unknown; isImage?: unknown } | null
+  if (!b || !Array.isArray(b.id)) return []
+  const isImage = Array.isArray(b.isImage) ? b.isImage : null
+  return b.id.filter((id, i) => typeof id === 'string' && id && (!isImage || isImage[i] === true))
+}
+
 export function randomSearchBody(albumId = '', personId = '', isFavorite = false): Record<string, unknown> {
   const body: Record<string, unknown> = { size: 1, type: 'IMAGE', withExif: true, withPeople: true }
   if (albumId) body.albumIds = [albumId]
@@ -150,6 +186,42 @@ function fetchRandomAsset(
   return { asset: pickRandomAsset(assets), message: '' }
 }
 
+function fetchAlbumAsset(serverUrl: string, apiKey: string, albumId: string): Picked {
+  const empty = "This album contains no images. Double-check the album ID. It's the UUID in the album's URL."
+  const version = request(apiKey, `${serverUrl}/api/server/version`)
+  if (version.status === 200 && supportsFilterSearch(parse(version.body))) {
+    const r = request(apiKey, `${serverUrl}/api/search/random`, 'POST', JSON.stringify(albumSearchBody(albumId)))
+    if (r.status !== 200) return { asset: null, message: `Error fetching a random image from Immich: ${httpErrorMessage(r)}` }
+    const assets = imageAssets(parse(r.body))
+    frameos.log(`Immich album search (album ${albumId}, all owners): HTTP ${r.status}, ${assets.length} image candidate(s)`)
+    return assets.length ? { asset: pickRandomAsset(assets), message: '' } : { asset: null, message: empty }
+  }
+
+  const album = encodeURIComponent(albumId)
+  const buckets = request(apiKey, `${serverUrl}/api/timeline/buckets?albumId=${album}`)
+  if (buckets.status === 404) {
+    frameos.log('This Immich server has no album timeline; searching the album instead, which only finds photos the API key owner or their partners own.')
+    return fetchRandomAsset(serverUrl, apiKey, albumId, '', false, empty)
+  }
+  if (buckets.status !== 200) return { asset: null, message: `Error reading the Immich album: ${httpErrorMessage(buckets)}` }
+  const bucketList = parse(buckets.body)
+  // A bucket can hold only videos; a few draws find the photos.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const timeBucket = pickTimeBucket(bucketList)
+    if (!timeBucket) break
+    const r = request(apiKey, `${serverUrl}/api/timeline/bucket?albumId=${album}&timeBucket=${encodeURIComponent(timeBucket)}`)
+    if (r.status !== 200) return { asset: null, message: `Error reading the Immich album: ${httpErrorMessage(r)}` }
+    const ids = bucketImageIds(parse(r.body))
+    frameos.log(`Immich album timeline (album ${albumId}, bucket ${timeBucket}): HTTP ${r.status}, ${ids.length} image candidate(s)`)
+    if (!ids.length) continue
+    const id = ids[Math.floor(Math.random() * ids.length)]
+    const detail = request(apiKey, `${serverUrl}/api/assets/${encodeURIComponent(id)}`)
+    const parsed = detail.status === 200 ? parse(detail.body) : null
+    return { asset: parsed && typeof parsed === 'object' ? slim(parsed as Record<string, any>) : { id }, message: '' }
+  }
+  return { asset: null, message: empty }
+}
+
 function esc(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
@@ -195,7 +267,7 @@ export function get(app: FrameOSApp, context: FrameOSContext): unknown {
 
   let picked: Picked
   if (mode === 'album') {
-    picked = fetchRandomAsset(serverUrl, apiKey, albumId, '', false, "This album contains no images. Double-check the album ID. It's the UUID in the album's URL.")
+    picked = fetchAlbumAsset(serverUrl, apiKey, albumId)
   } else if (mode === 'memories') {
     const date = todayIso()
     const r = request(apiKey, `${serverUrl}/api/memories?for=${date}`)
