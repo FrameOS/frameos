@@ -32,6 +32,7 @@ import Fuse from 'fuse.js'
 import { sceneStateLogic } from '../SceneState/sceneStateLogic'
 import {
   appLabel,
+  appListCategory,
   installSceneAppForKeyword,
   isJavaScriptCatalogApp,
   javascriptCatalogAppKeywords,
@@ -126,7 +127,7 @@ function addJavaScriptCatalogAppOptions(
       value: `app/${keyword}`,
       type: toFieldType(app.output?.[0].type ?? 'string'),
       keyword: optionKeyword ?? keyword,
-      category: 'code',
+      category: appListCategory(keyword, app),
       disabledReason: compatibility.reason,
     })
   }

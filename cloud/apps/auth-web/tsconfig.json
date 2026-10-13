@@ -48,6 +48,9 @@
     // them out.
     "src/test/shared-spa/usb-board-identity.test.ts",
     "src/test/shared-spa/scene-execution-fixtures.test.ts",
+    // Imports frontend/src/utils/sceneApps, whose SceneApp spreads predate
+    // exactOptionalPropertyTypes. Vitest still runs it.
+    "src/test/shared-spa/app-list-category.test.ts",
     // Same story: mounts embeddedUsbConnectLogic, whose graph reaches
     // workspaceLogic and EmbeddedReleaseFlasher. Vitest still runs it.
     "src/test/shared-spa/usb-connect-probe.test.ts",

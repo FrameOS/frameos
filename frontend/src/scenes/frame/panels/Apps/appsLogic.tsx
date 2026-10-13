@@ -5,7 +5,7 @@ import { searchInText } from '../../../../utils/searchInText'
 import { AppConfig, AppNodeData, SceneApp, FrameId } from '../../../../types'
 import { frameLogic } from '../../frameLogic'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
-import { isJavaScriptCatalogApp, normalizeSceneApps, sceneAppsToAppConfigs } from '../../../../utils/sceneApps'
+import { appListCategory, normalizeSceneApps, sceneAppsToAppConfigs } from '../../../../utils/sceneApps'
 import type { FrameScene } from '../../../../types'
 import type { FrameType } from '../../../../types'
 
@@ -124,7 +124,7 @@ export const appsLogic = kea<appsLogicType>([
         return Object.fromEntries(
           Object.entries(
             Object.entries(apps).reduce((acc, [keyword, app]) => {
-              const category = isJavaScriptCatalogApp(keyword) ? 'code' : (app.category || 'other').toLowerCase()
+              const category = appListCategory(keyword, app)
               if (!acc[category]) {
                 acc[category] = {}
               }

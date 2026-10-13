@@ -14,6 +14,18 @@ export function isJavaScriptCatalogApp(keyword?: string | null): boolean {
   return !!keyword && javascriptCatalogAppKeywords.includes(keyword)
 }
 
+// The starters you write your own code from. Every other catalog app is a
+// finished app (Weather, Unsplash, …) and lists under its own category.
+const javascriptTemplateAppKeywords = ['jsImage', 'jsLogic', 'jsSvg', 'jsText'].map((name) => `repo/apps/code/${name}`)
+
+/** Where an app lists in the apps panel and the new node picker. */
+export function appListCategory(keyword: string, app: Pick<AppConfig, 'category'>): string {
+  if (javascriptTemplateAppKeywords.includes(keyword)) {
+    return 'code'
+  }
+  return (app.category || 'other').toLowerCase()
+}
+
 export function javascriptCatalogAppLabel(keyword: string, app?: Pick<AppConfig, 'name'> | null): string {
   return `code: ${app?.name ?? keyword}`
 }
