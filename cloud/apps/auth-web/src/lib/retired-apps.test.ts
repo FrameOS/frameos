@@ -75,7 +75,8 @@ describe("retired apps (docs/retired-apps-fixtures.json)", () => {
     expect(keywordsRuntimeLacks("2026.10.10")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle"]);
     expect(keywordsRuntimeLacks("v2026.10.10+abc")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle"]);
     expect(keywordsRuntimeLacks("2026.10.12")).toEqual(["data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle"]);
-    expect(keywordsRuntimeLacks("2026.10.11")).toEqual([]);
+    expect(keywordsRuntimeLacks("2026.10.11")).toEqual(["data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle"]);
+    expect(keywordsRuntimeLacks("2026.10.13")).toEqual([]);
     expect(keywordsRuntimeLacks(null)).toEqual([]);
     expect(keywordsRuntimeLacks("nightly")).toEqual([]);
   });

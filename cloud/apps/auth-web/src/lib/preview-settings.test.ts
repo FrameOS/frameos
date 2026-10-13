@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { RETIRED_APPS } from "./retired-apps.gen";
 import {
   paidServicesForScenes,
   previewSettingsGroups,
@@ -229,6 +230,15 @@ describe("the keyword table vs the apps' own config.json files", () => {
             settings.filter((s): s is string => typeof s === "string"),
           );
         }
+      }
+    }
+    // A retired Nim keyword is still named by store versions saved before it
+    // was retired: it declares what its JavaScript replacement declares.
+    for (const [keyword, spec] of Object.entries(RETIRED_APPS)) {
+      const raw = readFileSync(join(repoRoot, spec.replacement, "config.json"), "utf8");
+      const settings = (JSON.parse(raw) as { settings?: unknown }).settings;
+      if (Array.isArray(settings) && settings.length > 0) {
+        found.set(keyword, settings.filter((s): s is string => typeof s === "string"));
       }
     }
     return found;
