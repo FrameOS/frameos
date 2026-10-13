@@ -1,4 +1,4 @@
-## The FrameOS Gallery code app (repo/apps/code/frameOSGallery) run for real
+## The FrameOS Gallery code app (repo/apps/image/frameOSGallery) run for real
 ## through the JS app runtime. The download is stubbed at the shared seam
 ## (`contextDownloadHook`), so this pins the URL the app asks for, the image it
 ## returns and the panels it paints, without reaching gallery.frameos.net.
@@ -11,7 +11,7 @@ import frameos/types
 import frameos/utils/app_images
 import frameos/values
 
-const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "frameOSGallery"
+const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "image" / "frameOSGallery"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 

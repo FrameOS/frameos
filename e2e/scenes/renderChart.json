@@ -44,7 +44,17 @@
         "y": 100
       },
       "data": {
-        "keyword": "render/chart",
+        "keyword": "render/image",
+        "config": {}
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "6502290f-7542-5c47-b462-b344fe8a7603-chart",
+      "type": "app",
+      "data": {
+        "keyword": "chart",
         "config": {
           "chartType": "line",
           "title": "Temperature",
@@ -52,8 +62,10 @@
           "transparentBackground": "false"
         }
       },
-      "width": 310,
-      "height": 160
+      "position": {
+        "x": 680,
+        "y": -50
+      }
     },
     {
       "id": "06dcf768-3b2a-5de9-84e8-d07312a52202",
@@ -63,7 +75,17 @@
         "y": 100
       },
       "data": {
-        "keyword": "render/chart",
+        "keyword": "render/image",
+        "config": {}
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "06dcf768-3b2a-5de9-84e8-d07312a52202-chart",
+      "type": "app",
+      "data": {
+        "keyword": "chart",
         "config": {
           "chartType": "bar",
           "title": "Renders",
@@ -73,8 +95,10 @@
           "transparentBackground": "false"
         }
       },
-      "width": 310,
-      "height": 160
+      "position": {
+        "x": 1020,
+        "y": -50
+      }
     },
     {
       "id": "a23581b2-9c42-5e38-89ee-2fae7479d277",
@@ -84,7 +108,17 @@
         "y": 100
       },
       "data": {
-        "keyword": "render/chart",
+        "keyword": "render/image",
+        "config": {}
+      },
+      "width": 310,
+      "height": 160
+    },
+    {
+      "id": "a23581b2-9c42-5e38-89ee-2fae7479d277-chart",
+      "type": "app",
+      "data": {
+        "keyword": "chart",
         "config": {
           "chartType": "area",
           "color": "#16a34a",
@@ -94,8 +128,10 @@
           "transparentBackground": "false"
         }
       },
-      "width": 310,
-      "height": 160
+      "position": {
+        "x": 1360,
+        "y": -50
+      }
     }
   ],
   "edges": [
@@ -130,6 +166,168 @@
       "target": "a23581b2-9c42-5e38-89ee-2fae7479d277",
       "targetHandle": "prev",
       "type": "appNodeEdge"
+    },
+    {
+      "id": "6502290f-7542-5c47-b462-b344fe8a7603-chart-image",
+      "type": "codeNodeEdge",
+      "source": "6502290f-7542-5c47-b462-b344fe8a7603-chart",
+      "sourceHandle": "fieldOutput",
+      "target": "6502290f-7542-5c47-b462-b344fe8a7603",
+      "targetHandle": "fieldInput/image"
+    },
+    {
+      "id": "06dcf768-3b2a-5de9-84e8-d07312a52202-chart-image",
+      "type": "codeNodeEdge",
+      "source": "06dcf768-3b2a-5de9-84e8-d07312a52202-chart",
+      "sourceHandle": "fieldOutput",
+      "target": "06dcf768-3b2a-5de9-84e8-d07312a52202",
+      "targetHandle": "fieldInput/image"
+    },
+    {
+      "id": "a23581b2-9c42-5e38-89ee-2fae7479d277-chart-image",
+      "type": "codeNodeEdge",
+      "source": "a23581b2-9c42-5e38-89ee-2fae7479d277-chart",
+      "sourceHandle": "fieldOutput",
+      "target": "a23581b2-9c42-5e38-89ee-2fae7479d277",
+      "targetHandle": "fieldInput/image"
     }
-  ]
+  ],
+  "apps": {
+    "chart": {
+      "name": "Chart",
+      "category": "data",
+      "description": "A line, bar or area chart as an SVG sized to the area it is drawn into. Wire it into render/image.",
+      "version": "1.0.0",
+      "fields": [
+        {
+          "name": "data",
+          "type": "json",
+          "value": "[]",
+          "required": true,
+          "label": "Chart data",
+          "hint": "[1,2,3], [{\"label\": \"Mon\", \"value\": 3}, …] or {\"series\": [{\"name\": \"a\", \"color\": \"#ff0000\", \"values\": [1, 2]}], \"labels\": [\"Mon\", \"Tue\"]}"
+        },
+        {
+          "name": "chartType",
+          "type": "select",
+          "options": [
+            "line",
+            "bar",
+            "area"
+          ],
+          "value": "line",
+          "required": true,
+          "label": "Chart type"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "value": "",
+          "label": "Title"
+        },
+        {
+          "name": "color",
+          "type": "color",
+          "value": "#2a78d6",
+          "required": true,
+          "label": "Series color",
+          "hint": "Extra series get colors from a palette"
+        },
+        {
+          "name": "transparentBackground",
+          "type": "boolean",
+          "value": "true",
+          "required": true,
+          "label": "Transparent background"
+        },
+        {
+          "name": "backgroundColor",
+          "type": "color",
+          "value": "#ffffff",
+          "label": "Background color",
+          "showIf": [
+            {
+              "field": "transparentBackground",
+              "operator": "eq",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "name": "axisColor",
+          "type": "color",
+          "value": "#333333",
+          "required": true,
+          "label": "Axis & text color"
+        },
+        {
+          "name": "showGrid",
+          "type": "boolean",
+          "value": "true",
+          "required": true,
+          "label": "Show grid lines"
+        },
+        {
+          "name": "showLabels",
+          "type": "boolean",
+          "value": "true",
+          "required": true,
+          "label": "Show axis labels"
+        },
+        {
+          "name": "minY",
+          "type": "string",
+          "value": "",
+          "label": "Min Y (empty = auto)",
+          "placeholder": "auto"
+        },
+        {
+          "name": "maxY",
+          "type": "string",
+          "value": "",
+          "label": "Max Y (empty = auto)",
+          "placeholder": "auto"
+        },
+        {
+          "name": "lineWidth",
+          "type": "float",
+          "value": "",
+          "label": "Line width (empty = scale with the chart)",
+          "showIf": [
+            {
+              "field": "chartType",
+              "operator": "in",
+              "value": [
+                "line",
+                "area"
+              ]
+            }
+          ]
+        },
+        {
+          "name": "fontSize",
+          "type": "float",
+          "value": "",
+          "label": "Font size (empty = scale with the chart)"
+        },
+        {
+          "name": "padding",
+          "type": "float",
+          "value": "",
+          "label": "Padding (empty = scale with the chart)"
+        }
+      ],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "origin": "repo/apps/image/chart",
+      "sources": {
+        "app.ts": "const PALETTE = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e34948', '#e87ba4', '#eb6834']\n\nconst esc = (s) =>\n  String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n\nconst num = (v) => {\n  if (typeof v === 'number') return v\n  if (typeof v === 'boolean') return v ? 1 : 0\n  if (typeof v === 'string' && v.trim() !== '') return Number(v.trim())\n  return NaN\n}\n\nconst fmt = (v) => (Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : String(Number(v.toFixed(2))))\n\nconst r1 = (v) => Math.round(v * 10) / 10\n\nfunction parse(data) {\n  if (typeof data === 'string') {\n    if (!data.trim()) return { series: [], labels: [] }\n    try {\n      data = JSON.parse(data)\n    } catch (e) {\n      return { series: [], labels: [] }\n    }\n  }\n  if (Array.isArray(data)) {\n    const labels = data.map((item) => (item && typeof item === 'object' ? String(item.label ?? item.name ?? '') : ''))\n    const values = data.map((item) =>\n      item && typeof item === 'object' ? num('value' in item ? item.value : item.y) : num(item)\n    )\n    return { series: [{ values }], labels: labels.some(Boolean) ? labels : [] }\n  }\n  if (!data || typeof data !== 'object') return { series: [], labels: [] }\n  const entry = (s) =>\n    Array.isArray(s)\n      ? { values: s.map(num) }\n      : s && typeof s === 'object'\n      ? { name: s.name ?? s.label, color: s.color, values: (s.values ?? s.data ?? []).map(num) }\n      : { values: [num(s)] }\n  const series = Array.isArray(data.series) ? data.series.map(entry) : 'values' in data ? [entry(data)] : []\n  const labels = Array.isArray(data.labels) ? data.labels.map((l) => (typeof l === 'number' ? fmt(l) : String(l ?? ''))) : []\n  return { series: series.filter((s) => s.values.length), labels }\n}\n\nfunction yRange(series, minY, maxY, includeZero) {\n  let lo = Infinity\n  let hi = -Infinity\n  for (const s of series) {\n    for (const v of s.values) {\n      if (Number.isFinite(v)) {\n        lo = Math.min(lo, v)\n        hi = Math.max(hi, v)\n      }\n    }\n  }\n  if (lo > hi) {\n    lo = 0\n    hi = 1\n  }\n  if (includeZero) {\n    lo = Math.min(lo, 0)\n    hi = Math.max(hi, 0)\n  }\n  const fixedLo = String(minY ?? '').trim() !== '' && Number.isFinite(Number(minY))\n  const fixedHi = String(maxY ?? '').trim() !== '' && Number.isFinite(Number(maxY))\n  if (fixedLo) lo = Number(minY)\n  if (fixedHi) hi = Number(maxY)\n  if (lo > hi) [lo, hi] = [hi, lo]\n  if (hi - lo < 1e-9) {\n    const pad = Math.max(Math.abs(lo) * 0.1, 1)\n    lo -= pad\n    hi += pad\n  }\n  // Grid steps of 1, 2, 2.5 or 5 x 10^n; an automatic end moves out to one.\n  const rough = (hi - lo) / 4\n  const magnitude = Math.pow(10, Math.floor(Math.log10(rough)))\n  const step = [1, 2, 2.5, 5, 10].map((m) => m * magnitude).find((m) => m >= rough)\n  if (!fixedLo) lo = Math.floor(lo / step + 1e-9) * step\n  if (!fixedHi) hi = Math.ceil(hi / step - 1e-9) * step\n  return [lo, hi, step]\n}\n\nexport function get(app, context) {\n  const c = app.config\n  const f = app.frame\n  const W = Math.round(context.imageWidth || (f.rotate % 180 ? f.height : f.width))\n  const H = Math.round(context.imageHeight || (f.rotate % 180 ? f.width : f.height))\n  const unit = Math.min(W, H)\n  const size = (value, auto) => (Number(value) > 0 ? Number(value) : auto)\n  const fontSize = size(c.fontSize, Math.max(10, Math.round(unit / 28)))\n  const lineWidth = size(c.lineWidth, Math.max(2, r1(unit / 200)))\n  const padding = Number(c.padding) >= 0 && String(c.padding ?? '').trim() !== '' ? Number(c.padding) : Math.round(unit / 30)\n  const type = ['line', 'bar', 'area'].includes(c.chartType) ? c.chartType : 'line'\n  const ink = c.axisColor || '#333333'\n  const out = [`<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${W} ${H}\" width=\"${W}\" height=\"${H}\">`]\n  if (String(c.transparentBackground) === 'false') {\n    out.push(`<rect width=\"${W}\" height=\"${H}\" fill=\"${esc(c.backgroundColor || '#ffffff')}\"/>`)\n  }\n  const text = (x, y, s, size, anchor, baseline = 'middle') =>\n    out.push(\n      `<text x=\"${r1(x)}\" y=\"${r1(y)}\" font-size=\"${r1(size)}\" fill=\"${esc(ink)}\" text-anchor=\"${anchor}\" dominant-baseline=\"${baseline}\">${esc(s)}</text>`\n    )\n  const done = () => frameos.svg(out.join('') + '</svg>', { width: W, height: H })\n\n  const { series, labels } = parse(c.data)\n  if (!series.some((s) => s.values.some(Number.isFinite))) {\n    text(W / 2, H / 2, 'No chart data', Math.max(8, Math.min(32, unit / 8)), 'middle')\n    return done()\n  }\n  const [lo, hi, step] = yRange(series, c.minY, c.maxY, type !== 'line')\n  const levels = []\n  for (let v = hi; v >= lo - step * 1e-6 && levels.length < 12; v -= step) levels.push(v)\n  const points = series.reduce((most, s) => Math.max(most, s.values.length), 0)\n  let plotX = padding\n  let plotY = padding\n  const plotRight = W - padding\n  let plotBottom = H - padding\n  if (c.title) {\n    text(W / 2, plotY + fontSize * 0.875, c.title, fontSize * 1.25, 'middle')\n    plotY += fontSize * 1.75\n  }\n  const showLabels = String(c.showLabels) !== 'false'\n  const gutter = showLabels ? levels.reduce((most, v) => Math.max(most, fmt(v).length), 0) * fontSize * 0.6 + fontSize * 0.4 : 0\n  plotX += gutter\n  if (showLabels && labels.length) plotBottom -= fontSize * 1.5\n  const plotW = plotRight - plotX\n  const plotH = plotBottom - plotY\n  if (plotW < 8 || plotH < 8) {\n    text(W / 2, H / 2, 'Not enough space', Math.max(8, Math.min(32, unit / 8)), 'middle')\n    return done()\n  }\n  const yOf = (v) => plotY + plotH - ((v - lo) / (hi - lo)) * plotH\n  const xOf = (i) =>\n    type === 'bar' ? plotX + ((i + 0.5) * plotW) / points : points === 1 ? plotX + plotW / 2 : plotX + (plotW * i) / (points - 1)\n  const baseY = yOf(Math.min(Math.max(0, lo), hi))\n\n  if (String(c.showGrid) !== 'false') {\n    const d = levels.map((v) => `M${r1(plotX)} ${r1(yOf(v))}h${r1(plotW)}`).join('')\n    out.push(`<path d=\"${d}\" stroke=\"${esc(ink)}\" stroke-opacity=\"0.25\" stroke-width=\"1\" fill=\"none\"/>`)\n  }\n\n  series.forEach((s, si) => {\n    const color = esc(s.color || (si === 0 ? c.color || PALETTE[0] : PALETTE[si % PALETTE.length]))\n    if (type === 'bar') {\n      const d = []\n      if (points > plotW) {\n        const cols = Math.max(Math.floor(plotW), 1)\n        const top = new Array(cols).fill(Infinity)\n        const bottom = new Array(cols).fill(-Infinity)\n        s.values.forEach((v, i) => {\n          if (!Number.isFinite(v)) return\n          const col = Math.min(cols - 1, Math.floor((i * cols) / points))\n          top[col] = Math.min(top[col], yOf(v), baseY)\n          bottom[col] = Math.max(bottom[col], yOf(v), baseY)\n        })\n        for (let i = 0; i < cols; i++) {\n          if (top[i] <= bottom[i]) d.push(`M${r1(plotX + i)} ${r1(top[i])}h1v${r1(Math.max(bottom[i] - top[i], 1))}h-1z`)\n        }\n      } else {\n        const groupW = plotW / points\n        const innerW = groupW * 0.8\n        const gap = Math.min(2, innerW / (series.length * 4))\n        const barW = Math.max(1, (innerW - gap * (series.length - 1)) / series.length)\n        s.values.forEach((v, i) => {\n          if (!Number.isFinite(v)) return\n          const x = plotX + i * groupW + (groupW - innerW) / 2 + si * (barW + gap)\n          const y = yOf(v)\n          d.push(`M${r1(x)} ${r1(Math.min(y, baseY))}h${r1(barW)}v${r1(Math.max(Math.abs(baseY - y), 1))}h${r1(-barW)}z`)\n        })\n      }\n      out.push(`<path d=\"${d.join('')}\" fill=\"${color}\"/>`)\n      return\n    }\n    for (let i = 0; i < s.values.length; ) {\n      if (!Number.isFinite(s.values[i])) {\n        i++\n        continue\n      }\n      let end = i\n      while (end + 1 < s.values.length && Number.isFinite(s.values[end + 1])) end++\n      if (end === i) {\n        out.push(`<circle cx=\"${r1(xOf(i))}\" cy=\"${r1(yOf(s.values[i]))}\" r=\"${r1(Math.max(lineWidth, 2))}\" fill=\"${color}\"/>`)\n      } else {\n        const pts = []\n        for (let j = i; j <= end; j++) pts.push(`${r1(xOf(j))} ${r1(yOf(s.values[j]))}`)\n        if (type === 'area') {\n          const area = `M${r1(xOf(i))} ${r1(baseY)}L${pts.join('L')}L${r1(xOf(end))} ${r1(baseY)}Z`\n          out.push(`<path d=\"${area}\" fill=\"${color}\" fill-opacity=\"0.35\"/>`)\n        }\n        const stroke = `stroke=\"${color}\" stroke-width=\"${r1(lineWidth)}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"`\n        out.push(`<path d=\"M${pts.join('L')}\" ${stroke} fill=\"none\"/>`)\n      }\n      i = end + 1\n    }\n  })\n\n  out.push(`<path d=\"M${r1(plotX)} ${r1(plotY)}v${r1(plotH)}h${r1(plotW)}\" stroke=\"${esc(ink)}\" stroke-width=\"1\" fill=\"none\"/>`)\n  if (showLabels) {\n    levels.forEach((v) => text(plotX - fontSize * 0.3, yOf(v), fmt(v), fontSize, 'end'))\n    if (labels.length) {\n      const widest = labels.reduce((most, l) => Math.max(most, l.length), 0) * fontSize * 0.6 + fontSize * 0.5\n      const step = Math.max(1, Math.ceil((points * widest) / plotW))\n      for (let i = 0; i < points; i += step) {\n        const x = Math.min(Math.max(xOf(i), widest / 2), W - widest / 2)\n        if (labels[i]) text(x, plotBottom + fontSize * 0.3, labels[i], fontSize, 'middle', 'hanging')\n      }\n    }\n  }\n  return done()\n}\n",
+        "config.json": "{\n  \"name\": \"Chart\",\n  \"category\": \"data\",\n  \"description\": \"A line, bar or area chart as an SVG sized to the area it is drawn into. Wire it into render/image.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"data\",\n      \"type\": \"json\",\n      \"value\": \"[]\",\n      \"required\": true,\n      \"label\": \"Chart data\",\n      \"hint\": \"[1,2,3], [{\\\"label\\\": \\\"Mon\\\", \\\"value\\\": 3}, …] or {\\\"series\\\": [{\\\"name\\\": \\\"a\\\", \\\"color\\\": \\\"#ff0000\\\", \\\"values\\\": [1, 2]}], \\\"labels\\\": [\\\"Mon\\\", \\\"Tue\\\"]}\"\n    },\n    { \"name\": \"chartType\", \"type\": \"select\", \"options\": [\"line\", \"bar\", \"area\"], \"value\": \"line\", \"required\": true, \"label\": \"Chart type\" },\n    { \"name\": \"title\", \"type\": \"string\", \"value\": \"\", \"label\": \"Title\" },\n    { \"name\": \"color\", \"type\": \"color\", \"value\": \"#2a78d6\", \"required\": true, \"label\": \"Series color\", \"hint\": \"Extra series get colors from a palette\" },\n    { \"name\": \"transparentBackground\", \"type\": \"boolean\", \"value\": \"true\", \"required\": true, \"label\": \"Transparent background\" },\n    {\n      \"name\": \"backgroundColor\",\n      \"type\": \"color\",\n      \"value\": \"#ffffff\",\n      \"label\": \"Background color\",\n      \"showIf\": [{ \"field\": \"transparentBackground\", \"operator\": \"eq\", \"value\": \"false\" }]\n    },\n    { \"name\": \"axisColor\", \"type\": \"color\", \"value\": \"#333333\", \"required\": true, \"label\": \"Axis & text color\" },\n    { \"name\": \"showGrid\", \"type\": \"boolean\", \"value\": \"true\", \"required\": true, \"label\": \"Show grid lines\" },\n    { \"name\": \"showLabels\", \"type\": \"boolean\", \"value\": \"true\", \"required\": true, \"label\": \"Show axis labels\" },\n    { \"name\": \"minY\", \"type\": \"string\", \"value\": \"\", \"label\": \"Min Y (empty = auto)\", \"placeholder\": \"auto\" },\n    { \"name\": \"maxY\", \"type\": \"string\", \"value\": \"\", \"label\": \"Max Y (empty = auto)\", \"placeholder\": \"auto\" },\n    {\n      \"name\": \"lineWidth\",\n      \"type\": \"float\",\n      \"value\": \"\",\n      \"label\": \"Line width (empty = scale with the chart)\",\n      \"showIf\": [{ \"field\": \"chartType\", \"operator\": \"in\", \"value\": [\"line\", \"area\"] }]\n    },\n    { \"name\": \"fontSize\", \"type\": \"float\", \"value\": \"\", \"label\": \"Font size (empty = scale with the chart)\" },\n    { \"name\": \"padding\", \"type\": \"float\", \"value\": \"\", \"label\": \"Padding (empty = scale with the chart)\" }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }]\n}\n"
+      }
+    }
+  }
 }

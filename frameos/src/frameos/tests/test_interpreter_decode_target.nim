@@ -226,7 +226,7 @@ block offset_draw_stays_unhinted:
 #
 # One seam feeds this: the shared contextDownloadHook that every producer
 # funnels through, the JavaScript apps' frameos.fetchImage included (the
-# gallery scenes run the repo/apps/code/frameOSGallery app). It never reaches
+# gallery scenes run the repo/apps/image/frameOSGallery app). It never reaches
 # the network, so this runs offline.
 # ---------------------------------------------------------------------------
 

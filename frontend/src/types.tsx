@@ -911,7 +911,7 @@ export interface AppConfig {
   output?: OutputField[]
   /** Default cache settings */
   cache?: CacheConfig
-  /** Origin app this app was created from, such as repo/apps/code/jsText */
+  /** Origin app this app was created from, such as repo/apps/text/jsText */
   origin?: string
 }
 

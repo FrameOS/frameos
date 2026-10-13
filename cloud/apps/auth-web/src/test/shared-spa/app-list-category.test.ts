@@ -1,17 +1,17 @@
 // Where an app lists in the scene editor's apps panel and the new node
-// picker. The JS catalog (repo/apps/code) holds the four "New … app (JS)"
+// picker. The JS catalog (repo/apps/<folder>) holds the four "New … app (JS)"
 // starters AND finished apps: Weather, Unsplash and the rest that replaced
 // built-in Nim apps (docs/retired-apps.json). The starters list under Code;
 // a finished app lists under the category its config.json declares, where
 // its Nim predecessor used to be.
 import { describe, expect, it } from "vitest";
 import { embeddedRepoAppConfigs } from "../../../../../../frontend/src/generated/repoApps";
-import { appListCategory } from "../../../../../../frontend/src/utils/sceneApps";
+import { appListCategory, repoAppKeywordByName } from "../../../../../../frontend/src/utils/sceneApps";
 
 const catalog = embeddedRepoAppConfigs as Record<string, { category?: string }>;
 
 function categoryOf(name: string): string {
-  const keyword = `repo/apps/code/${name}`;
+  const keyword = repoAppKeywordByName(name) ?? name;
   const app = catalog[keyword];
   expect(app, keyword).toBeDefined();
   return appListCategory(keyword, app ?? {});
@@ -31,7 +31,7 @@ describe("appListCategory", () => {
   });
 
   it("lists every non-starter catalog app under the category it declares", () => {
-    const starters = new Set(["jsImage", "jsLogic", "jsSvg", "jsText"].map((name) => `repo/apps/code/${name}`));
+    const starters = new Set(["jsImage", "jsLogic", "jsSvg", "jsText"].map((name) => repoAppKeywordByName(name)));
     for (const [keyword, app] of Object.entries(catalog)) {
       if (!starters.has(keyword)) {
         expect(appListCategory(keyword, app), keyword).toBe(app.category);

@@ -1,7 +1,7 @@
 // Built-in Nim apps retired in favour of a repo JavaScript app
 // (docs/retired-apps.json; prose in docs/retired-apps.md). `data/immich` and
 // `data/frameOSGallery` became the scene-local JS apps from
-// repo/apps/code/immich and repo/apps/code/frameOSGallery, which need
+// repo/apps/image/immich and repo/apps/image/frameOSGallery, which need
 // `frameos.fetchImage` and so a runtime from 2026.10.11 on.
 //
 // The cloud never rewrites a stored version (zips are immutable), so the cut
@@ -25,6 +25,17 @@ type JsonObject = Record<string, unknown>;
 
 function isObject(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+// The app an origin names, `repo/apps/<folder>/<name>` → name. Origins compare
+// by it: the folder moved once (every app was under repo/apps/code until
+// 2026.10.13), and scenes saved before still name the old one.
+function repoAppName(origin: unknown): string | undefined {
+  if (typeof origin !== "string") {
+    return undefined;
+  }
+  const parts = origin.split("/");
+  return parts.length === 4 && parts[0] === "repo" && parts[1] === "apps" && parts[3] ? parts[3] : undefined;
 }
 
 function appNodes(scene: JsonObject): JsonObject[] {
@@ -80,7 +91,10 @@ export function retireAppsInScenes(scenes: unknown, keywords?: Iterable<string>)
       }
       let apps = isObject(scene.apps) ? scene.apps : undefined;
       let key = apps
-        ? Object.keys(apps).find((name) => isObject(apps?.[name]) && (apps[name] as JsonObject).origin === spec.replacement)
+        ? Object.keys(apps).find(
+            (name) =>
+              isObject(apps?.[name]) && repoAppName((apps[name] as JsonObject).origin) === repoAppName(spec.replacement),
+          )
         : undefined;
       if (key === undefined) {
         if (!apps) {
@@ -96,12 +110,90 @@ export function retireAppsInScenes(scenes: unknown, keywords?: Iterable<string>)
         apps[key] = replacementAppEntry(spec.replacement);
       }
       for (const node of nodes) {
-        (node.data as JsonObject).keyword = key;
+        if (spec.renderFlow && inRenderFlow(scene, node)) {
+          feedFromNewNode(scene, node, key, spec.renderFlow, fieldNames(spec.replacement));
+        } else {
+          (node.data as JsonObject).keyword = key;
+        }
       }
       changed = true;
     }
   }
   return changed;
+}
+
+function fieldNames(origin: string): Set<string> {
+  const fields = REPLACEMENT_APPS[origin]?.fields;
+  return new Set(
+    (Array.isArray(fields) ? fields : [])
+      .map((field) => (isObject(field) ? field.name : undefined))
+      .filter((name): name is string => typeof name === "string"),
+  );
+}
+
+function edgesOf(scene: JsonObject): JsonObject[] {
+  if (!Array.isArray(scene.edges)) {
+    scene.edges = [];
+  }
+  return scene.edges as JsonObject[];
+}
+
+// Whether the render flow runs this node: an edge into its `prev` (from the
+// previous app, or from a layout's `field/...` cell) or out of its `next`.
+function inRenderFlow(scene: JsonObject, node: JsonObject): boolean {
+  return edgesOf(scene).some(
+    (edge) =>
+      isObject(edge) &&
+      ((edge.target === node.id && edge.targetHandle === "prev") || (edge.source === node.id && edge.sourceHandle === "next")),
+  );
+}
+
+function unusedId(base: string, taken: Set<unknown>): string {
+  let candidate = base;
+  let suffix = 2;
+  while (taken.has(candidate)) {
+    candidate = `${base}${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+// A retired render app in the render flow: the node stays where it is, as
+// `consumer` (render/image), and a new node of the replacement app, with the
+// old node's config, cache and field edges, feeds its image.
+function feedFromNewNode(scene: JsonObject, node: JsonObject, key: string, consumer: string, fields: Set<string>) {
+  const nodes = scene.nodes as JsonObject[];
+  const edges = edgesOf(scene);
+  const data = node.data as JsonObject;
+  const newId = unusedId(`${String(node.id)}-${key}`, new Set(nodes.map((entry) => (isObject(entry) ? entry.id : undefined))));
+  const newData: JsonObject = { keyword: key, config: isObject(data.config) ? data.config : {} };
+  if ("cache" in data) {
+    newData.cache = data.cache;
+  }
+  const newNode: JsonObject = { id: newId, type: "app", data: newData };
+  const position = node.position;
+  if (isObject(position) && typeof position.x === "number" && typeof position.y === "number") {
+    newNode.position = { x: position.x, y: position.y - 150 };
+  }
+  nodes.splice(nodes.indexOf(node) + 1, 0, newNode);
+  node.data = { keyword: consumer, config: {} };
+  for (const edge of edges) {
+    if (!isObject(edge) || edge.target !== node.id) {
+      continue;
+    }
+    const handle = edge.targetHandle;
+    if (typeof handle === "string" && handle.startsWith("fieldInput/") && fields.has(handle.slice("fieldInput/".length))) {
+      edge.target = newId;
+    }
+  }
+  edges.push({
+    id: unusedId(`${newId}-image`, new Set(edges.map((edge) => (isObject(edge) ? edge.id : undefined)))),
+    type: "codeNodeEdge",
+    source: newId,
+    sourceHandle: "fieldOutput",
+    target: node.id ?? null,
+    targetHandle: "fieldInput/image",
+  });
 }
 
 // Give a runtime that predates the replacements the retired keywords back, in
@@ -112,10 +204,10 @@ export function restoreAppsInScenes(scenes: unknown, keywords?: Iterable<string>
     return false;
   }
   const wanted = selected(keywords);
-  const byOrigin = new Map(
+  const byName = new Map(
     Object.entries(RETIRED_APPS)
       .filter(([keyword]) => wanted.has(keyword))
-      .map(([keyword, spec]) => [spec.replacement, keyword] as const),
+      .map(([keyword, spec]) => [repoAppName(spec.replacement), keyword] as const),
   );
   let changed = false;
   for (const scene of scenes) {
@@ -126,7 +218,8 @@ export function restoreAppsInScenes(scenes: unknown, keywords?: Iterable<string>
     let sceneChanged = false;
     for (const key of Object.keys(apps)) {
       const app = apps[key];
-      const keyword = isObject(app) && typeof app.origin === "string" ? byOrigin.get(app.origin) : undefined;
+      const name = isObject(app) ? repoAppName(app.origin) : undefined;
+      const keyword = name ? byName.get(name) : undefined;
       if (keyword === undefined) {
         continue;
       }

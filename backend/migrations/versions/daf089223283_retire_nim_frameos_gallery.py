@@ -5,7 +5,7 @@ Revises: b4d8f2a6c1e9
 Create Date: 2026-10-13
 
 The built-in Nim app `data/frameOSGallery` was deleted; its replacement is the
-repo JavaScript app `repo/apps/code/frameOSGallery`, carried by each scene in
+repo JavaScript app `repo/apps/image/frameOSGallery`, carried by each scene in
 its `apps` map (docs/retired-apps.md). Every stored scene is rewritten in
 place: frames, their deploy baseline (so the deploy drawer does not report a
 change nobody made) and saved templates. What a device is SENT still depends

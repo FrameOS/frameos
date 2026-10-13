@@ -116,7 +116,7 @@ legacy *compiled* scene; `docs/nim-to-js-conversion.md` is the way out.
 ### Photos from the network
 
 A JS app that shows a photo from an API (the Immich app,
-`repo/apps/code/immich`, is the worked example) does the JSON half with
+`repo/apps/image/immich`, is the worked example) does the JSON half with
 `httpRequest` and the picture with **`frameos.fetchImage(url, options)`**.
 The runtime downloads and decodes the image natively and hands JS an image
 reference; the bytes never enter the JS heap. The app returns that reference

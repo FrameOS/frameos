@@ -1,4 +1,4 @@
-## The Immich code app (repo/apps/code/immich) run for real through the JS app
+## The Immich code app (repo/apps/image/immich) run for real through the JS app
 ## runtime, against a mock Immich server on a thread: every mode, the legacy
 ## server fallback, the errors (thrown: the interpreter paints them), the
 ## metadata state and the saved asset.
@@ -14,7 +14,7 @@ import frameos/types
 import frameos/utils/http_client
 import frameos/values
 
-const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "immich"
+const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "image" / "immich"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 

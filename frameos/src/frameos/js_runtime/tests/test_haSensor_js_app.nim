@@ -1,4 +1,4 @@
-## The Home Assistant Sensor code app (repo/apps/code/haSensor) run for real
+## The Home Assistant Sensor code app (repo/apps/json/haSensor) run for real
 ## through the JS app runtime. Every `frameos.httpRequest` is answered by
 ## `jsHttpRequestHook`, so this pins the URL, the headers, the replies the app
 ## returns (state JSON or `{error}`), the one-second reuse of the last good
@@ -11,7 +11,7 @@ import frameos/types
 import frameos/utils/http_client
 import frameos/values
 
-const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "haSensor"
+const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "json" / "haSensor"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 

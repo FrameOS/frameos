@@ -1,4 +1,4 @@
-## The Google Photos code app (repo/apps/code/googlePhotos) run for real
+## The Google Photos code app (repo/apps/image/googlePhotos) run for real
 ## through the JS app runtime. The shared album page is answered at the
 ## `frameos.httpRequest` seam (`jsHttpRequestHook`) and the photo at the
 ## download seam (`contextDownloadHook`), so this pins the page request, the
@@ -29,7 +29,7 @@ import frameos/utils/app_images
 import frameos/utils/http_client
 import frameos/values
 
-const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "googlePhotos"
+const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "image" / "googlePhotos"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 

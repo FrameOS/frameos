@@ -515,11 +515,11 @@ class FrameDeployer:
             frontend_scripts_dir = Path(temp_dir) / "frontend" / "scripts"
             frontend_scripts_dir.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(repo_frontend_scripts, frontend_scripts_dir, dirs_exist_ok=True)
-        repo_apps_code = repo_root / "repo" / "apps" / "code"
-        if repo_apps_code.is_dir():
-            repo_apps_code_dir = Path(temp_dir) / "repo" / "apps" / "code"
-            repo_apps_code_dir.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(repo_apps_code, repo_apps_code_dir, dirs_exist_ok=True)
+        repo_apps = repo_root / "repo" / "apps"
+        if repo_apps.is_dir():
+            repo_apps_dir = Path(temp_dir) / "repo" / "apps"
+            repo_apps_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(repo_apps, repo_apps_dir, dirs_exist_ok=True)
         repo_scenes = repo_root / "repo" / "scenes"
         if repo_scenes.is_dir():
             repo_scenes_dir = Path(temp_dir) / "repo" / "scenes"

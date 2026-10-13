@@ -39,8 +39,8 @@ def create_project_layout(tmp_path: Path) -> Path:
     write(repo_root / "frontend" / "src" / "initKea.ts", "export function initKea() {}\n")
     write(repo_root / "frontend" / "public" / "img" / "logo-2" / "logo-white-colors.svg", "<svg />\n")
     write(repo_root / "frontend" / "schema" / "events.json", "{}\n")
-    write(repo_root / "repo" / "apps" / "code" / "sample" / "config.json", "{\"name\":\"Sample\"}\n")
-    write(repo_root / "repo" / "apps" / "code" / "sample" / "app.ts", "export function run() {}\n")
+    write(repo_root / "repo" / "apps" / "text" / "sample" / "config.json", "{\"name\":\"Sample\"}\n")
+    write(repo_root / "repo" / "apps" / "text" / "sample" / "app.ts", "export function run() {}\n")
     write(repo_root / "repo" / "scenes" / "samples" / "repository.json", "{\"name\":\"Samples\"}\n")
     write(repo_root / "repo" / "scenes" / "samples" / "Sample" / "template.json", "{\"name\":\"Sample\"}\n")
     write(repo_root / "repo" / "scenes" / "samples" / "Sample" / "scenes.json", "[]\n")
@@ -188,7 +188,7 @@ def test_hash_frontend_inputs_tracks_repo_app_templates(tmp_path):
     frameos_root = create_project_layout(tmp_path)
 
     before = prepare_assets.hash_frontend_inputs(frameos_root)
-    write(frameos_root.parent / "repo" / "apps" / "code" / "sample" / "config.json", "{\"name\":\"Updated\"}\n")
+    write(frameos_root.parent / "repo" / "apps" / "text" / "sample" / "config.json", "{\"name\":\"Updated\"}\n")
     after = prepare_assets.hash_frontend_inputs(frameos_root)
 
     assert after != before
@@ -224,7 +224,7 @@ def test_missing_frontend_inputs_require_generator_but_not_repo_apps(tmp_path):
     frameos_root = create_project_layout(tmp_path)
 
     shutil.rmtree(frameos_root.parent / "repo" / "apps")
-    assert Path("../repo/apps/code") not in prepare_assets.missing_frontend_inputs(frameos_root)
+    assert Path("../repo/apps") not in prepare_assets.missing_frontend_inputs(frameos_root)
 
     (frameos_root.parent / "frontend" / "scripts" / "generateRepoApps.mjs").unlink()
 

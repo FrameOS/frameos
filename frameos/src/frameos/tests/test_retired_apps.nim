@@ -82,3 +82,40 @@ suite "retired Nim apps":
       if ($entry).contains("Please provide an Immich server URL"):
         sawMessage = true
     check sawMessage
+
+  test "a render/chart node in the render flow draws the JavaScript chart":
+    let sceneId = "tests/retired-chart".SceneId
+    var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+    uploaded[sceneId] = ExportedInterpretedScene(
+      name: "Stale chart scene",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 300.0,
+      publicStateFields: @[],
+      nodes: @[
+        node(10, "event", %*{"keyword": "render"}),
+        node(1, "app", %*{"keyword": "render/chart", "config": {"data": "[1, 3, 2]",
+          "transparentBackground": "false", "backgroundColor": "#ff0000"}}),
+      ],
+      edges: @[edge(100, 10, "next", 1, "prev")],
+      apps: %*{}
+    )
+    setUploadedInterpretedScenes(uploaded)
+    resetInterpretedScenes()
+    defer: setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+    let config = FrameConfig(width: 80, height: 60, rotate: 0, scalingMode: "cover", debug: false,
+      saveAssets: %*false, settings: %*{})
+    let scene = init(sceneId, config, testLogger(config), %*{})
+    check InterpretedFrameScene(scene).appsByNodeId[1.NodeId].isDynamicJsApp()
+    let canvas = newImage(80, 60)
+    let image = render(scene, ExecutionContext(scene: scene, event: "render", payload: %*{},
+      hasImage: true, image: canvas, loopIndex: 0, loopKey: ".", nextSleep: 0.0))
+    var red, line = 0
+    for x in 0 ..< 80:
+      for y in 0 ..< 60:
+        if image[x, y].r > 200 and image[x, y].g < 60:
+          inc red
+        if image[x, y].b > 150 and image[x, y].r < 120:
+          inc line
+    check red > 80 * 60 div 2  # the chart's own background, drawn onto the canvas
+    check line > 0

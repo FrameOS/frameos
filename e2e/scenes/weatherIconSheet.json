@@ -17,7 +17,7 @@
   ],
   "apps": {
     "weatherIcons": {
-      "origin": "repo/apps/code/weatherIcons",
+      "origin": "repo/apps/json/weatherIcons",
       "name": "Weather icon set (JS)",
       "category": "data",
       "description": "Vector weather icons for WMO weather codes, returned as a JSON set of SVG fragments plus code-to-icon and code-to-label maps.",
@@ -73,7 +73,7 @@
       }
     },
     "weatherIcon": {
-      "origin": "repo/apps/code/weatherIcon",
+      "origin": "repo/apps/image/weatherIcon",
       "name": "Weather icon (JS)",
       "category": "data",
       "description": "Render a single weather icon (or a contact sheet of the whole set) as an image. Wire the icons input from the Weather icon set app.",

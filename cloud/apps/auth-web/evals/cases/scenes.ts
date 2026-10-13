@@ -200,7 +200,7 @@ export const cases: EvalCase[] = [
       { type: "render_ok" },
       { type: "render_not_blank" },
       { type: "app_used", keyword: "render/split" },
-      { type: "any_app_used", keywords: ["weather", "weatherPanel", "repo/apps/code/weatherPanel"] },
+      { type: "any_app_used", keywords: ["weather", "weatherPanel", "repo/apps/image/weatherPanel"] },
       { type: "any_app_used", keywords: ["render/calendar", "data/icalJson", "data/eventsToAgenda"] },
       { type: "judge", min: 3 },
     ],

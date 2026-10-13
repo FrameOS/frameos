@@ -1,4 +1,4 @@
-## The OpenAI Text code app (repo/apps/code/openaiText) run for real through
+## The OpenAI Text code app (repo/apps/text/openaiText) run for real through
 ## the JS app runtime, its chat completion answered at `jsHttpRequestHook`:
 ## the request, the reply, the size-only request log, and the error behavior
 ## (most errors log and return "", a failed request or a reply that is not JSON
@@ -15,7 +15,7 @@ import frameos/types
 import frameos/utils/http_client
 import frameos/values
 
-const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "openaiText"
+const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "text" / "openaiText"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 let appSources = %*{"app.ts": appSource, "config.json": appConfigJson}

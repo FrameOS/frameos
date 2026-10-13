@@ -61,7 +61,7 @@ def test_migration_rewrites_frames_baselines_and_templates():
 
     photos = frames[1].scenes[0]
     assert photos["nodes"][0]["data"] == {"keyword": "immich", "config": {"mode": "album"}}
-    assert photos["apps"]["immich"]["origin"] == "repo/apps/code/immich"
+    assert photos["apps"]["immich"]["origin"] == "repo/apps/image/immich"
     assert frames[1].scenes[1] == untouched
     baseline = frames[1].last_successful_deploy
     assert baseline["name"] == "Frame"

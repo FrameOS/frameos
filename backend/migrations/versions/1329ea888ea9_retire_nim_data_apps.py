@@ -1,14 +1,15 @@
-"""Rewrite eight retired Nim data apps into their JavaScript replacements
+"""Rewrite nine retired Nim apps into their JavaScript replacements
 
 Revision ID: 1329ea888ea9
 Revises: daf089223283
 Create Date: 2026-10-13
 
 The built-in Nim apps data/unsplash, data/wikicommons, data/googlePhotos,
-data/openaiImage, data/openaiText, data/haSensor, data/weather and
-data/beRecycle were deleted; each one's replacement is the repo JavaScript
-app of the same name under `repo/apps/code/`, carried by each scene in its
-`apps` map (docs/retired-apps.md). Every stored scene is rewritten in place:
+data/openaiImage, data/openaiText, data/haSensor, data/weather, data/beRecycle
+and render/chart were deleted; each one's replacement is the repo JavaScript
+app of the same name under `repo/apps/<folder>/`, carried by each scene in its
+`apps` map (docs/retired-apps.md). A render/chart node in the render flow
+becomes render/image, fed by a new node of the chart app. Every stored scene is rewritten in place:
 frames, their deploy baseline (so the deploy drawer does not report a change
 nobody made) and saved templates. What a device is SENT still depends on its
 runtime — one older than the replacement's gets the Nim keyword back
@@ -35,6 +36,7 @@ KEYWORDS = [
     "data/haSensor",
     "data/weather",
     "data/beRecycle",
+    "render/chart",
 ]
 
 

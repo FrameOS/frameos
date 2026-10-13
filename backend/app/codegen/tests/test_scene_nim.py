@@ -33,7 +33,7 @@ def test_app_output_field_input_is_coerced_to_target_field_type():
         "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
         "apps": {
             "jsText": {
-                "origin": "repo/apps/code/jsText",
+                "origin": "repo/apps/text/jsText",
                 "sources": {
                     "config.json": """
 {
@@ -86,7 +86,7 @@ def test_scene_js_app_uses_runtime_directly():
         "edges": [],
         "fields": [],
         "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
-        "apps": {"jsText": {"origin": "repo/apps/code/jsText", "sources": sources}},
+        "apps": {"jsText": {"origin": "repo/apps/text/jsText", "sources": sources}},
     }
     frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
 
@@ -141,7 +141,7 @@ def test_scene_app_with_empty_sources_raises_clear_error():
         "settings": {"execution": "compiled", "refreshInterval": 3600, "backgroundColor": "#000000"},
         "apps": {
             "jsText": {
-                "origin": "repo/apps/code/jsText",
+                "origin": "repo/apps/text/jsText",
                 "sources": {},
             }
         },
@@ -638,8 +638,8 @@ def test_static_byte_iter_config_value_is_wrapped_in_a_spool():
 
 
 def test_static_json_config_value_is_parsed_not_quoted():
-    # A json port's static value (render/calendar `events`, render/chart
-    # `data`) is a JsonNode in the compiled AppConfig; the editor stores the
+    # A json port's static value (render/calendar `events`, logic/setAsState
+    # `valueJson`) is a JsonNode in the compiled AppConfig; the editor stores the
     # text, and a hand-written scene may carry the object.
     def scene_with(events):
         return {

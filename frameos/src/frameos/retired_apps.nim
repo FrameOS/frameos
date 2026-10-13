@@ -28,7 +28,18 @@ when not defined(frameosEmbedded) and not defined(frameosWasm):
       result = all{keyword}
     except CatchableError:
       result = nil
+
+  proc isRetiredRenderApp*(keyword: string): bool =
+    ## A retired render app (render/chart), whose replacement returns the
+    ## image the old app drew. The control planes rewrite such a node in the
+    ## render flow into render/image fed by the replacement; a scene still on
+    ## disk is not rewritten, so the interpreter draws the image itself.
+    keyword in RetiredRenderFlowKeywords
 else:
   proc retiredAppSources*(keyword: string): JsonNode =
     discard keyword
     nil
+
+  proc isRetiredRenderApp*(keyword: string): bool =
+    discard keyword
+    false

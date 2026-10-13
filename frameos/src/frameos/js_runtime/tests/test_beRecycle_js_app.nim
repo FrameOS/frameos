@@ -1,4 +1,4 @@
-## The Recycling Calendar for Belgium code app (repo/apps/code/beRecycle) run
+## The Recycling Calendar for Belgium code app (repo/apps/json/beRecycle) run
 ## for real through the JS app runtime. Every `frameos.httpRequest` is answered
 ## by `jsHttpRequestHook` (it stands in for the Nim app's
 ## beRecycleAuthenticateHook / beRecycleFetchCollectionsHook), so this pins the
@@ -12,7 +12,7 @@ import frameos/types
 import frameos/utils/http_client
 import frameos/values
 
-const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "beRecycle"
+const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "json" / "beRecycle"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 

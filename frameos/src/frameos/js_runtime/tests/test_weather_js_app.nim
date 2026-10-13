@@ -1,4 +1,4 @@
-## The Weather (Open-Meteo) code app (repo/apps/code/weather) run for real
+## The Weather (Open-Meteo) code app (repo/apps/json/weather) run for real
 ## through the JS app runtime. Every `frameos.httpRequest` is answered by
 ## `jsHttpRequestHook`, so this pins the geocoding and forecast URLs, the
 ## output object and the `{location, error}` replies, without Open-Meteo.
@@ -10,7 +10,7 @@ import frameos/types
 import frameos/utils/http_client
 import frameos/values
 
-const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "weather"
+const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "json" / "weather"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 

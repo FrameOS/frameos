@@ -19,7 +19,7 @@ FIXTURES = json.loads((REPO_ROOT / "docs" / "retired-apps-fixtures.json").read_t
 
 
 def expand(value):
-    """Swap the fixtures' "@repo/apps/code/<app>" placeholders for the real entry."""
+    """Swap the fixtures' "@repo/apps/<folder>/<app>" placeholders for the real entry."""
     if isinstance(value, str) and value.startswith("@repo/"):
         return replacement_app_entry(value[1:])
     if isinstance(value, list):
@@ -69,19 +69,19 @@ def test_retire_then_restore_is_the_original_scene():
 
 
 def test_replacement_entry_is_the_repo_app():
-    entry = replacement_app_entry("repo/apps/code/immich")
-    assert entry["origin"] == "repo/apps/code/immich"
+    entry = replacement_app_entry("repo/apps/image/immich")
+    assert entry["origin"] == "repo/apps/image/immich"
     assert entry["settings"] == ["immich"]
-    assert entry["sources"]["app.ts"] == (REPO_ROOT / "repo/apps/code/immich/app.ts").read_text()
+    assert entry["sources"]["app.ts"] == (REPO_ROOT / "repo/apps/image/immich/app.ts").read_text()
     assert json.loads(entry["sources"]["config.json"])["name"] == entry["name"]
 
 
 def test_keywords_runtime_lacks():
-    assert keywords_runtime_lacks("2026.10.10") == ["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle"]
+    assert keywords_runtime_lacks("2026.10.10") == ["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart"]
     # 2026.10.11 has fetchImage; 2026.10.13 has app.frame.embedded,
     # frameos.remember and the failing throw the later four need.
-    assert keywords_runtime_lacks("2026.10.11") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle"]
-    assert keywords_runtime_lacks("2026.10.12") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle"]
+    assert keywords_runtime_lacks("2026.10.11") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart"]
+    assert keywords_runtime_lacks("2026.10.12") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart"]
     assert keywords_runtime_lacks("2026.10.13") == []
     assert keywords_runtime_lacks(None) == []
     assert keywords_runtime_lacks("not a version") == []

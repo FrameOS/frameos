@@ -65,7 +65,7 @@ def test_migration_rewrites_frames_baselines_and_templates():
 
     gallery = frames[1].scenes[0]
     assert gallery["nodes"][0]["data"] == {"keyword": "frameOSGallery", "config": {"category": "low-poly-animals"}}
-    assert gallery["apps"]["frameOSGallery"]["origin"] == "repo/apps/code/frameOSGallery"
+    assert gallery["apps"]["frameOSGallery"]["origin"] == "repo/apps/image/frameOSGallery"
     assert frames[1].scenes[1] == untouched
     baseline = frames[1].last_successful_deploy
     assert baseline["name"] == "Frame"

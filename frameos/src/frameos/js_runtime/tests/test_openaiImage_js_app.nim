@@ -1,4 +1,4 @@
-## The OpenAI Image code app (repo/apps/code/openaiImage) run for real through
+## The OpenAI Image code app (repo/apps/image/openaiImage) run for real through
 ## the JS app runtime. The API call is answered at `jsHttpRequestHook`; a
 ## `b64_json` reply decodes through the real `data:` URL path (and saves from
 ## it), a `url` reply's download is stubbed at `contextDownloadHook`. This pins
@@ -27,7 +27,7 @@ import frameos/utils/app_images
 import frameos/utils/http_client
 import frameos/values
 
-const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "openaiImage"
+const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "image" / "openaiImage"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 let appSources = %*{"app.ts": appSource, "config.json": appConfigJson}

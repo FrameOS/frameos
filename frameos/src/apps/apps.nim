@@ -20,7 +20,6 @@ import apps/logic/ifElse/app_loader as logic_ifElse_loader
 import apps/logic/nextSleepDuration/app_loader as logic_nextSleepDuration_loader
 import apps/logic/setAsState/app_loader as logic_setAsState_loader
 import apps/render/calendar/app_loader as render_calendar_loader
-import apps/render/chart/app_loader as render_chart_loader
 import apps/render/color/app_loader as render_color_loader
 import apps/render/gradient/app_loader as render_gradient_loader
 import apps/render/image/app_loader as render_image_loader
@@ -65,7 +64,6 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     AppEntry(keyword: "logic/nextSleepDuration", initProc: logic_nextSleepDuration_loader.init, setFieldProc: logic_nextSleepDuration_loader.setField, getProc: nil, runProc: logic_nextSleepDuration_loader.run),
     AppEntry(keyword: "logic/setAsState", initProc: logic_setAsState_loader.init, setFieldProc: logic_setAsState_loader.setField, getProc: nil, runProc: logic_setAsState_loader.run),
     AppEntry(keyword: "render/calendar", initProc: render_calendar_loader.init, setFieldProc: render_calendar_loader.setField, getProc: render_calendar_loader.get, runProc: render_calendar_loader.run),
-    AppEntry(keyword: "render/chart", initProc: render_chart_loader.init, setFieldProc: render_chart_loader.setField, getProc: render_chart_loader.get, runProc: render_chart_loader.run),
     AppEntry(keyword: "render/color", initProc: render_color_loader.init, setFieldProc: render_color_loader.setField, getProc: render_color_loader.get, runProc: render_color_loader.run),
     AppEntry(keyword: "render/gradient", initProc: render_gradient_loader.init, setFieldProc: render_gradient_loader.setField, getProc: render_gradient_loader.get, runProc: render_gradient_loader.run),
     AppEntry(keyword: "render/image", initProc: render_image_loader.init, setFieldProc: render_image_loader.setField, getProc: render_image_loader.get, runProc: render_image_loader.run),
@@ -98,7 +96,6 @@ else:
     AppEntry(keyword: "logic/nextSleepDuration", initProc: logic_nextSleepDuration_loader.init, setFieldProc: logic_nextSleepDuration_loader.setField, getProc: nil, runProc: logic_nextSleepDuration_loader.run),
     AppEntry(keyword: "logic/setAsState", initProc: logic_setAsState_loader.init, setFieldProc: logic_setAsState_loader.setField, getProc: nil, runProc: logic_setAsState_loader.run),
     AppEntry(keyword: "render/calendar", initProc: render_calendar_loader.init, setFieldProc: render_calendar_loader.setField, getProc: render_calendar_loader.get, runProc: render_calendar_loader.run),
-    AppEntry(keyword: "render/chart", initProc: render_chart_loader.init, setFieldProc: render_chart_loader.setField, getProc: render_chart_loader.get, runProc: render_chart_loader.run),
     AppEntry(keyword: "render/color", initProc: render_color_loader.init, setFieldProc: render_color_loader.setField, getProc: render_color_loader.get, runProc: render_color_loader.run),
     AppEntry(keyword: "render/gradient", initProc: render_gradient_loader.init, setFieldProc: render_gradient_loader.setField, getProc: render_gradient_loader.get, runProc: render_gradient_loader.run),
     AppEntry(keyword: "render/image", initProc: render_image_loader.init, setFieldProc: render_image_loader.setField, getProc: render_image_loader.get, runProc: render_image_loader.run),

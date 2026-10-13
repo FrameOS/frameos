@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const frontendRoot = path.resolve(__dirname, '..')
 const repoRoot = path.resolve(frontendRoot, '..')
-const sourceRoot = path.join(repoRoot, 'repo', 'apps', 'code')
+// repo/apps/<what the app returns>/<name>: image, text, json, logic.
+const sourceRoot = path.join(repoRoot, 'repo', 'apps')
 const outputPath = path.join(frontendRoot, 'src', 'generated', 'repoApps.ts')
 const sourceFiles = ['app.ts', 'app.tsx', 'app.js', 'app.jsx']
 
@@ -23,19 +24,23 @@ async function getAppDirs() {
   if (!(await pathExists(sourceRoot))) {
     return []
   }
-  const entries = await fs.readdir(sourceRoot, { withFileTypes: true })
-  return entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort()
+  const appDirs = []
+  for (const folder of (await fs.readdir(sourceRoot, { withFileTypes: true })).filter((entry) => entry.isDirectory())) {
+    for (const app of (await fs.readdir(path.join(sourceRoot, folder.name), { withFileTypes: true })).filter((entry) =>
+      entry.isDirectory()
+    )) {
+      appDirs.push(`${folder.name}/${app.name}`)
+    }
+  }
+  return appDirs.sort((a, b) => a.split('/')[1].localeCompare(b.split('/')[1]))
 }
 
 async function buildEmbeddedRepoApps() {
   const configs = {}
   const sources = {}
 
-  for (const appName of await getAppDirs()) {
-    const appDir = path.join(sourceRoot, appName)
+  for (const appPath of await getAppDirs()) {
+    const appDir = path.join(sourceRoot, appPath)
     const configPath = path.join(appDir, 'config.json')
     if (!(await pathExists(configPath))) {
       continue
@@ -51,7 +56,7 @@ async function buildEmbeddedRepoApps() {
       .map((entry) => entry.name)
       .sort()
     const hasJavaScriptSource = files.some((file) => sourceFiles.includes(file))
-    const keyword = `repo/apps/code/${appName}`
+    const keyword = `repo/apps/${appPath}`
 
     configs[keyword] = { ...config, origin: keyword }
     sources[keyword] = {}

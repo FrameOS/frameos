@@ -1,5 +1,5 @@
 {
-  "$comment": "Conformance corpus for the retired-app transform (docs/retired-apps.md). Each case runs `op` on `input` and must produce `output`. `retire` and `restore` take the scenes array; `forRuntime` also takes `runtimeVersion` (null = unknown). An app entry written as the string \"@repo/apps/code/immich\" stands for the full scene-local app the runner builds from that folder: the app's config.json keys plus `origin` and `sources` (every file of the folder). Runners: backend/app/utils/tests/test_retired_apps.py, cloud/apps/auth-web/src/lib/retired-apps.test.ts.",
+  "$comment": "Conformance corpus for the retired-app transform (docs/retired-apps.md). Each case runs `op` on `input` and must produce `output`. `retire` and `restore` take the scenes array; `forRuntime` also takes `runtimeVersion` (null = unknown). An app entry written as the string \"@repo/apps/image/immich\" stands for the full scene-local app the runner builds from that folder: the app's config.json keys plus `origin` and `sources` (every file of the folder). Runners: backend/app/utils/tests/test_retired_apps.py, cloud/apps/auth-web/src/lib/retired-apps.test.ts.",
   "cases": [
     {
       "name": "retire: a data/immich node becomes the scene-local JS app",
@@ -30,7 +30,7 @@
             }
           ],
           "edges": [{ "id": "e1", "source": "n2", "sourceHandle": "fieldOutput", "target": "n1", "targetHandle": "fieldInput/image" }],
-          "apps": { "immich": "@repo/apps/code/immich" }
+          "apps": { "immich": "@repo/apps/image/immich" }
         }
       ]
     },
@@ -53,7 +53,7 @@
             { "id": "a", "type": "app", "data": { "keyword": "immich", "config": { "mode": "favorites" } } },
             { "id": "b", "type": "app", "data": { "keyword": "immich", "config": { "mode": "memories" } } }
           ],
-          "apps": { "immich": "@repo/apps/code/immich" }
+          "apps": { "immich": "@repo/apps/image/immich" }
         }
       ]
     },
@@ -64,14 +64,14 @@
         {
           "id": "s1",
           "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } }],
-          "apps": { "immich": { "origin": "repo/apps/code/immich", "name": "Immich (edited)", "sources": { "app.ts": "export function get() {}" } } }
+          "apps": { "immich": { "origin": "repo/apps/image/immich", "name": "Immich (edited)", "sources": { "app.ts": "export function get() {}" } } }
         }
       ],
       "output": [
         {
           "id": "s1",
           "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } }],
-          "apps": { "immich": { "origin": "repo/apps/code/immich", "name": "Immich (edited)", "sources": { "app.ts": "export function get() {}" } } }
+          "apps": { "immich": { "origin": "repo/apps/image/immich", "name": "Immich (edited)", "sources": { "app.ts": "export function get() {}" } } }
         }
       ]
     },
@@ -85,7 +85,7 @@
             { "id": "a", "type": "app", "data": { "keyword": "photos", "config": {} } },
             { "id": "b", "type": "app", "data": { "keyword": "data/immich", "config": {} } }
           ],
-          "apps": { "photos": { "origin": "repo/apps/code/immich", "sources": { "app.ts": "export function get() {}" } } }
+          "apps": { "photos": { "origin": "repo/apps/image/immich", "sources": { "app.ts": "export function get() {}" } } }
         }
       ],
       "output": [
@@ -95,7 +95,27 @@
             { "id": "a", "type": "app", "data": { "keyword": "photos", "config": {} } },
             { "id": "b", "type": "app", "data": { "keyword": "photos", "config": {} } }
           ],
-          "apps": { "photos": { "origin": "repo/apps/code/immich", "sources": { "app.ts": "export function get() {}" } } }
+          "apps": { "photos": { "origin": "repo/apps/image/immich", "sources": { "app.ts": "export function get() {}" } } }
+        }
+      ]
+    },
+    {
+      "name": "retire: an entry saved under the old repo/apps/code origin is reused",
+      "op": "retire",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "data/immich", "config": {} } }],
+          "edges": [],
+          "apps": { "photos": { "name": "Immich", "origin": "repo/apps/code/immich", "sources": { "app.ts": "export function get() {}" } } }
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "photos", "config": {} } }],
+          "edges": [],
+          "apps": { "photos": { "name": "Immich", "origin": "repo/apps/code/immich", "sources": { "app.ts": "export function get() {}" } } }
         }
       ]
     },
@@ -109,7 +129,7 @@
             { "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } },
             { "id": "b", "type": "app", "data": { "keyword": "data/immich", "config": {} } }
           ],
-          "apps": { "immich": { "origin": "repo/apps/code/jsImage", "sources": { "app.ts": "export function get() {}" } } }
+          "apps": { "immich": { "origin": "repo/apps/image/jsImage", "sources": { "app.ts": "export function get() {}" } } }
         }
       ],
       "output": [
@@ -120,8 +140,8 @@
             { "id": "b", "type": "app", "data": { "keyword": "immich2", "config": {} } }
           ],
           "apps": {
-            "immich": { "origin": "repo/apps/code/jsImage", "sources": { "app.ts": "export function get() {}" } },
-            "immich2": "@repo/apps/code/immich"
+            "immich": { "origin": "repo/apps/image/jsImage", "sources": { "app.ts": "export function get() {}" } },
+            "immich2": "@repo/apps/image/immich"
           }
         }
       ]
@@ -149,7 +169,7 @@
         {
           "id": "s1",
           "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": { "mode": "album" } } }],
-          "apps": { "immich": "@repo/apps/code/immich" }
+          "apps": { "immich": "@repo/apps/image/immich" }
         }
       ],
       "output": [
@@ -170,8 +190,8 @@
             { "id": "b", "type": "app", "data": { "keyword": "panel", "config": {} } }
           ],
           "apps": {
-            "photos": { "origin": "repo/apps/code/immich", "sources": { "app.ts": "export function get() {}" } },
-            "panel": { "origin": "repo/apps/code/weatherPanel", "sources": { "app.ts": "export function get() {}" } }
+            "photos": { "origin": "repo/apps/image/immich", "sources": { "app.ts": "export function get() {}" } },
+            "panel": { "origin": "repo/apps/image/weatherPanel", "sources": { "app.ts": "export function get() {}" } }
           }
         }
       ],
@@ -183,10 +203,23 @@
             { "id": "b", "type": "app", "data": { "keyword": "panel", "config": {} } }
           ],
           "apps": {
-            "panel": { "origin": "repo/apps/code/weatherPanel", "sources": { "app.ts": "export function get() {}" } }
+            "panel": { "origin": "repo/apps/image/weatherPanel", "sources": { "app.ts": "export function get() {}" } }
           }
         }
       ]
+    },
+    {
+      "name": "restore: an entry saved under the old repo/apps/code origin goes back too",
+      "op": "restore",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "immich", "config": {} } }],
+          "edges": [],
+          "apps": { "immich": { "name": "Immich", "origin": "repo/apps/code/immich", "sources": { "app.ts": "export function get() {}" } } }
+        }
+      ],
+      "output": [{ "id": "s1", "nodes": [{ "id": "n1", "type": "app", "data": { "keyword": "data/immich", "config": {} } }], "edges": [] }]
     },
     {
       "name": "forRuntime: a runtime older than the replacement gets the Nim keyword",
@@ -196,7 +229,7 @@
         {
           "id": "s1",
           "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } }],
-          "apps": { "immich": "@repo/apps/code/immich" }
+          "apps": { "immich": "@repo/apps/image/immich" }
         }
       ],
       "output": [{ "id": "s1", "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "data/immich", "config": {} } }] }]
@@ -217,7 +250,7 @@
         {
           "id": "s1",
           "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } }],
-          "apps": { "immich": "@repo/apps/code/immich" }
+          "apps": { "immich": "@repo/apps/image/immich" }
         }
       ]
     },
@@ -230,7 +263,7 @@
         {
           "id": "s1",
           "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } }],
-          "apps": { "immich": "@repo/apps/code/immich" }
+          "apps": { "immich": "@repo/apps/image/immich" }
         }
       ]
     },
@@ -243,7 +276,7 @@
         {
           "id": "s1",
           "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "immich", "config": {} } }],
-          "apps": { "immich": "@repo/apps/code/immich" }
+          "apps": { "immich": "@repo/apps/image/immich" }
         }
       ]
     },
@@ -272,7 +305,7 @@
             { "id": "a", "type": "app", "data": { "keyword": "frameOSGallery", "config": { "category": "low-poly-animals" } } },
             { "id": "b", "type": "app", "data": { "keyword": "immich", "config": {} } }
           ],
-          "apps": { "immich": "@repo/apps/code/immich", "frameOSGallery": "@repo/apps/code/frameOSGallery" }
+          "apps": { "immich": "@repo/apps/image/immich", "frameOSGallery": "@repo/apps/image/frameOSGallery" }
         }
       ]
     },
@@ -287,7 +320,7 @@
             { "id": "a", "type": "app", "data": { "keyword": "frameOSGallery", "config": { "category": "cute" } } },
             { "id": "b", "type": "app", "data": { "keyword": "immich", "config": {} } }
           ],
-          "apps": { "immich": "@repo/apps/code/immich", "frameOSGallery": "@repo/apps/code/frameOSGallery" }
+          "apps": { "immich": "@repo/apps/image/immich", "frameOSGallery": "@repo/apps/image/frameOSGallery" }
         }
       ],
       "output": [
@@ -311,7 +344,7 @@
             { "id": "a", "type": "app", "data": { "keyword": "data/weather", "config": { "location": "Ghent" } } },
             { "id": "b", "type": "app", "data": { "keyword": "googlePhotos", "config": {} } }
           ],
-          "apps": { "googlePhotos": "@repo/apps/code/googlePhotos" }
+          "apps": { "googlePhotos": "@repo/apps/image/googlePhotos" }
         }
       ],
       "output": [
@@ -321,7 +354,211 @@
             { "id": "a", "type": "app", "data": { "keyword": "weather", "config": { "location": "Ghent" } } },
             { "id": "b", "type": "app", "data": { "keyword": "data/googlePhotos", "config": {} } }
           ],
-          "apps": { "weather": "@repo/apps/code/weather" }
+          "apps": { "weather": "@repo/apps/json/weather" }
+        }
+      ]
+    },
+    {
+      "name": "retire: a render/chart node in the render flow becomes render/image, fed by a new chart node",
+      "op": "retire",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "ev", "type": "event", "data": { "keyword": "render" } },
+            {
+              "id": "c",
+              "type": "app",
+              "position": { "x": 300, "y": 0 },
+              "data": { "keyword": "render/chart", "config": { "chartType": "bar", "title": "Rain" }, "cache": { "enabled": true } }
+            },
+            { "id": "s", "type": "state", "data": { "keyword": "series", "value": "[]" } },
+            { "id": "t", "type": "app", "data": { "keyword": "render/text", "config": { "text": "hi" } } }
+          ],
+          "edges": [
+            { "id": "e1", "type": "appNodeEdge", "source": "ev", "sourceHandle": "next", "target": "c", "targetHandle": "prev" },
+            { "id": "e2", "type": "appNodeEdge", "source": "c", "sourceHandle": "next", "target": "t", "targetHandle": "prev" },
+            { "id": "e3", "type": "codeNodeEdge", "source": "s", "sourceHandle": "fieldOutput", "target": "c", "targetHandle": "fieldInput/data" }
+          ]
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "ev", "type": "event", "data": { "keyword": "render" } },
+            { "id": "c", "type": "app", "position": { "x": 300, "y": 0 }, "data": { "keyword": "render/image", "config": {} } },
+            {
+              "id": "c-chart",
+              "type": "app",
+              "data": { "keyword": "chart", "config": { "chartType": "bar", "title": "Rain" }, "cache": { "enabled": true } },
+              "position": { "x": 300, "y": -150 }
+            },
+            { "id": "s", "type": "state", "data": { "keyword": "series", "value": "[]" } },
+            { "id": "t", "type": "app", "data": { "keyword": "render/text", "config": { "text": "hi" } } }
+          ],
+          "edges": [
+            { "id": "e1", "type": "appNodeEdge", "source": "ev", "sourceHandle": "next", "target": "c", "targetHandle": "prev" },
+            { "id": "e2", "type": "appNodeEdge", "source": "c", "sourceHandle": "next", "target": "t", "targetHandle": "prev" },
+            {
+              "id": "e3",
+              "type": "codeNodeEdge",
+              "source": "s",
+              "sourceHandle": "fieldOutput",
+              "target": "c-chart",
+              "targetHandle": "fieldInput/data"
+            },
+            {
+              "id": "c-chart-image",
+              "type": "codeNodeEdge",
+              "source": "c-chart",
+              "sourceHandle": "fieldOutput",
+              "target": "c",
+              "targetHandle": "fieldInput/image"
+            }
+          ],
+          "apps": { "chart": "@repo/apps/image/chart" }
+        }
+      ]
+    },
+    {
+      "name": "retire: a render/chart node in a split cell is in the render flow too",
+      "op": "retire",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "sp", "type": "app", "data": { "keyword": "render/split", "config": { "rows": "1", "columns": "1" } } },
+            { "id": "c", "type": "app", "data": { "keyword": "render/chart", "config": {} } }
+          ],
+          "edges": [{ "id": "e1", "source": "sp", "sourceHandle": "field/render_functions[1][1]", "target": "c", "targetHandle": "prev" }]
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "sp", "type": "app", "data": { "keyword": "render/split", "config": { "rows": "1", "columns": "1" } } },
+            { "id": "c", "type": "app", "data": { "keyword": "render/image", "config": {} } },
+            { "id": "c-chart", "type": "app", "data": { "keyword": "chart", "config": {} } }
+          ],
+          "edges": [
+            { "id": "e1", "source": "sp", "sourceHandle": "field/render_functions[1][1]", "target": "c", "targetHandle": "prev" },
+            {
+              "id": "c-chart-image",
+              "type": "codeNodeEdge",
+              "source": "c-chart",
+              "sourceHandle": "fieldOutput",
+              "target": "c",
+              "targetHandle": "fieldInput/image"
+            }
+          ],
+          "apps": { "chart": "@repo/apps/image/chart" }
+        }
+      ]
+    },
+    {
+      "name": "retire: a render/chart node read as a value just becomes the chart app",
+      "op": "retire",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "i", "type": "app", "data": { "keyword": "render/image", "config": {} } },
+            { "id": "c", "type": "app", "data": { "keyword": "render/chart", "config": { "title": "x" } } }
+          ],
+          "edges": [{ "id": "e1", "source": "c", "sourceHandle": "fieldOutput", "target": "i", "targetHandle": "fieldInput/image" }]
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "i", "type": "app", "data": { "keyword": "render/image", "config": {} } },
+            { "id": "c", "type": "app", "data": { "keyword": "chart", "config": { "title": "x" } } }
+          ],
+          "edges": [{ "id": "e1", "source": "c", "sourceHandle": "fieldOutput", "target": "i", "targetHandle": "fieldInput/image" }],
+          "apps": { "chart": "@repo/apps/image/chart" }
+        }
+      ]
+    },
+    {
+      "name": "forRuntime: an older runtime gets render/chart back, as the value its render/image draws",
+      "op": "forRuntime",
+      "runtimeVersion": "2026.10.12",
+      "input": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "ev", "type": "event", "data": { "keyword": "render" } },
+            { "id": "c", "type": "app", "position": { "x": 300, "y": 0 }, "data": { "keyword": "render/image", "config": {} } },
+            {
+              "id": "c-chart",
+              "type": "app",
+              "data": { "keyword": "chart", "config": { "chartType": "bar", "title": "Rain" }, "cache": { "enabled": true } },
+              "position": { "x": 300, "y": -150 }
+            },
+            { "id": "s", "type": "state", "data": { "keyword": "series", "value": "[]" } },
+            { "id": "t", "type": "app", "data": { "keyword": "render/text", "config": { "text": "hi" } } }
+          ],
+          "edges": [
+            { "id": "e1", "type": "appNodeEdge", "source": "ev", "sourceHandle": "next", "target": "c", "targetHandle": "prev" },
+            { "id": "e2", "type": "appNodeEdge", "source": "c", "sourceHandle": "next", "target": "t", "targetHandle": "prev" },
+            {
+              "id": "e3",
+              "type": "codeNodeEdge",
+              "source": "s",
+              "sourceHandle": "fieldOutput",
+              "target": "c-chart",
+              "targetHandle": "fieldInput/data"
+            },
+            {
+              "id": "c-chart-image",
+              "type": "codeNodeEdge",
+              "source": "c-chart",
+              "sourceHandle": "fieldOutput",
+              "target": "c",
+              "targetHandle": "fieldInput/image"
+            }
+          ],
+          "apps": { "chart": "@repo/apps/image/chart" }
+        }
+      ],
+      "output": [
+        {
+          "id": "s1",
+          "nodes": [
+            { "id": "ev", "type": "event", "data": { "keyword": "render" } },
+            { "id": "c", "type": "app", "position": { "x": 300, "y": 0 }, "data": { "keyword": "render/image", "config": {} } },
+            {
+              "id": "c-chart",
+              "type": "app",
+              "data": { "keyword": "render/chart", "config": { "chartType": "bar", "title": "Rain" }, "cache": { "enabled": true } },
+              "position": { "x": 300, "y": -150 }
+            },
+            { "id": "s", "type": "state", "data": { "keyword": "series", "value": "[]" } },
+            { "id": "t", "type": "app", "data": { "keyword": "render/text", "config": { "text": "hi" } } }
+          ],
+          "edges": [
+            { "id": "e1", "type": "appNodeEdge", "source": "ev", "sourceHandle": "next", "target": "c", "targetHandle": "prev" },
+            { "id": "e2", "type": "appNodeEdge", "source": "c", "sourceHandle": "next", "target": "t", "targetHandle": "prev" },
+            {
+              "id": "e3",
+              "type": "codeNodeEdge",
+              "source": "s",
+              "sourceHandle": "fieldOutput",
+              "target": "c-chart",
+              "targetHandle": "fieldInput/data"
+            },
+            {
+              "id": "c-chart-image",
+              "type": "codeNodeEdge",
+              "source": "c-chart",
+              "sourceHandle": "fieldOutput",
+              "target": "c",
+              "targetHandle": "fieldInput/image"
+            }
+          ]
         }
       ]
     }

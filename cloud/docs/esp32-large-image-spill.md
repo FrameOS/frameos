@@ -31,7 +31,7 @@ the bytes to storage and stream the decode from there.
 ## Data flow today (esp32, gallery scene)
 
 1. The gallery app's `get()` — the Nim `data/frameOSGallery` at the time of
-   the bench, `repo/apps/code/frameOSGallery` (`frameos.fetchImage`, via
+   the bench, `repo/apps/image/frameOSGallery` (`frameos.fetchImage`, via
    `jsFetchImage` in `js_runtime/app_runtime.nim`) since 2026-10-13 —
    downloads into the decode target the interpreter offered (the render
    canvas, panel-sized — this is where the decoded RGBA size comes from).

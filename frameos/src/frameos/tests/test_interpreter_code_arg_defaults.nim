@@ -87,7 +87,7 @@ proc withUploadedScene(sceneId: SceneId, exported: ExportedInterpretedScene,
 # --- The real scene's shape ------------------------------------------------
 # 20: "cal"     -> a healthy producer of a JSON event array (stands in for
 #                  data/icalJson)
-# 30: "recycle" -> the beRecycle JS app (repo/apps/code/beRecycle), which
+# 30: "recycle" -> the beRecycle JS app (repo/apps/json/beRecycle), which
 #                  throws "HTTP 401: ..." when the third-party API refuses
 # 40: merge     -> [...cal, ...recycle], args declared "string" even though
 #                  both producers emit JSON arrays (exactly as in the wild)
@@ -95,7 +95,7 @@ proc withUploadedScene(sceneId: SceneId, exported: ExportedInterpretedScene,
 #     error is attributed back to the arg that failed
 # 60: same merge as 40, but with input+duration caching enabled
 
-const RecycleAppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "beRecycle"
+const RecycleAppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / "repo" / "apps" / "json" / "beRecycle"
 
 proc recycleApps(): JsonNode =
   ## The scene carries the beRecycle JS app the way a converted scene does.

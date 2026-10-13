@@ -17,7 +17,7 @@ def immich_js_scene() -> dict:
         'name': 'Photos',
         'nodes': [{'id': 'n1', 'type': 'app', 'data': {'keyword': 'immich', 'config': {'mode': 'favorites'}}}],
         'edges': [],
-        'apps': {'immich': replacement_app_entry('repo/apps/code/immich')},
+        'apps': {'immich': replacement_app_entry('repo/apps/image/immich')},
     }
 
 
@@ -58,7 +58,7 @@ async def test_esp32_on_older_firmware_gets_the_retired_keyword(async_client, no
     current = await no_auth_client.get(url, headers={**auth(frame), 'If-None-Match': older.headers['etag']})
     assert current.status_code == 200, current.text
     assert current.json()[0]['nodes'][0]['data']['keyword'] == 'immich'
-    assert current.json()[0]['apps']['immich']['origin'] == 'repo/apps/code/immich'
+    assert current.json()[0]['apps']['immich']['origin'] == 'repo/apps/image/immich'
     assert current.headers['etag'] != older.headers['etag']
 
     # The stored scenes are untouched.
@@ -107,7 +107,7 @@ async def test_saving_a_frame_stores_the_js_app(async_client, db):
     db.refresh(frame)
     scene = frame.scenes[0]
     assert scene['nodes'][0]['data']['keyword'] == 'immich'
-    assert scene['apps']['immich']['origin'] == 'repo/apps/code/immich'
+    assert scene['apps']['immich']['origin'] == 'repo/apps/image/immich'
 
 
 @pytest.mark.asyncio

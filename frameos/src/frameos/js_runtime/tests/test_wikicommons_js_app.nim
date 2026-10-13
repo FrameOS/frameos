@@ -1,4 +1,4 @@
-## The Wikimedia Commons code app (repo/apps/code/wikicommons) run for real
+## The Wikimedia Commons code app (repo/apps/image/wikicommons) run for real
 ## through the JS app runtime. The API host is fixed, so `frameos.httpRequest`
 ## is answered by `jsHttpRequestHook`; the image URLs those answers carry
 ## point at a mock image server on a thread, so the download (with its
@@ -18,7 +18,7 @@ import frameos/types
 import frameos/utils/http_client
 import frameos/values
 
-const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "wikicommons"
+const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "image" / "wikicommons"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 let appFields = parseJson(appConfigJson)["fields"]

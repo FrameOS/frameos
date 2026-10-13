@@ -1,4 +1,4 @@
-"""The 1329ea888ea9 data migration (retire eight Nim data apps), run against an in-memory SQLite."""
+"""The 1329ea888ea9 data migration (retire nine Nim apps), run against an in-memory SQLite."""
 from __future__ import annotations
 
 import importlib.util
@@ -27,7 +27,10 @@ def _nim_scene(scene_id: str) -> dict:
             {"id": "n2", "type": "app", "data": {"keyword": "data/unsplash", "config": {"search": "fox"}}},
             # Already retired by the previous migration: left alone here.
             {"id": "n3", "type": "app", "data": {"keyword": "data/frameOSGallery", "config": {}}},
+            {"id": "ev", "type": "event", "data": {"keyword": "render"}},
+            {"id": "n4", "type": "app", "data": {"keyword": "render/chart", "config": {"chartType": "bar"}}},
         ],
+        "edges": [{"id": "e1", "source": "ev", "sourceHandle": "next", "target": "n4", "targetHandle": "prev"}],
         "settings": {"execution": "interpreted"},
     }
 
@@ -70,9 +73,14 @@ def test_migration_rewrites_frames_baselines_and_templates():
     assert converted["nodes"][0]["data"] == {"keyword": "weather", "config": {"location": "Brussels"}}
     assert converted["nodes"][1]["data"] == {"keyword": "unsplash", "config": {"search": "fox"}}
     assert converted["nodes"][2]["data"]["keyword"] == "data/frameOSGallery"
-    assert converted["apps"]["weather"]["origin"] == "repo/apps/code/weather"
-    assert converted["apps"]["unsplash"]["origin"] == "repo/apps/code/unsplash"
-    assert set(converted["apps"]) == {"weather", "unsplash"}
+    assert converted["apps"]["weather"]["origin"] == "repo/apps/json/weather"
+    assert converted["apps"]["unsplash"]["origin"] == "repo/apps/image/unsplash"
+    # The chart was drawn in the render flow: render/image there now, fed by the chart app.
+    assert converted["nodes"][4]["data"] == {"keyword": "render/image", "config": {}}
+    assert converted["nodes"][5] == {"id": "n4-chart", "type": "app", "data": {"keyword": "chart", "config": {"chartType": "bar"}}}
+    assert converted["edges"][-1]["source"] == "n4-chart" and converted["edges"][-1]["targetHandle"] == "fieldInput/image"
+    assert converted["apps"]["chart"]["origin"] == "repo/apps/image/chart"
+    assert set(converted["apps"]) == {"weather", "unsplash", "chart"}
     assert frames[1].scenes[1] == untouched
     baseline = frames[1].last_successful_deploy
     assert baseline["name"] == "Frame"

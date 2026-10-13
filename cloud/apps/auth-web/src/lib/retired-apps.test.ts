@@ -24,7 +24,7 @@ type Case = {
   output: unknown[];
 };
 
-// Swap the fixtures' "@repo/apps/code/<app>" placeholders for the real entry.
+// Swap the fixtures' "@repo/apps/<folder>/<app>" placeholders for the real entry.
 function expand(value: unknown): unknown {
   if (typeof value === "string" && value.startsWith("@repo/")) {
     return replacementAppEntry(value.slice(1));
@@ -64,18 +64,18 @@ describe("retired apps (docs/retired-apps-fixtures.json)", () => {
   }
 
   it("the generated replacement is the repo app", () => {
-    const entry = replacementAppEntry("repo/apps/code/immich");
+    const entry = replacementAppEntry("repo/apps/image/immich");
     const sources = entry.sources as Record<string, string>;
-    expect(entry.origin).toBe("repo/apps/code/immich");
+    expect(entry.origin).toBe("repo/apps/image/immich");
     expect(entry.settings).toEqual(["immich"]);
-    expect(sources["app.ts"]).toBe(readFileSync(join(repoRoot, "repo/apps/code/immich/app.ts"), "utf8"));
+    expect(sources["app.ts"]).toBe(readFileSync(join(repoRoot, "repo/apps/image/immich/app.ts"), "utf8"));
   });
 
   it("knows which runtimes lack the replacement", () => {
-    expect(keywordsRuntimeLacks("2026.10.10")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle"]);
-    expect(keywordsRuntimeLacks("v2026.10.10+abc")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle"]);
-    expect(keywordsRuntimeLacks("2026.10.12")).toEqual(["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle"]);
-    expect(keywordsRuntimeLacks("2026.10.11")).toEqual(["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle"]);
+    expect(keywordsRuntimeLacks("2026.10.10")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart"]);
+    expect(keywordsRuntimeLacks("v2026.10.10+abc")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart"]);
+    expect(keywordsRuntimeLacks("2026.10.12")).toEqual(["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart"]);
+    expect(keywordsRuntimeLacks("2026.10.11")).toEqual(["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart"]);
     expect(keywordsRuntimeLacks("2026.10.13")).toEqual([]);
     expect(keywordsRuntimeLacks(null)).toEqual([]);
     expect(keywordsRuntimeLacks("nightly")).toEqual([]);

@@ -1,4 +1,4 @@
-## The Unsplash code app (repo/apps/code/unsplash) run for real through the JS
+## The Unsplash code app (repo/apps/image/unsplash) run for real through the JS
 ## app runtime. The API host is fixed, so `frameos.httpRequest` is answered by
 ## `jsHttpRequestHook`; the photo URL the API returns points at a mock image
 ## server on a thread, so the download, the size suffix it gets and the saved
@@ -13,7 +13,7 @@ import frameos/types
 import frameos/utils/http_client
 import frameos/values
 
-const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "unsplash"
+const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "image" / "unsplash"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 let appFields = parseJson(appConfigJson)["fields"]

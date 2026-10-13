@@ -154,7 +154,7 @@ still sent the Nim keyword, and the Nim app goes in the same change.
   JS port of the built-ins it unblocks — demand-ordered, one at a time,
   never a bulk port. Done so far: the network photo
   (`frameos.fetchImage`, 2026-10-12), which carried the Immich app across
-  as `repo/apps/code/immich` and retired `data/immich`. On 2026-10-13 the
+  as `repo/apps/image/immich` and retired `data/immich`. On 2026-10-13 the
   FrameOS Gallery, Unsplash, Wikimedia Commons, Google Photos, OpenAI image
   and text, Home Assistant sensor, Weather and Recycle Belgium followed, with
   `frameos.remember` (state that outlives an ESP32 render), `fetchImage`

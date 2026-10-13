@@ -39,7 +39,7 @@ Rules:
 - Code and state nodes also connect only via codeNodeEdge, and their source handle is exactly "fieldOutput"
   (never "fieldOutput/<name>").
 - Images are data: render them by putting a render/image app in the prev/next chain and wiring the image
-  output into its image field. Never chain a data image app (e.g. repo/apps/code/openaiImage) directly into the render flow,
+  output into its image field. Never chain a data image app (e.g. repo/apps/image/openaiImage) directly into the render flow,
   and never store image outputs in state.
 - State nodes expose scene fields; add a matching entry in the scene's fields array. Prefer access "public"
   and persist "disk" so users can customize. Every state field needs a string default in "value".
@@ -106,7 +106,7 @@ Rules:
 - Layout apps (e.g. render/split) accept scene or render nodes on sourceHandle
   "field/render_functions[row][col]" -> targetHandle "prev".
 - settings.refreshInterval (seconds) is the default render cadence. Never set it below 3600 when the scene calls
-  paid APIs (e.g. repo/apps/code/openaiImage) unless explicitly asked. settings.backgroundColor is a hex fill.
+  paid APIs (e.g. repo/apps/image/openaiImage) unless explicitly asked. settings.backgroundColor is a hex fill.
 - Every scene automatically exposes its cadence to users as a final public state field "refreshInterval"
   ("Refresh interval (seconds)", readable as state.refreshInterval). Never add your own interval field or a
   logic/nextSleepDuration app just to make the cadence configurable. Only when the interval deserves a
