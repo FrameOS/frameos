@@ -909,6 +909,36 @@ suite "js app runtime":
     check payload["plainExif"].kind == JNull
     check payload["plainSaved"].kind == JNull
 
+  test "a field declared twice takes its default from the first declaration":
+    # openaiImage declares `quality` once per model family, each behind its
+    # own showIf; a node that never set it gets the first one's default, as a
+    # Nim app's loader gave it.
+    let config = testConfig()
+    let scene = FrameScene(id: "tests/js-app-duplicate-fields".SceneId, frameConfig: config, state: %*{},
+      logger: testLogger(config))
+    let sources = %*{
+      "app.ts": "export function get(app) { return { quality: app.config.quality, size: app.config.size } }",
+      "config.json": $(%*{
+        "name": "Duplicates", "category": "data", "output": [{"name": "out", "type": "json"}],
+        "fields": [
+          {"name": "quality", "type": "select", "value": "standard", "options": ["standard", "hd"]},
+          {"name": "quality", "type": "select", "value": "auto", "options": ["auto", "low"]},
+          {"name": "size", "type": "string", "value": "1024x1024"}
+        ]
+      })
+    }
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let sparse = initDynamicJsApp("dups", DiagramNode(id: 37.NodeId, nodeType: "app",
+      data: %*{"keyword": "dups", "config": {}}), scene, sources)
+    let sparseValue = sparse.getDynamicJsApp(context).asJson()
+    check sparseValue["quality"].getStr() == "standard"
+    check sparseValue["size"].getStr() == "1024x1024"
+    let explicit = initDynamicJsApp("dups", DiagramNode(id: 38.NodeId, nodeType: "app",
+      data: %*{"keyword": "dups", "config": {"quality": "low"}}), scene, sources)
+    check explicit.getDynamicJsApp(context).asJson()["quality"].getStr() == "low"
+    releaseJsAppRuntime(sparse)
+    releaseJsAppRuntime(explicit)
+
   test "remember outlives the interpreter, module state does not":
     # An ESP32 tears every idle interpreter down after a render; what an app
     # keeps with frameos.remember is still there when the next one starts.

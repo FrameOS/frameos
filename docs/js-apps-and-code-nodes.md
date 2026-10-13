@@ -103,7 +103,9 @@ calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,
 key from it, write with `frameos.setState(key, value)` and state nodes see the
 change. What an app does **not** have are the code-node time helpers
 (`format`, `now`, `parseTs`); take such values in through a field fed by a
-code node or `data/clock`. `Date` is UTC-only here as well.
+code node or `data/clock`. `Date` reads local time in the frame's zone,
+like Nim's `now()` (the process zone on a Pi, the frame's time zone setting
+on an ESP32).
 
 JavaScript is the format apps are written in. The Nim apps under
 `frameos/src/apps/` are the built-in catalog that ships inside the FrameOS

@@ -1235,6 +1235,11 @@ proc runtimeConfigFromNode(config: JsonNode, nodeConfig: JsonNode): JsonNode =
       let fieldType = field{"type"}.getStr()
       if name.len == 0:
         continue
+      # One name may be declared more than once, each behind its own showIf
+      # (openaiImage's `size` per model). The first declaration supplies the
+      # default, as it does for a Nim app's loader and the editor's typings.
+      if fieldTypes.hasKey(name) or result.hasKey(name):
+        continue
       if fieldType.len > 0:
         fieldTypes[name] = fieldType
       if field.hasKey("value"):
