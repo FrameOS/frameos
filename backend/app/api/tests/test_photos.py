@@ -1,19 +1,29 @@
 """Photos routes against docs/photos.md: the owner routes (project scoped)
-and the share routes frames call without a login."""
+and the share routes frames call without a login. The rows are
+photo_entry; the bytes go to the object store under photos/<sha256>, a
+directory here unless a test points the FRAMEOS_PHOTOS_S3_* variables at the
+fake bucket below."""
 from __future__ import annotations
 
+import datetime
+import hashlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 from urllib.parse import quote
 
+import httpx
 import pytest
 from PIL import Image
 
+from app.database import SessionLocal
 from app.models import new_frame
+from app.models.photo_entry import PhotoEntry
 from app.models.photo_share import PhotoShare
 from app.utils import photos as photos_utils
+from app.utils.object_store import S3ObjectStore, is_valid_object_key, s3_settings_from_env
 from app.utils.photo_album_scene import build_photo_album_scene
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -23,18 +33,46 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 def photos_dir(tmp_path, monkeypatch) -> Path:
     directory = tmp_path / "photos"
     monkeypatch.setenv("FRAMEOS_PHOTOS_DIR", str(directory))
-    monkeypatch.delenv("FRAMEOS_PHOTOS_ALLOW_EPHEMERAL", raising=False)
-    monkeypatch.delenv("HASSIO_TOKEN", raising=False)
+    for name in (
+        "FRAMEOS_PHOTOS_ALLOW_EPHEMERAL",
+        "HASSIO_TOKEN",
+        "FRAMEOS_PHOTOS_S3_ENDPOINT",
+        "FRAMEOS_PHOTOS_S3_BUCKET",
+        "FRAMEOS_PHOTOS_S3_ACCESS_KEY_ID",
+        "FRAMEOS_PHOTOS_S3_SECRET_ACCESS_KEY",
+        "FRAMEOS_PHOTOS_S3_REGION",
+        "FRAMEOS_PHOTOS_S3_PREFIX",
+    ):
+        monkeypatch.delenv(name, raising=False)
     # CI may itself run in a container; the persistence check has tests of
     # its own below.
     monkeypatch.setattr(photos_utils, "_running_in_docker", lambda: False)
+    monkeypatch.setattr(photos_utils, "_STORE", None)
+    photos_utils._READINESS_CACHE.clear()
     return directory
 
 
-def library(async_client) -> Path:
-    root = Path(os.environ["FRAMEOS_PHOTOS_DIR"]) / f"project_{async_client.project_id}"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+class Library:
+    """The project's library: `write` stores a file the way an upload does."""
+
+    def __init__(self, project_id: int) -> None:
+        self.project_id = project_id
+
+
+def library(async_client) -> Library:
+    return Library(async_client.project_id)
+
+
+def objects_root() -> Path:
+    return Path(os.environ["FRAMEOS_PHOTOS_DIR"]) / "objects"
+
+
+def object_file(data: bytes) -> Path:
+    return objects_root() / "photos" / hashlib.sha256(data).hexdigest()
+
+
+def thumb_file(data: bytes) -> Path:
+    return objects_root() / "photos" / "thumbs" / hashlib.sha256(data).hexdigest()
 
 
 def jpeg_bytes(width: int = 40, height: int = 30, color=(200, 10, 10), orientation: int | None = None) -> bytes:
@@ -49,13 +87,44 @@ def jpeg_bytes(width: int = 40, height: int = 30, color=(200, 10, 10), orientati
     return buffer.getvalue()
 
 
-def write(root: Path, rel: str, data: bytes = b"x", mtime: float | None = None) -> Path:
-    target = root / rel
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(data)
-    if mtime is not None:
-        os.utime(target, (mtime, mtime))
-    return target
+def write(lib: Library, rel: str, data: bytes = b"x", mtime: float | None = None) -> dict:
+    """Store `data` at `rel` (folders on the way are made), as an upload would."""
+    db = SessionLocal()
+    try:
+        store = photos_utils.ready_store()
+        created = (
+            datetime.datetime.fromtimestamp(mtime, tz=datetime.timezone.utc).replace(tzinfo=None)
+            if mtime is not None
+            else None
+        )
+        return photos_utils.store_file(
+            db, lib.project_id, store, photos_utils.parent_path(rel), photos_utils.base_name(rel), data, created_at=created
+        )
+    finally:
+        db.close()
+
+
+def make_folder(lib: Library, rel: str) -> dict:
+    db = SessionLocal()
+    try:
+        return photos_utils.create_folder(db, lib.project_id, rel)
+    finally:
+        db.close()
+
+
+async def entry_of(client, path: str) -> dict | None:
+    """The listing entry at `path`, or None."""
+    parent = photos_utils.parent_path(path)
+    response = await client.get("/api/photos/files", params={"path": parent})
+    if response.status_code != 200:
+        return None
+    return next((entry for entry in response.json()["entries"] if entry["path"] == path), None)
+
+
+async def read_file(client, path: str) -> bytes:
+    response = await client.get("/api/photos/file", params={"path": path})
+    assert response.status_code == 200, (path, response.text)
+    return response.content
 
 
 async def upload(client, folder: str, filename: str, data: bytes, upload_id: str = "upload-0001", **params):
@@ -105,7 +174,7 @@ async def test_status_reports_a_ready_library(async_client, photos_dir):
         "ready": True,
         "problem": None,
         "message": None,
-        "location": str(photos_dir / f"project_{async_client.project_id}"),
+        "location": str(photos_dir / "objects"),
         "used_bytes": 5,
         "quota_bytes": None,
         "free_bytes": body["free_bytes"],
@@ -114,8 +183,9 @@ async def test_status_reports_a_ready_library(async_client, photos_dir):
         "scanning": [],
     }
     assert isinstance(body["free_bytes"], int) and body["free_bytes"] > 0
-    # The write probe leaves nothing behind.
-    assert sorted(p.name for p in library(async_client).iterdir()) == ["Album"]
+    # The write probe leaves nothing behind; the bytes are under their hash.
+    assert sorted(p.name for p in (photos_dir / "objects").iterdir()) == ["photos"]
+    assert object_file(b"12345").read_bytes() == b"12345"
 
 
 @pytest.mark.asyncio
@@ -123,6 +193,7 @@ async def test_a_folder_that_can_not_be_written_blocks_the_library(async_client,
     blocker = tmp_path / "not-a-folder"
     blocker.write_text("a file where the photos folder should be")
     monkeypatch.setenv("FRAMEOS_PHOTOS_DIR", str(blocker))
+    monkeypatch.setattr(photos_utils, "_STORE", None)
 
     response = await async_client.get("/api/photos/status")
     assert response.status_code == 200
@@ -186,7 +257,6 @@ async def test_a_folder_inside_the_container_is_not_persistent(async_client, pho
     ],
 )
 async def test_paths_that_break_the_rules_are_a_400(async_client, path):
-    library(async_client)
     response = await async_client.get("/api/photos/files", params={"path": path})
     assert response.status_code == 400, response.text
     response = await async_client.post("/api/photos/folders", json={"path": path})
@@ -232,7 +302,13 @@ async def test_a_chunked_upload_lands_in_the_folder(async_client):
         "status": "ready",
         "colors": None,
     }
-    assert (library(async_client) / "Summer 2026/Beach/beach.jpg").read_bytes() == data
+    assert await read_file(async_client, "Summer 2026/Beach/beach.jpg") == data
+    # The bytes sit under their hash, with the thumbnail next to them.
+    assert object_file(data).read_bytes() == data
+    assert thumb_file(data).is_file()
+    # The folders on the way exist as rows of their own.
+    assert (await entry_of(async_client, "Summer 2026"))["kind"] == "folder"
+    assert (await entry_of(async_client, "Summer 2026/Beach"))["files"] == 1
     # The part is gone.
     assert list((photos_utils.cache_dir() / "uploads").iterdir()) == []
 
@@ -251,7 +327,7 @@ async def test_a_chunk_that_does_not_continue_the_upload_is_a_409(async_client):
     # An id the server never saw (the part was dropped).
     response = await upload(async_client, "", "a.jpg", b"abc", upload_id="other-0001", offset=10, complete=1)
     assert response.status_code == 409
-    assert not (library(async_client) / "a.jpg").exists()
+    assert await entry_of(async_client, "a.jpg") is None
 
 
 @pytest.mark.asyncio
@@ -260,8 +336,28 @@ async def test_a_taken_name_gets_a_number(async_client):
         response = await upload(async_client, "Album", "a.jpg", b"bytes %d" % index, upload_id=f"upload-{index:04d}")
         assert response.status_code == 200, response.text
         assert response.json()["entry"]["path"] == expected
-    assert (library(async_client) / "Album/a (3).jpg").read_bytes() == b"bytes 2"
-    assert (library(async_client) / "Album/a.jpg").read_bytes() == b"bytes 0"
+    assert await read_file(async_client, "Album/a (3).jpg") == b"bytes 2"
+    assert await read_file(async_client, "Album/a.jpg") == b"bytes 0"
+
+
+@pytest.mark.asyncio
+async def test_two_uploads_of_one_photo_share_one_object(async_client, db):
+    data = jpeg_bytes(50, 40)
+    assert (await upload(async_client, "A", "one.jpg", data, upload_id="upload-0001")).status_code == 200
+    assert (await upload(async_client, "B", "two.jpg", data, upload_id="upload-0002")).status_code == 200
+    rows = db.query(PhotoEntry).filter(PhotoEntry.kind == "file").all()
+    assert len({row.object_key for row in rows}) == 1
+    assert rows[0].object_key == f"photos/{hashlib.sha256(data).hexdigest()}"
+    assert sorted(p.name for p in (objects_root() / "photos").iterdir()) == sorted([hashlib.sha256(data).hexdigest(), "thumbs"])
+    assert len(list((objects_root() / "photos" / "thumbs").iterdir())) == 1
+
+    # One row gone: the object stays for the other.
+    assert (await async_client.post("/api/photos/delete", json={"paths": ["A/one.jpg"]})).json() == {"deleted": 1}
+    assert object_file(data).is_file() and thumb_file(data).is_file()
+    assert await read_file(async_client, "B/two.jpg") == data
+    # The last row gone: the object and its thumbnail go too.
+    assert (await async_client.post("/api/photos/delete", json={"paths": ["B"]})).json() == {"deleted": 1}
+    assert not object_file(data).exists() and not thumb_file(data).exists()
 
 
 @pytest.mark.asyncio
@@ -271,7 +367,7 @@ async def test_upload_limits(async_client, monkeypatch):
     assert response.status_code == 200
     response = await upload(async_client, "", "a.jpg", b"x" * 10, offset=10, complete=1)
     assert response.status_code == 413
-    assert not (library(async_client) / "a.jpg").exists()
+    assert await entry_of(async_client, "a.jpg") is None
 
     monkeypatch.setattr(photos_utils, "MAX_CHUNK_BYTES", 8)
     response = await upload(async_client, "", "b.jpg", b"y" * 9)
@@ -319,20 +415,18 @@ def test_unfinished_uploads_are_dropped_after_an_hour(photos_dir):
 
 @pytest.mark.asyncio
 async def test_listing_shapes_and_order(async_client):
-    root = library(async_client)
-    write(root, "Album 10/x.png", b"png")
-    write(root, "album 2/sub/deep.jpg", jpeg_bytes())
-    write(root, "album 2/notes.txt", b"hello")
-    write(root, "Album 3/2026/October/first.jpg", jpeg_bytes())
-    write(root, "Album 3/2026/notes.txt", b"hello")
-    write(root, "album 2/.DS_Store", b"junk")
-    write(root, "Covers/b.jpg", jpeg_bytes())
-    write(root, "Covers/A.png", b"png-bytes")
-    write(root, "img10.jpg", jpeg_bytes(10, 20))
-    write(root, "img2.jpg", jpeg_bytes(30, 40))
-    write(root, "B.txt", b"text")
-    write(root, ".DS_Store", b"junk")
-    write(root, ".hidden/secret.jpg", jpeg_bytes())
+    lib = library(async_client)
+    write(lib, "Album 10/x.png", b"png")
+    write(lib, "album 2/sub/deep.jpg", jpeg_bytes())
+    write(lib, "album 2/notes.txt", b"hello")
+    write(lib, "Album 3/2026/October/first.jpg", jpeg_bytes())
+    write(lib, "Album 3/2026/notes.txt", b"hello")
+    write(lib, "Covers/b.jpg", jpeg_bytes())
+    write(lib, "Covers/A.png", b"png-bytes")
+    write(lib, "img10.jpg", jpeg_bytes(10, 20))
+    write(lib, "img2.jpg", jpeg_bytes(30, 40))
+    write(lib, "B.txt", b"text")
+    make_folder(lib, "Empty")
 
     response = await async_client.get("/api/photos/files", params={"path": ""})
 
@@ -344,6 +438,7 @@ async def test_listing_shapes_and_order(async_client):
         "Album 3",
         "Album 10",
         "Covers",
+        "Empty",
         "B.txt",
         "img2.jpg",
         "img10.jpg",
@@ -351,7 +446,7 @@ async def test_listing_shapes_and_order(async_client):
     by_name = {entry["name"]: entry for entry in body["entries"]}
     album2 = by_name["album 2"]
     assert album2["kind"] == "folder"
-    assert album2["items"] == 2  # notes.txt + sub, not .DS_Store
+    assert album2["items"] == 2  # notes.txt + sub
     assert album2["files"] == 2
     assert album2["size"] == len(b"hello") + len(jpeg_bytes())
     # No image among the direct children: the first one a level down.
@@ -364,6 +459,20 @@ async def test_listing_shapes_and_order(async_client):
     # Photos only in a folder in a folder: the album still gets a cover.
     assert by_name["Album 3"]["cover"] == "Album 3/2026/October/first.jpg"
     assert by_name["Album 3"]["files"] == 2
+    assert by_name["Empty"] == {
+        "path": "Empty",
+        "name": "Empty",
+        "kind": "folder",
+        "size": 0,
+        "mtime": by_name["Empty"]["mtime"],
+        "items": 0,
+        "files": 0,
+        "cover": None,
+        "width": None,
+        "height": None,
+        "content_type": None,
+        "status": "ready",
+    }
 
     img2 = by_name["img2.jpg"]
     assert img2 == {
@@ -411,21 +520,15 @@ async def test_exif_rotation_is_applied_to_the_size(async_client):
 
 
 @pytest.mark.asyncio
-async def test_symlinks_out_of_the_library_are_not_there(async_client, tmp_path):
-    root = library(async_client)
-    outside = tmp_path / "outside"
-    write(outside, "secret.jpg", jpeg_bytes())
-    os.symlink(outside, root / "escape")
-    os.symlink(outside / "secret.jpg", root / "escape.jpg")
-    write(root, "Real/a.jpg", jpeg_bytes())
-    os.symlink(root / "Real", root / "Alias")
-
+async def test_libraries_of_two_projects_are_apart(async_client, db):
+    lib = library(async_client)
+    write(lib, "Mine/a.jpg", b"mine")
+    other = Library(lib.project_id + 1000)
+    db.add(PhotoEntry(project_id=other.project_id, path="Theirs", kind="folder", size_bytes=0, status="ready"))
+    db.commit()
     names = [entry["name"] for entry in (await async_client.get("/api/photos/files")).json()["entries"]]
-    assert names == ["Alias", "Real"]
-    assert (await async_client.get("/api/photos/files", params={"path": "escape"})).status_code == 404
-    assert (await async_client.get("/api/photos/file", params={"path": "escape.jpg"})).status_code == 404
-    assert (await async_client.get("/api/photos/file", params={"path": "escape/secret.jpg"})).status_code == 404
-    assert (await async_client.get("/api/photos/file", params={"path": "Alias/a.jpg"})).status_code == 200
+    assert names == ["Mine"]
+    assert (await async_client.get("/api/photos/files", params={"path": "Theirs"})).status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -435,11 +538,11 @@ async def test_symlinks_out_of_the_library_are_not_there(async_client, tmp_path)
 
 @pytest.mark.asyncio
 async def test_file_route_serves_inert_bytes(async_client):
-    root = library(async_client)
+    lib = library(async_client)
     data = jpeg_bytes()
-    write(root, "Album/a.jpg", data)
-    write(root, "Album/page.html", b"<script>alert(1)</script>")
-    write(root, "Album/notes.txt", b"hello")
+    write(lib, "Album/a.jpg", data)
+    write(lib, "Album/page.html", b"<script>alert(1)</script>")
+    write(lib, "Album/notes.txt", b"hello")
 
     response = await async_client.get("/api/photos/file", params={"path": "Album/a.jpg"})
     assert response.status_code == 200
@@ -463,11 +566,11 @@ async def test_file_route_serves_inert_bytes(async_client):
 
 @pytest.mark.asyncio
 async def test_thumbnails(async_client):
-    root = library(async_client)
-    write(root, "big.jpg", jpeg_bytes(1200, 800))
-    write(root, "turned.jpg", jpeg_bytes(1200, 800, orientation=6))
-    write(root, "broken.jpg", b"nope")
-    write(root, "notes.txt", b"hello")
+    lib = library(async_client)
+    write(lib, "big.jpg", jpeg_bytes(1200, 800))
+    write(lib, "turned.jpg", jpeg_bytes(1200, 800, orientation=6))
+    write(lib, "broken.jpg", b"nope")
+    write(lib, "notes.txt", b"hello")
 
     response = await async_client.get("/api/photos/thumb", params={"path": "big.jpg"})
     assert response.status_code == 200, response.text
@@ -476,7 +579,7 @@ async def test_thumbnails(async_client):
         assert thumb.size == (512, 341)
     etag = response.headers["etag"]
 
-    # Cached: the same bytes, and a revalidation is a 304.
+    # The same bytes again, and a revalidation is a 304.
     again = await async_client.get("/api/photos/thumb", params={"path": "big.jpg"})
     assert again.content == response.content
     not_modified = await async_client.get(
@@ -499,6 +602,24 @@ async def test_thumbnails(async_client):
     assert response.status_code == 405
 
 
+def test_a_huge_image_gets_no_thumbnail(monkeypatch):
+    # Each format has its own cap: a JPEG is read through draft mode and may
+    # be far larger than a PNG, which decodes whole.
+    monkeypatch.setattr(photos_utils, "THUMB_MAX_PIXELS", 1000)
+    monkeypatch.setattr(photos_utils, "THUMB_MAX_JPEG_PIXELS", 2000)
+    assert photos_utils.thumbnail_of(jpeg_bytes(20, 20), "small.jpg") is not None
+    assert photos_utils.thumbnail_of(jpeg_bytes(40, 40), "big.jpg") is not None
+    assert photos_utils.thumbnail_of(jpeg_bytes(50, 50), "huge.jpg") is None
+
+    def png_bytes(side: int) -> bytes:
+        buffer = io.BytesIO()
+        Image.new("RGB", (side, side), (10, 200, 10)).save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    assert photos_utils.thumbnail_of(png_bytes(20), "small.png") is not None
+    assert photos_utils.thumbnail_of(png_bytes(40), "big.png") is None
+
+
 # ---------------------------------------------------------------------------
 # Folders, move, rename, delete
 # ---------------------------------------------------------------------------
@@ -512,7 +633,7 @@ async def test_create_folders(async_client):
     assert entry["path"] == "Summer 2026/Beach"
     assert entry["kind"] == "folder"
     assert entry["items"] == 0 and entry["files"] == 0 and entry["cover"] is None
-    assert (library(async_client) / "Summer 2026/Beach").is_dir()
+    assert (await entry_of(async_client, "Summer 2026"))["items"] == 1
 
     response = await async_client.post("/api/photos/folders", json={"path": "Summer 2026/Beach"})
     assert response.status_code == 409
@@ -526,12 +647,12 @@ async def test_create_folders(async_client):
 
 @pytest.mark.asyncio
 async def test_move(async_client, db):
-    root = library(async_client)
-    write(root, "a.jpg", b"a")
-    write(root, "Summer/b.jpg", b"b")
-    write(root, "Summer/Beach/c.jpg", b"c")
-    write(root, "Albums/2026/a.jpg", b"already here")
-    write(root, "Albums/2026/stay.jpg", b"stay")
+    lib = library(async_client)
+    write(lib, "a.jpg", b"a")
+    write(lib, "Summer/b.jpg", b"b")
+    write(lib, "Summer/Beach/c.jpg", b"c")
+    write(lib, "Albums/2026/a.jpg", b"already here")
+    write(lib, "Albums/2026/stay.jpg", b"stay")
     summer = await share(async_client, "Summer")
     beach = await share(async_client, "Summer/Beach")
 
@@ -548,10 +669,10 @@ async def test_move(async_client, db):
             {"from": "Albums/2026/stay.jpg", "to": "Albums/2026/stay.jpg"},
         ]
     }
-    assert (root / "Albums/2026/a (2).jpg").read_bytes() == b"a"
-    assert (root / "Albums/2026/a.jpg").read_bytes() == b"already here"
-    assert (root / "Albums/2026/Summer/Beach/c.jpg").read_bytes() == b"c"
-    assert not (root / "Summer").exists()
+    assert await read_file(async_client, "Albums/2026/a (2).jpg") == b"a"
+    assert await read_file(async_client, "Albums/2026/a.jpg") == b"already here"
+    assert await read_file(async_client, "Albums/2026/Summer/Beach/c.jpg") == b"c"
+    assert await entry_of(async_client, "Summer") is None
 
     db.expire_all()
     paths = {row.token: row.path for row in db.query(PhotoShare).all()}
@@ -560,28 +681,47 @@ async def test_move(async_client, db):
     # Back to the root.
     response = await async_client.post("/api/photos/move", json={"paths": ["Albums/2026/Summer"], "to": ""})
     assert response.json() == {"moved": [{"from": "Albums/2026/Summer", "to": "Summer"}]}
+    assert await read_file(async_client, "Summer/Beach/c.jpg") == b"c"
+
+
+@pytest.mark.asyncio
+async def test_a_path_inside_a_moved_folder_is_reported_too(async_client):
+    lib = library(async_client)
+    write(lib, "Summer/Beach/c.jpg", b"c")
+    make_folder(lib, "Dest")
+    response = await async_client.post(
+        "/api/photos/move", json={"paths": ["Summer/Beach/c.jpg", "Summer"], "to": "Dest"}
+    )
+    assert response.json() == {
+        "moved": [
+            {"from": "Summer/Beach/c.jpg", "to": "Dest/Summer/Beach/c.jpg"},
+            {"from": "Summer", "to": "Dest/Summer"},
+        ]
+    }
 
 
 @pytest.mark.asyncio
 async def test_move_checks_everything_first(async_client):
-    root = library(async_client)
-    write(root, "a.jpg", b"a")
-    write(root, "Summer/Beach/c.jpg", b"c")
-    write(root, "Dest/keep.txt", b"k")
+    lib = library(async_client)
+    write(lib, "a.jpg", b"a")
+    write(lib, "Summer/Beach/c.jpg", b"c")
+    write(lib, "Dest/keep.txt", b"k")
 
     response = await async_client.post("/api/photos/move", json={"paths": ["a.jpg", "missing.jpg"], "to": "Dest"})
     assert response.status_code == 404
-    assert (root / "a.jpg").exists()
-    assert not (root / "Dest/a.jpg").exists()
+    assert await entry_of(async_client, "a.jpg") is not None
+    assert await entry_of(async_client, "Dest/a.jpg") is None
 
     response = await async_client.post("/api/photos/move", json={"paths": ["a.jpg", "Summer"], "to": "Summer"})
     assert response.status_code == 400
     response = await async_client.post("/api/photos/move", json={"paths": ["Summer"], "to": "Summer/Beach"})
     assert response.status_code == 400
-    assert (root / "a.jpg").exists()
+    assert await entry_of(async_client, "a.jpg") is not None
 
     response = await async_client.post("/api/photos/move", json={"paths": ["a.jpg"], "to": "Nowhere"})
     assert response.status_code == 404
+    response = await async_client.post("/api/photos/move", json={"paths": ["a.jpg"], "to": "Dest/keep.txt"})
+    assert response.status_code == 400
     response = await async_client.post("/api/photos/move", json={"paths": ["a.jpg"], "to": "../x"})
     assert response.status_code == 400
     response = await async_client.post("/api/photos/move", json={"paths": [], "to": "Dest"})
@@ -592,29 +732,30 @@ async def test_move_checks_everything_first(async_client):
 
 @pytest.mark.asyncio
 async def test_a_folder_cannot_be_moved_where_its_contents_would_not_fit(async_client):
-    root = library(async_client)
+    lib = library(async_client)
     deep = "/".join(["d"] * 30)
-    write(root, f"Top/{deep}/leaf.jpg", b"x")
-    write(root, "Dest/keep.txt", b"k")
+    write(lib, f"Top/{deep}/leaf.jpg", b"x")
+    write(lib, "Dest/keep.txt", b"k")
     # Top/d/.../leaf.jpg is 32 deep already; one more folder is one too many.
     response = await async_client.post("/api/photos/move", json={"paths": ["Top"], "to": "Dest"})
     assert response.status_code == 400
-    assert (root / "Top").is_dir() and not (root / "Dest/Top").exists()
+    assert (await entry_of(async_client, "Top"))["kind"] == "folder"
+    assert await entry_of(async_client, "Dest/Top") is None
     response = await async_client.post("/api/photos/rename", json={"path": "Top", "name": "x" * 1010})
     assert response.status_code == 400
-    assert (root / "Top").is_dir()
+    assert await entry_of(async_client, "Top") is not None
     # A rename that keeps everything within reach still works.
     response = await async_client.post("/api/photos/rename", json={"path": "Top", "name": "Tip"})
     assert response.status_code == 200
-    assert (root / f"Tip/{deep}/leaf.jpg").is_file()
+    assert (await entry_of(async_client, f"Tip/{deep}/leaf.jpg"))["kind"] == "file"
 
 
 @pytest.mark.asyncio
 async def test_rename(async_client, db):
-    root = library(async_client)
-    write(root, "Summer/a.jpg", jpeg_bytes())
-    write(root, "Summer/b.jpg", b"b")
-    write(root, "Summer/Beach/c.jpg", b"c")
+    lib = library(async_client)
+    write(lib, "Summer/a.jpg", jpeg_bytes())
+    write(lib, "Summer/b.jpg", b"b")
+    write(lib, "Summer/Beach/c.jpg", b"c")
     summer = await share(async_client, "Summer")
     beach = await share(async_client, "Summer/Beach")
 
@@ -631,22 +772,41 @@ async def test_rename(async_client, db):
     assert response.status_code == 400
     response = await async_client.post("/api/photos/rename", json={"path": "Summer/b.jpg", "name": ".x.jpg"})
     assert response.status_code == 400
+    # A rename to the same name is a no-op.
+    response = await async_client.post("/api/photos/rename", json={"path": "Summer/b.jpg", "name": "b.jpg"})
+    assert response.status_code == 200
 
     response = await async_client.post("/api/photos/rename", json={"path": "Summer", "name": "Summer 2026"})
     assert response.status_code == 200, response.text
     entry = response.json()["entry"]
     assert entry["kind"] == "folder" and entry["path"] == "Summer 2026"
+    assert await read_file(async_client, "Summer 2026/Beach/c.jpg") == b"c"
     db.expire_all()
     paths = {row.token: row.path for row in db.query(PhotoShare).all()}
     assert paths == {summer["token"]: "Summer 2026", beach["token"]: "Summer 2026/Beach"}
 
 
 @pytest.mark.asyncio
+async def test_a_moved_folder_does_not_take_its_namesakes_along(async_client):
+    """`Summer` and `Summer 2` share a prefix, not a folder."""
+    lib = library(async_client)
+    write(lib, "Summer/a.jpg", b"a")
+    write(lib, "Summer 2/b.jpg", b"b")
+    write(lib, "Summer%/c.jpg", b"c")
+    make_folder(lib, "Dest")
+    response = await async_client.post("/api/photos/move", json={"paths": ["Summer"], "to": "Dest"})
+    assert response.status_code == 200, response.text
+    names = [entry["name"] for entry in (await async_client.get("/api/photos/files")).json()["entries"]]
+    assert names == ["Dest", "Summer 2", "Summer%"]
+    assert await read_file(async_client, "Summer 2/b.jpg") == b"b"
+
+
+@pytest.mark.asyncio
 async def test_delete_removes_files_folders_and_their_links(async_client, db):
-    root = library(async_client)
-    write(root, "a.jpg", b"a")
-    write(root, "Old album/Sub/b.jpg", b"b")
-    write(root, "Other/c.jpg", b"c")
+    lib = library(async_client)
+    write(lib, "a.jpg", b"a")
+    write(lib, "Old album/Sub/b.jpg", b"b")
+    write(lib, "Other/c.jpg", b"c")
     await share(async_client, "Old album")
     await share(async_client, "Old album/Sub")
     other = await share(async_client, "Other")
@@ -655,31 +815,16 @@ async def test_delete_removes_files_folders_and_their_links(async_client, db):
 
     assert response.status_code == 200, response.text
     assert response.json() == {"deleted": 2}
-    assert not (root / "a.jpg").exists()
-    assert not (root / "Old album").exists()
-    assert (root / "Other/c.jpg").exists()
+    assert await entry_of(async_client, "a.jpg") is None
+    assert await entry_of(async_client, "Old album") is None
+    assert await entry_of(async_client, "Other/c.jpg") is not None
+    assert not object_file(b"a").exists() and not object_file(b"b").exists()
+    assert object_file(b"c").exists()
     db.expire_all()
     assert [row.token for row in db.query(PhotoShare).all()] == [other["token"]]
 
     response = await async_client.post("/api/photos/delete", json={"paths": ["../Other"]})
     assert response.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_a_stale_link_does_not_follow_a_new_folder_of_the_same_name(async_client, db, no_auth_client):
-    root = library(async_client)
-    write(root, "Family/a.jpg", b"a")
-    family = await share(async_client, "Family")
-    # Removed by hand: the row stays, the link is a 404.
-    import shutil
-
-    shutil.rmtree(root / "Family")
-    assert (await no_auth_client.get(f"/api/photos/shared/{family['token']}")).status_code == 404
-
-    write(root, "Private/p.jpg", b"p")
-    response = await async_client.post("/api/photos/rename", json={"path": "Private", "name": "Family"})
-    assert response.status_code == 200
-    assert (await no_auth_client.get(f"/api/photos/shared/{family['token']}")).status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -689,9 +834,9 @@ async def test_a_stale_link_does_not_follow_a_new_folder_of_the_same_name(async_
 
 @pytest.mark.asyncio
 async def test_share_links(async_client):
-    root = library(async_client)
-    write(root, "Summer 2026/a.jpg", b"a")
-    write(root, "file.jpg", b"f")
+    lib = library(async_client)
+    write(lib, "Summer 2026/a.jpg", b"a")
+    write(lib, "file.jpg", b"f")
 
     created = await share(async_client, "Summer 2026")
     assert created["path"] == "Summer 2026"
@@ -718,14 +863,12 @@ async def test_share_links(async_client):
 
 @pytest.mark.asyncio
 async def test_share_listing_without_a_login(async_client, no_auth_client, redis):
-    root = library(async_client)
-    write(root, "Summer 2026/b.jpg", jpeg_bytes(20, 10), mtime=1760000100)
-    write(root, "Summer 2026/beach/a.jpg", jpeg_bytes(8, 6), mtime=1760000000)
-    write(root, "Summer 2026/beach/notes.txt", b"not a photo")
-    write(root, "Summer 2026/A.PNG", b"png", mtime=1760000050)
-    write(root, "Summer 2026/.hidden.jpg", b"hidden")
-    write(root, "Summer 2026/.cache/x.jpg", b"hidden")
-    write(root, "Elsewhere/z.jpg", b"z")
+    lib = library(async_client)
+    write(lib, "Summer 2026/b.jpg", jpeg_bytes(20, 10), mtime=1760000100)
+    write(lib, "Summer 2026/beach/a.jpg", jpeg_bytes(8, 6), mtime=1760000000)
+    write(lib, "Summer 2026/beach/notes.txt", b"not a photo")
+    write(lib, "Summer 2026/A.PNG", b"png", mtime=1760000050)
+    write(lib, "Elsewhere/z.jpg", b"z")
     created = await share(async_client, "Summer 2026")
     token = created["token"]
 
@@ -735,7 +878,7 @@ async def test_share_listing_without_a_login(async_client, no_auth_client, redis
     body = response.json()
     assert body["name"] == "Summer 2026"
     assert body["count"] == 3
-    assert isinstance(body["updated_at"], int)
+    assert isinstance(body["updated_at"], int) and body["updated_at"] > 1760000100
     assert [photo["path"] for photo in body["files"]] == ["A.PNG", "b.jpg", "beach/a.jpg"]
     beach = body["files"][2]
     assert beach == {
@@ -754,9 +897,9 @@ async def test_share_listing_without_a_login(async_client, no_auth_client, redis
 
 @pytest.mark.asyncio
 async def test_share_listing_is_in_natural_order_like_the_cloud(async_client, no_auth_client, redis):
-    root = library(async_client)
+    lib = library(async_client)
     for name in ("IMG_10.jpg", "IMG_2.jpg", "img_1.jpg", "b/IMG_3.jpg", "a.jpg"):
-        write(root, f"Album/{name}", b"x")
+        write(lib, f"Album/{name}", b"x")
     token = (await share(async_client, "Album"))["token"]
     body = (await no_auth_client.get(f"/api/photos/shared/{token}")).json()
     assert [photo["path"] for photo in body["files"]] == ["a.jpg", "b/IMG_3.jpg", "img_1.jpg", "IMG_2.jpg", "IMG_10.jpg"]
@@ -764,12 +907,12 @@ async def test_share_listing_is_in_natural_order_like_the_cloud(async_client, no
 
 @pytest.mark.asyncio
 async def test_share_photo_orders(async_client, no_auth_client, redis):
-    root = library(async_client)
+    lib = library(async_client)
     # Path order: a, b, c, d; mtime order (oldest first): c, a, d, b.
-    write(root, "Album/a.jpg", b"a", mtime=1760000100)
-    write(root, "Album/b.jpg", b"b", mtime=1760000400)
-    write(root, "Album/c.jpg", b"c", mtime=1760000000)
-    write(root, "Album/sub/d.jpg", b"d", mtime=1760000200)
+    write(lib, "Album/a.jpg", b"a", mtime=1760000100)
+    write(lib, "Album/b.jpg", b"b", mtime=1760000400)
+    write(lib, "Album/c.jpg", b"c", mtime=1760000000)
+    write(lib, "Album/sub/d.jpg", b"d", mtime=1760000200)
     token = (await share(async_client, "Album"))["token"]
 
     async def pick(order: str | None, index: int | None) -> dict:
@@ -820,9 +963,9 @@ async def test_an_empty_album(async_client, no_auth_client, redis):
 
 @pytest.mark.asyncio
 async def test_a_deleted_link_or_folder_is_a_404(async_client, no_auth_client, redis):
-    root = library(async_client)
-    write(root, "One/a.jpg", b"a")
-    write(root, "Two/b.jpg", b"b")
+    lib = library(async_client)
+    write(lib, "One/a.jpg", b"a")
+    write(lib, "Two/b.jpg", b"b")
     one = (await share(async_client, "One"))["token"]
     two = (await share(async_client, "Two"))["token"]
 
@@ -836,15 +979,12 @@ async def test_a_deleted_link_or_folder_is_a_404(async_client, no_auth_client, r
 
 
 @pytest.mark.asyncio
-async def test_shared_files(async_client, no_auth_client, tmp_path, redis):
-    root = library(async_client)
+async def test_shared_files(async_client, no_auth_client, redis):
+    lib = library(async_client)
     data = jpeg_bytes()
-    write(root, "Album/sub/a b.jpg", data)
-    write(root, "Album/notes.txt", b"not a photo")
-    write(root, "Album/.secret.jpg", b"hidden")
-    write(root, "Private/p.jpg", b"private")
-    os.symlink(root / "Private", root / "Album/linked")
-    os.symlink(root / "Private/p.jpg", root / "Album/p.jpg")
+    write(lib, "Album/sub/a b.jpg", data)
+    write(lib, "Album/notes.txt", b"not a photo")
+    write(lib, "Private/p.jpg", b"private")
     token = (await share(async_client, "Album"))["token"]
 
     listing = (await no_auth_client.get(f"/api/photos/shared/{token}")).json()
@@ -857,12 +997,12 @@ async def test_shared_files(async_client, no_auth_client, tmp_path, redis):
     assert response.content == data
     assert response.headers["content-type"] == "image/jpeg"
     assert response.headers["x-content-type-options"] == "nosniff"
-    assert "max-age" in response.headers["cache-control"]
+    assert response.headers["cache-control"] == "private, max-age=300"
 
     base = f"/api/photos/shared/{token}/file"
     assert (await no_auth_client.get(base, params={"path": "notes.txt"})).status_code == 404
     assert (await no_auth_client.get(base, params={"path": "missing.jpg"})).status_code == 404
-    assert (await no_auth_client.get(base, params={"path": "linked/p.jpg"})).status_code == 404
+    # Another folder's photo is not below the shared one.
     assert (await no_auth_client.get(base, params={"path": "p.jpg"})).status_code == 404
     assert (await no_auth_client.get(base, params={"path": "../Private/p.jpg"})).status_code == 400
     assert (await no_auth_client.get(base, params={"path": ".secret.jpg"})).status_code == 400
@@ -893,19 +1033,18 @@ async def set_colors(client, path: str, colors):
 
 
 @pytest.mark.asyncio
-async def test_colors_are_a_sidecar_next_to_the_photo(async_client):
-    root = library(async_client)
-    write(root, "Summer/a.jpg", jpeg_bytes())
+async def test_colors_are_a_column_of_the_photo(async_client, db):
+    lib = library(async_client)
+    write(lib, "Summer/a.jpg", jpeg_bytes())
     profile = {"whites": -30, "hues": {"blue": {"saturation": 20}}, "palette": ["#000000", "#ffffff"]}
 
     response = await set_colors(async_client, "Summer/a.jpg", profile)
 
     assert response.status_code == 200, response.text
     assert response.json()["entry"]["colors"] == profile
-    assert json.loads((root / "Summer/a.jpg.frameos.json").read_text()) == {"version": 1, "colors": profile}
-    # Never listed, never counted.
+    db.expire_all()
+    assert db.query(PhotoEntry).filter(PhotoEntry.path == "Summer/a.jpg").one().colors == profile
     listing = (await async_client.get("/api/photos/files", params={"path": "Summer"})).json()
-    assert [entry["name"] for entry in listing["entries"]] == ["a.jpg"]
     assert listing["entries"][0]["colors"] == profile
     album = (await async_client.get("/api/photos/files", params={"path": ""})).json()["entries"][0]
     assert album["files"] == 1 and album["items"] == 1
@@ -917,14 +1056,13 @@ async def test_colors_are_a_sidecar_next_to_the_photo(async_client):
         response = await set_colors(async_client, "Summer/a.jpg", empty)
         assert response.status_code == 200, response.text
         assert response.json()["entry"]["colors"] is None
-        assert not (root / "Summer/a.jpg.frameos.json").exists()
 
 
 @pytest.mark.asyncio
 async def test_colors_refuse_what_the_contract_refuses(async_client):
-    root = library(async_client)
-    write(root, "Summer/a.jpg", jpeg_bytes())
-    write(root, "Summer/notes.txt", b"text")
+    lib = library(async_client)
+    write(lib, "Summer/a.jpg", jpeg_bytes())
+    write(lib, "Summer/notes.txt", b"text")
 
     assert (await set_colors(async_client, "Summer/a.jpg", [1, 2])).status_code == 400
     assert (await set_colors(async_client, "Summer/a.jpg", "bright")).status_code == 400
@@ -936,85 +1074,37 @@ async def test_colors_refuse_what_the_contract_refuses(async_client):
     assert (await set_colors(async_client, "../a.jpg", {"whites": 1})).status_code == 400
     big = {"note": "x" * (64 * 1024)}
     assert (await set_colors(async_client, "Summer/a.jpg", big)).status_code == 413
-    assert not (root / "Summer/a.jpg.frameos.json").exists()
+    assert (await entry_of(async_client, "Summer/a.jpg"))["colors"] is None
 
 
 @pytest.mark.asyncio
 async def test_colors_travel_with_the_photo(async_client):
-    root = library(async_client)
-    write(root, "Summer/a.jpg", jpeg_bytes())
-    (root / "Winter").mkdir()
+    lib = library(async_client)
+    write(lib, "Summer/a.jpg", jpeg_bytes())
+    make_folder(lib, "Winter")
     await set_colors(async_client, "Summer/a.jpg", {"exposure": 0.5})
 
     response = await async_client.post("/api/photos/rename", json={"path": "Summer/a.jpg", "name": "b.jpg"})
     assert response.json()["entry"]["colors"] == {"exposure": 0.5}
-    assert not (root / "Summer/a.jpg.frameos.json").exists()
 
     response = await async_client.post("/api/photos/move", json={"paths": ["Summer/b.jpg"], "to": "Winter"})
     assert response.status_code == 200, response.text
     moved = (await async_client.get("/api/photos/files", params={"path": "Winter"})).json()["entries"]
     assert moved[0]["colors"] == {"exposure": 0.5}
-    assert os.listdir(root / "Summer") == []
 
-    # A folder takes its photos' sidecars along.
     response = await async_client.post("/api/photos/move", json={"paths": ["Winter"], "to": "Summer"})
     assert response.status_code == 200, response.text
-    assert (root / "Summer/Winter/b.jpg.frameos.json").exists()
+    assert (await entry_of(async_client, "Summer/Winter/b.jpg"))["colors"] == {"exposure": 0.5}
 
-    response = await async_client.post("/api/photos/delete", json={"paths": ["Summer/Winter/b.jpg"]})
-    assert response.status_code == 200, response.text
-    assert os.listdir(root / "Summer/Winter") == []
-
-
-@pytest.mark.asyncio
-async def test_a_leftover_sidecar_does_not_color_a_newcomer(async_client):
-    root = library(async_client)
-    # The photo was deleted by hand; its sidecar stayed.
-    write(root, "Summer/new.jpg.frameos.json", b'{"version": 1, "colors": {"whites": -50}}')
-    write(root, "Other/new.jpg", jpeg_bytes())
-
-    response = await upload(async_client, "Summer", "new.jpg", jpeg_bytes())
-    assert response.status_code == 200, response.text
+    # The same bytes uploaded again are a new photo without a profile.
+    response = await upload(async_client, "Summer", "again.jpg", jpeg_bytes())
     assert response.json()["entry"]["colors"] is None
-    assert not (root / "Summer/new.jpg.frameos.json").exists()
-
-    response = await async_client.post("/api/photos/move", json={"paths": ["Other/new.jpg"], "to": "Summer"})
-    assert response.json()["moved"] == [{"from": "Other/new.jpg", "to": "Summer/new (2).jpg"}]
-    write(root, "Summer/renamed.jpg.frameos.json", b'{"version": 1, "colors": {"whites": -50}}')
-    response = await async_client.post(
-        "/api/photos/rename", json={"path": "Summer/new (2).jpg", "name": "renamed.jpg"}
-    )
-    assert response.json()["entry"]["colors"] is None
-
-
-@pytest.mark.asyncio
-async def test_sidecars_copied_in_by_hand(async_client):
-    root = library(async_client)
-    write(root, "Summer/a.jpg", jpeg_bytes())
-    write(root, "Summer/a.jpg.frameos.json", b'{"version": 1, "colors": {"contrast": 25}}')
-    write(root, "Summer/b.jpg", jpeg_bytes())
-    write(root, "Summer/b.jpg.frameos.json", b"not json")
-    write(root, "Summer/c.jpg", jpeg_bytes())
-    write(root, "Summer/c.jpg.frameos.json", b'{"version": 1, "colors": []}')
-    write(root, "elsewhere.json", b'{"version": 1, "colors": {"whites": -100}}')
-    write(root, "Summer/d.jpg", jpeg_bytes())
-    os.symlink(root / "elsewhere.json", root / "Summer/d.jpg.frameos.json")
-    write(root, "Summer/orphan.jpg.frameos.json", b'{"version": 1, "colors": {"whites": 1}}')
-
-    entries = (await async_client.get("/api/photos/files", params={"path": "Summer"})).json()["entries"]
-
-    assert {entry["name"]: entry["colors"] for entry in entries} == {
-        "a.jpg": {"contrast": 25},
-        "b.jpg": None,
-        "c.jpg": None,
-        "d.jpg": None,
-    }
 
 
 @pytest.mark.asyncio
 async def test_names_ending_in_frameos_json_are_kept_for_colors(async_client):
-    root = library(async_client)
-    write(root, "Summer/a.jpg", jpeg_bytes())
+    lib = library(async_client)
+    write(lib, "Summer/a.jpg", jpeg_bytes())
 
     response = await upload(async_client, "Summer", "x.frameos.json", b"{}")
     assert response.status_code == 400, response.text
@@ -1028,9 +1118,9 @@ async def test_names_ending_in_frameos_json_are_kept_for_colors(async_client):
 
 @pytest.mark.asyncio
 async def test_share_routes_carry_the_colors(async_client, no_auth_client, redis):
-    root = library(async_client)
-    write(root, "Summer/a.jpg", jpeg_bytes())
-    write(root, "Summer/b.jpg", jpeg_bytes())
+    lib = library(async_client)
+    write(lib, "Summer/a.jpg", jpeg_bytes())
+    write(lib, "Summer/b.jpg", jpeg_bytes(10, 10))
     await set_colors(async_client, "Summer/a.jpg", {"whites": -30})
     token = (await share(async_client, "Summer"))["token"]
 
@@ -1044,9 +1134,178 @@ async def test_share_routes_carry_the_colors(async_client, no_auth_client, redis
     assert picked["photo"]["colors"] == {"whites": -30}
     picked = (await no_auth_client.get(base, params={"order": "sequential", "index": 1})).json()
     assert picked["photo"]["colors"] is None
-    # The sidecar itself is not a photo a link serves.
     response = await no_auth_client.get(f"/api/photos/shared/{token}/file", params={"path": "a.jpg.frameos.json"})
     assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# An S3-compatible bucket (FRAMEOS_PHOTOS_S3_*)
+# ---------------------------------------------------------------------------
+
+
+class FakeBucket:
+    """An S3 bucket behind httpx.MockTransport: path-style requests, SigV4
+    headers checked for shape, and the objects it holds."""
+
+    def __init__(self, bucket: str = "frame-photos") -> None:
+        self.bucket = bucket
+        self.objects: dict[str, tuple[bytes, str]] = {}
+        self.requests: list[httpx.Request] = []
+        self.refuse: int | None = None
+
+    def transport(self) -> httpx.MockTransport:
+        return httpx.MockTransport(self.handle)
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if self.refuse is not None:
+            return httpx.Response(self.refuse, text="refused")
+        authorization = request.headers.get("authorization", "")
+        scope = re.search(r"Credential=AKIATEST/\d{8}/auto/s3/aws4_request", authorization)
+        assert scope, authorization
+        assert "SignedHeaders=" in authorization and re.search(r"Signature=[0-9a-f]{64}$", authorization)
+        assert request.headers["x-amz-content-sha256"] == hashlib.sha256(request.content).hexdigest()
+        assert re.fullmatch(r"\d{8}T\d{6}Z", request.headers["x-amz-date"])
+        prefix = f"/{self.bucket}/"
+        assert request.url.path.startswith(prefix), request.url.path
+        key = request.url.path[len(prefix):]
+        if request.method == "PUT":
+            self.objects[key] = (request.content, request.headers.get("content-type", ""))
+            return httpx.Response(200)
+        if request.method == "HEAD":
+            return httpx.Response(200 if key in self.objects else 404)
+        if request.method == "GET":
+            if key not in self.objects:
+                return httpx.Response(404, text="<Error><Code>NoSuchKey</Code></Error>")
+            data, content_type = self.objects[key]
+            return httpx.Response(200, content=data, headers={"content-type": content_type})
+        if request.method == "DELETE":
+            self.objects.pop(key, None)
+            return httpx.Response(204)
+        return httpx.Response(405)
+
+
+@pytest.fixture
+def bucket(monkeypatch) -> FakeBucket:
+    fake = FakeBucket()
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_ENDPOINT", "https://account.r2.cloudflarestorage.com")
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_BUCKET", fake.bucket)
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_ACCESS_KEY_ID", "AKIATEST")
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_SECRET_ACCESS_KEY", "secret")
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_PREFIX", "frameos/")
+
+    def build(settings):
+        return S3ObjectStore(settings, client=httpx.Client(transport=fake.transport()))
+
+    monkeypatch.setattr(photos_utils, "S3ObjectStore", build)
+    monkeypatch.setattr(photos_utils, "_STORE", None)
+    photos_utils._READINESS_CACHE.clear()
+    return fake
+
+
+def test_s3_settings_come_from_the_environment(monkeypatch):
+    assert s3_settings_from_env() == (None, None)
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_ENDPOINT", "account.r2.cloudflarestorage.com")
+    settings, problem = s3_settings_from_env()
+    assert settings is None and "FRAMEOS_PHOTOS_S3_BUCKET" in problem and "ACCESS_KEY_ID" in problem
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_BUCKET", "photos")
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_ACCESS_KEY_ID", "k")
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_SECRET_ACCESS_KEY", "s")
+    settings, problem = s3_settings_from_env()
+    assert problem is None
+    assert settings.endpoint == "https://account.r2.cloudflarestorage.com"
+    assert settings.region == "auto" and settings.prefix == ""
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_ENDPOINT", "https://s3.eu-central-1.amazonaws.com/photos")
+    assert "service address" in s3_settings_from_env()[1]
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_ENDPOINT", "https://s3.eu-central-1.amazonaws.com")
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_REGION", "eu-central-1")
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_PREFIX", "/one/two/")
+    settings, _ = s3_settings_from_env()
+    assert settings.region == "eu-central-1" and settings.prefix == "one/two"
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_BUCKET", "Not A Bucket")
+    assert "bucket name" in s3_settings_from_env()[1]
+
+
+def test_object_keys_are_checked():
+    assert is_valid_object_key("photos/" + "a" * 64)
+    assert is_valid_object_key("photos/thumbs/abc.jpg")
+    for bad in ("", "/photos/x", "photos/../x", "photos//x", ".hidden", "photos/x\n", "x" * 600):
+        assert not is_valid_object_key(bad), bad
+
+
+@pytest.mark.asyncio
+async def test_a_half_configured_bucket_blocks_the_library(async_client, monkeypatch):
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_ENDPOINT", "https://account.r2.cloudflarestorage.com")
+    monkeypatch.setenv("FRAMEOS_PHOTOS_S3_BUCKET", "photos")
+    body = (await async_client.get("/api/photos/status")).json()
+    assert body["ready"] is False
+    assert body["problem"] == "storage_misconfigured"
+    assert "FRAMEOS_PHOTOS_S3_ACCESS_KEY_ID" in body["message"]
+    assert (await async_client.get("/api/photos/files")).status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_a_bucket_that_refuses_the_keys_blocks_the_library(async_client, bucket):
+    bucket.refuse = 403
+    body = (await async_client.get("/api/photos/status")).json()
+    assert body["ready"] is False
+    assert body["problem"] == "storage_unavailable"
+    assert "credentials" in body["message"]
+    assert body["location"] == "s3://frame-photos/frameos at account.r2.cloudflarestorage.com"
+    assert (await async_client.get("/api/photos/files")).status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_photos_in_a_bucket(async_client, no_auth_client, db, bucket, photos_dir, redis):
+    data = jpeg_bytes(1200, 800)
+    digest = hashlib.sha256(data).hexdigest()
+
+    status = (await async_client.get("/api/photos/status")).json()
+    assert status["ready"] is True
+    assert status["location"] == "s3://frame-photos/frameos at account.r2.cloudflarestorage.com"
+    assert status["free_bytes"] is None
+
+    response = await upload(async_client, "Summer", "a.jpg", data)
+    assert response.status_code == 200, response.text
+    assert response.json()["entry"]["width"] == 1200
+    # The file and its thumbnail, under the prefix and their hash; nothing on
+    # the disk but the finished upload's leftovers.
+    assert set(bucket.objects) == {f"frameos/photos/{digest}", f"frameos/photos/thumbs/{digest}"}
+    assert bucket.objects[f"frameos/photos/{digest}"] == (data, "image/jpeg")
+    assert not (photos_dir / "objects").exists()
+    assert status["used_bytes"] == 0 and (await async_client.get("/api/photos/status")).json()["used_bytes"] == len(data)
+
+    # Served through the backend, from the bucket.
+    assert await read_file(async_client, "Summer/a.jpg") == data
+    thumb = await async_client.get("/api/photos/thumb", params={"path": "Summer/a.jpg"})
+    assert thumb.status_code == 200 and thumb.headers["etag"] == f'"{digest}"'
+    with Image.open(io.BytesIO(thumb.content)) as image:
+        assert image.size == (512, 341)
+    token = (await share(async_client, "Summer"))["token"]
+    shared = await no_auth_client.get(f"/api/photos/shared/{token}/file", params={"path": "a.jpg"})
+    assert shared.status_code == 200 and shared.content == data
+
+    # A second copy shares the objects; deleting the last row deletes them.
+    assert (await upload(async_client, "Winter", "b.jpg", data, upload_id="upload-0002")).status_code == 200
+    assert len(bucket.objects) == 2
+    assert (await async_client.post("/api/photos/delete", json={"paths": ["Summer"]})).json() == {"deleted": 1}
+    assert len(bucket.objects) == 2
+    assert (await async_client.post("/api/photos/delete", json={"paths": ["Winter/b.jpg"]})).json() == {"deleted": 1}
+    assert bucket.objects == {}
+    assert db.query(PhotoEntry).filter(PhotoEntry.kind == "file").count() == 0
+
+
+@pytest.mark.asyncio
+async def test_a_bucket_that_fails_mid_way_stores_nothing(async_client, bucket):
+    # The bucket answered the readiness probe; it fails on the upload itself.
+    assert (await async_client.get("/api/photos/files")).status_code == 200
+    bucket.refuse = 500
+    response = await upload(async_client, "Summer", "a.jpg", jpeg_bytes())
+    assert response.status_code == 503
+    assert "could not be stored" in response.json()["detail"]
+    assert bucket.objects == {}
+    bucket.refuse = None
+    assert await entry_of(async_client, "Summer/a.jpg") is None
 
 
 # ---------------------------------------------------------------------------
@@ -1108,8 +1367,7 @@ def test_album_scene_matches_the_fixture():
 
 @pytest.mark.asyncio
 async def test_album_scene_route(async_client, no_auth_client, db, redis):
-    root = library(async_client)
-    write(root, "Summer 2026/a.jpg", jpeg_bytes())
+    write(library(async_client), "Summer 2026/a.jpg", jpeg_bytes())
     frame = await new_frame(db, redis, "Kitchen", "localhost", "10.0.0.5")
     frame.server_port = 8989
     frame.server_scheme = "http"
@@ -1161,8 +1419,7 @@ async def test_album_scene_route(async_client, no_auth_client, db, redis):
 
 @pytest.mark.asyncio
 async def test_album_scene_route_refusals(async_client, db, redis):
-    root = library(async_client)
-    write(root, "Summer/a.jpg", jpeg_bytes())
+    write(library(async_client), "Summer/a.jpg", jpeg_bytes())
     frame = await new_frame(db, redis, "Kitchen", "localhost", "10.0.0.5")
 
     async def post(**body):

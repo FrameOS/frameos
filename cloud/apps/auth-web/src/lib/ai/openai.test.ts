@@ -44,6 +44,8 @@ describe("model resolution", () => {
 
   it("knows which models take a reasoning param", () => {
     expect(modelSupportsReasoning("gpt-5.5")).toBe(true);
+    expect(modelSupportsReasoning("gpt-6-astra")).toBe(true);
+    expect(modelSupportsReasoning("gpt-6.1-sol")).toBe(true);
     expect(modelSupportsReasoning("o3")).toBe(true);
     expect(modelSupportsReasoning("gpt-4.1")).toBe(false);
   });

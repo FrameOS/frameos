@@ -1,20 +1,25 @@
 """Photos on the self-hosted backend: the library of albums frames play.
 
-`docs/photos.md` is the contract (routes, shapes, path rules, share links);
-this module is the disk side of it. Files live in a plain folder, one per
-project: `<photos dir>/project_<id>/<path>`, so files copied in by hand show
-up in the library. Thumbnails and unfinished uploads live in
-`<photos dir>/.cache`. Share links are rows in `photo_share`
-(app/models/photo_share.py). A photo's color profile is a sidecar next to
-it, `<photo>.frameos.json`, in the frame assets' format
-(docs/asset-color-profiles.md); the path rules refuse that suffix, so a
-sidecar is never listed and travels with its photo.
+`docs/photos.md` is the contract (routes, shapes, path rules, share links).
+The rows are the cloud's: one `photo_entry` row per file and per folder
+(app/models/photo_entry.py), share links in `photo_share`. The bytes live in
+an object store (app/utils/object_store.py) under `photos/<sha256>`, with the
+thumbnail under `photos/thumbs/<sha256>`: a directory next to the database
+by default, or an S3-compatible bucket when the FRAMEOS_PHOTOS_S3_* variables
+are set. Two uploads of one photo share one object; a row never holds a file
+name the disk has to agree with.
 
-Everything here is blocking disk work; the routes (app/api/photos.py) run it
-in a worker thread.
+Every mutation runs under a per-project lock, so the " (2)" name pick and the
+subtree rewrite of a move see a library nobody else is changing. Objects are
+written BEFORE the row that points at them and deleted AFTER the rows that
+pointed at them are gone, and only when no other row still does.
+
+Everything here is blocking (disk, bucket, database); the routes
+(app/api/photos.py) run it in a worker thread.
 """
 from __future__ import annotations
 
+import datetime
 import hashlib
 import io
 import json
@@ -23,23 +28,29 @@ import os
 import random
 import re
 import shutil
-import stat as stat_module
 import tempfile
 import threading
 import time
-from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import timezone
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Iterator, Optional
 from urllib.parse import quote
 
 from fastapi import HTTPException
+from sqlalchemy import func, literal
 from sqlalchemy.orm import Session
 
 from app.config import DEFAULT_DATABASE_URL, get_bool_env
+from app.models.photo_entry import PhotoEntry
 from app.models.photo_share import PhotoShare
+from app.utils.object_store import (
+    DiskObjectStore,
+    ObjectStore,
+    S3ObjectStore,
+    StoreError,
+    s3_settings_from_env,
+)
 # A photographer's full-size file: 250 MiB, the same on the cloud
 # (cloud/apps/auth-web/src/lib/photos/library.ts maxPhotoUploadBytes).
 MAX_UPLOAD_BYTES = 250 * 1024 * 1024
@@ -56,7 +67,6 @@ THUMB_MAX_SIDE = 512
 # camera's 100 MP file is cheap and the cap is higher (docs/photos.md).
 THUMB_MAX_PIXELS = 80_000_000
 THUMB_MAX_JPEG_PIXELS = 400_000_000
-THUMB_MAX_AGE_SECONDS = 30 * 24 * 3600
 READINESS_CACHE_SECONDS = 30
 UPLOAD_PART_MAX_AGE_SECONDS = 3600
 SHARE_URL_PREFIX = "/api/photos/shared"
@@ -83,14 +93,15 @@ PLAYABLE_CONTENT_TYPES = {
 
 
 # ---------------------------------------------------------------------------
-# Where the files live
+# Where the bytes live
 # ---------------------------------------------------------------------------
 
 
 def photos_dir() -> Path:
     """The first of: FRAMEOS_PHOTOS_DIR, /data/photos on a Home Assistant
     add-on, `photos/` next to the SQLite database. Read per call so tests can
-    point it somewhere else."""
+    point it somewhere else. Holds `objects/` (the disk store) and `.cache/`
+    (unfinished uploads), whichever store is in use."""
     explicit = os.environ.get("FRAMEOS_PHOTOS_DIR")
     if explicit:
         return Path(os.path.abspath(explicit))
@@ -103,12 +114,40 @@ def photos_dir() -> Path:
     return Path(os.path.abspath(os.path.join("..", "db", "photos")))
 
 
-def project_root(project_id: int) -> Path:
-    return photos_dir() / f"project_{int(project_id)}"
+def objects_dir() -> Path:
+    return photos_dir() / "objects"
 
 
 def cache_dir() -> Path:
     return photos_dir() / ".cache"
+
+
+_STORE_LOCK = threading.Lock()
+_STORE: Optional[tuple[tuple[Any, ...], ObjectStore]] = None
+
+
+def object_store() -> tuple[Optional[ObjectStore], Optional[str]]:
+    """(the configured store, None), or (None, why it cannot be built). One
+    S3 client is kept for as long as the settings stay the same."""
+    global _STORE
+    settings, problem = s3_settings_from_env()
+    if problem:
+        return None, problem
+    key: tuple[Any, ...] = (settings,) if settings else ("disk", str(objects_dir()))
+    with _STORE_LOCK:
+        if _STORE is not None and _STORE[0] == key:
+            return _STORE[1], None
+        store: ObjectStore = S3ObjectStore(settings) if settings else DiskObjectStore(objects_dir())
+        _STORE = (key, store)
+        return store, None
+
+
+def file_object_key(sha256: str) -> str:
+    return f"photos/{sha256}"
+
+
+def thumb_object_key(sha256: str) -> str:
+    return f"photos/thumbs/{sha256}"
 
 
 # ---------------------------------------------------------------------------
@@ -181,36 +220,50 @@ def photos_are_ephemeral(
     return mount_point_of(os.path.realpath(path), mountinfo) in (None, "/")
 
 
-def check_ready(project_id: int) -> Readiness:
-    """Create the project's folder and prove it can be written to."""
-    root = project_root(project_id)
-    location = str(root)
+def check_ready() -> Readiness:
+    """Build the store and prove it answers: a write in the directory, or a
+    signed request to the bucket. The same for every project."""
+    store, problem = object_store()
+    if store is None:
+        return Readiness(ready=False, problem="storage_misconfigured", message=problem, location="")
+    location = store.location
     try:
-        root.mkdir(parents=True, exist_ok=True)
         cache_dir().mkdir(parents=True, exist_ok=True)
-        fd, probe = tempfile.mkstemp(dir=root, prefix=".frameos-probe-")
-        try:
-            os.write(fd, b"ok")
-        finally:
-            os.close(fd)
-            os.unlink(probe)
     except OSError as error:
         reason = error.strerror or str(error)
         return Readiness(
             ready=False,
             problem="not_writable",
             message=(
-                f"The photos folder {location} cannot be created or written to ({reason}). "
+                f"The photos folder {photos_dir()} cannot be created or written to ({reason}). "
                 "Check that the backend can write there, or set FRAMEOS_PHOTOS_DIR to a folder it can write to."
             ),
             location=location,
         )
-    if photos_are_ephemeral(root):
+    failure = store.check()
+    if failure is not None:
+        if store.driver == "disk":
+            return Readiness(
+                ready=False,
+                problem="not_writable",
+                message=(
+                    f"The photos folder {location} cannot be created or written to ({failure}). "
+                    "Check that the backend can write there, or set FRAMEOS_PHOTOS_DIR to a folder it can write to."
+                ),
+                location=location,
+            )
+        return Readiness(
+            ready=False,
+            problem="storage_unavailable",
+            message=f"The photo bucket cannot be used: {failure}",
+            location=location,
+        )
+    if store.driver == "disk" and photos_are_ephemeral(photos_dir()):
         return Readiness(
             ready=False,
             problem="not_persistent",
             message=(
-                f"The photos folder {location} is inside the Docker container, so every photo would be lost "
+                f"The photos folder {photos_dir()} is inside the Docker container, so every photo would be lost "
                 "when the container is recreated. Mount a volume there (the /app/db volume from "
                 "docker-compose.yml covers it), set FRAMEOS_PHOTOS_DIR to a folder on a mounted volume, "
                 "or set FRAMEOS_PHOTOS_ALLOW_EPHEMERAL=1 to use it anyway."
@@ -218,27 +271,6 @@ def check_ready(project_id: int) -> Readiness:
             location=location,
         )
     return Readiness(ready=True, problem=None, message=None, location=location)
-
-
-def used_bytes(root: Path) -> int:
-    """Everything stored under the project's folder, hidden files included."""
-    total = 0
-    stack = [str(root)]
-    while stack:
-        directory = stack.pop()
-        try:
-            entries = list(os.scandir(directory))
-        except OSError:
-            continue
-        for entry in entries:
-            try:
-                if entry.is_dir(follow_symlinks=False):
-                    stack.append(entry.path)
-                elif entry.is_file(follow_symlinks=False):
-                    total += entry.stat(follow_symlinks=False).st_size
-            except OSError:
-                continue
-    return total
 
 
 def free_bytes(path: Path) -> Optional[int]:
@@ -251,47 +283,58 @@ def free_bytes(path: Path) -> Optional[int]:
         return None
 
 
-def status(project_id: int) -> dict[str, Any]:
-    readiness = check_ready(project_id)
-    root = project_root(project_id)
+def used_bytes(db: Session, project_id: int) -> int:
+    total = (
+        db.query(func.coalesce(func.sum(PhotoEntry.size_bytes), 0))
+        .filter(PhotoEntry.project_id == project_id, PhotoEntry.kind == "file")
+        .scalar()
+    )
+    return int(total or 0)
+
+
+def status(db: Session, project_id: int) -> dict[str, Any]:
+    readiness = check_ready()
+    store, _problem = object_store()
+    on_disk = store is not None and store.driver == "disk"
     return {
         "ready": readiness.ready,
         "problem": readiness.problem,
         "message": readiness.message,
-        "location": readiness.location,
-        "used_bytes": used_bytes(root) if root.is_dir() else 0,
+        "location": readiness.location or None,
+        "used_bytes": used_bytes(db, project_id),
         "quota_bytes": None,
-        "free_bytes": free_bytes(root),
+        "free_bytes": free_bytes(objects_dir()) if on_disk else None,
         "max_upload_bytes": MAX_UPLOAD_BYTES,
         "accepts": None,
         "scanning": [],
     }
 
 
-# Keyed by project and location: tests move the library between cases.
-_READINESS_CACHE: dict[tuple[int, str], tuple[float, Readiness]] = {}
+# Keyed by the store's location: tests move the library between cases.
+_READINESS_CACHE: dict[str, tuple[float, Readiness]] = {}
 _READINESS_LOCK = threading.Lock()
 
 
-def ready_root(project_id: int) -> Path:
-    """The project's folder, or 503 with the reason while it is not ready.
-    The probe (a write in the folder) is repeated at most every 30 s per
-    project: a page load asks for one thumbnail per photo."""
+def ready_store() -> ObjectStore:
+    """The store, or 503 with the reason while it is not ready. The probe is
+    repeated at most every 30 s: a page load asks for one thumbnail per
+    photo."""
     now = time.monotonic()
-    key = (int(project_id), str(project_root(project_id)))
+    store, problem = object_store()
+    key = store.location if store is not None else f"misconfigured:{problem}"
     with _READINESS_LOCK:
         cached = _READINESS_CACHE.get(key)
     if cached is None or now - cached[0] > READINESS_CACHE_SECONDS or not cached[1].ready:
-        readiness = check_ready(project_id)
+        readiness = check_ready()
         with _READINESS_LOCK:
-            if len(_READINESS_CACHE) > 1000:
+            if len(_READINESS_CACHE) > 100:
                 _READINESS_CACHE.clear()
             _READINESS_CACHE[key] = (now, readiness)
     else:
         readiness = cached[1]
-    if not readiness.ready:
+    if not readiness.ready or store is None:
         raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=readiness.message)
-    return project_root(project_id)
+    return store
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +402,10 @@ def validate_path(value: Optional[str], *, allow_root: bool = False) -> str:
     return value
 
 
+def path_within_limits(value: str) -> bool:
+    return _path_problem(value) is None
+
+
 def join_path(parent: str, name: str) -> str:
     return f"{parent}/{name}" if parent else name
 
@@ -375,19 +422,16 @@ def is_at_or_below(path: str, folder: str) -> bool:
     return path == folder or path.startswith(folder + "/")
 
 
-def _inside(path: str, boundary: str) -> bool:
-    return path == boundary or path.startswith(boundary.rstrip("/") + "/")
+def path_prefixes(path: str) -> list[str]:
+    """Every folder on the way to `path`, the path itself last."""
+    if not path:
+        return []
+    segments = path.split("/")
+    return ["/".join(segments[: index + 1]) for index in range(len(segments))]
 
 
-def disk_path(root: Path, rel: str, *, boundary: Optional[Path] = None) -> Path:
-    """`rel` under `root` on disk, unresolved (so a symlink is the link
-    itself). Whatever it resolves to must stay inside `boundary` (default the
-    root): a symlink out of the library is not there (404)."""
-    target = root / rel if rel else root
-    limit = os.path.realpath(boundary or root)
-    if not _inside(os.path.realpath(target), limit):
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Not found")
-    return target
+def path_depth(path: str) -> int:
+    return 0 if path == "" else path.count("/") + 1
 
 
 def content_type_for(name: str) -> str:
@@ -414,26 +458,69 @@ def path_key(path: str) -> list[tuple[tuple[Any, ...], str]]:
     return [natural_key(segment) for segment in path.split("/")]
 
 
-def assert_subtree_fits(source: Path, new_rel: str) -> None:
-    """A folder moved or renamed to `new_rel` takes its contents along: every
-    descendant's new path must still be within the limits, or it could never
-    be listed or addressed again (400, like the cloud)."""
-    if not source.is_dir() or source.is_symlink():
-        return
-    base_depth = new_rel.count("/") + 1
-    base_bytes = len(new_rel.encode("utf-8"))
-    for directory, dirnames, filenames in os.walk(source):
-        rel_dir = os.path.relpath(directory, source)
-        below = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
-        below_bytes = 0 if rel_dir == "." else len(rel_dir.encode("utf-8", "surrogateescape")) + 1
-        for name in dirnames + filenames:
-            depth = base_depth + below + 1
-            size = base_bytes + below_bytes + 1 + len(name.encode("utf-8", "surrogateescape"))
-            if depth > MAX_DEPTH or size > MAX_PATH_BYTES:
-                raise HTTPException(
-                    status_code=HTTPStatus.BAD_REQUEST,
-                    detail=f"Something inside would be deeper than {MAX_DEPTH} folders or longer than {MAX_PATH_BYTES} bytes",
-                )
+def candidate_names(name: str) -> Iterator[str]:
+    """`name`, then `stem (2).ext`, `stem (3).ext`, ..."""
+    yield name
+    stem, extension = os.path.splitext(name)
+    for number in range(2, 100000):
+        yield f"{stem} ({number}){extension}"
+
+
+# ---------------------------------------------------------------------------
+# Queries
+# ---------------------------------------------------------------------------
+
+# The library is one process; a lock per project is the cloud's advisory
+# lock. SQLite serializes the writes themselves.
+_PROJECT_LOCKS: dict[int, threading.RLock] = {}
+_PROJECT_LOCKS_LOCK = threading.Lock()
+
+
+def project_lock(project_id: int) -> threading.RLock:
+    with _PROJECT_LOCKS_LOCK:
+        lock = _PROJECT_LOCKS.get(int(project_id))
+        if lock is None:
+            lock = _PROJECT_LOCKS[int(project_id)] = threading.RLock()
+        return lock
+
+
+def _below(path: str):
+    """A filter for rows strictly below `path` ("" is everything). Not LIKE:
+    SQLite's LIKE ignores case, and a name may hold its wildcards."""
+    if path == "":
+        return literal(True)
+    prefix = path + "/"
+    return func.substr(PhotoEntry.path, 1, len(prefix)) == prefix
+
+
+def _at_or_below(path: str):
+    return (PhotoEntry.path == path) | _below(path)
+
+
+def _row_at(db: Session, project_id: int, path: str) -> Optional[PhotoEntry]:
+    if path == "":
+        return None
+    return db.query(PhotoEntry).filter(PhotoEntry.project_id == project_id, PhotoEntry.path == path).first()
+
+
+def _rows_below(db: Session, project_id: int, path: str) -> list[PhotoEntry]:
+    return db.query(PhotoEntry).filter(PhotoEntry.project_id == project_id, _below(path)).all()
+
+
+def _rows_at_or_below(db: Session, project_id: int, path: str) -> list[PhotoEntry]:
+    return db.query(PhotoEntry).filter(PhotoEntry.project_id == project_id, _at_or_below(path)).all()
+
+
+def _seconds(value: Optional[datetime.datetime]) -> int:
+    if value is None:
+        return 0
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=datetime.timezone.utc)
+    return int(value.timestamp())
+
+
+def _utcnow() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 
 # ---------------------------------------------------------------------------
@@ -441,103 +528,138 @@ def assert_subtree_fits(source: Path, new_rel: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class Child:
-    name: str
-    rel: str  # path in the library
-    path: Path  # on disk, unresolved
-    is_dir: bool
-    stat: os.stat_result  # of what it points at
-    has_colors: bool = False  # a file with a `<name>.frameos.json` next to it
+def _is_cover_image(row: PhotoEntry) -> bool:
+    return row.kind == "file" and row.status == "ready" and bool((row.content_type or "").startswith("image/"))
 
 
-def children(directory: Path, rel: str, boundary: str) -> list[Child]:
-    """The visible entries of one folder. Hidden names, names the path rules
-    refuse, entries past the length/depth limits and symlinks that resolve
-    outside `boundary` (a resolved path) are not there."""
-    try:
-        entries = list(os.scandir(directory))
-    except OSError:
-        return []
-    # Sidecars fail the name rules, so they are seen here and nowhere else.
-    sidecars = {entry.name for entry in entries if entry.name.endswith(COLORS_SUFFIX)}
-    found: list[Child] = []
-    for entry in entries:
-        name = entry.name
-        if not is_valid_name(name):
+def describe_children(parent: str, rows: list[PhotoEntry]) -> list[dict[str, Any]]:
+    """Entries for the direct children of `parent` found in `rows`, which
+    must hold every row below each child that should be counted (folder
+    `items`, `files`, `size` and `cover` come from them). Folders first, then
+    by name. The cloud's describePhotoChildren."""
+    prefix = "" if parent == "" else parent + "/"
+    children: list[PhotoEntry] = []
+    stats: dict[str, dict[str, int]] = {}
+    by_parent: dict[str, dict[str, list[PhotoEntry]]] = {}
+
+    for row in rows:
+        if not row.path.startswith(prefix) or len(row.path) == len(prefix):
             continue
-        child_rel = join_path(rel, name)
-        if _path_problem(child_rel):
+        if "/" not in row.path[len(prefix):]:
+            children.append(row)
+            if row.kind == "folder":
+                stats[row.path] = {"files": 0, "items": 0, "size": 0}
+        group = by_parent.setdefault(parent_path(row.path), {"folders": [], "images": []})
+        if row.kind == "folder":
+            group["folders"].append(row)
+        elif _is_cover_image(row):
+            group["images"].append(row)
+
+    for row in rows:
+        relative = row.path[len(prefix):]
+        slash = relative.find("/")
+        if not row.path.startswith(prefix) or slash < 0:
             continue
-        try:
-            if entry.is_symlink() and not _inside(os.path.realpath(entry.path), boundary):
-                continue
-            entry_stat = entry.stat(follow_symlinks=True)
-        except OSError:
+        top = stats.get(prefix + relative[:slash])
+        if top is None:
             continue
-        if stat_module.S_ISDIR(entry_stat.st_mode):
-            is_dir = True
-        elif stat_module.S_ISREG(entry_stat.st_mode):
-            is_dir = False
+        if "/" not in relative[slash + 1:]:
+            top["items"] += 1
+        if row.kind == "file":
+            top["files"] += 1
+            top["size"] += int(row.size_bytes or 0)
+
+    def by_name(row: PhotoEntry):
+        return natural_key(base_name(row.path))
+
+    def first_image(folder: str) -> Optional[str]:
+        images = sorted(by_parent.get(folder, {}).get("images", []), key=by_name)
+        return images[0].path if images else None
+
+    # The first image among the direct children by name, else the first one
+    # found in the subfolders by name, however deep (docs/photos.md).
+    def cover_of(folder: str) -> Optional[str]:
+        direct = first_image(folder)
+        if direct:
+            return direct
+        for subfolder in sorted(by_parent.get(folder, {}).get("folders", []), key=by_name):
+            nested = cover_of(subfolder.path)
+            if nested:
+                return nested
+        return None
+
+    children.sort(key=lambda row: (0 if row.kind == "folder" else 1, by_name(row)))
+    entries: list[dict[str, Any]] = []
+    for row in children:
+        base = {"path": row.path, "name": base_name(row.path), "mtime": _seconds(row.created_at)}
+        if row.kind == "folder":
+            folder_stats = stats.get(row.path, {"files": 0, "items": 0, "size": 0})
+            entries.append({
+                **base,
+                "kind": "folder",
+                "size": folder_stats["size"],
+                "items": folder_stats["items"],
+                "files": folder_stats["files"],
+                "cover": cover_of(row.path),
+                "width": None,
+                "height": None,
+                "content_type": None,
+                "status": row.status,
+            })
         else:
-            continue
-        found.append(
-            Child(
-                name=name,
-                rel=child_rel,
-                path=Path(entry.path),
-                is_dir=is_dir,
-                stat=entry_stat,
-                has_colors=not is_dir and name + COLORS_SUFFIX in sidecars,
-            )
-        )
-    return found
+            entries.append({
+                **base,
+                "kind": "file",
+                "size": int(row.size_bytes or 0),
+                "width": row.width,
+                "height": row.height,
+                "content_type": row.content_type,
+                "status": row.status,
+                "colors": row.colors if row.colors else None,
+            })
+    return entries
 
 
-def walk(start: Path, start_rel: str, boundary: str) -> Iterator[Child]:
-    """Every visible entry below `start`. Symlinked folders inside the
-    boundary are followed, each real folder once."""
-    try:
-        start_stat = start.stat()
-    except OSError:
-        return
-    visited = {(start_stat.st_dev, start_stat.st_ino)}
-    stack = [(start, start_rel)]
-    while stack:
-        directory, rel = stack.pop()
-        for child in children(directory, rel, boundary):
-            yield child
-            if child.is_dir:
-                key = (child.stat.st_dev, child.stat.st_ino)
-                if key not in visited:
-                    visited.add(key)
-                    stack.append((child.path, child.rel))
+def entry_for(db: Session, project_id: int, path: str) -> Optional[dict[str, Any]]:
+    """One entry, in the listing shape, or None when nothing is there."""
+    if path == "":
+        return None
+    rows = _rows_at_or_below(db, project_id, path)
+    for entry in describe_children(parent_path(path), rows):
+        if entry["path"] == path:
+            return entry
+    return None
 
 
-def sort_children(items: list[Child]) -> list[Child]:
-    return sorted(items, key=lambda child: (0 if child.is_dir else 1, natural_key(child.name)))
+def list_folder(db: Session, project_id: int, folder: str) -> dict[str, Any]:
+    """The direct children of a folder (the root is ""). 404 for no such folder."""
+    if folder != "":
+        row = _row_at(db, project_id, folder)
+        if row is None or row.kind != "folder":
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Folder not found")
+    return {"path": folder, "entries": describe_children(folder, _rows_below(db, project_id, folder))}
 
 
-_SIZE_CACHE: "OrderedDict[tuple[int, int, int, int], tuple[Optional[int], Optional[int]]]" = OrderedDict()
-_SIZE_CACHE_LIMIT = 50000
-_SIZE_CACHE_LOCK = threading.Lock()
+def file_row(db: Session, project_id: int, path: str) -> PhotoEntry:
+    """A file's row, for the owner's file, thumbnail and colors routes, or 404."""
+    row = _row_at(db, project_id, path)
+    if row is None or row.kind != "file":
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="File not found")
+    return row
 
 
-def image_size(path: Path, file_stat: os.stat_result) -> tuple[Optional[int], Optional[int]]:
+# ---------------------------------------------------------------------------
+# Images: size and thumbnail, from bytes
+# ---------------------------------------------------------------------------
+
+
+def image_size_of(data: bytes) -> tuple[Optional[int], Optional[int]]:
     """Width and height from the image header (EXIF rotation applied, as a
-    browser shows it), or (None, None). Cached per file version."""
-    key = (file_stat.st_dev, file_stat.st_ino, file_stat.st_mtime_ns, file_stat.st_size)
-    with _SIZE_CACHE_LOCK:
-        cached = _SIZE_CACHE.get(key)
-        if cached is not None:
-            _SIZE_CACHE.move_to_end(key)
-            return cached
-    width: Optional[int] = None
-    height: Optional[int] = None
+    browser shows it), or (None, None)."""
     try:
         from PIL import Image
 
-        with Image.open(path) as image:
+        with Image.open(io.BytesIO(data)) as image:
             width, height = image.size
             try:
                 orientation = image.getexif().get(0x0112)
@@ -545,163 +667,29 @@ def image_size(path: Path, file_stat: os.stat_result) -> tuple[Optional[int], Op
                 orientation = None
             if orientation in (5, 6, 7, 8):
                 width, height = height, width
+            return width, height
     except Exception:
-        width, height = None, None
-    with _SIZE_CACHE_LOCK:
-        _SIZE_CACHE[key] = (width, height)
-        while len(_SIZE_CACHE) > _SIZE_CACHE_LIMIT:
-            _SIZE_CACHE.popitem(last=False)
-    return width, height
+        return None, None
 
 
-def colors_file(path: Path) -> Path:
-    """Where a photo's color profile lives: next to it, as a frame asset's."""
-    return path.with_name(path.name + COLORS_SUFFIX)
-
-
-def read_colors(path: Path) -> Optional[dict[str, Any]]:
-    """The photo's color profile (the sidecar's `colors`), or None: no
-    sidecar, a link, one too big or one that does not parse."""
-    sidecar = colors_file(path)
-    try:
-        sidecar_stat = os.lstat(sidecar)
-        if not stat_module.S_ISREG(sidecar_stat.st_mode) or sidecar_stat.st_size > MAX_COLORS_BYTES + 1024:
-            return None
-        root = json.loads(sidecar.read_text("utf-8"))
-    except (OSError, ValueError):
+def thumbnail_of(data: bytes, name: str) -> Optional[bytes]:
+    """A JPEG of at most 512 px on the long side, turned by the EXIF
+    orientation, transparency on white (what the cloud's sharp makes); None
+    for anything Pillow cannot read or an image over its format's cap: a
+    JPEG is read through draft mode, which decodes at a fraction of its
+    size, so it may have THUMB_MAX_JPEG_PIXELS; the rest decode whole and
+    stop at THUMB_MAX_PIXELS."""
+    if not content_type_for(name).startswith("image/"):
         return None
-    colors = root.get("colors") if isinstance(root, dict) else None
-    return colors if isinstance(colors, dict) and colors else None
-
-
-def file_entry(
-    rel: str, path: Path, file_stat: os.stat_result, has_colors: Optional[bool] = None
-) -> dict[str, Any]:
-    """`has_colors` is what the folder scan saw; None looks on disk."""
-    name = base_name(rel)
-    content_type = content_type_for(name)
-    width, height = image_size(path, file_stat) if content_type.startswith("image/") else (None, None)
-    return {
-        "path": rel,
-        "name": name,
-        "kind": "file",
-        "size": int(file_stat.st_size),
-        "mtime": int(file_stat.st_mtime),
-        "content_type": content_type,
-        "width": width,
-        "height": height,
-        "status": "ready",
-        "colors": read_colors(path) if has_colors is not False else None,
-    }
-
-
-def _first_playable(items: list[Child]) -> Optional[str]:
-    files = [child for child in items if not child.is_dir and is_playable(child.name)]
-    if not files:
-        return None
-    return min(files, key=lambda child: natural_key(child.name)).rel
-
-
-def _cover(direct: list[Child], boundary: str) -> Optional[str]:
-    """The first image among the direct children by name, else the first one
-    found in the subfolders by name, however deep (docs/photos.md)."""
-    cover = _first_playable(direct)
-    if cover is not None:
-        return cover
-    for sub in sort_children([child for child in direct if child.is_dir]):
-        cover = _cover(children(sub.path, sub.rel, boundary), boundary)
-        if cover is not None:
-            return cover
-    return None
-
-
-def folder_entry(rel: str, path: Path, folder_stat: os.stat_result, boundary: str) -> dict[str, Any]:
-    direct = children(path, rel, boundary)
-    files = 0
-    size = 0
-    for child in walk(path, rel, boundary):
-        if not child.is_dir:
-            files += 1
-            size += int(child.stat.st_size)
-    cover = _cover(direct, boundary)
-    return {
-        "path": rel,
-        "name": base_name(rel),
-        "kind": "folder",
-        "size": size,
-        "mtime": int(folder_stat.st_mtime),
-        "content_type": None,
-        "width": None,
-        "height": None,
-        "status": "ready",
-        "items": len(direct),
-        "files": files,
-        "cover": cover,
-    }
-
-
-def entry_for(root: Path, rel: str) -> dict[str, Any]:
-    target = disk_path(root, rel)
-    try:
-        target_stat = target.stat()
-    except OSError:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Not found")
-    if stat_module.S_ISDIR(target_stat.st_mode):
-        return folder_entry(rel, target, target_stat, os.path.realpath(root))
-    return file_entry(rel, target, target_stat)
-
-
-def list_folder(root: Path, rel: str) -> dict[str, Any]:
-    folder = disk_path(root, rel)
-    if not folder.is_dir():
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Folder not found")
-    boundary = os.path.realpath(root)
-    entries = [
-        folder_entry(child.rel, child.path, child.stat, boundary)
-        if child.is_dir
-        else file_entry(child.rel, child.path, child.stat, child.has_colors)
-        for child in sort_children(children(folder, rel, boundary))
-    ]
-    return {"path": rel, "entries": entries}
-
-
-def existing_file(root: Path, rel: str) -> Path:
-    target = disk_path(root, rel)
-    if not target.is_file():
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="File not found")
-    return target
-
-
-# ---------------------------------------------------------------------------
-# Thumbnails
-# ---------------------------------------------------------------------------
-
-
-def thumbnail_key(project_id: int, rel: str, file_stat: os.stat_result) -> str:
-    raw = f"{int(project_id)}:{rel}:{file_stat.st_mtime_ns}:{file_stat.st_size}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def thumbnail(project_id: int, root: Path, rel: str) -> Optional[tuple[Path, str]]:
-    """(the cached JPEG, its key) for an image, made on first request; None
-    for anything Pillow cannot read."""
-    source = existing_file(root, rel)
-    if not content_type_for(source.name).startswith("image/"):
-        return None
-    source_stat = source.stat()
-    key = thumbnail_key(project_id, rel, source_stat)
-    target = cache_dir() / "thumbs" / f"project_{int(project_id)}" / f"{key}.jpg"
-    if target.is_file():
-        return target, key
     try:
         from PIL import Image, ImageOps
 
         # Pillow refuses to open anything over twice its own pixel ceiling
-        # (178 MP); ours is the decision here, taken on the header below.
+        # (178 MP); ours is the decision here, taken on the header.
         bomb_limit = Image.MAX_IMAGE_PIXELS
         Image.MAX_IMAGE_PIXELS = THUMB_MAX_JPEG_PIXELS
         try:
-            opened = Image.open(source)
+            opened = Image.open(io.BytesIO(data))
         finally:
             Image.MAX_IMAGE_PIXELS = bomb_limit
         with opened:
@@ -718,121 +706,79 @@ def thumbnail(project_id: int, root: Path, rel: str) -> Optional[tuple[Path, str
                 image.paste(rgba, mask=rgba.getchannel("A"))
             buffer = io.BytesIO()
             image.save(buffer, format="JPEG", quality=82)
+            return buffer.getvalue()
     except Exception:
         return None
-    target.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=".thumb-")
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(buffer.getvalue())
-        os.replace(tmp_name, target)
-    except OSError:
-        _unlink_quietly(tmp_name)
-        return None
-    return target, key
 
 
 # ---------------------------------------------------------------------------
-# Writing
+# Folders and names
 # ---------------------------------------------------------------------------
 
 
-def _unlink_quietly(path: str | Path) -> None:
-    try:
-        os.unlink(path)
-    except OSError:
-        pass
+def _touch_folder(db: Session, project_id: int, folder: str) -> None:
+    """The folder's updated_at says "something directly inside changed",
+    which is what a share link's `updated_at` is built from."""
+    if folder == "":
+        return
+    db.query(PhotoEntry).filter(PhotoEntry.project_id == project_id, PhotoEntry.path == folder).update(
+        {PhotoEntry.updated_at: _utcnow()}, synchronize_session="fetch"
+    )
 
 
-def _carry_colors(source: Optional[Path], target: Path) -> None:
-    """A file arriving at `target` brings its own profile (from `source`) or
-    none: a sidecar left at the new name (its photo removed by hand) must not
-    color the newcomer."""
-    old = colors_file(source) if source is not None else None
-    if old is not None and os.path.lexists(old):
-        os.replace(old, colors_file(target))
-    else:
-        _unlink_quietly(colors_file(target))
+def _ensure_folders(db: Session, project_id: int, folder: str) -> int:
+    """Create the folder and every missing folder above it."""
+    prefixes = path_prefixes(folder)
+    if not prefixes:
+        return 0
+    existing = {
+        row.path: row.kind
+        for row in db.query(PhotoEntry).filter(PhotoEntry.project_id == project_id, PhotoEntry.path.in_(prefixes)).all()
+    }
+    missing: list[str] = []
+    for prefix in prefixes:
+        kind = existing.get(prefix)
+        if kind == "file":
+            raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"{prefix} is a file")
+        if kind is None:
+            missing.append(prefix)
+    now = _utcnow()
+    for path in missing:
+        db.add(PhotoEntry(project_id=project_id, path=path, kind="folder", size_bytes=0, status="ready", created_at=now, updated_at=now))
+    db.flush()
+    return len(missing)
 
 
-def set_colors(root: Path, rel: str, colors: Any) -> dict[str, Any]:
-    """Write or remove (None, {}) a photo's color profile."""
-    if disk_path(root, rel).is_dir():
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Colors go on a file, not a folder")
-    target = existing_file(root, rel)
-    if not is_playable(base_name(rel)):
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Only images can have colors")
-    if colors is not None and not isinstance(colors, dict):
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="colors must be an object or null")
-    sidecar = colors_file(target)
-    if not colors:
-        _unlink_quietly(sidecar)
-        return entry_for(root, rel)
-    encoded = json.dumps(colors, separators=(",", ":"), ensure_ascii=False)
-    if len(encoded.encode("utf-8")) > MAX_COLORS_BYTES:
-        raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="colors is too large")
-    # Written aside and renamed over, so a frame never reads half a file. The
-    # dot keeps the temporary file out of the listing.
-    temporary = sidecar.with_name(f".{sidecar.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-    try:
-        temporary.write_text('{"version":1,"colors":' + encoded + "}\n", encoding="utf-8")
-        os.replace(temporary, sidecar)
-    finally:
-        _unlink_quietly(temporary)
-    return entry_for(root, rel)
-
-
-def candidate_names(name: str) -> Iterator[str]:
-    """`name`, then `stem (2).ext`, `stem (3).ext`, ..."""
-    yield name
-    stem, extension = os.path.splitext(name)
-    for number in range(2, 100000):
-        yield f"{stem} ({number}){extension}"
-
-
-def _free_rel(directory: Path, folder_rel: str, name: str) -> Iterator[tuple[str, Path]]:
-    """Free (rel, disk path) candidates for `name` in `directory`."""
+def _free_child_name(db: Session, project_id: int, folder: str, name: str) -> str:
+    """`name`, or the first free `name (n)` among the folder's children."""
+    if _row_at(db, project_id, join_path(folder, name)) is None:
+        return name
+    prefix = "" if folder == "" else folder + "/"
+    taken = {
+        row.path[len(prefix):]
+        for row in _rows_below(db, project_id, folder)
+        if "/" not in row.path[len(prefix):]
+    }
     for candidate in candidate_names(name):
-        rel = join_path(folder_rel, candidate)
-        if _path_problem(rel):
-            raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"The name {name} is taken")
-        target = directory / candidate
-        if not os.path.lexists(target):
-            yield rel, target
+        if candidate not in taken:
+            return candidate
     raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"The name {name} is taken")
 
 
-def ensure_folder(db: Session, project_id: int, root: Path, rel: str) -> Path:
-    """Create `rel` and its parents. A file in the way is a 409. Share links
-    left pointing at a path that did not exist (its folder was removed by
-    hand) are dropped before the path exists again, so an old link never
-    starts showing a new folder."""
-    if rel == "":
-        return root
-    segments = rel.split("/")
-    for depth in range(1, len(segments) + 1):
-        current = "/".join(segments[:depth])
-        target = disk_path(root, current)
-        if target.is_dir():
-            continue
-        if os.path.lexists(target):
-            raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"{current} is a file")
-        delete_shares_at_or_below(db, project_id, current)
-        try:
-            target.mkdir()
-        except FileExistsError:
-            if not target.is_dir():
-                raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"{current} is a file")
-    return disk_path(root, rel)
+def create_folder(db: Session, project_id: int, path: str) -> dict[str, Any]:
+    """POST /api/photos/folders: a new folder and its missing parents."""
+    with project_lock(project_id):
+        if _row_at(db, project_id, path) is not None:
+            raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="Something with that name is already there")
+        _ensure_folders(db, project_id, path)
+        _touch_folder(db, project_id, parent_path(path))
+        db.commit()
+    return entry_for(db, project_id, path) or {}
 
 
-def create_folder(db: Session, project_id: int, root: Path, rel: str) -> dict[str, Any]:
-    target = disk_path(root, rel)
-    if os.path.lexists(target):
-        raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="That path exists")
-    ensure_folder(db, project_id, root, rel)
-    db.commit()
-    return entry_for(root, rel)
+# ---------------------------------------------------------------------------
+# Uploads
+# ---------------------------------------------------------------------------
 
 
 def valid_upload_id(upload_id: str) -> bool:
@@ -846,10 +792,6 @@ def upload_part_path(project_id: int, upload_id: str) -> Path:
 def cleanup_stale_parts(now: Optional[float] = None) -> None:
     current = now if now is not None else time.time()
     _unlink_older_than(cache_dir() / "uploads", current - UPLOAD_PART_MAX_AGE_SECONDS)
-    # Thumbnails are keyed by the photo's path and stat, so a rename, move,
-    # replace or delete leaves one behind for good. A month-old thumbnail is
-    # made again on request; an orphan is gone.
-    _THUMB_SWEEP.sweep(current)
 
 
 def _unlink_older_than(directory: Path, cutoff: float) -> None:
@@ -867,22 +809,11 @@ def _unlink_older_than(directory: Path, cutoff: float) -> None:
             continue
 
 
-class _ThumbSweep:
-    """At most once an hour, across all projects."""
-
-    def __init__(self) -> None:
-        self.last = 0.0
-        self.lock = threading.Lock()
-
-    def sweep(self, now: float, force: bool = False) -> None:
-        with self.lock:
-            if not force and now - self.last < 3600:
-                return
-            self.last = now
-        _unlink_older_than(cache_dir() / "thumbs", now - THUMB_MAX_AGE_SECONDS)
-
-
-_THUMB_SWEEP = _ThumbSweep()
+def _unlink_quietly(path: str | Path) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def write_chunk(project_id: int, upload_id: str, offset: int, chunk: bytes) -> int:
@@ -910,135 +841,245 @@ def write_chunk(project_id: int, upload_id: str, offset: int, chunk: bytes) -> i
     return offset + len(chunk)
 
 
-def finish_upload(
-    db: Session, project_id: int, root: Path, folder_rel: str, filename: str, upload_id: str
-) -> dict[str, Any]:
-    """Move a finished part into `folder_rel` under a free name."""
+def take_upload(project_id: int, upload_id: str) -> bytes:
+    """The finished part's bytes, removed from the cache. A second
+    complete=1 for the same upload finds nothing: 409, the client starts
+    over."""
     part = upload_part_path(project_id, upload_id)
-    if not part.is_file():
+    part.parent.mkdir(parents=True, exist_ok=True)
+    fd, claimed = tempfile.mkstemp(dir=part.parent, prefix=".finish-")
+    os.close(fd)
+    try:
+        os.replace(part, claimed)
+    except FileNotFoundError:
+        _unlink_quietly(claimed)
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="chunk_gap")
-    folder = ensure_folder(db, project_id, root, folder_rel)
-    db.commit()
-    for rel, target in _free_rel(folder, folder_rel, filename):
-        # Claim the name first (O_EXCL), then move the bytes over the claim:
-        # two uploads of one name never land on the same file.
-        try:
-            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-        except FileExistsError:
-            continue
-        os.close(fd)
-        try:
-            try:
-                os.replace(part, target)
-            except FileNotFoundError:
-                # A second complete=1 for the same upload: the first took the
-                # part. The client starts over, as for any lost part.
-                _unlink_quietly(target)
-                raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="chunk_gap")
-            except OSError:
-                # Another filesystem (a separately mounted project folder).
-                shutil.copyfile(part, target)
-                _unlink_quietly(part)
-        except OSError:
-            _unlink_quietly(target)
-            raise
-        _carry_colors(None, target)
-        return entry_for(root, rel)
-    raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"The name {filename} is taken")
+    try:
+        return Path(claimed).read_bytes()
+    finally:
+        _unlink_quietly(claimed)
 
 
-def move_paths(db: Session, project_id: int, root: Path, paths: list[str], to: str) -> list[dict[str, str]]:
-    """Move every path into the folder `to`. All of them are checked before
-    anything moves."""
-    destination = disk_path(root, to)
-    if not destination.is_dir():
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Destination folder not found")
-    sources: dict[str, Path] = {}
-    for path in paths:
-        if path in sources:
-            continue
-        if is_at_or_below(to, path):
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST, detail="A folder cannot be moved into itself"
-            )
-        source = disk_path(root, path)
-        if not os.path.lexists(source):
-            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=f"{path} not found")
-        sources[path] = source
-
-    moved: list[dict[str, str]] = []
-    done: list[tuple[str, str]] = []
-    for path, source in sources.items():
-        # Already carried along with a folder moved earlier in this call.
-        carried = next(((old, new) for old, new in done if path.startswith(old + "/")), None)
-        if carried is not None:
-            moved.append({"from": path, "to": carried[1] + path[len(carried[0]):]})
-            continue
-        if parent_path(path) == to:
-            moved.append({"from": path, "to": path})
-            continue
-        new_rel, target = next(_free_rel(destination, to, base_name(path)))
-        assert_subtree_fits(source, new_rel)
-        delete_shares_at_or_below(db, project_id, new_rel)
-        is_file = not source.is_dir()
-        os.rename(source, target)
-        if is_file:
-            _carry_colors(source, target)
-        rewrite_share_paths(db, project_id, path, new_rel)
-        # Per item: a later failure must not take the links of what already
-        # moved back to where it was.
+def store_file(
+    db: Session,
+    project_id: int,
+    store: ObjectStore,
+    folder: str,
+    name: str,
+    data: bytes,
+    *,
+    created_at: Optional[datetime.datetime] = None,
+) -> dict[str, Any]:
+    """Store one file: the objects first (the file, its thumbnail; an object
+    already there is left alone, two uploads of one photo share it), then
+    the row, with a " (2)" name when the name is taken."""
+    digest = hashlib.sha256(data).hexdigest()
+    object_key = file_object_key(digest)
+    content_type = content_type_for(name)
+    width, height = image_size_of(data) if content_type.startswith("image/") else (None, None)
+    thumb_key: Optional[str] = None
+    try:
+        if not store.exists(object_key):
+            store.put(object_key, data, content_type)
+        thumbnail = thumbnail_of(data, name)
+        if thumbnail is not None:
+            thumb_key = thumb_object_key(digest)
+            if not store.exists(thumb_key):
+                store.put(thumb_key, thumbnail, "image/jpeg")
+    except StoreError as error:
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=f"The photo could not be stored: {error}")
+    with project_lock(project_id):
+        _ensure_folders(db, project_id, folder)
+        free = _free_child_name(db, project_id, folder, name)
+        target = join_path(folder, free)
+        if not path_within_limits(target):
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"Paths can be at most {MAX_PATH_BYTES} bytes long")
+        now = _utcnow()
+        db.add(PhotoEntry(
+            project_id=project_id,
+            path=target,
+            kind="file",
+            size_bytes=len(data),
+            content_type=content_type,
+            sha256=digest,
+            object_key=object_key,
+            thumb_object_key=thumb_key,
+            width=width,
+            height=height,
+            status="ready",
+            created_at=created_at or now,
+            updated_at=now,
+        ))
+        _touch_folder(db, project_id, folder)
         db.commit()
-        done.append((path, new_rel))
-        moved.append({"from": path, "to": new_rel})
+    return entry_for(db, project_id, target) or {}
+
+
+def finish_upload(db: Session, project_id: int, store: ObjectStore, folder: str, filename: str, upload_id: str) -> dict[str, Any]:
+    return store_file(db, project_id, store, folder, filename, take_upload(project_id, upload_id))
+
+
+# ---------------------------------------------------------------------------
+# Move, rename, delete, colors
+# ---------------------------------------------------------------------------
+
+
+def _assert_subtree_fits(db: Session, project_id: int, source: str, target: str) -> None:
+    """Everything below `source` moves with it: every new path must still be
+    within the limits, or it could never be listed or addressed again."""
+    for row in _rows_at_or_below(db, project_id, source):
+        new_path = target + row.path[len(source):]
+        if len(new_path.encode("utf-8")) > MAX_PATH_BYTES or path_depth(new_path) > MAX_DEPTH:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=f"Something inside would be deeper than {MAX_DEPTH} folders or longer than {MAX_PATH_BYTES} bytes",
+            )
+
+
+def _rewrite_subtree(db: Session, project_id: int, source: str, target: str) -> None:
+    """Rewrite the paths of `source` and everything below it, and of the
+    share links pointing there. The caller made sure `target` is free."""
+    now = _utcnow()
+    tail = func.substr(PhotoEntry.path, len(source) + 1)
+    # "fetch": the session keeps rows it loaded (expire_on_commit is off),
+    # and the listing that answers this request must see the new paths.
+    db.query(PhotoEntry).filter(PhotoEntry.project_id == project_id, _at_or_below(source)).update(
+        {PhotoEntry.path: literal(target).concat(tail), PhotoEntry.updated_at: now}, synchronize_session="fetch"
+    )
+    for share in db.query(PhotoShare).filter(PhotoShare.project_id == project_id).all():
+        if is_at_or_below(share.path, source):
+            share.path = target + share.path[len(source):]
+
+
+def _outermost(paths: list[str]) -> list[str]:
+    """Drop paths that sit below another path in the same request: they
+    travel with their folder."""
+    unique = list(dict.fromkeys(paths))
+    return [path for path in unique if not any(other != path and is_at_or_below(path, other) for other in unique)]
+
+
+def move_paths(db: Session, project_id: int, paths: list[str], to: str) -> list[dict[str, str]]:
+    with project_lock(project_id):
+        if to != "":
+            destination = _row_at(db, project_id, to)
+            if destination is None:
+                raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Destination folder not found")
+            if destination.kind != "folder":
+                raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="The destination is a file")
+        # Every path is checked before anything moves.
+        for path in dict.fromkeys(paths):
+            row = _row_at(db, project_id, path)
+            if row is None:
+                raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=f"{path} not found")
+            if row.kind == "folder" and is_at_or_below(to, path):
+                raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="A folder cannot be moved into itself")
+        moved_to: dict[str, str] = {}
+        for source in _outermost(paths):
+            parent = parent_path(source)
+            if parent == to:
+                moved_to[source] = source
+                continue
+            free = _free_child_name(db, project_id, to, base_name(source))
+            target = join_path(to, free)
+            _assert_subtree_fits(db, project_id, source, target)
+            _rewrite_subtree(db, project_id, source, target)
+            _touch_folder(db, project_id, parent)
+            _touch_folder(db, project_id, to)
+            moved_to[source] = target
+        db.commit()
+    moved: list[dict[str, str]] = []
+    for source in dict.fromkeys(paths):
+        direct = moved_to.get(source)
+        if direct is not None:
+            moved.append({"from": source, "to": direct})
+            continue
+        ancestor = next((path for path in moved_to if is_at_or_below(source, path)), source)
+        moved.append({"from": source, "to": moved_to.get(ancestor, ancestor) + source[len(ancestor):]})
     return moved
 
 
-def rename_path(db: Session, project_id: int, root: Path, path: str, name: str) -> dict[str, Any]:
-    source = disk_path(root, path)
-    if not os.path.lexists(source):
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Not found")
-    new_rel = validate_path(join_path(parent_path(path), name))
-    if new_rel == path:
-        return entry_for(root, path)
-    assert_subtree_fits(source, new_rel)
-    target = disk_path(root, new_rel)
-    if os.path.lexists(target):
-        # A case-only rename on a case-insensitive disk finds itself.
-        try:
-            same = os.path.samefile(source, target)
-        except OSError:
-            same = False
-        if not same:
-            raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"The name {name} is taken")
-    else:
-        delete_shares_at_or_below(db, project_id, new_rel)
-    is_file = not source.is_dir()
-    os.rename(source, target)
-    if is_file:
-        _carry_colors(source, target)
-    rewrite_share_paths(db, project_id, path, new_rel)
-    db.commit()
-    return entry_for(root, new_rel)
+def rename_path(db: Session, project_id: int, path: str, name: str) -> dict[str, Any]:
+    target = validate_path(join_path(parent_path(path), name))
+    with project_lock(project_id):
+        row = _row_at(db, project_id, path)
+        if row is None:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Not found")
+        if target != path:
+            if _row_at(db, project_id, target) is not None:
+                raise HTTPException(status_code=HTTPStatus.CONFLICT, detail=f"The name {name} is taken")
+            _assert_subtree_fits(db, project_id, path, target)
+            _rewrite_subtree(db, project_id, path, target)
+            _touch_folder(db, project_id, parent_path(path))
+            db.commit()
+    return entry_for(db, project_id, target) or {}
 
 
-def delete_paths(db: Session, project_id: int, root: Path, paths: list[str]) -> int:
-    """Delete files and folders (with everything in them, and the share links
-    at or below them). Paths that are already gone are skipped."""
-    deleted = 0
-    for path in dict.fromkeys(paths):
-        target = root / path
-        if not os.path.lexists(target):
-            continue
-        if not _inside(os.path.realpath(target.parent), os.path.realpath(root)):
-            continue
-        if target.is_dir() and not target.is_symlink():
-            shutil.rmtree(target)
-        else:
-            target.unlink()
-            _unlink_quietly(colors_file(target))
-        delete_shares_at_or_below(db, project_id, path)
+def set_colors(db: Session, project_id: int, path: str, colors: Any) -> dict[str, Any]:
+    """Write or remove (None, {}) a photo's color profile. 400 for a folder
+    or a file a frame cannot play, 404 for nothing there."""
+    if colors is not None and not isinstance(colors, dict):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="colors must be an object or null")
+    if colors:
+        encoded = json.dumps(colors, separators=(",", ":"), ensure_ascii=False)
+        if len(encoded.encode("utf-8")) > MAX_COLORS_BYTES:
+            raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="colors must be at most 64 KB as JSON")
+    with project_lock(project_id):
+        row = _row_at(db, project_id, path)
+        if row is None:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="File not found")
+        if row.kind != "file":
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Colors go on a file, not a folder")
+        if not is_playable(base_name(path)):
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Only images can have colors")
+        row.colors = colors if colors else None
+        # updated_at, not created_at: `mtime` stays the file's, while a share
+        # link's `updated_at` says the album changed.
+        row.updated_at = _utcnow()
+        _touch_folder(db, project_id, parent_path(path))
         db.commit()
-        deleted += 1
+    return entry_for(db, project_id, path) or {}
+
+
+def _delete_unreferenced_objects(db: Session, store: ObjectStore, keys: list[Optional[str]]) -> None:
+    """Objects whose rows are gone, unless another row (any project: objects
+    are content addressed) still points at them. A store that refuses keeps
+    the bytes; the row is gone either way."""
+    for key in dict.fromkeys(key for key in keys if key):
+        still_used = (
+            db.query(PhotoEntry.id)
+            .filter((PhotoEntry.object_key == key) | (PhotoEntry.thumb_object_key == key))
+            .first()
+        )
+        if still_used is not None:
+            continue
+        try:
+            store.delete(key)
+        except StoreError:
+            continue
+
+
+def delete_paths(db: Session, project_id: int, store: ObjectStore, paths: list[str]) -> int:
+    """Delete files and folders (with everything in them, and the share links
+    at or below them). Paths that are already gone are skipped; the count is
+    of the outermost paths that were there."""
+    freed: list[Optional[str]] = []
+    deleted = 0
+    with project_lock(project_id):
+        for path in _outermost(paths):
+            rows = _rows_at_or_below(db, project_id, path)
+            if not rows:
+                continue
+            deleted += 1
+            for row in rows:
+                freed.extend([row.object_key, row.thumb_object_key])
+                db.delete(row)
+            for share in db.query(PhotoShare).filter(PhotoShare.project_id == project_id).all():
+                if is_at_or_below(share.path, path):
+                    db.delete(share)
+            db.flush()
+            _touch_folder(db, project_id, parent_path(path))
+        db.commit()
+    _delete_unreferenced_objects(db, store, freed)
     return deleted
 
 
@@ -1052,98 +1093,79 @@ def share_url(token: str) -> str:
 
 
 def share_json(share: PhotoShare) -> dict[str, Any]:
-    created_at = share.created_at
-    if created_at is not None and created_at.tzinfo is None:
-        # Stored as naive UTC.
-        created_at = created_at.replace(tzinfo=timezone.utc)
     return {
         "token": share.token,
         "path": share.path,
         "url": share_url(share.token),
-        "created_at": int(created_at.timestamp()) if created_at is not None else None,
+        "created_at": _seconds(share.created_at) if share.created_at is not None else None,
     }
-
-
-def rewrite_share_paths(db: Session, project_id: int, old: str, new: str) -> None:
-    """Links at or below a moved/renamed folder follow it."""
-    for share in db.query(PhotoShare).filter(PhotoShare.project_id == project_id).all():
-        if is_at_or_below(share.path, old):
-            share.path = new + share.path[len(old):]
-
-
-def delete_shares_at_or_below(db: Session, project_id: int, path: str) -> None:
-    for share in db.query(PhotoShare).filter(PhotoShare.project_id == project_id).all():
-        if is_at_or_below(share.path, path):
-            db.delete(share)
 
 
 def valid_share_token(token: str) -> bool:
     return bool(_SHARE_TOKEN_RE.fullmatch(token or ""))
 
 
+def assert_shareable_folder(db: Session, project_id: int, path: str) -> None:
+    """400 for a file, 404 for nothing there."""
+    row = _row_at(db, project_id, path)
+    if row is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Folder not found")
+    if row.kind != "folder":
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Share a folder, not a file")
+
+
 @dataclass
 class SharedPhoto:
     path: str  # relative to the shared folder
     name: str
-    file: Path
-    stat: os.stat_result
-    has_colors: bool = False
+    row: PhotoEntry
 
 
 @dataclass
 class SharedFolder:
+    project_id: int
+    path: str
     name: str
-    folder: Path
-    boundary: str  # the shared folder, resolved
 
 
-def shared_folder(share: PhotoShare) -> SharedFolder:
+def shared_folder(db: Session, share: PhotoShare) -> SharedFolder:
     """The folder a link points at, or 404 when it is gone."""
-    if _path_problem(share.path or "") or not share.path:
+    if not share.path or _path_problem(share.path):
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Not found")
-    root = project_root(int(share.project_id))
-    if not root.is_dir():
+    row = _row_at(db, int(share.project_id), share.path)
+    if row is None or row.kind != "folder":
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Not found")
-    folder = disk_path(root, share.path)
-    if not folder.is_dir():
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Not found")
-    return SharedFolder(name=base_name(share.path), folder=folder, boundary=os.path.realpath(folder))
+    return SharedFolder(project_id=int(share.project_id), path=share.path, name=base_name(share.path))
 
 
-def share_index(shared: SharedFolder) -> tuple[list[SharedPhoto], int]:
-    """Every playable file below the shared folder by path (at most
-    MAX_SHARE_FILES), and when anything in it last changed."""
+def share_index(db: Session, shared: SharedFolder) -> tuple[list[SharedPhoto], int]:
+    """Every playable file below the shared folder by path (natural order,
+    at most MAX_SHARE_FILES), and when anything in it last changed."""
     photos: list[SharedPhoto] = []
-    try:
-        updated_at = int(shared.folder.stat().st_mtime)
-    except OSError:
-        updated_at = 0
-    for child in walk(shared.folder, "", shared.boundary):
-        if child.is_dir:
-            updated_at = max(updated_at, int(child.stat.st_mtime))
+    updated_at = 0
+    prefix = shared.path + "/"
+    for row in _rows_at_or_below(db, shared.project_id, shared.path):
+        updated_at = max(updated_at, _seconds(row.updated_at))
+        name = base_name(row.path)
+        if row.kind != "file" or row.status != "ready" or not is_playable(name):
             continue
-        if not is_playable(child.name):
-            continue
-        updated_at = max(updated_at, int(child.stat.st_mtime))
-        photos.append(
-            SharedPhoto(path=child.rel, name=child.name, file=child.path, stat=child.stat, has_colors=child.has_colors)
-        )
+        photos.append(SharedPhoto(path=row.path[len(prefix):], name=name, row=row))
     photos.sort(key=lambda photo: path_key(photo.path))
     return photos[:MAX_SHARE_FILES], updated_at
 
 
 def shared_photo_json(token: str, photo: SharedPhoto) -> dict[str, Any]:
-    width, height = image_size(photo.file, photo.stat)
+    row = photo.row
     return {
         "path": photo.path,
         "name": photo.name,
         "url": f"{share_url(token)}/file?path={quote(photo.path, safe='')}",
-        "size": int(photo.stat.st_size),
-        "mtime": int(photo.stat.st_mtime),
-        "width": width,
-        "height": height,
-        "content_type": content_type_for(photo.name),
-        "colors": read_colors(photo.file) if photo.has_colors else None,
+        "size": int(row.size_bytes or 0),
+        "mtime": _seconds(row.created_at),
+        "width": row.width,
+        "height": row.height,
+        "content_type": row.content_type or content_type_for(photo.name),
+        "colors": row.colors if row.colors else None,
     }
 
 
@@ -1158,19 +1180,48 @@ def pick_photo(photos: list[SharedPhoto], order: str, index: int, token: str) ->
     if order == "sequential":
         return photos[position]
     if order == "newest":
-        return sorted(photos, key=lambda photo: (-photo.stat.st_mtime_ns, photo.path))[position]
+        return sorted(photos, key=lambda photo: (-_seconds(photo.row.created_at), path_key(photo.path)))[position]
     if order == "oldest":
-        return sorted(photos, key=lambda photo: (photo.stat.st_mtime_ns, photo.path))[position]
+        return sorted(photos, key=lambda photo: (_seconds(photo.row.created_at), path_key(photo.path)))[position]
     permutation = list(range(count))
     random.Random(f"{token}:{index // count}").shuffle(permutation)
     return photos[permutation[position]]
 
 
-def shared_file(shared: SharedFolder, rel: str) -> Path:
+def shared_file_row(db: Session, shared: SharedFolder, rel: str) -> PhotoEntry:
     """A playable file below the shared folder, or 404."""
     if not is_playable(base_name(rel)):
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Not found")
-    target = disk_path(shared.folder, rel, boundary=Path(shared.boundary))
-    if not target.is_file():
+    row = _row_at(db, shared.project_id, f"{shared.path}/{rel}")
+    if row is None or row.kind != "file" or row.status != "ready" or not row.object_key:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Not found")
-    return target
+    return row
+
+
+# ---------------------------------------------------------------------------
+# Serving bytes
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StoredBytes:
+    """What a route sends: a file to stream (the disk store) or the bytes."""
+
+    path: Optional[Path]
+    data: Optional[bytes]
+
+
+def fetch_object(store: ObjectStore, key: Optional[str]) -> StoredBytes:
+    """404 when the row names no object or the store has lost it."""
+    if not key:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Not found")
+    local = store.local_path(key)
+    if local is not None:
+        return StoredBytes(path=local, data=None)
+    try:
+        data = store.get(key)
+    except StoreError as error:
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=f"The photo could not be read: {error}")
+    if data is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Not found")
+    return StoredBytes(path=None, data=data)

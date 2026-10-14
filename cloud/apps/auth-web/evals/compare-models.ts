@@ -44,7 +44,8 @@ export const QUICK_SET = [
   "ask-explain-message-board",
 ];
 
-// USD per 1M tokens (standard tier, non-long-context). gpt-5.6-sol is the
+// USD per 1M tokens (standard tier, non-long-context), from
+// developers.openai.com/api/docs/pricing on 2026-10-14. gpt-5.6-sol is the
 // promotional price ("at least through November 21, 2026"). Models not
 // listed get no cost estimate rather than a wrong one.
 const PRICES: Record<string, { input: number; cached: number; output: number }> = {
@@ -52,6 +53,10 @@ const PRICES: Record<string, { input: number; cached: number; output: number }> 
   "gpt-5.6-luna": { cached: 0.02, input: 0.2, output: 1.2 },
   "gpt-5.6-sol": { cached: 0.4, input: 4, output: 20 },
   "gpt-5.6-terra": { cached: 0.2, input: 2, output: 12 },
+  "gpt-6-astra": { cached: 1, input: 10, output: 50 },
+  "gpt-6-luna": { cached: 0.01, input: 0.1, output: 0.5 },
+  "gpt-6-sol": { cached: 0.2, input: 2, output: 10 },
+  "gpt-6.1-sol": { cached: 0.1, input: 2, output: 10 },
 };
 
 type Options = {

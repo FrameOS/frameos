@@ -195,11 +195,14 @@
 
 - Photos (the rail button after Apps) is a library of albums on the control
   plane, played by frames through share links. One HTTP contract
-  (`/api/photos/...`, `docs/photos.md`) for both planes: the backend keeps
-  files on disk (`backend/app/utils/photos.py`, `FRAMEOS_PHOTOS_DIR`), the
-  cloud keeps rows in Postgres and bytes in R2 under random keys
-  (`cloud/apps/auth-web/src/lib/photos/`). A change to a route, shape or
-  status code lands on both and in the doc.
+  (`/api/photos/...`, `docs/photos.md`) for both planes, and one data model:
+  the backend keeps the cloud's tables in SQLite (`photo_entry`,
+  `photo_share`) and the bytes in an object store under `photos/<sha256>`
+  (`backend/app/utils/photos.py`, `object_store.py`: a directory under
+  `FRAMEOS_PHOTOS_DIR` by default, an S3/R2 bucket when the
+  `FRAMEOS_PHOTOS_S3_*` keys are set); the cloud keeps rows in Postgres and
+  bytes in R2 under random keys (`cloud/apps/auth-web/src/lib/photos/`). A
+  change to a route, shape or status code lands on both and in the doc.
 - Frames never get the owner's credentials: a scene carries a share link
   (`pk_...`) in the `repo/apps/image/photoAlbum` node's config and asks for
   one photo per render (`/shared/{token}/photo?index=`), keeping its place in

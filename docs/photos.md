@@ -2,8 +2,8 @@
 
 Photos is a library of albums that frames play. It is a top-level section of
 the workspace (after Frames, Scenes and Apps), served by both control planes:
-the self-hosted backend keeps the files on disk, FrameOS Cloud keeps them in
-R2. The SPA (`frontend/src/scenes/photos/`) talks to one HTTP contract,
+the self-hosted backend keeps the rows in SQLite and the bytes in a folder or
+a bucket of its own, FrameOS Cloud keeps them in Postgres and R2. The SPA (`frontend/src/scenes/photos/`) talks to one HTTP contract,
 described here, and the frame app `repo/apps/image/photoAlbum` reads an album
 through a share link.
 
@@ -146,11 +146,11 @@ Content-Type: application/octet-stream
 A JPEG thumbnail, at most 512 px on the long side, turned by the photo's
 EXIF orientation, transparency on white, or 404 when the server could not
 read the image (the SPA then shows the file itself). Each plane makes its
-own, whoever uploaded the photo: the backend with Pillow on first request,
-the cloud with sharp when the upload stores the photo. A JPEG gets one up to
-400 megapixels (both decoders shrink it while reading); a PNG, GIF, WebP or
-BMP decodes whole, so those stop at 80 megapixels. The cloud's PhotoDNA scan
-copy follows the same caps, so a larger image is refused where PhotoDNA is on.
+own when the upload stores the photo, whoever uploaded it: the backend with
+Pillow, the cloud with sharp. A JPEG gets one up to 400 megapixels (both
+decoders shrink it while reading); a PNG, GIF, WebP or BMP decodes whole, so
+those stop at 80 megapixels. The cloud's PhotoDNA scan copy follows the same
+caps, so a larger image is refused where PhotoDNA is on.
 
 ### `GET /api/photos/file?path=<file>[&download=1]`
 
@@ -323,31 +323,45 @@ A `url` that starts with `/` is relative to the share link's origin
 
 ### Backend
 
-Files live on disk, one folder per project:
-`<photos dir>/project_<id>/<path>`. The photos dir is the first of:
+The rows are the cloud's tables in SQLite: `photo_entry` (one row per file
+and per folder, with the path, size, content type, SHA-256, object keys,
+width and height, `colors` and timestamps) and `photo_share`. The bytes live
+in an object store under their content hash, `photos/<sha256>`, with the
+thumbnail (made at upload) under `photos/thumbs/<sha256>`: two uploads of one
+photo share one object, and a row never holds a file name the disk has to
+agree with. The store is one of:
 
-1. `FRAMEOS_PHOTOS_DIR`
-2. `/data/photos` on a Home Assistant add-on
-3. `photos/` next to the SQLite database (`/app/db/photos` in Docker)
+- **A directory** (the default): `<photos dir>/objects`. The photos dir is
+  the first of `FRAMEOS_PHOTOS_DIR`, `/data/photos` on a Home Assistant
+  add-on, `photos/` next to the SQLite database (`/app/db/photos` in
+  Docker). Unfinished uploads wait in `<photos dir>/.cache` whichever store
+  is in use.
+- **An S3-compatible bucket** (Cloudflare R2, AWS S3, MinIO, ...), when
+  `FRAMEOS_PHOTOS_S3_ENDPOINT` (the service address, such as
+  `https://<account>.r2.cloudflarestorage.com`), `FRAMEOS_PHOTOS_S3_BUCKET`,
+  `FRAMEOS_PHOTOS_S3_ACCESS_KEY_ID` and `FRAMEOS_PHOTOS_S3_SECRET_ACCESS_KEY`
+  are all set in the environment. `FRAMEOS_PHOTOS_S3_REGION` (default
+  `auto`, what R2 takes; AWS needs the bucket's region) and
+  `FRAMEOS_PHOTOS_S3_PREFIX` (a folder in the bucket) are optional. Requests
+  are path style and signed with AWS Signature Version 4. The bucket stays
+  private: frames and browsers get the bytes through the backend. Use one
+  backend per bucket (or per prefix): deleting a photo deletes its object
+  once no row of that backend points at it.
 
-The folder is a plain folder: files copied into it by hand show up in the
-library. Thumbnails and unfinished uploads live in `<photos dir>/.cache`.
-Share links are rows in the `photo_share` table.
+`location` in the status is the directory or `s3://<bucket>/<prefix> at
+<host>`. The library is not ready (and the page says why) when:
 
-A photo's color profile is a sidecar next to it, `<photo>.frameos.json`, in
-the format of the frame assets' sidecars: `{"version": 1, "colors": {...}}`.
-It is never listed and does not count in `files` or `size`; it moves, is
-renamed and is deleted with its photo. A sidecar over 64 KB, or one that does
-not parse, reads as no profile. Photos copied in by hand with their sidecars
-keep their colors.
+- the directory cannot be created or written (`not_writable`);
+- the backend runs in Docker and the directory is not on a mounted volume,
+  which would lose every photo when the container is recreated
+  (`not_persistent`; `FRAMEOS_PHOTOS_ALLOW_EPHEMERAL=1` skips the check);
+- some of the four bucket variables are set and not all
+  (`storage_misconfigured`), or the bucket refuses the keys or does not
+  answer (`storage_unavailable`).
 
-The library is not ready (and the page says why) when the folder cannot be
-created or written, or when the backend runs in Docker and the folder is not
-on a mounted volume, which would lose every photo when the container is
-recreated. `FRAMEOS_PHOTOS_ALLOW_EPHEMERAL=1` skips that last check.
-
-There is no quota; `free_bytes` is the free space on the disk. Uploads are at
-most 250 MiB each.
+There is no quota; `free_bytes` is the free space on the disk, `null` for a
+bucket. Uploads are at most 250 MiB each. Any file type can be stored; the
+content type comes from the name.
 
 ### Cloud
 
