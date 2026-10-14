@@ -24,7 +24,7 @@ import {
   PhotoIcon,
   RectangleStackIcon,
   Squares2X2Icon,
-  SwatchIcon,
+  PaintBrushIcon,
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
@@ -41,7 +41,12 @@ import { photosLogic, type PhotoUpload } from './photosLogic'
 import { aspectMarkRect, type PhotoThumbnailFit } from './photoEntries'
 import { photoColorsLogic } from './photoColorsLogic'
 import { type PhotoPreviewTarget, renderPhotoPreview } from './photoColors'
-import { ColorEditorModal } from '../frame/panels/Assets/ColorEditorModal'
+import {
+  ColorEditorAdjustments,
+  ColorEditorCanvas,
+  ColorEditorFooter,
+  ColorEditorViewControls,
+} from '../frame/panels/Assets/ColorEditorModal'
 import { Select } from '../../components/Select'
 import { photoFileUrl, photoThumbUrl, type PhotoEntry, type PhotosStatus } from './photosApi'
 import {
@@ -619,7 +624,7 @@ function entryMenuItems(
     isBrowserImageName(entry.name) && entry.status !== 'blocked'
       ? {
           label: entry.colors ? 'Edit colors' : 'Set colors',
-          icon: <SwatchIcon className="h-5 w-5" />,
+          icon: <PaintBrushIcon className="h-5 w-5" />,
           onClick: () => actions.openColors(entry.path),
         }
       : null,
@@ -1026,7 +1031,7 @@ function UploadPanel(): JSX.Element | null {
 function ColorsMark(): JSX.Element {
   return (
     <span title="Has colors" className="shrink-0">
-      <SwatchIcon className="h-3.5 w-3.5 opacity-60" aria-label="Has colors" />
+      <PaintBrushIcon className="h-3.5 w-3.5 opacity-60" aria-label="Has colors" />
     </span>
   )
 }
@@ -1117,31 +1122,63 @@ function PreviewTargetSelect({ overlay = false }: { overlay?: boolean }): JSX.El
   )
 }
 
-function PhotoColorsModal(): JSX.Element | null {
+/** The "Set colors" editor, beside the photo in the lightbox. */
+function PhotoColorsPanel(): JSX.Element {
   const values = useValues(photoColorsLogic)
   const actions = useActions(photoColorsLogic)
+  const fileName = values.imagePath ? photoBaseName(values.imagePath) : ''
   return (
-    <ColorEditorModal
-      values={values}
-      actions={actions}
-      previewControls={<PreviewTargetSelect />}
-      hint={
-        <>
+    <aside
+      className="photos-colors-panel frameos-panel flex w-[24rem] max-w-[90vw] shrink-0 flex-col border-l border-white/80 bg-white/95 text-slate-900 backdrop-blur-xl"
+      aria-label="Set colors"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div className="frameos-divider flex items-start gap-2 border-b px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <div className="frameos-strong truncate text-lg font-semibold">Set colors</div>
+          <div className="frame-tool-muted truncate text-xs">{fileName}</div>
+        </div>
+        <button
+          type="button"
+          title="Close"
+          onClick={actions.closeEditor}
+          className="frameos-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+        >
+          <XMarkIcon className="h-5 w-5" />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+        <ColorEditorViewControls values={values} actions={actions} className="text-xs" />
+        <ColorEditorAdjustments values={values} actions={actions} />
+        <p className="frame-tool-muted text-xs">
           Saved with the photo: every frame that plays it gets these colors. A panel's white is darker than a photo's;
           pull Whites down, or use Auto, to keep texture in bright areas. On a frame with automatic colors, saving Auto
           stores nothing, and each frame fits the photo to its own panel.
-        </>
-      }
-    />
+        </p>
+      </div>
+      <ColorEditorFooter values={values} actions={actions} className="frameos-divider border-t p-3" />
+    </aside>
   )
 }
 
 /** The lightbox's photo as the chosen panel shows it, or graded at full fidelity. */
 function LightboxPainted({ entry }: { entry: PhotoEntry }): JSX.Element {
-  const { lightboxSource, lightboxSourceError, previewTarget, fit } = useValues(photoColorsLogic)
+  const values = useValues(photoColorsLogic)
+  // Every key read here, in one place: the proxy reads each through a hook,
+  // so a key read in one branch only would change the hook order.
+  const {
+    lightboxSource,
+    lightboxSourceError,
+    previewTarget,
+    fit,
+    imagePath,
+    source: editorSource,
+    sourceError: editorSourceError,
+  } = values
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const workRef = useRef<HTMLCanvasElement | null>(null)
-  const source = lightboxSource?.path === entry.path ? lightboxSource : null
+  const editing = imagePath === entry.path
+  const source = editing ? null : lightboxSource?.path === entry.path ? lightboxSource : null
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -1160,13 +1197,24 @@ function LightboxPainted({ entry }: { entry: PhotoEntry }): JSX.Element {
     return () => window.cancelAnimationFrame(handle)
   }, [source, previewTarget, fit, entry.colors])
 
+  const panel = previewTarget.group !== 'original'
+  const painted = clsx('object-contain shadow-2xl', panel ? 'h-full w-full' : 'max-h-full max-w-full')
+  if (editing) {
+    // The editor's own preview: the sliders as they are now, not what is saved.
+    if (editorSourceError) {
+      return <div className="text-sm text-red-300">{editorSourceError}</div>
+    }
+    if (!editorSource) {
+      return <Spinner className="h-8 w-8" color="white" />
+    }
+    return <ColorEditorCanvas values={values} className={painted} />
+  }
   if (lightboxSourceError) {
     return <div className="text-sm text-red-300">{lightboxSourceError}</div>
   }
   if (!source) {
     return <Spinner className="h-8 w-8" color="white" />
   }
-  const panel = previewTarget.group !== 'original'
   return (
     <canvas
       ref={canvasRef}
@@ -1182,12 +1230,13 @@ function LightboxPainted({ entry }: { entry: PhotoEntry }): JSX.Element {
 function Lightbox(): JSX.Element | null {
   const { lightboxEntry, lightboxEntries } = useValues(photosLogic)
   const { closeLightbox, clickLightboxBackdrop, stepLightbox, deleteEntries } = useActions(photosLogic)
-  const { lightboxPainted } = useValues(photoColorsLogic)
-  const { openEditor } = useActions(photoColorsLogic)
+  const { lightboxPainted, imagePath } = useValues(photoColorsLogic)
+  const { openEditor, closeEditor } = useActions(photoColorsLogic)
   if (!lightboxEntry) {
     return null
   }
   const index = lightboxEntries.findIndex((entry) => entry.path === lightboxEntry.path)
+  const editing = imagePath === lightboxEntry.path
   return (
     <div
       className="photos-lightbox fixed inset-0 z-[110] flex flex-col bg-black/95 text-white backdrop-blur-sm"
@@ -1214,13 +1263,14 @@ function Lightbox(): JSX.Element | null {
             <button
               type="button"
               title={lightboxEntry.colors ? 'Edit colors' : 'Set colors'}
-              onClick={() => openEditor(lightboxEntry.path)}
+              aria-pressed={editing}
+              onClick={() => (editing ? closeEditor() : openEditor(lightboxEntry.path))}
               className={clsx(
                 'flex h-10 w-10 items-center justify-center rounded-xl hover:bg-white/10',
-                lightboxEntry.colors && 'text-emerald-300'
+                editing ? 'bg-white/15' : lightboxEntry.colors && 'text-emerald-300'
               )}
             >
-              <SwatchIcon className="h-5 w-5" />
+              <PaintBrushIcon className="h-5 w-5" />
             </button>
           </>
         ) : null}
@@ -1249,44 +1299,47 @@ function Lightbox(): JSX.Element | null {
           <XMarkIcon className="h-6 w-6" />
         </button>
       </div>
-      <div className="relative flex min-h-0 flex-1 items-center justify-center px-16 pb-8">
-        {lightboxPainted ? (
-          <LightboxPainted entry={lightboxEntry} />
-        ) : (
-          <img
-            key={lightboxEntry.path}
-            src={photoFileUrl(lightboxEntry.path)}
-            alt={lightboxEntry.name}
-            onClick={(event) => event.stopPropagation()}
-            className="max-h-full max-w-full object-contain shadow-2xl"
-          />
-        )}
-        {lightboxEntries.length > 1 ? (
-          <>
-            <button
-              type="button"
-              aria-label="Previous photo"
-              onClick={(event) => {
-                event.stopPropagation()
-                stepLightbox(-1)
-              }}
-              className="absolute left-4 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
-            >
-              <ArrowLeftIcon className="h-6 w-6" />
-            </button>
-            <button
-              type="button"
-              aria-label="Next photo"
-              onClick={(event) => {
-                event.stopPropagation()
-                stepLightbox(1)
-              }}
-              className="absolute right-4 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
-            >
-              <ArrowRightIcon className="h-6 w-6" />
-            </button>
-          </>
-        ) : null}
+      <div className="flex min-h-0 flex-1">
+        <div className="relative flex min-h-0 flex-1 items-center justify-center px-16 pb-8">
+          {lightboxPainted ? (
+            <LightboxPainted entry={lightboxEntry} />
+          ) : (
+            <img
+              key={lightboxEntry.path}
+              src={photoFileUrl(lightboxEntry.path)}
+              alt={lightboxEntry.name}
+              onClick={(event) => event.stopPropagation()}
+              className="max-h-full max-w-full object-contain shadow-2xl"
+            />
+          )}
+          {lightboxEntries.length > 1 ? (
+            <>
+              <button
+                type="button"
+                aria-label="Previous photo"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  stepLightbox(-1)
+                }}
+                className="absolute left-4 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
+              >
+                <ArrowLeftIcon className="h-6 w-6" />
+              </button>
+              <button
+                type="button"
+                aria-label="Next photo"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  stepLightbox(1)
+                }}
+                className="absolute right-4 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
+              >
+                <ArrowRightIcon className="h-6 w-6" />
+              </button>
+            </>
+          ) : null}
+        </div>
+        {editing ? <PhotoColorsPanel /> : null}
       </div>
     </div>
   )
@@ -1505,7 +1558,6 @@ function PhotosDialogs(): JSX.Element {
       ) : null}
       <ShareDialog />
       <InstallPicker />
-      <PhotoColorsModal />
     </>
   )
 }

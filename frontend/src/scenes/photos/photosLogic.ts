@@ -71,6 +71,8 @@ export interface PhotoBreadcrumb {
 }
 
 const UPLOAD_CONCURRENCY = 3
+/** `?photo=<path>` names the photo open in the lightbox. */
+const PHOTO_SEARCH_PARAM = 'photo'
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
@@ -1189,9 +1191,25 @@ export const photosLogic = kea<photosLogicType>([
       if (folder !== values.folder || !(folder in values.folderEntries)) {
         actions.setFolder(folder)
       }
+      // `?photo=<path>` is the open lightbox; the entry shows once its folder is in.
+      const photo = rawSearchParam(PHOTO_SEARCH_PARAM)
+      if (photo && photo !== values.lightboxPath) {
+        actions.openLightbox(photo)
+      } else if (!photo && values.lightboxPath) {
+        actions.closeLightbox()
+      }
     },
   })),
   actionToUrl(() => ({
+    openLightbox: ({ path }) => [
+      urls.photos(),
+      { ...router.values.searchParams, [PHOTO_SEARCH_PARAM]: path },
+      router.values.hashParams,
+    ],
+    closeLightbox: () => {
+      const { [PHOTO_SEARCH_PARAM]: _photo, ...search } = router.values.searchParams
+      return [urls.photos(), search, router.values.hashParams]
+    },
     // Another folder drops the other params (an open editor's `colors`); the
     // same folder, as a load from the URL, keeps them.
     setFolder: ({ folder }) => {

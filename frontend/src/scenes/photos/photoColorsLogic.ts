@@ -70,6 +70,7 @@ export interface photoColorsLogicValues {
   framesList: FrameType[] // framesModel
   folderEntries: Record<string, PhotoEntry[]> // photosLogic
   lightboxEntry: PhotoEntry | null // photosLogic
+  lightboxPath: string | null // photosLogic
   adjustmentMode: AdjustmentMode
   autoEndPoints: AutoEndPoints | null
   canSave: boolean
@@ -304,7 +305,11 @@ export interface photoColorsLogicMeta {
       },
       folderImagePaths: string[]
     ) => string | null
-    lightboxPainted: (lightboxEntry: PhotoEntry | null, previewTarget: PhotoPreviewTarget) => boolean
+    lightboxPainted: (
+      lightboxEntry: PhotoEntry | null,
+      previewTarget: PhotoPreviewTarget,
+      imagePath: string | null
+    ) => boolean
   }
 }
 
@@ -322,7 +327,7 @@ export type photoColorsLogicType = MakeLogicType<photoColorsLogicValues, photoCo
 export const photoColorsLogic = kea<photoColorsLogicType>([
   path(['src', 'scenes', 'photos', 'photoColorsLogic']),
   connect(() => ({
-    values: [framesModel, ['framesList'], photosLogic, ['folderEntries', 'lightboxEntry']],
+    values: [framesModel, ['framesList'], photosLogic, ['folderEntries', 'lightboxEntry', 'lightboxPath']],
     actions: [photosLogic, ['updateEntry', 'showNotice', 'openLightbox', 'closeLightbox', 'loadFolderSuccess']],
   })),
   actions({
@@ -541,14 +546,14 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
           ? folderImagePaths[position.index + 1] ?? null
           : null,
     ],
-    // The lightbox paints a canvas for a panel, or for a photo with colors;
-    // anything else is the file itself.
+    // The lightbox paints a canvas for a panel, for a photo with colors, or
+    // while the editor is open on it; anything else is the file itself.
     lightboxPainted: [
-      (s) => [s.lightboxEntry, s.previewTarget],
-      (lightboxEntry: PhotoEntry | null, previewTarget: PhotoPreviewTarget): boolean =>
+      (s) => [s.lightboxEntry, s.previewTarget, s.imagePath],
+      (lightboxEntry: PhotoEntry | null, previewTarget: PhotoPreviewTarget, imagePath: string | null): boolean =>
         !!lightboxEntry &&
         isBrowserImageName(lightboxEntry.name) &&
-        (previewTarget.group !== 'original' || !!lightboxEntry.colors),
+        (previewTarget.group !== 'original' || !!lightboxEntry.colors || imagePath === lightboxEntry.path),
     ],
   }),
   actionToUrl(() => ({
@@ -644,6 +649,10 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
         }
       },
       openEditor: ({ imagePath }) => {
+        // The editor is a panel beside the lightbox: it opens on the photo.
+        if (values.lightboxPath !== imagePath) {
+          actions.openLightbox(imagePath)
+        }
         if (values.savedProfile) {
           actions.setProfile(values.savedProfile)
         }
@@ -710,7 +719,14 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
           actions.openEditor(next)
         }
       },
-      openLightbox: () => actions.loadLightboxPreview(),
+      // Stepping through the lightbox takes the open editor along (unsaved
+      // changes are dropped, as with its own next button).
+      openLightbox: ({ path }) => {
+        if (values.imagePath && values.imagePath !== path) {
+          actions.openEditor(path)
+        }
+        actions.loadLightboxPreview()
+      },
       updateEntry: () => actions.loadLightboxPreview(),
       loadLightboxPreview: () => {
         const entry = values.lightboxEntry
@@ -718,7 +734,11 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
           actions.loadLightboxSource(entry.path)
         }
       },
+      // Closing the lightbox closes the editor beside it.
       closeLightbox: () => {
+        if (values.imagePath) {
+          actions.closeEditor()
+        }
         values.lightboxSource?.bitmap.close()
         actions.loadLightboxSourceSuccess(null)
       },
