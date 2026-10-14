@@ -1,4 +1,6 @@
 import { getBasePath } from './getBasePath'
+import { isCloudMode } from './cloudMode'
+import { isFrameControlMode } from './frameControlMode'
 
 type ProjectResponse = { id: number }
 type ProjectsListResponse = { projects: ProjectResponse[] }
@@ -127,8 +129,16 @@ export function projectApiPathForProject(projectId: number | null | undefined, p
   return `/api/projects/${projectId}${path.slice('/api'.length)}`
 }
 
+/** The cloud and a frame's own admin UI serve unscoped /api paths: there is
+ * no project to look up, and the cloud has no /api/projects at all. Every
+ * caller that resolves a URL itself (an XHR upload, an <img> fetch) goes
+ * through here, not only apiFetch, so the check lives here. */
+export function hasProjectScope(): boolean {
+  return !isCloudMode() && !isFrameControlMode()
+}
+
 export async function projectApiPath(path: string): Promise<string> {
-  if (!isProjectScopedApiPath(path)) {
+  if (!isProjectScopedApiPath(path) || !hasProjectScope()) {
     return path
   }
   const projectId = await getCurrentProjectId()

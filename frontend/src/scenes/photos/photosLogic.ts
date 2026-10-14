@@ -38,6 +38,8 @@ import {
 
 export type PhotosViewMode = 'grid' | 'list'
 export type PhotoSelectMode = 'replace' | 'toggle' | 'range'
+/** What a click on a tile carries: shift (range), cmd/ctrl (toggle) or nothing. */
+export type PhotoClickModifier = 'none' | 'toggle' | 'range'
 
 export interface PhotoUpload {
   id: string
@@ -127,6 +129,13 @@ export interface photosLogicValues {
 export interface photosLogicActions {
   clearSelection: () => {
     value: true
+  }
+  clickEntry: (
+    entry: PhotoEntry,
+    modifier?: PhotoClickModifier
+  ) => {
+    entry: PhotoEntry
+    modifier: PhotoClickModifier
   }
   closeInstallPicker: () => {
     value: true
@@ -225,6 +234,9 @@ export interface photosLogicActions {
     status: PhotosStatus
     payload?: any
   }
+  markShareCopied: () => {
+    value: true
+  }
   moveEntries: (
     paths: string[],
     to: string
@@ -290,9 +302,6 @@ export interface photosLogicActions {
   }
   setShareBusy: (busy: boolean) => {
     busy: boolean
-  }
-  markShareCopied: () => {
-    value: true
   }
   setViewMode: (viewMode: PhotosViewMode) => {
     viewMode: PhotosViewMode
@@ -416,6 +425,7 @@ export const photosLogic = kea<photosLogicType>([
     setSearch: (search: string) => ({ search }),
     setViewMode: (viewMode: PhotosViewMode) => ({ viewMode }),
     selectEntry: (path: string, mode: PhotoSelectMode = 'replace') => ({ path, mode }),
+    clickEntry: (entry: PhotoEntry, modifier: PhotoClickModifier = 'none') => ({ entry, modifier }),
     setSelection: (paths: string[]) => ({ paths }),
     selectAll: true,
     clearSelection: true,
@@ -909,6 +919,19 @@ export const photosLogic = kea<photosLogicType>([
           }
         }
         actions.setSelection([path])
+      },
+      // A plain click opens the entry; the first selection is the tick in
+      // the tile's corner, and once something is selected a plain click
+      // adds to (or removes from) the selection. The selection bar only
+      // appears on a deliberate tick, so a click never shifts the grid.
+      clickEntry: ({ entry, modifier }) => {
+        if (modifier === 'range' || modifier === 'toggle') {
+          actions.selectEntry(entry.path, modifier)
+        } else if (values.selectedPaths.length) {
+          actions.selectEntry(entry.path, 'toggle')
+        } else {
+          actions.openEntry(entry)
+        }
       },
       selectAll: () => {
         actions.setSelection(values.visibleEntries.map((entry) => entry.path))

@@ -120,6 +120,13 @@ export interface photoColorsLogicActions {
   closeLightbox: () => {
     value: true
   } // photosLogic
+  loadFolderSuccess: (
+    folder: string,
+    entries: PhotoEntry[]
+  ) => {
+    entries: PhotoEntry[]
+    folder: string
+  } // photosLogic
   openLightbox: (path: string) => {
     path: string
   } // photosLogic
@@ -132,13 +139,6 @@ export interface photoColorsLogicActions {
   } // photosLogic
   updateEntry: (entry: PhotoEntry) => {
     entry: PhotoEntry
-  } // photosLogic
-  loadFolderSuccess: (
-    folder: string,
-    entries: PhotoEntry[]
-  ) => {
-    entries: PhotoEntry[]
-    folder: string
   } // photosLogic
   closeEditor: () => {
     value: true

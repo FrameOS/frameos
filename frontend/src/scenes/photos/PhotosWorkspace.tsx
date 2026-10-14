@@ -61,10 +61,6 @@ const iconButtonClassName =
 const toolbarButtonClassName =
   'flex h-10 shrink-0 items-center gap-2 rounded-xl px-3 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50'
 
-function isTouchDevice(): boolean {
-  return typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches
-}
-
 function formatDate(seconds: number): string {
   return seconds > 0 ? new Date(seconds * 1000).toLocaleString() : ''
 }
@@ -537,16 +533,12 @@ function entryMenuItems(
 
 function useEntryInteractions(entry: PhotoEntry, selected: boolean) {
   const { selectedPaths } = useValues(photosLogic)
-  const { selectEntry, openEntry, startDrag, endDrag } = useActions(photosLogic)
+  const { clickEntry, openEntry, startDrag, endDrag } = useActions(photosLogic)
   return {
     draggable: true,
     onClick: (event: MouseEvent) => {
       event.stopPropagation()
-      if (isTouchDevice() && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
-        openEntry(entry)
-        return
-      }
-      selectEntry(entry.path, event.shiftKey ? 'range' : event.metaKey || event.ctrlKey ? 'toggle' : 'replace')
+      clickEntry(entry, event.shiftKey ? 'range' : event.metaKey || event.ctrlKey ? 'toggle' : 'none')
     },
     onDoubleClick: (event: MouseEvent) => {
       event.stopPropagation()

@@ -135,7 +135,8 @@ export async function apiFetch(input: RequestInfo | URL, options: ApiFetchOption
   if (typeof input === 'string') {
     // Cloud mode: paths are already canonical (/api/frames/...) at the
     // account origin — no project scoping. Frame-control mode: the local
-    // frame serves unscoped /api paths directly.
+    // frame serves unscoped /api paths directly. (projectApiPath checks the
+    // same itself; this guard keeps the auth redirect to the backend.)
     if (!frameControlMode && !cloudMode) {
       try {
         input = await projectApiPath(input)

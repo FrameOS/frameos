@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("cloud mode backend catalogs", () => {
   let apiFetch: typeof import("../../../../../../frontend/src/utils/apiFetch").apiFetch;
+  let projectApiPath: typeof import("../../../../../../frontend/src/utils/projectApi").projectApiPath;
   const fetchMock = vi.fn<typeof fetch>();
 
   beforeEach(async () => {
@@ -27,6 +28,23 @@ describe("cloud mode backend catalogs", () => {
     ({ apiFetch } = await import(
       "../../../../../../frontend/src/utils/apiFetch"
     ));
+    ({ projectApiPath } = await import(
+      "../../../../../../frontend/src/utils/projectApi"
+    ));
+  });
+
+  it("never looks up a project: the cloud has no /api/projects", async () => {
+    // The photo uploader (an XHR, for progress) and the preview image
+    // fetchers resolve their URL through projectApiPath themselves, not via
+    // apiFetch. On the cloud that used to GET /api/projects (a 404) and fail
+    // every upload with "Unable to load projects".
+    expect(await projectApiPath("/api/photos/upload")).toBe("/api/photos/upload");
+    expect(await projectApiPath("/api/frames/1/scene_images/abc")).toBe("/api/frames/1/scene_images/abc");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await apiFetch("/api/photos/status");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("/api/photos/status");
   });
 
   it("answers the backend-only catalogs locally, in the shape each loader expects", async () => {
