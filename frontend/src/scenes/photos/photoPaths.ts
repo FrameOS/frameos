@@ -11,8 +11,10 @@ export function photoPathSegments(path: string): string[] {
   return path.split('/').filter(Boolean)
 }
 
+/** Either side may be the root (""): a dropped file carries "" as the folder
+ * it sat in, and "Album/" is not a path the server accepts. */
 export function joinPhotoPath(folder: string, name: string): string {
-  return folder ? `${folder}/${name}` : name
+  return !folder ? name : !name ? folder : `${folder}/${name}`
 }
 
 export function parentPhotoPath(path: string): string {

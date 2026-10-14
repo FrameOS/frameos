@@ -1031,7 +1031,7 @@ function LightboxPainted({ entry }: { entry: PhotoEntry }): JSX.Element {
 
 function Lightbox(): JSX.Element | null {
   const { lightboxEntry, lightboxEntries } = useValues(photosLogic)
-  const { closeLightbox, stepLightbox, deleteEntries } = useActions(photosLogic)
+  const { closeLightbox, clickLightboxBackdrop, stepLightbox, deleteEntries } = useActions(photosLogic)
   const { lightboxPainted } = useValues(photoColorsLogic)
   const { openEditor } = useActions(photoColorsLogic)
   if (!lightboxEntry) {
@@ -1043,7 +1043,7 @@ function Lightbox(): JSX.Element | null {
       className="photos-lightbox fixed inset-0 z-[110] flex flex-col bg-black/95 text-white backdrop-blur-sm"
       role="dialog"
       aria-label={lightboxEntry.name}
-      onClick={closeLightbox}
+      onClick={clickLightboxBackdrop}
     >
       <div className="flex items-center gap-3 px-5 py-4" onClick={(event) => event.stopPropagation()}>
         <div className="min-w-0 flex-1">

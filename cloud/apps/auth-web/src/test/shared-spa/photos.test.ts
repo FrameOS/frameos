@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildPhotoAlbumScene as buildCloudPhotoAlbumScene } from "../../lib/photos/album-scene";
 import {
   isPhotoPathInside,
+  joinPhotoPath,
   parentPhotoPath,
   photoAlbumOf,
   photoNameProblem,
@@ -57,6 +58,15 @@ describe("photo paths", () => {
     expect(photoNameProblem("frameos.json")).toBeNull();
     // 255 bytes is the limit in UTF-8, not 255 characters.
     expect(photoNameProblem("é".repeat(128))).not.toBeNull();
+  });
+
+  it("joins paths with the root on either side", () => {
+    expect(joinPhotoPath("Summer", "beach.jpg")).toBe("Summer/beach.jpg");
+    expect(joinPhotoPath("", "beach.jpg")).toBe("beach.jpg");
+    // A file dropped into an album sat in "" (no folder of its own): the
+    // target is the album, never "Summer/", which the server refuses.
+    expect(joinPhotoPath("Summer", "")).toBe("Summer");
+    expect(joinPhotoPath("", "")).toBe("");
   });
 
   it("knows what is inside what", () => {
