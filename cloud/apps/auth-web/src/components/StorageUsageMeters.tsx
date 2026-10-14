@@ -73,11 +73,14 @@ function formatDollars(micros: bigint): string {
 export function StorageUsageMeters({
   aiHref = "/account/usage#ai",
   showAiLink = true,
+  size = "compact",
   usage,
 }: {
   aiHref?: string;
   /** The usage page shows the AI breakdown right below: no link row there. */
   showAiLink?: boolean;
+  /** "compact" is the header's thin meter; "large" is the usage page's own, with room to read. */
+  size?: "compact" | "large";
   usage: AccountUsage;
 }) {
   const totalBytes =
@@ -110,7 +113,7 @@ export function StorageUsageMeters({
   ];
 
   return (
-    <div className="storage-usage">
+    <div className={size === "large" ? "storage-usage storage-usage--large" : "storage-usage"}>
       <div className="storage-usage__total">
         {/* Named, because an unnamed limit reads as a bug the first time you
             meet it. Every number below is deployment-tunable

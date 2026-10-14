@@ -388,6 +388,93 @@ html.theme-dark .button-primary {
   font-size: 11px;
 }
 
+/* The usage page's own copy of the meters: same markup, a readable size and
+   a track that takes the width the card gives it. */
+.storage-usage--large {
+  grid-template-columns: max-content minmax(160px, 1fr) max-content;
+  gap: 10px 16px;
+  font-size: 14px;
+  margin-top: 12px;
+}
+
+.storage-usage--large .storage-usage__total-label {
+  font-size: 12px;
+}
+
+.storage-usage--large .storage-usage__total-value {
+  font-size: 15px;
+}
+
+.storage-usage--large .storage-usage__track {
+  height: 8px;
+}
+
+.storage-usage--large .storage-usage__value {
+  font-size: 13px;
+}
+
+/* Headings that sit between cards on a page (the usage page's "Account
+   usage" and "AI usage"), and the blocks inside a card that each carry a
+   small heading of their own. */
+.page-section-title {
+  margin: 0 0 4px;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.page-section-title--spaced {
+  margin-top: 36px;
+}
+
+.usage-block {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.usage-block h3 {
+  font-size: 15px;
+}
+
+.usage-block .table {
+  margin: 10px 0;
+}
+
+.usage-block__note {
+  margin-top: 8px;
+}
+
+.usage-card .copy + .copy {
+  margin-top: 8px;
+}
+
+.usage-details__summary {
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  list-style: none;
+}
+
+.usage-details__summary::-webkit-details-marker {
+  display: none;
+}
+
+.usage-details__summary::before {
+  content: "›";
+  display: inline-block;
+  width: 14px;
+  transition: transform 0.12s ease;
+}
+
+.usage-details[open] .usage-details__summary::before {
+  transform: rotate(90deg);
+}
+
+.usage-details .table,
+.usage-details .copy {
+  margin-top: 10px;
+}
+
 .compact-header {
   align-items: center;
   margin-bottom: 0;

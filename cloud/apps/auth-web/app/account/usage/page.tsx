@@ -7,10 +7,11 @@ import { accountUsage } from "../../../src/lib/usage";
 
 export const metadata = { title: "Usage" };
 
-// Everything the account uses, on one page: the storage and frame quotas
-// (the meters that used to sit in the account header), then AI usage with
-// its switch (AiUsageSections), then where to ask for more. Every number
-// comes from the same accountUsage() the quota refusals read.
+// Everything the account uses, on one page. Account usage first: the storage
+// and frame quotas (the meters that used to sit in the account header) and
+// where to ask for more. Then AI usage with its switch (AiUsageSections) and
+// how pricing works. Every number comes from the same accountUsage() the
+// quota refusals read.
 export default async function AccountUsagePage() {
   const session = await readSession();
   const accountId = session?.accountId;
@@ -27,22 +28,12 @@ export default async function AccountUsagePage() {
 
   return (
     <>
+      <h2 className="page-section-title">Account usage</h2>
+
       <section className="card">
         <h2>Storage and frames</h2>
-        <p className="copy">
-          What this account holds, against what the {usage.plan.name} plan allows. Published scenes are free and
-          listed for completeness.
-        </p>
-        <StorageUsageMeters showAiLink={false} usage={usage} />
+        <StorageUsageMeters showAiLink={false} size="large" usage={usage} />
       </section>
-
-      <section className="card" id="ai">
-        <h2>AI usage</h2>
-        <p className="copy">
-          What the AI features cost this account, where it went, and the switch that turns them off.
-        </p>
-      </section>
-      <AiUsageSections accountId={accountId} />
 
       <section className="card">
         <h2>Need more?</h2>
@@ -58,6 +49,10 @@ export default async function AccountUsagePage() {
           )}
         </p>
       </section>
+
+      <h2 className="page-section-title page-section-title--spaced">AI usage</h2>
+
+      <AiUsageSections accountId={accountId} />
     </>
   );
 }
