@@ -52,7 +52,8 @@
 
 html[data-frameos-theme='dark'],
 .frameos-app-shell.frameos-theme-dark,
-.frameos-auth-screen.frameos-theme-dark {
+.frameos-auth-screen.frameos-theme-dark,
+.frameos-dark-surface.frameos-theme-dark {
   --frameos-page-bg: var(--frameos-color-graphite);
   --frameos-primary-soft: rgb(var(--frameos-color-evergreen-rgb) / 0.3);
   --frameos-primary-soft-hover: rgb(var(--frameos-color-evergreen-rgb) / 0.38);
@@ -1533,6 +1534,11 @@ html[data-frameos-theme='dark'] .frameos-chat-proposal {
   border-color: rgba(255, 255, 255, 0.1);
 }
 
+.frameos-segment-group {
+  background: rgba(15, 23, 42, 0.04);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
+
 .frameos-theme-dark .frameos-segment-group {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -2679,7 +2685,8 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
   color: var(--tool-strong);
 }
 
-.frameos-theme-dark .frame-tool-panel {
+.frameos-theme-dark .frame-tool-panel,
+.frame-tool-panel.frameos-theme-dark {
   --tool-bg: rgba(38, 40, 47, 0.74);
   --tool-bg-strong: rgba(29, 31, 37, 0.92);
   --tool-border: rgba(255, 255, 255, 0.1);
@@ -3103,7 +3110,6 @@ html[data-frameos-theme='dark'] .app-compiled-warning {
 .frameos-app-shell:not(.frameos-theme-dark) .frame-tool-panel .text-gray-500 {
   color: #64748b;
 }
-
 
 @keyframes aiSceneEllipsis {
   0% {

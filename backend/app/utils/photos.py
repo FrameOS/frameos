@@ -51,19 +51,22 @@ from app.utils.object_store import (
     StoreError,
     s3_settings_from_env,
 )
-from app.utils.upload_limits import MAX_ASSET_UPLOAD_BYTES
-
-MAX_UPLOAD_BYTES = MAX_ASSET_UPLOAD_BYTES
+# A photographer's full-size file: 250 MiB, the same on the cloud
+# (cloud/apps/auth-web/src/lib/photos/library.ts maxPhotoUploadBytes).
+MAX_UPLOAD_BYTES = 250 * 1024 * 1024
 MAX_CHUNK_BYTES = 4 * 1024 * 1024
 MAX_PATH_BYTES = 1024
 MAX_SEGMENT_BYTES = 255
 MAX_DEPTH = 32
 MAX_SHARE_FILES = 10000
 THUMB_MAX_SIDE = 512
-# A thumbnail decodes the whole image first: a flat 13000 x 13000 PNG is a
-# few hundred KB on disk and 700 MB of RGBA. Above this there is no thumbnail
-# (the SPA shows the file itself).
+# A thumbnail of a PNG (GIF, WebP, BMP) decodes the whole image first: a flat
+# 13000 x 13000 PNG is a few hundred KB on disk and 700 MB of RGBA. Above
+# this there is no thumbnail (the SPA shows the file itself). A JPEG is read
+# through Pillow's draft mode, which decodes at a fraction of the size, so a
+# camera's 100 MP file is cheap and the cap is higher (docs/photos.md).
 THUMB_MAX_PIXELS = 80_000_000
+THUMB_MAX_JPEG_PIXELS = 400_000_000
 READINESS_CACHE_SECONDS = 30
 UPLOAD_PART_MAX_AGE_SECONDS = 3600
 SHARE_URL_PREFIX = "/api/photos/shared"
@@ -573,12 +576,14 @@ def describe_children(parent: str, rows: list[PhotoEntry]) -> list[dict[str, Any
         images = sorted(by_parent.get(folder, {}).get("images", []), key=by_name)
         return images[0].path if images else None
 
+    # The first image among the direct children by name, else the first one
+    # found in the subfolders by name, however deep (docs/photos.md).
     def cover_of(folder: str) -> Optional[str]:
         direct = first_image(folder)
         if direct:
             return direct
         for subfolder in sorted(by_parent.get(folder, {}).get("folders", []), key=by_name):
-            nested = first_image(subfolder.path)
+            nested = cover_of(subfolder.path)
             if nested:
                 return nested
         return None
@@ -670,14 +675,26 @@ def image_size_of(data: bytes) -> tuple[Optional[int], Optional[int]]:
 def thumbnail_of(data: bytes, name: str) -> Optional[bytes]:
     """A JPEG of at most 512 px on the long side, turned by the EXIF
     orientation, transparency on white (what the cloud's sharp makes); None
-    for anything Pillow cannot read or an image over THUMB_MAX_PIXELS."""
+    for anything Pillow cannot read or an image over its format's cap: a
+    JPEG is read through draft mode, which decodes at a fraction of its
+    size, so it may have THUMB_MAX_JPEG_PIXELS; the rest decode whole and
+    stop at THUMB_MAX_PIXELS."""
     if not content_type_for(name).startswith("image/"):
         return None
     try:
         from PIL import Image, ImageOps
 
-        with Image.open(io.BytesIO(data)) as opened:
-            if opened.size[0] * opened.size[1] > THUMB_MAX_PIXELS:
+        # Pillow refuses to open anything over twice its own pixel ceiling
+        # (178 MP); ours is the decision here, taken on the header.
+        bomb_limit = Image.MAX_IMAGE_PIXELS
+        Image.MAX_IMAGE_PIXELS = THUMB_MAX_JPEG_PIXELS
+        try:
+            opened = Image.open(io.BytesIO(data))
+        finally:
+            Image.MAX_IMAGE_PIXELS = bomb_limit
+        with opened:
+            cap = THUMB_MAX_JPEG_PIXELS if opened.format == "JPEG" else THUMB_MAX_PIXELS
+            if opened.size[0] * opened.size[1] > cap:
                 return None
             opened.draft("RGB", (THUMB_MAX_SIDE, THUMB_MAX_SIDE))
             # Shrink first: the transpose copies the image at its size.

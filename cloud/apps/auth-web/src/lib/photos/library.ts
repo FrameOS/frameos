@@ -22,7 +22,7 @@ import { notifyDiscord } from "../discord";
 import { getAccountBaseUrl } from "../env";
 import type { FramesDatabase } from "../frames";
 import { logWarn } from "../log";
-import { isValidObjectKey, objectStore } from "../object-store";
+import { type ObjectFile, isValidObjectKey, objectStore } from "../object-store";
 import { capturePostHogEvent } from "../posthog-capture";
 import { maxPhotoBytesPerAccount } from "../usage";
 import type { PhotoColors } from "./colors";
@@ -43,7 +43,10 @@ import {
 } from "./paths";
 import type { PhotoScanner } from "./scan";
 
-export const maxPhotoUploadBytes = 20 * 1024 * 1024;
+// A photographer's full-size file. A chunked upload stays on disk to the
+// end: it is hashed, scanned, thumbnailed and streamed to the object store
+// from its file, never held whole in memory.
+export const maxPhotoUploadBytes = 250 * 1024 * 1024;
 // nginx caps request bodies at 10 MB; 4 MiB chunks stay well inside it.
 export const maxPhotoChunkBytes = 4 * 1024 * 1024;
 // Rows, not bytes: empty folders cost nothing against the byte quota, so
@@ -196,6 +199,8 @@ export function describePhotoChildren(parent: string, rows: EntryRow[]): PhotoEn
 
   const firstImage = (folder: string) =>
     [...(byParent.get(folder)?.images ?? [])].sort(byName)[0]?.path;
+  // The first image among the direct children by name, else the first one
+  // found in the subfolders by name, however deep (docs/photos.md).
   const coverOf = (folder: string): string | null => {
     const direct = firstImage(folder);
     if (direct) {
@@ -203,7 +208,7 @@ export function describePhotoChildren(parent: string, rows: EntryRow[]): PhotoEn
     }
     const subfolders = [...(byParent.get(folder)?.folders ?? [])].sort(byName);
     for (const subfolder of subfolders) {
-      const nested = firstImage(subfolder.path);
+      const nested = coverOf(subfolder.path);
       if (nested) {
         return nested;
       }
@@ -537,7 +542,9 @@ export async function createPhotoFolder(
 // Uploads
 
 export type StorePhotoInput = {
-  bytes: Buffer;
+  /** The scanned file: bytes, or a finished upload still on disk. */
+  body: Buffer | ObjectFile;
+  size: number;
   contentType: string;
   folder: string;
   height: number | null;
@@ -561,7 +568,7 @@ export async function storePhotoFile(
 ): Promise<PhotoEntry> {
   const objectKey = randomPhotoObjectKey(accountId, "file");
   const thumbObjectKey = input.thumbnail ? randomPhotoObjectKey(accountId, "thumb") : null;
-  await objectStore().put(objectKey, input.bytes, input.contentType);
+  await objectStore().put(objectKey, input.body, input.contentType);
   try {
     if (thumbObjectKey && input.thumbnail) {
       await objectStore().put(thumbObjectKey, input.thumbnail, "image/jpeg");
@@ -575,12 +582,7 @@ export async function storePhotoFile(
     path = await db.transaction(async (tx) => {
       await lockPhotoLibrary(tx, accountId);
       await assertPhotosAvailable(tx, accountId);
-      await assertPhotoQuota(
-        tx,
-        accountId,
-        input.bytes.length,
-        1 + photoPathDepth(input.folder),
-      );
+      await assertPhotoQuota(tx, accountId, input.size, 1 + photoPathDepth(input.folder));
       await ensurePhotoFolders(tx, accountId, input.folder);
       const name = await freeChildName(tx, accountId, input.folder, input.name);
       const target = joinPhotoPath(input.folder, name);
@@ -595,7 +597,7 @@ export async function storePhotoFile(
         objectKey,
         path: target,
         sha256: input.sha256,
-        sizeBytes: input.bytes.length,
+        sizeBytes: input.size,
         thumbObjectKey,
         width: input.width,
       });

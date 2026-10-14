@@ -680,10 +680,16 @@ export async function waitForAssetColorsPreview(page: Page): Promise<void> {
 }
 
 export async function chooseAssetColorsAdjustments(page: Page, mode: 'none' | 'auto' | 'custom'): Promise<void> {
-  await page
-    .locator('select')
-    .filter({ has: page.locator('option[value="auto"]') })
-    .selectOption(mode)
+  // Reset is no adjustments, Auto the automatic fit; custom is any slider
+  // moved off both.
+  const dialog = page.getByRole('dialog')
+  if (mode === 'custom') {
+    const exposure = dialog.getByRole('slider', { name: 'Exposure' })
+    await exposure.focus()
+    await exposure.press('ArrowLeft')
+  } else {
+    await dialog.getByRole('button', { name: mode === 'none' ? 'Reset' : 'Auto', exact: true }).click()
+  }
   await waitForAssetColorsPreview(page)
 }
 

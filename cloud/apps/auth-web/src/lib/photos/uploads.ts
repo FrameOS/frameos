@@ -15,14 +15,14 @@
 // stale, and every ten minutes by a timer once this module is loaded, so a
 // burst that stops still gets cleaned up.
 
-import { mkdir, readdir, readFile, rm, rmdir, stat, appendFile, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, rm, rmdir, stat, appendFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 export const photoUploadTtlMs = 60 * 60 * 1000;
 // How many unfinished uploads one account may hold at once. A browser sends
-// a few files in parallel; a few dozen parked 20 MiB uploads would only fill
-// the disk.
+// a few files in parallel; a few dozen parked 250 MiB uploads would only
+// fill the disk.
 export const maxPendingPhotoUploadsPerAccount = 16;
 // And across all accounts, in bytes: the parked chunks share one disk.
 export const maxPendingPhotoUploadBytes = 2 * 1024 * 1024 * 1024;
@@ -112,6 +112,34 @@ export async function writePhotoUploadChunk(
   }
   await appendFile(path, bytes);
   return { ok: true, received: offset + bytes.length };
+}
+
+export type PhotoUploadFile = { path: string; size: number };
+
+/**
+ * The file holding the chunks so far, by path: the route scans, thumbnails
+ * and stores a finished upload from disk, never as one buffer. The caller
+ * discards it when done.
+ */
+export async function photoUploadFile(
+  accountId: string,
+  uploadId: string,
+): Promise<PhotoUploadFile | undefined> {
+  const path = uploadFile(accountId, uploadId);
+  const state = await fileState(path);
+  return state ? { path, size: state.size } : undefined;
+}
+
+/** The first `bytes` of a held upload: the header a sniff or a size read needs. */
+export async function readPhotoUploadHead(file: PhotoUploadFile, bytes: number): Promise<Buffer> {
+  const handle = await open(file.path, "r");
+  try {
+    const buffer = Buffer.alloc(Math.min(bytes, file.size));
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
 }
 
 /** The bytes held so far (the whole file once the last chunk is in). */

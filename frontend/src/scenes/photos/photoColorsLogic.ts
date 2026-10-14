@@ -29,6 +29,7 @@ import {
   photoColorsOfProfile,
   photoPreviewTargets,
   previewSizeFor,
+  rotatedPreviewTarget,
   profileOfPhotoColors,
 } from './photoColors'
 import { isBrowserImageName, parentPhotoPath } from './photoPaths'
@@ -69,6 +70,7 @@ export interface photoColorsLogicValues {
   framesList: FrameType[] // framesModel
   folderEntries: Record<string, PhotoEntry[]> // photosLogic
   lightboxEntry: PhotoEntry | null // photosLogic
+  lightboxPath: string | null // photosLogic
   adjustmentMode: AdjustmentMode
   autoEndPoints: AutoEndPoints | null
   canSave: boolean
@@ -88,6 +90,7 @@ export interface photoColorsLogicValues {
   }
   isDefault: boolean
   isDirty: boolean
+  lastPanelTargetKey: string | null
   lightboxPainted: boolean
   lightboxSource:
     | (PreviewSource & {
@@ -103,6 +106,7 @@ export interface photoColorsLogicValues {
   previewTargets: PhotoPreviewTarget[]
   previousImagePath: string | null
   profile: AssetColorProfile
+  rotatedPreviewTargets: Record<string, boolean>
   savedProfile: AssetColorProfile | null
   savedProfileLoading: boolean
   saving: boolean
@@ -202,6 +206,9 @@ export interface photoColorsLogicActions {
   resetProfile: () => {
     value: true
   }
+  rotatePreviewTarget: (key: string) => {
+    key: string
+  }
   saveAndOpenNext: () => {
     value: true
   }
@@ -254,7 +261,11 @@ export interface photoColorsLogicActions {
 export interface photoColorsLogicMeta {
   __keaTypeGenInternalSelectorTypes: {
     previewTargets: (framesList: FrameType[]) => PhotoPreviewTarget[]
-    previewTarget: (previewTargets: PhotoPreviewTarget[], previewTargetKey: string) => PhotoPreviewTarget
+    previewTarget: (
+      previewTargets: PhotoPreviewTarget[],
+      previewTargetKey: string,
+      rotatedPreviewTargets: Record<string, boolean>
+    ) => PhotoPreviewTarget
     entry: (folderEntries: Record<string, PhotoEntry[]>, imagePath: string | null) => PhotoEntry | null
     savedProfile: (entry: PhotoEntry | null) => AssetColorProfile | null
     hasSavedProfile: (entry: PhotoEntry | null) => boolean
@@ -295,7 +306,11 @@ export interface photoColorsLogicMeta {
       },
       folderImagePaths: string[]
     ) => string | null
-    lightboxPainted: (lightboxEntry: PhotoEntry | null, previewTarget: PhotoPreviewTarget) => boolean
+    lightboxPainted: (
+      lightboxEntry: PhotoEntry | null,
+      previewTarget: PhotoPreviewTarget,
+      imagePath: string | null
+    ) => boolean
   }
 }
 
@@ -313,11 +328,13 @@ export type photoColorsLogicType = MakeLogicType<photoColorsLogicValues, photoCo
 export const photoColorsLogic = kea<photoColorsLogicType>([
   path(['src', 'scenes', 'photos', 'photoColorsLogic']),
   connect(() => ({
-    values: [framesModel, ['framesList'], photosLogic, ['folderEntries', 'lightboxEntry']],
+    values: [framesModel, ['framesList'], photosLogic, ['folderEntries', 'lightboxEntry', 'lightboxPath']],
     actions: [photosLogic, ['updateEntry', 'showNotice', 'openLightbox', 'closeLightbox', 'loadFolderSuccess']],
   })),
   actions({
     setPreviewTarget: (key: string) => ({ key }),
+    /** Turn the chosen panel or frame on its side (remembered per target). */
+    rotatePreviewTarget: (key: string) => ({ key }),
     openEditor: (imagePath: string) => ({ imagePath }),
     closeEditor: true,
     setProfile: (profile: AssetColorProfile) => ({ profile }),
@@ -374,6 +391,18 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
       { persist: true, storageKey: 'photoColorsLogic.previewTarget' },
       { setPreviewTarget: (_, { key }) => key },
     ],
+    // The last panel or frame chosen: what the editor opens on when the
+    // lightbox is at full fidelity, which has nothing to grade for.
+    lastPanelTargetKey: [
+      null as string | null,
+      { persist: true, storageKey: 'photoColorsLogic.lastPanelTargetKey' },
+      { setPreviewTarget: (state, { key }) => (key === FULL_FIDELITY_TARGET.key ? state : key) },
+    ],
+    rotatedPreviewTargets: [
+      {} as Record<string, boolean>,
+      { persist: true, storageKey: 'photoColorsLogic.rotatedPreviewTargets' },
+      { rotatePreviewTarget: (state, { key }) => ({ ...state, [key]: !state[key] }) },
+    ],
     imagePath: [
       null as string | null,
       {
@@ -399,7 +428,6 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
     profile: [
       defaultAssetColorProfile(),
       {
-        openEditor: () => defaultAssetColorProfile(),
         setProfile: (_, { profile }) => profile,
         setPalette: (state, { palette }) => ({ ...state, palette }),
         setPaletteColor: (state, { index, color }) => ({
@@ -412,7 +440,6 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
     autoEndPoints: [
       null as AutoEndPoints | null,
       {
-        openEditor: () => null,
         setAutoEndPoints: (_, { autoEndPoints }) => autoEndPoints,
       },
     ],
@@ -437,9 +464,15 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
       (framesList: FrameType[]): PhotoPreviewTarget[] => photoPreviewTargets(framesList),
     ],
     previewTarget: [
-      (s) => [s.previewTargets, s.previewTargetKey],
-      (previewTargets: PhotoPreviewTarget[], previewTargetKey: string): PhotoPreviewTarget =>
-        previewTargets.find((target) => target.key === previewTargetKey) ?? FULL_FIDELITY_TARGET,
+      (s) => [s.previewTargets, s.previewTargetKey, s.rotatedPreviewTargets],
+      (
+        previewTargets: PhotoPreviewTarget[],
+        previewTargetKey: string,
+        rotatedPreviewTargets: Record<string, boolean>
+      ): PhotoPreviewTarget => {
+        const target = previewTargets.find((item) => item.key === previewTargetKey) ?? FULL_FIDELITY_TARGET
+        return rotatedPreviewTargets[target.key] ? rotatedPreviewTarget(target) : target
+      },
     ],
     entry: [
       (s) => [s.folderEntries, s.imagePath],
@@ -519,14 +552,14 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
           ? folderImagePaths[position.index + 1] ?? null
           : null,
     ],
-    // The lightbox paints a canvas for a panel, or for a photo with colors;
-    // anything else is the file itself.
+    // The lightbox paints a canvas for a panel, for a photo with colors, or
+    // while the editor is open on it; anything else is the file itself.
     lightboxPainted: [
-      (s) => [s.lightboxEntry, s.previewTarget],
-      (lightboxEntry: PhotoEntry | null, previewTarget: PhotoPreviewTarget): boolean =>
+      (s) => [s.lightboxEntry, s.previewTarget, s.imagePath],
+      (lightboxEntry: PhotoEntry | null, previewTarget: PhotoPreviewTarget, imagePath: string | null): boolean =>
         !!lightboxEntry &&
         isBrowserImageName(lightboxEntry.name) &&
-        (previewTarget.group !== 'original' || !!lightboxEntry.colors),
+        (previewTarget.group !== 'original' || !!lightboxEntry.colors || imagePath === lightboxEntry.path),
     ],
   }),
   actionToUrl(() => ({
@@ -573,7 +606,22 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
     return {
       // The Auto preset depends on the photo as placed and on the palette it
       // is dithered to, so it is recomputed when any of those change.
-      loadSourceSuccess: () => actions.recomputeAuto(),
+      loadSourceSuccess: ({ source }) => {
+        const stale: PreviewSource | null = cache.sourceToClose ?? null
+        cache.sourceToClose = null
+        if (stale && stale !== source) {
+          stale.bitmap.close()
+        }
+        actions.setProfile(values.savedProfile ?? defaultAssetColorProfile())
+        actions.recomputeAuto()
+      },
+      loadSourceFailure: () => {
+        const stale: PreviewSource | null = cache.sourceToClose ?? null
+        cache.sourceToClose = null
+        stale?.bitmap.close()
+        actions.setProfile(values.savedProfile ?? defaultAssetColorProfile())
+        actions.setAutoEndPoints(null)
+      },
       setFit: () => {
         actions.recomputeAuto()
         actions.loadLightboxPreview()
@@ -581,6 +629,10 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
       setPalette: () => actions.recomputeAuto(),
       setPaletteColor: () => actions.recomputeAuto(),
       setPreviewTarget: () => {
+        actions.recomputeAuto()
+        actions.loadLightboxPreview()
+      },
+      rotatePreviewTarget: () => {
         actions.recomputeAuto()
         actions.loadLightboxPreview()
       },
@@ -618,13 +670,35 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
         }
       },
       openEditor: ({ imagePath }) => {
-        if (values.savedProfile) {
-          actions.setProfile(values.savedProfile)
+        // The editor is a panel beside the lightbox: it opens on the photo.
+        if (values.lightboxPath !== imagePath) {
+          actions.openLightbox(imagePath)
+        }
+        // Full fidelity has no panel to grade for: open on the last panel or
+        // frame used, else the first frame, else the first panel family.
+        if (values.previewTargetKey === FULL_FIDELITY_TARGET.key) {
+          const targets = values.previewTargets
+          const remembered = targets.find(
+            (target) => target.key === values.lastPanelTargetKey && target.group !== 'original'
+          )
+          const pick =
+            remembered ??
+            targets.find((target) => target.group === 'frames') ??
+            targets.find((target) => target.group === 'panels')
+          if (pick) {
+            actions.setPreviewTarget(pick.key)
+          }
         }
         // Opened from the URL before the listing is in: the profile comes
         // with the entry, so it is applied when the folder loads.
         cache.awaitingSavedProfile = values.entry ? null : imagePath
         actions.loadSource(imagePath)
+      },
+      // The photo on show and its sliders change together: the previous
+      // photo stays, sliders and all, until the next one has loaded, and
+      // then both switch in one go.
+      loadSource: () => {
+        cache.sourceToClose = values.source
       },
       loadFolderSuccess: ({ folder }) => {
         const awaited: string | null = cache.awaitingSavedProfile ?? null
@@ -647,9 +721,9 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
           values.adjustmentMode === 'auto' && values.previewTarget.autoFit && !values.profile.palette
             ? null
             : photoColorsOfProfile(values.profile)
-        if (await save(colors)) {
-          actions.closeEditor()
-        }
+        // The panel stays: the saved entry comes back and the sliders are
+        // clean again, ready for the next tweak.
+        await save(colors)
       },
       removeProfile: async () => {
         if (await save(null)) {
@@ -660,13 +734,11 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
       // the one that keeps them.
       openPreviousImage: () => {
         if (values.previousImagePath) {
-          values.source?.bitmap.close()
           actions.openEditor(values.previousImagePath)
         }
       },
       openNextImage: () => {
         if (values.nextImagePath) {
-          values.source?.bitmap.close()
           actions.openEditor(values.nextImagePath)
         }
       },
@@ -680,11 +752,17 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
           return
         }
         if (next) {
-          values.source?.bitmap.close()
           actions.openEditor(next)
         }
       },
-      openLightbox: () => actions.loadLightboxPreview(),
+      // Stepping through the lightbox takes the open editor along (unsaved
+      // changes are dropped, as with its own next button).
+      openLightbox: ({ path }) => {
+        if (values.imagePath && values.imagePath !== path) {
+          actions.openEditor(path)
+        }
+        actions.loadLightboxPreview()
+      },
       updateEntry: () => actions.loadLightboxPreview(),
       loadLightboxPreview: () => {
         const entry = values.lightboxEntry
@@ -692,7 +770,11 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
           actions.loadLightboxSource(entry.path)
         }
       },
+      // Closing the lightbox closes the editor beside it.
       closeLightbox: () => {
+        if (values.imagePath) {
+          actions.closeEditor()
+        }
         values.lightboxSource?.bitmap.close()
         actions.loadLightboxSourceSuccess(null)
       },

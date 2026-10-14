@@ -2,14 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { activePhotoScanners, defaultPhotoDnaEndpoint, scanPhoto } from "./scan";
 
 const input = {
-  bytes: Buffer.from("fake image bytes"),
+  source: Buffer.from("fake image bytes"),
   contentType: "image/jpeg",
   sha256: "ab".repeat(32),
 };
 const notListed = async () => undefined;
 // What the route sends PhotoDNA (thumbnail.ts photoScanCopy): a small JPEG
 // made from the upload. Here, the bytes with a mark.
-const copyOf = async (bytes: Buffer) => Buffer.concat([Buffer.from("copy:"), bytes]);
+const copyOf = async (source: Buffer | string) =>
+  Buffer.concat([Buffer.from("copy:"), Buffer.isBuffer(source) ? source : Buffer.from(source)]);
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -100,7 +101,7 @@ describe("scanPhoto", () => {
     );
     expect(JSON.parse(String(init.body))).toEqual({
       DataRepresentation: "inline",
-      Value: Buffer.concat([Buffer.from("copy:"), input.bytes]).toString("base64"),
+      Value: Buffer.concat([Buffer.from("copy:"), input.source as Buffer]).toString("base64"),
     });
   });
 

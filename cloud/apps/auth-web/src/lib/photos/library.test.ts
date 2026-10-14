@@ -52,12 +52,17 @@ describe("describePhotoChildren", () => {
     folder("Nested/a"),
     file("Nested/z/1.jpg", 1),
     file("Nested/a/2.jpg", 2),
+    folder("Deep"),
+    folder("Deep/2026"),
+    folder("Deep/2026/October"),
+    file("Deep/2026/October/first.jpg", 3),
     file("root.jpg", 7),
     file("graded.jpg", 8, "image/jpeg", "ready", { saturation: 20, whites: -30 }),
   ];
 
   it("lists folders first, then files, by name", () => {
     expect(describePhotoChildren("", rows).map((entry) => entry.path)).toEqual([
+      "Deep",
       "Empty",
       "Nested",
       "Summer",
@@ -84,6 +89,13 @@ describe("describePhotoChildren", () => {
     expect(summer?.cover).toBe("Summer/A 10.jpg");
     // No direct image: the first one a level down, folders by name.
     expect(entries.find((entry) => entry.path === "Nested")?.cover).toBe("Nested/a/2.jpg");
+    // Photos only in a folder in a folder: the album still gets a cover.
+    expect(entries.find((entry) => entry.path === "Deep")).toMatchObject({
+      cover: "Deep/2026/October/first.jpg",
+      files: 1,
+      items: 1,
+      size: 3,
+    });
     expect(entries.find((entry) => entry.path === "Empty")).toMatchObject({
       cover: null,
       files: 0,

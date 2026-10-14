@@ -127,7 +127,7 @@ export const maxFrameLogBytesPerAccount = megabyteLimitFromEnv(
 // account gets the deployment's number.
 export const maxPhotoBytesPerAccount = megabyteLimitFromEnv(
   "FRAMEOS_CLOUD_MAX_PHOTO_MB",
-  1024,
+  10240,
 );
 
 /**

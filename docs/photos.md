@@ -67,8 +67,9 @@ The shape every listing returns:
 - `colors`: files only. The photo's color profile, or `null` (see Colors).
 - Folders also carry `items` (direct children), `files` (files anywhere below)
   and `cover` (the path of an image to show for the folder, or `null`: the
-  first image among the direct children by name, else the first one a level
-  down). A folder's `size` is the total size of the files below it.
+  first image among the direct children by name, else the first one found in
+  the subfolders by name, however deep). A folder's `size` is the total size
+  of the files below it.
 
 ## Owner routes
 
@@ -91,7 +92,7 @@ Errors use each plane's usual body (`{"detail": ...}` on the backend,
   "used_bytes": 123456,
   "quota_bytes": 1073741824,
   "free_bytes": 9876543210,
-  "max_upload_bytes": 67108864,
+  "max_upload_bytes": 262144000,
   "accepts": null,
   "scanning": []
 }
@@ -146,7 +147,10 @@ A JPEG thumbnail, at most 512 px on the long side, turned by the photo's
 EXIF orientation, transparency on white, or 404 when the server could not
 read the image (the SPA then shows the file itself). Each plane makes its
 own when the upload stores the photo, whoever uploaded it: the backend with
-Pillow, the cloud with sharp.
+Pillow, the cloud with sharp. A JPEG gets one up to 400 megapixels (both
+decoders shrink it while reading); a PNG, GIF, WebP or BMP decodes whole, so
+those stop at 80 megapixels. The cloud's PhotoDNA scan copy follows the same
+caps, so a larger image is refused where PhotoDNA is on.
 
 ### `GET /api/photos/file?path=<file>[&download=1]`
 
@@ -356,7 +360,7 @@ agree with. The store is one of:
   answer (`storage_unavailable`).
 
 There is no quota; `free_bytes` is the free space on the disk, `null` for a
-bucket. Uploads are at most 64 MiB each. Any file type can be stored; the
+bucket. Uploads are at most 250 MiB each. Any file type can be stored; the
 content type comes from the name.
 
 ### Cloud
@@ -369,10 +373,11 @@ only rewrites rows. A photo's color profile is the `colors` column (jsonb) of
 its row.
 
 Uploads accept JPEG, PNG, GIF and WebP only (every byte stored must pass the
-scan), at most 20 MiB each. Each account has `FRAMEOS_CLOUD_MAX_PHOTO_MB` of
-storage (default 1024), at most 100 000 entries and 16 unfinished uploads.
+scan), at most 250 MiB each. Each account has `FRAMEOS_CLOUD_MAX_PHOTO_MB` of
+storage (default 10240), at most 100 000 entries and 16 unfinished uploads.
 Unfinished uploads wait on the app server's disk (`FRAMEOS_PHOTO_UPLOAD_DIR`),
-never in the bucket.
+never in the bucket, and a finished one is hashed, scanned, thumbnailed and
+streamed to the bucket from that file, never held whole in memory.
 
 Revoking a link stops new listings and redirects at once. A frame that already
 holds a CDN address keeps it working until the photo is deleted.

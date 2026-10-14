@@ -178,7 +178,7 @@ async def test_status_reports_a_ready_library(async_client, photos_dir):
         "used_bytes": 5,
         "quota_bytes": None,
         "free_bytes": body["free_bytes"],
-        "max_upload_bytes": 64 * 1024 * 1024,
+        "max_upload_bytes": 250 * 1024 * 1024,
         "accepts": None,
         "scanning": [],
     }
@@ -419,6 +419,8 @@ async def test_listing_shapes_and_order(async_client):
     write(lib, "Album 10/x.png", b"png")
     write(lib, "album 2/sub/deep.jpg", jpeg_bytes())
     write(lib, "album 2/notes.txt", b"hello")
+    write(lib, "Album 3/2026/October/first.jpg", jpeg_bytes())
+    write(lib, "Album 3/2026/notes.txt", b"hello")
     write(lib, "Covers/b.jpg", jpeg_bytes())
     write(lib, "Covers/A.png", b"png-bytes")
     write(lib, "img10.jpg", jpeg_bytes(10, 20))
@@ -433,6 +435,7 @@ async def test_listing_shapes_and_order(async_client):
     assert body["path"] == ""
     assert [entry["name"] for entry in body["entries"]] == [
         "album 2",
+        "Album 3",
         "Album 10",
         "Covers",
         "Empty",
@@ -453,6 +456,9 @@ async def test_listing_shapes_and_order(async_client):
     # First image by name (case insensitive).
     assert by_name["Covers"]["cover"] == "Covers/A.png"
     assert by_name["Album 10"]["cover"] == "Album 10/x.png"
+    # Photos only in a folder in a folder: the album still gets a cover.
+    assert by_name["Album 3"]["cover"] == "Album 3/2026/October/first.jpg"
+    assert by_name["Album 3"]["files"] == 2
     assert by_name["Empty"] == {
         "path": "Empty",
         "name": "Empty",
@@ -597,9 +603,21 @@ async def test_thumbnails(async_client):
 
 
 def test_a_huge_image_gets_no_thumbnail(monkeypatch):
+    # Each format has its own cap: a JPEG is read through draft mode and may
+    # be far larger than a PNG, which decodes whole.
     monkeypatch.setattr(photos_utils, "THUMB_MAX_PIXELS", 1000)
+    monkeypatch.setattr(photos_utils, "THUMB_MAX_JPEG_PIXELS", 2000)
     assert photos_utils.thumbnail_of(jpeg_bytes(20, 20), "small.jpg") is not None
-    assert photos_utils.thumbnail_of(jpeg_bytes(40, 40), "big.jpg") is None
+    assert photos_utils.thumbnail_of(jpeg_bytes(40, 40), "big.jpg") is not None
+    assert photos_utils.thumbnail_of(jpeg_bytes(50, 50), "huge.jpg") is None
+
+    def png_bytes(side: int) -> bytes:
+        buffer = io.BytesIO()
+        Image.new("RGB", (side, side), (10, 200, 10)).save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    assert photos_utils.thumbnail_of(png_bytes(20), "small.png") is not None
+    assert photos_utils.thumbnail_of(png_bytes(40), "big.png") is None
 
 
 # ---------------------------------------------------------------------------

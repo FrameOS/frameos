@@ -117,6 +117,14 @@ export function photoPreviewTargets(frames: FrameType[]): PhotoPreviewTarget[] {
   ]
 }
 
+/** The same panel or frame turned on its side; full fidelity has no side to turn. */
+export function rotatedPreviewTarget(target: PhotoPreviewTarget): PhotoPreviewTarget {
+  if (target.group === 'original') {
+    return target
+  }
+  return { ...target, width: target.height, height: target.width }
+}
+
 /** The canvas size a target paints the photo at. */
 export function previewSizeFor(
   target: PhotoPreviewTarget,

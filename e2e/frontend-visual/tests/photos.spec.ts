@@ -295,7 +295,7 @@ test.describe.serial('@e2e photos library', () => {
     expect(deleted.ok()).toBeTruthy()
   })
 
-  test('install on frame opens the frame page on the photos drawer @e2e', async ({ page }) => {
+  test('install on frame installs the album as a saved scene and opens it @e2e', async ({ page }) => {
     await openPhotos(page, albumName)
     await expect(tileFor(page, `${albumName}/${renamedPhotoName}`)).toBeVisible()
 
@@ -304,14 +304,19 @@ test.describe.serial('@e2e photos library', () => {
     await expect(picker).toContainText(`Pick the frame that plays "${albumName}"`)
     await picker.getByRole('button', { name: seededFrameName }).click()
 
-    await expect(page).toHaveURL(/\/frames\/1\?(?=.*\bdrawer=templates\b)(?=.*\bdrawerPage=photos\b)/)
+    // Picking the frame is the install: the scene is added, the frame saved,
+    // and the new scene's drawer opens — no second Install click.
+    await expect(page).toHaveURL(/\/frames\/1\?(?=.*\bdrawer=scene\b)(?=.*\bsceneId=)/)
     const drawer = page.locator('.workspace-drawer').last()
-    await expect(drawer.getByRole('heading', { name: 'Photos' })).toBeVisible()
-    const album = drawer.getByRole('checkbox', { name: new RegExp(albumName) })
-    await expect(album).toBeVisible()
-    await expect(album).toHaveAttribute('aria-checked', 'true')
-    await expect(drawer.getByRole('button', { name: 'Install scene' })).toBeEnabled()
-    await expect(drawer.getByText(`Each album becomes a scene on ${seededFrameName}`)).toBeVisible()
+    await expect(drawer.getByRole('heading', { name: albumName })).toBeVisible()
+    await expect(page.getByText('unsaved changes')).toHaveCount(0)
+
+    const frame = await page.request.get(await currentProjectApiPath(page, '/api/frames/1'))
+    expect(frame.ok()).toBeTruthy()
+    const scenes = ((await frame.json()).frame?.scenes ?? []) as { id: string; name: string }[]
+    const installed = scenes.filter((scene) => scene.name === albumName)
+    expect(installed).toHaveLength(1)
+    await expect(page).toHaveURL(new RegExp(`sceneId=${installed[0].id}`))
   })
 
   test('deletes the album after a confirmation and leaves the library empty @e2e', async ({ page }) => {

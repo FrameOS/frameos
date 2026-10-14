@@ -31,7 +31,7 @@ from .frames import DEPLOY, FRAME_ID
 
 CHUNK_BYTES = 4 * 1024 * 1024
 # What the route takes (app/utils/photos.py MAX_UPLOAD_BYTES).
-MAX_UPLOAD_BYTES = 64 * 1024 * 1024
+MAX_UPLOAD_BYTES = 250 * 1024 * 1024
 MAX_REDIRECTS = 5
 # MCP clients pass these on to a model; the rest come back as a summary.
 INLINE_IMAGE_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")

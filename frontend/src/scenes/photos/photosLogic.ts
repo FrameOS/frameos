@@ -7,6 +7,7 @@ import { secureToken } from '../../utils/secureToken'
 import type { FrameId } from '../../types'
 import { preselectPhotoAlbums } from './installPhotoScenesLogic'
 import { readDroppedItems, type DroppedItem } from './photoDrop'
+import { entriesByOrientation, withUploadedPhoto, type PhotoOrientation, type PhotoThumbnailFit } from './photoEntries'
 import {
   PhotosApiError,
   createPhotoFolder,
@@ -70,6 +71,8 @@ export interface PhotoBreadcrumb {
 }
 
 const UPLOAD_CONCURRENCY = 3
+/** `?photo=<path>` names the photo open in the lightbox. */
+const PHOTO_SEARCH_PARAM = 'photo'
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
@@ -119,6 +122,7 @@ export interface photosLogicValues {
   sharesLoading: boolean
   status: PhotosStatus | null
   statusLoading: boolean
+  thumbnailFit: PhotoThumbnailFit
   uploadTotals: {
     loaded: number
     size: number
@@ -284,6 +288,9 @@ export interface photosLogicActions {
   selectAll: () => {
     value: true
   }
+  selectByOrientation: (orientation: PhotoOrientation) => {
+    orientation: PhotoOrientation
+  }
   selectEntry: (
     path: string,
     mode?: PhotoSelectMode
@@ -308,6 +315,9 @@ export interface photosLogicActions {
   }
   setShareBusy: (busy: boolean) => {
     busy: boolean
+  }
+  setThumbnailFit: (fit: PhotoThumbnailFit) => {
+    fit: PhotoThumbnailFit
   }
   setViewMode: (viewMode: PhotosViewMode) => {
     viewMode: PhotosViewMode
@@ -430,10 +440,12 @@ export const photosLogic = kea<photosLogicType>([
     refresh: true,
     setSearch: (search: string) => ({ search }),
     setViewMode: (viewMode: PhotosViewMode) => ({ viewMode }),
+    setThumbnailFit: (fit: PhotoThumbnailFit) => ({ fit }),
     selectEntry: (path: string, mode: PhotoSelectMode = 'replace') => ({ path, mode }),
     clickEntry: (entry: PhotoEntry, modifier: PhotoClickModifier = 'none') => ({ entry, modifier }),
     setSelection: (paths: string[]) => ({ paths }),
     selectAll: true,
+    selectByOrientation: (orientation: PhotoOrientation) => ({ orientation }),
     clearSelection: true,
     openEntry: (entry: PhotoEntry) => ({ entry }),
     openLightbox: (path: string) => ({ path }),
@@ -531,17 +543,7 @@ export const photosLogic = kea<photosLogicType>([
             ? { ...state, [folder]: current.map((item) => (item.path === entry.path ? entry : item)) }
             : state
         },
-        uploadFinished: (state, { entry }) => {
-          const folder = parentPhotoPath(entry.path)
-          const current = state[folder]
-          if (!current) {
-            return state
-          }
-          return {
-            ...state,
-            [folder]: sortPhotoEntries([...current.filter((item) => item.path !== entry.path), entry]),
-          }
-        },
+        uploadFinished: (state, { entry }) => withUploadedPhoto(state, entry),
       },
     ],
     folderLoading: [
@@ -574,6 +576,14 @@ export const photosLogic = kea<photosLogicType>([
       { persist: true, storageKey: 'photosLogic.viewMode' },
       {
         setViewMode: (_, { viewMode }) => viewMode,
+      },
+    ],
+    // How a thumbnail sits in its tile: filling it, or whole with room around it.
+    thumbnailFit: [
+      'cover' as PhotoThumbnailFit,
+      { persist: true, storageKey: 'photosLogic.thumbnailFit' },
+      {
+        setThumbnailFit: (_, { fit }) => fit,
       },
     ],
     selectedPaths: [
@@ -609,7 +619,10 @@ export const photosLogic = kea<photosLogicType>([
     uploads: [
       [] as PhotoUpload[],
       {
-        uploadQueued: (state, { uploads }) => [...state.filter((upload) => upload.status !== 'done'), ...uploads],
+        uploadQueued: (state, { uploads }) => [
+          ...state.filter((upload) => upload.status === 'queued' || upload.status === 'uploading'),
+          ...uploads,
+        ],
         uploadStarted: (state, { id }) =>
           state.map((upload) => (upload.id === id ? { ...upload, status: 'uploading' as const } : upload)),
         uploadProgress: (state, { id, loaded }) =>
@@ -781,10 +794,12 @@ export const photosLogic = kea<photosLogicType>([
     uploadTotals: [
       (s) => [s.uploads],
       (uploads: PhotoUpload[]): { loaded: number; size: number } =>
-        uploads.reduce(
-          (totals, upload) => ({ loaded: totals.loaded + upload.loaded, size: totals.size + upload.size }),
-          { loaded: 0, size: 0 }
-        ),
+        uploads
+          .filter((upload) => upload.status !== 'error')
+          .reduce((totals, upload) => ({ loaded: totals.loaded + upload.loaded, size: totals.size + upload.size }), {
+            loaded: 0,
+            size: 0,
+          }),
     ],
   }),
   listeners(({ actions, values, cache }) => {
@@ -948,6 +963,9 @@ export const photosLogic = kea<photosLogicType>([
       },
       selectAll: () => {
         actions.setSelection(values.visibleEntries.map((entry) => entry.path))
+      },
+      selectByOrientation: ({ orientation }) => {
+        actions.setSelection(entriesByOrientation(values.visibleEntries, orientation).map((entry) => entry.path))
       },
       openEntry: ({ entry }) => {
         if (entry.kind === 'folder') {
@@ -1173,9 +1191,25 @@ export const photosLogic = kea<photosLogicType>([
       if (folder !== values.folder || !(folder in values.folderEntries)) {
         actions.setFolder(folder)
       }
+      // `?photo=<path>` is the open lightbox; the entry shows once its folder is in.
+      const photo = rawSearchParam(PHOTO_SEARCH_PARAM)
+      if (photo && photo !== values.lightboxPath) {
+        actions.openLightbox(photo)
+      } else if (!photo && values.lightboxPath) {
+        actions.closeLightbox()
+      }
     },
   })),
   actionToUrl(() => ({
+    openLightbox: ({ path }) => [
+      urls.photos(),
+      { ...router.values.searchParams, [PHOTO_SEARCH_PARAM]: path },
+      router.values.hashParams,
+    ],
+    closeLightbox: () => {
+      const { [PHOTO_SEARCH_PARAM]: _photo, ...search } = router.values.searchParams
+      return [urls.photos(), search, router.values.hashParams]
+    },
     // Another folder drops the other params (an open editor's `colors`); the
     // same folder, as a load from the URL, keeps them.
     setFolder: ({ folder }) => {
