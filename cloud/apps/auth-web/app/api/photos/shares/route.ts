@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { recordAuditEvent } from "../../../../src/lib/audit";
 import { jsonError, readBoundedJsonObject } from "../../../../src/lib/device-flow";
 import { getPublicOrigin } from "../../../../src/lib/env";
+import { frameForAccount, isFrameId } from "../../../../src/lib/frames";
 import { photoOwnerContext, withPhotoErrors } from "../../../../src/lib/photos/http";
 import {
   createPhotoShare,
@@ -27,8 +28,9 @@ export async function GET(request: NextRequest) {
   );
 }
 
-// POST /api/photos/shares {"path": "Summer 2026"} -> {"share": Share}. One
-// link per folder: an existing one is returned as it is.
+// POST /api/photos/shares {"path": "Summer 2026", "frame_id"?: uuid} ->
+// {"share": Share}. The folder's general link, or with `frame_id` the link
+// for that one frame; either is returned as it is when it exists.
 export async function POST(request: NextRequest) {
   const context = await photoOwnerContext(request, { kind: "write" });
   if (context.response) {
@@ -42,14 +44,21 @@ export async function POST(request: NextRequest) {
   if (path === undefined) {
     return jsonError("invalid_path", 400);
   }
+  const frameId = parsed.body.frame_id ?? null;
+  if (frameId !== null && !isFrameId(frameId)) {
+    return jsonError("invalid_frame_id", 400);
+  }
+  if (frameId !== null && !(await frameForAccount(context.db, context.accountId, frameId))) {
+    return jsonError("frame_not_found", 404);
+  }
   return withPhotoErrors(async () => {
-    const { created, share } = await createPhotoShare(context.db, context.accountId, path);
+    const { created, share } = await createPhotoShare(context.db, context.accountId, path, frameId);
     if (created) {
       await recordAuditEvent(context.db, {
         accountId: context.accountId,
         actor: { accountId: context.accountId, providerSubject: context.providerSubject },
         eventType: "photos.share_created",
-        metadata: { path: share.path },
+        metadata: { frameId: share.frameId, path: share.path },
       });
     }
     return NextResponse.json({ share: photoShareJson(share, getPublicOrigin(request)) });

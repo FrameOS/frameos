@@ -111,9 +111,10 @@ export interface photosLogicValues {
   selectedPaths: string[]
   selectionAnchor: string | null
   shareBusy: boolean
-  shareCopied: boolean
+  shareCopiedToken: string | null
+  shareFrameChoice: string
   shareTarget: string | null
-  shareTargetShare: PhotoShare | null
+  shareTargetShares: PhotoShare[]
   shares: PhotoShare[]
   sharesByPath: Record<string, PhotoShare>
   sharesLoading: boolean
@@ -163,7 +164,11 @@ export interface photosLogicActions {
     name: string
     parent: string
   }
-  createShare: (path: string) => {
+  createShare: (
+    path: string,
+    frameId?: FrameId | null
+  ) => {
+    frameId: FrameId | null
     path: string
   }
   deleteEntries: (paths: string[]) => {
@@ -238,8 +243,8 @@ export interface photosLogicActions {
     status: PhotosStatus
     payload?: any
   }
-  markShareCopied: () => {
-    value: true
+  markShareCopied: (token: string) => {
+    token: string
   }
   moveEntries: (
     paths: string[],
@@ -309,6 +314,9 @@ export interface photosLogicActions {
   }
   setShareBusy: (busy: boolean) => {
     busy: boolean
+  }
+  setShareFrameChoice: (choice: string) => {
+    choice: string
   }
   setThumbnailFit: (fit: PhotoThumbnailFit) => {
     fit: PhotoThumbnailFit
@@ -400,7 +408,7 @@ export interface photosLogicMeta {
     lightboxEntries: (visibleEntries: PhotoEntry[]) => PhotoEntry[]
     lightboxEntry: (lightboxEntries: PhotoEntry[], lightboxPath: string | null) => PhotoEntry | null
     sharesByPath: (shares: PhotoShare[]) => Record<string, PhotoShare>
-    shareTargetShare: (sharesByPath: Record<string, PhotoShare>, shareTarget: string | null) => PhotoShare | null
+    shareTargetShares: (shares: PhotoShare[], shareTarget: string | null) => PhotoShare[]
     activeUploadCount: (uploads: PhotoUpload[]) => number
     uploadTotals: (uploads: PhotoUpload[]) => {
       loaded: number
@@ -468,10 +476,13 @@ export const photosLogic = kea<photosLogicType>([
     setDropTarget: (target: string | null) => ({ target }),
     openShare: (path: string) => ({ path }),
     closeShare: true,
-    createShare: (path: string) => ({ path }),
+    /** The folder's general link (frameId null) or one frame's own link. */
+    createShare: (path: string, frameId: FrameId | null = null) => ({ path, frameId }),
     deleteShare: (token: string) => ({ token }),
+    /** Which link the dialog's "New link" makes: '' for anyone, else a frame id. */
+    setShareFrameChoice: (choice: string) => ({ choice }),
     setShareBusy: (busy: boolean) => ({ busy }),
-    markShareCopied: true,
+    markShareCopied: (token: string) => ({ token }),
     showNotice: (kind: PhotosNotice['kind'], message: string) => ({ kind, message }),
     dismissNotice: true,
     openInstallPicker: (albums: string[]) => ({ albums }),
@@ -671,13 +682,21 @@ export const photosLogic = kea<photosLogicType>([
         setShareBusy: (_, { busy }) => busy,
       },
     ],
-    // "Copied" belongs to one dialog: the next one starts over.
-    shareCopied: [
-      false,
+    // "Copied" belongs to one link of one dialog: the next one starts over.
+    shareCopiedToken: [
+      null as string | null,
       {
-        markShareCopied: () => true,
-        openShare: () => false,
-        closeShare: () => false,
+        markShareCopied: (_, { token }) => token,
+        openShare: () => null,
+        closeShare: () => null,
+      },
+    ],
+    shareFrameChoice: [
+      '',
+      {
+        setShareFrameChoice: (_, { choice }) => choice,
+        openShare: () => '',
+        closeShare: () => '',
       },
     ],
     notice: [
@@ -761,17 +780,30 @@ export const photosLogic = kea<photosLogicType>([
     lightboxEntry: [
       (s) => [s.lightboxEntries, s.lightboxPath],
       (lightboxEntries: PhotoEntry[], lightboxPath: string | null): PhotoEntry | null =>
-        lightboxPath ? lightboxEntries.find((entry) => entry.path === lightboxPath) ?? null : null,
+        lightboxPath ? (lightboxEntries.find((entry) => entry.path === lightboxPath) ?? null) : null,
     ],
+    /** One link per folder, for the "shared" marks: the general one when there is one. */
     sharesByPath: [
       (s) => [s.shares],
-      (shares: PhotoShare[]): Record<string, PhotoShare> =>
-        Object.fromEntries(shares.map((share) => [share.path, share])),
+      (shares: PhotoShare[]): Record<string, PhotoShare> => {
+        const byPath: Record<string, PhotoShare> = {}
+        for (const share of shares) {
+          if (!byPath[share.path] || (byPath[share.path].frame_id !== null && share.frame_id === null)) {
+            byPath[share.path] = share
+          }
+        }
+        return byPath
+      },
     ],
-    shareTargetShare: [
-      (s) => [s.sharesByPath, s.shareTarget],
-      (sharesByPath: Record<string, PhotoShare>, shareTarget: string | null): PhotoShare | null =>
-        shareTarget ? sharesByPath[shareTarget] ?? null : null,
+    /** Every link of the folder the dialog is about: the general one first, then one per frame. */
+    shareTargetShares: [
+      (s) => [s.shares, s.shareTarget],
+      (shares: PhotoShare[], shareTarget: string | null): PhotoShare[] =>
+        shareTarget === null
+          ? []
+          : shares
+              .filter((share) => share.path === shareTarget)
+              .sort((a, b) => Number(a.frame_id !== null) - Number(b.frame_id !== null) || a.created_at - b.created_at),
     ],
     activeUploadCount: [
       (s) => [s.uploads],
@@ -1131,10 +1163,10 @@ export const photosLogic = kea<photosLogicType>([
           actions.setMutating(false)
         }
       },
-      createShare: async ({ path }) => {
+      createShare: async ({ path, frameId }) => {
         actions.setShareBusy(true)
         try {
-          await createPhotoShare(path)
+          await createPhotoShare(path, frameId)
           actions.loadShares()
         } catch (error) {
           reportError(error, 'Could not create the link.')
@@ -1145,7 +1177,7 @@ export const photosLogic = kea<photosLogicType>([
       deleteShare: async ({ token }) => {
         const confirmed = await confirmDialog({
           title: 'Stop sharing?',
-          message: 'Frames playing this link stop getting new photos. You can make a new link later.',
+          message: 'Whatever plays this link stops getting photos. Other links to the folder keep working.',
           confirmLabel: 'Stop sharing',
           danger: true,
         })

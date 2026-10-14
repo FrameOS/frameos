@@ -846,8 +846,17 @@ export async function deletePhotoEntries(
 
 export type PhotoShareRow = {
   createdAt: Date;
+  /** The frame the link was made for; null for the folder's general link. */
+  frameId: string | null;
   path: string;
   token: string;
+};
+
+const shareColumns = {
+  createdAt: photoShares.createdAt,
+  frameId: photoShares.frameId,
+  path: photoShares.path,
+  token: photoShares.token,
 };
 
 const shareTokenPattern = /^pk_[A-Za-z0-9_-]{32,128}$/;
@@ -868,6 +877,7 @@ export function photoShareUrl(origin: string, token: string) {
 export function photoShareJson(row: PhotoShareRow, origin: string) {
   return {
     created_at: seconds(row.createdAt),
+    frame_id: row.frameId,
     path: row.path,
     token: row.token,
     url: photoShareUrl(origin, row.token),
@@ -878,22 +888,27 @@ export async function listPhotoShares(
   db: FramesDatabase,
   accountId: string,
 ): Promise<PhotoShareRow[]> {
-  const rows = await db
-    .select({
-      createdAt: photoShares.createdAt,
-      path: photoShares.path,
-      token: photoShares.token,
-    })
-    .from(photoShares)
-    .where(eq(photoShares.accountId, accountId));
-  return rows.sort((a, b) => comparePhotoPaths(a.path, b.path));
+  const rows = await db.select(shareColumns).from(photoShares).where(eq(photoShares.accountId, accountId));
+  // By folder, the general link before the frames' own.
+  return rows.sort(
+    (a, b) =>
+      comparePhotoPaths(a.path, b.path) ||
+      Number(a.frameId !== null) - Number(b.frameId !== null) ||
+      a.createdAt.getTime() - b.createdAt.getTime(),
+  );
 }
 
-/** The folder's link, made now unless it already has one. */
+/**
+ * The folder's link for `frameId` (its general link when null), made now
+ * unless it already has one. A folder has one general link and one per
+ * frame, so a frame's access can be withdrawn on its own. The caller has
+ * checked that the frame is the account's.
+ */
 export async function createPhotoShare(
   db: FramesDatabase,
   accountId: string,
   path: string,
+  frameId: string | null = null,
 ): Promise<{ created: boolean; share: PhotoShareRow }> {
   return db.transaction(async (tx) => {
     await lockPhotoLibrary(tx, accountId);
@@ -905,23 +920,25 @@ export async function createPhotoShare(
     if (row.kind !== "folder") {
       throw new PhotoError("not_a_folder", 400);
     }
-    const columns = {
-      createdAt: photoShares.createdAt,
-      path: photoShares.path,
-      token: photoShares.token,
-    };
     const [existing] = await tx
-      .select(columns)
+      .select(shareColumns)
       .from(photoShares)
-      .where(and(eq(photoShares.accountId, accountId), eq(photoShares.path, path)))
+      .where(
+        and(
+          eq(photoShares.accountId, accountId),
+          eq(photoShares.path, path),
+          frameId === null ? isNull(photoShares.frameId) : eq(photoShares.frameId, frameId),
+        ),
+      )
+      .orderBy(photoShares.createdAt)
       .limit(1);
     if (existing) {
       return { created: false, share: existing };
     }
     const [created] = await tx
       .insert(photoShares)
-      .values({ accountId, path, token: newPhotoShareToken() })
-      .returning(columns);
+      .values({ accountId, frameId, path, token: newPhotoShareToken() })
+      .returning(shareColumns);
     return { created: true, share: created as PhotoShareRow };
   });
 }
@@ -934,11 +951,7 @@ export async function deletePhotoShare(
   const [deleted] = await db
     .delete(photoShares)
     .where(and(eq(photoShares.accountId, accountId), eq(photoShares.token, token)))
-    .returning({
-      createdAt: photoShares.createdAt,
-      path: photoShares.path,
-      token: photoShares.token,
-    });
+    .returning(shareColumns);
   return deleted;
 }
 

@@ -49,6 +49,12 @@ class PhotoPathBody(BaseModel):
     path: str
 
 
+class PhotoShareBody(BaseModel):
+    path: str
+    # A frame's own link to the folder; absent for the folder's general link.
+    frame_id: Any = None
+
+
 class PhotoMoveBody(BaseModel):
     paths: list[str] = Field(max_length=MAX_PATHS_PER_REQUEST)
     to: str = ""
@@ -252,12 +258,27 @@ async def photos_shares(db: Session = Depends(get_db)):
 
 
 @api_project.post("/photos/shares")
-async def photos_create_share(data: PhotoPathBody, db: Session = Depends(get_db)):
-    return {"share": photos.share_json(await _folder_share(db, data.path))}
+async def photos_create_share(data: PhotoShareBody, db: Session = Depends(get_db)):
+    frame = _share_frame(db, data.frame_id)
+    return {"share": photos.share_json(await _folder_share(db, data.path, frame.id if frame else None))}
 
 
-async def _folder_share(db: Session, path: str) -> PhotoShare:
-    """The folder's link, made now unless it already has one."""
+def _share_frame(db: Session, frame_id: Any) -> Frame | None:
+    """The frame a link is for: None for the folder's general link."""
+    if frame_id is None:
+        return None
+    if isinstance(frame_id, bool) or not isinstance(frame_id, int):
+        raise _bad_request("frame_id must be a frame's id")
+    frame = db.query(Frame).filter_by(project_id=current_project_id(), id=frame_id).first()
+    if frame is None:
+        raise _not_found("Frame not found")
+    return frame
+
+
+async def _folder_share(db: Session, path: str, frame_id: int | None = None) -> PhotoShare:
+    """The folder's link for `frame_id` (its general link when None), made
+    now unless it already has one. A folder has one general link and one
+    per frame, so a frame's access can be withdrawn on its own."""
     if path == "":
         raise _bad_request("Share a folder, not the whole library")
     rel = photos.validate_path(path)
@@ -266,12 +287,14 @@ async def _folder_share(db: Session, path: str) -> PhotoShare:
     await asyncio.to_thread(photos.assert_shareable_folder, db, project_id, rel)
     share = (
         db.query(PhotoShare)
-        .filter(PhotoShare.project_id == project_id, PhotoShare.path == rel)
+        .filter(PhotoShare.project_id == project_id, PhotoShare.path == rel, PhotoShare.frame_id == frame_id)
         .order_by(PhotoShare.id.asc())
         .first()
     )
     if share is None:
-        share = PhotoShare(project_id=project_id, path=rel, token=f"pk_{secrets.token_urlsafe(32)}")
+        share = PhotoShare(
+            project_id=project_id, path=rel, frame_id=frame_id, token=f"pk_{secrets.token_urlsafe(32)}"
+        )
         db.add(share)
         db.commit()
         db.refresh(share)
@@ -292,9 +315,9 @@ def _frame_origin(frame: Frame) -> str:
 
 @api_project.post("/photos/scene")
 async def photos_album_scene(data: PhotoSceneBody, db: Session = Depends(get_db)):
-    """A ready scene that plays the folder on one frame, with the folder's
-    share link in it (made now if it has none). Installing it is the frame
-    routes' business."""
+    """A ready scene that plays the folder on one frame, with the frame's own
+    share link to the folder in it (made now if it has none). Installing it
+    is the frame routes' business."""
     seconds = DEFAULT_SECONDS if data.seconds is None else data.seconds
     if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not 0 < seconds < float("inf"):
         raise _bad_request("seconds must be a positive number")
@@ -312,7 +335,7 @@ async def photos_album_scene(data: PhotoSceneBody, db: Session = Depends(get_db)
     if frame is None:
         raise _not_found("Frame not found")
     origin = _frame_origin(frame)
-    share = await _folder_share(db, data.path)
+    share = await _folder_share(db, data.path, frame.id)
     scene = build_photo_album_scene(
         name=(data.name or "").strip() or photos.base_name(share.path),
         album_url=origin + photos.share_url(share.token),

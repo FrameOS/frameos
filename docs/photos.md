@@ -204,21 +204,35 @@ paths; an empty list is a 400.
 
 ### Share links
 
-- `GET /api/photos/shares` → `{"shares": [Share, ...]}`
+A folder has one link for anyone (`frame_id` null) and one per frame it
+plays on (`frame_id` the frame's id): "Install on frame" and
+`POST /api/photos/scene` make the frame its own link, so one frame's access
+can be withdrawn without touching the others or the link given to a friend.
+
+- `GET /api/photos/shares` → `{"shares": [Share, ...]}`, by folder, the
+  general link before the frames' own.
 - `POST /api/photos/shares` with `{"path": "Summer 2026"}` →
-  `{"share": Share}`. A folder has at most one link, so this returns the
-  existing one if there is one. The path must be an existing folder, not the
-  root: 400 for the root or a file, 404 when nothing is there.
-- `DELETE /api/photos/shares/{token}` → `{"deleted": true}`.
+  `{"share": Share}`: the folder's general link, returned as it is when it
+  exists. With `"frame_id"` the link for that frame, likewise. The path must
+  be an existing folder, not the root: 400 for the root or a file, 404 when
+  nothing is there; a `frame_id` that is not one of the account's frames is
+  a 404, one of the wrong shape a 400.
+- `DELETE /api/photos/shares/{token}` → `{"deleted": true}`. The other
+  links of the folder keep working.
 
 ```json
 {
   "token": "pk_3n1...",
   "path": "Summer 2026",
+  "frame_id": null,
   "url": "https://cloud.frameos.net/api/photos/shared/pk_3n1...",
   "created_at": 1760000000
 }
 ```
+
+A deleted frame leaves its link behind, unbound on the cloud (the column
+is a foreign key that nulls) and still naming the id on the backend, for
+the dialog to show and the owner to remove.
 
 `url` is absolute on the cloud. The backend does not know which address its
 frames use to reach it, so it returns `/api/photos/shared/<token>` and the
@@ -233,9 +247,12 @@ Tokens are `pk_` plus at least 32 URL-safe random characters.
 ```
 
 → `{"scene": Scene, "share": Share}`: a ready scene that plays the folder
-(see Installing photo scenes), with the folder's share link in it. The link
-is made now when the folder has none, as `POST /api/photos/shares` would.
-Installing the scene is up to the caller (the frame routes, or the MCP's
+(see Installing photo scenes), with the frame's own share link to the
+folder in it, made now when the frame has none, as `POST /api/photos/shares`
+with `frame_id` would. The backend requires `frame_id` (the link carries
+the address that frame reaches the backend at); the cloud's links are
+absolute, so without one the folder's general link serves. Installing the
+scene is up to the caller (the frame routes, or the MCP's
 `photo_album_install`).
 
 - `path`: an existing folder, not the root (400 for the root or a file, 404
@@ -428,10 +445,10 @@ photo a frame plays.
 ## Installing photo scenes
 
 "Install photo scenes" (the Photos page, an album's menu and the "Add scene"
-drawer) makes one scene per ticked album on one frame: it creates the album's
-share link, builds a scene around `repo/apps/image/photoAlbum` with the link in
-the app node's config, and installs it like any other scene (the frame's
-scenes list; the deploy follows). Settings: how long each photo stays, the
+drawer) makes one scene per ticked album on one frame: it creates the frame's
+own share link to the album, builds a scene around `repo/apps/image/photoAlbum`
+with the link in the app node's config, and installs it like any other scene
+(the frame's scenes list; the deploy follows). Settings: how long each photo stays, the
 order, and how a photo fits the screen.
 
 The scene: a `render` event into `render/image`, whose image comes from the
@@ -453,7 +470,8 @@ tools: `photos_status`, `photos_list`, `photo_get` (the thumbnail, or the
 file with `original`), `photo_upload` (base64 or a URL the server downloads,
 sent in the upload route's chunks), `photo_folder_create`, `photos_move`,
 `photo_rename`, `photos_delete`, `photo_colors_set`, `photo_shares_list`,
-`photo_share_create`, `photo_share_delete` and `photo_album_install`
-(`POST /api/photos/scene`, then the frame's own install). Every write takes
+`photo_share_create` (with `frame_id`, one frame's own link),
+`photo_share_delete` and `photo_album_install` (`POST /api/photos/scene`,
+then the frame's own install). Every write takes
 `confirm: true`, because a frame playing a shared album shows the change on
 its next photo, and sharing makes a folder readable by anyone with the link.

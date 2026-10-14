@@ -4,6 +4,11 @@ A token that gives read access to one folder of a project's photo library and
 everything below it. Frames play an album through its link, so they never
 need the owner's credentials. `path` follows the folder when it is moved or
 renamed (app/utils/photos.py) and the row goes when the folder is deleted.
+
+A folder may have several links: one for anyone (`frame_id` NULL) and one
+per frame it was installed on (`frame_id` the frame's id), so a frame's
+access can be withdrawn on its own. The frame id is a plain column, not a
+foreign key: a deleted frame leaves its link behind to be seen and removed.
 """
 from __future__ import annotations
 
@@ -29,5 +34,6 @@ class PhotoShare(Base):
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("project.id", ondelete="CASCADE"), nullable=False)
     token: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     path: Mapped[str] = mapped_column(Text, nullable=False)
+    frame_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Naive UTC, like the other tables.
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(), nullable=False, default=_utcnow)

@@ -1096,6 +1096,7 @@ def share_json(share: PhotoShare) -> dict[str, Any]:
     return {
         "token": share.token,
         "path": share.path,
+        "frame_id": share.frame_id,
         "url": share_url(share.token),
         "created_at": _seconds(share.created_at) if share.created_at is not None else None,
     }

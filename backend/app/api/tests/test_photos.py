@@ -862,6 +862,46 @@ async def test_share_links(async_client):
 
 
 @pytest.mark.asyncio
+async def test_share_links_per_frame(async_client, db, redis):
+    """A folder has one general link and one per frame, each deletable alone."""
+    lib = library(async_client)
+    write(lib, "Summer 2026/a.jpg", b"a")
+    kitchen = await new_frame(db, redis, "Kitchen", "localhost", "10.0.0.5")
+    hall = await new_frame(db, redis, "Hall", "localhost", "10.0.0.6")
+
+    general = await share(async_client, "Summer 2026")
+    assert general["frame_id"] is None
+    for_kitchen = (await async_client.post(
+        "/api/photos/shares", json={"path": "Summer 2026", "frame_id": kitchen.id}
+    )).json()["share"]
+    assert for_kitchen["frame_id"] == kitchen.id
+    assert for_kitchen["token"] != general["token"]
+    # One link per frame and folder; the general link is not it.
+    again = (await async_client.post(
+        "/api/photos/shares", json={"path": "Summer 2026", "frame_id": kitchen.id}
+    )).json()["share"]
+    assert again == for_kitchen
+    assert await share(async_client, "Summer 2026") == general
+    for_hall = (await async_client.post(
+        "/api/photos/shares", json={"path": "Summer 2026", "frame_id": hall.id}
+    )).json()["share"]
+    assert len({general["token"], for_kitchen["token"], for_hall["token"]}) == 3
+
+    listed = (await async_client.get("/api/photos/shares")).json()["shares"]
+    assert [row["frame_id"] for row in listed] == [None, kitchen.id, hall.id]
+
+    assert (await async_client.post("/api/photos/shares", json={"path": "Summer 2026", "frame_id": 999999})).status_code == 404
+    assert (await async_client.post("/api/photos/shares", json={"path": "Summer 2026", "frame_id": "7"})).status_code == 400
+    assert (await async_client.post("/api/photos/shares", json={"path": "Summer 2026", "frame_id": True})).status_code == 400
+
+    # Withdrawing the kitchen's link leaves the others playing.
+    assert (await async_client.delete(f"/api/photos/shares/{for_kitchen['token']}")).json() == {"deleted": True}
+    assert [row["token"] for row in (await async_client.get("/api/photos/shares")).json()["shares"]] == [
+        general["token"], for_hall["token"],
+    ]
+
+
+@pytest.mark.asyncio
 async def test_share_listing_without_a_login(async_client, no_auth_client, redis):
     lib = library(async_client)
     write(lib, "Summer 2026/b.jpg", jpeg_bytes(20, 10), mtime=1760000100)
@@ -1395,13 +1435,15 @@ async def test_album_scene_route(async_client, no_auth_client, db, redis):
     # The link the scene carries plays.
     assert (await no_auth_client.get(f"/api/photos/shared/{token}")).json()["count"] == 1
 
-    # The folder keeps one link; defaults and a name of one's own.
+    # The link is the frame's own, kept across installs; the folder's
+    # general link is another one. Defaults and a name of one's own.
+    assert body["share"]["frame_id"] == frame.id
     again = (await async_client.post(
         "/api/photos/scene", json={"path": "Summer 2026", "frame_id": frame.id, "name": " Beach "}
     )).json()
     assert again["share"]["token"] == token
-    assert (await share(async_client, "Summer 2026"))["token"] == token
-    assert db.query(PhotoShare).count() == 1
+    assert (await share(async_client, "Summer 2026"))["token"] != token
+    assert db.query(PhotoShare).count() == 2
     assert again["scene"]["name"] == "Beach"
     assert again["scene"]["settings"]["refreshInterval"] == 3600
     assert [field["value"] for field in again["scene"]["fields"]] == ["3600", "random", "cover", "0"]

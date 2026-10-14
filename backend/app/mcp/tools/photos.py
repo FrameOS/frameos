@@ -277,20 +277,24 @@ def register_photo_tools(server: McpServer, ctx: ToolContext) -> None:
 
     server.tool(Tool(
         name="photo_shares_list",
-        description="The library's share links: token, folder and url. On the backend the url is relative; a frame puts its own server address in front.",
+        description="The library's share links: token, folder, url and frame_id (the frame the link was made for, null for the folder's general link). On the backend the url is relative; a frame puts its own server address in front.",
         annotations={"readOnlyHint": True},
         handler=photo_shares_list,
     ))
 
-    async def photo_share_create(confirm: bool, path: str, project_id: int | None = None):
-        return await run(lambda: _json(api, "POST", "/api/photos/shares", project_id, json={"path": path}))
+    async def photo_share_create(confirm: bool, path: str, frame_id: int | None = None, project_id: int | None = None):
+        body: dict[str, Any] = {"path": path}
+        if frame_id is not None:
+            body["frame_id"] = frame_id
+        return await run(lambda: _json(api, "POST", "/api/photos/shares", project_id, json=body))
 
     server.tool(Tool(
         name="photo_share_create",
-        description="The folder's share link (an existing one is returned as it is). Anyone with the link can see every photo below the folder, with no login. Requires confirm=true.",
+        description="The folder's share link (an existing one is returned as it is): its general link, or with frame_id the link for one frame, which can be deleted without touching the others. Anyone with a link can see every photo below the folder, with no login. Requires confirm=true.",
         properties={
             "confirm": confirmed("makes the folder's photos readable by anyone who has the link"),
             "path": {**PATH, "minLength": 1, "description": "Folder to share (not the root)."},
+            "frame_id": {"type": "integer", "description": "Make (or return) the link for this frame instead of the folder's general link."},
         },
         required=["confirm", "path"],
         handler=photo_share_create,

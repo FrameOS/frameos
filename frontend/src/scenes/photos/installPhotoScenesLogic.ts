@@ -304,7 +304,8 @@ export const installPhotoScenesLogic = kea<installPhotoScenesLogicType>([
           // The cached listing will do.
         }
         for (const album of albums) {
-          const share = await createPhotoShare(album)
+          // The frame's own link to the album: it can be withdrawn on its own.
+          const share = await createPhotoShare(album, frame.id)
           const albumUrl = shareUrlForFrame(share, frame)
           if (!albumUrl) {
             actions.setError(

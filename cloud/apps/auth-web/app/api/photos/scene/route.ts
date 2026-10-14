@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { recordAuditEvent } from "../../../../src/lib/audit";
 import { jsonError, readBoundedJsonObject } from "../../../../src/lib/device-flow";
 import { getPublicOrigin } from "../../../../src/lib/env";
+import { frameForAccount, isFrameId } from "../../../../src/lib/frames";
 import {
   buildPhotoAlbumScene,
   defaultPhotoAlbumSeconds,
@@ -51,14 +52,24 @@ export async function POST(request: NextRequest) {
   if (name !== null && (typeof name !== "string" || name.length > maxSceneNameLength)) {
     return jsonError("invalid_name", 400);
   }
+  // The scene is for one frame, which gets its own link to the folder; the
+  // link is absolute here, so without a frame the folder's general link
+  // serves (a backend needs the frame for its address, docs/photos.md).
+  const frameId = body.frame_id ?? null;
+  if (frameId !== null && !isFrameId(frameId)) {
+    return jsonError("invalid_frame_id", 400);
+  }
+  if (frameId !== null && !(await frameForAccount(context.db, context.accountId, frameId))) {
+    return jsonError("frame_not_found", 404);
+  }
   return withPhotoErrors(async () => {
-    const { created, share } = await createPhotoShare(context.db, context.accountId, path);
+    const { created, share } = await createPhotoShare(context.db, context.accountId, path, frameId);
     if (created) {
       await recordAuditEvent(context.db, {
         accountId: context.accountId,
         actor: { accountId: context.accountId, providerSubject: context.providerSubject },
         eventType: "photos.share_created",
-        metadata: { path: share.path },
+        metadata: { frameId: share.frameId, path: share.path },
       });
     }
     const origin = getPublicOrigin(request);

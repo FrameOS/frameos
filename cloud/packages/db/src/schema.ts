@@ -1889,16 +1889,19 @@ export const photoShares = pgTable(
       .references(() => accounts.id, { onDelete: "cascade" }),
     token: text("token").notNull(),
     path: text("path").notNull(),
+    // The frame this link was made for (migration 0061); NULL for the
+    // folder's general link. A folder has one link per frame it plays on,
+    // so one frame's access can be withdrawn alone. A deleted frame takes
+    // its link's binding, not the link: the row stays, unbound, to be seen
+    // and removed.
+    frameId: uuid("frame_id").references(() => frames.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
   },
   (table) => ({
     tokenUnique: uniqueIndex("photo_shares_token_unique").on(table.token),
-    accountPathUnique: uniqueIndex("photo_shares_account_path_unique").on(
-      table.accountId,
-      table.path,
-    ),
+    accountPathIdx: index("photo_shares_account_path_idx").on(table.accountId, table.path),
   }),
 );
 

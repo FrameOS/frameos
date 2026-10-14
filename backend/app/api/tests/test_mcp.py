@@ -430,13 +430,20 @@ async def test_photos_tools_against_the_real_routes(async_client, db: Session, r
 
     shared = result_json(await call(async_client, "photo_share_create", {"confirm": True, "path": "Summer 2026"}))
     token = shared["share"]["token"]
+    assert shared["share"]["frame_id"] is None
     assert result_json(await call(async_client, "photo_shares_list"))["shares"][0]["token"] == token
 
     frame = await new_frame(db, redis, "Kitchen", "localhost", "10.0.0.5")
+    # The frame gets a link of its own, the same one the install uses.
+    for_frame = result_json(await call(async_client, "photo_share_create", {
+        "confirm": True, "path": "Summer 2026", "frame_id": frame.id,
+    }))["share"]
+    assert for_frame["frame_id"] == frame.id and for_frame["token"] != token
     installed = result_json(await call(async_client, "photo_album_install", {
         "confirm": True, "frame_id": frame.id, "path": "Summer 2026", "seconds": 600, "order": "newest", "deploy": "none",
     }))
-    assert installed["share"]["token"] == token
+    assert installed["share"]["token"] == for_frame["token"]
+    token = for_frame["token"]
     assert installed["deploy"] == "none"
     scenes = frame_row(db, frame.id).scenes
     assert [scene["name"] for scene in scenes] == ["Summer 2026"]

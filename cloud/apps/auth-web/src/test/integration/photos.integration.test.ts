@@ -3,7 +3,7 @@
 // filesystem object store, the share routes with no session at all, and the
 // scan gate's consequences (422, the hit row, the suspension, every share
 // link 404).
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +14,8 @@ import {
   accounts,
   auditEvents,
   createDb,
+  frames,
+  linkedClients,
   photoBlockedHashes,
   photoEntries,
   photoScanHits,
@@ -40,6 +42,7 @@ import { POST as postUpload } from "../../../app/api/photos/upload/route";
 import { objectStore } from "../../lib/object-store";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
+import { hashSecret } from "../../lib/secrets";
 
 // A tiny photo quota for this file (read once, when usage.ts loads), so the
 // 507 is reachable with handmade images of a few hundred bytes.
@@ -112,6 +115,40 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+function rawPublicKeyBase64() {
+  const { publicKey } = generateKeyPairSync("ed25519");
+  const spki = publicKey.export({ format: "der", type: "spki" });
+  return Buffer.from(spki.subarray(spki.length - 32)).toString("base64");
+}
+
+/** A frame of the account, enough of one for a share link to point at. */
+async function seedFrame(accountId: string, name: string) {
+  const [client] = await db
+    .insert(linkedClients)
+    .values({
+      accountId,
+      clientKind: "frame",
+      providerClientMetadata: { requestedScopes: ["frame:managed"] },
+      publicDisplayName: name,
+      tokenReference: hashSecret(`fc_link_photos_${accountId}_${name}`),
+    })
+    .returning();
+  const [frame] = await db
+    .insert(frames)
+    .values({ accountId, linkedClientId: client!.id, name, publicKey: rawPublicKeyBase64(), status: "active" })
+    .returning();
+  return frame!;
+}
+
+const providerSubjects = new Map<string, string>();
+
+/** Back to an account signIn() made earlier. */
+async function signInAs(accountId: string) {
+  const providerSubject = providerSubjects.get(accountId)!;
+  const token = await createSession(db, { accountId, providerIssuer: issuer, providerSubject });
+  cookieJar.set(sessionCookieName, token);
+}
+
 async function signIn() {
   userCounter += 1;
   const providerSubject = `photo-user-${userCounter}`;
@@ -123,6 +160,7 @@ async function signIn() {
     providerKey: "google",
     providerSubject,
   });
+  providerSubjects.set(accountId, providerSubject);
   const token = await createSession(db, { accountId, providerIssuer: issuer, providerSubject });
   cookieJar.set(sessionCookieName, token);
   return accountId;
@@ -205,7 +243,8 @@ const tokenParams = (token: string) => ({ params: Promise.resolve({ token }) });
 async function share(path: string) {
   const response = await postShares(postJson("/api/photos/shares", { path }));
   expect(response.status).toBe(200);
-  return ((await response.json()) as { share: { path: string; token: string; url: string } }).share;
+  return ((await response.json()) as { share: { frame_id: string | null; path: string; token: string; url: string } })
+    .share;
 }
 
 describe("photo library: status and listing", () => {
@@ -877,10 +916,69 @@ describe("photo library: album scenes", () => {
       nodes: SceneNode[];
       settings: { refreshInterval: number };
     };
-    share: { path: string; token: string; url: string };
+    share: { frame_id: string | null; path: string; token: string; url: string };
   };
 
-  it("builds a scene that plays the folder, with the folder's one share link", async () => {
+  it("gives a frame its own link to the folder, kept across installs and deletable alone", async () => {
+    const accountId = await signIn();
+    const kitchen = await seedFrame(accountId, "Kitchen");
+    const hall = await seedFrame(accountId, "Hall");
+    const other = await seedFrame(await signIn(), "Theirs");
+    await signInAs(accountId);
+    await upload("Summer 2026", "a.png", png(10, 10, "per-frame"));
+
+    const general = await share("Summer 2026");
+    expect(general.frame_id).toBeNull();
+    const forKitchen = (await (
+      await postScene(postJson("/api/photos/scene", { frame_id: kitchen.id, path: "Summer 2026" }))
+    ).json()) as SceneAnswer;
+    expect(forKitchen.share.frame_id).toBe(kitchen.id);
+    expect(forKitchen.share.token).not.toBe(general.token);
+    const album = forKitchen.scene.nodes.find((node) => node.data.keyword === "photoAlbum");
+    expect(album?.data.config).toEqual({ album: forKitchen.share.url, counterStateKey: "photoIndex" });
+    // The same frame again: the same link. POST /shares with the frame too.
+    const again = (await (
+      await postScene(postJson("/api/photos/scene", { frame_id: kitchen.id, path: "Summer 2026" }))
+    ).json()) as SceneAnswer;
+    expect(again.share.token).toBe(forKitchen.share.token);
+    const viaShares = (await (
+      await postShares(postJson("/api/photos/shares", { frame_id: kitchen.id, path: "Summer 2026" }))
+    ).json()) as { share: { token: string } };
+    expect(viaShares.share.token).toBe(forKitchen.share.token);
+    const forHall = (await (
+      await postShares(postJson("/api/photos/shares", { frame_id: hall.id, path: "Summer 2026" }))
+    ).json()) as { share: { frame_id: string; token: string } };
+    expect(forHall.share.frame_id).toBe(hall.id);
+    expect(new Set([general.token, forKitchen.share.token, forHall.share.token]).size).toBe(3);
+
+    // Another account's frame is not a target.
+    expect((await postShares(postJson("/api/photos/shares", { frame_id: other.id, path: "Summer 2026" }))).status).toBe(404);
+    expect((await postShares(postJson("/api/photos/shares", { frame_id: "x", path: "Summer 2026" }))).status).toBe(400);
+
+    const listed = (await (await getShares(get("/api/photos/shares"))).json()) as {
+      shares: { frame_id: string | null; token: string }[];
+    };
+    expect(listed.shares.map((row) => row.frame_id)).toEqual([null, kitchen.id, hall.id]);
+
+    // Withdrawing the kitchen's link leaves the others playing.
+    const gone = await deleteShare(
+      new NextRequest(new URL(`/api/photos/shares/${forKitchen.share.token}`, baseUrl), {
+        headers: { origin: baseUrl },
+        method: "DELETE",
+      }),
+      tokenParams(forKitchen.share.token),
+    );
+    expect(gone.status).toBe(200);
+    signOut();
+    expect(
+      (await getShared(get(`/api/photos/shared/${forKitchen.share.token}`), tokenParams(forKitchen.share.token))).status,
+    ).toBe(404);
+    expect(
+      (await getShared(get(`/api/photos/shared/${forHall.share.token}`), tokenParams(forHall.share.token))).status,
+    ).toBe(200);
+  });
+
+  it("builds a scene that plays the folder, with the folder's share link", async () => {
     const accountId = await signIn();
     await upload("Summer 2026", "a.png", png(10, 10, "scene"));
     const response = await postScene(
@@ -898,9 +996,11 @@ describe("photo library: album scenes", () => {
     expect(body.scene.apps.photoAlbum.origin).toBe("repo/apps/image/photoAlbum");
     expect(Object.keys(body.scene.apps.photoAlbum.sources).sort()).toEqual(["app.ts", "config.json"]);
 
-    // One link per folder: the one POST /shares hands out, made (and audited) once.
+    // Without a frame, the folder's general link: the one POST /shares hands
+    // out, made (and audited) once.
+    expect(body.share.frame_id).toBeNull();
     const again = (await (
-      await postScene(postJson("/api/photos/scene", { frame_id: 7, name: " Beach ", path: "Summer 2026" }))
+      await postScene(postJson("/api/photos/scene", { name: " Beach ", path: "Summer 2026" }))
     ).json()) as SceneAnswer;
     expect(again.share.token).toBe(body.share.token);
     expect((await share("Summer 2026")).token).toBe(body.share.token);
@@ -937,6 +1037,9 @@ describe("photo library: album scenes", () => {
       [{ path: "../etc" }, 400],
       [{ path: "Summer/a.png" }, 400],
       [{ path: "Nope" }, 404],
+      [{ frame_id: 7 }, 400],
+      [{ frame_id: "not-a-frame" }, 400],
+      [{ frame_id: "00000000-0000-4000-8000-000000000000" }, 404],
     ];
     for (const [overrides, status] of cases) {
       const response = await postScene(postJson("/api/photos/scene", { path: "Summer", ...overrides }));

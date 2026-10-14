@@ -278,7 +278,8 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext) {
     "photo_shares_list",
     {
       annotations: { readOnlyHint: true },
-      description: "The library's share links: token, folder and the url frames play.",
+      description:
+        "The library's share links: token, folder, the url frames play and frame_id (the frame the link was made for, null for the folder's general link).",
       inputSchema: {},
     },
     async () => run(async () => text(await api.json("GET", "/api/photos/shares"))),
@@ -288,14 +289,19 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext) {
     "photo_share_create",
     {
       description:
-        "The folder's share link (an existing one is returned as it is). Anyone with the link can see every photo below the folder, with no login. Requires confirm=true.",
+        "The folder's share link (an existing one is returned as it is): its general link, or with frame_id the link for one frame, which can be deleted without touching the others. Anyone with a link can see every photo below the folder, with no login. Requires confirm=true.",
       inputSchema: {
         confirm: confirmed("makes the folder's photos readable by anyone who has the link"),
+        frame_id: uuid()
+          .optional()
+          .describe("Make (or return) the link for this frame instead of the folder's general link."),
         path: photoPath.describe("Folder to share (not the root)."),
       },
     },
-    async ({ path }) =>
-      run(async () => text(await api.json("POST", "/api/photos/shares", { body: { path } }))),
+    async ({ frame_id, path }) =>
+      run(async () =>
+        text(await api.json("POST", "/api/photos/shares", { body: { frame_id, path } })),
+      ),
   );
 
   server.registerTool(
@@ -319,7 +325,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext) {
     "photo_album_install",
     {
       description:
-        "Play a folder on a frame: makes the folder's share link (if it has none) and a scene that shows one photo per `seconds`, saves the scene to the account as a private scene and installs it on the frame (the same as Install photo scenes in the web UI). activate=true shows it now. Requires confirm=true.",
+        "Play a folder on a frame: makes the frame's own share link to the folder (if it has none) and a scene that shows one photo per `seconds`, saves the scene to the account as a private scene and installs it on the frame (the same as Install photo scenes in the web UI). activate=true shows it now. Requires confirm=true.",
       inputSchema: {
         activate: z.boolean().optional(),
         confirm: confirmed("changes what a physical frame shows"),
@@ -345,7 +351,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext) {
         const made = await api.json<{ scene: Record<string, unknown>; share: Record<string, unknown> }>(
           "POST",
           "/api/photos/scene",
-          { body: { fit, name, order, path, seconds } },
+          { body: { fit, frame_id, name, order, path, seconds } },
         );
         const installed = await installSceneOnFrame(ctx, {
           activate,

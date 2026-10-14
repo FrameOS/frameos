@@ -756,8 +756,8 @@ describe("photos tools", () => {
       `POST /api/frames/${frameId}/scenes/add`,
       `POST /api/frames/${frameId}/event/setCurrentScene`,
     ]);
-    // Cloud links are absolute: the route needs no frame.
-    expect(calls[1]?.body).toEqual({ order: "newest", path: "Summer", seconds: 600 });
+    // The frame gets a link of its own to the folder.
+    expect(calls[1]?.body).toEqual({ frame_id: frameId, order: "newest", path: "Summer", seconds: 600 });
     expect(calls[2]?.body).toMatchObject({ name: "Summer", scenes: [{ id: "scene-1", name: "Summer" }] });
     expect(JSON.parse(textOf(result))).toMatchObject({
       command_id: "cmd-2",

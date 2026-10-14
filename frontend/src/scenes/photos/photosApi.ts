@@ -1,6 +1,7 @@
 // The Photos HTTP contract (docs/photos.md), the same on the backend and the
 // cloud. apiFetch adds the backend's project scope; URLs that end up in the
 // DOM (an <img src>) add it themselves, plus the ingress base path.
+import type { FrameId } from '../../types'
 import { apiFetch } from '../../utils/apiFetch'
 import { getBasePath } from '../../utils/getBasePath'
 import { projectApiPath, projectApiPathFromCache } from '../../utils/projectApi'
@@ -47,6 +48,8 @@ export interface PhotosStatus {
 export interface PhotoShare {
   token: string
   path: string
+  /** The frame the link was made for; null for the folder's general link. */
+  frame_id: FrameId | null
   url: string
   created_at: number
 }
@@ -140,8 +143,11 @@ export async function fetchPhotoShares(): Promise<PhotoShare[]> {
   return (await photosJson<{ shares: PhotoShare[] }>('/api/photos/shares')).shares ?? []
 }
 
-export async function createPhotoShare(path: string): Promise<PhotoShare> {
-  return (await jsonPost<{ share: PhotoShare }>('/api/photos/shares', { path })).share
+/** The folder's general link, or with `frameId` the link for that one frame (made when missing). */
+export async function createPhotoShare(path: string, frameId: FrameId | null = null): Promise<PhotoShare> {
+  return (
+    await jsonPost<{ share: PhotoShare }>('/api/photos/shares', frameId === null ? { path } : { path, frame_id: frameId })
+  ).share
 }
 
 export async function deletePhotoShare(token: string): Promise<void> {
