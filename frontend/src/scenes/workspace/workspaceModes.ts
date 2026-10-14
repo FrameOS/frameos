@@ -1,4 +1,4 @@
-export type WorkspaceMode = 'frames' | 'frame' | 'scenes' | 'apps' | 'settings'
+export type WorkspaceMode = 'frames' | 'frame' | 'scenes' | 'apps' | 'photos' | 'settings'
 
 export function workspaceModeForScene(scene: string | null | undefined): WorkspaceMode | null {
   if (scene === 'frames') {
@@ -12,6 +12,9 @@ export function workspaceModeForScene(scene: string | null | undefined): Workspa
   }
   if (scene === 'appsWorkspace') {
     return 'apps'
+  }
+  if (scene === 'photosWorkspace') {
+    return 'photos'
   }
   if (scene === 'settings') {
     return 'settings'

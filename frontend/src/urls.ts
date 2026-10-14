@@ -61,14 +61,18 @@ export const urls = {
     (frameId ? '/' + frameId : '') +
     (frameId && sceneId ? '/' + sceneId : '') +
     (frameId && sceneId && nodeId ? '/' + nodeId : ''),
+  // The folder rides in the query (?folder=Summer%2FBeach), not the path, so
+  // one route pattern covers every depth.
+  photos: (folder?: string | null) =>
+    getRouteBasePath() + '/photos' + (folder ? '?' + new URLSearchParams({ folder }).toString() : ''),
   systemApps: (keyword?: string | null) =>
     getRouteBasePath() + '/apps/system' + (keyword ? '/' + encodeURIComponent(keyword) : ''),
   settings: () =>
     isInFrameAdminMode()
       ? frameControlUrl('settings')
       : isCloudMode()
-        ? cloudAccountSettingsUrl()
-        : getRouteBasePath() + '/settings',
+      ? cloudAccountSettingsUrl()
+      : getRouteBasePath() + '/settings',
   login: () => getRouteBasePath() + '/login',
   logout: () => getRouteBasePath() + '/logout',
   signup: () => getRouteBasePath() + '/signup',

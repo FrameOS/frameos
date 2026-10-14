@@ -11,7 +11,10 @@ layers, the same two FrameOS Cloud has (`cloud/docs/mcp.md`):
    agent can act on. It lives in `backend/app/mcp` and is, by design, a thin
    wrapper — every tool is one (occasionally two) calls to the backend's own
    routes, made in-process, so the routes remain the single place behaviour,
-   validation and auth live.
+   validation and auth live. The two exceptions are the photos tools'
+   (`photo_upload` downloads a URL before it calls the upload route, with the
+   outbound check template URLs get; `photo_album_install` is the scene route
+   added for it plus what `frame_scene_install` does).
 
 Both are managed on Settings → API tokens and MCP (`/settings#settings-developer`).
 Neither is available under Home Assistant ingress: tokens are minted behind a
@@ -85,7 +88,7 @@ an account with several is told to pass one.
 
 ### Tools
 
-Fifty-odd tools in four groups; every one documents its parameters, and the
+Sixty-odd tools in five groups; every one documents its parameters, and the
 names follow the cloud's where the meaning matches. Read-only tools are
 annotated `readOnlyHint`, destructive ones `destructiveHint` and take
 `confirm: true` — as does every tool that changes what a physical frame does,
@@ -93,7 +96,8 @@ shows or stores (`frame_update`, `frame_scene_install`, `frame_scene_update`,
 `frame_scene_remove`, `frame_scene_activate`, `frame_scene_state_set`,
 `frame_render`, `frame_event`, `frame_restart`, `frame_reboot`, `frame_stop`,
 `frame_deploy`, the `frame_asset_*` writes, `frame_assets_sync_fonts`,
-`frame_firmware_update`). `test_mcp.py` enumerates the gated tools and fails
+`frame_firmware_update`, `photo_album_install`, every photo library write
+and `photo_share_create`). `test_mcp.py` enumerates the gated tools and fails
 when one of them lacks the literal. The server's instructions tell the model
 to treat every tool result as untrusted data and to call those only on the
 user's own say-so.
@@ -132,6 +136,15 @@ save on the backend for a `frame_deploy` later).
   `scene_update` (name, description), `scene_delete`; and the catalog:
   `store_browse` (the bundled repositories plus the ones the project added,
   with how to install each row), `store_scene_get`.
+- **photos** — the project's library (`docs/photos.md`, "MCP"):
+  `photos_status`, `photos_list`, `photo_get`, `photo_upload` (base64, or a
+  URL the backend downloads, every redirect hop passing the same outbound
+  check as template URLs), `photo_folder_create`, `photos_move`,
+  `photo_rename`, `photos_delete`, `photo_colors_set`, `photo_shares_list`,
+  `photo_share_create`, `photo_share_delete`, and `photo_album_install`
+  (`POST /api/photos/scene` for the frame, then `frame_scene_install`). The
+  writes are gated: a frame playing a shared album shows the folder as it is
+  at its next photo.
 - **ai** — `ai_scene_generate`, `ai_scene_chat`, `ai_chats_list`,
   `ai_chat_get`. The AI only proposes scene JSON; installing it is a
   separate, confirmed `frame_scene_install`.
@@ -157,7 +170,8 @@ and `scene_render` are not here. Scene previews come from the frame
 
 `backend/app/api/tests/test_mcp.py` drives the endpoint through the test
 client against the real routes: the protocol surface, the gated-tool
-enumeration, frames and saved-scene tools end to end, resources and
-prompts, and API tokens driving the MCP (a read-only token's mutations are
+enumeration, frames, saved-scene and photos tools end to end (a URL upload
+against a mock transport, redirects and the outbound check included),
+resources and prompts, and API tokens driving the MCP (a read-only token's mutations are
 refused by the routes). `test_api_tokens.py` covers minting, the password
 gate, read-only enforcement, revocation, expiry and forged prefixes.

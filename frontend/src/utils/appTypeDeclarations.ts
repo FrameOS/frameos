@@ -160,6 +160,8 @@ declare const frameos: {
       headers?: Record<string, string>;
       saveAsset?: { name: string; extension?: string; mode?: "auto" | "always" };
       exif?: boolean;
+      // The image's color profile (a .frameos.json sidecar's colors object); null = none, clears the last palette.
+      colors?: { [key: string]: any } | null;
     }
   ): {
     image: FrameOSImageRef | null;

@@ -19,6 +19,8 @@ export default tseslint.config(
       // file is excluded from that tsconfig — which typed linting requires.
       // Vitest still runs it.
       "**/src/test/shared-spa/esp32-frame-controls.test.tsx",
+      // Same exclusion: builds a scene through frontend/src/utils/sceneApps.
+      "**/src/test/shared-spa/photos.test.ts",
       // Imports frontend/src/utils/duplicateScenes, excluded from the
       // package tsconfig for its pre-strict FrameEvent typing; the project
       // service therefore cannot parse it. Vitest still runs it.

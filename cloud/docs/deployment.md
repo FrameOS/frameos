@@ -101,6 +101,14 @@ The deploy builds locally and ships a self-contained bundle:
    streams the tar into `/usr/local/bin/frameos-cloud-update --archive -` on
    the server. Staging fails if a shipped script sources a path that is not
    in the bundle.
+
+   One dependency is native: sharp, which makes photo thumbnails. The box
+   needs its linux-x64 (glibc) build and the libvips beside it (traced in by
+   `outputFileTracingIncludes`, since the addon finds it through an rpath).
+   A bundle built on a laptop carries the laptop's build, so
+   `scripts/stage-sharp.sh` adds the box's two packages, at the versions
+   sharp names, with `npm pack`. It refuses a bundle without them, and on a
+   linux-x64 host it loads sharp from the bundle first.
 3. `frameos-cloud-update` applies the SQL migrations via `psql` from the new
    release (before anything is flipped, so a failed migration leaves the
    running app untouched), then performs the zero-downtime flip below. Each
@@ -619,6 +627,56 @@ entirely SD-image codes does still get `claim_token_quota_exceeded`.
 Raising `FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT` also raises the budget of a
 multi-use SD-image code, which is capped at the frame limit.
 
+## Photos
+
+The photo library (`docs/photos.md` at the repo root is the contract) keeps
+its rows in Postgres and its bytes in the object store, under random keys
+(`photos/<account-id>/<random>`, thumbnails under
+`photos/<account-id>/thumbs/`). A photo's color profile is the `colors`
+jsonb column of its `photo_entries` row, not an object. All optional:
+
+```text
+FRAMEOS_CLOUD_MAX_PHOTO_MB=1024     # storage per account
+PHOTODNA_SUBSCRIPTION_KEY=…         # PhotoDNA scanning of every upload
+PHOTODNA_ENDPOINT=…                 # overrides the PhotoDNA Match URL
+FRAMEOS_PHOTO_UPLOAD_DIR=…          # where unfinished uploads wait
+```
+
+Every upload is scanned before anything is stored: against the
+`photo_blocked_hashes` table always, and by PhotoDNA when its key is set.
+Its thumbnail is made on the server (sharp) from the scanned file, so it is
+not scanned again. OpenAI moderation is not used for photos: it scores
+`sexual/minors` on text only. Cloudflare's CSAM Scanning Tool on the CDN zone
+is a second layer for everything the CDN serves. A configured scanner that can not be reached refuses the upload. A match stores
+nothing, records a row in `photo_scan_hits`, suspends the account's photos
+(`accounts.photos_suspended_at`: uploads refused, share links answer 404)
+and notifies the admins (the `photo scan matched` PostHog event and
+`DISCORD_REPORTS_WEBHOOK_URL`). The matches are listed at `/admin/photos`;
+the `/admin` checks warn while the hash list is the only scanner. Adding a
+blocked hash and lifting a suspension are SQL for now:
+
+```sql
+INSERT INTO photo_blocked_hashes (sha256, reason) VALUES ('<hex>', '<why>');
+UPDATE accounts SET photos_suspended_at = NULL WHERE id = '<account id>';
+```
+
+The PhotoDNA client is written against Microsoft's published Match API and
+has not been exercised against the live service yet: try the first key with a
+known-clean image before relying on it.
+
+Chunks of an unfinished upload wait on the app server's local disk (never in
+the bucket, which is public through the CDN alias): `FRAMEOS_PHOTO_UPLOAD_DIR`,
+which the unit defaults to `/var/lib/frameos-cloud/photo-uploads`
+(`StateDirectory=frameos-cloud`) because the box's `/tmp` is a tmpfs, so the
+code's own default would park them in memory. At most 16 unfinished uploads
+per account and 2 GiB in all; files older than an hour are swept every ten
+minutes. An upload that spans a deploy answers 409 on the new instance only
+when the directory differs; with the shared state directory it carries on.
+
+Cloudflare's CSAM Scanning Tool can additionally be turned on for the zone
+that serves the bucket's public alias: it scans what the CDN serves, which
+includes every photo a frame plays.
+
 ## DNS and Reverse Proxy
 
 Create DNS records and TLS certificates for all three hostnames, then send them to
@@ -767,10 +825,20 @@ store/scene-images/<sha256>
 frames/<frame-id>/cache/<sha256>
 ```
 
+Photos are the exception: `photos/<account-id>/<random>` and
+`photos/<account-id>/thumbs/<random>`. The alias serves any key without
+authentication, so a content hash would be a key anyone holding the same
+photo could compute; a random key is only known to the owner and to frames
+given a share link. `scripts/object-store-sweep.sh` lists the photo columns
+with the others.
+
 `R2_CLOUD_PUBLIC_BASE_URL` only affects **public** store objects: a public
 scene's preview and gallery images redirect (307) to the CDN. Private scenes
 and every frame snapshot are proxied through the app, where the session check
-still applies — the alias has no authentication in front of it.
+still applies — the alias has no authentication in front of it. Photos read
+through a share link (`/api/photos/shared/<token>/file`) also redirect (302)
+to their random key on the CDN; the owner's own views of the library are
+proxied.
 
 Image content types are sniffed from the bytes when serving, not read from the
 stored column — a `content_type` is only as good as whatever wrote it, and the
@@ -817,8 +885,9 @@ NEXT_PUBLIC_POSTHOG_HOST=…                   # optional; defaults to
 | ---------------------- | -------------------- | ------------------------------------------------- |
 | `cloud user signed up` | the new account id   | password signup, first Google sign-in             |
 | `store scene reported` | the reporter account | `POST /api/store/scenes/<id>/report` (new report) |
+| `photo scan matched`   | the uploader account | a photo upload a scanner matched                  |
 
-Both go to the `/capture` endpoint using the same public project key as the
+All go to the `/capture` endpoint using the same public project key as the
 browser SDK (no extra secret required). The Discord messages for these
 ("new user", "scene reported") are PostHog webhook destinations on the
 events, configured in PostHog, not in auth-web. `DISCORD_REPORTS_WEBHOOK_URL`

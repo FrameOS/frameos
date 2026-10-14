@@ -1,0 +1,43 @@
+{
+  "name": "Photo album",
+  "description": "Play an album from FrameOS Photos through its share link, one photo per render.",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "album",
+      "type": "string",
+      "value": "",
+      "required": true,
+      "label": "Album link",
+      "hint": "Make one with Install photo scenes on the Photos page.",
+      "placeholder": "https://example.com/api/photos/shared/pk_..."
+    },
+    {
+      "name": "order",
+      "type": "select",
+      "value": "random",
+      "options": ["random", "sequential", "newest", "oldest"],
+      "required": false,
+      "label": "Order",
+      "hint": "random shows every photo once before any repeats. sequential goes by folder and file name, newest and oldest by date."
+    },
+    {
+      "name": "counterStateKey",
+      "type": "string",
+      "value": "photoIndex",
+      "required": false,
+      "label": "State field for the position",
+      "hint": "The scene needs an integer state field with this name, saved to disk, so the album keeps its place after a restart or a deep sleep. Leave empty to pick a random photo each time."
+    }
+  ],
+  "output": [
+    {
+      "name": "image",
+      "type": "image"
+    }
+  ],
+  "cache": {
+    "enabled": false
+  }
+}

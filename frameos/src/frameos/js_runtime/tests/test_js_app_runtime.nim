@@ -4,6 +4,8 @@ import pixie
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/burrito
 import frameos/types
+import frameos/utils/asset_colors
+import frameos/utils/dither
 import frameos/utils/http_client
 import frameos/utils/memory
 import frameos/values
@@ -986,6 +988,83 @@ suite "js app runtime":
     # Over the node's limit: refused, logged, and the old value stays.
     check not third["tooBig"].getBool()
     check runtime.memory["big"] == "\"x\""
+
+  proc fetchWithColors(nodeId: int, colorsJs: string, scalingMode = ""): (Value, ExecutionContext, Image) =
+    ## One fetchImage of the 5x3 (20, 120, 220) photo with `colorsJs` spliced
+    ## into the options ("" leaves the key out). With `scalingMode`, a 6x4
+    ## cell is offered under that placement.
+    let config = testConfig()
+    let scene = FrameScene(id: "tests/js-app-fetch-image-colors".SceneId, frameConfig: config, state: %*{},
+      logger: testLogger(config))
+    let owner = AppRoot(nodeId: nodeId.NodeId, nodeName: "jsFetchImageColors", scene: scene, frameConfig: config)
+    let cell = newImage(6, 4)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0,
+      loopKey: ".", nextSleep: -1)
+    if scalingMode.len > 0:
+      context.decodeTargetImage = cell
+      context.decodeTargetNodeId = nodeId.NodeId
+      context.decodeTargetScalingMode = scalingMode
+    let colors = if colorsJs.len > 0: ", colors: " & colorsJs else: ""
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "image",
+      source = "export function get(app, context) {\n" &
+        "  return frameos.fetchImage(`${app.config.base}/photo.png`, { headers: { \"x-api-key\": \"secret\" }" &
+        colors & " }).image\n}"
+    )
+    (runtime.get(owner, %*{"base": echoServerBase()}, context), context, cell)
+
+  test "fetchImage applies a colors profile and marks the image graded":
+    for colorsJs in ["{ exposure: 1 }", "{ version: 1, colors: { exposure: 1 } }"]:
+      let (value, _, _) = fetchWithColors(35, colorsJs)
+      check value.kind == fkImage
+      let image = value.asImage()
+      let pixel = image.data[image.dataIndex(2, 1)]
+      # One stop up: (20, 120, 220) doubles, clipped at white.
+      check pixel.r == 40
+      check pixel.g == 240
+      check pixel.b == 255
+      check isImageGraded(image)
+
+  test "fetchImage keeps a contain offer for the consumer when it grades":
+    # The adjustments must not touch the canvas around a contained photo, so
+    # the offer stays unclaimed; cover still decodes into the target.
+    let (contained, containContext, cell) = fetchWithColors(36, "{ whites: -30 }", "contain")
+    check contained.kind == fkImage
+    check containContext.decodeTargetImage == cell
+    check containContext.decodeTargetClaimedBy == 0.NodeId
+    check isImageGraded(contained.asImage())
+    let (covered, coverContext, _) = fetchWithColors(36, "{ whites: -30 }", "cover")
+    check covered.kind == fkImage
+    check coverContext.decodeTargetImage.isNil
+    check coverContext.decodeTargetClaimedBy == 36.NodeId
+    # Without adjustments contain claims the offer as before.
+    let (_, plainContext, _) = fetchWithColors(36, "null", "contain")
+    check plainContext.decodeTargetClaimedBy == 36.NodeId
+
+  test "fetchImage sets a colors palette as the render palette override":
+    clearRenderPaletteOverride()
+    let (value, _, _) = fetchWithColors(37, """{ palette: ["#000000", [255, 255, 255]] }""")
+    check value.kind == fkImage
+    check renderPaletteOverride == @[(0, 0, 0), (255, 255, 255)]
+    # A palette alone grades nothing.
+    check not isImageGraded(value.asImage())
+    check value.asImage().data[value.asImage().dataIndex(2, 1)].b == 220
+    clearRenderPaletteOverride()
+
+  test "fetchImage with colors null clears the override, without the key leaves it":
+    setRenderPaletteOverride(@[(0, 0, 0), (255, 255, 255)])
+    let (untouched, _, _) = fetchWithColors(38, "")
+    check untouched.kind == fkImage
+    check renderPaletteOverride == @[(0, 0, 0), (255, 255, 255)]
+    check not isImageGraded(untouched.asImage())
+    for colorsJs in ["null", "{}", "\"nonsense\"", "{ palette: [\"#zzzzzz\"] }"]:
+      setRenderPaletteOverride(@[(0, 0, 0), (255, 255, 255)])
+      let (value, _, _) = fetchWithColors(38, colorsJs)
+      check value.kind == fkImage
+      check renderPaletteOverride.len == 0
+      check not isImageGraded(value.asImage())
+      check value.asImage().data[value.asImage().dataIndex(2, 1)].b == 220
 
   test "httpRequest posts with headers and fetches binary responses":
     let base = echoServerBase()

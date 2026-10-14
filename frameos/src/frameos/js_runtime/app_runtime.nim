@@ -425,14 +425,28 @@ proc sanitizedAssetExtension(extension: string): string =
     return ".jpg"
   "." & ext
 
+proc fetchImageColorProfile(node: JsonNode): Option[AssetColorProfile] =
+  ## `fetchImage`'s `colors` option: a sidecar's inner `colors` object (what
+  ## the Photos share routes send) or a whole sidecar. Never raises: anything
+  ## that does not parse is no profile, like a broken sidecar.
+  try:
+    if node.isNil or node.kind != JObject:
+      return none(AssetColorProfile)
+    let inner = node{"colors"}
+    if not inner.isNil and inner.kind == JObject:
+      return parseAssetColorProfile(node)
+    some(parseAssetColorAdjustments(node))
+  except CatchableError:
+    none(AssetColorProfile)
+
 proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Downloads and decodes an image natively, so the bytes never enter the JS
   ## heap: a JS app gets back an image reference it returns as its output,
   ## never the pixels. Options JSON: {headers: {name: value},
-  ## saveAsset: {name, extension, mode: "auto" | "always"}, exif: bool}.
-  ## Returns JSON {image: imageRef | null, width, height, savedAs?, exif?,
-  ## exifSummary?} or {image: null, error}. A `data:` URL decodes the same
-  ## way, which is how an app shows an image an API returned as base64.
+  ## saveAsset: {name, extension, mode: "auto" | "always"}, exif: bool,
+  ## colors}. Returns JSON {image: imageRef | null, width, height, savedAs?,
+  ## exif?, exifSummary?} or {image: null, error}. A `data:` URL decodes the
+  ## same way, which is how an app shows an image an API returned as base64.
   ##
   ## This is the producer's half of the `intoTarget` handshake for a JS app
   ## (docs/value-pipeline.md). The planner offers a JS node the consumer's
@@ -452,6 +466,13 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
   ## bytes (exiftool where the host has it, then the built-in parser). The
   ## bytes exist only on hosts: the embedded streaming path keeps no copy, and
   ## reports no `savedAs` and no `exif`.
+  ##
+  ## `colors` is the image's own color profile (docs/asset-color-profiles.md),
+  ## applied the way `loadAssetImage` applies a sidecar: palette override,
+  ## adjustments, the graded mark. `null` says the image has none, so an
+  ## earlier photo's palette override is cleared; without the key nothing
+  ## about colors changes. With adjustments, `contain` does not claim the
+  ## target: they must not touch the canvas around the photo.
   let e = env(ctx)
   var response = %*{"image": newJNull()}
   if e == nil:
@@ -479,8 +500,21 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
     let maxBytes = frameos_apps.maxImageResponseBytes(owner)
     let (offeredWidth, offeredHeight) = owner.offeredDecodeTargetSize(context)
     let offeredFit = if context.isNil: "" else: context.decodeTargetScalingMode
+    let colorsGiven = options.hasKey("colors")
+    let colorProfile =
+      if colorsGiven: fetchImageColorProfile(options["colors"])
+      else: none(AssetColorProfile)
+    let adjustColors = colorProfile.isSome and colorProfile.get().hasAdjustments()
+    if colorsGiven:
+      # The panel dither reads it after the render: sticky until the next
+      # image or scene, as in data/localImage.
+      if colorProfile.isSome and colorProfile.get().hasPaletteOverride():
+        setRenderPaletteOverride(colorProfile.get().palette)
+      else:
+        clearRenderPaletteOverride()
     var downloaded: tuple[image: Image, data: string]
-    if offeredWidth > 0 and offeredHeight > 0 and offeredFit notin DecoderFits:
+    if offeredWidth > 0 and offeredHeight > 0 and
+        (offeredFit notin DecoderFits or (adjustColors and offeredFit == "contain")):
       downloaded = downloadImageWithDataBounded(urlStr, offeredWidth, offeredHeight,
         maxBytes = maxBytes, headers = headers)
     else:
@@ -489,6 +523,14 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
     if downloaded.image.isNil:
       response["error"] = %*"the response was not an image this frame can decode"
       return nimStringToJS(ctx, $response)
+
+    # A claimed target is the canvas on the ESP32: a mark an earlier image
+    # left on it must not outlive that image.
+    unmarkImageGraded(downloaded.image)
+    if adjustColors:
+      applyAssetColors(downloaded.image, colorProfile.get())
+      # Explicit sliders stand; the consumer's automatic fit skips this one.
+      markImageGraded(downloaded.image)
 
     response["image"] = e.runtime.storeTransientImageJson(downloaded.image)
     response["width"] = %*downloaded.image.width

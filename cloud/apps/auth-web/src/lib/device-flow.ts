@@ -113,6 +113,28 @@ export async function readBoundedJsonValue(
   }
 }
 
+// Same bound for a raw (non-JSON) body, for routes that take bytes: the
+// caller picks the refusal, since "too large" means different limits there
+// (a photo chunk, a thumbnail). `undefined` when the body cannot be read.
+export async function readBoundedBytes(
+  request: NextRequest,
+  maxBytes: number,
+): Promise<{ bytes: Buffer; overflow: false } | { overflow: true } | undefined> {
+  const declared = Number(request.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    return { overflow: true };
+  }
+  if (!request.body) {
+    // No body at all (readBodyUpTo's text() fallback would also mangle bytes).
+    return { bytes: Buffer.alloc(0), overflow: false };
+  }
+  const read = await readBodyUpTo(request, maxBytes);
+  if (read === undefined) {
+    return undefined;
+  }
+  return read.overflow ? { overflow: true } : { bytes: read.bytes, overflow: false };
+}
+
 // The body as bytes, or `overflow` once more than maxBytes have arrived (the
 // rest of the stream is cancelled, not drained). `undefined` when the body
 // cannot be read at all.

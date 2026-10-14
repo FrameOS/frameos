@@ -241,6 +241,9 @@ function pathFrameIdAfterToken(pathname: string, tokenizedPath: string, token: s
 }
 
 function frameIdFromWorkspacePath(pathname: string): FrameId | null {
+  if (pathname === urls.photos()) {
+    return null
+  }
   return (
     pathFrameIdAfterToken(pathname, urls.scenes(':frameId'), ':frameId') ??
     pathFrameIdAfterToken(pathname, urls.apps(':frameId'), ':frameId') ??
@@ -316,12 +319,13 @@ export interface ChatDrawerSelection {
   source?: 'templates' | null
 }
 
-/** The Add scene drawer's pages: the actions, or one of its two scene lists. Kept in the URL (`drawerPage`). */
-export type AddScenePage = 'actions' | 'store' | 'saved'
+/** The Add scene drawer's pages: the actions, its two scene lists, or the
+ * photo album installer. Kept in the URL (`drawerPage`). */
+export type AddScenePage = 'actions' | 'store' | 'saved' | 'photos'
 
 function templateDrawerPageFromSearch(search: Record<string, unknown>): AddScenePage {
   const page = searchValue(search, 'drawerPage')
-  return page === 'store' || page === 'saved' ? page : 'actions'
+  return page === 'store' || page === 'saved' || page === 'photos' ? page : 'actions'
 }
 
 /** The `q` (scene search) of the Add scene drawer, if the URL carries one. */
@@ -2146,6 +2150,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
       [urls.apps(':frameId')]: applySceneOrAppRoute,
       [urls.apps(':frameId', ':sceneId')]: applySceneOrAppRoute,
       [urls.apps(':frameId', ':sceneId', ':nodeId')]: applySceneOrAppRoute,
+      // Not a frame: on the cloud /frames/:id would read it as frame "photos".
+      [urls.photos()]: (_params, _search, hash) => {
+        syncSecondarySidebarFromHashForMobile(hash)
+        closeDrawersFromUrl()
+      },
       [urls.frame(':id')]: ({ id }, search, hash, _payload, previousLocation) =>
         applyFrameRoute(id, null, search, hash, previousLocation),
       [urls.frame(':id', ':tool')]: ({ id, tool }, search, hash, _payload, previousLocation) =>

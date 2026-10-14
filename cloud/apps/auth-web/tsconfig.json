@@ -21,6 +21,9 @@
     // (frontend/src components) predates this package's strict compiler
     // options. Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/esp32-frame-controls.test.tsx",
+    // Builds a photo album scene through frontend/src/utils/sceneApps, whose
+    // typing predates exactOptionalPropertyTypes. Vitest still runs it.
+    "src/test/shared-spa/photos.test.ts",
     // Imports frontend/src/utils/duplicateScenes, whose FrameEvent typing
     // predates exactOptionalPropertyTypes. Vitest still runs it.
     "src/test/shared-spa/duplicate-scenes.test.ts",

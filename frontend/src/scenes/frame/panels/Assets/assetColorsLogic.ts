@@ -6,15 +6,22 @@ import { frameLogic } from '../../frameLogic'
 import { assetsLogic, isThumbnailAssetName, type AssetNode } from './assetsLogic'
 import { assetPathKey } from './assetPaths'
 import { frameAssetUrl } from '../../../../utils/frameAssetsApi'
-import { devices } from '../../../../devices'
-import { type AutoEndPoints, applyAssetColors, autoEndPoints } from '../../../../utils/assetColors/adjust'
+import type { AutoEndPoints } from '../../../../utils/assetColors/adjust'
 import {
   paletteDeviceOf,
   panelAutoFitByDefault,
   panelPaletteForFrame,
   visiblePalette,
 } from '../../../../utils/assetColors/devicePalette'
-import { ditherToPalette } from '../../../../utils/assetColors/dither'
+import {
+  type AdjustmentMode,
+  type PreviewFit,
+  type PreviewSource,
+  autoProfileFor,
+  computeAutoEndPoints,
+  deviceLabelFor,
+  panelRenderSize,
+} from '../../../../utils/assetColors/preview'
 import {
   type AssetColorProfile,
   type HueRangeName,
@@ -42,61 +49,24 @@ function panelOf(
   }
 }
 
+// The preview arithmetic lives in utils/assetColors/preview.ts; these names
+// are re-exported for the modules that import them from here.
+export {
+  autoProfileFor,
+  computeAutoEndPoints,
+  deviceLabelFor,
+  drawPreviewSource,
+  panelRenderSize,
+  renderColorPreview,
+} from '../../../../utils/assetColors/preview'
+export type { AdjustmentMode, PreviewFit, PreviewSource } from '../../../../utils/assetColors/preview'
+
 export interface AssetColorsLogicProps {
   frameId: FrameId
 }
 
-export type PreviewFit = 'cover' | 'contain'
-
-/** None: every slider neutral. Auto: the Auto preset's end points and nothing else. Custom: anything else. */
-export type AdjustmentMode = 'none' | 'auto' | 'custom'
-
-/** The profile the Auto preset produces: the end points, everything else neutral, the palette kept. */
-export function autoProfileFor(profile: AssetColorProfile, endPoints: AutoEndPoints): AssetColorProfile {
-  return { ...defaultAssetColorProfile(), palette: profile.palette, whites: endPoints.whites, blacks: endPoints.blacks }
-}
-
 function sameAdjustments(a: AssetColorProfile, b: AssetColorProfile): boolean {
   return serializeAssetColorProfile({ ...a, palette: null }) === serializeAssetColorProfile({ ...b, palette: null })
-}
-
-/** The Auto preset for the photo as the panel will show it (placed, at panel size). */
-export function computeAutoEndPoints(
-  work: HTMLCanvasElement,
-  source: PreviewSource,
-  options: { width: number; height: number; fit: PreviewFit; palette: RgbTriplet[] | null }
-): AutoEndPoints | null {
-  const { width, height, fit, palette } = options
-  work.width = width
-  work.height = height
-  const context = work.getContext('2d', { willReadFrequently: true })
-  if (!context) {
-    return null
-  }
-  drawPreviewSource(context, source, width, height, fit)
-  return autoEndPoints(context.getImageData(0, 0, width, height).data, palette)
-}
-
-/** What the modal paints: the photo scaled onto a canvas the size of the panel. */
-export interface PreviewSource {
-  bitmap: ImageBitmap
-  width: number
-  height: number
-}
-
-/** The catalog label for a device value ("Waveshare 7.3\" (E) 800x480 Spectra 6 Color"). */
-export function deviceLabelFor(device: string | null | undefined): string {
-  if (!device) {
-    return ''
-  }
-  for (const group of devices) {
-    for (const option of group.options) {
-      if (option.value === device) {
-        return option.label
-      }
-    }
-  }
-  return ''
 }
 
 /** The `?colors=<path>` search param that names the open editor, so the URL can be shared and reloaded. */
@@ -111,76 +81,6 @@ function colorsPathFromSearch(search: Record<string, unknown>): string | null {
     return null
   }
   return String(raw)
-}
-
-/** The panel's render size in scene space (a rotated panel swaps the two). */
-export function panelRenderSize(frame: Pick<FrameType, 'width' | 'height' | 'rotate'>): {
-  width: number
-  height: number
-} {
-  const width = Math.max(1, Math.round(Number(frame.width) || 800))
-  const height = Math.max(1, Math.round(Number(frame.height) || 480))
-  const rotate = Number(frame.rotate) || 0
-  return rotate === 90 || rotate === 270 ? { width: height, height: width } : { width, height }
-}
-
-/**
- * The photo drawn onto a panel-sized canvas, as the frame's image app would
- * place it (cover crops to fill; contain letterboxes on black).
- */
-export function drawPreviewSource(
-  context: CanvasRenderingContext2D,
-  source: PreviewSource,
-  width: number,
-  height: number,
-  fit: PreviewFit
-): void {
-  context.fillStyle = '#000000'
-  context.fillRect(0, 0, width, height)
-  const scale =
-    fit === 'cover'
-      ? Math.max(width / source.width, height / source.height)
-      : Math.min(width / source.width, height / source.height)
-  const drawWidth = source.width * scale
-  const drawHeight = source.height * scale
-  context.drawImage(source.bitmap, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight)
-}
-
-/**
- * The panel-sized preview: the photo placed, the profile applied, and (when
- * asked) dithered to the palette the panel will show — the same arithmetic
- * the runtime runs (utils/assetColors). Pure: the caller owns the canvases.
- */
-export function renderColorPreview(
-  work: HTMLCanvasElement,
-  source: PreviewSource,
-  options: {
-    width: number
-    height: number
-    fit: PreviewFit
-    profile: AssetColorProfile
-    panelPalette: RgbTriplet[] | null
-    dithered: boolean
-    adjusted: boolean
-  }
-): ImageData | null {
-  const { width, height, fit, profile, panelPalette, dithered, adjusted } = options
-  work.width = width
-  work.height = height
-  const context = work.getContext('2d', { willReadFrequently: true })
-  if (!context) {
-    return null
-  }
-  drawPreviewSource(context, source, width, height, fit)
-  const imageData = context.getImageData(0, 0, width, height)
-  if (adjusted) {
-    applyAssetColors(imageData.data, profile)
-  }
-  const palette = profile.palette && profile.palette.length > 0 ? profile.palette : visiblePalette(panelPalette)
-  if (dithered && palette.length > 0) {
-    ditherToPalette(imageData.data, width, height, palette)
-  }
-  return imageData
 }
 
 async function fetchAssetBitmap(frameId: FrameId, path: string): Promise<PreviewSource> {

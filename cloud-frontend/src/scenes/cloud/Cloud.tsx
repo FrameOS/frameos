@@ -10,6 +10,7 @@ import { Frame } from '../../../../frontend/src/scenes/frame/Frame'
 import { socketLogic } from '../../../../frontend/src/scenes/socketLogic'
 import { AppsWorkspace } from '../../../../frontend/src/scenes/workspace/AppsWorkspace'
 import { FramesHome } from '../../../../frontend/src/scenes/workspace/FramesHome'
+import { PhotosWorkspace } from '../../../../frontend/src/scenes/photos/PhotosWorkspace'
 import { SceneWorkspace } from '../../../../frontend/src/scenes/workspace/SceneWorkspace'
 import { CloudFirstRunAddFrame } from '../../components/CloudFirstRunAddFrame'
 
@@ -91,6 +92,14 @@ export function CloudAppsWorkspace({ frameId, sceneId, nodeId }: CloudSceneProps
   return (
     <CloudGate>
       <AppsWorkspace frameId={frameId} sceneId={sceneId} nodeId={nodeId} />
+    </CloudGate>
+  )
+}
+
+export function CloudPhotosWorkspace() {
+  return (
+    <CloudGate>
+      <PhotosWorkspace />
     </CloudGate>
   )
 }

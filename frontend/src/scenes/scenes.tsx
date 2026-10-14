@@ -16,6 +16,7 @@ const sceneLoaders = {
   frame: () => import('./frame/Frame'),
   sceneWorkspace: () => import('./workspace/SceneWorkspace'),
   appsWorkspace: () => import('./workspace/AppsWorkspace'),
+  photosWorkspace: () => import('./photos/PhotosWorkspace'),
   settings: () => import('./settings/Settings'),
   login: () => import('./login/Login'),
   signup: () => import('./signup/Signup'),
@@ -96,6 +97,8 @@ export const getRoutes = () =>
     [urls.apps(':frameId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId', ':nodeId')]: 'appsWorkspace',
+    // The on-device admin panel is one frame; the library lives on a control plane.
+    ...(isInFrameAdminMode() ? {} : { [urls.photos()]: 'photosWorkspace' }),
     [urls.login()]: 'login',
     [urls.signup()]: 'signup',
     [urls.setupUnavailable()]: 'setupUnavailable',
