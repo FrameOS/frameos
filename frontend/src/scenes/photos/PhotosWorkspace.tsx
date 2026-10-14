@@ -270,7 +270,7 @@ function SidebarFolderRow({
   active: boolean
   shared?: boolean
 }): JSX.Element {
-  const { setFolder } = useActions(photosLogic)
+  const { setFolder, openShare } = useActions(photosLogic)
   const { isOver, handlers } = useFolderDrop(path)
   return (
     <a
@@ -303,7 +303,31 @@ function SidebarFolderRow({
           {description}
         </span>
       </span>
-      {shared ? <LinkIcon className="h-4 w-4 shrink-0 opacity-60" aria-label="Shared" /> : null}
+      {shared ? (
+        // Inside the row's link, so not a <button>: it opens the share
+        // dialog instead of the folder.
+        <span
+          role="button"
+          tabIndex={0}
+          title="Share link"
+          aria-label={`Share link for ${label}`}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            openShare(path)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              event.stopPropagation()
+              openShare(path)
+            }
+          }}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg opacity-60 hover:bg-slate-200/60 hover:opacity-100"
+        >
+          <LinkIcon className="h-4 w-4" />
+        </span>
+      ) : null}
     </a>
   )
 }

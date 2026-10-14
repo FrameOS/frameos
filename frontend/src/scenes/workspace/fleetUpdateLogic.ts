@@ -123,10 +123,10 @@ export type fleetUpdateLogicType = MakeLogicType<fleetUpdateLogicValues, fleetUp
   fleetUpdateLogicMeta
 
 /**
- * "Update all" in the frames sidebar: the active frames whose only pending
- * change is a FrameOS upgrade (pendingFrameosUpgrade) and that have no
- * update queued or running, updated one after another with a pause in
- * between. One run at a time: a second click while the loop runs is a no-op,
+ * "Update all" in the frames sidebar: the active frames a FrameOS release
+ * behind (pendingFrameosUpgrade; other undeployed changes ride along) that
+ * have no update queued or running, updated one after another with a pause
+ * in between. One run at a time: a second click while the loop runs is a no-op,
  * and every frame the loop has asked leaves the list until the next fleet
  * refresh shows the request landed (queued) or the frame moved on.
  */

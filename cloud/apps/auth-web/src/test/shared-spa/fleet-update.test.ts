@@ -98,14 +98,19 @@ describe("pendingFrameosUpgrade", () => {
     });
   });
 
-  it("is nothing for a frame on the latest release, an unknown release, or a frame with other changes pending", () => {
+  it("is nothing for a frame on the latest release, an unknown release, or an archived frame", () => {
     expect(pendingFrameosUpgrade(cloudFrame("a", { frameos_version: LATEST }), LATEST)).toBeNull();
     expect(pendingFrameosUpgrade(cloudFrame("a"), null)).toBeNull();
     expect(pendingFrameosUpgrade(cloudFrame("a", { frameos_version: "" }), LATEST)).toBeNull();
+    expect(pendingFrameosUpgrade(cloudFrame("a", { archived: true }), LATEST)).toBeNull();
+  });
+
+  it("still names the upgrade when other changes are pending too", () => {
+    // A new release routinely leaves a scene or a settings field looking
+    // undeployed on every frame; that must not hide "Update all".
     expect(
       pendingFrameosUpgrade(cloudFrame("a", { assigned_checksum: "new", scenes_checksum: "old" }), LATEST)
-    ).toBeNull();
-    expect(pendingFrameosUpgrade(cloudFrame("a", { archived: true }), LATEST)).toBeNull();
+    ).toEqual({ kind: "upgrade", previousVersion: "2026.9.20", currentVersion: LATEST });
   });
 });
 

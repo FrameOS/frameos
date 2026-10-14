@@ -371,16 +371,16 @@ export function cloudUndeployedChangeDetails(
 }
 
 /**
- * The FrameOS upgrade a saved frame is waiting for, when that upgrade is
- * the ONLY thing it is behind on — the dashboard's "upgrade" label
- * (FrameDashboardStatusLine) computed from the row alone, for the sidebar's
- * "Update all" (fleetUpdateLogic), which cannot mount a frameLogic per
- * frame. Same inputs as the `undeployedChangeDetails` selector: the cloud
- * compares the device's version with the latest published release, the
- * backend the deploy baseline with the version it was built with. A frame
- * whose deploy would also carry scene or settings changes is not "just an
- * upgrade", and a frame whose version was never reported is an install, not
- * an upgrade: null for both.
+ * The FrameOS upgrade a saved frame is waiting for — the dashboard's
+ * "upgrade" label (FrameDashboardStatusLine) computed from the row alone,
+ * for the sidebar's "Update all" (fleetUpdateLogic), which cannot mount a
+ * frameLogic per frame. Same inputs as the `undeployedChangeDetails`
+ * selector: the cloud compares the device's version with the latest
+ * published release, the backend the deploy baseline with the version it
+ * was built with. Other pending changes do not matter here: a new release
+ * routinely leaves a settings field or a scene looking undeployed on every
+ * frame, and a full deploy carries them along anyway. A frame whose version
+ * was never reported is an install, not an upgrade: null.
  */
 export function pendingFrameosUpgrade(
   frame: FrameType | null | undefined,
@@ -394,9 +394,6 @@ export function pendingFrameosUpgrade(
     : isInFrameAdminMode()
     ? []
     : deployChangeDetails(deployedFrameBaseline(frame), frame, frame.mode || 'rpios')
-  if (details.length === 0 || !details.every((change) => change.frameosVersionChange || change.remoteVersionChange)) {
-    return null
-  }
   const upgrade = details.find((change) => change.frameosVersionChange?.kind === 'upgrade')?.frameosVersionChange
   return upgrade?.previousVersion ? upgrade : null
 }

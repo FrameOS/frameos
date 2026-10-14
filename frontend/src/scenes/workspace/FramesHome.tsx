@@ -460,8 +460,8 @@ function SidebarAddFrameButton(): JSX.Element | null {
 
 /**
  * "Update all", between the Active title and the "+": shown while one or
- * more active frames are only a FrameOS release behind with nothing queued
- * for them yet, it asks each of them to update in turn (fleetUpdateLogic)
+ * more active frames are a FrameOS release behind with nothing queued for
+ * them yet, it asks each of them to update in turn (fleetUpdateLogic)
  * and spins until the last request went out. A click while it spins does
  * nothing.
  */
