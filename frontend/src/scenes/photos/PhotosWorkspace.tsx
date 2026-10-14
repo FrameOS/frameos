@@ -1,6 +1,7 @@
 import { useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import { useEffect, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ArrowDownTrayIcon,
   ArrowLeftIcon,
@@ -1268,7 +1269,12 @@ function Lightbox(): JSX.Element | null {
   }
   const index = lightboxEntries.findIndex((entry) => entry.path === lightboxEntry.path)
   const editing = imagePath === lightboxEntry.path
-  return (
+  // Portalled to <body>: on the cloud the workspace sits in a wrapper with a
+  // transform (cloud-frontend index.css), which makes it the containing block
+  // for every fixed descendant, so an in-tree overlay would stop under the
+  // account header. On <body> it covers the whole viewport, header included,
+  // like the headless UI modals and the scene editor do.
+  return createPortal(
     <div
       className="photos-lightbox fixed inset-0 z-[110] flex flex-col bg-black/95 text-white backdrop-blur-sm"
       role="dialog"
@@ -1372,7 +1378,8 @@ function Lightbox(): JSX.Element | null {
         </div>
         {editing ? <PhotoColorsPanel /> : null}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
