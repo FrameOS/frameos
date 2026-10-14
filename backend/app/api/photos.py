@@ -1,18 +1,18 @@
 """Photos: the library of albums frames play. `docs/photos.md` is the
-contract; the disk side is app/utils/photos.py.
+contract; the rows, the object store and everything blocking are in
+app/utils/photos.py.
 
 Owner routes are project scoped (`/api/projects/{id}/photos/...`). The share
 routes (`/api/photos/shared/{token}...`) are what frames call: no login, the
 token is the credential and resolves the project, and they live on the public
 router (the one Home Assistant exposes on port 8989), rate limited per
-address and link.
+address.
 """
 from __future__ import annotations
 
 import asyncio
 import secrets
 from http import HTTPStatus
-from pathlib import Path
 from typing import Any
 
 from arq import ArqRedis as Redis
@@ -28,6 +28,7 @@ from app.redis import get_redis
 from app.tenancy import current_project_id
 from app.utils import photos
 from app.utils.asset_headers import inert_asset_headers
+from app.utils.object_store import ObjectStore
 from app.utils.photo_album_scene import DEFAULT_SECONDS, FIT_VALUES, ORDER_VALUES, build_photo_album_scene
 from app.utils.rate_limit import hit_rate_limit
 from app.utils.request_ip import client_ip_for_request
@@ -85,8 +86,8 @@ class PhotoSceneBody(BaseModel):
 MAX_SCENE_NAME_LENGTH = 256
 
 
-async def _ready_root(project_id: int) -> Path:
-    return await asyncio.to_thread(photos.ready_root, project_id)
+async def _ready_store() -> ObjectStore:
+    return await asyncio.to_thread(photos.ready_store)
 
 
 def _some_paths(paths: list[str]) -> list[str]:
@@ -103,21 +104,28 @@ def _not_found(detail: str = "Not found") -> HTTPException:
     return HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=detail)
 
 
+def _bytes_response(stored: photos.StoredBytes, media_type: str, headers: dict[str, str]) -> Response:
+    """The disk store's file is streamed; a bucket's bytes are sent as is."""
+    if stored.path is not None:
+        return FileResponse(stored.path, media_type=media_type, headers=headers)
+    return Response(content=stored.data or b"", media_type=media_type, headers=headers)
+
+
 # ---------------------------------------------------------------------------
 # Owner routes
 # ---------------------------------------------------------------------------
 
 
 @api_project.get("/photos/status")
-async def photos_status():
-    return await asyncio.to_thread(photos.status, current_project_id())
+async def photos_status(db: Session = Depends(get_db)):
+    return await asyncio.to_thread(photos.status, db, current_project_id())
 
 
 @api_project.get("/photos/files")
-async def photos_files(path: str = ""):
+async def photos_files(path: str = "", db: Session = Depends(get_db)):
     rel = photos.validate_path(path, allow_root=True)
-    root = await _ready_root(current_project_id())
-    return await asyncio.to_thread(photos.list_folder, root, rel)
+    await _ready_store()
+    return await asyncio.to_thread(photos.list_folder, db, current_project_id(), rel)
 
 
 @api_project.post("/photos/upload")
@@ -142,27 +150,26 @@ async def photos_upload(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="Uploaded file too large")
 
     project_id = current_project_id()
-    root = await _ready_root(project_id)
+    store = await _ready_store()
     chunk = await read_body_limited(request, photos.MAX_CHUNK_BYTES, "Chunks can be at most 4 MiB")
     if not chunk and not complete:
         raise _bad_request("Empty chunk")
     received = await asyncio.to_thread(photos.write_chunk, project_id, upload_id, offset, chunk)
     if not complete:
         return {"pending": True, "received": received}
-    entry = await asyncio.to_thread(photos.finish_upload, db, project_id, root, folder, filename, upload_id)
+    entry = await asyncio.to_thread(photos.finish_upload, db, project_id, store, folder, filename, upload_id)
     return {"entry": entry}
 
 
 @api_project.get("/photos/thumb")
-async def photos_thumb(request: Request, path: str = ""):
+async def photos_thumb(request: Request, path: str = "", db: Session = Depends(get_db)):
     rel = photos.validate_path(path)
-    project_id = current_project_id()
-    root = await _ready_root(project_id)
-    made = await asyncio.to_thread(photos.thumbnail, project_id, root, rel)
-    if made is None:
+    store = await _ready_store()
+    row = await asyncio.to_thread(photos.file_row, db, current_project_id(), rel)
+    if not row.thumb_object_key:
         raise _not_found("No thumbnail")
-    thumb, key = made
-    etag = f'"{key}"'
+    # The key is the thumbnail's content hash: a replaced file gets a new one.
+    etag = f'"{row.thumb_object_key.rsplit("/", 1)[-1]}"'
     headers = {
         "ETag": etag,
         "Cache-Control": "private, no-cache",
@@ -170,28 +177,29 @@ async def photos_thumb(request: Request, path: str = ""):
     }
     if etag in (request.headers.get("if-none-match") or ""):
         return Response(status_code=HTTPStatus.NOT_MODIFIED, headers=headers)
-    return FileResponse(thumb, media_type="image/jpeg", headers=headers)
+    stored = await asyncio.to_thread(photos.fetch_object, store, row.thumb_object_key)
+    return _bytes_response(stored, "image/jpeg", headers)
 
 
 @api_project.get("/photos/file")
-async def photos_file(path: str = "", download: str = ""):
+async def photos_file(path: str = "", download: str = "", db: Session = Depends(get_db)):
     rel = photos.validate_path(path)
-    root = await _ready_root(current_project_id())
-    target = await asyncio.to_thread(photos.existing_file, root, rel)
+    store = await _ready_store()
+    row = await asyncio.to_thread(photos.file_row, db, current_project_id(), rel)
     name = photos.base_name(rel)
-    content_type = photos.content_type_for(name)
+    content_type = row.content_type or photos.content_type_for(name)
     inline = download.lower() not in ("1", "true") and content_type.startswith("image/")
     headers = inert_asset_headers(content_type, name, inline=inline)
     headers["Cache-Control"] = "private, no-cache"
-    return FileResponse(target, media_type=content_type, headers=headers)
+    stored = await asyncio.to_thread(photos.fetch_object, store, row.object_key)
+    return _bytes_response(stored, content_type, headers)
 
 
 @api_project.post("/photos/folders")
 async def photos_create_folder(data: PhotoPathBody, db: Session = Depends(get_db)):
     rel = photos.validate_path(data.path)
-    project_id = current_project_id()
-    root = await _ready_root(project_id)
-    entry = await asyncio.to_thread(photos.create_folder, db, project_id, root, rel)
+    await _ready_store()
+    entry = await asyncio.to_thread(photos.create_folder, db, current_project_id(), rel)
     return {"entry": entry}
 
 
@@ -199,9 +207,8 @@ async def photos_create_folder(data: PhotoPathBody, db: Session = Depends(get_db
 async def photos_move(data: PhotoMoveBody, db: Session = Depends(get_db)):
     to = photos.validate_path(data.to, allow_root=True)
     paths = _some_paths(data.paths)
-    project_id = current_project_id()
-    root = await _ready_root(project_id)
-    moved = await asyncio.to_thread(photos.move_paths, db, project_id, root, paths, to)
+    await _ready_store()
+    moved = await asyncio.to_thread(photos.move_paths, db, current_project_id(), paths, to)
     return {"moved": moved}
 
 
@@ -209,40 +216,38 @@ async def photos_move(data: PhotoMoveBody, db: Session = Depends(get_db)):
 async def photos_rename(data: PhotoRenameBody, db: Session = Depends(get_db)):
     rel = photos.validate_path(data.path)
     name = photos.validate_name(data.name)
-    project_id = current_project_id()
-    root = await _ready_root(project_id)
-    entry = await asyncio.to_thread(photos.rename_path, db, project_id, root, rel, name)
+    await _ready_store()
+    entry = await asyncio.to_thread(photos.rename_path, db, current_project_id(), rel, name)
     return {"entry": entry}
 
 
 @api_project.post("/photos/delete")
 async def photos_delete(data: PhotoDeleteBody, db: Session = Depends(get_db)):
     paths = _some_paths(data.paths)
-    project_id = current_project_id()
-    root = await _ready_root(project_id)
-    deleted = await asyncio.to_thread(photos.delete_paths, db, project_id, root, paths)
+    store = await _ready_store()
+    deleted = await asyncio.to_thread(photos.delete_paths, db, current_project_id(), store, paths)
     return {"deleted": deleted}
 
 
 @api_project.post("/photos/colors")
-async def photos_set_colors(data: PhotoColorsBody):
+async def photos_set_colors(data: PhotoColorsBody, db: Session = Depends(get_db)):
     rel = photos.validate_path(data.path)
     if data.colors is _NO_COLORS:
         raise _bad_request("colors must be an object or null")
-    root = await _ready_root(current_project_id())
-    entry = await asyncio.to_thread(photos.set_colors, root, rel, data.colors)
+    await _ready_store()
+    entry = await asyncio.to_thread(photos.set_colors, db, current_project_id(), rel, data.colors)
     return {"entry": entry}
 
 
 @api_project.get("/photos/shares")
 async def photos_shares(db: Session = Depends(get_db)):
-    await _ready_root(current_project_id())
+    await _ready_store()
     shares = (
         db.query(PhotoShare)
         .filter(PhotoShare.project_id == current_project_id())
-        .order_by(PhotoShare.path.asc(), PhotoShare.id.asc())
         .all()
     )
+    shares.sort(key=lambda share: (photos.path_key(share.path), share.id))
     return {"shares": [photos.share_json(share) for share in shares]}
 
 
@@ -257,12 +262,8 @@ async def _folder_share(db: Session, path: str) -> PhotoShare:
         raise _bad_request("Share a folder, not the whole library")
     rel = photos.validate_path(path)
     project_id = current_project_id()
-    root = await _ready_root(project_id)
-    folder = photos.disk_path(root, rel)
-    if not await asyncio.to_thread(folder.is_dir):
-        if await asyncio.to_thread(folder.is_file):
-            raise _bad_request("Share a folder, not a file")
-        raise _not_found("Folder not found")
+    await _ready_store()
+    await asyncio.to_thread(photos.assert_shareable_folder, db, project_id, rel)
     share = (
         db.query(PhotoShare)
         .filter(PhotoShare.project_id == project_id, PhotoShare.path == rel)
@@ -324,7 +325,7 @@ async def photos_album_scene(data: PhotoSceneBody, db: Session = Depends(get_db)
 
 @api_project.delete("/photos/shares/{token}")
 async def photos_delete_share(token: str, db: Session = Depends(get_db)):
-    await _ready_root(current_project_id())
+    await _ready_store()
     share = (
         db.query(PhotoShare)
         .filter(PhotoShare.project_id == current_project_id(), PhotoShare.token == token)
@@ -357,7 +358,7 @@ async def _shared_folder(request: Request, token: str, db: Session, redis: Redis
     share = db.query(PhotoShare).filter(PhotoShare.token == token).first()
     if share is None:
         raise _not_found()
-    return await asyncio.to_thread(photos.shared_folder, share)
+    return await asyncio.to_thread(photos.shared_folder, db, share)
 
 
 @api_public.get("/photos/shared/{token}")
@@ -370,7 +371,7 @@ async def photos_shared_listing(
     shared = await _shared_folder(request, token, db, redis)
 
     def build() -> dict:
-        files, updated_at = photos.share_index(shared)
+        files, updated_at = photos.share_index(db, shared)
         return {
             "name": shared.name,
             "count": len(files),
@@ -395,7 +396,7 @@ async def photos_shared_photo(
     shared = await _shared_folder(request, token, db, redis)
 
     def build() -> dict:
-        files, _updated_at = photos.share_index(shared)
+        files, _updated_at = photos.share_index(db, shared)
         photo = photos.pick_photo(files, order, index, token)
         return {
             "index": index,
@@ -416,10 +417,12 @@ async def photos_shared_file(
 ):
     shared = await _shared_folder(request, token, db, redis)
     rel = photos.validate_path(path)
-    target = await asyncio.to_thread(photos.shared_file, shared, rel)
+    row = await asyncio.to_thread(photos.shared_file_row, db, shared, rel)
+    store = await _ready_store()
     name = photos.base_name(rel)
-    content_type = photos.content_type_for(name)
+    content_type = row.content_type or photos.content_type_for(name)
     headers = inert_asset_headers(content_type, name, inline=True)
     # The URL carries the token: no shared cache keeps the bytes.
     headers["Cache-Control"] = "private, max-age=300"
-    return FileResponse(target, media_type=content_type, headers=headers)
+    stored = await asyncio.to_thread(photos.fetch_object, store, row.object_key)
+    return _bytes_response(stored, content_type, headers)

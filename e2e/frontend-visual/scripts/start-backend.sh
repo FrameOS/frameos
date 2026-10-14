@@ -11,6 +11,14 @@ export REDIS_URL="${REDIS_URL:-redis://localhost:6379/15}"
 
 mkdir -p "$ROOT/.tmp"
 
+# The Photos library (tests/photos.spec.ts) keeps its bytes on disk next to
+# the rows: give it a folder as disposable as the database. Only the default
+# is wiped.
+if [ -z "${FRAMEOS_PHOTOS_DIR:-}" ]; then
+  export FRAMEOS_PHOTOS_DIR="$ROOT/.tmp/frontend-visual-photos"
+  rm -rf "$FRAMEOS_PHOTOS_DIR"
+fi
+
 if [ ! -f "$ROOT/frontend/dist/index.html" ]; then
   echo "frontend/dist is missing. Run: pnpm --dir frontend run build" >&2
   exit 1
