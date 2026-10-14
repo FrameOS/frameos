@@ -38,8 +38,6 @@ import {
 } from './photoPaths'
 
 export type PhotosViewMode = 'grid' | 'list'
-/** Backdrop clicks this soon after opening the lightbox are the tail of a double-click. */
-const LIGHTBOX_SETTLE_MS = 400
 export type PhotoSelectMode = 'replace' | 'toggle' | 'range'
 /** What a click on a tile carries: shift (range), cmd/ctrl (toggle) or nothing. */
 export type PhotoClickModifier = 'none' | 'toggle' | 'range'
@@ -100,7 +98,6 @@ export interface photosLogicValues {
   installPickerAlbums: string[] | null
   lightboxEntries: PhotoEntry[]
   lightboxEntry: PhotoEntry | null
-  lightboxOpenedAt: number
   lightboxPath: string | null
   looseRootFileCount: number
   mutating: boolean
@@ -143,9 +140,6 @@ export interface photosLogicActions {
   ) => {
     entry: PhotoEntry
     modifier: PhotoClickModifier
-  }
-  clickLightboxBackdrop: () => {
-    value: true
   }
   closeInstallPicker: () => {
     value: true
@@ -450,7 +444,6 @@ export const photosLogic = kea<photosLogicType>([
     openEntry: (entry: PhotoEntry) => ({ entry }),
     openLightbox: (path: string) => ({ path }),
     closeLightbox: true,
-    clickLightboxBackdrop: true,
     stepLightbox: (delta: number) => ({ delta }),
     uploadFiles: (folder: string, files: File[]) => ({ folder, files }),
     uploadDropped: (folder: string, files: DroppedPhotoFile[]) => ({ folder, files }),
@@ -608,12 +601,6 @@ export const photosLogic = kea<photosLogicType>([
         openLightbox: (_, { path }) => path,
         closeLightbox: () => null,
         setFolder: () => null,
-      },
-    ],
-    lightboxOpenedAt: [
-      0,
-      {
-        openLightbox: () => Date.now(),
       },
     ],
     uploads: [
@@ -974,14 +961,6 @@ export const photosLogic = kea<photosLogicType>([
           actions.openLightbox(entry.path)
         } else {
           window.open(photoFileUrl(entry.path), '_blank', 'noopener,noreferrer')
-        }
-      },
-      // A click opens the lightbox, so the second click of a double-click
-      // lands on the backdrop that now covers the tile; it must not close
-      // what the first one just opened.
-      clickLightboxBackdrop: () => {
-        if (Date.now() - values.lightboxOpenedAt >= LIGHTBOX_SETTLE_MS) {
-          actions.closeLightbox()
         }
       },
       stepLightbox: ({ delta }) => {

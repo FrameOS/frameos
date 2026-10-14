@@ -1149,7 +1149,6 @@ function PhotoColorsPanel(): JSX.Element {
     <aside
       className="frameos-theme-dark frameos-dark-surface photos-colors-panel flex w-[24rem] max-w-[90vw] shrink-0"
       aria-label="Set colors"
-      onClick={(event) => event.stopPropagation()}
     >
       <div className="frameos-panel frame-tool-panel flex min-h-0 w-full flex-col border-l backdrop-blur-xl">
         <div className="frameos-divider flex items-start gap-2 border-b px-4 py-3">
@@ -1261,7 +1260,7 @@ function LightboxPainted({ entry }: { entry: PhotoEntry }): JSX.Element {
 
 function Lightbox(): JSX.Element | null {
   const { lightboxEntry, lightboxEntries } = useValues(photosLogic)
-  const { closeLightbox, clickLightboxBackdrop, stepLightbox, deleteEntries } = useActions(photosLogic)
+  const { closeLightbox, stepLightbox, deleteEntries } = useActions(photosLogic)
   const { lightboxPainted, imagePath } = useValues(photoColorsLogic)
   const { openEditor, closeEditor } = useActions(photoColorsLogic)
   if (!lightboxEntry) {
@@ -1279,9 +1278,8 @@ function Lightbox(): JSX.Element | null {
       className="photos-lightbox fixed inset-0 z-[110] flex flex-col bg-black/95 text-white backdrop-blur-sm"
       role="dialog"
       aria-label={lightboxEntry.name}
-      onClick={clickLightboxBackdrop}
     >
-      <div className="flex items-center gap-3 px-5 py-4" onClick={(event) => event.stopPropagation()}>
+      <div className="flex items-center gap-3 px-5 py-4">
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold">{lightboxEntry.name}</div>
           <div className="truncate text-xs text-white/60">
@@ -1345,7 +1343,6 @@ function Lightbox(): JSX.Element | null {
               key={lightboxEntry.path}
               src={photoFileUrl(lightboxEntry.path)}
               alt={lightboxEntry.name}
-              onClick={(event) => event.stopPropagation()}
               className="max-h-full max-w-full object-contain shadow-2xl"
             />
           )}
@@ -1354,10 +1351,7 @@ function Lightbox(): JSX.Element | null {
               <button
                 type="button"
                 aria-label="Previous photo"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  stepLightbox(-1)
-                }}
+                onClick={() => stepLightbox(-1)}
                 className="absolute left-4 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
               >
                 <ArrowLeftIcon className="h-6 w-6" />
@@ -1365,10 +1359,7 @@ function Lightbox(): JSX.Element | null {
               <button
                 type="button"
                 aria-label="Next photo"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  stepLightbox(1)
-                }}
+                onClick={() => stepLightbox(1)}
                 className="absolute right-4 top-1/2 flex h-12 w-12 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 hover:bg-white/20"
               >
                 <ArrowRightIcon className="h-6 w-6" />
