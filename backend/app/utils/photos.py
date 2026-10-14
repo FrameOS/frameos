@@ -49,10 +49,13 @@ MAX_SEGMENT_BYTES = 255
 MAX_DEPTH = 32
 MAX_SHARE_FILES = 10000
 THUMB_MAX_SIDE = 512
-# A thumbnail decodes the whole image first: a flat 13000 x 13000 PNG is a
-# few hundred KB on disk and 700 MB of RGBA. Above this there is no thumbnail
-# (the SPA shows the file itself).
+# A thumbnail of a PNG (GIF, WebP, BMP) decodes the whole image first: a flat
+# 13000 x 13000 PNG is a few hundred KB on disk and 700 MB of RGBA. Above
+# this there is no thumbnail (the SPA shows the file itself). A JPEG is read
+# through Pillow's draft mode, which decodes at a fraction of the size, so a
+# camera's 100 MP file is cheap and the cap is higher (docs/photos.md).
 THUMB_MAX_PIXELS = 80_000_000
+THUMB_MAX_JPEG_PIXELS = 400_000_000
 THUMB_MAX_AGE_SECONDS = 30 * 24 * 3600
 READINESS_CACHE_SECONDS = 30
 UPLOAD_PART_MAX_AGE_SECONDS = 3600
@@ -693,8 +696,17 @@ def thumbnail(project_id: int, root: Path, rel: str) -> Optional[tuple[Path, str
     try:
         from PIL import Image, ImageOps
 
-        with Image.open(source) as opened:
-            if opened.size[0] * opened.size[1] > THUMB_MAX_PIXELS:
+        # Pillow refuses to open anything over twice its own pixel ceiling
+        # (178 MP); ours is the decision here, taken on the header below.
+        bomb_limit = Image.MAX_IMAGE_PIXELS
+        Image.MAX_IMAGE_PIXELS = THUMB_MAX_JPEG_PIXELS
+        try:
+            opened = Image.open(source)
+        finally:
+            Image.MAX_IMAGE_PIXELS = bomb_limit
+        with opened:
+            cap = THUMB_MAX_JPEG_PIXELS if opened.format == "JPEG" else THUMB_MAX_PIXELS
+            if opened.size[0] * opened.size[1] > cap:
                 return None
             opened.draft("RGB", (THUMB_MAX_SIDE, THUMB_MAX_SIDE))
             # Shrink first: the transpose copies the image at its size.

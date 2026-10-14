@@ -503,8 +503,8 @@ export const assetColorsLogic = kea<assetColorsLogicType>([
         sameAdjustments(profile, defaultAssetColorProfile())
           ? 'none'
           : autoEndPoints && sameAdjustments(profile, autoProfileFor(profile, autoEndPoints))
-            ? 'auto'
-            : 'custom',
+          ? 'auto'
+          : 'custom',
     ],
     isDirty: [
       (s) => [s.profile, s.savedProfile],
@@ -551,13 +551,13 @@ export const assetColorsLogic = kea<assetColorsLogicType>([
     previousImagePath: [
       (s) => [s.imagePosition, s.folderImagePaths],
       (position: { index: number; count: number }, folderImagePaths: string[]): string | null =>
-        position.index > 0 ? (folderImagePaths[position.index - 1] ?? null) : null,
+        position.index > 0 ? folderImagePaths[position.index - 1] ?? null : null,
     ],
     nextImagePath: [
       (s) => [s.imagePosition, s.folderImagePaths],
       (position: { index: number; count: number }, folderImagePaths: string[]): string | null =>
         position.index >= 0 && position.index < position.count - 1
-          ? (folderImagePaths[position.index + 1] ?? null)
+          ? folderImagePaths[position.index + 1] ?? null
           : null,
     ],
   }),
@@ -623,6 +623,12 @@ export const assetColorsLogic = kea<assetColorsLogicType>([
         values.isDefault
       ) {
         actions.setProfile(autoProfileFor(values.profile, endPoints))
+      }
+    },
+    // Reset lands on Auto when the target has a range to fit into.
+    resetProfile: () => {
+      if (values.autoEndPoints) {
+        actions.setProfile(autoProfileFor(values.profile, values.autoEndPoints))
       }
     },
     setAdjustmentMode: ({ mode }) => {

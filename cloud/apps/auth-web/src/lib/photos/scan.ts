@@ -44,7 +44,8 @@ export type PhotoScanResult =
   | { error: string; outcome: "unavailable"; scanner: PhotoScanner };
 
 export type PhotoScanInput = {
-  bytes: Buffer;
+  /** The image: bytes, or the path of a finished upload on disk. */
+  source: Buffer | string;
   contentType: string;
   sha256: string;
 };
@@ -59,7 +60,7 @@ export type PhotoScanDeps = {
    * since the Match API takes a few MB and not every format. Null when the
    * image cannot be read, which fails closed.
    */
-  scanCopy?: (bytes: Buffer, contentType: string) => Promise<Buffer | null>;
+  scanCopy?: (source: Buffer | string, contentType: string) => Promise<Buffer | null>;
 };
 
 export async function scanPhoto(
@@ -88,7 +89,7 @@ export async function scanPhoto(
     const makeCopy = deps.scanCopy ?? defaultScanCopy;
     let copy: Buffer | null;
     try {
-      copy = await makeCopy(input.bytes, input.contentType);
+      copy = await makeCopy(input.source, input.contentType);
     } catch (error) {
       return { error: errorText(error), outcome: "unavailable", scanner: "photodna" };
     }
@@ -104,9 +105,9 @@ export async function scanPhoto(
   return { outcome: "clean", scanners };
 }
 
-async function defaultScanCopy(bytes: Buffer) {
+async function defaultScanCopy(source: Buffer | string) {
   const { photoScanCopy } = await import("./thumbnail");
-  return photoScanCopy(bytes);
+  return photoScanCopy(source);
 }
 
 type PhotoDnaResponse = {

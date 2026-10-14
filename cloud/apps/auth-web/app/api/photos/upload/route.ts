@@ -19,9 +19,11 @@ import {
 } from "../../../../src/lib/photos/paths";
 import { makePhotoThumbnail } from "../../../../src/lib/photos/thumbnail";
 import {
+  type PhotoUploadFile,
   discardPhotoUpload,
   isValidPhotoUploadId,
-  readPhotoUpload,
+  photoUploadFile,
+  readPhotoUploadHead,
   writePhotoUploadChunk,
 } from "../../../../src/lib/photos/uploads";
 
@@ -34,12 +36,15 @@ export const runtime = "nodejs";
 // reaches the object store until the whole file is in, is one of the four
 // accepted image types (sniffed), fits the quota and has passed every
 // configured scanner. Its thumbnail is made here too (src/lib/photos/thumbnail.ts).
+// A chunked file is worked on where it lies: hashed, scanned, thumbnailed
+// and streamed to the store from disk, so a 250 MiB photo is never one
+// buffer in this process.
 export async function POST(request: NextRequest) {
   const context = await photoOwnerContext(request, { kind: "upload" });
   if (context.response) {
     return context.response;
   }
-  const { accountId, db } = context;
+  const { accountId, db, email } = context;
   const query = request.nextUrl.searchParams;
 
   const uploadId = query.get("upload_id");
@@ -91,7 +96,7 @@ export async function POST(request: NextRequest) {
     // Cheap early refusal; the real check runs again under the lock.
     await assertPhotoQuota(db, accountId, offset + chunk.length);
 
-    let file: Buffer;
+    let file: Buffer | PhotoUploadFile;
     if (offset === 0 && complete) {
       // A file in one request never touches the disk.
       file = chunk;
@@ -108,31 +113,46 @@ export async function POST(request: NextRequest) {
       if (!complete) {
         return NextResponse.json({ pending: true, received: written.received });
       }
-      const held = await readPhotoUpload(accountId, uploadId);
-      await discardPhotoUpload(accountId, uploadId);
+      const held = await photoUploadFile(accountId, uploadId);
       if (!held) {
         return jsonError("chunk_gap", 409, { received: 0 });
       }
       file = held;
     }
 
-    if (file.length === 0) {
+    try {
+      return await storeFinished(file, folder);
+    } finally {
+      if (!Buffer.isBuffer(file)) {
+        await discardPhotoUpload(accountId, uploadId);
+      }
+    }
+  });
+
+  async function storeFinished(file: Buffer | PhotoUploadFile, folder: string) {
+    const size = Buffer.isBuffer(file) ? file.length : file.size;
+    if (size === 0) {
       return jsonError("file_empty", 400);
     }
-    const contentType = acceptedType(file);
+    // The header is all a sniff and a size read need; a JPEG's frame header
+    // sits after its EXIF, XMP and ICC segments, well inside one chunk.
+    const head = Buffer.isBuffer(file) ? file : await readPhotoUploadHead(file, maxPhotoChunkBytes);
+    const contentType = acceptedType(head);
     if (!contentType) {
       return unsupportedType();
     }
-    await assertPhotoQuota(db, accountId, file.length);
+    await assertPhotoQuota(db, accountId, size);
 
-    const scanned = await scanIncomingPhoto(db, request, context, file, contentType);
+    const source = Buffer.isBuffer(file) ? file : file.path;
+    const scanned = await scanIncomingPhoto(db, request, { accountId, email }, source, contentType);
     if (scanned.response) {
       return scanned.response;
     }
-    const dimensions = imageDimensions(file, contentType);
-    const thumbnail = await makePhotoThumbnail(file);
+    const dimensions = imageDimensions(head, contentType);
+    const thumbnail = await makePhotoThumbnail(source);
     const entry = await storePhotoFile(db, accountId, {
-      bytes: file,
+      body: file,
+      size,
       contentType,
       folder,
       height: dimensions?.height ?? null,
@@ -142,7 +162,7 @@ export async function POST(request: NextRequest) {
       width: dimensions?.width ?? null,
     });
     return NextResponse.json({ entry });
-  });
+  }
 }
 
 function acceptedType(bytes: Buffer): string | undefined {

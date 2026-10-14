@@ -297,8 +297,14 @@ export function ColorEditorFooter({
     actions
   return (
     <div className={clsx('flex flex-wrap items-center gap-2', className)}>
-      <Button color="secondary" size="small" onClick={resetProfile} disabled={isDefault}>
-        Reset sliders
+      <Button
+        color="secondary"
+        size="small"
+        onClick={resetProfile}
+        disabled={isDefault}
+        title="Back to Auto, or to no adjustments when there is nothing to fit"
+      >
+        Reset
       </Button>
       {hasSavedProfile ? (
         <Button color="red" size="small" onClick={removeProfile}>

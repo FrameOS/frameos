@@ -147,7 +147,10 @@ A JPEG thumbnail, at most 512 px on the long side, turned by the photo's
 EXIF orientation, transparency on white, or 404 when the server could not
 read the image (the SPA then shows the file itself). Each plane makes its
 own, whoever uploaded the photo: the backend with Pillow on first request,
-the cloud with sharp when the upload stores the photo.
+the cloud with sharp when the upload stores the photo. A JPEG gets one up to
+400 megapixels (both decoders shrink it while reading); a PNG, GIF, WebP or
+BMP decodes whole, so those stop at 80 megapixels. The cloud's PhotoDNA scan
+copy follows the same caps, so a larger image is refused where PhotoDNA is on.
 
 ### `GET /api/photos/file?path=<file>[&download=1]`
 
@@ -357,9 +360,10 @@ its row.
 
 Uploads accept JPEG, PNG, GIF and WebP only (every byte stored must pass the
 scan), at most 250 MiB each. Each account has `FRAMEOS_CLOUD_MAX_PHOTO_MB` of
-storage (default 1024), at most 100 000 entries and 16 unfinished uploads.
+storage (default 10240), at most 100 000 entries and 16 unfinished uploads.
 Unfinished uploads wait on the app server's disk (`FRAMEOS_PHOTO_UPLOAD_DIR`),
-never in the bucket.
+never in the bucket, and a finished one is hashed, scanned, thumbnailed and
+streamed to the bucket from that file, never held whole in memory.
 
 Revoking a link stops new listings and redirects at once. A frame that already
 holds a CDN address keeps it working until the photo is deleted.

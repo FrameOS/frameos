@@ -32,16 +32,21 @@
 // means. It moves bytes.
 
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
+import { Readable } from "node:stream";
 import { AwsClient } from "aws4fetch";
 
 export type ObjectStoreDriver = "fs" | "s3";
 
+/** A body that stays on disk: it is copied or streamed, never read whole. */
+export type ObjectFile = { path: string; size: number };
+
 export type ObjectStore = {
   driver: ObjectStoreDriver;
   /** Write bytes at `key`. Overwriting with identical bytes is a no-op-ish. */
-  put(key: string, body: Buffer, contentType: string): Promise<void>;
+  put(key: string, body: Buffer | ObjectFile, contentType: string): Promise<void>;
   /** Bytes at `key`, or undefined when the object is not there. */
   get(key: string): Promise<Buffer | undefined>;
   /** Size in bytes, or undefined when the object is not there. */
@@ -126,7 +131,11 @@ function createFsStore(root: string): ObjectStore {
         .update(`${process.pid}:${Date.now()}:${Math.random()}`)
         .digest("hex")
         .slice(0, 12)}.tmp`;
-      await writeFile(temporary, body);
+      if (Buffer.isBuffer(body)) {
+        await writeFile(temporary, body);
+      } else {
+        await copyFile(body.path, temporary);
+      }
       await rename(temporary, path);
     },
     async get(key) {
@@ -191,10 +200,14 @@ function createS3Store(config: {
   return {
     driver: "s3",
     async put(key, body, contentType) {
+      // A file streams from disk: the signer sends S3 an unsigned payload
+      // (its default for a body it cannot hash) and a half-duplex request.
       const response = await client.fetch(urlFor(key), {
-        body: new Uint8Array(body),
+        body: Buffer.isBuffer(body)
+          ? new Uint8Array(body)
+          : (Readable.toWeb(createReadStream(body.path)) as unknown as ReadableStream),
         headers: {
-          "content-length": String(body.length),
+          "content-length": String(Buffer.isBuffer(body) ? body.length : body.size),
           "content-type": contentType || "application/octet-stream",
         },
         method: "PUT",

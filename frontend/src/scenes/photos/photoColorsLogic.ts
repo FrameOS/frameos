@@ -641,6 +641,13 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
           actions.setProfile(autoProfileFor(values.profile, endPoints))
         }
       },
+      // Reset lands on Auto (what a photo without colors shows) when the
+      // target has a range to fit into; otherwise on no adjustments.
+      resetProfile: () => {
+        if (values.autoEndPoints) {
+          actions.setProfile(autoProfileFor(values.profile, values.autoEndPoints))
+        }
+      },
       setAdjustmentMode: ({ mode }) => {
         if (mode === 'none') {
           actions.setProfile({ ...defaultAssetColorProfile(), palette: values.profile.palette })
@@ -682,9 +689,9 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
           values.adjustmentMode === 'auto' && values.previewTarget.autoFit && !values.profile.palette
             ? null
             : photoColorsOfProfile(values.profile)
-        if (await save(colors)) {
-          actions.closeEditor()
-        }
+        // The panel stays: the saved entry comes back and the sliders are
+        // clean again, ready for the next tweak.
+        await save(colors)
       },
       removeProfile: async () => {
         if (await save(null)) {

@@ -93,6 +93,16 @@ describe("filesystem driver", () => {
     await store.delete(key);
   });
 
+  it("copies a file from disk without reading it whole", async () => {
+    const source = join(root, "upload.part");
+    await writeFile(source, "from disk");
+    const key = "store/scene-images/from-file";
+    await objectStore().put(key, { path: source, size: 9 }, "text/plain");
+    expect((await objectStore().get(key))?.toString()).toBe("from disk");
+    // The source is the caller's to remove.
+    expect(await readFile(source, "utf8")).toBe("from disk");
+  });
+
   it("has no public URL: a dev directory is not reachable from a browser", () => {
     expect(objectStore().publicUrl("store/scene-images/abc")).toBeUndefined();
   });

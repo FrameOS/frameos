@@ -3,6 +3,8 @@
 // cannot answer, refuse. (A thumbnail is made from bytes that passed.)
 
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 import type { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../device-flow";
 import type { FramesDatabase } from "../frames";
@@ -15,16 +17,23 @@ export function photoSha256(bytes: Buffer) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+/** The digest of a file on disk, streamed. */
+export async function photoFileSha256(path: string) {
+  const hash = createHash("sha256");
+  await pipeline(createReadStream(path), hash);
+  return hash.digest("hex");
+}
+
 export async function scanIncomingPhoto(
   db: FramesDatabase,
   request: NextRequest,
   owner: { accountId: string; email: string | undefined },
-  bytes: Buffer,
+  source: Buffer | string,
   contentType: string,
 ): Promise<{ response: NextResponse; sha256?: undefined } | { response?: undefined; sha256: string }> {
-  const sha256 = photoSha256(bytes);
+  const sha256 = Buffer.isBuffer(source) ? photoSha256(source) : await photoFileSha256(source);
   const result = await scanPhoto(
-    { bytes, contentType, sha256 },
+    { source, contentType, sha256 },
     { blockedHash: (digest) => blockedPhotoHash(db, digest) },
   );
   if (result.outcome === "unavailable") {

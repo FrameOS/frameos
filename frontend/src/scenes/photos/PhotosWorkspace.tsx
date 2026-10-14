@@ -1126,7 +1126,20 @@ function PreviewTargetSelect({ overlay = false }: { overlay?: boolean }): JSX.El
 function PhotoColorsPanel(): JSX.Element {
   const values = useValues(photoColorsLogic)
   const actions = useActions(photoColorsLogic)
+  const { saveAndOpenNext } = actions
   const fileName = values.imagePath ? photoBaseName(values.imagePath) : ''
+  // Cmd/Ctrl+Enter is "Save & next" (just "Save" on the last photo), from a
+  // slider or anywhere else in the lightbox.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault()
+        saveAndOpenNext()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
   return (
     <aside
       className="photos-colors-panel frameos-panel flex w-[24rem] max-w-[90vw] shrink-0 flex-col border-l border-white/80 bg-white/95 text-slate-900 backdrop-blur-xl"
