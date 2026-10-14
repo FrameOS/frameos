@@ -117,6 +117,52 @@ export function photoPreviewTargets(frames: FrameType[]): PhotoPreviewTarget[] {
   ]
 }
 
+/**
+ * Where a preview's size comes from: the palette target's own panel
+ * (`target`), one of the frames (`frame:<id>`, its size and rotation) or a
+ * common panel size (`size:<w>x<h>`). The palette stays the target's.
+ */
+export const PREVIEW_SIZE_TARGET_KEY = 'target'
+
+export const PREVIEW_SIZE_PRESETS: { width: number; height: number; label: string }[] = [
+  { width: 800, height: 480, label: '7.5" and 7.3" panels' },
+  { width: 1200, height: 825, label: '9.7" panels' },
+  { width: 1304, height: 984, label: '10.3" panels' },
+  { width: 1600, height: 1200, label: '13.3" panels' },
+  { width: 1872, height: 1404, label: '13.3" Spectra' },
+  { width: 1280, height: 720, label: '720p' },
+  { width: 1920, height: 1080, label: '1080p' },
+  { width: 2560, height: 1440, label: '1440p' },
+  { width: 3840, height: 2160, label: '4K' },
+]
+
+export function previewSizePresetKey(preset: { width: number; height: number }): string {
+  return `size:${preset.width}x${preset.height}`
+}
+
+/**
+ * The target at the chosen size: a frame's panel size (turned as the frame
+ * is), a preset, or the target's own. Full fidelity has no size to change.
+ */
+export function previewTargetAtSize(
+  target: PhotoPreviewTarget,
+  sizeKey: string,
+  frames: FrameType[]
+): PhotoPreviewTarget {
+  if (target.group === 'original' || !sizeKey || sizeKey === PREVIEW_SIZE_TARGET_KEY) {
+    return target
+  }
+  if (sizeKey.startsWith('frame:')) {
+    const frame = frames.find((item) => `frame:${item.id}` === sizeKey)
+    return frame ? { ...target, ...panelRenderSize(frame) } : target
+  }
+  const match = /^size:(\d+)x(\d+)$/.exec(sizeKey)
+  if (match) {
+    return { ...target, width: Number(match[1]), height: Number(match[2]) }
+  }
+  return target
+}
+
 /** The same panel or frame turned on its side; full fidelity has no side to turn. */
 export function rotatedPreviewTarget(target: PhotoPreviewTarget): PhotoPreviewTarget {
   if (target.group === 'original') {

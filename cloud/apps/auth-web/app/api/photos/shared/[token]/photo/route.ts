@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../../../../../../src/lib/device-flow";
 import { sharedPhotoContext, sharedPhotoJson } from "../../../../../../src/lib/photos/http";
-import { sharedPhotoColors, sharedPhotos } from "../../../../../../src/lib/photos/library";
+import { sharedPhotoAt, sharedPhotoColors, sharedPhotos } from "../../../../../../src/lib/photos/library";
 import { parsePhotoOrder, pickPhoto } from "../../../../../../src/lib/photos/pick";
 
 export const runtime = "nodejs";
@@ -30,6 +30,18 @@ export async function GET(
     return context.response;
   }
   const { db, origin, share } = context;
+  // `path`: one named photo (a single-photo scene), never the counter's pick.
+  const path = query.get("path");
+  if (path) {
+    const named = await sharedPhotoAt(db, share, path);
+    if (!named) {
+      return jsonError("not_found", 404);
+    }
+    return NextResponse.json(
+      { count: 1, index: 0, photo: sharedPhotoJson(origin, token, named) },
+      { headers: { "cache-control": "no-store" } },
+    );
+  }
   const { photos } = await sharedPhotos(db, share, { withColors: false });
   const picked = pickPhoto(photos, { index, order, token });
   const photo = picked.photo

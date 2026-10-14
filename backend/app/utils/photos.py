@@ -73,6 +73,12 @@ SHARE_URL_PREFIX = "/api/photos/shared"
 SHARE_ORDERS = ("random", "sequential", "newest", "oldest")
 COLORS_SUFFIX = ".frameos.json"
 MAX_COLORS_BYTES = 64 * 1024
+# Resizing (docs/photos.md "POST /api/photos/resize"): the fits, the formats
+# a photo can be re-encoded to, and the longest side a result may have.
+RESIZE_FITS = ("inside", "cover", "contain", "fill")
+RESIZE_FORMATS = ("keep", "jpeg", "png", "webp")
+RESIZE_MAX_SIDE = 16384
+RESIZE_EXTENSIONS = {"jpeg": ".jpg", "png": ".png", "webp": ".webp", "gif": ".gif", "bmp": ".bmp"}
 
 _UPLOAD_ID_RE = re.compile(r"[A-Za-z0-9_-]{8,64}")
 _SHARE_TOKEN_RE = re.compile(r"pk_[A-Za-z0-9_-]{32,124}")
@@ -1040,6 +1046,192 @@ def set_colors(db: Session, project_id: int, path: str, colors: Any) -> dict[str
     return entry_for(db, project_id, path) or {}
 
 
+@dataclass
+class ResizeOptions:
+    width: Optional[int]
+    height: Optional[int]
+    fit: str = "inside"
+    format: str = "keep"
+    quality: int = 85
+    upscale: bool = False
+    background: str = "#ffffff"
+    # PNG only: reduce to a palette of this many colors (2 to 256), or keep every color.
+    colors: Optional[int] = None
+
+
+def _parse_background(value: str) -> tuple[int, int, int]:
+    match = re.fullmatch(r"#?([0-9a-fA-F]{6})", value.strip())
+    if not match:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="background must be a #rrggbb color")
+    digits = match.group(1)
+    return int(digits[0:2], 16), int(digits[2:4], 16), int(digits[4:6], 16)
+
+
+def resize_box(
+    source: tuple[int, int], width: Optional[int], height: Optional[int], fit: str, upscale: bool
+) -> tuple[int, int]:
+    """The canvas the result is drawn on. `inside` keeps the aspect and fits
+    within the box (one side may be left out); the other fits take the box
+    as it is. Without `upscale` nothing is invented: `inside` never grows
+    the photo, and a box larger than the photo shrinks to fit inside it at
+    the box's own aspect."""
+    sw, sh = source
+    if fit == "inside":
+        bw = width or sw
+        bh = height or sh
+        scale = min(bw / sw, bh / sh)
+        if not upscale:
+            scale = min(scale, 1.0)
+        return max(1, round(sw * scale)), max(1, round(sh * scale))
+    bw, bh = width or sw, height or sh
+    if not upscale and (bw > sw or bh > sh):
+        scale = min(sw / bw, sh / bh)
+        bw, bh = max(1, round(bw * scale)), max(1, round(bh * scale))
+    return bw, bh
+
+
+def resize_image_bytes(data: bytes, name: str, options: ResizeOptions) -> tuple[bytes, str, int, int]:
+    """The photo re-drawn at the size `options` asks for, upright (the EXIF
+    turn applied and dropped), encoded in the format asked for or the one it
+    came in: (bytes, format name, width, height). 400 for a photo Pillow
+    cannot read or a format it cannot write, 413 for one over its format's
+    pixel cap."""
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:  # pragma: no cover - Pillow is a dependency
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="Image support is not installed")
+
+    bomb_limit = Image.MAX_IMAGE_PIXELS
+    Image.MAX_IMAGE_PIXELS = THUMB_MAX_JPEG_PIXELS
+    try:
+        opened = Image.open(io.BytesIO(data))
+    except Exception:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="This file is not an image that can be resized")
+    finally:
+        Image.MAX_IMAGE_PIXELS = bomb_limit
+    with opened:
+        source_format = (opened.format or "").lower()
+        if source_format == "mpo":
+            source_format = "jpeg"
+        cap = THUMB_MAX_JPEG_PIXELS if source_format == "jpeg" else THUMB_MAX_PIXELS
+        if opened.size[0] * opened.size[1] > cap:
+            raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="This image is too large to resize")
+        target_format = source_format if options.format == "keep" else options.format
+        if target_format not in RESIZE_EXTENSIONS:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"Images of type {source_format or 'unknown'} cannot be resized here")
+        # The EXIF turn first, so the box is measured against the photo as it is seen.
+        image = ImageOps.exif_transpose(opened) or opened
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGBA" if "A" in image.mode or image.mode == "P" else "RGB")
+        bw, bh = resize_box(image.size, options.width, options.height, options.fit, options.upscale)
+        if options.fit in ("inside", "fill"):
+            image = image.resize((bw, bh), Image.Resampling.LANCZOS)
+        elif options.fit == "cover":
+            image = ImageOps.fit(image, (bw, bh), Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+        else:  # contain: fit within, pad to the box on the background
+            scale = min(bw / image.size[0], bh / image.size[1])
+            inner = (max(1, round(image.size[0] * scale)), max(1, round(image.size[1] * scale)))
+            image = image.resize(inner, Image.Resampling.LANCZOS)
+            rgb = _parse_background(options.background)
+            fill: tuple[int, int, int] | tuple[int, int, int, int] = (rgb[0], rgb[1], rgb[2], 255) if image.mode == "RGBA" else rgb
+            canvas = Image.new("RGBA" if image.mode == "RGBA" else "RGB", (bw, bh), fill)
+            canvas.paste(image, ((bw - inner[0]) // 2, (bh - inner[1]) // 2))
+            image = canvas
+        buffer = io.BytesIO()
+        quality = max(1, min(100, int(options.quality)))
+        if target_format == "jpeg":
+            if image.mode == "RGBA":
+                flat = Image.new("RGB", image.size, _parse_background(options.background))
+                flat.paste(image, mask=image.getchannel("A"))
+                image = flat
+            # Baseline, never progressive: the smallest frames decode a baseline JPEG in strips.
+            image.save(buffer, format="JPEG", quality=quality, optimize=True, progressive=False)
+        elif target_format == "png":
+            if options.colors:
+                image = image.quantize(colors=max(2, min(256, int(options.colors))), method=Image.Quantize.FASTOCTREE)
+            image.save(buffer, format="PNG", optimize=True)
+        elif target_format == "webp":
+            image.save(buffer, format="WEBP", quality=quality, lossless=quality >= 100, method=4)
+        elif target_format == "gif":
+            image.convert("RGB").quantize(colors=256).save(buffer, format="GIF")
+        else:  # bmp
+            if image.mode == "RGBA":
+                flat = Image.new("RGB", image.size, _parse_background(options.background))
+                flat.paste(image, mask=image.getchannel("A"))
+                image = flat
+            image.save(buffer, format="BMP")
+        return buffer.getvalue(), target_format, image.size[0], image.size[1]
+
+
+def resize_photo(db: Session, project_id: int, store: ObjectStore, path: str, options: ResizeOptions) -> dict[str, Any]:
+    """Replace a photo with itself resized (docs/photos.md "POST
+    /api/photos/resize"): new bytes, thumbnail, size and dimensions, the
+    same row otherwise (its colors, its place in the album, its date). A
+    format change changes the extension; the returned entry has the path."""
+    if options.fit not in RESIZE_FITS:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"fit must be one of {', '.join(RESIZE_FITS)}")
+    if options.format not in RESIZE_FORMATS:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"format must be one of {', '.join(RESIZE_FORMATS)}")
+    for side in (options.width, options.height):
+        if side is not None and (not isinstance(side, int) or isinstance(side, bool) or side < 1 or side > RESIZE_MAX_SIDE):
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"width and height must be whole numbers from 1 to {RESIZE_MAX_SIDE}")
+    if options.width is None and options.height is None:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Give a width, a height, or both")
+    if options.fit != "inside" and (options.width is None or options.height is None):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"fit {options.fit} needs both a width and a height")
+    _parse_background(options.background)
+    row = _row_at(db, project_id, path)
+    if row is None or row.kind != "file":
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="File not found")
+    if not is_playable(base_name(path)) or not (row.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Only images can be resized")
+    stored = fetch_object(store, row.object_key)
+    data = stored.data if stored.data is not None else (stored.path.read_bytes() if stored.path else b"")
+    resized, target_format, width, height = resize_image_bytes(data, base_name(path), options)
+    digest = hashlib.sha256(resized).hexdigest()
+    object_key = file_object_key(digest)
+    new_name = base_name(path)
+    stem, _dot, ext = new_name.rpartition(".")
+    if RESIZE_EXTENSIONS.get(target_format) and content_type_for(new_name) != f"image/{target_format}":
+        new_name = f"{stem or new_name}{RESIZE_EXTENSIONS[target_format]}"
+    content_type = content_type_for(new_name)
+    thumb_key: Optional[str] = None
+    try:
+        if not store.exists(object_key):
+            store.put(object_key, resized, content_type)
+        thumbnail = thumbnail_of(resized, new_name)
+        if thumbnail is not None:
+            thumb_key = thumb_object_key(digest)
+            if not store.exists(thumb_key):
+                store.put(thumb_key, thumbnail, "image/jpeg")
+    except StoreError as error:
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=f"The photo could not be stored: {error}")
+    with project_lock(project_id):
+        row = _row_at(db, project_id, path)
+        if row is None or row.kind != "file":
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="File not found")
+        old_keys = [row.object_key, row.thumb_object_key]
+        folder = parent_path(path)
+        target = path
+        if new_name != base_name(path):
+            target = join_path(folder, _free_child_name(db, project_id, folder, new_name))
+            if not path_within_limits(target):
+                raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"Paths can be at most {MAX_PATH_BYTES} bytes long")
+        row.path = target
+        row.size_bytes = len(resized)
+        row.content_type = content_type
+        row.sha256 = digest
+        row.object_key = object_key
+        row.thumb_object_key = thumb_key
+        row.width = width
+        row.height = height
+        row.updated_at = _utcnow()
+        _touch_folder(db, project_id, folder)
+        db.commit()
+        _delete_unreferenced_objects(db, store, [key for key in old_keys if key not in (object_key, thumb_key)])
+    return entry_for(db, project_id, target) or {}
+
+
 def _delete_unreferenced_objects(db: Session, store: ObjectStore, keys: list[Optional[str]]) -> None:
     """Objects whose rows are gone, unless another row (any project: objects
     are content addressed) still points at them. A store that refuses keeps
@@ -1202,6 +1394,17 @@ def pick_photo(photos: list[SharedPhoto], order: str, index: int, token: str) ->
     permutation = list(range(count))
     random.Random(f"{token}:{index // count}").shuffle(permutation)
     return photos[permutation[position]]
+
+
+def shared_photo_at(db: Session, shared: SharedFolder, rel: str) -> Optional[SharedPhoto]:
+    """One playable file below the shared folder, by its path relative to
+    it, or None (a single-photo scene asks for its photo by path)."""
+    if _path_problem(rel) or not is_playable(base_name(rel)):
+        return None
+    row = _row_at(db, shared.project_id, f"{shared.path}/{rel}")
+    if row is None or row.kind != "file" or row.status != "ready":
+        return None
+    return SharedPhoto(path=rel, name=base_name(rel), row=row)
 
 
 def shared_file_row(db: Session, shared: SharedFolder, rel: str) -> PhotoEntry:

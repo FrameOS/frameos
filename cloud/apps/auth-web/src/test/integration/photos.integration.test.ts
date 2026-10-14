@@ -31,6 +31,7 @@ import { POST as postDelete } from "../../../app/api/photos/delete/route";
 import { POST as postFolders } from "../../../app/api/photos/folders/route";
 import { POST as postMove } from "../../../app/api/photos/move/route";
 import { POST as postRename } from "../../../app/api/photos/rename/route";
+import { POST as postResize } from "../../../app/api/photos/resize/route";
 import { POST as postScene } from "../../../app/api/photos/scene/route";
 import { GET as getShared } from "../../../app/api/photos/shared/[token]/route";
 import { GET as getSharedFile } from "../../../app/api/photos/shared/[token]/file/route";
@@ -1194,5 +1195,127 @@ describe("photo library: accounts are separate", () => {
     signOut();
     const index = await getShared(get(`/api/photos/shared/${mine.token}`), tokenParams(mine.token));
     expect(((await index.json()) as { count: number }).count).toBe(1);
+  });
+});
+
+describe("POST /api/photos/resize", () => {
+  async function resize(body: Record<string, unknown>) {
+    return postResize(postJson("/api/photos/resize", body));
+  }
+  async function meta(path: string) {
+    const served = await getFile(get(`/api/photos/file?path=${encodeURIComponent(path)}`));
+    expect(served.status).toBe(200);
+    const bytes = Buffer.from(await served.arrayBuffer());
+    return { bytes, ...(await sharp(bytes).metadata()) };
+  }
+
+  it("replaces the bytes and keeps the entry", async () => {
+    await signIn();
+    const uploaded = (await (await upload("Album", "a.png", await realPng(400, 300))).json()).entry;
+    expect([uploaded.width, uploaded.height]).toEqual([400, 300]);
+    await postColors(postJson("/api/photos/colors", { colors: { whites: -10 }, path: "Album/a.png" }));
+    const [before] = await db.select({ objectKey: photoEntries.objectKey, thumbObjectKey: photoEntries.thumbObjectKey }).from(photoEntries);
+
+    const response = await resize({ height: 200, path: "Album/a.png", width: 200 });
+    expect(response.status).toBe(200);
+    const entry = (await response.json()).entry;
+    expect(entry.path).toBe("Album/a.png");
+    expect([entry.width, entry.height]).toEqual([200, 150]);
+    expect(entry.colors).toEqual({ whites: -10 });
+    expect(entry.mtime).toBe(uploaded.mtime);
+    const file = await meta("Album/a.png");
+    expect([file.format, file.width, file.height]).toEqual(["png", 200, 150]);
+    expect(entry.size).toBe(file.bytes.length);
+    // Old objects gone, new ones there.
+    expect(await objectStore().head(before!.objectKey!)).toBeUndefined();
+    expect(await objectStore().head(before!.thumbObjectKey!)).toBeUndefined();
+    const [after] = await db.select({ objectKey: photoEntries.objectKey, thumbObjectKey: photoEntries.thumbObjectKey }).from(photoEntries);
+    expect(await objectStore().head(after!.objectKey!)).toBe(file.bytes.length);
+    expect(await objectStore().head(after!.thumbObjectKey!)).toBeGreaterThan(0);
+    const thumb = await getThumb(get("/api/photos/thumb?path=Album%2Fa.png"));
+    expect(thumb.status).toBe(200);
+  });
+
+  it("fits, formats, and never invents pixels unless asked", async () => {
+    await signIn();
+    await upload("Album", "a.png", await realPng(400, 300));
+    let entry = (await (await resize({ height: 800, path: "Album/a.png", width: 800 })).json()).entry;
+    expect([entry.width, entry.height]).toEqual([400, 300]);
+    entry = (await (await resize({ height: 800, path: "Album/a.png", upscale: true, width: 800 })).json()).entry;
+    expect([entry.width, entry.height]).toEqual([800, 600]);
+    entry = (await (await resize({ fit: "cover", height: 100, path: "Album/a.png", width: 100 })).json()).entry;
+    expect([entry.width, entry.height]).toEqual([100, 100]);
+
+    await upload("Album", "b.png", await realPng(400, 300));
+    entry = (await (await resize({ background: "#000000", fit: "contain", height: 100, path: "Album/b.png", width: 100 })).json()).entry;
+    expect([entry.width, entry.height]).toEqual([100, 100]);
+    const padded = await meta("Album/b.png");
+    const { data } = await sharp(padded.bytes).raw().toBuffer({ resolveWithObject: true });
+    const pixel = (x: number, y: number) => data[(y * 100 + x) * 3]!;
+    expect(pixel(50, 2)).toBeLessThan(20);
+    expect(pixel(50, 50)).toBeGreaterThan(20);
+
+    // A format change renames to a free name with the new extension.
+    await upload("Album", "c.png", await realPng(40, 30));
+    await upload("Album", "c.jpg", await realPng(40, 30));
+    const response = await resize({ format: "jpeg", path: "Album/c.png", quality: 70, width: 20 });
+    expect(response.status).toBe(200);
+    entry = (await response.json()).entry;
+    expect(entry.path).toBe("Album/c (2).jpg");
+    expect(entry.content_type).toBe("image/jpeg");
+    const converted = await meta("Album/c (2).jpg");
+    expect([converted.format, converted.width, converted.height, converted.isProgressive]).toEqual(["jpeg", 20, 15, false]);
+    entry = (await (await resize({ colors: 16, format: "png", path: "Album/c (2).jpg", width: 10 })).json()).entry;
+    expect(entry.path).toBe("Album/c (2).png");
+    entry = (await (await resize({ format: "webp", path: "Album/c (2).png", width: 10 })).json()).entry;
+    expect(entry.path).toBe("Album/c (2).webp");
+    expect((await meta("Album/c (2).webp")).format).toBe("webp");
+  });
+
+  it("refuses what the contract refuses", async () => {
+    await signIn();
+    await upload("Album", "a.png", await realPng(40, 30));
+    await postFolders(postJson("/api/photos/folders", { path: "Empty" }));
+    for (const [body, status] of [
+      [{ path: "Album/a.png" }, 400],
+      [{ path: "Album/a.png", width: 0 }, 400],
+      [{ fit: "cover", path: "Album/a.png", width: 20 }, 400],
+      [{ fit: "sideways", path: "Album/a.png", width: 20 }, 400],
+      [{ format: "tiff", path: "Album/a.png", width: 20 }, 400],
+      [{ path: "Album/a.png", quality: 0, width: 20 }, 400],
+      [{ background: "red", path: "Album/a.png", width: 20 }, 400],
+      [{ path: "Empty", width: 20 }, 404],
+      [{ path: "Album/missing.png", width: 20 }, 404],
+    ] as const) {
+      const response = await resize(body);
+      expect(response.status, JSON.stringify(body)).toBe(status);
+    }
+  });
+});
+
+describe("GET /api/photos/shared/{token}/photo?path=", () => {
+  it("answers one named photo, and 404 for anything else", async () => {
+    await signIn();
+    await upload("Album/beach", "a.png", png(40, 30, "a"));
+    await upload("Album", "b.png", png(40, 30, "b"));
+    const shareResponse = await postShares(postJson("/api/photos/shares", { path: "Album" }));
+    const { share } = (await shareResponse.json()) as { share: { token: string } };
+    signOut();
+
+    const response = await getSharedPhoto(
+      get(`/api/photos/shared/${share.token}/photo?path=${encodeURIComponent("beach/a.png")}`),
+      { params: Promise.resolve({ token: share.token }) },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { count: number; index: number; photo: { path: string; url: string } };
+    expect([body.index, body.count, body.photo.path]).toEqual([0, 1, "beach/a.png"]);
+    expect(body.photo.url).toContain("/file?path=beach%2Fa.png");
+    for (const missing of ["beach/nope.png", "../b.png", "beach"]) {
+      const refused = await getSharedPhoto(
+        get(`/api/photos/shared/${share.token}/photo?path=${encodeURIComponent(missing)}`),
+        { params: Promise.resolve({ token: share.token }) },
+      );
+      expect(refused.status, missing).toBe(404);
+    }
   });
 });

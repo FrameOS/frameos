@@ -202,6 +202,39 @@ paths; an empty list is a 400.
 - Moving or renaming the photo keeps its profile; deleting it deletes the
   profile.
 
+### `POST /api/photos/resize`
+
+`{"path": "Summer 2026/a.jpg", "width": 1600, "height": 1200, "fit": "inside", "format": "keep", "quality": 85, "upscale": false, "background": "#ffffff", "colors": null}`
+→ `{"entry": Entry}`. Replaces the photo with itself resized: new bytes, a
+new thumbnail, a new `size`, `width` and `height`; the same entry otherwise
+(its `colors`, its `mtime`, the share links of its folder). The result is
+stored upright (the EXIF turn applied, then dropped).
+
+- `path` must be a playable image (400 otherwise, a folder included; 404
+  when it is missing).
+- `width`, `height`: whole numbers from 1 to 16384. Give one or both.
+- `fit`: `inside` (default; keeps the aspect, fits within the box, one side
+  may be left out), `cover` (fills the box, crops the middle), `contain`
+  (fits within the box, pads with `background`) or `fill` (stretches to
+  the box). Every fit but `inside` needs both sides.
+- `upscale` (default false): nothing is invented. `inside` never grows the
+  photo; for the other fits a box larger than the photo shrinks to fit
+  inside it at the box's own aspect. With `true` the box is taken as is.
+- `format`: `keep` (default; the type the photo has) or `jpeg`, `png`,
+  `webp`. A different type changes the extension, to a free name (`a.jpg`
+  resized to PNG is `a.png`, or `a (2).png`); the returned entry has the
+  path. A GIF or BMP kept keeps its type; a type the server cannot write is
+  a 400.
+- `quality`: 1 to 100, default 85, for JPEG and WebP (100 makes WebP
+  lossless). A JPEG is always baseline, never progressive: that is what the
+  smallest frames decode.
+- `colors`: PNG only, 2 to 256: the result is reduced to a palette of that
+  many colors. Absent: every color is kept.
+- `background`: `#rrggbb`, default white: what `contain` pads with and what
+  transparency is flattened on for JPEG and BMP.
+- 413 for a photo over the thumbnailer's pixel cap, 503 when the server has
+  no image library. The cloud scans the new bytes like an upload (422, 503).
+
 ### Share links
 
 A folder has one link for anyone (`frame_id` and `name` null), one per
@@ -268,6 +301,9 @@ scene is up to the caller (the frame routes, or the MCP's
 - `fit`: `cover` (default) or `contain`.
 - `name`: the scene's name, at most 256 characters; default the folder's
   name.
+- The SPA's builder also makes a single-photo scene (`photo`: the file's
+  path relative to the folder, in the app node's config): the same scene,
+  with the app asking for that photo by `path` instead of moving a counter.
 - `frame_id`: backend only, and required there: the link in the scene is the
   address that frame uses to reach the backend (its `server_scheme`,
   `server_host` and `server_port`), so 404 for a frame of another project and
@@ -317,7 +353,12 @@ relative to the shared folder. `colors` is the photo's color profile or
 
 ### `GET /api/photos/shared/{token}/photo?order=<order>&index=<n>`
 
-One photo, so a frame never downloads the whole listing:
+One photo, so a frame never downloads the whole listing. With
+`?path=<path>` (relative to the shared folder) it is that photo, as
+`{"index": 0, "count": 1, "photo": ...}`, or a 404 when nothing playable
+is there: a scene that shows one photo (the Photos page's "Show on frame"
+on a file) asks for it this way, and `order` and `index` are ignored.
+Otherwise:
 
 ```json
 {"index": 41, "count": 120, "photo": {"path": "...", "name": "...", "url": "...", "colors": null, "...": "..."}}

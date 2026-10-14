@@ -118,7 +118,17 @@ proc mockPhotosLoop() {.thread.} =
       client.reply("404 Not Found", "application/json", """{"detail":"Share link not found"}""")
       continue
 
-    if route == "photo":
+    if route == "photo" and queryParam(query, "path") != "":
+      # One named photo (a single-photo scene): index and order are ignored.
+      let name = queryParam(query, "path").split('/')[^1]
+      let i = Names.find(name)
+      if i < 0 or token == "pk_empty":
+        client.reply("404 Not Found", "application/json", """{"detail":"Not Found"}""")
+      else:
+        var photo = photoAt(token, "sequential", i, base)
+        photo["path"] = %queryParam(query, "path")
+        client.reply("200 OK", "application/json", $(%*{"index": 0, "count": 1, "photo": photo}))
+    elif route == "photo":
       let index = parseInt(queryParam(query, "index"))
       if token == "pk_empty":
         client.reply("200 OK", "application/json", $(%*{"index": index, "count": 0, "photo": newJNull()}))
@@ -224,6 +234,20 @@ suite "photo album code app":
     check h.scene.state["photoIndex"].getInt() == 4
     check not h.anyErrorLogged()
     check h.runtime.images.len == 0
+
+  test "one photo by path is asked for by path, and the counter stays put":
+    let h = newHarness()
+    h.scene.state["photoIndex"] = %7
+    let config = %*{"album": shareLink("pk_rel"), "order": "newest", "counterStateKey": "photoIndex", "photo": "beach/c.jpg"}
+    check h.render(config).size() == (7, 5)
+    check h.render(config).size() == (7, 5)
+    check h.scene.state["photoIndex"].getInt() == 7
+    check h.logged("Showing c.jpg")
+    check not h.logged("of 3")
+    check not h.anyErrorLogged()
+    # A photo that left the album says so.
+    check h.render(%*{"album": shareLink("pk_rel"), "photo": "beach/zzz.jpg"}).size() == (200, 120)
+    check h.errorLogged("no longer in the album")
 
   test "the order and a counter left as a string reach the share route":
     let h = newHarness()

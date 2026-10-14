@@ -26,6 +26,7 @@ import {
   previewSizeFor,
   profileOfPhotoColors,
   rotatedPreviewTarget,
+  previewTargetAtSize,
 } from "../../../../../../frontend/src/scenes/photos/photoColors";
 import { defaultAssetColorProfile } from "../../../../../../frontend/src/utils/assetColors/profile";
 import type { FrameType } from "../../../../../../frontend/src/types";
@@ -241,6 +242,26 @@ describe("buildPhotoAlbumScene", () => {
     expect(has(fit, "fieldOutput", image, "fieldInput/placement")).toBe(true);
   });
 
+  it("shows one photo alone when asked, by its path inside the album", () => {
+    const single = buildPhotoAlbumScene({
+      name: "beach.jpg",
+      albumUrl: "http://10.0.0.5:8989/api/photos/shared/pk_x",
+      seconds: 600,
+      order: "random",
+      fit: "cover",
+      photo: "trip/beach.jpg",
+    });
+    const album = (single.nodes as unknown as TestNode[]).find((node) => node.data.keyword === "photoAlbum")!;
+    expect(album.data.config).toEqual({
+      album: "http://10.0.0.5:8989/api/photos/shared/pk_x",
+      counterStateKey: "photoIndex",
+      photo: "trip/beach.jpg",
+    });
+    // Without a photo the config is as before: the fixture pins that shape.
+    const album2 = (scene.nodes as unknown as TestNode[]).find((node) => node.data.keyword === "photoAlbum")!;
+    expect("photo" in (album2.data.config as object)).toBe(false);
+  });
+
   it("gives every scene its own ids", () => {
     const other = buildPhotoAlbumScene({
       name: "Summer",
@@ -317,6 +338,25 @@ describe("rotatedPreviewTarget", () => {
     expect(rotated.key).toBe(panel.key);
     expect(previewSizeFor(rotated, { width: 4000, height: 3000 })).toEqual({ width: 480, height: 800 });
     expect(rotatedPreviewTarget(targets[0])).toBe(targets[0]);
+  });
+});
+
+describe("previewTargetAtSize", () => {
+  const frames = [
+    { id: 7, name: "Hall", width: 1200, height: 825, rotate: 90 },
+    { id: 8, name: "Desk", width: 800, height: 480, rotate: 0 },
+  ] as unknown as FrameType[];
+  it("keeps the palette and takes the size from a frame, a preset, or the target itself", () => {
+    const targets = photoPreviewTargets(frames);
+    const panel = targets.find((target) => target.group === "panels")!;
+    expect(previewTargetAtSize(panel, "target", frames)).toBe(panel);
+    const fromFrame = previewTargetAtSize(panel, "frame:7", frames);
+    expect([fromFrame.width, fromFrame.height, fromFrame.palette]).toEqual([825, 1200, panel.palette]);
+    const preset = previewTargetAtSize(panel, "size:1920x1080", frames);
+    expect([preset.width, preset.height, preset.key]).toEqual([1920, 1080, panel.key]);
+    expect(previewTargetAtSize(panel, "frame:99", frames)).toBe(panel);
+    expect(previewTargetAtSize(panel, "size:big", frames)).toBe(panel);
+    expect(previewTargetAtSize(targets[0], "size:1920x1080", frames)).toBe(targets[0]);
   });
 });
 

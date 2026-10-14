@@ -24,6 +24,7 @@ import {
   MagnifyingGlassIcon,
   PencilSquareIcon,
   PhotoIcon,
+  PlayIcon,
   RectangleStackIcon,
   Squares2X2Icon,
   PaintBrushIcon,
@@ -38,13 +39,28 @@ import { TextInput } from '../../components/TextInput'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
-import type { FrameType } from '../../types'
+import type { FrameId, FrameType } from '../../types'
 import { inHassioIngress } from '../../utils/inHassioIngress'
 import { formatFrameRelativeTime, frameIsActive } from '../../decorators/frame'
-import { photosLogic, type PhotoUpload } from './photosLogic'
+import { photosLogic, type PhotoShowTarget, type PhotoUpload } from './photosLogic'
+import {
+  CUSTOM_SIZE_KEY,
+  PNG_COLOR_CHOICES,
+  RESIZE_FITS,
+  RESIZE_FORMATS,
+  photoResizeLogic,
+  type ResizeSizeChoice,
+} from './photoResizeLogic'
 import { aspectMarkRect, type PhotoThumbnailFit } from './photoEntries'
 import { photoColorsLogic } from './photoColorsLogic'
-import { type PhotoPreviewTarget, renderPhotoPreview } from './photoColors'
+import {
+  PREVIEW_SIZE_PRESETS,
+  PREVIEW_SIZE_TARGET_KEY,
+  type PhotoPreviewTarget,
+  previewSizePresetKey,
+  renderPhotoPreview,
+} from './photoColors'
+import { panelRenderSize } from '../../utils/assetColors/preview'
 import {
   ColorEditorAdjustments,
   ColorEditorCanvas,
@@ -52,7 +68,14 @@ import {
   ColorEditorViewControls,
 } from '../frame/panels/Assets/ColorEditorModal'
 import { Select } from '../../components/Select'
-import { photoFileUrl, photoThumbUrl, shareUrlForFrame, type PhotoEntry, type PhotoShare, type PhotosStatus } from './photosApi'
+import {
+  photoFileUrl,
+  photoThumbUrl,
+  shareUrlForFrame,
+  type PhotoEntry,
+  type PhotoShare,
+  type PhotosStatus,
+} from './photosApi'
 import {
   dragHasFiles,
   dragHasPhotoPaths,
@@ -466,6 +489,7 @@ function PhotosTopBar(): JSX.Element {
     refresh,
     openInstallPicker,
     openShare,
+    selectAll,
     selectByOrientation,
   } = useActions(photosLogic)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -557,6 +581,11 @@ function PhotosTopBar(): JSX.Element {
                     }
                   : null,
                 {
+                  label: 'Select all',
+                  icon: <CheckIcon className="h-5 w-5" />,
+                  onClick: selectAll,
+                },
+                {
                   label: 'Select all portrait',
                   icon: <AspectMark width={3} height={4} />,
                   onClick: () => selectByOrientation('portrait'),
@@ -616,8 +645,40 @@ function PhotosTopBar(): JSX.Element {
   )
 }
 
+/**
+ * "Show on frame", or, while a frame was used for it recently, "Show on
+ * <that frame>" plus "Show on…" for any other.
+ */
+function showOnFrameItems(
+  target: PhotoShowTarget,
+  recent: FrameType | null,
+  actions: {
+    openShowPicker: (target: PhotoShowTarget) => void
+    showOnFrame: (frameId: FrameId, target: PhotoShowTarget) => void
+  }
+): DropdownMenuItem[] {
+  if (recent) {
+    return [
+      {
+        label: `Show on ${recent.name || frameHost(recent)}`,
+        icon: <PlayIcon className="h-5 w-5" />,
+        onClick: () => actions.showOnFrame(recent.id, target),
+      },
+      {
+        label: 'Show on…',
+        icon: <ComputerDesktopIcon className="h-5 w-5" />,
+        onClick: () => actions.openShowPicker(target),
+      },
+    ]
+  }
+  return [
+    { label: 'Show on frame', icon: <PlayIcon className="h-5 w-5" />, onClick: () => actions.openShowPicker(target) },
+  ]
+}
+
 function entryMenuItems(
   entry: PhotoEntry,
+  recentShowFrame: FrameType | null,
   actions: {
     openEntry: (entry: PhotoEntry) => void
     openRename: (path: string) => void
@@ -625,11 +686,15 @@ function entryMenuItems(
     openShare: (path: string) => void
     openInstallPicker: (albums: string[]) => void
     openColors: (path: string) => void
+    openShowPicker: (target: PhotoShowTarget) => void
+    showOnFrame: (frameId: FrameId, target: PhotoShowTarget) => void
+    openResize: (paths: string[]) => void
   }
 ): DropdownMenuItem[] {
   if (entry.kind === 'folder') {
     return [
       { label: 'Open', icon: <FolderIcon className="h-5 w-5" />, onClick: () => actions.openEntry(entry) },
+      ...showOnFrameItems({ albums: [entry.path], photo: null }, recentShowFrame, actions),
       {
         label: 'Install on frame',
         icon: <ComputerDesktopIcon className="h-5 w-5" />,
@@ -644,15 +709,26 @@ function entryMenuItems(
       { label: 'Delete', icon: <TrashIcon className="h-5 w-5" />, onClick: () => actions.deleteEntries([entry.path]) },
     ]
   }
+  const playable = isBrowserImageName(entry.name) && entry.status !== 'blocked'
+  // A photo in the library root has no album to share, so no frame can show it.
+  const inAlbum = entry.path.includes('/')
   return [
-    isBrowserImageName(entry.name) && entry.status !== 'blocked'
+    playable
       ? { label: 'View', icon: <PhotoIcon className="h-5 w-5" />, onClick: () => actions.openEntry(entry) }
       : null,
-    isBrowserImageName(entry.name) && entry.status !== 'blocked'
+    ...(playable && inAlbum ? showOnFrameItems({ albums: [], photo: entry.path }, recentShowFrame, actions) : []),
+    playable
       ? {
           label: entry.colors ? 'Edit colors' : 'Set colors',
           icon: <PaintBrushIcon className="h-5 w-5" />,
           onClick: () => actions.openColors(entry.path),
+        }
+      : null,
+    playable
+      ? {
+          label: 'Resize',
+          icon: <ArrowsPointingInIcon className="h-5 w-5" />,
+          onClick: () => actions.openResize([entry.path]),
         }
       : null,
     entry.status !== 'blocked'
@@ -724,7 +800,17 @@ function SelectToggle({
 }
 
 function EntryMenu({ entry }: { entry: PhotoEntry }): JSX.Element {
-  const { openEntry, openRename, deleteEntries, openShare, openInstallPicker } = useActions(photosLogic)
+  const { recentShowFrame } = useValues(photosLogic)
+  const {
+    openEntry,
+    openRename,
+    deleteEntries,
+    openShare,
+    openInstallPicker,
+    openShowPicker,
+    showOnFrame,
+    openResize,
+  } = useActions(photosLogic)
   const { openEditor } = useActions(photoColorsLogic)
   return (
     <div onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
@@ -732,9 +818,12 @@ function EntryMenu({ entry }: { entry: PhotoEntry }): JSX.Element {
         horizontal
         className="w-fit"
         buttonColor="tertiary"
-        items={entryMenuItems(entry, {
+        items={entryMenuItems(entry, recentShowFrame, {
           openEntry,
           openRename,
+          openShowPicker,
+          showOnFrame,
+          openResize,
           deleteEntries,
           openShare,
           openInstallPicker,
@@ -893,13 +982,17 @@ function ListRow({ entry, selected, shared }: { entry: PhotoEntry; selected: boo
 
 function SelectionBar(): JSX.Element | null {
   const { selectedEntries, albums, folder } = useValues(photosLogic)
-  const { clearSelection, deleteEntries, moveEntries, openRename, openInstallPicker } = useActions(photosLogic)
+  const { clearSelection, deleteEntries, moveEntries, openRename, openInstallPicker, openResize } =
+    useActions(photosLogic)
   if (!selectedEntries.length) {
     return null
   }
   const paths = selectedEntries.map((entry) => entry.path)
   const single = selectedEntries.length === 1 ? selectedEntries[0] : null
   const folders = selectedEntries.filter((entry) => entry.kind === 'folder').map((entry) => entry.path)
+  const resizable = selectedEntries
+    .filter((entry) => entry.kind === 'file' && entry.status !== 'blocked' && isBrowserImageName(entry.name))
+    .map((entry) => entry.path)
   const moveTargets = [
     { name: 'Library', path: '' },
     ...albums.map((album) => ({ name: album.name, path: album.path })),
@@ -936,6 +1029,16 @@ function SelectionBar(): JSX.Element | null {
         >
           <ComputerDesktopIcon className="h-4 w-4" />
           Install on frame
+        </button>
+      ) : null}
+      {resizable.length ? (
+        <button
+          type="button"
+          onClick={() => openResize(resizable)}
+          className={clsx(toolbarButtonClassName, 'frameos-secondary-button h-9')}
+        >
+          <ArrowsPointingInIcon className="h-4 w-4" />
+          {resizable.length > 1 ? `Resize all (${resizable.length})` : 'Resize'}
         </button>
       ) : null}
       {single && single.kind === 'file' && single.status !== 'blocked' ? (
@@ -1081,11 +1184,65 @@ function previewTargetOptions(targets: PhotoPreviewTarget[]): {
   }
 }
 
-/** Full fidelity, a frame, or a panel family: what the photo is previewed as. */
+/** The size choices beside the palette: the target's own panel, a frame's, or a common size. */
+function previewSizeOptions(frames: PhotoPreviewTarget[], framesList: FrameType[]) {
+  return [
+    { value: PREVIEW_SIZE_TARGET_KEY, label: 'Panel size' },
+    ...(frames.length
+      ? [
+          {
+            label: 'From a frame',
+            options: frames.map((target) => {
+              const frame = framesList.find((item) => `frame:${item.id}` === target.key)
+              const size = frame ? panelRenderSize(frame) : { width: target.width, height: target.height }
+              return { value: target.key, label: `${target.label} ${size.width}×${size.height}` }
+            }),
+          },
+        ]
+      : []),
+    {
+      label: 'Change size',
+      options: PREVIEW_SIZE_PRESETS.map((preset) => ({
+        value: previewSizePresetKey(preset),
+        label: `${preset.width}×${preset.height} ${preset.label}`,
+      })),
+    },
+  ]
+}
+
+/** Full fidelity, a frame, or a panel family: what the photo is previewed as, and at what size. */
 function PreviewTargetSelect({ overlay = false }: { overlay?: boolean }): JSX.Element {
-  const { previewTargets, previewTarget } = useValues(photoColorsLogic)
-  const { setPreviewTarget, rotatePreviewTarget } = useActions(photoColorsLogic)
+  const { previewTargets, previewTarget, previewSizeKey, fit } = useValues(photoColorsLogic)
+  const { setPreviewTarget, setPreviewSize, rotatePreviewTarget, setFit } = useActions(photoColorsLogic)
+  const { framesList } = useValues(framesModel)
   const { original, frames, panels } = previewTargetOptions(previewTargets)
+  const sizeOptions = previewSizeOptions(frames, framesList)
+  const sizeControls =
+    previewTarget.group !== 'original' ? (
+      <>
+        <Select
+          value={previewSizeKey}
+          onChange={setPreviewSize}
+          options={sizeOptions}
+          title="The size the photo is placed at"
+          className={
+            overlay
+              ? 'h-9 max-w-[12rem] rounded-xl border border-white/20 bg-white/10 px-2 text-sm text-white'
+              : undefined
+          }
+        />
+        <Select
+          value={fit}
+          onChange={(value) => setFit(value === 'contain' ? 'contain' : 'cover')}
+          options={[
+            { value: 'cover', label: 'Fill' },
+            { value: 'contain', label: 'Whole photo' },
+          ]}
+          title="How the photo meets the panel"
+          className={overlay ? 'h-9 rounded-xl border border-white/20 bg-white/10 px-2 text-sm text-white' : undefined}
+        />
+      </>
+    ) : null
   const toOption = (target: PhotoPreviewTarget) => ({
     value: target.key,
     label: target.group === 'panels' ? `${target.label} panel` : target.label,
@@ -1119,9 +1276,10 @@ function PreviewTargetSelect({ overlay = false }: { overlay?: boolean }): JSX.El
     ) : null
   if (!overlay) {
     return (
-      <span className="flex items-center gap-2">
+      <span className="flex flex-wrap items-center gap-2">
         <span className="frame-tool-muted text-xs">Preview</span>
         <Select value={previewTarget.key} onChange={setPreviewTarget} options={options} />
+        {sizeControls}
         {rotate}
       </span>
     )
@@ -1150,6 +1308,7 @@ function PreviewTargetSelect({ overlay = false }: { overlay?: boolean }): JSX.El
           )
         )}
       </select>
+      {sizeControls}
       {rotate}
     </label>
   )
@@ -1254,7 +1413,16 @@ function LightboxPainted({ entry }: { entry: PhotoEntry }): JSX.Element {
       if (imageData) {
         canvas.width = imageData.width
         canvas.height = imageData.height
-        canvas.getContext('2d')?.putImageData(imageData, 0, 0)
+        const context = canvas.getContext('2d')
+        context?.putImageData(imageData, 0, 0)
+        // A panel's edge, drawn on the pixels themselves: a letterboxed photo
+        // would otherwise vanish into the black behind it, as if the size
+        // had not changed. (The canvas box is larger than its contents.)
+        if (context && previewTarget.group !== 'original') {
+          context.strokeStyle = 'rgba(255, 255, 255, 0.35)'
+          context.lineWidth = 1
+          context.strokeRect(0.5, 0.5, imageData.width - 1, imageData.height - 1)
+        }
       }
     })
     return () => window.cancelAnimationFrame(handle)
@@ -1283,7 +1451,9 @@ function LightboxPainted({ entry }: { entry: PhotoEntry }): JSX.Element {
       ref={canvasRef}
       onClick={(event) => event.stopPropagation()}
       // A panel is scaled up to the room there is, pixel for pixel, so the
-      // dither shows; a photo is never shown larger than it is.
+      // dither shows; a photo is never shown larger than it is. A ring marks
+      // the panel's edge: a letterboxed photo would otherwise vanish into the
+      // black behind it, as if the size had not changed.
       className={clsx('object-contain shadow-2xl', panel ? 'h-full w-full' : 'max-h-full max-w-full')}
       style={{ imageRendering: panel ? 'pixelated' : 'auto' }}
     />
@@ -1535,8 +1705,8 @@ function ShareDialog(): JSX.Element | null {
     <Modal title={`Share "${photoBaseName(shareTarget)}"`} onClose={closeShare} panelClassName="max-w-[34rem]">
       <div className="space-y-4 p-5 text-sm">
         <p className="frameos-muted">
-          Anyone with a link can see the photos in this folder. A frame plays the album through its own link, so you
-          can stop one frame without touching the others. A custom link is one to give to a friend.
+          Anyone with a link can see the photos in this folder. A frame plays the album through its own link, so you can
+          stop one frame without touching the others. A custom link is one to give to a friend.
         </p>
         {shareTargetShares.length ? (
           <ul className="space-y-3">
@@ -1679,10 +1849,61 @@ function ShareDialog(): JSX.Element | null {
 function InstallPicker(): JSX.Element | null {
   const { installPickerAlbums } = useValues(photosLogic)
   const { closeInstallPicker, installOnFrame } = useActions(photosLogic)
-  const { framesList } = useValues(framesModel)
   if (installPickerAlbums === null) {
     return null
   }
+  return (
+    <FramePicker
+      title="Install on frame"
+      description={
+        installPickerAlbums.length
+          ? `Pick the frame that plays ${
+              installPickerAlbums.length === 1
+                ? `"${photoBaseName(installPickerAlbums[0])}"`
+                : `these ${installPickerAlbums.length} albums`
+            }. You choose the timing next.`
+          : 'Pick a frame. You choose the albums and the timing next.'
+      }
+      onPick={installOnFrame}
+      onClose={closeInstallPicker}
+    />
+  )
+}
+
+/** "Show on frame": the frame that shows the album, or the one photo, right away. */
+function ShowPicker(): JSX.Element | null {
+  const { showPickerTarget } = useValues(photosLogic)
+  const { closeShowPicker, showOnFrame } = useActions(photosLogic)
+  if (showPickerTarget === null) {
+    return null
+  }
+  const what = showPickerTarget.photo
+    ? `"${photoBaseName(showPickerTarget.photo)}"`
+    : showPickerTarget.albums.length === 1
+    ? `"${photoBaseName(showPickerTarget.albums[0])}"`
+    : `these ${showPickerTarget.albums.length} albums`
+  return (
+    <FramePicker
+      title="Show on frame"
+      description={`Pick the frame that shows ${what} now. A scene is installed on it when it has none for this yet, then made the current one.`}
+      onPick={(frameId) => showOnFrame(frameId, showPickerTarget)}
+      onClose={closeShowPicker}
+    />
+  )
+}
+
+function FramePicker({
+  title,
+  description,
+  onPick,
+  onClose,
+}: {
+  title: string
+  description: string
+  onPick: (frameId: FrameId) => void
+  onClose: () => void
+}): JSX.Element {
+  const { framesList } = useValues(framesModel)
   const frames = framesList.filter((frame) => !frame.archived)
   // The home page's split: a frame that is online, or was heard from
   // recently, above the ones that were not.
@@ -1695,29 +1916,23 @@ function InstallPicker(): JSX.Element | null {
     return ago ? `last seen ${ago} ago` : null
   }
   return (
-    <Modal title="Install on frame" onClose={closeInstallPicker} panelClassName="max-w-[28rem]">
+    <Modal title={title} onClose={onClose} panelClassName="max-w-[28rem]">
       <div className="space-y-3 p-5">
-        <p className="frameos-muted text-sm">
-          {installPickerAlbums.length
-            ? `Pick the frame that plays ${
-                installPickerAlbums.length === 1
-                  ? `"${photoBaseName(installPickerAlbums[0])}"`
-                  : `these ${installPickerAlbums.length} albums`
-              }. You choose the timing next.`
-            : 'Pick a frame. You choose the albums and the timing next.'}
-        </p>
+        <p className="frameos-muted text-sm">{description}</p>
         {frames.length ? (
           <div className="max-h-[50vh] space-y-3 overflow-y-auto">
             {groups.map((group) => (
               <div key={group.title} className="space-y-2">
                 {groups.length > 1 ? (
-                  <div className="frameos-muted px-1 text-[10px] font-semibold uppercase tracking-wide">{group.title}</div>
+                  <div className="frameos-muted px-1 text-[10px] font-semibold uppercase tracking-wide">
+                    {group.title}
+                  </div>
                 ) : null}
                 {group.frames.map((frame) => (
                   <button
                     key={frame.id}
                     type="button"
-                    onClick={() => installOnFrame(frame.id)}
+                    onClick={() => onPick(frame.id)}
                     className="frameos-card flex w-full items-center gap-3 rounded-xl border border-white/90 bg-white/80 px-3 py-2.5 text-left shadow-sm transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                   >
                     <span className="frameos-icon-tile flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
@@ -1779,7 +1994,190 @@ function PhotosDialogs(): JSX.Element {
       ) : null}
       <ShareDialog />
       <InstallPicker />
+      <ShowPicker />
+      <ResizeDialog />
     </>
+  )
+}
+
+/** Resize one photo, or every selected one, in place: a size, how the photo meets it, the format. */
+function ResizeDialog(): JSX.Element | null {
+  const { resizeTargets, mutating } = useValues(photosLogic)
+  const { closeResize, resizeEntries } = useActions(photosLogic)
+  const { sizeKey, sizeChoices, width, height, fit, format, quality, upscale, background, colors, options, valid } =
+    useValues(photoResizeLogic)
+  const { setSize, setWidth, setHeight, setFit, setFormat, setQuality, setUpscale, setBackground, setColors } =
+    useActions(photoResizeLogic)
+  if (resizeTargets === null) {
+    return null
+  }
+  const count = resizeTargets.length
+  const groups: { label: string; group: ResizeSizeChoice['group'] }[] = [
+    { label: 'From a frame', group: 'frames' },
+    { label: 'Common sizes', group: 'presets' },
+  ]
+  const sizeOptions = [
+    ...groups
+      .map(({ label, group }) => ({
+        label,
+        options: sizeChoices
+          .filter((choice) => choice.group === group)
+          .map((choice) => ({ value: choice.key, label: choice.label })),
+      }))
+      .filter((group) => group.options.length),
+    { value: CUSTOM_SIZE_KEY, label: 'Custom size' },
+  ]
+  const fitHint = RESIZE_FITS.find((item) => item.value === fit)?.hint
+  const lossy = format === 'jpeg' || format === 'webp'
+  const padsOrFlattens = fit === 'contain' || format === 'jpeg'
+  const fieldClassName =
+    'frameos-input h-10 rounded-xl border border-white/90 bg-white/90 px-3 text-sm shadow-sm outline-none focus:ring-2 focus:ring-blue-400'
+  return (
+    <Modal
+      title={count === 1 ? `Resize "${photoBaseName(resizeTargets[0])}"` : `Resize ${count} photos`}
+      onClose={closeResize}
+      panelClassName="max-w-[32rem]"
+    >
+      <div className="space-y-4 p-5">
+        <p className="frameos-muted text-sm">
+          The photo is replaced with a smaller copy. Its colors and its place in the album stay; the original is gone.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+            <span className="frameos-strong font-semibold">Size</span>
+            <Select
+              value={sizeKey}
+              options={sizeOptions}
+              onChange={(key) => {
+                const choice = sizeChoices.find((item) => item.key === key)
+                setSize(key, choice?.width ?? width, choice?.height ?? height)
+              }}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="frameos-strong font-semibold">Width</span>
+            <input
+              type="number"
+              min={1}
+              max={16384}
+              value={width ?? ''}
+              placeholder={fit === 'inside' ? 'any' : ''}
+              onChange={(event) => setWidth(event.target.value === '' ? null : Number(event.target.value))}
+              className={fieldClassName}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="frameos-strong font-semibold">Height</span>
+            <input
+              type="number"
+              min={1}
+              max={16384}
+              value={height ?? ''}
+              placeholder={fit === 'inside' ? 'any' : ''}
+              onChange={(event) => setHeight(event.target.value === '' ? null : Number(event.target.value))}
+              className={fieldClassName}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+            <span className="frameos-strong font-semibold">How the photo meets the size</span>
+            <Select
+              value={fit}
+              onChange={(value) => setFit(value as typeof fit)}
+              options={RESIZE_FITS.map(({ value, label }) => ({ value, label }))}
+            />
+            {fitHint ? <span className="frameos-muted text-xs">{fitHint}</span> : null}
+          </label>
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <input type="checkbox" checked={upscale} onChange={(event) => setUpscale(event.target.checked)} />
+            <span>Enlarge photos smaller than this size</span>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="frameos-strong font-semibold">Format</span>
+            <Select value={format} onChange={(value) => setFormat(value as typeof format)} options={RESIZE_FORMATS} />
+          </label>
+          {lossy ? (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="frameos-strong font-semibold">Quality: {quality}</span>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={quality}
+                onChange={(event) => setQuality(Number(event.target.value))}
+                className="mt-2"
+              />
+              <span className="frameos-muted text-xs">
+                {format === 'webp' && quality >= 100 ? 'Lossless.' : 'Frames show no difference above 85.'}
+              </span>
+            </label>
+          ) : null}
+          {format === 'png' ? (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="frameos-strong font-semibold">Colors</span>
+              <Select value={colors} onChange={setColors} options={PNG_COLOR_CHOICES} />
+              <span className="frameos-muted text-xs">Fewer colors make a much smaller file.</span>
+            </label>
+          ) : null}
+          {padsOrFlattens ? (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="frameos-strong font-semibold">Background</span>
+              <span className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={/^#[0-9a-fA-F]{6}$/.test(background) ? background : '#ffffff'}
+                  onChange={(event) => setBackground(event.target.value)}
+                  className="h-10 w-14 cursor-pointer rounded-lg border border-white/90 bg-white/90 p-1"
+                />
+                <span className="frameos-muted text-xs">
+                  {fit === 'contain' ? 'Fills the padding' : 'Behind transparent parts'}
+                  {fit === 'contain' && format === 'jpeg' ? ' and behind transparent parts' : ''}.
+                </span>
+              </span>
+            </label>
+          ) : null}
+        </div>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={closeResize}
+            className={clsx(toolbarButtonClassName, 'frameos-secondary-button')}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!valid || mutating}
+            onClick={() => resizeEntries(resizeTargets, options)}
+            className={clsx(toolbarButtonClassName, 'frameos-primary-action text-white')}
+          >
+            <ArrowsPointingInIcon className="h-5 w-5" />
+            {count === 1 ? 'Resize' : `Resize ${count} photos`}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/** A line under the toolbar while a batch of photos is being resized. */
+function ResizeProgress(): JSX.Element | null {
+  const { resizeProgress } = useValues(photosLogic)
+  if (!resizeProgress) {
+    return null
+  }
+  return (
+    <div className="frameos-card mb-3 flex items-center gap-3 rounded-2xl border border-white/90 bg-white/90 px-4 py-2 text-sm shadow-sm">
+      <Spinner className="h-4 w-4" />
+      <span>
+        Resizing {Math.min(resizeProgress.done + 1, resizeProgress.total)} of {resizeProgress.total}…
+      </span>
+      <span className="frameos-divider ml-auto h-1.5 w-40 overflow-hidden rounded-full bg-slate-200">
+        <span
+          className="block h-full rounded-full bg-blue-500 transition-all"
+          style={{ width: `${Math.round((resizeProgress.done / Math.max(1, resizeProgress.total)) * 100)}%` }}
+        />
+      </span>
+    </div>
   )
 }
 
@@ -1860,6 +2258,7 @@ function PhotosBrowser(): JSX.Element {
       )}
     >
       <Notice />
+      <ResizeProgress />
       <SelectionBar />
       <div className="@container min-h-0 flex-1 overflow-y-auto pb-24">
         {!folderLoaded && !currentFolderError ? (

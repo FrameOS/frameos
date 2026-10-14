@@ -25,10 +25,12 @@ import {
 } from '../../utils/assetColors/preview'
 import {
   FULL_FIDELITY_TARGET,
+  PREVIEW_SIZE_TARGET_KEY,
   type PhotoPreviewTarget,
   photoColorsOfProfile,
   photoPreviewTargets,
   previewSizeFor,
+  previewTargetAtSize,
   rotatedPreviewTarget,
   profileOfPhotoColors,
 } from './photoColors'
@@ -101,6 +103,7 @@ export interface photoColorsLogicValues {
   lightboxSourceLoading: boolean
   nextImagePath: string | null
   panelPalette: RgbTriplet[] | null
+  previewSizeKey: string
   previewTarget: PhotoPreviewTarget
   previewTargetKey: string
   previewTargets: PhotoPreviewTarget[]
@@ -234,6 +237,9 @@ export interface photoColorsLogicActions {
     color: RgbTriplet
     index: number
   }
+  setPreviewSize: (key: string) => {
+    key: string
+  }
   setPreviewTarget: (key: string) => {
     key: string
   }
@@ -264,7 +270,9 @@ export interface photoColorsLogicMeta {
     previewTarget: (
       previewTargets: PhotoPreviewTarget[],
       previewTargetKey: string,
-      rotatedPreviewTargets: Record<string, boolean>
+      rotatedPreviewTargets: Record<string, boolean>,
+      previewSizeKey: string,
+      framesList: FrameType[]
     ) => PhotoPreviewTarget
     entry: (folderEntries: Record<string, PhotoEntry[]>, imagePath: string | null) => PhotoEntry | null
     savedProfile: (entry: PhotoEntry | null) => AssetColorProfile | null
@@ -333,6 +341,8 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
   })),
   actions({
     setPreviewTarget: (key: string) => ({ key }),
+    /** Where the preview's size comes from: the target's own panel, a frame, or a common size. */
+    setPreviewSize: (key: string) => ({ key }),
     /** Turn the chosen panel or frame on its side (remembered per target). */
     rotatePreviewTarget: (key: string) => ({ key }),
     openEditor: (imagePath: string) => ({ imagePath }),
@@ -403,6 +413,11 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
       { persist: true, storageKey: 'photoColorsLogic.rotatedPreviewTargets' },
       { rotatePreviewTarget: (state, { key }) => ({ ...state, [key]: !state[key] }) },
     ],
+    previewSizeKey: [
+      PREVIEW_SIZE_TARGET_KEY as string,
+      { persist: true, storageKey: 'photoColorsLogic.previewSizeKey' },
+      { setPreviewSize: (_, { key }) => key || PREVIEW_SIZE_TARGET_KEY },
+    ],
     imagePath: [
       null as string | null,
       {
@@ -464,14 +479,19 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
       (framesList: FrameType[]): PhotoPreviewTarget[] => photoPreviewTargets(framesList),
     ],
     previewTarget: [
-      (s) => [s.previewTargets, s.previewTargetKey, s.rotatedPreviewTargets],
+      (s) => [s.previewTargets, s.previewTargetKey, s.rotatedPreviewTargets, s.previewSizeKey, s.framesList],
       (
         previewTargets: PhotoPreviewTarget[],
         previewTargetKey: string,
-        rotatedPreviewTargets: Record<string, boolean>
+        rotatedPreviewTargets: Record<string, boolean>,
+        previewSizeKey: string,
+        framesList: FrameType[]
       ): PhotoPreviewTarget => {
         const target = previewTargets.find((item) => item.key === previewTargetKey) ?? FULL_FIDELITY_TARGET
-        return rotatedPreviewTargets[target.key] ? rotatedPreviewTarget(target) : target
+        // The palette is the target's; the size may come from elsewhere; the
+        // turn is remembered per target and applied last.
+        const sized = previewTargetAtSize(target, previewSizeKey, framesList)
+        return rotatedPreviewTargets[target.key] ? rotatedPreviewTarget(sized) : sized
       },
     ],
     entry: [
@@ -629,6 +649,10 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
       setPalette: () => actions.recomputeAuto(),
       setPaletteColor: () => actions.recomputeAuto(),
       setPreviewTarget: () => {
+        actions.recomputeAuto()
+        actions.loadLightboxPreview()
+      },
+      setPreviewSize: () => {
         actions.recomputeAuto()
         actions.loadLightboxPreview()
       },

@@ -63,11 +63,14 @@ export function get(app: FrameOSApp, context: FrameOSContext): unknown {
   const link = albumLink(app.config.album)
   if (!link) return fail('Please add an album link. Make one with Install photo scenes on the Photos page.')
   const order = ORDERS.includes(String(app.config.order)) ? String(app.config.order) : 'random'
-  const key = String(app.config.counterStateKey ?? '').trim()
+  // One photo of the album, by its path, instead of the counter's pick.
+  const single = String(app.config.photo ?? '').trim()
+  const key = single ? '' : String(app.config.counterStateKey ?? '').trim()
   const index = key ? position(app.state[key]) : Math.floor(Math.random() * 1000000)
 
-  const r = frameos.httpRequest(`${link}/photo?order=${order}&index=${index}`, { timeoutMs: 20000 })
-  if (r.status === 404) return fail('This album link no longer works.')
+  const query = single ? `path=${encodeURIComponent(single)}` : `order=${order}&index=${index}`
+  const r = frameos.httpRequest(`${link}/photo?${query}`, { timeoutMs: 20000 })
+  if (r.status === 404) return fail(single ? 'This photo is no longer in the album.' : 'This album link no longer works.')
   if (r.status !== 200) {
     return fail(r.status ? `Could not load the album (HTTP ${r.status}).` : `Could not reach the album: ${r.error ?? 'no response'}`)
   }
@@ -88,7 +91,7 @@ export function get(app: FrameOSApp, context: FrameOSContext): unknown {
   const name = String(photo.name || photo.path || 'a photo')
   const url = photoUrl(link, photo.url)
   if (!url) return fail(`The album sent no address for ${name}.`)
-  frameos.log(`Showing ${name} (${(index % count) + 1} of ${count})`)
+  frameos.log(single ? `Showing ${name}` : `Showing ${name} (${(index % count) + 1} of ${count})`)
   // null, not undefined: no profile clears the last photo's palette
   const result = frameos.fetchImage(url, { colors: photo.colors ?? null })
   if (!result.image) return fail(`Could not load ${name}: ${result.error ?? 'no image'}`)

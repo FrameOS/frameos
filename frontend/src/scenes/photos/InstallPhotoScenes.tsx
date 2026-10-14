@@ -135,7 +135,7 @@ export function InstallPhotoScenes({ frame }: { frame: FrameType }): JSX.Element
       <button
         type="button"
         disabled={!canInstall}
-        onClick={install}
+        onClick={() => install()}
         className="frameos-primary-action flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {installing ? <Spinner className="h-4 w-4" color="white" /> : <PhotoIcon className="h-5 w-5" />}

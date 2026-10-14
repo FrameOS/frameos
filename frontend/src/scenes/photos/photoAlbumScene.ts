@@ -29,6 +29,8 @@ export interface PhotoAlbumSceneOptions {
   order: PhotoAlbumOrder
   fit: PhotoAlbumFit
   backgroundColor?: string
+  /** One photo of the album, by its path relative to the folder: the scene shows it alone. */
+  photo?: string
 }
 
 /** A scene that shows one photo of an album per render: render event →
@@ -120,7 +122,11 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
         'app',
         {
           keyword: PHOTO_ALBUM_APP_KEY,
-          config: { album: options.albumUrl, counterStateKey: 'photoIndex' },
+          config: {
+            album: options.albumUrl,
+            counterStateKey: 'photoIndex',
+            ...(options.photo ? { photo: options.photo } : {}),
+          },
           cache: { enabled: false },
         },
         -260,

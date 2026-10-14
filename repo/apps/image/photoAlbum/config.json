@@ -1,6 +1,6 @@
 {
   "name": "Photo album",
-  "description": "Play an album from FrameOS Photos through its share link, one photo per render.",
+  "description": "Play an album from FrameOS Photos through its share link, one photo per render, or show one photo of it.",
   "category": "data",
   "version": "1.0.0",
   "fields": [
@@ -14,10 +14,23 @@
       "placeholder": "https://example.com/api/photos/shared/pk_..."
     },
     {
+      "name": "photo",
+      "type": "string",
+      "value": "",
+      "required": false,
+      "label": "One photo",
+      "hint": "The path of one photo inside the album, to show it alone. Leave empty to play the album."
+    },
+    {
       "name": "order",
       "type": "select",
       "value": "random",
-      "options": ["random", "sequential", "newest", "oldest"],
+      "options": [
+        "random",
+        "sequential",
+        "newest",
+        "oldest"
+      ],
       "required": false,
       "label": "Order",
       "hint": "random shows every photo once before any repeats. sequential goes by folder and file name, newest and oldest by date."

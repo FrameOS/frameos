@@ -40,6 +40,7 @@ import {
   photoPathDepth,
   photoPathPrefixes,
   photoPathWithinLimits,
+  parsePhotoPath,
 } from "./paths";
 import type { PhotoScanner } from "./scan";
 
@@ -614,6 +615,104 @@ export async function storePhotoFile(
   return (await loadPhotoEntry(db, accountId, path)) as PhotoEntry;
 }
 
+export type ReplacePhotoInput = {
+  body: Buffer;
+  contentType: string;
+  /** The extension the new bytes call for (".jpg"); the name follows it when it differs. */
+  extension: string;
+  height: number | null;
+  sha256: string;
+  size: number;
+  thumbnail: Buffer | null;
+  width: number | null;
+};
+
+/**
+ * Replace a photo's bytes in place (POST /api/photos/resize): new objects,
+ * then the row updated under the lock (its colors, its date and its share
+ * links untouched); the old objects go when the row no longer names them.
+ * A format change renames the file to a free name with the new extension.
+ */
+export async function replacePhotoFile(
+  db: FramesDatabase,
+  accountId: string,
+  path: string,
+  input: ReplacePhotoInput,
+): Promise<PhotoEntry> {
+  const objectKey = randomPhotoObjectKey(accountId, "file");
+  const thumbObjectKey = input.thumbnail ? randomPhotoObjectKey(accountId, "thumb") : null;
+  await objectStore().put(objectKey, input.body, input.contentType);
+  try {
+    if (thumbObjectKey && input.thumbnail) {
+      await objectStore().put(thumbObjectKey, input.thumbnail, "image/jpeg");
+    }
+  } catch (error) {
+    await deletePhotoObjects([objectKey, thumbObjectKey]);
+    throw error;
+  }
+  let target: string;
+  let oldKeys: (string | null)[] = [];
+  try {
+    target = await db.transaction(async (tx) => {
+      await lockPhotoLibrary(tx, accountId);
+      await assertPhotosAvailable(tx, accountId);
+      const [row] = await tx
+        .select({
+          kind: photoEntries.kind,
+          objectKey: photoEntries.objectKey,
+          sizeBytes: photoEntries.sizeBytes,
+          status: photoEntries.status,
+          thumbObjectKey: photoEntries.thumbObjectKey,
+        })
+        .from(photoEntries)
+        .where(and(eq(photoEntries.accountId, accountId), eq(photoEntries.path, path)))
+        .limit(1);
+      if (!row || row.kind !== "file" || row.status !== "ready") {
+        throw new PhotoError("not_found", 404);
+      }
+      const growth = input.size - Number(row.sizeBytes);
+      if (growth > 0) {
+        await assertPhotoQuota(tx, accountId, growth, 0);
+      }
+      const folder = photoParent(path);
+      const name = photoBasename(path);
+      const dot = name.lastIndexOf(".");
+      const currentExtension = dot > 0 ? name.slice(dot).toLowerCase() : "";
+      let next = path;
+      if (currentExtension !== input.extension) {
+        const stem = dot > 0 ? name.slice(0, dot) : name;
+        const free = await freeChildName(tx, accountId, folder, `${stem}${input.extension}`);
+        next = joinPhotoPath(folder, free);
+        if (!photoPathWithinLimits(next)) {
+          throw new PhotoError("invalid_path", 400);
+        }
+      }
+      oldKeys = [row.objectKey, row.thumbObjectKey];
+      await tx
+        .update(photoEntries)
+        .set({
+          contentType: input.contentType,
+          height: input.height,
+          objectKey,
+          path: next,
+          sha256: input.sha256,
+          sizeBytes: input.size,
+          thumbObjectKey,
+          updatedAt: new Date(),
+          width: input.width,
+        })
+        .where(and(eq(photoEntries.accountId, accountId), eq(photoEntries.path, path)));
+      await touchPhotoFolder(tx, accountId, folder);
+      return next;
+    });
+  } catch (error) {
+    await deletePhotoObjects([objectKey, thumbObjectKey]);
+    throw error;
+  }
+  await deletePhotoObjects(oldKeys);
+  return (await loadPhotoEntry(db, accountId, target)) as PhotoEntry;
+}
+
 // ---------------------------------------------------------------------------
 // Move, rename, delete
 
@@ -1115,6 +1214,50 @@ export async function sharedPhotoColors(
     )
     .limit(1);
   return (row?.colors as PhotoColors | undefined) ?? null;
+}
+
+/**
+ * One playable file below the shared folder by its path relative to it, or
+ * undefined (a single-photo scene asks for its photo by path).
+ */
+export async function sharedPhotoAt(
+  db: FramesDatabase,
+  share: ResolvedPhotoShare,
+  relative: string,
+): Promise<SharedPhoto | undefined> {
+  const name = photoBasename(relative);
+  if (!isPlayablePhotoName(name) || parsePhotoPath(relative, { allowRoot: false }) === undefined) {
+    return undefined;
+  }
+  const [row] = await db
+    .select({
+      colors: photoEntries.colors,
+      contentType: photoEntries.contentType,
+      createdAt: photoEntries.createdAt,
+      height: photoEntries.height,
+      kind: photoEntries.kind,
+      sizeBytes: photoEntries.sizeBytes,
+      status: photoEntries.status,
+      width: photoEntries.width,
+    })
+    .from(photoEntries)
+    .where(
+      and(eq(photoEntries.accountId, share.accountId), eq(photoEntries.path, `${share.path}/${relative}`)),
+    )
+    .limit(1);
+  if (!row || row.kind !== "file" || row.status !== "ready") {
+    return undefined;
+  }
+  return {
+    colors: (row.colors as PhotoColors | null) ?? null,
+    contentType: row.contentType,
+    height: row.height,
+    mtime: seconds(row.createdAt),
+    name,
+    path: relative,
+    size: Number(row.sizeBytes),
+    width: row.width,
+  };
 }
 
 /** One playable file below the shared folder (`relative` to it). */

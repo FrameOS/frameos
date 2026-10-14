@@ -139,6 +139,33 @@ export async function setPhotoColors(path: string, colors: PhotoColors | null): 
   return (await jsonPost<{ entry: PhotoEntry }>('/api/photos/colors', { path, colors })).entry
 }
 
+export type PhotoResizeFit = 'inside' | 'cover' | 'contain' | 'fill'
+export type PhotoResizeFormat = 'keep' | 'jpeg' | 'png' | 'webp'
+
+/** `POST /api/photos/resize` (docs/photos.md): the photo replaced with itself at this size. */
+export interface PhotoResizeOptions {
+  width?: number | null
+  height?: number | null
+  fit: PhotoResizeFit
+  format: PhotoResizeFormat
+  quality: number
+  upscale: boolean
+  background: string
+  /** PNG only: a palette of this many colors, or null for every color. */
+  colors?: number | null
+}
+
+export async function resizePhoto(path: string, options: PhotoResizeOptions): Promise<PhotoEntry> {
+  const body: Record<string, unknown> = { path, ...options }
+  for (const key of ['width', 'height', 'colors']) {
+    if (body[key] === null || body[key] === undefined) {
+      delete body[key]
+    }
+  }
+  const { entry } = await jsonPost<{ entry: PhotoEntry }>('/api/photos/resize', body)
+  return entry
+}
+
 export async function deletePhotos(paths: string[]): Promise<number> {
   return (await jsonPost<{ deleted: number }>('/api/photos/delete', { paths })).deleted ?? 0
 }

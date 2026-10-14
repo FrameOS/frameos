@@ -84,6 +84,19 @@ class PhotoColorsBody(BaseModel):
     colors: Any = _NO_COLORS
 
 
+class PhotoResizeBody(BaseModel):
+    path: str
+    # Checked by hand (app/utils/photos.py resize_photo), for the contract's 400s.
+    width: Any = None
+    height: Any = None
+    fit: Any = "inside"
+    format: Any = "keep"
+    quality: Any = 85
+    upscale: Any = False
+    background: Any = "#ffffff"
+    colors: Any = None
+
+
 class PhotoSceneBody(BaseModel):
     path: str
     # Checked by hand too, for the contract's 400s.
@@ -247,6 +260,41 @@ async def photos_set_colors(data: PhotoColorsBody, db: Session = Depends(get_db)
         raise _bad_request("colors must be an object or null")
     await _ready_store()
     entry = await asyncio.to_thread(photos.set_colors, db, current_project_id(), rel, data.colors)
+    return {"entry": entry}
+
+
+@api_project.post("/photos/resize")
+async def photos_resize(data: PhotoResizeBody, db: Session = Depends(get_db)):
+    rel = photos.validate_path(data.path)
+    store = await _ready_store()
+
+    def whole(value: Any) -> Any:
+        # JSON numbers arrive as int or float; 1600.0 is 1600, 1600.5 is not.
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
+
+    quality = whole(data.quality)
+    if not isinstance(quality, int) or isinstance(quality, bool) or quality < 1 or quality > 100:
+        raise _bad_request("quality must be a whole number from 1 to 100")
+    colors = whole(data.colors)
+    if colors is not None and (not isinstance(colors, int) or isinstance(colors, bool) or colors < 2 or colors > 256):
+        raise _bad_request("colors must be a whole number from 2 to 256")
+    if not isinstance(data.upscale, bool):
+        raise _bad_request("upscale must be true or false")
+    if not isinstance(data.fit, str) or not isinstance(data.format, str) or not isinstance(data.background, str):
+        raise _bad_request("fit, format and background must be strings")
+    options = photos.ResizeOptions(
+        width=whole(data.width),
+        height=whole(data.height),
+        fit=data.fit,
+        format=data.format,
+        quality=quality,
+        upscale=data.upscale,
+        background=data.background,
+        colors=colors,
+    )
+    entry = await asyncio.to_thread(photos.resize_photo, db, current_project_id(), store, rel, options)
     return {"entry": entry}
 
 
@@ -443,6 +491,7 @@ async def photos_shared_photo(
     request: Request,
     order: str = "random",
     index: int = Query(0),
+    path: str = "",
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
@@ -451,6 +500,12 @@ async def photos_shared_photo(
     shared = await _shared_folder(request, token, db, redis)
 
     def build() -> dict:
+        # `path`: one named photo (a single-photo scene), never the counter's pick.
+        if path:
+            photo = photos.shared_photo_at(db, shared, path)
+            if photo is None:
+                raise _not_found()
+            return {"index": 0, "count": 1, "photo": photos.shared_photo_json(token, photo)}
         files, _updated_at = photos.share_index(db, shared)
         photo = photos.pick_photo(files, order, index, token)
         return {

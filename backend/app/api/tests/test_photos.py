@@ -1516,3 +1516,121 @@ async def test_album_scene_route_refusals(async_client, db, redis):
     assert response.status_code == 400
     assert "address" in response.json()["detail"]
     assert db.query(PhotoShare).count() == 0
+
+
+# ---------------------------------------------------------------------------
+# Resize
+# ---------------------------------------------------------------------------
+
+
+async def resize(client, path: str, **options):
+    return await client.post("/api/photos/resize", json={"path": path, **options})
+
+
+def image_size(data: bytes) -> tuple[str, int, int]:
+    with Image.open(io.BytesIO(data)) as image:
+        return (image.format or "").lower(), image.size[0], image.size[1]
+
+
+@pytest.mark.asyncio
+async def test_resize_replaces_the_bytes_and_keeps_the_row(async_client, db):
+    lib = library(async_client)
+    original = jpeg_bytes(400, 300)
+    write(lib, "Summer/a.jpg", original, mtime=1_700_000_000)
+    await set_colors(async_client, "Summer/a.jpg", {"whites": -10})
+
+    response = await resize(async_client, "Summer/a.jpg", width=200, height=200)
+
+    assert response.status_code == 200, response.text
+    entry = response.json()["entry"]
+    assert entry["path"] == "Summer/a.jpg"
+    assert (entry["width"], entry["height"]) == (200, 150)
+    assert entry["colors"] == {"whites": -10}
+    assert entry["mtime"] == 1_700_000_000
+    data = await read_file(async_client, "Summer/a.jpg")
+    assert image_size(data) == ("jpeg", 200, 150)
+    assert entry["size"] == len(data)
+    # The old object is gone, the new one and its thumbnail are there.
+    assert not object_file(original).exists()
+    assert object_file(data).exists() and thumb_file(data).exists()
+    thumb = await async_client.get("/api/photos/thumb", params={"path": "Summer/a.jpg"})
+    assert thumb.status_code == 200 and image_size(thumb.content)[1:] == (200, 150)
+
+
+@pytest.mark.asyncio
+async def test_resize_fits_and_formats(async_client):
+    lib = library(async_client)
+    write(lib, "Summer/a.jpg", jpeg_bytes(400, 300))
+
+    # inside without upscale leaves a smaller photo alone; with it, it grows.
+    response = await resize(async_client, "Summer/a.jpg", width=800, height=800)
+    assert (response.json()["entry"]["width"], response.json()["entry"]["height"]) == (400, 300)
+    response = await resize(async_client, "Summer/a.jpg", width=800, height=800, upscale=True)
+    assert (response.json()["entry"]["width"], response.json()["entry"]["height"]) == (800, 600)
+
+    # cover crops to the box; contain pads to it; fill stretches.
+    response = await resize(async_client, "Summer/a.jpg", width=100, height=100, fit="cover")
+    assert (response.json()["entry"]["width"], response.json()["entry"]["height"]) == (100, 100)
+    write(lib, "Summer/b.jpg", jpeg_bytes(400, 300))
+    response = await resize(async_client, "Summer/b.jpg", width=100, height=100, fit="contain", background="#000000")
+    assert (response.json()["entry"]["width"], response.json()["entry"]["height"]) == (100, 100)
+    with Image.open(io.BytesIO(await read_file(async_client, "Summer/b.jpg"))) as image:
+        assert image.getpixel((50, 2))[0] < 20  # the pad is black
+        assert image.getpixel((50, 50))[0] > 150  # the photo is red
+    write(lib, "Summer/c.jpg", jpeg_bytes(400, 300))
+    response = await resize(async_client, "Summer/c.jpg", width=100, height=100, fit="fill")
+    assert (response.json()["entry"]["width"], response.json()["entry"]["height"]) == (100, 100)
+
+    # A format change changes the extension, and the name stays free of clashes.
+    write(lib, "Summer/d.jpg", jpeg_bytes(40, 30))
+    write(lib, "Summer/d.png", jpeg_bytes(40, 30))
+    response = await resize(async_client, "Summer/d.jpg", width=20, format="png", colors=16)
+    assert response.status_code == 200, response.text
+    assert response.json()["entry"]["path"] == "Summer/d (2).png"
+    assert response.json()["entry"]["content_type"] == "image/png"
+    assert image_size(await read_file(async_client, "Summer/d (2).png")) == ("png", 20, 15)
+    response = await resize(async_client, "Summer/d (2).png", width=10, format="webp", quality=70)
+    assert response.json()["entry"]["path"] == "Summer/d (2).webp"
+    assert image_size(await read_file(async_client, "Summer/d (2).webp")) == ("webp", 10, 8)
+
+
+@pytest.mark.asyncio
+async def test_resize_refuses_what_the_contract_refuses(async_client):
+    lib = library(async_client)
+    write(lib, "Summer/a.jpg", jpeg_bytes(40, 30))
+    write(lib, "Summer/notes.txt", b"hello")
+    make_folder(lib, "Empty")
+
+    for body, status in (
+        ({"path": "Summer/a.jpg"}, 400),
+        ({"path": "Summer/a.jpg", "width": 0}, 400),
+        ({"path": "Summer/a.jpg", "width": 20, "fit": "cover"}, 400),
+        ({"path": "Summer/a.jpg", "width": 20, "fit": "sideways"}, 400),
+        ({"path": "Summer/a.jpg", "width": 20, "format": "tiff"}, 400),
+        ({"path": "Summer/a.jpg", "width": 20, "quality": 0}, 400),
+        ({"path": "Summer/a.jpg", "width": 20, "background": "red"}, 400),
+        ({"path": "Summer/notes.txt", "width": 20}, 400),
+        ({"path": "Empty", "width": 20}, 404),
+        ({"path": "Summer/missing.jpg", "width": 20}, 404),
+    ):
+        response = await async_client.post("/api/photos/resize", json=body)
+        assert response.status_code == status, (body, response.text)
+
+
+@pytest.mark.asyncio
+async def test_a_shared_photo_by_path(async_client, no_auth_client, redis):
+    lib = library(async_client)
+    write(lib, "Summer/beach/a.jpg", jpeg_bytes())
+    write(lib, "Summer/b.jpg", jpeg_bytes())
+    link = await share(async_client, "Summer")
+
+    response = await no_auth_client.get(f"/api/photos/shared/{link['token']}/photo", params={"path": "beach/a.jpg"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["index"], body["count"]) == (0, 1)
+    assert body["photo"]["path"] == "beach/a.jpg"
+    assert body["photo"]["url"].endswith("/file?path=beach%2Fa.jpg")
+
+    for missing in ("beach/nope.jpg", "../b.jpg", "beach"):
+        response = await no_auth_client.get(f"/api/photos/shared/{link['token']}/photo", params={"path": missing})
+        assert response.status_code == 404, missing
