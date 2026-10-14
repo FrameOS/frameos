@@ -13,6 +13,7 @@ import {
   frameLogs,
   frameMetrics,
   frames,
+  photoEntries,
   linkedClients,
   storeScenes,
   storeSceneVersions,
@@ -164,15 +165,20 @@ async function seedEverything(accountId: string) {
     path: "images/one.png",
     sizeBytes: 40,
   });
+  await db.insert(photoEntries).values([
+    { accountId, kind: "folder", path: "Album", sizeBytes: 0 },
+    { accountId, kind: "file", objectKey: "photos/x", path: "Album/a.jpg", sizeBytes: 70 },
+  ]);
   return {
     backupBytes: 1_000,
     backupCount: 2,
     frameAssetBytes: 40,
     frameLogBytes: 120,
     frameMetricsBytes: 60,
+    photoBytes: 70,
     privateSceneBytes: 5_000,
     publicSceneBytes: 3_000,
-    totalBytes: 5_000 + 3_000 + 1_000 + 120 + 60 + 40,
+    totalBytes: 5_000 + 3_000 + 1_000 + 120 + 60 + 40 + 70,
   };
 }
 
@@ -202,6 +208,7 @@ describe("account storage snapshot", () => {
       frameAssetBytes: expected.frameAssetBytes,
       frameLogBytes: expected.frameLogBytes,
       frameMetricsBytes: expected.frameMetricsBytes,
+      photoBytes: expected.photoBytes,
       privateSceneBytes: expected.privateSceneBytes,
       publicSceneBytes: expected.publicSceneBytes,
       totalBytes: expected.totalBytes,

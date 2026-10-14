@@ -25,6 +25,7 @@ import {
   frames,
 } from "@frameos-cloud/db";
 import { logError, logInfo } from "./log";
+import { photoBytesForAccount } from "./usage";
 import type { FramesDatabase } from "./frames";
 import {
   backupBytesForAccount,
@@ -51,6 +52,8 @@ export interface AccountStorageBuckets {
   frameAssetBytes: number;
   frameLogBytes: number;
   frameMetricsBytes: number;
+  // The photo library's files in the object store (docs/photos.md).
+  photoBytes: number;
   privateSceneBytes: number;
   publicSceneBytes: number;
   totalBytes: number;
@@ -107,7 +110,7 @@ export async function measureAccountStorage(
   db: FramesDatabase,
   accountId: string,
 ): Promise<AccountStorageBuckets> {
-  const [scenes, backupBytes, backupCount, frameLogBytes, frameMetricsBytes, frameAssetBytes] =
+  const [scenes, backupBytes, backupCount, frameLogBytes, frameMetricsBytes, frameAssetBytes, photoBytes] =
     await Promise.all([
       sceneBytesForAccount(db, accountId),
       backupBytesForAccount(db, accountId),
@@ -115,6 +118,7 @@ export async function measureAccountStorage(
       frameLogBytesForAccount(db, accountId),
       frameMetricsBytesForAccount(db, accountId),
       frameAssetBytesForAccount(db, accountId),
+      photoBytesForAccount(db, accountId),
     ]);
   const buckets = {
     backupBytes,
@@ -122,6 +126,7 @@ export async function measureAccountStorage(
     frameAssetBytes,
     frameLogBytes,
     frameMetricsBytes,
+    photoBytes,
     privateSceneBytes: scenes.privateBytes,
     publicSceneBytes: scenes.publicBytes,
   };
@@ -133,7 +138,8 @@ export async function measureAccountStorage(
       buckets.backupBytes +
       buckets.frameLogBytes +
       buckets.frameMetricsBytes +
-      buckets.frameAssetBytes,
+      buckets.frameAssetBytes +
+      buckets.photoBytes,
   };
 }
 
@@ -151,6 +157,7 @@ async function writeSnapshot(
     frameAssetBytes: Math.round(buckets.frameAssetBytes),
     frameLogBytes: Math.round(buckets.frameLogBytes),
     frameMetricsBytes: Math.round(buckets.frameMetricsBytes),
+    photoBytes: Math.round(buckets.photoBytes),
     privateSceneBytes: Math.round(buckets.privateSceneBytes),
     publicSceneBytes: Math.round(buckets.publicSceneBytes),
     totalBytes: Math.round(buckets.totalBytes),
@@ -310,6 +317,7 @@ const zeroBuckets: AccountStorageBuckets = {
   frameAssetBytes: 0,
   frameLogBytes: 0,
   frameMetricsBytes: 0,
+  photoBytes: 0,
   privateSceneBytes: 0,
   publicSceneBytes: 0,
   totalBytes: 0,
@@ -344,6 +352,7 @@ export async function listAccountStorageForAdmin(
       frameAssetBytes: accountStorageUsage.frameAssetBytes,
       frameLogBytes: accountStorageUsage.frameLogBytes,
       frameMetricsBytes: accountStorageUsage.frameMetricsBytes,
+      photoBytes: accountStorageUsage.photoBytes,
       primaryEmail: accounts.primaryEmail,
       privateSceneBytes: accountStorageUsage.privateSceneBytes,
       publicSceneBytes: accountStorageUsage.publicSceneBytes,
@@ -363,6 +372,7 @@ export async function listAccountStorageForAdmin(
       backupCount: sql<number>`coalesce(sum(${accountStorageUsage.backupCount}), 0)::int`,
       frameAssetBytes: sql<number>`coalesce(sum(${accountStorageUsage.frameAssetBytes}), 0)::float8`,
       frameLogBytes: sql<number>`coalesce(sum(${accountStorageUsage.frameLogBytes}), 0)::float8`,
+      photoBytes: sql<number>`coalesce(sum(${accountStorageUsage.photoBytes}), 0)::float8`,
       frameMetricsBytes: sql<number>`coalesce(sum(${accountStorageUsage.frameMetricsBytes}), 0)::float8`,
       computedAt: sql<Date | null>`max(${accountStorageUsage.computedAt})`,
       privateSceneBytes: sql<number>`coalesce(sum(${accountStorageUsage.privateSceneBytes}), 0)::float8`,
@@ -389,6 +399,7 @@ export async function listAccountStorageForAdmin(
       frameAssetBytes: row.frameAssetBytes ?? 0,
       frameLogBytes: row.frameLogBytes ?? 0,
       frameMetricsBytes: row.frameMetricsBytes ?? 0,
+      photoBytes: row.photoBytes ?? 0,
       primaryEmail: row.primaryEmail,
       privateSceneBytes: row.privateSceneBytes ?? 0,
       publicSceneBytes: row.publicSceneBytes ?? 0,
@@ -401,6 +412,7 @@ export async function listAccountStorageForAdmin(
           frameAssetBytes: Number(summary.frameAssetBytes),
           frameLogBytes: Number(summary.frameLogBytes),
           frameMetricsBytes: Number(summary.frameMetricsBytes),
+          photoBytes: Number(summary.photoBytes),
           privateSceneBytes: Number(summary.privateSceneBytes),
           publicSceneBytes: Number(summary.publicSceneBytes),
           totalBytes: Number(summary.totalBytes),

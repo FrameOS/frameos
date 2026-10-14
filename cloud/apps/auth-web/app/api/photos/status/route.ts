@@ -8,7 +8,7 @@ import {
   photosSuspendedMessage,
 } from "../../../../src/lib/photos/library";
 import { activePhotoScanners } from "../../../../src/lib/photos/scan";
-import { maxPhotoBytesPerAccount } from "../../../../src/lib/usage";
+import { photoQuotaBytesForAccount } from "../../../../src/lib/usage";
 
 export const runtime = "nodejs";
 
@@ -20,9 +20,10 @@ export async function GET(request: NextRequest) {
     return context.response;
   }
   const { accountId, db } = context;
-  const [suspendedAt, totals] = await Promise.all([
+  const [suspendedAt, totals, quotaBytes] = await Promise.all([
     photosSuspendedAt(db, accountId),
     photoLibraryTotals(db, accountId),
+    photoQuotaBytesForAccount(db, accountId),
   ]);
   const suspended = Boolean(suspendedAt);
   return NextResponse.json(
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
       max_upload_bytes: maxPhotoUploadBytes,
       message: suspended ? photosSuspendedMessage : null,
       problem: suspended ? "suspended" : null,
-      quota_bytes: maxPhotoBytesPerAccount,
+      quota_bytes: quotaBytes,
       ready: !suspended,
       scanning: activePhotoScanners(),
       used_bytes: Math.round(totals.bytes),

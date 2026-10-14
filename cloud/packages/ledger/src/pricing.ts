@@ -60,6 +60,9 @@ export const fallbackModelPrices: Record<
   "gpt-5.6-luna": { cached: 0.02, input: 0.2, output: 1.2 },
   "gpt-5.6-sol": { cached: 0.4, input: 4, output: 20 },
   "gpt-5.6-terra": { cached: 0.2, input: 2, output: 12 },
+  // The store classifier's model since 2026-10-14 (gpt-4o-mini is being
+  // retired); migration 0063 seeds the same numbers.
+  "gpt-6-luna": { cached: 0.01, input: 0.1, output: 0.5 },
 };
 
 // A model we have never seen at all. Zero would meter it free and hide the

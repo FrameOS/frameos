@@ -11,6 +11,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import sharp from "sharp";
 import {
+  accountIdentities,
   accounts,
   auditEvents,
   createDb,
@@ -48,8 +49,10 @@ import { hashSecret } from "../../lib/secrets";
 // 507 is reachable with handmade images of a few hundred bytes.
 vi.hoisted(() => {
   process.env.FRAMEOS_CLOUD_MAX_PHOTO_MB = "0.01";
+  process.env.FRAMEOS_CLOUD_MAX_UNVERIFIED_PHOTO_MB = "0.005";
 });
 const quotaBytes = Math.round(0.01 * 1024 * 1024);
+const unverifiedQuotaBytes = Math.round(0.005 * 1024 * 1024);
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
 vi.mock("next/headers", () => ({
@@ -149,13 +152,13 @@ async function signInAs(accountId: string) {
   cookieJar.set(sessionCookieName, token);
 }
 
-async function signIn() {
+async function signIn({ emailVerified = true }: { emailVerified?: boolean } = {}) {
   userCounter += 1;
   const providerSubject = `photo-user-${userCounter}`;
   const { accountId } = await upsertAccountFromIdentity(db, {
     displayName: `Photo User ${userCounter}`,
     email: `photos-${userCounter}@example.com`,
-    emailVerified: true,
+    emailVerified,
     providerIssuer: issuer,
     providerKey: "google",
     providerSubject,
@@ -251,6 +254,20 @@ describe("photo library: status and listing", () => {
   it("needs a session", async () => {
     expect((await getStatus(get("/api/photos/status"))).status).toBe(401);
     expect((await getFiles(get("/api/photos/files?path="))).status).toBe(401);
+  });
+
+  it("gives an account without a verified email the smaller quota, and the full one once verified", async () => {
+    const accountId = await signIn({ emailVerified: false });
+    const status = async () =>
+      ((await (await getStatus(get("/api/photos/status"))).json()) as { quota_bytes: number }).quota_bytes;
+    expect(await status()).toBe(unverifiedQuotaBytes);
+    // The refusal uses the same number as the display.
+    const filler = Buffer.concat([png(5, 5, "unverified"), Buffer.alloc(unverifiedQuotaBytes, 7)]);
+    const refused = await upload("", "big.png", filler);
+    expect(refused.status).toBe(507);
+    expect(await refused.json()).toMatchObject({ error: "storage_quota_exceeded", max_bytes: unverifiedQuotaBytes });
+    await db.update(accountIdentities).set({ emailVerified: true }).where(eq(accountIdentities.accountId, accountId));
+    expect(await status()).toBe(quotaBytes);
   });
 
   it("describes the cloud library", async () => {

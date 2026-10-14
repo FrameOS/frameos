@@ -17,7 +17,9 @@ import {
   createDb,
   frames,
   linkedClients,
+  photoEntries,
   photoScanHits,
+  photoShares,
   sessions,
   storeSceneReports,
   storeScenes,
@@ -436,6 +438,10 @@ export type AdminOverview = {
   backupRuns: { count: number; last7d: number; lastAt: Date | null; lastBytes: number | null };
   frames: ActiveTotal & { connected: number; pending: number };
   openReports: number;
+  // The photo libraries (docs/photos.md): what the object store holds for
+  // them, and how many albums (folders), photos (files), links and
+  // accounts that is.
+  photos: { accounts: number; albums: number; bytes: number; files: number; shares: number };
   sessions: number;
   storeScenes: { public: number; pulled: number; total: number };
 };
@@ -515,6 +521,16 @@ export async function getAdminOverview(
     .from(sessions)
     .where(and(isNull(sessions.revokedAt), gt(sessions.expiresAt, now)));
 
+  const [photoRow] = await db
+    .select({
+      accounts: sql<number>`count(distinct ${photoEntries.accountId})::int`,
+      albums: sql<number>`count(*) filter (where ${photoEntries.kind} = 'folder')::int`,
+      bytes: sql<number>`coalesce(sum(${photoEntries.sizeBytes}) filter (where ${photoEntries.kind} = 'file'), 0)::float8`,
+      files: sql<number>`count(*) filter (where ${photoEntries.kind} = 'file')::int`,
+    })
+    .from(photoEntries);
+  const [shareRow] = await db.select({ count: sql<number>`count(*)::int` }).from(photoShares);
+
   return {
     accounts: {
       last7d: accountRow?.last7d ?? 0,
@@ -543,6 +559,13 @@ export async function getAdminOverview(
       total: frameRow?.total ?? 0,
     },
     openReports: reportRow?.count ?? 0,
+    photos: {
+      accounts: photoRow?.accounts ?? 0,
+      albums: photoRow?.albums ?? 0,
+      bytes: Number(photoRow?.bytes ?? 0),
+      files: photoRow?.files ?? 0,
+      shares: shareRow?.count ?? 0,
+    },
     sessions: sessionRow?.count ?? 0,
     storeScenes: {
       public: sceneRow?.public ?? 0,

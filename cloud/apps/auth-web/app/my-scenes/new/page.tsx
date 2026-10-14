@@ -60,7 +60,7 @@ export default async function NewScenePage({
   return (
     <NewSceneWithAi
       aiDisabled={aiDisabled}
-      aiSettingsUrl={getAccountUrl("/account/ai")}
+      aiSettingsUrl={getAccountUrl("/account/usage#ai")}
       handoffKey={fromConverter ? convertedScenesHandoffKey : undefined}
       initialPrompt={prompt}
       loginUrl={new URL("/login", getCloudBaseUrl()).toString()}

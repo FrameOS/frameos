@@ -11,8 +11,10 @@ import { sanitizeTagCandidates } from "./store";
 const classifyEndpoint = "https://api.openai.com/v1/chat/completions";
 const classifyTimeoutMs = 20_000;
 
+// gpt-6-luna: the cheapest current model (OpenAI is retiring the gpt-4
+// family, gpt-4o-mini with it); a category and a few tags need no more.
 function classifyModel() {
-  return process.env.OPENAI_CLASSIFY_MODEL?.trim() || "gpt-4o-mini";
+  return process.env.OPENAI_CLASSIFY_MODEL?.trim() || "gpt-6-luna";
 }
 
 export type SceneClassification = {

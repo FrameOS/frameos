@@ -71,10 +71,13 @@ function formatDollars(micros: bigint): string {
 }
 
 export function StorageUsageMeters({
-  aiHref = "/account/ai",
+  aiHref = "/account/usage#ai",
+  showAiLink = true,
   usage,
 }: {
   aiHref?: string;
+  /** The usage page shows the AI breakdown right below: no link row there. */
+  showAiLink?: boolean;
   usage: AccountUsage;
 }) {
   const totalBytes =
@@ -113,7 +116,7 @@ export function StorageUsageMeters({
             meet it. Every number below is deployment-tunable
             (FRAMEOS_CLOUD_MAX_*), so a paid tier raises them without a code
             change — see src/lib/usage.ts. */}
-        <span className="storage-usage__total-label">Free plan · storage used</span>
+        <span className="storage-usage__total-label">{usage.plan.name} · storage used</span>
         <span className="storage-usage__total-value">{formatBytes(totalBytes)}</span>
       </div>
       {meters.map((bucket) => {
@@ -134,11 +137,13 @@ export function StorageUsageMeters({
       })}
       {/* AI usage: a label and a figure, no meter, linking to the page that
           breaks it down and holds the off switch. */}
-      <Link className="storage-usage__link" href={aiHref}>
-        <span className="storage-usage__label">AI usage</span>
-        <span className="storage-usage__note">{aiUsageValue(usage.ai).note ?? ""}</span>
-        <span className="storage-usage__value">{aiUsageValue(usage.ai).value}</span>
-      </Link>
+      {showAiLink ? (
+        <Link className="storage-usage__link" href={aiHref}>
+          <span className="storage-usage__label">AI usage</span>
+          <span className="storage-usage__note">{aiUsageValue(usage.ai).note ?? ""}</span>
+          <span className="storage-usage__value">{aiUsageValue(usage.ai).value}</span>
+        </Link>
+      ) : null}
       {usage.scenes.public_bytes > 0 ? (
         <div className="storage-usage__row" title="Published public scenes don't count against any quota">
           <span className="storage-usage__label">Public scenes</span>

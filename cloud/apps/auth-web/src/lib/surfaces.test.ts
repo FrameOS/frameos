@@ -57,6 +57,7 @@ describe("surface routing", () => {
       ["/account/installs", "/backends"],
       ["/account/frames", "/frames"],
       ["/account/ai", "/ai"],
+      ["/account/usage", "/usage"],
       ["/account/settings", "/settings"],
       ["/account/backups", "/backups"],
       ["/account/activity", "/activity"],
@@ -141,6 +142,7 @@ describe("surface routing", () => {
     for (const [external, internal] of [
       ["/backends", "/account/installs"],
       ["/ai", "/account/ai"],
+      ["/usage", "/account/usage"],
       ["/settings", "/account/settings"],
       ["/backups", "/account/backups"],
       ["/activity", "/account/activity"],

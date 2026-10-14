@@ -30,6 +30,8 @@ const accountPagePrefixes = [
 // clean path is a 404 in production — which is exactly how /ai shipped.
 const accountSectionRewrites = new Map([
   ["/backends", "/account/installs"],
+  ["/usage", "/account/usage"],
+  // AI usage moved onto the usage page; the old clean path still lands.
   ["/ai", "/account/ai"],
   ["/settings", "/account/settings"],
   ["/backups", "/account/backups"],

@@ -421,7 +421,7 @@ export default async function ScenePage({
           look behind it. Only the owner can save a new version. */}
       <SceneEditorModal
         aiDisabled={aiDisabled}
-        aiSettingsUrl={getAccountUrl("/account/ai")}
+        aiSettingsUrl={getAccountUrl("/account/usage#ai")}
         backUrl={getStorePath()}
         canFork={Boolean(session?.accountId)}
         canPreview={scene.status !== "pulled"}

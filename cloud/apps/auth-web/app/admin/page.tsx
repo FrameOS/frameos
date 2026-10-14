@@ -133,6 +133,12 @@ export default async function AdminPage() {
             label="Sessions"
             value={overview.sessions}
           />
+          <StatTile
+            detail={`${overview.photos.files} photo${overview.photos.files === 1 ? "" : "s"} in ${overview.photos.albums} album${overview.photos.albums === 1 ? "" : "s"} · ${overview.photos.accounts} account${overview.photos.accounts === 1 ? "" : "s"} · ${overview.photos.shares} share link${overview.photos.shares === 1 ? "" : "s"}`}
+            href="/admin/storage"
+            label="Photos"
+            value={formatBytes(overview.photos.bytes)}
+          />
         </div>
       </section>
 

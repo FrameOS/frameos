@@ -10,11 +10,9 @@ import {
 } from "@frameos-cloud/db";
 import { AccountNav } from "../../src/components/AccountNav";
 import { AppShell } from "../../src/components/AppShell";
-import { StorageUsageMeters } from "../../src/components/StorageUsageMeters";
 import { UserIdentifier } from "../../src/components/UserIdentifier";
 import { getAccountUrl, getCloudBaseUrl } from "../../src/lib/env";
 import { readSession } from "../../src/lib/session";
-import { accountUsage, type AccountUsage } from "../../src/lib/usage";
 
 // Shared chrome for all /account pages: sign-in gate, app shell, the account
 // header, and the section navigation with each section's headline number as
@@ -39,14 +37,11 @@ export default async function AccountLayout({
   let isSuperadmin = false;
   let installCount = 0;
   let backupCount = 0;
-  let usage: AccountUsage | null = null;
 
   if (session.accountId) {
     const accountId = session.accountId;
     const db = createDb();
-    // Byte sums come from the same accountUsage() helper the quota
-    // enforcement and /api/backends/grants use — one definition of "used".
-    const [[row], installs, backups, usageSnapshot] =
+    const [[row], installs, backups] =
       await Promise.all([
         db
           .select({ isSuperadmin: accounts.isSuperadmin })
@@ -75,12 +70,10 @@ export default async function AccountLayout({
           .select({ count: sql<number>`count(*)::int` })
           .from(clientBackups)
           .where(eq(clientBackups.accountId, accountId)),
-        accountUsage(db, accountId),
       ]);
     isSuperadmin = row?.isSuperadmin ?? false;
     installCount = installs[0]?.count ?? 0;
     backupCount = backups[0]?.count ?? 0;
-    usage = usageSnapshot;
   }
 
   return (
@@ -100,7 +93,6 @@ export default async function AccountLayout({
           <h1>{session?.name ?? "FrameOS Cloud account"}</h1>
           <p className="copy">{session?.email}</p>
         </div>
-        {session?.accountId && usage ? <StorageUsageMeters usage={usage} /> : null}
       </div>
       <AccountNav
         counts={{
@@ -114,6 +106,7 @@ export default async function AccountLayout({
           installs: getAccountUrl("/account/installs"),
           security: getAccountUrl("/account/security"),
           settings: getAccountUrl("/account/settings"),
+          usage: getAccountUrl("/account/usage"),
         }}
       />
       {children}

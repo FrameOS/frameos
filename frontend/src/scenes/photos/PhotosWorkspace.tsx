@@ -38,8 +38,9 @@ import { TextInput } from '../../components/TextInput'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
+import type { FrameType } from '../../types'
 import { inHassioIngress } from '../../utils/inHassioIngress'
-import { formatFrameRelativeTime } from '../../decorators/frame'
+import { formatFrameRelativeTime, frameIsActive } from '../../decorators/frame'
 import { photosLogic, type PhotoUpload } from './photosLogic'
 import { aspectMarkRect, type PhotoThumbnailFit } from './photoEntries'
 import { photoColorsLogic } from './photoColorsLogic'
@@ -844,7 +845,13 @@ function ListRow({ entry, selected, shared }: { entry: PhotoEntry; selected: boo
       <div className="frameos-inset relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100">
         {entry.kind === 'folder' ? (
           entry.cover ? (
-            <FolderCover entry={entry} className="h-10 w-10" />
+            <>
+              <FolderCover entry={entry} className="h-10 w-10" />
+              {/* The grid's mark: a cover alone looks like a photo. */}
+              <span className="absolute bottom-0.5 left-0.5 flex h-4 w-4 items-center justify-center rounded bg-black/45 text-white">
+                <FolderIcon className="h-3 w-3" />
+              </span>
+            </>
           ) : (
             <FolderIcon className="frameos-folder-icon h-5 w-5" />
           )
@@ -1677,6 +1684,16 @@ function InstallPicker(): JSX.Element | null {
     return null
   }
   const frames = framesList.filter((frame) => !frame.archived)
+  // The home page's split: a frame that is online, or was heard from
+  // recently, above the ones that were not.
+  const groups = [
+    { title: 'Active', frames: frames.filter((frame) => frameIsActive(frame)) },
+    { title: 'Inactive', frames: frames.filter((frame) => !frameIsActive(frame)) },
+  ].filter((group) => group.frames.length)
+  const lastSeen = (frame: FrameType): string | null => {
+    const ago = formatFrameRelativeTime(frame.last_log_at ?? frame.last_seen_at)
+    return ago ? `last seen ${ago} ago` : null
+  }
   return (
     <Modal title="Install on frame" onClose={closeInstallPicker} panelClassName="max-w-[28rem]">
       <div className="space-y-3 p-5">
@@ -1690,27 +1707,39 @@ function InstallPicker(): JSX.Element | null {
             : 'Pick a frame. You choose the albums and the timing next.'}
         </p>
         {frames.length ? (
-          <div className="max-h-[50vh] space-y-2 overflow-y-auto">
-            {frames.map((frame) => (
-              <button
-                key={frame.id}
-                type="button"
-                onClick={() => installOnFrame(frame.id)}
-                className="frameos-card flex w-full items-center gap-3 rounded-xl border border-white/90 bg-white/80 px-3 py-2.5 text-left shadow-sm transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                <span className="frameos-icon-tile flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
-                  <ComputerDesktopIcon className="h-5 w-5" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="frameos-strong block truncate text-sm font-semibold">
-                    {frame.name || frameHost(frame)}
-                  </span>
-                  <span className="frameos-muted block truncate text-xs">
-                    {frame.width && frame.height ? `${frame.width}×${frame.height}` : frameHost(frame)}
-                  </span>
-                </span>
-                <ChevronRightIcon className="frameos-muted h-5 w-5 shrink-0" />
-              </button>
+          <div className="max-h-[50vh] space-y-3 overflow-y-auto">
+            {groups.map((group) => (
+              <div key={group.title} className="space-y-2">
+                {groups.length > 1 ? (
+                  <div className="frameos-muted px-1 text-[10px] font-semibold uppercase tracking-wide">{group.title}</div>
+                ) : null}
+                {group.frames.map((frame) => (
+                  <button
+                    key={frame.id}
+                    type="button"
+                    onClick={() => installOnFrame(frame.id)}
+                    className="frameos-card flex w-full items-center gap-3 rounded-xl border border-white/90 bg-white/80 px-3 py-2.5 text-left shadow-sm transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  >
+                    <span className="frameos-icon-tile flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
+                      <ComputerDesktopIcon className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="frameos-strong block truncate text-sm font-semibold">
+                        {frame.name || frameHost(frame)}
+                      </span>
+                      <span className="frameos-muted block truncate text-xs">
+                        {[
+                          frame.width && frame.height ? `${frame.width}×${frame.height}` : frameHost(frame),
+                          lastSeen(frame),
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                    </span>
+                    <ChevronRightIcon className="frameos-muted h-5 w-5 shrink-0" />
+                  </button>
+                ))}
+              </div>
             ))}
           </div>
         ) : (

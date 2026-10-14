@@ -563,6 +563,8 @@ export const accountStorageUsage = pgTable(
     frameAssetBytes: bigint("frame_asset_bytes", { mode: "number" })
       .default(0)
       .notNull(),
+    // The photo library's files in the object store (migration 0064).
+    photoBytes: bigint("photo_bytes", { mode: "number" }).default(0).notNull(),
     totalBytes: bigint("total_bytes", { mode: "number" }).default(0).notNull(),
     computedAt: timestamp("computed_at", { withTimezone: true })
       .defaultNow()

@@ -25,6 +25,7 @@ import {
   type AccountPlan,
 } from "@frameos-cloud/ledger";
 import {
+  accountIdentities,
   clientBackups,
   frameLogs,
   frames,
@@ -124,11 +125,31 @@ export const maxFrameLogBytesPerAccount = megabyteLimitFromEnv(
   100,
 );
 // The photo library (docs/photos.md). Not a plan entitlement yet: every
-// account gets the deployment's number.
+// verified account gets the deployment's number, an unverified one (no
+// confirmed email, no social login) the smaller of the two below. A bucket
+// anyone can fill with a throwaway sign-up is the one that gets abused.
 export const maxPhotoBytesPerAccount = megabyteLimitFromEnv(
   "FRAMEOS_CLOUD_MAX_PHOTO_MB",
-  10240,
+  1024,
 );
+export const maxUnverifiedPhotoBytesPerAccount = megabyteLimitFromEnv(
+  "FRAMEOS_CLOUD_MAX_UNVERIFIED_PHOTO_MB",
+  250,
+);
+
+/**
+ * The photo quota ONE account has: the full number once any of its sign-in
+ * identities has a verified email (a social login arrives verified), the
+ * unverified one until then.
+ */
+export async function photoQuotaBytesForAccount(db: FramesDatabase, accountId: string): Promise<number> {
+  const [row] = await db
+    .select({ id: accountIdentities.id })
+    .from(accountIdentities)
+    .where(and(eq(accountIdentities.accountId, accountId), eq(accountIdentities.emailVerified, true)))
+    .limit(1);
+  return row ? maxPhotoBytesPerAccount : Math.min(maxPhotoBytesPerAccount, maxUnverifiedPhotoBytesPerAccount);
+}
 
 /**
  * The quota numbers that apply to ONE account: its plan's entitlements
@@ -429,7 +450,7 @@ export async function accountUsage(db: FramesDatabase, accountId: string) {
   // One plan lookup for both the quota limits and the AI summary; `undefined`
   // when the accounting tables are not migrated, which both handle.
   const plan = await readAccountPlan(db, accountId).catch(() => undefined);
-  const [scenes, backups, logs, frameCount, cloudRenderedCount, limits, ai, photos] =
+  const [scenes, backups, logs, frameCount, cloudRenderedCount, limits, ai, photos, photoQuota] =
     await Promise.all([
       sceneBytesForAccount(db, accountId),
       backupBytesForAccount(db, accountId),
@@ -439,6 +460,7 @@ export async function accountUsage(db: FramesDatabase, accountId: string) {
       accountLimits(db, accountId, plan),
       accountAiSummary(db, accountId, now, plan),
       photoBytesForAccount(db, accountId),
+      photoQuotaBytesForAccount(db, accountId),
     ]);
   return {
     ai,
@@ -469,7 +491,7 @@ export async function accountUsage(db: FramesDatabase, accountId: string) {
     // The photo library (docs/photos.md): uploads over the limit are refused.
     photos: {
       bytes: Math.round(photos),
-      max_bytes: maxPhotoBytesPerAccount,
+      max_bytes: photoQuota,
     },
     // Which plan these limits came from, so a UI can say "on the Maker plan"
     // beside the numbers rather than presenting them as laws of nature.

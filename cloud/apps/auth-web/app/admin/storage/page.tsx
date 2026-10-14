@@ -105,6 +105,11 @@ export default async function AdminStoragePage({
             </span>
             <span className="stat-tile__detail">device files held here</span>
           </div>
+          <div className="stat-tile">
+            <span className="stat-tile__label">Photos</span>
+            <span className="stat-tile__value">{formatBytes(totals.photoBytes)}</span>
+            <span className="stat-tile__detail">photo libraries in the object store</span>
+          </div>
         </div>
       </section>
 
@@ -165,6 +170,7 @@ export default async function AdminStoragePage({
                   <th title="Cached device files — no quota measures these">
                     Asset cache
                   </th>
+                  <th title="The photo library, against its own quota">Photos</th>
                   <th>Measured</th>
                 </tr>
               </thead>
@@ -205,6 +211,9 @@ export default async function AdminStoragePage({
                     </td>
                     <td>
                       <Bytes bytes={row.frameAssetBytes} />
+                    </td>
+                    <td>
+                      <Bytes bytes={row.photoBytes} />
                     </td>
                     <td className="cell-nowrap copy">
                       {row.computedAt

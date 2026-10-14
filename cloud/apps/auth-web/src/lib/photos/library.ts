@@ -24,7 +24,7 @@ import type { FramesDatabase } from "../frames";
 import { logWarn } from "../log";
 import { type ObjectFile, isValidObjectKey, objectStore } from "../object-store";
 import { capturePostHogEvent } from "../posthog-capture";
-import { maxPhotoBytesPerAccount } from "../usage";
+import { photoQuotaBytesForAccount } from "../usage";
 import type { PhotoColors } from "./colors";
 import {
   comparePhotoNames,
@@ -384,10 +384,13 @@ export async function assertPhotoQuota(
   extraBytes: number,
   extraEntries = 0,
 ) {
-  const totals = await photoLibraryTotals(db, accountId);
-  if (totals.bytes + extraBytes > maxPhotoBytesPerAccount) {
+  const [totals, quotaBytes] = await Promise.all([
+    photoLibraryTotals(db, accountId),
+    photoQuotaBytesForAccount(db, accountId),
+  ]);
+  if (totals.bytes + extraBytes > quotaBytes) {
     throw new PhotoError("storage_quota_exceeded", 507, {
-      max_bytes: maxPhotoBytesPerAccount,
+      max_bytes: quotaBytes,
       used_bytes: Math.round(totals.bytes),
     });
   }
