@@ -41,6 +41,9 @@ when not defined(frameosEmbedded) and not defined(frameosWasm):
   import frameos/utils/process
 
 const MaxImageDownloadBytes = 15 * 1024 * 1024
+## The ceiling for a body decoded straight off the socket (a window of it
+## in memory at a time): the photo library takes 250 MiB uploads.
+const StreamedImageMaxBytes = 256 * 1024 * 1024
 const MaxExifOutputBytes = 1024 * 1024
 const ExifToolTimeoutMs = 10_000
 const DisplayDecodeMaxEdge* = 2048
@@ -1026,7 +1029,13 @@ when defined(frameosEmbedded):
     defer: stream.closeHttpBodyStream()
     if stream.httpBodyStreamFailed:
       return false
-    if stream.contentLength > 0 and maxBytes > 0 and stream.contentLength > maxBytes:
+    # `maxBytes` bounds what the BUFFERED path may hold; a streamed decode
+    # holds a window of the body, whatever its length, so a photographer's
+    # 14 MB camera JPEG decodes here on a board whose buffered ceiling is
+    # 6 MB. Handing it over on size (as this once did) sent it to the
+    # buffered fetch, which refused it with "response too large". Only a
+    # body past any plausible photo is left to that path and its error.
+    if stream.contentLength > StreamedImageMaxBytes:
       return false
     var format = "unknown"
     var totalLen = 0
@@ -1142,8 +1151,11 @@ when defined(frameosWasm):
     ## none of it; here it is the HTTP hook's buffer, which the simulated
     ## ceiling does not count, decoded where it lies. Copied into a string
     ## first, the whole body was charged to a board that keeps none of it,
-    ## and photos the frame shows were refused.
-    var response = boundedRequestBuffer(url, maxBytes = maxBytes, headers = headers)
+    ## and photos the frame shows were refused. The same goes for the size:
+    ## the device streams a body of any length into a target, so the
+    ## buffered ceiling (`maxBytes`) does not apply here either.
+    var response = boundedRequestBuffer(url, maxBytes = max(maxBytes, StreamedImageMaxBytes),
+      headers = headers)
     try:
       if response.code >= 400:
         raise newException(IOError, response.status)
