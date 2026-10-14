@@ -579,6 +579,22 @@ function applyDeviceLimits(limits) {
   }
 }
 
+// Run as an ESP32 (memory.runsAsEmbedded in the runtime): a JS app's
+// interpreter lasts one render, `app.frame.embedded` is true and downloads
+// decode into the canvas. The device picker's ESP32 presets ask for it, and so
+// does a preview of an ESP32 frame; anything else runs as a Pi.
+function applyEmbedded(enabled) {
+  if (!enabled) {
+    return
+  }
+  try {
+    call('frameos_wasm_set_embedded', null, ['boolean'], [true])
+  } catch (e) {
+    // older bundle without the export
+    post({ type: 'log', message: 'running as an ESP32 is unavailable in this runtime build' })
+  }
+}
+
 function memoryStat(name) {
   try {
     return call(name, 'number', [], [])
@@ -748,6 +764,7 @@ async function init(msg) {
     // init on purpose: module startup (the baked-in font tables and friends)
     // lives in a frame's flash, not in its render budget.
     applyDeviceLimits(msg.deviceLimits)
+    applyEmbedded(msg.embedded === true || Boolean(msg.deviceLimits && msg.deviceLimits.embedded))
     // Apps may save into the browser folder (a device's saveAssets setting;
     // on by default here — it's the visitor's own browser storage). Pass
     // `saveAssets: false` or a {nodeName: bool} map to mirror a frame.

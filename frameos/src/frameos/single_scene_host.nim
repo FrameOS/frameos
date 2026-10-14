@@ -21,6 +21,7 @@ import ./interpreter
 import ./types
 import ./utils/asset_colors
 import ./utils/dither
+import ./utils/memory
 import ./js_runtime/app_runtime
 import ./js_runtime/run_budget
 import ./js_runtime/runtime as jsRuntime
@@ -287,7 +288,9 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   discard host.events.drain()
   # The scene is done with its JS apps until the next render. On an ESP32 that
   # is minutes away, and the image packing and the next decode want the
-  # memory; the preview does the same so that an app keeping values in module
-  # variables, which do not survive this, misbehaves in the editor rather than
-  # only on the frame (releaseIdleJsAppRuntimes).
-  releaseIdleJsAppRuntimes()
+  # memory. The preview does the same while it runs as an ESP32, so that an
+  # app keeping values in module variables, which do not survive this,
+  # misbehaves in the editor rather than only on the frame; otherwise it
+  # keeps them, as a Pi does (releaseIdleJsAppRuntimes).
+  if runsAsEmbedded():
+    releaseIdleJsAppRuntimes()

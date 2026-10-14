@@ -9,7 +9,7 @@ noticing. `docs/retired-apps.json` lists them:
 | `data/immich` | `repo/apps/image/immich` | 2026.10.11 | `frameos.fetchImage` |
 | `data/frameOSGallery` | `repo/apps/image/frameOSGallery` | 2026.10.13 | a throw in `get()` fails the node (the painted error) |
 | `data/unsplash` | `repo/apps/image/unsplash` | 2026.10.13 | a throw in `get()` fails the node (the painted error) |
-| `data/wikicommons` | `repo/apps/image/wikicommons` | 2026.10.13 | `app.frame.embedded` (the ESP32's 900 px thumbnails) |
+| `data/wikicommons` | `repo/apps/image/wikicommons` | 2026.10.13 | a throw in `get()` fails the node (the painted error) |
 | `data/googlePhotos` | `repo/apps/image/googlePhotos` | 2026.10.13 | `frameos.remember` (the album list outlives an ESP32 render) |
 | `data/openaiImage` | `repo/apps/image/openaiImage` | 2026.10.13 | `app.frame.embedded`, and saving a `data:` URL (the `b64_json` reply) |
 | `data/openaiText` | `repo/apps/text/openaiText` | 2026.10.11 | `frameos.httpRequest` |

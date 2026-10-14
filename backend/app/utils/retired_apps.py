@@ -54,7 +54,7 @@ RETIRED_APPS: dict[str, dict[str, str]] = {
         "replacement": "repo/apps/image/wikicommons",
         "sceneAppKey": "wikicommons",
         "runtime": "2026.10.13",
-        "needs": "app.frame.embedded (the ESP32's 900 px thumbnails)",
+        "needs": "a throw in get() failing the node (the painted error)",
     },
     "data/googlePhotos": {
         "replacement": "repo/apps/image/googlePhotos",

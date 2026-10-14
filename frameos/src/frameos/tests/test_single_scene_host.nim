@@ -7,6 +7,7 @@ import ../js_runtime/app_runtime
 import ../js_runtime/run_budget
 import ../js_runtime/runtime as jsRuntime
 import ../utils/http_client
+import ../utils/memory
 
 # The ESP32 and the wasm preview hold one scene, built on first use. A battery
 # ESP32 reads the button that woke it before its first render, so the press is
@@ -127,9 +128,10 @@ let abortScene = %*{
 }
 scenes.add(abortScene)
 
-# Where a JS app's values live (docs/js-apps-and-code-nodes.md): module
-# variables last one render on this host, an ESP32 and the editor's preview
-# alike, init() runs on every render, and `frameos.remember` carries over.
+# Where a JS app's values live (docs/js-apps-and-code-nodes.md): on an ESP32,
+# and in the editor's preview while it runs as one, module variables last one
+# render, init() runs on every render, and `frameos.remember` carries over.
+# The preview of anything else keeps the interpreter, as a Pi does.
 const valuesSceneId = "tests/single-scene-host/values"
 scenes.add(%*{
   "id": valuesSceneId,
@@ -222,16 +224,27 @@ doAssert count("fetched 200") == 1, $logLines
 doAssert count("deadline") == 0, $logLines
 jsHttpRequestHook = nil
 
-let valuesHost = SingleSceneHost(frameConfig: config, logger: abortLogger)
-valuesHost.requestSelect = proc (sceneId: string): bool = true
-valuesHost.start()
-valuesHost.makeCurrent(valuesSceneId.SceneId)
-logLines.setLen(0)
-for _ in 1..3:
-  discard valuesHost.ensureScene()
-  discard valuesHost.renderScene(ExecutionContext(scene: valuesHost.scene, event: "render",
-    payload: %*{}, loopIndex: 0, loopKey: "."))
+proc renderValuesThrice() =
+  let valuesHost = SingleSceneHost(frameConfig: config, logger: abortLogger)
+  valuesHost.requestSelect = proc (sceneId: string): bool = true
+  valuesHost.start()
+  valuesHost.makeCurrent(valuesSceneId.SceneId)
+  logLines.setLen(0)
+  for _ in 1..3:
+    discard valuesHost.ensureScene()
+    discard valuesHost.renderScene(ExecutionContext(scene: valuesHost.scene, event: "render",
+      payload: %*{}, loopIndex: 0, loopKey: "."))
+  valuesHost.dropScene()
+
+setSimulatedEmbedded(true)
+renderValuesThrice()
 for kept in 1..3:
   doAssert count("module 1 init 1 kept " & $kept) == 1,
-    "a fresh module and init() per render, remember carries over: " & $logLines
+    "as an ESP32: a fresh module and init() per render, remember carries over: " & $logLines
+
+setSimulatedEmbedded(false)
+renderValuesThrice()
+for n in 1..3:
+  doAssert count("module " & $n & " init 1 kept " & $n) == 1,
+    "as a Pi: one module and one init() for the scene's life: " & $logLines
 echo "ok"

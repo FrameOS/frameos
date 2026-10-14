@@ -119,12 +119,13 @@ when defined(frameosEmbedded):
 
 proc releaseIdleJsAppRuntimes*() =
   ## Drop every JS app interpreter that is not mid-call. The single-scene host
-  ## calls it after every render (single_scene_host.renderScene), on an ESP32
-  ## and in the editor's preview alike: there an app's module variables last
-  ## one render and its init() runs on every one, and what must last longer
-  ## goes through `frameos.remember`. The preview does it so that an app
-  ## leaning on module state shows it in the editor, not on the frame. A Pi
-  ## keeps its interpreters for the scene's life and never calls this.
+  ## calls it after every render (single_scene_host.renderScene) on an ESP32,
+  ## and in the editor's preview while it runs as one (runsAsEmbedded): there
+  ## an app's module variables last one render and its init() runs on every
+  ## one, and what must last longer goes through `frameos.remember`. The
+  ## preview does it so that an app leaning on module state shows it in the
+  ## editor, not on the frame. A Pi keeps its interpreters for the scene's
+  ## life and never calls this.
   ##
   ## Eviction otherwise only ever runs from ensureReady — that is, when ANOTHER
   ## JS node is about to be built. Nothing on the image path triggers it, so a
@@ -941,9 +942,10 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   of "debug":
     return nimBoolToJS(ctx, e.owner.frameConfig.debug)
   of "embedded":
-    # An ESP32-class runtime: no storage for assets, a few MB of PSRAM. The
-    # photo apps ask for smaller and lighter images there.
-    return nimBoolToJS(ctx, defined(frameosEmbedded))
+    # An ESP32-class runtime, or the preview running as one: no storage for
+    # assets, a few MB of PSRAM. The OpenAI image app asks for a lighter
+    # picture there.
+    return nimBoolToJS(ctx, runsAsEmbedded())
   else:
     return jsUndefSentinel(ctx)
 

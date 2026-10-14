@@ -186,10 +186,11 @@ Three places, the same rule on every device:
 Module-level variables last as long as the app's interpreter, and an ESP32
 drops every idle interpreter after each render to give the next decode the
 memory, so the next render starts with a fresh module and runs `init()`
-again. The editor's preview does the same, so an app that keeps a counter in
-a module variable shows its first photo forever in the editor too, not only
-on the frame. A Pi keeps its interpreters for the scene's life, to stay fast,
-but an app must not count on that.
+again. A Pi keeps its interpreters for the scene's life, to stay fast, but an
+app must not count on that. The editor's preview runs as either: as an ESP32
+when its memory limit is set to one of the ESP32 boards or when it previews
+an ESP32 frame, and as a Pi otherwise. Try a new app both ways: one that keeps
+a counter in a module variable shows its first photo forever as an ESP32.
 
 `remember` values are JSON, at most 512 KB per node on an ESP32. `remember`
 answers `false` when a value would not fit, and `null` forgets the key. The
@@ -249,7 +250,7 @@ imports them with relative paths:
 
 `export function init(app)` is optional and runs each time the app's
 interpreter starts: once per scene on a Pi, before every render on an ESP32
-and in the preview (see [Where an app keeps its values](#where-an-app-keeps-its-values)).
+and in a preview running as one (see [Where an app keeps its values](#where-an-app-keeps-its-values)).
 Do **not** give a
 scene-local app `category: "render"`: as of Aug 2026 such an app placed in the
 prev/next chain draws nothing and logs nothing. The pattern that works is a
@@ -394,8 +395,8 @@ render allocates — not terse code:
   `init()` and update them in place: flat arrays of numbers and fixed-size
   pools, no new objects, closures or big strings per frame, no fetch or
   `JSON.parse` in the render path, and a hard cap on particle counts. Those
-  buffers are scratch (an ESP32 and the preview build them again every
-  render), so positions come from the clock, not from the previous frame.
+  buffers are scratch (an ESP32 builds them again every render), so
+  positions come from the clock, not from the previous frame.
 
 ## Checklist before shipping a scene
 

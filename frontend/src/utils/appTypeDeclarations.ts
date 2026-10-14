@@ -115,7 +115,7 @@ interface FrameOSApp {
     timeZone: string;
     /** The frame's debug setting (FrameOS 2026.10.13+; undefined before). */
     debug?: boolean;
-    /** An ESP32-class runtime (FrameOS 2026.10.13+; undefined before). */
+    /** An ESP32-class runtime, or the preview running as one (FrameOS 2026.10.13+; undefined before). */
     embedded?: boolean;
   };
   initialized?: boolean;

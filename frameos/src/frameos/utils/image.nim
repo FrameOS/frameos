@@ -552,11 +552,12 @@ proc decodeIntoTargetWithDegrade*(target: Image, fit: ScaledDecodeFit,
     for divisor in [2, 4]:
       let tempWidth = max(1, target.width div divisor)
       let tempHeight = max(1, target.height div divisor)
-      when defined(frameosEmbedded):
+      when defined(frameosEmbedded) or defined(frameosWasm):
         # An allocation the heap cannot satisfy is not a catchable failure on
         # embedded — the runtime longjmp-aborts the whole render and leaks
-        # everything on the stack. Ask first: seen on an 8 MB board whose
-        # largest free block was 1.7 MB when the half-res rung wanted 1.9 MB.
+        # everything on the stack, and so does the preview under a simulated
+        # ceiling. Ask first: seen on an 8 MB board whose largest free block
+        # was 1.7 MB when the half-res rung wanted 1.9 MB.
         let contiguous = availableRenderBytes()
         if contiguous > 0 and tempWidth * tempHeight * 4 > contiguous:
           continue
@@ -1140,6 +1141,40 @@ when defined(frameosEmbedded):
     let directUrl = embeddedSizedRemoteImageUrl(url, target)
     downloadImageFromResolvedBuffer(directUrl, maxBytes, target, headers, fit)
 
+when defined(frameosWasm):
+  proc decodesIntoTarget(target: Image): bool =
+    runsAsEmbedded() and not target.isNil and target.width > 0 and target.height > 0
+
+  proc downloadDecodingIntoTarget(url: string, maxBytes: int, target: Image,
+      headers: seq[SimpleHttpHeader], fit: ScaledDecodeFit): Image =
+    ## The preview running as an ESP32 (runsAsEmbedded) decodes a download the
+    ## way the device does: straight into the canvas region the planner
+    ## offered, with the plan clamped to the memory budget and degraded rather
+    ## than refused. The device streams the body off the socket and holds
+    ## none of it; here it is the HTTP hook's buffer, which the simulated
+    ## ceiling does not count, decoded where it lies. Copied into a string
+    ## first, the whole body was charged to a board that keeps none of it,
+    ## and photos the frame shows were refused.
+    var response = boundedRequestBuffer(url, maxBytes = maxBytes, headers = headers)
+    try:
+      if response.code >= 400:
+        raise newException(IOError, response.status)
+      if response.body.isNil or response.bodyLen <= 0:
+        raise newException(PixieError, "Unsupported image file format: empty response")
+      let data = response.body
+      let len = response.bodyLen
+      var head = newString(min(len, 5))
+      copyMem(addr head[0], data, head.len)
+      if head.startsWith("<?xml") or head.startsWith("<svg"):
+        var content = newString(len)
+        copyMem(addr content[0], data, len)
+        return decodeImageWithFallback(content)
+      refreshDecodeBudgetInto()
+      result = decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
+        discard decodeImageScaledInto(data, len, dst, fit))
+    finally:
+      response.freeHttpBufferResponse()
+
 proc downloadImage*(url: string, maxBytes = MaxImageDownloadBytes, headers: seq[SimpleHttpHeader] = @[]): Image =
   if url.startsWith("data:"):
     return decodeDataUrl(url)
@@ -1205,6 +1240,9 @@ proc downloadImageInto*(url: string, target: Image, maxBytes = MaxImageDownloadB
     # need the native resolution and scale it themselves
     if url.startsWith("data:"):
       return decodeDataUrl(url)
+    when defined(frameosWasm):
+      if decodesIntoTarget(target):
+        return downloadDecodingIntoTarget(url, maxBytes, target, headers, fit)
     var response = boundedRequestWithHeaders(url, headers = headers, maxBytes = maxBytes)
     if response.code >= 400:
       raise newException(IOError, response.status)
@@ -1222,6 +1260,10 @@ proc downloadImageWithDataInto*(url: string, target: Image, maxBytes = MaxImageD
   else:
     if url.startsWith("data:"):
       return decodeDataUrlWithData(url)
+    when defined(frameosWasm):
+      if decodesIntoTarget(target):
+        # No bytes back, as on the device: its streamed decode keeps none.
+        return (downloadDecodingIntoTarget(url, maxBytes, target, headers, fit), "")
     let response = boundedRequestWithHeaders(url, headers = headers, maxBytes = maxBytes)
     if response.code >= 400:
       raise newException(IOError, response.status)

@@ -24,6 +24,7 @@ import { isFrameControlMode } from '../../../../utils/frameControlMode'
 import { getBasePath } from '../../../../utils/getBasePath'
 import { projectApiPath } from '../../../../utils/projectApi'
 import { frameLogic } from '../../frameLogic'
+import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
 import { collectScenePreviewPayloadScenes, scenesLogic } from './scenesLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { gatePreviewSettings } from './previewKeyConsentLogic'
@@ -931,6 +932,10 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         // Apps may save into the browser folder; it is the user's own
         // browser storage, so the frame's saveAssets setting doesn't apply.
         saveAssets: true,
+        // Run the scene the way this frame will: an ESP32 restarts every JS
+        // app on each render and decodes photos into the canvas, a Pi keeps
+        // them running.
+        embedded: isEsp32Frame(values.frame),
       })
     },
     closeLivePreview: () => {

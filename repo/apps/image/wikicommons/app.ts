@@ -78,7 +78,7 @@ export function get(app, context) {
     : mode === 'random'
     ? 'randomImage'
     : mode
-  const width = Math.min(Math.max(w, h, 1), f.embedded ? 900 : Infinity)
+  const width = Math.max(w, h, 1)
   const now = new Date()
   const [Y, M, D] = [now.getFullYear(), now.getMonth() + 1, now.getDate()]
   const potd = (y, m, d) =>

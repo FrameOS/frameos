@@ -16,6 +16,7 @@ import pixie
 import frameos/js_runtime/app_runtime
 import frameos/types
 import frameos/utils/http_client
+import frameos/utils/memory
 import frameos/values
 
 const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "image" / "wikicommons"
@@ -341,6 +342,17 @@ suite "wikicommons code app":
     check apiCalls.len == 2
     check apiCalls[0].param("iiurlwidth") == "300"
     check apiCalls[1].param("iiurlwidth") == "200"
+
+  test "an ESP32 asks for the whole panel too":
+    # It used to ask for at most 900 px, which a 13.3" panel stretched to
+    # 1600. The decode streams into the canvas and clamps itself to the
+    # memory budget, so a larger source never costs it the frame.
+    setSimulatedEmbedded(true)
+    defer: setSimulatedEmbedded(false)
+    let h = newHarness(width = 1200, height = 1600)
+    check h.render(%*{}, width = 1200, height = 1600).kind == fkImage
+    check apiCalls.len == 1
+    check apiCalls[0].param("iiurlwidth") == "1600"
 
   test "on this day: today's month and day in an earlier year":
     let h = newHarness()

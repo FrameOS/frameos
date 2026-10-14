@@ -33,6 +33,7 @@
 import strutils, unicode, options, math
 import pixie
 import frameos/utils/font
+import frameos/utils/memory
 
 type
   TextRenderOptions* = object
@@ -314,11 +315,17 @@ proc drawText*(
     when defined(frameosEmbedded):
       image.fillTextApproxStroke(layout.borderTypeset.get(), origin, strokeWidth)
     else:
-      image.strokeText(
-        layout.borderTypeset.get(),
-        translate(origin),
-        strokeWidth = strokeWidth
-      )
+      # The preview running as an ESP32 strokes the way the device does: the
+      # path stroke cost the Wikimedia Commons caption 2.5 MB on a 13.3"
+      # canvas, more than an 8 MB board has left.
+      if runsAsEmbedded():
+        image.fillTextApproxStroke(layout.borderTypeset.get(), origin, strokeWidth)
+      else:
+        image.strokeText(
+          layout.borderTypeset.get(),
+          translate(origin),
+          strokeWidth = strokeWidth
+        )
   image.fillText(
     layout.textTypeset,
     translate(origin)
