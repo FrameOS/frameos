@@ -374,11 +374,12 @@ suite "pngIsProvablyOpaque":
     check pngIsProvablyOpaque("not a png at all") == false
 
 suite "embeddedSizedRemoteImageUrl":
-  # Unsplash (imgix) serves a crop sized for the panel. Which FORMAT it is
-  # asked for depends on the board: imgix's auto=format answer to a frame is
-  # a progressive JPEG, which only decodes buffered, so a board without the
-  # headroom for that asks for PNG (streams row by row) and one with it
-  # keeps the small JPEG body. An author's own fm=/auto= is never touched.
+  # Unsplash (imgix) serves a crop sized for the panel, and is asked for its
+  # own choice of format: its auto=format answer to a frame is a progressive
+  # JPEG, which every board decodes now that the decoder reads one in
+  # strips. (The 8 MB boards used to ask for PNG, four times the bytes,
+  # because the whole image's coefficients did not fit next to their
+  # canvas.) An author's own fm=/auto= is never touched.
   const photo = "https://images.unsplash.com/photo-1?ixid=abc"
   let panel = newImage(1200, 1600)   # 13.3" — asks for an 800x800 crop
   let small = newImage(800, 480)     # 7.3" / PhotoPainter
@@ -395,8 +396,7 @@ suite "embeddedSizedRemoteImageUrl":
     check "w=800" in smallUrl
     check "h=480" in smallUrl
 
-  test "an explicit fm= or auto= stands, whatever the board":
-    availableRenderBytesOverride = 1024 * 1024   # would want PNG otherwise
+  test "an explicit fm= or auto= stands":
     let explicitFormat = embeddedSizedRemoteImageUrl(photo & "&fm=jpg&q=60", panel)
     check "fm=jpg" in explicitFormat
     check "fm=png" notin explicitFormat
@@ -406,41 +406,15 @@ suite "embeddedSizedRemoteImageUrl":
     check "fm=" notin explicitAuto
     check "auto=format" notin explicitAuto
 
-  test "plans the buffered progressive decode the way pixie does":
-    # 4:2:0 coefficients (3 B/px) + channel planes (1.5 B/px) + body (0.5
-    # B/px); the luma coefficient plane (2 B/px) is the largest allocation.
-    let plan = progressiveJpegBufferedDecodeBytes(800, 800)
-    check plan.total == 3_200_000
-    check plan.largest == 1_280_000
-
-  test "a board short of headroom for the progressive decode asks for PNG":
-    # 8 MB board with a 1200x1600 canvas: ~2 MB left, plan is 3.2 MB.
-    availableRenderBytesOverride = 2 * 1024 * 1024
-    check not progressiveJpegFitsBufferedDecode(800, 800)
-    let url = embeddedSizedRemoteImageUrl(photo, panel)
-    check "fm=png" in url
-    check "auto=format" notin url
-
-  test "a board with the headroom keeps the JPEG":
-    # 16 MB board with the same canvas: ~5 MB left.
-    availableRenderBytesOverride = 5 * 1024 * 1024
-    check progressiveJpegFitsBufferedDecode(800, 800)
-    let url = embeddedSizedRemoteImageUrl(photo, panel)
-    check "auto=format" in url
-    check "fm=" notin url
-
-  test "a small panel's crop fits even on a tight board":
-    # 800x480 crop: 1.9 MB plan, 768K largest — an 8 MB board with a 7.3"
-    # canvas has ~3 MB for it.
-    availableRenderBytesOverride = 3 * 1024 * 1024
-    check progressiveJpegFitsBufferedDecode(800, 480)
-    let url = embeddedSizedRemoteImageUrl(photo, small)
-    check "auto=format" in url
-    check "fm=" notin url
-
-  test "unknown memory counts as plenty":
-    availableRenderBytesOverride = 0
-    check progressiveJpegFitsBufferedDecode(800, 800)
+  test "asks for imgix's own format on every board, however tight":
+    # An 8 MB board with a 1200x1600 canvas has ~2 MB left; the progressive
+    # JPEG decodes in strips of what that holds.
+    for headroom in [2 * 1024 * 1024, 5 * 1024 * 1024, 0]:
+      availableRenderBytesOverride = headroom
+      for target in [panel, small]:
+        let url = embeddedSizedRemoteImageUrl(photo, target)
+        check "auto=format" in url
+        check "fm=" notin url
 
   test "other hosts pass through untouched":
     availableRenderBytesOverride = 1024 * 1024

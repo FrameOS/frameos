@@ -119,9 +119,11 @@ sufficient and simpler.
   unchanged: pixie's decode budget (`refreshDecodeBudget` /
   `availableRenderBytes`) still bounds the decoder's own working set, and the
   target is the pre-existing canvas, so no new full-frame allocation appears.
-- **Progressive JPEG**: pixie's streaming decoder raises; we deliberately do
-  *not* fall back to a buffered read (that is the allocation that just
-  failed). The scene renders its error frame.
+- **Progressive JPEG**: decoded in strips of MCU rows, one pass over the
+  spilled file per strip through the file source's rewind (the fork's
+  `jpeg.nim`, `decodeSOF0`): one strip of coefficients is resident, sized to
+  the budget. There is still no fallback to a buffered read (that is the
+  allocation that just failed).
 - **PNG and everything else**: clear `PixieError` for now. Streamed PNG
   decode needs its `InflateSegment`s resident, so a spilled PNG would need a
   file-backed `BitStreamReader` source in the pixie fork (follow-up below).
@@ -156,7 +158,7 @@ Wired in `embedded/esp32/main/main.c` after storage init, as designed:
 | Spill never wired / dir unset | Exactly today's BODY_OOM error frame. |
 | No SD, tiny SPIFFS, body > cap | 599 `response exceeded N bytes`; error frame. |
 | Disk full mid-spill | Partial file unlinked; 599 spill-failed; error frame. |
-| Progressive JPEG spilled | PixieError surfaced; error frame. |
+| Progressive JPEG spilled | Decoded in strips, a pass over the file each. |
 | PNG/WEBP/GIF spilled | PixieError "no file-backed streaming decoder"; error frame. |
 | Crash mid-spill | Orphan `.tmp`; removed by boot sweep. |
 | Text/JSON request spilled | IOError from `boundedRequest`; app logs it. |

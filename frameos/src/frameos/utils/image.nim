@@ -476,6 +476,16 @@ proc fileJpegSource(file: File): JpegSourceProc =
     except IOError, OSError:
       0
 
+proc fileRewind(file: File): JpegRewindProc =
+  ## The file back at its first byte, for a progressive JPEG decoded in
+  ## strips: a pass over the file per strip.
+  result = proc(): bool {.gcsafe, raises: [].} =
+    try:
+      file.setFilePos(0)
+      true
+    except IOError, OSError:
+      false
+
 proc ensureFileReadBudget(path: string, fileSize: int64) =
   ## Refuses to buffer a whole compressed file when doing so would consume
   ## most of the remaining render memory.
@@ -512,9 +522,10 @@ proc readImageWithDisplayBounds*(path: string,
         raise newException(PixieError, "Cannot open image file: " & path)
       try:
         return decodeJpegStreamScaled(
-          fileJpegSource(file), fileSize.int, target.width, target.height)
+          fileJpegSource(file), fileSize.int, target.width, target.height,
+          rewind = fileRewind(file))
       except PixieError:
-        # Progressive JPEGs cannot stream; retry buffered below (bounded by
+        # What the stream decoder refuses retries buffered below (bounded by
         # the file-read budget and pixie's decode budget).
         discard
       finally:
@@ -597,7 +608,7 @@ proc decodeIntoTargetWithDegrade*(target: Image, fit: ScaledDecodeFit,
 
 proc streamDecodeInto*(format: string, source: JpegSourceProc, totalLen: int,
     target: Image, fit: ScaledDecodeFit, rewind: proc(),
-    collectBeforeDecode = false): bool =
+    collectBeforeDecode = false, seekable = false): bool =
   ## The format dispatch shared by every sequential-source decode into a
   ## target: an SD-card file (readImageIntoTarget), a download spilled to
   ## storage (decodeSpilledImageInto) and the HTTP socket itself
@@ -607,6 +618,11 @@ proc streamDecodeInto*(format: string, source: JpegSourceProc, totalLen: int,
   ## rung; BMP and PPM decode once. `collectBeforeDecode` runs a GC cycle
   ## right before each decode so the plan check sees the heap it will
   ## allocate from (the download paths want that; the SD path never did).
+  ## `seekable` lets the decoder itself rewind the source, as often as it
+  ## needs: a progressive JPEG too big for the budget to hold whole is read
+  ## in strips, a pass over the source each. True for a file; a socket is
+  ## not, and a progressive JPEG it cannot hold whole raises (non-budget)
+  ## for the caller to buffer.
   ##
   ## Returns false when the format has no streaming decoder in this build,
   ## or when a JPEG's length is unknown (its reader needs the exact count):
@@ -623,12 +639,23 @@ proc streamDecodeInto*(format: string, source: JpegSourceProc, totalLen: int,
   of "JPEG":
     if totalLen <= 0:
       return false
-    when compiles(decodeJpegStreamScaledInto(source, totalLen, target, fit)):
-      # Progressive JPEGs raise here (non-budget); budget refusals degrade
-      # to a reduced-resolution decode inside the ladder.
+    when compiles(decodeJpegStreamScaledInto(source, totalLen, target, fit, nil)):
+      let seek: JpegRewindProc =
+        if seekable:
+          proc(): bool {.gcsafe, raises: [].} =
+            try:
+              {.cast(gcsafe).}:
+                rewind()
+              true
+            except:
+              false
+        else:
+          nil
+      # Budget refusals degrade to a reduced-resolution decode inside the
+      # ladder; a progressive JPEG an unseekable source cannot carry raises.
       discard decodeIntoTargetWithDegrade(target, fit, proc(dst: Image) =
         restart()
-        decodeJpegStreamScaledInto(source, totalLen, dst, fit))
+        decodeJpegStreamScaledInto(source, totalLen, dst, fit, seek))
       return true
   of "PNG":
     when compiles(decodePngStreamScaledInto(source, totalLen, target, fit)):
@@ -735,11 +762,11 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
     # A budget refusal degrades to a reduced-resolution decode inside the
     # ladder; only non-budget errors reach the buffered retry below.
     if streamDecodeInto(format, fileJpegSource(file), fileSize.int, target, fit,
-        proc() = file.setFilePos(0)):
+        proc() = file.setFilePos(0), seekable = true):
       return true
   except PixieError:
-    # Progressive JPEGs, interlaced/16-bit PNGs and RLE BMPs cannot stream;
-    # retry buffered below.
+    # Interlaced/16-bit PNGs and RLE BMPs cannot stream; retry buffered
+    # below.
     discard
   finally:
     file.close()
@@ -811,39 +838,6 @@ proc hasQueryParam(query, key: string): bool =
       return true
   false
 
-proc progressiveJpegBufferedDecodeBytes*(width, height: int):
-    tuple[total, largest: int64] =
-  ## What decoding a progressive JPEG of this size into the canvas costs on
-  ## the buffered path, as pixie plans it (decodeSOF in the fork's jpeg.nim):
-  ## a progressive scan cannot stream its blocks, so every component's DCT
-  ## coefficients stay resident — 64 int16 per 8x8 block, 3 bytes per pixel
-  ## with the 4:2:0 chroma imgix emits; the target-sized channel planes come
-  ## on top (1.5 bytes per pixel, the source being no larger than the
-  ## canvas here); and the compressed body itself is buffered first — half a
-  ## byte per pixel is a generous bound for quality-80 output. The largest
-  ## single allocation is the luma coefficient plane.
-  let pixels = width.int64 * height.int64
-  let lumaCoefficients = pixels * 2
-  let coefficients = lumaCoefficients + pixels # two 4:2:0 chroma planes
-  let channels = pixels + pixels div 2
-  let body = pixels div 2
-  (coefficients + channels + body, lumaCoefficients)
-
-proc progressiveJpegFitsBufferedDecode*(width, height: int): bool =
-  ## Whether this board, right now, can decode a progressive JPEG of this
-  ## size the buffered way — the same two questions the decoder's plan
-  ## check asks (refreshDecodeBudgetInto: the whole headroom for the plan,
-  ## the largest free block for its biggest buffer). Unknown memory counts
-  ## as plenty, which is what every host answers.
-  let plan = progressiveJpegBufferedDecodeBytes(width, height)
-  let headroom = availableRenderHeadroomBytes()
-  if headroom > 0 and plan.total > headroom.int64:
-    return false
-  let contiguous = availableRenderBytes()
-  if contiguous > 0 and plan.largest > contiguous.int64:
-    return false
-  true
-
 # RULE: NEVER route frame image downloads through a backend/image proxy, and
 # don't reach for host-side resize params as the fix either. Frames render
 # independently, from the original source. When a source serves images too
@@ -872,20 +866,13 @@ proc embeddedSizedRemoteImageUrl*(url: string, target: Image): string =
     parsed.query = upsertQueryParam(parsed.query, "fit", "crop")
     # An author's explicit format choice stands.
     if not hasQueryParam(parsed.query, "fm") and not hasQueryParam(parsed.query, "auto"):
-      # To a non-browser User-Agent imgix answers auto=format with a
-      # PROGRESSIVE JPEG (fm=jpg too), and a progressive JPEG is the one
-      # format that cannot stream into the canvas: its coefficients must
-      # all be resident, so it decodes buffered. Boards with the headroom
-      # for that keep the small JPEG body; a board that cannot hold it next
-      # to its canvas (the 8 MB E1004 at 1200x1600: measured OOM abort)
-      # asks for PNG, whose rows stream off the socket through a fixed
-      # inflate window. WebP would be 8x fewer bytes than PNG but its decode
-      # wants ~1.4 MB of contiguous buffers at panel size, over what that
-      # board has left (measured: budget refusal).
-      if progressiveJpegFitsBufferedDecode(requestedWidth, requestedHeight):
-        parsed.query = upsertQueryParam(parsed.query, "auto", "format")
-      else:
-        parsed.query = upsertQueryParam(parsed.query, "fm", "png")
+      # To a frame's User-Agent imgix answers auto=format with a progressive
+      # JPEG, a quarter of the bytes of the PNG the 8 MB boards used to ask
+      # for instead. Its coefficients used to need the whole image resident
+      # (3 bytes a pixel), which those boards could not hold next to their
+      # canvas; the decoder now reads them in strips of whatever the budget
+      # holds (jpeg.nim in the pixie fork), so every board takes the JPEG.
+      parsed.query = upsertQueryParam(parsed.query, "auto", "format")
     return $parsed
   else:
     return url
@@ -949,13 +936,14 @@ when defined(frameosEmbedded):
     let got = file.readBuffer(addr header[0], header.len)
     header.setLen(max(0, got))
     let format = embeddedImageFormat(header.cstring, header.len)
-    # Errors surface rather than retrying buffered: progressive JPEGs,
-    # interlaced/16-bit PNGs, RLE BMPs and ASCII PPMs all raise out of the
-    # streaming decoders, and the buffered retry other paths use is exactly
-    # the allocation that could not be made. Budget refusals degrade to a
-    # reduced-resolution decode instead.
+    # Errors surface rather than retrying buffered: interlaced/16-bit PNGs,
+    # RLE BMPs and ASCII PPMs raise out of the streaming decoders, and the
+    # buffered retry other paths use is exactly the allocation that could
+    # not be made. Budget refusals degrade to a reduced-resolution decode
+    # instead. A progressive JPEG reads the file once per strip.
     if streamDecodeInto(format, fileJpegSource(file), totalLen, target, fit,
-        proc() = file.setFilePos(0), collectBeforeDecode = true):
+        proc() = file.setFilePos(0), collectBeforeDecode = true,
+        seekable = true):
       return target
     raise newException(PixieError,
       &"Spilled {format} download ({totalLen div 1024}K) has no file-backed streaming decoder")

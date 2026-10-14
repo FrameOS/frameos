@@ -8,7 +8,7 @@
 # renamed or re-typed pixie proc would not fail the build — it would silently
 # turn that format back into "no file-backed streaming decoder" at runtime.
 # These tests are what catches that.
-import std/[os, unittest]
+import std/[os, strutils, unittest]
 import pixie
 import pixie/fileformats/bmp as pixie_bmp
 import pixie/fileformats/jpeg as pixie_jpeg
@@ -175,3 +175,65 @@ suite "spilled WEBP file-backed streaming decode":
       let target = newImage(64, 48)
       expect PixieError:
         decodeWebpStreamScaledInto(fileSource(file), encoded.len, target, fitCover)
+
+suite "spilled progressive JPEG file-backed streaming decode":
+  # A progressive JPEG's coefficients used to have to be resident whole, so a
+  # spilled one (too big for PSRAM) was an error frame. The decoder now reads
+  # it in strips, a pass over the file per strip, through the rewind the
+  # file source hands it; a source that cannot rewind (the socket) is told
+  # so, catchably and not as a budget refusal, so its caller buffers instead.
+  const fixture = currentSourcePath().parentDir / "fixtures" / "progressive-480x720.jpg"
+  let encoded = readFile(fixture)
+  doAssert decodeJpegInfo(encoded).progressive
+
+  test "reads the file once per strip and lands on the buffered pixels":
+    setJpegStripMcuRows(3) # 45 MCU rows: fifteen strips, a rewind each
+    defer: setJpegStripMcuRows(0)
+    for fit in [fitCover, fitContain, fitStretch]:
+      let expected = newImage(120, 90)
+      var buffered = encoded
+      decodeJpegScaledInto(buffered, expected, fit)
+
+      var file: File
+      check file.open(fixture)
+      var rewinds = 0
+      let rewind = proc(): bool {.gcsafe, raises: [].} =
+        try:
+          file.setFilePos(0)
+          inc rewinds
+          true
+        except IOError, OSError:
+          false
+      let target = newImage(120, 90)
+      decodeJpegStreamScaledInto(fileSource(file), encoded.len, target, fit, rewind)
+      file.close()
+      check rewinds == 14
+
+      for i in 0 ..< target.dataLen:
+        check target.data[i] == expected.data[i]
+
+  test "a source that cannot rewind is refused, not as a budget refusal":
+    setJpegStripMcuRows(3)
+    defer: setJpegStripMcuRows(0)
+    var file: File
+    check file.open(fixture)
+    defer: file.close()
+    let target = newImage(120, 90)
+    try:
+      decodeJpegStreamScaledInto(fileSource(file), encoded.len, target, fitCover)
+      check false
+    except PixieError as e:
+      check "cannot be decoded from a stream" in e.msg
+      check "memory budget" notin e.msg
+
+  test "held whole, a stream needs no rewind":
+    let expected = newImage(120, 90)
+    var buffered = encoded
+    decodeJpegScaledInto(buffered, expected, fitCover)
+    var file: File
+    check file.open(fixture)
+    defer: file.close()
+    let target = newImage(120, 90)
+    decodeJpegStreamScaledInto(fileSource(file), encoded.len, target, fitCover)
+    for i in 0 ..< target.dataLen:
+      check target.data[i] == expected.data[i]

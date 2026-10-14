@@ -3,7 +3,7 @@
 # into-target decode at reduced resolution and upscales. These tests drive
 # the ladder with a scripted decode proc so the mechanics are pinned without
 # depending on a real decoder's plan arithmetic.
-import std/[strutils, unittest]
+import std/[os, strutils, unittest]
 import pixie
 import pixie/fileformats/jpeg as pixie_jpeg
 import pixie/fileformats/png as pixie_png
@@ -174,3 +174,47 @@ suite "streamDecodeInto":
     # The quarter-res rung's pixels were stretched over the whole target.
     check target[0, 0].a == 255
     check target[239, 179].a == 255
+
+suite "streamDecodeInto: a progressive JPEG in strips":
+  # The strip decode reads the source once per strip. A file source says it
+  # is seekable and the decoder rewinds it itself; a socket does not, and a
+  # progressive JPEG the budget cannot hold whole comes back as the decoder's
+  # own refusal (not a budget one, which the ladder would retry), so the
+  # socket path buffers the body instead.
+  const fixture = currentSourcePath().parentDir / "fixtures" / "progressive-480x720.jpg"
+  let encoded = readFile(fixture)
+
+  test "a seekable source carries a strip decode, rewound once per strip":
+    setJpegStripMcuRows(5) # 45 MCU rows: nine strips
+    defer: setJpegStripMcuRows(0)
+    let expected = newImage(120, 90)
+    var buffered = encoded
+    decodeJpegScaledInto(buffered, expected, fitCover)
+    let cursor = Cursor(data: encoded, pos: 17)
+    var rewinds = 0
+    let target = newImage(120, 90)
+    check streamDecodeInto("JPEG", cursor.source(), encoded.len, target, fitCover,
+      proc() =
+        inc rewinds
+        cursor.pos = 0,
+      seekable = true)
+    # Once before the decode, then once for every strip after the first.
+    check rewinds == 9
+    for i in 0 ..< target.dataLen:
+      check target.data[i] == expected.data[i]
+
+  test "an unseekable source raises for the caller, not as a budget refusal":
+    setJpegStripMcuRows(5)
+    defer: setJpegStripMcuRows(0)
+    let cursor = Cursor(data: encoded)
+    var rewinds = 0
+    try:
+      discard streamDecodeInto("JPEG", cursor.source(), encoded.len,
+        newImage(120, 90), fitCover, proc() =
+          inc rewinds
+          cursor.pos = 0)
+      check false
+    except PixieError as e:
+      check "cannot be decoded from a stream" in e.msg
+      check "memory budget" notin e.msg
+    check rewinds == 1
