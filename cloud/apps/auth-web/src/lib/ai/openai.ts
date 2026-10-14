@@ -116,10 +116,10 @@ export function resolveReasoningEffort(
   return DEFAULT_REASONING_EFFORT;
 }
 
-// gpt-5 family and o-series accept the reasoning parameter; anything else
-// (gpt-4.1, custom deployments) must not receive it.
+// The gpt-5 and gpt-6 families and the o-series accept the reasoning
+// parameter; anything else (gpt-4.1, custom deployments) must not receive it.
 export function modelSupportsReasoning(model: string): boolean {
-  return /^(gpt-5|o[0-9])/.test(model);
+  return /^(gpt-[5-9]|o[0-9])/.test(model);
 }
 
 function parseSseChunks(buffer: string): { events: string[]; rest: string } {
