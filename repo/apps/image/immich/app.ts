@@ -75,6 +75,52 @@ function random(server, key, empty, albumId = '', personId = '', favorite = fals
   return pick(assets)
 }
 
+// A shared album, every owner's photos. Immich 3.2's structured filter
+// searches the album whole; the flat albumIds field also filters by owner
+// (the key's user and partners). Before 3.2 the album timeline (1.133+): a
+// month bucket is columnar, ~350 bytes per asset.
+function album(server, key, albumId) {
+  const empty = "This album contains no images. Double-check the album ID. It's the UUID in the album's URL."
+  const version = request(key, `${server}/api/server/version`)
+  const v = version.status === 200 ? parse(version.body) : null
+  if (typeof v?.major === 'number' && typeof v?.minor === 'number' && (v.major > 3 || (v.major === 3 && v.minor >= 2))) {
+    const search = { size: 1, withExif: true, withPeople: true, filter: { type: { eq: 'IMAGE' }, albumIds: { any: [albumId] } } }
+    const r = request(key, `${server}/api/search/random`, 'POST', JSON.stringify(search))
+    if (r.status !== 200) throw new Error(`Error fetching a random image from Immich: ${httpError(r)}`)
+    const assets = images(parse(r.body))
+    frameos.log(`Immich album search (album ${albumId}, all owners): HTTP ${r.status}, ${assets.length} image candidate(s)`)
+    if (!assets.length) throw new Error(empty)
+    return pick(assets)
+  }
+  const a = encodeURIComponent(albumId)
+  const buckets = request(key, `${server}/api/timeline/buckets?albumId=${a}`)
+  if (buckets.status !== 200) throw new Error(`Error reading the Immich album: ${httpError(buckets)}`)
+  const list = (parse(buckets.body) ?? []).filter((b) => typeof b?.timeBucket === 'string' && b.count > 0)
+  const total = list.reduce((sum, b) => sum + b.count, 0)
+  for (let attempt = 0; attempt < 3 && total > 0; attempt++) {
+    let target = Math.random() * total
+    let bucket = list[list.length - 1].timeBucket
+    for (const b of list) {
+      if (target < b.count) {
+        bucket = b.timeBucket
+        break
+      }
+      target -= b.count
+    }
+    const r = request(key, `${server}/api/timeline/bucket?albumId=${a}&timeBucket=${encodeURIComponent(bucket)}`)
+    if (r.status !== 200) throw new Error(`Error reading the Immich album: ${httpError(r)}`)
+    const b = parse(r.body)
+    const ids = (Array.isArray(b?.id) ? b.id : []).filter((id, i) => typeof id === 'string' && id && (!Array.isArray(b.isImage) || b.isImage[i] === true))
+    frameos.log(`Immich album timeline (album ${albumId}, bucket ${bucket}): HTTP ${r.status}, ${ids.length} image candidate(s)`)
+    if (!ids.length) continue
+    const id = ids[Math.floor(Math.random() * ids.length)]
+    const detail = request(key, `${server}/api/assets/${encodeURIComponent(id)}`)
+    const parsed = detail.status === 200 ? parse(detail.body) : null
+    return images([parsed])[0] ?? { id, name: '', favorite: false, exif: {}, people: [] }
+  }
+  throw new Error(empty)
+}
+
 export function get(app) {
   const c = app.config
   const server = String(frameos.getSetting('immich', 'url') ?? '')
@@ -90,8 +136,7 @@ export function get(app) {
 
   let asset
   if (c.mode === 'album') {
-    const empty = "This album contains no images. Double-check the album ID. It's the UUID in the album's URL."
-    asset = random(server, key, empty, albumId)
+    asset = album(server, key, albumId)
   } else if (c.mode === 'favorites') {
     asset = random(server, key, 'No favorite images found in Immich.', '', '', true)
   } else if (c.mode === 'memories') {
