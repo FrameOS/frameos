@@ -86,7 +86,9 @@ def bundle_repo_apps(payload: dict[str, Any]) -> list[str]:
             if not isinstance(node, dict) or node.get("type") != "app":
                 continue
             data = node.get("data")
-            keyword = data.get("keyword") if isinstance(data, dict) else None
+            if not isinstance(data, dict):
+                continue
+            keyword = data.get("keyword")
             root = _template_dir(keyword) if isinstance(keyword, str) else None
             if root is None:
                 continue
