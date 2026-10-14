@@ -1127,7 +1127,9 @@ function PhotoColorsPanel(): JSX.Element {
   const values = useValues(photoColorsLogic)
   const actions = useActions(photoColorsLogic)
   const { saveAndOpenNext } = actions
-  const fileName = values.imagePath ? photoBaseName(values.imagePath) : ''
+  // Read up front: the proxy reads each key through a hook.
+  const { imagePath, source, sourceLoading, sourceError } = values
+  const fileName = imagePath ? photoBaseName(imagePath) : ''
   // Cmd/Ctrl+Enter is "Save & next" (just "Save" on the last photo), from a
   // slider or anywhere else in the lightbox.
   useEffect(() => {
@@ -1141,35 +1143,51 @@ function PhotoColorsPanel(): JSX.Element {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
   return (
+    // Always the dark theme: the drawer sits in the black lightbox. The
+    // theme class is on the wrapper, since the dark rules match descendants.
     <aside
-      className="photos-colors-panel frameos-panel flex w-[24rem] max-w-[90vw] shrink-0 flex-col border-l border-white/80 bg-white/95 text-slate-900 backdrop-blur-xl"
+      className="frameos-theme-dark frameos-dark-surface photos-colors-panel flex w-[24rem] max-w-[90vw] shrink-0"
       aria-label="Set colors"
       onClick={(event) => event.stopPropagation()}
     >
-      <div className="frameos-divider flex items-start gap-2 border-b px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <div className="frameos-strong truncate text-lg font-semibold">Set colors</div>
-          <div className="frame-tool-muted truncate text-xs">{fileName}</div>
+      <div className="frameos-panel frame-tool-panel flex min-h-0 w-full flex-col border-l backdrop-blur-xl">
+        <div className="frameos-divider flex items-start gap-2 border-b px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="frameos-strong truncate text-lg font-semibold">Set colors</div>
+            <div className="frame-tool-muted truncate text-xs">{fileName}</div>
+          </div>
+          <button
+            type="button"
+            title="Close"
+            onClick={actions.closeEditor}
+            className="frameos-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+          >
+            <XMarkIcon className="h-5 w-5" />
+          </button>
         </div>
-        <button
-          type="button"
-          title="Close"
-          onClick={actions.closeEditor}
-          className="frameos-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
-        >
-          <XMarkIcon className="h-5 w-5" />
-        </button>
+        {!source && sourceLoading && !sourceError ? (
+          // The photo and its sliders arrive together.
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <Spinner className="h-8 w-8" />
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+            <ColorEditorViewControls values={values} actions={actions} className="text-xs" />
+            <ColorEditorAdjustments values={values} actions={actions} />
+            <p className="frame-tool-muted text-xs">
+              Saved with the photo: every frame that plays it gets these colors. A panel's white is darker than a
+              photo's; pull Whites down, or use Auto, to keep texture in bright areas. On a frame with automatic colors,
+              saving Auto stores nothing, and each frame fits the photo to its own panel.
+            </p>
+          </div>
+        )}
+        <ColorEditorFooter
+          values={values}
+          actions={actions}
+          variant="drawer"
+          className="frameos-divider border-t p-3"
+        />
       </div>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-        <ColorEditorViewControls values={values} actions={actions} className="text-xs" />
-        <ColorEditorAdjustments values={values} actions={actions} />
-        <p className="frame-tool-muted text-xs">
-          Saved with the photo: every frame that plays it gets these colors. A panel's white is darker than a photo's;
-          pull Whites down, or use Auto, to keep texture in bright areas. On a frame with automatic colors, saving Auto
-          stores nothing, and each frame fits the photo to its own panel.
-        </p>
-      </div>
-      <ColorEditorFooter values={values} actions={actions} className="frameos-divider border-t p-3" />
     </aside>
   )
 }

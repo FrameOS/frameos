@@ -625,12 +625,6 @@ export const assetColorsLogic = kea<assetColorsLogicType>([
         actions.setProfile(autoProfileFor(values.profile, endPoints))
       }
     },
-    // Reset lands on Auto when the target has a range to fit into.
-    resetProfile: () => {
-      if (values.autoEndPoints) {
-        actions.setProfile(autoProfileFor(values.profile, values.autoEndPoints))
-      }
-    },
     setAdjustmentMode: ({ mode }) => {
       if (mode === 'none') {
         actions.setProfile({ ...defaultAssetColorProfile(), palette: values.profile.palette })

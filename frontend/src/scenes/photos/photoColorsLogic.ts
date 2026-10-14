@@ -90,6 +90,7 @@ export interface photoColorsLogicValues {
   }
   isDefault: boolean
   isDirty: boolean
+  lastPanelTargetKey: string | null
   lightboxPainted: boolean
   lightboxSource:
     | (PreviewSource & {
@@ -390,6 +391,13 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
       { persist: true, storageKey: 'photoColorsLogic.previewTarget' },
       { setPreviewTarget: (_, { key }) => key },
     ],
+    // The last panel or frame chosen: what the editor opens on when the
+    // lightbox is at full fidelity, which has nothing to grade for.
+    lastPanelTargetKey: [
+      null as string | null,
+      { persist: true, storageKey: 'photoColorsLogic.lastPanelTargetKey' },
+      { setPreviewTarget: (state, { key }) => (key === FULL_FIDELITY_TARGET.key ? state : key) },
+    ],
     rotatedPreviewTargets: [
       {} as Record<string, boolean>,
       { persist: true, storageKey: 'photoColorsLogic.rotatedPreviewTargets' },
@@ -420,7 +428,6 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
     profile: [
       defaultAssetColorProfile(),
       {
-        openEditor: () => defaultAssetColorProfile(),
         setProfile: (_, { profile }) => profile,
         setPalette: (state, { palette }) => ({ ...state, palette }),
         setPaletteColor: (state, { index, color }) => ({
@@ -433,7 +440,6 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
     autoEndPoints: [
       null as AutoEndPoints | null,
       {
-        openEditor: () => null,
         setAutoEndPoints: (_, { autoEndPoints }) => autoEndPoints,
       },
     ],
@@ -600,7 +606,22 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
     return {
       // The Auto preset depends on the photo as placed and on the palette it
       // is dithered to, so it is recomputed when any of those change.
-      loadSourceSuccess: () => actions.recomputeAuto(),
+      loadSourceSuccess: ({ source }) => {
+        const stale: PreviewSource | null = cache.sourceToClose ?? null
+        cache.sourceToClose = null
+        if (stale && stale !== source) {
+          stale.bitmap.close()
+        }
+        actions.setProfile(values.savedProfile ?? defaultAssetColorProfile())
+        actions.recomputeAuto()
+      },
+      loadSourceFailure: () => {
+        const stale: PreviewSource | null = cache.sourceToClose ?? null
+        cache.sourceToClose = null
+        stale?.bitmap.close()
+        actions.setProfile(values.savedProfile ?? defaultAssetColorProfile())
+        actions.setAutoEndPoints(null)
+      },
       setFit: () => {
         actions.recomputeAuto()
         actions.loadLightboxPreview()
@@ -641,13 +662,6 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
           actions.setProfile(autoProfileFor(values.profile, endPoints))
         }
       },
-      // Reset lands on Auto (what a photo without colors shows) when the
-      // target has a range to fit into; otherwise on no adjustments.
-      resetProfile: () => {
-        if (values.autoEndPoints) {
-          actions.setProfile(autoProfileFor(values.profile, values.autoEndPoints))
-        }
-      },
       setAdjustmentMode: ({ mode }) => {
         if (mode === 'none') {
           actions.setProfile({ ...defaultAssetColorProfile(), palette: values.profile.palette })
@@ -660,13 +674,31 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
         if (values.lightboxPath !== imagePath) {
           actions.openLightbox(imagePath)
         }
-        if (values.savedProfile) {
-          actions.setProfile(values.savedProfile)
+        // Full fidelity has no panel to grade for: open on the last panel or
+        // frame used, else the first frame, else the first panel family.
+        if (values.previewTargetKey === FULL_FIDELITY_TARGET.key) {
+          const targets = values.previewTargets
+          const remembered = targets.find(
+            (target) => target.key === values.lastPanelTargetKey && target.group !== 'original'
+          )
+          const pick =
+            remembered ??
+            targets.find((target) => target.group === 'frames') ??
+            targets.find((target) => target.group === 'panels')
+          if (pick) {
+            actions.setPreviewTarget(pick.key)
+          }
         }
         // Opened from the URL before the listing is in: the profile comes
         // with the entry, so it is applied when the folder loads.
         cache.awaitingSavedProfile = values.entry ? null : imagePath
         actions.loadSource(imagePath)
+      },
+      // The photo on show and its sliders change together: the previous
+      // photo stays, sliders and all, until the next one has loaded, and
+      // then both switch in one go.
+      loadSource: () => {
+        cache.sourceToClose = values.source
       },
       loadFolderSuccess: ({ folder }) => {
         const awaited: string | null = cache.awaitingSavedProfile ?? null
@@ -702,13 +734,11 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
       // the one that keeps them.
       openPreviousImage: () => {
         if (values.previousImagePath) {
-          values.source?.bitmap.close()
           actions.openEditor(values.previousImagePath)
         }
       },
       openNextImage: () => {
         if (values.nextImagePath) {
-          values.source?.bitmap.close()
           actions.openEditor(values.nextImagePath)
         }
       },
@@ -722,7 +752,6 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
           return
         }
         if (next) {
-          values.source?.bitmap.close()
           actions.openEditor(next)
         }
       },
