@@ -19,6 +19,7 @@ import {
   type ResponsesToolDefinition,
   type ResponseUsage,
 } from "./openai";
+import { SCENE_GUIDE_SECTIONS } from "./scene-guide.gen";
 import { captureAiGeneration } from "./telemetry";
 import { parseToolArguments } from "./tool-args";
 
@@ -127,20 +128,32 @@ Rules for edits:
   change a field, update config.json in the same call.
 - The runtime is QuickJS, not Node: no npm packages, no require(), no filesystem, no DOM. Relative
   imports of the app's own files are fine (and you may add a file by writing it through the tool);
-  JSX only in .tsx/.jsx. Use the ambient FrameOS helpers already visible in the app's own source.
-- The app may run on an ESP32 frame — a microcontroller whose few MB of RAM are shared by the canvas, the
-  JS heap and the network stack — so be clever about data structures and behaviour. Parsed objects cost
-  10-20x their JSON text: keep big tables as compact strings (SVG path "d" strings, delimited text), not
-  object/array literals. Keep only the fields you draw from a fetched payload, slice lists before mapping
-  them, build strings with one array + join(""), and never park whole responses in module variables or
-  app.state. An app that re-renders every second or faster sets its state up once in init() and updates
-  it in place: no per-frame objects, closures, fetches or JSON.parse, and capped particle counts.
+  JSX only in .tsx/.jsx. The frameos API, what the app sees and the rules for small frames are in the
+  guide below.
 - Keep it TypeScript-shaped and readable; match the surrounding style.
 - If the request is ambiguous, ask one question instead of guessing at a rewrite.
 
 Be concise. Reply in the user's language.
+
+How JavaScript apps work, from the FrameOS scene guide (the app may run on an ESP32 with a few MB of
+memory):
+
+${APP_GUIDE}
 `.trim();
 }
+
+// The scene guide's sections about writing an app (docs/scene-guide.md); the
+// backend's app AI reads the same ones (backend/app/utils/ai_app.py).
+const appGuideSectionIds = ["js-apps", "images-svg-and-text", "layout-and-color", "small-frames", "js-api-reference"];
+const APP_GUIDE = appGuideSectionIds
+  .map((id) => {
+    const section = SCENE_GUIDE_SECTIONS.find((entry) => entry.id === id);
+    if (!section) {
+      throw new Error(`scene guide section ${id} is gone`);
+    }
+    return section.text;
+  })
+  .join("\n\n");
 
 function appContextBlock(input: {
   appName: string | null;

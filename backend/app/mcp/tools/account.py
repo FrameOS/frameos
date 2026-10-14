@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.schemas.settings import SettingsUpdateRequest
+from app.utils.scene_guide_gen import SCENE_GUIDE_SECTIONS
 from app.utils.settings_secrets import MASK_BULLETS
 from app.utils.versions import current_frameos_version
 
@@ -13,6 +14,14 @@ from ..registry import Tool
 from ..result import McpInputError, run, text
 
 SETTINGS_GROUPS = tuple(SettingsUpdateRequest.model_fields)
+
+# What the guide leaves to each server: the tools that look things up and
+# check a scene here.
+SCENE_GUIDE_TOOLS = (
+    "On this server: apps_list and app_source_get look apps up (fields, options, a repo JS app's files), "
+    "fonts_list lists the fonts, frame_scene_install puts a scene on a frame and frame_scene_preview "
+    "renders it there; frame_logs shows what the runtime said."
+)
 
 
 def register_account_tools(server: McpServer, ctx: ToolContext) -> None:
@@ -153,7 +162,7 @@ def register_account_tools(server: McpServer, ctx: ToolContext) -> None:
 
     async def apps_list(search: str | None = None, project_id: int | None = None):
         async def go():
-            payload = await api.json("GET", "/api/apps", project_id=project_id)
+            payload = await api.json("GET", "/api/apps", project_id=project_id, params={"include_repo": "true"})
             apps = []
             for keyword, config in (payload.get("apps") or {}).items():
                 entry = {
@@ -179,7 +188,12 @@ def register_account_tools(server: McpServer, ctx: ToolContext) -> None:
 
     server.tool(Tool(
         name="apps_list",
-        description="The app catalog a scene's nodes come from: keyword (what a node's data.keyword names), name, category, description, fields with their types and defaults, output type. `search` filters by any of those.",
+        description=(
+            "The app catalog a scene's nodes come from: keyword (what a node's data.keyword names), name, category, "
+            "description, fields with their types and defaults, output type. `search` filters by any of those. "
+            "repo/apps/<folder>/<name> rows are JavaScript app templates: a scene copies one into its own `apps` map "
+            "under <name> (scene_guide, \"Apps\"; app_source_get has its files)."
+        ),
         properties={"search": {"type": "string"}},
         annotations={"readOnlyHint": True},
         handler=apps_list,
@@ -190,11 +204,33 @@ def register_account_tools(server: McpServer, ctx: ToolContext) -> None:
 
     server.tool(Tool(
         name="app_source_get",
-        description="The source files of one catalog app (config.json plus its Nim or JavaScript), for understanding what it does or building a code node after it.",
+        description="The source files of one catalog app (config.json plus its Nim or JavaScript), for understanding what it does, building a code node after it, or copying a repo/apps/<folder>/<name> template into a scene.",
         properties={"keyword": {"type": "string", "minLength": 1}},
         required=["keyword"],
         annotations={"readOnlyHint": True},
         handler=app_source_get,
+    ))
+
+    async def scene_guide(section: str | None = None):
+        async def go():
+            payload = await api.json("GET", "/api/scene_guide", scoped=False, params={"section": section} if section else None)
+            others = ", ".join(entry["id"] for entry in payload.get("sections") or [])
+            return text(f"{SCENE_GUIDE_TOOLS}\n\n{payload['guide']}\nSections (pass `section` for one): {others}")
+
+        return await run(go)
+
+    server.tool(Tool(
+        name="scene_guide",
+        description=(
+            "How to write a FrameOS scene: the scene JSON, every node type and how edges connect them, fields and "
+            "state, code nodes and their helpers, JS apps and the whole frameos API, SVG and text, layout, small-device "
+            "limits and the event names. Read it before writing or editing scene JSON or app code; `section` returns "
+            "one part."
+        ),
+        properties={"section": {"type": "string", "enum": [entry["id"] for entry in SCENE_GUIDE_SECTIONS]}},
+        annotations={"readOnlyHint": True},
+        scoped=False,
+        handler=scene_guide,
     ))
 
     async def fonts_list(project_id: int | None = None):

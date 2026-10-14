@@ -169,7 +169,8 @@ describe("the JavaScript `context`", () => {
     for (const path of [
       "docs/js-apps-and-code-nodes.md",
       "cloud/packages/scene-convert/src/prompt.ts",
-      "cloud/apps/auth-web/src/lib/ai/prompts.ts",
+      // The scene guide the AIs and the MCP servers serve (prompts.ts embeds it).
+      "docs/scene-guide.md",
     ]) {
       const text = repoFile(path);
       for (const key of codeContextKeys) {

@@ -46,6 +46,7 @@ Vocabulary: a *frame* is a device enrolled with the cloud (frames_list). A *scen
 Typical flows:
 - See what is on a frame: frame_get → frame_scenes_list → frame_screenshot; frame_logs when something looks wrong.
 - Put a scene on a frame: store_browse or scenes_list → frame_scene_install (activate=true to show it now).
+- Write or edit scene JSON or app code yourself: read scene_guide first (how nodes, edges, state, code nodes and JS apps work, on every device), look apps up with apps_list / app_source_get, check with scene_lint.
 - Make a new scene: ai_scene_chat(prompt, apply="new_scene") or scene_create(scenes=…) → scene_render to preview → frame_scene_install.
 - Update an installed scene: frame_scenes_list (update_available: true) → frame_scene_update.
 - A frame that joined with scenes of its own lists none until they are imported: frame_scenes_list (device_scenes.status "ready") → frame_device_scenes_import.
@@ -240,7 +241,7 @@ function registerPrompts(server: McpServer) {
           content: {
             text: `Build a FrameOS scene: ${description}${frame_id ? ` It is for frame ${frame_id} (call frame_get first for its size and platform).` : ""}
 1. Call ai_scene_chat with a precise prompt (include the frame's width/height and platform) and apply="new_scene".
-2. Preview it with scene_render at the frame's resolution; if the logs show errors, fix them with scene_get_content + scene_update_content (or another ai_scene_chat with scene_id) and re-render.
+2. Preview it with scene_render at the frame's resolution; if the logs show errors, fix them with scene_get_content + scene_update_content (or another ai_scene_chat with scene_id) and re-render. Read scene_guide before editing the JSON yourself.
 3. Show me the preview and, ${frame_id ? `if it looks right, install it with frame_scene_install(frame_id, scene_id, activate=true)` : "ask whether to install it on a frame"}.`,
             type: "text",
           },

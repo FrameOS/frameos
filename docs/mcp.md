@@ -112,7 +112,9 @@ save on the backend for a `frame_deploy` later).
   version and URL), `projects_list`, `api_tokens_list`, `api_token_revoke`,
   `settings_get` (secrets always masked), `settings_update` (merges over the
   current group; a masked value posted back keeps the stored key),
-  `system_info`, `apps_list`, `app_source_get`, `fonts_list`.
+  `system_info`, `apps_list` (built-in apps and the repo JS app templates,
+  `repo/apps/<folder>/<name>`), `app_source_get`, `fonts_list`, and
+  `scene_guide`.
 - **frames** — `frames_list`, `frame_get` (credentials redacted, scenes
   summarised), `frame_ping`, `frame_sync_status`, `frame_state_get`,
   `frame_create`, `frame_update` (the settable keys are listed in its
@@ -148,6 +150,16 @@ save on the backend for a `frame_deploy` later).
 - **ai** — `ai_scene_generate`, `ai_scene_chat`, `ai_chats_list`,
   `ai_chat_get`. The AI only proposes scene JSON; installing it is a
   separate, confirmed `frame_scene_install`.
+
+**`scene_guide`** is how to write a scene: the scene JSON, every node type and
+how edges connect them, fields and state, code nodes, JS apps and the whole
+`frameos` API, SVG and layout rules, small-device limits and the event names,
+whole or one `section` at a time. It is `docs/scene-guide.md`, the same text
+the scene AI and the app AI read on both control planes and the cloud's
+`scene_guide` serves (`GET /api/scene_guide` here, `/api/scenes/guide` there),
+generated into both by `frameos/tools/generate_scene_guide.py`. The server's
+instructions and the `build_scene` prompt send an agent there before it writes
+scene JSON.
 
 Resources: `frameos://frames`, `frameos://frames/{id}`,
 `frameos://frames/{id}/scenes/{scene_id}`, `frameos://scenes`. Prompts:

@@ -24,6 +24,7 @@ from app.schemas.ai_scenes import (
 )
 from app.config import config
 from app.utils.ai_catalog import AiCatalogItem, build_catalog_context, collect_catalog_items
+from app.utils.repo_apps import bundle_repo_apps, repo_app_configs
 from app.utils.ai_scene import (
     CHAT_MODEL,
     SCENE_MODEL,
@@ -395,6 +396,7 @@ async def generate_scene(
                     ai_parent_id=posthog_root_span_id,
                 )
 
+            bundle_repo_apps(response_payload or {})
             validation_issues = validate_scene_payload(response_payload or {})
             if validation_issues:
                 await _publish_ai_scene_log(
@@ -776,6 +778,7 @@ async def chat_scene(
                         ai_session_id=posthog_session_id,
                         ai_parent_id=posthog_root_span_id,
                     )
+                bundle_repo_apps(response_payload or {})
                 validation_issues = validate_scene_payload(response_payload or {})
                 if validation_issues:
                     await _publish_ai_scene_log(
@@ -854,7 +857,7 @@ async def chat_scene(
             scene_model = openai_model(openai_settings, "sceneModel", SCENE_MODEL)
             response_payload: dict[str, Any] | None = None
             validation_issues: list[str] = []
-            available_apps = sorted(get_app_configs().keys())
+            available_apps = sorted({*get_app_configs(), *repo_app_configs()})
             max_attempts = 2
             for attempt in range(1, max_attempts + 1):
                 await _publish_ai_scene_log(
@@ -879,6 +882,7 @@ async def chat_scene(
                     ai_session_id=posthog_session_id,
                     ai_parent_id=posthog_root_span_id,
                 )
+                bundle_repo_apps(response_payload or {})
                 validation_issues = validate_scene_payload(response_payload or {})
                 if validation_issues:
                     await _publish_ai_scene_log(

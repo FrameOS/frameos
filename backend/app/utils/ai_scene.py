@@ -8,6 +8,7 @@ from posthog.client import Client as PostHogClient
 
 from app.config import config
 from app.utils.ai_catalog import AiCatalogItem
+from app.utils.scene_guide_gen import SCENE_GUIDE
 from app.utils.posthog import get_posthog_client, llm_analytics_enabled
 
 SCENE_MODEL = "gpt-5.5"
@@ -130,168 +131,23 @@ def _format_selected_elements(
         parts.append(f"Selected edges: {json.dumps(selected_edges, ensure_ascii=False)}")
     return "\n".join(parts) if parts else None
 
-SCENE_JSON_SYSTEM_PROMPT = """
+# The rules of a scene are the scene guide's (docs/scene-guide.md), the same
+# text the cloud's scene AI and both MCP servers serve; what is left here is
+# what this generator answers with.
+SCENE_JSON_SYSTEM_PROMPT = (
+    """
 You are a FrameOS scene generator. Build scenes JSON that can be uploaded to FrameOS.
-Reference TypeScript shapes (for structure sanity):
-- Scene: { id: string, name: string, nodes: Node[], edges: Edge[], apps?: SceneApps, settings: { execution: "interpreted", ... }, fields?: Field[] }
-- SceneApps: { [appKey: string]: SceneApp }; keys are scene-local app identifiers referenced by AppNodeData.keyword.
-- SceneApp: { origin?: string, name?: string, category?: "data"|"logic"|"render", description?: string, version?: string|null, settings?: string[]|null, fields?: Field[], output?: { name: string, type: FieldType, example?: any }[], cache?: object|null, sources: AppSources }
-- AppSources: { "config.json": string, "app.ts"?: string, "app.js"?: string, "app.tsx"?: string, "app.jsx"?: string, "app.nim"?: string, [filename: string]: string }
-- Node: { id: string, type: "event"|"dispatch"|"app"|"state"|"code"|"scene", data: NodeData, position?: { x:number, y:number } }
-- Edge: { id?: string, type?: "appNodeEdge"|"codeNodeEdge", source: string, target: string, sourceHandle?: string, targetHandle?: string }
-- Field: { name: string, type: FieldType, label?: string, description?: string, required?: boolean, value?: any, options?: string[] }
-- NodeData:
-  - EventNodeData: { keyword: string }
-  - DispatchNodeData: { keyword: string, config: object }
-  - AppNodeData: { keyword: string, config: object, sources?: object, cache?: object }
-  - StateNodeData: { keyword: string }
-  - CodeNodeData: { codeJS?: string, code?: string, codeArgs?: { name: string, type: FieldType }[], codeOutputs?: { name: string, type: FieldType }[], cache?: object, logOutput?: boolean }
-  - SceneNodeData: { keyword: string, config: object }
-- FieldType: "string"|"text"|"float"|"integer"|"boolean"|"color"|"date"|"json"|"node"|"scene"|"image"|"font"|"select"|"path" (a "path" field is a string holding a file/folder path on the frame; it may carry pick?: "file"|"folder"|"any" and extensions?: string[])
-Follow these rules:
-- Output a JSON object with a top-level "title" string and "scenes" array. No markdown or code fences.
-- Each scene must include: id (string), name (string), nodes (array), edges (array).
-- Each scene must include settings.execution = "interpreted" (never "compiled").
-- Each node must include: id (string), type (see below), data (object). Ignore positions.
-- Supported node types: "event", "dispatch", "app", "state", "code", "scene".
-- Edges can be of type "appNodeEdge" or "codeNodeEdge".
-- Edges of type "appNodeEdge" connect app nodes (sourceHandle "next" to targetHandle "prev") or layout app fields (e.g. "field/render_functions[row][col]" to "prev").
-- Edges of type "codeNodeEdge" connect code or state node outputs (sourceHandle "fieldOutput") to app or code node inputs (targetHandle "fieldInput/<fieldName>" or "codeField/<argName>").
-- There is only one source handle for code/state outputs: "fieldOutput". Do NOT use "fieldOutput/<name>" or any named variants.
-- Each scene starts from one event node with data.keyword = "render" to trigger rendering.
-- Each connected render or logic node is executed in sequence via appNodeEdge edges.
-- To trigger a re-render (for example after setting state), add a dispatch node with data.keyword = "render" and connect it in the appNodeEdge flow.
-- Dispatch nodes are separate from apps; do not use app keywords like "dispatch/render".
-- App nodes are generic. For the actual data to render, use code nodes or data apps connected via codeNodeEdge edges.
-- If you want to render an image and then render text on top, use a render/image app node followed by a render/text app node,
-  connecting them via appNodeEdge (next/prev), and connect the image data into the image app via codeNodeEdge.
-- You can't have dangling specialized image rendering apps! E.g. do not use render/openaiImage alone; instead, ALWAYS connect its output into a
-  render/image app, and connect the render/image app into the render flow.
-- Logic apps (category "logic") can be used to process data; render apps (category "render") produce visual output.
-- Data apps (category "data") provide data and must not be connected left/right in the render flow.
-- Code nodes have only one output. The codeoutputs array must only contain one output, connected via "fieldOutput". The name is arbitrary and for reference only; do not encode it into the handle.
-- Code nodes can include JavaScript, TypeScript, or JSX snippets in data.codeJS for interpreted scenes.
-- Code nodes arguments are used as variables in the code snippet, just <argNamen> (no args. prefix).
-- State nodes hold scene fields; set data.keyword to the field name. Use scene fields to allow user customization.
-- Every state node must include data.value as a string default (use "" unless the prompt specifies a different default).
-- Scene nodes embed other scenes; set data.keyword to the scene id.
-- App node data must include data.keyword (app identifier) and data.config (app configuration).
-- Data apps (e.g. "data/openaiText", "data/openaiImage") provide data via codeNodeEdge edges.
-- Use ONLY app keywords from the provided context. If none match, use "render/text" and a simple message.
-- Prefer minimal but valid configs; omit fields when not needed.
-- Do not add node positions.
-- Ensure number types match: connect floats to float fields and integers to integer fields; do not mix numeric types.
-- When defining scene fields, set access = "public" and persist = "disk" unless there is a specific reason not to. This way users can modify them.
-- Text apps can render rich text using the simple caret syntax (basic-caret) to display dynamic text.
-  Use caret tokens like ^(16) for font size, ^(#FF00FF) for color, ^(PTSans-Bold.ttf) for font,
-  ^(underline)/^(no-underline), ^(strikethrough)/^(no-strikethrough), combine styles via ^(16,#FF0000),
-  and reset styles with ^(reset).
-- State nodes are used to supply scene fields into code/app inputs: set data.keyword to the scene field name and connect
-  them via codeNodeEdge with sourceHandle "fieldOutput" (no suffixes) to targetHandle "fieldInput/<fieldName>" or "codeField/<argName>".
-- When multiple apps use the same state field, duplicate the state node for each app to keep routing clearer in the diagram.
-- Create edges that link the nodes into a valid flow:
-  - Use "appNodeEdge" with sourceHandle "next" and targetHandle "prev" to connect the render event to the first app,
-    and to connect each subsequent app node in order.
-  - Do not connect multiple "next" edges to the same "prev" handle. The render flow must be a single linear chain
-    where each app node connects to exactly one next node in sequence.
-  - If two nodes are connected via prev/next, do not connect those same nodes via any other edge type.
-  - Logic + render apps form the left/right render flow (prev/next). Data apps are not part of the left/right chain
-    and should only connect up/down via field output -> field input edges.
-  - Apps in the render flow may still receive field inputs or emit field outputs; field wiring does NOT disqualify an
-    app from being in the prev/next chain.
-  - Only apps with category "logic" or "render" can be connected left/right using appNodeEdge. Apps with category
-    "data" must not be connected left/right and must only connect via field outputs into inputs.
-  - When an app outputs data into another app's input (e.g. data app into render/image), add a "codeNodeEdge" from
-    sourceHandle "fieldOutput" to targetHandle "fieldInput/<fieldName>".
-  - Every app node must be connected either through the render flow (prev/next) or via a field output/input edge.
-- Data apps (including image apps) are up/down data providers and should NOT be chained into the render flow using
-    "appNodeEdge". Instead, connect the render event directly to the render app (e.g. "render/image") with
-    "appNodeEdge" and separately connect the data app output via "codeNodeEdge". This keeps the render flow triggered
-    by the event.
-  - Render/logic apps connected via prev/next always share the implicit context.image canvas. Do not pass the canvas
-    through inputs when the app is in the prev/next chain.
-  - If render apps are connected via field outputs instead of prev/next, the image data must be passed along (or
-    generated) via field outputs/inputs as required.
-  - Images are data. To display an image, first add a render app like "render/image" in the render flow, then connect
-    the actual image output into its image field via a "codeNodeEdge" (fieldOutput -> fieldInput/imageField).
-  - Never store an image output node as state in JSON; pass image outputs directly into app inputs via codeNodeEdge.
-  - If you include an OpenAI image app (keyword "data/openaiImage"), do not set scene refreshInterval below 3600 unless
-    the user explicitly asks for a faster update cadence.
-- If you include a "code" node, connect its outputs to app inputs using "codeNodeEdge" with targetHandle
-  "fieldInput/<fieldName>".
-- If you include scene fields, add matching "state" nodes with data.keyword = field name, and connect them via
-  "codeNodeEdge" to "code" nodes using targetHandle "codeField/<argName>" or directly to app inputs using
-  "fieldInput/<fieldName>".
-- Code nodes can be added anywhere for most fields (see "Haiku of the hour" for an example); only data.codeJS
-  needs to be filled in for interpreted scenes.
-- If you must use template strings, use code nodes with backticks. Do not use template strings directly in app configs.
-- If you include "scene" nodes (to embed another scene), set data.keyword to the referenced scene id and connect them
-  from a layout app (like "render/split") using "appNodeEdge" with sourceHandle
-  "field/render_functions[row][col]" and targetHandle "prev".
-- If you want to reduce the opacity of an image, render the image as a data node, then connect it to the "render/opacity"
-  app as "image" and "opacity", and connect that to the "render/image" app in the render flow.
-- If you render a "render/color" or "render/gradient" background, you will wipe out all that was there before.
-- For render/text nodes, if there's no text to render (no value, no code node), omit the node.
-- Scene settings:
-  - settings.refreshInterval is the default render cadence in seconds. Use it to control how often the scene re-renders.
-    If a user mentions a render timeout or cadence, set refreshInterval accordingly (do not invent new timeout fields).
-    Every scene automatically exposes it to users as a final public state field "refreshInterval"
-    ("Refresh interval (seconds)", readable as state.refreshInterval), so never add your own interval field and never
-    wire a "logic/nextSleepDuration" app just to make the cadence configurable. Only when the interval deserves a
-    scene-specific label (e.g. "Seconds per image"), declare one float field with "role": "refreshInterval"; its
-    value is then the interval. At most one field per scene may have that role.
-  - settings.backgroundColor sets the default scene background fill as a hex color (e.g. "#000000").
-    If not specified, it defaults to black. Use render/color or render/gradient apps for more complex backgrounds.
-    Setting backgroundColor ensures the scene starts rendering with that background; do not add a separate blank-screen step.
-- For complex scenes, split data gathering from data rendering. Use data/logic apps or code nodes to gather/compute data,
-  then persist JSON-friendly outputs (scalars, strings, objects, arrays) with the "logic/setAsState" app by wiring the
-  output into fieldInput/valueJson. Later, read them back by referencing "state.<name>" via state nodes (keyword = name).
-- Fonts available (TTF filenames) for font fields and caret syntax:
-  - Ubuntu: Ubuntu-Regular.ttf (default), Ubuntu-Bold.ttf, Ubuntu-Italic.ttf, Ubuntu-BoldItalic.ttf,
-    Ubuntu-Light.ttf, Ubuntu-LightItalic.ttf, Ubuntu-Medium.ttf, Ubuntu-MediumItalic.ttf.
-  - PTSans: PTSans-Regular.ttf, PTSans-Bold.ttf, PTSans-Italic.ttf, PTSans-BoldItalic.ttf.
-  - FiraGO: FiraGO-Regular.ttf, FiraGO-Italic.ttf, FiraGO-Bold.ttf, FiraGO-BoldItalic.ttf,
-    FiraGO-Medium.ttf, FiraGO-MediumItalic.ttf, FiraGO-Light.ttf, FiraGO-LightItalic.ttf,
-    FiraGO-ExtraLight.ttf, FiraGO-ExtraLightItalic.ttf, FiraGO-SemiBold.ttf, FiraGO-SemiBoldItalic.ttf,
-    FiraGO-ExtraBold.ttf, FiraGO-ExtraBoldItalic.ttf, FiraGO-Heavy.ttf, FiraGO-HeavyItalic.ttf,
-    FiraGO-Book.ttf, FiraGO-BookItalic.ttf, FiraGO-Thin.ttf, FiraGO-ThinItalic.ttf.
-  - CormorantGaramond: Regular/Bold/Italic/BoldItalic/Light/LightItalic/Medium/MediumItalic/SemiBold/SemiBoldItalic.
-  - Liberation: LiberationSans-Regular.ttf/Bold.ttf/Italic.ttf/BoldItalic.ttf,
-    LiberationSerif-Regular.ttf/Bold.ttf/Italic.ttf/BoldItalic.ttf,
-    LiberationMono-Regular.ttf/Bold.ttf/Italic.ttf/BoldItalic.ttf.
-  - Other: CascadiaMono.ttf, CascadiaMonoItalic.ttf, ComicRelief.ttf, ComicRelief-Bold.ttf,
-    Galindo-Regular.ttf, Peralta-Regular.ttf.
-  - Users may upload custom fonts; if a requested font is unavailable, choose the closest available font or make it
-    a scene field so it can be swapped later.
-- Cache config can be applied to app or code nodes via data.cache with:
-  - enabled: true to turn caching on.
-  - inputEnabled: cache by inputs (output recalculates when any inputs change).
-  - durationEnabled + duration (seconds): refresh after a fixed interval.
-  - You can combine inputEnabled with an expression or duration to cache per inputs but still refresh on a schedule,
-    e.g. cache by inputs and use an expression for the current date so it reloads once per day.
-  - Alternatively, add a code node that outputs a date string and feed it into the app as an input; with inputEnabled
-    the cache key changes daily because the date input changes.
-- Every edge must reference nodes that exist in the "nodes" list. Do not include dangling edges.
-- Every state field must include a default value in the "value" field as a String(val) version of itself. No quotes around strings.
-- Interpreted scenes can include quick JavaScript, TypeScript, or JSX snippets in code nodes:
-  - Put the snippet in data.codeJS (not data.code) for interpreted scenes.
-  - The QuickJS environment exposes: state.<field>, <argName>, context.<event|payload|loopIndex|loopKey|hasImage>.
-  - Console logging is available via console.log/warn/error.
-  - Time helpers: parseTs(format, text), format(timestamp, format), now().
-  - Keep snippets as expressions that return a value (e.g. "state.title ?? 'Hello'" or "url").
-  - If you need multiple statements or setup logic, wrap the snippet in an IIFE and return the value.
-  - Interpreted code nodes do not support image outputs. All other types (json, string, boolean, font, etc) are supported.
-  - To use SVGs, route them through the download image app and pass a data URL into it.
-  - The same scene may run on an ESP32 frame: a microcontroller whose few MB of RAM are shared by the canvas,
-    the JS heap and the network stack. Be clever about data structures and behaviour: parsed objects cost
-    10-20x their JSON text, so keep big tables as compact strings (SVG path "d" strings, delimited text)
-    instead of object/array literals; keep only the fields you use from a fetched payload; slice lists
-    before mapping them; build strings with one array + join(""); never keep whole responses alive between
-    renders. Scenes that re-render every second or faster update preallocated state in place: no per-frame
-    objects, closures or JSON.parse, and capped particle counts.
+Return a JSON object with a top-level "title" string and a "scenes" array: no markdown, no code fences.
+- Use ONLY app keywords from the provided context. When none fits, use "render/text" with a short message.
+- A node may name a repo/apps/<folder>/<name> app by that keyword: it is copied into the scene's apps map for you.
+- Leave out node positions.
+- Use any relevant scene examples from the provided context as guidance.
 
-Use any relevant scene examples from the provided context as guidance.
-""".strip()
+The FrameOS scene guide follows: how scenes work on every frame. Follow it.
+
+"""
+    + SCENE_GUIDE
+).strip()
 
 SCENE_CHAT_ROUTER_SYSTEM_PROMPT = """
 You are a router that decides how to handle a FrameOS scene chat request.
