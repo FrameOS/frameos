@@ -22,7 +22,7 @@ import {
 const fifteenMinutes = 15 * 60 * 1000;
 
 // Per address. Generous for reads: one library page asks for a thumbnail per
-// photo. Uploads count chunks (a 20 MiB file is five) and thumbnails.
+// photo. Uploads count chunks (a 20 MiB file is five).
 export const photoRateLimits = {
   read: { limit: 6000, windowMs: fifteenMinutes },
   upload: { limit: 3000, windowMs: fifteenMinutes },

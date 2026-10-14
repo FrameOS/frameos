@@ -16,12 +16,10 @@ import {
   fetchPhotoFolder,
   fetchPhotoShares,
   fetchPhotosStatus,
-  makePhotoThumbnail,
   movePhotos,
   photoFileUrl,
   renamePhoto,
   uploadPhoto,
-  uploadPhotoThumbnail,
   type PhotoEntry,
   type PhotoShare,
   type PhotosStatus,
@@ -465,7 +463,6 @@ export const photosLogic = kea<photosLogicType>([
               free_bytes: null,
               max_upload_bytes: 0,
               accepts: null,
-              client_thumbnails: false,
               scanning: [],
             } as PhotosStatus
           }
@@ -783,13 +780,6 @@ export const photosLogic = kea<photosLogicType>([
       try {
         const entry = await uploadPhoto(item.folder, item.file, (loaded) => actions.uploadProgress(item.id, loaded))
         actions.uploadFinished(item.id, entry)
-        if (values.status?.client_thumbnails && isBrowserImageName(entry.name)) {
-          const thumbnail = await makePhotoThumbnail(item.file)
-          if (thumbnail) {
-            // A missing thumbnail only means the grid shows the full photo.
-            await uploadPhotoThumbnail(entry.path, thumbnail).catch(() => undefined)
-          }
-        }
       } catch (error) {
         actions.uploadFailed(item.id, errorMessage(error, 'Upload failed.'))
       }

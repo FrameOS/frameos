@@ -28,7 +28,6 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(
     {
       accepts: [...acceptedPhotoContentTypes],
-      client_thumbnails: true,
       free_bytes: null,
       location: null,
       max_upload_bytes: maxPhotoUploadBytes,

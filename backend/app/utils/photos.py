@@ -255,7 +255,6 @@ def status(project_id: int) -> dict[str, Any]:
         "free_bytes": free_bytes(root),
         "max_upload_bytes": MAX_UPLOAD_BYTES,
         "accepts": None,
-        "client_thumbnails": False,
         "scanning": [],
     }
 

@@ -191,6 +191,11 @@
   build, and all three tests compare with it. Change one, change all three.
   The photos MCP tools (same names on both servers) gate every write on
   `confirm`: a frame playing a shared album shows the change.
+- Thumbnails are made on the server on both planes (backend Pillow, cloud
+  sharp at upload), so every upload gets one, MCP and API ones included.
+  sharp is the cloud's one native dependency: `next.config.ts` traces its
+  libvips in (the tracer misses it) and `cloud/scripts/stage-sharp.sh` gives
+  a laptop-built release the box's linux-x64 build, or refuses it.
 - Cloud uploads are scanned before anything is stored (hash list,
   PhotoDNA), and a configured scanner that fails stores nothing. Not OpenAI
   moderation: it scores `sexual/minors` on text only. Any new table holding photo objects goes into

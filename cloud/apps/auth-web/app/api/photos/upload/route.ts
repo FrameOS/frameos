@@ -17,6 +17,7 @@ import {
   parsePhotoPath,
   photoPathWithinLimits,
 } from "../../../../src/lib/photos/paths";
+import { makePhotoThumbnail } from "../../../../src/lib/photos/thumbnail";
 import {
   discardPhotoUpload,
   isValidPhotoUploadId,
@@ -32,7 +33,7 @@ export const runtime = "nodejs";
 // Chunks wait on this host's disk (src/lib/photos/uploads.ts). Nothing
 // reaches the object store until the whole file is in, is one of the four
 // accepted image types (sniffed), fits the quota and has passed every
-// configured scanner.
+// configured scanner. Its thumbnail is made here too (src/lib/photos/thumbnail.ts).
 export async function POST(request: NextRequest) {
   const context = await photoOwnerContext(request, { kind: "upload" });
   if (context.response) {
@@ -129,6 +130,7 @@ export async function POST(request: NextRequest) {
       return scanned.response;
     }
     const dimensions = imageDimensions(file, contentType);
+    const thumbnail = await makePhotoThumbnail(file);
     const entry = await storePhotoFile(db, accountId, {
       bytes: file,
       contentType,
@@ -136,6 +138,7 @@ export async function POST(request: NextRequest) {
       height: dimensions?.height ?? null,
       name: filename,
       sha256: scanned.sha256,
+      thumbnail,
       width: dimensions?.width ?? null,
     });
     return NextResponse.json({ entry });

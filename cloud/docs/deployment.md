@@ -101,6 +101,14 @@ The deploy builds locally and ships a self-contained bundle:
    streams the tar into `/usr/local/bin/frameos-cloud-update --archive -` on
    the server. Staging fails if a shipped script sources a path that is not
    in the bundle.
+
+   One dependency is native: sharp, which makes photo thumbnails. The box
+   needs its linux-x64 (glibc) build and the libvips beside it (traced in by
+   `outputFileTracingIncludes`, since the addon finds it through an rpath).
+   A bundle built on a laptop carries the laptop's build, so
+   `scripts/stage-sharp.sh` adds the box's two packages, at the versions
+   sharp names, with `npm pack`. It refuses a bundle without them, and on a
+   linux-x64 host it loads sharp from the bundle first.
 3. `frameos-cloud-update` applies the SQL migrations via `psql` from the new
    release (before anything is flipped, so a failed migration leaves the
    running app untouched), then performs the zero-downtime flip below. Each
@@ -634,9 +642,10 @@ PHOTODNA_ENDPOINT=…                 # overrides the PhotoDNA Match URL
 FRAMEOS_PHOTO_UPLOAD_DIR=…          # where unfinished uploads wait
 ```
 
-Every upload (and every browser-made thumbnail) is scanned before anything
-is stored: against the `photo_blocked_hashes` table always, and by PhotoDNA
-when its key is set. OpenAI moderation is not used for photos: it scores
+Every upload is scanned before anything is stored: against the
+`photo_blocked_hashes` table always, and by PhotoDNA when its key is set.
+Its thumbnail is made on the server (sharp) from the scanned file, so it is
+not scanned again. OpenAI moderation is not used for photos: it scores
 `sexual/minors` on text only. Cloudflare's CSAM Scanning Tool on the CDN zone
 is a second layer for everything the CDN serves. A configured scanner that can not be reached refuses the upload. A match stores
 nothing, records a row in `photo_scan_hits`, suspends the account's photos
@@ -872,7 +881,7 @@ NEXT_PUBLIC_POSTHOG_HOST=…                   # optional; defaults to
 | ---------------------- | -------------------- | ------------------------------------------------- |
 | `cloud user signed up` | the new account id   | password signup, first Google sign-in             |
 | `store scene reported` | the reporter account | `POST /api/store/scenes/<id>/report` (new report) |
-| `photo scan matched`   | the uploader account | a photo upload or thumbnail a scanner matched     |
+| `photo scan matched`   | the uploader account | a photo upload a scanner matched                  |
 
 All go to the `/capture` endpoint using the same public project key as the
 browser SDK (no extra secret required). The Discord messages for these

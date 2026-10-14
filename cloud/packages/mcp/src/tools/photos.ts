@@ -109,7 +109,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext) {
             const thumb = await api.bytes("GET", "/api/photos/thumb", { query: { path } });
             return image(thumb.bytes, "image/jpeg", `${path} (thumbnail, ${thumb.bytes.length} bytes)`);
           } catch (error) {
-            // No thumbnail (the browser makes them after an upload): the file.
+            // No thumbnail (the upload could not make one): the file.
             if (!(error instanceof CloudApiError && error.status === 404)) {
               throw error;
             }

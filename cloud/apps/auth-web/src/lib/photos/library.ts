@@ -46,8 +46,6 @@ import type { PhotoScanner } from "./scan";
 export const maxPhotoUploadBytes = 20 * 1024 * 1024;
 // nginx caps request bodies at 10 MB; 4 MiB chunks stay well inside it.
 export const maxPhotoChunkBytes = 4 * 1024 * 1024;
-export const maxPhotoThumbBytes = 512 * 1024;
-export const maxPhotoThumbSide = 512;
 // Rows, not bytes: empty folders cost nothing against the byte quota, so
 // the row count has a ceiling of its own.
 export const maxPhotoEntriesPerAccount = 100_000;
@@ -536,7 +534,7 @@ export async function createPhotoFolder(
 }
 
 // ---------------------------------------------------------------------------
-// Uploads and thumbnails
+// Uploads
 
 export type StorePhotoInput = {
   bytes: Buffer;
@@ -545,13 +543,16 @@ export type StorePhotoInput = {
   height: number | null;
   name: string;
   sha256: string;
+  /** The JPEG from makePhotoThumbnail, or null when there is none. */
+  thumbnail: Buffer | null;
   width: number | null;
 };
 
 /**
- * Store one scanned file: the object first, then the row (with a " (2)"
- * name when the name is taken). Quota and suspension are checked again under
- * the lock; a refusal there deletes the object it just wrote.
+ * Store one scanned file: the objects first (the file, its thumbnail), then
+ * the row (with a " (2)" name when the name is taken). Quota and suspension
+ * are checked again under the lock; a refusal there deletes the objects it
+ * just wrote.
  */
 export async function storePhotoFile(
   db: FramesDatabase,
@@ -559,7 +560,16 @@ export async function storePhotoFile(
   input: StorePhotoInput,
 ): Promise<PhotoEntry> {
   const objectKey = randomPhotoObjectKey(accountId, "file");
+  const thumbObjectKey = input.thumbnail ? randomPhotoObjectKey(accountId, "thumb") : null;
   await objectStore().put(objectKey, input.bytes, input.contentType);
+  try {
+    if (thumbObjectKey && input.thumbnail) {
+      await objectStore().put(thumbObjectKey, input.thumbnail, "image/jpeg");
+    }
+  } catch (error) {
+    await deletePhotoObjects([objectKey, thumbObjectKey]);
+    throw error;
+  }
   let path: string;
   try {
     path = await db.transaction(async (tx) => {
@@ -586,46 +596,17 @@ export async function storePhotoFile(
         path: target,
         sha256: input.sha256,
         sizeBytes: input.bytes.length,
+        thumbObjectKey,
         width: input.width,
       });
       await touchPhotoFolder(tx, accountId, input.folder);
       return target;
     });
   } catch (error) {
-    await deletePhotoObjects([objectKey]);
+    await deletePhotoObjects([objectKey, thumbObjectKey]);
     throw error;
   }
   return (await loadPhotoEntry(db, accountId, path)) as PhotoEntry;
-}
-
-/** Store (or replace) a file's thumbnail. 404 when the file is not there. */
-export async function storePhotoThumb(
-  db: FramesDatabase,
-  accountId: string,
-  path: string,
-  bytes: Buffer,
-): Promise<void> {
-  const objectKey = randomPhotoObjectKey(accountId, "thumb");
-  await objectStore().put(objectKey, bytes, "image/jpeg");
-  let previous: string | null = null;
-  try {
-    previous = await db.transaction(async (tx) => {
-      await lockPhotoLibrary(tx, accountId);
-      const row = await rowAt(tx, accountId, path);
-      if (!row || row.kind !== "file") {
-        throw new PhotoError("not_found", 404);
-      }
-      await tx
-        .update(photoEntries)
-        .set({ thumbObjectKey: objectKey })
-        .where(and(eq(photoEntries.accountId, accountId), eq(photoEntries.path, path)));
-      return row.thumbObjectKey;
-    });
-  } catch (error) {
-    await deletePhotoObjects([objectKey]);
-    throw error;
-  }
-  await deletePhotoObjects([previous]);
 }
 
 // ---------------------------------------------------------------------------

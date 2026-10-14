@@ -1,7 +1,7 @@
 // Width and height from an image's header bytes, for the four types the cloud
-// stores (JPEG, PNG, GIF, WebP). The cloud has no image library on the server,
-// and the contract only needs the two numbers, so this reads them straight
-// out of the format headers without decoding a pixel.
+// stores (JPEG, PNG, GIF, WebP). The contract only needs the two numbers, so
+// this reads them straight out of the format headers without decoding a
+// pixel (sharp decodes only for the thumbnail, thumbnail.ts).
 //
 // The numbers match what a browser reports as naturalWidth/naturalHeight: a
 // JPEG whose EXIF orientation turns it a quarter (5-8) has them swapped, the

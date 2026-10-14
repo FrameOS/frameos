@@ -111,7 +111,6 @@ async def test_status_reports_a_ready_library(async_client, photos_dir):
         "free_bytes": body["free_bytes"],
         "max_upload_bytes": 64 * 1024 * 1024,
         "accepts": None,
-        "client_thumbnails": False,
         "scanning": [],
     }
     assert isinstance(body["free_bytes"], int) and body["free_bytes"] > 0
@@ -487,11 +486,11 @@ async def test_thumbnails(async_client):
         response = await async_client.get("/api/photos/thumb", params={"path": path})
         assert response.status_code == 404, path
 
-    # The backend makes its own thumbnails and ignores the browser's.
+    # Each plane makes its own thumbnails: there is nothing to send one to.
     response = await async_client.post(
         "/api/photos/thumb", params={"path": "big.jpg"}, content=b"jpeg", headers={"Content-Type": "image/jpeg"}
     )
-    assert response.status_code == 204
+    assert response.status_code == 405
 
 
 # ---------------------------------------------------------------------------

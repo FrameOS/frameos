@@ -22,7 +22,7 @@ CREATE TABLE "photo_entries" (
   "content_type" text,
   "sha256" text,
   "object_key" text,
-  -- The browser-made thumbnail (POST /api/photos/thumb), when there is one.
+  -- The thumbnail the upload made, when it could make one.
   "thumb_object_key" text,
   "width" integer,
   "height" integer,

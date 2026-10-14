@@ -84,7 +84,7 @@ SELECT object_key FROM store_images
 UNION
 SELECT object_key FROM frame_asset_files WHERE object_key IS NOT NULL
 UNION
--- Photos (docs/photos.md): the file and its browser-made thumbnail. Leave
+-- Photos (docs/photos.md): the file and its thumbnail. Leave
 -- these out and --apply deletes every photo in the library as an orphan.
 SELECT object_key FROM photo_entries WHERE object_key IS NOT NULL
 UNION

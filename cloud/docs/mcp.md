@@ -196,9 +196,8 @@ a frame's logs must not be able to talk an agent into installing something.
   `photo_share_create`, `photo_share_delete`, and `photo_album_install`
   (`POST /api/photos/scene`, then what `frame_scene_install` does with raw
   JSON: a private scene, added to the frame). The writes are gated: a frame
-  playing a shared album shows the folder as it is at its next photo. An
-  upload through the MCP has no browser to make its thumbnail, so the
-  library shows the photo itself for it.
+  playing a shared album shows the folder as it is at its next photo. The
+  upload route makes the thumbnail, so an MCP upload gets one like any other.
 - **ai** — `ai_scene_chat` (follows the NDJSON turn up to `wait_seconds`,
   then `apply`: none / new_scene / save_version), `ai_turn_wait`,
   `ai_turn_cancel`, `ai_chats_list`, `ai_chat_get`, `ai_chat_delete`. The

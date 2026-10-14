@@ -101,6 +101,15 @@ function createNextConfig(phase: string): NextConfig {
     // workspace dependencies resolve into the bundle.
     output: "standalone",
     outputFileTracingRoot: path.join(__dirname, "../../.."),
+    // sharp's addon finds libvips through an rpath, which the tracer cannot
+    // see: without this the bundle has sharp and no libvips, sharp does not
+    // load, and photo uploads get no thumbnail (src/lib/photos/thumbnail.ts).
+    // deploy.sh refuses a stage whose sharp cannot load.
+    outputFileTracingIncludes: {
+      "/api/photos/upload": [
+        "../../../node_modules/.pnpm/@img+sharp-libvips-*/node_modules/@img/sharp-libvips-*/lib/**/*",
+      ],
+    },
     async rewrites() {
       return {
         // The frames SPA (cloud-frontend) resolves root-absolute assets

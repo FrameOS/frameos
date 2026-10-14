@@ -1,6 +1,6 @@
-// The gate every incoming byte passes before the object store sees it
-// (uploads and browser-made thumbnails alike): scan, and on a match record
-// the hit and suspend the account; on a scanner that cannot answer, refuse.
+// The gate every upload passes before the object store sees it: scan, and
+// on a match record the hit and suspend the account; on a scanner that
+// cannot answer, refuse. (A thumbnail is made from bytes that passed.)
 
 import { createHash } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";

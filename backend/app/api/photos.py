@@ -164,15 +164,6 @@ async def photos_thumb(request: Request, path: str = ""):
     return FileResponse(thumb, media_type="image/jpeg", headers=headers)
 
 
-@api_project.post("/photos/thumb", status_code=HTTPStatus.NO_CONTENT)
-async def photos_thumb_upload(path: str = ""):
-    """The cloud stores thumbnails the browser makes; the backend makes its
-    own (`client_thumbnails: false`) and ignores these."""
-    photos.validate_path(path)
-    await _ready_root(current_project_id())
-    return Response(status_code=HTTPStatus.NO_CONTENT)
-
-
 @api_project.get("/photos/file")
 async def photos_file(path: str = "", download: str = ""):
     rel = photos.validate_path(path)

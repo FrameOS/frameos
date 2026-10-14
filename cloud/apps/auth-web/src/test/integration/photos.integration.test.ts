@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
+import sharp from "sharp";
 import {
   accounts,
   auditEvents,
@@ -34,7 +35,7 @@ import { GET as getSharedPhoto } from "../../../app/api/photos/shared/[token]/ph
 import { DELETE as deleteShare } from "../../../app/api/photos/shares/[token]/route";
 import { GET as getShares, POST as postShares } from "../../../app/api/photos/shares/route";
 import { GET as getStatus } from "../../../app/api/photos/status/route";
-import { GET as getThumb, POST as postThumb } from "../../../app/api/photos/thumb/route";
+import { GET as getThumb } from "../../../app/api/photos/thumb/route";
 import { POST as postUpload } from "../../../app/api/photos/upload/route";
 import { objectStore } from "../../lib/object-store";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
@@ -146,6 +147,11 @@ function png(width: number, height: number, salt = "") {
   ]);
 }
 
+/** An image sharp can read (the two above are headers only). */
+function realPng(width: number, height: number) {
+  return sharp({ create: { background: "#3366cc", channels: 3, height, width } }).png().toBuffer();
+}
+
 function jpeg(width: number, height: number, salt = "") {
   return Buffer.concat([
     Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, height >> 8, height & 255, width >> 8, width & 255]),
@@ -214,7 +220,6 @@ describe("photo library: status and listing", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       accepts: ["image/jpeg", "image/png", "image/gif", "image/webp"],
-      client_thumbnails: true,
       free_bytes: null,
       location: null,
       max_upload_bytes: 20 * 1024 * 1024,
@@ -411,28 +416,24 @@ describe("photo library: uploads", () => {
 });
 
 describe("photo library: thumbnails", () => {
-  it("stores a browser-made JPEG thumbnail and serves it back", async () => {
+  it("makes the thumbnail when it stores the photo", async () => {
     await signIn();
-    await upload("", "a.png", png(4000, 3000, "thumb"));
-    expect((await getThumb(get("/api/photos/thumb?path=a.png"))).status).toBe(404);
-
-    const thumb = jpeg(512, 384, "thumb");
-    const stored = await postThumb(postBytes("/api/photos/thumb", { path: "a.png" }, thumb));
-    expect(stored.status).toBe(204);
+    const response = await upload("", "a.png", await realPng(640, 480));
+    expect(response.status).toBe(200);
     const served = await getThumb(get("/api/photos/thumb?path=a.png&v=1"));
     expect(served.status).toBe(200);
     expect(served.headers.get("content-type")).toBe("image/jpeg");
-    expect(Buffer.from(await served.arrayBuffer()).equals(thumb)).toBe(true);
+    const meta = await sharp(Buffer.from(await served.arrayBuffer())).metadata();
+    expect([meta.format, meta.width, meta.height]).toEqual(["jpeg", 512, 384]);
+  });
 
-    expect(
-      (await postThumb(postBytes("/api/photos/thumb", { path: "a.png" }, jpeg(513, 10)))).status,
-    ).toBe(400);
-    expect(
-      (await postThumb(postBytes("/api/photos/thumb", { path: "a.png" }, png(100, 100)))).status,
-    ).toBe(415);
-    expect(
-      (await postThumb(postBytes("/api/photos/thumb", { path: "missing.png" }, thumb))).status,
-    ).toBe(404);
+  it("stores a photo it cannot read, without a thumbnail", async () => {
+    await signIn();
+    // A PNG header and no pixels: sniffed as a PNG, unreadable to sharp.
+    expect((await upload("", "b.png", png(4000, 3000, "thumb"))).status).toBe(200);
+    expect((await listFolder("")).map((entry) => entry.path)).toEqual(["b.png"]);
+    expect((await getThumb(get("/api/photos/thumb?path=b.png"))).status).toBe(404);
+    expect((await getThumb(get("/api/photos/thumb?path=missing.png"))).status).toBe(404);
   });
 });
 
@@ -530,10 +531,10 @@ describe("photo library: folders, moves, renames, deletes", () => {
 
   it("deletes folders with their files, objects and share links", async () => {
     const accountId = await signIn();
-    await upload("Old", "a.png", png(10, 10, "a"));
+    // A real image, for a thumbnail; the others have none.
+    await upload("Old", "a.png", await realPng(100, 100));
     await upload("Old/Deep", "b.png", png(10, 10, "b"));
     await upload("", "keep.png", png(10, 10, "keep"));
-    await postThumb(postBytes("/api/photos/thumb", { path: "Old/a.png" }, jpeg(100, 100, "t")));
     const oldShare = await share("Old/Deep");
     const keys = (
       await db.select().from(photoEntries).where(eq(photoEntries.accountId, accountId))

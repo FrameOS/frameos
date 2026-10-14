@@ -41,7 +41,6 @@ export interface PhotosStatus {
   free_bytes: number | null
   max_upload_bytes: number
   accepts: string[] | null
-  client_thumbnails: boolean
   scanning: string[]
 }
 
@@ -254,40 +253,6 @@ export async function uploadPhoto(
     }
   }
   throw new PhotosApiError(409, 'Upload failed. Try again.')
-}
-
-const THUMB_EDGE = 512
-
-/** A JPEG thumbnail made in the browser, for planes without a server-side image library. */
-export async function makePhotoThumbnail(file: Blob): Promise<Blob | null> {
-  if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') {
-    return null
-  }
-  try {
-    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' } as ImageBitmapOptions)
-    const scale = Math.min(1, THUMB_EDGE / Math.max(bitmap.width, bitmap.height))
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale))
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-    const context = canvas.getContext('2d')
-    if (!context) {
-      bitmap.close()
-      return null
-    }
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-    bitmap.close()
-    return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82))
-  } catch {
-    return null
-  }
-}
-
-export async function uploadPhotoThumbnail(path: string, thumbnail: Blob): Promise<void> {
-  const url = await projectApiPath('/api/photos/thumb')
-  const response = await postBytes(`${url}?${new URLSearchParams({ path }).toString()}`, thumbnail, 'image/jpeg')
-  if (response.status >= 400) {
-    throw chunkError(response)
-  }
 }
 
 /** The share link a frame plays. The backend answers a root-relative path,

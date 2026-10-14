@@ -259,6 +259,10 @@ for shipped in "$stage"/cloud/scripts/*.sh; do
     fi
   done < <(sed -nE 's/^[[:space:]]*(\.|source)[[:space:]]+"?(scripts\/[^" ]+)"?.*$/\2/p' "$shipped")
 done
+# sharp (photo thumbnails) is native: the box needs its linux-x64 build,
+# which a bundle built on a laptop does not have. This adds it when missing
+# and refuses a bundle whose sharp the box could not load.
+scripts/stage-sharp.sh "$stage"
 # The server-side deploy script rides along in the release it deploys, and
 # frameos-cloud-update installs the newer copy over itself once the release is
 # live. Before this the box's copy existed only on the box (and in backups),

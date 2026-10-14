@@ -59,8 +59,8 @@ The shape every listing returns:
 
 - `kind` is `"file"` or `"folder"`.
 - `mtime` is in seconds.
-- `width`, `height`: pixels when known, else `null`. The backend reads them
-  from the image header; the cloud stores what the browser measured.
+- `width`, `height`: pixels when known, else `null`, read from the image
+  header on both planes.
 - `status`: `"ready"`, or `"blocked"` on the cloud when a scan matched (the
   bytes are gone; see Scanning).
 - `colors`: files only. The photo's color profile, or `null` (see Colors).
@@ -92,7 +92,6 @@ Errors use each plane's usual body (`{"detail": ...}` on the backend,
   "free_bytes": 9876543210,
   "max_upload_bytes": 67108864,
   "accepts": null,
-  "client_thumbnails": false,
   "scanning": []
 }
 ```
@@ -104,9 +103,6 @@ Errors use each plane's usual body (`{"detail": ...}` on the backend,
 - `location`: where the files live (backend only, `null` on the cloud).
 - `quota_bytes`, `free_bytes`: `null` when there is no such limit.
 - `accepts`: the content types uploads may have, or `null` for any file.
-- `client_thumbnails`: `true` when the browser should make a thumbnail after
-  each upload and send it to `POST /api/photos/thumb` (the cloud has no image
-  library on the server). The backend makes its own.
 - `scanning`: the scanners every upload passes (cloud), e.g.
   `["hash_list", "photodna"]`.
 
@@ -141,16 +137,13 @@ Content-Type: application/octet-stream
   (sniffed from the bytes, not the name), 507 when the quota is used up, 422
   when a scan matched.
 
-### `POST /api/photos/thumb?path=<file>`
-
-Raw JPEG body, at most 512 KiB, at most 512 px on the long side. Stored as
-that file's thumbnail when `client_thumbnails` is true; the backend answers
-204 and ignores it.
-
 ### `GET /api/photos/thumb?path=<file>`
 
-A thumbnail, at most 512 px on the long side, or 404 when there is none (the
-SPA then shows the file itself). Browser previews only.
+A JPEG thumbnail, at most 512 px on the long side, turned by the photo's
+EXIF orientation, transparency on white, or 404 when the server could not
+read the image (the SPA then shows the file itself). Each plane makes its
+own, whoever uploaded the photo: the backend with Pillow on first request,
+the cloud with sharp when the upload stores the photo.
 
 ### `GET /api/photos/file?path=<file>[&download=1]`
 
@@ -379,8 +372,8 @@ option and shows the photo ungraded, with the automatic fit as before.
 
 ## Scanning (cloud)
 
-Every upload, and every thumbnail the browser sends, is scanned before
-anything is stored, by every scanner that is configured:
+Every upload is scanned before anything is stored, by every scanner that is
+configured (the thumbnail is made from the scanned bytes):
 
 1. **Hash list**: the SHA-256 against `photo_blocked_hashes`, always on.
    Admins add hashes.
