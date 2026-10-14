@@ -26,6 +26,10 @@ import frameos/js_runtime/app_runtime
 # ------------------------------------------------------------------ C hooks
 
 proc espLog(msg: cstring) {.importc: "frameos_nim_log_hook", cdecl.}
+proc espFlushLogs() {.importc: "frameos_nim_flush_logs", cdecl.}
+  ## Uploads the backend log queue now (frameos_nim_glue.c; a no-op when
+  ## log upload is off or internal RAM is short). Safe from the render
+  ## task: it takes the log lock, never the Nim lock.
 proc requestSceneSelect(sceneId: cstring): bool {.importc: "frameos_nim_request_scene_select", cdecl.}
   ## Queues a scene switch with the firmware (fos_scenes_select), which owns
   ## it: the scene may have to come off flash, and the choice is persisted.
@@ -459,6 +463,8 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
   initLock(logger.lock)
   channels.embeddedLogHook = proc(payload: JsonNode) {.gcsafe.} =
     espLog(($payload).cstring)
+  channels.embeddedLogFlushHook = proc() {.gcsafe.} =
+    espFlushLogs()
   channels.embeddedEventHook = proc(sceneId: Option[SceneId], event: string, payload: JsonNode,
       origin: EventOrigin) {.gcsafe.} =
     {.cast(gcsafe).}:

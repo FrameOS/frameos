@@ -10,6 +10,10 @@ when defined(frameosDriverLibrary):
   import frameos/events_gen
   export events_gen.EventOrigin
 
+  proc flushLogsNow*() {.gcsafe.} =
+    ## Driver libraries log through the host; nothing to push.
+    discard
+
   var
     sharedHostLogHook: HostLogProc
     sharedHostSendEventHook: HostSendEventProc
@@ -98,6 +102,16 @@ elif defined(frameosEmbedded) or defined(frameosWasm):
 
   var embeddedLogHook*: EmbeddedLogHook
   var embeddedEventHook*: EmbeddedEventHook
+  ## Ships every log line queued so far, now. The ESP32 firmware uploads the
+  ## backend log queue between its steps, never during a render; a line that
+  ## announces a decode that will take minutes has to go out before it
+  ## (utils/image.nim), or it arrives with the result. The cloud path streams
+  ## from its own task and needs nothing; the wasm host leaves this nil.
+  var embeddedLogFlushHook*: proc() {.gcsafe, nimcall.}
+
+  proc flushLogsNow*() {.gcsafe.} =
+    if not embeddedLogFlushHook.isNil:
+      embeddedLogFlushHook()
 
   proc setSharedHostCallbacks*(logHook: HostLogProc, sendEventHook: HostSendEventProc) =
     discard
@@ -146,6 +160,10 @@ else:
   export events_gen.EventOrigin
 
   proc setSharedHostCallbacks*(logHook: HostLogProc, sendEventHook: HostSendEventProc) =
+    discard
+
+  proc flushLogsNow*() {.gcsafe.} =
+    ## The logger thread drains `logChannel` on its own clock; nothing to do.
     discard
 
   # Event

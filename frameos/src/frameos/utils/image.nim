@@ -19,6 +19,9 @@ import frameos/channels
 import frameos/utils/http_client
 import frameos/utils/memory
 import frameos/utils/font
+import frameos/utils/decode_progress
+import frameos/js_runtime/run_budget
+import std/monotimes
 # pixie.nim imports the fileformat modules without re-exporting them, so every
 # format the streaming decode paths reach for has to be imported by name. Miss
 # one and its `when compiles(...)` branch below quietly evaluates false — the
@@ -998,6 +1001,9 @@ when defined(frameosEmbedded):
         return decodeImageWithFallback(data, len, target, fitStretch)
     decodeImageWithFallback(data, len)
 
+  proc monoMs(): int64 =
+    getMonoTime().ticks div 1_000_000
+
   proc downloadImageStreamingInto(url: string, maxBytes: int, target: Image,
       headers: seq[SimpleHttpHeader], fit: ScaledDecodeFit): bool =
     ## Decodes a remote JPEG/PNG (BMP/PPM/WebP too) straight off the socket
@@ -1044,8 +1050,38 @@ when defined(frameosEmbedded):
       format = embeddedImageFormat(header.cstring, header.len)
       totalLen = if stream.contentLength > 0: stream.contentLength.int else: 0
       refreshDecodeBudgetInto()
-      if not streamDecodeInto(format, stream.httpBodyStreamSource(), totalLen,
-          target, fit, proc() = stream.rewindHttpBodyStream(),
+      # A large body announces itself before the decode and reports as it
+      # goes (utils/decode_progress.nim), and while it keeps consuming the
+      # source it renews the run's wall-clock deadline: a 60 MP photo is
+      # minutes of honest work on this board, not a tarpit. The notice and
+      # each report are pushed to the backend at once (flushLogsNow), since
+      # the firmware's own upload only runs between renders.
+      var progress = initDecodeProgress(format, totalLen, target.width, target.height, monoMs())
+      let startNote = progress.startNote()
+      if not startNote.isNil:
+        log(startNote)
+        flushLogsNow()
+      let rawSource = stream.httpBodyStreamSource()
+      let source: JpegSourceProc = proc(dst: pointer, maxBytes: int): int {.gcsafe, raises: [].} =
+        let got = rawSource(dst, maxBytes)
+        if got > 0:
+          try:
+            {.cast(gcsafe).}:
+              let step = progress.advance(got, monoMs())
+              if step.renew:
+                discard renewRenderDeadline(renderDeadlineBudgetMs())
+              if not step.note.isNil:
+                log(step.note)
+                flushLogsNow()
+          except Exception:
+            # The source callback promises pixie nothing raises out of it;
+            # a report that cannot be logged is not worth the decode.
+            discard
+        got
+      if not streamDecodeInto(format, source, totalLen,
+          target, fit, proc() =
+            stream.rewindHttpBodyStream()
+            progress.restart(monoMs()),
           collectBeforeDecode = true):
         return false
     except HttpStreamReopenError as e:

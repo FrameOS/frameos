@@ -15,6 +15,15 @@
 ##   three places: the QuickJS interrupt handler (trips the script), the HTTP
 ##   client (caps every request's timeout to what is left), and the binding
 ##   wrapper (marks the trip as soon as a slow call returns).
+##
+##   One kind of native work is bounded by its input, not by a remote host: a
+##   streamed image decode. A 60 MP camera JPEG takes an ESP32 seven minutes
+##   of honest work, and the first version of this deadline let it finish and
+##   then threw the picture away (2026-10-14). Such a call renews the deadline
+##   while its source keeps advancing (`renewRenderDeadline`, the decoder's
+##   progress hook in utils/image.nim): a stalled tarpit stops advancing and
+##   still trips, a decode that is working gets the time it needs, up to a
+##   hard ceiling nothing extends (`RenderDeadlineHardCeilingMs`).
 ## * The per-run dispatch budget. A dispatch node fires an event; an event
 ##   whose handler dispatches again is an unbounded chain — on the Pi it
 ##   floods the event queue and starves rendering, on the ESP32 it recurses
@@ -37,25 +46,61 @@ const
     else:
       120_000      # under the 900 s systemd WatchdogSec with room for the driver's refresh
   DefaultDispatchBudget* = 64
+  RenderDeadlineHardCeilingMs* = when defined(frameosEmbedded):
+      900_000      # a 60 MP decode is ~7 min on an ESP32-S3; a battery frame sleeps after the render anyway
+    elif defined(frameosWasm):
+      300_000
+    else:
+      600_000      # still under the 900 s systemd WatchdogSec
 
 var
   renderDeadlineArmed {.threadvar.}: bool
   renderDeadlineAt {.threadvar.}: MonoTime
+  renderDeadlineHardAt {.threadvar.}: MonoTime ## no renewal moves `renderDeadlineAt` past this
   renderDeadlineBudget {.threadvar.}: int
   dispatchBudgetRemaining {.threadvar.}: int
   dispatchBudgetTotal {.threadvar.}: int
   dispatchBudgetExhaustedLogged {.threadvar.}: bool
 
-proc armRenderDeadline*(budgetMs: int): bool =
+proc armRenderDeadline*(budgetMs: int, hardCeilingMs = RenderDeadlineHardCeilingMs): bool =
   ## Start the wall clock for this run. Returns true when this call armed it
   ## (so the matching disarm belongs to this caller); false when a run is
   ## already in progress on this thread or the budget disables the ceiling.
+  ## `hardCeilingMs` is how far renewals may push the deadline out, counted
+  ## from now; a budget above it is its own ceiling.
   if renderDeadlineArmed or budgetMs <= 0:
     return false
   renderDeadlineArmed = true
   renderDeadlineBudget = budgetMs
-  renderDeadlineAt = getMonoTime() + initDuration(milliseconds = budgetMs)
+  let now = getMonoTime()
+  renderDeadlineAt = now + initDuration(milliseconds = budgetMs)
+  renderDeadlineHardAt = now + initDuration(milliseconds = max(budgetMs, hardCeilingMs))
   true
+
+proc renewRenderDeadline*(graceMs: int): bool =
+  ## A native call that is visibly advancing (a streamed decode that just
+  ## consumed more of its source) asks for `graceMs` more from now. The
+  ## deadline only ever moves later, never past the hard ceiling set when the
+  ## run was armed, and a deadline that has already passed is not brought
+  ## back: the script is being stopped. Returns true when the deadline now
+  ## lies ahead of this moment.
+  if not renderDeadlineArmed or graceMs <= 0:
+    return false
+  let now = getMonoTime()
+  if now >= renderDeadlineAt:
+    return false
+  let wanted = now + initDuration(milliseconds = graceMs)
+  let capped = if wanted < renderDeadlineHardAt: wanted else: renderDeadlineHardAt
+  if capped > renderDeadlineAt:
+    renderDeadlineAt = capped
+  true
+
+proc renderDeadlineHardRemainingMs*(): int =
+  ## -1 when no deadline is armed; otherwise what is left of the hard ceiling.
+  if not renderDeadlineArmed:
+    return -1
+  let remaining = (renderDeadlineHardAt - getMonoTime()).inMilliseconds
+  if remaining <= 0: 0 else: int(remaining)
 
 proc disarmRenderDeadline*() =
   renderDeadlineArmed = false
