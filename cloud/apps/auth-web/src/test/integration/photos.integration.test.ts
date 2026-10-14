@@ -222,7 +222,7 @@ describe("photo library: status and listing", () => {
       accepts: ["image/jpeg", "image/png", "image/gif", "image/webp"],
       free_bytes: null,
       location: null,
-      max_upload_bytes: 20 * 1024 * 1024,
+      max_upload_bytes: 250 * 1024 * 1024,
       message: null,
       problem: null,
       quota_bytes: quotaBytes,
@@ -378,7 +378,7 @@ describe("photo library: uploads", () => {
       postBytes("/api/photos/upload", {
         complete: "1",
         filename: "huge.png",
-        offset: String(20 * 1024 * 1024),
+        offset: String(250 * 1024 * 1024),
         path: "",
         upload_id: "past-the-limit",
       }, png(1, 1)),

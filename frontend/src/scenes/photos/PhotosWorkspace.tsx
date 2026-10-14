@@ -5,8 +5,11 @@ import {
   ArrowDownTrayIcon,
   ArrowLeftIcon,
   ArrowPathIcon,
+  ArrowPathRoundedSquareIcon,
   ArrowRightIcon,
   ArrowUpTrayIcon,
+  ArrowsPointingInIcon,
+  ArrowsPointingOutIcon,
   CheckIcon,
   ChevronRightIcon,
   ComputerDesktopIcon,
@@ -35,6 +38,7 @@ import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
 import { inHassioIngress } from '../../utils/inHassioIngress'
 import { photosLogic, type PhotoUpload } from './photosLogic'
+import { aspectMarkRect, type PhotoThumbnailFit } from './photoEntries'
 import { photoColorsLogic } from './photoColorsLogic'
 import { type PhotoPreviewTarget, renderPhotoPreview } from './photoColors'
 import { ColorEditorModal } from '../frame/panels/Assets/ColorEditorModal'
@@ -124,10 +128,12 @@ function PhotoThumb({
   entry,
   className,
   iconClassName = 'h-10 w-10',
+  fit = 'cover',
 }: {
   entry: PhotoEntry
   className?: string
   iconClassName?: string
+  fit?: PhotoThumbnailFit
 }): JSX.Element {
   // The thumbnail first; the photo itself when there is no thumbnail; an
   // icon when neither loads.
@@ -160,29 +166,86 @@ function PhotoThumb({
       loading="lazy"
       draggable={false}
       onError={() => setStage(stage === 'thumb' ? 'file' : 'icon')}
-      className={clsx('object-cover', className)}
+      className={clsx(fit === 'contain' ? 'object-contain' : 'object-cover', className)}
     />
   )
 }
 
-function FolderCover({ entry, className }: { entry: PhotoEntry; className?: string }): JSX.Element {
-  const [failed, setFailed] = useState(false)
-  if (entry.cover && !failed) {
+function FolderCover({
+  entry,
+  className,
+  fit = 'cover',
+}: {
+  entry: PhotoEntry
+  className?: string
+  fit?: PhotoThumbnailFit
+}): JSX.Element {
+  const cover = entry.cover ?? null
+  const [failed, setFailed] = useState<string | null>(null)
+  // The cover before this one stays underneath while the new one fades in:
+  // an upload in progress moves an album's cover along with each photo.
+  const [shown, setShown] = useState<{ previous: string | null; current: string | null }>({
+    previous: null,
+    current: cover,
+  })
+  const [loaded, setLoaded] = useState<string | null>(null)
+  useEffect(() => {
+    setShown((state) => (state.current === cover ? state : { previous: state.current, current: cover }))
+  }, [cover])
+  const fitClassName = fit === 'contain' ? 'object-contain' : 'object-cover'
+  if (!shown.current || failed === shown.current) {
     return (
-      <img
-        src={photoThumbUrl({ path: entry.cover, mtime: entry.mtime, size: entry.size })}
-        alt=""
-        loading="lazy"
-        draggable={false}
-        onError={() => setFailed(true)}
-        className={clsx('object-cover', className)}
-      />
+      <div className={clsx('flex items-center justify-center', className)}>
+        <FolderIcon className="frameos-folder-icon h-1/2 w-1/2 max-h-12 max-w-12" />
+      </div>
     )
   }
   return (
-    <div className={clsx('flex items-center justify-center', className)}>
-      <FolderIcon className="frameos-folder-icon h-1/2 w-1/2 max-h-12 max-w-12" />
+    <div className={clsx('relative overflow-hidden', className)}>
+      {shown.previous && shown.previous !== failed && loaded !== shown.current ? (
+        <img
+          key={shown.previous}
+          src={photoThumbUrl({ path: shown.previous, mtime: entry.mtime, size: entry.size })}
+          alt=""
+          draggable={false}
+          className={clsx('absolute inset-0 h-full w-full', fitClassName)}
+        />
+      ) : null}
+      <img
+        key={shown.current}
+        src={photoThumbUrl({ path: shown.current, mtime: entry.mtime, size: entry.size })}
+        alt=""
+        loading="lazy"
+        draggable={false}
+        onLoad={() => setLoaded(shown.current)}
+        onError={() => setFailed(shown.current)}
+        className={clsx(
+          'absolute inset-0 h-full w-full transition-opacity duration-500',
+          fitClassName,
+          loaded === shown.current ? 'opacity-100' : 'opacity-0'
+        )}
+      />
     </div>
+  )
+}
+
+/** A small outline with the photo's aspect ratio, next to its dimensions. */
+function AspectMark({ width, height }: { width: number; height: number }): JSX.Element {
+  const box = 14
+  const rect = aspectMarkRect(width, height, box)
+  return (
+    <svg width={box} height={box} viewBox={`0 0 ${box} ${box}`} className="shrink-0 opacity-70" aria-hidden="true">
+      <rect
+        x={rect.x}
+        y={rect.y}
+        width={rect.width}
+        height={rect.height}
+        rx="1.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+    </svg>
   )
 }
 
@@ -261,9 +324,7 @@ function StorageMeter({ status }: { status: PhotosStatus }): JSX.Element {
           : ''}
       </div>
       {status.location ? (
-        <div className="frameos-muted mt-1 truncate font-mono text-[11px]" title={status.location}>
-          {status.location}
-        </div>
+        <div className="frameos-muted mt-1 break-all font-mono text-[11px]">{status.location}</div>
       ) : null}
     </div>
   )
@@ -362,10 +423,19 @@ function Breadcrumb({ name, path, last }: { name: string; path: string; last: bo
 }
 
 function PhotosTopBar(): JSX.Element {
-  const { breadcrumbs, folder, search, viewMode, selectedEntries, currentFolderLoading, status } =
+  const { breadcrumbs, folder, search, viewMode, thumbnailFit, selectedEntries, currentFolderLoading, status } =
     useValues(photosLogic)
-  const { setSearch, setViewMode, openNewFolder, uploadFiles, refresh, openInstallPicker, openShare } =
-    useActions(photosLogic)
+  const {
+    setSearch,
+    setViewMode,
+    setThumbnailFit,
+    openNewFolder,
+    uploadFiles,
+    refresh,
+    openInstallPicker,
+    openShare,
+    selectByOrientation,
+  } = useActions(photosLogic)
   const inputRef = useRef<HTMLInputElement>(null)
   const selectedFolders = selectedEntries.filter((entry) => entry.kind === 'folder').map((entry) => entry.path)
   const installAlbums = selectedFolders.length ? selectedFolders : folder ? [folder] : []
@@ -417,6 +487,29 @@ function PhotosTopBar(): JSX.Element {
               </button>
             ))}
           </div>
+          <div className="frameos-segment-group flex h-10 shrink-0 items-center rounded-xl p-1">
+            {(
+              [
+                ['cover', ArrowsPointingOutIcon, 'Fill the tiles'],
+                ['contain', ArrowsPointingInIcon, 'Show whole photos'],
+              ] as const
+            ).map(([fit, Icon, label]) => (
+              <button
+                key={fit}
+                type="button"
+                title={label}
+                aria-label={label}
+                aria-pressed={thumbnailFit === fit}
+                onClick={() => setThumbnailFit(fit)}
+                className={clsx(
+                  'frameos-segment flex h-8 w-8 items-center justify-center rounded-lg transition',
+                  thumbnailFit === fit ? 'frameos-primary-soft-active' : 'text-slate-500'
+                )}
+              >
+                <Icon className="h-4 w-4" />
+              </button>
+            ))}
+          </div>
           <DropdownMenu
             className="w-fit"
             buttonColor="tertiary"
@@ -430,6 +523,16 @@ function PhotosTopBar(): JSX.Element {
                       onClick: () => openShare(folder),
                     }
                   : null,
+                {
+                  label: 'Select all portrait',
+                  icon: <AspectMark width={3} height={4} />,
+                  onClick: () => selectByOrientation('portrait'),
+                },
+                {
+                  label: 'Select all landscape',
+                  icon: <AspectMark width={4} height={3} />,
+                  onClick: () => selectByOrientation('landscape'),
+                },
               ].filter(Boolean) as DropdownMenuItem[]
             }
           />
@@ -553,7 +656,16 @@ function useEntryInteractions(entry: PhotoEntry, selected: boolean) {
   }
 }
 
-function SelectToggle({ entry, selected }: { entry: PhotoEntry; selected: boolean }): JSX.Element {
+function SelectToggle({
+  entry,
+  selected,
+  placement = 'tile',
+}: {
+  entry: PhotoEntry
+  selected: boolean
+  /** A tile's corner (shown on hover), or the front of a list row (always there). */
+  placement?: 'tile' | 'row'
+}): JSX.Element {
   const { selectEntry } = useActions(photosLogic)
   return (
     <button
@@ -564,10 +676,13 @@ function SelectToggle({ entry, selected }: { entry: PhotoEntry; selected: boolea
         selectEntry(entry.path, 'toggle')
       }}
       className={clsx(
-        'photos-select-toggle absolute left-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border-2 shadow transition',
+        'photos-select-toggle z-10 flex h-6 w-6 items-center justify-center rounded-full border-2 transition',
+        placement === 'tile' ? 'absolute left-2 top-2 shadow' : 'shrink-0',
         selected
           ? 'frameos-primary-active border-transparent text-white'
-          : 'border-white bg-black/20 text-transparent opacity-0 group-hover:opacity-100 focus:opacity-100'
+          : placement === 'tile'
+          ? 'border-white bg-black/20 text-transparent opacity-0 group-hover:opacity-100 focus:opacity-100'
+          : 'border-slate-300 text-transparent hover:border-slate-500 hover:text-slate-400'
       )}
     >
       <CheckIcon className="h-4 w-4" />
@@ -598,6 +713,7 @@ function EntryMenu({ entry }: { entry: PhotoEntry }): JSX.Element {
 }
 
 function FolderTile({ entry, selected, shared }: { entry: PhotoEntry; selected: boolean; shared: boolean }) {
+  const { thumbnailFit } = useValues(photosLogic)
   const interactions = useEntryInteractions(entry, selected)
   const { isOver, handlers } = useFolderDrop(entry.path)
   return (
@@ -613,7 +729,7 @@ function FolderTile({ entry, selected, shared }: { entry: PhotoEntry; selected: 
     >
       <SelectToggle entry={entry} selected={selected} />
       <div className="frameos-inset relative aspect-[4/3] w-full overflow-hidden bg-slate-100">
-        <FolderCover entry={entry} className="h-full w-full" />
+        <FolderCover entry={entry} className="h-full w-full" fit={thumbnailFit} />
         {entry.cover ? (
           <span className="absolute bottom-2 left-2 flex h-7 w-7 items-center justify-center rounded-lg bg-black/45 text-white">
             <FolderIcon className="h-4 w-4" />
@@ -637,6 +753,7 @@ function FolderTile({ entry, selected, shared }: { entry: PhotoEntry; selected: 
 }
 
 function FileTile({ entry, selected }: { entry: PhotoEntry; selected: boolean }) {
+  const { thumbnailFit } = useValues(photosLogic)
   const interactions = useEntryInteractions(entry, selected)
   return (
     <div
@@ -649,7 +766,7 @@ function FileTile({ entry, selected }: { entry: PhotoEntry; selected: boolean })
     >
       <SelectToggle entry={entry} selected={selected} />
       <div className="frameos-inset relative aspect-[4/3] w-full overflow-hidden bg-slate-100">
-        <PhotoThumb entry={entry} className="h-full w-full" />
+        <PhotoThumb entry={entry} className="h-full w-full" fit={thumbnailFit} />
         {entry.status === 'blocked' ? (
           <span className="absolute inset-x-2 bottom-2 rounded-lg bg-red-600/90 px-2 py-1 text-center text-xs font-semibold text-white">
             Blocked
@@ -691,6 +808,7 @@ function ListRow({ entry, selected, shared }: { entry: PhotoEntry; selected: boo
         entry.kind === 'folder' && drop.isOver && 'frameos-primary-drop-target'
       )}
     >
+      <SelectToggle entry={entry} selected={selected} placement="row" />
       <div className="frameos-inset relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100">
         {entry.kind === 'folder' ? (
           entry.cover ? (
@@ -718,8 +836,15 @@ function ListRow({ entry, selected, shared }: { entry: PhotoEntry; selected: boo
       <div className="frameos-muted hidden w-24 shrink-0 text-right text-xs @3xl:block">
         {entry.kind === 'folder' ? photoCountLabel(entry.files) : humanFileSize(entry.size)}
       </div>
-      <div className="frameos-muted hidden w-28 shrink-0 text-right text-xs @3xl:block">
-        {entry.width && entry.height ? `${entry.width}×${entry.height}` : ''}
+      <div className="frameos-muted hidden w-28 shrink-0 items-center justify-end gap-1.5 text-right text-xs @3xl:flex">
+        {entry.width && entry.height ? (
+          <>
+            <AspectMark width={entry.width} height={entry.height} />
+            <span>
+              {entry.width}×{entry.height}
+            </span>
+          </>
+        ) : null}
       </div>
       <div className="frameos-muted hidden w-44 shrink-0 text-right text-xs @5xl:block">{formatDate(entry.mtime)}</div>
       <EntryMenu entry={entry} />
@@ -864,7 +989,7 @@ function UploadPanel(): JSX.Element | null {
         {activeUploadCount ? <Spinner className="h-5 w-5 shrink-0" /> : <CheckIcon className="h-5 w-5 shrink-0" />}
         <div className="frameos-strong min-w-0 flex-1 text-sm font-semibold">
           {activeUploadCount
-            ? `Uploading ${done + 1 > uploads.length ? uploads.length : done + 1} of ${uploads.length}`
+            ? `Uploading ${Math.min(done + failed.length + 1, uploads.length)} of ${uploads.length}`
             : failed.length
             ? `${done} uploaded, ${failed.length} failed`
             : `${done} uploaded`}
@@ -920,7 +1045,7 @@ function previewTargetOptions(targets: PhotoPreviewTarget[]): {
 /** Full fidelity, a frame, or a panel family: what the photo is previewed as. */
 function PreviewTargetSelect({ overlay = false }: { overlay?: boolean }): JSX.Element {
   const { previewTargets, previewTarget } = useValues(photoColorsLogic)
-  const { setPreviewTarget } = useActions(photoColorsLogic)
+  const { setPreviewTarget, rotatePreviewTarget } = useActions(photoColorsLogic)
   const { original, frames, panels } = previewTargetOptions(previewTargets)
   const toOption = (target: PhotoPreviewTarget) => ({
     value: target.key,
@@ -931,11 +1056,34 @@ function PreviewTargetSelect({ overlay = false }: { overlay?: boolean }): JSX.El
     ...(frames.length ? [{ label: 'On a frame', options: frames.map(toOption) }] : []),
     { label: 'On a panel, 800×480', options: panels.map(toOption) },
   ]
+  // A panel or frame can be turned on its side; the photo is placed in it again.
+  const rotate =
+    previewTarget.group !== 'original' ? (
+      <button
+        type="button"
+        title={`Rotate, now ${previewTarget.width}×${previewTarget.height}`}
+        aria-label="Rotate the panel"
+        onClick={(event) => {
+          event.stopPropagation()
+          rotatePreviewTarget(previewTarget.key)
+        }}
+        className={clsx(
+          'flex h-9 items-center gap-1 rounded-xl px-2 text-xs transition',
+          overlay ? 'text-white/80 hover:bg-white/10' : 'frame-tool-muted hover:bg-slate-100'
+        )}
+      >
+        <ArrowPathRoundedSquareIcon className="h-4 w-4" />
+        <span>
+          {previewTarget.width}×{previewTarget.height}
+        </span>
+      </button>
+    ) : null
   if (!overlay) {
     return (
       <span className="flex items-center gap-2">
         <span className="frame-tool-muted text-xs">Preview</span>
         <Select value={previewTarget.key} onChange={setPreviewTarget} options={options} />
+        {rotate}
       </span>
     )
   }
@@ -963,6 +1111,7 @@ function PreviewTargetSelect({ overlay = false }: { overlay?: boolean }): JSX.El
           )
         )}
       </select>
+      {rotate}
     </label>
   )
 }

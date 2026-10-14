@@ -29,6 +29,7 @@ import {
   photoColorsOfProfile,
   photoPreviewTargets,
   previewSizeFor,
+  rotatedPreviewTarget,
   profileOfPhotoColors,
 } from './photoColors'
 import { isBrowserImageName, parentPhotoPath } from './photoPaths'
@@ -103,6 +104,7 @@ export interface photoColorsLogicValues {
   previewTargets: PhotoPreviewTarget[]
   previousImagePath: string | null
   profile: AssetColorProfile
+  rotatedPreviewTargets: Record<string, boolean>
   savedProfile: AssetColorProfile | null
   savedProfileLoading: boolean
   saving: boolean
@@ -202,6 +204,9 @@ export interface photoColorsLogicActions {
   resetProfile: () => {
     value: true
   }
+  rotatePreviewTarget: (key: string) => {
+    key: string
+  }
   saveAndOpenNext: () => {
     value: true
   }
@@ -254,7 +259,11 @@ export interface photoColorsLogicActions {
 export interface photoColorsLogicMeta {
   __keaTypeGenInternalSelectorTypes: {
     previewTargets: (framesList: FrameType[]) => PhotoPreviewTarget[]
-    previewTarget: (previewTargets: PhotoPreviewTarget[], previewTargetKey: string) => PhotoPreviewTarget
+    previewTarget: (
+      previewTargets: PhotoPreviewTarget[],
+      previewTargetKey: string,
+      rotatedPreviewTargets: Record<string, boolean>
+    ) => PhotoPreviewTarget
     entry: (folderEntries: Record<string, PhotoEntry[]>, imagePath: string | null) => PhotoEntry | null
     savedProfile: (entry: PhotoEntry | null) => AssetColorProfile | null
     hasSavedProfile: (entry: PhotoEntry | null) => boolean
@@ -318,6 +327,8 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
   })),
   actions({
     setPreviewTarget: (key: string) => ({ key }),
+    /** Turn the chosen panel or frame on its side (remembered per target). */
+    rotatePreviewTarget: (key: string) => ({ key }),
     openEditor: (imagePath: string) => ({ imagePath }),
     closeEditor: true,
     setProfile: (profile: AssetColorProfile) => ({ profile }),
@@ -373,6 +384,11 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
       FULL_FIDELITY_TARGET.key as string,
       { persist: true, storageKey: 'photoColorsLogic.previewTarget' },
       { setPreviewTarget: (_, { key }) => key },
+    ],
+    rotatedPreviewTargets: [
+      {} as Record<string, boolean>,
+      { persist: true, storageKey: 'photoColorsLogic.rotatedPreviewTargets' },
+      { rotatePreviewTarget: (state, { key }) => ({ ...state, [key]: !state[key] }) },
     ],
     imagePath: [
       null as string | null,
@@ -437,9 +453,15 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
       (framesList: FrameType[]): PhotoPreviewTarget[] => photoPreviewTargets(framesList),
     ],
     previewTarget: [
-      (s) => [s.previewTargets, s.previewTargetKey],
-      (previewTargets: PhotoPreviewTarget[], previewTargetKey: string): PhotoPreviewTarget =>
-        previewTargets.find((target) => target.key === previewTargetKey) ?? FULL_FIDELITY_TARGET,
+      (s) => [s.previewTargets, s.previewTargetKey, s.rotatedPreviewTargets],
+      (
+        previewTargets: PhotoPreviewTarget[],
+        previewTargetKey: string,
+        rotatedPreviewTargets: Record<string, boolean>
+      ): PhotoPreviewTarget => {
+        const target = previewTargets.find((item) => item.key === previewTargetKey) ?? FULL_FIDELITY_TARGET
+        return rotatedPreviewTargets[target.key] ? rotatedPreviewTarget(target) : target
+      },
     ],
     entry: [
       (s) => [s.folderEntries, s.imagePath],
@@ -581,6 +603,10 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
       setPalette: () => actions.recomputeAuto(),
       setPaletteColor: () => actions.recomputeAuto(),
       setPreviewTarget: () => {
+        actions.recomputeAuto()
+        actions.loadLightboxPreview()
+      },
+      rotatePreviewTarget: () => {
         actions.recomputeAuto()
         actions.loadLightboxPreview()
       },

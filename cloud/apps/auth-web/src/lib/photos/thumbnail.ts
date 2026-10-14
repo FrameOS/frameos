@@ -15,8 +15,8 @@ import { logWarn } from "../log";
 
 export const photoThumbMaxSide = 512;
 // A PNG decodes to width x height x 4 bytes whatever its file size: 20 MiB
-// of PNG can be 16k x 16k, a gigabyte of pixels. Above this the photo is
-// stored without a thumbnail (sharp's default allows 268 MP).
+// of PNG can already be 16k x 16k, a gigabyte of pixels. Above this the
+// photo is stored without a thumbnail (sharp's default allows 268 MP).
 export const photoThumbMaxPixels = 80_000_000;
 
 type SharpFactory = (input: Buffer, options: { failOn: "none"; limitInputPixels: number }) => Sharp;
@@ -41,7 +41,7 @@ function loadSharp() {
 
 /**
  * The copy PhotoDNA scans: a JPEG of at most 2048 px, well under the Match
- * API's size limit whatever the upload was (a 20 MiB PNG, a WebP it does
+ * API's size limit whatever the upload was (a 250 MiB PNG, a WebP it does
  * not read). PhotoDNA is a perceptual hash: a resized copy matches what the
  * original would. Null when sharp cannot read the image.
  */

@@ -40,9 +40,9 @@ from sqlalchemy.orm import Session
 
 from app.config import DEFAULT_DATABASE_URL, get_bool_env
 from app.models.photo_share import PhotoShare
-from app.utils.upload_limits import MAX_ASSET_UPLOAD_BYTES
-
-MAX_UPLOAD_BYTES = MAX_ASSET_UPLOAD_BYTES
+# A photographer's full-size file: 250 MiB, the same on the cloud
+# (cloud/apps/auth-web/src/lib/photos/library.ts maxPhotoUploadBytes).
+MAX_UPLOAD_BYTES = 250 * 1024 * 1024
 MAX_CHUNK_BYTES = 4 * 1024 * 1024
 MAX_PATH_BYTES = 1024
 MAX_SEGMENT_BYTES = 255
@@ -599,6 +599,19 @@ def _first_playable(items: list[Child]) -> Optional[str]:
     return min(files, key=lambda child: natural_key(child.name)).rel
 
 
+def _cover(direct: list[Child], boundary: str) -> Optional[str]:
+    """The first image among the direct children by name, else the first one
+    found in the subfolders by name, however deep (docs/photos.md)."""
+    cover = _first_playable(direct)
+    if cover is not None:
+        return cover
+    for sub in sort_children([child for child in direct if child.is_dir]):
+        cover = _cover(children(sub.path, sub.rel, boundary), boundary)
+        if cover is not None:
+            return cover
+    return None
+
+
 def folder_entry(rel: str, path: Path, folder_stat: os.stat_result, boundary: str) -> dict[str, Any]:
     direct = children(path, rel, boundary)
     files = 0
@@ -607,12 +620,7 @@ def folder_entry(rel: str, path: Path, folder_stat: os.stat_result, boundary: st
         if not child.is_dir:
             files += 1
             size += int(child.stat.st_size)
-    cover = _first_playable(direct)
-    if cover is None:
-        for sub in sort_children([child for child in direct if child.is_dir]):
-            cover = _first_playable(children(sub.path, sub.rel, boundary))
-            if cover is not None:
-                break
+    cover = _cover(direct, boundary)
     return {
         "path": rel,
         "name": base_name(rel),

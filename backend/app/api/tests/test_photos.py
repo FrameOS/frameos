@@ -109,7 +109,7 @@ async def test_status_reports_a_ready_library(async_client, photos_dir):
         "used_bytes": 5,
         "quota_bytes": None,
         "free_bytes": body["free_bytes"],
-        "max_upload_bytes": 64 * 1024 * 1024,
+        "max_upload_bytes": 250 * 1024 * 1024,
         "accepts": None,
         "scanning": [],
     }
@@ -323,6 +323,8 @@ async def test_listing_shapes_and_order(async_client):
     write(root, "Album 10/x.png", b"png")
     write(root, "album 2/sub/deep.jpg", jpeg_bytes())
     write(root, "album 2/notes.txt", b"hello")
+    write(root, "Album 3/2026/October/first.jpg", jpeg_bytes())
+    write(root, "Album 3/2026/notes.txt", b"hello")
     write(root, "album 2/.DS_Store", b"junk")
     write(root, "Covers/b.jpg", jpeg_bytes())
     write(root, "Covers/A.png", b"png-bytes")
@@ -339,6 +341,7 @@ async def test_listing_shapes_and_order(async_client):
     assert body["path"] == ""
     assert [entry["name"] for entry in body["entries"]] == [
         "album 2",
+        "Album 3",
         "Album 10",
         "Covers",
         "B.txt",
@@ -358,6 +361,9 @@ async def test_listing_shapes_and_order(async_client):
     # First image by name (case insensitive).
     assert by_name["Covers"]["cover"] == "Covers/A.png"
     assert by_name["Album 10"]["cover"] == "Album 10/x.png"
+    # Photos only in a folder in a folder: the album still gets a cover.
+    assert by_name["Album 3"]["cover"] == "Album 3/2026/October/first.jpg"
+    assert by_name["Album 3"]["files"] == 2
 
     img2 = by_name["img2.jpg"]
     assert img2 == {

@@ -67,8 +67,9 @@ The shape every listing returns:
 - `colors`: files only. The photo's color profile, or `null` (see Colors).
 - Folders also carry `items` (direct children), `files` (files anywhere below)
   and `cover` (the path of an image to show for the folder, or `null`: the
-  first image among the direct children by name, else the first one a level
-  down). A folder's `size` is the total size of the files below it.
+  first image among the direct children by name, else the first one found in
+  the subfolders by name, however deep). A folder's `size` is the total size
+  of the files below it.
 
 ## Owner routes
 
@@ -91,7 +92,7 @@ Errors use each plane's usual body (`{"detail": ...}` on the backend,
   "used_bytes": 123456,
   "quota_bytes": 1073741824,
   "free_bytes": 9876543210,
-  "max_upload_bytes": 67108864,
+  "max_upload_bytes": 262144000,
   "accepts": null,
   "scanning": []
 }
@@ -343,7 +344,7 @@ on a mounted volume, which would lose every photo when the container is
 recreated. `FRAMEOS_PHOTOS_ALLOW_EPHEMERAL=1` skips that last check.
 
 There is no quota; `free_bytes` is the free space on the disk. Uploads are at
-most 64 MiB each.
+most 250 MiB each.
 
 ### Cloud
 
@@ -355,7 +356,7 @@ only rewrites rows. A photo's color profile is the `colors` column (jsonb) of
 its row.
 
 Uploads accept JPEG, PNG, GIF and WebP only (every byte stored must pass the
-scan), at most 20 MiB each. Each account has `FRAMEOS_CLOUD_MAX_PHOTO_MB` of
+scan), at most 250 MiB each. Each account has `FRAMEOS_CLOUD_MAX_PHOTO_MB` of
 storage (default 1024), at most 100 000 entries and 16 unfinished uploads.
 Unfinished uploads wait on the app server's disk (`FRAMEOS_PHOTO_UPLOAD_DIR`),
 never in the bucket.

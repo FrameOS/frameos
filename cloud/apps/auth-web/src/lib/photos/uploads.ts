@@ -21,8 +21,8 @@ import { join, resolve } from "node:path";
 
 export const photoUploadTtlMs = 60 * 60 * 1000;
 // How many unfinished uploads one account may hold at once. A browser sends
-// a few files in parallel; a few dozen parked 20 MiB uploads would only fill
-// the disk.
+// a few files in parallel; a few dozen parked 250 MiB uploads would only
+// fill the disk.
 export const maxPendingPhotoUploadsPerAccount = 16;
 // And across all accounts, in bytes: the parked chunks share one disk.
 export const maxPendingPhotoUploadBytes = 2 * 1024 * 1024 * 1024;

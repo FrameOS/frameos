@@ -43,7 +43,9 @@ import {
 } from "./paths";
 import type { PhotoScanner } from "./scan";
 
-export const maxPhotoUploadBytes = 20 * 1024 * 1024;
+// A photographer's full-size file. The whole file is held in memory once
+// its last chunk is in (scan, thumbnail, one put to the object store).
+export const maxPhotoUploadBytes = 250 * 1024 * 1024;
 // nginx caps request bodies at 10 MB; 4 MiB chunks stay well inside it.
 export const maxPhotoChunkBytes = 4 * 1024 * 1024;
 // Rows, not bytes: empty folders cost nothing against the byte quota, so
@@ -196,6 +198,8 @@ export function describePhotoChildren(parent: string, rows: EntryRow[]): PhotoEn
 
   const firstImage = (folder: string) =>
     [...(byParent.get(folder)?.images ?? [])].sort(byName)[0]?.path;
+  // The first image among the direct children by name, else the first one
+  // found in the subfolders by name, however deep (docs/photos.md).
   const coverOf = (folder: string): string | null => {
     const direct = firstImage(folder);
     if (direct) {
@@ -203,7 +207,7 @@ export function describePhotoChildren(parent: string, rows: EntryRow[]): PhotoEn
     }
     const subfolders = [...(byParent.get(folder)?.folders ?? [])].sort(byName);
     for (const subfolder of subfolders) {
-      const nested = firstImage(subfolder.path);
+      const nested = coverOf(subfolder.path);
       if (nested) {
         return nested;
       }

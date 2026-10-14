@@ -11,6 +11,11 @@ import {
 } from "../../../../../../frontend/src/scenes/photos/photoPaths";
 import { shareUrlForFrame, type PhotoEntry } from "../../../../../../frontend/src/scenes/photos/photosApi";
 import {
+  aspectMarkRect,
+  entriesByOrientation,
+  withUploadedPhoto,
+} from "../../../../../../frontend/src/scenes/photos/photoEntries";
+import {
   PHOTO_ALBUM_APP_ORIGIN,
   buildPhotoAlbumScene,
 } from "../../../../../../frontend/src/scenes/photos/photoAlbumScene";
@@ -20,6 +25,7 @@ import {
   photoPreviewTargets,
   previewSizeFor,
   profileOfPhotoColors,
+  rotatedPreviewTarget,
 } from "../../../../../../frontend/src/scenes/photos/photoColors";
 import { defaultAssetColorProfile } from "../../../../../../frontend/src/utils/assetColors/profile";
 import type { FrameType } from "../../../../../../frontend/src/types";
@@ -87,6 +93,64 @@ describe("photo paths", () => {
       entry("album", "folder"),
     ]);
     expect(sorted.map((item) => item.name)).toEqual(["album", "Zoo", "img2.jpg", "img10.jpg"]);
+  });
+});
+
+describe("withUploadedPhoto", () => {
+  const album = (): PhotoEntry => ({ ...entry("Trip", "folder"), cover: null, files: 0, items: 1, size: 0 });
+  const sub = (): PhotoEntry => ({ ...entry("Trip/Day 1", "folder"), cover: null, files: 0, items: 0, size: 0 });
+  const photo = (path: string, size = 10): PhotoEntry => ({
+    ...entry(path, "file"),
+    name: path.split("/").pop() ?? path,
+    size,
+    width: 40,
+    height: 30,
+  });
+
+  it("adds the photo to its folder and makes it the cover of every folder above", () => {
+    const listings = { "": [album()], Trip: [sub()], "Trip/Day 1": [] };
+    const after = withUploadedPhoto(listings, photo("Trip/Day 1/a.jpg"));
+    expect(after["Trip/Day 1"].map((item) => item.path)).toEqual(["Trip/Day 1/a.jpg"]);
+    expect(after.Trip[0]).toMatchObject({ cover: "Trip/Day 1/a.jpg", files: 1, items: 1, size: 10 });
+    expect(after[""][0]).toMatchObject({ cover: "Trip/Day 1/a.jpg", files: 1, items: 1, size: 10 });
+    // The next photo moves the cover along.
+    const later = withUploadedPhoto(after, photo("Trip/Day 1/b.jpg", 5));
+    expect(later[""][0]).toMatchObject({ cover: "Trip/Day 1/b.jpg", files: 2, items: 1, size: 15 });
+    expect(later["Trip/Day 1"].map((item) => item.path)).toEqual(["Trip/Day 1/a.jpg", "Trip/Day 1/b.jpg"]);
+  });
+
+  it("leaves listings it has not loaded alone, and does not count a replaced file twice", () => {
+    const listings = { "": [album()] };
+    const after = withUploadedPhoto(listings, photo("Trip/a.jpg"));
+    expect(Object.keys(after)).toEqual([""]);
+    expect(after[""][0]).toMatchObject({ cover: "Trip/a.jpg", files: 1, items: 2 });
+    const replaced = withUploadedPhoto({ ...after, Trip: [photo("Trip/a.jpg")] }, photo("Trip/a.jpg"));
+    expect(replaced[""][0]).toMatchObject({ files: 1, items: 2 });
+    // A file a frame cannot play is counted but is no cover.
+    const text = withUploadedPhoto(listings, { ...photo("Trip/notes.txt"), content_type: "text/plain" });
+    expect(text[""][0]).toMatchObject({ cover: null, files: 1 });
+  });
+});
+
+describe("entriesByOrientation", () => {
+  it("picks the taller or the wider photos, never squares, folders or unknown sizes", () => {
+    const tall = { ...entry("tall.jpg", "file"), width: 30, height: 40 };
+    const wide = { ...entry("wide.jpg", "file"), width: 40, height: 30 };
+    const square = { ...entry("square.jpg", "file"), width: 30, height: 30 };
+    const unknown = entry("unknown.jpg", "file");
+    const folder = { ...entry("Album", "folder"), width: 30, height: 40 };
+    const all = [folder, tall, wide, square, unknown];
+    expect(entriesByOrientation(all, "portrait").map((item) => item.path)).toEqual(["tall.jpg"]);
+    expect(entriesByOrientation(all, "landscape").map((item) => item.path)).toEqual(["wide.jpg"]);
+  });
+});
+
+describe("aspectMarkRect", () => {
+  it("fits the photo's shape into the box, centred, never thinner than two pixels", () => {
+    expect(aspectMarkRect(1200, 1600, 16)).toEqual({ x: 2, y: 0, width: 12, height: 16 });
+    expect(aspectMarkRect(1600, 1200, 16)).toEqual({ x: 0, y: 2, width: 16, height: 12 });
+    expect(aspectMarkRect(100, 100, 16)).toEqual({ x: 0, y: 0, width: 16, height: 16 });
+    expect(aspectMarkRect(4000, 100, 16)).toEqual({ x: 0, y: 7, width: 16, height: 2 });
   });
 });
 
@@ -244,6 +308,18 @@ describe("photo colors", () => {
 
 // docs/photo-album-scene.json pins the SPA's builder, the cloud's (POST
 // /api/photos/scene) and the backend's (test_photos.py) to one scene.
+describe("rotatedPreviewTarget", () => {
+  it("turns a panel on its side and leaves full fidelity alone", () => {
+    const targets = photoPreviewTargets([]);
+    const panel = targets.find((target) => target.group === "panels")!;
+    const rotated = rotatedPreviewTarget(panel);
+    expect([rotated.width, rotated.height]).toEqual([panel.height, panel.width]);
+    expect(rotated.key).toBe(panel.key);
+    expect(previewSizeFor(rotated, { width: 4000, height: 3000 })).toEqual({ width: 480, height: 800 });
+    expect(rotatedPreviewTarget(targets[0])).toBe(targets[0]);
+  });
+});
+
 describe("the photo album scene fixture", () => {
   type Built = {
     apps?: Record<string, { origin?: string; sources?: Record<string, string> }>;
