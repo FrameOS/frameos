@@ -1402,7 +1402,7 @@ function PhotosBrowser(): JSX.Element {
     search,
     draggingPaths,
   } = useValues(photosLogic)
-  const { clearSelection, handleKeyDown } = useActions(photosLogic)
+  const { handleKeyDown } = useActions(photosLogic)
   const { isOver, handlers } = useFolderDrop(folder)
   const selected = new Set(selectedPaths)
 
@@ -1431,12 +1431,6 @@ function PhotosBrowser(): JSX.Element {
   return (
     <div
       {...handlers}
-      onClick={(event) => {
-        // Only a click on the background clears; tiles and bars stop theirs.
-        if ((event.target as HTMLElement).closest('[data-photos-background]') === event.target) {
-          clearSelection()
-        }
-      }}
       className={clsx(
         'photos-browser relative flex min-h-0 flex-1 flex-col rounded-[24px] border-2 border-dashed border-transparent transition',
         isOver && !draggingPaths.length && 'frameos-primary-drop-target'
@@ -1444,7 +1438,7 @@ function PhotosBrowser(): JSX.Element {
     >
       <Notice />
       <SelectionBar />
-      <div data-photos-background className="@container min-h-0 flex-1 overflow-y-auto pb-24">
+      <div className="@container min-h-0 flex-1 overflow-y-auto pb-24">
         {!folderLoaded && !currentFolderError ? (
           <LoadingGrid />
         ) : currentFolderError ? (
@@ -1471,7 +1465,7 @@ function PhotosBrowser(): JSX.Element {
             ))}
           </div>
         ) : (
-          <div data-photos-background className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-3">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-3">
             {visibleEntries.map((entry) =>
               entry.kind === 'folder' ? (
                 <FolderTile
