@@ -1,7 +1,7 @@
 """Rewrite data/frameOSGallery nodes into the FrameOS Gallery JavaScript app
 
 Revision ID: daf089223283
-Revises: b4d8f2a6c1e9
+Revises: c7f3a1e5d9b2
 Create Date: 2026-10-13
 
 The built-in Nim app `data/frameOSGallery` was deleted; its replacement is the
@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "daf089223283"
-down_revision = "b4d8f2a6c1e9"
+down_revision = "c7f3a1e5d9b2"
 branch_labels = None
 depends_on = None
 
