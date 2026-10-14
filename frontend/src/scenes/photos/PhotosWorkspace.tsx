@@ -511,7 +511,8 @@ function PhotosTopBar(): JSX.Element {
             ))}
           </div>
           <DropdownMenu
-            className="w-fit"
+            // The menu's own trigger is a small pill; here it is a toolbar button like its neighbours.
+            className="h-10 w-10 items-center !rounded-xl !px-0 !py-0"
             buttonColor="tertiary"
             items={
               [
