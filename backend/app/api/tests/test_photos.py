@@ -1089,7 +1089,7 @@ def test_album_scene_matches_the_fixture():
     assert json.dumps(scene["settings"]["refreshInterval"]) == "600"
     ids = [scene["id"], *(node["id"] for node in scene["nodes"]), *(edge["id"] for edge in scene["edges"])]
     assert len(set(ids)) == len(ids)
-    app_dir = REPO_ROOT / "repo" / "apps" / "code" / "photoAlbum"
+    app_dir = REPO_ROOT / "repo" / "apps" / "image" / "photoAlbum"
     assert scene["apps"]["photoAlbum"]["sources"] == {
         name: (app_dir / name).read_text() for name in fixture["scene"]["apps"]["photoAlbum"]["files"]
     }

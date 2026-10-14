@@ -94,6 +94,7 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
   try:
     host.dropScene()
     resetInterpretedScenes()
+    setSimulatedEmbedded(false)
     host.sceneId = none(SceneId)
     defaultSceneId = none(SceneId)
     scenesLoadedCount = 0
@@ -258,6 +259,12 @@ proc frameos_wasm_set_fusion(enabled: bool) {.exportc, cdecl.} =
   ## materialized floor, and the rendered pixels must not change. Plans are
   ## built at scene init, so call this before selecting the scene.
   imageFusionEnabled = enabled
+
+proc frameos_wasm_set_embedded(enabled: bool) {.exportc, cdecl.} =
+  ## Run as an ESP32 (memory.runsAsEmbedded): a JS app's interpreter lasts
+  ## one render, `app.frame.embedded` is true, downloads decode into the
+  ## canvas. Off by default, as a Pi; every frameos_wasm_init turns it off.
+  setSimulatedEmbedded(enabled)
 
 proc frameos_wasm_select_scene(sceneId: cstring): bool {.exportc, cdecl.} =
   try:

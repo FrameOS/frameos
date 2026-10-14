@@ -62,7 +62,7 @@ FRONTEND_REQUIRED_SOURCE_FILES = (
 )
 
 FRONTEND_OPTIONAL_SOURCE_FILES = (
-    Path("../repo/apps/code"),
+    Path("../repo/apps"),
 )
 
 FRONTEND_SOURCE_FILES = (

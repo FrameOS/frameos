@@ -1,0 +1,55 @@
+{
+  "name": "Weather (Open-Meteo)",
+  "description": "Current, hourly and daily forecasts from Open-Meteo for a location.",
+  "category": "data",
+  "version": "1.1.0",
+  "fields": [
+    {
+      "name": "location",
+      "type": "string",
+      "value": "",
+      "required": true,
+      "label": "Location",
+      "placeholder": "City, state, or country"
+    },
+    { "name": "date", "type": "date", "value": "", "label": "Date", "placeholder": "2024-01-30" },
+    {
+      "name": "forecastDays",
+      "type": "integer",
+      "value": "1",
+      "label": "Forecast days (1-16)",
+      "showIf": [{ "field": "date", "operator": "empty" }]
+    },
+    {
+      "name": "temperatureUnit",
+      "type": "select",
+      "options": ["celsius", "fahrenheit"],
+      "value": "celsius",
+      "required": true,
+      "label": "Temperature unit"
+    },
+    {
+      "name": "windSpeedUnit",
+      "type": "select",
+      "options": ["kmh", "ms", "mph", "kn"],
+      "value": "kmh",
+      "required": true,
+      "label": "Wind speed unit"
+    },
+    {
+      "name": "precipitationUnit",
+      "type": "select",
+      "options": ["mm", "inch"],
+      "value": "mm",
+      "required": true,
+      "label": "Precipitation unit"
+    }
+  ],
+  "output": [
+    {
+      "name": "weather",
+      "type": "json",
+      "example": "{\"provider\":\"open-meteo\",\"forecastModes\":[\"current\",\"hourly\",\"daily\"],\"date\":\"2026-01-18\",\"location\":{\"name\":\"Brussels\",\"latitude\":50.85045,\"longitude\":4.34878,\"timezone\":\"Europe/Brussels\",\"country\":\"Belgium\",\"countryCode\":\"BE\",\"admin1\":\"Brussels Capital\",\"admin2\":\"Bruxelles-Capitale\"},\"forecast\":{\"latitude\":50.854,\"longitude\":4.35,\"generationtime_ms\":0.37,\"utc_offset_seconds\":3600,\"timezone\":\"Europe/Brussels\",\"timezone_abbreviation\":\"GMT+1\",\"elevation\":27,\"current_weather_units\":{\"time\":\"iso8601\",\"interval\":\"seconds\",\"temperature\":\"°C\",\"windspeed\":\"km/h\",\"winddirection\":\"°\",\"is_day\":\"\",\"weathercode\":\"wmo code\"},\"current_weather\":{\"time\":\"2026-01-18T22:15\",\"interval\":900,\"temperature\":5.7,\"windspeed\":5.4,\"winddirection\":132,\"is_day\":0,\"weathercode\":0},\"hourly_units\":{\"time\":\"iso8601\",\"temperature_2m\":\"°C\",\"apparent_temperature\":\"°C\",\"precipitation\":\"mm\",\"weathercode\":\"wmo code\",\"windspeed_10m\":\"km/h\",\"winddirection_10m\":\"°\"},\"hourly\":{\"time\":[\"2026-01-18T00:00\"],\"temperature_2m\":[9.2],\"apparent_temperature\":[7.5],\"precipitation\":[0],\"weathercode\":[0],\"windspeed_10m\":[4],\"winddirection_10m\":[166]},\"daily_units\":{\"time\":\"iso8601\",\"temperature_2m_max\":\"°C\",\"temperature_2m_min\":\"°C\",\"precipitation_sum\":\"mm\",\"weathercode\":\"wmo code\",\"sunrise\":\"iso8601\",\"sunset\":\"iso8601\",\"windspeed_10m_max\":\"km/h\"},\"daily\":{\"time\":[\"2026-01-18\"],\"temperature_2m_max\":[11.3],\"temperature_2m_min\":[5.5],\"precipitation_sum\":[0],\"weathercode\":[3],\"sunrise\":[\"2026-01-18T08:35\"],\"sunset\":[\"2026-01-18T17:10\"],\"windspeed_10m_max\":[10.4]}}}"
+    }
+  ]
+}

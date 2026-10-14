@@ -69,6 +69,7 @@ extern double fos_nim_scene_interval_impl(void);
 extern double fos_nim_next_sleep_impl(void);
 extern bool fos_nim_render_requested_impl(void);
 extern bool fos_nim_tick_impl(void);
+extern int fos_nim_recover_oom_abort_impl(size_t *js_bytes, int *http_released);
 /* `origin` is the event's FOS_ORIGIN_* bit (main/fos_events_gen.h): who said
  * it, stamped by the producer's entry point and never read from the payload. */
 extern bool fos_nim_send_event_impl(unsigned int origin, const char *event, const char *payload_json);
@@ -534,6 +535,16 @@ void fos_scenes_mark_oom_restart(void);
 
 static void nim_oom_abort_note(const char *what)
 {
+    /* The longjmp skipped every Nim `finally` between the guard and the
+     * failed allocation. Put back what they owned before anything else runs
+     * Nim: left alone, the aborted render's wall-clock deadline stayed armed
+     * and failed every later JS call, the event dispatcher stopped
+     * delivering, and the HTTP streams and JS interpreters it held stayed
+     * held (fos_nim_recover_oom_abort_impl in embedded_main.nim). Runs before
+     * the memory readings below, so they count what it gave back. */
+    size_t js_bytes = 0;
+    int http_released = 0;
+    int js_dropped = fos_nim_recover_oom_abort_impl(&js_bytes, &http_released);
     s_nim_oom_abort_streak++;
     size_t canvas_bytes = (size_t)s_frame_width * (size_t)s_frame_height * 4u;
     size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -549,14 +560,16 @@ static void nim_oom_abort_note(const char *what)
                    leaked_too_much;
     /* The serial line above never reaches the cloud; this one does, so the
      * "render-cycle-failed" it precedes has a cause next to it. */
-    char line[360];
+    char line[420];
     snprintf(line, sizeof(line),
              "{\"event\":\"memory:oomAbort\",\"source\":\"esp32\","
              "\"where\":\"%s\",\"streak\":%u,\"freePsram\":%u,"
              "\"largestPsramBlock\":%u,\"baselinePsram\":%u,"
+             "\"jsDropped\":%d,\"jsDroppedBytes\":%u,\"httpReleased\":%d,"
              "\"status\":\"%s\"}",
              what, s_nim_oom_abort_streak, (unsigned)free_psram, (unsigned)largest,
-             (unsigned)s_psram_free_baseline, restart ? "restarting" : "leaked");
+             (unsigned)s_psram_free_baseline, js_dropped, (unsigned)js_bytes, http_released,
+             restart ? "restarting" : "leaked");
     frameos_nim_log_hook(line);
     if (restart) {
         ESP_LOGE("fos_nim", "OOM aborts have leaked the Nim heap beyond recovery; restarting");

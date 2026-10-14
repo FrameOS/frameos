@@ -159,6 +159,49 @@ QuickJS runtimes the SVG came from. The SVG-level XML re-parse banding
 (`svgBandHeight`/`renderSvgBanded`) is gone: it only covered the standalone
 path and cost a full parse per band.
 
+## An abort no longer breaks the renders after it (2026-10-13)
+
+The longjmp skips every `finally` as well as every destructor, and some of
+those put shared state back. On the E1002 (PR #544) a Google Photos render
+aborted inside `frameos.httpRequest`, on the 1.17 MB copy of a share page,
+and from then on every JS call in that boot failed at once with "render
+exceeded its 90000ms wall-clock deadline": `interpreter.runEvent` disarms
+the run's deadline in a `finally`, and an armed deadline is never re-armed,
+so every later run rode on the dead render's clock. The same jump left the
+event dispatcher `draining` (no event delivered again), `runNodeStack`
+holding nodes (false "depends on itself" cycles), `sceneJsLock` taken (the
+next code node waits forever), and the QuickJS interpreter it jumped out of
+marked as mid-call for good.
+
+`nim_oom_abort_note` now calls `fos_nim_recover_oom_abort_impl` first, at
+every guarded entry point (render, scene switch, scene load, input tick,
+event dispatch). It:
+
+- closes the HTTP streams and frees the response bodies and spill files the
+  aborted call held (`releaseStrandedHttp`). A stranded stream keeps its
+  socket and TLS session in internal RAM; the incident's stranded body was
+  the 1.17 MB page. Before the memory readings, so the restart rule counts
+  what came back.
+- puts back what the skipped `finally`s owned
+  (`single_scene_host.recoverAbortedRun`): the deadline and dispatch
+  budget, the dispatcher's flags, the recursion guards, the lock.
+- drops the JS interpreters that were mid-call (`QuickJS.abandon`). The
+  runtime still points at a stack frame that is gone, so running it again
+  walks that frame on the next thrown error, and `JS_FreeRuntime` asserts
+  that nothing is still referenced, which on the device is a panic. They
+  are leaked on purpose and their bytes come off the scene's JS heap budget.
+  "Mid-call" lasts until the caller has freed the last value it got back
+  (`get` reads its payload after JS returns). The next render builds the app
+  a new interpreter; `frameos.remember` values carry over.
+
+`memory:oomAbort` gains `jsDropped`, `jsDroppedBytes` and `httpReleased`.
+`test_single_scene_host.nim` aborts with a real longjmp from inside a JS
+app's `httpRequest` and from inside a code node, and checks that the next
+render and the next button press work.
+
+What the aborted call allocated in Nim stays leaked; the restart rules above
+still decide when that is too much.
+
 ## Boot and render costs
 
 Same bench frame, for context when weighing "do less at boot" ideas:

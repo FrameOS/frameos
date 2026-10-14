@@ -2,7 +2,7 @@ import frameos/types
 import frameos/values
 import frameos/spool
 from frameos/apps as frameos_apps import spoolDir
-from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool
+from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool, scaleAndDrawImage
 from frameos/utils/memory import renderMemoryInUse, availableRenderBytes,
   availableRenderHeadroomBytes
 when defined(memProbe): import frameos/utils/memory
@@ -190,6 +190,13 @@ proc getInterpretedApp(keyword: string, app: AppRoot, context: ExecutionContext)
 
 proc runInterpretedApp(keyword: string, app: AppRoot, context: ExecutionContext) =
   if app.isDynamicJsApp():
+    if isRetiredRenderApp(keyword) and context.hasImage and not context.image.isNil:
+      # A render/chart node still on a Pi's disk runs the JavaScript chart,
+      # which returns its image instead of drawing it (frameos/retired_apps.nim).
+      let value = app.getDynamicJsApp(context)
+      if value.kind == fkImage and not value.asImage().isNil:
+        scaleAndDrawImage(context.image, value.asImage(), "stretch")
+      return
     app.runDynamicJsApp(context)
   else:
     apps.runApp(keyword, app, context)
@@ -1727,6 +1734,18 @@ proc render*(self: FrameScene, context: ExecutionContext): Image =
     })
   runEvent(self, context)
   result = context.image
+
+proc clearRunNodeStacks*(scene: FrameScene) =
+  ## After an out-of-memory abort (single_scene_host.recoverAbortedRun), for
+  ## the scene and every child scene it holds: runNode pops its stack in a
+  ## `defer`, which the longjmp skipped, and a node left on it read as its
+  ## own producer ("depends on itself") on every later render.
+  if scene.isNil or not (scene of InterpretedFrameScene):
+    return
+  let interpreted = InterpretedFrameScene(scene)
+  interpreted.runNodeStack.setLen(0)
+  for _, child in interpreted.sceneNodes:
+    clearRunNodeStacks(child)
 
 # -------------------------
 # Serialization hooks

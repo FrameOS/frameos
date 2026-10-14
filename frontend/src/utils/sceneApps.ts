@@ -14,6 +14,27 @@ export function isJavaScriptCatalogApp(keyword?: string | null): boolean {
   return !!keyword && javascriptCatalogAppKeywords.includes(keyword)
 }
 
+// The starters you write your own code from. Every other catalog app is a
+// finished app (Weather, Unsplash, …) and lists under its own category.
+const javascriptTemplateAppKeywords = ['jsImage', 'jsLogic', 'jsSvg', 'jsText'].map(
+  (name) => repoAppKeywordByName(name) ?? name
+)
+
+/** A repo JS app's keyword by its name. The folder it sits in (repo/apps/image,
+ * text, json, logic) has changed before: until 2026.10.13 every app was under
+ * repo/apps/code, and scenes saved then still name that origin. */
+export function repoAppKeywordByName(name: string): string | undefined {
+  return javascriptCatalogAppKeywords.find((keyword) => keyword.slice(keyword.lastIndexOf('/') + 1) === name)
+}
+
+/** Where an app lists in the apps panel and the new node picker. */
+export function appListCategory(keyword: string, app: Pick<AppConfig, 'category'>): string {
+  if (javascriptTemplateAppKeywords.includes(keyword)) {
+    return 'code'
+  }
+  return (app.category || 'other').toLowerCase()
+}
+
 export function javascriptCatalogAppLabel(keyword: string, app?: Pick<AppConfig, 'name'> | null): string {
   return `code: ${app?.name ?? keyword}`
 }
@@ -95,8 +116,8 @@ export function canonicalEmbeddedRepoAppKeyword(keyword?: string | null): string
 
   const parts = keyword.split('/').filter(Boolean)
   const appName = parts[parts.length - 1]
-  const codeKeyword = appName ? `repo/apps/code/${appName}` : undefined
-  return codeKeyword && embeddedRepoAppSources[codeKeyword] ? codeKeyword : undefined
+  const current = appName ? repoAppKeywordByName(appName) : undefined
+  return current && embeddedRepoAppSources[current] ? current : undefined
 }
 
 export function embeddedRepoAppSourcesForOrigin(origin?: string | null): Record<string, string> | undefined {

@@ -406,6 +406,17 @@ proc tick*(loop: EventLoop, now = getMonoTime()): int =
     inc loop.nextSeq
     inc result
 
+proc resetAfterAbort*(loop: EventLoop) =
+  ## After an out-of-memory abort (single_scene_host.recoverAbortedRun): the
+  ## longjmp skipped the `finally`s above. Left set, `draining` turned every
+  ## later drain into a no-op, so no event reached a scene again, and
+  ## `hostRunDepth` marked everything dispatched from then on as coming from
+  ## a render. The queue itself is intact; what is still in it is delivered.
+  loop.draining = false
+  loop.handlingFromRender = false
+  loop.hostRunDepth = 0
+  loop.watching = false
+
 template hostRun*(loop: EventLoop, body: untyped) =
   ## Around the host's own runs of a scene — its render, its init — so that
   ## what they dispatch is known to come from there (see `hostRunDepth`).

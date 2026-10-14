@@ -32,6 +32,12 @@ export interface DeviceLimits {
   jsMaxStackKb: number
   /** HTTP response cap in bytes; 0 keeps the host default. */
   maxHttpResponseBytes: number
+  /** Run as an ESP32: a JS app's module variables last one render and its
+   * init() runs on every one (what must last goes through
+   * `frameos.remember`), `app.frame.embedded` is true, and downloads decode
+   * straight into the canvas. False runs as a Pi, which keeps an app's
+   * interpreter for the scene's life. */
+  embedded: boolean
 }
 
 /** The devices that can be simulated. "Off" is not one of them — it is a
@@ -182,6 +188,9 @@ export function describeDeviceLimits(limits: DeviceLimits): string {
   if (limits.maxHttpResponseBytes > 0) {
     parts.push(`${Math.round(limits.maxHttpResponseBytes / (1024 * 1024))} MB max HTTP response`)
   }
+  if (limits.embedded) {
+    parts.push('JS apps restart on every render')
+  }
   return parts.join(', ')
 }
 
@@ -200,6 +209,7 @@ export function deviceLimitsFor(
     jsMemoryLimitMb: -1,
     jsMaxStackKb: -1,
     maxHttpResponseBytes: 0,
+    embedded: false,
   })
   const esp32 = (psramBytes: number): DeviceLimits => ({
     memoryBytes: esp32PreviewMemoryBytes(width, height, psramBytes),
@@ -213,6 +223,7 @@ export function deviceLimitsFor(
     jsMemoryLimitMb: ESP32_JS_MEMORY_LIMIT_MB,
     jsMaxStackKb: ESP32_JS_MAX_STACK_KB,
     maxHttpResponseBytes: ESP32_MAX_HTTP_RESPONSE_BYTES,
+    embedded: true,
   })
 
   switch (key) {

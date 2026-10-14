@@ -4,7 +4,7 @@ Photos is a library of albums that frames play. It is a top-level section of
 the workspace (after Frames, Scenes and Apps), served by both control planes:
 the self-hosted backend keeps the files on disk, FrameOS Cloud keeps them in
 R2. The SPA (`frontend/src/scenes/photos/`) talks to one HTTP contract,
-described here, and the frame app `repo/apps/code/photoAlbum` reads an album
+described here, and the frame app `repo/apps/image/photoAlbum` reads an album
 through a share link.
 
 ## Words
@@ -374,7 +374,7 @@ or as a chosen panel shows it: scaled to the panel, with the frame's
 automatic fit and fine tuning, dithered to its palette.
 
 Frames get it with the photo. The share routes send `colors` with every file,
-and `repo/apps/code/photoAlbum` hands it to the runtime as
+and `repo/apps/image/photoAlbum` hands it to the runtime as
 `frameos.fetchImage(url, {colors})`, which grades the photo the way a local
 asset's sidecar is applied, palette override included, so the frame's
 automatic fit leaves it alone. A runtime older than 2026.10.13 ignores the
@@ -410,7 +410,7 @@ photo a frame plays.
 
 "Install photo scenes" (the Photos page, an album's menu and the "Add scene"
 drawer) makes one scene per ticked album on one frame: it creates the album's
-share link, builds a scene around `repo/apps/code/photoAlbum` with the link in
+share link, builds a scene around `repo/apps/image/photoAlbum` with the link in
 the app node's config, and installs it like any other scene (the frame's
 scenes list; the deploy follows). Settings: how long each photo stays, the
 order, and how a photo fits the screen.

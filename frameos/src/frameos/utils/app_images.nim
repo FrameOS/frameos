@@ -171,11 +171,11 @@ proc downloadImageForTarget*(url: string, maxBytes: int, target: Image = nil,
 
 when defined(testing):
   ## Test seam for the download-based image producers (downloadImage,
-  ## unsplash, immich, googlePhotos, openaiImage, wikicommons). data/frameOS-
-  ## Gallery exposes its own `galleryDownloadHook`; everything else funnels
-  ## through downloadImageWithDataForContext below, and without a seam here a
-  ## test cannot observe what the interpreter handed them — which is exactly
-  ## the invariant worth pinning, since an unhinted producer decodes at native
+  ## unsplash, googlePhotos, openaiImage, wikicommons, and the JavaScript
+  ## apps' frameos.fetchImage). They all funnel through
+  ## downloadImageWithDataForContext below, and without a seam here a test
+  ## cannot observe what the interpreter handed them — which is exactly the
+  ## invariant worth pinning, since an unhinted producer decodes at native
   ## resolution on embedded. Compiled out of real builds.
   type ContextDownloadHook* = proc(url: string, maxBytes: int, target: Image,
     fit: ScaledDecodeFit, boundWidth: int, boundHeight: int): tuple[image: Image, data: string]

@@ -1,0 +1,34 @@
+{
+  "name": "Unsplash",
+  "description": "Random Unsplash photo",
+  "category": "data",
+  "version": "1.0.0",
+  "settings": ["unsplash"],
+  "fields": [
+    { "name": "search", "type": "string", "value": "nature", "label": "Search", "placeholder": "e.g. nature, birds" },
+    {
+      "name": "orientation",
+      "type": "select",
+      "value": "auto",
+      "options": ["auto", "any", "landscape", "portrait", "squarish"],
+      "label": "Orientation"
+    },
+    {
+      "name": "metadataStateKey",
+      "type": "string",
+      "value": "",
+      "label": "Metadata state key",
+      "hint": "Stores {search, title, description, location, author, links, ...} under this key."
+    },
+    {
+      "name": "saveAssets",
+      "type": "select",
+      "value": "auto",
+      "options": ["auto", "always", "never"],
+      "label": "Save asset",
+      "hint": "Saves the image to the frame's assets folder. auto follows the frame's save-assets setting."
+    }
+  ],
+  "output": [{ "name": "image", "type": "image" }],
+  "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "900" }
+}

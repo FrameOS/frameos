@@ -81,18 +81,20 @@ when the label shown should differ from the value stored in config or state.
 
 App nodes then use `keyword: "myPanel"`. Inside `app.ts` the app sees
 `app.config` (its fields), `app.state`, `app.frame` (`width`, `height`,
-`rotate`, `timeZone`), `context` (`imageWidth`/`imageHeight` when an image
+`rotate`, `timeZone`, and from 2026.10.13 `debug` and `embedded`, true on an
+ESP32-class runtime), `context` (`imageWidth`/`imageHeight` when an image
 is flowing through), and the `frameos` helpers — the full bridge, as the
 type declarations (`frontend/src/utils/appTypeDeclarations.ts`,
 `cloud/apps/auth-web/scripts/generate-ai-context.mjs`) list it:
 `frameos.fetchJson(url)`, `frameos.fetchText(url)`,
 `frameos.httpRequest(url, {method, headers, body, bodyBase64, base64,
-timeoutMs})`, `frameos.fetchImage(url, {headers, saveAsset})` (see
+timeoutMs, find, findLength, findLimit})` (see [Big pages](#big-pages)), `frameos.fetchImage(url, {headers, saveAsset})` (see
 [Photos from the network](#photos-from-the-network)), `frameos.svg(svg,
 spec)`, `frameos.image(spec)`,
 `frameos.log()`, `frameos.error()`, `frameos.setState()`,
 `frameos.setNextSleep()`, `frameos.getSetting("namespace", "key")` (only
-namespaces the app's `config.json` declares under `settings`), the asset
+namespaces the app's `config.json` declares under `settings`),
+`frameos.remember(key, value)` / `frameos.recall(key)` (see below), the asset
 calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,
 `appendAsset`, `deleteAsset`, `loadAssetImage`, and the stream calls
 `openAssetStream`, `createStream`, `streamRead`, `streamWrite`,
@@ -101,7 +103,9 @@ calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,
 key from it, write with `frameos.setState(key, value)` and state nodes see the
 change. What an app does **not** have are the code-node time helpers
 (`format`, `now`, `parseTs`); take such values in through a field fed by a
-code node or `data/clock`. `Date` is UTC-only here as well.
+code node or `data/clock`. `Date` reads local time in the frame's zone,
+like Nim's `now()` (the process zone on a Pi, the frame's time zone setting
+on an ESP32).
 
 JavaScript is the format apps are written in. The Nim apps under
 `frameos/src/apps/` are the built-in catalog that ships inside the FrameOS
@@ -112,7 +116,7 @@ legacy *compiled* scene; `docs/nim-to-js-conversion.md` is the way out.
 ### Photos from the network
 
 A JS app that shows a photo from an API (the Immich app,
-`repo/apps/code/immich`, is the worked example) does the JSON half with
+`repo/apps/image/immich`, is the worked example) does the JSON half with
 `httpRequest` and the picture with **`frameos.fetchImage(url, options)`**.
 The runtime downloads and decodes the image natively and hands JS an image
 reference; the bytes never enter the JS heap. The app returns that reference
@@ -123,27 +127,95 @@ const photo = frameos.fetchImage(`${server}/api/assets/${id}/thumbnail?size=prev
   headers: { 'x-api-key': apiKey },
   saveAsset: { name: 'IMG_001', extension: 'jpg', mode: 'auto' },
 })
-if (!photo.image) {
-  return frameos.svg(errorPanel(photo.error))
-}
+if (!photo.image) throw new Error(`Error fetching image from Immich: ${photo.error}`)
 return photo.image
 ```
 
 - `options.headers` go on the request, like `httpRequest`.
 - The result is `{ image, width, height }` or `{ image: null, error }`
   (an HTTP status, a transport failure, a body that is not an image). It
-  never throws, so the app can paint the message.
+  never throws, so the app decides what to say (and throws it, see below).
 - `options.saveAsset` keeps the downloaded file as a frame asset, the way
   the built-in photo apps do (`saved/<app>/<name>.<md5>.<ext>`; `mode:
   "auto"` honours the frame's save-assets setting, `"always"` saves
   regardless). The extension is reduced to a short alphanumeric suffix.
   Frames without storage (ESP32) never save and report no `savedAs`.
+- `options.exif: true` adds `exif` (an object: `make`, `model`, `iso`,
+  GPS, …, plus everything exiftool reports where the host has it) and
+  `exifSummary` (one line, e.g. "Canon EOS · f/2.8") read from the
+  downloaded bytes. Like `savedAs`, an ESP32 reports neither. FrameOS
+  2026.10.13 and later.
+- The URL may be a `data:` URL. That is how an app shows an image an API
+  returned as base64 (OpenAI's `b64_json`):
+  `frameos.fetchImage(`data:image/png;base64,${b64}`)`. It decodes into the
+  offered canvas like a download, and from 2026.10.13 `saveAsset` and `exif`
+  work on it on hosts too.
 - On an ESP32 the decode streams straight into the canvas the `render/image`
   node offered, with the node's `placement` (cover, contain or stretch), so a
   1440 px Immich preview needs its compressed body plus a few rows, not a
   full-resolution RGBA buffer. Any other placement decodes bounded by the
   target's size and lets `render/image` place the result. On a Pi the decode
   is at native resolution and the consumer scales.
+
+### When something goes wrong
+
+Throw. An error thrown out of `get()` fails the node the way a raising
+built-in app does: the message is logged with its source line, an image
+field gets the message painted (natively, into the canvas on an ESP32, so an
+app needs no error panel of its own), a code node that reads the value gets
+the zero value of its arg's type, and the node cache keeps nothing, so the
+next render tries again. That is what the photo apps do for a missing key or
+a failed download. (Before 2026.10.13 the consumer got `null` instead, and a
+cached node kept it.)
+
+Keep apps small: a scene carries a copy of every app it uses (its
+`config.json` twice: as keys and as a file), an ESP32 stores all its scenes
+in 512 KiB, and the active scene's sources are parsed on every render. No
+comment blocks, no helpers used once, short config hints.
+
+### Where an app keeps its values
+
+Three places, the same rule on every device:
+
+| the value | goes in | lasts |
+|---|---|---|
+| what the rest of the scene should see: a position a button changes, the photo's metadata | `frameos.setState(key, value)`, read back as `app.state[key]` | the scene's state: every node reads it, state nodes see changes, declared fields can persist and show in the frame's controls |
+| the app's own, needed on the next render: a fetched photo list, a position | `frameos.remember(key, value)`, read back with `frameos.recall(key)` | until the scene unloads (not across a restart); private to the node |
+| scratch for this render: lookup tables built when the module loads, intermediate results | module-level variables | one render |
+
+Module-level variables last as long as the app's interpreter, and an ESP32
+drops every idle interpreter after each render to give the next decode the
+memory, so the next render starts with a fresh module and runs `init()`
+again. A Pi keeps its interpreters for the scene's life, to stay fast, but an
+app must not count on that. The editor's preview runs as either: as an ESP32
+when its memory limit is set to one of the ESP32 boards or when it previews
+an ESP32 frame, and as a Pi otherwise. Try a new app both ways: one that keeps
+a counter in a module variable shows its first photo forever as an ESP32.
+
+`remember` values are JSON, at most 512 KB per node on an ESP32. `remember`
+answers `false` when a value would not fit, and `null` forgets the key. The
+Google Photos app keeps its album's photo list and its position this way.
+Scene state is shared by the whole scene, so a private value kept there
+collides with a second copy of the app and sits where everything else reads
+it. FrameOS 2026.10.13 and later.
+
+An animation works out each frame from the clock (`Date.now()`) rather than
+adding to a position kept between frames: the store's DVD bounce scene
+computes where the logo is from the time, so a fresh module draws the same
+picture.
+
+### Big pages
+
+A response body becomes a JS string, and on an ESP32 a 1 MB page with one
+non-Latin-1 character is 2 MB of JS heap, twice over while the reply is
+parsed: over the 4 MB an ESP32 app runtime gets. When the app only needs
+what follows some marker, pass `find`: `frameos.httpRequest(url, {find:
+'https://lh3.googleusercontent.com/', findLength: 400})` keeps the body
+native and answers `{status, found}`, the text at each occurrence (marker
+included, `findLength` bytes, default 512; `findLimit` occurrences, default
+1000). On a non-2xx status `body` holds the first KB, so the error stays
+readable. The Google Photos app reads its 1.2 MB share page this way.
+FrameOS 2026.10.13 and later.
 
 ### More than one file
 
@@ -176,7 +248,10 @@ imports them with relative paths:
 |---|---|---|
 | `data` / `logic` | `export function get(app, context)` → returns the `output` value (string, json, or `frameos.svg`/`frameos.image` for an image) | `codeNodeEdge` from `fieldOutput` into another node's `fieldInput/<field>` (e.g. `render/image`'s `image`) |
 
-`export function init(app)` is optional and runs once. Do **not** give a
+`export function init(app)` is optional and runs each time the app's
+interpreter starts: once per scene on a Pi, before every render on an ESP32
+and in a preview running as one (see [Where an app keeps its values](#where-an-app-keeps-its-values)).
+Do **not** give a
 scene-local app `category: "render"`: as of Aug 2026 such an app placed in the
 prev/next chain draws nothing and logs nothing. The pattern that works is a
 **data app whose `get()` returns `frameos.svg(...)`**, wired into a
@@ -316,10 +391,12 @@ render allocates — not terse code:
   round coordinates to one decimal, thin polylines to what the pixel grid can
   show, scale a shape with one `<g transform="translate(x y) scale(s)">`
   instead of recomputing its points, and stay in the hundreds of elements.
-- **Scenes that re-render every second or faster** set their state up once in
-  `init()` and update it in place: flat arrays of numbers and fixed-size
+- **Scenes that re-render every second or faster** set their buffers up in
+  `init()` and update them in place: flat arrays of numbers and fixed-size
   pools, no new objects, closures or big strings per frame, no fetch or
-  `JSON.parse` in the render path, and a hard cap on particle counts.
+  `JSON.parse` in the render path, and a hard cap on particle counts. Those
+  buffers are scratch (an ESP32 builds them again every render), so
+  positions come from the clock, not from the previous frame.
 
 ## Checklist before shipping a scene
 
@@ -333,3 +410,4 @@ render allocates — not terse code:
 - Scene-local JS apps are data apps exporting `get`, wired into `render/image`.
 - SVG uses only the supported tags; gradients are top-level `linearGradient` with `userSpaceOnUse`.
 - Nothing big is embedded as an object literal or kept alive between renders (see "Write for the smallest frame").
+- A JS app keeps what must outlast a render with `frameos.remember` (private) or `frameos.setState` (shared), never in a module variable.

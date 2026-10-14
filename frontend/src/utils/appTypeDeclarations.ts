@@ -113,6 +113,10 @@ interface FrameOSApp {
     rotate: number;
     assetsPath: string;
     timeZone: string;
+    /** The frame's debug setting (FrameOS 2026.10.13+; undefined before). */
+    debug?: boolean;
+    /** An ESP32-class runtime, or the preview running as one (FrameOS 2026.10.13+; undefined before). */
+    embedded?: boolean;
   };
   initialized?: boolean;
   log(...args: any[]): void;
@@ -145,17 +149,29 @@ declare const frameos: {
       bodyBase64?: string;
       base64?: boolean;
       timeoutMs?: number;
+      find?: string;
+      findLength?: number;
+      findLimit?: number;
     }
-  ): { status: number; body?: string; bodyBase64?: string; error?: string };
+  ): { status: number; body?: string; bodyBase64?: string; found?: string[]; error?: string };
   fetchImage(
     url: string,
     options?: {
       headers?: Record<string, string>;
       saveAsset?: { name: string; extension?: string; mode?: "auto" | "always" };
+      exif?: boolean;
       // The image's color profile (a .frameos.json sidecar's colors object); null = none, clears the last palette.
       colors?: { [key: string]: any } | null;
     }
-  ): { image: FrameOSImageRef | null; width?: number; height?: number; error?: string; savedAs?: string };
+  ): {
+    image: FrameOSImageRef | null;
+    width?: number;
+    height?: number;
+    error?: string;
+    savedAs?: string;
+    exif?: Record<string, any>;
+    exifSummary?: string;
+  };
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;
@@ -173,6 +189,9 @@ declare const frameos: {
   streamClose(stream: FrameOSStreamRef | number): boolean;
   getSetting(...path: string[]): any;
   setState(key: string, value: FrameOSJson): void;
+  /** Keep a value for this node between renders (FrameOS 2026.10.13+). null forgets it. */
+  remember(key: string, value: FrameOSJson): boolean;
+  recall(key: string): FrameOSJson | undefined;
 };
 `
 }

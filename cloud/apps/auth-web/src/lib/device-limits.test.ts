@@ -147,6 +147,8 @@ describe("deviceLimitsFor", () => {
       expect(limits.maxHttpResponseBytes).toBe(6 * MB);
       // Deliberately unsimulated — see the comment on the preset.
       expect(limits.memoryReserveBytes).toBe(0);
+      // An ESP32 drops its JS interpreters after every render.
+      expect(limits.embedded).toBe(true);
     }
   });
 
@@ -164,6 +166,8 @@ describe("deviceLimitsFor", () => {
       expect(limits.jsMemoryLimitMb).toBe(-1);
       expect(limits.jsMaxStackKb).toBe(-1);
       expect(limits.maxHttpResponseBytes).toBe(0);
+      // A Pi keeps them for the scene's life.
+      expect(limits.embedded).toBe(false);
     }
     expect(deviceLimitsFor("piZero", 800, 480)!.memoryBytes).toBeLessThan(
       deviceLimitsFor("pi", 800, 480)!.memoryBytes,
@@ -178,5 +182,7 @@ describe("deviceLimitsFor", () => {
     expect(text).toContain("4 MB JS heap");
     expect(text).toContain("20 KB JS stack");
     expect(text).toContain("6 MB max HTTP response");
+    expect(text).toContain("JS apps restart on every render");
+    expect(describeDeviceLimits(deviceLimitsFor("pi", 800, 480)!)).not.toContain("restart");
   });
 });

@@ -174,7 +174,7 @@
   ],
   "apps": {
     "weatherIcons": {
-      "origin": "repo/apps/code/weatherIcons",
+      "origin": "repo/apps/json/weatherIcons",
       "name": "Weather icon set (JS)",
       "category": "data",
       "description": "Vector weather icons for WMO weather codes, returned as a JSON set of SVG fragments plus code-to-icon and code-to-label maps.",
@@ -230,7 +230,7 @@
       }
     },
     "weatherPanel": {
-      "origin": "repo/apps/code/weatherPanel",
+      "origin": "repo/apps/image/weatherPanel",
       "name": "Weather panel (JS)",
       "category": "data",
       "description": "High fidelity weather panel rendered as vector graphics. Draws current conditions, an hourly forecast chart, or a daily forecast list from Open-Meteo data. Wire weather from the Weather app and icons from the Weather icon set app.",

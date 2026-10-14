@@ -96,15 +96,22 @@ uses QuickJS only to execute the resulting JavaScript.
     `{status, bodyBase64}` when `base64: true` (required for binary responses,
     since raw bytes cannot cross the JS boundary as strings), or
     `{status: 0, error}` on transport failure.
-  - `fetchImage(url, {headers, saveAsset: {name, extension, mode}, colors})`:
+    With `find: "<text>"` the body stays native and the reply carries
+    `found`, the text at each occurrence (`findLength` bytes, default 512;
+    `findLimit` of them, default 1000), plus the first KB of `body` on a
+    non-2xx status: how an app scrapes a page bigger than an ESP32's JS heap.
+  - `fetchImage(url, {headers, saveAsset: {name, extension, mode}, exif, colors})`:
     download and decode an image natively — the bytes never enter the JS
-    heap — and return `{image: imageRef, width, height, savedAs?}` or
+    heap — and return `{image: imageRef, width, height, savedAs?, exif?,
+    exifSummary?}` or
     `{image: null, error}`. The producer's half of the planner's `intoTarget`
     handshake for a JS node: under a decoder fit (cover/contain/stretch) it
     claims the offered target and, on embedded, streams the decode straight
     into the canvas; under any other placement it decodes bounded by the
     target's size and leaves the offer unclaimed. `saveAsset` keeps the bytes
-    as a frame asset like the Nim photo apps (`saved/<app>/…`; hosts only).
+    as a frame asset like the Nim photo apps (`saved/<app>/…`; hosts only);
+    `exif: true` reads the EXIF block of those bytes (hosts only). A `data:`
+    URL decodes the same way.
     `colors` is the image's color profile (a sidecar's inner `colors` object,
     or a whole sidecar; `docs/asset-color-profiles.md`), applied the way
     `loadAssetImage` applies a sidecar: palette override, adjustments, and

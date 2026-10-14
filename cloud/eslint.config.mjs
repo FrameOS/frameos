@@ -40,6 +40,8 @@ export default tseslint.config(
       // the tsconfig exclude for the same strict-compiler reason.
       "**/src/test/shared-spa/usb-board-identity.test.ts",
       "**/src/test/shared-spa/scene-execution-fixtures.test.ts",
+      // Same exclusion, same reason: imports utils/sceneApps.
+      "**/src/test/shared-spa/app-list-category.test.ts",
       // Same exclusion, same reason: mounts embeddedUsbConnectLogic.
       "**/src/test/shared-spa/usb-connect-probe.test.ts",
       // Same exclusion, same reason: imports frameLogic, whose graph reaches

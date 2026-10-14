@@ -152,6 +152,16 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     proc c_remove(path: cstring): cint
                             {.importc: "remove", header: "<stdio.h>".}
 
+    var
+      # What the C side holds for a Nim call in progress: response bodies not
+      # yet freed, spilled bodies not yet removed, streams not yet closed.
+      # The call that took each one gives it back in a `finally`/`defer`; an
+      # out-of-memory abort is a longjmp that skips those, and these lists
+      # are how releaseStrandedHttp finds what it stranded.
+      heldBodyChunks: seq[tuple[chunks: pointer, count: csize_t]]
+      heldSpillPaths: seq[string]
+      heldStreams: seq[pointer]
+
   proc encodeSimpleHeaders(headers: seq[SimpleHttpHeader]): string =
     ## Newline-separated `Name: value` block for the C side (frameos_nim_glue
     ## set_extra_headers). Validated first: the block's own framing is the
@@ -174,8 +184,15 @@ when defined(frameosEmbedded) or defined(frameosWasm):
         # Spilled bodies are single-use temp files; remove as soon as the
         # consumer is done. Boot-time sweeps catch crash leftovers.
         discard c_remove(response.spillPath.cstring)
+        let held = heldSpillPaths.find(response.spillPath)
+        if held >= 0:
+          heldSpillPaths.del(held)
         response.spillPath = ""
       if response.rawChunks != nil:
+        for i in countdown(heldBodyChunks.high, 0):
+          if heldBodyChunks[i].chunks == response.rawChunks:
+            heldBodyChunks.del(i)
+            break
         fos_nim_http_free_chunks(response.rawChunks, response.rawChunkCount)
         response.rawChunks = nil
         response.rawChunkCount = 0
@@ -243,6 +260,9 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     proc closeHttpBodyStream*(stream: HttpBodyStream) =
       if stream.isNil or stream.handle == nil:
         return
+      let held = heldStreams.find(stream.handle)
+      if held >= 0:
+        heldStreams.del(held)
       fos_nim_http_stream_close(stream.handle)
       stream.handle = nil
 
@@ -254,6 +274,8 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       stream.handle = fos_nim_http_stream_open(stream.url.cstring, headerPtr,
         stream.headerBlock.len.csize_t, stream.timeoutMs.cint, addr status,
         addr contentLength, errBuf.cstring, errBuf.len.csize_t)
+      if stream.handle != nil:
+        heldStreams.add(stream.handle)
       stream.prefix = ""
       stream.prefixPos = 0
       stream.consumed = 0
@@ -368,6 +390,24 @@ when defined(frameosEmbedded) or defined(frameosWasm):
         except CatchableError:
           0
 
+    proc releaseStrandedHttp*(): int =
+      ## After an out-of-memory abort (embedded_main.nim): close the streams
+      ## and free the bodies the aborted call was holding; returns how many.
+      ## A stream left open keeps its socket and TLS session, in the internal
+      ## RAM every later HTTPS request needs; a body is up to the response
+      ## cap of PSRAM. Every one of them belongs to the call the abort
+      ## jumped out of: none outlives the call that took it.
+      for handle in heldStreams:
+        fos_nim_http_stream_close(handle)
+      for held in heldBodyChunks:
+        fos_nim_http_free_chunks(held.chunks, held.count)
+      for path in heldSpillPaths:
+        discard c_remove(path.cstring)
+      result = heldStreams.len + heldBodyChunks.len + heldSpillPaths.len
+      heldStreams.setLen(0)
+      heldBodyChunks.setLen(0)
+      heldSpillPaths.setLen(0)
+
   proc boundedRequestBuffer*(
       url: string,
       httpMethod = "GET",
@@ -407,6 +447,8 @@ when defined(frameosEmbedded) or defined(frameosWasm):
           discard c_remove(spillPath)
           fos_nim_http_free(spillPath)
         raise newException(IOError, &"HTTP request failed: {url}")
+      if rawChunks != nil:
+        heldBodyChunks.add((cast[pointer](rawChunks), chunkCount))
       result.code = status.int
       result.status = $status
       result.rawChunks = rawChunks
@@ -422,6 +464,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
         # The whole body lives in a temp file; the chunk array is a single
         # empty placeholder. Leave `body` nil so nobody misreads it.
         result.spillPath = $spillPath
+        heldSpillPaths.add(result.spillPath)
         fos_nim_http_free(spillPath)
         result.bodyLen = spillLen.int
       else:

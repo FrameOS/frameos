@@ -6,9 +6,9 @@
 ## case they cannot reach: scenes already on disk when the runtime itself
 ## moved on. A Pi updates itself (auto_update, the admin UI) and carries its
 ## scenes.json forward without a redeploy, so a scene deployed while it ran an
-## older release still names `data/immich` after the update. Such a node gets
-## the replacement app from the generated copy (retired_apps_gen.nim) — the
-## same sources a converted scene would carry.
+## older release still names `data/immich` or `data/frameOSGallery` after
+## the update. Such a node gets the replacement app from the generated copy
+## (retired_apps_gen.nim) — the same sources a converted scene would carry.
 ##
 ## Not on the ESP32 or in the wasm preview: the ESP32 re-pulls its scenes on
 ## every wake and its control plane hands it the converted form, and every
@@ -28,7 +28,18 @@ when not defined(frameosEmbedded) and not defined(frameosWasm):
       result = all{keyword}
     except CatchableError:
       result = nil
+
+  proc isRetiredRenderApp*(keyword: string): bool =
+    ## A retired render app (render/chart), whose replacement returns the
+    ## image the old app drew. The control planes rewrite such a node in the
+    ## render flow into render/image fed by the replacement; a scene still on
+    ## disk is not rewritten, so the interpreter draws the image itself.
+    keyword in RetiredRenderFlowKeywords
 else:
   proc retiredAppSources*(keyword: string): JsonNode =
     discard keyword
     nil
+
+  proc isRetiredRenderApp*(keyword: string): bool =
+    discard keyword
+    false

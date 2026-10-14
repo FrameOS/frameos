@@ -139,7 +139,7 @@
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 
 - A Nim app that gets a repo JavaScript replacement (`data/immich` →
-  `repo/apps/code/immich`) is deleted in the same change and listed in
+  `repo/apps/image/immich`) is deleted in the same change and listed in
   `docs/retired-apps.json`. Stored scenes become the JS app (backend alembic
   migration + import doors; the cloud converts at read time, its zips are
   immutable), every path to a device sends what that runtime reads (older
@@ -147,6 +147,14 @@
   replacement for a scene still on disk. `docs/retired-apps.md` has the
   steps; run `python3 frameos/tools/generate_retired_apps.py` after touching
   the contract or a replacement's files (`test_retired_apps.py` checks it).
+- A port must behave like the Nim app on an ESP32 too: the runtime tears
+  every idle JS interpreter down after each render, so state that outlives a
+  render goes through `frameos.remember` / `recall`, not module variables; a
+  throw in `get()` fails the node like a raising Nim app (defaulted args, no
+  cache entry). Port the Nim tests to `js_runtime/tests/test_<app>_js_app.nim`
+  with `jsHttpRequestHook` / `contextDownloadHook`, and give the contract the
+  first runtime with every bridge call the port makes (2026.10.13 for
+  `remember`, `app.frame.embedded`, `fetchImage` `exif`).
 
 ## Per-photo colour profiles: `docs/asset-color-profiles.md` is the contract
 
@@ -176,7 +184,7 @@
   (`cloud/apps/auth-web/src/lib/photos/`). A change to a route, shape or
   status code lands on both and in the doc.
 - Frames never get the owner's credentials: a scene carries a share link
-  (`pk_...`) in the `repo/apps/code/photoAlbum` node's config and asks for
+  (`pk_...`) in the `repo/apps/image/photoAlbum` node's config and asks for
   one photo per render (`/shared/{token}/photo?index=`), keeping its place in
   a disk-persisted state field. The share routes are on the backend's public
   router and are rate limited.
@@ -204,7 +212,7 @@
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】
 - `frontend/` – React + TypeScript single-page application built with esbuild, Tailwind, and kea state management. Compiled assets live in `frontend/dist` and are served by the backend when present. 【F:frontend/package.json†L1-L66】【F:backend/app/fastapi.py†L38-L86】
-- `frameos/` – Nim-based runtime for devices, containing system drivers, Nim app definitions, and assets compiled into the on-device application. Nim apps live in `src/apps`; repo-provided JavaScript app templates live outside the runtime under `repo/apps/code` (with the general repo app layout still `repo/apps/<folder>/<app>`). Entry point `src/frameos.nim` is a small CLI (see "Device runtime" below); `make build` writes the binary to the gitignored `frameos/build/frameos`.
+- `frameos/` – Nim-based runtime for devices, containing system drivers, Nim app definitions, and assets compiled into the on-device application. Nim apps live in `src/apps`; repo-provided JavaScript app templates live outside the runtime under `repo/apps/<folder>/<app>`, the folder naming what the app returns (`image`, `text`, `json`, `logic`). Entry point `src/frameos.nim` is a small CLI (see "Device runtime" below); `make build` writes the binary to the gitignored `frameos/build/frameos`.
 - `e2e/` – The end-to-end suites: the scene-renderer snapshot harness (`e2e/run`, `e2e/snapshots`), the Playwright frontend suite (`e2e/frontend-visual`, incl. the cloud `/frames` specs) and the opt-in real-SSH deploy test (`e2e/deploy`). `e2e/README.md` describes each, how CI runs them and which snapshots CI commits itself.
 - `embedded/` – The ESP32 firmware (`embedded/esp32`, ESP-IDF + the Nim runtime compiled to C) and the Pico W thin client (`embedded/pico`). Neither control plane builds firmware: both flash signed release images. The IDF-free modules have host tests (`embedded/esp32/main/tests`, see that README's Layout).
 - `cloud/` – FrameOS Cloud: the hosted service (Next.js + Drizzle/Postgres) behind `cloud.frameos.net` and `scenes.frameos.net` (legacy `account.frameos.net` redirects) — accounts, device/backend linking, and the scene store. Part of the monorepo's single pnpm workspace (one root lockfile, Turborepo builds); run pnpm commands from `cloud/`, see `cloud/README.md` and `cloud/docs/cloud-frames.md`. CI runs via `.github/workflows/cloud-ci.yml`.
@@ -270,7 +278,7 @@
   still open.
 - `frameos/src` houses the on-device runtime written in Nim with asyncdispatch (`frameos/frameos` and `frameos/build` are untracked build outputs, not sources).
 - Entry point `src/frameos.nim` is the runtime's CLI, not a bare `waitFor startFrameOS()`: `start` (the default, also for any unrecognised `--flag`) runs `startFrameOS()` in a retry loop with the boot guard; `version` / `--version` / `-v` prints the compiled version and exits — it used to fall through to `start` and boot a second runtime next to the service, which is how release 9.2 shipped a 9.1 runtime, so keep that branch first; `check` verifies the binary starts; `setup` (`--with-setup=/boot/frameos-setup.json[.gz]`, `--reboot-if-required`) runs first-boot device setup; `driver-setup` and `set-display` (`--device`, `--width`, `--height`, `--rotate`, `--vcom`, `--upload-url`) patch and apply the display; `upgrade` (`--dry-run`, `--no-reboot`) pulls the latest GitHub release; `privileged-worker` is the root side of the privileged door on Buildroot frames; `help` lists them. Drivers, system integrations, and Nim app implementations live in nested directories (`src/apps`, `src/drivers`, `src/system`, `src/frameos`); JavaScript example app sources/configs live under `repo/apps/<folder>/<app>`.
-- JavaScript repo apps under `repo/apps/code` are catalog templates for custom code apps. Do not generate or commit Nim wrappers inside `repo/apps`; compiled scenes that use them copy their sources into generated `src/apps/sceneapp_*` folders during build/deploy.
+- JavaScript repo apps under `repo/apps/<image|text|json|logic>/<app>` are catalog templates for custom code apps; a scene copies one into its own `apps` map, with `origin` naming the template (until 2026.10.13 they all sat under `repo/apps/code`, and readers match an old origin by the app's name). Do not generate or commit Nim wrappers inside `repo/apps`; compiled scenes that use them copy their sources into generated `src/apps/sceneapp_*` folders during build/deploy.
 - `frameos/Makefile` is the build entry: `make build` (app loaders → driver sources → shared driver libraries → assets → `nim c src/frameos.nim` into `build/frameos`), `make run`, `make test` (`nimble test`), `make test-shard SHARD=n` (what CI's "FrameOS Nim Tests" shards run, via `tools/run_test_shard.sh`), `make cross-<target>` / `make release-<target>` / `make release-all` (`backend/bin/cross`, the Docker cross-toolchain builds). `frameos.nimble` holds the dependencies and the `build_quickjs` task; `nimble build` itself can crash the compiler on macOS, so prefer `make build` / `nim c` directly.
 - **Nim test cost is compile cost.** Every test file is its own binary and compiles most of the tree (a server or interpreter test is ~6 s of Nim frontend plus 300 C files; the 45 MB `src/assets/repo_scenes.nim` string-literal module is NOT the problem, it compiles in under 2 s). `config.nims` builds `-d:testing` binaries with `--opt:none`, which halves a cold C compile; CI's warm nimcache skips gcc entirely, so what you can still make slower is the frontend (imports) and the run. A test must never wait out a real runtime interval: stub the hook instead (`setMetricsHooksForTest(sleepHook = …)`, the chromium app's `chromiumSettleHook` is already a no-op under `-d:testing`, `RunnerThread.stopMessageLoop` ends `startMessageLoop` instead of letting `maxIterations` run out at 200 ms a pass). Before that, three tests were 140 s of the suite's 240 s of run time (2026-10-11).
 

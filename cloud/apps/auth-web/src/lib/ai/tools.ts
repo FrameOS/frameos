@@ -227,12 +227,12 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
   {
     description:
       "Full config of one app: fields (names, types, defaults), outputs, caching. For JS apps " +
-      "(repo/apps/code/*) this includes the TypeScript source.",
+      "(repo/apps/<folder>/<name>) this includes the TypeScript source.",
     name: "get_app",
     parameters: {
       additionalProperties: false,
       properties: {
-        keyword: { description: "App keyword, e.g. render/text or repo/apps/code/weatherPanel.", type: "string" },
+        keyword: { description: "App keyword, e.g. render/text or repo/apps/image/weatherPanel.", type: "string" },
       },
       required: ["keyword"],
       type: "object",
@@ -304,7 +304,7 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
       additionalProperties: false,
       properties: {
         prefix: {
-          description: "Path prefix filter, e.g. frontend/src/scenes or repo/apps/code.",
+          description: "Path prefix filter, e.g. frontend/src/scenes or repo/apps.",
           type: "string",
         },
         query: { description: "Optional substring to match in file paths.", type: "string" },

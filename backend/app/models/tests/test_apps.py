@@ -14,8 +14,8 @@ async def test_get_app_configs():
     assert isinstance(configs, dict)
     assert "logic/ifElse" in configs
     assert "data/clock" in configs
-    assert "repo/apps/code/jsLogic" not in configs
-    assert "repo/apps/code/jsText" not in configs
+    assert "repo/apps/logic/jsLogic" not in configs
+    assert "repo/apps/text/jsText" not in configs
 
 @pytest.mark.asyncio
 async def test_get_local_frame_apps():
@@ -30,7 +30,7 @@ async def test_get_one_app_sources():
 
 @pytest.mark.asyncio
 async def test_get_one_app_sources_excludes_frontend_js_templates():
-    sources = get_one_app_sources("repo/apps/code/jsText")
+    sources = get_one_app_sources("repo/apps/text/jsText")
     assert sources == {}
 
 @pytest.mark.asyncio
@@ -72,7 +72,7 @@ async def test_get_scene_apps_from_scenes():
 @pytest.mark.asyncio
 async def test_get_scene_apps_from_scenes_skips_js_sources():
     sources = {"config.json": '{"name":"Scene JS"}', "app.ts": "export function get(): string { return 'ok' }"}
-    scenes = [{"apps": {"jsText": {"origin": "repo/apps/code/jsText", "sources": sources}}, "nodes": []}]
+    scenes = [{"apps": {"jsText": {"origin": "repo/apps/text/jsText", "sources": sources}}, "nodes": []}]
     apps = get_scene_apps_from_scenes(scenes)
     assert apps == {}
 

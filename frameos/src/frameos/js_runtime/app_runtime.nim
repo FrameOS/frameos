@@ -11,6 +11,7 @@ import frameos/utils/http_client
 import frameos/utils/app_images
 import frameos/utils/asset_colors
 import frameos/utils/dither
+import frameos/utils/exif
 import frameos/utils/image
 import frameos/utils/paths
 import frameos/utils/system
@@ -36,6 +37,12 @@ type
     nextImageId*: int
     images*: Table[int, Image]
     transientImageIds: seq[int]
+    ## `frameos.remember` / `recall`: values the app keeps between renders, as
+    ## JSON text. Held here and not in the interpreter because an ESP32 tears
+    ## every idle interpreter down after a render (releaseIdleJsAppRuntimes),
+    ## and module state goes with it; this survives until the scene does.
+    memory*: Table[string, string]
+    memoryBytes*: int
 
   JsAppEvalEnv = ref object
     runtime: JsAppRuntime
@@ -48,6 +55,21 @@ var jsAppEnvByCtx = initTable[ptr JSContext, JsAppEvalEnv]()
 ## The runtime behind each live interpreter, for the module loader: QuickJS
 ## hands the loader a context, and the app's files live on the runtime.
 var jsAppRuntimeByCtx = initTable[ptr JSContext, JsAppRuntime]()
+## The runtimes with a call in progress, outermost first: a JS app can run
+## another node, which can be another JS app. A call lasts until the caller
+## has freed the last value it got back (`get` reads its payload after JS
+## returns). Eviction must never pull one out from under its call, and after
+## an out-of-memory abort what is still here is what the abort jumped out of
+## (abandonMidCallJsAppRuntimes).
+var jsRuntimeStack: seq[JsAppRuntime] = @[]
+
+template midCall(runtime: JsAppRuntime, body: untyped) =
+  jsRuntimeStack.add(runtime)
+  try:
+    body
+  finally:
+    if jsRuntimeStack.len > 0 and jsRuntimeStack[^1] == runtime:
+      discard jsRuntimeStack.pop()
 
 proc teardownJsRuntime(runtime: JsAppRuntime) =
   ## Close one JS app node's interpreter. Not embedded-only: JsAppRuntime has
@@ -67,6 +89,11 @@ proc teardownJsRuntime(runtime: JsAppRuntime) =
   runtime.images.clear()
   runtime.transientImageIds.setLen(0)
 
+var liveJsRuntimes: seq[JsAppRuntime] = @[]
+  ## Every interpreter built and not yet released, on every platform: the
+  ## single-scene host (an ESP32, the editor's preview) drops the idle ones
+  ## after each render, and an ESP32 also evicts them under memory pressure.
+
 when defined(frameosEmbedded):
   # Every JS app node builds its own QuickJS runtime, and each one costs about
   # 580 KB of PSRAM: ~151 KB for the runtime itself, the rest for the prelude
@@ -80,8 +107,6 @@ when defined(frameosEmbedded):
   # and rebuild the others on demand. Rebuilding re-runs the app's init(), so
   # this only happens when headroom is actually short: a Pi, the backend and a
   # roomy frame never evict and keep today's behaviour exactly.
-  var liveJsRuntimes: seq[JsAppRuntime] = @[]
-  var jsRuntimeStack: seq[JsAppRuntime] = @[]
   const JsEvictHeadroomBytes = 2 * 1024 * 1024
 
   proc evictIdleJsRuntimes(keep: JsAppRuntime) =
@@ -93,8 +118,14 @@ when defined(frameosEmbedded):
         teardownJsRuntime(other)
 
 proc releaseIdleJsAppRuntimes*() =
-  ## Drop every JS app interpreter that is not mid-call. Called when a render
-  ## finishes.
+  ## Drop every JS app interpreter that is not mid-call. The single-scene host
+  ## calls it after every render (single_scene_host.renderScene) on an ESP32,
+  ## and in the editor's preview while it runs as one (runsAsEmbedded): there
+  ## an app's module variables last one render and its init() runs on every
+  ## one, and what must last longer goes through `frameos.remember`. The
+  ## preview does it so that an app leaning on module state shows it in the
+  ## editor, not on the frame. A Pi keeps its interpreters for the scene's
+  ## life and never calls this.
   ##
   ## Eviction otherwise only ever runs from ensureReady — that is, when ANOTHER
   ## JS node is about to be built. Nothing on the image path triggers it, so a
@@ -105,10 +136,32 @@ proc releaseIdleJsAppRuntimes*() =
   ## Cheap to undo: rebuilding re-parses and re-evaluates the module, which
   ## is a few milliseconds even for the bundled 36 KB Weather app now that
   ## QuickJS parses the TypeScript itself.
-  when defined(frameosEmbedded):
-    for runtime in liveJsRuntimes:
-      if runtime.ready and not jsRuntimeStack.contains(runtime):
-        teardownJsRuntime(runtime)
+  for runtime in liveJsRuntimes:
+    if runtime.ready and not jsRuntimeStack.contains(runtime):
+      teardownJsRuntime(runtime)
+
+proc abandonMidCallJsAppRuntimes*(): tuple[count, bytes: int] =
+  ## After an out-of-memory abort (single_scene_host.recoverAbortedRun): drop
+  ## the interpreters the abort jumped out of (QuickJS.abandon says why they
+  ## can be neither run nor freed). The `finally` in `invoke` that pops them
+  ## never ran, so left alone they stayed "mid-call" for good and were never
+  ## released. The next render builds the app a new one and runs its init()
+  ## again; `frameos.remember` values are Nim data and carry over.
+  for runtime in jsRuntimeStack:
+    if runtime.isNil or not runtime.ready:
+      continue  # already dropped: a runtime re-entered further up the chain
+    let ctx = runtime.js.context
+    if not ctx.isNil:
+      jsAppEnvByCtx.del(ctx)
+      jsAppRuntimeByCtx.del(ctx)
+      clearJsSourceMaps(ctx)
+    result.bytes += runtime.js.abandon()
+    inc result.count
+    runtime.ready = false
+    runtime.initialized = false
+    runtime.images.clear()
+    runtime.transientImageIds.setLen(0)
+  jsRuntimeStack.setLen(0)
 
 proc jsFetchMaxBytes(e: JsAppEvalEnv): int =
   if e != nil:
@@ -190,6 +243,43 @@ proc jsSetState(ctx: ptr JSContext, key: JSValue, valueJson: JSValue): JSValue {
 
   return jsUndefSentinel(ctx)
 
+const JsAppMemoryMaxBytes* = when defined(frameosEmbedded): 512 * 1024 else: 16 * 1024 * 1024
+  ## What one node may keep with `frameos.remember`, all keys together.
+
+proc jsRemember(ctx: ptr JSContext, key: JSValue, valueJson: JSValue): JSValue {.nimcall.} =
+  ## Keep a JSON value for this node across renders and interpreter restarts.
+  ## null or undefined forgets the key. False when it would not fit.
+  let e = env(ctx)
+  if e == nil or e.runtime.isNil:
+    return nimBoolToJS(ctx, false)
+  let memoryKey = toNimString(ctx, key)
+  if memoryKey.len == 0:
+    return nimBoolToJS(ctx, false)
+  let valueStr = toNimString(ctx, valueJson)
+  let runtime = e.runtime
+  let previous = runtime.memory.getOrDefault(memoryKey, "")
+  if valueStr.len == 0 or valueStr == "null":
+    if runtime.memory.hasKey(memoryKey):
+      runtime.memoryBytes -= memoryKey.len + previous.len
+      runtime.memory.del(memoryKey)
+    return nimBoolToJS(ctx, true)
+  let replaced = if runtime.memory.hasKey(memoryKey): memoryKey.len + previous.len else: 0
+  let after = runtime.memoryBytes - replaced + memoryKey.len + valueStr.len
+  if after > JsAppMemoryMaxBytes:
+    frameos_apps.logError(e.owner, "frameos.remember(\"" & memoryKey & "\") refused: " & $after &
+      " bytes would exceed this node's " & $JsAppMemoryMaxBytes & " byte limit")
+    return nimBoolToJS(ctx, false)
+  runtime.memory[memoryKey] = valueStr
+  runtime.memoryBytes = after
+  nimBoolToJS(ctx, true)
+
+proc jsRecall(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
+  ## The JSON text `jsRemember` kept under the key, "" when there is none.
+  let e = env(ctx)
+  if e == nil or e.runtime.isNil:
+    return nimStringToJS(ctx, "")
+  nimStringToJS(ctx, e.runtime.memory.getOrDefault(toNimString(ctx, key), ""))
+
 proc jsFetchText(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
   let urlStr = toNimString(ctx, url)
@@ -207,11 +297,53 @@ proc storeTransientImageJson(runtime: JsAppRuntime, image: Image): JsonNode
 
 const JsHttpMaxTimeoutMs = 600_000
 
+when defined(testing):
+  ## Test seam for `frameos.httpRequest`: when set, every request a JS app
+  ## makes is answered here instead of on the network, so an app whose API
+  ## host is fixed (OpenAI, Unsplash, Commons, …) runs against canned replies.
+  ## Images have their own seam (app_images.contextDownloadHook). Compiled out
+  ## of real builds.
+  type JsHttpRequestHook* = proc(url, httpMethod, body: string,
+    headers: seq[SimpleHttpHeader]): tuple[code: int, body: string]
+  var jsHttpRequestHook*: JsHttpRequestHook = nil
+
+const
+  JsHttpFindDefaultLength = 512
+  JsHttpFindMaxLength = 16_384
+  JsHttpFindDefaultLimit = 1000
+  JsHttpFindMaxLimit = 10_000
+  JsHttpFindErrorBodyBytes = 1024
+
+proc utf8Boundary(s: string, index: int): int =
+  ## `index` moved back to the start of the UTF-8 sequence it falls in, so a
+  ## slice ending there never splits a character.
+  result = min(index, s.len)
+  while result > 0 and result < s.len and (s[result].uint8 and 0xC0) == 0x80:
+    dec result
+
+proc findSnippets*(body, needle: string, length, limit: int): JsonNode =
+  ## The text at each occurrence of `needle` (needle included), `length`
+  ## bytes at most, for `httpRequest`'s `find`. Lets a JS app scrape a page
+  ## bigger than its heap: a Google Photos share page is 1.2 MB, which as a
+  ## JS string (and the JSON it rides in) is over an ESP32 runtime's 4 MB,
+  ## while the photo links in it are a few KB.
+  result = newJArray()
+  if needle.len == 0:
+    return
+  var i = body.find(needle)
+  while i >= 0 and result.len < limit:
+    result.add(%*body[i ..< utf8Boundary(body, i + max(length, needle.len))])
+    i = body.find(needle, i + needle.len)
+
 proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
   ## Bounded HTTP request with method/headers/body. Options JSON:
   ## {method, headers: {name: value}, body, bodyBase64, base64 (return body
-  ## base64-encoded, required for binary responses), timeoutMs}.
-  ## Returns JSON: {status, body | bodyBase64} or {status: 0, error}.
+  ## base64-encoded, required for binary responses), timeoutMs, find,
+  ## findLength, findLimit}.
+  ## Returns JSON: {status, body | bodyBase64} or {status: 0, error}. With
+  ## `find` the body stays native: the response carries `found` (the text
+  ## at each occurrence, findLimit of them, findLength bytes each) and, for a
+  ## non-2xx status, the first KB of the body so the error stays readable.
   let e = env(ctx)
   var response = %*{"status": 0}
 
@@ -238,20 +370,38 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     # thread until the systemd watchdog fired.
     let timeoutMs = capToRenderDeadline(clamp(options{"timeoutMs"}.getInt(DefaultFetchTimeoutMs), 1000, JsHttpMaxTimeoutMs))
     let maxSeconds = capToRenderDeadline(int(max(DefaultFetchMaxSeconds, timeoutMs.float / 1000.0 + 30.0) * 1000)).float / 1000.0
-    let res = boundedRequestWithHeaders(
-      urlStr,
-      httpMethod = options{"method"}.getStr("GET").toUpperAscii(),
-      body = body,
-      headers = headers,
-      timeoutMs = timeoutMs,
-      maxBytes = jsFetchMaxBytes(e),
-      maxSeconds = maxSeconds
-    )
-    response["status"] = %*res.code
-    if options{"base64"}.getBool(false):
-      response["bodyBase64"] = %*encode(res.body)
+    let httpMethod = options{"method"}.getStr("GET").toUpperAscii()
+    var code = 0
+    var resBody = ""
+    var answered = false
+    when defined(testing):
+      if jsHttpRequestHook != nil:
+        (code, resBody) = jsHttpRequestHook(urlStr, httpMethod, body, headers)
+        answered = true
+    if not answered:
+      let res = boundedRequestWithHeaders(
+        urlStr,
+        httpMethod = httpMethod,
+        body = body,
+        headers = headers,
+        timeoutMs = timeoutMs,
+        maxBytes = jsFetchMaxBytes(e),
+        maxSeconds = maxSeconds
+      )
+      code = res.code
+      resBody = res.body
+    response["status"] = %*code
+    let find = options{"find"}.getStr("")
+    if find.len > 0:
+      let length = clamp(options{"findLength"}.getInt(JsHttpFindDefaultLength), 1, JsHttpFindMaxLength)
+      let limit = clamp(options{"findLimit"}.getInt(JsHttpFindDefaultLimit), 1, JsHttpFindMaxLimit)
+      response["found"] = findSnippets(resBody, find, length, limit)
+      if code < 200 or code >= 300:
+        response["body"] = %*resBody[0 ..< utf8Boundary(resBody, JsHttpFindErrorBodyBytes)]
+    elif options{"base64"}.getBool(false):
+      response["bodyBase64"] = %*encode(resBody)
     else:
-      response["body"] = %*res.body
+      response["body"] = %*resBody
   except CatchableError as err:
     response["error"] = %*err.msg
     if e != nil:
@@ -293,9 +443,10 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
   ## Downloads and decodes an image natively, so the bytes never enter the JS
   ## heap: a JS app gets back an image reference it returns as its output,
   ## never the pixels. Options JSON: {headers: {name: value},
-  ## saveAsset: {name, extension, mode: "auto" | "always"}, colors}. Returns
-  ## JSON {image: imageRef | null, width, height, savedAs?} or
-  ## {image: null, error}.
+  ## saveAsset: {name, extension, mode: "auto" | "always"}, exif: bool,
+  ## colors}. Returns JSON {image: imageRef | null, width, height, savedAs?,
+  ## exif?, exifSummary?} or {image: null, error}. A `data:` URL decodes the
+  ## same way, which is how an app shows an image an API returned as base64.
   ##
   ## This is the producer's half of the `intoTarget` handshake for a JS app
   ## (docs/value-pipeline.md). The planner offers a JS node the consumer's
@@ -311,8 +462,10 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
   ##
   ## `saveAsset` keeps the downloaded bytes as a frame asset the way the Nim
   ## photo apps do (`saved/<app>/<name>.<md5><ext>`; "auto" honours the
-  ## frame's own save-assets setting). The bytes exist only on hosts: the
-  ## embedded streaming path keeps no copy, and reports no `savedAs`.
+  ## frame's own save-assets setting). `exif` reads the EXIF block of those
+  ## bytes (exiftool where the host has it, then the built-in parser). The
+  ## bytes exist only on hosts: the embedded streaming path keeps no copy, and
+  ## reports no `savedAs` and no `exif`.
   ##
   ## `colors` is the image's own color profile (docs/asset-color-profiles.md),
   ## applied the way `loadAssetImage` applies a sidecar: palette override,
@@ -391,6 +544,16 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
           sanitizedAssetExtension(save{"extension"}.getStr("")), downloaded.data, mode == "auto")
         if saved.len > 0:
           response["savedAs"] = %*saved
+
+    if options{"exif"}.getBool(false) and downloaded.data.len > 0:
+      var metadata = %*{}
+      let exifTool = getExifMetadataFromData(downloaded.data)
+      if exifTool.isSome:
+        metadata["exif"] = exifTool.get()
+      mergeParsedExif(metadata, downloaded.data)
+      for key in ["exif", "exifSummary"]:
+        if metadata.hasKey(key):
+          response[key] = metadata[key]
   except CatchableError as err:
     response["error"] = %*err.msg
     frameos_apps.logError(e.owner, "JS app fetchImage failed: " & err.msg)
@@ -818,6 +981,13 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     return nimStringToJS(ctx, e.owner.frameConfig.assetsPath)
   of "timeZone":
     return nimStringToJS(ctx, e.owner.frameConfig.timeZone)
+  of "debug":
+    return nimBoolToJS(ctx, e.owner.frameConfig.debug)
+  of "embedded":
+    # An ESP32-class runtime, or the preview running as one: no storage for
+    # assets, a few MB of PSRAM. The OpenAI image app asks for a lighter
+    # picture there.
+    return nimBoolToJS(ctx, runsAsEmbedded())
   else:
     return jsUndefSentinel(ctx)
 
@@ -876,7 +1046,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
       for key in state.keys:
         keys.add(key)
   of "frame":
-    keys = @["width", "height", "rotate", "assetsPath", "timeZone"]
+    keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded"]
   of "context":
     keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
     if e.context.hasImage and not e.context.image.isNil:
@@ -1193,6 +1363,11 @@ proc runtimeConfigFromNode(config: JsonNode, nodeConfig: JsonNode): JsonNode =
       let fieldType = field{"type"}.getStr()
       if name.len == 0:
         continue
+      # One name may be declared more than once, each behind its own showIf
+      # (openaiImage's `size` per model). The first declaration supplies the
+      # default, as it does for a Nim app's loader and the editor's typings.
+      if fieldTypes.hasKey(name) or result.hasKey(name):
+        continue
       if fieldType.len > 0:
         fieldTypes[name] = fieldType
       if field.hasKey("value"):
@@ -1251,8 +1426,8 @@ proc releaseJsAppRuntime*(app: AppRoot) =
   ##
   ## Scene cleanup has to call this explicitly. Dropping the app object is not
   ## enough — JsAppRuntime owns raw QuickJS pointers and has no destructor —
-  ## and on embedded `liveJsRuntimes` holds a reference to every runtime it has
-  ## ever readied, so nothing about dropping the scene makes one collectable.
+  ## and `liveJsRuntimes` holds a reference to every runtime it has ever
+  ## readied, so nothing about dropping the scene makes one collectable.
   ## The cost is per NODE, not per scene: the bundled Weather scene builds four
   ## (~148 KB of PSRAM each, measured with -d:memProbe), so a frame cycling
   ## between two JS scenes used to shed a few hundred KB per switch and reboot
@@ -1262,14 +1437,13 @@ proc releaseJsAppRuntime*(app: AppRoot) =
   let runtime = DynamicJsApp(app).runtime
   if runtime.isNil:
     return
-  when defined(frameosEmbedded):
-    # Never pull the rug from under a runtime that is mid-call; scene teardown
-    # runs between renders, so this is belt-and-braces.
-    if jsRuntimeStack.contains(runtime):
-      return
-    let live = liveJsRuntimes.find(runtime)
-    if live >= 0:
-      liveJsRuntimes.delete(live)
+  # Never pull the rug from under a runtime that is mid-call; scene teardown
+  # runs between renders, so this is belt-and-braces.
+  if jsRuntimeStack.contains(runtime):
+    return
+  let live = liveJsRuntimes.find(runtime)
+  if live >= 0:
+    liveJsRuntimes.delete(live)
   teardownJsRuntime(runtime)
 
 proc setDynamicJsAppField*(app: AppRoot, field: string, value: Value) =
@@ -1291,8 +1465,8 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   when defined(frameosEmbedded):
     # Reclaim the other nodes' interpreters before building this one.
     evictIdleJsRuntimes(runtime)
-    if not liveJsRuntimes.contains(runtime):
-      liveJsRuntimes.add(runtime)
+  if not liveJsRuntimes.contains(runtime):
+    liveJsRuntimes.add(runtime)
 
   when defined(memProbe): memProbe("    newQuickJS BEFORE")
   runtime.js = newQuickJS(sceneJsConfig(frameConfig, sceneId))
@@ -1302,6 +1476,8 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsAppLog", jsAppLog)
   runtime.js.registerFunction("jsSetNextSleep", jsSetNextSleep)
   runtime.js.registerFunction("jsSetState", jsSetState)
+  runtime.js.registerFunction("jsRemember", jsRemember)
+  runtime.js.registerFunction("jsRecall", jsRecall)
   runtime.js.registerFunction("jsFetchText", jsFetchText)
   runtime.js.registerFunction("jsHttpRequest", jsHttpRequest)
   runtime.js.registerFunction("jsFetchImage", jsFetchImage)
@@ -1382,6 +1558,14 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
       String(key || ""),
       JSON.stringify(value === undefined ? null : value, __jsReplacer)
     ),
+    remember: (key, value) => jsRemember(
+      String(key || ""),
+      JSON.stringify(value === undefined ? null : value, __jsReplacer)
+    ) === true,
+    recall: (key) => {
+      const kept = jsRecall(String(key || ""));
+      return kept ? JSON.parse(kept) : undefined;
+    },
   };
   globalThis.__frameosModule = {};
   const exports = globalThis.__frameosModule;
@@ -1700,16 +1884,20 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
 
   runtime.toValue(owner, context, jsValueToJson(ctx, payload), expectedType)
 
-proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext, fnName: string): JSValue =
+type JsAppError* = object of CatchableError
+  ## A JS app's get() threw. The message is the JS error's; the mapped stack
+  ## is already logged.
+
+proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext, fnName: string,
+    raiseOnError = false): JSValue =
   ensureReady(runtime, owner.frameConfig, if owner.scene.isNil: "" else: owner.scene.id.string)
   let ctx = runtime.js.context
   let fnNameValue = nimStringToJS(ctx, fnName)
   defer: JS_FreeValue(ctx, fnNameValue)
 
   jsAppEnvByCtx[ctx] = JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson, context: context)
-  # A JS app can run another node, which can be another JS app, so track the
-  # whole call chain — an ancestor mid-call must never be evicted underneath.
-  when defined(frameosEmbedded): jsRuntimeStack.add(runtime)
+  # Callers hold the runtime on jsRuntimeStack (midCall) for as long as they
+  # hold the value this returns.
   when defined(memProbe): memProbe("    js invoke " & fnName & " BEFORE")
   result =
     try:
@@ -1717,9 +1905,6 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
     finally:
       if jsAppEnvByCtx.hasKey(ctx):
         jsAppEnvByCtx.del(ctx)
-      when defined(frameosEmbedded):
-        if jsRuntimeStack.len > 0 and jsRuntimeStack[^1] == runtime:
-          discard jsRuntimeStack.pop()
       when defined(memProbe): memProbe("    js invoke " & fnName & " AFTER")
 
   if JS_IsException(result) != 0:
@@ -1733,6 +1918,8 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
         "stack": details.stack
       })
     JS_FreeValue(ctx, result)
+    if raiseOnError:
+      raise newException(JsAppError, details.message)
     return jsNull(ctx)
 
 proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
@@ -1747,32 +1934,39 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
     loopKey: ".",
     nextSleep: -1
   )
-  let payload = runtime.invoke(owner, configJson, context, "init")
-  JS_FreeValue(runtime.js.context, payload)
+  runtime.midCall:
+    let payload = runtime.invoke(owner, configJson, context, "init")
+    JS_FreeValue(runtime.js.context, payload)
   runtime.initialized = true
 
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
   runtime.init(owner, configJson)
   try:
-    let payload = runtime.invoke(owner, configJson, context, "get")
-    defer: JS_FreeValue(runtime.js.context, payload)
-    return toValue(runtime, owner, context, payload, runtime.outputType)
+    runtime.midCall:
+      # A throw fails the node, as a raising Nim app does: the interpreter then
+      # defaults the consumer's arg or paints the error into its image, and the
+      # node cache keeps nothing. It used to hand the consumer null instead,
+      # which the cache then served until it expired.
+      let payload = runtime.invoke(owner, configJson, context, "get", raiseOnError = true)
+      defer: JS_FreeValue(runtime.js.context, payload)
+      return toValue(runtime, owner, context, payload, runtime.outputType)
   finally:
     runtime.clearTransientImages()
 
 proc run*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext) =
   runtime.init(owner, configJson)
   try:
-    let payload = runtime.invoke(owner, configJson, context, "run")
-    defer: JS_FreeValue(runtime.js.context, payload)
-    if runtime.category == "render":
-      let value = toValue(runtime, owner, context, payload, "image")
-      if value.kind == fkImage and not value.asImage().isNil:
-        let drawn = value.asImage()
-        context.image.draw(drawn)
-        # A render app's image lands at the origin, its own size.
-        applyAutoFitToDrawn(context.image, 0, 0, min(drawn.width, context.image.width),
-          min(drawn.height, context.image.height), drawn)
+    runtime.midCall:
+      let payload = runtime.invoke(owner, configJson, context, "run")
+      defer: JS_FreeValue(runtime.js.context, payload)
+      if runtime.category == "render":
+        let value = toValue(runtime, owner, context, payload, "image")
+        if value.kind == fkImage and not value.asImage().isNil:
+          let drawn = value.asImage()
+          context.image.draw(drawn)
+          # A render app's image lands at the origin, its own size.
+          applyAutoFitToDrawn(context.image, 0, 0, min(drawn.width, context.image.width),
+            min(drawn.height, context.image.height), drawn)
   finally:
     runtime.clearTransientImages()
 

@@ -41,7 +41,7 @@
         "id": "9f106977-5929-4c9a-884e-35b0bc7b51d4",
         "position": { "x": 487, "y": 16 },
         "data": {
-          "keyword": "data/frameOSGallery",
+          "keyword": "frameOSGallery",
           "config": { "category": "building-art-styles" },
           "cache": { "duration": "60", "durationEnabled": true, "enabled": true, "inputEnabled": true }
         },
@@ -108,6 +108,67 @@
         "targetHandle": "fieldInput/duration",
         "type": "codeNodeEdge"
       }
-    ]
+    ],
+    "apps": {
+      "frameOSGallery": {
+        "name": "FrameOS Gallery",
+        "description": "Random image from the FrameOS gallery",
+        "category": "data",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries."
+          },
+          {
+            "name": "category",
+            "type": "select",
+            "options": [
+              "building-art-styles",
+              "cute",
+              "cyberpunk-europe",
+              "low-poly-animals",
+              "masterpieces",
+              "space-gallery",
+              "space-odyssey",
+              "other"
+            ],
+            "value": "cute",
+            "required": false,
+            "label": "Category"
+          },
+          {
+            "name": "categoryOther",
+            "type": "string",
+            "value": "",
+            "required": false,
+            "label": "Category (if other)",
+            "showIf": [
+              {
+                "field": "category",
+                "operator": "eq",
+                "value": "other"
+              }
+            ]
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "cache": {
+          "enabled": true,
+          "inputEnabled": true,
+          "durationEnabled": true,
+          "duration": "900"
+        },
+        "origin": "repo/apps/image/frameOSGallery",
+        "sources": {
+          "app.ts": "export function get(app: FrameOSApp) {\n  const { category, categoryOther } = app.config\n  const name = category === 'other' ? categoryOther.trim() : category\n  if (!name) throw new Error('Please enter the name of a gallery under \"Category (if other)\".')\n  frameos.log(`FrameOS Gallery category: ${name}`)\n  const photo = frameos.fetchImage(`https://gallery.frameos.net/image?category=${encodeURIComponent(name)}`)\n  if (!photo.image)\n    throw new Error(`An error occurred while downloading the gallery image. ${photo.error ?? 'unknown error'}`)\n  return photo.image\n}\n",
+          "config.json": "{\n  \"name\": \"FrameOS Gallery\",\n  \"description\": \"Random image from the FrameOS gallery\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    { \"markdown\": \"[Click here](https://gallery.frameos.net/) to see all the galleries.\" },\n    {\n      \"name\": \"category\",\n      \"type\": \"select\",\n      \"options\": [\n        \"building-art-styles\",\n        \"cute\",\n        \"cyberpunk-europe\",\n        \"low-poly-animals\",\n        \"masterpieces\",\n        \"space-gallery\",\n        \"space-odyssey\",\n        \"other\"\n      ],\n      \"value\": \"cute\",\n      \"required\": false,\n      \"label\": \"Category\"\n    },\n    {\n      \"name\": \"categoryOther\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Category (if other)\",\n      \"showIf\": [{ \"field\": \"category\", \"operator\": \"eq\", \"value\": \"other\" }]\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
+        }
+      }
+    }
   }
 ]

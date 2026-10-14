@@ -3,7 +3,6 @@ import pixie
 import ../interpreter
 import ../types
 import ../utils/app_images
-import ../../apps/data/frameOSGallery/app as galleryApp
 
 # The interpreter's decode-target hint, from the interpreter's side.
 #
@@ -35,7 +34,11 @@ proc recordingDownload(url: string, maxBytes: int, target: Image,
   # 4MB of RGBA is what blew the ESP32 decode budget.
   newImage(1024, 1024)
 
-galleryDownloadHook = recordingDownload
+proc recordingContextDownload(url: string, maxBytes: int, target: Image,
+    fit: ScaledDecodeFit, boundWidth: int, boundHeight: int): tuple[image: Image, data: string] =
+  (recordingDownload(url, maxBytes, target, fit), "")
+
+contextDownloadHook = recordingContextDownload
 
 proc testConfig(): FrameConfig =
   FrameConfig(
@@ -63,14 +66,14 @@ proc edge(id, source: int, sourceHandle: string, target: int,
   DiagramEdge(id: id.NodeId, source: source.NodeId, sourceHandle: sourceHandle,
     target: target.NodeId, targetHandle: targetHandle, data: %*{})
 
-proc galleryScene(producerCached: bool, imageConfig: JsonNode,
+proc photoScene(producerCached: bool, imageConfig: JsonNode,
     withOpacity = false): ExportedInterpretedScene =
   var nodes = @[
     node(1, "event", %*{"keyword": "render"}),
     node(2, "app", %*{"keyword": "render/image", "config": imageConfig}),
     node(3, "app", %*{
-      "keyword": "data/frameOSGallery",
-      "config": {"category": "nature"},
+      "keyword": "data/downloadImage",
+      "config": {"url": "https://example.com/photo.jpg"},
       "cache": {
         "enabled": producerCached,
         "inputEnabled": false,
@@ -103,7 +106,7 @@ proc renderWith(producerCached: bool, imageConfig: JsonNode = %*{},
     withOpacity = false): tuple[target: Image, canvas: Image, calls: int] =
   let sceneId = "tests/decode-target".SceneId
   var uploaded = initTable[SceneId, ExportedInterpretedScene]()
-  uploaded[sceneId] = galleryScene(producerCached, imageConfig, withOpacity)
+  uploaded[sceneId] = photoScene(producerCached, imageConfig, withOpacity)
   setUploadedInterpretedScenes(uploaded)
   resetInterpretedScenes()
 
@@ -179,7 +182,7 @@ block the_plan_records_why_it_chose_an_owned_target:
   let sceneId = "tests/decode-target".SceneId
   proc planFor(producerCached: bool, withOpacity: bool): ImageFusionPlan =
     var uploaded = initTable[SceneId, ExportedInterpretedScene]()
-    uploaded[sceneId] = galleryScene(producerCached, %*{}, withOpacity)
+    uploaded[sceneId] = photoScene(producerCached, %*{}, withOpacity)
     setUploadedInterpretedScenes(uploaded)
     resetInterpretedScenes()
     let config = testConfig()
@@ -221,9 +224,10 @@ block offset_draw_stays_unhinted:
 # was correct in the tests and wrong in every file we ship. A new template that
 # draws a downloaded image some way that loses the hint fails here.
 #
-# Two seams feed this: frameOSGallery's own download hook, and the shared
-# contextDownloadHook that the other six producers funnel through. Neither
-# reaches the network, so this runs offline.
+# One seam feeds this: the shared contextDownloadHook that every producer
+# funnels through, the JavaScript apps' frameos.fetchImage included (the
+# gallery scenes run the repo/apps/image/frameOSGallery app). It never reaches
+# the network, so this runs offline.
 # ---------------------------------------------------------------------------
 
 const RepoScenesDir = "../repo/scenes"
@@ -255,12 +259,6 @@ proc needsUnseamedNetwork(sceneJson: string): bool =
     if sceneJson.contains(app):
       return true
   false
-
-proc recordingContextDownload(url: string, maxBytes: int, target: Image,
-    fit: ScaledDecodeFit, boundWidth: int, boundHeight: int): tuple[image: Image, data: string] =
-  (recordingDownload(url, maxBytes, target, fit), "")
-
-contextDownloadHook = recordingContextDownload
 
 var shippedScenesChecked = 0
 var shippedProducerCalls = 0

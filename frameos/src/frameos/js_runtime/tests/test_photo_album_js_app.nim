@@ -1,4 +1,4 @@
-## The Photo album code app (repo/apps/code/photoAlbum) run for real through
+## The Photo album code app (repo/apps/image/photoAlbum) run for real through
 ## the JS app runtime, against a mock of the Photos share routes
 ## (docs/photos.md, "Share routes") on a thread: the counter in scene state,
 ## the order, root-relative and absolute photo addresses, a CDN redirect, a
@@ -14,7 +14,7 @@ import frameos/utils/dither
 import frameos/utils/http_client
 import frameos/values
 
-const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "code" / "photoAlbum"
+const AppDir = currentSourcePath().parentDir() / ".." / ".." / ".." / ".." / ".." / "repo" / "apps" / "image" / "photoAlbum"
 let appSource = readFile(AppDir / "app.ts")
 let appConfigJson = readFile(AppDir / "config.json")
 

@@ -1,0 +1,37 @@
+{
+  "name": "Recycling Calendar for Belgium",
+  "description": "Trash pickup dates as a JSON event list",
+  "category": "data",
+  "version": "1.1.0",
+  "fields": [
+    { "name": "streetName", "type": "string", "value": "", "required": true, "label": "Street name" },
+    { "name": "number", "type": "integer", "value": "", "required": true, "label": "Number" },
+    { "name": "postalCode", "type": "integer", "value": "", "required": true, "label": "Postal code" },
+    {
+      "name": "exportFrom",
+      "type": "string",
+      "value": "",
+      "label": "Export events from (YYYY-MM-DD)",
+      "placeholder": "now"
+    },
+    {
+      "name": "exportUntil",
+      "type": "string",
+      "value": "",
+      "label": "Export events until (YYYY-MM-DD)",
+      "placeholder": "1 year later"
+    },
+    { "name": "exportCount", "type": "integer", "value": "50", "label": "Maximum number of events to export" },
+    {
+      "name": "language",
+      "type": "select",
+      "options": ["en", "fr", "nl"],
+      "value": "en",
+      "required": true,
+      "label": "Language"
+    },
+    { "markdown": "[{ summary, startTime, endTime, timezone }]" }
+  ],
+  "output": [{ "name": "events", "type": "json" }],
+  "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "14400" }
+}

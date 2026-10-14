@@ -29,7 +29,7 @@ describe("bundled AI context", () => {
   it("bundles JS app sources but never Nim", () => {
     const catalog = appCatalog();
     const repoApps = Object.values(catalog).filter((app) =>
-      app.keyword.startsWith("repo/apps/code/"),
+      app.keyword.startsWith("repo/apps/"),
     );
     expect(repoApps.length).toBeGreaterThan(3);
     const withSources = repoApps.filter(

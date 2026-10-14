@@ -857,7 +857,7 @@ describe("command redelivery", () => {
       nodes: Array<{ data: { config: unknown; keyword: string } }>;
     }>;
     expect(pushed?.nodes[0]?.data).toEqual({ config: { mode: "favorites" }, keyword: "immich" });
-    expect(pushed?.apps?.immich?.origin).toBe("repo/apps/code/immich");
+    expect(pushed?.apps?.immich?.origin).toBe("repo/apps/image/immich");
     expect(push.scene_id).toBe("photos");
     const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
     expect(row?.assignedChecksum).toBe(push.checksum);

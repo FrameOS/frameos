@@ -183,7 +183,7 @@ backend push it from firmware 2026.10.4 on (`docs/cloud-frames-contract.json`).
 * The JS runtime's `loadAssetImage(path)` — same treatment.
 * The JS runtime's `fetchImage(url, {colors})` — a downloaded image's profile,
   given as the sidecar's inner `colors` object (or a whole sidecar). Photos
-  sends each photo's profile this way (`repo/apps/code/photoAlbum`,
+  sends each photo's profile this way (`repo/apps/image/photoAlbum`,
   `docs/photos.md`). Same treatment, `contain` included: with adjustments the
   offered target is left unclaimed. `colors: null` means the image has no
   profile and clears an earlier palette override; without the key nothing

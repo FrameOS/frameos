@@ -43,7 +43,7 @@ describe("draws_svg", () => {
     expect(run({ type: "draws_svg" }, [renderSvg]).passed).toBe(true);
 
     const template = {
-      apps: { dots: { origin: "repo/apps/code/jsSvg", sources: { "app.ts": "export const get = () => null" } } },
+      apps: { dots: { origin: "repo/apps/text/jsSvg", sources: { "app.ts": "export const get = () => null" } } },
       nodes: [event, { data: { config: {}, keyword: "dots" }, id: "dots", type: "app" }],
     };
     expect(run({ type: "draws_svg" }, [template]).passed).toBe(true);

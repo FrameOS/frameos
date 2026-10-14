@@ -62,6 +62,29 @@ when defined(testing):
   # headroom) on a development host. 0 disables the override.
   var availableRenderBytesOverride* = 0
 
+when defined(frameosWasm) or defined(testing):
+  var simulatingEmbedded = false
+
+  proc setSimulatedEmbedded*(enabled: bool) =
+    ## The preview runs as an ESP32 (frameos_wasm_set_embedded: the device
+    ## picker's ESP32 presets, or a preview of an ESP32 frame); tests use it
+    ## to check both behaviours on one host.
+    simulatingEmbedded = enabled
+
+proc runsAsEmbedded*(): bool {.inline.} =
+  ## An ESP32-class runtime: the firmware always, the editor's preview while
+  ## it simulates one. What changes with it: a JS app's interpreter lasts one
+  ## render (single_scene_host.renderScene), `app.frame.embedded` is true,
+  ## and a download decodes into the canvas the way the device's does
+  ## (utils/image.nim). Everything else keeps an interpreter for the
+  ## scene's life, as a Pi does.
+  when defined(frameosEmbedded):
+    true
+  elif defined(frameosWasm) or defined(testing):
+    simulatingEmbedded
+  else:
+    false
+
 when defined(memProbe):
   proc c_printf(fmt: cstring) {.importc: "printf", varargs, cdecl.}
   when defined(frameosEmbedded):
@@ -148,6 +171,21 @@ proc availableRenderHeadroomBytes*(): int =
     # Development hosts: plenty of memory, keep decodes bounded anyway.
     1024 * 1024 * 1024
 
+proc decodeHeadroomBytes(): int =
+  ## The headroom a decoder may plan for. On the device that is free PSRAM
+  ## less EmbeddedReserveBytes, which also covers what a decode allocates
+  ## outside its plan. The preview's ESP32 presets leave that reserve out of
+  ## the ceiling, because the planner then declined to fuse a panel the
+  ## device fuses (frameos/wasm/src/devices.ts), so it is kept here, for the
+  ## decoders alone. Without it a 1920 px photo on a 13.3" panel planned
+  ## right up to the ceiling and the next allocation was refused, where the
+  ## device plans 1.5 MB smaller and renders it.
+  result = availableRenderHeadroomBytes()
+  when defined(frameosWasm):
+    const SimulatedDecodeReserveBytes = 1536 * 1024
+    if runsAsEmbedded() and simulatedRenderBytes() > 0:
+      result = max(0, result - SimulatedDecodeReserveBytes)
+
 proc refreshDecodeContiguousBudget() =
   ## The headroom budget answers whether a decode's buffers can coexist;
   ## this one bounds the largest SINGLE buffer by the largest free block.
@@ -172,7 +210,7 @@ proc refreshDecodeBudget*() =
   ## answer refused a 1.4MB streamed-JPEG working set the heap held with
   ## room to spare (spill bench, 2026-08). Single image-sized buffers keep
   ## checking availableRenderBytes at their own call sites.
-  let available = availableRenderHeadroomBytes()
+  let available = decodeHeadroomBytes()
   if available > 0:
     setDecodeBudgetBytes(available div 2)
   refreshDecodeContiguousBudget()
@@ -184,7 +222,7 @@ proc refreshDecodeBudgetInto*() =
   ## and the whole headroom may hold the decode plan. The emergency reserve
   ## sits outside the headroom either way. On the 13.3E6 the halved budget
   ## refused a spilled 4.4MB JPEG whose ~1.8MB plan fit the heap twice over.
-  let available = availableRenderHeadroomBytes()
+  let available = decodeHeadroomBytes()
   if available > 0:
     setDecodeBudgetBytes(available)
   refreshDecodeContiguousBudget()

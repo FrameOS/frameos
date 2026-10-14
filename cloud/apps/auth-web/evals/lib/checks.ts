@@ -37,7 +37,7 @@ function fieldsOf(scenes: unknown[]): JsonObject[] {
 }
 
 // An app node "uses" a keyword when its keyword matches, or when it is a
-// scene-local app whose origin is that repo app (weatherPanel -> repo/apps/code/weatherPanel).
+// scene-local app whose origin is that repo app (weatherPanel -> repo/apps/image/weatherPanel).
 function appKeywordsUsed(scenes: unknown[]): string[] {
   const keywords: string[] = [];
   for (const scene of scenes) {
@@ -92,7 +92,7 @@ const SVG_SOURCE = /frameos\.svg\s*\(|<svg[\s>]/;
 // frameos.svg(...) into render/image — which is what the prompt prescribes.
 function svgRoute(scenes: unknown[]): string | null {
   const keywords = appKeywordsUsed(scenes);
-  const app = ["render/svg", "repo/apps/code/jsSvg", "jsSvg"].find((keyword) => keywords.includes(keyword));
+  const app = ["render/svg", "repo/apps/text/jsSvg", "jsSvg"].find((keyword) => keywords.includes(keyword));
   if (app) {
     return app;
   }

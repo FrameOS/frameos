@@ -1,7 +1,10 @@
 """Built-in Nim apps retired in favour of a repo JavaScript app.
 
-`data/immich` became the scene-local JS app from `repo/apps/code/immich`,
-which needs `frameos.fetchImage` and so a runtime from 2026.10.11 on.
+Eleven of them so far (data/immich, data/frameOSGallery, render/chart, …): each
+became the scene-local JS app of the same name from `repo/apps/<folder>/`, which
+runs on the runtime its `runtime` names and later. A retired render app's node
+in the render flow becomes the app its `renderFlow` names (render/image), fed
+by a new node of the replacement.
 `docs/retired-apps.json` is the contract (RETIRED_APPS below is its copy,
 pinned by test_retired_apps.py), docs/retired-apps.md the prose, and
 docs/retired-apps-fixtures.json the corpus this module and the cloud's
@@ -30,10 +33,71 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 RETIRED_APPS: dict[str, dict[str, str]] = {
     "data/immich": {
-        "replacement": "repo/apps/code/immich",
+        "replacement": "repo/apps/image/immich",
         "sceneAppKey": "immich",
         "runtime": "2026.10.11",
         "needs": "frameos.fetchImage",
+    },
+    "data/frameOSGallery": {
+        "replacement": "repo/apps/image/frameOSGallery",
+        "sceneAppKey": "frameOSGallery",
+        "runtime": "2026.10.13",
+        "needs": "a throw in get() failing the node (the painted error)",
+    },
+    "data/unsplash": {
+        "replacement": "repo/apps/image/unsplash",
+        "sceneAppKey": "unsplash",
+        "runtime": "2026.10.13",
+        "needs": "a throw in get() failing the node (the painted error)",
+    },
+    "data/wikicommons": {
+        "replacement": "repo/apps/image/wikicommons",
+        "sceneAppKey": "wikicommons",
+        "runtime": "2026.10.13",
+        "needs": "a throw in get() failing the node (the painted error)",
+    },
+    "data/googlePhotos": {
+        "replacement": "repo/apps/image/googlePhotos",
+        "sceneAppKey": "googlePhotos",
+        "runtime": "2026.10.13",
+        "needs": "frameos.remember (the album list outlives an ESP32 render)",
+    },
+    "data/openaiImage": {
+        "replacement": "repo/apps/image/openaiImage",
+        "sceneAppKey": "openaiImage",
+        "runtime": "2026.10.13",
+        "needs": "app.frame.embedded and saving a data: URL (the b64_json reply)",
+    },
+    "data/openaiText": {
+        "replacement": "repo/apps/text/openaiText",
+        "sceneAppKey": "openaiText",
+        "runtime": "2026.10.11",
+        "needs": "frameos.httpRequest",
+    },
+    "data/haSensor": {
+        "replacement": "repo/apps/json/haSensor",
+        "sceneAppKey": "haSensor",
+        "runtime": "2026.10.11",
+        "needs": "frameos.httpRequest",
+    },
+    "data/weather": {
+        "replacement": "repo/apps/json/weather",
+        "sceneAppKey": "weather",
+        "runtime": "2026.10.11",
+        "needs": "frameos.httpRequest",
+    },
+    "data/beRecycle": {
+        "replacement": "repo/apps/json/beRecycle",
+        "sceneAppKey": "beRecycle",
+        "runtime": "2026.10.13",
+        "needs": "a throw in get() failing the node",
+    },
+    "render/chart": {
+        "replacement": "repo/apps/image/chart",
+        "sceneAppKey": "chart",
+        "runtime": "2026.10.13",
+        "needs": "nothing new: an older frame keeps the built-in chart it has",
+        "renderFlow": "render/image",
     },
 }
 
@@ -55,6 +119,28 @@ def _replacement_app_entry(origin: str) -> dict[str, Any]:
         if path.is_file() and not path.name.endswith(".nim")
     }
     return {**config, "origin": origin, "sources": sources}
+
+
+def retired_app_config(keyword: str | None) -> dict[str, Any] | None:
+    """The replacement's config.json for a retired keyword, for readers that
+    look an app up by keyword (the settings it declares, its fields) and meet
+    a scene that was not converted yet. None for any other keyword."""
+    spec = RETIRED_APPS.get(keyword or "")
+    if spec is None:
+        return None
+    entry = _replacement_app_entry(spec["replacement"])
+    return {key: value for key, value in entry.items() if key not in ("origin", "sources")}
+
+
+def _repo_app_name(origin: Any) -> str | None:
+    """The app an origin names, `repo/apps/<folder>/<name>` → name. Origins
+    compare by it: the folder moved once (every app was under repo/apps/code
+    until 2026.10.13), and scenes saved before still name the old one."""
+    if isinstance(origin, str):
+        parts = origin.split("/")
+        if len(parts) == 4 and parts[:2] == ["repo", "apps"] and parts[3]:
+            return parts[3]
+    return None
 
 
 def _app_nodes(scene: dict) -> list[dict]:
@@ -97,7 +183,11 @@ def retire_apps_in_scene(scene: Any, keywords: Iterable[str] | None = None) -> b
         key = None
         if apps:
             key = next(
-                (name for name, app in apps.items() if isinstance(app, dict) and app.get("origin") == origin),
+                (
+                    name
+                    for name, app in apps.items()
+                    if isinstance(app, dict) and _repo_app_name(app.get("origin")) == _repo_app_name(origin)
+                ),
                 None,
             )
         if key is None:
@@ -108,10 +198,81 @@ def retire_apps_in_scene(scene: Any, keywords: Iterable[str] | None = None) -> b
             while key in apps:
                 key, suffix = f"{base}{suffix}", suffix + 1
             apps[key] = replacement_app_entry(origin)
+        consumer = spec.get("renderFlow")
         for node in nodes:
-            node["data"]["keyword"] = key
+            if consumer and _in_render_flow(scene, node):
+                _feed_from_new_node(scene, node, key, consumer, _field_names(origin))
+            else:
+                node["data"]["keyword"] = key
         changed = True
     return changed
+
+
+def _field_names(origin: str) -> set[str]:
+    fields = _replacement_app_entry(origin).get("fields") or []
+    return {field["name"] for field in fields if isinstance(field, dict) and isinstance(field.get("name"), str)}
+
+
+def _edges(scene: dict) -> list:
+    edges = scene.get("edges")
+    if not isinstance(edges, list):
+        edges = scene["edges"] = []
+    return edges
+
+
+def _in_render_flow(scene: dict, node: dict) -> bool:
+    """Whether the render flow runs this node: an edge into its `prev` (from the
+    previous app, or from a layout's `field/...` cell) or out of its `next`."""
+    node_id = node.get("id")
+    return any(
+        isinstance(edge, dict)
+        and (
+            (edge.get("target") == node_id and edge.get("targetHandle") == "prev")
+            or (edge.get("source") == node_id and edge.get("sourceHandle") == "next")
+        )
+        for edge in _edges(scene)
+    )
+
+
+def _unused_id(base: str, taken: set) -> str:
+    candidate, suffix = base, 2
+    while candidate in taken:
+        candidate, suffix = f"{base}{suffix}", suffix + 1
+    return candidate
+
+
+def _feed_from_new_node(scene: dict, node: dict, key: str, consumer: str, fields: set[str]) -> None:
+    """A retired render app in the render flow: the node stays where it is, as
+    `consumer` (render/image), and a new node of the replacement app, with the
+    old node's config, cache and field edges, feeds its image."""
+    nodes = scene["nodes"]
+    edges = _edges(scene)
+    data = node["data"]
+    node_id = node.get("id")
+    new_id = _unused_id(f"{node_id}-{key}", {entry.get("id") for entry in nodes if isinstance(entry, dict)})
+    new_data: dict[str, Any] = {"keyword": key, "config": data.get("config") or {}}
+    if "cache" in data:
+        new_data["cache"] = data["cache"]
+    new_node: dict[str, Any] = {"id": new_id, "type": "app", "data": new_data}
+    position = node.get("position")
+    if isinstance(position, dict) and isinstance(position.get("x"), (int, float)) and isinstance(position.get("y"), (int, float)):
+        new_node["position"] = {"x": position["x"], "y": position["y"] - 150}
+    nodes.insert(nodes.index(node) + 1, new_node)
+    node["data"] = {"keyword": consumer, "config": {}}
+    for edge in edges:
+        if not isinstance(edge, dict) or edge.get("target") != node_id:
+            continue
+        handle = edge.get("targetHandle")
+        if isinstance(handle, str) and handle.startswith("fieldInput/") and handle[len("fieldInput/"):] in fields:
+            edge["target"] = new_id
+    edges.append({
+        "id": _unused_id(f"{new_id}-image", {edge.get("id") for edge in edges if isinstance(edge, dict)}),
+        "type": "codeNodeEdge",
+        "source": new_id,
+        "sourceHandle": "fieldOutput",
+        "target": node_id,
+        "targetHandle": "fieldInput/image",
+    })
 
 
 def retire_apps_in_scenes(scenes: Any, keywords: Iterable[str] | None = None) -> bool:
@@ -132,14 +293,14 @@ def restore_apps_in_scene(scene: Any, keywords: Iterable[str] | None = None) -> 
     if not apps:
         return False
     selected = set(RETIRED_APPS if keywords is None else keywords)
-    by_origin = {
-        spec["replacement"]: keyword for keyword, spec in RETIRED_APPS.items() if keyword in selected
+    by_name = {
+        _repo_app_name(spec["replacement"]): keyword for keyword, spec in RETIRED_APPS.items() if keyword in selected
     }
     changed = False
     for key in list(apps):
         app = apps[key]
-        origin = app.get("origin") if isinstance(app, dict) else None
-        keyword = by_origin.get(origin) if isinstance(origin, str) else None
+        name = _repo_app_name(app.get("origin")) if isinstance(app, dict) else None
+        keyword = by_name.get(name) if name else None
         if keyword is None:
             continue
         for node in _app_nodes(scene):

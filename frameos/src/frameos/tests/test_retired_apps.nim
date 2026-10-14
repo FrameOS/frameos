@@ -1,6 +1,6 @@
-## A scene still on disk from before the runtime dropped the Nim Immich app
-## names `data/immich` with no scene-local app; the Linux runtime runs the
-## JavaScript app that replaced it (frameos/retired_apps.nim).
+## A scene still on disk from before the runtime dropped a Nim app names
+## `data/immich` (or `data/frameOSGallery`) with no scene-local app; the Linux
+## runtime runs the JavaScript app that replaced it (frameos/retired_apps.nim).
 
 import std/[json, strutils, tables, unittest]
 import pixie
@@ -37,8 +37,12 @@ suite "retired Nim apps":
     check not sources.isNil
     check sources{"app.ts"}.getStr().contains("frameos.fetchImage(")
     check parseJson(sources{"config.json"}.getStr())["settings"] == %*["immich"]
+    let gallery = retiredAppSources("data/frameOSGallery")
+    check not gallery.isNil
+    check gallery{"app.ts"}.getStr().contains("https://gallery.frameos.net/image")
     check retiredAppSources("data/clock").isNil
     check retiredAppSources("immich").isNil
+    check retiredAppSources("frameOSGallery").isNil
 
   test "a data/immich node runs the JavaScript app":
     let sceneId = "tests/retired-immich".SceneId
@@ -67,14 +71,51 @@ suite "retired Nim apps":
     let scene = init(sceneId, config, testLogger(config), %*{})
     check InterpretedFrameScene(scene).appsByNodeId[1.NodeId].isDynamicJsApp()
 
-    # No Immich settings on this frame: the JS app answers with its message
-    # panel, which proves it ran with the `immich` settings namespace it
-    # declares (getSetting would refuse an undeclared one).
-    let value = scene.getDataNode(1.NodeId, ExecutionContext(scene: scene, event: "render",
-      payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: 0.0))
-    check value.kind == fkImage
+    # No Immich settings on this frame: the JS app throws its message, which
+    # proves it ran with the `immich` settings namespace it declares
+    # (getSetting would refuse an undeclared one).
+    expect(JsAppError):
+      discard scene.getDataNode(1.NodeId, ExecutionContext(scene: scene, event: "render",
+        payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: 0.0))
     var sawMessage = false
     for entry in logged:
       if ($entry).contains("Please provide an Immich server URL"):
         sawMessage = true
     check sawMessage
+
+  test "a render/chart node in the render flow draws the JavaScript chart":
+    let sceneId = "tests/retired-chart".SceneId
+    var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+    uploaded[sceneId] = ExportedInterpretedScene(
+      name: "Stale chart scene",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 300.0,
+      publicStateFields: @[],
+      nodes: @[
+        node(10, "event", %*{"keyword": "render"}),
+        node(1, "app", %*{"keyword": "render/chart", "config": {"data": "[1, 3, 2]",
+          "transparentBackground": "false", "backgroundColor": "#ff0000"}}),
+      ],
+      edges: @[edge(100, 10, "next", 1, "prev")],
+      apps: %*{}
+    )
+    setUploadedInterpretedScenes(uploaded)
+    resetInterpretedScenes()
+    defer: setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+    let config = FrameConfig(width: 80, height: 60, rotate: 0, scalingMode: "cover", debug: false,
+      saveAssets: %*false, settings: %*{})
+    let scene = init(sceneId, config, testLogger(config), %*{})
+    check InterpretedFrameScene(scene).appsByNodeId[1.NodeId].isDynamicJsApp()
+    let canvas = newImage(80, 60)
+    let image = render(scene, ExecutionContext(scene: scene, event: "render", payload: %*{},
+      hasImage: true, image: canvas, loopIndex: 0, loopKey: ".", nextSleep: 0.0))
+    var red, line = 0
+    for x in 0 ..< 80:
+      for y in 0 ..< 60:
+        if image[x, y].r > 200 and image[x, y].g < 60:
+          inc red
+        if image[x, y].b > 150 and image[x, y].r < 120:
+          inc line
+    check red > 80 * 60 div 2  # the chart's own background, drawn onto the canvas
+    check line > 0

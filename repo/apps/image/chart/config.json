@@ -1,0 +1,42 @@
+{
+  "name": "Chart",
+  "category": "data",
+  "description": "A line, bar or area chart as an SVG sized to the area it is drawn into. Wire it into render/image.",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "data",
+      "type": "json",
+      "value": "[]",
+      "required": true,
+      "label": "Chart data",
+      "hint": "[1,2,3], [{\"label\": \"Mon\", \"value\": 3}, …] or {\"series\": [{\"name\": \"a\", \"color\": \"#ff0000\", \"values\": [1, 2]}], \"labels\": [\"Mon\", \"Tue\"]}"
+    },
+    { "name": "chartType", "type": "select", "options": ["line", "bar", "area"], "value": "line", "required": true, "label": "Chart type" },
+    { "name": "title", "type": "string", "value": "", "label": "Title" },
+    { "name": "color", "type": "color", "value": "#2a78d6", "required": true, "label": "Series color", "hint": "Extra series get colors from a palette" },
+    { "name": "transparentBackground", "type": "boolean", "value": "true", "required": true, "label": "Transparent background" },
+    {
+      "name": "backgroundColor",
+      "type": "color",
+      "value": "#ffffff",
+      "label": "Background color",
+      "showIf": [{ "field": "transparentBackground", "operator": "eq", "value": "false" }]
+    },
+    { "name": "axisColor", "type": "color", "value": "#333333", "required": true, "label": "Axis & text color" },
+    { "name": "showGrid", "type": "boolean", "value": "true", "required": true, "label": "Show grid lines" },
+    { "name": "showLabels", "type": "boolean", "value": "true", "required": true, "label": "Show axis labels" },
+    { "name": "minY", "type": "string", "value": "", "label": "Min Y (empty = auto)", "placeholder": "auto" },
+    { "name": "maxY", "type": "string", "value": "", "label": "Max Y (empty = auto)", "placeholder": "auto" },
+    {
+      "name": "lineWidth",
+      "type": "float",
+      "value": "",
+      "label": "Line width (empty = scale with the chart)",
+      "showIf": [{ "field": "chartType", "operator": "in", "value": ["line", "area"] }]
+    },
+    { "name": "fontSize", "type": "float", "value": "", "label": "Font size (empty = scale with the chart)" },
+    { "name": "padding", "type": "float", "value": "", "label": "Padding (empty = scale with the chart)" }
+  ],
+  "output": [{ "name": "image", "type": "image" }]
+}

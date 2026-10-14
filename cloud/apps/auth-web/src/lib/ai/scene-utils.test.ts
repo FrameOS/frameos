@@ -192,9 +192,9 @@ describe("splitStateNodesByApp", () => {
 describe("bundleRepoApps", () => {
   it("copies repo JS app templates into the scene's apps map under short keywords", () => {
     const catalog = {
-      "repo/apps/code/weatherIcons": {
+      "repo/apps/json/weatherIcons": {
         category: "data",
-        keyword: "repo/apps/code/weatherIcons",
+        keyword: "repo/apps/json/weatherIcons",
         name: "Weather icon set (JS)",
         output: [{ name: "icons", type: "json" }],
         sources: { "app.ts": "export function get() { return {} }", "config.json": "{}" },
@@ -203,22 +203,37 @@ describe("bundleRepoApps", () => {
     };
     const scene = minimalScene();
     (scene.nodes as JsonObject[]).push({
-      data: { config: {}, keyword: "repo/apps/code/weatherIcons" },
+      data: { config: {}, keyword: "repo/apps/json/weatherIcons" },
       id: "icons",
       type: "app",
     });
     const payload = { scenes: [scene] };
-    expect(bundleRepoApps(payload, catalog)).toEqual(["repo/apps/code/weatherIcons -> apps.weatherIcons"]);
+    expect(bundleRepoApps(payload, catalog)).toEqual(["repo/apps/json/weatherIcons -> apps.weatherIcons"]);
     const apps = scene.apps as Record<string, JsonObject>;
     expect(apps.weatherIcons).toMatchObject({
       category: "data",
       name: "Weather icon set (JS)",
-      origin: "repo/apps/code/weatherIcons",
+      origin: "repo/apps/json/weatherIcons",
       sources: { "app.ts": expect.stringContaining("export function get") },
     });
     expect(apps.weatherIcons?.keyword).toBeUndefined();
     expect((scene.nodes as JsonObject[])[2]?.data).toEqual({ config: {}, keyword: "weatherIcons" });
     // Idempotent: a second pass finds nothing left to bundle.
     expect(bundleRepoApps(payload, catalog)).toEqual([]);
+  });
+
+  it("finds an app by the repo/apps/code keyword it had until the folders were renamed", () => {
+    const catalog = {
+      "repo/apps/json/weatherIcons": {
+        keyword: "repo/apps/json/weatherIcons",
+        name: "Weather icon set (JS)",
+        sources: { "app.ts": "export function get() { return {} }" },
+      },
+    };
+    const scene = minimalScene();
+    (scene.nodes as JsonObject[]).push({ data: { config: {}, keyword: "repo/apps/code/weatherIcons" }, id: "icons", type: "app" });
+    expect(bundleRepoApps({ scenes: [scene] }, catalog)).toEqual(["repo/apps/code/weatherIcons -> apps.weatherIcons"]);
+    expect((scene.apps as Record<string, JsonObject>).weatherIcons?.origin).toBe("repo/apps/json/weatherIcons");
+    expect((scene.nodes as JsonObject[])[2]?.data).toEqual({ config: {}, keyword: "weatherIcons" });
   });
 });

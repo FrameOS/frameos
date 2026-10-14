@@ -3,7 +3,7 @@ import type { FrameScene } from '../../types'
 import { embeddedRepoAppConfigs, embeddedRepoAppSources } from '../../generated/repoApps'
 import { buildSceneApp } from '../../utils/sceneApps'
 
-export const PHOTO_ALBUM_APP_ORIGIN = 'repo/apps/code/photoAlbum'
+export const PHOTO_ALBUM_APP_ORIGIN = 'repo/apps/image/photoAlbum'
 const PHOTO_ALBUM_APP_KEY = 'photoAlbum'
 
 export type PhotoAlbumOrder = 'random' | 'sequential' | 'newest' | 'oldest'

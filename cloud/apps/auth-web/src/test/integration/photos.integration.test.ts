@@ -895,7 +895,7 @@ describe("photo library: album scenes", () => {
     expect(body.scene.name).toBe("Summer 2026");
     expect(body.scene.settings).toEqual({ backgroundColor: "#000000", execution: "interpreted", refreshInterval: 600 });
     expect(body.scene.fields.map((field) => field.value)).toEqual(["600", "newest", "contain", "0"]);
-    expect(body.scene.apps.photoAlbum.origin).toBe("repo/apps/code/photoAlbum");
+    expect(body.scene.apps.photoAlbum.origin).toBe("repo/apps/image/photoAlbum");
     expect(Object.keys(body.scene.apps.photoAlbum.sources).sort()).toEqual(["app.ts", "config.json"]);
 
     // One link per folder: the one POST /shares hands out, made (and audited) once.

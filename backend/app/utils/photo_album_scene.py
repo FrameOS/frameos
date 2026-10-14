@@ -13,7 +13,7 @@ from typing import Any
 
 from app.utils.retired_apps import replacement_app_entry
 
-PHOTO_ALBUM_APP_ORIGIN = "repo/apps/code/photoAlbum"
+PHOTO_ALBUM_APP_ORIGIN = "repo/apps/image/photoAlbum"
 PHOTO_ALBUM_APP_KEY = "photoAlbum"
 DEFAULT_SECONDS = 3600
 

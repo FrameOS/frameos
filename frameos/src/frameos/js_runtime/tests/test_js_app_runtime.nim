@@ -430,6 +430,8 @@ suite "js app runtime":
             frameKeys: Object.keys(app.frame).sort(),
             contextKeys: Object.keys(context).sort(),
             spreadConfig: { ...app.config },
+            debug: app.frame.debug,
+            embedded: app.frame.embedded,
           }
         }"""
     )
@@ -441,8 +443,11 @@ suite "js app runtime":
     check payload["configKeys"][1].getStr() == "mode"
     check payload["stateKeys"][0].getStr() == "seen"
     check "width" in payload["frameKeys"].mapIt(it.getStr())
+    check "embedded" in payload["frameKeys"].mapIt(it.getStr())
     check "event" in payload["contextKeys"].mapIt(it.getStr())
     check payload["spreadConfig"]["message"].getStr() == "hello"
+    check payload["debug"].getBool() == true
+    check payload["embedded"].getBool() == false
 
   test "maps JS app runtime errors to original source lines":
     let config = testConfig()
@@ -463,7 +468,8 @@ suite "js app runtime":
         }"""
     )
 
-    discard runtime.get(owner, %*{}, context)
+    expect(JsAppError):
+      discard runtime.get(owner, %*{}, context)
     let stackLogs = logged.filterIt("jsApp:error" in it{"event"}.getStr())
     check stackLogs.len == 1
     check "app.ts:3:" in stackLogs[0]{"stack"}.getStr()
@@ -845,6 +851,144 @@ suite "js app runtime":
     check fileExists(savedEvil)
     check payload["never"].kind == JNull
 
+  test "fetchImage decodes a data URL like a download: saved bytes and EXIF included":
+    # An API that answers with base64 (OpenAI's b64_json) hands the app a data
+    # URL; the photo apps save it and read its EXIF the same as a download.
+    let assetsDir = getTempDir() / "frameos-js-fetch-image-data-url"
+    removeDir(assetsDir)
+    createDir(assetsDir)
+    defer: removeDir(assetsDir)
+
+    # A little-endian TIFF with Make "Canon" (out of line) and Model "EOS",
+    # spliced into a real JPEG as its first APP1 segment.
+    const tiff =
+      "II\x2A\x00\x08\x00\x00\x00" &
+      "\x02\x00" &
+      "\x0F\x01\x02\x00\x06\x00\x00\x00\x26\x00\x00\x00" &
+      "\x10\x01\x02\x00\x04\x00\x00\x00EOS\x00" &
+      "\x00\x00\x00\x00" &
+      "Canon\x00"
+    let exifPayload = "Exif\x00\x00" & tiff
+    let segmentLen = exifPayload.len + 2
+    let app1 = "\xFF\xE1" & chr((segmentLen shr 8) and 0xFF) & chr(segmentLen and 0xFF) & exifPayload
+    let jpeg = readFile(currentSourcePath().parentDir() / ".." / ".." / "tests" / "fixtures" / "large-gradient.jpg")
+    let withExif = jpeg[0 .. 1] & app1 & jpeg[2 .. ^1]
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    config.saveAssets = %*true
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-fetch-image-data-url".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 35.NodeId, nodeName: "openaiImage", appKeyword: "openaiImage", scene: scene,
+      frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app, context) {
+          const photo = frameos.fetchImage(app.config.url, { exif: true,
+            saveAsset: { name: "a red fox", extension: "jpg", mode: "auto" } })
+          const plain = frameos.fetchImage(app.config.url)
+          return { width: photo.width, error: photo.error ?? null, exif: photo.exif ?? null,
+            exifSummary: photo.exifSummary ?? null, savedAs: photo.savedAs ?? null,
+            plainExif: plain.exif ?? null, plainSaved: plain.savedAs ?? null }
+        }"""
+    )
+
+    let value = runtime.get(owner, %*{"url": "data:image/jpeg;base64," & encode(withExif)}, context)
+    check value.kind == fkJson
+    let payload = value.asJson()
+    check payload["error"].kind == JNull
+    check payload["width"].getInt() > 0
+    check payload["exif"]["make"].getStr() == "Canon"
+    check payload["exif"]["model"].getStr() == "EOS"
+    check payload["exifSummary"].getStr() == "Canon EOS"
+    let saved = payload["savedAs"].getStr()
+    check saved.startsWith(assetsDir / "saved" / "openaiImage" / "")
+    check saved.endsWith(".jpg")
+    check readFile(saved) == withExif
+    # Neither is read unless asked for.
+    check payload["plainExif"].kind == JNull
+    check payload["plainSaved"].kind == JNull
+
+  test "a field declared twice takes its default from the first declaration":
+    # openaiImage declares `quality` once per model family, each behind its
+    # own showIf; a node that never set it gets the first one's default, as a
+    # Nim app's loader gave it.
+    let config = testConfig()
+    let scene = FrameScene(id: "tests/js-app-duplicate-fields".SceneId, frameConfig: config, state: %*{},
+      logger: testLogger(config))
+    let sources = %*{
+      "app.ts": "export function get(app) { return { quality: app.config.quality, size: app.config.size } }",
+      "config.json": $(%*{
+        "name": "Duplicates", "category": "data", "output": [{"name": "out", "type": "json"}],
+        "fields": [
+          {"name": "quality", "type": "select", "value": "standard", "options": ["standard", "hd"]},
+          {"name": "quality", "type": "select", "value": "auto", "options": ["auto", "low"]},
+          {"name": "size", "type": "string", "value": "1024x1024"}
+        ]
+      })
+    }
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let sparse = initDynamicJsApp("dups", DiagramNode(id: 37.NodeId, nodeType: "app",
+      data: %*{"keyword": "dups", "config": {}}), scene, sources)
+    let sparseValue = sparse.getDynamicJsApp(context).asJson()
+    check sparseValue["quality"].getStr() == "standard"
+    check sparseValue["size"].getStr() == "1024x1024"
+    let explicit = initDynamicJsApp("dups", DiagramNode(id: 38.NodeId, nodeType: "app",
+      data: %*{"keyword": "dups", "config": {"quality": "low"}}), scene, sources)
+    check explicit.getDynamicJsApp(context).asJson()["quality"].getStr() == "low"
+    releaseJsAppRuntime(sparse)
+    releaseJsAppRuntime(explicit)
+
+  test "remember outlives the interpreter, module state does not":
+    # An ESP32 tears every idle interpreter down after a render; what an app
+    # keeps with frameos.remember is still there when the next one starts.
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-remember".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """let renders = 0
+        export function get(app, context) {
+          renders += 1
+          const before = frameos.recall("count") ?? 0
+          const kept = frameos.remember("count", before + 1)
+          frameos.remember("list", ["a", { b: 2 }])
+          frameos.remember("list2", "temporary")
+          frameos.remember("list2", null)
+          const tooBig = frameos.remember("big", "x".repeat(app.config.big))
+          return { renders, before, kept, tooBig, list: frameos.recall("list"),
+            forgotten: frameos.recall("list2") ?? null, missing: frameos.recall("missing") ?? null }
+        }"""
+    )
+    let owner = DynamicJsApp(nodeId: 36.NodeId, nodeName: "jsRemember", scene: scene, frameConfig: config,
+      runtime: runtime, configJson: %*{"big": 1})
+
+    let first = runtime.get(owner, %*{"big": 1}, context).asJson()
+    check first["renders"].getInt() == 1
+    check first["before"].getInt() == 0
+    check first["kept"].getBool()
+    check first["tooBig"].getBool()
+    check first["list"] == %*["a", {"b": 2}]
+    check first["forgotten"].kind == JNull
+    check first["missing"].kind == JNull
+
+    let second = runtime.get(owner, %*{"big": 1}, context).asJson()
+    check second["renders"].getInt() == 2
+    check second["before"].getInt() == 1
+
+    releaseJsAppRuntime(owner)
+    let third = runtime.get(owner, %*{"big": JsAppMemoryMaxBytes}, context).asJson()
+    check third["renders"].getInt() == 1 # a fresh interpreter
+    check third["before"].getInt() == 2  # the kept value is not
+    # Over the node's limit: refused, logged, and the old value stays.
+    check not third["tooBig"].getBool()
+    check runtime.memory["big"] == "\"x\""
+
   proc fetchWithColors(nodeId: int, colorsJs: string, scalingMode = ""): (Value, ExecutionContext, Image) =
     ## One fetchImage of the 5x3 (20, 120, 220) photo with `colorsJs` spliced
     ## into the options ("" leaves the key out). With `scalingMode`, a 6x4
@@ -962,6 +1106,59 @@ suite "js app runtime":
     check decode(payload["binary"]["bodyBase64"].getStr()) == expected
     check payload["failed"]["status"].getInt() == 0
     check payload["failed"]["error"].getStr().len > 0
+
+  test "httpRequest find hands back the text at each occurrence, not the body":
+    # A page bigger than an ESP32's JS heap (Google Photos: 1.2 MB) reaches
+    # the app as a few KB of snippets; the body never becomes a JS string.
+    let needle = "https://lh3.googleusercontent.com/"
+    var page = "<html>" & repeat("x", 5000)
+    for i in 0 ..< 5:
+      page.add(needle & "pw/photo" & $i & "=w1-h1\"" & repeat("y", 50))
+    page.add(needle & "é" & repeat("z", 50))  # "é" is 2 bytes, at the cut
+    page.add("</html>")
+    let errorPage = repeat("e", 3000)
+    jsHttpRequestHook = proc(url, httpMethod, body: string,
+        headers: seq[SimpleHttpHeader]): tuple[code: int, body: string] =
+      if url.endsWith("/missing"): (404, errorPage) else: (200, page)
+    defer: jsHttpRequestHook = nil
+
+    let config = testConfig()
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/js-app-http-find".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 24.NodeId, nodeName: "jsHttpFind", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "json",
+      source = """export function get(app) {
+          const needle = 'https://lh3.googleusercontent.com/'
+          return {
+            all: frameos.httpRequest('https://photos.example/album', { find: needle, findLength: needle.length + 1 }),
+            some: frameos.httpRequest('https://photos.example/album', { find: needle, findLimit: 2 }),
+            missing: frameos.httpRequest('https://photos.example/missing', { find: needle }),
+          }
+        }"""
+    )
+    let payload = runtime.get(owner, %*{}, context).asJson()
+
+    let all = payload["all"]
+    check all["status"].getInt() == 200
+    check not all.hasKey("body")
+    check all["found"].len == 6
+    for snippet in all["found"]:
+      check snippet.getStr().startsWith(needle)
+    check all["found"][0].getStr() == needle & "p"
+    # One byte short of the 2-byte "é": the cut moves back, never splits it.
+    check all["found"][5].getStr() == needle
+
+    let some = payload["some"]
+    check some["found"].len == 2
+    check some["found"][1].getStr().startsWith(needle & "pw/photo1=w1-h1")
+
+    let missing = payload["missing"]
+    check missing["status"].getInt() == 404
+    check missing["found"].len == 0
+    check missing["body"].getStr().len == 1024
 
   test "getSetting honors declared settings namespaces":
     let config = testConfig()
@@ -1096,7 +1293,8 @@ const helper = () => {
 }
 export const get = () => helper()""",
       sourceName = "app.ts")
-    discard runtime.get(owner, %*{}, context)
+    expect(JsAppError):
+      discard runtime.get(owner, %*{}, context)
     var stack = ""
     for entry in logged:
       if entry{"stack"}.getStr().len > 0:
@@ -1344,7 +1542,8 @@ suite "js app imports":
     let runtime = newJsAppRuntime(
       category = "data", outputType = "text", source = sources["app.ts"].getStr(),
       sourceName = "app.ts", sources = sources)
-    discard runtime.get(owner, %*{}, context)
+    expect(JsAppError):
+      discard runtime.get(owner, %*{}, context)
     var stack = ""
     for entry in logged:
       if "jsApp:error" in entry{"event"}.getStr():

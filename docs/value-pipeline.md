@@ -195,7 +195,7 @@ plan is not the claim; now one log field says which you have.
   and then takes the same decode-into-target path as the Nim photo apps;
   under `center` or a corner it decodes bounded by the offered size and
   leaves the target unclaimed. This is what lets the Immich code app
-  (`repo/apps/code/immich`) stream a photo into an ESP32 canvas without the
+  (`repo/apps/image/immich`) stream a photo into an ESP32 canvas without the
   bytes ever crossing the JS heap.
 - **SVG rasterizes into the offered target** (`renderInto` in the pixie fork,
   `renderSvgIntoTarget` in `utils/image.nim`) — including the live canvas.

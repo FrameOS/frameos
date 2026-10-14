@@ -235,6 +235,10 @@ proc sceneStateJson*(): string =
 proc takeRenderRequested*(): bool =
   host.takeRenderRequested()
 
+proc recoverFromOomAbort*(): tuple[jsDropped, jsBytes: int] =
+  ## single_scene_host.recoverAbortedRun, for the glue's abort handler.
+  host.recoverAbortedRun()
+
 proc tickInput*(): bool =
   ## Time passing with nothing sent (single_scene_host.tick).
   result = host.tick()
@@ -755,12 +759,10 @@ proc renderCurrentScene*(): Option[Image] =
     loopKey: ".",
     nextSleep: -1
   )
+  # renderScene hands the JS apps' interpreters back before it returns, so the
+  # packing and display work below see the memory.
   let image = host.renderScene(context)
   persistSceneState()
-  # The scene is done with its JS nodes until the next render, which on this
-  # board is minutes away. Hand their interpreters back now so the packing and
-  # display work below — and the next render's image decodes — see the memory.
-  releaseIdleJsAppRuntimes()
   when defined(memProbe): memProbe("  renderCurrentScene: idle js runtimes released")
   if image.isNil:
     log("render returned no image")

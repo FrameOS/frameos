@@ -32,7 +32,12 @@ let networkApps = toHashSet([
 ])
 let hostOnlyApps = toHashSet(["chromiumScreenshot", "rstpSnapshot"])
 
-availableRenderBytesOverride = 4 * 1024 * 1024
+# A fixed budget, so both runs (and every machine) bound the same way, and a
+# large enough one that the materialized floor's raster of an 800x480 JS app
+# SVG (the Chart sample) is not bounded: under 4 MB it was rasterized smaller
+# and stretched, which is the floor saving memory the fused render never
+# needs, not a planner difference.
+availableRenderBytesOverride = 8 * 1024 * 1024
 refreshDecodeBudget()
 
 proc testConfig(assetsPath: string): FrameConfig =

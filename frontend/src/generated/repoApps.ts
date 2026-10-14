@@ -2,9 +2,410 @@
 import type { AppConfig } from '../types'
 
 export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
-  "repo/apps/code/immich": {
+  "repo/apps/json/beRecycle": {
+    "name": "Recycling Calendar for Belgium",
+    "description": "Trash pickup dates as a JSON event list",
+    "category": "data",
+    "version": "1.1.0",
+    "fields": [
+      {
+        "name": "streetName",
+        "type": "string",
+        "value": "",
+        "required": true,
+        "label": "Street name"
+      },
+      {
+        "name": "number",
+        "type": "integer",
+        "value": "",
+        "required": true,
+        "label": "Number"
+      },
+      {
+        "name": "postalCode",
+        "type": "integer",
+        "value": "",
+        "required": true,
+        "label": "Postal code"
+      },
+      {
+        "name": "exportFrom",
+        "type": "string",
+        "value": "",
+        "label": "Export events from (YYYY-MM-DD)",
+        "placeholder": "now"
+      },
+      {
+        "name": "exportUntil",
+        "type": "string",
+        "value": "",
+        "label": "Export events until (YYYY-MM-DD)",
+        "placeholder": "1 year later"
+      },
+      {
+        "name": "exportCount",
+        "type": "integer",
+        "value": "50",
+        "label": "Maximum number of events to export"
+      },
+      {
+        "name": "language",
+        "type": "select",
+        "options": [
+          "en",
+          "fr",
+          "nl"
+        ],
+        "value": "en",
+        "required": true,
+        "label": "Language"
+      },
+      {
+        "markdown": "[{ summary, startTime, endTime, timezone }]"
+      }
+    ],
+    "output": [
+      {
+        "name": "events",
+        "type": "json"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "14400"
+    },
+    "origin": "repo/apps/json/beRecycle"
+  },
+  "repo/apps/image/chart": {
+    "name": "Chart",
+    "category": "data",
+    "description": "A line, bar or area chart as an SVG sized to the area it is drawn into. Wire it into render/image.",
+    "version": "1.0.0",
+    "fields": [
+      {
+        "name": "data",
+        "type": "json",
+        "value": "[]",
+        "required": true,
+        "label": "Chart data",
+        "hint": "[1,2,3], [{\"label\": \"Mon\", \"value\": 3}, …] or {\"series\": [{\"name\": \"a\", \"color\": \"#ff0000\", \"values\": [1, 2]}], \"labels\": [\"Mon\", \"Tue\"]}"
+      },
+      {
+        "name": "chartType",
+        "type": "select",
+        "options": [
+          "line",
+          "bar",
+          "area"
+        ],
+        "value": "line",
+        "required": true,
+        "label": "Chart type"
+      },
+      {
+        "name": "title",
+        "type": "string",
+        "value": "",
+        "label": "Title"
+      },
+      {
+        "name": "color",
+        "type": "color",
+        "value": "#2a78d6",
+        "required": true,
+        "label": "Series color",
+        "hint": "Extra series get colors from a palette"
+      },
+      {
+        "name": "transparentBackground",
+        "type": "boolean",
+        "value": "true",
+        "required": true,
+        "label": "Transparent background"
+      },
+      {
+        "name": "backgroundColor",
+        "type": "color",
+        "value": "#ffffff",
+        "label": "Background color",
+        "showIf": [
+          {
+            "field": "transparentBackground",
+            "operator": "eq",
+            "value": "false"
+          }
+        ]
+      },
+      {
+        "name": "axisColor",
+        "type": "color",
+        "value": "#333333",
+        "required": true,
+        "label": "Axis & text color"
+      },
+      {
+        "name": "showGrid",
+        "type": "boolean",
+        "value": "true",
+        "required": true,
+        "label": "Show grid lines"
+      },
+      {
+        "name": "showLabels",
+        "type": "boolean",
+        "value": "true",
+        "required": true,
+        "label": "Show axis labels"
+      },
+      {
+        "name": "minY",
+        "type": "string",
+        "value": "",
+        "label": "Min Y (empty = auto)",
+        "placeholder": "auto"
+      },
+      {
+        "name": "maxY",
+        "type": "string",
+        "value": "",
+        "label": "Max Y (empty = auto)",
+        "placeholder": "auto"
+      },
+      {
+        "name": "lineWidth",
+        "type": "float",
+        "value": "",
+        "label": "Line width (empty = scale with the chart)",
+        "showIf": [
+          {
+            "field": "chartType",
+            "operator": "in",
+            "value": [
+              "line",
+              "area"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "fontSize",
+        "type": "float",
+        "value": "",
+        "label": "Font size (empty = scale with the chart)"
+      },
+      {
+        "name": "padding",
+        "type": "float",
+        "value": "",
+        "label": "Padding (empty = scale with the chart)"
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "origin": "repo/apps/image/chart"
+  },
+  "repo/apps/image/frameOSGallery": {
+    "name": "FrameOS Gallery",
+    "description": "Random image from the FrameOS gallery",
+    "category": "data",
+    "version": "1.0.0",
+    "fields": [
+      {
+        "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries."
+      },
+      {
+        "name": "category",
+        "type": "select",
+        "options": [
+          "building-art-styles",
+          "cute",
+          "cyberpunk-europe",
+          "low-poly-animals",
+          "masterpieces",
+          "space-gallery",
+          "space-odyssey",
+          "other"
+        ],
+        "value": "cute",
+        "required": false,
+        "label": "Category"
+      },
+      {
+        "name": "categoryOther",
+        "type": "string",
+        "value": "",
+        "required": false,
+        "label": "Category (if other)",
+        "showIf": [
+          {
+            "field": "category",
+            "operator": "eq",
+            "value": "other"
+          }
+        ]
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "900"
+    },
+    "origin": "repo/apps/image/frameOSGallery"
+  },
+  "repo/apps/image/googlePhotos": {
+    "name": "Google Photos",
+    "description": "Photos from a shared Google Photos album. Reads the public share page (there is no API), so a Google page change can break it.",
+    "category": "data",
+    "version": "1.0.0",
+    "fields": [
+      {
+        "name": "shareUrl",
+        "type": "text",
+        "value": "",
+        "required": true,
+        "label": "Shared album link",
+        "placeholder": "https://photos.app.goo.gl/...",
+        "hint": "In Google Photos, open the album, tap Share, create a link anyone can view and paste it here. Keep the album shared."
+      },
+      {
+        "name": "mode",
+        "type": "select",
+        "options": [
+          "random",
+          "sequential"
+        ],
+        "value": "random",
+        "required": true,
+        "label": "Order of images"
+      },
+      {
+        "name": "counterStateKey",
+        "type": "string",
+        "value": "",
+        "required": false,
+        "label": "Optional state key for persistence",
+        "hint": "Keeps the photo position across restarts.",
+        "showIf": [
+          {
+            "field": "mode",
+            "operator": "eq",
+            "value": "sequential"
+          }
+        ]
+      },
+      {
+        "name": "fitMode",
+        "type": "select",
+        "options": [
+          "cover",
+          "contain"
+        ],
+        "value": "cover",
+        "required": true,
+        "label": "Fit mode",
+        "hint": "cover crops the photo to fill the frame, contain shows all of it."
+      },
+      {
+        "name": "metadataStateKey",
+        "type": "string",
+        "value": "",
+        "required": false,
+        "label": "Metadata state key",
+        "hint": "Stores {source, index, count, imageUrl}."
+      },
+      {
+        "name": "saveAssets",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          "auto",
+          "always",
+          "never"
+        ],
+        "label": "Save asset",
+        "hint": "Save each photo in the frame's assets folder. auto saves when the frame is set to save assets."
+      },
+      {
+        "name": "cacheAlbumSeconds",
+        "type": "integer",
+        "value": "3600",
+        "required": false,
+        "label": "Album cache duration (seconds)",
+        "placeholder": "3600",
+        "hint": "How long to reuse the album's photo list. New photos show up within this time."
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "900"
+    },
+    "origin": "repo/apps/image/googlePhotos"
+  },
+  "repo/apps/json/haSensor": {
+    "name": "Home Assistant Sensor",
+    "description": "Get the state of a Home Assistant entity",
+    "category": "data",
+    "version": "1.0.0",
+    "settings": [
+      "homeAssistant"
+    ],
+    "fields": [
+      {
+        "markdown": "Find the [entity id here](http://homeassistant.local:8123/config/entities)"
+      },
+      {
+        "name": "entityId",
+        "type": "text",
+        "required": true,
+        "label": "Entity ID",
+        "placeholder": "sensor.temperature"
+      },
+      {
+        "name": "debug",
+        "type": "boolean",
+        "value": "false",
+        "label": "Debug logging"
+      }
+    ],
+    "output": [
+      {
+        "name": "state",
+        "type": "json"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "60"
+    },
+    "origin": "repo/apps/json/haSensor"
+  },
+  "repo/apps/image/immich": {
     "name": "Immich",
-    "description": "Show photos from a self-hosted Immich server: a random image from the whole library, one album, one person, your favorites, or today's memories. The photo is decoded straight into the canvas, so it runs on an ESP32 too.",
+    "description": "Photos from a self-hosted Immich server: random, from one album or person, favorites, or today's memories.",
     "category": "data",
     "version": "1.0.0",
     "settings": [
@@ -21,35 +422,31 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
           "favorites",
           "memories"
         ],
-        "required": false,
         "label": "Mode",
-        "hint": "Which images to show: a random image from the whole library, a random image from one album, a random favorite, or today's memories."
+        "hint": "random picks from the whole library."
       },
       {
         "name": "albumId",
         "type": "string",
         "value": "",
-        "required": false,
         "label": "Album ID",
-        "hint": "UUID of the album, visible in the album URL.",
+        "hint": "The UUID in the album's URL.",
         "placeholder": "e.g. 7f2d3c8a-1b2c-4d5e-8f90-a1b2c3d4e5f6"
       },
       {
         "name": "personId",
         "type": "string",
         "value": "",
-        "required": false,
         "label": "Person ID",
-        "hint": "Optional. UUID of a person to limit random images to, visible in the person's URL.",
+        "hint": "Optional: only this person's photos (the UUID in their URL).",
         "placeholder": "e.g. 9c8b7a6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d"
       },
       {
         "name": "metadataStateKey",
         "type": "string",
         "value": "",
-        "required": false,
         "label": "Metadata state key",
-        "hint": "Enter a state key to persist metadata about the image. Stores: {source, id, originalFileName, camera EXIF fields, people, ...}."
+        "hint": "Stores {source, id, originalFileName, camera EXIF fields, people} under this key."
       },
       {
         "name": "saveAssets",
@@ -61,7 +458,7 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
           "never"
         ],
         "label": "Save asset",
-        "hint": "Save the downloaded image to disk as an asset in the frame's assets folder. You can later use the 'Local image' app to view saved assets. 'auto' saves when the frame is set to save assets, 'always' always saves, 'never' never saves. Frames without storage (ESP32) never save."
+        "hint": "Saves the photo to the frame's assets folder. auto follows the frame's setting. ESP32 frames never save."
       },
       {
         "name": "previewSize",
@@ -72,7 +469,7 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
           "fullsize"
         ],
         "label": "Image size",
-        "hint": "'preview' is resized server-side and much lighter on frame memory. 'fullsize' downloads the original file."
+        "hint": "preview is resized by Immich and much lighter on memory; fullsize downloads the original."
       }
     ],
     "output": [
@@ -87,9 +484,9 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
       "durationEnabled": true,
       "duration": "900"
     },
-    "origin": "repo/apps/code/immich"
+    "origin": "repo/apps/image/immich"
   },
-  "repo/apps/code/jsImage": {
+  "repo/apps/image/jsImage": {
     "name": "New image data app (JS)",
     "category": "data",
     "description": "JavaScript data app template that returns an image object.",
@@ -125,9 +522,9 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
         "type": "image"
       }
     ],
-    "origin": "repo/apps/code/jsImage"
+    "origin": "repo/apps/image/jsImage"
   },
-  "repo/apps/code/jsLogic": {
+  "repo/apps/logic/jsLogic": {
     "name": "New logic app (JS)",
     "category": "logic",
     "description": "JavaScript logic app template for side effects and scene state updates.",
@@ -139,9 +536,9 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
         "value": "jsLogicResult"
       }
     ],
-    "origin": "repo/apps/code/jsLogic"
+    "origin": "repo/apps/logic/jsLogic"
   },
-  "repo/apps/code/jsSvg": {
+  "repo/apps/text/jsSvg": {
     "name": "New SVG data app (JS)",
     "category": "data",
     "description": "JavaScript data app template that returns SVG markup.",
@@ -172,9 +569,9 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
         "example": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\">...</svg>"
       }
     ],
-    "origin": "repo/apps/code/jsSvg"
+    "origin": "repo/apps/text/jsSvg"
   },
-  "repo/apps/code/jsText": {
+  "repo/apps/text/jsText": {
     "name": "New text data app (JS)",
     "category": "data",
     "description": "JavaScript data app template that returns text.",
@@ -199,9 +596,315 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
         "example": "FrameOS: Hello from QuickJS"
       }
     ],
-    "origin": "repo/apps/code/jsText"
+    "origin": "repo/apps/text/jsText"
   },
-  "repo/apps/code/photoAlbum": {
+  "repo/apps/image/openaiImage": {
+    "name": "OpenAI Image",
+    "description": "Random AI generated art from OpenAI's image models",
+    "category": "data",
+    "version": "1.0.0",
+    "settings": [
+      "openAI"
+    ],
+    "fields": [
+      {
+        "name": "prompt",
+        "type": "text",
+        "rows": 4,
+        "value": "",
+        "required": true,
+        "label": "Prompt",
+        "placeholder": "e.g. pumpkin pyjama party, digital art"
+      },
+      {
+        "name": "model",
+        "type": "select",
+        "options": [
+          "gpt-image-2",
+          "gpt-image-1.5",
+          "gpt-image-1",
+          "dall-e-3",
+          "dall-e-2"
+        ],
+        "value": "gpt-image-2",
+        "required": true,
+        "label": "Model"
+      },
+      {
+        "name": "size",
+        "type": "select",
+        "options": [
+          "best for orientation",
+          "1024x640",
+          "640x1024",
+          "1024x1024",
+          "1536x1024",
+          "1024x1536"
+        ],
+        "value": "best for orientation",
+        "label": "Size",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "gpt-image-2"
+          }
+        ]
+      },
+      {
+        "name": "size",
+        "type": "select",
+        "options": [
+          "best for orientation",
+          "1024x1024",
+          "1536x1024",
+          "1024x1536"
+        ],
+        "value": "best for orientation",
+        "label": "Size",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "in",
+            "value": [
+              "gpt-image-1",
+              "gpt-image-1.5"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "size",
+        "type": "select",
+        "options": [
+          "best for orientation",
+          "1024x1024",
+          "1792x1024",
+          "1024x1792"
+        ],
+        "value": "best for orientation",
+        "label": "Size",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "dall-e-3"
+          }
+        ]
+      },
+      {
+        "name": "size",
+        "type": "select",
+        "options": [
+          "best for orientation",
+          "1024x1024",
+          "512x512",
+          "256x256"
+        ],
+        "value": "best for orientation",
+        "label": "Size",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "dall-e-2"
+          }
+        ]
+      },
+      {
+        "name": "style",
+        "type": "select",
+        "options": [
+          "vivid",
+          "natural",
+          ""
+        ],
+        "value": "vivid",
+        "label": "Style",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "dall-e-3"
+          }
+        ]
+      },
+      {
+        "name": "quality",
+        "type": "select",
+        "options": [
+          "standard",
+          "hd",
+          ""
+        ],
+        "value": "standard",
+        "label": "Quality",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "eq",
+            "value": "dall-e-3"
+          }
+        ]
+      },
+      {
+        "name": "quality",
+        "type": "select",
+        "options": [
+          "auto",
+          "low",
+          "medium",
+          "high",
+          ""
+        ],
+        "value": "auto",
+        "label": "Quality",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "in",
+            "value": [
+              "gpt-image-2",
+              "gpt-image-1",
+              "gpt-image-1.5"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "outputFormat",
+        "type": "select",
+        "options": [
+          "auto",
+          "png",
+          "jpeg",
+          "webp"
+        ],
+        "value": "auto",
+        "label": "Output format",
+        "showIf": [
+          {
+            "field": "model",
+            "operator": "in",
+            "value": [
+              "gpt-image-2",
+              "gpt-image-1",
+              "gpt-image-1.5"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "outputCompression",
+        "type": "integer",
+        "value": 0,
+        "label": "Output compression",
+        "hint": "JPEG/WebP compression, 0-100. 0 uses the default.",
+        "showIf": [
+          {
+            "and": [
+              {
+                "field": "outputFormat",
+                "operator": "ne",
+                "value": "png"
+              },
+              {
+                "field": "model",
+                "operator": "in",
+                "value": [
+                  "gpt-image-2",
+                  "gpt-image-1",
+                  "gpt-image-1.5"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "metadataStateKey",
+        "type": "string",
+        "value": "",
+        "required": false,
+        "label": "Metadata state key",
+        "hint": "State key that receives {prompt, generatedPrompt, model, size}."
+      },
+      {
+        "name": "saveAssets",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          "auto",
+          "always",
+          "never"
+        ],
+        "label": "Save asset",
+        "hint": "Keep each image in the frame's assets folder. auto follows the frame's save assets setting."
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "3600"
+    },
+    "origin": "repo/apps/image/openaiImage"
+  },
+  "repo/apps/text/openaiText": {
+    "name": "OpenAI Text",
+    "description": "Text response from ChatGPT and friends",
+    "category": "data",
+    "version": "1.0.0",
+    "settings": [
+      "openAI"
+    ],
+    "fields": [
+      {
+        "name": "system",
+        "type": "text",
+        "rows": 6,
+        "value": "You're a smart e-ink frame running FrameOS. Reply with plain text only. Space is very limited.",
+        "required": true,
+        "label": "System Prompt"
+      },
+      {
+        "name": "user",
+        "type": "text",
+        "rows": 6,
+        "value": "",
+        "required": true,
+        "label": "User Prompt",
+        "placeholder": "Write your prompt here. Keep it short and clear."
+      },
+      {
+        "name": "model",
+        "type": "string",
+        "value": "gpt-5.5",
+        "required": true,
+        "label": "Model"
+      }
+    ],
+    "output": [
+      {
+        "name": "reply",
+        "type": "string"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "600"
+    },
+    "origin": "repo/apps/text/openaiText"
+  },
+  "repo/apps/image/photoAlbum": {
     "name": "Photo album",
     "description": "Play an album from FrameOS Photos through its share link, one photo per render.",
     "category": "data",
@@ -248,12 +951,153 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
     "cache": {
       "enabled": false
     },
-    "origin": "repo/apps/code/photoAlbum"
+    "origin": "repo/apps/image/photoAlbum"
   },
-  "repo/apps/code/weatherIcon": {
+  "repo/apps/image/unsplash": {
+    "name": "Unsplash",
+    "description": "Random Unsplash photo",
+    "category": "data",
+    "version": "1.0.0",
+    "settings": [
+      "unsplash"
+    ],
+    "fields": [
+      {
+        "name": "search",
+        "type": "string",
+        "value": "nature",
+        "label": "Search",
+        "placeholder": "e.g. nature, birds"
+      },
+      {
+        "name": "orientation",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          "auto",
+          "any",
+          "landscape",
+          "portrait",
+          "squarish"
+        ],
+        "label": "Orientation"
+      },
+      {
+        "name": "metadataStateKey",
+        "type": "string",
+        "value": "",
+        "label": "Metadata state key",
+        "hint": "Stores {search, title, description, location, author, links, ...} under this key."
+      },
+      {
+        "name": "saveAssets",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          "auto",
+          "always",
+          "never"
+        ],
+        "label": "Save asset",
+        "hint": "Saves the image to the frame's assets folder. auto follows the frame's save-assets setting."
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "900"
+    },
+    "origin": "repo/apps/image/unsplash"
+  },
+  "repo/apps/json/weather": {
+    "name": "Weather (Open-Meteo)",
+    "description": "Current, hourly and daily forecasts from Open-Meteo for a location.",
+    "category": "data",
+    "version": "1.1.0",
+    "fields": [
+      {
+        "name": "location",
+        "type": "string",
+        "value": "",
+        "required": true,
+        "label": "Location",
+        "placeholder": "City, state, or country"
+      },
+      {
+        "name": "date",
+        "type": "date",
+        "value": "",
+        "label": "Date",
+        "placeholder": "2024-01-30"
+      },
+      {
+        "name": "forecastDays",
+        "type": "integer",
+        "value": "1",
+        "label": "Forecast days (1-16)",
+        "showIf": [
+          {
+            "field": "date",
+            "operator": "empty"
+          }
+        ]
+      },
+      {
+        "name": "temperatureUnit",
+        "type": "select",
+        "options": [
+          "celsius",
+          "fahrenheit"
+        ],
+        "value": "celsius",
+        "required": true,
+        "label": "Temperature unit"
+      },
+      {
+        "name": "windSpeedUnit",
+        "type": "select",
+        "options": [
+          "kmh",
+          "ms",
+          "mph",
+          "kn"
+        ],
+        "value": "kmh",
+        "required": true,
+        "label": "Wind speed unit"
+      },
+      {
+        "name": "precipitationUnit",
+        "type": "select",
+        "options": [
+          "mm",
+          "inch"
+        ],
+        "value": "mm",
+        "required": true,
+        "label": "Precipitation unit"
+      }
+    ],
+    "output": [
+      {
+        "name": "weather",
+        "type": "json",
+        "example": "{\"provider\":\"open-meteo\",\"forecastModes\":[\"current\",\"hourly\",\"daily\"],\"date\":\"2026-01-18\",\"location\":{\"name\":\"Brussels\",\"latitude\":50.85045,\"longitude\":4.34878,\"timezone\":\"Europe/Brussels\",\"country\":\"Belgium\",\"countryCode\":\"BE\",\"admin1\":\"Brussels Capital\",\"admin2\":\"Bruxelles-Capitale\"},\"forecast\":{\"latitude\":50.854,\"longitude\":4.35,\"generationtime_ms\":0.37,\"utc_offset_seconds\":3600,\"timezone\":\"Europe/Brussels\",\"timezone_abbreviation\":\"GMT+1\",\"elevation\":27,\"current_weather_units\":{\"time\":\"iso8601\",\"interval\":\"seconds\",\"temperature\":\"°C\",\"windspeed\":\"km/h\",\"winddirection\":\"°\",\"is_day\":\"\",\"weathercode\":\"wmo code\"},\"current_weather\":{\"time\":\"2026-01-18T22:15\",\"interval\":900,\"temperature\":5.7,\"windspeed\":5.4,\"winddirection\":132,\"is_day\":0,\"weathercode\":0},\"hourly_units\":{\"time\":\"iso8601\",\"temperature_2m\":\"°C\",\"apparent_temperature\":\"°C\",\"precipitation\":\"mm\",\"weathercode\":\"wmo code\",\"windspeed_10m\":\"km/h\",\"winddirection_10m\":\"°\"},\"hourly\":{\"time\":[\"2026-01-18T00:00\"],\"temperature_2m\":[9.2],\"apparent_temperature\":[7.5],\"precipitation\":[0],\"weathercode\":[0],\"windspeed_10m\":[4],\"winddirection_10m\":[166]},\"daily_units\":{\"time\":\"iso8601\",\"temperature_2m_max\":\"°C\",\"temperature_2m_min\":\"°C\",\"precipitation_sum\":\"mm\",\"weathercode\":\"wmo code\",\"sunrise\":\"iso8601\",\"sunset\":\"iso8601\",\"windspeed_10m_max\":\"km/h\"},\"daily\":{\"time\":[\"2026-01-18\"],\"temperature_2m_max\":[11.3],\"temperature_2m_min\":[5.5],\"precipitation_sum\":[0],\"weathercode\":[3],\"sunrise\":[\"2026-01-18T08:35\"],\"sunset\":[\"2026-01-18T17:10\"],\"windspeed_10m_max\":[10.4]}}}"
+      }
+    ],
+    "origin": "repo/apps/json/weather"
+  },
+  "repo/apps/image/weatherIcon": {
     "name": "Weather icon (JS)",
     "category": "data",
-    "description": "Render a single weather icon (or a contact sheet of the whole set) as an image. Wire the icons input from the Weather icon set app.",
+    "description": "One weather icon, or a sheet of the whole set. Wire icons from the Weather icon set app.",
     "version": "1.0.0",
     "fields": [
       {
@@ -305,12 +1149,12 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
         "type": "image"
       }
     ],
-    "origin": "repo/apps/code/weatherIcon"
+    "origin": "repo/apps/image/weatherIcon"
   },
-  "repo/apps/code/weatherIcons": {
+  "repo/apps/json/weatherIcons": {
     "name": "Weather icon set (JS)",
     "category": "data",
-    "description": "Vector weather icons for WMO weather codes, returned as a JSON set of SVG fragments plus code-to-icon and code-to-label maps.",
+    "description": "SVG weather icons for WMO weather codes, with code-to-icon and code-to-label maps.",
     "version": "1.0.0",
     "fields": [
       {
@@ -323,7 +1167,7 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
           "mono"
         ],
         "value": "auto",
-        "hint": "auto picks vivid, or mono when low contrast is enabled"
+        "hint": "auto is mono with low contrast, vivid otherwise."
       },
       {
         "name": "lowContrast",
@@ -354,15 +1198,15 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
       {
         "name": "icons",
         "type": "json",
-        "example": "{\n  \"viewBox\": 64,\n  \"map\": { \"0\": \"clear\", \"61\": \"rain\" },\n  \"labels\": { \"0\": \"Clear sky\", \"61\": \"Light rain\" },\n  \"icons\": { \"clear\": \"<g>...</g>\", \"rain\": \"<g>...</g>\" }\n}"
+        "example": "{\"viewBox\": 64, \"palette\": \"vivid\", \"map\": {\"61\": \"rain\"}, \"labels\": {\"61\": \"Light rain\"}, \"icons\": {\"rain\": \"<g>...</g>\"}}"
       }
     ],
-    "origin": "repo/apps/code/weatherIcons"
+    "origin": "repo/apps/json/weatherIcons"
   },
-  "repo/apps/code/weatherPanel": {
+  "repo/apps/image/weatherPanel": {
     "name": "Weather panel (JS)",
     "category": "data",
-    "description": "High fidelity weather panel rendered as vector graphics. Draws current conditions, an hourly forecast chart, or a daily forecast list from Open-Meteo data. Wire weather from the Weather app and icons from the Weather icon set app.",
+    "description": "Current conditions, an hourly chart or a daily list from Open-Meteo data. Wire weather from the Weather app and icons from the Weather icon set app.",
     "version": "1.0.0",
     "fields": [
       {
@@ -484,45 +1328,139 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
         "type": "image"
       }
     ],
-    "origin": "repo/apps/code/weatherPanel"
+    "origin": "repo/apps/image/weatherPanel"
+  },
+  "repo/apps/image/wikicommons": {
+    "name": "Wikimedia Commons",
+    "description": "Images from Wikimedia Commons",
+    "category": "data",
+    "version": "1.0.0",
+    "fields": [
+      {
+        "name": "mode",
+        "type": "select",
+        "value": "pictureOfTheDay",
+        "options": [
+          "pictureOfTheDay",
+          "onThisDay",
+          "randomPictureOfTheDay",
+          "randomImage"
+        ],
+        "label": "Mode",
+        "hint": "Today's Picture of the Day, this date's in an earlier year, a random earlier one, or a random Commons image."
+      },
+      {
+        "name": "saveAssets",
+        "type": "select",
+        "value": "auto",
+        "options": [
+          "auto",
+          "always",
+          "never"
+        ],
+        "label": "Save asset",
+        "hint": "Saves the image to the frame's assets folder. auto follows the frame's save-assets setting."
+      },
+      {
+        "name": "metadataStateKey",
+        "type": "string",
+        "value": "",
+        "label": "Metadata state key",
+        "placeholder": "e.g. wikimediaMetadata",
+        "hint": "Stores {title, description, author, license, pageUrl, imageUrl, mime} under this key."
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "inputEnabled": true,
+      "durationEnabled": true,
+      "duration": "3600"
+    },
+    "origin": "repo/apps/image/wikicommons"
   }
 }
 
 export const embeddedRepoAppSources: Record<string, Record<string, string>> = {
-  "repo/apps/code/immich": {
-    "app.ts": "// Immich photo app. JSON over frameos.httpRequest; the photo itself goes\n// through frameos.fetchImage (native decode, straight into the canvas on an\n// ESP32).\n\nconst TIMEOUT = 30000\n\ntype Asset = {\n  id: string\n  type?: string\n  originalFileName?: string\n  isFavorite?: boolean\n  exifInfo?: Record<string, unknown> | null\n  people?: { name?: string }[] | null\n}\ntype Picked = { asset: Asset | null; message: string }\ntype Response = { status: number; body?: string; bodyBase64?: string; error?: string }\n\nexport function normalizeServerUrl(url: unknown): string {\n  return String(url ?? '').trim().replace(/\\/+$/, '')\n}\n\nexport function assetDownloadUrl(serverUrl: string, assetId: string, previewSize: string): string {\n  const id = encodeURIComponent(assetId)\n  return previewSize === 'fullsize'\n    ? `${serverUrl}/api/assets/${id}/original`\n    : `${serverUrl}/api/assets/${id}/thumbnail?size=preview`\n}\n\n// Bare YYYY-MM-DD: Immich 3 rejects a time suffix. Local where the frame has\n// a zone, UTC otherwise.\nexport function todayIso(now: Date = new Date()): string {\n  const pad = (n: number): string => String(n).padStart(2, '0')\n  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`\n}\n\n// Immich 3.2's structured filter searches a shared album whole; the flat\n// albumIds field also filters by owner (the key's user and partners).\nexport function albumSearchBody(albumId: string): Record<string, unknown> {\n  return { size: 1, withExif: true, withPeople: true, filter: { type: { eq: 'IMAGE' }, albumIds: { any: [albumId] } } }\n}\n\nexport function supportsFilterSearch(version: unknown): boolean {\n  const v = version as { major?: unknown; minor?: unknown } | null\n  if (!v || typeof v.major !== 'number' || typeof v.minor !== 'number') return false\n  return v.major > 3 || (v.major === 3 && v.minor >= 2)\n}\n\nexport function pickTimeBucket(buckets: unknown, random = Math.random()): string {\n  if (!Array.isArray(buckets)) return ''\n  const valid = buckets.filter((b) => b && typeof b.timeBucket === 'string' && typeof b.count === 'number' && b.count > 0)\n  const total = valid.reduce((sum, b) => sum + b.count, 0)\n  let target = random * total\n  for (const b of valid) {\n    if (target < b.count) return b.timeBucket\n    target -= b.count\n  }\n  return valid.length ? valid[valid.length - 1].timeBucket : ''\n}\n\nexport function bucketImageIds(bucket: unknown): string[] {\n  const b = bucket as { id?: unknown; isImage?: unknown } | null\n  if (!b || !Array.isArray(b.id)) return []\n  const isImage = Array.isArray(b.isImage) ? b.isImage : null\n  return b.id.filter((id, i) => typeof id === 'string' && id && (!isImage || isImage[i] === true))\n}\n\nexport function randomSearchBody(albumId = '', personId = '', isFavorite = false): Record<string, unknown> {\n  const body: Record<string, unknown> = { size: 1, type: 'IMAGE', withExif: true, withPeople: true }\n  if (albumId) body.albumIds = [albumId]\n  if (personId) body.personIds = [personId]\n  if (isFavorite) body.isFavorite = true\n  return body\n}\n\n// Keep only what the render needs: a parsed response costs many times its\n// JSON size on the heap.\nfunction slim(asset: Record<string, any>): Asset {\n  const out: Asset = { id: String(asset.id ?? ''), type: asset.type }\n  if (asset.originalFileName) out.originalFileName = String(asset.originalFileName)\n  if (asset.isFavorite) out.isFavorite = true\n  if (asset.exifInfo && typeof asset.exifInfo === 'object') out.exifInfo = asset.exifInfo\n  if (Array.isArray(asset.people)) out.people = asset.people.map((p: any) => ({ name: p?.name }))\n  return out\n}\n\nexport function imageAssets(assets: unknown): Asset[] {\n  if (!Array.isArray(assets)) return []\n  return assets.filter((a) => a && typeof a === 'object' && a.type === 'IMAGE').map(slim)\n}\n\nexport function memoriesImageAssets(memories: unknown): Asset[] {\n  if (!Array.isArray(memories)) return []\n  return memories.flatMap((m) => (m && typeof m === 'object' ? imageAssets(m.assets) : []))\n}\n\nexport function pickRandomAsset(assets: Asset[]): Asset | null {\n  return assets.length ? assets[Math.floor(Math.random() * assets.length)] : null\n}\n\nexport function assetMetadata(asset: Asset): Record<string, unknown> {\n  const meta: Record<string, unknown> = { source: 'immich', id: asset.id ?? '', originalFileName: asset.originalFileName ?? '' }\n  const exif = asset.exifInfo\n  if (exif && typeof exif === 'object') {\n    for (const key of ['make', 'model', 'fNumber', 'exposureTime', 'iso', 'focalLength', 'dateTimeOriginal']) {\n      if (exif[key] !== undefined && exif[key] !== null) meta[key] = exif[key]\n    }\n  }\n  const names = (asset.people ?? []).map((p) => p?.name ?? '').filter((n) => n !== '')\n  if (names.length) meta.people = names\n  return meta\n}\n\n// Only a short alphanumeric suffix may reach a path under the assets folder.\nexport function assetFileExtension(asset: Asset, previewSize: string): string {\n  const match = previewSize === 'fullsize' ? /^.+\\.([a-z0-9]{1,5})$/i.exec(asset.originalFileName ?? '') : null\n  return match ? `.${match[1].toLowerCase()}` : '.jpg'\n}\n\nexport function assetBaseName(asset: Asset): string {\n  const name = (asset.originalFileName ?? '').replace(/\\.[^.]*$/, '')\n  return name || asset.id || 'immich'\n}\n\nexport function httpErrorMessage(r: Response): string {\n  if (r.status === 0) return r.error ? `request failed: ${r.error}` : 'request failed'\n  let message = `HTTP ${r.status}`\n  const body = r.body ?? ''\n  try {\n    const json = JSON.parse(body)\n    const d = json?.message\n    if (typeof d === 'string' && d) message += `: ${d}`\n    else if (Array.isArray(d) && d.length) message += `: ${typeof d[0] === 'string' ? d[0] : JSON.stringify(d[0])}`\n    else if (typeof json?.error === 'string' && json.error) message += `: ${json.error}`\n  } catch {\n    if (body.length > 0 && body.length < 300) message += `: ${body}`\n  }\n  return message\n}\n\nfunction request(apiKey: string, url: string, method = 'GET', body = ''): Response {\n  return frameos.httpRequest(url, {\n    method,\n    headers: { 'x-api-key': apiKey, Accept: 'application/json', 'Content-Type': 'application/json' },\n    body,\n    timeoutMs: TIMEOUT,\n  })\n}\n\nfunction parse(body: string | undefined): unknown {\n  try {\n    return JSON.parse(body ?? '')\n  } catch {\n    return null\n  }\n}\n\nfunction fetchRandomAsset(\n  serverUrl: string,\n  apiKey: string,\n  albumId = '',\n  personId = '',\n  isFavorite = false,\n  emptyMessage = 'Immich returned no image assets.'\n): Picked {\n  let r = request(apiKey, `${serverUrl}/api/search/random`, 'POST', JSON.stringify(randomSearchBody(albumId, personId, isFavorite)))\n  let legacy = false\n  if (r.status === 404) {\n    // Older servers: no server-side filters, ask for a batch and filter here.\n    frameos.log('This Immich server lacks POST /api/search/random; falling back to /api/assets/random where album/person/favorite filters cannot be applied.')\n    r = request(apiKey, `${serverUrl}/api/assets/random?count=20`)\n    legacy = true\n  }\n  if (r.status !== 200) return { asset: null, message: `Error fetching a random image from Immich: ${httpErrorMessage(r)}` }\n  let assets = imageAssets(parse(r.body))\n  if (legacy && isFavorite) assets = assets.filter((a) => a.isFavorite)\n  const scope = albumId ? `album ${albumId}` : personId ? `person ${personId}` : isFavorite ? 'favorites' : 'whole library'\n  frameos.log(`Immich random search (${scope}): HTTP ${r.status}, ${assets.length} image candidate(s)`)\n  if (!assets.length) {\n    return { asset: null, message: legacy ? 'This Immich server returned no matching images from /api/assets/random.' : emptyMessage }\n  }\n  return { asset: pickRandomAsset(assets), message: '' }\n}\n\nfunction fetchAlbumAsset(serverUrl: string, apiKey: string, albumId: string): Picked {\n  const empty = \"This album contains no images. Double-check the album ID. It's the UUID in the album's URL.\"\n  const version = request(apiKey, `${serverUrl}/api/server/version`)\n  if (version.status === 200 && supportsFilterSearch(parse(version.body))) {\n    const r = request(apiKey, `${serverUrl}/api/search/random`, 'POST', JSON.stringify(albumSearchBody(albumId)))\n    if (r.status !== 200) return { asset: null, message: `Error fetching a random image from Immich: ${httpErrorMessage(r)}` }\n    const assets = imageAssets(parse(r.body))\n    frameos.log(`Immich album search (album ${albumId}, all owners): HTTP ${r.status}, ${assets.length} image candidate(s)`)\n    return assets.length ? { asset: pickRandomAsset(assets), message: '' } : { asset: null, message: empty }\n  }\n\n  // Before 3.2: the album timeline (Immich 1.133+). A month bucket is columnar,\n  // ~350 bytes per asset, so a huge month is a heavy response on an ESP32.\n  const album = encodeURIComponent(albumId)\n  const buckets = request(apiKey, `${serverUrl}/api/timeline/buckets?albumId=${album}`)\n  if (buckets.status !== 200) return { asset: null, message: `Error reading the Immich album: ${httpErrorMessage(buckets)}` }\n  const bucketList = parse(buckets.body)\n  for (let attempt = 0; attempt < 3; attempt++) {\n    const timeBucket = pickTimeBucket(bucketList)\n    if (!timeBucket) break\n    const r = request(apiKey, `${serverUrl}/api/timeline/bucket?albumId=${album}&timeBucket=${encodeURIComponent(timeBucket)}`)\n    if (r.status !== 200) return { asset: null, message: `Error reading the Immich album: ${httpErrorMessage(r)}` }\n    const ids = bucketImageIds(parse(r.body))\n    frameos.log(`Immich album timeline (album ${albumId}, bucket ${timeBucket}): HTTP ${r.status}, ${ids.length} image candidate(s)`)\n    if (!ids.length) continue\n    const id = ids[Math.floor(Math.random() * ids.length)]\n    const detail = request(apiKey, `${serverUrl}/api/assets/${encodeURIComponent(id)}`)\n    const parsed = detail.status === 200 ? parse(detail.body) : null\n    return { asset: parsed && typeof parsed === 'object' ? slim(parsed as Record<string, any>) : { id }, message: '' }\n  }\n  return { asset: null, message: empty }\n}\n\nfunction esc(text: string): string {\n  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\nexport function errorPanel(width: number, height: number, message: string): string {\n  const size = Math.max(14, Math.round(Math.min(width, height) / 24))\n  const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))\n  const lines: string[] = []\n  let line = ''\n  for (const word of message.split(/\\s+/).filter(Boolean)) {\n    if (line && line.length + 1 + word.length > max) {\n      lines.push(line)\n      line = word\n    } else line = line ? `${line} ${word}` : word\n  }\n  if (line) lines.push(line)\n  const text = lines\n    .map((l, i) => `<text x=\"${size}\" y=\"${size * 2 + i * Math.round(size * 1.35)}\" font-family=\"Ubuntu\" font-size=\"${size}\" fill=\"#111111\">${esc(l)}</text>`)\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${text}</svg>`\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const width = context.imageWidth || app.frame.width\n  const height = context.imageHeight || app.frame.height\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    return frameos.svg(errorPanel(width, height, message), { width, height })\n  }\n  const c = app.config\n  const mode = String(c.mode ?? '').trim() || 'random'\n  const albumId = String(c.albumId ?? '').trim()\n  const personId = String(c.personId ?? '').trim()\n  const metadataStateKey = String(c.metadataStateKey ?? '').trim()\n  const saveAssets = String(c.saveAssets ?? 'auto')\n  const previewSize = c.previewSize === 'fullsize' ? 'fullsize' : 'preview'\n\n  const serverUrl = normalizeServerUrl(frameos.getSetting('immich', 'url'))\n  if (!serverUrl) return fail('Please provide an Immich server URL in the settings.')\n  const apiKey = String(frameos.getSetting('immich', 'apiKey') ?? '')\n  if (!apiKey) return fail('Please provide an Immich API key in the settings.')\n  if (mode === 'album' && !albumId) return fail(\"Please provide an album ID. It's the UUID visible in the album's URL.\")\n\n  let picked: Picked\n  if (mode === 'album') {\n    picked = fetchAlbumAsset(serverUrl, apiKey, albumId)\n  } else if (mode === 'memories') {\n    const date = todayIso()\n    const r = request(apiKey, `${serverUrl}/api/memories?for=${date}`)\n    let asset: Asset | null = null\n    if (r.status === 200) {\n      const assets = memoriesImageAssets(parse(r.body))\n      frameos.log(`Immich memories for ${date}: HTTP 200, ${assets.length} image candidate(s)`)\n      asset = pickRandomAsset(assets)\n    } else frameos.log(`No Immich memories for today (${httpErrorMessage(r)}), showing a random image instead.`)\n    picked = asset ? { asset, message: '' } : fetchRandomAsset(serverUrl, apiKey)\n  } else if (mode === 'favorites') {\n    picked = fetchRandomAsset(serverUrl, apiKey, '', '', true, 'No favorite images found in Immich.')\n  } else {\n    picked = fetchRandomAsset(serverUrl, apiKey, '', personId)\n  }\n  const asset = picked.asset\n  if (!asset) return fail(picked.message)\n  if (!asset.id) return fail('Immich returned an asset without an ID.')\n\n  const saveAsset =\n    saveAssets === 'auto' || saveAssets === 'always'\n      ? { name: assetBaseName(asset), extension: assetFileExtension(asset, previewSize), mode: saveAssets }\n      : undefined\n  frameos.log(`Showing Immich asset ${asset.id} (${asset.originalFileName ?? 'unnamed'}, ${previewSize})`)\n  const photo = frameos.fetchImage(assetDownloadUrl(serverUrl, asset.id, previewSize), {\n    headers: { 'x-api-key': apiKey },\n    saveAsset,\n  })\n  if (!photo.image) return fail(`Error fetching image from Immich: ${photo.error ?? 'no image'}`)\n  if (metadataStateKey) frameos.setState(metadataStateKey, assetMetadata(asset))\n  return photo.image\n}\n",
-    "config.json": "{\n  \"name\": \"Immich\",\n  \"description\": \"Show photos from a self-hosted Immich server: a random image from the whole library, one album, one person, your favorites, or today's memories. The photo is decoded straight into the canvas, so it runs on an ESP32 too.\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"immich\"],\n  \"fields\": [\n    {\n      \"name\": \"mode\",\n      \"type\": \"select\",\n      \"value\": \"random\",\n      \"options\": [\"random\", \"album\", \"favorites\", \"memories\"],\n      \"required\": false,\n      \"label\": \"Mode\",\n      \"hint\": \"Which images to show: a random image from the whole library, a random image from one album, a random favorite, or today's memories.\"\n    },\n    {\n      \"name\": \"albumId\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Album ID\",\n      \"hint\": \"UUID of the album, visible in the album URL.\",\n      \"placeholder\": \"e.g. 7f2d3c8a-1b2c-4d5e-8f90-a1b2c3d4e5f6\"\n    },\n    {\n      \"name\": \"personId\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Person ID\",\n      \"hint\": \"Optional. UUID of a person to limit random images to, visible in the person's URL.\",\n      \"placeholder\": \"e.g. 9c8b7a6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Enter a state key to persist metadata about the image. Stores: {source, id, originalFileName, camera EXIF fields, people, ...}.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Save the downloaded image to disk as an asset in the frame's assets folder. You can later use the 'Local image' app to view saved assets. 'auto' saves when the frame is set to save assets, 'always' always saves, 'never' never saves. Frames without storage (ESP32) never save.\"\n    },\n    {\n      \"name\": \"previewSize\",\n      \"type\": \"select\",\n      \"value\": \"preview\",\n      \"options\": [\"preview\", \"fullsize\"],\n      \"label\": \"Image size\",\n      \"hint\": \"'preview' is resized server-side and much lighter on frame memory. 'fullsize' downloads the original file.\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"900\"\n  }\n}\n"
+  "repo/apps/json/beRecycle": {
+    "app.ts": "// Belgian waste collection days, from the recyclecms API behind RecycleApp.be.\nconst q = (value) =>\n  encodeURIComponent(value).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())\n\nfunction api(path) {\n  const { status, body, error } = frameos.httpRequest(`https://api.fostplus.be/recyclecms/public/v1/${path}`, {\n    headers: { 'User-Agent': 'Mozilla/5.0', 'x-consumer': 'recycleapp.be' },\n  })\n  if (!status) throw new Error(error)\n  if (status >= 400) throw new Error(`HTTP ${status}: ${body}`)\n  return JSON.parse(body)\n}\n\nfunction day(value, field) {\n  const m = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(value)\n  if (!m) throw new Error(`Invalid ${field} \"${value}\": expected YYYY-MM-DD.`)\n  const date = new Date(0)\n  date.setUTCFullYear(m[1], m[2] - 1, m[3])\n  return date.toISOString().slice(0, 10)\n}\n\nexport function get(app) {\n  const c = app.config\n  const timezone = app.frame.timeZone || 'UTC'\n  const today = (ms) =>\n    new Date(timezone === 'UTC' ? ms : ms - new Date(ms).getTimezoneOffset() * 6e4).toISOString().slice(0, 10)\n  const from = c.exportFrom ? day(c.exportFrom, 'exportFrom') : today(Date.now())\n  const until = c.exportUntil ? day(c.exportUntil, 'exportUntil') : today(Date.now() + 366 * 864e5)\n\n  frameos.log('Preparing request headers...')\n  frameos.log('Fetching collections...')\n  frameos.log('Fetching address IDs...')\n  const zip = api(`zipcodes?q=${c.postalCode}`).items?.find((item) => +item.code === c.postalCode)?.id\n  if (!zip) throw new Error('Could not find the right zip code.')\n  const street = api(`streets?q=${q(c.streetName)}&zipcodes=${q(zip)}`).items?.find(\n    (item) => item.name === c.streetName\n  )?.id\n  if (!street) throw new Error('Could not find the right street name.')\n  const { items } = api(\n    `collections?zipcodeId=${q(zip)}&streetId=${q(street)}&houseNumber=${c.number}` +\n      `&fromDate=${from}&untilDate=${until}&size=100`\n  )\n  if (!items) throw new Error('Something went wrong while fetching collections.')\n\n  frameos.log({ event: 'reply', eventsInRange: items.length })\n  frameos.log('Converting collections to events...')\n  return items.map((item) => {\n    const date = item.timestamp.split('T')[0]\n    const summary = `Trash: ${item.fraction?.name?.[c.language] ?? ''}`\n    return { summary, startTime: `${date}T08:00:00`, endTime: `${date}T08:15:00`, timezone }\n  })\n}\n",
+    "config.json": "{\n  \"name\": \"Recycling Calendar for Belgium\",\n  \"description\": \"Trash pickup dates as a JSON event list\",\n  \"category\": \"data\",\n  \"version\": \"1.1.0\",\n  \"fields\": [\n    { \"name\": \"streetName\", \"type\": \"string\", \"value\": \"\", \"required\": true, \"label\": \"Street name\" },\n    { \"name\": \"number\", \"type\": \"integer\", \"value\": \"\", \"required\": true, \"label\": \"Number\" },\n    { \"name\": \"postalCode\", \"type\": \"integer\", \"value\": \"\", \"required\": true, \"label\": \"Postal code\" },\n    {\n      \"name\": \"exportFrom\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"label\": \"Export events from (YYYY-MM-DD)\",\n      \"placeholder\": \"now\"\n    },\n    {\n      \"name\": \"exportUntil\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"label\": \"Export events until (YYYY-MM-DD)\",\n      \"placeholder\": \"1 year later\"\n    },\n    { \"name\": \"exportCount\", \"type\": \"integer\", \"value\": \"50\", \"label\": \"Maximum number of events to export\" },\n    {\n      \"name\": \"language\",\n      \"type\": \"select\",\n      \"options\": [\"en\", \"fr\", \"nl\"],\n      \"value\": \"en\",\n      \"required\": true,\n      \"label\": \"Language\"\n    },\n    { \"markdown\": \"[{ summary, startTime, endTime, timezone }]\" }\n  ],\n  \"output\": [{ \"name\": \"events\", \"type\": \"json\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"14400\" }\n}\n"
   },
-  "repo/apps/code/jsImage": {
+  "repo/apps/image/chart": {
+    "app.ts": "const PALETTE = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e34948', '#e87ba4', '#eb6834']\n\nconst esc = (s) =>\n  String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n\nconst num = (v) => {\n  if (typeof v === 'number') return v\n  if (typeof v === 'boolean') return v ? 1 : 0\n  if (typeof v === 'string' && v.trim() !== '') return Number(v.trim())\n  return NaN\n}\n\nconst fmt = (v) => (Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : String(Number(v.toFixed(2))))\n\nconst r1 = (v) => Math.round(v * 10) / 10\n\nfunction parse(data) {\n  if (typeof data === 'string') {\n    if (!data.trim()) return { series: [], labels: [] }\n    try {\n      data = JSON.parse(data)\n    } catch (e) {\n      return { series: [], labels: [] }\n    }\n  }\n  if (Array.isArray(data)) {\n    const labels = data.map((item) => (item && typeof item === 'object' ? String(item.label ?? item.name ?? '') : ''))\n    const values = data.map((item) =>\n      item && typeof item === 'object' ? num('value' in item ? item.value : item.y) : num(item)\n    )\n    return { series: [{ values }], labels: labels.some(Boolean) ? labels : [] }\n  }\n  if (!data || typeof data !== 'object') return { series: [], labels: [] }\n  const entry = (s) =>\n    Array.isArray(s)\n      ? { values: s.map(num) }\n      : s && typeof s === 'object'\n      ? { name: s.name ?? s.label, color: s.color, values: (s.values ?? s.data ?? []).map(num) }\n      : { values: [num(s)] }\n  const series = Array.isArray(data.series) ? data.series.map(entry) : 'values' in data ? [entry(data)] : []\n  const labels = Array.isArray(data.labels) ? data.labels.map((l) => (typeof l === 'number' ? fmt(l) : String(l ?? ''))) : []\n  return { series: series.filter((s) => s.values.length), labels }\n}\n\nfunction yRange(series, minY, maxY, includeZero) {\n  let lo = Infinity\n  let hi = -Infinity\n  for (const s of series) {\n    for (const v of s.values) {\n      if (Number.isFinite(v)) {\n        lo = Math.min(lo, v)\n        hi = Math.max(hi, v)\n      }\n    }\n  }\n  if (lo > hi) {\n    lo = 0\n    hi = 1\n  }\n  if (includeZero) {\n    lo = Math.min(lo, 0)\n    hi = Math.max(hi, 0)\n  }\n  const fixedLo = String(minY ?? '').trim() !== '' && Number.isFinite(Number(minY))\n  const fixedHi = String(maxY ?? '').trim() !== '' && Number.isFinite(Number(maxY))\n  if (fixedLo) lo = Number(minY)\n  if (fixedHi) hi = Number(maxY)\n  if (lo > hi) [lo, hi] = [hi, lo]\n  if (hi - lo < 1e-9) {\n    const pad = Math.max(Math.abs(lo) * 0.1, 1)\n    lo -= pad\n    hi += pad\n  }\n  // Grid steps of 1, 2, 2.5 or 5 x 10^n; an automatic end moves out to one.\n  const rough = (hi - lo) / 4\n  const magnitude = Math.pow(10, Math.floor(Math.log10(rough)))\n  const step = [1, 2, 2.5, 5, 10].map((m) => m * magnitude).find((m) => m >= rough)\n  if (!fixedLo) lo = Math.floor(lo / step + 1e-9) * step\n  if (!fixedHi) hi = Math.ceil(hi / step - 1e-9) * step\n  return [lo, hi, step]\n}\n\nexport function get(app, context) {\n  const c = app.config\n  const f = app.frame\n  const W = Math.round(context.imageWidth || (f.rotate % 180 ? f.height : f.width))\n  const H = Math.round(context.imageHeight || (f.rotate % 180 ? f.width : f.height))\n  const unit = Math.min(W, H)\n  const size = (value, auto) => (Number(value) > 0 ? Number(value) : auto)\n  const fontSize = size(c.fontSize, Math.max(10, Math.round(unit / 28)))\n  const lineWidth = size(c.lineWidth, Math.max(2, r1(unit / 200)))\n  const padding = Number(c.padding) >= 0 && String(c.padding ?? '').trim() !== '' ? Number(c.padding) : Math.round(unit / 30)\n  const type = ['line', 'bar', 'area'].includes(c.chartType) ? c.chartType : 'line'\n  const ink = c.axisColor || '#333333'\n  const out = [`<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${W} ${H}\" width=\"${W}\" height=\"${H}\">`]\n  if (String(c.transparentBackground) === 'false') {\n    out.push(`<rect width=\"${W}\" height=\"${H}\" fill=\"${esc(c.backgroundColor || '#ffffff')}\"/>`)\n  }\n  const text = (x, y, s, size, anchor, baseline = 'middle') =>\n    out.push(\n      `<text x=\"${r1(x)}\" y=\"${r1(y)}\" font-size=\"${r1(size)}\" fill=\"${esc(ink)}\" text-anchor=\"${anchor}\" dominant-baseline=\"${baseline}\">${esc(s)}</text>`\n    )\n  const done = () => frameos.svg(out.join('') + '</svg>', { width: W, height: H })\n\n  const { series, labels } = parse(c.data)\n  if (!series.some((s) => s.values.some(Number.isFinite))) {\n    text(W / 2, H / 2, 'No chart data', Math.max(8, Math.min(32, unit / 8)), 'middle')\n    return done()\n  }\n  const [lo, hi, step] = yRange(series, c.minY, c.maxY, type !== 'line')\n  const levels = []\n  for (let v = hi; v >= lo - step * 1e-6 && levels.length < 12; v -= step) levels.push(v)\n  const points = series.reduce((most, s) => Math.max(most, s.values.length), 0)\n  let plotX = padding\n  let plotY = padding\n  const plotRight = W - padding\n  let plotBottom = H - padding\n  if (c.title) {\n    text(W / 2, plotY + fontSize * 0.875, c.title, fontSize * 1.25, 'middle')\n    plotY += fontSize * 1.75\n  }\n  const showLabels = String(c.showLabels) !== 'false'\n  const gutter = showLabels ? levels.reduce((most, v) => Math.max(most, fmt(v).length), 0) * fontSize * 0.6 + fontSize * 0.4 : 0\n  plotX += gutter\n  if (showLabels && labels.length) plotBottom -= fontSize * 1.5\n  const plotW = plotRight - plotX\n  const plotH = plotBottom - plotY\n  if (plotW < 8 || plotH < 8) {\n    text(W / 2, H / 2, 'Not enough space', Math.max(8, Math.min(32, unit / 8)), 'middle')\n    return done()\n  }\n  const yOf = (v) => plotY + plotH - ((v - lo) / (hi - lo)) * plotH\n  const xOf = (i) =>\n    type === 'bar' ? plotX + ((i + 0.5) * plotW) / points : points === 1 ? plotX + plotW / 2 : plotX + (plotW * i) / (points - 1)\n  const baseY = yOf(Math.min(Math.max(0, lo), hi))\n\n  if (String(c.showGrid) !== 'false') {\n    const d = levels.map((v) => `M${r1(plotX)} ${r1(yOf(v))}h${r1(plotW)}`).join('')\n    out.push(`<path d=\"${d}\" stroke=\"${esc(ink)}\" stroke-opacity=\"0.25\" stroke-width=\"1\" fill=\"none\"/>`)\n  }\n\n  series.forEach((s, si) => {\n    const color = esc(s.color || (si === 0 ? c.color || PALETTE[0] : PALETTE[si % PALETTE.length]))\n    if (type === 'bar') {\n      const d = []\n      if (points > plotW) {\n        const cols = Math.max(Math.floor(plotW), 1)\n        const top = new Array(cols).fill(Infinity)\n        const bottom = new Array(cols).fill(-Infinity)\n        s.values.forEach((v, i) => {\n          if (!Number.isFinite(v)) return\n          const col = Math.min(cols - 1, Math.floor((i * cols) / points))\n          top[col] = Math.min(top[col], yOf(v), baseY)\n          bottom[col] = Math.max(bottom[col], yOf(v), baseY)\n        })\n        for (let i = 0; i < cols; i++) {\n          if (top[i] <= bottom[i]) d.push(`M${r1(plotX + i)} ${r1(top[i])}h1v${r1(Math.max(bottom[i] - top[i], 1))}h-1z`)\n        }\n      } else {\n        const groupW = plotW / points\n        const innerW = groupW * 0.8\n        const gap = Math.min(2, innerW / (series.length * 4))\n        const barW = Math.max(1, (innerW - gap * (series.length - 1)) / series.length)\n        s.values.forEach((v, i) => {\n          if (!Number.isFinite(v)) return\n          const x = plotX + i * groupW + (groupW - innerW) / 2 + si * (barW + gap)\n          const y = yOf(v)\n          d.push(`M${r1(x)} ${r1(Math.min(y, baseY))}h${r1(barW)}v${r1(Math.max(Math.abs(baseY - y), 1))}h${r1(-barW)}z`)\n        })\n      }\n      out.push(`<path d=\"${d.join('')}\" fill=\"${color}\"/>`)\n      return\n    }\n    for (let i = 0; i < s.values.length; ) {\n      if (!Number.isFinite(s.values[i])) {\n        i++\n        continue\n      }\n      let end = i\n      while (end + 1 < s.values.length && Number.isFinite(s.values[end + 1])) end++\n      if (end === i) {\n        out.push(`<circle cx=\"${r1(xOf(i))}\" cy=\"${r1(yOf(s.values[i]))}\" r=\"${r1(Math.max(lineWidth, 2))}\" fill=\"${color}\"/>`)\n      } else {\n        const pts = []\n        for (let j = i; j <= end; j++) pts.push(`${r1(xOf(j))} ${r1(yOf(s.values[j]))}`)\n        if (type === 'area') {\n          const area = `M${r1(xOf(i))} ${r1(baseY)}L${pts.join('L')}L${r1(xOf(end))} ${r1(baseY)}Z`\n          out.push(`<path d=\"${area}\" fill=\"${color}\" fill-opacity=\"0.35\"/>`)\n        }\n        const stroke = `stroke=\"${color}\" stroke-width=\"${r1(lineWidth)}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"`\n        out.push(`<path d=\"M${pts.join('L')}\" ${stroke} fill=\"none\"/>`)\n      }\n      i = end + 1\n    }\n  })\n\n  out.push(`<path d=\"M${r1(plotX)} ${r1(plotY)}v${r1(plotH)}h${r1(plotW)}\" stroke=\"${esc(ink)}\" stroke-width=\"1\" fill=\"none\"/>`)\n  if (showLabels) {\n    levels.forEach((v) => text(plotX - fontSize * 0.3, yOf(v), fmt(v), fontSize, 'end'))\n    if (labels.length) {\n      const widest = labels.reduce((most, l) => Math.max(most, l.length), 0) * fontSize * 0.6 + fontSize * 0.5\n      const step = Math.max(1, Math.ceil((points * widest) / plotW))\n      for (let i = 0; i < points; i += step) {\n        const x = Math.min(Math.max(xOf(i), widest / 2), W - widest / 2)\n        if (labels[i]) text(x, plotBottom + fontSize * 0.3, labels[i], fontSize, 'middle', 'hanging')\n      }\n    }\n  }\n  return done()\n}\n",
+    "config.json": "{\n  \"name\": \"Chart\",\n  \"category\": \"data\",\n  \"description\": \"A line, bar or area chart as an SVG sized to the area it is drawn into. Wire it into render/image.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"data\",\n      \"type\": \"json\",\n      \"value\": \"[]\",\n      \"required\": true,\n      \"label\": \"Chart data\",\n      \"hint\": \"[1,2,3], [{\\\"label\\\": \\\"Mon\\\", \\\"value\\\": 3}, …] or {\\\"series\\\": [{\\\"name\\\": \\\"a\\\", \\\"color\\\": \\\"#ff0000\\\", \\\"values\\\": [1, 2]}], \\\"labels\\\": [\\\"Mon\\\", \\\"Tue\\\"]}\"\n    },\n    { \"name\": \"chartType\", \"type\": \"select\", \"options\": [\"line\", \"bar\", \"area\"], \"value\": \"line\", \"required\": true, \"label\": \"Chart type\" },\n    { \"name\": \"title\", \"type\": \"string\", \"value\": \"\", \"label\": \"Title\" },\n    { \"name\": \"color\", \"type\": \"color\", \"value\": \"#2a78d6\", \"required\": true, \"label\": \"Series color\", \"hint\": \"Extra series get colors from a palette\" },\n    { \"name\": \"transparentBackground\", \"type\": \"boolean\", \"value\": \"true\", \"required\": true, \"label\": \"Transparent background\" },\n    {\n      \"name\": \"backgroundColor\",\n      \"type\": \"color\",\n      \"value\": \"#ffffff\",\n      \"label\": \"Background color\",\n      \"showIf\": [{ \"field\": \"transparentBackground\", \"operator\": \"eq\", \"value\": \"false\" }]\n    },\n    { \"name\": \"axisColor\", \"type\": \"color\", \"value\": \"#333333\", \"required\": true, \"label\": \"Axis & text color\" },\n    { \"name\": \"showGrid\", \"type\": \"boolean\", \"value\": \"true\", \"required\": true, \"label\": \"Show grid lines\" },\n    { \"name\": \"showLabels\", \"type\": \"boolean\", \"value\": \"true\", \"required\": true, \"label\": \"Show axis labels\" },\n    { \"name\": \"minY\", \"type\": \"string\", \"value\": \"\", \"label\": \"Min Y (empty = auto)\", \"placeholder\": \"auto\" },\n    { \"name\": \"maxY\", \"type\": \"string\", \"value\": \"\", \"label\": \"Max Y (empty = auto)\", \"placeholder\": \"auto\" },\n    {\n      \"name\": \"lineWidth\",\n      \"type\": \"float\",\n      \"value\": \"\",\n      \"label\": \"Line width (empty = scale with the chart)\",\n      \"showIf\": [{ \"field\": \"chartType\", \"operator\": \"in\", \"value\": [\"line\", \"area\"] }]\n    },\n    { \"name\": \"fontSize\", \"type\": \"float\", \"value\": \"\", \"label\": \"Font size (empty = scale with the chart)\" },\n    { \"name\": \"padding\", \"type\": \"float\", \"value\": \"\", \"label\": \"Padding (empty = scale with the chart)\" }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }]\n}\n"
+  },
+  "repo/apps/image/frameOSGallery": {
+    "app.ts": "export function get(app: FrameOSApp) {\n  const { category, categoryOther } = app.config\n  const name = category === 'other' ? categoryOther.trim() : category\n  if (!name) throw new Error('Please enter the name of a gallery under \"Category (if other)\".')\n  frameos.log(`FrameOS Gallery category: ${name}`)\n  const photo = frameos.fetchImage(`https://gallery.frameos.net/image?category=${encodeURIComponent(name)}`)\n  if (!photo.image)\n    throw new Error(`An error occurred while downloading the gallery image. ${photo.error ?? 'unknown error'}`)\n  return photo.image\n}\n",
+    "config.json": "{\n  \"name\": \"FrameOS Gallery\",\n  \"description\": \"Random image from the FrameOS gallery\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    { \"markdown\": \"[Click here](https://gallery.frameos.net/) to see all the galleries.\" },\n    {\n      \"name\": \"category\",\n      \"type\": \"select\",\n      \"options\": [\n        \"building-art-styles\",\n        \"cute\",\n        \"cyberpunk-europe\",\n        \"low-poly-animals\",\n        \"masterpieces\",\n        \"space-gallery\",\n        \"space-odyssey\",\n        \"other\"\n      ],\n      \"value\": \"cute\",\n      \"required\": false,\n      \"label\": \"Category\"\n    },\n    {\n      \"name\": \"categoryOther\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Category (if other)\",\n      \"showIf\": [{ \"field\": \"category\", \"operator\": \"eq\", \"value\": \"other\" }]\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
+  },
+  "repo/apps/image/googlePhotos": {
+    "app.ts": "// Google Photos has no API for shared albums: this scrapes the public share page for photo paths.\nconst HOST = 'https://lh3.googleusercontent.com/'\nconst PATH = /[\\w\\-\\/=.\\\\]*/y\n\n// The page as one string, or the snippets httpRequest's `find` returns.\nexport function extractPhotoPaths(texts) {\n  const paths = new Set()\n  for (const text of [].concat(texts)) {\n    for (let i = text.indexOf(HOST); i >= 0; i = text.indexOf(HOST, i)) {\n      PATH.lastIndex = i += HOST.length\n      const raw = PATH.exec(text)[0]\n      i += raw.length\n      const path = raw\n        .replace(/\\\\+$/, '')\n        .replace(/\\\\u003d/g, '=')\n        .replace(/\\\\u0026/g, '&')\n        .replace(/\\\\\\//g, '/')\n        .split('=')[0]\n      if (path.length > 60 && (path.startsWith('pw/') || path.includes('AF1Qip'))) paths.add(path)\n    }\n  }\n  return [...paths]\n}\n\nexport const sizedPhotoUrl = (base, width, height, fitMode) =>\n  `${base}=w${width}-h${height}-${fitMode === 'contain' ? 'no' : 'c'}`\n\nexport const wrapIndex = (counter, count) => (count > 0 ? ((counter % count) + count) % count : 0)\n\nfunction albumPaths(url, debug) {\n  if (debug) frameos.log(`Fetching shared album: ${url}`)\n  const r = frameos.httpRequest(url, {\n    headers: {\n      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',\n      Accept: 'text/html',\n    },\n    timeoutMs: 60000,\n    // Just the text at each photo link: a 1.2 MB page does not fit an ESP32's JS heap.\n    find: HOST,\n    findLength: 400,\n  })\n  if (r.status !== 200) throw new Error(r.status ? `Error ${r.status} while fetching the shared album page.` : r.error)\n  const paths = extractPhotoPaths(r.found)\n  if (!paths.length) {\n    throw new Error(\n      'No photos found on the shared album page. Make sure the link is a public share link and the album is not empty.'\n    )\n  }\n  if (debug) frameos.log(`Found ${paths.length} photos in the shared album`)\n  return paths\n}\n\nexport function get(app, context) {\n  const c = app.config\n  const f = app.frame\n  const url = c.shareUrl.trim()\n  const counterKey = c.counterStateKey.trim()\n  const metaKey = c.metadataStateKey.trim()\n  const width = context.imageWidth || (f.rotate % 180 ? f.height : f.width)\n  const height = context.imageHeight || (f.rotate % 180 ? f.width : f.height)\n  if (!url) throw new Error('Please provide a Google Photos shared album link.')\n  if (!/^https?:\\/\\//.test(url)) throw new Error(`Invalid shared album link: ${url}`)\n\n  let album = frameos.recall('album')\n  if (album?.url !== url || Date.now() / 1000 - album.at >= (c.cacheAlbumSeconds > 0 ? c.cacheAlbumSeconds : 3600)) {\n    try {\n      album = { url, paths: albumPaths(url, f.debug), at: Date.now() / 1000 }\n      const mark = `${url} ${album.paths.length}`\n      if (frameos.recall('unkept') !== mark) {\n        if (frameos.remember('album', album)) frameos.remember('unkept', null)\n        else {\n          frameos.remember('album', null)\n          frameos.remember('unkept', mark)\n          frameos.log(`The album's ${album.paths.length} photos are too many to keep: it is fetched on every render.`)\n        }\n      }\n    } catch (e) {\n      if (album?.url !== url) throw new Error(`Error loading the shared album: ${e.message}`)\n      frameos.error(`Error refreshing the shared album, reusing the cached photo list: ${e.message}`)\n    }\n  }\n\n  const count = album.paths.length\n  let index\n  if (c.mode === 'sequential') {\n    const saved = frameos.recall('counter') ?? app.state[counterKey]\n    index = wrapIndex(Number.isInteger(saved) ? saved : 0, count)\n    const next = wrapIndex(index + 1, count)\n    frameos.remember('counter', next)\n    if (counterKey) frameos.setState(counterKey, next)\n  } else index = Math.floor(Math.random() * count)\n\n  const imageUrl = sizedPhotoUrl(HOST + album.paths[index], width, height, c.fitMode)\n  if (f.debug) frameos.log(`Downloading image: ${imageUrl}`)\n  const name = `google-photos ${index} ${width}x${height}`\n  const photo = frameos.fetchImage(imageUrl, { saveAsset: { name, extension: 'jpg', mode: c.saveAssets } })\n  if (!photo.image) throw new Error(`Error fetching image from Google Photos: ${photo.error}`)\n  if (metaKey) frameos.setState(metaKey, { source: 'googlePhotos', index, count, imageUrl })\n  return photo.image\n}\n",
+    "config.json": "{\n  \"name\": \"Google Photos\",\n  \"description\": \"Photos from a shared Google Photos album. Reads the public share page (there is no API), so a Google page change can break it.\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"shareUrl\",\n      \"type\": \"text\",\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"Shared album link\",\n      \"placeholder\": \"https://photos.app.goo.gl/...\",\n      \"hint\": \"In Google Photos, open the album, tap Share, create a link anyone can view and paste it here. Keep the album shared.\"\n    },\n    {\n      \"name\": \"mode\",\n      \"type\": \"select\",\n      \"options\": [\"random\", \"sequential\"],\n      \"value\": \"random\",\n      \"required\": true,\n      \"label\": \"Order of images\"\n    },\n    {\n      \"name\": \"counterStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Optional state key for persistence\",\n      \"hint\": \"Keeps the photo position across restarts.\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"sequential\" }]\n    },\n    {\n      \"name\": \"fitMode\",\n      \"type\": \"select\",\n      \"options\": [\"cover\", \"contain\"],\n      \"value\": \"cover\",\n      \"required\": true,\n      \"label\": \"Fit mode\",\n      \"hint\": \"cover crops the photo to fill the frame, contain shows all of it.\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Stores {source, index, count, imageUrl}.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Save each photo in the frame's assets folder. auto saves when the frame is set to save assets.\"\n    },\n    {\n      \"name\": \"cacheAlbumSeconds\",\n      \"type\": \"integer\",\n      \"value\": \"3600\",\n      \"required\": false,\n      \"label\": \"Album cache duration (seconds)\",\n      \"placeholder\": \"3600\",\n      \"hint\": \"How long to reuse the album's photo list. New photos show up within this time.\"\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
+  },
+  "repo/apps/json/haSensor": {
+    "app.ts": "// The state of one Home Assistant entity (GET /api/states/<entity_id>).\nexport const lastReply = { at: 0, body: '' }\n\nfunction errorReply(error) {\n  frameos.error(error)\n  return { error }\n}\n\nexport function get(app) {\n  const url = frameos.getSetting('homeAssistant', 'url')\n  if (!url) return errorReply('Please provide a Home Assistant URL in the settings.')\n  const token = frameos.getSetting('homeAssistant', 'accessToken')\n  if (!token) return errorReply('Please provide a Home Assistant access token in the settings.')\n  if (lastReply.body && lastReply.at + 1000 > Date.now()) return JSON.parse(lastReply.body)\n\n  const id = (app.config.entityId ?? '').trim()\n  if (!/^[a-z0-9_]+\\.[a-z0-9_]+$/.test(id))\n    return errorReply(\n      `Invalid Home Assistant entity id \"${id}\": expected <domain>.<object_id> using only a-z, 0-9 and _.`\n    )\n  const stateUrl = `${url.endsWith('/') ? url.slice(0, -1) : url}/api/states/${id}`\n  if (app.config.debug) frameos.log(`Fetching Home Assistant status from ${stateUrl}`)\n  const { status, body, error } = frameos.httpRequest(stateUrl, {\n    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'Accept-Encoding': 'identity' },\n    timeoutMs: 10000,\n  })\n  const fail = (why) => errorReply(`Error fetching Home Assistant status: ${why}`)\n  if (!status) return fail(error)\n  if (status >= 400) return fail(`HTTP ${status}: ${body}`)\n  let state\n  try {\n    state = JSON.parse(body)\n  } catch (e) {\n    return fail(e.message)\n  }\n  lastReply.at = Date.now()\n  lastReply.body = body\n  if (app.config.debug) frameos.log(JSON.stringify(state))\n  return state\n}\n",
+    "config.json": "{\n  \"name\": \"Home Assistant Sensor\",\n  \"description\": \"Get the state of a Home Assistant entity\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"homeAssistant\"],\n  \"fields\": [\n    { \"markdown\": \"Find the [entity id here](http://homeassistant.local:8123/config/entities)\" },\n    { \"name\": \"entityId\", \"type\": \"text\", \"required\": true, \"label\": \"Entity ID\", \"placeholder\": \"sensor.temperature\" },\n    { \"name\": \"debug\", \"type\": \"boolean\", \"value\": \"false\", \"label\": \"Debug logging\" }\n  ],\n  \"output\": [{ \"name\": \"state\", \"type\": \"json\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"60\" }\n}\n"
+  },
+  "repo/apps/image/immich": {
+    "app.ts": "// Immich photos: JSON over frameos.httpRequest, the photo through frameos.fetchImage (decoded natively).\nconst EXIF = ['make', 'model', 'fNumber', 'exposureTime', 'iso', 'focalLength', 'dateTimeOriginal']\nconst NO_IMAGES = 'Immich returned no image assets.'\n\nfunction request(key, url, method = 'GET', body = '') {\n  const headers = { 'x-api-key': key, Accept: 'application/json', 'Content-Type': 'application/json' }\n  return frameos.httpRequest(url, { method, headers, body, timeoutMs: 30000 })\n}\n\nfunction parse(body) {\n  try {\n    return JSON.parse(body ?? '')\n  } catch {\n    return null\n  }\n}\n\nfunction httpError(r) {\n  if (r.status === 0) return r.error ? `request failed: ${r.error}` : 'request failed'\n  const body = r.body ?? ''\n  let message = `HTTP ${r.status}`\n  try {\n    const json = JSON.parse(body)\n    const d = json?.message\n    if (typeof d === 'string' && d) message += `: ${d}`\n    else if (Array.isArray(d) && d.length) message += `: ${typeof d[0] === 'string' ? d[0] : JSON.stringify(d[0])}`\n    else if (typeof json?.error === 'string' && json.error) message += `: ${json.error}`\n  } catch {\n    if (body.length > 0 && body.length < 300) message += `: ${body}`\n  }\n  return message\n}\n\nfunction images(list) {\n  return (Array.isArray(list) ? list : [])\n    .filter((a) => a && typeof a === 'object' && a.type === 'IMAGE')\n    .map((a) => {\n      const exif = {}\n      for (const k of EXIF) if (a.exifInfo?.[k] != null) exif[k] = a.exifInfo[k]\n      const people = (Array.isArray(a.people) ? a.people : []).map((p) => p?.name ?? '').filter((n) => n !== '')\n      const name = a.originalFileName ? String(a.originalFileName) : ''\n      return { id: String(a.id ?? ''), name, favorite: !!a.isFavorite, exif, people }\n    })\n}\n\nconst pick = (assets) => (assets.length ? assets[Math.floor(Math.random() * assets.length)] : null)\n\nfunction random(server, key, empty, albumId = '', personId = '', favorite = false) {\n  const search = { size: 1, type: 'IMAGE', withExif: true, withPeople: true }\n  if (albumId) search.albumIds = [albumId]\n  if (personId) search.personIds = [personId]\n  if (favorite) search.isFavorite = true\n  let r = request(key, `${server}/api/search/random`, 'POST', JSON.stringify(search))\n  const legacy = r.status === 404\n  if (legacy) {\n    frameos.log(\n      'This Immich server lacks POST /api/search/random; falling back to /api/assets/random where album/person/favorite filters cannot be applied.'\n    )\n    r = request(key, `${server}/api/assets/random?count=20`)\n  }\n  if (r.status !== 200) throw new Error(`Error fetching a random image from Immich: ${httpError(r)}`)\n  let assets = images(parse(r.body))\n  if (legacy && favorite) assets = assets.filter((a) => a.favorite)\n  const scope = albumId\n    ? `album ${albumId}`\n    : personId\n    ? `person ${personId}`\n    : favorite\n    ? 'favorites'\n    : 'whole library'\n  frameos.log(`Immich random search (${scope}): HTTP ${r.status}, ${assets.length} image candidate(s)`)\n  if (!assets.length) {\n    throw new Error(legacy ? 'This Immich server returned no matching images from /api/assets/random.' : empty)\n  }\n  return pick(assets)\n}\n\n// A shared album, every owner's photos. Immich 3.2's structured filter\n// searches the album whole; the flat albumIds field also filters by owner\n// (the key's user and partners). Before 3.2 the album timeline (1.133+): a\n// month bucket is columnar, ~350 bytes per asset.\nfunction album(server, key, albumId) {\n  const empty = \"This album contains no images. Double-check the album ID. It's the UUID in the album's URL.\"\n  const version = request(key, `${server}/api/server/version`)\n  const v = version.status === 200 ? parse(version.body) : null\n  if (typeof v?.major === 'number' && typeof v?.minor === 'number' && (v.major > 3 || (v.major === 3 && v.minor >= 2))) {\n    const search = { size: 1, withExif: true, withPeople: true, filter: { type: { eq: 'IMAGE' }, albumIds: { any: [albumId] } } }\n    const r = request(key, `${server}/api/search/random`, 'POST', JSON.stringify(search))\n    if (r.status !== 200) throw new Error(`Error fetching a random image from Immich: ${httpError(r)}`)\n    const assets = images(parse(r.body))\n    frameos.log(`Immich album search (album ${albumId}, all owners): HTTP ${r.status}, ${assets.length} image candidate(s)`)\n    if (!assets.length) throw new Error(empty)\n    return pick(assets)\n  }\n  const a = encodeURIComponent(albumId)\n  const buckets = request(key, `${server}/api/timeline/buckets?albumId=${a}`)\n  if (buckets.status !== 200) throw new Error(`Error reading the Immich album: ${httpError(buckets)}`)\n  const list = (parse(buckets.body) ?? []).filter((b) => typeof b?.timeBucket === 'string' && b.count > 0)\n  const total = list.reduce((sum, b) => sum + b.count, 0)\n  for (let attempt = 0; attempt < 3 && total > 0; attempt++) {\n    let target = Math.random() * total\n    let bucket = list[list.length - 1].timeBucket\n    for (const b of list) {\n      if (target < b.count) {\n        bucket = b.timeBucket\n        break\n      }\n      target -= b.count\n    }\n    const r = request(key, `${server}/api/timeline/bucket?albumId=${a}&timeBucket=${encodeURIComponent(bucket)}`)\n    if (r.status !== 200) throw new Error(`Error reading the Immich album: ${httpError(r)}`)\n    const b = parse(r.body)\n    const ids = (Array.isArray(b?.id) ? b.id : []).filter((id, i) => typeof id === 'string' && id && (!Array.isArray(b.isImage) || b.isImage[i] === true))\n    frameos.log(`Immich album timeline (album ${albumId}, bucket ${bucket}): HTTP ${r.status}, ${ids.length} image candidate(s)`)\n    if (!ids.length) continue\n    const id = ids[Math.floor(Math.random() * ids.length)]\n    const detail = request(key, `${server}/api/assets/${encodeURIComponent(id)}`)\n    const parsed = detail.status === 200 ? parse(detail.body) : null\n    return images([parsed])[0] ?? { id, name: '', favorite: false, exif: {}, people: [] }\n  }\n  throw new Error(empty)\n}\n\nexport function get(app) {\n  const c = app.config\n  const server = String(frameos.getSetting('immich', 'url') ?? '')\n    .trim()\n    .replace(/\\/+$/, '')\n  if (!server) throw new Error('Please provide an Immich server URL in the settings.')\n  const key = String(frameos.getSetting('immich', 'apiKey') ?? '')\n  if (!key) throw new Error('Please provide an Immich API key in the settings.')\n  const albumId = c.albumId.trim()\n  if (c.mode === 'album' && !albumId) {\n    throw new Error(\"Please provide an album ID. It's the UUID visible in the album's URL.\")\n  }\n\n  let asset\n  if (c.mode === 'album') {\n    asset = album(server, key, albumId)\n  } else if (c.mode === 'favorites') {\n    asset = random(server, key, 'No favorite images found in Immich.', '', '', true)\n  } else if (c.mode === 'memories') {\n    const now = new Date()\n    const date = [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((n) => String(n).padStart(2, '0')).join('-')\n    const r = request(key, `${server}/api/memories?for=${date}`)\n    if (r.status === 200) {\n      const memories = parse(r.body)\n      const assets = Array.isArray(memories)\n        ? memories.flatMap((m) => (m && typeof m === 'object' ? images(m.assets) : []))\n        : []\n      frameos.log(`Immich memories for ${date}: HTTP 200, ${assets.length} image candidate(s)`)\n      asset = pick(assets)\n    } else frameos.log(`No Immich memories for today (${httpError(r)}), showing a random image instead.`)\n    asset ??= random(server, key, NO_IMAGES)\n  } else {\n    asset = random(server, key, NO_IMAGES, '', c.personId.trim())\n  }\n  if (!asset.id) throw new Error('Immich returned an asset without an ID.')\n\n  const full = c.previewSize === 'fullsize'\n  frameos.log(`Showing Immich asset ${asset.id} (${asset.name || 'unnamed'}, ${full ? 'fullsize' : 'preview'})`)\n  const id = encodeURIComponent(asset.id)\n  const ext = full && /^.+\\.([a-z0-9]{1,5})$/i.exec(asset.name)\n  const saveAsset =\n    c.saveAssets === 'auto' || c.saveAssets === 'always'\n      ? {\n          name: asset.name.replace(/\\.[^.]*$/, '') || asset.id,\n          extension: ext ? `.${ext[1].toLowerCase()}` : '.jpg',\n          mode: c.saveAssets,\n        }\n      : undefined\n  const url = full ? `${server}/api/assets/${id}/original` : `${server}/api/assets/${id}/thumbnail?size=preview`\n  const photo = frameos.fetchImage(url, { headers: { 'x-api-key': key }, saveAsset })\n  if (!photo.image) throw new Error(`Error fetching image from Immich: ${photo.error ?? 'no image'}`)\n  const stateKey = c.metadataStateKey.trim()\n  if (stateKey) {\n    const people = asset.people.length ? { people: asset.people } : {}\n    frameos.setState(stateKey, {\n      source: 'immich',\n      id: asset.id,\n      originalFileName: asset.name,\n      ...asset.exif,\n      ...people,\n    })\n  }\n  return photo.image\n}\n",
+    "config.json": "{\n  \"name\": \"Immich\",\n  \"description\": \"Photos from a self-hosted Immich server: random, from one album or person, favorites, or today's memories.\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"immich\"],\n  \"fields\": [\n    {\n      \"name\": \"mode\",\n      \"type\": \"select\",\n      \"value\": \"random\",\n      \"options\": [\"random\", \"album\", \"favorites\", \"memories\"],\n      \"label\": \"Mode\",\n      \"hint\": \"random picks from the whole library.\"\n    },\n    {\n      \"name\": \"albumId\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"label\": \"Album ID\",\n      \"hint\": \"The UUID in the album's URL.\",\n      \"placeholder\": \"e.g. 7f2d3c8a-1b2c-4d5e-8f90-a1b2c3d4e5f6\"\n    },\n    {\n      \"name\": \"personId\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"label\": \"Person ID\",\n      \"hint\": \"Optional: only this person's photos (the UUID in their URL).\",\n      \"placeholder\": \"e.g. 9c8b7a6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Stores {source, id, originalFileName, camera EXIF fields, people} under this key.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Saves the photo to the frame's assets folder. auto follows the frame's setting. ESP32 frames never save.\"\n    },\n    {\n      \"name\": \"previewSize\",\n      \"type\": \"select\",\n      \"value\": \"preview\",\n      \"options\": [\"preview\", \"fullsize\"],\n      \"label\": \"Image size\",\n      \"hint\": \"preview is resized by Immich and much lighter on memory; fullsize downloads the original.\"\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
+  },
+  "repo/apps/image/jsImage": {
     "app.ts": "export function get(app: FrameOSApp): FrameOSImageSpec {\n  return frameos.image({\n    width: app.config.width,\n    height: app.config.height,\n    color: app.config.color,\n    opacity: app.config.opacity,\n  })\n}\n",
     "config.json": "{\n  \"name\": \"New image data app (JS)\",\n  \"category\": \"data\",\n  \"description\": \"JavaScript data app template that returns an image object.\",\n  \"fields\": [\n    {\n      \"name\": \"width\",\n      \"label\": \"Width\",\n      \"type\": \"integer\",\n      \"value\": 320\n    },\n    {\n      \"name\": \"height\",\n      \"label\": \"Height\",\n      \"type\": \"integer\",\n      \"value\": 180\n    },\n    {\n      \"name\": \"color\",\n      \"label\": \"Fill Color\",\n      \"type\": \"color\",\n      \"value\": \"#dde7f0\"\n    },\n    {\n      \"name\": \"opacity\",\n      \"label\": \"Opacity\",\n      \"type\": \"float\",\n      \"value\": 1\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n"
   },
-  "repo/apps/code/jsLogic": {
+  "repo/apps/logic/jsLogic": {
     "app.ts": "export function run(app: FrameOSApp, context: FrameOSContext): void {\n  const stateKey = app.config.stateKey || 'jsLogicResult'\n\n  app.log('JS logic app ran', { event: context.event, stateKey })\n\n  // Set the delay before the next render, in seconds.\n  // frameos.setNextSleep(60)\n\n  // Read existing scene state. State nodes with matching keys read these values.\n  // const previous = app.state[stateKey]\n\n  // Persist a value into scene state for connected state nodes to read later.\n  // frameos.setState(stateKey, {\n  //   updatedAt: Date.now(),\n  //   event: context.event,\n  //   previous,\n  // })\n\n  // Fetch from an API, then write the response into state.\n  // const data = frameos.fetchJson('https://api.example.com/status')\n  // frameos.setState(stateKey, data)\n\n  // Fetch plain text.\n  // const body = frameos.fetchText('https://example.com/')\n  // app.log('Fetched characters', body.length)\n}\n",
     "config.json": "{\n  \"name\": \"New logic app (JS)\",\n  \"category\": \"logic\",\n  \"description\": \"JavaScript logic app template for side effects and scene state updates.\",\n  \"fields\": [\n    {\n      \"name\": \"stateKey\",\n      \"label\": \"State key\",\n      \"type\": \"string\",\n      \"value\": \"jsLogicResult\"\n    }\n  ]\n}\n"
   },
-  "repo/apps/code/jsSvg": {
+  "repo/apps/text/jsSvg": {
     "app.ts": "export function get(app: FrameOSApp): string {\n  const label = app.config.label || 'QuickJS'\n  const bg = app.config.background || '#ffffff'\n  const fg = app.config.foreground || '#111111'\n\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 320 120\">\n    <rect width=\"320\" height=\"120\" rx=\"18\" fill=\"${bg}\" />\n    <circle cx=\"60\" cy=\"60\" r=\"28\" fill=\"${fg}\" opacity=\"0.15\" />\n    <text x=\"100\" y=\"70\" fill=\"${fg}\" font-size=\"28\" font-family=\"sans-serif\">${label}</text>\n  </svg>`\n}\n",
     "config.json": "{\n  \"name\": \"New SVG data app (JS)\",\n  \"category\": \"data\",\n  \"description\": \"JavaScript data app template that returns SVG markup.\",\n  \"fields\": [\n    {\n      \"name\": \"label\",\n      \"label\": \"Label\",\n      \"type\": \"string\",\n      \"value\": \"QuickJS\"\n    },\n    {\n      \"name\": \"background\",\n      \"label\": \"Background\",\n      \"type\": \"color\",\n      \"value\": \"#ffffff\"\n    },\n    {\n      \"name\": \"foreground\",\n      \"label\": \"Foreground\",\n      \"type\": \"color\",\n      \"value\": \"#111111\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"svg\",\n      \"type\": \"text\",\n      \"example\": \"<svg xmlns=\\\"http://www.w3.org/2000/svg\\\" viewBox=\\\"0 0 320 120\\\">...</svg>\"\n    }\n  ]\n}\n"
   },
-  "repo/apps/code/jsText": {
+  "repo/apps/text/jsText": {
     "app.ts": "export function init(app: FrameOSApp): void {\n  app.initialized = true\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): string {\n  const eventLabel = context.event ? ` (${context.event})` : ''\n  return `${app.config.prefix}: ${app.config.message}${app.initialized ? eventLabel : ''}`\n}\n",
     "config.json": "{\n  \"name\": \"New text data app (JS)\",\n  \"category\": \"data\",\n  \"description\": \"JavaScript data app template that returns text.\",\n  \"fields\": [\n    {\n      \"name\": \"prefix\",\n      \"label\": \"Prefix\",\n      \"type\": \"string\",\n      \"value\": \"FrameOS\"\n    },\n    {\n      \"name\": \"message\",\n      \"label\": \"Message\",\n      \"type\": \"text\",\n      \"value\": \"Hello from QuickJS\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"text\",\n      \"type\": \"text\",\n      \"example\": \"FrameOS: Hello from QuickJS\"\n    }\n  ]\n}\n"
   },
-  "repo/apps/code/photoAlbum": {
+  "repo/apps/image/openaiImage": {
+    "app.ts": "// OpenAI image: one generation over frameos.httpRequest, its base64 or URL image through frameos.fetchImage.\nconst D = '1024x1024'\nconst GPT = [D, '1536x1024', '1024x1536']\nconst SIZES = {\n  'dall-e-3': [D, '1792x1024', '1024x1792'],\n  'dall-e-2': ['256x256', '512x512', D],\n  'gpt-image-2': [...GPT, '1024x640', '640x1024'],\n  'gpt-image-1': GPT,\n  'gpt-image-1.5': GPT,\n}\n\nexport function get(app, context) {\n  const { prompt, model, size: wanted, style, quality, metadataStateKey, saveAssets } = app.config\n  if (!prompt) throw new Error('No prompt provided in app config.')\n  const apiKey = frameos.getSetting('openAI', 'apiKey')\n  if (!apiKey) throw new Error('Please provide an OpenAI API key in the settings.')\n\n  const { width, height, rotate, embedded } = app.frame\n  let wide = (width - height) * (rotate % 180 ? -1 : 1)\n  if (context.imageWidth) wide = context.imageWidth - context.imageHeight\n  const sizes = SIZES[model] ?? []\n  const i = model === 'gpt-image-2' && embedded ? 3 : 1\n  let size = D\n  if (wanted !== 'best for orientation') size = sizes.includes(wanted) ? wanted : D\n  else if (wide && model !== 'dall-e-2') size = sizes[wide > 0 ? i : i + 1] ?? D\n\n  const body = { prompt, n: 1, size, model }\n  if (model === 'dall-e-3') {\n    if (style) body.style = style\n    if (quality) body.quality = quality\n  } else if (model.startsWith('gpt-image-')) {\n    let { outputFormat: format, outputCompression: compression } = app.config\n    if (['low', 'medium', 'high', 'auto'].includes(quality)) body.quality = quality\n    if (embedded) {\n      body.quality = 'low'\n      if (!format || format === 'auto') format = 'jpeg'\n      if (!(compression > 0)) compression = 50\n    }\n    if (['jpeg', 'png', 'webp'].includes(format)) body.output_format = format\n    if (['jpeg', 'webp'].includes(format) && compression > 0) body.output_compression = Math.min(compression, 100)\n  }\n\n  let r = frameos.httpRequest('https://api.openai.com/v1/images/generations', {\n    method: 'POST',\n    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },\n    body: JSON.stringify(body),\n    timeoutMs: 300000,\n  })\n  const fail = (message) => {\n    throw new Error(`Error fetching image from OpenAI: ${message}`)\n  }\n  if (!r.status) fail(r.error)\n  if (r.status !== 200) {\n    let detail = r.body\n    try {\n      const json = JSON.parse(r.body)\n      const e = json?.error\n      detail = typeof e?.message === 'string' ? e.message : typeof e === 'string' ? e : JSON.stringify(json)\n    } catch {}\n    throw new Error(`Error making request ${r.status}: ${detail}`)\n  }\n  let image\n  try {\n    image = JSON.parse(r.body)?.data?.[0] ?? {}\n  } catch (e) {\n    fail(e.message)\n  }\n  r = null\n  const revisedPrompt = image.revised_prompt || undefined\n  let source = image.b64_json ? `data:image/${body.output_format ?? 'png'};base64,${image.b64_json}` : image.url\n  image = null\n  if (!source) throw new Error('No image data returned from OpenAI.')\n  const photo = frameos.fetchImage(source, { saveAsset: { name: prompt, extension: 'jpg', mode: saveAssets } })\n  source = null\n  if (!photo.image) fail(photo.error)\n  const meta = { source: 'openai', prompt, generatedPrompt: revisedPrompt || prompt, model, size, revisedPrompt }\n  if (metadataStateKey) frameos.setState(metadataStateKey, meta)\n  return photo.image\n}\n",
+    "config.json": "{\n  \"name\": \"OpenAI Image\",\n  \"description\": \"Random AI generated art from OpenAI's image models\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"openAI\"],\n  \"fields\": [\n    {\n      \"name\": \"prompt\",\n      \"type\": \"text\",\n      \"rows\": 4,\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"Prompt\",\n      \"placeholder\": \"e.g. pumpkin pyjama party, digital art\"\n    },\n    {\n      \"name\": \"model\",\n      \"type\": \"select\",\n      \"options\": [\"gpt-image-2\", \"gpt-image-1.5\", \"gpt-image-1\", \"dall-e-3\", \"dall-e-2\"],\n      \"value\": \"gpt-image-2\",\n      \"required\": true,\n      \"label\": \"Model\"\n    },\n    {\n      \"name\": \"size\",\n      \"type\": \"select\",\n      \"options\": [\"best for orientation\", \"1024x640\", \"640x1024\", \"1024x1024\", \"1536x1024\", \"1024x1536\"],\n      \"value\": \"best for orientation\",\n      \"label\": \"Size\",\n      \"showIf\": [{ \"field\": \"model\", \"operator\": \"eq\", \"value\": \"gpt-image-2\" }]\n    },\n    {\n      \"name\": \"size\",\n      \"type\": \"select\",\n      \"options\": [\"best for orientation\", \"1024x1024\", \"1536x1024\", \"1024x1536\"],\n      \"value\": \"best for orientation\",\n      \"label\": \"Size\",\n      \"showIf\": [{ \"field\": \"model\", \"operator\": \"in\", \"value\": [\"gpt-image-1\", \"gpt-image-1.5\"] }]\n    },\n    {\n      \"name\": \"size\",\n      \"type\": \"select\",\n      \"options\": [\"best for orientation\", \"1024x1024\", \"1792x1024\", \"1024x1792\"],\n      \"value\": \"best for orientation\",\n      \"label\": \"Size\",\n      \"showIf\": [{ \"field\": \"model\", \"operator\": \"eq\", \"value\": \"dall-e-3\" }]\n    },\n    {\n      \"name\": \"size\",\n      \"type\": \"select\",\n      \"options\": [\"best for orientation\", \"1024x1024\", \"512x512\", \"256x256\"],\n      \"value\": \"best for orientation\",\n      \"label\": \"Size\",\n      \"showIf\": [{ \"field\": \"model\", \"operator\": \"eq\", \"value\": \"dall-e-2\" }]\n    },\n    {\n      \"name\": \"style\",\n      \"type\": \"select\",\n      \"options\": [\"vivid\", \"natural\", \"\"],\n      \"value\": \"vivid\",\n      \"label\": \"Style\",\n      \"showIf\": [{ \"field\": \"model\", \"operator\": \"eq\", \"value\": \"dall-e-3\" }]\n    },\n    {\n      \"name\": \"quality\",\n      \"type\": \"select\",\n      \"options\": [\"standard\", \"hd\", \"\"],\n      \"value\": \"standard\",\n      \"label\": \"Quality\",\n      \"showIf\": [{ \"field\": \"model\", \"operator\": \"eq\", \"value\": \"dall-e-3\" }]\n    },\n    {\n      \"name\": \"quality\",\n      \"type\": \"select\",\n      \"options\": [\"auto\", \"low\", \"medium\", \"high\", \"\"],\n      \"value\": \"auto\",\n      \"label\": \"Quality\",\n      \"showIf\": [{ \"field\": \"model\", \"operator\": \"in\", \"value\": [\"gpt-image-2\", \"gpt-image-1\", \"gpt-image-1.5\"] }]\n    },\n    {\n      \"name\": \"outputFormat\",\n      \"type\": \"select\",\n      \"options\": [\"auto\", \"png\", \"jpeg\", \"webp\"],\n      \"value\": \"auto\",\n      \"label\": \"Output format\",\n      \"showIf\": [{ \"field\": \"model\", \"operator\": \"in\", \"value\": [\"gpt-image-2\", \"gpt-image-1\", \"gpt-image-1.5\"] }]\n    },\n    {\n      \"name\": \"outputCompression\",\n      \"type\": \"integer\",\n      \"value\": 0,\n      \"label\": \"Output compression\",\n      \"hint\": \"JPEG/WebP compression, 0-100. 0 uses the default.\",\n      \"showIf\": [\n        {\n          \"and\": [\n            { \"field\": \"outputFormat\", \"operator\": \"ne\", \"value\": \"png\" },\n            { \"field\": \"model\", \"operator\": \"in\", \"value\": [\"gpt-image-2\", \"gpt-image-1\", \"gpt-image-1.5\"] }\n          ]\n        }\n      ]\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Metadata state key\",\n      \"hint\": \"State key that receives {prompt, generatedPrompt, model, size}.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Keep each image in the frame's assets folder. auto follows the frame's save assets setting.\"\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"3600\" }\n}\n"
+  },
+  "repo/apps/text/openaiText": {
+    "app.ts": "// OpenAI text: one chat completion over frameos.httpRequest; most errors are logged and give \"\".\nconst bytes = (text) => {\n  let n = 0\n  for (const ch of text) {\n    const c = ch.codePointAt(0)\n    n += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4\n  }\n  return n\n}\nconst fail = (message) => (frameos.error(message), '')\n\nexport function get(app) {\n  const { system, user, model } = app.config\n  if (!system && !user) return fail('No system or user prompt provided in app config.')\n  const apiKey = frameos.getSetting('openAI', 'apiKey')\n  if (!apiKey) return fail('Please provide an OpenAI API key in the settings.')\n\n  frameos.log({ model, systemPromptChars: bytes(system), userPromptChars: bytes(user) })\n  const r = frameos.httpRequest('https://api.openai.com/v1/chat/completions', {\n    method: 'POST',\n    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },\n    body: JSON.stringify({\n      model,\n      messages: [\n        { role: 'system', content: system },\n        { role: 'user', content: user },\n      ],\n    }),\n    timeoutMs: 60000,\n  })\n  if (r.status && r.status !== 200) {\n    let detail = r.body\n    try {\n      const json = JSON.parse(r.body)\n      const e = json?.error\n      detail = typeof e?.message === 'string' ? e.message : typeof e === 'string' ? e : JSON.stringify(json)\n    } catch {}\n    return fail(`Error making request ${r.status}: ${detail}`)\n  }\n  try {\n    if (!r.status) throw new Error(r.error)\n    const reply = JSON.parse(r.body)?.choices?.[0]?.message?.content ?? ''\n    frameos.log({ replyChars: bytes(reply) })\n    return reply\n  } catch (e) {\n    fail(`OpenAI API error: ${e.message}`)\n    return `OpenAI API error: ${e.message}`\n  }\n}\n",
+    "config.json": "{\n  \"name\": \"OpenAI Text\",\n  \"description\": \"Text response from ChatGPT and friends\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"openAI\"],\n  \"fields\": [\n    {\n      \"name\": \"system\",\n      \"type\": \"text\",\n      \"rows\": 6,\n      \"value\": \"You're a smart e-ink frame running FrameOS. Reply with plain text only. Space is very limited.\",\n      \"required\": true,\n      \"label\": \"System Prompt\"\n    },\n    {\n      \"name\": \"user\",\n      \"type\": \"text\",\n      \"rows\": 6,\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"User Prompt\",\n      \"placeholder\": \"Write your prompt here. Keep it short and clear.\"\n    },\n    { \"name\": \"model\", \"type\": \"string\", \"value\": \"gpt-5.5\", \"required\": true, \"label\": \"Model\" }\n  ],\n  \"output\": [{ \"name\": \"reply\", \"type\": \"string\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"600\" }\n}\n"
+  },
+  "repo/apps/image/photoAlbum": {
     "app.ts": "// Photo album: plays an album from FrameOS Photos through its share link\n// (docs/photos.md, \"Share routes\"). One photo per render. The position lives\n// in a scene state field: on an ESP32 the JS heap does not outlive a render.\n\nconst ORDERS = ['random', 'sequential', 'newest', 'oldest']\n\n// The share link, or '' when it is not an http(s) URL.\nexport function albumLink(value: unknown): string {\n  const link = String(value ?? '').trim().replace(/\\/+$/, '')\n  return /^https?:\\/\\/[^\\s/?#]+/i.test(link) ? link : ''\n}\n\n// scheme://host[:port] of a link. QuickJS has no URL global.\nexport function linkOrigin(link: string): string {\n  const match = /^https?:\\/\\/[^/?#]+/i.exec(link)\n  return match ? match[0] : ''\n}\n\n// A photo's address: absolute as is, root-relative against the link's origin.\nexport function photoUrl(link: string, url: unknown): string {\n  const value = String(url ?? '')\n  if (/^https?:\\/\\//i.test(value)) return value\n  return value.startsWith('/') ? linkOrigin(link) + value : ''\n}\n\n// The counter as a non-negative integer; anything else starts over at 0.\nexport function position(value: unknown): number {\n  const n = Math.floor(Number(value))\n  return Number.isFinite(n) && n > 0 ? n : 0\n}\n\nfunction esc(text: string): string {\n  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\nexport function panel(width: number, height: number, message: string): string {\n  const size = Math.max(14, Math.round(Math.min(width, height) / 24))\n  const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))\n  const lines: string[] = []\n  let line = ''\n  for (const word of message.split(/\\s+/).filter(Boolean)) {\n    if (line && line.length + 1 + word.length > max) {\n      lines.push(line)\n      line = word\n    } else line = line ? `${line} ${word}` : word\n  }\n  if (line) lines.push(line)\n  const text = lines\n    .map((l, i) => `<text x=\"${size}\" y=\"${size * 2 + i * Math.round(size * 1.35)}\" font-family=\"Ubuntu\" font-size=\"${size}\" fill=\"#111111\">${esc(l)}</text>`)\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${text}</svg>`\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const width = context.imageWidth || app.frame.width\n  const height = context.imageHeight || app.frame.height\n  const show = (message: string): unknown => frameos.svg(panel(width, height, message), { width, height })\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    return show(message)\n  }\n\n  const link = albumLink(app.config.album)\n  if (!link) return fail('Please add an album link. Make one with Install photo scenes on the Photos page.')\n  const order = ORDERS.includes(String(app.config.order)) ? String(app.config.order) : 'random'\n  const key = String(app.config.counterStateKey ?? '').trim()\n  const index = key ? position(app.state[key]) : Math.floor(Math.random() * 1000000)\n\n  const r = frameos.httpRequest(`${link}/photo?order=${order}&index=${index}`, { timeoutMs: 20000 })\n  if (r.status === 404) return fail('This album link no longer works.')\n  if (r.status !== 200) {\n    return fail(r.status ? `Could not load the album (HTTP ${r.status}).` : `Could not reach the album: ${r.error ?? 'no response'}`)\n  }\n  let data: any = null\n  try {\n    data = JSON.parse(r.body ?? '')\n  } catch {}\n  if (!data || typeof data !== 'object') return fail('The album sent an answer this frame could not read.')\n  const count = position(data.count)\n  const photo = data.photo\n  if (!count || !photo || typeof photo !== 'object') {\n    frameos.log('This album has no photos yet.')\n    return show('This album has no photos yet.')\n  }\n\n  // Move on before the download, so one broken photo cannot stall the frame.\n  if (key) frameos.setState(key, index + 1)\n  const name = String(photo.name || photo.path || 'a photo')\n  const url = photoUrl(link, photo.url)\n  if (!url) return fail(`The album sent no address for ${name}.`)\n  frameos.log(`Showing ${name} (${(index % count) + 1} of ${count})`)\n  // null, not undefined: no profile clears the last photo's palette\n  const result = frameos.fetchImage(url, { colors: photo.colors ?? null })\n  if (!result.image) return fail(`Could not load ${name}: ${result.error ?? 'no image'}`)\n  return result.image\n}\n",
     "config.json": "{\n  \"name\": \"Photo album\",\n  \"description\": \"Play an album from FrameOS Photos through its share link, one photo per render.\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"album\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"Album link\",\n      \"hint\": \"Make one with Install photo scenes on the Photos page.\",\n      \"placeholder\": \"https://example.com/api/photos/shared/pk_...\"\n    },\n    {\n      \"name\": \"order\",\n      \"type\": \"select\",\n      \"value\": \"random\",\n      \"options\": [\"random\", \"sequential\", \"newest\", \"oldest\"],\n      \"required\": false,\n      \"label\": \"Order\",\n      \"hint\": \"random shows every photo once before any repeats. sequential goes by folder and file name, newest and oldest by date.\"\n    },\n    {\n      \"name\": \"counterStateKey\",\n      \"type\": \"string\",\n      \"value\": \"photoIndex\",\n      \"required\": false,\n      \"label\": \"State field for the position\",\n      \"hint\": \"The scene needs an integer state field with this name, saved to disk, so the album keeps its place after a restart or a deep sleep. Leave empty to pick a random photo each time.\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": false\n  }\n}\n"
   },
-  "repo/apps/code/weatherIcon": {
-    "app.ts": "// Render one weather icon (or the whole set as a contact sheet) as an image.\n// Wire `icons` from the \"Weather icon set (JS)\" app, which provides the SVG\n// fragments plus the WMO code-to-icon map.\n\nfunction resolveIconKey(iconSet, weathercode, isDay) {\n  const map = iconSet && iconSet.map ? iconSet.map : {}\n  const icons = iconSet && iconSet.icons ? iconSet.icons : {}\n  let key = map['' + weathercode] || 'cloudy'\n  if (!isDay && icons[key + '-night']) {\n    key = key + '-night'\n  }\n  if (!icons[key]) {\n    key = 'cloudy'\n  }\n  return key\n}\n\nfunction hasBackground(color) {\n  if (!color) {\n    return false\n  }\n  const c = ('' + color).toLowerCase()\n  return c !== 'none' && c !== '#00000000' && c !== 'transparent'\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const iconSet = app.config.icons\n  if (!iconSet || !iconSet.icons) {\n    app.logError('weatherIcon: missing icon set, wire it from the Weather icon set app')\n    return null\n  }\n  const viewBox = iconSet.viewBox || 64\n  const background = app.config.background\n\n  let width = Number(app.config.size) || 0\n  let height = width\n  if (width <= 0) {\n    width = context.imageWidth || app.frame.width\n    height = context.imageHeight || app.frame.height\n  }\n\n  const parts = []\n  if (hasBackground(background)) {\n    parts.push('<rect x=\"0\" y=\"0\" width=\"' + width + '\" height=\"' + height + '\" fill=\"' + background + '\"/>')\n  }\n\n  if (app.config.sheet === true) {\n    const keys = Object.keys(iconSet.icons).sort()\n    const columns = Math.max(1, Number(app.config.columns) || 4)\n    const rows = Math.ceil(keys.length / columns)\n    const cellW = width / columns\n    const cellH = height / rows\n    const scale = (Math.min(cellW, cellH) / viewBox) * 0.92\n    for (let i = 0; i < keys.length; i++) {\n      const col = i % columns\n      const row = Math.floor(i / columns)\n      const x = col * cellW + (cellW - viewBox * scale) / 2\n      const y = row * cellH + (cellH - viewBox * scale) / 2\n      parts.push(\n        '<g transform=\"translate(' + x.toFixed(2) + ' ' + y.toFixed(2) + ') scale(' + scale.toFixed(4) + ')\">' +\n        iconSet.icons[keys[i]] + '</g>'\n      )\n    }\n  } else {\n    const key = resolveIconKey(iconSet, Number(app.config.weathercode) || 0, app.config.isDay !== false)\n    const scale = (Math.min(width, height) / viewBox) * 0.96\n    const x = (width - viewBox * scale) / 2\n    const y = (height - viewBox * scale) / 2\n    parts.push(\n      '<g transform=\"translate(' + x.toFixed(2) + ' ' + y.toFixed(2) + ') scale(' + scale.toFixed(4) + ')\">' +\n      iconSet.icons[key] + '</g>'\n    )\n  }\n\n  const svg =\n    '<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ' + width + ' ' + height + '\">' +\n    parts.join('') + '</svg>'\n  return frameos.svg(svg, { width: width, height: height })\n}\n",
-    "config.json": "{\n  \"name\": \"Weather icon (JS)\",\n  \"category\": \"data\",\n  \"description\": \"Render a single weather icon (or a contact sheet of the whole set) as an image. Wire the icons input from the Weather icon set app.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"icons\",\n      \"label\": \"Icon set (from Weather icon set app)\",\n      \"type\": \"json\",\n      \"required\": true\n    },\n    {\n      \"name\": \"weathercode\",\n      \"label\": \"WMO weather code\",\n      \"type\": \"integer\",\n      \"value\": \"0\"\n    },\n    {\n      \"name\": \"isDay\",\n      \"label\": \"Day time\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"size\",\n      \"label\": \"Size in pixels (0 = fit frame)\",\n      \"type\": \"integer\",\n      \"value\": \"0\"\n    },\n    {\n      \"name\": \"background\",\n      \"label\": \"Background color\",\n      \"type\": \"color\",\n      \"value\": \"#00000000\"\n    },\n    {\n      \"name\": \"sheet\",\n      \"label\": \"Render the full set as a sheet\",\n      \"type\": \"boolean\",\n      \"value\": \"false\"\n    },\n    {\n      \"name\": \"columns\",\n      \"label\": \"Sheet columns\",\n      \"type\": \"integer\",\n      \"value\": \"4\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n"
+  "repo/apps/image/unsplash": {
+    "app.ts": "// A random Unsplash photo for a search; frameos.fetchImage decodes it natively.\nconst enc = (s) =>\n  encodeURIComponent(s)\n    .replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())\n    .replace(/%20/g, '+')\nconst str = (v, d = '') => (typeof v === 'string' ? v : d)\n\nexport function get(app, context) {\n  const { config: c, frame: f } = app\n  const turned = f.rotate === 90 || f.rotate === 270\n  const w = context.imageWidth || (turned ? f.height : f.width)\n  const h = context.imageHeight || (turned ? f.width : f.height)\n  const search = c.search.trim()\n  const stateKey = c.metadataStateKey.trim()\n  const fail = (m) => {\n    throw new Error(`Error fetching image from Unsplash: ${m}`)\n  }\n\n  const key = str(frameos.getSetting('unsplash', 'accessKey'))\n  if (!key) throw new Error('Please provide an Unsplash API key in the settings.')\n  const o = c.orientation\n  const orientation = o === 'auto' ? (h > w ? 'portrait' : w > h ? 'landscape' : 'squarish') : o === 'any' ? '' : o\n  const url = `https://api.unsplash.com/photos/random/?orientation=${enc(orientation)}&query=${enc(search)}`\n  if (f.debug) frameos.log(`API request: ${url}`)\n  const r = frameos.httpRequest(url, {\n    headers: { Authorization: `Client-ID ${key}`, 'Accept-Version': 'v1', 'Content-Type': 'application/json' },\n    timeoutMs: 60000,\n  })\n  if (!r.status) fail(r.error)\n  if (r.status !== 200) {\n    let detail = r.body\n    try {\n      const j = JSON.parse(r.body)\n      detail = str(j?.error?.message, str(j?.error, JSON.stringify(j)))\n    } catch {}\n    throw new Error(`Error making request ${r.status}: ${detail}`)\n  }\n  let j\n  try {\n    j = JSON.parse(r.body)\n  } catch (e) {\n    fail(e.message)\n  }\n  const raw = str(j?.urls?.raw)\n  if (!raw) throw new Error('No image URL returned from Unsplash.')\n  const imageUrl = `${raw}&w=${w}&h=${h}&fit=crop&crop=faces,edges`\n  const description = str(j.description, str(j.alt_description))\n  const meta = stateKey && {\n    source: 'unsplash',\n    search,\n    orientation,\n    imageUrl,\n    id: str(j.id),\n    title: str(j.slug, description),\n    description,\n    altDescription: str(j.alt_description),\n    location: str(j.location?.name),\n    createdAt: str(j.created_at),\n    photoUrl: str(j.links?.html),\n    author: str(j.user?.name),\n    authorUsername: str(j.user?.username),\n    authorUrl: str(j.user?.links?.html),\n  }\n  j = null\n\n  if (f.debug) frameos.log(`Downloading image: ${imageUrl}`)\n  const mode = c.saveAssets\n  const photo = frameos.fetchImage(imageUrl, {\n    saveAsset:\n      mode === 'auto' || mode === 'always' ? { name: `${search} ${w}x${h}`, extension: '.jpg', mode } : undefined,\n  })\n  if (!photo.image) fail(photo.error)\n  if (meta) frameos.setState(stateKey, meta)\n  return photo.image\n}\n",
+    "config.json": "{\n  \"name\": \"Unsplash\",\n  \"description\": \"Random Unsplash photo\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"settings\": [\"unsplash\"],\n  \"fields\": [\n    { \"name\": \"search\", \"type\": \"string\", \"value\": \"nature\", \"label\": \"Search\", \"placeholder\": \"e.g. nature, birds\" },\n    {\n      \"name\": \"orientation\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"any\", \"landscape\", \"portrait\", \"squarish\"],\n      \"label\": \"Orientation\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"label\": \"Metadata state key\",\n      \"hint\": \"Stores {search, title, description, location, author, links, ...} under this key.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Saves the image to the frame's assets folder. auto follows the frame's save-assets setting.\"\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
   },
-  "repo/apps/code/weatherIcons": {
-    "app.ts": "// Weather icon set for Open-Meteo / WMO weather codes.\n// Returns { viewBox, map, labels, icons } where every icon is an SVG <g>\n// fragment drawn inside a 64x64 box. Consumers stamp the fragments with\n// <g transform=\"translate(x,y) scale(s)\">...</g>.\n\nconst WMO_ICON_MAP = {\n  '0': 'clear',\n  '1': 'mostly-clear',\n  '2': 'partly',\n  '3': 'overcast',\n  '45': 'fog',\n  '48': 'fog',\n  '51': 'drizzle',\n  '53': 'drizzle',\n  '55': 'drizzle',\n  '56': 'freezing-rain',\n  '57': 'freezing-rain',\n  '61': 'rain',\n  '63': 'rain',\n  '65': 'heavy-rain',\n  '66': 'freezing-rain',\n  '67': 'freezing-rain',\n  '71': 'snow',\n  '73': 'snow',\n  '75': 'heavy-snow',\n  '77': 'snow',\n  '80': 'showers',\n  '81': 'showers',\n  '82': 'heavy-rain',\n  '85': 'snow-showers',\n  '86': 'snow-showers',\n  '95': 'thunder',\n  '96': 'thunder-hail',\n  '99': 'thunder-hail',\n}\n\nconst WMO_LABELS = {\n  '0': 'Clear sky',\n  '1': 'Mainly clear',\n  '2': 'Partly cloudy',\n  '3': 'Overcast',\n  '45': 'Fog',\n  '48': 'Icy fog',\n  '51': 'Light drizzle',\n  '53': 'Drizzle',\n  '55': 'Dense drizzle',\n  '56': 'Freezing drizzle',\n  '57': 'Freezing drizzle',\n  '61': 'Light rain',\n  '63': 'Rain',\n  '65': 'Heavy rain',\n  '66': 'Freezing rain',\n  '67': 'Freezing rain',\n  '71': 'Light snow',\n  '73': 'Snow',\n  '75': 'Heavy snow',\n  '77': 'Snow grains',\n  '80': 'Rain showers',\n  '81': 'Rain showers',\n  '82': 'Violent showers',\n  '85': 'Snow showers',\n  '86': 'Snow showers',\n  '95': 'Thunderstorm',\n  '96': 'Storm with hail',\n  '99': 'Storm with hail',\n}\n\n// Material-style cloud outline, drawn in a 24x24 box (spans roughly x 0..24, y 4..20).\nconst CLOUD_PATH =\n  'M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z'\n\nfunction group(children) {\n  return '<g>' + children.join('') + '</g>'\n}\n\nfunction cloud(x, y, scale, fill, stroke, lw) {\n  return (\n    '<g transform=\"translate(' + x + ' ' + y + ') scale(' + scale + ')\">' +\n    '<path d=\"' + CLOUD_PATH + '\" fill=\"' + fill + '\" stroke=\"' + stroke +\n    '\" stroke-width=\"' + (lw / scale) + '\" stroke-linejoin=\"round\"/></g>'\n  )\n}\n\nfunction sun(cx, cy, r, fill, stroke, lw, rays) {\n  const parts = []\n  parts.push(\n    '<circle cx=\"' + cx + '\" cy=\"' + cy + '\" r=\"' + r + '\" fill=\"' + fill +\n    '\" stroke=\"' + stroke + '\" stroke-width=\"' + lw + '\"/>'\n  )\n  const rayCount = 8\n  for (let i = 0; i < rayCount; i++) {\n    const a = (Math.PI * 2 * i) / rayCount + Math.PI / 8\n    const r1 = r + rays * 0.55\n    const r2 = r + rays * 1.45\n    const x1 = cx + Math.cos(a) * r1\n    const y1 = cy + Math.sin(a) * r1\n    const x2 = cx + Math.cos(a) * r2\n    const y2 = cy + Math.sin(a) * r2\n    parts.push(\n      '<line x1=\"' + x1.toFixed(2) + '\" y1=\"' + y1.toFixed(2) + '\" x2=\"' + x2.toFixed(2) +\n      '\" y2=\"' + y2.toFixed(2) + '\" stroke=\"' + stroke + '\" stroke-width=\"' + lw +\n      '\" stroke-linecap=\"round\"/>'\n    )\n  }\n  return parts.join('')\n}\n\nfunction moon(cx, cy, r, fill, stroke, lw) {\n  // Crescent: large outer arc plus a shallower inner return arc.\n  const top = (cy - r).toFixed(2)\n  const bottom = (cy + r).toFixed(2)\n  const x = (cx + r * 0.45).toFixed(2)\n  const inner = (r * 0.78).toFixed(2)\n  const d =\n    'M ' + x + ' ' + top +\n    ' A ' + r + ' ' + r + ' 0 1 0 ' + x + ' ' + bottom +\n    ' A ' + inner + ' ' + inner + ' 0 0 1 ' + x + ' ' + top + ' Z'\n  return (\n    '<path d=\"' + d + '\" fill=\"' + fill + '\" stroke=\"' + stroke + '\" stroke-width=\"' + lw +\n    '\" stroke-linejoin=\"round\"/>'\n  )\n}\n\nfunction star(x, y, s, color, lw) {\n  return (\n    '<path d=\"M ' + x + ' ' + (y - s) + ' L ' + x + ' ' + (y + s) +\n    ' M ' + (x - s) + ' ' + y + ' L ' + (x + s) + ' ' + y +\n    '\" stroke=\"' + color + '\" stroke-width=\"' + lw + '\" stroke-linecap=\"round\"/>'\n  )\n}\n\nfunction rainLine(x, y, len, color, lw) {\n  const x2 = (x - len * 0.3).toFixed(2)\n  const y2 = (y + len).toFixed(2)\n  return (\n    '<line x1=\"' + x + '\" y1=\"' + y + '\" x2=\"' + x2 + '\" y2=\"' + y2 + '\" stroke=\"' + color +\n    '\" stroke-width=\"' + lw + '\" stroke-linecap=\"round\"/>'\n  )\n}\n\nfunction dot(x, y, r, color) {\n  return '<circle cx=\"' + x + '\" cy=\"' + y + '\" r=\"' + r + '\" fill=\"' + color + '\"/>'\n}\n\nfunction flake(x, y, s, color, lw) {\n  const parts = []\n  for (let i = 0; i < 3; i++) {\n    const a = (Math.PI * i) / 3 + Math.PI / 6\n    const dx = Math.cos(a) * s\n    const dy = Math.sin(a) * s\n    parts.push(\n      '<line x1=\"' + (x - dx).toFixed(2) + '\" y1=\"' + (y - dy).toFixed(2) +\n      '\" x2=\"' + (x + dx).toFixed(2) + '\" y2=\"' + (y + dy).toFixed(2) +\n      '\" stroke=\"' + color + '\" stroke-width=\"' + lw + '\" stroke-linecap=\"round\"/>'\n    )\n  }\n  return parts.join('')\n}\n\nfunction bolt(x, y, s, fill, stroke, lw) {\n  const pts = [\n    [x + 2.5 * s, y],\n    [x - 2.2 * s, y + 7 * s],\n    [x + 0.4 * s, y + 7 * s],\n    [x - 1.6 * s, y + 12 * s],\n    [x + 3.6 * s, y + 4.6 * s],\n    [x + 1 * s, y + 4.6 * s],\n  ]\n  const d = pts.map((p, i) => (i === 0 ? 'M' : 'L') + ' ' + p[0].toFixed(2) + ' ' + p[1].toFixed(2)).join(' ') + ' Z'\n  return (\n    '<path d=\"' + d + '\" fill=\"' + fill + '\" stroke=\"' + stroke + '\" stroke-width=\"' + lw +\n    '\" stroke-linejoin=\"round\"/>'\n  )\n}\n\nfunction fogLines(color, lw) {\n  const parts = []\n  const rows = [\n    [16, 48, 46],\n    [20, 54, 44],\n    [24, 60, 40],\n  ]\n  for (let i = 0; i < rows.length; i++) {\n    const x1 = rows[i][0]\n    const y = rows[i][1]\n    const x2 = rows[i][0] + rows[i][2] - 16\n    parts.push(\n      '<line x1=\"' + x1 + '\" y1=\"' + y + '\" x2=\"' + x2 + '\" y2=\"' + y + '\" stroke=\"' + color +\n      '\" stroke-width=\"' + lw + '\" stroke-linecap=\"round\"/>'\n    )\n  }\n  return parts.join('')\n}\n\nfunction buildIcons(colors, lw) {\n  const c = colors\n  const icons = {}\n\n  const mainCloud = cloud(9, 14, 1.9, c.cloudFill, c.cloudStroke, lw)\n  const highCloud = cloud(9, 6, 1.9, c.cloudFill, c.cloudStroke, lw)\n  const backCloud = cloud(24, 6, 1.15, c.cloudBackFill, c.cloudBackStroke, lw)\n  const smallCloud = cloud(22, 26, 1.55, c.cloudFill, c.cloudStroke, lw)\n  const sunPeek = sun(20, 20, 8.5, c.sunFill, c.sunStroke, lw, 5)\n  const moonPeek = moon(20, 19, 9.5, c.moonFill, c.moonStroke, lw)\n\n  icons['clear'] = group([sun(32, 32, 11, c.sunFill, c.sunStroke, lw, 7)])\n  icons['clear-night'] = group([\n    moon(30, 32, 13, c.moonFill, c.moonStroke, lw),\n    star(47, 16, 3, c.starColor, lw * 0.8),\n    star(52, 30, 2, c.starColor, lw * 0.7),\n  ])\n  icons['mostly-clear'] = group([\n    sun(28, 26, 10, c.sunFill, c.sunStroke, lw, 6),\n    cloud(28, 32, 1.15, c.cloudFill, c.cloudStroke, lw),\n  ])\n  icons['mostly-clear-night'] = group([\n    moon(27, 26, 11, c.moonFill, c.moonStroke, lw),\n    star(50, 18, 2.5, c.starColor, lw * 0.7),\n    cloud(28, 32, 1.15, c.cloudFill, c.cloudStroke, lw),\n  ])\n  icons['partly'] = group([sunPeek, smallCloud])\n  icons['partly-night'] = group([moonPeek, smallCloud])\n  icons['cloudy'] = group([backCloud, cloud(7, 16, 1.9, c.cloudFill, c.cloudStroke, lw)])\n  icons['overcast'] = group([\n    cloud(20, 6, 1.35, c.cloudBackFill, c.cloudBackStroke, lw),\n    cloud(6, 18, 1.95, c.cloudDarkFill, c.cloudDarkStroke, lw),\n  ])\n  icons['fog'] = group([cloud(9, 2, 1.75, c.cloudFill, c.cloudStroke, lw), fogLines(c.fogColor, lw)])\n  icons['drizzle'] = group([\n    highCloud,\n    dot(24, 50, 1.9, c.rainColor),\n    dot(33, 56, 1.9, c.rainColor),\n    dot(42, 50, 1.9, c.rainColor),\n    dot(28, 59, 1.9, c.rainColor),\n    dot(38, 61, 1.9, c.rainColor),\n  ])\n  icons['rain'] = group([\n    highCloud,\n    rainLine(25, 49, 9, c.rainColor, lw),\n    rainLine(34, 52, 9, c.rainColor, lw),\n    rainLine(43, 49, 9, c.rainColor, lw),\n  ])\n  icons['heavy-rain'] = group([\n    highCloud,\n    rainLine(22, 48, 8, c.rainColor, lw),\n    rainLine(30, 53, 8, c.rainColor, lw),\n    rainLine(38, 48, 8, c.rainColor, lw),\n    rainLine(46, 53, 8, c.rainColor, lw),\n    rainLine(28, 44, 6, c.rainColor, lw),\n    rainLine(40, 58, 6, c.rainColor, lw),\n  ])\n  icons['freezing-rain'] = group([\n    highCloud,\n    rainLine(24, 49, 9, c.rainColor, lw),\n    rainLine(33, 53, 9, c.rainColor, lw),\n    flake(43, 54, 4.5, c.snowColor, lw * 0.85),\n  ])\n  icons['snow'] = group([\n    highCloud,\n    flake(24, 51, 5, c.snowColor, lw * 0.85),\n    flake(34, 58, 5, c.snowColor, lw * 0.85),\n    flake(44, 51, 5, c.snowColor, lw * 0.85),\n  ])\n  icons['heavy-snow'] = group([\n    highCloud,\n    flake(22, 49, 5, c.snowColor, lw * 0.85),\n    flake(33, 54, 5, c.snowColor, lw * 0.85),\n    flake(44, 49, 5, c.snowColor, lw * 0.85),\n    flake(27, 59, 4, c.snowColor, lw * 0.85),\n    flake(39, 61, 4, c.snowColor, lw * 0.85),\n  ])\n  icons['sleet'] = group([\n    highCloud,\n    rainLine(25, 49, 8, c.rainColor, lw),\n    flake(35, 55, 4.5, c.snowColor, lw * 0.85),\n    rainLine(45, 49, 8, c.rainColor, lw),\n  ])\n  icons['showers'] = group([\n    sun(19, 17, 7.5, c.sunFill, c.sunStroke, lw, 4.5),\n    cloud(15, 16, 1.65, c.cloudFill, c.cloudStroke, lw),\n    rainLine(26, 52, 8, c.rainColor, lw),\n    rainLine(35, 55, 8, c.rainColor, lw),\n    rainLine(44, 52, 8, c.rainColor, lw),\n  ])\n  icons['showers-night'] = group([\n    moon(19, 16, 8.5, c.moonFill, c.moonStroke, lw),\n    cloud(15, 16, 1.65, c.cloudFill, c.cloudStroke, lw),\n    rainLine(26, 52, 8, c.rainColor, lw),\n    rainLine(35, 55, 8, c.rainColor, lw),\n    rainLine(44, 52, 8, c.rainColor, lw),\n  ])\n  icons['snow-showers'] = group([\n    sun(19, 17, 7.5, c.sunFill, c.sunStroke, lw, 4.5),\n    cloud(15, 16, 1.65, c.cloudFill, c.cloudStroke, lw),\n    flake(26, 54, 4.5, c.snowColor, lw * 0.85),\n    flake(38, 57, 4.5, c.snowColor, lw * 0.85),\n  ])\n  icons['thunder'] = group([highCloud, bolt(32, 41, 1.5, c.boltFill, c.boltStroke, lw * 0.75)])\n  icons['thunder-hail'] = group([\n    highCloud,\n    bolt(28, 41, 1.4, c.boltFill, c.boltStroke, lw * 0.75),\n    dot(43, 49, 2.4, c.snowColor),\n    dot(47, 56, 2.4, c.snowColor),\n  ])\n  return icons\n}\n\nexport function get(app: FrameOSApp) {\n  const lowContrast = app.config.lowContrast === true\n  let palette = app.config.palette || 'auto'\n  if (palette === 'auto') {\n    palette = lowContrast ? 'mono' : 'vivid'\n  }\n  const lw = Number(app.config.lineWidth) > 0 ? Number(app.config.lineWidth) : 3\n  const ink = app.config.ink || '#222222'\n  const paper = app.config.paper || '#ffffff'\n\n  let colors\n  if (palette === 'mono') {\n    colors = {\n      sunFill: 'none',\n      sunStroke: ink,\n      moonFill: 'none',\n      moonStroke: ink,\n      starColor: ink,\n      cloudFill: paper,\n      cloudStroke: ink,\n      cloudBackFill: paper,\n      cloudBackStroke: ink,\n      cloudDarkFill: paper,\n      cloudDarkStroke: ink,\n      rainColor: ink,\n      snowColor: ink,\n      boltFill: paper,\n      boltStroke: ink,\n      fogColor: ink,\n    }\n  } else {\n    colors = {\n      sunFill: '#FFD54F',\n      sunStroke: '#F59E0B',\n      moonFill: '#FDE9A8',\n      moonStroke: '#E8B93C',\n      starColor: '#FDE9A8',\n      cloudFill: '#FDFEFF',\n      cloudStroke: '#7C8DA6',\n      cloudBackFill: '#DCE5F0',\n      cloudBackStroke: '#93A5BD',\n      cloudDarkFill: '#C7D2E1',\n      cloudDarkStroke: '#6C7E98',\n      rainColor: '#38BDF8',\n      snowColor: '#A8D8F0',\n      boltFill: '#FFD54F',\n      boltStroke: '#F59E0B',\n      fogColor: '#9FB0C4',\n    }\n  }\n\n  return {\n    viewBox: 64,\n    palette: palette,\n    map: WMO_ICON_MAP,\n    labels: WMO_LABELS,\n    icons: buildIcons(colors, lw),\n  }\n}\n",
-    "config.json": "{\n  \"name\": \"Weather icon set (JS)\",\n  \"category\": \"data\",\n  \"description\": \"Vector weather icons for WMO weather codes, returned as a JSON set of SVG fragments plus code-to-icon and code-to-label maps.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"palette\",\n      \"label\": \"Palette\",\n      \"type\": \"select\",\n      \"options\": [\"auto\", \"vivid\", \"mono\"],\n      \"value\": \"auto\",\n      \"hint\": \"auto picks vivid, or mono when low contrast is enabled\"\n    },\n    {\n      \"name\": \"lowContrast\",\n      \"label\": \"Low contrast\",\n      \"type\": \"boolean\",\n      \"value\": \"false\"\n    },\n    {\n      \"name\": \"lineWidth\",\n      \"label\": \"Line width\",\n      \"type\": \"float\",\n      \"value\": \"3\"\n    },\n    {\n      \"name\": \"ink\",\n      \"label\": \"Ink color (mono)\",\n      \"type\": \"color\",\n      \"value\": \"#222222\"\n    },\n    {\n      \"name\": \"paper\",\n      \"label\": \"Paper color (mono)\",\n      \"type\": \"color\",\n      \"value\": \"#ffffff\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"icons\",\n      \"type\": \"json\",\n      \"example\": \"{\\n  \\\"viewBox\\\": 64,\\n  \\\"map\\\": { \\\"0\\\": \\\"clear\\\", \\\"61\\\": \\\"rain\\\" },\\n  \\\"labels\\\": { \\\"0\\\": \\\"Clear sky\\\", \\\"61\\\": \\\"Light rain\\\" },\\n  \\\"icons\\\": { \\\"clear\\\": \\\"<g>...</g>\\\", \\\"rain\\\": \\\"<g>...</g>\\\" }\\n}\"\n    }\n  ]\n}\n"
+  "repo/apps/json/weather": {
+    "app.ts": "// Open-Meteo: geocode the location, then fetch its current, hourly and daily forecast.\nconst enc = (value) =>\n  encodeURIComponent(value)\n    .replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())\n    .replace(/%20/g, '+')\nconst num = (value) => (Number.isInteger(value) ? `${value}.0` : value)\n\nfunction fetchJson(url) {\n  const { status, body, error } = frameos.httpRequest(url)\n  if (!status) throw new Error(error)\n  if (status >= 400) throw new Error(`HTTP ${status}${body && `: ${body}`}`)\n  return JSON.parse(body)\n}\n\nexport function forecastUrl(c, latitude, longitude, timezone, date) {\n  const days = c.date\n    ? `start_date=${enc(date)}&end_date=${enc(date)}`\n    : `forecast_days=${Math.max(1, Math.min(16, c.forecastDays))}`\n  return (\n    `https://api.open-meteo.com/v1/forecast?latitude=${num(latitude)}&longitude=${num(\n      longitude\n    )}&current_weather=true` +\n    '&hourly=temperature_2m,apparent_temperature,precipitation,weathercode,windspeed_10m,winddirection_10m' +\n    '&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode,sunrise,sunset,windspeed_10m_max' +\n    `&timezone=${enc(timezone)}&temperature_unit=${enc(c.temperatureUnit)}&windspeed_unit=${enc(c.windSpeedUnit)}` +\n    `&precipitation_unit=${enc(c.precipitationUnit)}&${days}`\n  )\n}\n\nexport function get(app) {\n  const c = app.config\n  const location = c.location\n  if (!location) return { location: '', error: 'Location is required.' }\n  const date = c.date || new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10)\n  try {\n    const r = fetchJson(\n      `https://geocoding-api.open-meteo.com/v1/search?name=${enc(location)}&count=1&language=en&format=json`\n    )?.results?.[0]\n    if (!r) return { location, error: 'No matching locations found.' }\n    const need = (key) => {\n      if (!(key in r)) throw new Error(`key not found: ${key}`)\n      return r[key]\n    }\n    const latitude = need('latitude')\n    const longitude = need('longitude')\n    const timezone = app.frame.timeZone || (r.timezone ?? 'auto')\n    const forecast = fetchJson(forecastUrl(c, latitude, longitude, timezone, date))\n    const { country, country_code: countryCode, admin1, admin2 } = r\n    return {\n      provider: 'open-meteo',\n      forecastModes: ['current', 'hourly', 'daily'],\n      date,\n      location: { name: need('name'), latitude, longitude, timezone, country, countryCode, admin1, admin2 },\n      forecast,\n    }\n  } catch (e) {\n    return { location, error: e.message }\n  }\n}\n",
+    "config.json": "{\n  \"name\": \"Weather (Open-Meteo)\",\n  \"description\": \"Current, hourly and daily forecasts from Open-Meteo for a location.\",\n  \"category\": \"data\",\n  \"version\": \"1.1.0\",\n  \"fields\": [\n    {\n      \"name\": \"location\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"Location\",\n      \"placeholder\": \"City, state, or country\"\n    },\n    { \"name\": \"date\", \"type\": \"date\", \"value\": \"\", \"label\": \"Date\", \"placeholder\": \"2024-01-30\" },\n    {\n      \"name\": \"forecastDays\",\n      \"type\": \"integer\",\n      \"value\": \"1\",\n      \"label\": \"Forecast days (1-16)\",\n      \"showIf\": [{ \"field\": \"date\", \"operator\": \"empty\" }]\n    },\n    {\n      \"name\": \"temperatureUnit\",\n      \"type\": \"select\",\n      \"options\": [\"celsius\", \"fahrenheit\"],\n      \"value\": \"celsius\",\n      \"required\": true,\n      \"label\": \"Temperature unit\"\n    },\n    {\n      \"name\": \"windSpeedUnit\",\n      \"type\": \"select\",\n      \"options\": [\"kmh\", \"ms\", \"mph\", \"kn\"],\n      \"value\": \"kmh\",\n      \"required\": true,\n      \"label\": \"Wind speed unit\"\n    },\n    {\n      \"name\": \"precipitationUnit\",\n      \"type\": \"select\",\n      \"options\": [\"mm\", \"inch\"],\n      \"value\": \"mm\",\n      \"required\": true,\n      \"label\": \"Precipitation unit\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"weather\",\n      \"type\": \"json\",\n      \"example\": \"{\\\"provider\\\":\\\"open-meteo\\\",\\\"forecastModes\\\":[\\\"current\\\",\\\"hourly\\\",\\\"daily\\\"],\\\"date\\\":\\\"2026-01-18\\\",\\\"location\\\":{\\\"name\\\":\\\"Brussels\\\",\\\"latitude\\\":50.85045,\\\"longitude\\\":4.34878,\\\"timezone\\\":\\\"Europe/Brussels\\\",\\\"country\\\":\\\"Belgium\\\",\\\"countryCode\\\":\\\"BE\\\",\\\"admin1\\\":\\\"Brussels Capital\\\",\\\"admin2\\\":\\\"Bruxelles-Capitale\\\"},\\\"forecast\\\":{\\\"latitude\\\":50.854,\\\"longitude\\\":4.35,\\\"generationtime_ms\\\":0.37,\\\"utc_offset_seconds\\\":3600,\\\"timezone\\\":\\\"Europe/Brussels\\\",\\\"timezone_abbreviation\\\":\\\"GMT+1\\\",\\\"elevation\\\":27,\\\"current_weather_units\\\":{\\\"time\\\":\\\"iso8601\\\",\\\"interval\\\":\\\"seconds\\\",\\\"temperature\\\":\\\"°C\\\",\\\"windspeed\\\":\\\"km/h\\\",\\\"winddirection\\\":\\\"°\\\",\\\"is_day\\\":\\\"\\\",\\\"weathercode\\\":\\\"wmo code\\\"},\\\"current_weather\\\":{\\\"time\\\":\\\"2026-01-18T22:15\\\",\\\"interval\\\":900,\\\"temperature\\\":5.7,\\\"windspeed\\\":5.4,\\\"winddirection\\\":132,\\\"is_day\\\":0,\\\"weathercode\\\":0},\\\"hourly_units\\\":{\\\"time\\\":\\\"iso8601\\\",\\\"temperature_2m\\\":\\\"°C\\\",\\\"apparent_temperature\\\":\\\"°C\\\",\\\"precipitation\\\":\\\"mm\\\",\\\"weathercode\\\":\\\"wmo code\\\",\\\"windspeed_10m\\\":\\\"km/h\\\",\\\"winddirection_10m\\\":\\\"°\\\"},\\\"hourly\\\":{\\\"time\\\":[\\\"2026-01-18T00:00\\\"],\\\"temperature_2m\\\":[9.2],\\\"apparent_temperature\\\":[7.5],\\\"precipitation\\\":[0],\\\"weathercode\\\":[0],\\\"windspeed_10m\\\":[4],\\\"winddirection_10m\\\":[166]},\\\"daily_units\\\":{\\\"time\\\":\\\"iso8601\\\",\\\"temperature_2m_max\\\":\\\"°C\\\",\\\"temperature_2m_min\\\":\\\"°C\\\",\\\"precipitation_sum\\\":\\\"mm\\\",\\\"weathercode\\\":\\\"wmo code\\\",\\\"sunrise\\\":\\\"iso8601\\\",\\\"sunset\\\":\\\"iso8601\\\",\\\"windspeed_10m_max\\\":\\\"km/h\\\"},\\\"daily\\\":{\\\"time\\\":[\\\"2026-01-18\\\"],\\\"temperature_2m_max\\\":[11.3],\\\"temperature_2m_min\\\":[5.5],\\\"precipitation_sum\\\":[0],\\\"weathercode\\\":[3],\\\"sunrise\\\":[\\\"2026-01-18T08:35\\\"],\\\"sunset\\\":[\\\"2026-01-18T17:10\\\"],\\\"windspeed_10m_max\\\":[10.4]}}}\"\n    }\n  ]\n}\n"
   },
-  "repo/apps/code/weatherPanel": {
-    "app.ts": "// High fidelity weather panel for Open-Meteo data.\n//\n// Everything is drawn as vector SVG that FrameOS rasterizes with pixie.\n// Pixie's SVG subset has no <text> element, so the panel ships a small\n// single-stroke vector font (digits, A-Z and a few symbols) and draws all\n// text as stroked paths. Icons come in through the `icons` field, produced\n// by the \"Weather icon set (JS)\" app.\n\n// ---------------------------------------------------------------------------\n// Vector font: single stroke glyphs in a 14-unit tall box, baseline at y=14.\n// Each entry is [advanceWidth, pathData].\n// ---------------------------------------------------------------------------\n\nconst GLYPHS = {\n  '0': [9, 'M4.5 0 Q9 0 9 7 Q9 14 4.5 14 Q0 14 0 7 Q0 0 4.5 0'],\n  '1': [9, 'M2.5 2.6 Q5 1.6 6 0 L6 14'],\n  '2': [9, 'M0.5 3 Q0.5 0 4.5 0 Q8.5 0 8.5 3 Q8.5 5.5 6 8 L0 14 L9 14'],\n  '3': [9, 'M0.8 2.2 Q1.6 0 4.5 0 Q8.2 0 8.2 3.1 Q8.2 6.1 4.4 6.4 Q8.7 6.7 8.7 10.3 Q8.7 14 4.5 14 Q1.2 14 0.4 11.6'],\n  '4': [9, 'M6.5 14 L6.5 0 L0 9.5 L9 9.5'],\n  '5': [9, 'M8 0 L1.4 0 L0.9 6.1 Q2.2 5.2 4.2 5.2 Q8.7 5.2 8.7 9.5 Q8.7 14 4.4 14 Q1.2 14 0.4 11.8'],\n  '6': [9, 'M8 1.6 Q7 0 4.8 0 Q0.4 0 0.4 7.3 Q0.4 14 4.6 14 Q8.7 14 8.7 9.9 Q8.7 6 4.9 6 Q1.3 6 0.4 8.8'],\n  '7': [9, 'M0.3 0 L9 0 L3.6 14'],\n  '8': [9, 'M4.5 6.4 Q1 6.1 1 3.2 Q1 0 4.5 0 Q8 0 8 3.2 Q8 6.1 4.5 6.4 Q0.4 6.8 0.4 10.4 Q0.4 14 4.5 14 Q8.6 14 8.6 10.4 Q8.6 6.8 4.5 6.4'],\n  '9': [9, 'M1 12.4 Q2 14 4.2 14 Q8.6 14 8.6 6.7 Q8.6 0 4.4 0 Q0.3 0 0.3 4.1 Q0.3 8 4.1 8 Q7.7 8 8.6 5.2'],\n  'A': [10, 'M0 14 L5 0 L10 14 M1.8 9.2 L8.2 9.2'],\n  'B': [9.4, 'M1 0 L1 14 M1 0 L5 0 Q8.4 0 8.4 3.2 Q8.4 6.3 5 6.4 L1 6.4 M5 6.4 Q9 6.5 9 10.2 Q9 14 5 14 L1 14'],\n  'C': [9.6, 'M9.2 2.6 Q8 0 5 0 Q0.5 0 0.5 7 Q0.5 14 5 14 Q8 14 9.2 11.4'],\n  'D': [9.7, 'M1 0 L1 14 M1 0 L4.4 0 Q9.2 0 9.2 7 Q9.2 14 4.4 14 L1 14'],\n  'E': [8.7, 'M8.3 0 L1 0 L1 14 L8.3 14 M1 6.4 L7 6.4'],\n  'F': [8.5, 'M8.3 0 L1 0 L1 14 M1 6.4 L7 6.4'],\n  'G': [9.7, 'M9.2 2.6 Q8 0 5 0 Q0.5 0 0.5 7 Q0.5 14 5 14 Q9.2 14 9.2 10.4 L9.2 8 L5.4 8'],\n  'H': [9.5, 'M1 0 L1 14 M8.5 0 L8.5 14 M1 6.4 L8.5 6.4'],\n  'I': [2.6, 'M1.3 0 L1.3 14'],\n  'J': [7, 'M6 0 L6 10.6 Q6 14 3.2 14 Q0.7 14 0.4 11'],\n  'K': [9.6, 'M1 0 L1 14 M9 0 L1 7.8 M3.8 5.6 L9.5 14'],\n  'L': [8, 'M1 0 L1 14 L7.8 14'],\n  'M': [11.5, 'M1 14 L1 0 L5.75 9.6 L10.5 0 L10.5 14'],\n  'N': [9.5, 'M1 14 L1 0 L8.5 14 L8.5 0'],\n  'O': [10.5, 'M5.25 0 Q10 0 10 7 Q10 14 5.25 14 Q0.5 14 0.5 7 Q0.5 0 5.25 0'],\n  'P': [9.2, 'M1 14 L1 0 L5.2 0 Q8.8 0 8.8 3.6 Q8.8 7.2 5.2 7.2 L1 7.2'],\n  'Q': [10.5, 'M5.25 0 Q10 0 10 7 Q10 14 5.25 14 Q0.5 14 0.5 7 Q0.5 0 5.25 0 M6.4 10.6 L10.3 14.8'],\n  'R': [9.5, 'M1 14 L1 0 L5.2 0 Q8.8 0 8.8 3.5 Q8.8 6.9 5.2 6.9 L1 6.9 M5.4 6.9 L9.2 14'],\n  'S': [9.2, 'M8.4 2.1 Q7.6 0 4.6 0 Q1 0 1 3.1 Q1 5.6 4.6 6.4 Q8.7 7.3 8.7 10.3 Q8.7 14 4.6 14 Q1.1 14 0.3 11.7'],\n  'T': [9, 'M4.5 14 L4.5 0 M0 0 L9 0'],\n  'U': [9.5, 'M1 0 L1 9.4 Q1 14 4.75 14 Q8.5 14 8.5 9.4 L8.5 0'],\n  'V': [10, 'M0 0 L5 14 L10 0'],\n  'W': [13, 'M0.5 0 L3.4 14 L6.5 3.4 L9.6 14 L12.5 0'],\n  'X': [9.5, 'M0.4 0 L9.1 14 M9.1 0 L0.4 14'],\n  'Y': [10, 'M0 0 L5 7.6 L10 0 M5 7.6 L5 14'],\n  'Z': [9, 'M0.5 0 L8.5 0 L0.5 14 L8.5 14'],\n  ' ': [5.5, ''],\n  '-': [7, 'M1 7.5 L6 7.5'],\n  '+': [8, 'M4 3.8 L4 11.2 M0.3 7.5 L7.7 7.5'],\n  '.': [3.5, 'M1.05 13.3 Q1.05 12.6 1.75 12.6 Q2.45 12.6 2.45 13.3 Q2.45 14 1.75 14 Q1.05 14 1.05 13.3'],\n  ',': [3.5, 'M2.4 12.4 Q2.6 14.6 1.1 16'],\n  ':': [3.5, 'M1.05 4.7 Q1.05 4 1.75 4 Q2.45 4 2.45 4.7 Q2.45 5.4 1.75 5.4 Q1.05 5.4 1.05 4.7 M1.05 13.3 Q1.05 12.6 1.75 12.6 Q2.45 12.6 2.45 13.3 Q2.45 14 1.75 14 Q1.05 14 1.05 13.3'],\n  '·': [3.8, 'M1.2 7.5 Q1.2 6.8 1.9 6.8 Q2.6 6.8 2.6 7.5 Q2.6 8.2 1.9 8.2 Q1.2 8.2 1.2 7.5'],\n  '°': [6.6, 'M3.25 0 Q5.55 0 5.55 2.3 Q5.55 4.6 3.25 4.6 Q0.95 4.6 0.95 2.3 Q0.95 0 3.25 0'],\n  '%': [11, 'M2.6 0.6 Q4.6 0.6 4.6 2.7 Q4.6 4.8 2.6 4.8 Q0.6 4.8 0.6 2.7 Q0.6 0.6 2.6 0.6 M10.4 0.5 L0.6 13.5 M8.4 9.2 Q10.4 9.2 10.4 11.3 Q10.4 13.4 8.4 13.4 Q6.4 13.4 6.4 11.3 Q6.4 9.2 8.4 9.2'],\n  '/': [7, 'M6.5 0 L0.5 14'],\n  \"'\": [2.6, 'M1.3 0 L1.1 3.6'],\n  '(': [4.6, 'M4 -0.5 Q1 3 1 7 Q1 11 4 14.5'],\n  ')': [4.6, 'M0.6 -0.5 Q3.6 3 3.6 7 Q3.6 11 0.6 14.5'],\n}\n\nconst ACCENTS = {\n  'À': 'A', 'Á': 'A', 'Â': 'A', 'Ã': 'A', 'Ä': 'A', 'Å': 'A', 'Æ': 'A',\n  'Ç': 'C',\n  'È': 'E', 'É': 'E', 'Ê': 'E', 'Ë': 'E',\n  'Ì': 'I', 'Í': 'I', 'Î': 'I', 'Ï': 'I',\n  'Ñ': 'N',\n  'Ò': 'O', 'Ó': 'O', 'Ô': 'O', 'Õ': 'O', 'Ö': 'O', 'Ø': 'O',\n  'Ù': 'U', 'Ú': 'U', 'Û': 'U', 'Ü': 'U',\n  'Ý': 'Y', 'Š': 'S', 'Ž': 'Z',\n}\n\nconst TRACKING = 1.8\n\nfunction glyphFor(ch) {\n  let up = ch.toUpperCase()\n  if (ACCENTS[up]) {\n    up = ACCENTS[up]\n  }\n  return GLYPHS[up]\n}\n\nfunction textUnits(str) {\n  let units = 0\n  for (let i = 0; i < str.length; i++) {\n    const g = glyphFor(str.charAt(i))\n    if (g) {\n      units += g[0] + TRACKING\n    }\n  }\n  return units > 0 ? units - TRACKING : 0\n}\n\nfunction textWidth(str, size) {\n  return (textUnits(str) * size) / 14\n}\n\n// Shrink `size` until `str` fits in maxWidth.\nfunction fitSize(str, size, maxWidth) {\n  const w = textWidth(str, size)\n  return w > maxWidth ? (size * maxWidth) / w : size\n}\n\n// Draw `str` with the baseline at (x, y). anchor: start | middle | end.\nfunction text(str, x, y, size, color, weight, anchor) {\n  const s = size / 14\n  let startX = x\n  if (anchor === 'middle') {\n    startX = x - textWidth(str, size) / 2\n  } else if (anchor === 'end') {\n    startX = x - textWidth(str, size)\n  }\n  const sw = (weight / s).toFixed(3)\n  const parts = []\n  let cx = 0\n  for (let i = 0; i < str.length; i++) {\n    const g = glyphFor(str.charAt(i))\n    if (!g) {\n      continue\n    }\n    if (g[1]) {\n      parts.push('<path d=\"' + g[1] + '\" transform=\"translate(' + cx.toFixed(2) + ' 0)\"/>')\n    }\n    cx += g[0] + TRACKING\n  }\n  return (\n    '<g transform=\"translate(' + startX.toFixed(2) + ' ' + (y - size).toFixed(2) + ') scale(' + s.toFixed(4) + ')\"' +\n    ' fill=\"none\" stroke=\"' + color + '\" stroke-width=\"' + sw + '\" stroke-linecap=\"round\" stroke-linejoin=\"round\">' +\n    parts.join('') + '</g>'\n  )\n}\n\n// ---------------------------------------------------------------------------\n// Small helpers\n// ---------------------------------------------------------------------------\n\nfunction clamp(v, lo, hi) {\n  return v < lo ? lo : v > hi ? hi : v\n}\n\nfunction hexToRgb(hex) {\n  const h = hex.charAt(0) === '#' ? hex.substring(1) : hex\n  return [\n    parseInt(h.substring(0, 2), 16),\n    parseInt(h.substring(2, 4), 16),\n    parseInt(h.substring(4, 6), 16),\n  ]\n}\n\nfunction rgbToHex(r, g, b) {\n  const to2 = (v) => {\n    const s = Math.round(clamp(v, 0, 255)).toString(16)\n    return s.length < 2 ? '0' + s : s\n  }\n  return '#' + to2(r) + to2(g) + to2(b)\n}\n\nfunction mix(hexA, hexB, t) {\n  const a = hexToRgb(hexA)\n  const b = hexToRgb(hexB)\n  return rgbToHex(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t)\n}\n\n// Temperature to color, anchored on celsius; fahrenheit values are converted.\nconst TEMP_STOPS = [\n  [-15, '#7FA9F0'],\n  [0, '#7CC4E8'],\n  [10, '#8FD0A8'],\n  [18, '#F2C94C'],\n  [27, '#F2994A'],\n  [38, '#EB5757'],\n]\n\nfunction tempColor(value, unit) {\n  let c = value\n  if (unit && unit.indexOf('F') >= 0) {\n    c = ((value - 32) * 5) / 9\n  }\n  if (c <= TEMP_STOPS[0][0]) {\n    return TEMP_STOPS[0][1]\n  }\n  for (let i = 1; i < TEMP_STOPS.length; i++) {\n    if (c <= TEMP_STOPS[i][0]) {\n      const t = (c - TEMP_STOPS[i - 1][0]) / (TEMP_STOPS[i][0] - TEMP_STOPS[i - 1][0])\n      return mix(TEMP_STOPS[i - 1][1], TEMP_STOPS[i][1], t)\n    }\n  }\n  return TEMP_STOPS[TEMP_STOPS.length - 1][1]\n}\n\nfunction parseIso(iso) {\n  // \"2026-01-18T22:15\" -> parts; no Date object to stay deterministic.\n  const datePart = iso.split('T')[0]\n  const timePart = iso.split('T')[1] || '00:00'\n  const d = datePart.split('-')\n  const t = timePart.split(':')\n  return {\n    y: parseInt(d[0], 10),\n    mo: parseInt(d[1], 10),\n    d: parseInt(d[2], 10),\n    h: parseInt(t[0], 10),\n    mi: parseInt(t[1] || '0', 10),\n  }\n}\n\nconst DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']\nconst MONTH_NAMES = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']\n\nfunction dayOfWeek(y, mo, d) {\n  // Sakamoto's algorithm, 0 = Sunday.\n  const t = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]\n  let yy = y\n  if (mo < 3) {\n    yy -= 1\n  }\n  return (yy + Math.floor(yy / 4) - Math.floor(yy / 100) + Math.floor(yy / 400) + t[mo - 1] + d) % 7\n}\n\nfunction fmtTemp(v) {\n  const r = Math.round(v)\n  return (r === 0 ? 0 : r) + '°'\n}\n\nfunction unitLetter(unit) {\n  return ('' + (unit || '°C')).indexOf('F') >= 0 ? 'F' : 'C'\n}\n\nfunction fmtPrecip(v) {\n  return Math.round(v * 10) / 10 + ''\n}\n\nfunction fmtClock(iso) {\n  const p = iso.split('T')\n  return p.length > 1 ? p[1] : iso\n}\n\nfunction iconFragment(iconSet, code, isDay, x, y, size) {\n  if (!iconSet || !iconSet.icons) {\n    return ''\n  }\n  const map = iconSet.map || {}\n  const icons = iconSet.icons\n  let key = map['' + code] || 'cloudy'\n  if (!isDay && icons[key + '-night']) {\n    key = key + '-night'\n  }\n  if (!icons[key]) {\n    key = icons['cloudy'] ? 'cloudy' : ''\n  }\n  if (!key) {\n    return ''\n  }\n  const vb = iconSet.viewBox || 64\n  const s = size / vb\n  return '<g transform=\"translate(' + x.toFixed(2) + ' ' + y.toFixed(2) + ') scale(' + s.toFixed(4) + ')\">' + icons[key] + '</g>'\n}\n\nfunction conditionLabel(iconSet, code) {\n  if (iconSet && iconSet.labels && iconSet.labels['' + code]) {\n    return iconSet.labels['' + code]\n  }\n  return 'CODE ' + code\n}\n\n// ---------------------------------------------------------------------------\n// Themes\n// ---------------------------------------------------------------------------\n\nfunction skyFor(code, isDay) {\n  if (code >= 95) {\n    return ['#252A40', '#4A5578']\n  }\n  if (code >= 71 && code <= 86 && code !== 80 && code !== 81 && code !== 82) {\n    return isDay ? ['#5D7A9C', '#A9BFD6'] : ['#1F2A3F', '#44546F']\n  }\n  if (code >= 51) {\n    return isDay ? ['#3E5C7A', '#7395B0'] : ['#141E2C', '#31445C']\n  }\n  if (code >= 45) {\n    return isDay ? ['#6E7B8A', '#A3AEBA'] : ['#242B34', '#4A545F']\n  }\n  if (code >= 2) {\n    return isDay ? ['#3E6FB0', '#84AED6'] : ['#161E38', '#35426A']\n  }\n  return isDay ? ['#2E6FD0', '#7FB8EE'] : ['#111834', '#2C3B6E']\n}\n\nfunction themeFor(code, isDay, lowContrast) {\n  if (lowContrast) {\n    return {\n      flat: true,\n      bgTop: '#FFFFFF',\n      bgBottom: '#FFFFFF',\n      text: '#111111',\n      sub: '#3D3D3D',\n      faint: '#8A8A8A',\n      line: '#111111',\n      grid: '#C8C8C8',\n      rain: '#111111',\n      areaFill: 'none',\n      barSolid: '#111111',\n    }\n  }\n  const sky = skyFor(code, isDay)\n  return {\n    flat: false,\n    bgTop: sky[0],\n    bgBottom: sky[1],\n    text: '#FFFFFF',\n    sub: 'rgba(255,255,255,0.78)',\n    faint: 'rgba(255,255,255,0.45)',\n    line: '#FFFFFF',\n    grid: 'rgba(255,255,255,0.22)',\n    rain: '#9BDCFF',\n    areaFill: 'rgba(255,255,255,0.16)',\n    barSolid: '',\n  }\n}\n\n// ---------------------------------------------------------------------------\n// Data extraction\n// ---------------------------------------------------------------------------\n\nfunction hourlySeries(forecast, count) {\n  const hourly = forecast.hourly || {}\n  const times = hourly.time || []\n  const cur = forecast.current_weather || {}\n  const nowIso = cur.time || (times.length ? times[0] : '')\n  let start = 0\n  for (let i = 0; i < times.length; i++) {\n    if (times[i] >= nowIso.substring(0, 14) + '00') {\n      start = i\n      break\n    }\n    if (i === times.length - 1) {\n      start = i\n    }\n  }\n  const out = []\n  for (let i = start; i < times.length && out.length < count; i++) {\n    const p = parseIso(times[i])\n    out.push({\n      iso: times[i],\n      hour: p.h,\n      dow: dayOfWeek(p.y, p.mo, p.d),\n      temp: (hourly.temperature_2m || [])[i],\n      precip: (hourly.precipitation || [])[i] || 0,\n      code: (hourly.weathercode || [])[i] || 0,\n      wind: (hourly.windspeed_10m || [])[i],\n      isDay: hourIsDay(p.h, forecast),\n    })\n  }\n  return out\n}\n\nfunction hourIsDay(hour, forecast) {\n  // Approximate day/night per hour from the first day's sunrise/sunset.\n  const daily = forecast.daily || {}\n  const sunrise = (daily.sunrise || [])[0]\n  const sunset = (daily.sunset || [])[0]\n  if (!sunrise || !sunset) {\n    return hour >= 7 && hour < 20\n  }\n  const riseH = parseIso(sunrise).h\n  const setH = parseIso(sunset).h\n  return hour >= riseH && hour <= setH\n}\n\nfunction dailySeries(forecast, count) {\n  const daily = forecast.daily || {}\n  const times = daily.time || []\n  const out = []\n  for (let i = 0; i < times.length && out.length < count; i++) {\n    const p = parseIso(times[i])\n    out.push({\n      iso: times[i],\n      dow: dayOfWeek(p.y, p.mo, p.d),\n      dayNum: p.d,\n      min: (daily.temperature_2m_min || [])[i],\n      max: (daily.temperature_2m_max || [])[i],\n      precip: (daily.precipitation_sum || [])[i] || 0,\n      code: (daily.weathercode || [])[i] || 0,\n    })\n  }\n  return out\n}\n\n// ---------------------------------------------------------------------------\n// Shared chrome\n// ---------------------------------------------------------------------------\n\nfunction backgroundSvg(p) {\n  if (p.theme.flat) {\n    return '<rect x=\"0\" y=\"0\" width=\"' + p.W + '\" height=\"' + p.H + '\" fill=\"' + p.theme.bgTop + '\"/>'\n  }\n  return (\n    '<linearGradient id=\"bg\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"' + p.H + '\">' +\n    '<stop offset=\"0\" stop-color=\"' + p.theme.bgTop + '\"/>' +\n    '<stop offset=\"1\" stop-color=\"' + p.theme.bgBottom + '\"/>' +\n    '</linearGradient>' +\n    '<rect x=\"0\" y=\"0\" width=\"' + p.W + '\" height=\"' + p.H + '\" fill=\"url(#bg)\"/>'\n  )\n}\n\nfunction headerSvg(p, title) {\n  const parts = []\n  const size = p.base\n  const y = p.pad + size\n  if (p.showLocation && p.locationName) {\n    parts.push(text(p.locationName, p.pad, y, size, p.theme.text, size * 0.14, 'start'))\n    parts.push(text(title, p.W - p.pad, y, size * 0.82, p.theme.sub, size * 0.1, 'end'))\n  } else {\n    parts.push(text(title, p.pad, y, size * 0.9, p.theme.sub, size * 0.12, 'start'))\n  }\n  return { svg: parts.join(''), bottom: y + size * 0.6 }\n}\n\nfunction windArrow(x, y, r, deg, color, lw) {\n  // Arrow points in the direction the wind blows toward.\n  const d = 'M0 ' + (-r).toFixed(2) + ' L' + (r * 0.62).toFixed(2) + ' ' + (r * 0.85).toFixed(2) +\n    ' L0 ' + (r * 0.35).toFixed(2) + ' L' + (-r * 0.62).toFixed(2) + ' ' + (r * 0.85).toFixed(2) + ' Z'\n  return (\n    '<g transform=\"translate(' + x.toFixed(2) + ' ' + y.toFixed(2) + ') rotate(' + ((deg + 180) % 360).toFixed(1) + ')\">' +\n    '<path d=\"' + d + '\" fill=\"' + color + '\" stroke=\"' + color + '\" stroke-width=\"' + lw +\n    '\" stroke-linejoin=\"round\"/></g>'\n  )\n}\n\n// ---------------------------------------------------------------------------\n// Current conditions panel\n// ---------------------------------------------------------------------------\n\nfunction renderCurrent(p) {\n  const parts = []\n  const cur = p.forecast.current_weather || {}\n  const units = p.forecast.current_weather_units || {}\n  const daily = p.forecast.daily || {}\n  const isDay = cur.is_day === 1\n  const compact = p.H < 240 || (p.H < 300 && !p.showDetails)\n\n  let top = p.pad\n  if (p.showLocation) {\n    const dateIso = (cur.time || p.weather.date || '').substring(0, 10)\n    let title = ''\n    if (dateIso) {\n      const dp = parseIso(dateIso)\n      title = DAY_NAMES[dayOfWeek(dp.y, dp.mo, dp.d)] + ' ' + dp.d + ' ' + MONTH_NAMES[dp.mo - 1]\n    }\n    const h = headerSvg(p, title)\n    parts.push(h.svg)\n    top = h.bottom\n  }\n\n  const detailsH = p.showDetails && !compact ? clamp(p.H * 0.2, 54, 92) : 0\n  const feelsH = compact ? p.base * 1.4 : p.base * 1.9\n  const condH = compact ? p.base * 1.7 : p.base * 2.2\n\n  // Hero: icon + temperature side by side, centered.\n  const heroTop = top\n  const heroBottom = p.H - p.pad - detailsH - condH - feelsH\n  const heroH = Math.max(40, heroBottom - heroTop)\n  const iconSize = clamp(Math.min(heroH * 0.94, p.W * 0.4), 34, 300)\n  const tempSize = clamp(Math.min(heroH * 0.62, p.W * 0.26), 26, 240)\n  const tempStr = fmtTemp(cur.temperature || 0)\n  const unitStr = (units.temperature || '°C').indexOf('F') >= 0 ? 'F' : 'C'\n  const unitSize = tempSize * 0.3\n  const gapHero = iconSize * 0.12\n  const tempW = textWidth(tempStr, tempSize)\n  const heroW = iconSize + gapHero + tempW + unitSize * 0.75\n  const heroX = (p.W - heroW) / 2\n  const heroMidY = heroTop + heroH / 2\n  parts.push(iconFragment(p.icons, cur.weathercode || 0, isDay, heroX, heroMidY - iconSize / 2, iconSize))\n  const tempBase = heroMidY + tempSize * 0.42\n  parts.push(text(tempStr, heroX + iconSize + gapHero, tempBase, tempSize, p.theme.text, tempSize * 0.15, 'start'))\n  parts.push(\n    text(unitStr, heroX + iconSize + gapHero + tempW + unitSize * 0.3, tempBase - tempSize + unitSize, unitSize, p.theme.sub, unitSize * 0.13, 'start')\n  )\n\n  // Condition label + feels like / hi-lo line.\n  const condY = heroBottom + condH * 0.72\n  parts.push(text(conditionLabel(p.icons, cur.weathercode || 0), p.W / 2, condY, condH * 0.5, p.theme.text, condH * 0.07, 'middle'))\n\n  const bits = []\n  const apparent = currentApparent(p.forecast)\n  if (apparent !== null) {\n    bits.push('FEELS ' + fmtTemp(apparent))\n  }\n  if ((daily.temperature_2m_max || []).length) {\n    bits.push('H ' + fmtTemp(daily.temperature_2m_max[0]) + ' L ' + fmtTemp(daily.temperature_2m_min[0]))\n  }\n  if (bits.length) {\n    parts.push(text(bits.join(' · '), p.W / 2, condY + feelsH * 0.7, feelsH * 0.42, p.theme.sub, feelsH * 0.055, 'middle'))\n  }\n\n  if (detailsH > 0) {\n    parts.push(renderDetailCells(p, cur, units, daily, p.H - p.pad - detailsH, detailsH))\n  }\n  return parts.join('')\n}\n\nfunction currentApparent(forecast) {\n  const hourly = forecast.hourly || {}\n  const cur = forecast.current_weather || {}\n  const times = hourly.time || []\n  const apparent = hourly.apparent_temperature || []\n  if (!times.length || !apparent.length || !cur.time) {\n    return null\n  }\n  const key = cur.time.substring(0, 14) + '00'\n  for (let i = 0; i < times.length; i++) {\n    if (times[i] === key) {\n      return apparent[i]\n    }\n  }\n  return null\n}\n\nfunction renderDetailCells(p, cur, units, daily, top, height) {\n  const parts = []\n  const cells = []\n  const windUnit = (units.windspeed || 'km/h').toUpperCase()\n  cells.push({\n    label: 'WIND',\n    value: Math.round(cur.windspeed || 0) + ' ' + windUnit,\n    arrow: cur.winddirection,\n  })\n  const dailyUnits = p.forecast.daily_units || {}\n  const precip = (daily.precipitation_sum || [])[0]\n  cells.push({\n    label: 'PRECIP',\n    value: (precip === undefined ? '0' : Math.round(precip * 10) / 10) + ' ' + (dailyUnits.precipitation_sum || 'mm').toUpperCase(),\n  })\n  const sunrise = (daily.sunrise || [])[0]\n  const sunset = (daily.sunset || [])[0]\n  if (sunrise) {\n    cells.push({ label: 'SUNRISE', value: fmtClock(sunrise) })\n  }\n  if (sunset) {\n    cells.push({ label: 'SUNSET', value: fmtClock(sunset) })\n  }\n\n  parts.push(\n    '<line x1=\"' + p.pad + '\" y1=\"' + top.toFixed(2) + '\" x2=\"' + (p.W - p.pad) + '\" y2=\"' + top.toFixed(2) +\n    '\" stroke=\"' + p.theme.grid + '\" stroke-width=\"1\"/>'\n  )\n\n  const n = cells.length\n  const cellW = (p.W - p.pad * 2) / n\n  const innerW = cellW * 0.86\n  const labelBase = clamp(height * 0.16, 7, 12)\n  const valueBase = clamp(height * 0.26, 9, 19)\n  for (let i = 0; i < n; i++) {\n    const cx = p.pad + cellW * (i + 0.5)\n    const cell = cells[i]\n    const labelSize = fitSize(cell.label, labelBase, innerW)\n    parts.push(text(cell.label, cx, top + height * 0.34, labelSize, p.theme.faint, labelSize * 0.13, 'middle'))\n    const hasArrow = cell.arrow !== undefined\n    const midY = top + height * 0.68\n    let valueSize = fitSize(cell.value, valueBase, hasArrow ? innerW - valueBase * 0.9 : innerW)\n    const valueW = textWidth(cell.value, valueSize)\n    const arrowW = hasArrow ? valueSize * 0.85 : 0\n    const groupX = cx - (valueW + arrowW) / 2\n    if (hasArrow) {\n      parts.push(windArrow(groupX + arrowW * 0.36, midY, valueSize * 0.34, cell.arrow || 0, p.theme.sub, 1))\n    }\n    parts.push(text(cell.value, groupX + arrowW, midY + valueSize * 0.36, valueSize, p.theme.text, valueSize * 0.12, 'start'))\n    if (i > 0) {\n      const lx = p.pad + cellW * i\n      parts.push(\n        '<line x1=\"' + lx.toFixed(2) + '\" y1=\"' + (top + height * 0.22).toFixed(2) + '\" x2=\"' + lx.toFixed(2) +\n        '\" y2=\"' + (top + height * 0.82).toFixed(2) + '\" stroke=\"' + p.theme.grid + '\" stroke-width=\"1\"/>'\n      )\n    }\n  }\n  return parts.join('')\n}\n\n// ---------------------------------------------------------------------------\n// Hourly forecast panel\n// ---------------------------------------------------------------------------\n\nfunction renderHourly(p) {\n  const availW = p.W - p.pad * 2\n  const wanted = clamp(p.hours, 2, 24)\n  const horizontalFit = Math.floor(availW / 32)\n  if (horizontalFit < Math.min(wanted, 5)) {\n    return renderHourlyList(p, wanted)\n  }\n  return renderHourlyChart(p, Math.min(wanted, horizontalFit))\n}\n\nfunction renderHourlyChart(p, count) {\n  const parts = []\n  const series = hourlySeries(p.forecast, count)\n  if (!series.length) {\n    return renderMessage(p, 'NO HOURLY DATA')\n  }\n  const h = headerSvg(p, 'NEXT ' + series.length + ' HOURS')\n  parts.push(h.svg)\n\n  const left = p.pad\n  const right = p.W - p.pad\n  const availW = right - left\n  const colW = availW / series.length\n\n  // The panel has two optional parts: the values row (icons + temperatures)\n  // and the graph (temperature curve + precipitation bars).\n  const showGraph = p.showGraph\n  const showValues = p.showValues || !showGraph\n\n  const timeH = clamp(p.base * 1.5, 14, 26)\n  const iconSize = showValues ? clamp(colW * (showGraph ? 0.78 : 0.95), 15, showGraph ? 46 : 64) : 0\n  const tempSize = showValues ? clamp(colW * (showGraph ? 0.34 : 0.4), 9, showGraph ? 20 : 24) : 0\n  const precipH = showGraph ? clamp(p.H * 0.07, 8, 34) : 0\n\n  // Cap the curve height and center the whole block vertically.\n  const availBand = p.H - p.pad - timeH - (h.bottom + p.base * 0.4)\n  const valuesH = showValues ? iconSize + tempSize * 1.25 + tempSize * 0.8 : 0\n  const fixedH = valuesH + (showGraph ? precipH + 6 : 0)\n  const chartH = showGraph ? clamp(availBand - fixedH, 40, p.H * (showValues ? 0.4 : 0.62)) : 0\n  const offset = Math.max(0, (availBand - fixedH - chartH) / 2)\n\n  const iconTop = h.bottom + p.base * 0.4 + offset\n  const tempY = iconTop + iconSize + tempSize * 1.25\n  const chartTop = iconTop + valuesH\n  const chartBottom = chartTop + chartH\n  const bottom = chartBottom + precipH + (showGraph ? 6 : 0)\n\n  // Temperature curve scale.\n  let tMin = series[0].temp\n  let tMax = series[0].temp\n  let pMax = 0.4\n  for (let i = 0; i < series.length; i++) {\n    tMin = Math.min(tMin, series[i].temp)\n    tMax = Math.max(tMax, series[i].temp)\n    pMax = Math.max(pMax, series[i].precip)\n  }\n  if (tMax - tMin < 2) {\n    tMax += 1\n    tMin -= 1\n  }\n  const ys = []\n  const xs = []\n  for (let i = 0; i < series.length; i++) {\n    xs.push(left + colW * (i + 0.5))\n    ys.push(chartBottom - ((series[i].temp - tMin) / (tMax - tMin)) * (chartBottom - chartTop))\n  }\n\n  // Per-column icons, temps, precipitation bars and time labels. The first\n  // temperature and the first precipitation value carry the units.\n  const unit = (p.forecast.hourly_units || {}).temperature_2m || '°C'\n  const precipUnit = ((p.forecast.hourly_units || {}).precipitation || 'mm').toUpperCase()\n  const tempLabels = []\n  let fittedTempSize = tempSize\n  for (let i = 0; i < series.length; i++) {\n    tempLabels.push(fmtTemp(series[i].temp) + (i === 0 ? unitLetter(unit) : ''))\n    if (showValues) {\n      fittedTempSize = Math.min(fittedTempSize, fitSize(tempLabels[i], tempSize, colW * 0.96))\n    }\n  }\n  const dividerTop = showValues ? iconTop + iconSize * 0.2 : chartTop\n  let precipLabeled = false\n  for (let i = 0; i < series.length; i++) {\n    const cx = xs[i]\n    const item = series[i]\n    if (showValues) {\n      parts.push(iconFragment(p.icons, item.code, item.isDay, cx - iconSize / 2, iconTop, iconSize))\n      parts.push(text(tempLabels[i], cx, tempY, fittedTempSize, p.theme.text, fittedTempSize * 0.13, 'middle'))\n    }\n    if (showGraph && item.precip > 0.05) {\n      const bh = Math.max(2.5, (Math.min(item.precip, pMax) / pMax) * precipH)\n      const bw = Math.max(3, colW * 0.24)\n      const barTop = bottom - 4 - bh\n      parts.push(\n        '<rect x=\"' + (cx - bw / 2).toFixed(2) + '\" y=\"' + barTop.toFixed(2) + '\" width=\"' + bw.toFixed(2) +\n        '\" height=\"' + bh.toFixed(2) + '\" fill=\"' + p.theme.rain + '\"/>'\n      )\n      const precipSize = clamp(colW * 0.24, 7, 10)\n      let precipLabel = fmtPrecip(item.precip)\n      if (!precipLabeled && textWidth(precipLabel + ' ' + precipUnit, precipSize) <= colW * 1.5) {\n        precipLabel = precipLabel + ' ' + precipUnit\n        precipLabeled = true\n      }\n      parts.push(text(precipLabel, cx, barTop - precipSize * 0.4, precipSize, p.theme.rain, precipSize * 0.13, 'middle'))\n    }\n    const isMidnight = item.hour === 0\n    const label = isMidnight ? DAY_NAMES[item.dow] : '' + item.hour\n    const labelSize = clamp(colW * 0.3, 8, 13)\n    parts.push(\n      text(label, cx, bottom + timeH * 0.75, labelSize, isMidnight ? p.theme.text : p.theme.sub, labelSize * 0.12, 'middle')\n    )\n    if (isMidnight && i > 0) {\n      const lx = left + colW * i\n      parts.push(\n        '<line x1=\"' + lx.toFixed(2) + '\" y1=\"' + dividerTop.toFixed(2) + '\" x2=\"' + lx.toFixed(2) +\n        '\" y2=\"' + bottom.toFixed(2) + '\" stroke=\"' + p.theme.grid + '\" stroke-width=\"1\"/>'\n      )\n    }\n  }\n\n  if (!showGraph) {\n    return parts.join('')\n  }\n\n  // Smooth temperature curve (Catmull-Rom converted to cubic beziers).\n  let d = 'M ' + xs[0].toFixed(2) + ' ' + ys[0].toFixed(2)\n  for (let i = 0; i < xs.length - 1; i++) {\n    const x0 = i > 0 ? xs[i - 1] : xs[i]\n    const y0 = i > 0 ? ys[i - 1] : ys[i]\n    const x3 = i + 2 < xs.length ? xs[i + 2] : xs[i + 1]\n    const y3 = i + 2 < ys.length ? ys[i + 2] : ys[i + 1]\n    const c1x = xs[i] + (xs[i + 1] - x0) / 6\n    const c1y = ys[i] + (ys[i + 1] - y0) / 6\n    const c2x = xs[i + 1] - (x3 - xs[i]) / 6\n    const c2y = ys[i + 1] - (y3 - ys[i]) / 6\n    d += ' C ' + c1x.toFixed(2) + ' ' + c1y.toFixed(2) + ' ' + c2x.toFixed(2) + ' ' + c2y.toFixed(2) +\n      ' ' + xs[i + 1].toFixed(2) + ' ' + ys[i + 1].toFixed(2)\n  }\n  if (p.theme.areaFill !== 'none') {\n    const area = d + ' L ' + xs[xs.length - 1].toFixed(2) + ' ' + chartBottom.toFixed(2) +\n      ' L ' + xs[0].toFixed(2) + ' ' + chartBottom.toFixed(2) + ' Z'\n    parts.push('<path d=\"' + area + '\" fill=\"' + p.theme.areaFill + '\"/>')\n  }\n  const curveColor = p.theme.flat ? p.theme.line : tempColor((tMin + tMax) / 2, unit)\n  parts.push(\n    '<path d=\"' + d + '\" fill=\"none\" stroke=\"' + curveColor + '\" stroke-width=\"' + clamp(colW * 0.06, 1.5, 3) +\n    '\" stroke-linecap=\"round\"/>'\n  )\n  for (let i = 0; i < xs.length; i++) {\n    parts.push('<circle cx=\"' + xs[i].toFixed(2) + '\" cy=\"' + ys[i].toFixed(2) + '\" r=\"' + clamp(colW * 0.07, 1.8, 3.4) + '\" fill=\"' +\n      (p.theme.flat ? p.theme.bgTop : curveColor) + '\" stroke=\"' + (p.theme.flat ? p.theme.line : p.theme.text) + '\" stroke-width=\"1.4\"/>')\n  }\n  return parts.join('')\n}\n\nfunction renderHourlyList(p, wanted) {\n  const parts = []\n  const h = headerSvg(p, 'HOURLY')\n  parts.push(h.svg)\n  const top = h.bottom + p.base * 0.3\n  const availH = p.H - p.pad - top\n  const rowH = clamp(availH / wanted, 26, 54)\n  const count = Math.max(1, Math.floor(availH / rowH))\n  const series = hourlySeries(p.forecast, count)\n  if (!series.length) {\n    return renderMessage(p, 'NO HOURLY DATA')\n  }\n  const size = clamp(rowH * 0.42, 9, 20)\n  const unit = (p.forecast.hourly_units || {}).temperature_2m || '°C'\n  const precipUnit = ((p.forecast.hourly_units || {}).precipitation || 'mm').toUpperCase()\n  let precipLabeled = false\n  for (let i = 0; i < series.length; i++) {\n    const item = series[i]\n    const midY = top + rowH * (i + 0.5)\n    const baseY = midY + size * 0.36\n    const label = item.hour === 0 ? DAY_NAMES[item.dow] : (item.hour < 10 ? '0' : '') + item.hour + ':00'\n    parts.push(text(label, p.pad, baseY, size, p.theme.sub, size * 0.12, 'start'))\n    parts.push(iconFragment(p.icons, item.code, item.isDay, p.W * 0.36, midY - rowH * 0.42, rowH * 0.84))\n    parts.push(\n      text(fmtTemp(item.temp) + (i === 0 ? unitLetter(unit) : ''), p.W * 0.66, baseY, size * 1.15, p.theme.text, size * 0.15, 'middle')\n    )\n    if (item.precip > 0.05) {\n      const precipLabel = fmtPrecip(item.precip) + (precipLabeled ? '' : ' ' + precipUnit)\n      precipLabeled = true\n      parts.push(text(precipLabel, p.W - p.pad, baseY, size * 0.92, p.theme.rain, size * 0.11, 'end'))\n    }\n    if (i > 0) {\n      parts.push(\n        '<line x1=\"' + p.pad + '\" y1=\"' + (top + rowH * i).toFixed(2) + '\" x2=\"' + (p.W - p.pad) +\n        '\" y2=\"' + (top + rowH * i).toFixed(2) + '\" stroke=\"' + p.theme.grid + '\" stroke-width=\"1\"/>'\n      )\n    }\n  }\n  return parts.join('')\n}\n\n// ---------------------------------------------------------------------------\n// Daily forecast panel\n// ---------------------------------------------------------------------------\n\nfunction renderDaily(p) {\n  const parts = []\n  const h = headerSvg(p, 'DAILY')\n  parts.push(h.svg)\n  const top = h.bottom + p.base * 0.3\n  const availH = p.H - p.pad - top\n  const wanted = clamp(p.days, 1, 16)\n  const rowH = clamp(availH / wanted, 26, 72)\n  const count = Math.max(1, Math.min(wanted, Math.floor(availH / rowH)))\n  const series = dailySeries(p.forecast, count)\n  if (!series.length) {\n    return renderMessage(p, 'NO DAILY DATA')\n  }\n\n  let tMin = series[0].min\n  let tMax = series[0].max\n  for (let i = 0; i < series.length; i++) {\n    tMin = Math.min(tMin, series[i].min)\n    tMax = Math.max(tMax, series[i].max)\n  }\n  if (tMax - tMin < 1) {\n    tMax += 1\n  }\n\n  const unit = (p.forecast.daily_units || {}).temperature_2m_max || '°C'\n  const size = clamp(rowH * 0.34, 9, 21)\n\n  // Measured column budget: day | icon | (precip) | min | bar | max.\n  const todayLabel = p.W >= 380 ? 'TODAY' : DAY_NAMES[series[0].dow]\n  const dayLabels = series.map((item, i) => (i === 0 ? todayLabel : DAY_NAMES[item.dow]))\n  let dayW = 0\n  for (let i = 0; i < dayLabels.length; i++) {\n    dayW = Math.max(dayW, textWidth(dayLabels[i], size))\n  }\n  dayW += size * 0.8\n  const iconS = clamp(rowH * 0.78, 16, 48)\n  const tempW = textWidth('-88°', size) + size * 0.6\n  let precipW = p.W >= 430 ? textWidth('88.8', size * 0.88) + size : 0\n  let barLeft = p.pad + dayW + iconS + precipW + tempW\n  let barRight = p.W - p.pad - tempW\n  if (barRight - barLeft < p.W * 0.16) {\n    precipW = 0\n    barLeft = p.pad + dayW + iconS + tempW\n  }\n  const scaleX = (t) => barLeft + ((t - tMin) / (tMax - tMin)) * (barRight - barLeft)\n\n  for (let i = 0; i < series.length; i++) {\n    const item = series[i]\n    const midY = top + rowH * (i + 0.5)\n    const baseY = midY + size * 0.36\n    parts.push(text(dayLabels[i], p.pad, baseY, size, p.theme.text, size * 0.13, 'start'))\n    parts.push(iconFragment(p.icons, item.code, true, p.pad + dayW, midY - iconS / 2, iconS))\n    if (precipW > 0 && item.precip > 0.05) {\n      parts.push(\n        text(Math.round(item.precip * 10) / 10 + '', p.pad + dayW + iconS + precipW * 0.85, baseY, size * 0.88, p.theme.rain, size * 0.1, 'end')\n      )\n    }\n    parts.push(text(fmtTemp(item.min), barLeft - size * 0.7, baseY, size, p.theme.sub, size * 0.12, 'end'))\n    parts.push(text(fmtTemp(item.max), barRight + size * 0.7, baseY, size, p.theme.text, size * 0.13, 'start'))\n\n    // Temperature range bar on a shared scale.\n    const x1 = scaleX(item.min)\n    const x2 = Math.max(scaleX(item.max), x1 + 2)\n    const bw = clamp(rowH * 0.18, 4, 10)\n    if (p.theme.flat) {\n      parts.push(\n        '<line x1=\"' + x1.toFixed(2) + '\" y1=\"' + midY.toFixed(2) + '\" x2=\"' + x2.toFixed(2) + '\" y2=\"' + midY.toFixed(2) +\n        '\" stroke=\"' + p.theme.barSolid + '\" stroke-width=\"' + bw + '\" stroke-linecap=\"round\"/>'\n      )\n    } else {\n      // Track + gradient bar built from butt-capped segments with round ends.\n      parts.push(\n        '<line x1=\"' + barLeft.toFixed(2) + '\" y1=\"' + midY.toFixed(2) + '\" x2=\"' + barRight.toFixed(2) + '\" y2=\"' + midY.toFixed(2) +\n        '\" stroke=\"' + p.theme.grid + '\" stroke-width=\"' + bw + '\" stroke-linecap=\"round\"/>'\n      )\n      const segments = 10\n      for (let s = 0; s < segments; s++) {\n        const t0 = s / segments\n        const t1 = (s + 1) / segments\n        const temp = item.min + (item.max - item.min) * ((t0 + t1) / 2)\n        const sx1 = x1 + (x2 - x1) * t0\n        const sx2 = x1 + (x2 - x1) * t1\n        const isFirst = s === 0\n        const isLast = s === segments - 1\n        parts.push(\n          '<line x1=\"' + (isFirst ? sx1 : sx1 - 0.4).toFixed(2) + '\" y1=\"' + midY.toFixed(2) + '\" x2=\"' + sx2.toFixed(2) +\n          '\" y2=\"' + midY.toFixed(2) + '\" stroke=\"' + tempColor(temp, unit) + '\" stroke-width=\"' + bw +\n          '\" stroke-linecap=\"' + (isFirst || isLast ? 'round' : 'butt') + '\"/>'\n        )\n      }\n    }\n    if (i > 0) {\n      parts.push(\n        '<line x1=\"' + p.pad + '\" y1=\"' + (top + rowH * i).toFixed(2) + '\" x2=\"' + (p.W - p.pad) +\n        '\" y2=\"' + (top + rowH * i).toFixed(2) + '\" stroke=\"' + p.theme.grid + '\" stroke-width=\"1\"/>'\n      )\n    }\n  }\n  return parts.join('')\n}\n\n// ---------------------------------------------------------------------------\n// Fallbacks\n// ---------------------------------------------------------------------------\n\nfunction renderMessage(p, message) {\n  return text(message, p.W / 2, p.H / 2, clamp(p.W * 0.05, 10, 24), p.theme.sub, 2, 'middle')\n}\n\nfunction renderErrorPanel(W, H, lowContrast, message) {\n  const theme = themeFor(3, true, lowContrast)\n  const p = { W: W, H: H, theme: theme }\n  const parts = [backgroundSvg(p)]\n  const size = clamp(Math.min(W, H) * 0.06, 10, 26)\n  parts.push(text('WEATHER UNAVAILABLE', W / 2, H / 2 - size * 0.4, size, theme.text, size * 0.13, 'middle'))\n  if (message) {\n    const sub = ('' + message).substring(0, 60)\n    parts.push(text(sub, W / 2, H / 2 + size * 1.4, size * 0.55, theme.sub, size * 0.07, 'middle'))\n  }\n  return parts.join('')\n}\n\n// ---------------------------------------------------------------------------\n// Entry point\n// ---------------------------------------------------------------------------\n\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  let W = Number(app.config.width) || 0\n  let H = Number(app.config.height) || 0\n  if (W <= 0) {\n    W = context.imageWidth || app.frame.width\n  }\n  if (H <= 0) {\n    H = context.imageHeight || app.frame.height\n  }\n\n  const weather = app.config.weather\n  const lowContrast = app.config.lowContrast === true\n  let body\n  if (!weather || weather.error || !weather.forecast) {\n    body = renderErrorPanel(W, H, lowContrast, weather ? weather.error : 'no data')\n  } else {\n    const forecast = weather.forecast\n    const cur = forecast.current_weather || {}\n    // Kept outside the object literal: the FrameOS TS transpiler misreads\n    // `key: value !== x` inside object literals as a type annotation.\n    const showLocation = app.config.showLocation !== false\n    const showDetails = app.config.showDetails !== false\n    const showValues = app.config.showValues !== false\n    const showGraph = app.config.showGraph !== false\n    const p = {\n      W: W,\n      H: H,\n      pad: clamp(Math.min(W, H) * 0.055, 8, 30),\n      base: clamp(Math.min(W, H) * 0.052, 9, 24),\n      weather: weather,\n      forecast: forecast,\n      icons: app.config.icons,\n      theme: themeFor(cur.weathercode || 0, cur.is_day === 1, lowContrast),\n      hours: Number(app.config.hours) || 10,\n      days: Number(app.config.days) || 7,\n      showLocation: showLocation,\n      showDetails: showDetails,\n      showValues: showValues,\n      showGraph: showGraph,\n      locationName: weather.location && weather.location.name ? weather.location.name : '',\n    }\n    const mode = app.config.mode || 'current'\n    if (mode === 'hourly') {\n      body = backgroundSvg(p) + renderHourly(p)\n    } else if (mode === 'daily') {\n      body = backgroundSvg(p) + renderDaily(p)\n    } else {\n      body = backgroundSvg(p) + renderCurrent(p)\n    }\n  }\n\n  const svg = '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"' + W + '\" height=\"' + H + '\" viewBox=\"0 0 ' + W + ' ' + H + '\">' + body + '</svg>'\n  return frameos.svg(svg, { width: W, height: H })\n}\n",
-    "config.json": "{\n  \"name\": \"Weather panel (JS)\",\n  \"category\": \"data\",\n  \"description\": \"High fidelity weather panel rendered as vector graphics. Draws current conditions, an hourly forecast chart, or a daily forecast list from Open-Meteo data. Wire weather from the Weather app and icons from the Weather icon set app.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"weather\",\n      \"label\": \"Weather data (from Weather app)\",\n      \"type\": \"json\",\n      \"required\": true\n    },\n    {\n      \"name\": \"icons\",\n      \"label\": \"Icon set (from Weather icon set app)\",\n      \"type\": \"json\",\n      \"required\": true\n    },\n    {\n      \"name\": \"mode\",\n      \"label\": \"Mode\",\n      \"type\": \"select\",\n      \"options\": [\"current\", \"hourly\", \"daily\"],\n      \"value\": \"current\"\n    },\n    {\n      \"name\": \"hours\",\n      \"label\": \"Hours to show\",\n      \"type\": \"integer\",\n      \"value\": \"10\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"hourly\" }]\n    },\n    {\n      \"name\": \"days\",\n      \"label\": \"Days to show\",\n      \"type\": \"integer\",\n      \"value\": \"7\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"daily\" }]\n    },\n    {\n      \"name\": \"showValues\",\n      \"label\": \"Show icons and temperatures (hourly)\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"hourly\" }]\n    },\n    {\n      \"name\": \"showGraph\",\n      \"label\": \"Show graph (hourly)\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"hourly\" }]\n    },\n    {\n      \"name\": \"lowContrast\",\n      \"label\": \"Low contrast\",\n      \"type\": \"boolean\",\n      \"value\": \"false\"\n    },\n    {\n      \"name\": \"showLocation\",\n      \"label\": \"Show location header\",\n      \"type\": \"boolean\",\n      \"value\": \"true\"\n    },\n    {\n      \"name\": \"showDetails\",\n      \"label\": \"Show detail row\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"current\" }]\n    },\n    {\n      \"name\": \"width\",\n      \"label\": \"Width (0 = fit canvas)\",\n      \"type\": \"integer\",\n      \"value\": \"0\"\n    },\n    {\n      \"name\": \"height\",\n      \"label\": \"Height (0 = fit canvas)\",\n      \"type\": \"integer\",\n      \"value\": \"0\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ]\n}\n"
+  "repo/apps/image/weatherIcon": {
+    "app.ts": "// One weather icon, or the whole set as a sheet, from the Weather icon set app's `icons`.\nexport function get(app, context) {\n  const { icons: set, weathercode, isDay, size, background, sheet, columns } = app.config\n  if (!set || !set.icons) throw new Error('weatherIcon: missing icon set, wire it from the Weather icon set app')\n  const vb = set.viewBox || 64\n  const [w, h] =\n    size > 0 ? [size, size] : [context.imageWidth || app.frame.width, context.imageHeight || app.frame.height]\n  const stamp = (x, y, s, icon) =>\n    `<g transform=\"translate(${x.toFixed(2)} ${y.toFixed(2)}) scale(${s.toFixed(4)})\">${icon}</g>`\n  let out =\n    background && !['none', '#00000000', 'transparent'].includes(('' + background).toLowerCase())\n      ? `<rect x=\"0\" y=\"0\" width=\"${w}\" height=\"${h}\" fill=\"${background}\"/>`\n      : ''\n  if (sheet) {\n    const keys = Object.keys(set.icons).sort()\n    const cols = Math.max(1, columns || 4)\n    const cw = w / cols\n    const ch = h / Math.ceil(keys.length / cols)\n    const s = (Math.min(cw, ch) / vb) * 0.92\n    const [dx, dy] = [(cw - vb * s) / 2, (ch - vb * s) / 2]\n    keys.forEach((key, i) => (out += stamp((i % cols) * cw + dx, Math.floor(i / cols) * ch + dy, s, set.icons[key])))\n  } else {\n    let key = (set.map || {})['' + weathercode] || 'cloudy'\n    if (!isDay && set.icons[key + '-night']) key += '-night'\n    if (!set.icons[key]) key = 'cloudy'\n    const s = (Math.min(w, h) / vb) * 0.96\n    out += stamp((w - vb * s) / 2, (h - vb * s) / 2, s, set.icons[key])\n  }\n  const svg = `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${w} ${h}\">${out}</svg>`\n  return frameos.svg(svg, { width: w, height: h })\n}\n",
+    "config.json": "{\n  \"name\": \"Weather icon (JS)\",\n  \"category\": \"data\",\n  \"description\": \"One weather icon, or a sheet of the whole set. Wire icons from the Weather icon set app.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    { \"name\": \"icons\", \"label\": \"Icon set (from Weather icon set app)\", \"type\": \"json\", \"required\": true },\n    { \"name\": \"weathercode\", \"label\": \"WMO weather code\", \"type\": \"integer\", \"value\": \"0\" },\n    { \"name\": \"isDay\", \"label\": \"Day time\", \"type\": \"boolean\", \"value\": \"true\" },\n    { \"name\": \"size\", \"label\": \"Size in pixels (0 = fit frame)\", \"type\": \"integer\", \"value\": \"0\" },\n    { \"name\": \"background\", \"label\": \"Background color\", \"type\": \"color\", \"value\": \"#00000000\" },\n    { \"name\": \"sheet\", \"label\": \"Render the full set as a sheet\", \"type\": \"boolean\", \"value\": \"false\" },\n    { \"name\": \"columns\", \"label\": \"Sheet columns\", \"type\": \"integer\", \"value\": \"4\" }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }]\n}\n"
+  },
+  "repo/apps/json/weatherIcons": {
+    "app.ts": "// Weather icons for WMO codes: { viewBox, palette, map, labels, icons }, each icon a <g> fragment in a 64x64 box.\nconst map = {}\nconst labels = {}\nfor (const line of `0 clear Clear sky\n1 mostly-clear Mainly clear\n2 partly Partly cloudy\n3 overcast Overcast\n45 fog Fog\n48 fog Icy fog\n51 drizzle Light drizzle\n53 drizzle Drizzle\n55 drizzle Dense drizzle\n56 freezing-rain Freezing drizzle\n57 freezing-rain Freezing drizzle\n61 rain Light rain\n63 rain Rain\n65 heavy-rain Heavy rain\n66 freezing-rain Freezing rain\n67 freezing-rain Freezing rain\n71 snow Light snow\n73 snow Snow\n75 heavy-snow Heavy snow\n77 snow Snow grains\n80 showers Rain showers\n81 showers Rain showers\n82 heavy-rain Violent showers\n85 snow-showers Snow showers\n86 snow-showers Snow showers\n95 thunder Thunderstorm\n96 thunder-hail Storm with hail\n99 thunder-hail Storm with hail`.split('\\n')) {\n  const [code, icon, ...label] = line.split(' ')\n  map[code] = icon\n  labels[code] = label.join(' ')\n}\n\nconst CLOUD =\n  'M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z'\nconst VIVID =\n  '#FFD54F #F59E0B #FDE9A8 #E8B93C #FDE9A8 #FDFEFF #7C8DA6 #DCE5F0 #93A5BD #C7D2E1 #6C7E98 #38BDF8 #A8D8F0 #FFD54F #F59E0B #9FB0C4'\n\nexport function get(app) {\n  const { palette: picked, lowContrast, lineWidth, ink, paper } = app.config\n  const palette = picked === 'auto' ? (lowContrast ? 'mono' : 'vivid') : picked\n  const lw = lineWidth > 0 ? lineWidth : 3\n  const colors =\n    palette === 'mono'\n      ? ['none', ink, 'none', ink, ink, paper, ink, paper, ink, paper, ink, ink, ink, paper, ink, ink]\n      : VIVID.split(' ')\n  const [sunF, sunS, moonF, moonS, starC, cloudF, cloudS, backF] = colors\n  const [backS, darkF, darkS, rainC, snowC, boltF, boltS, fogC] = colors.slice(8)\n\n  const g = (...parts) => '<g>' + parts.join('') + '</g>'\n  const each = (xy, draw) => {\n    let out = ''\n    for (let i = 0; i < xy.length; i += 2) out += draw(xy[i], xy[i + 1])\n    return out\n  }\n  const ln = (x1, y1, x2, y2, color, w) =>\n    `<line x1=\"${x1}\" y1=\"${y1}\" x2=\"${x2}\" y2=\"${y2}\" stroke=\"${color}\" stroke-width=\"${w}\" stroke-linecap=\"round\"/>`\n  const path = (d, fill, stroke, w) =>\n    `<path d=\"${d}\" fill=\"${fill}\" stroke=\"${stroke}\" stroke-width=\"${w}\" stroke-linejoin=\"round\"/>`\n  const cloud = (x, y, s, fill = cloudF, stroke = cloudS) =>\n    `<g transform=\"translate(${x} ${y}) scale(${s})\">${path(CLOUD, fill, stroke, lw / s)}</g>`\n  const sun = (cx, cy, r, rays) => {\n    let out = `<circle cx=\"${cx}\" cy=\"${cy}\" r=\"${r}\" fill=\"${sunF}\" stroke=\"${sunS}\" stroke-width=\"${lw}\"/>`\n    for (let i = 0; i < 8; i++) {\n      const a = (Math.PI * 2 * i) / 8 + Math.PI / 8\n      const at = (rr) => [(cx + Math.cos(a) * rr).toFixed(2), (cy + Math.sin(a) * rr).toFixed(2)]\n      out += ln(...at(r + rays * 0.55), ...at(r + rays * 1.45), sunS, lw)\n    }\n    return out\n  }\n  const moon = (cx, cy, r) => {\n    const [t, b, x, i] = [cy - r, cy + r, cx + r * 0.45, r * 0.78].map((v) => v.toFixed(2))\n    return path(`M ${x} ${t} A ${r} ${r} 0 1 0 ${x} ${b} A ${i} ${i} 0 0 1 ${x} ${t} Z`, moonF, moonS, lw)\n  }\n  const star = (x, y, s, w) =>\n    `<path d=\"M ${x} ${y - s} L ${x} ${y + s} M ${x - s} ${y} L ${x + s} ${y}\"` +\n    ` stroke=\"${starC}\" stroke-width=\"${w}\" stroke-linecap=\"round\"/>`\n  const rain = (len, ...xy) => each(xy, (x, y) => ln(x, y, (x - len * 0.3).toFixed(2), (y + len).toFixed(2), rainC, lw))\n  const dots = (r, color, ...xy) => each(xy, (x, y) => `<circle cx=\"${x}\" cy=\"${y}\" r=\"${r}\" fill=\"${color}\"/>`)\n  const flakes = (s, ...xy) =>\n    each(xy, (x, y) => {\n      let out = ''\n      for (let i = 0; i < 3; i++) {\n        const a = (Math.PI * i) / 3 + Math.PI / 6\n        const [dx, dy] = [Math.cos(a) * s, Math.sin(a) * s]\n        out += ln(...[x - dx, y - dy, x + dx, y + dy].map((v) => v.toFixed(2)), snowC, lw * 0.85)\n      }\n      return out\n    })\n  const bolt = (x, y, s) => {\n    const pts = [2.5, 0, -2.2, 7, 0.4, 7, -1.6, 12, 3.6, 4.6, 1, 4.6]\n    const d = each(pts, (dx, dy) => ` L ${(x + dx * s).toFixed(2)} ${(y + dy * s).toFixed(2)}`)\n    return path(d.replace(' L', 'M') + ' Z', boltF, boltS, lw * 0.75)\n  }\n  const fog = (x1, y, x2) => ln(x1, y, x2, y, fogC, lw)\n\n  const high = cloud(9, 6, 1.9)\n  const small = cloud(22, 26, 1.55)\n  const shower = cloud(15, 16, 1.65)\n  const icons = {\n    clear: g(sun(32, 32, 11, 7)),\n    'clear-night': g(moon(30, 32, 13), star(47, 16, 3, lw * 0.8), star(52, 30, 2, lw * 0.7)),\n    'mostly-clear': g(sun(28, 26, 10, 6), cloud(28, 32, 1.15)),\n    'mostly-clear-night': g(moon(27, 26, 11), star(50, 18, 2.5, lw * 0.7), cloud(28, 32, 1.15)),\n    partly: g(sun(20, 20, 8.5, 5), small),\n    'partly-night': g(moon(20, 19, 9.5), small),\n    cloudy: g(cloud(24, 6, 1.15, backF, backS), cloud(7, 16, 1.9)),\n    overcast: g(cloud(20, 6, 1.35, backF, backS), cloud(6, 18, 1.95, darkF, darkS)),\n    fog: g(cloud(9, 2, 1.75), fog(16, 48, 46), fog(20, 54, 48), fog(24, 60, 48)),\n    drizzle: g(high, dots(1.9, rainC, 24, 50, 33, 56, 42, 50, 28, 59, 38, 61)),\n    rain: g(high, rain(9, 25, 49, 34, 52, 43, 49)),\n    'heavy-rain': g(high, rain(8, 22, 48, 30, 53, 38, 48, 46, 53), rain(6, 28, 44, 40, 58)),\n    'freezing-rain': g(high, rain(9, 24, 49, 33, 53), flakes(4.5, 43, 54)),\n    snow: g(high, flakes(5, 24, 51, 34, 58, 44, 51)),\n    'heavy-snow': g(high, flakes(5, 22, 49, 33, 54, 44, 49), flakes(4, 27, 59, 39, 61)),\n    sleet: g(high, rain(8, 25, 49), flakes(4.5, 35, 55), rain(8, 45, 49)),\n    showers: g(sun(19, 17, 7.5, 4.5), shower, rain(8, 26, 52, 35, 55, 44, 52)),\n    'showers-night': g(moon(19, 16, 8.5), shower, rain(8, 26, 52, 35, 55, 44, 52)),\n    'snow-showers': g(sun(19, 17, 7.5, 4.5), shower, flakes(4.5, 26, 54, 38, 57)),\n    thunder: g(high, bolt(32, 41, 1.5)),\n    'thunder-hail': g(high, bolt(28, 41, 1.4), dots(2.4, snowC, 43, 49, 47, 56)),\n  }\n  return { viewBox: 64, palette, map, labels, icons }\n}\n",
+    "config.json": "{\n  \"name\": \"Weather icon set (JS)\",\n  \"category\": \"data\",\n  \"description\": \"SVG weather icons for WMO weather codes, with code-to-icon and code-to-label maps.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"palette\",\n      \"label\": \"Palette\",\n      \"type\": \"select\",\n      \"options\": [\"auto\", \"vivid\", \"mono\"],\n      \"value\": \"auto\",\n      \"hint\": \"auto is mono with low contrast, vivid otherwise.\"\n    },\n    { \"name\": \"lowContrast\", \"label\": \"Low contrast\", \"type\": \"boolean\", \"value\": \"false\" },\n    { \"name\": \"lineWidth\", \"label\": \"Line width\", \"type\": \"float\", \"value\": \"3\" },\n    { \"name\": \"ink\", \"label\": \"Ink color (mono)\", \"type\": \"color\", \"value\": \"#222222\" },\n    { \"name\": \"paper\", \"label\": \"Paper color (mono)\", \"type\": \"color\", \"value\": \"#ffffff\" }\n  ],\n  \"output\": [\n    {\n      \"name\": \"icons\",\n      \"type\": \"json\",\n      \"example\": \"{\\\"viewBox\\\": 64, \\\"palette\\\": \\\"vivid\\\", \\\"map\\\": {\\\"61\\\": \\\"rain\\\"}, \\\"labels\\\": {\\\"61\\\": \\\"Light rain\\\"}, \\\"icons\\\": {\\\"rain\\\": \\\"<g>...</g>\\\"}}\"\n    }\n  ]\n}\n"
+  },
+  "repo/apps/image/weatherPanel": {
+    "app.ts": "// Weather panel for Open-Meteo data, all vector: pixie's SVG has no <text>, so text is a single-stroke font.\nconst G = {}\nfor (const [, k, w, d] of `0 9 M4.5 0 Q9 0 9 7 Q9 14 4.5 14 Q0 14 0 7 Q0 0 4.5 0\n1 9 M2.5 2.6 Q5 1.6 6 0 L6 14\n2 9 M0.5 3 Q0.5 0 4.5 0 Q8.5 0 8.5 3 Q8.5 5.5 6 8 L0 14 L9 14\n3 9 M0.8 2.2 Q1.6 0 4.5 0 Q8.2 0 8.2 3.1 Q8.2 6.1 4.4 6.4 Q8.7 6.7 8.7 10.3 Q8.7 14 4.5 14 Q1.2 14 0.4 11.6\n4 9 M6.5 14 L6.5 0 L0 9.5 L9 9.5\n5 9 M8 0 L1.4 0 L0.9 6.1 Q2.2 5.2 4.2 5.2 Q8.7 5.2 8.7 9.5 Q8.7 14 4.4 14 Q1.2 14 0.4 11.8\n6 9 M8 1.6 Q7 0 4.8 0 Q0.4 0 0.4 7.3 Q0.4 14 4.6 14 Q8.7 14 8.7 9.9 Q8.7 6 4.9 6 Q1.3 6 0.4 8.8\n7 9 M0.3 0 L9 0 L3.6 14\n8 9 M4.5 6.4 Q1 6.1 1 3.2 Q1 0 4.5 0 Q8 0 8 3.2 Q8 6.1 4.5 6.4 Q0.4 6.8 0.4 10.4 Q0.4 14 4.5 14 Q8.6 14 8.6 10.4 Q8.6 6.8 4.5 6.4\n9 9 M1 12.4 Q2 14 4.2 14 Q8.6 14 8.6 6.7 Q8.6 0 4.4 0 Q0.3 0 0.3 4.1 Q0.3 8 4.1 8 Q7.7 8 8.6 5.2\nA 10 M0 14 L5 0 L10 14 M1.8 9.2 L8.2 9.2\nB 9.4 M1 0 L1 14 M1 0 L5 0 Q8.4 0 8.4 3.2 Q8.4 6.3 5 6.4 L1 6.4 M5 6.4 Q9 6.5 9 10.2 Q9 14 5 14 L1 14\nC 9.6 M9.2 2.6 Q8 0 5 0 Q0.5 0 0.5 7 Q0.5 14 5 14 Q8 14 9.2 11.4\nD 9.7 M1 0 L1 14 M1 0 L4.4 0 Q9.2 0 9.2 7 Q9.2 14 4.4 14 L1 14\nE 8.7 M8.3 0 L1 0 L1 14 L8.3 14 M1 6.4 L7 6.4\nF 8.5 M8.3 0 L1 0 L1 14 M1 6.4 L7 6.4\nG 9.7 M9.2 2.6 Q8 0 5 0 Q0.5 0 0.5 7 Q0.5 14 5 14 Q9.2 14 9.2 10.4 L9.2 8 L5.4 8\nH 9.5 M1 0 L1 14 M8.5 0 L8.5 14 M1 6.4 L8.5 6.4\nI 2.6 M1.3 0 L1.3 14\nJ 7 M6 0 L6 10.6 Q6 14 3.2 14 Q0.7 14 0.4 11\nK 9.6 M1 0 L1 14 M9 0 L1 7.8 M3.8 5.6 L9.5 14\nL 8 M1 0 L1 14 L7.8 14\nM 11.5 M1 14 L1 0 L5.75 9.6 L10.5 0 L10.5 14\nN 9.5 M1 14 L1 0 L8.5 14 L8.5 0\nO 10.5 M5.25 0 Q10 0 10 7 Q10 14 5.25 14 Q0.5 14 0.5 7 Q0.5 0 5.25 0\nP 9.2 M1 14 L1 0 L5.2 0 Q8.8 0 8.8 3.6 Q8.8 7.2 5.2 7.2 L1 7.2\nQ 10.5 M5.25 0 Q10 0 10 7 Q10 14 5.25 14 Q0.5 14 0.5 7 Q0.5 0 5.25 0 M6.4 10.6 L10.3 14.8\nR 9.5 M1 14 L1 0 L5.2 0 Q8.8 0 8.8 3.5 Q8.8 6.9 5.2 6.9 L1 6.9 M5.4 6.9 L9.2 14\nS 9.2 M8.4 2.1 Q7.6 0 4.6 0 Q1 0 1 3.1 Q1 5.6 4.6 6.4 Q8.7 7.3 8.7 10.3 Q8.7 14 4.6 14 Q1.1 14 0.3 11.7\nT 9 M4.5 14 L4.5 0 M0 0 L9 0\nU 9.5 M1 0 L1 9.4 Q1 14 4.75 14 Q8.5 14 8.5 9.4 L8.5 0\nV 10 M0 0 L5 14 L10 0\nW 13 M0.5 0 L3.4 14 L6.5 3.4 L9.6 14 L12.5 0\nX 9.5 M0.4 0 L9.1 14 M9.1 0 L0.4 14\nY 10 M0 0 L5 7.6 L10 0 M5 7.6 L5 14\nZ 9 M0.5 0 L8.5 0 L0.5 14 L8.5 14\n  5.5\n- 7 M1 7.5 L6 7.5\n+ 8 M4 3.8 L4 11.2 M0.3 7.5 L7.7 7.5\n. 3.5 M1.05 13.3 Q1.05 12.6 1.75 12.6 Q2.45 12.6 2.45 13.3 Q2.45 14 1.75 14 Q1.05 14 1.05 13.3\n, 3.5 M2.4 12.4 Q2.6 14.6 1.1 16\n: 3.5 M1.05 4.7 Q1.05 4 1.75 4 Q2.45 4 2.45 4.7 Q2.45 5.4 1.75 5.4 Q1.05 5.4 1.05 4.7 M1.05 13.3 Q1.05 12.6 1.75 12.6 Q2.45 12.6 2.45 13.3 Q2.45 14 1.75 14 Q1.05 14 1.05 13.3\n· 3.8 M1.2 7.5 Q1.2 6.8 1.9 6.8 Q2.6 6.8 2.6 7.5 Q2.6 8.2 1.9 8.2 Q1.2 8.2 1.2 7.5\n° 6.6 M3.25 0 Q5.55 0 5.55 2.3 Q5.55 4.6 3.25 4.6 Q0.95 4.6 0.95 2.3 Q0.95 0 3.25 0\n% 11 M2.6 0.6 Q4.6 0.6 4.6 2.7 Q4.6 4.8 2.6 4.8 Q0.6 4.8 0.6 2.7 Q0.6 0.6 2.6 0.6 M10.4 0.5 L0.6 13.5 M8.4 9.2 Q10.4 9.2 10.4 11.3 Q10.4 13.4 8.4 13.4 Q6.4 13.4 6.4 11.3 Q6.4 9.2 8.4 9.2\n/ 7 M6.5 0 L0.5 14\n' 2.6 M1.3 0 L1.1 3.6\n( 4.6 M4 -0.5 Q1 3 1 7 Q1 11 4 14.5\n) 4.6 M0.6 -0.5 Q3.6 3 3.6 7 Q3.6 11 0.6 14.5`.matchAll(/^(.) (\\S+) ?(.*)$/gm))\n  G[k] = [+w, d]\nfor (const g of 'AÀÁÂÃÄÅÆ CÇ EÈÉÊË IÌÍÎÏ NÑ OÒÓÔÕÖØ UÙÚÛÜ YÝ SŠ ZŽ'.split(' ')) for (const c of g) G[c] = G[g[0]]\n\nconst T = 1.8\nconst glyphs = (s) => [...s].map((c) => G[c.toUpperCase()]).filter(Boolean)\nconst clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v)\nconst f2 = (v) => v.toFixed(2)\nconst xy = (x, y) => f2(x) + ' ' + f2(y)\nconst temp = (v) => Math.round(v) + '°'\nconst mm = (v) => Math.round(v * 10) / 10 + ''\nconst letter = (unit) => (unit.includes('F') ? 'F' : 'C')\nconst DAYS = 'SUN MON TUE WED THU FRI SAT'.split(' ')\nconst MONTHS = 'JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC'.split(' ')\nconst dow = (y, m, d) => new Date(Date.UTC(y, m - 1, d)).getUTCDay()\n\nfunction parseIso(iso) {\n  const [date, time] = iso.split('T')\n  const [y, m, d] = date.split('-').map((v) => parseInt(v, 10))\n  return [y, m, d, parseInt((time || '00:00').split(':')[0], 10)]\n}\n\nfunction width(s, size) {\n  let units = 0\n  for (const g of glyphs(s)) units += g[0] + T\n  return ((units > 0 ? units - T : 0) * size) / 14\n}\n\nconst fit = (s, size, max) => {\n  const w = width(s, size)\n  return w > max ? (size * max) / w : size\n}\n\nfunction text(s, x, y, size, color, weight, anchor) {\n  const k = size / 14\n  const x0 = anchor === 'middle' ? x - width(s, size) / 2 : anchor === 'end' ? x - width(s, size) : x\n  let d = ''\n  let cx = 0\n  for (const [advance, path] of glyphs(s)) {\n    if (path) d += `<path d=\"${path}\" transform=\"translate(${f2(cx)} 0)\"/>`\n    cx += advance + T\n  }\n  return (\n    `<g transform=\"translate(${xy(x0, y - size)}) scale(${k.toFixed(4)})\" fill=\"none\" stroke=\"${color}\"` +\n    ` stroke-width=\"${(weight / k).toFixed(3)}\" stroke-linecap=\"round\" stroke-linejoin=\"round\">${d}</g>`\n  )\n}\n\nconst line = (x1, y1, x2, y2, stroke, w = 1, cap = '') =>\n  `<line x1=\"${x1}\" y1=\"${y1}\" x2=\"${x2}\" y2=\"${y2}\" stroke=\"${stroke}\" stroke-width=\"${w}\"` +\n  (cap && ` stroke-linecap=\"${cap}\"`) +\n  '/>'\nconst hr = (p, y) => line(p.pad, f2(y), p.W - p.pad, f2(y), p.grid)\nconst vr = (p, x, y1, y2) => line(f2(x), f2(y1), f2(x), f2(y2), p.grid)\n\nconst STOP_T = [-15, 0, 10, 18, 27, 38]\nconst STOP_C = ['7FA9F0', '7CC4E8', '8FD0A8', 'F2C94C', 'F2994A', 'EB5757']\nfunction tempColor(v, unit) {\n  const c = unit.includes('F') ? ((v - 32) * 5) / 9 : v\n  const i = STOP_T.findIndex((t) => c <= t)\n  if (i <= 0) return '#' + STOP_C[i < 0 ? 5 : 0]\n  const t = (c - STOP_T[i - 1]) / (STOP_T[i] - STOP_T[i - 1])\n  let hex = '#'\n  for (let j = 0; j < 6; j += 2) {\n    const [a, b] = [STOP_C[i - 1], STOP_C[i]].map((s) => parseInt(s.slice(j, j + 2), 16))\n    hex += Math.round(a + (b - a) * t)\n      .toString(16)\n      .padStart(2, '0')\n  }\n  return hex\n}\n\nfunction icon(set, code, day, x, y, size) {\n  const icons = set && set.icons\n  if (!icons) return ''\n  let key = (set.map || {})['' + code] || 'cloudy'\n  if (!day && icons[key + '-night']) key += '-night'\n  if (!icons[key]) {\n    if (!icons.cloudy) return ''\n    key = 'cloudy'\n  }\n  return `<g transform=\"translate(${xy(x, y)}) scale(${(size / (set.viewBox || 64)).toFixed(4)})\">${icons[key]}</g>`\n}\n\nfunction sky(c, day) {\n  if (c >= 95) return ['#252A40', '#4A5578']\n  if (c >= 71 && c <= 86 && ![80, 81, 82].includes(c)) return day ? ['#5D7A9C', '#A9BFD6'] : ['#1F2A3F', '#44546F']\n  if (c >= 51) return day ? ['#3E5C7A', '#7395B0'] : ['#141E2C', '#31445C']\n  if (c >= 45) return day ? ['#6E7B8A', '#A3AEBA'] : ['#242B34', '#4A545F']\n  if (c >= 2) return day ? ['#3E6FB0', '#84AED6'] : ['#161E38', '#35426A']\n  return day ? ['#2E6FD0', '#7FB8EE'] : ['#111834', '#2C3B6E']\n}\n\nfunction header(p, title) {\n  const y = p.pad + p.base\n  return p.showLocation && p.name\n    ? text(p.name, p.pad, y, p.base, p.ink, p.base * 0.14) +\n        text(title, p.W - p.pad, y, p.base * 0.82, p.sub, p.base * 0.1, 'end')\n    : text(title, p.pad, y, p.base * 0.9, p.sub, p.base * 0.12)\n}\n\nconst message = (p, s) => text(s, p.W / 2, p.H / 2, clamp(p.W * 0.05, 10, 24), p.sub, 2, 'middle')\n\nfunction current(p) {\n  const { W, H, pad, base, fc } = p\n  const cur = fc.current_weather || {}\n  const code = cur.weathercode || 0\n  const daily = fc.daily || {}\n  const compact = H < 240 || (H < 300 && !p.showDetails)\n  let svg = ''\n  let top = pad\n  if (p.showLocation) {\n    const iso = (cur.time || p.date || '').substring(0, 10)\n    let title = ''\n    if (iso) {\n      const [y, m, d] = parseIso(iso)\n      title = DAYS[dow(y, m, d)] + ' ' + d + ' ' + MONTHS[m - 1]\n    }\n    svg += header(p, title)\n    top = p.hb\n  }\n  const detailsH = p.showDetails && !compact ? clamp(H * 0.2, 54, 92) : 0\n  const feelsH = compact ? base * 1.4 : base * 1.9\n  const condH = compact ? base * 1.7 : base * 2.2\n\n  const heroBottom = H - pad - detailsH - condH - feelsH\n  const heroH = Math.max(40, heroBottom - top)\n  const iconSize = clamp(Math.min(heroH * 0.94, W * 0.4), 34, 300)\n  const tempSize = clamp(Math.min(heroH * 0.62, W * 0.26), 26, 240)\n  const tempStr = temp(cur.temperature || 0)\n  const unitSize = tempSize * 0.3\n  const gap = iconSize * 0.12\n  const tempW = width(tempStr, tempSize)\n  const heroX = (W - (iconSize + gap + tempW + unitSize * 0.75)) / 2\n  const midY = top + heroH / 2\n  const tx = heroX + iconSize + gap\n  const tempY = midY + tempSize * 0.42\n  const unit = letter((fc.current_weather_units || {}).temperature || '°C')\n  svg += icon(p.icons, code, cur.is_day === 1, heroX, midY - iconSize / 2, iconSize)\n  svg += text(tempStr, tx, tempY, tempSize, p.ink, tempSize * 0.15)\n  svg += text(unit, tx + tempW + unitSize * 0.3, tempY - tempSize + unitSize, unitSize, p.sub, unitSize * 0.13)\n\n  const condY = heroBottom + condH * 0.72\n  const label = p.icons?.labels?.['' + code] || 'CODE ' + code\n  svg += text(label, W / 2, condY, condH * 0.5, p.ink, condH * 0.07, 'middle')\n  const bits = []\n  const hourly = fc.hourly || {}\n  const apparent = hourly.apparent_temperature || []\n  const i = cur.time && apparent.length ? (hourly.time || []).indexOf(cur.time.substring(0, 14) + '00') : -1\n  if (i >= 0 && apparent[i] !== null) bits.push('FEELS ' + temp(apparent[i]))\n  if ((daily.temperature_2m_max || []).length) {\n    bits.push('H ' + temp(daily.temperature_2m_max[0]) + ' L ' + temp(daily.temperature_2m_min[0]))\n  }\n  if (bits.length) {\n    svg += text(bits.join(' · '), W / 2, condY + feelsH * 0.7, feelsH * 0.42, p.sub, feelsH * 0.055, 'middle')\n  }\n  return detailsH > 0 ? svg + details(p, cur, daily, H - pad - detailsH, detailsH) : svg\n}\n\nfunction details(p, cur, daily, top, height) {\n  const { W, pad, fc } = p\n  const precip = (daily.precipitation_sum || [])[0]\n  const wind =\n    Math.round(cur.windspeed || 0) + ' ' + ((fc.current_weather_units || {}).windspeed || 'km/h').toUpperCase()\n  const rain =\n    (precip === undefined ? '0' : mm(precip)) + ' ' + ((fc.daily_units || {}).precipitation_sum || 'mm').toUpperCase()\n  const cells = [\n    ['WIND', wind, cur.winddirection],\n    ['PRECIP', rain],\n  ]\n  const [rise, set] = [(daily.sunrise || [])[0], (daily.sunset || [])[0]]\n  if (rise) cells.push(['SUNRISE', rise.split('T')[1] ?? rise])\n  if (set) cells.push(['SUNSET', set.split('T')[1] ?? set])\n\n  let svg = hr(p, top)\n  const cellW = (W - pad * 2) / cells.length\n  const innerW = cellW * 0.86\n  const labelBase = clamp(height * 0.16, 7, 12)\n  const valueBase = clamp(height * 0.26, 9, 19)\n  const midY = top + height * 0.68\n  cells.forEach(([label, value, arrow], i) => {\n    const cx = pad + cellW * (i + 0.5)\n    const ls = fit(label, labelBase, innerW)\n    svg += text(label, cx, top + height * 0.34, ls, p.faint, ls * 0.13, 'middle')\n    const hasArrow = arrow !== undefined\n    const vs = fit(value, valueBase, hasArrow ? innerW - valueBase * 0.9 : innerW)\n    const arrowW = hasArrow ? vs * 0.85 : 0\n    const x = cx - (width(value, vs) + arrowW) / 2\n    if (hasArrow) {\n      const r = vs * 0.34\n      const d = `M0 ${f2(-r)} L${xy(r * 0.62, r * 0.85)} L0 ${f2(r * 0.35)} L${xy(-r * 0.62, r * 0.85)} Z`\n      svg +=\n        `<g transform=\"translate(${xy(x + arrowW * 0.36, midY)}) rotate(${(((arrow || 0) + 180) % 360).toFixed(1)})\">` +\n        `<path d=\"${d}\" fill=\"${p.sub}\" stroke=\"${p.sub}\" stroke-width=\"1\" stroke-linejoin=\"round\"/></g>`\n    }\n    svg += text(value, x + arrowW, midY + vs * 0.36, vs, p.ink, vs * 0.12)\n    if (i) svg += vr(p, pad + cellW * i, top + height * 0.22, top + height * 0.82)\n  })\n  return svg\n}\n\nfunction hours(fc, count) {\n  const h = fc.hourly || {}\n  const times = h.time || []\n  const now = (fc.current_weather || {}).time || (times.length ? times[0] : '')\n  let start = times.findIndex((t) => t >= now.substring(0, 14) + '00')\n  if (start < 0) start = Math.max(0, times.length - 1)\n  const daily = fc.daily || {}\n  const [rise, set] = [(daily.sunrise || [])[0], (daily.sunset || [])[0]]\n  const out = []\n  for (let i = start; i < times.length && out.length < count; i++) {\n    const [y, m, d, hour] = parseIso(times[i])\n    out.push({\n      hour,\n      dow: dow(y, m, d),\n      temp: (h.temperature_2m || [])[i],\n      precip: (h.precipitation || [])[i] || 0,\n      code: (h.weathercode || [])[i] || 0,\n      isDay: rise && set ? hour >= parseIso(rise)[3] && hour <= parseIso(set)[3] : hour >= 7 && hour < 20,\n    })\n  }\n  return out\n}\n\nfunction hourly(p) {\n  const wanted = clamp(p.hours, 2, 24)\n  const fits = Math.floor((p.W - p.pad * 2) / 32)\n  return fits < Math.min(wanted, 5) ? hourlyList(p, wanted) : hourlyChart(p, Math.min(wanted, fits))\n}\n\nfunction hourlyChart(p, count) {\n  const { W, H, pad, base, fc } = p\n  const series = hours(fc, count)\n  if (!series.length) return message(p, 'NO HOURLY DATA')\n  let svg = header(p, 'NEXT ' + series.length + ' HOURS')\n  const colW = (W - pad - pad) / series.length\n  const graph = p.showGraph\n  const values = p.showValues || !graph\n\n  const timeH = clamp(base * 1.5, 14, 26)\n  const iconSize = values ? clamp(colW * (graph ? 0.78 : 0.95), 15, graph ? 46 : 64) : 0\n  const tempSize = values ? clamp(colW * (graph ? 0.34 : 0.4), 9, graph ? 20 : 24) : 0\n  const precipH = graph ? clamp(H * 0.07, 8, 34) : 0\n  const band = H - pad - timeH - (p.hb + base * 0.4)\n  const valuesH = values ? iconSize + tempSize * 1.25 + tempSize * 0.8 : 0\n  const fixedH = valuesH + (graph ? precipH + 6 : 0)\n  const chartH = graph ? clamp(band - fixedH, 40, H * (values ? 0.4 : 0.62)) : 0\n  const iconTop = p.hb + base * 0.4 + Math.max(0, (band - fixedH - chartH) / 2)\n  const chartTop = iconTop + valuesH\n  const chartBottom = chartTop + chartH\n  const bottom = chartBottom + precipH + (graph ? 6 : 0)\n\n  const temps = series.map((s) => s.temp)\n  let tMin = Math.min(...temps)\n  let tMax = Math.max(...temps)\n  const pMax = Math.max(0.4, ...series.map((s) => s.precip))\n  if (tMax - tMin < 2) {\n    tMax += 1\n    tMin -= 1\n  }\n  const xs = series.map((_, i) => pad + colW * (i + 0.5))\n  const ys = temps.map((t) => chartBottom - ((t - tMin) / (tMax - tMin)) * (chartBottom - chartTop))\n\n  const units = fc.hourly_units || {}\n  const unit = units.temperature_2m || '°C'\n  const precipUnit = (units.precipitation || 'mm').toUpperCase()\n  const labels = temps.map((t, i) => temp(t) + (i ? '' : letter(unit)))\n  const ts = Math.min(tempSize, ...labels.map((l) => fit(l, tempSize, colW * 0.96)))\n  const dividerTop = values ? iconTop + iconSize * 0.2 : chartTop\n  const bw = Math.max(3, colW * 0.24)\n  const precipSize = clamp(colW * 0.24, 7, 10)\n  const labelSize = clamp(colW * 0.3, 8, 13)\n  const timeY = bottom + timeH * 0.75\n  let labeled = false\n  series.forEach((s, i) => {\n    const cx = xs[i]\n    if (values) {\n      svg += icon(p.icons, s.code, s.isDay, cx - iconSize / 2, iconTop, iconSize)\n      svg += text(labels[i], cx, iconTop + iconSize + tempSize * 1.25, ts, p.ink, ts * 0.13, 'middle')\n    }\n    if (graph && s.precip > 0.05) {\n      const bh = Math.max(2.5, (s.precip / pMax) * precipH)\n      const barTop = bottom - 4 - bh\n      svg += `<rect x=\"${f2(cx - bw / 2)}\" y=\"${f2(barTop)}\" width=\"${f2(bw)}\" height=\"${f2(bh)}\" fill=\"${p.rain}\"/>`\n      let label = mm(s.precip)\n      if (!labeled && width(label + ' ' + precipUnit, precipSize) <= colW * 1.5) {\n        label += ' ' + precipUnit\n        labeled = true\n      }\n      svg += text(label, cx, barTop - precipSize * 0.4, precipSize, p.rain, precipSize * 0.13, 'middle')\n    }\n    const midnight = s.hour === 0\n    const time = midnight ? DAYS[s.dow] : '' + s.hour\n    svg += text(time, cx, timeY, labelSize, midnight ? p.ink : p.sub, labelSize * 0.12, 'middle')\n    if (midnight && i) svg += vr(p, pad + colW * i, dividerTop, bottom)\n  })\n  if (!graph) return svg\n\n  let d = 'M ' + xy(xs[0], ys[0])\n  for (let i = 0; i < xs.length - 1; i++) {\n    const [x0, x1, x2, x3] = [xs[i - 1] ?? xs[i], xs[i], xs[i + 1], xs[i + 2] ?? xs[i + 1]]\n    const [y0, y1, y2, y3] = [ys[i - 1] ?? ys[i], ys[i], ys[i + 1], ys[i + 2] ?? ys[i + 1]]\n    d += ` C ${xy(x1 + (x2 - x0) / 6, y1 + (y2 - y0) / 6)} ${xy(x2 - (x3 - x1) / 6, y2 - (y3 - y1) / 6)} ${xy(x2, y2)}`\n  }\n  if (!p.flat) {\n    const area = `${d} L ${xy(xs[xs.length - 1], chartBottom)} L ${xy(xs[0], chartBottom)} Z`\n    svg += `<path d=\"${area}\" fill=\"rgba(255,255,255,0.16)\"/>`\n  }\n  const curve = p.flat ? p.ink : tempColor((tMin + tMax) / 2, unit)\n  const lw = clamp(colW * 0.06, 1.5, 3)\n  svg += `<path d=\"${d}\" fill=\"none\" stroke=\"${curve}\" stroke-width=\"${lw}\" stroke-linecap=\"round\"/>`\n  const r = clamp(colW * 0.07, 1.8, 3.4)\n  const fill = p.flat ? p.top : curve\n  xs.forEach((x, i) => {\n    svg += `<circle cx=\"${f2(x)}\" cy=\"${f2(ys[i])}\" r=\"${r}\" fill=\"${fill}\" stroke=\"${p.ink}\" stroke-width=\"1.4\"/>`\n  })\n  return svg\n}\n\nfunction hourlyList(p, wanted) {\n  const { W, H, pad, base, fc } = p\n  const top = p.hb + base * 0.3\n  const availH = H - pad - top\n  const rowH = clamp(availH / wanted, 26, 54)\n  const series = hours(fc, Math.max(1, Math.floor(availH / rowH)))\n  if (!series.length) return message(p, 'NO HOURLY DATA')\n  let svg = header(p, 'HOURLY')\n  const size = clamp(rowH * 0.42, 9, 20)\n  const units = fc.hourly_units || {}\n  const unit = letter(units.temperature_2m || '°C')\n  let precipUnit = ' ' + (units.precipitation || 'mm').toUpperCase()\n  series.forEach((s, i) => {\n    const midY = top + rowH * (i + 0.5)\n    const y = midY + size * 0.36\n    svg += text(s.hour === 0 ? DAYS[s.dow] : String(s.hour).padStart(2, '0') + ':00', pad, y, size, p.sub, size * 0.12)\n    svg += icon(p.icons, s.code, s.isDay, W * 0.36, midY - rowH * 0.42, rowH * 0.84)\n    svg += text(temp(s.temp) + (i ? '' : unit), W * 0.66, y, size * 1.15, p.ink, size * 0.15, 'middle')\n    if (s.precip > 0.05) {\n      svg += text(mm(s.precip) + precipUnit, W - pad, y, size * 0.92, p.rain, size * 0.11, 'end')\n      precipUnit = ''\n    }\n    if (i) svg += hr(p, top + rowH * i)\n  })\n  return svg\n}\n\nfunction daily(p) {\n  const { W, H, pad, base, fc } = p\n  const top = p.hb + base * 0.3\n  const availH = H - pad - top\n  const wanted = clamp(p.days, 1, 16)\n  const rowH = clamp(availH / wanted, 26, 72)\n  const count = Math.max(1, Math.min(wanted, Math.floor(availH / rowH)))\n  const dd = fc.daily || {}\n  const times = dd.time || []\n  const series = []\n  for (let i = 0; i < times.length && series.length < count; i++) {\n    const [y, m, d] = parseIso(times[i])\n    series.push({\n      dow: dow(y, m, d),\n      min: (dd.temperature_2m_min || [])[i],\n      max: (dd.temperature_2m_max || [])[i],\n      precip: (dd.precipitation_sum || [])[i] || 0,\n      code: (dd.weathercode || [])[i] || 0,\n    })\n  }\n  if (!series.length) return message(p, 'NO DAILY DATA')\n  let svg = header(p, 'DAILY')\n  const tMin = Math.min(...series.map((s) => s.min))\n  let tMax = Math.max(...series.map((s) => s.max))\n  if (tMax - tMin < 1) tMax += 1\n\n  const unit = (fc.daily_units || {}).temperature_2m_max || '°C'\n  const size = clamp(rowH * 0.34, 9, 21)\n  const labels = series.map((s, i) => (i || W < 380 ? DAYS[s.dow] : 'TODAY'))\n  const dayW = Math.max(0, ...labels.map((l) => width(l, size))) + size * 0.8\n  const iconS = clamp(rowH * 0.78, 16, 48)\n  const tempW = width('-88°', size) + size * 0.6\n  const barRight = W - pad - tempW\n  let precipW = W >= 430 ? width('88.8', size * 0.88) + size : 0\n  if (barRight - (pad + dayW + iconS + precipW + tempW) < W * 0.16) precipW = 0\n  const barLeft = pad + dayW + iconS + precipW + tempW\n  const scaleX = (t) => barLeft + ((t - tMin) / (tMax - tMin)) * (barRight - barLeft)\n  const bw = clamp(rowH * 0.18, 4, 10)\n\n  series.forEach((s, i) => {\n    const midY = top + rowH * (i + 0.5)\n    const baseY = midY + size * 0.36\n    svg += text(labels[i], pad, baseY, size, p.ink, size * 0.13)\n    svg += icon(p.icons, s.code, true, pad + dayW, midY - iconS / 2, iconS)\n    if (precipW > 0 && s.precip > 0.05) {\n      svg += text(mm(s.precip), pad + dayW + iconS + precipW * 0.85, baseY, size * 0.88, p.rain, size * 0.1, 'end')\n    }\n    svg += text(temp(s.min), barLeft - size * 0.7, baseY, size, p.sub, size * 0.12, 'end')\n    svg += text(temp(s.max), barRight + size * 0.7, baseY, size, p.ink, size * 0.13)\n    const x1 = scaleX(s.min)\n    const x2 = Math.max(scaleX(s.max), x1 + 2)\n    const y = f2(midY)\n    if (p.flat) svg += line(f2(x1), y, f2(x2), y, p.ink, bw, 'round')\n    else {\n      svg += line(f2(barLeft), y, f2(barRight), y, p.grid, bw, 'round')\n      for (let k = 0; k < 10; k++) {\n        const [t0, t1] = [k / 10, (k + 1) / 10]\n        const sx1 = x1 + (x2 - x1) * t0\n        const color = tempColor(s.min + (s.max - s.min) * ((t0 + t1) / 2), unit)\n        svg += line(f2(k ? sx1 - 0.4 : sx1), y, f2(x1 + (x2 - x1) * t1), y, color, bw, k && k < 9 ? 'butt' : 'round')\n      }\n    }\n    if (i) svg += hr(p, top + rowH * i)\n  })\n  return svg\n}\n\nexport function get(app, context) {\n  const c = app.config\n  const W = c.width > 0 ? c.width : context.imageWidth || app.frame.width\n  const H = c.height > 0 ? c.height : context.imageHeight || app.frame.height\n  const weather = c.weather\n  if (!weather || weather.error || !weather.forecast) {\n    throw new Error('Weather unavailable: ' + (weather ? weather.error || 'no forecast' : 'no data'))\n  }\n  const fc = weather.forecast\n  const cur = fc.current_weather || {}\n  const pad = clamp(Math.min(W, H) * 0.055, 8, 30)\n  const base = clamp(Math.min(W, H) * 0.052, 9, 24)\n  const flat = c.lowContrast\n  const [ink, sub, faint, grid, rain] = (\n    flat\n      ? '#111111 #3D3D3D #8A8A8A #C8C8C8 #111111'\n      : '#FFFFFF rgba(255,255,255,0.78) rgba(255,255,255,0.45) rgba(255,255,255,0.22) #9BDCFF'\n  ).split(' ')\n  const [top, bottom] = flat ? ['#FFFFFF'] : sky(cur.weathercode || 0, cur.is_day === 1)\n  const p = {\n    W,\n    H,\n    pad,\n    base,\n    hb: pad + base + base * 0.6,\n    fc,\n    icons: c.icons,\n    date: weather.date,\n    name: weather.location?.name || '',\n    flat,\n    top,\n    ink,\n    sub,\n    faint,\n    grid,\n    rain,\n    hours: c.hours || 10,\n    days: c.days || 7,\n    showLocation: c.showLocation,\n    showDetails: c.showDetails,\n    showValues: c.showValues,\n    showGraph: c.showGraph,\n  }\n  const body = c.mode === 'hourly' ? hourly(p) : c.mode === 'daily' ? daily(p) : current(p)\n  const bg = flat\n    ? ''\n    : `<linearGradient id=\"bg\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"${H}\">` +\n      `<stop offset=\"0\" stop-color=\"${top}\"/><stop offset=\"1\" stop-color=\"${bottom}\"/></linearGradient>`\n  const rect = `<rect x=\"0\" y=\"0\" width=\"${W}\" height=\"${H}\" fill=\"${flat ? top : 'url(#bg)'}\"/>`\n  const svg = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${W}\" height=\"${H}\" viewBox=\"0 0 ${W} ${H}\">`\n  return frameos.svg(svg + bg + rect + body + '</svg>', { width: W, height: H })\n}\n",
+    "config.json": "{\n  \"name\": \"Weather panel (JS)\",\n  \"category\": \"data\",\n  \"description\": \"Current conditions, an hourly chart or a daily list from Open-Meteo data. Wire weather from the Weather app and icons from the Weather icon set app.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    { \"name\": \"weather\", \"label\": \"Weather data (from Weather app)\", \"type\": \"json\", \"required\": true },\n    { \"name\": \"icons\", \"label\": \"Icon set (from Weather icon set app)\", \"type\": \"json\", \"required\": true },\n    {\n      \"name\": \"mode\",\n      \"label\": \"Mode\",\n      \"type\": \"select\",\n      \"options\": [\"current\", \"hourly\", \"daily\"],\n      \"value\": \"current\"\n    },\n    {\n      \"name\": \"hours\",\n      \"label\": \"Hours to show\",\n      \"type\": \"integer\",\n      \"value\": \"10\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"hourly\" }]\n    },\n    {\n      \"name\": \"days\",\n      \"label\": \"Days to show\",\n      \"type\": \"integer\",\n      \"value\": \"7\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"daily\" }]\n    },\n    {\n      \"name\": \"showValues\",\n      \"label\": \"Show icons and temperatures (hourly)\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"hourly\" }]\n    },\n    {\n      \"name\": \"showGraph\",\n      \"label\": \"Show graph (hourly)\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"hourly\" }]\n    },\n    { \"name\": \"lowContrast\", \"label\": \"Low contrast\", \"type\": \"boolean\", \"value\": \"false\" },\n    { \"name\": \"showLocation\", \"label\": \"Show location header\", \"type\": \"boolean\", \"value\": \"true\" },\n    {\n      \"name\": \"showDetails\",\n      \"label\": \"Show detail row\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"showIf\": [{ \"field\": \"mode\", \"operator\": \"eq\", \"value\": \"current\" }]\n    },\n    { \"name\": \"width\", \"label\": \"Width (0 = fit canvas)\", \"type\": \"integer\", \"value\": \"0\" },\n    { \"name\": \"height\", \"label\": \"Height (0 = fit canvas)\", \"type\": \"integer\", \"value\": \"0\" }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }]\n}\n"
+  },
+  "repo/apps/image/wikicommons": {
+    "app.ts": "// Wikimedia Commons pictures of the day or random files; frameos.fetchImage decodes them natively.\nconst UA = 'FrameOS Wikimedia Commons app (https://github.com/FrameOS/frameos)'\nconst str = (v, d = '') => (typeof v === 'string' ? v : d)\nconst rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1))\nconst pad = (n) => String(n).padStart(2, '0')\nconst days = (y, m) =>\n  m === 2 ? ((y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28) : [4, 6, 9, 11].includes(m) ? 30 : 31\nconst text = (v) =>\n  str(v)\n    .replace(/<[^>]*>?|>/g, '')\n    .replace(/&quot;/g, '\"')\n    .replace(/&amp;/g, '&')\n    .replace(/&#039;|&apos;/g, \"'\")\n    .replace(/&lt;/g, '<')\n    .replace(/&gt;/g, '>')\n    .trim()\n\nfunction find(query, width) {\n  const r = frameos.httpRequest(\n    `https://commons.wikimedia.org/w/api.php?format=json&formatversion=2&action=query&${query}&prop=imageinfo` +\n      `&iiprop=url%7Cmime%7Cextmetadata&iiextmetadatafilter=ImageDescription%7CObjectName%7CArtist%7CLicenseShortName&iiurlwidth=${width}`,\n    { headers: { Accept: 'application/json', 'User-Agent': UA }, timeoutMs: 60000 }\n  )\n  if (!r.status) throw new Error(r.error)\n  if (r.status >= 400) throw new Error(`Wikimedia Commons API HTTP ${r.status}`)\n  const j = JSON.parse(r.body)\n  if (j?.error !== undefined) {\n    throw new Error(`Wikimedia Commons API error: ${str(j.error?.info, JSON.stringify(j.error))}`)\n  }\n  for (const page of j?.query?.pages ?? []) {\n    const i = page.imageinfo?.[0]\n    const mime = str(i?.mime)\n    const imageUrl = str(i?.thumburl, str(i?.url))\n    if (!mime.startsWith('image/') || !imageUrl) continue\n    const md = (key) => text(i.extmetadata?.[key]?.value)\n    return {\n      title: str(page.title),\n      description: md('ImageDescription') || md('ObjectName'),\n      author: md('Artist'),\n      license: md('LicenseShortName'),\n      pageUrl: str(i.descriptionurl),\n      imageUrl,\n      mime,\n    }\n  }\n  throw new Error('No supported image returned from Wikimedia Commons.')\n}\n\nfunction retry(what, attempt) {\n  let last = ''\n  for (let i = 0; i < 10; i++) {\n    try {\n      return attempt()\n    } catch (e) {\n      last = e.message\n    }\n  }\n  throw new Error(`Could not find a random Wikimedia Commons ${what}: ${last}`)\n}\n\nexport function get(app, context) {\n  const { config: c, frame: f } = app\n  const turned = f.rotate === 90 || f.rotate === 270\n  const w = context.imageWidth || (turned ? f.height : f.width)\n  const h = context.imageHeight || (turned ? f.width : f.height)\n  const mode = c.mode.trim()\n  const sub = (c.submode ?? '').trim()\n  const stateKey = c.metadataStateKey.trim()\n  const save = c.saveAssets\n  const norm = ['', 'potd', 'pictureOfTheDay'].includes(mode)\n    ? ['', 'day'].includes(sub)\n      ? 'pictureOfTheDay'\n      : ['onthisday', 'onThisDay'].includes(sub)\n      ? 'onThisDay'\n      : ['month', 'random', 'randomPotd', 'randomPictureOfTheDay'].includes(sub)\n      ? 'randomPictureOfTheDay'\n      : mode\n    : mode === 'random'\n    ? 'randomImage'\n    : mode\n  const width = Math.max(w, h, 1)\n  const now = new Date()\n  const [Y, M, D] = [now.getFullYear(), now.getMonth() + 1, now.getDate()]\n  const potd = (y, m, d) =>\n    find(`generator=images&titles=Template%3APotd%2F${y}-${pad(m)}-${pad(d)}&gimlimit=20`, width)\n\n  let img\n  try {\n    if (norm === 'pictureOfTheDay') img = potd(Y, M, D)\n    else if (norm === 'onThisDay') {\n      let y = 0\n      for (let i = 0; i < 100 && !y; i++) {\n        const t = rand(2008, Math.max(2008, Y - 1))\n        if (D <= days(t, M)) y = t\n      }\n      if (!y) throw new Error('No previous Wikimedia Commons picture of the day exists for this date.')\n      img = potd(y, M, D)\n    } else if (norm === 'randomPictureOfTheDay') {\n      img = retry('picture of the day', () => {\n        const y = rand(2008, Y)\n        const m = rand(1, y === Y ? M : 12)\n        return potd(y, m, rand(1, y === Y && m === M ? Math.min(days(y, m), D) : days(y, m)))\n      })\n    } else if (norm === 'randomImage') {\n      img = retry('image', () => find('generator=random&grnnamespace=6&grnlimit=20', width))\n    } else throw new Error(`Invalid Wikimedia Commons mode: ${mode}`)\n  } catch (e) {\n    throw new Error(`Error fetching image from Wikimedia Commons: ${e.message}`)\n  }\n\n  if (f.debug) frameos.log(`Downloading Wikimedia Commons image: ${img.imageUrl}`)\n  const path = img.imageUrl.split('?')[0].toLowerCase()\n  const extension =\n    /\\.(jpe?g|png|gif|webp|svg)$/.exec(path)?.[1].replace('jpeg', 'jpg') ??\n    { jpeg: 'jpg', png: 'png', gif: 'gif', webp: 'webp', 'svg+xml': 'svg' }[img.mime.slice(6)] ??\n    'img'\n  const photo = frameos.fetchImage(img.imageUrl, {\n    headers: { 'User-Agent': UA },\n    saveAsset:\n      save === 'auto' || save === 'always'\n        ? { name: img.title.replace(/File:/g, ''), extension, mode: save }\n        : undefined,\n  })\n  if (!photo.image) throw new Error(`Error fetching image from Wikimedia Commons: ${photo.error}`)\n  if (stateKey) frameos.setState(stateKey, { source: 'wikimedia-commons', mode: norm, ...img })\n  return photo.image\n}\n",
+    "config.json": "{\n  \"name\": \"Wikimedia Commons\",\n  \"description\": \"Images from Wikimedia Commons\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"mode\",\n      \"type\": \"select\",\n      \"value\": \"pictureOfTheDay\",\n      \"options\": [\"pictureOfTheDay\", \"onThisDay\", \"randomPictureOfTheDay\", \"randomImage\"],\n      \"label\": \"Mode\",\n      \"hint\": \"Today's Picture of the Day, this date's in an earlier year, a random earlier one, or a random Commons image.\"\n    },\n    {\n      \"name\": \"saveAssets\",\n      \"type\": \"select\",\n      \"value\": \"auto\",\n      \"options\": [\"auto\", \"always\", \"never\"],\n      \"label\": \"Save asset\",\n      \"hint\": \"Saves the image to the frame's assets folder. auto follows the frame's save-assets setting.\"\n    },\n    {\n      \"name\": \"metadataStateKey\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"label\": \"Metadata state key\",\n      \"placeholder\": \"e.g. wikimediaMetadata\",\n      \"hint\": \"Stores {title, description, author, license, pageUrl, imageUrl, mime} under this key.\"\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"3600\" }\n}\n"
   }
 }

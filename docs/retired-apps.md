@@ -2,11 +2,21 @@
 
 A built-in Nim app that gets a repo JavaScript replacement is deleted from the
 runtime in the same change, without anyone redeploying, re-editing a scene or
-noticing. `docs/retired-apps.json` lists them; today that is one:
+noticing. `docs/retired-apps.json` lists them:
 
 | retired keyword | replacement | first runtime | why that runtime |
 |---|---|---|---|
-| `data/immich` | `repo/apps/code/immich` | 2026.10.11 | `frameos.fetchImage` |
+| `data/immich` | `repo/apps/image/immich` | 2026.10.11 | `frameos.fetchImage` |
+| `data/frameOSGallery` | `repo/apps/image/frameOSGallery` | 2026.10.13 | a throw in `get()` fails the node (the painted error) |
+| `data/unsplash` | `repo/apps/image/unsplash` | 2026.10.13 | a throw in `get()` fails the node (the painted error) |
+| `data/wikicommons` | `repo/apps/image/wikicommons` | 2026.10.13 | a throw in `get()` fails the node (the painted error) |
+| `data/googlePhotos` | `repo/apps/image/googlePhotos` | 2026.10.13 | `frameos.remember` (the album list outlives an ESP32 render) |
+| `data/openaiImage` | `repo/apps/image/openaiImage` | 2026.10.13 | `app.frame.embedded`, and saving a `data:` URL (the `b64_json` reply) |
+| `data/openaiText` | `repo/apps/text/openaiText` | 2026.10.11 | `frameos.httpRequest` |
+| `data/haSensor` | `repo/apps/json/haSensor` | 2026.10.11 | `frameos.httpRequest` |
+| `data/weather` | `repo/apps/json/weather` | 2026.10.11 | `frameos.httpRequest` |
+| `data/beRecycle` | `repo/apps/json/beRecycle` | 2026.10.13 | a throw in `get()` fails the node |
+| `render/chart` | `repo/apps/image/chart` | 2026.10.13 | nothing new: an older frame keeps the built-in chart it has |
 
 The replacement runs only on a runtime that has what it `needs`. Firmware
 older than `runtime` still has the Nim app, so it is sent the Nim keyword.
@@ -22,6 +32,17 @@ app's `config.json` keys plus `origin` and `sources` under `scene.apps`. The
 key is `sceneAppKey`, or an existing entry with the same `origin`. The node's
 config, cache and edges are untouched, since the fields keep their names.
 A node that carries its own `data.sources` is an edited copy and is left alone.
+
+**Render apps.** A retired render app's replacement is a data app that returns
+the image (the chart returns an SVG sized to the area it draws into), so a
+node of it in the render flow, with an edge into its `prev` or out of its
+`next`, cannot just change keyword. The entry's `renderFlow` names what takes
+its place: the node keeps its id and its place in the chain as that app
+(`render/image`, empty config), and a new node `<id>-<sceneAppKey>` of the
+replacement takes the old config, cache and the edges into its fields, and
+feeds the image (`fieldInput/image`). A node read as a value just changes
+keyword. Going back to an older runtime only changes the new node's keyword,
+since the built-in chart works as a value too.
 
 - **Backend:** an alembic migration (frames, their deploy baseline,
   templates), then every door scenes come in by: template import, backup
@@ -67,12 +88,15 @@ judged as that release.
   carries `scenes.json` forward without a redeploy. A scene deployed under the
   old release therefore still names the retired keyword. The Linux runtime
   runs the replacement for such a node from a generated copy
-  (`frameos/src/frameos/retired_apps.nim`). The ESP32 and the wasm preview do
-  not carry that copy.
+  (`frameos/src/frameos/retired_apps.nim`). For a retired render app in the
+  render flow, which is not rewritten there, the interpreter draws the
+  replacement's image onto the canvas itself. The ESP32 and the wasm preview
+  do not carry that copy.
 
 ## Adding an entry
 
-1. Ship the replacement as `repo/apps/code/<app>` and make it a faithful port.
+1. Ship the replacement as `repo/apps/<folder>/<app>`, the folder naming what it
+   returns (`image`, `text`, `json`, `logic`), and make it a faithful port.
    Same field names, so a converted node keeps its config.
 2. Add the keyword to `docs/retired-apps.json` and to `RETIRED_APPS` in
    `backend/app/utils/retired_apps.py`.

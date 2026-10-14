@@ -277,7 +277,7 @@ export function splitStateNodesByApp(payload: JsonObject): void {
   }
 }
 
-// Repo JS apps (repo/apps/code/*) are templates, not runtime keywords: the
+// Repo JS apps (repo/apps/<folder>/<name>) are templates, not runtime keywords: the
 // frame only knows an app once its config + sources sit in the scene's own
 // "apps" map under a short keyword (the Weather sample carries weatherIcons
 // and weatherPanel that way, with "origin" naming the template). The catalog
@@ -306,18 +306,23 @@ export function bundleRepoApps(
       if (nodeEntry.type !== "app" || typeof keyword !== "string" || !keyword.startsWith("repo/apps/")) {
         continue;
       }
-      const template = catalog[keyword];
+      // A keyword from before the folders were named for what the apps return
+      // (repo/apps/code/<name>, until 2026.10.13) still finds its app.
+      const name = keyword.slice(keyword.lastIndexOf("/") + 1);
+      const template =
+        catalog[keyword] ??
+        Object.values(catalog).find((app) => app.keyword.startsWith("repo/apps/") && app.keyword.endsWith(`/${name}`));
       if (!template?.sources || Object.keys(template.sources).length === 0) {
         continue;
       }
-      const short = keyword.slice(keyword.lastIndexOf("/") + 1);
+      const short = name;
       const apps =
         entry.apps && typeof entry.apps === "object" && !Array.isArray(entry.apps)
           ? (entry.apps as JsonObject)
           : (entry.apps = {});
       if (!apps[short]) {
-        const { keyword: _keyword, sources, ...config } = template;
-        apps[short] = { ...config, origin: keyword, sources: { ...sources } };
+        const { keyword: templateKeyword, sources, ...config } = template;
+        apps[short] = { ...config, origin: templateKeyword, sources: { ...sources } };
       }
       data.keyword = short;
       nodeEntry.data = data;

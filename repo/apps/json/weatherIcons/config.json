@@ -1,0 +1,27 @@
+{
+  "name": "Weather icon set (JS)",
+  "category": "data",
+  "description": "SVG weather icons for WMO weather codes, with code-to-icon and code-to-label maps.",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "palette",
+      "label": "Palette",
+      "type": "select",
+      "options": ["auto", "vivid", "mono"],
+      "value": "auto",
+      "hint": "auto is mono with low contrast, vivid otherwise."
+    },
+    { "name": "lowContrast", "label": "Low contrast", "type": "boolean", "value": "false" },
+    { "name": "lineWidth", "label": "Line width", "type": "float", "value": "3" },
+    { "name": "ink", "label": "Ink color (mono)", "type": "color", "value": "#222222" },
+    { "name": "paper", "label": "Paper color (mono)", "type": "color", "value": "#ffffff" }
+  ],
+  "output": [
+    {
+      "name": "icons",
+      "type": "json",
+      "example": "{\"viewBox\": 64, \"palette\": \"vivid\", \"map\": {\"61\": \"rain\"}, \"labels\": {\"61\": \"Light rain\"}, \"icons\": {\"rain\": \"<g>...</g>\"}}"
+    }
+  ]
+}

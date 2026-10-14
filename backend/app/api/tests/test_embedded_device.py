@@ -1,4 +1,5 @@
 import io
+import json
 import struct
 
 import httpx
@@ -447,10 +448,14 @@ async def test_settings_pull_follows_the_granted_set(async_client, no_auth_clien
     frame = await device_frame(async_client, db)
     frame.scenes = [
         {
-            'id': 'own-gallery',
+            'id': 'own-scene',
             'name': 'Own scene',
-            'nodes': [{'type': 'app', 'data': {'keyword': 'data/frameOSGallery'}}],
+            'nodes': [{'type': 'app', 'data': {'keyword': 'ownApp'}}],
             'edges': [],
+            'apps': {'ownApp': {'sources': {
+                'app.ts': 'export function get() {}',
+                'config.json': json.dumps({'name': 'Own app', 'settings': ['frameOS']}),
+            }}},
         },
         {
             'id': 'store-unsplash',

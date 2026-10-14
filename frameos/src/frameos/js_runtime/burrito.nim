@@ -124,6 +124,9 @@ type
     malloc_size*: csize_t
     malloc_limit*: csize_t
     opaque*: pointer
+  JSMemoryUsage* {.importc: "JSMemoryUsage", header: "quickjs/quickjs.h", bycopy.} = object
+    ## Only the field FrameOS reads; the C struct has many more.
+    malloc_size*: int64
   ## `const void *` as C spells it: the usable-size callback's parameter type
   ## in JSMallocFunctions, which clang refuses to take a plain `void *` for.
   ConstPointer* {.importc: "const void *", nodecl.} = distinct pointer
@@ -299,6 +302,7 @@ proc JS_RunGC*(rt: ptr JSRuntime)
 proc JS_SetMemoryLimit*(rt: ptr JSRuntime, limit: csize_t)
 proc JS_SetMaxStackSize*(rt: ptr JSRuntime, stackSize: csize_t)
 proc JS_SetInterruptHandler*(rt: ptr JSRuntime, cb: JSInterruptHandler, opaque: pointer)
+proc JS_ComputeMemoryUsage*(rt: ptr JSRuntime, s: ptr JSMemoryUsage)
 
 # Bytecode serialization
 proc JS_WriteObject*(ctx: ptr JSContext, psize: ptr csize_t, obj: JSValueConst, flags: cint): ptr uint8
@@ -1495,6 +1499,37 @@ proc close*(js: var QuickJS) =
   if js.guard != nil:
     dealloc(js.guard)
     js.guard = nil
+
+proc abandon*(js: var QuickJS): int {.discardable.} =
+  ## Let go of an interpreter that an out-of-memory abort jumped out of
+  ## mid-call, without freeing it; returns the bytes it still holds.
+  ##
+  ## The abort is a longjmp (frameos_nim_glue.c), so QuickJS never unwound:
+  ## the runtime still points at a stack frame that no longer exists, and
+  ## every value that frame held is still referenced. Running it again walks
+  ## that frame on the next thrown error, and JS_FreeRuntime asserts that
+  ## nothing is referenced any more, which on the ESP32 is a panic. So it is
+  ## leaked on purpose: until the next reboot the memory is gone either way.
+  ## Its bytes come off the scene's heap budget, which they no longer serve.
+  if js.runtime == nil:
+    return 0
+  var usage: JSMemoryUsage
+  JS_ComputeMemoryUsage(js.runtime, addr usage)
+  result = max(0, usage.malloc_size.int)
+  let budget = js.config.heapBudget
+  if budget != nil:
+    let held = result.csize_t
+    budget.usedBytes = if budget.usedBytes > held: budget.usedBytes - held else: 0
+  # Nothing reads these again, but neither points at freed memory.
+  JS_SetInterruptHandler(js.runtime, nil, nil)
+  if js.context != nil:
+    JS_SetContextOpaque(js.context, nil)
+  if js.contextData != nil:
+    reset(js.contextData.functions)
+    dealloc(js.contextData)
+  if js.guard != nil:
+    dealloc(js.guard)
+  js = QuickJS()
 
 proc eval*(js: QuickJS, code: string, filename: string = "<eval>", flags: cint = 0): string =
   ## Evaluate JavaScript code and return result as string. `flags` adds

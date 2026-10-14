@@ -198,7 +198,7 @@ class AppConfigSchema(BaseModel):
     cache: Optional[CacheConfig] = Field(None, description="Default cache settings for this app")
     origin: Optional[str] = Field(
         None,
-        description="Origin app this app was created from, such as repo/apps/code/jsText."
+        description="Origin app this app was created from, such as repo/apps/text/jsText."
     )
 
     model_config = ConfigDict(

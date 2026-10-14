@@ -20,6 +20,7 @@ from app.drivers.devices import (
     device_gpio_button_defaults,
 )
 from app.models.apps import get_app_configs
+from app.utils.retired_apps import retired_app_config
 from app.models.settings import get_settings_dict
 from app.utils.events_contract_gen import BUTTON_ROLES, DEFAULT_KEYBOARD_LAYOUT, KEYBOARD_LAYOUTS
 from app.utils.timezone import frame_timezone, stored_timezone
@@ -915,7 +916,9 @@ def shipped_frame_settings(frame: "Frame", all_settings: dict, app_configs: Opti
                         pass
                 else:
                     if keyword:
-                        app_config = app_configs.get(keyword, None)
+                        # A retired Nim keyword (utils/retired_apps.py) still
+                        # declares what its JS replacement does.
+                        app_config = app_configs.get(keyword, None) or retired_app_config(keyword)
                         if app_config:
                             settings = app_config.get('settings', [])
                             for key in settings:

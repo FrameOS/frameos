@@ -3,7 +3,7 @@
 //
 //   - app catalog: every builtin app's config.json (frameos/src/apps — the
 //     configs only, never the app.nim sources: the cloud chat is deliberately
-//     Nim-free) plus the repo JS/TS apps (repo/apps/code) WITH their sources,
+//     Nim-free) plus the repo JS/TS apps (repo/apps/<image|text|json|logic>) WITH their sources,
 //   - scene event keywords (frontend/schema/events.json),
 //   - the QuickJS ambient type declarations JS code nodes / JS apps see,
 //   - example scenes: every repo/scenes template, condensed for search plus
@@ -68,13 +68,21 @@ async function collectBuiltinApps() {
 // --- repo JS/TS apps (configs + sources; skip app.nim like generateRepoApps) ---
 async function collectRepoApps() {
   const apps = {}
-  const sourceRoot = path.join(repoRoot, 'repo', 'apps', 'code')
+  // repo/apps/<what the app returns>/<name>: image, text, json, logic.
+  const sourceRoot = path.join(repoRoot, 'repo', 'apps')
   if (!(await pathExists(sourceRoot))) {
     return apps
   }
-  const entries = await fs.readdir(sourceRoot, { withFileTypes: true })
-  for (const entry of entries.filter((item) => item.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
-    const appDir = path.join(sourceRoot, entry.name)
+  const entries = []
+  for (const folder of (await fs.readdir(sourceRoot, { withFileTypes: true })).filter((item) => item.isDirectory())) {
+    for (const item of await fs.readdir(path.join(sourceRoot, folder.name), { withFileTypes: true })) {
+      if (item.isDirectory()) {
+        entries.push({ folder: folder.name, name: item.name })
+      }
+    }
+  }
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const appDir = path.join(sourceRoot, entry.folder, entry.name)
     const configPath = path.join(appDir, 'config.json')
     if (!(await pathExists(configPath))) {
       continue
@@ -83,7 +91,7 @@ async function collectRepoApps() {
     if (!config || typeof config !== 'object' || !config.name) {
       continue
     }
-    const keyword = `repo/apps/code/${entry.name}`
+    const keyword = `repo/apps/${entry.folder}/${entry.name}`
     const sources = {}
     const files = (await fs.readdir(appDir, { withFileTypes: true }))
       .filter((item) => item.isFile())
@@ -254,7 +262,7 @@ interface FrameOSApp {
   category: string;
   config: FrameOSAppConfig;
   state: Record<string, any>;
-  frame: { width: number; height: number; rotate: number; assetsPath: string; timeZone: string; };
+  frame: { width: number; height: number; rotate: number; assetsPath: string; timeZone: string; debug?: boolean; embedded?: boolean; };
   initialized?: boolean;
   log(...args: any[]): void;
   logError(...args: any[]): void;
@@ -294,17 +302,29 @@ declare const frameos: {
       bodyBase64?: string;
       base64?: boolean;
       timeoutMs?: number;
+      find?: string;
+      findLength?: number;
+      findLimit?: number;
     }
-  ): { status: number; body?: string; bodyBase64?: string; error?: string };
+  ): { status: number; body?: string; bodyBase64?: string; found?: string[]; error?: string };
   fetchImage(
     url: string,
     options?: {
       headers?: Record<string, string>;
       saveAsset?: { name: string; extension?: string; mode?: "auto" | "always" };
+      exif?: boolean;
       // The image's color profile (a .frameos.json sidecar's colors object); null = none, clears the last palette.
       colors?: { [key: string]: any } | null;
     }
-  ): { image: FrameOSImageRef | null; width?: number; height?: number; error?: string; savedAs?: string };
+  ): {
+    image: FrameOSImageRef | null;
+    width?: number;
+    height?: number;
+    error?: string;
+    savedAs?: string;
+    exif?: Record<string, any>;
+    exifSummary?: string;
+  };
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;
@@ -322,6 +342,9 @@ declare const frameos: {
   streamClose(stream: FrameOSStreamRef | number): boolean;
   getSetting(...path: string[]): any;
   setState(key: string, value: FrameOSJson): void;
+  /** Keep a value for this node between renders (FrameOS 2026.10.13+). null forgets it. */
+  remember(key: string, value: FrameOSJson): boolean;
+  recall(key: string): FrameOSJson | undefined;
 };
 `
 

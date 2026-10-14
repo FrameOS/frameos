@@ -1,0 +1,34 @@
+{
+  "name": "Wikimedia Commons",
+  "description": "Images from Wikimedia Commons",
+  "category": "data",
+  "version": "1.0.0",
+  "fields": [
+    {
+      "name": "mode",
+      "type": "select",
+      "value": "pictureOfTheDay",
+      "options": ["pictureOfTheDay", "onThisDay", "randomPictureOfTheDay", "randomImage"],
+      "label": "Mode",
+      "hint": "Today's Picture of the Day, this date's in an earlier year, a random earlier one, or a random Commons image."
+    },
+    {
+      "name": "saveAssets",
+      "type": "select",
+      "value": "auto",
+      "options": ["auto", "always", "never"],
+      "label": "Save asset",
+      "hint": "Saves the image to the frame's assets folder. auto follows the frame's save-assets setting."
+    },
+    {
+      "name": "metadataStateKey",
+      "type": "string",
+      "value": "",
+      "label": "Metadata state key",
+      "placeholder": "e.g. wikimediaMetadata",
+      "hint": "Stores {title, description, author, license, pageUrl, imageUrl, mime} under this key."
+    }
+  ],
+  "output": [{ "name": "image", "type": "image" }],
+  "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "3600" }
+}

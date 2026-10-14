@@ -16,8 +16,8 @@ async def test_api_apps(async_client):
     # Check for known apps (example: 'logic/ifElse' is from the sample code)
     assert 'logic/ifElse' in data['apps'], "Expected 'logic/ifElse' to be listed among apps"
     assert 'data/clock' in data['apps'], "Expected 'data/clock' to be listed among apps"
-    assert 'repo/apps/code/jsLogic' not in data['apps'], "Expected JS templates to be frontend-only"
-    assert 'repo/apps/code/jsText' not in data['apps'], "Expected JS templates to be frontend-only"
+    assert 'repo/apps/logic/jsLogic' not in data['apps'], "Expected JS templates to be frontend-only"
+    assert 'repo/apps/text/jsText' not in data['apps'], "Expected JS templates to be frontend-only"
 
 
 @pytest.mark.asyncio
@@ -36,7 +36,7 @@ async def test_api_apps_source(async_client):
 
 @pytest.mark.asyncio
 async def test_api_apps_source_excludes_frontend_js_templates(async_client):
-    response = await async_client.get('/api/apps/source?keyword=repo/apps/code/jsText')
+    response = await async_client.get('/api/apps/source?keyword=repo/apps/text/jsText')
     assert response.status_code == 404
 
 

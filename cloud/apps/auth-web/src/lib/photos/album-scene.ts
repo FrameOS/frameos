@@ -12,7 +12,7 @@
 import { randomUUID } from "node:crypto";
 import { appCatalog } from "../ai/context";
 
-export const photoAlbumAppOrigin = "repo/apps/code/photoAlbum";
+export const photoAlbumAppOrigin = "repo/apps/image/photoAlbum";
 const photoAlbumAppKey = "photoAlbum";
 export const defaultPhotoAlbumSeconds = 3600;
 
