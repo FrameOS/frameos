@@ -185,6 +185,12 @@ a frame's logs must not be able to talk an agent into installing something.
   are content-addressed by sha256 and the ordered set is part of a version:
   each of the last three publishes one; position 0 is the cover),
   `scene_render`, `scene_lint`.
+- **writing scenes** — `scene_guide` (how to write a scene: nodes, edges,
+  state, code nodes, JS apps and the `frameos` API, SVG and layout, small
+  devices and events; `docs/scene-guide.md`, the text both scene AIs read,
+  from `GET /api/scenes/guide`), `apps_list` and `app_source_get` (the scene
+  AI's own catalog from `GET /api/apps` and `/api/apps/source`, the repo JS
+  app templates included). The backend's MCP has the same three tools.
 - **store** — `store_browse`, `store_scene_get`, `store_scene_report`.
 - **photos** — the account's library (`docs/photos.md`, "MCP"; the names
   match the backend's): `photos_status`, `photos_list`, `photo_get` (the

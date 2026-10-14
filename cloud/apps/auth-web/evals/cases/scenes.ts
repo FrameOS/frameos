@@ -353,7 +353,9 @@ export const cases: EvalCase[] = [
       { type: "preserves_fields" },
       { type: "render_ok" },
       { type: "render_not_blank" },
-      { type: "any_app_used", keywords: ["data/clock", "render/text"] },
+      // No app check: a JS app's Date reads the frame's local time, so drawing
+      // the time inside the scene's own weatherPanel is as good as adding
+      // data/clock + render/text. The judge checks where it went.
       { type: "judge", min: 3 },
     ],
     id: "modify-weather-add-time",

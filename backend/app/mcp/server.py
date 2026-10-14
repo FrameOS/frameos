@@ -28,6 +28,7 @@ The backend PUSHES: changing a frame's scenes or settings edits the project's re
 Typical flows:
 - See what is on a frame: frame_get → frame_scenes_list → frame_screenshot; frame_logs when something looks wrong; frame_ping when it seems offline.
 - Put a scene on a frame: store_browse or scenes_list → frame_scene_install (activate=true to show it now).
+- Write or edit scene JSON or app code yourself: read scene_guide first (how nodes, edges, state, code nodes and JS apps work, on every device), look apps up with apps_list / app_source_get.
 - Make a new scene: ai_scene_generate(prompt, frame_id) → review the JSON → frame_scene_install(scenes=…) or scene_create.
 - Change a scene: frame_scene_get → edit → frame_scene_update; or ai_scene_chat(frame_id, scene_id, prompt) for a proposal.
 - Change device settings: frame_update(settings={…}, then="fast_deploy").
@@ -176,7 +177,7 @@ def register_prompts(server: McpServer) -> None:
             + (f" It is for frame {args['frame_id']} (call frame_get first for its size and device)." if args.get("frame_id") else "")
             + "\n1. Call ai_scene_generate with a precise prompt"
             + (f" and frame_id={args['frame_id']}" if args.get("frame_id") else "")
-            + ".\n2. Review the scene JSON (apps_list explains the apps it uses); fix obvious problems by editing the JSON."
+            + ".\n2. Review the scene JSON against scene_guide (apps_list explains the apps it uses); fix problems by editing the JSON."
             + "\n3. Show me the plan and, "
             + (
                 f"if it looks right, install it with frame_scene_install(frame_id={args['frame_id']}, scenes=…, activate=true, confirm=true) and show frame_screenshot."

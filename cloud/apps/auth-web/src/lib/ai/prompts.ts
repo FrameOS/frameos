@@ -7,192 +7,23 @@
 // Deliberately Nim-free: the cloud chat builds *interpreted* scenes running
 // JS/TS apps and QuickJS code nodes. It never sees or mentions Nim sources.
 
-import { jsTypeDeclarations, sceneEvents } from "./context";
+import { SCENE_GUIDE } from "./scene-guide.gen";
 
-const SCENE_RULES = `
-FrameOS scenes are JSON graphs: { id, name, nodes[], edges[], fields?, settings }.
-Reference shapes:
-- Node: { id: string, type: "event"|"dispatch"|"app"|"state"|"code"|"scene", data: NodeData }
-- Edge: { id?: string, type: "appNodeEdge"|"codeNodeEdge", source, target, sourceHandle?, targetHandle? }
-- NodeData by type:
-  - event: { keyword: string } — scenes start from an event node with keyword "render".
-  - dispatch: { keyword: string, config: object } — e.g. keyword "render" to trigger a re-render.
-  - app: { keyword: string, config: object, sources?: object } — keyword must be a real app keyword.
-  - state: { keyword: string, value?: string } — keyword is a scene field name; value is its string default.
-  - code: { codeJS: string, codeArgs?: {name,type}[], codeOutputs?: {name,type}[] } — QuickJS snippet.
-  - scene: { keyword: string, config: object } — embeds another scene by id.
-- Field: { name, type, label?, description?, required?, value?, options?, access?, persist?, role? }
-- "options" (select fields only): a list of strings — ["dark", "light"] — or of { "value": "dark",
-  "label": "Dark mode" } pairs when the label shown should differ from the stored value. Nothing else;
-  config and state always hold the option's value, never its label.
-- Field types: string, text, float, integer, boolean, color, date, json, node, scene, image, font, select, path.
-
-Rules:
-- settings.execution MUST be "interpreted". Never anything else.
-- One render event node starts the render flow. Connect it to the first render/logic app with an
-  "appNodeEdge" (sourceHandle "next" -> targetHandle "prev"), and chain further render/logic apps the same way.
-  The render chain is linear: never point two "next" edges at the same "prev".
-- Apps in the prev/next chain share the implicit canvas; do not pass images between them through inputs.
-- Data apps (category "data") are NOT part of the prev/next chain. They feed values into other nodes with
-  "codeNodeEdge" edges: sourceHandle "fieldOutput" -> targetHandle "fieldInput/<fieldName>" (app input) or
-  "codeField/<argName>" (code node argument).
-- Code and state nodes also connect only via codeNodeEdge, and their source handle is exactly "fieldOutput"
-  (never "fieldOutput/<name>").
-- Images are data: render them by putting a render/image app in the prev/next chain and wiring the image
-  output into its image field. Never chain a data image app (e.g. repo/apps/image/openaiImage) directly into the render flow,
-  and never store image outputs in state.
-- State nodes expose scene fields; add a matching entry in the scene's fields array. Prefer access "public"
-  and persist "disk" so users can customize. Every state field needs a string default in "value".
-  Duplicate the state node per consuming app to keep routing legible.
-- Code nodes: put the snippet in data.codeJS. It is an expression returning a value (wrap multi-statement
-  logic in an IIFE). Code nodes have exactly ONE output and cannot output images.
-  The ONLY globals in a code node are: state.<field>, the declared codeArgs by name, context (event,
-  payload, loopIndex, loopKey, hasImage, imageWidth, imageHeight — the size in pixels of the canvas being
-  drawn on, undefined outside a render), console.log/warn/error, and three time helpers:
-  now() -> seconds since epoch (number); format(ts, pattern) -> string in the frame's time zone;
-  parseTs(pattern, text) -> seconds. There is NO frameos object, NO fetch and NO HTTP in code nodes:
-  fetch data with a data app (data/downloadUrl, data/parseJson, data/xmlToJson, ...) and wire its
-  fieldOutput into a code node argument. Standard JavaScript (Math, JSON, Date) is available, but Date
-  has no time-zone data — always derive local time from format(now(), ...).
-- format()/parseTs() patterns use curly tokens, NOT strftime or "HH:mm": {year/4} {year/2} {month/2}
-  {month} {month/n} (full name) {month/n/3} (Jan) {day/2} {day} {hour/2} {hour} {hour/2/ap} {hour/ap}
-  {am/pm} {minute/2} {second/2} {weekday} (Monday) {weekday/3} (Mon) {weekday/2} (Mo). Examples:
-  format(now(), "{hour/2}:{minute/2}") -> "09:05"; format(now(), "{weekday}, {month/n} {day}") ->
-  "Monday, August 24"; format(now(), "{year/4}-{month/2}-{day/2}") -> "2026-08-24". Letters outside
-  braces are copied verbatim, so "HH:mm" prints literally "HH:mm". To get numbers, wrap:
-  Number(format(now(), "{hour}")). The data/clock app is the simplest way to show the current time.
-- Scene-local JS apps (the scene's "apps" map, sources app.ts/config.json) run in a different sandbox:
-  they get app.config / app.state / app.frame (width, height, timeZone) and the frameos helpers from
-  the API reference (frameos.fetchJson, frameos.fetchText, frameos.svg, frameos.image, ...), but NOT
-  format/now/parseTs and NOT the scene's state — pass what they need through their fields. Their Date
-  is UTC-only; feed local time in from a code node or data/clock field when the app needs it.
-- An app's sources may hold more than app.ts: helper .ts/.tsx/.js/.jsx files and .json data files
-  (e.g. "icons.tsx", "lib/format.ts", "data.json"), imported with relative paths — import { x } from
-  "./lib/format", import data from "./data.json". Only the app's own files resolve; there are no npm
-  packages. JSX is only lowered in .tsx/.jsx files. Split an app when app.ts grows past a few hundred
-  lines or when data (lookup tables, icon SVG strings) would swamp the code.
-- app.frame.width / app.frame.height / app.frame.timeZone are ALWAYS set in a JS app (the frame's real
-  size, also in previews): size full-screen output from them directly, without "fallback" size fields
-  or "|| 800" guesses. Explicit width/height fields are only for an app that must draw into a sub-area
-  (a render/split cell) — then default them to empty and fall back to app.frame when empty.
-- Write readable code: normal formatting, one statement per line, blank lines between functions, short
-  comments where logic is not obvious, descriptive names. Never minify or pack code onto single lines —
-  users open and edit this code in the scene editor.
-- Memory: the same scene may run on an ESP32 frame — a microcontroller whose few MB of RAM are shared by
-  the canvas, the JS heap, fonts and the network stack, where a Raspberry Pi has hundreds. Write every
-  code node and JS app as if for that device, and be clever about data structures and behaviour:
-  * Parsed objects cost 10-20x their JSON text (boxed numbers, nested arrays). Never embed big object or
-    array literals (GeoJSON, coordinate lists, lookup tables) — ship such data as compact strings, which
-    cost about 1x: precomputed SVG path "d" strings, delimited text you split on demand.
-  * Keep only what you draw: pull the few fields you need out of a fetched payload straight away, slice
-    lists to what fits on screen BEFORE mapping over them, ask an API for fewer rows and fields when it
-    lets you, and never park whole responses in module-level variables or app.state.
-  * Build output once: collect parts in one array and join("") at the end instead of growing strings in
-    nested loops or chaining map/filter/concat copies of a large array. Keep generated SVG small — round
-    coordinates to one decimal, thin polylines to what the pixel grid can show, scale a shape with one
-    <g transform="translate(x y) scale(s)"> instead of recomputing its points, and stay in the hundreds
-    of elements, not thousands.
-  * Scenes that re-render every second or faster: set state up once in init(), then update it in place —
-    flat arrays of numbers and fixed-size pools; no new objects, closures or big strings per frame, no
-    fetch or JSON.parse in the render path, and a hard cap on particle/sprite counts.
-  This is about what stays alive and how much is allocated, not about terse code — the readability rule
-  above still holds.
-- JS app contract: a scene-local app is category "data" (or "logic") and exports
-  "export function get(app, context)" returning the value named in config.json "output" — a string/json,
-  or frameos.svg(...) / frameos.image(...) for an image output. It is NOT part of the prev/next chain: wire
-  its fieldOutput into a render/image node's "image" field (or into other apps' inputs). Do NOT make
-  scene-local apps with category "render" — they draw nothing in the runtime. Optional
-  "export function init(app)" runs once. Copy the Weather example's weatherPanel for the pattern.
-- Layout apps (e.g. render/split) accept scene or render nodes on sourceHandle
-  "field/render_functions[row][col]" -> targetHandle "prev".
-- settings.refreshInterval (seconds) is the default render cadence. Never set it below 3600 when the scene calls
-  paid APIs (e.g. repo/apps/image/openaiImage) unless explicitly asked. settings.backgroundColor is a hex fill.
-- Every scene automatically exposes its cadence to users as a final public state field "refreshInterval"
-  ("Refresh interval (seconds)", readable as state.refreshInterval). Never add your own interval field or a
-  logic/nextSleepDuration app just to make the cadence configurable. Only when the interval deserves a
-  scene-specific label (e.g. "Seconds per image"), declare ONE float field with role: "refreshInterval";
-  its value is then the interval.
-- Caching: app/code nodes accept data.cache { enabled, inputEnabled, durationEnabled, duration } — cache
-  expensive data fetches, refresh on a sensible schedule.
-- Rich text via caret syntax in text apps: ^(16) size, ^(#FF00FF) color, ^(PTSans-Bold.ttf) font,
-  ^(underline), combine ^(16,#FF0000), reset with ^(reset).
-- Fonts available include Ubuntu-*, PTSans-*, FiraGO-*, CormorantGaramond-*, Liberation*-*,
-  CascadiaMono, ComicRelief, Galindo-Regular, Peralta-Regular (all .ttf).
-- Use ONLY app keywords that exist (verify with search_apps / get_app). If nothing fits, build the logic
-  with code nodes and generic apps like render/text, render/image, or a scene-local JS app.
-- data.config keys MUST be field names of that app, and select fields MUST use one of their options; every
-  config value is a string ("12", "true", "#ff0000"). Node-typed fields (logic/ifElse thenNode/elseNode,
-  render/split render_functions) are never set in config — they are edges: sourceHandle "field/<name>"
-  (cells: "field/render_functions[row][col]", 1-based, within rows x columns) -> targetHandle "prev".
-- Required fields without a default must be set in config or fed by an edge; an app's required image
-  input (render/image "image") must come from an edge.
-- A code node argument is only available when it is BOTH declared in data.codeArgs ({name, type}) AND
-  fed by a codeNodeEdge into targetHandle "codeField/<name>". Arguments arrive as const bindings —
-  never redeclare them ("const lat = Number(lat)" is a SyntaxError on the frame); write
-  "const latNum = Number(lat)" instead. Give the code node ONE codeOutputs entry
-  with the right type ("string", "json", "integer", "float", "boolean").
-- Type discipline: image outputs (render/* apps, data/*Image apps) flow only into image fields; text/json
-  values flow only into non-image fields. Scene nodes take fieldInput/<stateField> to set the embedded
-  scene's state.
-- The delivery tools lint all of this against the real app catalog and refuse scenes with errors; read
+// How scenes work is the scene guide's (docs/scene-guide.md, generated into
+// scene-guide.gen.ts): the same text the backend's scene AI and both MCP
+// servers serve. What stays here is how this chat's own tools fit in.
+const CHAT_SCENE_RULES = `
+- Look up every app you use with search_apps / get_app first (exact field names, types and options),
+  and look at a close example scene with get_example: the Weather example wires the catalog's weather
+  apps (weather, weatherIcons, weatherPanel) together. A repo JS app may be named by its
+  repo/apps/<folder>/<name> keyword in a node: the delivery tools copy it into the scene's apps map.
+  Write a scene-local JS app only for what no catalog app does.
+- The delivery tools lint the scene against the real app catalog and refuse scenes with errors; read
   the returned issues, fix them (get_app shows exact field names, types, options), and resend the whole
   scene. Warnings are delivered; fix them when they matter for the request.
-- When modifying an existing scene, keep node ids and untouched nodes/edges exactly as they are, and
-  keep the scene's fields so users' saved settings still apply. Change the minimum that fulfils the
-  request; do not reformat or "clean up" unrelated parts.
-- Layout for real panels: pick fonts and sizes for the frame resolution given in context (a 800x480
-  panel reads well at 24-48px body text; 1600x1200 wants 40-80px). Set settings.backgroundColor
-  explicitly.
-- Responsive by construction: the same scene gets installed on 800x480, 480x800 (portrait), 1200x825 and
-  1600x1200 panels. In JS apps and code nodes derive EVERY coordinate, box, gap, radius and font size
-  from the frame size (app.frame.width/height; in code nodes context.imageWidth/imageHeight when
-  present) — e.g. const W = app.frame.width, H = app.frame.height, unit = Math.min(W, H) / 100 — and
-  emit the SVG as <svg viewBox="0 0 W H" width="W" height="H"> with those numbers, never a hard-coded
-  800x600. Branch on orientation (H > W → stack columns vertically). Text: SVG <text> does not wrap, so
-  estimate characters per line as width / (fontSize * 0.55), break lines yourself, truncate with an
-  ellipsis, and reduce the font size when a headline would not fit; prefer render/text (which wraps)
-  for paragraphs. Keep a margin of ~4% of min(W, H) on all sides and never let anything cross the
-  canvas edge.
-- Colour and style: frames may be colour e-ink (Spectra 6 dithers everything to black, white, red,
-  yellow, green, blue) or HDMI/LCD panels. Unless the user asks for monochrome, design WITH colour, but
-  modern: soft gradient backgrounds (render/gradient with two related tones, or SVG linearGradient with
-  gradientUnits="userSpaceOnUse"), deep or muted tones (navy, teal, forest, plum, terracotta, ochre,
-  charcoal, warm off-white), and ONE accent colour for the key figure. Never put pure saturated primaries
-  (#ff0000 #00ff00 #0000ff #ffff00) next to each other or use them as large fills — that reads as a
-  1990s slide. Keep text/background tonal contrast high so it also survives dithering, use generous
-  whitespace and a clear hierarchy; a plain grey-on-white page looks unfinished.
-- render/svg uses a strict, limited SVG renderer. Supported tags ONLY: svg, g, path, rect, circle,
-  ellipse, line, polyline, polygon, text/tspan, linearGradient, radialGradient, defs (only for
-  gradients), title, desc. ANY other tag — including <use>, <image>, <filter>, <mask>, <clipPath>,
-  <pattern>, <style>, <foreignObject> — makes the WHOLE SVG fail to render ("Failed to render SVG";
-  inside a JS app that surfaces as "No image provided"). A viewBox attribute is required.
-- SVG gradients: <linearGradient> or <radialGradient>, at the top level or inside <defs>, ALWAYS with
-  gradientUnits="userSpaceOnUse" (objectBoundingBox, the default, fails the document), coordinates in
-  viewBox units (x1/y1/x2/y2 or cx/cy/r), and <stop> children with numeric offset between 0 and 1,
-  stop-color as hex and optional stop-opacity. gradientTransform works. Example:
-  <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="600">
-  <stop offset="0" stop-color="#0f172a"/><stop offset="1" stop-color="#1e3a5f"/></linearGradient>
-  <radialGradient id="glow" gradientUnits="userSpaceOnUse" cx="400" cy="120" r="360">
-  <stop offset="0" stop-color="#ffe08a" stop-opacity="0.8"/><stop offset="1" stop-color="#ffe08a" stop-opacity="0"/>
-  </radialGradient> then fill="url(#bg)". Fills only — a stroke cannot reference a gradient. For a
-  full-screen gradient background the render/gradient app (startColor, endColor, angle) is simpler.
-- SVG is XML: every dynamic string placed into markup (text content AND attribute values) must be
-  escaped — & as &amp;, < as &lt;, > as &gt;, " as &quot; — through one esc() helper; a single raw "&"
-  ("Surf & snow", a URL with &) makes the whole SVG fail to parse ("No image provided").
-- SVG <text> is drawn as glyph outlines, so fill, stroke, gradients, opacity and transforms all work on
-  it. Supported: x, y, dx, dy (first value only), font-family, font-size, font-weight, font-style,
-  text-anchor (start/middle/end), dominant-baseline (alphabetic/middle/hanging/ideographic), and <tspan>
-  children with their own position and fill. NOT supported: textPath, textLength, letter-spacing,
-  per-glyph x/y lists, automatic wrapping (one line per text/tspan — position each line yourself), and
-  emoji (color glyphs have no outline). font-family names match the frame's font files loosely
-  ("PT Sans" or "PTSans-Bold.ttf" both find PTSans-Bold.ttf); an unknown family silently falls back to
-  the default face, so name a font from the list above when the exact face matters. On ESP32 frames only
-  the built-in Ubuntu face exists — font-family is ignored there. Prefer render/text apps when you need
-  wrapping, rich-text carets, or precise multi-line layout.
 `.trim();
 
 export function buildSystemPrompt(): string {
-  const events = JSON.stringify(sceneEvents());
   return `
 You are the FrameOS Cloud assistant. FrameOS turns Raspberry Pi-class devices and e-ink displays into
 single-purpose smart frames. Users manage their frames and scenes at FrameOS Cloud; scenes are visual
@@ -275,12 +106,10 @@ Style:
 - If a tool errors or data is missing, say what you could not see rather than inventing an answer.
 - Never mention internal implementation languages of the frame runtime; scenes are JSON + JavaScript.
 
-${SCENE_RULES}
+${CHAT_SCENE_RULES}
 
-Scene event keywords (for event nodes and dispatch nodes):
-${events}
+The FrameOS scene guide follows: how scenes work on every frame. Follow it.
 
-JS API reference for code nodes and JS apps (ambient declarations):
-${jsTypeDeclarations()}
+${SCENE_GUIDE}
 `.trim();
 }

@@ -129,12 +129,29 @@
 - The cloud AI (`cloud/apps/auth-web/src/lib/ai/`) builds and edits scenes on
   the frames workspace AND on the scene store (`SceneAiPanel`). Every delivered
   scene passes `scene-lint.ts` (catalog-aware structural lint) before reaching
-  the editor. When you touch `prompts.ts`, the linter, the app catalog or
-  `docs/js-apps-and-code-nodes.md`, run the evals against real OpenAI and
+  the editor. When you touch `prompts.ts`, the linter, the app catalog,
+  `docs/scene-guide.md` or `docs/js-apps-and-code-nodes.md`, run the evals against real OpenAI and
   compare with the previous report: `pnpm --filter @frameos-cloud/auth-web
   ai:eval --compare evals/results/<prev>/report.json` (needs the dev server on
   :3000, the local DB filled by `scripts/import-store-scenes.mjs`, and
   `OPENAI_API_KEY`). See `cloud/apps/auth-web/evals/README.md`.
+
+## Writing scenes: `docs/scene-guide.md` is what every author reads
+
+- How a scene is written — its JSON, the node types and edges, fields and
+  state, code nodes, JS apps and the `frameos` API, where an app keeps its
+  values, SVG, layout, small devices, events — is `docs/scene-guide.md`. The
+  scene AI and the app AI on both control planes read it in their prompts,
+  and both MCP servers serve it as `scene_guide`. A rule a scene author must
+  follow goes there, not into one prompt: each consumer adds only what is its
+  own (its tool names, its output format).
+- After editing it, run `python3 frameos/tools/generate_scene_guide.py`. It
+  fills the events table from `docs/events-contract.json` and the JS API from
+  `frontend/src/utils/appTypeDeclarations.ts`, refuses when the runtime's
+  `frameos` object or `app.frame` keys disagree with those declarations, and
+  writes the backend and cloud copies (the backend suite runs `--check`). Then
+  run the AI evals above. Keep it free of Nim: the cloud prompt is tested for
+  that.
 
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 

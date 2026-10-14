@@ -297,6 +297,17 @@ async def test_saved_scenes_catalog_and_settings(async_client, db: Session, redi
 
     apps = result_json(await call(async_client, "apps_list", {"search": "text"}))
     assert any(app["keyword"] == "render/text" for app in apps["apps"])
+    photos = result_json(await call(async_client, "apps_list", {"search": "google photos"}))
+    assert any(app["keyword"] == "repo/apps/image/googlePhotos" for app in photos["apps"])
+    sources = result_json(await call(async_client, "app_source_get", {"keyword": "repo/apps/image/googlePhotos"}))
+    assert "app.ts" in sources
+
+    guide = result_text(await call(async_client, "scene_guide"))
+    assert "# Writing FrameOS scenes" in guide and "apps_list" in guide
+    assert "frameos.remember" in guide
+    section = result_text(await call(async_client, "scene_guide", {"section": "code-nodes"}))
+    assert section.splitlines()[2] == "## Code nodes"
+    assert "## JS apps" not in section
 
     info = result_json(await call(async_client, "account_info"))
     assert info["user"]["email"] == "test@example.com"

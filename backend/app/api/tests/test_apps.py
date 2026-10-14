@@ -35,9 +35,16 @@ async def test_api_apps_source(async_client):
 
 
 @pytest.mark.asyncio
-async def test_api_apps_source_excludes_frontend_js_templates(async_client):
+async def test_api_apps_source_serves_repo_js_templates(async_client):
+    # For the MCP's app_source_get: a scene copies a template's files into its
+    # own `apps` map. The editor reads its embedded copy first.
     response = await async_client.get('/api/apps/source?keyword=repo/apps/text/jsText')
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert 'app.ts' in response.json() and 'config.json' in response.json()
+    # A keyword from before the folders were renamed (repo/apps/code) finds it too.
+    legacy = await async_client.get('/api/apps/source?keyword=repo/apps/code/jsText')
+    assert legacy.json() == response.json()
+    assert (await async_client.get('/api/apps/source?keyword=repo/apps/text/nope')).status_code == 404
 
 
 @pytest.mark.asyncio

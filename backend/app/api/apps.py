@@ -11,27 +11,53 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.apps import get_app_configs, get_one_app_sources
 from app.utils.js_apps import validate_js_source
+from app.utils.repo_apps import REPO_APP_PREFIX, repo_app_configs, repo_app_sources
+from app.utils.scene_guide_gen import SCENE_GUIDE, SCENE_GUIDE_SECTIONS
 from app.schemas.apps import (
  AppsListResponse,
  AppsSourceResponse,
  ValidateSourceRequest,
  ValidateSourceResponse,
 )
-from . import api_project
+from . import api_project, api_user
 
 from typing import Optional
 
 @api_project.get("/apps", response_model=AppsListResponse)
-async def api_apps_list(db: Session = Depends(get_db)):
-    return {"apps": get_app_configs()}
+async def api_apps_list(include_repo: bool = False, db: Session = Depends(get_db)):
+    # include_repo adds the JS app templates (repo/apps/<folder>/<name>) for the MCP
+    # and the AI; the editor lists those from its own bundle.
+    apps = get_app_configs()
+    if include_repo:
+        apps = {**apps, **repo_app_configs()}
+    return {"apps": apps}
 
 
 @api_project.get("/apps/source", response_model=AppsSourceResponse)
 async def api_apps_source(keyword: Optional[str] = None, db: Session = Depends(get_db)):
-    sources = get_one_app_sources(keyword)
+    if keyword and keyword.startswith(REPO_APP_PREFIX):
+        sources = repo_app_sources(keyword)
+    else:
+        sources = get_one_app_sources(keyword)
     if not sources:
         raise HTTPException(status_code=404, detail="App sources not found")
     return sources
+
+
+@api_user.get("/scene_guide")
+async def api_scene_guide(section: Optional[str] = None):
+    """How to write a scene (docs/scene-guide.md, the same text the cloud
+    serves): the whole guide, or one `## ` section by its id."""
+    sections = [{"id": entry["id"], "title": entry["title"]} for entry in SCENE_GUIDE_SECTIONS]
+    if not section:
+        return {"guide": SCENE_GUIDE, "sections": sections}
+    for entry in SCENE_GUIDE_SECTIONS:
+        if entry["id"] == section:
+            return {"guide": entry["text"], "sections": sections}
+    raise HTTPException(
+        status_code=404,
+        detail=f"No section {section!r}; the sections are " + ", ".join(entry["id"] for entry in sections),
+    )
 
 
 @api_project.post("/apps/validate_source", response_model=ValidateSourceResponse)

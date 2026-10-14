@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable, Literal
 
 from app.models.apps import get_app_configs
+from app.utils.repo_apps import repo_app_configs
 
 MAX_DESCRIPTION_LENGTH = 220
 MAX_COMPACT_ITEMS_PER_SECTION = 120
@@ -245,7 +246,9 @@ def collect_catalog_items(settings: dict[str, Any] | None = None) -> list[AiCata
     repo_root = _repo_root()
     missing_keys = missing_service_keys(settings or {})
     items: list[AiCatalogItem] = []
-    for keyword, config in sorted(get_app_configs().items()):
+    # The repo's JS app templates too: the scene AI names them by
+    # repo/apps/<folder>/<name>, and bundle_repo_apps copies them into the scene.
+    for keyword, config in sorted({**get_app_configs(), **repo_app_configs()}.items()):
         item = _app_item(keyword, config)
         required_settings = item.metadata_json.get("settings") or []
         if _settings_available(required_settings, missing_keys):

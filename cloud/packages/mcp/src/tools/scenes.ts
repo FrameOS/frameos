@@ -22,6 +22,11 @@ const scenesJson = z
 
 type SceneSummary = Record<string, unknown> & { id: string; name: string };
 
+// What the guide leaves to each server: the tools that look things up and
+// check a scene here.
+const sceneGuideTools =
+  "On this server: apps_list and app_source_get look apps up (fields, options, a repo JS app's files), scene_lint checks a scene the way publishing does, scene_render renders it in the real runtime and returns the logs, and frame_scene_install puts it on a frame.";
+
 const storeCategories = [
   "photos",
   "art",
@@ -582,6 +587,55 @@ export function registerSceneTools(server: McpServer, ctx: ToolContext) {
         }
         return text(await api.json("POST", "/api/scenes/lint", { body: { scenes: payload } }));
       }),
+  );
+
+  server.registerTool(
+    "scene_guide",
+    {
+      annotations: { readOnlyHint: true },
+      description:
+        "How to write a FrameOS scene: the scene JSON, every node type and how edges connect them, fields and state, code nodes and their helpers, JS apps and the whole frameos API, SVG and text, layout, small-device limits and the event names. Read it before writing or editing scene JSON or app code; `section` (an id the reply lists, e.g. js-apps) returns one part.",
+      inputSchema: {
+        section: z.string().max(60).optional(),
+      },
+    },
+    async ({ section }) =>
+      run(async () => {
+        const reply = await api.json<{ guide: string; sections?: { id: string }[] }>("GET", "/api/scenes/guide", {
+          query: { section },
+        });
+        const others = (reply.sections ?? []).map((entry) => entry.id).join(", ");
+        return text(`${sceneGuideTools}\n\n${reply.guide}\nSections (pass \`section\` for one): ${others}`);
+      }),
+  );
+
+  server.registerTool(
+    "apps_list",
+    {
+      annotations: { readOnlyHint: true },
+      description:
+        "The app catalog a scene's nodes come from: keyword (what a node's data.keyword names), name, category, description, fields with their types and defaults, output type. `search` narrows it, `category` picks data, logic or render. repo/apps/<folder>/<name> rows are JavaScript app templates: a scene copies one into its own `apps` map under <name> (scene_guide, \"Apps\"; app_source_get has its files).",
+      inputSchema: {
+        category: z.enum(["data", "logic", "render"]).optional(),
+        search: z.string().max(100).optional(),
+      },
+    },
+    async ({ category, search }) =>
+      run(async () => text(await api.json("GET", "/api/apps", { query: { category, search } }))),
+  );
+
+  server.registerTool(
+    "app_source_get",
+    {
+      annotations: { readOnlyHint: true },
+      description:
+        "One catalog app's files by keyword: a repo/apps/<folder>/<name> template's config.json and sources (what a scene copies into its `apps` map), or a built-in app's config.json.",
+      inputSchema: {
+        keyword: z.string().min(1).max(200),
+      },
+    },
+    async ({ keyword }) =>
+      run(async () => text(await api.json("GET", "/api/apps/source", { query: { keyword } }))),
   );
 
   server.registerTool(

@@ -564,3 +564,43 @@ suite "interpreter error paths":
           inc nonBackground
       check nonBackground > rendered.dataLen div 2
       check not InterpretedFrameScene(scene).cacheValues.hasKey(30.NodeId)
+
+  test "an uncached JS image app that throws gets its own message painted, not a type error":
+    # The cloud evals' RSS scene (2026-10-14): a data app wired into
+    # render/image without a cache, so render/image offers it the live canvas.
+    let sceneId = "tests/interpreter-errors/js-image-producer-throws-uncached".SceneId
+    let exported = ExportedInterpretedScene(
+      name: "js image producer error, uncached",
+      backgroundColor: parseHtmlColor("#000000"),
+      refreshInterval: 1.0,
+      publicStateFields: @[],
+      nodes: @[
+        node(10, "event", %*{"keyword": "render"}),
+        node(20, "app", %*{"keyword": "render/image", "config": {}}),
+        node(30, "app", %*{"keyword": "feed", "config": {}})
+      ],
+      edges: @[
+        edge(100, 10, "next", 20, "prev"),
+        edge(101, 30, "fieldOutput", 20, "fieldInput/image")
+      ],
+      apps: %*{"feed": {"sources": {
+        "app.ts": "export function get() { throw new Error('RSS feed returned HTTP 403') }",
+        "config.json": $(%*{"name": "Feed", "category": "data", "output": [{"name": "image", "type": "image"}]})
+      }}}
+    )
+
+    withUploadedScene(sceneId, exported) do (store: LogStore, scene: FrameScene):
+      let rendered = render(scene, ctx(scene, "render"))
+      var sawMessage = false
+      for entry in store.entries:
+        if entry.kind != JObject:
+          continue
+        check "expected fkImage" notin $entry
+        if "RSS feed returned HTTP 403" in $entry:
+          sawMessage = true
+      check sawMessage
+      var nonBackground = 0
+      for pixel in rendered:
+        if pixel.r.int + pixel.g.int + pixel.b.int > 96:
+          inc nonBackground
+      check nonBackground > rendered.dataLen div 2

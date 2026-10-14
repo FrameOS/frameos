@@ -3,6 +3,13 @@ from typing import Any
 
 from app.config import config
 from app.utils.ai_scene import _build_ai_posthog_properties, _new_ai_span_id, _openai_client
+from app.utils.scene_guide_gen import SCENE_GUIDE_SECTIONS
+
+# The scene guide's sections about writing an app (docs/scene-guide.md).
+APP_GUIDE_SECTION_IDS = ("js-apps", "images-svg-and-text", "layout-and-color", "small-frames", "js-api-reference")
+_app_sections = {section["id"]: section["text"] for section in SCENE_GUIDE_SECTIONS}
+assert all(section_id in _app_sections for section_id in APP_GUIDE_SECTION_IDS), "a scene guide section was renamed"
+APP_GUIDE = "\n\n".join(_app_sections[section_id] for section_id in APP_GUIDE_SECTION_IDS)
 
 APP_CHAT_ROUTER_SYSTEM_PROMPT = """
 You are a router that decides how to handle a FrameOS app chat request.
@@ -17,17 +24,17 @@ Rules:
 - Use ask_about_app for explanations, diagnostics, or how-to questions about the app.
 """.strip()
 
-APP_EDIT_SYSTEM_PROMPT = """
+APP_EDIT_SYSTEM_PROMPT = (
+    """
 You are editing a FrameOS app. Apps may be written in Nim or in QuickJS JavaScript/TypeScript, depending on the provided source files.
 For Nim apps, you have access to the Nim version 2.2 STL and the following nimble packages:
 pixie v6.1.0, chrono 0.3.1, checksums 0.2.1, ws 0.5.0, QRGen 3.1.0, zippy 0.10.19, chroma 1.0.0, bumpy 1.1.3
 
-JavaScript/TypeScript apps may run on an ESP32 frame: a microcontroller whose few MB of RAM are shared by the
-canvas, the JS heap and the network stack. Be clever about data structures and behaviour: parsed objects cost
-10-20x their JSON text, so keep big tables as compact strings instead of object/array literals; keep only the
-fields you use from a fetched payload; slice lists before mapping them; build strings with one array + join("");
-never keep whole responses alive between renders. An app that re-renders every second or faster updates
-preallocated state in place: no per-frame objects, closures or JSON.parse, and capped particle counts.
+How JavaScript/TypeScript apps work, from the FrameOS scene guide (they may run on an ESP32 with a few MB of memory):
+
+"""
+    + APP_GUIDE
+    + """
 
 Return the modified files in full with the changes inlined. Only modify what is necessary.
 Return JSON only with:
@@ -35,14 +42,16 @@ Return JSON only with:
 - files: an object mapping filenames to their full updated contents (only include files you changed).
 
 Make these changes:
-""".strip()
+"""
+).strip()
 
 APP_EDIT_FILES_PROMPT = """
 -------------
 Here are the relevant files of the app:
 """.strip()
 
-APP_CHAT_ANSWER_SYSTEM_PROMPT = """
+APP_CHAT_ANSWER_SYSTEM_PROMPT = (
+    """
 You are a friendly assistant for FrameOS apps.
 Answer questions about the current app or how to edit it.
 Use the provided app sources and context.
@@ -50,7 +59,12 @@ Provide helpful context without overwhelming the user; keep replies concise unle
 Limit answers to a few short paragraphs (2-3 max) and avoid long lists unless the user asks.
 If the answer is uncertain, say what is missing and how to proceed.
 Return JSON only with the key "answer".
-""".strip()
+
+How JavaScript/TypeScript apps work, from the FrameOS scene guide:
+
+"""
+    + APP_GUIDE
+).strip()
 
 
 def _format_app_sources(sources: dict[str, str]) -> str:

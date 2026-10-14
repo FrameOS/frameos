@@ -206,6 +206,9 @@ describe("frameos-cloud MCP server", () => {
       "scene_update_content",
       "scene_render",
       "scene_lint",
+      "scene_guide",
+      "apps_list",
+      "app_source_get",
       "scene_convert",
       "store_browse",
       "ai_scene_chat",
@@ -217,6 +220,45 @@ describe("frameos-cloud MCP server", () => {
     // Destructive tools say so.
     expect(tools.find((tool) => tool.name === "frame_delete")?.annotations?.destructiveHint).toBe(true);
     expect(tools.find((tool) => tool.name === "frames_list")?.annotations?.readOnlyHint).toBe(true);
+  });
+
+  it("serves the scene guide and the app catalog from the cloud's routes", async () => {
+    responders.push((call) => {
+      const url = new URL(call.url);
+      if (url.pathname === "/api/scenes/guide") {
+        const section = url.searchParams.get("section");
+        return json({
+          guide: section ? `## ${section}\n` : "# Writing FrameOS scenes\n",
+          sections: [{ id: "nodes", title: "Nodes" }, { id: "js-apps", title: "JS apps" }],
+        });
+      }
+      if (url.pathname === "/api/apps") {
+        return json({ apps: [{ keyword: "repo/apps/image/googlePhotos", search: url.searchParams.get("search") }], count: 1 });
+      }
+      if (url.pathname === "/api/apps/source") {
+        return json({ "app.ts": "export function get() {}", keyword: url.searchParams.get("keyword") });
+      }
+      return undefined;
+    });
+    const client = await connect();
+    const guide = textOf(await client.callTool({ arguments: {}, name: "scene_guide" }));
+    expect(guide).toContain("# Writing FrameOS scenes");
+    expect(guide).toContain("apps_list and app_source_get");
+    expect(guide).toContain("Sections (pass `section` for one): nodes, js-apps");
+    const part = textOf(await client.callTool({ arguments: { section: "js-apps" }, name: "scene_guide" }));
+    expect(part).toContain("## js-apps");
+    const apps = JSON.parse(textOf(await client.callTool({ arguments: { search: "photos" }, name: "apps_list" })));
+    expect(apps.apps[0]).toMatchObject({ keyword: "repo/apps/image/googlePhotos", search: "photos" });
+    const files = JSON.parse(
+      textOf(await client.callTool({ arguments: { keyword: "repo/apps/image/googlePhotos" }, name: "app_source_get" })),
+    );
+    expect(files).toMatchObject({ "app.ts": "export function get() {}", keyword: "repo/apps/image/googlePhotos" });
+    expect(calls.map((call) => new URL(call.url).pathname)).toEqual([
+      "/api/scenes/guide",
+      "/api/scenes/guide",
+      "/api/apps",
+      "/api/apps/source",
+    ]);
   });
 
   it("sends the bearer token and reads the frames list", async () => {
