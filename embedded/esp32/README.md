@@ -874,9 +874,10 @@ do not build it again.
 What exists: `decodePngScaledInto` is a streamed scanline decode bounded by
 pixie's own decode budget, and since #398 any image with a decode target is
 decoded straight off the socket (`image:streamed` / `image:stream:fallback`
-in the log). What does not stream on 8 MB boards is progressive JPEG and
-WebP — prefer PNG or baseline JPEG URLs for new sources; the analysis is in
-`docs/esp32-progressive-jpeg.md`.
+in the log). A progressive JPEG is read in strips when the budget cannot
+hold its coefficients whole (`docs/esp32-progressive-jpeg.md`): off a socket
+that means the body is buffered first, so a source that can serve baseline
+JPEG or PNG still saves the 8 MB boards that copy. WebP does not stream.
 
 Default pins target the XIAO ESP32-S3: CS=GPIO3 (D2), DC=GPIO4 (D3), RST=GPIO5 (D4),
 BUSY=GPIO6 (D5), SCK=GPIO7 (D8), MOSI=GPIO9 (D10). Remap at runtime with `set pins`,
