@@ -166,6 +166,41 @@
   (`docs/cloud-frames-contract.json` + generator), the backend column, the SPA
   key lists AND the settings nav list in `FrameWorkspace.tsx`.
 
+## Photos: `docs/photos.md` is the contract
+
+- Photos (the rail button after Apps) is a library of albums on the control
+  plane, played by frames through share links. One HTTP contract
+  (`/api/photos/...`, `docs/photos.md`) for both planes: the backend keeps
+  files on disk (`backend/app/utils/photos.py`, `FRAMEOS_PHOTOS_DIR`), the
+  cloud keeps rows in Postgres and bytes in R2 under random keys
+  (`cloud/apps/auth-web/src/lib/photos/`). A change to a route, shape or
+  status code lands on both and in the doc.
+- Frames never get the owner's credentials: a scene carries a share link
+  (`pk_...`) in the `repo/apps/code/photoAlbum` node's config and asks for
+  one photo per render (`/shared/{token}/photo?index=`), keeping its place in
+  a disk-persisted state field. The share routes are on the backend's public
+  router and are rate limited.
+- A photo's color profile (the asset sidecar's `colors`, docs "Colors") is a
+  `<photo>.frameos.json` sidecar on the backend (the path rules refuse the
+  suffix, so it is never listed and travels with its photo) and the `colors`
+  column on the cloud. Frames get it in the share JSON and hand it to
+  `frameos.fetchImage(url, {colors})`. The editor is the Assets panel's
+  (`ColorEditorModal`, preview math in `utils/assetColors/preview.ts`).
+- The album scene has three builders (the SPA's, and `POST /api/photos/scene`
+  on each plane); `docs/photo-album-scene.json` is the scene they all must
+  build, and all three tests compare with it. Change one, change all three.
+  The photos MCP tools (same names on both servers) gate every write on
+  `confirm`: a frame playing a shared album shows the change.
+- Thumbnails are made on the server on both planes (backend Pillow, cloud
+  sharp at upload), so every upload gets one, MCP and API ones included.
+  sharp is the cloud's one native dependency: `next.config.ts` traces its
+  libvips in (the tracer misses it) and `cloud/scripts/stage-sharp.sh` gives
+  a laptop-built release the box's linux-x64 build, or refuses it.
+- Cloud uploads are scanned before anything is stored (hash list,
+  PhotoDNA), and a configured scanner that fails stores nothing. Not OpenAI
+  moderation: it scores `sexual/minors` on text only. Any new table holding photo objects goes into
+  `cloud/scripts/object-store-sweep.sh`, or the sweep deletes the photos.
+
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】
 - `frontend/` – React + TypeScript single-page application built with esbuild, Tailwind, and kea state management. Compiled assets live in `frontend/dist` and are served by the backend when present. 【F:frontend/package.json†L1-L66】【F:backend/app/fastapi.py†L38-L86】
@@ -184,7 +219,7 @@
   - Custom exception handlers degrade gracefully to JSON for API calls and reuse the SPA shell for 404/validation errors in non-test scenarios. 【F:backend/app/fastapi.py†L1-L112】
 - Persistence uses SQLAlchemy ORM models (e.g., `User` with hashed passwords) and Alembic migrations (see `migrations/`). Session factory exposed from `app/database.py`. 【F:backend/app/models/user.py†L1-L16】
 - Background jobs run through `arq` with Redis: worker defined in `app/tasks/worker.py` loads tasks for deploying/resetting frames, building SD images, and controlling agents. Startup hooks share HTTP, Redis, and DB clients. Run via `arq app.tasks.worker.WorkerSettings`. 【F:backend/app/tasks/worker.py†L1-L64】
-- API tokens (`app/models/api_token.py`, `fb_api_…` / read-only `fb_apiro_…`) are accepted by `get_current_user` wherever a login JWT is; the MCP server at `POST /api/mcp` (`app/api/mcp.py`, `app/mcp/`) wraps the backend's own routes in-process over ASGI — a new tool is one HTTP call to an existing route, never new behaviour, and one that changes a physical frame takes `confirm` (the gated list is pinned by `test_mcp.py`). `docs/mcp.md` is the contract; the cloud's `cloud/packages/mcp` is the sibling to keep tool names in step with.
+- API tokens (`app/models/api_token.py`, `fb_api_…` / read-only `fb_apiro_…`) are accepted by `get_current_user` wherever a login JWT is; the MCP server at `POST /api/mcp` (`app/api/mcp.py`, `app/mcp/`) wraps the backend's own routes in-process over ASGI — a new tool is one HTTP call to an existing route, never new behaviour (the photos tools' URL download and scene install are the two noted exceptions in `docs/mcp.md`), and one that changes a physical frame takes `confirm` (the gated list is pinned by `test_mcp.py`). A string argument that lands in a route path needs a `pattern` (the registry enforces it): httpx normalizes `..`, so a free string could name another route. `docs/mcp.md` is the contract; the cloud's `cloud/packages/mcp` is the sibling to keep tool names in step with.
 - Tests rely on pytest + pytest-asyncio fixtures defined in `app/conftest.py`; there is broad coverage across API, websocket, and model layers under `app/api/tests` and `app/models/tests`. 【F:backend/app/conftest.py†L1-L65】【F:backend/app/api/tests/test_frames.py†L1-L183】
 - Common local workflows:
   - Install dependencies: `pip install -r requirements.txt`. The lock carries a `--hash` for every file and is a *universal* resolution (it is compiled on macOS and installed on Linux); CI and the Docker image install it with `--require-hashes`. Regenerate it ONLY with `backend/bin/compile-requirements` (`--upgrade-package <name>` to bump one package) — a plain `pip-compile` drops the hashes and the Linux-only packages, and every CI install fails. After it, refresh `tools/buildroot-images/requirements-upload.txt` (recipe in its `.in`).

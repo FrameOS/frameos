@@ -81,7 +81,8 @@ export function StorageUsageMeters({
     usage.scenes.private_bytes +
     usage.scenes.public_bytes +
     usage.backups.bytes +
-    usage.frame_logs.bytes;
+    usage.frame_logs.bytes +
+    usage.photos.bytes;
   const meters: MeterBucket[] = [
     // First, because it is the quota people actually meet: storage is
     // generous, frames are a countable thing you add one at a time.
@@ -102,6 +103,7 @@ export function StorageUsageMeters({
       label: "Frame logs",
       maxBytes: usage.frame_logs.max_bytes,
     },
+    { bytes: usage.photos.bytes, label: "Photos", maxBytes: usage.photos.max_bytes },
   ];
 
   return (

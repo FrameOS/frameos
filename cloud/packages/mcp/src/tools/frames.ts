@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { confirmed } from "./confirm";
 import { failure, image, run, text, uuid, type ToolContext } from "../result";
-import { resolveSceneSource, sceneSourceSchema } from "./scene-source";
+import { resolveSceneSource, sceneSourceSchema, type SceneSourceInput } from "./scene-source";
 
 // Cloud-managed frames. Every call here is one of the /api/frames routes;
 // the few "compound" tools (remove one scene, install from a URL) are two
@@ -66,6 +66,52 @@ function formBody(fields: Record<string, string | Blob>, filename?: string) {
     }
   }
   return form;
+}
+
+/**
+ * frame_scene_install's work: resolve the source (a store id, a URL or raw
+ * scene JSON, saved first as a private scene), add it to the frame, and
+ * switch to it when asked. photo_album_install installs its scene this way.
+ */
+export async function installSceneOnFrame(
+  ctx: ToolContext,
+  input: SceneSourceInput & {
+    activate?: boolean | undefined;
+    frame_id: string;
+    scene_version?: number | null | undefined;
+    settings_groups?: string[] | undefined;
+  },
+) {
+  const { activate, frame_id, scene_version, settings_groups, ...source } = input;
+  const resolved = await resolveSceneSource(ctx, source);
+  if ("error" in resolved) {
+    return failure(resolved.error);
+  }
+  const added = await ctx.client.json<Record<string, unknown>>(
+    "POST",
+    `/api/frames/${frame_id}/scenes/add`,
+    {
+      body: {
+        scene_id: resolved.sceneId,
+        ...(scene_version !== undefined ? { scene_version } : {}),
+        ...(settings_groups !== undefined ? { settings_groups } : {}),
+      },
+    },
+  );
+  let activated: Record<string, unknown> | undefined;
+  if (activate) {
+    activated = await ctx.client.json<Record<string, unknown>>(
+      "POST",
+      `/api/frames/${frame_id}/event/setCurrentScene`,
+      { body: { sceneId: resolved.sceneId } },
+    );
+  }
+  return text({
+    ...added,
+    scene: resolved.summary ?? { id: resolved.sceneId },
+    ...(resolved.created ? { created_private_scene: true } : {}),
+    ...(activated ? { activate: activated } : {}),
+  });
 }
 
 export function registerFrameTools(server: McpServer, ctx: ToolContext) {
@@ -292,38 +338,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
         ...sceneSourceSchema,
       },
     },
-    async ({ activate, frame_id, name, scene_version, settings_groups, ...source }) =>
-      run(async () => {
-        const resolved = await resolveSceneSource(ctx, { ...source, name });
-        if ("error" in resolved) {
-          return failure(resolved.error);
-        }
-        const added = await api.json<Record<string, unknown>>(
-          "POST",
-          `/api/frames/${frame_id}/scenes/add`,
-          {
-            body: {
-              scene_id: resolved.sceneId,
-              ...(scene_version !== undefined ? { scene_version } : {}),
-              ...(settings_groups !== undefined ? { settings_groups } : {}),
-            },
-          },
-        );
-        let activated: Record<string, unknown> | undefined;
-        if (activate) {
-          activated = await api.json<Record<string, unknown>>(
-            "POST",
-            `/api/frames/${frame_id}/event/setCurrentScene`,
-            { body: { sceneId: resolved.sceneId } },
-          );
-        }
-        return text({
-          ...added,
-          scene: resolved.summary ?? { id: resolved.sceneId },
-          ...(resolved.created ? { created_private_scene: true } : {}),
-          ...(activated ? { activate: activated } : {}),
-        });
-      }),
+    async ({ confirm: _confirm, ...input }) => run(() => installSceneOnFrame(ctx, input)),
   );
 
   server.registerTool(

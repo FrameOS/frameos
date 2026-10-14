@@ -39,6 +39,8 @@ async function fakeFetch(input: string, init?: RequestInit): Promise<Response> {
     } catch {
       body = init.body;
     }
+  } else if (init?.body instanceof Uint8Array) {
+    body = { bytes: init.body.byteLength };
   } else if (init?.body instanceof FormData) {
     body = Object.fromEntries(
       [...init.body.entries()].map(([key, value]) => [
@@ -564,6 +566,192 @@ describe("frameos-cloud MCP server", () => {
     expect(resources.map((resource) => resource.uri)).toContain("frameos://frames");
     const frame = await client.readResource({ uri: `frameos://frames/${frameId}` });
     expect(JSON.parse((frame.contents[0] as { text: string }).text)).toMatchObject({ frame: { name: "Kitchen" } });
+  });
+});
+
+describe("photos tools", () => {
+  const photoWrites = [
+    "photo_album_install",
+    "photo_colors_set",
+    "photo_folder_create",
+    "photo_rename",
+    "photo_share_create",
+    "photo_share_delete",
+    "photo_upload",
+    "photos_delete",
+    "photos_move",
+  ];
+
+  function photoRoutes(maxUploadBytes = 20 * 1024 * 1024) {
+    responders.push((call) => {
+      const url = new URL(call.url);
+      if (url.pathname === "/api/photos/status") {
+        return json({ max_upload_bytes: maxUploadBytes, ready: true });
+      }
+      if (url.pathname === "/api/photos/upload") {
+        const folder = url.searchParams.get("path") ?? "";
+        const name = url.searchParams.get("filename") ?? "";
+        return url.searchParams.get("complete") === "1"
+          ? json({ entry: { kind: "file", name, path: folder ? `${folder}/${name}` : name } })
+          : json({ pending: true, received: (call.body as { bytes: number }).bytes });
+      }
+      if (url.pathname === "/api/photos/scene") {
+        return json({
+          scene: { edges: [], fields: [], id: "scene-1", name: "Summer", nodes: [], settings: {} },
+          share: { path: "Summer", token: "pk_abc", url: "https://cloud.example/api/photos/shared/pk_abc" },
+        });
+      }
+      if (url.pathname === "/api/photos/thumb") {
+        return json({ error: "not_found" }, 404);
+      }
+      if (url.pathname === "/api/photos/file") {
+        return new Response(pngBytes, { headers: { "content-type": "image/png" } });
+      }
+      if (url.pathname.startsWith("/api/photos/")) {
+        return json({ ok: true, path: url.pathname });
+      }
+      return undefined;
+    });
+  }
+
+  it("gates every photo write on confirm=true and marks the reads", async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const photoTools = tools.filter((tool) => /^photos?_/.test(tool.name));
+    expect(photoTools.map((tool) => tool.name).sort()).toEqual(
+      [...photoWrites, "photo_get", "photo_shares_list", "photos_list", "photos_status"].sort(),
+    );
+    for (const tool of photoTools) {
+      const schema = tool.inputSchema as { properties?: Record<string, unknown>; required?: string[] };
+      if (photoWrites.includes(tool.name)) {
+        expect(schema.required ?? [], tool.name).toContain("confirm");
+      } else {
+        expect(schema.properties?.confirm, tool.name).toBeUndefined();
+        expect(tool.annotations?.readOnlyHint, tool.name).toBe(true);
+      }
+    }
+    const refused = await client.callTool({ arguments: { paths: ["a.jpg"] }, name: "photos_delete" });
+    expect(refused.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("uploads base64 in the route's chunks, under one upload id", async () => {
+    photoRoutes();
+    const client = await connect();
+    const bytes = Buffer.alloc(5 * 1024 * 1024, 7);
+    const result = await client.callTool({
+      arguments: { confirm: true, content_base64: bytes.toString("base64"), filename: "big.jpg", folder: "Summer" },
+      name: "photo_upload",
+    });
+    expect(result.isError).toBeFalsy();
+    const uploads = calls.filter((call) => call.url.includes("/api/photos/upload")).map((call) => new URL(call.url));
+    expect(uploads.map((url) => [url.searchParams.get("offset"), url.searchParams.get("complete")])).toEqual([
+      ["0", "0"],
+      [String(4 * 1024 * 1024), "1"],
+    ]);
+    expect(new Set(uploads.map((url) => url.searchParams.get("upload_id"))).size).toBe(1);
+    expect(uploads[0]?.searchParams.get("upload_id")).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
+    expect(calls.filter((call) => call.url.includes("/upload")).map((call) => call.body)).toEqual([
+      { bytes: 4 * 1024 * 1024 },
+      { bytes: 1024 * 1024 },
+    ]);
+    expect(JSON.parse(textOf(result))).toEqual({ entry: { kind: "file", name: "big.jpg", path: "Summer/big.jpg" } });
+
+    const neither = await client.callTool({ arguments: { confirm: true, filename: "a.jpg" }, name: "photo_upload" });
+    expect(neither.isError).toBe(true);
+  });
+
+  it("uploads from a URL through the guarded fetch, named after the URL and held to the limit", async () => {
+    photoRoutes(1000);
+    responders.push((call) =>
+      call.url.startsWith("https://images.example/")
+        ? new Response(call.url.includes("huge") ? Buffer.alloc(2000) : pngBytes, {
+            headers: { "content-type": "image/png" },
+          })
+        : undefined,
+    );
+    const client = await connect();
+    const result = await client.callTool({
+      arguments: { confirm: true, folder: "Web", url: "https://images.example/pics/sunset%20glow.png" },
+      name: "photo_upload",
+    });
+    expect(JSON.parse(textOf(result))).toMatchObject({ entry: { path: "Web/sunset glow.png" } });
+    const upload = calls.find((call) => call.url.includes("/api/photos/upload"));
+    expect(upload?.body).toEqual({ bytes: pngBytes.length });
+
+    calls = [];
+    const huge = await client.callTool({
+      arguments: { confirm: true, url: "https://images.example/huge.png" },
+      name: "photo_upload",
+    });
+    expect(huge.isError).toBe(true);
+    expect(textOf(huge)).toContain("upload limit");
+    expect(calls.some((call) => call.url.includes("/api/photos/upload"))).toBe(false);
+  });
+
+  it("falls back to the file when a photo has no thumbnail", async () => {
+    photoRoutes();
+    const client = await connect();
+    const result = await client.callTool({ arguments: { path: "Summer/a.png" }, name: "photo_get" });
+    const content = result.content as { mimeType?: string; type: string }[];
+    expect(content.map((entry) => entry.type)).toEqual(["text", "image"]);
+    expect(content[1]?.mimeType).toBe("image/png");
+    expect(calls.map((call) => new URL(call.url).pathname)).toEqual(["/api/photos/thumb", "/api/photos/file"]);
+  });
+
+  it("installs an album: the scene route, a private scene, then the frame", async () => {
+    photoRoutes();
+    const client = await connect();
+    const result = await client.callTool({
+      arguments: { activate: true, confirm: true, frame_id: frameId, order: "newest", path: "Summer", seconds: 600 },
+      name: "photo_album_install",
+    });
+    expect(result.isError).toBeFalsy();
+    expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
+      `GET /api/frames/${frameId}`,
+      "POST /api/photos/scene",
+      "POST /api/account/scenes",
+      `POST /api/frames/${frameId}/scenes/add`,
+      `POST /api/frames/${frameId}/event/setCurrentScene`,
+    ]);
+    // Cloud links are absolute: the route needs no frame.
+    expect(calls[1]?.body).toEqual({ order: "newest", path: "Summer", seconds: 600 });
+    expect(calls[2]?.body).toMatchObject({ name: "Summer", scenes: [{ id: "scene-1", name: "Summer" }] });
+    expect(JSON.parse(textOf(result))).toMatchObject({
+      command_id: "cmd-2",
+      created_private_scene: true,
+      share: { token: "pk_abc" },
+    });
+  });
+
+  it("shares nothing for a frame that does not exist", async () => {
+    photoRoutes();
+    const client = await connect();
+    const result = await client.callTool({
+      arguments: { confirm: true, frame_id: "99999999-2222-3333-4444-555555555555", path: "Summer" },
+      name: "photo_album_install",
+    });
+    expect(result.isError).toBe(true);
+    expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
+      "GET /api/frames/99999999-2222-3333-4444-555555555555",
+    ]);
+  });
+
+  it("sends the library writes to their routes", async () => {
+    photoRoutes();
+    const client = await connect();
+    await client.callTool({ arguments: { colors: null, confirm: true, path: "a.jpg" }, name: "photo_colors_set" });
+    await client.callTool({ arguments: { confirm: true, paths: ["a.jpg"] }, name: "photos_move" });
+    await client.callTool({ arguments: { confirm: true, token: "pk_abc" }, name: "photo_share_delete" });
+    await client.callTool({ arguments: {}, name: "photos_list" });
+    expect(calls.map((call) => [`${call.method} ${new URL(call.url).pathname}${new URL(call.url).search}`, call.body])).toEqual([
+      ["POST /api/photos/colors", { colors: null, path: "a.jpg" }],
+      ["POST /api/photos/move", { paths: ["a.jpg"], to: "" }],
+      ["DELETE /api/photos/shares/pk_abc", undefined],
+      ["GET /api/photos/files?path=", undefined],
+    ]);
+    const badToken = await client.callTool({ arguments: { confirm: true, token: "../frames" }, name: "photo_share_delete" });
+    expect(badToken.isError).toBe(true);
   });
 });
 

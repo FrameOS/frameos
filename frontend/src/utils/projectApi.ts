@@ -108,6 +108,7 @@ export function isProjectScopedApiPath(path: string): boolean {
     '/api/fonts',
     '/api/frame-bootstrap',
     '/api/frames',
+    '/api/photos',
     '/api/repositories',
     '/api/settings',
     '/api/templates',

@@ -28,6 +28,10 @@ from app.tenancy import current_project_id, get_user_project
 
 
 SCENE_IMAGE_CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
+# "Nothing yet" must not be remembered. A new scene's tile asks for its cover
+# (at ?t=-1) before the cover upload lands; with the day-long header above, the
+# browser kept the placeholder and every reload showed a blank tile.
+SCENE_IMAGE_PLACEHOLDER_HEADERS = {"Cache-Control": "no-store"}
 
 # A scene cover is a preview, not a payload: anything larger than this is not
 # something we want to hold in memory, thumbnail, and store per scene.
@@ -207,7 +211,7 @@ async def get_scene_image(
         new_width, new_height = new_height, new_width
 
     png = _generate_placeholder(new_width, new_height)
-    return StreamingResponse(io.BytesIO(png), media_type="image/png", headers=SCENE_IMAGE_CACHE_HEADERS)
+    return StreamingResponse(io.BytesIO(png), media_type="image/png", headers=SCENE_IMAGE_PLACEHOLDER_HEADERS)
 
 
 # One scene snapshot, as posted by the frame or copied from a cover.

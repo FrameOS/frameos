@@ -101,6 +101,8 @@ e2e/frontend-visual/test-results/
 frameos/.tmp-home/
 build/
 files/
+# A route folder named "files" (GET /api/photos/files, docs/photos.md), not runtime files.
+!cloud/apps/auth-web/app/api/photos/files/
 nimcache/
 e2e/scenes/*.so
 *.rdb

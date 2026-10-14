@@ -10,6 +10,7 @@ import {
   CodeBracketIcon,
   ComputerDesktopIcon,
   MoonIcon,
+  PhotoIcon,
   RectangleGroupIcon,
   Squares2X2Icon,
   SunIcon,
@@ -30,6 +31,7 @@ import {
 } from './workspaceLogic'
 import { workspaceModeForSceneOrFrames, type WorkspaceMode } from './workspaceModes'
 import { AccountSettingsRailLink } from './AccountSettingsRailLink'
+import { photosLibraryIsAvailable } from './workspaceSurfaces'
 
 function LoadingNavButton({
   active,
@@ -310,6 +312,19 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
             >
               <CodeBracketIcon className="h-7 w-7" />
             </LoadingNavButton>
+            {photosLibraryIsAvailable() ? (
+              <LoadingNavButton
+                active={mode === 'photos'}
+                href={urls.photos()}
+                pending={spinnerMode === 'photos'}
+                preloadScene="photosWorkspace"
+                sidebarOpen={secondarySidebarOpen}
+                title={secondarySidebarOpen && mode === 'photos' ? 'Hide photos panel' : 'Photos'}
+                onActiveClick={toggleSecondarySidebar}
+              >
+                <PhotoIcon className="h-7 w-7" />
+              </LoadingNavButton>
+            ) : null}
           </nav>
           <button
             type="button"

@@ -201,6 +201,55 @@ export const embeddedRepoAppConfigs: Record<string, AppConfig> = {
     ],
     "origin": "repo/apps/code/jsText"
   },
+  "repo/apps/code/photoAlbum": {
+    "name": "Photo album",
+    "description": "Play an album from FrameOS Photos through its share link, one photo per render.",
+    "category": "data",
+    "version": "1.0.0",
+    "fields": [
+      {
+        "name": "album",
+        "type": "string",
+        "value": "",
+        "required": true,
+        "label": "Album link",
+        "hint": "Make one with Install photo scenes on the Photos page.",
+        "placeholder": "https://example.com/api/photos/shared/pk_..."
+      },
+      {
+        "name": "order",
+        "type": "select",
+        "value": "random",
+        "options": [
+          "random",
+          "sequential",
+          "newest",
+          "oldest"
+        ],
+        "required": false,
+        "label": "Order",
+        "hint": "random shows every photo once before any repeats. sequential goes by folder and file name, newest and oldest by date."
+      },
+      {
+        "name": "counterStateKey",
+        "type": "string",
+        "value": "photoIndex",
+        "required": false,
+        "label": "State field for the position",
+        "hint": "The scene needs an integer state field with this name, saved to disk, so the album keeps its place after a restart or a deep sleep. Leave empty to pick a random photo each time."
+      }
+    ],
+    "output": [
+      {
+        "name": "image",
+        "type": "image"
+      }
+    ],
+    "cache": {
+      "enabled": false
+    },
+    "origin": "repo/apps/code/photoAlbum"
+  },
   "repo/apps/code/weatherIcon": {
     "name": "Weather icon (JS)",
     "category": "data",
@@ -459,6 +508,10 @@ export const embeddedRepoAppSources: Record<string, Record<string, string>> = {
   "repo/apps/code/jsText": {
     "app.ts": "export function init(app: FrameOSApp): void {\n  app.initialized = true\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): string {\n  const eventLabel = context.event ? ` (${context.event})` : ''\n  return `${app.config.prefix}: ${app.config.message}${app.initialized ? eventLabel : ''}`\n}\n",
     "config.json": "{\n  \"name\": \"New text data app (JS)\",\n  \"category\": \"data\",\n  \"description\": \"JavaScript data app template that returns text.\",\n  \"fields\": [\n    {\n      \"name\": \"prefix\",\n      \"label\": \"Prefix\",\n      \"type\": \"string\",\n      \"value\": \"FrameOS\"\n    },\n    {\n      \"name\": \"message\",\n      \"label\": \"Message\",\n      \"type\": \"text\",\n      \"value\": \"Hello from QuickJS\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"text\",\n      \"type\": \"text\",\n      \"example\": \"FrameOS: Hello from QuickJS\"\n    }\n  ]\n}\n"
+  },
+  "repo/apps/code/photoAlbum": {
+    "app.ts": "// Photo album: plays an album from FrameOS Photos through its share link\n// (docs/photos.md, \"Share routes\"). One photo per render. The position lives\n// in a scene state field: on an ESP32 the JS heap does not outlive a render.\n\nconst ORDERS = ['random', 'sequential', 'newest', 'oldest']\n\n// The share link, or '' when it is not an http(s) URL.\nexport function albumLink(value: unknown): string {\n  const link = String(value ?? '').trim().replace(/\\/+$/, '')\n  return /^https?:\\/\\/[^\\s/?#]+/i.test(link) ? link : ''\n}\n\n// scheme://host[:port] of a link. QuickJS has no URL global.\nexport function linkOrigin(link: string): string {\n  const match = /^https?:\\/\\/[^/?#]+/i.exec(link)\n  return match ? match[0] : ''\n}\n\n// A photo's address: absolute as is, root-relative against the link's origin.\nexport function photoUrl(link: string, url: unknown): string {\n  const value = String(url ?? '')\n  if (/^https?:\\/\\//i.test(value)) return value\n  return value.startsWith('/') ? linkOrigin(link) + value : ''\n}\n\n// The counter as a non-negative integer; anything else starts over at 0.\nexport function position(value: unknown): number {\n  const n = Math.floor(Number(value))\n  return Number.isFinite(n) && n > 0 ? n : 0\n}\n\nfunction esc(text: string): string {\n  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;')\n}\n\nexport function panel(width: number, height: number, message: string): string {\n  const size = Math.max(14, Math.round(Math.min(width, height) / 24))\n  const max = Math.max(10, Math.floor((width - 2 * size) / (size * 0.55)))\n  const lines: string[] = []\n  let line = ''\n  for (const word of message.split(/\\s+/).filter(Boolean)) {\n    if (line && line.length + 1 + word.length > max) {\n      lines.push(line)\n      line = word\n    } else line = line ? `${line} ${word}` : word\n  }\n  if (line) lines.push(line)\n  const text = lines\n    .map((l, i) => `<text x=\"${size}\" y=\"${size * 2 + i * Math.round(size * 1.35)}\" font-family=\"Ubuntu\" font-size=\"${size}\" fill=\"#111111\">${esc(l)}</text>`)\n    .join('')\n  return `<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ${width} ${height}\" width=\"${width}\" height=\"${height}\"><rect width=\"${width}\" height=\"${height}\" fill=\"#ffffff\"/>${text}</svg>`\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext): unknown {\n  const width = context.imageWidth || app.frame.width\n  const height = context.imageHeight || app.frame.height\n  const show = (message: string): unknown => frameos.svg(panel(width, height, message), { width, height })\n  const fail = (message: string): unknown => {\n    frameos.error(message)\n    return show(message)\n  }\n\n  const link = albumLink(app.config.album)\n  if (!link) return fail('Please add an album link. Make one with Install photo scenes on the Photos page.')\n  const order = ORDERS.includes(String(app.config.order)) ? String(app.config.order) : 'random'\n  const key = String(app.config.counterStateKey ?? '').trim()\n  const index = key ? position(app.state[key]) : Math.floor(Math.random() * 1000000)\n\n  const r = frameos.httpRequest(`${link}/photo?order=${order}&index=${index}`, { timeoutMs: 20000 })\n  if (r.status === 404) return fail('This album link no longer works.')\n  if (r.status !== 200) {\n    return fail(r.status ? `Could not load the album (HTTP ${r.status}).` : `Could not reach the album: ${r.error ?? 'no response'}`)\n  }\n  let data: any = null\n  try {\n    data = JSON.parse(r.body ?? '')\n  } catch {}\n  if (!data || typeof data !== 'object') return fail('The album sent an answer this frame could not read.')\n  const count = position(data.count)\n  const photo = data.photo\n  if (!count || !photo || typeof photo !== 'object') {\n    frameos.log('This album has no photos yet.')\n    return show('This album has no photos yet.')\n  }\n\n  // Move on before the download, so one broken photo cannot stall the frame.\n  if (key) frameos.setState(key, index + 1)\n  const name = String(photo.name || photo.path || 'a photo')\n  const url = photoUrl(link, photo.url)\n  if (!url) return fail(`The album sent no address for ${name}.`)\n  frameos.log(`Showing ${name} (${(index % count) + 1} of ${count})`)\n  // null, not undefined: no profile clears the last photo's palette\n  const result = frameos.fetchImage(url, { colors: photo.colors ?? null })\n  if (!result.image) return fail(`Could not load ${name}: ${result.error ?? 'no image'}`)\n  return result.image\n}\n",
+    "config.json": "{\n  \"name\": \"Photo album\",\n  \"description\": \"Play an album from FrameOS Photos through its share link, one photo per render.\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"album\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"Album link\",\n      \"hint\": \"Make one with Install photo scenes on the Photos page.\",\n      \"placeholder\": \"https://example.com/api/photos/shared/pk_...\"\n    },\n    {\n      \"name\": \"order\",\n      \"type\": \"select\",\n      \"value\": \"random\",\n      \"options\": [\"random\", \"sequential\", \"newest\", \"oldest\"],\n      \"required\": false,\n      \"label\": \"Order\",\n      \"hint\": \"random shows every photo once before any repeats. sequential goes by folder and file name, newest and oldest by date.\"\n    },\n    {\n      \"name\": \"counterStateKey\",\n      \"type\": \"string\",\n      \"value\": \"photoIndex\",\n      \"required\": false,\n      \"label\": \"State field for the position\",\n      \"hint\": \"The scene needs an integer state field with this name, saved to disk, so the album keeps its place after a restart or a deep sleep. Leave empty to pick a random photo each time.\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"cache\": {\n    \"enabled\": false\n  }\n}\n"
   },
   "repo/apps/code/weatherIcon": {
     "app.ts": "// Render one weather icon (or the whole set as a contact sheet) as an image.\n// Wire `icons` from the \"Weather icon set (JS)\" app, which provides the SVG\n// fragments plus the WMO code-to-icon map.\n\nfunction resolveIconKey(iconSet, weathercode, isDay) {\n  const map = iconSet && iconSet.map ? iconSet.map : {}\n  const icons = iconSet && iconSet.icons ? iconSet.icons : {}\n  let key = map['' + weathercode] || 'cloudy'\n  if (!isDay && icons[key + '-night']) {\n    key = key + '-night'\n  }\n  if (!icons[key]) {\n    key = 'cloudy'\n  }\n  return key\n}\n\nfunction hasBackground(color) {\n  if (!color) {\n    return false\n  }\n  const c = ('' + color).toLowerCase()\n  return c !== 'none' && c !== '#00000000' && c !== 'transparent'\n}\n\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const iconSet = app.config.icons\n  if (!iconSet || !iconSet.icons) {\n    app.logError('weatherIcon: missing icon set, wire it from the Weather icon set app')\n    return null\n  }\n  const viewBox = iconSet.viewBox || 64\n  const background = app.config.background\n\n  let width = Number(app.config.size) || 0\n  let height = width\n  if (width <= 0) {\n    width = context.imageWidth || app.frame.width\n    height = context.imageHeight || app.frame.height\n  }\n\n  const parts = []\n  if (hasBackground(background)) {\n    parts.push('<rect x=\"0\" y=\"0\" width=\"' + width + '\" height=\"' + height + '\" fill=\"' + background + '\"/>')\n  }\n\n  if (app.config.sheet === true) {\n    const keys = Object.keys(iconSet.icons).sort()\n    const columns = Math.max(1, Number(app.config.columns) || 4)\n    const rows = Math.ceil(keys.length / columns)\n    const cellW = width / columns\n    const cellH = height / rows\n    const scale = (Math.min(cellW, cellH) / viewBox) * 0.92\n    for (let i = 0; i < keys.length; i++) {\n      const col = i % columns\n      const row = Math.floor(i / columns)\n      const x = col * cellW + (cellW - viewBox * scale) / 2\n      const y = row * cellH + (cellH - viewBox * scale) / 2\n      parts.push(\n        '<g transform=\"translate(' + x.toFixed(2) + ' ' + y.toFixed(2) + ') scale(' + scale.toFixed(4) + ')\">' +\n        iconSet.icons[keys[i]] + '</g>'\n      )\n    }\n  } else {\n    const key = resolveIconKey(iconSet, Number(app.config.weathercode) || 0, app.config.isDay !== false)\n    const scale = (Math.min(width, height) / viewBox) * 0.96\n    const x = (width - viewBox * scale) / 2\n    const y = (height - viewBox * scale) / 2\n    parts.push(\n      '<g transform=\"translate(' + x.toFixed(2) + ' ' + y.toFixed(2) + ') scale(' + scale.toFixed(4) + ')\">' +\n      iconSet.icons[key] + '</g>'\n    )\n  }\n\n  const svg =\n    '<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ' + width + ' ' + height + '\">' +\n    parts.join('') + '</svg>'\n  return frameos.svg(svg, { width: width, height: height })\n}\n",

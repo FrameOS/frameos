@@ -13,6 +13,7 @@ import {
   ComputerDesktopIcon,
   MagnifyingGlassIcon,
   MoonIcon,
+  PhotoIcon,
   PlusIcon,
   RectangleGroupIcon,
   SparklesIcon,
@@ -43,7 +44,7 @@ import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { DeployToFrameIcon } from './FrameChangeStatusIcon'
-import { frameChangeDrawerKind } from './workspaceSurfaces'
+import { frameChangeDrawerKind, photosLibraryIsAvailable } from './workspaceSurfaces'
 import { FrameRenameModal } from './FrameActionsMenu'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { getFrameControlFrameId } from '../../utils/frameControlMode'
@@ -424,7 +425,8 @@ export function FrameosShell({
   const appsHref = inFrameAdminMode
     ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
     : lastAppsHref ?? urls.systemApps()
-  const showAiButton = showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && !!selectedFrame)
+  const showAiButton =
+    showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && mode !== 'photos' && !!selectedFrame)
   const chatSceneId = mode === 'scenes' || mode === 'apps' ? selectedSceneId : null
   const chatDrawerIsOpen = !!chatDrawerSelection
   // Carried in the selection (not read off the URL): the open-echo through
@@ -471,7 +473,7 @@ export function FrameosShell({
       />
     ) : null
   const unsavedHeaderButton =
-    selectedFrame && mode !== 'frames' && mode !== 'settings' ? (
+    selectedFrame && mode !== 'frames' && mode !== 'settings' && mode !== 'photos' ? (
       <FrameStatusHeaderButton frameId={selectedFrame.id} />
     ) : null
   const workspaceMainStyle = {
@@ -613,6 +615,21 @@ export function FrameosShell({
             >
               <CodeBracketIcon className="h-7 w-7" />
             </NavButton>
+            {photosLibraryIsAvailable() ? (
+              <NavButton
+                active={activeMode === 'photos'}
+                current={mode === 'photos'}
+                href={urls.photos()}
+                pending={pendingMode === 'photos'}
+                preloadScene="photosWorkspace"
+                sidebarOpen={secondarySidebarOpen}
+                title={secondarySidebarOpen && mode === 'photos' ? 'Hide photos panel' : 'Photos'}
+                onActiveClick={toggleSecondarySidebar}
+                onInactiveClick={prepareFirstLevelNavigation}
+              >
+                <PhotoIcon className="h-7 w-7" />
+              </NavButton>
+            ) : null}
           </nav>
           {unsavedHeaderButton}
           <button

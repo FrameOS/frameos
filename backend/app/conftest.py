@@ -23,6 +23,7 @@ PROJECT_SCOPED_TEST_PATHS = (
     "/api/assets",
     "/api/fonts",
     "/api/frames",
+    "/api/photos",
     "/api/repositories",
     "/api/settings",
     "/api/templates",
@@ -30,6 +31,7 @@ PROJECT_SCOPED_TEST_PATHS = (
 
 PROJECT_SCOPED_TEST_EXCLUSIONS = (
     "/api/projects/",
+    "/api/photos/shared/",
     "/api/repositories/system",
     "/api/repositories/system/",
 )

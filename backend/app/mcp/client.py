@@ -26,11 +26,13 @@ PROJECT_SCOPED_PREFIXES = (
     "/api/assets",
     "/api/fonts",
     "/api/frames",
+    "/api/photos",
     "/api/repositories",
     "/api/settings",
     "/api/templates",
 )
-PROJECT_SCOPED_EXCLUSIONS = ("/api/repositories/system",)
+# The bundled catalog, and the share routes frames call (public, by token).
+PROJECT_SCOPED_EXCLUSIONS = ("/api/repositories/system", "/api/photos/shared/")
 
 
 class BackendApi:

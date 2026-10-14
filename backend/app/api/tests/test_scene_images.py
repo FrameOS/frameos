@@ -327,6 +327,8 @@ async def test_get_scene_image_serves_the_status_screens_slashed_id(async_client
     placeholder = await async_client.get(url)
     assert placeholder.status_code == 200, placeholder.text
     assert placeholder.headers['content-type'].startswith('image/')
+    # ...and one the browser must not keep: the real picture is on its way.
+    assert placeholder.headers['cache-control'] == 'no-store'
 
     # And once the frame's picture has been stored, that is what comes back.
     png = _png_bytes((5, 6, 7), (32, 24))
@@ -344,3 +346,4 @@ async def test_get_scene_image_serves_the_status_screens_slashed_id(async_client
     served = await async_client.get(url)
     assert served.status_code == 200, served.text
     assert served.content == png
+    assert served.headers['cache-control'] == 'private, max-age=86400'
