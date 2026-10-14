@@ -2065,7 +2065,7 @@ async function saveFrameForm(
   }
 }
 
-function openSceneControlDrawer(frameId: FrameId, sceneId: string): void {
+export function openSceneControlDrawer(frameId: FrameId, sceneId: string): void {
   const searchParams = {
     ...router.values.searchParams,
     drawer: 'scene',

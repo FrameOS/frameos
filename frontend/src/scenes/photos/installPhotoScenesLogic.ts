@@ -1,8 +1,8 @@
 import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
-import type { FrameId, FrameScene } from '../../types'
+import type { FrameId, FrameScene, FrameType } from '../../types'
 import { framesModel } from '../../models/framesModel'
-import { frameLogic } from '../frame/frameLogic'
+import { frameLogic, openSceneControlDrawer } from '../frame/frameLogic'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
 import { workspaceLogic } from '../workspace/workspaceLogic'
 import { DEFAULT_SLIDESHOW_SECONDS, MIN_SLIDESHOW_SECONDS } from '../frame/panels/Assets/slideshowSettingsLogic'
@@ -295,6 +295,14 @@ export const installPhotoScenesLogic = kea<installPhotoScenesLogicType>([
         const sceneIdsBefore = new Set(
           ((frameStore.values.frameForm?.scenes ?? frameStore.values.scenes) as FrameScene[]).map((scene) => scene.id)
         )
+        // The listing as it is now, not as it was when the drawer opened:
+        // the album's cover (the scene's image) may have arrived since.
+        let albumEntries: PhotoEntry[] = values.library?.albums ?? []
+        try {
+          albumEntries = (await fetchPhotoFolder('')).filter((entry) => entry.kind === 'folder')
+        } catch {
+          // The cached listing will do.
+        }
         for (const album of albums) {
           const share = await createPhotoShare(album)
           const albumUrl = shareUrlForFrame(share, frame)
@@ -304,7 +312,7 @@ export const installPhotoScenesLogic = kea<installPhotoScenesLogicType>([
             )
             return
           }
-          const entry = values.library?.albums.find((item) => item.path === album)
+          const entry = albumEntries.find((item) => item.path === album)
           const scene = buildPhotoAlbumScene({
             name: photoBaseName(album),
             albumUrl,
@@ -321,12 +329,21 @@ export const installPhotoScenesLogic = kea<installPhotoScenesLogicType>([
         }
         const scenesAfter = (frameStore.values.frameForm?.scenes ?? frameStore.values.scenes) as FrameScene[]
         const firstNew = scenesAfter.find((scene) => !sceneIdsBefore.has(scene.id))
+        // Installed means saved: the scenes go to the backend now, not on a
+        // later Save, and the new scene's drawer opens on the saved frame.
+        await frameStore.asyncActions.submitFrameFormRequest(frameStore.values.frameForm as FrameType)
+        const saveError = frameStore.values.frameFormSaveError
+        if (saveError) {
+          actions.setError(saveError.message || 'Could not save the frame.')
+          return
+        }
         actions.setSelectedAlbums([])
         if (workspaceLogic.isMounted()) {
           workspaceLogic.actions.closeTemplateDrawer()
         }
         if (firstNew) {
           scenesLogic({ frameId: props.frameId }).actions.focusScene(firstNew.id)
+          openSceneControlDrawer(props.frameId, firstNew.id)
         }
       } catch (error) {
         actions.setError(error instanceof Error ? error.message : 'Could not install the scenes.')
@@ -337,9 +354,12 @@ export const installPhotoScenesLogic = kea<installPhotoScenesLogicType>([
   })),
   afterMount(({ actions, props }) => {
     const preselected = takePreselectedAlbums(props.frameId)
-    if (preselected) {
-      actions.setSelectedAlbums(preselected)
-    }
     actions.loadLibrary()
+    // Albums picked on the Photos page: install them right away, no second
+    // Install click in the drawer.
+    if (preselected?.length) {
+      actions.setSelectedAlbums(preselected)
+      actions.install()
+    }
   }),
 ])
