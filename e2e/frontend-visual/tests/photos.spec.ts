@@ -204,7 +204,8 @@ test.describe.serial('@e2e photos library', () => {
     const tile = tileFor(page, `${albumName}/${photoName}`)
     await expect(tile).toBeVisible()
 
-    await tile.dblclick()
+    // A plain click opens; selecting is the tick in the tile's corner.
+    await tile.click()
     const lightbox = page.getByRole('dialog', { name: photoName })
     await expect(lightbox).toBeVisible()
     await expect(lightbox).toContainText('1 of 1')
@@ -220,7 +221,8 @@ test.describe.serial('@e2e photos library', () => {
     const tile = tileFor(page, `${albumName}/${photoName}`)
     await expect(tile).toBeVisible()
 
-    await tile.click()
+    await tile.hover()
+    await tile.getByRole('button', { name: `Select ${photoName}` }).click()
     await expect(page.getByText('1 selected')).toBeVisible()
     await page.getByRole('button', { name: 'Rename' }).click()
 
@@ -317,7 +319,8 @@ test.describe.serial('@e2e photos library', () => {
     const tile = tileFor(page, albumName)
     await expect(tile).toBeVisible()
 
-    await tile.click()
+    await tile.hover()
+    await tile.getByRole('button', { name: `Select ${albumName}` }).click()
     await expect(page.getByText('1 selected')).toBeVisible()
     await page.getByRole('button', { name: 'Delete' }).click()
 
