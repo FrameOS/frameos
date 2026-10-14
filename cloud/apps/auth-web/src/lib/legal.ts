@@ -52,6 +52,19 @@ export function getLegalEntity(): LegalEntity {
   };
 }
 
+// Where a person writes to ask for more quota or help. FRAMEOS_SUPPORT_EMAIL
+// when set; otherwise contact@ on the legal contact's domain, because the
+// legal address is for notices, not for "can I have more frames".
+export function getSupportEmail(): string {
+  const configured = process.env.FRAMEOS_SUPPORT_EMAIL?.trim();
+  if (configured) {
+    return configured;
+  }
+  const legal = process.env.FRAMEOS_LEGAL_CONTACT_EMAIL?.trim() ?? "";
+  const at = legal.indexOf("@");
+  return at > 0 ? `contact@${legal.slice(at + 1)}` : "";
+}
+
 export function isLegalEntityConfigured() {
   return Boolean(process.env.FRAMEOS_LEGAL_ENTITY_NAME?.trim());
 }

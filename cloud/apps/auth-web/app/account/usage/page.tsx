@@ -1,7 +1,7 @@
 import { createDb } from "@frameos-cloud/db";
 import { AiUsageSections } from "../../../src/components/AiUsageSections";
 import { StorageUsageMeters } from "../../../src/components/StorageUsageMeters";
-import { getLegalEntity } from "../../../src/lib/legal";
+import { getSupportEmail } from "../../../src/lib/legal";
 import { readSession } from "../../../src/lib/session";
 import { accountUsage } from "../../../src/lib/usage";
 
@@ -24,7 +24,7 @@ export default async function AccountUsagePage() {
   }
   const db = createDb();
   const usage = await accountUsage(db, accountId);
-  const contactEmail = getLegalEntity().contactEmail;
+  const contactEmail = getSupportEmail();
 
   return (
     <>

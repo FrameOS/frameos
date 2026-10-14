@@ -72,10 +72,10 @@ export default async function AccountDeveloperPage() {
           <div>
             <h2>MCP server</h2>
             <p className="copy">
-              Connect an AI agent (Claude Code, Claude Desktop, Cursor, or any
-              Model Context Protocol client) to your frames. The server is
-              hosted here — no local process — and speaks Streamable HTTP with
-              your API token as a bearer.
+              Connect an AI agent such as Claude Code or Codex to your frames
+              over the Model Context Protocol. The server is hosted here, with
+              no local process to run, and speaks Streamable HTTP with your
+              API token as a bearer.
             </p>
           </div>
         </div>
@@ -89,7 +89,21 @@ export default async function AccountDeveloperPage() {
             <code>{`claude mcp add --transport http frameos ${mcpUrl} \\
   --header "Authorization: Bearer fc_api_…"`}</code>
           </pre>
-          <h3>Claude Desktop, Cursor and other clients</h3>
+          <h3>Codex</h3>
+          <pre className="code-block">
+            <code>{`FRAMEOS_CLOUD_TOKEN=fc_api_… codex mcp add frameos --url ${mcpUrl} \\
+  --bearer-token-env-var FRAMEOS_CLOUD_TOKEN`}</code>
+          </pre>
+          <p className="copy">
+            Or in <code>~/.codex/config.toml</code>, with the token in the
+            environment Codex starts from:
+          </p>
+          <pre className="code-block">
+            <code>{`[mcp_servers.frameos]
+url = "${mcpUrl}"
+bearer_token_env_var = "FRAMEOS_CLOUD_TOKEN"`}</code>
+          </pre>
+          <h3>Other clients</h3>
           <pre className="code-block">
             <code>{JSON.stringify(
               {
@@ -117,28 +131,28 @@ export default async function AccountDeveloperPage() {
           <h3>What it can do</h3>
           <ul className="copy">
             <li>
-              <strong>Frames</strong> — list and inspect, rename, push settings
+              <strong>Frames</strong>: list and inspect, rename, push settings
               and schedules, assign and activate scenes, screenshots, logs,
               metrics, activity, asset files, reboot/restart, firmware updates,
               claim tokens for new frames.
             </li>
             <li>
-              <strong>Scenes</strong> — list, read and save scene JSON as new
+              <strong>Scenes</strong>: list, read and save scene JSON as new
               versions, create from JSON/zip/URL, fork, rename, publish to the
               store, tags/category/description, gallery images, yank or
               restore versions, delete.
             </li>
             <li>
-              <strong>Preview and check</strong> — render any scene on the
+              <strong>Preview and check</strong>: render any scene on the
               server with the real FrameOS runtime and get the image back;
               lint scenes the way publishing does.
             </li>
             <li>
-              <strong>Scene AI</strong> — ask the cloud&apos;s scene assistant to
+              <strong>Scene AI</strong>: ask the cloud&apos;s scene assistant to
               build or change a scene, then save or install the result.
             </li>
             <li>
-              <strong>Store and account</strong> — browse the public store,
+              <strong>Store and account</strong>: browse the public store,
               account settings and service keys, usage against every quota.
             </li>
           </ul>

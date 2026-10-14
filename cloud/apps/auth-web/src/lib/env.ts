@@ -27,21 +27,49 @@ export function getBaseUrl() {
 // remains as a compatibility alias for that auth origin while call sites that
 // deliberately belong to one surface use the explicit names.
 export function getCloudBaseUrl() {
-  return optionalEnv("FRAMEOS_CLOUD_APP_URL") ?? "http://localhost:3000";
+  return devLocalUrl(optionalEnv("FRAMEOS_CLOUD_APP_URL") ?? "http://localhost:3000");
+}
+
+// `next dev` takes the next free port when 3000 is busy and records the one
+// it got in process.env.PORT (next/dist/server/lib/start-server.js), while
+// .env.local still says 3000. Every absolute URL built here would then point
+// at whatever else is on 3000. Outside production a configured localhost URL
+// follows the port this server actually listens on.
+function devLocalUrl(url: string) {
+  const port = process.env.PORT?.trim();
+  if (process.env.NODE_ENV === "production" || !port) {
+    return url;
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
+      return url;
+    }
+    if (parsed.port === port) {
+      return url;
+    }
+    parsed.port = port;
+    const rebuilt = parsed.toString();
+    return url.endsWith("/") ? rebuilt : rebuilt.replace(/\/$/, "");
+  } catch {
+    return url;
+  }
 }
 
 // Account, device approval, and administration pages live here in
 // production. It falls back to the cloud origin so local development keeps
 // the existing /account/* routes on one localhost port.
 export function getAccountBaseUrl() {
-  return optionalEnv("FRAMEOS_ACCOUNT_APP_URL") ?? getCloudBaseUrl();
+  const configured = optionalEnv("FRAMEOS_ACCOUNT_APP_URL");
+  return configured ? devLocalUrl(configured) : getCloudBaseUrl();
 }
 
 // Local development deliberately defaults to the cloud URL, so both surfaces
 // continue to run through one localhost port. Production sets this to the
 // dedicated scenes.frameos.net origin.
 export function getScenesBaseUrl() {
-  return optionalEnv("FRAMEOS_SCENES_APP_URL") ?? getCloudBaseUrl();
+  const configured = optionalEnv("FRAMEOS_SCENES_APP_URL");
+  return configured ? devLocalUrl(configured) : getCloudBaseUrl();
 }
 
 export function getAppOrigins() {

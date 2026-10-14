@@ -77,11 +77,11 @@ export default async function AccountBackupsPage({
         <div>
           <h2>Cloud backups</h2>
           <p className="copy">
-            Frame configurations and scenes pushed by your linked backends,
-            encrypted with your backup key before upload — we only store
-            ciphertext. Backups belong to this account, so a reinstalled
-            backend that relinks (and imports your backup recovery key) can
-            restore them.
+            Frame configurations and scenes your linked backends push here.
+            Each backup is encrypted with your backup key before upload, so
+            we only ever hold ciphertext. Backups belong to this account: a
+            reinstalled backend that links again and imports your backup
+            recovery key can restore them.
             {backupRows.length > 0
               ? ` Using ${backupRows.length} of ${maxBackupsPerAccount} items, ${formatBytes(totalBackupBytes)} total.`
               : ""}
@@ -170,9 +170,9 @@ export default async function AccountBackupsPage({
       ) : (
         <section className="card">
           <p>
-            No backups yet. Enable cloud backups on a linked backend (Settings →
-            FrameOS Cloud) and use “Back up now” — frames also back up
-            automatically after every successful deploy.
+            No backups yet. Turn on cloud backups on a linked backend under
+            Settings, FrameOS Cloud, then use Back up now. Frames also back up
+            on their own after every successful deploy.
           </p>
         </section>
       )}

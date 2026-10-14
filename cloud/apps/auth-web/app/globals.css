@@ -4377,3 +4377,87 @@ html.theme-dark .action-card__ghost {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* The account activity page (ActivityFeed.tsx): the filter row, the chart
+   you drag across to pick a time range, and the list that dims while a new
+   slice loads instead of blanking. Bars wear the accent; text never does. */
+.activity-filters {
+  margin-bottom: 12px;
+}
+
+.activity-chart-card {
+  padding: 14px 18px 10px;
+  margin-bottom: 12px;
+}
+
+.activity-chart {
+  position: relative;
+  width: 100%;
+  cursor: crosshair;
+  user-select: none;
+}
+
+.activity-chart--empty {
+  opacity: 0.5;
+}
+
+.activity-chart svg {
+  display: block;
+}
+
+.activity-chart__bar {
+  fill: var(--primary);
+}
+
+.activity-chart__bar--dim {
+  fill: var(--primary);
+  opacity: 0.3;
+}
+
+.activity-chart__selection {
+  fill: var(--primary-soft);
+}
+
+.activity-chart__baseline {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.activity-chart__tick {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.activity-chart__tooltip {
+  position: absolute;
+  top: -4px;
+  transform: translate(-50%, -100%);
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.activity-chart__hint {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.activity-list--stale {
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+.link-button {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--primary);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}

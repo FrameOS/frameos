@@ -143,39 +143,41 @@ export async function AiUsageSections({ accountId }: { accountId: string }) {
         ) : null}
 
         <div className="usage-block">
-          <h3>Where it went</h3>
-          {thisMonth.buckets.length === 0 ? (
-            <p className="copy">No AI requests yet this month.</p>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Feature</th>
-                  <th>Requests</th>
-                  <th style={{ textAlign: "right" }}>This month</th>
-                </tr>
-              </thead>
-              <tbody>
-                {collapseBySurface(thisMonth).map((row) => (
-                  <tr key={row.surface ?? "other"}>
-                    <td>
-                      {surfaceLabel(row.surface)}
-                      {freeSurfaces.has(row.surface ?? "") ? (
-                        <span className="pill"> free</span>
-                      ) : null}
-                    </td>
-                    <td>{row.turns}</td>
-                    <td style={{ textAlign: "right" }}>
-                      {dollars(row.chargeableMicros)}
-                    </td>
+          <details className="usage-details">
+            <summary className="usage-details__summary">Where it went</summary>
+            {thisMonth.buckets.length === 0 ? (
+              <p className="copy">No AI requests yet this month.</p>
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Feature</th>
+                    <th>Requests</th>
+                    <th style={{ textAlign: "right" }}>This month</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          <p className="copy usage-block__note">
-            The scene converter and store classification are always on us.
-          </p>
+                </thead>
+                <tbody>
+                  {collapseBySurface(thisMonth).map((row) => (
+                    <tr key={row.surface ?? "other"}>
+                      <td>
+                        {surfaceLabel(row.surface)}
+                        {freeSurfaces.has(row.surface ?? "") ? (
+                          <span className="pill"> free</span>
+                        ) : null}
+                      </td>
+                      <td>{row.turns}</td>
+                      <td style={{ textAlign: "right" }}>
+                        {dollars(row.chargeableMicros)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <p className="copy usage-block__note">
+              The scene converter and store classification are always on us.
+            </p>
+          </details>
         </div>
 
         <div className="usage-block">

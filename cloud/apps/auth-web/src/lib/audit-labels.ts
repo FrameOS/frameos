@@ -2,7 +2,7 @@
 // feed. Unknown event types fall back to the raw type so new events are never
 // silently invisible.
 
-const eventLabels: Record<string, string> = {
+export const eventLabels: Record<string, string> = {
   "account.data_exported": "Account data exported",
   "account.email_verified": "Email address verified",
   "account.password_changed": "Password changed",
