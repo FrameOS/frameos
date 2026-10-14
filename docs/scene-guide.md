@@ -229,7 +229,8 @@ all its scenes in 512 KiB.
   does rather than returns (state, the next sleep).
 - Never make a JS app with category `render`: it draws nothing.
 - `init(app)` is optional and runs each time the app's interpreter starts:
-  once per scene on a Pi, before every render on an ESP32 and in the preview.
+  once per scene on a Pi, before every render on an ESP32 and in a preview
+  running as one.
 
 **What the app sees.**
 
@@ -238,7 +239,7 @@ all its scenes in 512 KiB.
   `frameos.setState(key, value)`.
 - `app.frame`: the frame, read only: `width`, `height` (always set, also in
   the preview), `rotate`, `timeZone`, `assetsPath`, `debug`, and `embedded`
-  (true on an ESP32).
+  (true on an ESP32, and in a preview running as one).
 - `app.nodeId`, `app.nodeName`.
 - `context`: this run: `event`, `payload`, and when an image is flowing
   through, `imageWidth` / `imageHeight`. That is the area being drawn into (a
@@ -261,10 +262,12 @@ all its scenes in 512 KiB.
 | the app's own, needed on the next render: a fetched list, a position | `frameos.remember(key, value)`, read back with `frameos.recall(key)` | until the scene unloads, private to the node; JSON, at most 512 KB per node on an ESP32; `remember` answers `false` when it does not fit, and `null` forgets |
 | scratch for this render: lookup tables built when the module loads, intermediate results | module-level variables | one render |
 
-An ESP32 and the editor's preview start every render with a fresh module, so a
-counter in a module variable shows the first photo forever. A Pi keeps its
-modules longer, but an app must not count on it. An animation works out each
-frame from the clock (`Date.now()`), not from the frame before.
+An ESP32 starts every render with a fresh module, so a counter in a module
+variable shows the first photo forever. A Pi keeps its modules longer, but an
+app must not count on it. The editor's preview runs as an ESP32 when its memory
+limit is set to an ESP32 board or it previews an ESP32 frame, and as a Pi
+otherwise, so an app can be tried both ways. An animation works out each frame
+from the clock (`Date.now()`), not from the frame before.
 
 **Errors.** Throw. An error thrown from `get()` fails the node: it is logged
 with its source line, an image field gets the message painted, and the next
@@ -383,8 +386,7 @@ terse code:
   and updates them in place: flat arrays of numbers, fixed-size pools, no new
   objects, closures or big strings per frame, no fetch or `JSON.parse` while
   rendering, and a hard cap on particle counts. Those buffers are rebuilt on
-  every render on an ESP32 and in the preview, so positions come from the
-  clock.
+  every render on an ESP32, so positions come from the clock.
 - The runtime stops a script after 20 seconds of JavaScript on an ESP32 (30
   on a Pi), and a render or an event after 90 seconds in all (120 on a Pi, 60
   in the preview), HTTP included.
@@ -490,7 +492,7 @@ interface FrameOSApp {
     timeZone: string;
     /** The frame's debug setting (FrameOS 2026.10.13+; undefined before). */
     debug?: boolean;
-    /** An ESP32-class runtime (FrameOS 2026.10.13+; undefined before). */
+    /** An ESP32-class runtime, or the preview running as one (FrameOS 2026.10.13+; undefined before). */
     embedded?: boolean;
   };
   initialized?: boolean;
