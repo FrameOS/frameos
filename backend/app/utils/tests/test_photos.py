@@ -2,12 +2,15 @@
 the path rules, the persistence check and the share pick."""
 from __future__ import annotations
 
+import datetime
+
 import os
 from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 
+from app.models.photo_entry import PhotoEntry
 from app.utils import photos
 
 
@@ -20,7 +23,7 @@ def clean_env(monkeypatch):
 def test_photos_dir_resolution(monkeypatch, tmp_path):
     monkeypatch.setenv("FRAMEOS_PHOTOS_DIR", str(tmp_path / "mine"))
     assert photos.photos_dir() == tmp_path / "mine"
-    assert photos.project_root(7) == tmp_path / "mine" / "project_7"
+    assert photos.objects_dir() == tmp_path / "mine" / "objects"
     assert photos.cache_dir() == tmp_path / "mine" / ".cache"
     monkeypatch.delenv("FRAMEOS_PHOTOS_DIR")
 
@@ -173,10 +176,9 @@ def test_photos_are_ephemeral_only_in_docker_off_a_volume(monkeypatch):
 
 def _photos(tmp_path: Path, names: list[str]) -> list[photos.SharedPhoto]:
     found = []
-    for name in names:
-        target = tmp_path / name
-        target.write_bytes(b"x")
-        found.append(photos.SharedPhoto(path=name, name=name, file=target, stat=target.stat()))
+    for index, name in enumerate(names):
+        row = PhotoEntry(project_id=1, path=name, kind="file", size_bytes=1, created_at=datetime.datetime(2026, 1, 1, 0, 0, index))
+        found.append(photos.SharedPhoto(path=name, name=name, row=row))
     return found
 
 

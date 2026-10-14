@@ -88,7 +88,7 @@ type declarations (`frontend/src/utils/appTypeDeclarations.ts`,
 `cloud/apps/auth-web/scripts/generate-ai-context.mjs`) list it:
 `frameos.fetchJson(url)`, `frameos.fetchText(url)`,
 `frameos.httpRequest(url, {method, headers, body, bodyBase64, base64,
-timeoutMs, find, findLength, findLimit})` (see [Big pages](#big-pages)), `frameos.fetchImage(url, {headers, saveAsset})` (see
+timeoutMs, find, findLength, findLimit})` (see [Big pages](#big-pages)), `frameos.fetchImage(url, {headers, saveAsset, colors})` (see
 [Photos from the network](#photos-from-the-network)), `frameos.svg(svg,
 spec)`, `frameos.image(spec)`,
 `frameos.log()`, `frameos.error()`, `frameos.setState()`,
@@ -150,6 +150,22 @@ return photo.image
   `frameos.fetchImage(`data:image/png;base64,${b64}`)`. It decodes into the
   offered canvas like a download, and from 2026.10.13 `saveAsset` and `exif`
   work on it on hosts too.
+- `options.colors` grades the photo with a color profile: the object a frame
+  asset's `<image>.frameos.json` sidecar holds under `"colors"` (`exposure`,
+  `contrast`, `whites`, `blacks`, `saturation`, the `shadows` / `midtones` /
+  `highlights` tints, per-hue `hues`, an optional dither `palette`;
+  `docs/asset-color-profiles.md` has the keys and ranges). A whole sidecar
+  (`{version, colors}`) is accepted too. The runtime applies it after the
+  decode the way `loadAssetImage` applies a sidecar: the palette override,
+  then the adjustments. The palette override stays until the next image or
+  scene, so pass `colors: null` for a photo without a profile to clear the
+  last one; leave the key out and nothing about colors changes. A profile
+  that does not parse counts as none. With adjustments, `contain` decodes
+  bounded by the target instead of into the canvas, because the adjustments
+  must not touch the canvas around the photo. The Photos album app
+  (`repo/apps/image/photoAlbum`) sends each photo's profile from the share
+  JSON this way: `frameos.fetchImage(url, { colors: photo.colors ?? null })`.
+  A runtime older than 2026.10.13 ignores the option.
 - On an ESP32 the decode streams straight into the canvas the `render/image`
   node offered, with the node's `placement` (cover, contain or stretch), so a
   1440 px Immich preview needs its compressed body plus a few rows, not a

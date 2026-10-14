@@ -14,4 +14,5 @@ from .template import *  # noqa: F403
 from .user import *  # noqa: F403
 from .user_session import *  # noqa: F403
 from .api_token import *  # noqa: F403
+from .photo_entry import *  # noqa: F403
 from .photo_share import *  # noqa: F403
