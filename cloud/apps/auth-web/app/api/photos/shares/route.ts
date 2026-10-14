@@ -5,8 +5,10 @@ import { getPublicOrigin } from "../../../../src/lib/env";
 import { frameForAccount, isFrameId } from "../../../../src/lib/frames";
 import { photoOwnerContext, withPhotoErrors } from "../../../../src/lib/photos/http";
 import {
+  createCustomPhotoShare,
   createPhotoShare,
   listPhotoShares,
+  maxPhotoShareNameLength,
   photoShareJson,
 } from "../../../../src/lib/photos/library";
 import { parsePhotoPath } from "../../../../src/lib/photos/paths";
@@ -28,9 +30,10 @@ export async function GET(request: NextRequest) {
   );
 }
 
-// POST /api/photos/shares {"path": "Summer 2026", "frame_id"?: uuid} ->
-// {"share": Share}. The folder's general link, or with `frame_id` the link
-// for that one frame; either is returned as it is when it exists.
+// POST /api/photos/shares {"path": "Summer 2026", "frame_id"?: uuid,
+// "name"?: "Grandma"} -> {"share": Share}. The folder's general link, or with
+// `frame_id` the link for that one frame (either returned as it is when it
+// exists), or with `name` a new custom link every time.
 export async function POST(request: NextRequest) {
   const context = await photoOwnerContext(request, { kind: "write" });
   if (context.response) {
@@ -43,6 +46,23 @@ export async function POST(request: NextRequest) {
   const path = parsePhotoPath(parsed.body.path, { allowRoot: false });
   if (path === undefined) {
     return jsonError("invalid_path", 400);
+  }
+  const rawName = parsed.body.name ?? null;
+  if (rawName !== null) {
+    const name = typeof rawName === "string" ? rawName.trim() : "";
+    if (!name || name.length > maxPhotoShareNameLength) {
+      return jsonError("invalid_name", 400);
+    }
+    return withPhotoErrors(async () => {
+      const share = await createCustomPhotoShare(context.db, context.accountId, path, name);
+      await recordAuditEvent(context.db, {
+        accountId: context.accountId,
+        actor: { accountId: context.accountId, providerSubject: context.providerSubject },
+        eventType: "photos.share_created",
+        metadata: { name: share.name, path: share.path },
+      });
+      return NextResponse.json({ share: photoShareJson(share, getPublicOrigin(request)) });
+    });
   }
   const frameId = parsed.body.frame_id ?? null;
   if (frameId !== null && !isFrameId(frameId)) {

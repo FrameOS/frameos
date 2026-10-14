@@ -1097,9 +1097,24 @@ def share_json(share: PhotoShare) -> dict[str, Any]:
         "token": share.token,
         "path": share.path,
         "frame_id": share.frame_id,
+        "name": share.name,
         "url": share_url(share.token),
         "created_at": _seconds(share.created_at) if share.created_at is not None else None,
+        "last_used_at": _seconds(share.last_used_at) if share.last_used_at is not None else None,
     }
+
+
+# How long a link's `last_used_at` stays put between reads: one write per
+# minute per link, not one per photo a frame fetches.
+SHARE_USE_TOUCH_SECONDS = 60
+
+
+def touch_share_use(db: Session, share: PhotoShare) -> None:
+    now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    last = share.last_used_at
+    if last is None or (now - last).total_seconds() >= SHARE_USE_TOUCH_SECONDS:
+        share.last_used_at = now
+        db.commit()
 
 
 def valid_share_token(token: str) -> bool:

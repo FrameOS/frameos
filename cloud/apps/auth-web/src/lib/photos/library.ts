@@ -848,6 +848,10 @@ export type PhotoShareRow = {
   createdAt: Date;
   /** The frame the link was made for; null for the folder's general link. */
   frameId: string | null;
+  /** When something last read through the link; null until then. */
+  lastUsedAt: Date | null;
+  /** A custom link's label; null for the general and per-frame links. */
+  name: string | null;
   path: string;
   token: string;
 };
@@ -855,9 +859,15 @@ export type PhotoShareRow = {
 const shareColumns = {
   createdAt: photoShares.createdAt,
   frameId: photoShares.frameId,
+  lastUsedAt: photoShares.lastUsedAt,
+  name: photoShares.name,
   path: photoShares.path,
   token: photoShares.token,
 };
+
+export const maxPhotoShareNameLength = 120;
+/** One `last_used_at` write per link per minute, not one per photo fetched. */
+const shareUseTouchMs = 60_000;
 
 const shareTokenPattern = /^pk_[A-Za-z0-9_-]{32,128}$/;
 
@@ -878,6 +888,8 @@ export function photoShareJson(row: PhotoShareRow, origin: string) {
   return {
     created_at: seconds(row.createdAt),
     frame_id: row.frameId,
+    last_used_at: row.lastUsedAt ? seconds(row.lastUsedAt) : null,
+    name: row.name,
     path: row.path,
     token: row.token,
     url: photoShareUrl(origin, row.token),
@@ -889,13 +901,37 @@ export async function listPhotoShares(
   accountId: string,
 ): Promise<PhotoShareRow[]> {
   const rows = await db.select(shareColumns).from(photoShares).where(eq(photoShares.accountId, accountId));
-  // By folder, the general link before the frames' own.
+  // By folder: the general link, then the frames' own, then the custom ones.
+  const rank = (row: PhotoShareRow) => (row.name !== null ? 2 : row.frameId !== null ? 1 : 0);
   return rows.sort(
     (a, b) =>
-      comparePhotoPaths(a.path, b.path) ||
-      Number(a.frameId !== null) - Number(b.frameId !== null) ||
-      a.createdAt.getTime() - b.createdAt.getTime(),
+      comparePhotoPaths(a.path, b.path) || rank(a) - rank(b) || a.createdAt.getTime() - b.createdAt.getTime(),
   );
+}
+
+/** A new custom link to the folder, every time; `name` is its label. */
+export async function createCustomPhotoShare(
+  db: FramesDatabase,
+  accountId: string,
+  path: string,
+  name: string,
+): Promise<PhotoShareRow> {
+  return db.transaction(async (tx) => {
+    await lockPhotoLibrary(tx, accountId);
+    await assertPhotosAvailable(tx, accountId);
+    const row = await rowAt(tx, accountId, path);
+    if (!row) {
+      throw new PhotoError("not_found", 404);
+    }
+    if (row.kind !== "folder") {
+      throw new PhotoError("not_a_folder", 400);
+    }
+    const [created] = await tx
+      .insert(photoShares)
+      .values({ accountId, name, path, token: newPhotoShareToken() })
+      .returning(shareColumns);
+    return created as PhotoShareRow;
+  });
 }
 
 /**
@@ -928,6 +964,7 @@ export async function createPhotoShare(
           eq(photoShares.accountId, accountId),
           eq(photoShares.path, path),
           frameId === null ? isNull(photoShares.frameId) : eq(photoShares.frameId, frameId),
+          isNull(photoShares.name),
         ),
       )
       .orderBy(photoShares.createdAt)
@@ -969,7 +1006,12 @@ export async function resolvePhotoShare(
     return undefined;
   }
   const [share] = await db
-    .select({ accountId: photoShares.accountId, path: photoShares.path })
+    .select({
+      accountId: photoShares.accountId,
+      id: photoShares.id,
+      lastUsedAt: photoShares.lastUsedAt,
+      path: photoShares.path,
+    })
     .from(photoShares)
     .innerJoin(accounts, eq(accounts.id, photoShares.accountId))
     .where(and(eq(photoShares.token, token), isNull(accounts.photosSuspendedAt)))
@@ -981,7 +1023,13 @@ export async function resolvePhotoShare(
   if (!folder || folder.kind !== "folder") {
     return undefined;
   }
-  return { ...share, name: photoBasename(share.path), token };
+  // The owner's dialog says "last used 5 min ago" from this: moved once a
+  // minute, so a frame's many fetches of one render cost one write.
+  const now = Date.now();
+  if (!share.lastUsedAt || now - share.lastUsedAt.getTime() >= shareUseTouchMs) {
+    await db.update(photoShares).set({ lastUsedAt: new Date(now) }).where(eq(photoShares.id, share.id));
+  }
+  return { accountId: share.accountId, name: photoBasename(share.path), path: share.path, token };
 }
 
 export type SharedPhoto = {

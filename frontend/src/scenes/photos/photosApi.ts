@@ -50,8 +50,12 @@ export interface PhotoShare {
   path: string
   /** The frame the link was made for; null for the folder's general link. */
   frame_id: FrameId | null
+  /** A custom link's label; null for the general and per-frame links. */
+  name: string | null
   url: string
   created_at: number
+  /** When something last read through the link (seconds); null until then. */
+  last_used_at: number | null
 }
 
 export class PhotosApiError extends Error {
@@ -143,11 +147,22 @@ export async function fetchPhotoShares(): Promise<PhotoShare[]> {
   return (await photosJson<{ shares: PhotoShare[] }>('/api/photos/shares')).shares ?? []
 }
 
-/** The folder's general link, or with `frameId` the link for that one frame (made when missing). */
-export async function createPhotoShare(path: string, frameId: FrameId | null = null): Promise<PhotoShare> {
-  return (
-    await jsonPost<{ share: PhotoShare }>('/api/photos/shares', frameId === null ? { path } : { path, frame_id: frameId })
-  ).share
+/**
+ * The folder's general link, with `frameId` the link for that one frame (both
+ * made when missing), or with `name` a new custom link every time.
+ */
+export async function createPhotoShare(
+  path: string,
+  frameId: FrameId | null = null,
+  name: string | null = null
+): Promise<PhotoShare> {
+  const body: Record<string, unknown> = { path }
+  if (name !== null) {
+    body.name = name
+  } else if (frameId !== null) {
+    body.frame_id = frameId
+  }
+  return (await jsonPost<{ share: PhotoShare }>('/api/photos/shares', body)).share
 }
 
 export async function deletePhotoShare(token: string): Promise<void> {

@@ -1895,6 +1895,12 @@ export const photoShares = pgTable(
     // its link's binding, not the link: the row stays, unbound, to be seen
     // and removed.
     frameId: uuid("frame_id").references(() => frames.id, { onDelete: "set null" }),
+    // A custom link's label ("Grandma", migration 0062); NULL for the general
+    // and per-frame links. Named links are made new every time.
+    name: text("name"),
+    // When a frame (or anyone) last read through the link, moved at most
+    // once a minute (library.ts resolvePhotoShare).
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

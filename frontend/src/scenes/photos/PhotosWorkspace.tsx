@@ -14,6 +14,7 @@ import {
   CheckIcon,
   ChevronRightIcon,
   ComputerDesktopIcon,
+  UserIcon,
   DocumentIcon,
   ExclamationTriangleIcon,
   FolderIcon,
@@ -38,6 +39,7 @@ import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
 import { inHassioIngress } from '../../utils/inHassioIngress'
+import { formatFrameRelativeTime } from '../../decorators/frame'
 import { photosLogic, type PhotoUpload } from './photosLogic'
 import { aspectMarkRect, type PhotoThumbnailFit } from './photoEntries'
 import { photoColorsLogic } from './photoColorsLogic'
@@ -1458,21 +1460,40 @@ function NameDialog({
 }
 
 function ShareDialog(): JSX.Element | null {
-  const { shareTarget, shareTargetShares, shareBusy, sharesLoading, shareCopiedToken, shareFrameChoice } =
-    useValues(photosLogic)
-  const { closeShare, createShare, deleteShare, markShareCopied, setShareFrameChoice } = useActions(photosLogic)
+  const {
+    shareTarget,
+    shareTargetShares,
+    shareBusy,
+    sharesLoading,
+    shareCopiedToken,
+    shareFrameChoice,
+    shareCustomName,
+    shareStopToken,
+  } = useValues(photosLogic)
+  const {
+    closeShare,
+    createShare,
+    deleteShare,
+    markShareCopied,
+    setShareFrameChoice,
+    setShareCustomName,
+    askStopSharing,
+    cancelStopSharing,
+  } = useActions(photosLogic)
   const { frames, framesList } = useValues(framesModel)
   if (shareTarget === null) {
     return null
   }
   const frameChoices = framesList.filter((frame) => !frame.archived)
   const describe = (share: PhotoShare): string =>
-    share.frame_id === null
+    share.name !== null
+      ? share.name
+      : share.frame_id === null
       ? 'Anyone with the link'
       : frames[share.frame_id]?.name ?? `Frame ${share.frame_id} (gone)`
   // The backend answers a path: a frame's own link gets that frame's address
-  // for the backend, the general link the page's origin. Behind Home
-  // Assistant the page's origin is not that address.
+  // for the backend, the others the page's origin. Behind Home Assistant the
+  // page's origin is not that address.
   const linkFor = (share: PhotoShare): string => {
     if (/^https?:\/\//.test(share.url)) {
       return share.url
@@ -1481,40 +1502,85 @@ function ShareDialog(): JSX.Element | null {
     const fromFrame = frame ? shareUrlForFrame(share, frame) : null
     return fromFrame ?? (inHassioIngress() ? share.url : `${window.location.origin}${share.url}`)
   }
-  const choiceTaken =
-    shareFrameChoice === ''
-      ? shareTargetShares.some((share) => share.frame_id === null)
-      : shareTargetShares.some((share) => String(share.frame_id) === shareFrameChoice)
+  const lastUsed = (share: PhotoShare): string => {
+    const ago = share.last_used_at ? formatFrameRelativeTime(share.last_used_at * 1000) : null
+    return ago ? `last used ${ago} ago` : 'never used'
+  }
+  const custom = shareFrameChoice === 'custom'
+  const choiceTaken = custom
+    ? false
+    : shareFrameChoice === ''
+    ? shareTargetShares.some((share) => share.name === null && share.frame_id === null)
+    : shareTargetShares.some((share) => share.name === null && String(share.frame_id) === shareFrameChoice)
+  const canCreate = !shareBusy && !sharesLoading && !choiceTaken && (!custom || shareCustomName.trim().length > 0)
+  const create = (): void => {
+    if (!canCreate) {
+      return
+    }
+    if (custom) {
+      createShare(shareTarget, null, shareCustomName.trim())
+      return
+    }
+    const chosen = shareFrameChoice === '' ? null : frameChoices.find((frame) => String(frame.id) === shareFrameChoice)
+    createShare(shareTarget, chosen ? chosen.id : null)
+  }
   return (
     <Modal title={`Share "${photoBaseName(shareTarget)}"`} onClose={closeShare} panelClassName="max-w-[34rem]">
       <div className="space-y-4 p-5 text-sm">
         <p className="frameos-muted">
           Anyone with a link can see the photos in this folder. A frame plays the album through its own link, so you
-          can stop one frame without touching the others. A link for anyone is one to give to a friend.
+          can stop one frame without touching the others. A custom link is one to give to a friend.
         </p>
         {shareTargetShares.length ? (
           <ul className="space-y-3">
             {shareTargetShares.map((share) => {
               const link = linkFor(share)
               const copied = shareCopiedToken === share.token
+              const stopping = shareStopToken === share.token
               return (
                 <li key={share.token} className="space-y-1.5">
                   <div className="flex items-center gap-2">
-                    {share.frame_id === null ? (
+                    {share.name !== null ? (
+                      <UserIcon className="h-4 w-4 shrink-0 opacity-60" />
+                    ) : share.frame_id === null ? (
                       <LinkIcon className="h-4 w-4 shrink-0 opacity-60" />
                     ) : (
                       <ComputerDesktopIcon className="h-4 w-4 shrink-0 opacity-60" />
                     )}
-                    <span className="min-w-0 flex-1 truncate font-medium">{describe(share)}</span>
-                    <button
-                      type="button"
-                      disabled={shareBusy}
-                      title="Stop sharing through this link"
-                      onClick={() => deleteShare(share.token)}
-                      className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-500/10"
-                    >
-                      Stop sharing
-                    </button>
+                    <span className="min-w-0 flex-1 truncate">
+                      <span className="font-medium">{describe(share)}</span>
+                      <span className="frameos-muted"> · {lastUsed(share)}</span>
+                    </span>
+                    {stopping ? (
+                      <span className="flex items-center gap-1">
+                        <span className="frameos-muted text-xs">Stop sharing?</span>
+                        <button
+                          type="button"
+                          disabled={shareBusy}
+                          onClick={() => deleteShare(share.token)}
+                          className="rounded-lg bg-red-600 px-2 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                        >
+                          Stop
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelStopSharing}
+                          className="frameos-muted rounded-lg px-2 py-1 text-xs font-medium hover:bg-slate-200/60"
+                        >
+                          Keep
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={shareBusy}
+                        title="Stop sharing through this link"
+                        onClick={() => askStopSharing(share.token)}
+                        className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-500/10"
+                      >
+                        Stop sharing
+                      </button>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <input
@@ -1544,33 +1610,59 @@ function ShareDialog(): JSX.Element | null {
         )}
         {shareTargetShares.some((share) => share.frame_id === null && !/^https?:\/\//.test(share.url)) ? (
           <p className="frameos-muted text-xs">
-            Frames reach the link for anyone through the backend address in their settings.
+            Frames reach a link for anyone through the backend address in their settings.
           </p>
         ) : null}
-        <div className="frameos-divider flex flex-wrap items-center gap-2 border-t pt-4">
-          <span className="frameos-muted text-xs">New link for</span>
-          <Select
-            value={shareFrameChoice}
-            onChange={setShareFrameChoice}
-            className="h-9 min-w-[12rem] flex-1"
-            options={[
-              { value: '', label: 'Anyone with the link' },
-              ...frameChoices.map((frame) => ({ value: String(frame.id), label: frame.name || `Frame ${frame.id}` })),
-            ]}
-          />
-          <button
-            type="button"
-            disabled={shareBusy || sharesLoading || choiceTaken}
-            title={choiceTaken ? 'That link exists already' : undefined}
-            onClick={() => {
-              const chosen = shareFrameChoice === '' ? null : frameChoices.find((frame) => String(frame.id) === shareFrameChoice)
-              createShare(shareTarget, chosen ? chosen.id : null)
-            }}
-            className={clsx(toolbarButtonClassName, 'frameos-primary-action text-white')}
-          >
-            {shareBusy ? <Spinner className="h-4 w-4" color="white" /> : <LinkIcon className="h-4 w-4" />}
-            Create link
-          </button>
+        <div className="frameos-divider space-y-2 border-t pt-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="frameos-muted text-xs">New link for</span>
+            <Select
+              value={shareFrameChoice}
+              onChange={setShareFrameChoice}
+              className="h-9 min-w-[12rem] flex-1"
+              options={[
+                { value: '', label: 'Anyone with the link' },
+                { value: 'custom', label: 'Custom (a friend, a place)' },
+                ...frameChoices.map((frame) => ({ value: String(frame.id), label: frame.name || `Frame ${frame.id}` })),
+              ]}
+            />
+            {!custom ? (
+              <button
+                type="button"
+                disabled={!canCreate}
+                title={choiceTaken ? 'That link exists already' : undefined}
+                onClick={create}
+                className={clsx(toolbarButtonClassName, 'frameos-primary-action text-white')}
+              >
+                {shareBusy ? <Spinner className="h-4 w-4" color="white" /> : <LinkIcon className="h-4 w-4" />}
+                Create link
+              </button>
+            ) : null}
+          </div>
+          {custom ? (
+            <form
+              className="flex items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                create()
+              }}
+            >
+              <TextInput
+                value={shareCustomName}
+                onChange={setShareCustomName}
+                placeholder="Who or what is this link for?"
+                className="h-9 min-w-0 flex-1"
+              />
+              <button
+                type="submit"
+                disabled={!canCreate}
+                className={clsx(toolbarButtonClassName, 'frameos-primary-action text-white')}
+              >
+                {shareBusy ? <Spinner className="h-4 w-4" color="white" /> : <LinkIcon className="h-4 w-4" />}
+                Create link
+              </button>
+            </form>
+          ) : null}
         </div>
       </div>
     </Modal>

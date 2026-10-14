@@ -279,7 +279,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "The library's share links: token, folder, the url frames play and frame_id (the frame the link was made for, null for the folder's general link).",
+        "The library's share links: token, folder, the url frames play, frame_id (the frame the link was made for), name (a custom link's label), both null for the folder's general link, and last_used_at.",
       inputSchema: {},
     },
     async () => run(async () => text(await api.json("GET", "/api/photos/shares"))),
@@ -289,18 +289,19 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext) {
     "photo_share_create",
     {
       description:
-        "The folder's share link (an existing one is returned as it is): its general link, or with frame_id the link for one frame, which can be deleted without touching the others. Anyone with a link can see every photo below the folder, with no login. Requires confirm=true.",
+        "A share link to the folder: its general link, with frame_id the link for one frame (both returned as they are when they exist), or with name a new custom link every time. Each can be deleted without touching the others. Anyone with a link can see every photo below the folder, with no login. Requires confirm=true.",
       inputSchema: {
         confirm: confirmed("makes the folder's photos readable by anyone who has the link"),
         frame_id: uuid()
           .optional()
           .describe("Make (or return) the link for this frame instead of the folder's general link."),
+        name: z.string().min(1).max(120).optional().describe("A custom link with this label, made new every time."),
         path: photoPath.describe("Folder to share (not the root)."),
       },
     },
-    async ({ frame_id, path }) =>
+    async ({ frame_id, name, path }) =>
       run(async () =>
-        text(await api.json("POST", "/api/photos/shares", { body: { frame_id, path } })),
+        text(await api.json("POST", "/api/photos/shares", { body: { frame_id, name, path } })),
       ),
   );
 

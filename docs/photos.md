@@ -204,19 +204,23 @@ paths; an empty list is a 400.
 
 ### Share links
 
-A folder has one link for anyone (`frame_id` null) and one per frame it
-plays on (`frame_id` the frame's id): "Install on frame" and
-`POST /api/photos/scene` make the frame its own link, so one frame's access
-can be withdrawn without touching the others or the link given to a friend.
+A folder has one link for anyone (`frame_id` and `name` null), one per
+frame it plays on (`frame_id` the frame's id; "Install on frame" and
+`POST /api/photos/scene` make it) and any number of custom links (`name`
+what the owner called it, "Grandma"), so one link's access can be withdrawn
+without touching the others. `last_used_at` is when something last read
+through the link (moved at most once a minute), or null.
 
 - `GET /api/photos/shares` → `{"shares": [Share, ...]}`, by folder, the
   general link before the frames' own.
 - `POST /api/photos/shares` with `{"path": "Summer 2026"}` →
   `{"share": Share}`: the folder's general link, returned as it is when it
-  exists. With `"frame_id"` the link for that frame, likewise. The path must
-  be an existing folder, not the root: 400 for the root or a file, 404 when
-  nothing is there; a `frame_id` that is not one of the account's frames is
-  a 404, one of the wrong shape a 400.
+  exists. With `"frame_id"` the link for that frame, likewise. With
+  `"name"` (1 to 120 characters, trimmed) a new custom link every time. The
+  path must be an existing folder, not the root: 400 for the root or a
+  file, 404 when nothing is there; a `frame_id` that is not one of the
+  account's frames is a 404, one of the wrong shape a 400, as is a bad
+  `name`.
 - `DELETE /api/photos/shares/{token}` → `{"deleted": true}`. The other
   links of the folder keep working.
 
@@ -225,8 +229,10 @@ can be withdrawn without touching the others or the link given to a friend.
   "token": "pk_3n1...",
   "path": "Summer 2026",
   "frame_id": null,
+  "name": null,
   "url": "https://cloud.frameos.net/api/photos/shared/pk_3n1...",
-  "created_at": 1760000000
+  "created_at": 1760000000,
+  "last_used_at": null
 }
 ```
 
@@ -470,7 +476,8 @@ tools: `photos_status`, `photos_list`, `photo_get` (the thumbnail, or the
 file with `original`), `photo_upload` (base64 or a URL the server downloads,
 sent in the upload route's chunks), `photo_folder_create`, `photos_move`,
 `photo_rename`, `photos_delete`, `photo_colors_set`, `photo_shares_list`,
-`photo_share_create` (with `frame_id`, one frame's own link),
+`photo_share_create` (with `frame_id` one frame's own link, with `name` a
+new custom link),
 `photo_share_delete` and `photo_album_install` (`POST /api/photos/scene`,
 then the frame's own install). Every write takes
 `confirm: true`, because a frame playing a shared album shows the change on

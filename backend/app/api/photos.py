@@ -53,6 +53,11 @@ class PhotoShareBody(BaseModel):
     path: str
     # A frame's own link to the folder; absent for the folder's general link.
     frame_id: Any = None
+    # A custom link, named by the owner ("Grandma"): a new one every time.
+    name: Any = None
+
+
+MAX_SHARE_NAME_LENGTH = 120
 
 
 class PhotoMoveBody(BaseModel):
@@ -259,8 +264,28 @@ async def photos_shares(db: Session = Depends(get_db)):
 
 @api_project.post("/photos/shares")
 async def photos_create_share(data: PhotoShareBody, db: Session = Depends(get_db)):
+    if data.name is not None:
+        if not isinstance(data.name, str) or not data.name.strip() or len(data.name.strip()) > MAX_SHARE_NAME_LENGTH:
+            raise _bad_request(f"name must be text of 1 to {MAX_SHARE_NAME_LENGTH} characters")
+        return {"share": photos.share_json(await _custom_share(db, data.path, data.name.strip()))}
     frame = _share_frame(db, data.frame_id)
     return {"share": photos.share_json(await _folder_share(db, data.path, frame.id if frame else None))}
+
+
+async def _custom_share(db: Session, path: str, name: str) -> PhotoShare:
+    """A new named link to the folder, every time: two links called the
+    same are two links, each withdrawn on its own."""
+    if path == "":
+        raise _bad_request("Share a folder, not the whole library")
+    rel = photos.validate_path(path)
+    project_id = current_project_id()
+    await _ready_store()
+    await asyncio.to_thread(photos.assert_shareable_folder, db, project_id, rel)
+    share = PhotoShare(project_id=project_id, path=rel, name=name, token=f"pk_{secrets.token_urlsafe(32)}")
+    db.add(share)
+    db.commit()
+    db.refresh(share)
+    return share
 
 
 def _share_frame(db: Session, frame_id: Any) -> Frame | None:
@@ -287,7 +312,12 @@ async def _folder_share(db: Session, path: str, frame_id: int | None = None) -> 
     await asyncio.to_thread(photos.assert_shareable_folder, db, project_id, rel)
     share = (
         db.query(PhotoShare)
-        .filter(PhotoShare.project_id == project_id, PhotoShare.path == rel, PhotoShare.frame_id == frame_id)
+        .filter(
+            PhotoShare.project_id == project_id,
+            PhotoShare.path == rel,
+            PhotoShare.frame_id == frame_id,
+            PhotoShare.name.is_(None),
+        )
         .order_by(PhotoShare.id.asc())
         .first()
     )
@@ -381,7 +411,9 @@ async def _shared_folder(request: Request, token: str, db: Session, redis: Redis
     share = db.query(PhotoShare).filter(PhotoShare.token == token).first()
     if share is None:
         raise _not_found()
-    return await asyncio.to_thread(photos.shared_folder, db, share)
+    folder = await asyncio.to_thread(photos.shared_folder, db, share)
+    photos.touch_share_use(db, share)
+    return folder
 
 
 @api_public.get("/photos/shared/{token}")

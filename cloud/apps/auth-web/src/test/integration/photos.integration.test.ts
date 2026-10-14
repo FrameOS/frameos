@@ -978,6 +978,35 @@ describe("photo library: album scenes", () => {
     ).toBe(200);
   });
 
+  it("makes a custom-named link new every time, and every link says when it was last read", async () => {
+    const accountId = await signIn();
+    await upload("Summer 2026", "a.png", png(10, 10, "custom"));
+    const named = async (name: unknown) =>
+      postShares(postJson("/api/photos/shares", { name, path: "Summer 2026" }));
+    const grandma = ((await (await named(" Grandma ")).json()) as { share: SceneAnswer["share"] & { name: string } })
+      .share;
+    expect(grandma.name).toBe("Grandma");
+    expect(grandma.frame_id).toBeNull();
+    const again = ((await (await named("Grandma")).json()) as { share: { token: string } }).share;
+    expect(again.token).not.toBe(grandma.token);
+    const general = await share("Summer 2026");
+    expect([grandma.token, again.token]).not.toContain(general.token);
+    for (const bad of ["", "   ", "x".repeat(121), 7, true]) {
+      expect((await named(bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+
+    signOut();
+    expect((await getShared(get(`/api/photos/shared/${grandma.token}`), tokenParams(grandma.token))).status).toBe(200);
+    await signInAs(accountId);
+    const listed = (await (await getShares(get("/api/photos/shares"))).json()) as {
+      shares: { last_used_at: number | null; token: string }[];
+    };
+    const byToken = new Map(listed.shares.map((row) => [row.token, row.last_used_at]));
+    expect(typeof byToken.get(grandma.token)).toBe("number");
+    expect(byToken.get(again.token)).toBeNull();
+    expect(byToken.get(general.token)).toBeNull();
+  });
+
   it("builds a scene that plays the folder, with the folder's share link", async () => {
     const accountId = await signIn();
     await upload("Summer 2026", "a.png", png(10, 10, "scene"));

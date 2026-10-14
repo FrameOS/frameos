@@ -902,6 +902,26 @@ async def test_share_links_per_frame(async_client, db, redis):
 
 
 @pytest.mark.asyncio
+async def test_custom_share_links_and_last_use(async_client, no_auth_client, redis):
+    """A named link is a new one every time, and every link says when it was last read."""
+    write(library(async_client), "Summer 2026/a.jpg", b"a")
+    grandma = (await async_client.post("/api/photos/shares", json={"path": "Summer 2026", "name": " Grandma "})).json()["share"]
+    assert grandma["name"] == "Grandma" and grandma["frame_id"] is None and grandma["last_used_at"] is None
+    again = (await async_client.post("/api/photos/shares", json={"path": "Summer 2026", "name": "Grandma"})).json()["share"]
+    assert again["token"] != grandma["token"]
+    general = await share(async_client, "Summer 2026")
+    assert general["name"] is None and general["token"] not in (grandma["token"], again["token"])
+    for bad in ("", "   ", "x" * 121, 7, True):
+        assert (await async_client.post("/api/photos/shares", json={"path": "Summer 2026", "name": bad})).status_code == 400
+
+    assert (await no_auth_client.get(f"/api/photos/shared/{grandma['token']}")).status_code == 200
+    listed = {row["token"]: row for row in (await async_client.get("/api/photos/shares")).json()["shares"]}
+    assert isinstance(listed[grandma["token"]]["last_used_at"], int)
+    assert listed[again["token"]]["last_used_at"] is None
+    assert listed[general["token"]]["last_used_at"] is None
+
+
+@pytest.mark.asyncio
 async def test_share_listing_without_a_login(async_client, no_auth_client, redis):
     lib = library(async_client)
     write(lib, "Summer 2026/b.jpg", jpeg_bytes(20, 10), mtime=1760000100)
