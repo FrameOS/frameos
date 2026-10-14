@@ -33,11 +33,8 @@ export function todayIso(now: Date = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
 }
 
-// The flat search fields (albumIds, personIds, ...) AND an owner filter: only
-// the key's user and their timeline partners. A shared album's photos owned by
-// anyone else never match. Immich 3.2's structured `filter` searches an album
-// whole (access-checked), so album mode uses it there and the album timeline
-// before that.
+// Immich 3.2's structured filter searches a shared album whole; the flat
+// albumIds field also filters by owner (the key's user and partners).
 export function albumSearchBody(albumId: string): Record<string, unknown> {
   return { size: 1, withExif: true, withPeople: true, filter: { type: { eq: 'IMAGE' }, albumIds: { any: [albumId] } } }
 }
@@ -48,7 +45,6 @@ export function supportsFilterSearch(version: unknown): boolean {
   return v.major > 3 || (v.major === 3 && v.minor >= 2)
 }
 
-// Pick a bucket weighted by its asset count.
 export function pickTimeBucket(buckets: unknown, random = Math.random()): string {
   if (!Array.isArray(buckets)) return ''
   const valid = buckets.filter((b) => b && typeof b.timeBucket === 'string' && typeof b.count === 'number' && b.count > 0)
@@ -61,7 +57,6 @@ export function pickTimeBucket(buckets: unknown, random = Math.random()): string
   return valid.length ? valid[valid.length - 1].timeBucket : ''
 }
 
-// A time bucket is columnar: parallel arrays, `isImage` beside `id`.
 export function bucketImageIds(bucket: unknown): string[] {
   const b = bucket as { id?: unknown; isImage?: unknown } | null
   if (!b || !Array.isArray(b.id)) return []
@@ -197,15 +192,12 @@ function fetchAlbumAsset(serverUrl: string, apiKey: string, albumId: string): Pi
     return assets.length ? { asset: pickRandomAsset(assets), message: '' } : { asset: null, message: empty }
   }
 
+  // Before 3.2: the album timeline (Immich 1.133+). A month bucket is columnar,
+  // ~350 bytes per asset, so a huge month is a heavy response on an ESP32.
   const album = encodeURIComponent(albumId)
   const buckets = request(apiKey, `${serverUrl}/api/timeline/buckets?albumId=${album}`)
-  if (buckets.status === 404) {
-    frameos.log('This Immich server has no album timeline; searching the album instead, which only finds photos the API key owner or their partners own.')
-    return fetchRandomAsset(serverUrl, apiKey, albumId, '', false, empty)
-  }
   if (buckets.status !== 200) return { asset: null, message: `Error reading the Immich album: ${httpErrorMessage(buckets)}` }
   const bucketList = parse(buckets.body)
-  // A bucket can hold only videos; a few draws find the photos.
   for (let attempt = 0; attempt < 3; attempt++) {
     const timeBucket = pickTimeBucket(bucketList)
     if (!timeBucket) break
