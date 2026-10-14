@@ -43,8 +43,9 @@ export async function GET(
   if (!bytes) {
     return jsonError("not_found", 404);
   }
+  // The URL carries the token: no shared cache keeps the bytes.
   return photoBytesResponse(bytes, {
-    cacheControl: "public, max-age=300",
+    cacheControl: "private, max-age=300",
     contentType: row.contentType,
   });
 }

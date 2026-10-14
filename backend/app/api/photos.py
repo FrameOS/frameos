@@ -37,9 +37,9 @@ from . import api_project, api_public
 # Registered on the routers by import; nothing to re-export into app.api.
 __all__: list[str] = []
 
-# Frames render every few minutes and several of them may share one address
-# (and one album): generous, per address and link.
-SHARE_REQUESTS_PER_HOUR = 1200
+# Per address, like the cloud. What the app asks for: two requests per render (the pick, then the file),
+# every 5 s at the fastest, a few frames behind one address.
+SHARE_REQUESTS_PER_HOUR = 3600
 SHARE_RATE_WINDOW_SECONDS = 3600
 MAX_PATHS_PER_REQUEST = 10000
 
@@ -62,11 +62,14 @@ class PhotoDeleteBody(BaseModel):
     paths: list[str] = Field(max_length=MAX_PATHS_PER_REQUEST)
 
 
+_NO_COLORS = object()
+
+
 class PhotoColorsBody(BaseModel):
     path: str
-    # Any JSON: the shape is checked by hand, so a wrong one is the
-    # contract's 400 rather than FastAPI's 422.
-    colors: Any = None
+    # Any JSON: the shape is checked by hand, so a wrong one (or a missing
+    # key) is the contract's 400 rather than FastAPI's 422.
+    colors: Any = _NO_COLORS
 
 
 class PhotoSceneBody(BaseModel):
@@ -84,6 +87,12 @@ MAX_SCENE_NAME_LENGTH = 256
 
 async def _ready_root(project_id: int) -> Path:
     return await asyncio.to_thread(photos.ready_root, project_id)
+
+
+def _some_paths(paths: list[str]) -> list[str]:
+    if not paths:
+        raise _bad_request("paths must not be empty")
+    return [photos.validate_path(path) for path in paths]
 
 
 def _bad_request(detail: str) -> HTTPException:
@@ -189,7 +198,7 @@ async def photos_create_folder(data: PhotoPathBody, db: Session = Depends(get_db
 @api_project.post("/photos/move")
 async def photos_move(data: PhotoMoveBody, db: Session = Depends(get_db)):
     to = photos.validate_path(data.to, allow_root=True)
-    paths = [photos.validate_path(path) for path in data.paths]
+    paths = _some_paths(data.paths)
     project_id = current_project_id()
     root = await _ready_root(project_id)
     moved = await asyncio.to_thread(photos.move_paths, db, project_id, root, paths, to)
@@ -208,7 +217,7 @@ async def photos_rename(data: PhotoRenameBody, db: Session = Depends(get_db)):
 
 @api_project.post("/photos/delete")
 async def photos_delete(data: PhotoDeleteBody, db: Session = Depends(get_db)):
-    paths = [photos.validate_path(path) for path in data.paths]
+    paths = _some_paths(data.paths)
     project_id = current_project_id()
     root = await _ready_root(project_id)
     deleted = await asyncio.to_thread(photos.delete_paths, db, project_id, root, paths)
@@ -218,6 +227,8 @@ async def photos_delete(data: PhotoDeleteBody, db: Session = Depends(get_db)):
 @api_project.post("/photos/colors")
 async def photos_set_colors(data: PhotoColorsBody):
     rel = photos.validate_path(data.path)
+    if data.colors is _NO_COLORS:
+        raise _bad_request("colors must be an object or null")
     root = await _ready_root(current_project_id())
     entry = await asyncio.to_thread(photos.set_colors, root, rel, data.colors)
     return {"entry": entry}
@@ -338,7 +349,7 @@ async def _shared_folder(request: Request, token: str, db: Session, redis: Redis
     if await hit_rate_limit(
         redis,
         "photo_share",
-        f"{address}:{token}",
+        address,
         limit=SHARE_REQUESTS_PER_HOUR,
         window_seconds=SHARE_RATE_WINDOW_SECONDS,
     ):
@@ -409,5 +420,6 @@ async def photos_shared_file(
     name = photos.base_name(rel)
     content_type = photos.content_type_for(name)
     headers = inert_asset_headers(content_type, name, inline=True)
-    headers["Cache-Control"] = "public, max-age=300"
+    # The URL carries the token: no shared cache keeps the bytes.
+    headers["Cache-Control"] = "private, max-age=300"
     return FileResponse(target, media_type=content_type, headers=headers)

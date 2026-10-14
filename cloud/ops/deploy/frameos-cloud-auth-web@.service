@@ -39,6 +39,12 @@ EnvironmentFile=/etc/frameos-cloud/auth-web.env
 # A default, not an override — the env file wins over this line (see
 # ExecStart). It only matters on a host whose env file forgot NODE_ENV.
 Environment=NODE_ENV=production
+# Unfinished photo uploads (docs/photos.md) wait on disk between chunks. The
+# default is the system temp directory, which is a tmpfs on the box: parked
+# chunks would be RAM. StateDirectory makes /var/lib/frameos-cloud, owned by
+# the service user; both instances share it.
+StateDirectory=frameos-cloud
+Environment=FRAMEOS_PHOTO_UPLOAD_DIR=/var/lib/frameos-cloud/photo-uploads
 
 Restart=on-failure
 RestartSec=5

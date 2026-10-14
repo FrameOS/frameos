@@ -1,6 +1,14 @@
+import { crc32 } from "node:zlib";
 import sharp from "sharp";
-import { describe, expect, it } from "vitest";
-import { makePhotoThumbnail } from "./thumbnail";
+import { describe, expect, it, vi } from "vitest";
+import { makePhotoThumbnail, photoThumbMaxPixels } from "./thumbnail";
+
+const warnings = vi.hoisted(
+  () => [] as { event: string; fields?: Record<string, unknown> | undefined }[],
+);
+vi.mock("../log", () => ({
+  logWarn: (event: string, fields?: Record<string, unknown>) => warnings.push({ event, fields }),
+}));
 
 // Left half transparent, right half red.
 function halfTransparent(width: number, height: number) {
@@ -64,6 +72,23 @@ describe("makePhotoThumbnail", () => {
       .toBuffer();
     const meta = await sharp((await makePhotoThumbnail(gif))!).metadata();
     expect([meta.format, meta.width, meta.height]).toEqual(["jpeg", 512, 300]);
+  });
+
+  it("refuses an image over the pixel cap before decoding it", async () => {
+    // A real 2 x 2 PNG whose header claims 20000 x 20000 (400 MP): sharp
+    // checks the cap on the header, so that, not the short pixel data, is
+    // what refuses it.
+    const huge = await sharp({ create: { background: "#000", channels: 3, height: 2, width: 2 } })
+      .png()
+      .toBuffer();
+    huge.writeUInt32BE(20000, 16);
+    huge.writeUInt32BE(20000, 20);
+    huge.writeUInt32BE(crc32(huge.subarray(12, 29)), 29);
+    expect(20000 * 20000).toBeGreaterThan(photoThumbMaxPixels);
+    warnings.length = 0;
+    expect(await makePhotoThumbnail(huge)).toBeNull();
+    expect(warnings.map((w) => w.event)).toEqual(["photos.thumbnail_failed"]);
+    expect(String(warnings[0]?.fields?.error)).toMatch(/pixel limit/i);
   });
 
   it("answers null for bytes it cannot read", async () => {

@@ -665,9 +665,13 @@ has not been exercised against the live service yet: try the first key with a
 known-clean image before relying on it.
 
 Chunks of an unfinished upload wait on the app server's local disk (never in
-the bucket, which is public through the CDN alias). Under the systemd unit's
-`PrivateTmp=true` each blue/green instance has its own temp directory, so an
-upload that spans a deploy answers 409 and the browser starts it over.
+the bucket, which is public through the CDN alias): `FRAMEOS_PHOTO_UPLOAD_DIR`,
+which the unit defaults to `/var/lib/frameos-cloud/photo-uploads`
+(`StateDirectory=frameos-cloud`) because the box's `/tmp` is a tmpfs, so the
+code's own default would park them in memory. At most 16 unfinished uploads
+per account and 2 GiB in all; files older than an hour are swept every ten
+minutes. An upload that spans a deploy answers 409 on the new instance only
+when the directory differs; with the shared state directory it carries on.
 
 Cloudflare's CSAM Scanning Tool can additionally be turned on for the zone
 that serves the bucket's public alias: it scans what the CDN serves, which

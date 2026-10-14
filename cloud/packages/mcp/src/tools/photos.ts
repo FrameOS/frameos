@@ -157,7 +157,10 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext) {
         let bytes: Uint8Array;
         let name = filename;
         if (url !== undefined) {
-          const response = await ctx.fetchExternal(url, { headers: { accept: "image/*" } });
+          const response = await ctx.fetchExternal(url, {
+            headers: { accept: "image/*" },
+            signal: AbortSignal.timeout(60_000),
+          });
           if (!response.ok) {
             return failure(`${url} answered ${response.status}`);
           }
@@ -336,6 +339,9 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext) {
     },
     async ({ activate, fit, frame_id, name, order, path, seconds }) =>
       run(async () => {
+        // The frame first: the scene route shares the folder, and a wrong
+        // frame id must not leave a link behind (the backend checks too).
+        await api.json("GET", `/api/frames/${frame_id}`);
         const made = await api.json<{ scene: Record<string, unknown>; share: Record<string, unknown> }>(
           "POST",
           "/api/photos/scene",

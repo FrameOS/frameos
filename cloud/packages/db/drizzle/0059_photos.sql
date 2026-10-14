@@ -59,7 +59,7 @@ CREATE TABLE "photo_scan_hits" (
   "account_id" uuid REFERENCES "accounts"("id") ON DELETE SET NULL,
   "account_email" text,
   "sha256" text NOT NULL,
-  -- hash_list | photodna | openai
+  -- hash_list | photodna
   "scanner" text NOT NULL,
   -- The scanner's answer (PhotoDNA's tracking id and match details, the
   -- moderation categories), never the image.

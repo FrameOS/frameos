@@ -708,19 +708,33 @@ describe("photos tools", () => {
     });
     expect(result.isError).toBeFalsy();
     expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
+      `GET /api/frames/${frameId}`,
       "POST /api/photos/scene",
       "POST /api/account/scenes",
       `POST /api/frames/${frameId}/scenes/add`,
       `POST /api/frames/${frameId}/event/setCurrentScene`,
     ]);
     // Cloud links are absolute: the route needs no frame.
-    expect(calls[0]?.body).toEqual({ order: "newest", path: "Summer", seconds: 600 });
-    expect(calls[1]?.body).toMatchObject({ name: "Summer", scenes: [{ id: "scene-1", name: "Summer" }] });
+    expect(calls[1]?.body).toEqual({ order: "newest", path: "Summer", seconds: 600 });
+    expect(calls[2]?.body).toMatchObject({ name: "Summer", scenes: [{ id: "scene-1", name: "Summer" }] });
     expect(JSON.parse(textOf(result))).toMatchObject({
       command_id: "cmd-2",
       created_private_scene: true,
       share: { token: "pk_abc" },
     });
+  });
+
+  it("shares nothing for a frame that does not exist", async () => {
+    photoRoutes();
+    const client = await connect();
+    const result = await client.callTool({
+      arguments: { confirm: true, frame_id: "99999999-2222-3333-4444-555555555555", path: "Summer" },
+      name: "photo_album_install",
+    });
+    expect(result.isError).toBe(true);
+    expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
+      "GET /api/frames/99999999-2222-3333-4444-555555555555",
+    ]);
   });
 
   it("sends the library writes to their routes", async () => {

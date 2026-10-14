@@ -9,6 +9,8 @@ has to decide, and say, that the USER asked for the change. A test enumerates
 the gated tools by annotation (test_mcp.py)."""
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
@@ -125,7 +127,7 @@ _TYPE_CHECKS: dict[str, Callable[[Any], bool]] = {
 
 def validate_value(schema: dict[str, Any], value: Any, path: str) -> None:
     """The subset of JSON Schema the tool definitions use: type (one or a
-    list), const, enum, minimum/maximum, min/maxLength, items, required and
+    list), const, enum, minimum/maximum, min/maxLength, pattern, items, required and
     properties with additionalProperties: false. Enough for a handler to
     trust its arguments' shapes; the backend's routes validate the rest."""
     expected = schema.get("type")
@@ -147,6 +149,10 @@ def validate_value(schema: dict[str, Any], value: Any, path: str) -> None:
             raise SchemaError(f"{path}: must be at least {schema['minLength']} characters")
         if "maxLength" in schema and len(value) > schema["maxLength"]:
             raise SchemaError(f"{path}: must be at most {schema['maxLength']} characters")
+        # A value that lands in a URL path (a share token) must match its
+        # pattern here, or "../../frames/5" reaches another route.
+        if "pattern" in schema and not re.search(schema["pattern"], value):
+            raise SchemaError(f"{path}: must match {schema['pattern']}")
     if isinstance(value, list):
         if "maxItems" in schema and len(value) > schema["maxItems"]:
             raise SchemaError(f"{path}: at most {schema['maxItems']} items")

@@ -27,8 +27,9 @@ export const photoRateLimits = {
   read: { limit: 6000, windowMs: fifteenMinutes },
   upload: { limit: 3000, windowMs: fifteenMinutes },
   write: { limit: 600, windowMs: fifteenMinutes },
-  // What frames call. Several frames can share one address.
-  shared: { limit: 1200, windowMs: 60 * 60 * 1000 },
+  // What frames call: two requests per render (the pick, then the file),
+  // every 5 s at the fastest, a few frames behind one address.
+  shared: { limit: 3600, windowMs: 60 * 60 * 1000 },
 } as const;
 
 export type PhotoOwnerContext =

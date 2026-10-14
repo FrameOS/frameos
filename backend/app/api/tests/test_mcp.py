@@ -441,6 +441,15 @@ async def test_photos_tools_against_the_real_routes(async_client, db: Session, r
     moved = result_json(await call(async_client, "photos_move", {"confirm": True, "paths": ["Summer 2026/sea.jpg"], "to": ""}))
     assert moved["moved"] == [{"from": "Summer 2026/sea.jpg", "to": "sea.jpg"}]
 
+    # The token is a URL path segment: anything else must never reach another
+    # route (httpx folds "..", so this would be DELETE /frames/<id>).
+    for bad in (f"../../frames/{frame.id}", "pk_x?y=1", "frames", ""):
+        refused = (await rpc(async_client, "tools/call", {
+            "name": "photo_share_delete", "arguments": {"confirm": True, "token": bad},
+        })).json()
+        assert refused["error"]["code"] == -32602, bad
+        assert "pk_" in refused["error"]["message"]
+    assert frame_row(db, frame.id) is not None
     assert result_json(await call(async_client, "photo_share_delete", {"confirm": True, "token": token})) == {"deleted": True}
     assert result_json(await call(async_client, "photos_delete", {"confirm": True, "paths": ["sea.jpg", "Summer 2026"]})) == {"deleted": 2}
     assert result_json(await call(async_client, "photos_list"))["entries"] == []

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../../../../../../src/lib/device-flow";
 import { sharedPhotoContext, sharedPhotoJson } from "../../../../../../src/lib/photos/http";
-import { sharedPhotos } from "../../../../../../src/lib/photos/library";
+import { sharedPhotoColors, sharedPhotos } from "../../../../../../src/lib/photos/library";
 import { parsePhotoOrder, pickPhoto } from "../../../../../../src/lib/photos/pick";
 
 export const runtime = "nodejs";
@@ -30,9 +30,11 @@ export async function GET(
     return context.response;
   }
   const { db, origin, share } = context;
-  const { photos } = await sharedPhotos(db, share);
+  const { photos } = await sharedPhotos(db, share, { withColors: false });
   const picked = pickPhoto(photos, { index, order, token });
-  const photo = picked.photo;
+  const photo = picked.photo
+    ? { ...picked.photo, colors: await sharedPhotoColors(db, share, picked.photo.path) }
+    : null;
   return NextResponse.json(
     {
       count: picked.count,

@@ -90,9 +90,9 @@ export function parsePhotoPath(
   return segments.every(isValidPhotoSegment) ? raw : undefined;
 }
 
-// One move or delete takes at most this many paths (a selection, not a
-// library).
-export const maxPhotoPathsPerRequest = 1000;
+// One move or delete takes at most this many paths (a selection: the SPA
+// sends "select all" in one request). The backend takes the same.
+export const maxPhotoPathsPerRequest = 10000;
 
 /** A non-empty list of valid, non-root paths, or undefined. */
 export function parsePhotoPathList(value: unknown): string[] | undefined {

@@ -54,6 +54,12 @@ export type PhotoScanDeps = {
   fetchImpl?: typeof fetch;
   /** The hash list lookup: the row when the digest is listed. */
   blockedHash: (sha256: string) => Promise<{ reason: string | null } | undefined>;
+  /**
+   * What PhotoDNA is sent: a small JPEG copy (thumbnail.ts photoScanCopy),
+   * since the Match API takes a few MB and not every format. Null when the
+   * image cannot be read, which fails closed.
+   */
+  scanCopy?: (bytes: Buffer, contentType: string) => Promise<Buffer | null>;
 };
 
 export async function scanPhoto(
@@ -79,13 +85,28 @@ export async function scanPhoto(
   }
 
   if (scanners.includes("photodna")) {
-    const result = await photoDnaMatch(input.bytes, env, fetchImpl);
+    const makeCopy = deps.scanCopy ?? defaultScanCopy;
+    let copy: Buffer | null;
+    try {
+      copy = await makeCopy(input.bytes, input.contentType);
+    } catch (error) {
+      return { error: errorText(error), outcome: "unavailable", scanner: "photodna" };
+    }
+    if (!copy) {
+      return { error: "unreadable_image", outcome: "unavailable", scanner: "photodna" };
+    }
+    const result = await photoDnaMatch(copy, env, fetchImpl);
     if (result.outcome !== "clean") {
       return result;
     }
   }
 
   return { outcome: "clean", scanners };
+}
+
+async function defaultScanCopy(bytes: Buffer) {
+  const { photoScanCopy } = await import("./thumbnail");
+  return photoScanCopy(bytes);
 }
 
 type PhotoDnaResponse = {
@@ -141,6 +162,10 @@ export async function photoDnaMatch(
       });
       if (!response.ok) {
         lastError = `http_${response.status}`;
+        if (response.status === 401 || response.status === 403) {
+          // A refused key will not be accepted a second time.
+          break;
+        }
         continue;
       }
       payload = (await response.json()) as PhotoDnaResponse;

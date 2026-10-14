@@ -33,15 +33,15 @@ import {
 } from './photoColors'
 import { isBrowserImageName, parentPhotoPath } from './photoPaths'
 import { type PhotoEntry, PhotosApiError, photoFileUrl, setPhotoColors } from './photosApi'
-import { photosLogic } from './photosLogic'
+import { photosLogic, rawSearchParam } from './photosLogic'
 
 /** `?colors=<path>` names the open editor, as on the Assets panel. */
 const COLORS_SEARCH_PARAM = 'colors'
 
-function colorsPathFromSearch(search: Record<string, unknown> | undefined): string | null {
-  const raw = search?.[COLORS_SEARCH_PARAM]
-  const value = Array.isArray(raw) ? raw[0] : raw
-  return value === undefined || value === null || value === '' ? null : String(value)
+function colorsPathFromSearch(): string | null {
+  // The raw string: kea-router parses "2024/a.jpg"-like values (photosLogic).
+  const value = rawSearchParam(COLORS_SEARCH_PARAM)
+  return value === null || value === '' ? null : value
 }
 
 async function fetchPhotoBitmap(path: string): Promise<PreviewSource> {
@@ -132,6 +132,13 @@ export interface photoColorsLogicActions {
   } // photosLogic
   updateEntry: (entry: PhotoEntry) => {
     entry: PhotoEntry
+  } // photosLogic
+  loadFolderSuccess: (
+    folder: string,
+    entries: PhotoEntry[]
+  ) => {
+    entries: PhotoEntry[]
+    folder: string
   } // photosLogic
   closeEditor: () => {
     value: true
@@ -307,7 +314,7 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
   path(['src', 'scenes', 'photos', 'photoColorsLogic']),
   connect(() => ({
     values: [framesModel, ['framesList'], photosLogic, ['folderEntries', 'lightboxEntry']],
-    actions: [photosLogic, ['updateEntry', 'showNotice', 'openLightbox', 'closeLightbox']],
+    actions: [photosLogic, ['updateEntry', 'showNotice', 'openLightbox', 'closeLightbox', 'loadFolderSuccess']],
   })),
   actions({
     setPreviewTarget: (key: string) => ({ key }),
@@ -534,8 +541,8 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
     },
   })),
   urlToAction(({ actions, values }) => ({
-    [urls.photos()]: (_, search) => {
-      const imagePath = colorsPathFromSearch(search)
+    [urls.photos()]: () => {
+      const imagePath = colorsPathFromSearch()
       if (imagePath && imagePath !== values.imagePath) {
         actions.openEditor(imagePath)
       } else if (!imagePath && values.imagePath) {
@@ -614,7 +621,20 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
         if (values.savedProfile) {
           actions.setProfile(values.savedProfile)
         }
+        // Opened from the URL before the listing is in: the profile comes
+        // with the entry, so it is applied when the folder loads.
+        cache.awaitingSavedProfile = values.entry ? null : imagePath
         actions.loadSource(imagePath)
+      },
+      loadFolderSuccess: ({ folder }) => {
+        const awaited: string | null = cache.awaitingSavedProfile ?? null
+        if (!awaited || awaited !== values.imagePath || parentPhotoPath(awaited) !== folder) {
+          return
+        }
+        cache.awaitingSavedProfile = null
+        if (values.savedProfile) {
+          actions.setProfile(values.savedProfile)
+        }
       },
       closeEditor: () => {
         values.source?.bitmap.close()

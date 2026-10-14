@@ -984,14 +984,19 @@ export type SharedPhoto = {
 /**
  * Every playable file below the shared folder, by path (natural order), at
  * most `maxSharedPhotoFiles`. Also when the album last changed.
+ *
+ * `colors` (up to 64 KB a row) comes along only when asked: the listing
+ * sends every file's, but /photo, called once per render per frame, picks
+ * one file and reads that one's with sharedPhotoColors.
  */
 export async function sharedPhotos(
   db: FramesDatabase,
   share: ResolvedPhotoShare,
+  options: { withColors: boolean } = { withColors: true },
 ): Promise<{ photos: SharedPhoto[]; updatedAt: number }> {
   const rows = await db
     .select({
-      colors: photoEntries.colors,
+      colors: options.withColors ? photoEntries.colors : sql<null>`NULL`,
       contentType: photoEntries.contentType,
       createdAt: photoEntries.createdAt,
       height: photoEntries.height,
@@ -1030,6 +1035,22 @@ export async function sharedPhotos(
   return { photos: photos.slice(0, maxSharedPhotoFiles), updatedAt };
 }
 
+/** The color profile of one file below the shared folder, or null. */
+export async function sharedPhotoColors(
+  db: FramesDatabase,
+  share: ResolvedPhotoShare,
+  relative: string,
+): Promise<PhotoColors | null> {
+  const [row] = await db
+    .select({ colors: photoEntries.colors })
+    .from(photoEntries)
+    .where(
+      and(eq(photoEntries.accountId, share.accountId), eq(photoEntries.path, `${share.path}/${relative}`)),
+    )
+    .limit(1);
+  return (row?.colors as PhotoColors | undefined) ?? null;
+}
+
 /** One playable file below the shared folder (`relative` to it). */
 export async function sharedPhotoObject(
   db: FramesDatabase,
@@ -1056,7 +1077,8 @@ export async function blockedPhotoHash(
   const [row] = await db
     .select({ reason: photoBlockedHashes.reason })
     .from(photoBlockedHashes)
-    .where(eq(photoBlockedHashes.sha256, sha256))
+    // Hash tools print either case; admins paste what they got.
+    .where(sql`lower(${photoBlockedHashes.sha256}) = ${sha256.toLowerCase()}`)
     .limit(1);
   return row;
 }

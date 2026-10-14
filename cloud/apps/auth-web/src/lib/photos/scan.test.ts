@@ -7,6 +7,9 @@ const input = {
   sha256: "ab".repeat(32),
 };
 const notListed = async () => undefined;
+// What the route sends PhotoDNA (thumbnail.ts photoScanCopy): a small JPEG
+// made from the upload. Here, the bytes with a mark.
+const copyOf = async (bytes: Buffer) => Buffer.concat([Buffer.from("copy:"), bytes]);
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -80,12 +83,13 @@ describe("scanPhoto", () => {
     expect(result).toMatchObject({ outcome: "unavailable", scanner: "hash_list" });
   });
 
-  it("sends PhotoDNA the inline image with the subscription key", async () => {
+  it("sends PhotoDNA the scan copy inline with the subscription key", async () => {
     vi.stubEnv("PHOTODNA_SUBSCRIPTION_KEY", "secret-key");
     const fetchImpl = vi.fn(async () => jsonResponse(photoDnaOk(false)));
     const result = await scanPhoto(input, {
       blockedHash: notListed,
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      scanCopy: copyOf,
     });
     expect(result).toEqual({ outcome: "clean", scanners: ["hash_list", "photodna"] });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -96,15 +100,39 @@ describe("scanPhoto", () => {
     );
     expect(JSON.parse(String(init.body))).toEqual({
       DataRepresentation: "inline",
-      Value: input.bytes.toString("base64"),
+      Value: Buffer.concat([Buffer.from("copy:"), input.bytes]).toString("base64"),
     });
+  });
+
+  it("fails closed when the image cannot be copied for PhotoDNA", async () => {
+    vi.stubEnv("PHOTODNA_SUBSCRIPTION_KEY", "k");
+    const fetchImpl = vi.fn();
+    const result = await scanPhoto(input, {
+      blockedHash: notListed,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      scanCopy: async () => null,
+    });
+    expect(result).toEqual({ error: "unreadable_image", outcome: "unavailable", scanner: "photodna" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a refused key", async () => {
+    vi.stubEnv("PHOTODNA_SUBSCRIPTION_KEY", "wrong");
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "denied" }, 401));
+    const result = await scanPhoto(input, {
+      blockedHash: notListed,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      scanCopy: copyOf,
+    });
+    expect(result).toEqual({ error: "http_401", outcome: "unavailable", scanner: "photodna" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("uses PHOTODNA_ENDPOINT when set", async () => {
     vi.stubEnv("PHOTODNA_SUBSCRIPTION_KEY", "k");
     vi.stubEnv("PHOTODNA_ENDPOINT", "https://photodna.example/Match");
     const fetchImpl = vi.fn(async () => jsonResponse(photoDnaOk(false)));
-    await scanPhoto(input, { blockedHash: notListed, fetchImpl: fetchImpl as unknown as typeof fetch });
+    await scanPhoto(input, { blockedHash: notListed, fetchImpl: fetchImpl as unknown as typeof fetch, scanCopy: copyOf });
     expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toBe(
       "https://photodna.example/Match?enhance=false",
     );
@@ -116,6 +144,7 @@ describe("scanPhoto", () => {
     const result = await scanPhoto(input, {
       blockedHash: notListed,
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      scanCopy: copyOf,
     });
     expect(result).toMatchObject({
       details: { tracking_id: "track-1" },
@@ -132,6 +161,7 @@ describe("scanPhoto", () => {
     const result = await scanPhoto(input, {
       blockedHash: notListed,
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      scanCopy: copyOf,
     });
     expect(result).toEqual({ error: "status_3004", outcome: "unavailable", scanner: "photodna" });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -143,6 +173,7 @@ describe("scanPhoto", () => {
     const result = await scanPhoto(input, {
       blockedHash: notListed,
       fetchImpl: fetchImpl as unknown as typeof fetch,
+      scanCopy: copyOf,
     });
     expect(result).toEqual({ error: "http_503", outcome: "unavailable", scanner: "photodna" });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
@@ -159,7 +190,8 @@ describe("scanPhoto", () => {
     vi.stubEnv("PHOTODNA_SUBSCRIPTION_KEY", "k");
     const fetchImpl = vi.fn(async () => jsonResponse({ Status: { Code: 3000 } }));
     expect(
-      await scanPhoto(input, { blockedHash: notListed, fetchImpl: fetchImpl as unknown as typeof fetch }),
+      await scanPhoto(input, { blockedHash: notListed,
+      scanCopy: copyOf, fetchImpl: fetchImpl as unknown as typeof fetch }),
     ).toMatchObject({ error: "invalid_response", outcome: "unavailable" });
   });
 });

@@ -49,6 +49,12 @@ MAX_SEGMENT_BYTES = 255
 MAX_DEPTH = 32
 MAX_SHARE_FILES = 10000
 THUMB_MAX_SIDE = 512
+# A thumbnail decodes the whole image first: a flat 13000 x 13000 PNG is a
+# few hundred KB on disk and 700 MB of RGBA. Above this there is no thumbnail
+# (the SPA shows the file itself).
+THUMB_MAX_PIXELS = 80_000_000
+THUMB_MAX_AGE_SECONDS = 30 * 24 * 3600
+READINESS_CACHE_SECONDS = 30
 UPLOAD_PART_MAX_AGE_SECONDS = 3600
 SHARE_URL_PREFIX = "/api/photos/shared"
 SHARE_ORDERS = ("random", "sequential", "newest", "oldest")
@@ -259,9 +265,27 @@ def status(project_id: int) -> dict[str, Any]:
     }
 
 
+# Keyed by project and location: tests move the library between cases.
+_READINESS_CACHE: dict[tuple[int, str], tuple[float, Readiness]] = {}
+_READINESS_LOCK = threading.Lock()
+
+
 def ready_root(project_id: int) -> Path:
-    """The project's folder, or 503 with the reason while it is not ready."""
-    readiness = check_ready(project_id)
+    """The project's folder, or 503 with the reason while it is not ready.
+    The probe (a write in the folder) is repeated at most every 30 s per
+    project: a page load asks for one thumbnail per photo."""
+    now = time.monotonic()
+    key = (int(project_id), str(project_root(project_id)))
+    with _READINESS_LOCK:
+        cached = _READINESS_CACHE.get(key)
+    if cached is None or now - cached[0] > READINESS_CACHE_SECONDS or not cached[1].ready:
+        readiness = check_ready(project_id)
+        with _READINESS_LOCK:
+            if len(_READINESS_CACHE) > 1000:
+                _READINESS_CACHE.clear()
+            _READINESS_CACHE[key] = (now, readiness)
+    else:
+        readiness = cached[1]
     if not readiness.ready:
         raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=readiness.message)
     return project_root(project_id)
@@ -379,6 +403,34 @@ def natural_key(name: str) -> tuple[tuple[Any, ...], str]:
     itself breaks ties so the order is total."""
     parts = _DIGITS_RE.split(name.casefold())
     return tuple(int(part) if index % 2 else part for index, part in enumerate(parts)), name
+
+
+def path_key(path: str) -> list[tuple[tuple[Any, ...], str]]:
+    """Natural order one segment at a time (a folder before its contents),
+    the cloud's comparePhotoPaths."""
+    return [natural_key(segment) for segment in path.split("/")]
+
+
+def assert_subtree_fits(source: Path, new_rel: str) -> None:
+    """A folder moved or renamed to `new_rel` takes its contents along: every
+    descendant's new path must still be within the limits, or it could never
+    be listed or addressed again (400, like the cloud)."""
+    if not source.is_dir() or source.is_symlink():
+        return
+    base_depth = new_rel.count("/") + 1
+    base_bytes = len(new_rel.encode("utf-8"))
+    for directory, dirnames, filenames in os.walk(source):
+        rel_dir = os.path.relpath(directory, source)
+        below = 0 if rel_dir == "." else rel_dir.count(os.sep) + 1
+        below_bytes = 0 if rel_dir == "." else len(rel_dir.encode("utf-8", "surrogateescape")) + 1
+        for name in dirnames + filenames:
+            depth = base_depth + below + 1
+            size = base_bytes + below_bytes + 1 + len(name.encode("utf-8", "surrogateescape"))
+            if depth > MAX_DEPTH or size > MAX_PATH_BYTES:
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_REQUEST,
+                    detail=f"Something inside would be deeper than {MAX_DEPTH} folders or longer than {MAX_PATH_BYTES} bytes",
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -634,9 +686,12 @@ def thumbnail(project_id: int, root: Path, rel: str) -> Optional[tuple[Path, str
         from PIL import Image, ImageOps
 
         with Image.open(source) as opened:
+            if opened.size[0] * opened.size[1] > THUMB_MAX_PIXELS:
+                return None
             opened.draft("RGB", (THUMB_MAX_SIDE, THUMB_MAX_SIDE))
+            # Shrink first: the transpose copies the image at its size.
+            opened.thumbnail((THUMB_MAX_SIDE, THUMB_MAX_SIDE))
             image = ImageOps.exif_transpose(opened)
-            image.thumbnail((THUMB_MAX_SIDE, THUMB_MAX_SIDE))
             if image.mode not in ("RGB", "L"):
                 rgba = image.convert("RGBA")
                 image = Image.new("RGB", rgba.size, (255, 255, 255))
@@ -682,6 +737,8 @@ def _carry_colors(source: Optional[Path], target: Path) -> None:
 
 def set_colors(root: Path, rel: str, colors: Any) -> dict[str, Any]:
     """Write or remove (None, {}) a photo's color profile."""
+    if disk_path(root, rel).is_dir():
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Colors go on a file, not a folder")
     target = existing_file(root, rel)
     if not is_playable(base_name(rel)):
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Only images can have colors")
@@ -767,17 +824,45 @@ def upload_part_path(project_id: int, upload_id: str) -> Path:
 
 
 def cleanup_stale_parts(now: Optional[float] = None) -> None:
-    cutoff = (now if now is not None else time.time()) - UPLOAD_PART_MAX_AGE_SECONDS
+    current = now if now is not None else time.time()
+    _unlink_older_than(cache_dir() / "uploads", current - UPLOAD_PART_MAX_AGE_SECONDS)
+    # Thumbnails are keyed by the photo's path and stat, so a rename, move,
+    # replace or delete leaves one behind for good. A month-old thumbnail is
+    # made again on request; an orphan is gone.
+    _THUMB_SWEEP.sweep(current)
+
+
+def _unlink_older_than(directory: Path, cutoff: float) -> None:
     try:
-        entries = list(os.scandir(cache_dir() / "uploads"))
+        entries = list(os.scandir(directory))
     except OSError:
         return
     for entry in entries:
         try:
-            if entry.stat(follow_symlinks=False).st_mtime < cutoff:
+            if entry.is_dir(follow_symlinks=False):
+                _unlink_older_than(Path(entry.path), cutoff)
+            elif entry.stat(follow_symlinks=False).st_mtime < cutoff:
                 os.unlink(entry.path)
         except OSError:
             continue
+
+
+class _ThumbSweep:
+    """At most once an hour, across all projects."""
+
+    def __init__(self) -> None:
+        self.last = 0.0
+        self.lock = threading.Lock()
+
+    def sweep(self, now: float, force: bool = False) -> None:
+        with self.lock:
+            if not force and now - self.last < 3600:
+                return
+            self.last = now
+        _unlink_older_than(cache_dir() / "thumbs", now - THUMB_MAX_AGE_SECONDS)
+
+
+_THUMB_SWEEP = _ThumbSweep()
 
 
 def write_chunk(project_id: int, upload_id: str, offset: int, chunk: bytes) -> int:
@@ -825,6 +910,11 @@ def finish_upload(
         try:
             try:
                 os.replace(part, target)
+            except FileNotFoundError:
+                # A second complete=1 for the same upload: the first took the
+                # part. The client starts over, as for any lost part.
+                _unlink_quietly(target)
+                raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="chunk_gap")
             except OSError:
                 # Another filesystem (a separately mounted project folder).
                 shutil.copyfile(part, target)
@@ -868,6 +958,7 @@ def move_paths(db: Session, project_id: int, root: Path, paths: list[str], to: s
             moved.append({"from": path, "to": path})
             continue
         new_rel, target = next(_free_rel(destination, to, base_name(path)))
+        assert_subtree_fits(source, new_rel)
         delete_shares_at_or_below(db, project_id, new_rel)
         is_file = not source.is_dir()
         os.rename(source, target)
@@ -889,6 +980,7 @@ def rename_path(db: Session, project_id: int, root: Path, path: str, name: str) 
     new_rel = validate_path(join_path(parent_path(path), name))
     if new_rel == path:
         return entry_for(root, path)
+    assert_subtree_fits(source, new_rel)
     target = disk_path(root, new_rel)
     if os.path.lexists(target):
         # A case-only rename on a case-insensitive disk finds itself.
@@ -1016,7 +1108,7 @@ def share_index(shared: SharedFolder) -> tuple[list[SharedPhoto], int]:
         photos.append(
             SharedPhoto(path=child.rel, name=child.name, file=child.path, stat=child.stat, has_colors=child.has_colors)
         )
-    photos.sort(key=lambda photo: photo.path)
+    photos.sort(key=lambda photo: path_key(photo.path))
     return photos[:MAX_SHARE_FILES], updated_at
 
 

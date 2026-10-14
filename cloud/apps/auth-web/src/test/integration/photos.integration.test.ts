@@ -827,7 +827,8 @@ describe("photo library: share links", () => {
       tokenParams(album.token),
     );
     expect(file.status).toBe(200);
-    expect(file.headers.get("cache-control")).toBe("public, max-age=300");
+    // The URL carries the token: a shared cache must not keep the bytes.
+    expect(file.headers.get("cache-control")).toBe("private, max-age=300");
     expect(Buffer.from(await file.arrayBuffer()).equals(bytes.get("Sub/a.png")!)).toBe(true);
     // ...redirected to the object's random key with one.
     cdn.base = "https://cdn.example";

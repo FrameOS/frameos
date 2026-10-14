@@ -6,6 +6,7 @@ import {
   discardPhotoUpload,
   isValidPhotoUploadId,
   maxPendingPhotoUploadsPerAccount,
+  pendingPhotoUploadBytes,
   pendingPhotoUploadCount,
   photoUploadDirectory,
   readPhotoUpload,
@@ -103,6 +104,17 @@ describe("photo upload chunks", () => {
     expect((await writePhotoUploadChunk(account, "parallel-0", 0, Buffer.from("b"))).ok).toBe(
       true,
     );
+  });
+
+  it("counts the bytes parked across accounts, within the hour", async () => {
+    const other = "1c7e5d2f-9e2a-4b68-8d1f-4a7b3c2d5e6f";
+    await writePhotoUploadChunk(account, "mine-0001", 0, Buffer.alloc(10));
+    await writePhotoUploadChunk(account, "mine-0001", 10, Buffer.alloc(5));
+    await writePhotoUploadChunk(other, "theirs-0001", 0, Buffer.alloc(7));
+    expect(await pendingPhotoUploadBytes()).toBe(22);
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await utimes(join(root, other, "theirs-0001.part"), old, old);
+    expect(await pendingPhotoUploadBytes()).toBe(15);
   });
 
   it("refuses ids and accounts that are not safe path components", async () => {

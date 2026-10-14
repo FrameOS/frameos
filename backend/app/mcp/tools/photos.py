@@ -20,6 +20,7 @@ from urllib.parse import unquote, urljoin, urlparse
 import httpx
 from fastapi import HTTPException
 
+from app.utils import photos
 from app.utils.network import assert_url_target_allowed
 
 from ..client import ToolContext
@@ -185,7 +186,7 @@ def register_photo_tools(server: McpServer, ctx: ToolContext) -> None:
         description=(
             "Add a photo to a folder of the library (missing folders are made; a taken name gets \" (2)\"), "
             "from a URL the backend downloads or from base64 bytes. The answer's entry has the real path. "
-            "For a file on your own disk, POST it to /api/photos/upload with the API token instead (docs/photos.md). "
+            "For a file on your own disk, POST it to /api/projects/{project_id}/photos/upload with the API token instead (docs/photos.md). "
             "Requires confirm=true."
         ),
         properties={
@@ -296,6 +297,10 @@ def register_photo_tools(server: McpServer, ctx: ToolContext) -> None:
     ))
 
     async def photo_share_delete(confirm: bool, token: str, project_id: int | None = None):
+        # The token is a URL path segment: anything but a share token would
+        # name another route ("../../frames/5"), so this is checked twice.
+        if not photos.valid_share_token(token):
+            raise McpInputError("token must be a pk_... share token from photo_shares_list")
         return await run(lambda: _json(api, "DELETE", f"/api/photos/shares/{token}", project_id))
 
     server.tool(Tool(

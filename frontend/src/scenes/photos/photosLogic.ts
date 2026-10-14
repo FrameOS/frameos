@@ -106,6 +106,7 @@ export interface photosLogicValues {
   selectedPaths: string[]
   selectionAnchor: string | null
   shareBusy: boolean
+  shareCopied: boolean
   shareTarget: string | null
   shareTargetShare: PhotoShare | null
   shares: PhotoShare[]
@@ -290,6 +291,9 @@ export interface photosLogicActions {
   setShareBusy: (busy: boolean) => {
     busy: boolean
   }
+  markShareCopied: () => {
+    value: true
+  }
   setViewMode: (viewMode: PhotosViewMode) => {
     viewMode: PhotosViewMode
   }
@@ -389,6 +393,15 @@ export interface photosLogicMeta {
 export type photosLogicType = MakeLogicType<photosLogicValues, photosLogicActions, Record<string, any>> &
   photosLogicMeta
 
+/**
+ * A query value as the string in the URL. kea-router's searchParams parses
+ * values: an album named "2024" arrives as a number, "true" as a boolean
+ * and "[a]" as an array, and none of those is the folder's name.
+ */
+export function rawSearchParam(key: string): string | null {
+  return new URLSearchParams(router.values.location.search).get(key)
+}
+
 export const photosLogic = kea<photosLogicType>([
   path(['src', 'scenes', 'photos', 'photosLogic']),
   actions({
@@ -436,6 +449,7 @@ export const photosLogic = kea<photosLogicType>([
     createShare: (path: string) => ({ path }),
     deleteShare: (token: string) => ({ token }),
     setShareBusy: (busy: boolean) => ({ busy }),
+    markShareCopied: true,
     showNotice: (kind: PhotosNotice['kind'], message: string) => ({ kind, message }),
     dismissNotice: true,
     openInstallPicker: (albums: string[]) => ({ albums }),
@@ -632,6 +646,15 @@ export const photosLogic = kea<photosLogicType>([
       false,
       {
         setShareBusy: (_, { busy }) => busy,
+      },
+    ],
+    // "Copied" belongs to one dialog: the next one starts over.
+    shareCopied: [
+      false,
+      {
+        markShareCopied: () => true,
+        openShare: () => false,
+        closeShare: () => false,
       },
     ],
     notice: [
@@ -983,6 +1006,9 @@ export const photosLogic = kea<photosLogicType>([
         try {
           const entry = await renamePhoto(path, trimmed)
           actions.closeRename()
+          if (values.lightboxPath === path) {
+            actions.closeLightbox()
+          }
           const parent = parentPhotoPath(path)
           // Renaming the folder you are in (or one above it) moves you along.
           if (isPhotoPathInside(values.folder, path) && values.folder) {
@@ -1005,6 +1031,9 @@ export const photosLogic = kea<photosLogicType>([
         try {
           const moved = await movePhotos(movable, to)
           actions.clearSelection()
+          if (values.lightboxPath && movable.some((path) => isPhotoPathInside(values.lightboxPath ?? '', path))) {
+            actions.closeLightbox()
+          }
           if (values.folder && movable.some((path) => isPhotoPathInside(values.folder, path))) {
             const match = moved.find((item) => isPhotoPathInside(values.folder, item.from))
             if (match) {
@@ -1095,8 +1124,8 @@ export const photosLogic = kea<photosLogicType>([
     }
   }),
   urlToAction(({ actions, values }) => ({
-    [urls.photos()]: (_, search) => {
-      const folder = typeof search.folder === 'string' ? search.folder : ''
+    [urls.photos()]: () => {
+      const folder = rawSearchParam('folder') ?? ''
       if (folder !== values.folder || !(folder in values.folderEntries)) {
         actions.setFolder(folder)
       }
@@ -1107,7 +1136,7 @@ export const photosLogic = kea<photosLogicType>([
     // same folder, as a load from the URL, keeps them.
     setFolder: ({ folder }) => {
       const search = router.values.searchParams
-      const current = typeof search.folder === 'string' ? search.folder : ''
+      const current = rawSearchParam('folder') ?? ''
       const { folder: _folder, ...others } = search
       return [
         urls.photos(),
@@ -1118,8 +1147,11 @@ export const photosLogic = kea<photosLogicType>([
   })),
   afterMount(({ actions, cache }) => {
     cache.uploadQueue = []
-    cache.activeUploads = 0
-    cache.touchedFolders = new Set<string>()
+    // An upload sent before an unmount is still counted here when it ends:
+    // starting from zero again would leave the count negative for good, and
+    // the refresh that follows the last upload would never run.
+    cache.activeUploads = typeof cache.activeUploads === 'number' ? cache.activeUploads : 0
+    cache.touchedFolders = cache.touchedFolders instanceof Set ? cache.touchedFolders : new Set<string>()
     cache.folderRequests = {}
     cache.loadedOnce = false
     actions.loadStatus()

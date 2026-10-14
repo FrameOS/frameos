@@ -11,7 +11,10 @@ layers, the same two FrameOS Cloud has (`cloud/docs/mcp.md`):
    agent can act on. It lives in `backend/app/mcp` and is, by design, a thin
    wrapper — every tool is one (occasionally two) calls to the backend's own
    routes, made in-process, so the routes remain the single place behaviour,
-   validation and auth live.
+   validation and auth live. The two exceptions are the photos tools'
+   (`photo_upload` downloads a URL before it calls the upload route, with the
+   outbound check template URLs get; `photo_album_install` is the scene route
+   added for it plus what `frame_scene_install` does).
 
 Both are managed on Settings → API tokens and MCP (`/settings#settings-developer`).
 Neither is available under Home Assistant ingress: tokens are minted behind a

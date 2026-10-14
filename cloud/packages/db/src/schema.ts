@@ -3,6 +3,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import {
   bigint,
   boolean,
+  check,
   customType,
   index,
   integer,
@@ -1873,6 +1874,7 @@ export const photoEntries = pgTable(
       table.accountId,
       table.path,
     ),
+    kindCheck: check("photo_entries_kind_check", sql`${table.kind} IN ('file', 'folder')`),
   }),
 );
 
@@ -1913,7 +1915,7 @@ export const photoScanHits = pgTable(
     }),
     accountEmail: text("account_email"),
     sha256: text("sha256").notNull(),
-    // hash_list | photodna | openai
+    // hash_list | photodna
     scanner: text("scanner").notNull(),
     details: jsonb("details"),
     clientIp: text("client_ip"),

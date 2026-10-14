@@ -578,6 +578,29 @@ async def test_move_checks_everything_first(async_client):
     assert response.status_code == 404
     response = await async_client.post("/api/photos/move", json={"paths": ["a.jpg"], "to": "../x"})
     assert response.status_code == 400
+    response = await async_client.post("/api/photos/move", json={"paths": [], "to": "Dest"})
+    assert response.status_code == 400
+    response = await async_client.post("/api/photos/delete", json={"paths": []})
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_a_folder_cannot_be_moved_where_its_contents_would_not_fit(async_client):
+    root = library(async_client)
+    deep = "/".join(["d"] * 30)
+    write(root, f"Top/{deep}/leaf.jpg", b"x")
+    write(root, "Dest/keep.txt", b"k")
+    # Top/d/.../leaf.jpg is 32 deep already; one more folder is one too many.
+    response = await async_client.post("/api/photos/move", json={"paths": ["Top"], "to": "Dest"})
+    assert response.status_code == 400
+    assert (root / "Top").is_dir() and not (root / "Dest/Top").exists()
+    response = await async_client.post("/api/photos/rename", json={"path": "Top", "name": "x" * 1010})
+    assert response.status_code == 400
+    assert (root / "Top").is_dir()
+    # A rename that keeps everything within reach still works.
+    response = await async_client.post("/api/photos/rename", json={"path": "Top", "name": "Tip"})
+    assert response.status_code == 200
+    assert (root / f"Tip/{deep}/leaf.jpg").is_file()
 
 
 @pytest.mark.asyncio
@@ -721,6 +744,16 @@ async def test_share_listing_without_a_login(async_client, no_auth_client, redis
         "colors": None,
     }
     assert body["files"][0]["content_type"] == "image/png"
+
+
+@pytest.mark.asyncio
+async def test_share_listing_is_in_natural_order_like_the_cloud(async_client, no_auth_client, redis):
+    root = library(async_client)
+    for name in ("IMG_10.jpg", "IMG_2.jpg", "img_1.jpg", "b/IMG_3.jpg", "a.jpg"):
+        write(root, f"Album/{name}", b"x")
+    token = (await share(async_client, "Album"))["token"]
+    body = (await no_auth_client.get(f"/api/photos/shared/{token}")).json()
+    assert [photo["path"] for photo in body["files"]] == ["a.jpg", "b/IMG_3.jpg", "img_1.jpg", "IMG_2.jpg", "IMG_10.jpg"]
 
 
 @pytest.mark.asyncio
@@ -890,8 +923,10 @@ async def test_colors_refuse_what_the_contract_refuses(async_client):
     assert (await set_colors(async_client, "Summer/a.jpg", [1, 2])).status_code == 400
     assert (await set_colors(async_client, "Summer/a.jpg", "bright")).status_code == 400
     assert (await set_colors(async_client, "Summer/notes.txt", {"whites": 1})).status_code == 400
-    assert (await set_colors(async_client, "Summer", {"whites": 1})).status_code == 404
+    assert (await set_colors(async_client, "Summer", {"whites": 1})).status_code == 400
     assert (await set_colors(async_client, "Summer/missing.jpg", {"whites": 1})).status_code == 404
+    # The key is required: a request that forgot it must not clear a profile.
+    assert (await async_client.post("/api/photos/colors", json={"path": "Summer/a.jpg"})).status_code == 400
     assert (await set_colors(async_client, "../a.jpg", {"whites": 1})).status_code == 400
     big = {"note": "x" * (64 * 1024)}
     assert (await set_colors(async_client, "Summer/a.jpg", big)).status_code == 413

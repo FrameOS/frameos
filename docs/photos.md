@@ -28,7 +28,8 @@ Every path is relative to the library root.
 - A segment is 1 to 255 bytes of UTF-8. It is not `.` or `..`, does not start
   with `.`, and contains no `/`, `\`, NUL or control character (below 0x20,
   and 0x7f).
-- A whole path is at most 1024 bytes and 32 segments deep.
+- A whole path is at most 1024 bytes and 32 segments deep. Moving or
+  renaming a folder checks its contents against this too (400).
 - Names are case sensitive.
 - Names starting with `.` are never listed and cannot be created. On the
   backend, files a person copies into the folder by hand (`.DS_Store`) stay
@@ -135,7 +136,9 @@ Content-Type: application/octet-stream
 - Unfinished uploads are dropped after an hour.
 - 413 over `max_upload_bytes`, 415 when `accepts` does not list the type
   (sniffed from the bytes, not the name), 507 when the quota is used up, 422
-  when a scan matched.
+  when a scan matched, 503 when a scanner could not answer. The cloud also
+  answers 429 `too_many_uploads` (16 unfinished uploads per account) and 507
+  `entry_limit_reached`.
 
 ### `GET /api/photos/thumb?path=<file>`
 
@@ -177,6 +180,9 @@ when the name is taken. Share links follow.
 
 `{"paths": ["a.jpg", "Old album"]}` → `{"deleted": 2}`. Folders go with
 everything in them, and so do the share links pointing at or below them.
+`deleted` counts the outermost paths: a path inside another one listed is
+gone with it, not counted. `paths` (here and for a move) is 1 to 10000
+paths; an empty list is a 400.
 
 ### `POST /api/photos/colors`
 
@@ -184,8 +190,9 @@ everything in them, and so do the share links pointing at or below them.
 `{"entry": Entry}`. Sets the photo's color profile (see Colors).
 `"colors": null`, or an empty object, removes it.
 
-- `path` must be a playable image (400 otherwise; 404 when it is missing).
-- `colors` must be a JSON object (400 otherwise) of at most 64 KB as JSON
+- `path` must be a playable image (400 otherwise, a folder included; 404
+  when it is missing).
+- `colors` must be present, a JSON object or `null` (400 otherwise), of at most 64 KB as JSON
   (413 otherwise). It is stored as sent: the keys are the editor's business,
   and the runtime clamps every value and ignores keys it does not know.
 - Moving or renaming the photo keeps its profile; deleting it deletes the
@@ -245,8 +252,10 @@ Installing the scene is up to the caller (the frame routes, or the MCP's
 
 No login: the token is the credential. Self-hosted these are not project
 scoped and live on the public router, the one Home Assistant exposes on port
-8989. They are rate limited per address. A deleted link, a deleted folder or a
-suspended account is a 404.
+8989. They are rate limited per address: 3600 requests an hour, which is the
+app's two requests per render at its fastest (5 s) for a couple of frames
+behind one address. A deleted link, a deleted folder or a suspended account
+is a 404.
 
 "Playable" means an image a frame can decode, by extension: `jpg`, `jpeg`,
 `png`, `gif`, `bmp`, `webp`, `qoi`, `ppm`.
@@ -274,8 +283,9 @@ suspended account is a 404.
 }
 ```
 
-Every playable file below the shared folder, by path, at most 10000. `path`
-is relative to the shared folder. `colors` is the photo's color profile or
+Every playable file below the shared folder, by path (natural order, one
+segment at a time, as the owner's listing), at most 10000. `path` is
+relative to the shared folder. `colors` is the photo's color profile or
 `null`, as in an Entry.
 
 ### `GET /api/photos/shared/{token}/photo?order=<order>&index=<n>`

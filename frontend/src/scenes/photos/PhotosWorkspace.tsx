@@ -1211,9 +1211,8 @@ function NameDialog({
 }
 
 function ShareDialog(): JSX.Element | null {
-  const { shareTarget, shareTargetShare, shareBusy, sharesLoading } = useValues(photosLogic)
-  const { closeShare, createShare, deleteShare } = useActions(photosLogic)
-  const [copied, setCopied] = useState(false)
+  const { shareTarget, shareTargetShare, shareBusy, sharesLoading, shareCopied } = useValues(photosLogic)
+  const { closeShare, createShare, deleteShare, markShareCopied } = useActions(photosLogic)
   if (shareTarget === null) {
     return null
   }
@@ -1245,12 +1244,12 @@ function ShareDialog(): JSX.Element | null {
               <button
                 type="button"
                 onClick={() => {
-                  void navigator.clipboard?.writeText(link).then(() => setCopied(true))
+                  void navigator.clipboard?.writeText(link).then(() => markShareCopied())
                 }}
                 className={clsx(toolbarButtonClassName, 'frameos-primary-action text-white')}
               >
-                {copied ? <CheckIcon className="h-4 w-4" /> : <LinkIcon className="h-4 w-4" />}
-                {copied ? 'Copied' : 'Copy'}
+                {shareCopied ? <CheckIcon className="h-4 w-4" /> : <LinkIcon className="h-4 w-4" />}
+                {shareCopied ? 'Copied' : 'Copy'}
               </button>
             </div>
             {!/^https?:\/\//.test(shareTargetShare?.url ?? '') ? (

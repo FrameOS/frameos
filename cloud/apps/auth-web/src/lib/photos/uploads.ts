@@ -10,9 +10,10 @@
 // the client starts over under a new id: the protocol is built for exactly
 // that, so a shared store would buy nothing.
 //
-// Files older than an hour are dropped (docs/photos.md), checked lazily: on
-// every new upload at most once per ten minutes, and whenever a chunk finds
-// its own file stale.
+// Files older than an hour are dropped (docs/photos.md): on every new
+// upload at most once per ten minutes, whenever a chunk finds its own file
+// stale, and every ten minutes by a timer once this module is loaded, so a
+// burst that stops still gets cleaned up.
 
 import { mkdir, readdir, readFile, rm, rmdir, stat, appendFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -23,6 +24,8 @@ export const photoUploadTtlMs = 60 * 60 * 1000;
 // a few files in parallel; a few dozen parked 20 MiB uploads would only fill
 // the disk.
 export const maxPendingPhotoUploadsPerAccount = 16;
+// And across all accounts, in bytes: the parked chunks share one disk.
+export const maxPendingPhotoUploadBytes = 2 * 1024 * 1024 * 1024;
 
 const sweepEveryMs = 10 * 60 * 1000;
 let lastSweepAt = 0;
@@ -94,6 +97,9 @@ export async function writePhotoUploadChunk(
       if ((await pendingPhotoUploadCount(accountId, now)) >= maxPendingPhotoUploadsPerAccount) {
         return { error: "too_many_uploads", ok: false };
       }
+      if ((await pendingPhotoUploadBytes(now)) >= maxPendingPhotoUploadBytes) {
+        return { error: "too_many_uploads", ok: false };
+      }
     }
     await mkdir(accountDirectory(accountId), { recursive: true });
     await writeFile(path, bytes);
@@ -145,12 +151,8 @@ export async function pendingPhotoUploadCount(accountId: string, now = Date.now(
   return count;
 }
 
-/** Drop every upload older than the hour, across all accounts. */
-export async function sweepStalePhotoUploads(now = Date.now(), force = false): Promise<void> {
-  if (!force && now - lastSweepAt < sweepEveryMs) {
-    return;
-  }
-  lastSweepAt = now;
+/** Every parked file, across all accounts, with whether it is within the hour. */
+async function* parkedFiles(now: number) {
   const root = photoUploadDirectory();
   let accounts: string[];
   try {
@@ -169,11 +171,43 @@ export async function sweepStalePhotoUploads(now = Date.now(), force = false): P
     for (const name of names) {
       const path = join(directory, name);
       const state = await fileState(path).catch(() => undefined);
-      if (state && now - state.mtimeMs > photoUploadTtlMs) {
-        await rm(path, { force: true }).catch(() => undefined);
+      if (state) {
+        yield { fresh: now - state.mtimeMs <= photoUploadTtlMs, path, size: state.size };
       }
     }
     // Only succeeds when the directory is empty, which is the point.
     await rmdir(directory).catch(() => undefined);
   }
+}
+
+/** The bytes parked across all accounts, within the hour. */
+export async function pendingPhotoUploadBytes(now = Date.now()) {
+  let total = 0;
+  for await (const file of parkedFiles(now)) {
+    if (file.fresh) {
+      total += file.size;
+    }
+  }
+  return total;
+}
+
+/** Drop every upload older than the hour, across all accounts. */
+export async function sweepStalePhotoUploads(now = Date.now(), force = false): Promise<void> {
+  if (!force && now - lastSweepAt < sweepEveryMs) {
+    return;
+  }
+  lastSweepAt = now;
+  for await (const file of parkedFiles(now)) {
+    if (!file.fresh) {
+      await rm(file.path, { force: true }).catch(() => undefined);
+    }
+  }
+}
+
+// The timer never keeps the process alive, and a sweep that fails (the
+// directory is gone) says nothing: the next chunk will.
+if (process.env.NODE_ENV === "production") {
+  setInterval(() => {
+    sweepStalePhotoUploads(Date.now(), true).catch(() => undefined);
+  }, sweepEveryMs).unref();
 }
