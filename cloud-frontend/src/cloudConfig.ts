@@ -28,6 +28,11 @@ interface CloudAppConfig {
    * account action sends a session that must re-prove its credentials. Read
    * by the shared SPA's account pages (settings/account/reauth.ts), not here. */
   cloud_reauth_url?: string
+  /** The auth origin's /login page: the signed-out store front's Sign in. */
+  cloud_login_url?: string
+  /** Whether the visitor has a session. The shell is served to signed-out
+   * visitors too (the public store); read by frontend/src/utils/cloudMode.ts. */
+  cloud_signed_in?: boolean
   cloud_theme_cookie_domain?: string
   /** Read by livePreviewLogic straight off FRAMEOS_APP_CONFIG: the wasm
    * preview's same-origin HTTP proxy (/api/store/preview-proxy). */

@@ -1,13 +1,11 @@
 import { sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
-import { renderToStaticMarkup } from "react-dom/server";
 import {
   createDb,
   storeScenes,
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import HomePage from "../../../app/store/page";
 import { GET as getBrowse } from "../../../app/api/store/browse/route";
 import { GET as getRepositoryJson } from "../../../app/api/store/repository.json/route";
 import { GET as getVersionedRepositoryJson } from "../../../app/api/store/[frameosVersion]/repository.json/route";
@@ -229,18 +227,9 @@ describe("store browse feed", () => {
       "Scene 052",
     ]);
     expect(second.hasMore).toBe(false);
-
-    // The server-rendered page carries the first batch only; the rest is the
-    // feed's job.
-    const markup = renderToStaticMarkup(
-      await HomePage({ searchParams: Promise.resolve({}) }),
-    );
-    expect(markup).toContain("Scene 000");
-    expect(markup).not.toContain("Scene 052");
-    expect(markup).toContain("Page 1 of 2");
   });
 
-  it("applies the version filter to the feed and the page", async () => {
+  it("applies the version filter to the feed", async () => {
     const accountId = await seedPublisher();
     await seedScene(accountId, { frameosVersion: "2026.9.0", name: "Nine" });
     await seedScene(accountId, { frameosVersion: "2026.10.0", name: "Ten" });
@@ -252,23 +241,9 @@ describe("store browse feed", () => {
       "Nine",
     ]);
 
-    const markup = renderToStaticMarkup(
-      await HomePage({ searchParams: Promise.resolve({ version: "2026.9.0" }) }),
-    );
-    expect(markup).toContain("Scenes for FrameOS 2026.9.0");
-    expect(markup).toContain("Nine");
-    expect(markup).not.toContain(">Ten<");
-    // The version picker offers both declared versions and keeps the choice
-    // selected, so submitting the search again preserves the filter.
-    expect(markup).toContain("FrameOS 2026.10.0");
-    expect(markup).toContain('<option value="2026.9.0" selected="">');
-    // The "Add this repository URL…" box was deliberately dropped from the
-    // store front; the per-version repository.json endpoint (covered above)
-    // is unchanged but no longer advertised here.
-    expect(markup).not.toContain("repository.json");
   });
 
-  it("ignores a malformed version instead of failing the page", async () => {
+  it("ignores a malformed version instead of failing the feed", async () => {
     const accountId = await seedPublisher();
     await seedScene(accountId, { frameosVersion: "2026.10.0", name: "Ten" });
 

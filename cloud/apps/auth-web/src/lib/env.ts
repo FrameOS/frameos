@@ -190,10 +190,11 @@ export function getHomeUrl() {
   return new URL("/home", getAccountBaseUrl()).toString();
 }
 
-// The public store front. On its own host (production: scenes.frameos.net)
-// it is the root; when the store shares an origin with the cloud app (local
-// development) the root belongs to the signed-in workspace redirect, so the
-// store front answers at /store instead (app/store/page.tsx serves both).
+// The public store front — a page of the frames workspace SPA since 2026.10
+// (app/store/route.ts, app/route.ts). On its own host (production:
+// scenes.frameos.net) it is the root; when the store shares an origin with
+// the cloud app (local development) the root belongs to the workspace's
+// home page, so the store front answers at /store instead.
 export function getStorePath() {
   return new URL(getScenesBaseUrl()).origin ===
     new URL(getCloudBaseUrl()).origin

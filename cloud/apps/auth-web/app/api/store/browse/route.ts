@@ -15,7 +15,8 @@ import { storeRoute } from "../../../../src/lib/store-cache";
 export const runtime = "nodejs";
 
 // One page of the public store listing, for the lazy feed on the store front
-// (src/components/StoreSceneFeed). Same filters and same ordering as the
+// (the store front's lazy feed, until the SPA took the page over in 2026.10;
+// still the paged listing for clients). Same filters and same ordering as the
 // server-rendered first page, so scrolling continues the list instead of
 // re-shuffling it.
 async function handleGet(request: NextRequest) {

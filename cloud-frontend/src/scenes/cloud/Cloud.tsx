@@ -11,6 +11,10 @@ import { socketLogic } from '../../../../frontend/src/scenes/socketLogic'
 import { AppsWorkspace } from '../../../../frontend/src/scenes/workspace/AppsWorkspace'
 import { FramesHome } from '../../../../frontend/src/scenes/workspace/FramesHome'
 import { CloudHome } from '../../../../frontend/src/scenes/home/CloudHome'
+import { PublicStoreFront } from '../../../../frontend/src/scenes/store/PublicStoreFront'
+import { cloudSignedIn } from '../../../../frontend/src/utils/cloudMode'
+import { urls } from '../../../../frontend/src/urls'
+import { accountNavUrls } from '../../cloudConfig'
 import { PhotosWorkspace } from '../../../../frontend/src/scenes/photos/PhotosWorkspace'
 import { Settings } from '../../../../frontend/src/scenes/settings/Settings'
 import { SceneWorkspace } from '../../../../frontend/src/scenes/workspace/SceneWorkspace'
@@ -52,6 +56,21 @@ function CloudGate({ children }: { children: ReactNode }) {
 // workspace (CloudFirstRunAddFrame, registered in main.tsx as the shared
 // frames home's first-run panel), with the rail and the frame tree around
 // it like on every other page.
+// The scene store's front: signed out it is the public store without the
+// workspace around it; signed in it is the scenes library (on the account
+// origin — the scenes host's root may be a different host).
+export function CloudStoreFront() {
+  if (cloudSignedIn()) {
+    const target = new URL(urls.scenesHome('store'), accountNavUrls().framesUrl)
+    target.search = typeof window !== 'undefined' ? window.location.search : ''
+    if (typeof window !== 'undefined') {
+      window.location.replace(target.toString())
+    }
+    return <div className="p-6 text-slate-500">Opening the scene library...</div>
+  }
+  return <PublicStoreFront />
+}
+
 // The home page behind the rail's logo: hello, the recent frames and
 // albums, the account's usage (frontend/src/scenes/home/CloudHome.tsx).
 export function CloudHomePage() {

@@ -244,6 +244,9 @@ describe("frames SPA shell", () => {
     expect(lines).toContain(
       'cloud_reauth_url: "https://frameos.net/login/reauth",',
     );
+    // The shell is served signed out too (the store front); no cookie here.
+    expect(lines).toContain("cloud_signed_in: false,");
+    expect(lines).toContain('cloud_login_url: "https://frameos.net/login",');
     // The settings are the SPA's own scene again (they were an account page
     // from 2026.9 to 2026.10); nothing to inject for them.
     expect(lines.join("\n")).not.toContain("cloud_settings_url");
@@ -284,15 +287,16 @@ describe("frames SPA shell", () => {
   });
 
   // The apps and photos pages are the SPA's, beside the /frames mount.
-  it("serves the shell at /apps, /home and /photos", async () => {
-    for (const [segment, path] of [
-      ["apps", "/apps/system/data%2Fclock"],
-      ["home", "/home"],
-      ["photos", "/photos?folder=Summer"],
+  it("serves the shell at /apps, /home, /photos and /store", async () => {
+    for (const [modulePath, path] of [
+      ["../../apps/[[...path]]/route", "/apps/system/data%2Fclock"],
+      ["../../home/[[...path]]/route", "/home"],
+      ["../../photos/[[...path]]/route", "/photos?folder=Summer"],
+      ["../../store/route", "/store?category=clocks"],
     ] as const) {
-      const { GET: get } = await import(`../../${segment}/[[...path]]/route`);
+      const { GET: get } = await import(modulePath);
       const response = await get(new NextRequest(`https://account.frameos.net${path}`));
-      expect(response.status).toBe(200);
+      expect(response.status, path).toBe(200);
       expect(response.headers.get("content-type")).toContain("text/html");
     }
   });

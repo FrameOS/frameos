@@ -12,6 +12,7 @@ import {
 } from "../../../src/lib/env";
 import { claimTokenTtlMs } from "../../../src/lib/frames";
 import { reauthPath } from "../../../src/lib/recent-auth";
+import { readSession } from "../../../src/lib/session";
 
 export const runtime = "nodejs";
 
@@ -126,7 +127,14 @@ async function enrollmentOrigin(accountOrigin: string): Promise<string> {
 
 async function appConfigLines(): Promise<string[]> {
   const accountOrigin = new URL(getAccountBaseUrl()).origin;
+  // The shell is served to signed-out visitors too (the public store front
+  // at /store and the scenes host's root): the SPA has to know, because its
+  // workspace logics call account routes that answer 401 — and apiFetch
+  // turns the first of those into a trip to /login.
+  const signedIn = Boolean(await readSession());
   return [
+    `cloud_signed_in: ${signedIn ? "true" : "false"},`,
+    `cloud_login_url: ${JSON.stringify(new URL("/login", getCloudBaseUrl()).toString())},`,
     `cloud_account_url: ${JSON.stringify(getAccountUrl())},`,
     // The fleet SPA is served from the account origin (this route).
     `cloud_frames_url: ${JSON.stringify(new URL("/frames", getAccountBaseUrl()).toString())},`,
@@ -188,9 +196,10 @@ function anchorMissing(anchor: string, purpose: string) {
 
 // SPA fallback for the cloud frames UI: every /frames/** path serves the
 // @frameos/cloud-frontend shell (copied into public/frames-app by
-// scripts/copy-frames-app-assets.mjs), and so does every /account/** path —
-// the account's settings pages are scenes of the same SPA at their old
-// addresses (app/account/[[...section]]/route.ts delegates here). The
+// scripts/copy-frames-app-assets.mjs), and so do /account/**, /apps/**,
+// /photos/**, /home and the store front (/store, and the scenes host's
+// root) — pages of the same SPA at their own addresses, whose routes
+// delegate here. The
 // bundle's static assets are root-absolute /frames-app/* references that
 // Next serves from public/ directly, so this route only ever answers with
 // the HTML shell. The SPA itself redirects to /login on 401 — the shell is

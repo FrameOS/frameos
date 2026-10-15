@@ -13,7 +13,6 @@ import {
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { imageSetForVersion } from "../../lib/store-images";
-import HomePage from "../../../app/store/page";
 import MyScenesPage from "../../../app/my-scenes/page";
 import { PATCH as adminPatchScene } from "../../../app/api/admin/scenes/[sceneId]/route";
 import { generateMetadata as generateSceneMetadata } from "../../../app/s/[slug]/page";
@@ -490,28 +489,14 @@ describe("store publish and distribution", () => {
     const [rowsAfter] = await db.select({ count: sql<number>`count(*)::int` }).from(storeImages);
     expect(rowsAfter?.count).toBe(rowsBefore?.count);
   });
-  it("offers the signed-in owner a 'My scenes' tab that lists their scenes", async () => {
+  it("lists the owner's scenes on the My scenes page", async () => {
     const { accessToken } = await linkClient(publishScopes);
     await publish(accessToken);
-
-    const signedInMarkup = renderToStaticMarkup(
-      await HomePage({ searchParams: Promise.resolve({}) }),
-    );
-    expect(signedInMarkup).toContain("My scenes");
-    expect(signedInMarkup).toContain("Public scene store");
-    // Private scenes are not on the store front itself any more.
-    expect(signedInMarkup).not.toContain("Sunrise Clock");
 
     const myScenesMarkup = renderToStaticMarkup(
       await MyScenesPage({ searchParams: Promise.resolve({}) }),
     );
     expect(myScenesMarkup).toContain("Sunrise Clock");
-
-    cookieJar.clear();
-    const anonymousMarkup = renderToStaticMarkup(
-      await HomePage({ searchParams: Promise.resolve({}) }),
-    );
-    expect(anonymousMarkup).not.toContain("My scenes");
   });
 
   it("requires the store:publish scope and a structurally valid zip", async () => {
@@ -898,11 +883,6 @@ describe("store publish and distribution", () => {
     // Nothing to show: the tiles say so and the image route is a 404.
     expect(
       renderToStaticMarkup(
-        await HomePage({ searchParams: Promise.resolve({}) }),
-      ),
-    ).toContain("No preview");
-    expect(
-      renderToStaticMarkup(
         await MyScenesPage({ searchParams: Promise.resolve({}) }),
       ),
     ).toContain("No preview");
@@ -923,11 +903,6 @@ describe("store publish and distribution", () => {
     const gallery = await registerImage(sceneId, galleryBytes);
     expect((await saveVersion(sceneId, { images: [gallery] })).status).toBe(200);
 
-    const markup = renderToStaticMarkup(
-      await HomePage({ searchParams: Promise.resolve({}) }),
-    );
-    expect(markup).not.toContain("No preview");
-    expect(markup).toContain(`/api/store/scenes/${sceneId}/image`);
     // The owner's own listing selects from store_scenes alone (no publisher
     // join), which is where a subquery once resolved against the wrong table.
     const ownMarkup = renderToStaticMarkup(

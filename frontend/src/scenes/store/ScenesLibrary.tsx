@@ -10,17 +10,24 @@ import {
   CloudIcon,
   DocumentPlusIcon,
   FolderIcon,
-  PhotoIcon,
   SparklesIcon,
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 
 import { Spinner } from '../../components/Spinner'
-import type { TemplateType } from '../../types'
 import { urls } from '../../urls'
-import { imageElementIsBlank } from '../../utils/blankImage'
 import { storeShelfForCategory } from '../../utils/storeCategories'
+import {
+  Note,
+  Pill,
+  SceneTile,
+  StoreShelves,
+  StoreTagCloud,
+  TileGrid,
+  scrollStoreToTop,
+  watchVisibleShelf,
+} from './StoreTiles'
 import {
   scenesLibraryPageLabel,
   scenesLibraryPages,
@@ -130,133 +137,6 @@ function CategoryLink({
   )
 }
 
-function TileImage({ imageUrl }: { imageUrl: string | null }): JSX.Element {
-  const [unusable, setUnusable] = useState(false)
-  useEffect(() => setUnusable(false), [imageUrl])
-  return (
-    <div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-md border border-slate-500/15 bg-[#1f2937]">
-      <PhotoIcon className="h-8 w-8 text-[#3b4757]" aria-hidden="true" />
-      {imageUrl && !unusable ? (
-        <img
-          src={imageUrl}
-          alt=""
-          loading="lazy"
-          draggable={false}
-          className="absolute inset-0 h-full w-full object-cover"
-          onError={() => setUnusable(true)}
-          onLoad={(event) => {
-            if (imageElementIsBlank(event.currentTarget)) {
-              setUnusable(true)
-            }
-          }}
-        />
-      ) : null}
-    </div>
-  )
-}
-
-function Pill({
-  children,
-  tone,
-  onClick,
-}: {
-  children: ReactNode
-  tone?: 'ok' | 'warn'
-  onClick?: () => void
-}): JSX.Element {
-  const className = clsx(
-    'frameos-inset inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4',
-    tone === 'ok' && 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700',
-    tone === 'warn' && 'border-amber-500/40 bg-amber-500/10 text-amber-700',
-    onClick && 'cursor-pointer hover:border-blue-400'
-  )
-  return onClick ? (
-    <button type="button" className={className} onClick={onClick}>
-      {children}
-    </button>
-  ) : (
-    <span className={className}>{children}</span>
-  )
-}
-
-/** One scene, as the store page draws it: small, square-ish, every fact on
- * it. The card is one link; the pills beside it are their own buttons. */
-function SceneTile({
-  template,
-  badge,
-  badgeTone,
-  showAuthor = true,
-  onTag,
-  actions,
-}: {
-  template: TemplateType
-  badge?: string
-  badgeTone?: 'ok' | 'warn'
-  showAuthor?: boolean
-  onTag?: (tag: string) => void
-  actions?: ReactNode
-}): JSX.Element {
-  const href = typeof template.url === 'string' && template.url ? template.url : null
-  const shelf = template.category ? storeShelfForCategory(template.category) : null
-  const tags = (template.tags ?? []).slice(0, 4)
-  const flags = template.flags ?? []
-  const meta = [
-    showAuthor && template.author ? `by ${template.author}` : null,
-    template.version ? `v${template.version}` : null,
-    template.frameosVersion ? `FrameOS ${template.frameosVersion}+` : null,
-  ].filter(Boolean)
-  const body = (
-    <>
-      <TileImage imageUrl={typeof template.image === 'string' ? template.image : null} />
-      <h3 className="frameos-strong text-sm font-semibold leading-tight">
-        {template.name}
-        {flags.includes('shell') ? (
-          <span
-            className="ml-1 rounded border border-amber-500/40 bg-amber-500/10 px-1 text-[10px] font-medium text-amber-700"
-            title="This scene configures apps or code that run shell commands on the frame"
-          >
-            runs shell commands
-          </span>
-        ) : null}
-      </h3>
-      {template.description ? (
-        <p className="frameos-muted line-clamp-2 text-xs leading-snug">{template.description}</p>
-      ) : null}
-    </>
-  )
-  return (
-    <div className="frameos-card flex flex-col gap-2 rounded-lg border p-2.5 transition hover:border-blue-400">
-      {href ? (
-        <a
-          href={href}
-          className="flex flex-col gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
-          {body}
-        </a>
-      ) : (
-        <div className="flex flex-col gap-2">{body}</div>
-      )}
-      {badge || shelf || tags.length > 0 ? (
-        <div className="flex flex-wrap gap-1">
-          {badge ? <Pill tone={badgeTone}>{badge}</Pill> : null}
-          {shelf ? <Pill>{shelf.title}</Pill> : null}
-          {tags.map((tag) => (
-            <Pill key={tag} onClick={onTag ? () => onTag(tag) : undefined}>
-              {tag}
-            </Pill>
-          ))}
-        </div>
-      ) : null}
-      {meta.length > 0 ? <div className="frameos-muted mt-auto text-[11px]">{meta.join(' · ')}</div> : null}
-      {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
-    </div>
-  )
-}
-
-function TileGrid({ children }: { children: ReactNode }): JSX.Element {
-  return <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(200px,1fr))]">{children}</div>
-}
-
 function PageHeader({
   title,
   description,
@@ -275,10 +155,6 @@ function PageHeader({
       {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
     </div>
   )
-}
-
-function Note({ children }: { children: ReactNode }): JSX.Element {
-  return <div className="frameos-inset rounded-xl border p-4 text-sm leading-relaxed">{children}</div>
 }
 
 function RefreshButton({ onClick, loading }: { onClick: () => void; loading: boolean }): JSX.Element {
@@ -434,16 +310,6 @@ function StoreActionCards(): JSX.Element {
   )
 }
 
-// The page scrolls inside the shell's <main> on wide screens and with the
-// window on narrow ones; both go to the top when the page changes.
-function scrollLibraryToTop(): void {
-  if (typeof document === 'undefined') {
-    return
-  }
-  document.querySelector('[data-workspace-main]')?.scrollTo({ top: 0 })
-  window.scrollTo({ top: 0 })
-}
-
 function StorePage(): JSX.Element {
   const { storeShelves, storeScenesCount, storeTagCounts, repositoriesLoading, search, category, tag } =
     useValues(scenesLibraryLogic)
@@ -457,35 +323,7 @@ function StorePage(): JSX.Element {
     if (category || tag) {
       return
     }
-    const main = document.querySelector<HTMLElement>('[data-workspace-main]')
-    const scroller: HTMLElement | Window = main && main.scrollHeight > main.clientHeight ? main : window
-    let frame = 0
-    const update = () => {
-      frame = 0
-      const sections = shelvesRef.current?.querySelectorAll<HTMLElement>('[data-shelf]') ?? []
-      const top = (scroller instanceof Window ? 0 : scroller.getBoundingClientRect().top) + 120
-      let current: string | null = null
-      for (const section of sections) {
-        if (section.getBoundingClientRect().top <= top) {
-          current = section.dataset.shelf ?? null
-        }
-      }
-      setVisibleShelf(current)
-    }
-    const onScroll = () => {
-      if (!frame) {
-        frame = window.requestAnimationFrame(update)
-      }
-    }
-    scroller.addEventListener('scroll', onScroll, { passive: true })
-    update()
-    return () => {
-      scroller.removeEventListener('scroll', onScroll)
-      if (frame) {
-        window.cancelAnimationFrame(frame)
-      }
-      setVisibleShelf(null)
-    }
+    return watchVisibleShelf(shelvesRef.current, setVisibleShelf)
   }, [category, tag, storeShelves.length, setVisibleShelf])
   const goTo = (filters: { category?: string | null; tag?: string | null }) =>
     router.actions.push(urls.scenesHome('store', { category, tag, ...filters }))
@@ -512,59 +350,24 @@ function StorePage(): JSX.Element {
             <Spinner className="h-4 w-4" />
             Loading the scene store…
           </div>
-        ) : storeShelves.length === 0 ? (
-          <Note>
-            {storeScenesCount === 0
-              ? mode === 'frameAdmin'
-                ? "The scene store could not be reached. Check the frame's connection and try again."
-                : 'The public scene store is not available right now. Check the connection to FrameOS Cloud in Settings.'
-              : search
-              ? `No store scenes match "${search}".`
-              : 'No store scenes match these filters.'}
-          </Note>
         ) : (
-          storeShelves.map(({ shelf, templates }) => (
-            <section key={shelf.slug} data-shelf={shelf.slug} className="scroll-mt-4 space-y-3">
-              {!activeShelf ? (
-                <h2 className="frameos-heading flex items-baseline gap-2 text-lg font-bold">
-                  <A href={urls.scenesHome('store', { category: shelf.slug })} className="hover:underline">
-                    {shelf.title}
-                  </A>
-                  <span className="frameos-muted text-xs font-medium">{templates.length}</span>
-                </h2>
-              ) : null}
-              <TileGrid>
-                {templates.map((template) => (
-                  <SceneTile
-                    key={template.sceneId ?? template.id ?? template.name}
-                    template={template}
-                    onTag={(value) => goTo({ tag: value.toLowerCase() })}
-                  />
-                ))}
-              </TileGrid>
-            </section>
-          ))
+          <StoreShelves
+            shelves={storeShelves}
+            activeCategory={category}
+            shelfHref={(slug) => urls.scenesHome('store', { category: slug })}
+            onTag={(value) => goTo({ tag: value.toLowerCase() })}
+            emptyMessage={
+              storeScenesCount === 0
+                ? mode === 'frameAdmin'
+                  ? "The scene store could not be reached. Check the frame's connection and try again."
+                  : 'The public scene store is not available right now. Check the connection to FrameOS Cloud in Settings.'
+                : search
+                ? `No store scenes match "${search}".`
+                : 'No store scenes match these filters.'
+            }
+          />
         )}
-        {storeTagCounts.length > 0 ? (
-          <section className="space-y-2">
-            <h2 className="frameos-heading text-lg font-bold">Tags</h2>
-            <div className="flex flex-wrap gap-1.5">
-              {storeTagCounts.map(({ tag: value, count }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => goTo({ tag: tag === value ? null : value })}
-                  className={clsx(
-                    'frameos-inset rounded-full border px-2.5 py-0.5 text-xs transition hover:border-blue-400',
-                    tag === value && 'frameos-primary-active border-transparent text-white'
-                  )}
-                >
-                  {value} <span className="opacity-60">{count}</span>
-                </button>
-              ))}
-            </div>
-          </section>
-        ) : null}
+        <StoreTagCloud tags={storeTagCounts} activeTag={tag} onTag={(value) => goTo({ tag: value })} />
       </div>
     </>
   )
@@ -716,7 +519,7 @@ export function ScenesLibraryPage(): JSX.Element {
   // A new page or filter starts at the top; the scroll position of the
   // previous one would otherwise carry over into the shell's <main>.
   useEffect(() => {
-    scrollLibraryToTop()
+    scrollStoreToTop()
   }, [page, category, tag])
   return (
     <div className="mx-auto max-w-6xl pb-16 @container">

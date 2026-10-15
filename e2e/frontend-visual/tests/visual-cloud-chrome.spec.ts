@@ -8,7 +8,7 @@ import { settleForScreenshot } from './visual-helpers'
  * Visual + e2e coverage for the shared FrameOS Cloud chrome on the Next.js
  * pages: the store front (cloud/apps/auth-web/app/page.tsx, PublicShell) and
  * the Backends page of the frames workspace SPA (/account/backends, the
- * former /account/installs), both under the same frameos-account-header and
+ * former /account/installs, now inside the workspace shell) and
  * mist/graphite palette (app/cloud-chrome.css). Dark mode is carried by the shared
  * frameos_theme cookie (app/layout.tsx renders html.theme-dark straight from
  * it, no flash) — the same cookie visual-cloud-frames-workspace.spec.ts feeds
@@ -111,18 +111,17 @@ test.describe('cloud chrome: store front and account pages @e2e', () => {
   })
 
   for (const theme of ['light', 'dark'] as const) {
-    test(`store front chrome, signed out / ${theme}`, async ({ page }) => {
+    test(`store front, signed out / ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width: 1280, height: 900 })
       await setTheme(page, theme)
-      await page.goto(`${cloudUrl}/`, { waitUntil: 'networkidle' })
+      // The store front is the frames workspace SPA's public store (2026.10):
+      // no workspace around it, a slim header with Sign in.
+      await page.goto(`${cloudUrl}/store`, { waitUntil: 'networkidle' })
 
-      await expectThemeClass(page, theme)
-      const header = page.locator('header.frameos-account-header')
-      await expect(header).toBeVisible()
-      await expect(header.getByRole('link', { name: 'Scenes', exact: true })).toBeVisible()
-      await expect(header.getByRole('link', { name: 'Sign in' })).toBeVisible()
-      // Signed out there is nothing behind the Frames link, so it is absent.
-      await expect(header.getByRole('link', { name: 'Frames', exact: true })).toHaveCount(0)
+      await expect(page.getByRole('heading', { name: 'Scene store' })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible()
+      await expect(page.locator('aside.workspace-sidebar')).toHaveCount(0)
+      await expect(page.locator('html')).toHaveAttribute('data-frameos-theme', theme)
 
       await settleForScreenshot(page)
       // Top chrome only: the scene shelves below depend on what the local
@@ -144,10 +143,9 @@ test.describe('cloud chrome: store front and account pages @e2e', () => {
       await expectThemeClass(page, theme)
       await expect(page.getByRole('heading', { name: 'Linked backends' })).toBeVisible()
       await expect(page.getByText('No linked backends yet.')).toBeVisible()
-      // The same header chrome as the store and the /frames workspace.
-      const header = page.locator('header.frameos-account-header')
-      await expect(header).toBeVisible()
-      await expect(header.getByRole('link', { name: 'Frames', exact: true })).toBeVisible()
+      // Inside the workspace shell: the rail's logo, Frames in the rail.
+      await expect(page.locator('aside a.workspace-logo-button')).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Frames', exact: true })).toBeVisible()
 
       await maskAccountEmail(page)
       await settleForScreenshot(page)
@@ -156,33 +154,20 @@ test.describe('cloud chrome: store front and account pages @e2e', () => {
     })
   }
 
-  test('store front shows the Frames link when signed in', async ({ page }) => {
+  test('the store front opens the scenes library when signed in', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await signIn(page)
     await setTheme(page, 'light')
-    await page.goto(`${cloudUrl}/`, { waitUntil: 'networkidle' })
+    await page.goto(`${cloudUrl}/store`, { waitUntil: 'networkidle' })
 
-    // The point of the header change: PublicShell now offers Frames to
-    // signed-in visitors, ordered as in AppShell (Scenes, Frames, Account).
-    const header = page.locator('header.frameos-account-header')
-    const frames = header.getByRole('link', { name: 'Frames', exact: true })
-    await expect(frames).toBeVisible()
-    await expect(frames).toHaveAttribute('href', /\/frames$/)
-    await expect(header.getByRole('link', { name: 'Account', exact: true })).toBeVisible()
-    await expect(header.getByRole('button', { name: 'Sign out' })).toBeVisible()
-
-    // A fresh account's private-scenes shelf renders its deterministic empty
-    // state above the store content.
-    await expect(page.getByRole('heading', { name: 'My private scenes' })).toBeVisible()
-    await expect(page.getByText('You do not have any private scenes yet.')).toBeVisible()
-
-    await settleForScreenshot(page)
-    await expect(page).toHaveScreenshot('store-front--signed-in--light.png', {
-      clip: { x: 0, y: 0, width: 1280, height: 320 },
-    })
+    // Signed in, the store is the scenes library inside the workspace.
+    await expect(page).toHaveURL(/\/frames\/scenes$/)
+    await expect(page.locator('aside.workspace-sidebar')).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Public scene store' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Private scenes' })).toBeVisible()
   })
 
-  test('the /frames workspace is served with the shared chrome and injected config', async ({ page }) => {
+  test('the /frames workspace is served with the injected config', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await signIn(page)
     await setTheme(page, 'dark')
@@ -195,14 +180,11 @@ test.describe('cloud chrome: store front and account pages @e2e', () => {
     expect(String(appConfig.cloud_frames_url)).toMatch(/\/frames$/)
     expect(String(appConfig.cloud_origin)).toMatch(/^https?:\/\//)
 
-    // Same header, same dark palette as the Next.js pages — carried by the
-    // same cookie. (No pixel snapshot here: the enrollment panel mints a
-    // fresh claim code per load, so the page's text is never stable.)
-    await expect(page.locator('header.frameos-account-header')).toBeVisible()
+    // Same dark palette as the Next.js pages — carried by the same cookie.
+    // (No pixel snapshot here: the enrollment panel mints a fresh claim code
+    // per load, so the page's text is never stable.)
     await expect(page.locator('html')).toHaveAttribute('data-frameos-theme', 'dark')
-    const nav = page.locator('header.frameos-account-header nav')
-    for (const link of ['Scenes', 'Frames', 'Account']) {
-      await expect(nav.getByRole('link', { name: link, exact: true })).toBeVisible()
-    }
+    await expect(page.locator('aside a.workspace-logo-button')).toBeVisible()
+    expect(appConfig.cloud_signed_in).toBe(true)
   })
 })

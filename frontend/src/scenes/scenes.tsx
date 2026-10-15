@@ -15,6 +15,8 @@ const sceneLoaders = {
   // The cloud's home page (hello, recent frames and albums, usage); the
   // self-hosted shells never route to it.
   home: () => import('./home/CloudHome'),
+  // The signed-out scene store (the cloud's /store, the scenes host's root).
+  storeFront: () => import('./store/PublicStoreFront'),
   frames: () => import('./frames/Frames'),
   frame: () => import('./frame/Frame'),
   sceneWorkspace: () => import('./workspace/SceneWorkspace'),
@@ -92,7 +94,7 @@ export function preloadSceneComponent(scene: LoadableSceneKey): void {
 export const getRoutes = () =>
   ({
     ...(getRouteBasePath() ? { [getRouteBasePath() + '/']: 'frames' } : {}),
-    ...(isCloudMode() ? { [urls.home()]: 'home' } : {}),
+    ...(isCloudMode() ? { [urls.home()]: 'home', [urls.store()]: 'storeFront', '/': 'storeFront' } : {}),
     [urls.frames()]: isInFrameAdminMode() ? 'frame' : 'frames',
     ...(isInFrameAdminMode()
       ? {}
