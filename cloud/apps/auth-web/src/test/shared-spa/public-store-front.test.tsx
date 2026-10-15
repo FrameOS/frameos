@@ -80,7 +80,7 @@ describe("the signed-out store front", () => {
   it("renders the store from the public index alone, with a way to sign in", async () => {
     render(<PublicStoreFront />);
 
-    expect(screen.getByRole("heading", { name: "Scene store" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Public scene store" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Sign in" }).getAttribute("href")).toBe(
       "https://cloud.example/login",
     );
