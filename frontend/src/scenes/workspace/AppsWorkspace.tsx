@@ -1,7 +1,7 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { router } from 'kea-router'
 import clsx from 'clsx'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import {
   ArrowLeftIcon,
   ArrowTopRightOnSquareIcon,
@@ -231,12 +231,39 @@ function systemAppOptionGroups(
   return groups
 }
 
+// The app the side panel was left through. The lists are long, so when
+// the back arrow brings the list back it scrolls that app's row into
+// view, where the eye was. Module state: it only has to outlive one
+// navigation and never needs to be observed.
+let lastOpenedAppKey: string | null = null
+
 function pushFrameAppsUrl(frame: FrameType, app: AppNodeOption | null): void {
+  if (app) {
+    lastOpenedAppKey = appOptionKey(app)
+  }
   router.actions.push(urls.apps(frame.id, app?.sceneId, app?.nodeId))
 }
 
 function pushSystemAppsUrl(keyword?: string | null): void {
+  if (keyword) {
+    lastOpenedAppKey = keyword
+  }
   router.actions.push(urls.systemApps(keyword))
+}
+
+// Scrolls the row of the app the list was left through into view, once,
+// when a list mounts; the row's own container scrolls (the side panel).
+function useScrollToLastOpenedApp(listRef: RefObject<HTMLElement | null>): void {
+  useEffect(() => {
+    const key = lastOpenedAppKey
+    if (!key || !listRef.current) {
+      return
+    }
+    const row = [...listRef.current.querySelectorAll<HTMLElement>('[data-app-key]')].find(
+      (element) => element.dataset.appKey === key
+    )
+    row?.scrollIntoView({ block: 'center' })
+  }, [listRef])
 }
 
 function SelectionSelect({
@@ -349,12 +376,26 @@ function AppListGroup({ label, children }: { label: string; children: ReactNode 
   )
 }
 
-function AppListRow({ label, detail, onClick }: { label: string; detail?: string; onClick: () => void }): JSX.Element {
+function AppListRow({
+  appKey,
+  label,
+  detail,
+  onClick,
+}: {
+  appKey: string
+  label: string
+  detail?: string
+  onClick: () => void
+}): JSX.Element {
   return (
     <button
       type="button"
+      data-app-key={appKey}
       onClick={onClick}
-      className="frameos-settings-nav-link flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      className={clsx(
+        'frameos-settings-nav-link flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        appKey === lastOpenedAppKey && 'frameos-settings-nav-link-active'
+      )}
     >
       <CubeTransparentIcon className="h-4 w-4 shrink-0 opacity-70" />
       <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -364,16 +405,19 @@ function AppListRow({ label, detail, onClick }: { label: string; detail?: string
 }
 
 function SystemAppList({ systemApps }: { systemApps: SystemAppOption[] }): JSX.Element {
+  const listRef = useRef<HTMLElement>(null)
+  useScrollToLastOpenedApp(listRef)
   if (systemApps.length === 0) {
     return <EmptyFileList label="No system apps" />
   }
   return (
-    <nav aria-label="System apps" className="space-y-4">
+    <nav ref={listRef} aria-label="System apps" className="space-y-4">
       {systemAppOptionGroups(systemApps).map((group) => (
         <AppListGroup key={group.key} label={group.label}>
           {group.options.map((option) => (
             <AppListRow
               key={option.keyword}
+              appKey={option.keyword}
               label={option.label}
               detail={option.javascript ? 'JS' : undefined}
               onClick={() => pushSystemAppsUrl(option.keyword)}
@@ -386,16 +430,19 @@ function SystemAppList({ systemApps }: { systemApps: SystemAppOption[] }): JSX.E
 }
 
 function FrameAppList({ frame, appOptions }: { frame: FrameType; appOptions: AppNodeOption[] }): JSX.Element {
+  const listRef = useRef<HTMLElement>(null)
+  useScrollToLastOpenedApp(listRef)
   if (appOptions.length === 0) {
     return <EmptyFileList label="No apps on this frame" />
   }
   return (
-    <nav aria-label="Apps" className="space-y-4">
+    <nav ref={listRef} aria-label="Apps" className="space-y-4">
       {appNodeSceneGroups(appOptions).map((group) => (
         <AppListGroup key={group.key} label={group.label}>
           {group.options.map((app) => (
             <AppListRow
               key={appOptionKey(app)}
+              appKey={appOptionKey(app)}
               label={app.label}
               detail={app.language === 'javascript' ? 'JS' : undefined}
               onClick={() => pushFrameAppsUrl(frame, app)}
