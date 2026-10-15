@@ -31,6 +31,7 @@ import {
   requestNextFramesHomeScrollTop,
   scrollFramesHomeToTop,
   workspaceLogic,
+  rememberedAppsHref,
 } from './workspaceLogic'
 import { workspaceModeForScene, type WorkspaceMode } from './workspaceModes'
 import { framesModel } from '../../models/framesModel'
@@ -439,7 +440,7 @@ export function FrameosShell({
     : urls.frames()
   const appsHref = inFrameAdminMode
     ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
-    : lastAppsHref ?? urls.appsHome()
+    : rememberedAppsHref(lastAppsHref)
   const showAiButton =
     showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && mode !== 'photos' && !!selectedFrame)
   const chatSceneId = mode === 'scenes' || mode === 'apps' ? selectedSceneId : null

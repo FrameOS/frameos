@@ -241,6 +241,22 @@ function pathFrameIdAfterToken(pathname: string, tokenizedPath: string, token: s
   return parseRouteFrameId(segment)
 }
 
+// The apps page the rail's button returns to. The remembered one is
+// persisted, and the apps routes have moved before (on the cloud from
+// /frames/apps/… to /apps/… in 2026.10): a value from an older route shape
+// would send the button to a page that redirects or 404s, so only a current
+// apps path wins over the home.
+export function rememberedAppsHref(lastAppsHref: string | null): string {
+  const current = [urls.appsHome(), urls.systemApps(), urls.apps()]
+  const isCurrent =
+    !!lastAppsHref &&
+    current.some(
+      (prefix) =>
+        lastAppsHref === prefix || lastAppsHref.startsWith(`${prefix}/`) || lastAppsHref.startsWith(`${prefix}?`)
+    )
+  return isCurrent ? lastAppsHref : urls.appsHome()
+}
+
 function frameIdFromWorkspacePath(pathname: string): FrameId | null {
   if (pathname === urls.photos()) {
     return null

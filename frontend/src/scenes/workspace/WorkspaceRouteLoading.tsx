@@ -28,6 +28,7 @@ import {
   requestNextFramesHomeScrollTop,
   scrollFramesHomeToTop,
   workspaceLogic,
+  rememberedAppsHref,
 } from './workspaceLogic'
 import { workspaceModeForSceneOrFrames, type WorkspaceMode } from './workspaceModes'
 import { photosLibraryIsAvailable } from './workspaceSurfaces'
@@ -204,7 +205,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
     : urls.frames()
   const appsHref = inFrameAdminMode
     ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
-    : lastAppsHref ?? urls.appsHome()
+    : rememberedAppsHref(lastAppsHref)
   const workspaceMainStyle = {
     '--workspace-main-offset': secondarySidebarOpen ? '480px' : '128px',
     '--workspace-sidebar-edge': secondarySidebarOpen ? '440px' : '108px',
