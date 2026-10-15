@@ -695,20 +695,24 @@ could only be changed over the console.
 
 ### Button beep
 
-A press the button task registers sounds the board's buzzer (`fos_buzzer.c`,
-2 kHz through an LEDC PWM channel) until the key is released, for a second at
-most: a tap clicks, a hold beeps. It starts from the button task the moment
-the press is queued, so the feedback does not wait for a render that may be
-30 s into a panel refresh. A press that wakes the chip from deep sleep gets a
-60 ms chirp as soon as it boots.
+A press the button task registers clicks the board's buzzer (`fos_buzzer.c`,
+a 14 ms square wave at 2 kHz through an LEDC PWM channel) and its release
+clicks again at 0.7 of that pitch, with the hold silent in between: the two
+clicks of a mechanical key, so a tap and a one-second hold both sound right
+and nothing drones (until 2026.10.15 the press tone ran until the release, a
+second at most). The down click starts from the button task the moment the
+press is queued, so the feedback does not wait for a render that may be 30 s
+into a panel refresh. A press that wakes the chip from deep sleep gets a 60 ms
+chirp as soon as it boots.
 
 Presses during a render are registered: the button task keeps polling, and
 the render task drains the queue in one go before its next pass (one render
 for the whole burst). The queue holds 64 edges, 32 press/release pairs, and a
 press is accepted only when its release also fits, so the dispatcher never
 sees a key that stays down. A press with no room is dropped, logged as
-`button:dropped`, and gets a short low buzz instead (a quarter of the press
-tone, 50 ms): it was not received.
+`button:dropped`, and gets the same two clicks from a 100 Hz base instead
+(100 Hz down, 70 Hz up, 14 ms each, a dull "no" next to the bright "yes"):
+it was not received.
 
 The pitch is `buzzer_tone_hz` (100-10000, default 2000). The pin is
 `buzzer_pin` (`-1` = none): the reTerminal E-series presets set GPIO 45 at
