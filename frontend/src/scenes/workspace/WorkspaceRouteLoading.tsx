@@ -39,6 +39,7 @@ function LoadingNavButton({
   pending,
   preloadScene,
   sidebarOpen,
+  label,
   title,
   onActiveClick,
   onInactiveClick,
@@ -49,6 +50,7 @@ function LoadingNavButton({
   pending: boolean
   preloadScene: LoadableSceneKey
   sidebarOpen: boolean
+  label: string
   title: string
   onActiveClick: () => void
   onInactiveClick?: () => void
@@ -59,49 +61,59 @@ function LoadingNavButton({
   const preload = () => preloadSceneComponent(preloadScene)
 
   return (
-    <a
-      href={resolvedHref}
-      title={title}
-      onPointerEnter={preload}
-      onFocus={preload}
-      onMouseDown={preload}
-      onClick={(event: MouseEvent<HTMLAnchorElement>) => {
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-          return
-        }
-        event.preventDefault()
-        if (active) {
-          onActiveClick()
-        } else {
-          onInactiveClick?.()
-          router.actions.push(resolvedHref)
-        }
-      }}
-      className={clsx(
-        'frameos-nav-button flex h-12 w-12 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        active
-          ? 'frameos-primary-active text-white shadow-lg'
-          : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
-      )}
-    >
-      {pending ? (
-        <Spinner
-          className="workspace-nav-spinner flex h-7 w-7 items-center justify-center"
-          color={active ? 'white' : undefined}
-        />
-      ) : active ? (
-        <>
-          {sidebarOpen ? (
-            <ChevronUpIcon className="h-7 w-7 lg:hidden" />
-          ) : (
-            <ChevronDownIcon className="h-7 w-7 lg:hidden" />
-          )}
-          <span className="hidden lg:flex">{sidebarOpen ? children : <ChevronRightIcon className="h-7 w-7" />}</span>
-        </>
-      ) : (
-        children
-      )}
-    </a>
+    <div className="flex flex-col items-center">
+      <a
+        href={resolvedHref}
+        title={title}
+        onPointerEnter={preload}
+        onFocus={preload}
+        onMouseDown={preload}
+        onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+            return
+          }
+          event.preventDefault()
+          if (active) {
+            onActiveClick()
+          } else {
+            onInactiveClick?.()
+            router.actions.push(resolvedHref)
+          }
+        }}
+        className={clsx(
+          'frameos-nav-button flex h-12 w-12 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+          active
+            ? 'frameos-primary-active text-white shadow-lg'
+            : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
+        )}
+      >
+        {pending ? (
+          <Spinner
+            className="workspace-nav-spinner flex h-7 w-7 items-center justify-center"
+            color={active ? 'white' : undefined}
+          />
+        ) : active ? (
+          <>
+            {sidebarOpen ? (
+              <ChevronUpIcon className="h-7 w-7 lg:hidden" />
+            ) : (
+              <ChevronDownIcon className="h-7 w-7 lg:hidden" />
+            )}
+            <span className="hidden lg:flex">{sidebarOpen ? children : <ChevronRightIcon className="h-7 w-7" />}</span>
+          </>
+        ) : (
+          children
+        )}
+      </a>
+      <span
+        className={clsx(
+          'frameos-nav-label mt-1 hidden text-[10px] font-medium leading-none lg:block',
+          active && 'frameos-nav-label-active'
+        )}
+      >
+        {label}
+      </span>
+    </div>
   )
 }
 
@@ -192,7 +204,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
   const mode = workspaceModeForSceneOrFrames(scene)
   const spinnerMode = useDelayedInitialSpinnerMode(mode)
   const inFrameAdminMode = isInFrameAdminMode()
-  const homeHref = inFrameAdminMode ? urls.frameControl() : urls.frames()
+  const homeHref = inFrameAdminMode ? urls.frameControl() : urls.home()
   const scenesHref = selectedFrame
     ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined)
     : inFrameAdminMode
@@ -231,37 +243,40 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
             secondarySidebarOpen ? 'border-r border-slate-200/80' : 'max-lg:border-r max-lg:border-slate-200/80'
           )}
         >
-          {/* The cloud header already shows the FrameOS Cloud logo; the rail one would duplicate it. */}
-          {!isCloudMode() ? (
-            <a
-              href={homeHref}
-              title={inFrameAdminMode ? 'Frame' : 'Frames home'}
-              onPointerEnter={preloadHome}
-              onFocus={preloadHome}
-              onMouseDown={preloadHome}
-              onClick={(event: MouseEvent<HTMLAnchorElement>) => {
-                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-                  return
-                }
-                event.preventDefault()
-                if (inFrameAdminMode) {
-                  router.actions.push(homeHref)
-                  return
-                }
-                requestNextFramesHomeScrollTop()
-                if (mode === 'frames') {
-                  scrollFramesHomeToTop('smooth', false)
-                } else {
-                  router.actions.push(homeHref)
-                  scrollFramesHomeToTop()
-                }
-              }}
-              className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
+          <a
+            href={homeHref}
+            title={inFrameAdminMode ? 'Frame' : isCloudMode() ? 'Home' : 'Frames home'}
+            onPointerEnter={preloadHome}
+            onFocus={preloadHome}
+            onMouseDown={preloadHome}
+            onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                return
+              }
+              event.preventDefault()
+              if (inFrameAdminMode) {
+                router.actions.push(homeHref)
+                return
+              }
+              requestNextFramesHomeScrollTop()
+              if (isCloudMode()) {
+                router.actions.push(homeHref)
+              } else if (mode === 'frames') {
+                scrollFramesHomeToTop('smooth', false)
+              } else {
+                router.actions.push(homeHref)
+                scrollFramesHomeToTop()
+              }
+            }}
+            className="workspace-logo-button frameos-icon-button mb-6 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            {isCloudMode() ? (
+              <img alt="" src={theme === 'dark' ? '/logo-dark.svg' : '/logo-light.svg'} className="h-7 w-auto" />
+            ) : (
               <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-auto" />
-            </a>
-          ) : null}
-          <nav className="flex flex-1 flex-col items-center gap-4">
+            )}
+          </a>
+          <nav className="flex flex-1 flex-col items-center gap-2 lg:gap-3">
             {!inFrameAdminMode ? (
               <LoadingNavButton
                 active={mode === 'frames'}
@@ -269,6 +284,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
                 pending={spinnerMode === 'frames'}
                 preloadScene="frames"
                 sidebarOpen={secondarySidebarOpen}
+                label="Frames"
                 title="Frames home"
                 onActiveClick={() => {
                   requestNextFramesHomeScrollTop()
@@ -285,6 +301,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
               pending={spinnerMode === 'frame'}
               preloadScene="frames"
               sidebarOpen={secondarySidebarOpen}
+              label="Frame"
               title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
               onActiveClick={() => router.actions.push(frameHref)}
             >
@@ -296,6 +313,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
               pending={spinnerMode === 'scenes'}
               preloadScene="sceneWorkspace"
               sidebarOpen={secondarySidebarOpen}
+              label="Scenes"
               title={secondarySidebarOpen && mode === 'scenes' ? 'Hide scenes panel' : 'Scenes'}
               onActiveClick={toggleSecondarySidebar}
             >
@@ -307,6 +325,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
               pending={spinnerMode === 'apps'}
               preloadScene="appsWorkspace"
               sidebarOpen={secondarySidebarOpen}
+              label="Apps"
               title={secondarySidebarOpen && mode === 'apps' ? 'Hide apps panel' : 'Apps'}
               onActiveClick={toggleSecondarySidebar}
             >
@@ -319,6 +338,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
                 pending={spinnerMode === 'photos'}
                 preloadScene="photosWorkspace"
                 sidebarOpen={secondarySidebarOpen}
+                label="Photos"
                 title={secondarySidebarOpen && mode === 'photos' ? 'Hide photos panel' : 'Photos'}
                 onActiveClick={toggleSecondarySidebar}
               >
@@ -340,6 +360,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
             pending={spinnerMode === 'settings'}
             preloadScene="settings"
             sidebarOpen={secondarySidebarOpen}
+            label="Settings"
             title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
             onActiveClick={toggleSecondarySidebar}
           >

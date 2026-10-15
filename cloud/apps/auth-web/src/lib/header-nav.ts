@@ -12,7 +12,7 @@ export function activeHeaderSection(
   // The frames workspace SPA: its mount, and the apps and photos pages it
   // serves beside it.
   if (
-    ["/frames", "/apps", "/photos"].some(
+    ["/frames", "/home", "/apps", "/photos"].some(
       (prefix) => path === prefix || path.startsWith(`${prefix}/`),
     )
   ) {

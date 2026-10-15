@@ -9,6 +9,7 @@ describe("activeHeaderSection", () => {
     expect(activeHeaderSection("/apps/system/data%2Fx")).toBe("frames");
     expect(activeHeaderSection("/apps/frames/abc")).toBe("frames");
     expect(activeHeaderSection("/photos")).toBe("frames");
+    expect(activeHeaderSection("/home")).toBe("frames");
   });
 
   it("maps account and admin subpages", () => {

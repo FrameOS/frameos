@@ -5,6 +5,7 @@ import { NotFound } from '../../../frontend/src/scenes/NotFound'
 
 export const scenes = {
   error404: NotFound,
+  home: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudHomePage }))),
   frames: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudFramesHome }))),
   frame: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudFrame }))),
   sceneWorkspace: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudSceneWorkspace }))),
@@ -29,6 +30,7 @@ export const scenes = {
 // this shell at /account/** too (app/account/[[...section]]/route.ts).
 export const getRoutes = () =>
   ({
+    [urls.home()]: 'home',
     [urls.frames()]: 'frames',
     [urls.frames() + '/']: 'frames',
     [urls.settings()]: 'settings',

@@ -10,6 +10,7 @@ import { Frame } from '../../../../frontend/src/scenes/frame/Frame'
 import { socketLogic } from '../../../../frontend/src/scenes/socketLogic'
 import { AppsWorkspace } from '../../../../frontend/src/scenes/workspace/AppsWorkspace'
 import { FramesHome } from '../../../../frontend/src/scenes/workspace/FramesHome'
+import { CloudHome } from '../../../../frontend/src/scenes/home/CloudHome'
 import { PhotosWorkspace } from '../../../../frontend/src/scenes/photos/PhotosWorkspace'
 import { Settings } from '../../../../frontend/src/scenes/settings/Settings'
 import { SceneWorkspace } from '../../../../frontend/src/scenes/workspace/SceneWorkspace'
@@ -51,6 +52,16 @@ function CloudGate({ children }: { children: ReactNode }) {
 // workspace (CloudFirstRunAddFrame, registered in main.tsx as the shared
 // frames home's first-run panel), with the rail and the frame tree around
 // it like on every other page.
+// The home page behind the rail's logo: hello, the recent frames and
+// albums, the account's usage (frontend/src/scenes/home/CloudHome.tsx).
+export function CloudHomePage() {
+  return (
+    <CloudGate>
+      <CloudHome />
+    </CloudGate>
+  )
+}
+
 export function CloudFramesHome() {
   return (
     <CloudGate>

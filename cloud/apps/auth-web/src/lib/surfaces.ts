@@ -27,6 +27,7 @@ const accountPagePrefixes = [
   "/apps",
   "/device",
   "/frames",
+  "/home",
   "/photos",
 ] as const;
 // The clean split-host spellings the account sections had until 2026.10
@@ -141,11 +142,11 @@ export function resolveSurfaceRoute(
       return redirectTo(requestUrl, scenes, myScenesPath);
     }
     if (pathname === "/") {
-      // With the account surface on this host, the root is the frames
-      // workspace; its own sign-in gate handles signed-out visitors.
+      // With the account surface on this host, the root is the workspace's
+      // home page; its own sign-in gate handles signed-out visitors.
       // Otherwise the cloud host is only the login door.
       return accountIsCloud
-        ? redirectTo(requestUrl, account, "/frames")
+        ? redirectTo(requestUrl, account, "/home")
         : redirectTo(requestUrl, cloud, "/login");
     }
     if (matchesAny(pathname, accountPagePrefixes)) {
@@ -191,7 +192,7 @@ export function resolveSurfaceRoute(
       return redirectTo(requestUrl, scenes, myScenesPath);
     }
     if (pathname === "/") {
-      return redirectTo(requestUrl, account, "/frames");
+      return redirectTo(requestUrl, account, "/home");
     }
     if (pathMatchesPrefix(pathname, "/account")) {
       // getAccountPath keeps some paths as-is — serve those directly instead

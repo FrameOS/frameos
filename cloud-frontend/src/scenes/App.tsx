@@ -1,7 +1,6 @@
 import { lazy, type ComponentType, type LazyExoticComponent, Suspense } from 'react'
 import { useValues } from 'kea'
 
-import { AccountHeader } from '../components/AccountHeader'
 import { sceneLogic } from './sceneLogic'
 import { scenes } from './scenes'
 
@@ -32,12 +31,12 @@ const ConfirmDialog = lazy(() =>
   }))
 )
 
-// Layout contract (see .frameos-cloud-app in src/index.css): the account
-// header is persistent chrome that never scrolls away and never re-mounts per
-// scene, and the workspace shell below it owns everything that is left of the
-// viewport. The shell brings its own scrolling (a fixed rail, fixed drawers,
-// a scrolling <main>), so this wrapper must not add a second, page-level
-// scrollbar — that is what would break the drawers' sizing.
+// Layout contract (see .frameos-cloud-app in src/index.css): the workspace
+// shell owns the whole viewport — the cloud header it used to sit under is
+// gone since 2026.10; the rail's logo opens the home page and the settings
+// panel holds Sign out. The shell brings its own scrolling (a fixed rail,
+// fixed drawers, a scrolling <main>), so this wrapper must not add a second,
+// page-level scrollbar — that is what would break the drawers' sizing.
 export function App(): JSX.Element {
   const { scene, params } = useValues(sceneLogic)
   const SceneComponent: ComponentType<any> | LazyExoticComponent<any> =
@@ -45,7 +44,6 @@ export function App(): JSX.Element {
 
   return (
     <div className="frameos-cloud-app">
-      <AccountHeader />
       <div className="frameos-cloud-app__shell">
         <Suspense fallback={<div />}>
           <SceneComponent {...params} />

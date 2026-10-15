@@ -86,6 +86,7 @@ function NavButton({
   preloadScene,
   sidebarOpen,
   panelAvailable,
+  label,
   title,
   onActiveClick,
   onInactiveClick,
@@ -97,6 +98,8 @@ function NavButton({
   pending: boolean
   preloadScene: LoadableSceneKey
   sidebarOpen: boolean
+  /** The feature's name under the icon (only where the rail is tall). */
+  label: string
   /** False when the page has no second level: the current button keeps its
    * icon (there is no panel to point at) and a click on it does nothing. */
   panelAvailable: boolean
@@ -110,51 +113,61 @@ function NavButton({
   const preload = () => preloadSceneComponent(preloadScene)
 
   return (
-    <a
-      href={resolvedHref}
-      title={title}
-      onPointerEnter={preload}
-      onFocus={preload}
-      onMouseDown={preload}
-      onClick={(event: MouseEvent<HTMLAnchorElement>) => {
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-          return
-        }
-        event.preventDefault()
-        if (current) {
-          if (panelAvailable) {
-            onActiveClick()
+    <div className="flex flex-col items-center">
+      <a
+        href={resolvedHref}
+        title={title}
+        onPointerEnter={preload}
+        onFocus={preload}
+        onMouseDown={preload}
+        onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+            return
           }
-        } else {
-          onInactiveClick()
-          router.actions.push(resolvedHref)
-        }
-      }}
-      className={clsx(
-        'frameos-nav-button flex h-12 w-12 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        active
-          ? 'frameos-primary-active text-white shadow-lg'
-          : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
-      )}
-    >
-      {pending ? (
-        <Spinner
-          className="workspace-nav-spinner flex h-7 w-7 items-center justify-center"
-          color={active ? 'white' : undefined}
-        />
-      ) : active && panelAvailable ? (
-        <>
-          {sidebarOpen ? (
-            <ChevronUpIcon className="h-7 w-7 lg:hidden" />
-          ) : (
-            <ChevronDownIcon className="h-7 w-7 lg:hidden" />
-          )}
-          <span className="hidden lg:flex">{sidebarOpen ? children : <ChevronRightIcon className="h-7 w-7" />}</span>
-        </>
-      ) : (
-        children
-      )}
-    </a>
+          event.preventDefault()
+          if (current) {
+            if (panelAvailable) {
+              onActiveClick()
+            }
+          } else {
+            onInactiveClick()
+            router.actions.push(resolvedHref)
+          }
+        }}
+        className={clsx(
+          'frameos-nav-button flex h-12 w-12 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+          active
+            ? 'frameos-primary-active text-white shadow-lg'
+            : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
+        )}
+      >
+        {pending ? (
+          <Spinner
+            className="workspace-nav-spinner flex h-7 w-7 items-center justify-center"
+            color={active ? 'white' : undefined}
+          />
+        ) : active && panelAvailable ? (
+          <>
+            {sidebarOpen ? (
+              <ChevronUpIcon className="h-7 w-7 lg:hidden" />
+            ) : (
+              <ChevronDownIcon className="h-7 w-7 lg:hidden" />
+            )}
+            <span className="hidden lg:flex">{sidebarOpen ? children : <ChevronRightIcon className="h-7 w-7" />}</span>
+          </>
+        ) : (
+          children
+        )}
+      </a>
+      <span
+        className={clsx(
+          'frameos-nav-label mt-1 hidden text-[10px] font-medium leading-none lg:block',
+          active && 'frameos-nav-label-active'
+        )}
+      >
+        {label}
+      </span>
+    </div>
   )
 }
 
@@ -427,7 +440,7 @@ export function FrameosShell({
   // IS one frame and always has it). framesEverLoaded, not an empty map: the
   // map is empty during the first load too.
   const showFrameButton = inFrameAdminMode || !framesEverLoaded || Object.keys(frames).length > 0
-  const homeHref = inFrameAdminMode ? urls.frameControl() : urls.frames()
+  const homeHref = inFrameAdminMode ? urls.frameControl() : urls.home()
   const scenesHref = selectedFrame
     ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined)
     : inFrameAdminMode
@@ -442,7 +455,8 @@ export function FrameosShell({
     ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
     : rememberedAppsHref(lastAppsHref)
   const showAiButton =
-    showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && mode !== 'photos' && !!selectedFrame)
+    showAiButtonProp ??
+    (mode !== 'home' && mode !== 'frames' && mode !== 'settings' && mode !== 'photos' && !!selectedFrame)
   const chatSceneId = mode === 'scenes' || mode === 'apps' ? selectedSceneId : null
   const chatDrawerIsOpen = !!chatDrawerSelection
   // Carried in the selection (not read off the URL): the open-echo through
@@ -489,7 +503,7 @@ export function FrameosShell({
       />
     ) : null
   const unsavedHeaderButton =
-    selectedFrame && mode !== 'frames' && mode !== 'settings' && mode !== 'photos' ? (
+    selectedFrame && mode !== 'home' && mode !== 'frames' && mode !== 'settings' && mode !== 'photos' ? (
       <FrameStatusHeaderButton frameId={selectedFrame.id} />
     ) : null
   const workspaceMainStyle = {
@@ -499,7 +513,7 @@ export function FrameosShell({
   const { activeMode, pendingMode } = useDelayedPendingMode(mode)
   const resolvedBrowserTitle =
     browserTitle === null ? DEFAULT_BROWSER_TITLE : `${browserTitle ?? title} · ${DEFAULT_BROWSER_TITLE}`
-  const preloadHome = () => preloadSceneComponent('frames')
+  const preloadHome = () => preloadSceneComponent(isCloudMode() ? 'home' : 'frames')
   const prepareFirstLevelNavigation = () => {
     closeTemplateDrawer()
     closeScheduleDrawer()
@@ -534,39 +548,50 @@ export function FrameosShell({
             secondaryPanelOpen ? 'border-r border-slate-200/80' : 'max-lg:border-r max-lg:border-slate-200/80'
           )}
         >
-          {/* The cloud header already shows the FrameOS Cloud logo; the rail one would duplicate it. */}
-          {!isCloudMode() ? (
-            <a
-              href={homeHref}
-              title={inFrameAdminMode ? 'Frame' : 'Frames home'}
-              onPointerEnter={preloadHome}
-              onFocus={preloadHome}
-              onMouseDown={preloadHome}
-              onClick={(event: MouseEvent<HTMLAnchorElement>) => {
-                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-                  return
-                }
-                event.preventDefault()
-                if (inFrameAdminMode) {
-                  prepareFirstLevelNavigation()
-                  router.actions.push(homeHref)
-                  return
-                }
-                requestNextFramesHomeScrollTop()
+          {/* The logo is the way home: the cloud's home page, the frames home
+              (or the one frame) elsewhere. */}
+          <a
+            href={homeHref}
+            title={inFrameAdminMode ? 'Frame' : isCloudMode() ? 'Home' : 'Frames home'}
+            onPointerEnter={preloadHome}
+            onFocus={preloadHome}
+            onMouseDown={preloadHome}
+            onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                return
+              }
+              event.preventDefault()
+              if (inFrameAdminMode) {
                 prepareFirstLevelNavigation()
-                if (mode === 'frames') {
-                  scrollFramesHomeToTop('smooth', false)
-                } else {
+                router.actions.push(homeHref)
+                return
+              }
+              requestNextFramesHomeScrollTop()
+              prepareFirstLevelNavigation()
+              if (isCloudMode()) {
+                if (mode !== 'home') {
                   router.actions.push(homeHref)
-                  scrollFramesHomeToTop()
                 }
-              }}
-              className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
+              } else if (mode === 'frames') {
+                scrollFramesHomeToTop('smooth', false)
+              } else {
+                router.actions.push(homeHref)
+                scrollFramesHomeToTop()
+              }
+            }}
+            className={clsx(
+              'workspace-logo-button frameos-icon-button mb-6 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              mode === 'home' && 'frameos-nav-logo-current'
+            )}
+          >
+            {isCloudMode() ? (
+              // The cloud's own mark (served from the Next app's public root).
+              <img alt="" src={theme === 'dark' ? '/logo-dark.svg' : '/logo-light.svg'} className="h-7 w-auto" />
+            ) : (
               <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-auto" />
-            </a>
-          ) : null}
-          <nav className="flex flex-1 flex-col items-center gap-4">
+            )}
+          </a>
+          <nav className="flex flex-1 flex-col items-center gap-2 lg:gap-3">
             {!inFrameAdminMode ? (
               <NavButton
                 active={activeMode === 'frames'}
@@ -576,6 +601,7 @@ export function FrameosShell({
                 preloadScene="frames"
                 sidebarOpen={secondaryPanelOpen}
                 panelAvailable={tree !== null}
+                label="Frames"
                 title={secondaryPanelOpen && mode === 'frames' ? 'Hide frames panel' : 'Frames home'}
                 onActiveClick={() => {
                   requestNextFramesHomeScrollTop()
@@ -599,6 +625,7 @@ export function FrameosShell({
                 preloadScene="frames"
                 sidebarOpen={secondaryPanelOpen}
                 panelAvailable={tree !== null}
+                label="Frame"
                 title={secondaryPanelOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
                 onActiveClick={() => {
                   prepareFirstLevelNavigation()
@@ -617,6 +644,7 @@ export function FrameosShell({
               preloadScene="sceneWorkspace"
               sidebarOpen={secondaryPanelOpen}
               panelAvailable={tree !== null}
+              label="Scenes"
               title={secondaryPanelOpen && mode === 'scenes' ? 'Hide scenes panel' : 'Scenes'}
               onActiveClick={toggleSecondarySidebar}
               onInactiveClick={prepareFirstLevelNavigation}
@@ -631,6 +659,7 @@ export function FrameosShell({
               preloadScene="appsWorkspace"
               sidebarOpen={secondaryPanelOpen}
               panelAvailable={tree !== null}
+              label="Apps"
               title={secondaryPanelOpen && mode === 'apps' ? 'Hide apps panel' : 'Apps'}
               onActiveClick={toggleSecondarySidebar}
               onInactiveClick={prepareFirstLevelNavigation}
@@ -646,6 +675,7 @@ export function FrameosShell({
                 preloadScene="photosWorkspace"
                 sidebarOpen={secondaryPanelOpen}
                 panelAvailable={tree !== null}
+                label="Photos"
                 title={secondaryPanelOpen && mode === 'photos' ? 'Hide photos panel' : 'Photos'}
                 onActiveClick={toggleSecondarySidebar}
                 onInactiveClick={prepareFirstLevelNavigation}
@@ -671,6 +701,7 @@ export function FrameosShell({
             preloadScene="settings"
             sidebarOpen={secondaryPanelOpen}
             panelAvailable={tree !== null}
+            label="Settings"
             title={secondaryPanelOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
             onActiveClick={toggleSecondarySidebar}
             onInactiveClick={prepareFirstLevelNavigation}

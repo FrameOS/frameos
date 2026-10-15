@@ -184,6 +184,12 @@ export function getFramesUrl() {
   return new URL("/frames", getAccountBaseUrl()).toString();
 }
 
+// The SPA's home page (app/home/[[...path]]): where the root of the cloud
+// host sends a visitor, and what the store's root falls back to in dev.
+export function getHomeUrl() {
+  return new URL("/home", getAccountBaseUrl()).toString();
+}
+
 // The public store front. On its own host (production: scenes.frameos.net)
 // it is the root; when the store shares an origin with the cloud app (local
 // development) the root belongs to the signed-in workspace redirect, so the

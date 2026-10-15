@@ -82,7 +82,17 @@ export interface AiUsage {
   turns: AiTurn[]
 }
 
+export interface UsageAccount {
+  created_at: string
+  email: string
+  id: string
+  is_superadmin: boolean
+  name: string | null
+}
+
 export interface UsageResponse {
+  /** The signed-in account (the home page's greeting). */
+  account?: UsageAccount
   /** Where to ask for more; null when the deployment has no support address. */
   support_email: string | null
   usage: AccountUsage
@@ -127,12 +137,14 @@ export interface usageLogicActions {
   }
   loadUsageSuccess: (
     usageResponse: {
+      account: UsageAccount | undefined
       support_email: string | null
       usage: AccountUsage
     } | null,
     payload?: any
   ) => {
     usageResponse: {
+      account: UsageAccount | undefined
       support_email: string | null
       usage: AccountUsage
     } | null
@@ -172,11 +184,15 @@ export const usageLogic = kea<usageLogicType>([
           if (!response.ok) {
             throw new Error('Failed to load the account usage')
           }
-          const payload = (await response.json()) as { usage?: AccountUsage; support_email?: string | null }
+          const payload = (await response.json()) as {
+            account?: UsageAccount
+            usage?: AccountUsage
+            support_email?: string | null
+          }
           if (!payload.usage) {
             return null
           }
-          return { support_email: payload.support_email ?? null, usage: payload.usage }
+          return { account: payload.account, support_email: payload.support_email ?? null, usage: payload.usage }
         },
       },
     ],

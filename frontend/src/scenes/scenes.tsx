@@ -12,6 +12,9 @@ export type SceneComponent = ComponentType<Record<string, any>>
 export const Error404 = NotFound
 
 const sceneLoaders = {
+  // The cloud's home page (hello, recent frames and albums, usage); the
+  // self-hosted shells never route to it.
+  home: () => import('./home/CloudHome'),
   frames: () => import('./frames/Frames'),
   frame: () => import('./frame/Frame'),
   sceneWorkspace: () => import('./workspace/SceneWorkspace'),
@@ -89,6 +92,7 @@ export function preloadSceneComponent(scene: LoadableSceneKey): void {
 export const getRoutes = () =>
   ({
     ...(getRouteBasePath() ? { [getRouteBasePath() + '/']: 'frames' } : {}),
+    ...(isCloudMode() ? { [urls.home()]: 'home' } : {}),
     [urls.frames()]: isInFrameAdminMode() ? 'frame' : 'frames',
     ...(isInFrameAdminMode()
       ? {}

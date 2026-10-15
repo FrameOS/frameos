@@ -1202,6 +1202,26 @@ html[data-frameos-theme='dark'] .frameos-checkbox {
   color: #b91c1c;
 }
 
+/* The feature's name under each rail icon (tall rail only). */
+.frameos-nav-label {
+  color: #64748b;
+}
+.frameos-nav-label-active {
+  color: #0f172a;
+}
+.frameos-theme-dark .frameos-nav-label {
+  color: #94a3b8;
+}
+.frameos-theme-dark .frameos-nav-label-active {
+  color: #f8fafc;
+}
+.frameos-nav-logo-current {
+  background: rgba(15, 23, 42, 0.06);
+}
+.frameos-theme-dark .frameos-nav-logo-current {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .frameos-theme-dark .frameos-nav-button:not(.frameos-primary-active),
 html[data-frameos-theme='dark'] .frameos-secondary-button,
 .frameos-theme-dark .frameos-icon-button,

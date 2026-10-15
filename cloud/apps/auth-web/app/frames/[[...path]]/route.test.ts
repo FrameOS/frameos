@@ -284,9 +284,10 @@ describe("frames SPA shell", () => {
   });
 
   // The apps and photos pages are the SPA's, beside the /frames mount.
-  it("serves the shell at /apps and /photos", async () => {
+  it("serves the shell at /apps, /home and /photos", async () => {
     for (const [segment, path] of [
       ["apps", "/apps/system/data%2Fclock"],
+      ["home", "/home"],
       ["photos", "/photos?folder=Summer"],
     ] as const) {
       const { GET: get } = await import(`../../${segment}/[[...path]]/route`);

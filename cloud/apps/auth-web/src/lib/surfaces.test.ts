@@ -163,7 +163,7 @@ describe("surface routing", () => {
     }
     expectRoute("https://account.frameos.net/", {
       kind: "redirect",
-      url: "https://account.frameos.net/frames",
+      url: "https://account.frameos.net/home",
     });
     // The query rides along: a filtered backups bookmark stays filtered.
     expectRoute("https://account.frameos.net/backups?kind=frames", {
@@ -175,10 +175,10 @@ describe("surface routing", () => {
   it("serves the account surface on the cloud host when the origins merge", () => {
     configureMergedOrigins();
 
-    // Root is the frames workspace; its own gate handles signed-out.
+    // Root is the workspace's home page; its own gate handles signed-out.
     expectRoute("https://cloud.frameos.net/", {
       kind: "redirect",
-      url: "https://cloud.frameos.net/frames",
+      url: "https://cloud.frameos.net/home",
     });
     // Renamed sections redirect to their page on the same host.
     expectRoute("https://cloud.frameos.net/account/installs", {
@@ -214,6 +214,7 @@ describe("surface routing", () => {
       "/account/developer",
       "/apps",
       "/apps/system/data%2Fclock",
+      "/home",
       "/photos",
       "/admin/scenes",
       "/device",

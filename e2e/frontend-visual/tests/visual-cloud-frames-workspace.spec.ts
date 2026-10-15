@@ -48,14 +48,10 @@ test.describe('cloud /frames workspace @e2e', () => {
         await expect(page.getByRole('button', { name: title })).toBeVisible()
       }
 
-      // The shared cloud chrome: same header classes as the Next.js pages.
-      const header = page.locator('header.frameos-account-header')
-      await expect(header).toBeVisible()
-      for (const link of ['Scenes', 'Frames', 'Account']) {
-        await expect(header.getByRole('link', { name: link, exact: true })).toBeVisible()
-      }
-      // Sign out moved to the bottom of the settings side panel (2026.10).
-      await expect(header.getByRole('button', { name: 'Sign out' })).toHaveCount(0)
+      // No cloud header above the workspace any more (2026.10): the rail's
+      // logo is the way home and the settings panel holds Sign out.
+      await expect(page.locator('header.frameos-account-header')).toHaveCount(0)
+      await expect(page.locator('aside a.workspace-logo-button')).toBeVisible()
 
       // The theme signal the two surfaces share.
       await expect(page.locator('html')).toHaveAttribute('data-frameos-theme', theme)
@@ -82,7 +78,7 @@ test.describe('cloud /frames workspace @e2e', () => {
       await page.goto(`${CLOUD_ORIGIN}/frames`, { waitUntil: 'domcontentloaded' })
       await expect(page.getByText('Kitchen frame').first()).toBeVisible()
       await expect(page.getByText('Hallway e-ink').first()).toBeVisible()
-      await expect(page.locator('header.frameos-account-header')).toBeVisible()
+      await expect(page.locator('aside a.workspace-logo-button')).toBeVisible()
 
       await settleForScreenshot(page)
       await expect(page).toHaveScreenshot(`cloud-frames-home--${theme}.png`)
