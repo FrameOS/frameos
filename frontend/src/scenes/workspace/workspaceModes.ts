@@ -10,7 +10,7 @@ export function workspaceModeForScene(scene: string | null | undefined): Workspa
   if (scene === 'frame') {
     return 'frame'
   }
-  if (scene === 'sceneWorkspace' || scene === 'storeFront') {
+  if (scene === 'sceneWorkspace' || scene === 'sceneEditor' || scene === 'storeFront') {
     return 'scenes'
   }
   if (scene === 'appsWorkspace') {

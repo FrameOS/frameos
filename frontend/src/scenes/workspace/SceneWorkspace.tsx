@@ -623,7 +623,7 @@ function UtilityToolbar({
   )
 }
 
-function SceneDiagramOverlay({
+export function SceneDiagramOverlay({
   frameId,
   frameMode,
   scene,
@@ -746,7 +746,7 @@ function SceneCanvasLoadingPlaceholder(): JSX.Element {
   )
 }
 
-function ScenePreviewPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
+export function ScenePreviewPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
   const { frame } = useValues(frameLogic({ frameId }))
   return (
     <div className="space-y-4">
@@ -756,7 +756,7 @@ function ScenePreviewPanel({ frameId, scene }: { frameId: FrameId; scene: FrameS
   )
 }
 
-function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
+export function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
   const { renameScene, confirmSceneUpdate } = useActions(scenesLogic({ frameId }))
   const { sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
   const availableUpdateVersion = sceneUpdateVersions[scene.id]
@@ -997,7 +997,7 @@ function SceneCanvas({
 }
 
 /** The app being edited from the diagram, over the scene (openAppModal). */
-function SceneAppModal({ frameId }: { frameId: FrameId }): JSX.Element | null {
+export function SceneAppModal({ frameId }: { frameId: FrameId }): JSX.Element | null {
   const { appModalEditor } = useValues(frameEditorsLogic({ frameId }))
   const { closeEditor } = useActions(frameEditorsLogic({ frameId }))
   return appModalEditor ? (
@@ -1005,7 +1005,7 @@ function SceneAppModal({ frameId }: { frameId: FrameId }): JSX.Element | null {
   ) : null
 }
 
-function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): null {
+export function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): null {
   const { selectedNodeId } = useValues(workspaceLogic)
   const diagram = diagramLogic({ frameId, sceneId })
   const { nodes } = useValues(diagram)
@@ -1155,17 +1155,7 @@ function ScenesHome(): JSX.Element {
       mode="scenes"
       title="Scenes"
       showAiButton={false}
-      tree={
-        <ScenesSidePanel activePage={page}>
-          {firstFrame ? (
-            <InstalledScenesTree frameId={firstFrame.id} />
-          ) : framesLoading || !framesEverLoaded ? (
-            <SceneTreeLoadingPlaceholder />
-          ) : (
-            <div className="frameos-muted px-2 py-1 text-sm">Add a frame to install scenes on it.</div>
-          )}
-        </ScenesSidePanel>
-      }
+      tree={<ScenesSidePanel activePage={page}>{null}</ScenesSidePanel>}
     >
       <ScenesLibraryPage />
     </FrameosShell>

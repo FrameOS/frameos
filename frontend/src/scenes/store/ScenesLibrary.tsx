@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowDownOnSquareIcon,
+  ComputerDesktopIcon,
   ArrowDownTrayIcon,
   ArrowPathIcon,
   ArrowUpTrayIcon,
@@ -29,6 +30,11 @@ import {
 } from '../workspace/workspaceSurfaces'
 import { scenesLibraryLogic } from './scenesLibraryLogic'
 import { installSceneLogic } from './installSceneLogic'
+import { FrameImage } from '../../components/FrameImage'
+import { frameHost } from '../../decorators/frame'
+import { frameIdsEqual } from '../../utils/frameId'
+import { groupFramesByStatus } from '../workspace/frameStatusGroups'
+import type { FrameType } from '../../types'
 import { InstallSceneModal } from './InstallSceneModal'
 import { storeRepositoryOf } from './storeCatalog'
 
@@ -44,6 +50,14 @@ const pageIcons: Record<ScenesLibraryPageKey, typeof CloudIcon> = {
   store: BuildingStorefrontIcon,
   cloud: CloudIcon,
   local: FolderIcon,
+  installed: ComputerDesktopIcon,
+}
+
+/** The frames whose scenes the Installed page lists, active ones first. */
+function installedFrames(framesList: FrameType[]): FrameType[] {
+  return groupFramesByStatus(framesList)
+    .filter((group) => group.key !== 'archived')
+    .flatMap((group) => group.frames)
 }
 
 const navLinkClass =
@@ -68,7 +82,12 @@ export function ScenesSidePanel({
     hasDriveScope,
     templates,
     visibility,
+    framesList,
+    frame: frameFilter,
   } = useValues(scenesLibraryLogic)
+  const frames = installedFrames(framesList)
+  const installedCount = frames.reduce((sum, frame) => sum + (frame.scenes?.length ?? 0), 0)
+  const highlightedFrame = frameFilter ?? visibleShelf
   const publishedCount = driveTemplates.filter((template) => template.visibility === 'public').length
   const privateCount = driveTemplates.length - publishedCount
   // On My scenes the highlighted shelf follows the page the same way.
@@ -80,6 +99,7 @@ export function ScenesSidePanel({
     store: storeScenesCount,
     cloud: hasDriveScope ? driveTemplates.length : null,
     local: templates.length,
+    installed: installedCount,
   }
   return (
     <div className="space-y-5">
@@ -101,6 +121,19 @@ export function ScenesSidePanel({
                 <span className="min-w-0 flex-1 truncate">{scenesLibraryPageLabel(page, mode)}</span>
                 {pageCounts[page] !== null ? <span className="frameos-muted text-xs">{pageCounts[page]}</span> : null}
               </A>
+              {page === 'installed' && active && frames.length > 0 ? (
+                <div className="mt-1 space-y-0.5 pl-6">
+                  {frames.map((candidate) => (
+                    <SubPageLink
+                      key={candidate.id}
+                      label={candidate.name || frameHost(candidate)}
+                      count={candidate.scenes?.length ?? 0}
+                      active={highlightedFrame !== null && frameIdsEqual(highlightedFrame, candidate.id)}
+                      href={urls.scenesHome('installed', { frame: candidate.id })}
+                    />
+                  ))}
+                </div>
+              ) : null}
               {page === 'cloud' && active && hasDriveScope && driveTemplates.length > 0 ? (
                 <div className="mt-1 space-y-0.5 pl-6">
                   {myScenesShelves.map(({ key, title }) => (
@@ -131,10 +164,7 @@ export function ScenesSidePanel({
           )
         })}
       </nav>
-      <section aria-label="Installed scenes">
-        <div className="frameos-muted mb-2 px-2 text-xs font-semibold uppercase tracking-wide">Installed scenes</div>
-        {children}
-      </section>
+      {children}
     </div>
   )
 }
@@ -217,9 +247,9 @@ function InstallButton({
     <button
       type="button"
       onClick={() => openInstall(template, repository)}
-      className="frameos-primary-action flex h-8 w-full items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      className="frameos-form-control inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-xs font-semibold transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
     >
-      <ArrowDownOnSquareIcon className="h-4 w-4" />
+      <ArrowDownOnSquareIcon className="h-3.5 w-3.5" />
       Install
     </button>
   )
@@ -600,17 +630,112 @@ function LocalScenesPage(): JSX.Element {
   )
 }
 
+// A frame's scene: its picture, its name, a way into the full-screen editor.
+function InstalledSceneTile({ frame, scene }: { frame: FrameType; scene: { id: string; name?: string } }): JSX.Element {
+  return (
+    <A
+      href={urls.sceneEditor(frame.id, scene.id)}
+      className="frameos-card flex flex-col gap-2 overflow-hidden rounded-lg border border-white/90 pb-2.5 shadow-lg shadow-slate-300/35 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-300/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      <FrameImage
+        frameId={frame.id}
+        sceneId={scene.id}
+        thumb
+        refreshable={false}
+        objectFit="cover"
+        className="aspect-[4/3] w-full overflow-hidden bg-slate-500/10"
+        wasmFallback={{ sceneId: scene.id }}
+      />
+      <div className="px-2.5 pt-1">
+        <h3 className="frameos-strong text-sm font-semibold leading-tight">{scene.name || 'Untitled scene'}</h3>
+        <div className="frameos-muted mt-0.5 text-[11px]">{frame.name || frameHost(frame)}</div>
+      </div>
+    </A>
+  )
+}
+
+function InstalledScenesPage(): JSX.Element {
+  const { framesList, frame: frameFilter, search } = useValues(scenesLibraryLogic)
+  const { setVisibleShelf } = useActions(scenesLibraryLogic)
+  const shelvesRef = useRef<HTMLDivElement>(null)
+  const frames = installedFrames(framesList)
+  const shownFrames = frameFilter ? frames.filter((frame) => frameIdsEqual(frame.id, frameFilter)) : frames
+  const focused = frameFilter ? shownFrames[0] ?? null : null
+  useEffect(() => {
+    if (frameFilter) {
+      return
+    }
+    return watchVisibleShelf(shelvesRef.current, setVisibleShelf)
+  }, [frameFilter, frames.length, setVisibleShelf])
+  return (
+    <>
+      <PageHeader
+        title={focused ? focused.name || frameHost(focused) : 'Installed scenes'}
+        description="The scenes on your frames, frame by frame. Open one to edit it full screen."
+      />
+      <div className="space-y-8" ref={shelvesRef}>
+        {frames.length === 0 ? (
+          <Note>
+            No frames yet.{' '}
+            <A href={urls.frames()} className="font-semibold underline-offset-2 hover:underline">
+              Add a frame
+            </A>{' '}
+            to install scenes on it.
+          </Note>
+        ) : (
+          shownFrames.map((frame) => {
+            const scenes = (frame.scenes ?? []).filter(
+              (scene) => search === '' || (scene.name ?? '').toLowerCase().includes(search.toLowerCase())
+            )
+            return (
+              <section key={frame.id} data-shelf={String(frame.id)} className="scroll-mt-4 space-y-3">
+                {!focused ? (
+                  <h2 className="frameos-heading flex items-baseline gap-2 text-lg font-bold">
+                    <A href={urls.scenesHome('installed', { frame: frame.id })} className="hover:underline">
+                      {frame.name || frameHost(frame)}
+                    </A>
+                    <span className="frameos-muted text-xs font-medium">{scenes.length}</span>
+                  </h2>
+                ) : null}
+                {scenes.length === 0 ? (
+                  <div className="frameos-muted text-sm">
+                    {search ? `No scenes match "${search}".` : 'No scenes on this frame yet.'}
+                  </div>
+                ) : (
+                  <TileGrid>
+                    {scenes.map((scene) => (
+                      <InstalledSceneTile key={scene.id} frame={frame} scene={scene} />
+                    ))}
+                  </TileGrid>
+                )}
+              </section>
+            )
+          })
+        )}
+      </div>
+    </>
+  )
+}
+
 /** The page area for the library page the URL names. */
 export function ScenesLibraryPage(): JSX.Element {
-  const { page, category, visibility } = useValues(scenesLibraryLogic)
+  const { page, category, visibility, frame } = useValues(scenesLibraryLogic)
   // A new page or filter starts at the top; the scroll position of the
   // previous one would otherwise carry over into the shell's <main>.
   useEffect(() => {
     scrollStoreToTop()
-  }, [page, category, visibility])
+  }, [page, category, visibility, frame])
   return (
     <div className="mx-auto max-w-6xl pb-16 @container">
-      {page === 'store' ? <StorePage /> : page === 'cloud' ? <CloudScenesPage /> : <LocalScenesPage />}
+      {page === 'store' ? (
+        <StorePage />
+      ) : page === 'cloud' ? (
+        <CloudScenesPage />
+      ) : page === 'installed' ? (
+        <InstalledScenesPage />
+      ) : (
+        <LocalScenesPage />
+      )}
       <InstallSceneModal />
     </div>
   )

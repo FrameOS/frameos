@@ -841,9 +841,9 @@ describe("Scenes library", () => {
   // plane; a backend also has the account's cloud drive and its own saved
   // scenes, the cloud only its drive, the on-device panel nothing of its own.
   it("lists the store first on every plane, then the private pages the plane has", () => {
-    expect(scenesLibraryPages.backend).toEqual(["store", "cloud", "local"]);
-    expect(scenesLibraryPages.cloud).toEqual(["store", "cloud"]);
-    expect(scenesLibraryPages.frameAdmin).toEqual(["store"]);
+    expect(scenesLibraryPages.backend).toEqual(["store", "cloud", "local", "installed"]);
+    expect(scenesLibraryPages.cloud).toEqual(["store", "cloud", "installed"]);
+    expect(scenesLibraryPages.frameAdmin).toEqual(["store", "installed"]);
     expect(scenesLibraryPageIsAvailable("local", "backend")).toBe(true);
     expect(scenesLibraryPageIsAvailable("local", "cloud")).toBe(false);
     expect(scenesLibraryPageIsAvailable("cloud", "frameAdmin")).toBe(false);

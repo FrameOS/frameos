@@ -27,6 +27,13 @@ interface RepositoryJson {
   templates?: (Partial<CloudStoreTemplate> & Record<string, unknown>)[]
 }
 
+function sameOriginScenePage(url: unknown, slug: unknown): string | undefined {
+  if (typeof slug === 'string' && slug) {
+    return `/s/${encodeURIComponent(slug)}`
+  }
+  return typeof url === 'string' ? url : undefined
+}
+
 function resolveRepositoryUrl(repositoryUrl: string, value: string | undefined): string | undefined {
   if (!value || !value.startsWith('./')) {
     return value
@@ -49,6 +56,10 @@ export function cloudStoreRepository(id: string, url: string, data: RepositoryJs
       const sceneId = typeof template.sceneId === 'string' ? template.sceneId : undefined
       return {
         ...template,
+        // The scene's page on this origin (/s/<slug>): in development that is
+        // the dev server, not the scenes host the index names; in production
+        // the cloud host sends /s/* to the scenes host anyway.
+        url: sameOriginScenePage(template.url, template.id),
         image: resolveRepositoryUrl(url, typeof template.image === 'string' ? template.image : undefined),
         zip: resolveRepositoryUrl(url, typeof template.zip === 'string' ? template.zip : undefined),
         ...(sceneId && !template.scenesUrl && !template.scenes?.length

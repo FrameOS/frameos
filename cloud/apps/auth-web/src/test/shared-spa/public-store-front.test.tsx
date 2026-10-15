@@ -86,10 +86,10 @@ describe("the signed-out store front", () => {
     );
     await waitFor(() => expect(screen.getByText("Big clock")).toBeTruthy());
     expect(screen.getByText("Slideshow")).toBeTruthy();
-    // The tile is the scene's own page.
-    expect(screen.getByText("Big clock").closest("a")?.getAttribute("href")).toBe(
-      "https://scenes.example/s/big-clock",
-    );
+    // The tile is the scene's own page, on this origin (in development that
+    // is the dev server; in production the cloud host forwards /s/* to the
+    // scenes host), whatever host the index names.
+    expect(screen.getByText("Big clock").closest("a")?.getAttribute("href")).toBe("/s/big-clock");
     // Categories as a row of pills.
     const categories = screen.getByRole("navigation", { name: "Categories" });
     expect(within(categories).getByRole("link", { name: /Weather/ })).toBeTruthy();

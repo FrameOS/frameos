@@ -2,9 +2,10 @@ import { actions, afterMount, connect, kea, listeners, path, reducers, selectors
 import type { MakeLogicType } from 'kea'
 import { router, urlToAction } from 'kea-router'
 
+import { framesModel } from '../../models/framesModel'
 import { repositoriesModel } from '../../models/repositoriesModel'
 import { templatesModel } from '../../models/templatesModel'
-import type { RepositoryType, TemplateType } from '../../types'
+import type { FrameType, RepositoryType, TemplateType } from '../../types'
 import { urls } from '../../urls'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
@@ -41,6 +42,7 @@ export interface scenesLibraryLogicValues {
   driveTemplates: TemplateType[] // cloudDriveLogic
   driveTemplatesLoading: boolean // cloudDriveLogic
   hasDriveScope: boolean // cloudDriveLogic
+  framesList: FrameType[] // framesModel
   repositories: RepositoryType[] // repositoriesModel
   repositoriesLoading: boolean // repositoriesModel
   templates: TemplateType[] // templatesModel
@@ -48,6 +50,7 @@ export interface scenesLibraryLogicValues {
   search: string // workspaceLogic
   category: string | null
   drivePageTemplates: TemplateType[]
+  frame: string | null
   localPageTemplates: TemplateType[]
   page: ScenesLibraryPage
   storeOrigin: string
@@ -88,9 +91,11 @@ export interface scenesLibraryLogicActions {
   setRoute: (
     page: string | null,
     category: string | null,
-    visibility: string | null
+    visibility: string | null,
+    frame: string | null
   ) => {
     category: string | null
+    frame: string | null
     page: string | null
     visibility: string | null
   }
@@ -137,6 +142,8 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
       ['templates', 'templatesLoading'],
       workspaceLogic,
       ['search'],
+      framesModel,
+      ['framesList'],
     ],
     actions: [
       cloudDriveLogic,
@@ -148,10 +155,11 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
     ],
   })),
   actions({
-    setRoute: (page: string | null, category: string | null, visibility: string | null) => ({
+    setRoute: (page: string | null, category: string | null, visibility: string | null, frame: string | null) => ({
       page,
       category,
       visibility,
+      frame,
     }),
     /** A scene zip: to the account's private scenes on the cloud, to the
      * local saved scenes on a backend. */
@@ -172,6 +180,13 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
       null as string | null,
       {
         setRoute: (_, { category }) => category || null,
+      },
+    ],
+    // Installed scenes: one frame, or every frame.
+    frame: [
+      null as string | null,
+      {
+        setRoute: (_, { frame }) => frame || null,
       },
     ],
     // My scenes: "public" (published to the store) or "private", or both.
@@ -276,7 +291,8 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
       actions.setRoute(
         typeof search.page === 'string' ? search.page : null,
         typeof search.category === 'string' ? search.category : null,
-        typeof search.visibility === 'string' ? search.visibility : null
+        typeof search.visibility === 'string' ? search.visibility : null,
+        typeof search.frame === 'string' ? search.frame : null
       )
     },
   })),

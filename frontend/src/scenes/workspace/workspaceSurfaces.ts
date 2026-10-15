@@ -104,12 +104,12 @@ export function addSceneActionIsAllowed(mode: WorkspaceMode, action: AddSceneAct
  * scenes. The on-device panel keeps nothing of its own, so it browses the
  * store only.
  */
-export type ScenesLibraryPage = 'store' | 'cloud' | 'local'
+export type ScenesLibraryPage = 'store' | 'cloud' | 'local' | 'installed'
 
 export const scenesLibraryPages: Record<WorkspaceMode, readonly ScenesLibraryPage[]> = {
-  backend: ['store', 'cloud', 'local'],
-  cloud: ['store', 'cloud'],
-  frameAdmin: ['store'],
+  backend: ['store', 'cloud', 'local', 'installed'],
+  cloud: ['store', 'cloud', 'installed'],
+  frameAdmin: ['store', 'installed'],
 }
 
 export function scenesLibraryPageIsAvailable(
@@ -129,6 +129,8 @@ export function scenesLibraryPageLabel(page: ScenesLibraryPage, mode: WorkspaceM
       return mode === 'cloud' ? 'My scenes' : 'My cloud scenes'
     case 'local':
       return 'Private local scenes'
+    case 'installed':
+      return 'Installed scenes'
   }
 }
 

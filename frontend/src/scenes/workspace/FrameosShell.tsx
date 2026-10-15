@@ -221,7 +221,7 @@ function AiMagicButton({
   )
 }
 
-function WorkspaceChatDrawer({
+export function WorkspaceChatDrawer({
   frameId,
   nodeId,
   sceneId,

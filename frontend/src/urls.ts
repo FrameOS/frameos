@@ -83,6 +83,9 @@ export const urls = {
   frameControl: frameControlUrl,
   scenes: scenesUrl,
   frameControlScenes: frameControlScenesUrl,
+  /** The full-screen editor of one installed scene (scenes/editor): the
+   * frame's scene route with /edit after it. */
+  sceneEditor: (frameId: FrameId, sceneId: string) => scenesUrl(frameId, sceneId) + '/edit',
   /** The old address of the store front, kept as an alias of the library;
    * the scenes host's root is the store front too. */
   store: () => '/store',
@@ -90,7 +93,10 @@ export const urls = {
    * without a frame, with the page in the query so the frame routes stay
    * what they are. The store is the bare page. Signed out on the cloud the
    * store front at /store is all there is, and its links stay on it. */
-  scenesHome: (page?: string | null, filters?: { category?: string | null; visibility?: string | null }) => {
+  scenesHome: (
+    page?: string | null,
+    filters?: { category?: string | null; visibility?: string | null; frame?: string | number | null }
+  ) => {
     const params = new URLSearchParams()
     if (page && page !== 'store') {
       params.set('page', page)
@@ -100,6 +106,9 @@ export const urls = {
     }
     if (filters?.visibility) {
       params.set('visibility', filters.visibility)
+    }
+    if (filters?.frame !== undefined && filters?.frame !== null && filters.frame !== '') {
+      params.set('frame', String(filters.frame))
     }
     const query = params.toString()
     return scenesUrl() + (query ? '?' + query : '')
