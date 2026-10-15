@@ -1,3 +1,5 @@
+import { useValues } from 'kea'
+import { router } from 'kea-router'
 import { useRef, useState, type ReactElement } from 'react'
 
 import { accountNavUrls } from '../cloudConfig'
@@ -26,11 +28,16 @@ import { accountNavUrls } from '../cloudConfig'
 // bundle has no session, and a link that 403s for almost everyone is worse
 // than one more click through Account.
 //
-// Everything this bundle serves lives under /frames, so "Frames" is always
-// the active entry. Below 40rem the links fold into a panel behind the
-// hamburger (cloud-chrome.css), mirroring auth-web's HeaderNav.tsx.
+// This bundle serves two surfaces: the /frames workspace and, since 2026.10,
+// the account's pages at /account/<page> (frontend/src/scenes/settings/
+// account). The active entry follows the router's location — "Account" on
+// the latter, "Frames" everywhere else. Below 40rem the links fold into a
+// panel behind the hamburger (cloud-chrome.css), mirroring auth-web's
+// HeaderNav.tsx.
 export function AccountHeader(): ReactElement {
   const { accountUrl, framesUrl, logoutUrl, scenesUrl } = accountNavUrls()
+  const { location } = useValues(router)
+  const onAccountPages = location.pathname === '/account' || location.pathname.startsWith('/account/')
   const [open, setOpen] = useState(false)
   const betaDialogRef = useRef<HTMLDialogElement>(null)
 
@@ -137,8 +144,8 @@ export function AccountHeader(): ReactElement {
         id="frameos-primary-nav"
       >
         <a
-          aria-current="page"
-          className="frameos-account-header__link frameos-account-header__link--active"
+          aria-current={onAccountPages ? undefined : 'page'}
+          className={navLinkClass(!onAccountPages)}
           href={framesUrl}
         >
           Frames
@@ -146,7 +153,11 @@ export function AccountHeader(): ReactElement {
         <a className="frameos-account-header__link" href={scenesUrl}>
           Scenes
         </a>
-        <a className="frameos-account-header__link" href={accountUrl}>
+        <a
+          aria-current={onAccountPages ? 'page' : undefined}
+          className={navLinkClass(onAccountPages)}
+          href={accountUrl}
+        >
           Account
         </a>
         <form action={logoutUrl} method="post">
@@ -157,6 +168,10 @@ export function AccountHeader(): ReactElement {
       </nav>
     </header>
   )
+}
+
+function navLinkClass(active: boolean): string {
+  return active ? 'frameos-account-header__link frameos-account-header__link--active' : 'frameos-account-header__link'
 }
 
 function MenuIcon(): ReactElement {
