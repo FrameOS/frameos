@@ -13,8 +13,9 @@ import {
   Play,
   Save,
   Sparkles,
-  Workflow,
   type LucideIcon,
+  Workflow,
+  X,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -591,6 +592,8 @@ type SceneEditorWorkspaceProps = {
   info?: ReactNode;
   /** What fills the frame when every panel is closed. */
   empty?: ReactNode;
+  /** The X in the AI and preview panels' corners: closes that panel. */
+  onClosePanel?: ((panel: "ai" | "preview") => void) | undefined;
 };
 
 const panelCopy: Record<
@@ -1053,6 +1056,7 @@ export function SceneEditorWorkspace({
   preview,
   info,
   empty,
+  onClosePanel,
 }: SceneEditorWorkspaceProps) {
   const resizes: Record<SceneEditorPanelName, Resize> = {
     ai: useResizableWidth(panelWidths.ai),
@@ -1204,6 +1208,17 @@ export function SceneEditorWorkspace({
         <>
           {resizerBefore("ai")}
           <aside aria-label="AI assistant" className="editor-modal__ai">
+            {onClosePanel ? (
+              <button
+                aria-label="Hide the AI assistant"
+                className="editor-modal__panel-close"
+                onClick={() => onClosePanel("ai")}
+                title="Hide the AI assistant"
+                type="button"
+              >
+                <X aria-hidden />
+              </button>
+            ) : null}
             <SceneAiPanel {...ai} height={height} selectedSceneId={sceneId ?? null} width={width} />
           </aside>
         </>
@@ -1212,6 +1227,17 @@ export function SceneEditorWorkspace({
         <>
           {resizerBefore("preview")}
           <aside aria-label="Live preview" className="editor-modal__preview">
+            {onClosePanel ? (
+              <button
+                aria-label="Hide the preview"
+                className="editor-modal__panel-close"
+                onClick={() => onClosePanel("preview")}
+                title="Hide the preview"
+                type="button"
+              >
+                <X aria-hidden />
+              </button>
+            ) : null}
             {/* Mounted once the scenes are in, so the panel's first source
                 choice sees them (it is made on mount). */}
             {preview.scenes ? (
@@ -2134,6 +2160,7 @@ export function SceneEditorModal({
         {error ? <span className="pill pill-warning">{error}</span> : null}
       </SceneEditorBar>
       <SceneEditorWorkspace
+        onClosePanel={togglePanel}
         info={
           info ? (
             <SceneInfoPanel

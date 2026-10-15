@@ -2653,6 +2653,7 @@ a.stat-tile:hover {
 }
 
 .editor-modal__preview {
+  position: relative;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
@@ -2885,9 +2886,38 @@ a.stat-tile:hover {
 }
 
 .editor-modal__ai {
+  position: relative;
   min-width: 0;
   min-height: 0;
   background: var(--surface);
+}
+
+/* The X in the top-right corner of the AI and preview panels. */
+.editor-modal__panel-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.editor-modal__panel-close:hover {
+  border-color: var(--accent, #888);
+  color: var(--text);
+}
+
+.editor-modal__panel-close svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* The Info column (left of the diagram): the scene page's gallery,
