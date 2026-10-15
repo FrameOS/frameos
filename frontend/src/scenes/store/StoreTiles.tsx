@@ -100,7 +100,7 @@ export function SceneTile({
     </>
   )
   return (
-    <div className="frameos-card flex flex-col gap-2 overflow-hidden rounded-lg border pb-2.5 transition hover:border-blue-400">
+    <div className="frameos-card flex flex-col gap-2 overflow-hidden rounded-lg border border-white/90 pb-2.5 shadow-lg shadow-slate-300/35 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-300/50">
       {href ? (
         <a href={href} className="flex flex-col focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
           {body}
@@ -128,12 +128,15 @@ export function StoreShelves({
   activeCategory,
   emptyMessage,
   shelfHref,
+  tileActions,
 }: {
   shelves: StoreShelfGroup[]
   activeCategory: string | null
   emptyMessage: ReactNode
   /** A link to one shelf's page, shown as the shelf title when all shelves are listed. */
   shelfHref?: (slug: string) => string
+  /** What a tile ends with (an Install button on the signed-in library). */
+  tileActions?: (template: TemplateType) => ReactNode
 }): JSX.Element {
   if (shelves.length === 0) {
     return <Note>{emptyMessage}</Note>
@@ -156,7 +159,11 @@ export function StoreShelves({
           ) : null}
           <TileGrid>
             {templates.map((template) => (
-              <SceneTile key={template.sceneId ?? template.id ?? template.name} template={template} />
+              <SceneTile
+                key={template.sceneId ?? template.id ?? template.name}
+                template={template}
+                actions={tileActions?.(template)}
+              />
             ))}
           </TileGrid>
         </section>

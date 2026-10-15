@@ -3,6 +3,7 @@ import { A, router } from 'kea-router'
 import clsx from 'clsx'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
+  ArrowDownOnSquareIcon,
   ArrowDownTrayIcon,
   ArrowPathIcon,
   ArrowUpTrayIcon,
@@ -16,6 +17,7 @@ import {
 } from '@heroicons/react/24/outline'
 
 import { Spinner } from '../../components/Spinner'
+import type { RepositoryType, TemplateType } from '../../types'
 import { urls } from '../../urls'
 import { storeShelfForCategory } from '../../utils/storeCategories'
 import { Note, SceneTile, StoreShelves, TileGrid, scrollStoreToTop, watchVisibleShelf } from './StoreTiles'
@@ -26,6 +28,9 @@ import {
   type ScenesLibraryPage as ScenesLibraryPageKey,
 } from '../workspace/workspaceSurfaces'
 import { scenesLibraryLogic } from './scenesLibraryLogic'
+import { installSceneLogic } from './installSceneLogic'
+import { InstallSceneModal } from './InstallSceneModal'
+import { storeRepositoryOf } from './storeCatalog'
 
 // The scenes library: the pages at the top of the Scenes side panel and
 // what the page area shows for them — the store front as the cloud's own
@@ -199,6 +204,27 @@ function PageHeader({
   )
 }
 
+// The tile's last thing: a way onto a frame. The dialog asks which.
+function InstallButton({
+  template,
+  repository,
+}: {
+  template: TemplateType
+  repository: RepositoryType | null
+}): JSX.Element {
+  const { openInstall } = useActions(installSceneLogic)
+  return (
+    <button
+      type="button"
+      onClick={() => openInstall(template, repository)}
+      className="frameos-primary-action flex h-8 w-full items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      <ArrowDownOnSquareIcon className="h-4 w-4" />
+      Install
+    </button>
+  )
+}
+
 function RefreshButton({ onClick, loading }: { onClick: () => void; loading: boolean }): JSX.Element {
   return (
     <button
@@ -353,7 +379,8 @@ function StoreActionCards(): JSX.Element {
 }
 
 function StorePage(): JSX.Element {
-  const { storeShelves, storeScenesCount, repositoriesLoading, search, category } = useValues(scenesLibraryLogic)
+  const { storeShelves, storeScenesCount, repositoriesLoading, search, category, repositories } =
+    useValues(scenesLibraryLogic)
   const { loadRepositories, setVisibleShelf } = useActions(scenesLibraryLogic)
   const mode = workspaceMode()
   const shelvesRef = useRef<HTMLDivElement>(null)
@@ -387,6 +414,9 @@ function StorePage(): JSX.Element {
             shelves={storeShelves}
             activeCategory={category}
             shelfHref={(slug) => urls.scenesHome('store', { category: slug })}
+            tileActions={(template) => (
+              <InstallButton template={template} repository={storeRepositoryOf(repositories, template)} />
+            )}
             emptyMessage={
               storeScenesCount === 0
                 ? mode === 'frameAdmin'
@@ -411,6 +441,7 @@ function CloudScenesPage(): JSX.Element {
     cloudEnabled,
     search,
     visibility,
+    driveRepository,
   } = useValues(scenesLibraryLogic)
   const { loadDrive, setVisibleShelf } = useActions(scenesLibraryLogic)
   const mode = workspaceMode()
@@ -493,6 +524,7 @@ function CloudScenesPage(): JSX.Element {
                       key={template.sceneId ?? template.id ?? template.name}
                       template={template}
                       showAuthor={false}
+                      actions={<InstallButton template={template} repository={driveRepository} />}
                     />
                   ))}
                 </TileGrid>
@@ -539,6 +571,7 @@ function LocalScenesPage(): JSX.Element {
                 actions={
                   template.id ? (
                     <>
+                      <InstallButton template={template} repository={null} />
                       <button type="button" className={actionClass} onClick={() => exportTemplate(template.id!, 'zip')}>
                         <ArrowDownTrayIcon className="h-4 w-4" />
                         Download .zip
@@ -578,6 +611,7 @@ export function ScenesLibraryPage(): JSX.Element {
   return (
     <div className="mx-auto max-w-6xl pb-16 @container">
       {page === 'store' ? <StorePage /> : page === 'cloud' ? <CloudScenesPage /> : <LocalScenesPage />}
+      <InstallSceneModal />
     </div>
   )
 }

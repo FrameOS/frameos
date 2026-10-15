@@ -68,6 +68,21 @@ export function storeOriginOf(storeTemplates: TemplateType[]): string {
   return isCloudMode() && typeof window !== 'undefined' ? window.location.origin : 'https://scenes.frameos.net'
 }
 
+/** The catalog row a store template came from (for an install). */
+export function storeRepositoryOf(repositories: RepositoryType[], template: TemplateType): RepositoryType | null {
+  return (
+    repositories
+      .filter(isCloudStoreRepository)
+      .find((repository) =>
+        (repository.templates ?? []).some(
+          (candidate) =>
+            (template.sceneId && candidate.sceneId === template.sceneId) ||
+            (template.id && candidate.id === template.id)
+        )
+      ) ?? null
+  )
+}
+
 export function storeShelfCountsOf(storeTemplates: TemplateType[]): StoreShelfCount[] {
   return groupByStoreShelf(storeTemplates).map(({ shelf, templates }) => ({ shelf, count: templates.length }))
 }

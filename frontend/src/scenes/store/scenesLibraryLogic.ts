@@ -37,6 +37,7 @@ const STALE_AFTER_MS = 60_000
 export interface scenesLibraryLogicValues {
   cloudConnected: boolean // cloudDriveLogic
   cloudEnabled: boolean // cloudDriveLogic
+  driveRepository: RepositoryType // cloudDriveLogic
   driveTemplates: TemplateType[] // cloudDriveLogic
   driveTemplatesLoading: boolean // cloudDriveLogic
   hasDriveScope: boolean // cloudDriveLogic
@@ -129,7 +130,7 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
   connect(() => ({
     values: [
       cloudDriveLogic,
-      ['driveTemplates', 'driveTemplatesLoading', 'hasDriveScope', 'cloudConnected', 'cloudEnabled'],
+      ['driveTemplates', 'driveTemplatesLoading', 'hasDriveScope', 'cloudConnected', 'cloudEnabled', 'driveRepository'],
       repositoriesModel,
       ['repositories', 'repositoriesLoading'],
       templatesModel,
