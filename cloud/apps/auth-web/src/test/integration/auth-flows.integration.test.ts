@@ -1351,11 +1351,11 @@ describe("the login page with a live session", () => {
 
   // Stale links and browsers that cached the old permanent redirect from the
   // cloud root land here with a perfectly good session.
-  it("sends a signed-in visitor to the account home", async () => {
+  it("sends a signed-in visitor to the frames workspace", async () => {
     const user = await signUpUser();
     await establishSession(user.accountId, user.email);
 
-    expect(await loginDestination()).toBe(`${baseUrl}/account`);
+    expect(await loginDestination()).toBe(`${baseUrl}/frames`);
   });
 
   it("honours a safe return_to and ignores a foreign one", async () => {
@@ -1365,7 +1365,7 @@ describe("the login page with a live session", () => {
     expect(await loginDestination({ return_to: "/frames" })).toBe("/frames");
     expect(
       await loginDestination({ return_to: "https://evil.example/steal" }),
-    ).toBe(`${baseUrl}/account`);
+    ).toBe(`${baseUrl}/frames`);
   });
 
   // An error describes something about this session that the visitor has to

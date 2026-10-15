@@ -58,6 +58,12 @@ proc cloudStatusPayload(state: JsonNode): JsonNode =
     "managed_available": status == "connected" and
       linkHasScope(state, "frame:managed") and not backendManaged,
     "managed_enroll_error": jsonOrNull(state{"managed_enroll_error"}),
+    # "Ship logs and metrics to the cloud": offered when the link carries a
+    # telemetry scope, on unless the admin switched it off here. Logs only
+    # travel while the frame is managed from the provider (the hub session
+    # is what pushes them).
+    "telemetry_available": telemetryGranted(state),
+    "telemetry_enabled": telemetryEnabled(state),
   }
   if status == "connecting":
     result["connection"] = %*{
@@ -693,6 +699,40 @@ proc addCloudApiRoutes*(router: var Router) =
           # Without cloud login there is only the password left, so store the
           # flag that says so rather than relying on the effective answer.
           state["local_fallback_enabled"] = %true
+        saveCloudLinkState(state)
+        jsonResponse(request, Http200, cloudStatusPayload(state))
+  )
+
+  router.post("/api/cloud/telemetry", proc(request: Request) {.gcsafe.} =
+    ## The "Ship logs and metrics to the cloud" switch.
+    ##
+    ## Local, like the cloud-login switch: the telemetry grant stays on the
+    ## link either way, and this only decides whether the hub session pushes
+    ## logs and metrics. Saving bumps the link generation, which the session
+    ## loop watches, so the change applies without a reconnect. Turning it on
+    ## needs the grant — a link approved without it cannot escalate itself
+    ## from here; disconnect and connect again to ask for it.
+    if not hasAdminAccess(request):
+      jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
+      return
+    {.gcsafe.}:
+      let payload = try:
+          parseJson(if request.body.strip().len == 0: "{}" else: request.body)
+        except CatchableError:
+          jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+          return
+      if payload{"enabled"} == nil or payload{"enabled"}.kind != JBool:
+        jsonResponse(request, Http400, %*{"detail": "Send {\"enabled\": true|false}"})
+        return
+      let enabled = payload{"enabled"}.getBool()
+      withLock cloudLinkLock:
+        let state = loadCloudLinkState()
+        if enabled and not telemetryGranted(state):
+          jsonResponse(request, Http409,
+            %*{"detail": "This cloud link was not approved for shipping logs and metrics. " &
+                         "Disconnect and connect again to ask for it."})
+          return
+        state["telemetry_enabled"] = %enabled
         saveCloudLinkState(state)
         jsonResponse(request, Http200, cloudStatusPayload(state))
   )

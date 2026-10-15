@@ -111,7 +111,7 @@ export interface cloudLogicValues {
   isFeatureChangeSubmitting: boolean
   isProviderUrlSubmitting: boolean
   isProviderUrlValid: boolean
-  pendingCloudSwitch: 'login' | 'managed' | null
+  pendingCloudSwitch: 'login' | 'managed' | 'telemetry' | null
   providerEditorOpen: boolean
   providerUrl: CloudProviderForm
   providerUrlAllErrors: Record<string, any>
@@ -222,6 +222,9 @@ export interface cloudLogicActions {
   setCloudManaged: (enabled: boolean) => {
     enabled: boolean
   }
+  setCloudTelemetryEnabled: (enabled: boolean) => {
+    enabled: boolean
+  }
   setFeatureDraft: (draft: string[] | null) => {
     draft: string[] | null
   }
@@ -328,6 +331,7 @@ export const cloudLogic = kea<cloudLogicType>([
     setLocalFallback: (enabled: boolean) => ({ enabled }),
     setCloudManaged: (enabled: boolean) => ({ enabled }),
     setCloudLoginEnabled: (enabled: boolean) => ({ enabled }),
+    setCloudTelemetryEnabled: (enabled: boolean) => ({ enabled }),
     setBackupFeature: (key: 'scenes' | 'frames' | 'all', enabled: boolean) => ({ key, enabled }),
     loadCloudBackups: true,
     backupAllToCloud: true,
@@ -481,10 +485,11 @@ export const cloudLogic = kea<cloudLogicType>([
     // through /api/cloud/* and answer with a fresh status, so one marker for
     // the whole pair is enough to disable them and show a spinner.
     pendingCloudSwitch: [
-      null as 'login' | 'managed' | null,
+      null as 'login' | 'managed' | 'telemetry' | null,
       {
         setCloudManaged: () => 'managed',
         setCloudLoginEnabled: () => 'login',
+        setCloudTelemetryEnabled: () => 'telemetry',
         loadCloudStatusSuccess: () => null,
         loadCloudStatusFailure: () => null,
         setCloudError: () => null,
@@ -567,11 +572,13 @@ export const cloudLogic = kea<cloudLogicType>([
       // manager yet, and cloud login is their one cloud feature). A frame
       // that no self-hosted backend controls also asks for frame:managed, so
       // approving the link enrolls it as a real cloud-managed frame instead
-      // of a bare linked client.
+      // of a bare linked client — and asks for log and metrics shipping with
+      // it (the hub session is what pushes them), so the Logs panel on the
+      // cloud fills from day one; the admin page's switch can turn it off.
       const scopes = isInFrameAdminMode()
         ? values.cloudStatus?.backend_managed
           ? ['frame:link', 'auth:login']
-          : ['frame:link', 'frame:managed', 'auth:login']
+          : ['frame:link', 'frame:managed', 'telemetry:logs', 'telemetry:metrics', 'auth:login']
         : [...BASE_SCOPES, ...INCLUDED_FEATURE_SCOPES]
       const response = await apiFetch('/api/cloud/connect', {
         method: 'POST',
@@ -704,6 +711,21 @@ export const cloudLogic = kea<cloudLogicType>([
             enabled ? 'Could not hand this frame to FrameOS Cloud' : 'Could not take this frame back from FrameOS Cloud'
           )
         )
+        actions.loadCloudStatus()
+        return
+      }
+      actions.loadCloudStatusSuccess((await response.json()) as CloudStatus)
+    },
+    setCloudTelemetryEnabled: async ({ enabled }) => {
+      // A local switch over the telemetry grant: the link keeps its scopes,
+      // the hub session stops (or resumes) pushing logs and metrics.
+      const response = await apiFetch('/api/cloud/telemetry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      if (!response.ok) {
+        actions.setCloudError(await cloudErrorMessage(response, 'Could not change log shipping'))
         actions.loadCloudStatus()
         return
       }

@@ -1,3 +1,4 @@
+import { A } from 'kea-router'
 import { useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import { useEffect, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react'
@@ -390,7 +391,7 @@ function StorageMeter({ status }: { status: PhotosStatus }): JSX.Element {
     // On the cloud the quota is the account's: the box is the way to the
     // usage page, where it is explained and can be raised.
     return (
-      <a
+      <A
         href={urls.accountUsage()}
         title="Your usage and quotas"
         className="frameos-inset block rounded-2xl border p-3 text-xs transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
@@ -400,7 +401,7 @@ function StorageMeter({ status }: { status: PhotosStatus }): JSX.Element {
           See your usage
           <ChevronRightIcon className="h-3 w-3" />
         </div>
-      </a>
+      </A>
     )
   }
   return <div className="frameos-inset rounded-2xl border p-3 text-xs">{body}</div>
@@ -412,8 +413,10 @@ function PhotosSidebar(): JSX.Element {
   const currentAlbum = photoAlbumOf(folder)
   const rootLoaded = '' in folderEntries
 
+  // A column that fills the panel: the storage box sits at the bottom, in
+  // view whatever the album list's length, like Sign out under Settings.
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-full flex-col gap-4">
       <div className="flex items-center justify-between gap-2 px-1">
         <div className="min-w-0">
           <div className="frameos-muted text-xs font-semibold uppercase tracking-wide text-slate-400">Photos</div>
@@ -466,7 +469,9 @@ function PhotosSidebar(): JSX.Element {
               <div className="frameos-muted px-3 py-2 text-sm">No albums yet. Make one to start.</div>
             ) : null}
           </div>
-          <StorageMeter status={status} />
+          <div className="mt-auto pt-4">
+            <StorageMeter status={status} />
+          </div>
         </>
       ) : null}
     </div>

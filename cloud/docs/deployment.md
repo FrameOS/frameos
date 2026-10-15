@@ -561,7 +561,7 @@ it (see docs/operational-runbooks.md).
 
 The public hostnames point at the same process. `cloud.frameos.net` owns
 login/auth plus the account, device, admin, and frames pages (root redirects
-to `/backends`, the linked-backends home), and `scenes.frameos.net` owns the
+to `/frames`, the frames workspace), and `scenes.frameos.net` owns the
 public store and scene/publisher pages. “My scenes” is the `/scenes` section
 of the account surface. API routes remain reachable on every hostname for
 compatibility with linked FrameOS backends — including the legacy
@@ -744,7 +744,7 @@ with `GITHUB_TOKEN` when one is set in the environment — set it if the host
 shares its egress IP with anything else that talks to GitHub.
 
 After deployment, verify that `https://cloud.frameos.net/` redirects to
-`/backends` (which lands on login when signed out), that
+`/frames` (which lands on login when signed out), that
 `https://cloud.frameos.net/scenes` opens “My scenes,” that public scenes stay
 on `scenes.frameos.net`, and that `https://account.frameos.net/` redirects to
 `cloud.frameos.net` while `account.frameos.net/api/*` still answers. Signing

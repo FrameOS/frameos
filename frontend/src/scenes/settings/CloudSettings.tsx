@@ -199,6 +199,7 @@ export function CloudSettingsSection({
     unlinkCloudIdentity,
     setLocalFallback,
     setCloudManaged,
+    setCloudTelemetryEnabled,
     setCloudLoginEnabled,
     setBackupFeature,
     loadCloudBackups,
@@ -431,6 +432,23 @@ export function CloudSettingsSection({
                   <Label>Cloud features</Label>
                 </div>
                 <div className="w-full space-y-4 text-sm">
+                  <CloudFeatureSwitch
+                    label="Ship logs and metrics to the cloud"
+                    value={cloudStatus?.telemetry_enabled === true}
+                    onChange={setCloudTelemetryEnabled}
+                    busy={pendingCloudSwitch === 'telemetry'}
+                    disabled={pendingCloudSwitch !== null || !cloudStatus?.telemetry_available}
+                    description={
+                      cloudStatus?.mode === 'managed'
+                        ? `The Logs and Metrics pages on ${providerHost} fill from this frame.`
+                        : `The Logs and Metrics pages on ${providerHost} fill from this frame once it is managed from there (the switch below).`
+                    }
+                    unavailableReason={
+                      cloudStatus?.telemetry_available
+                        ? undefined
+                        : 'This link was never approved for it. Disconnect and connect again to ask for the permission.'
+                    }
+                  />
                   <CloudFeatureSwitch
                     label="Manage this frame from FrameOS Cloud"
                     value={cloudStatus?.mode === 'managed'}

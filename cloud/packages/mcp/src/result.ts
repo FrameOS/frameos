@@ -98,7 +98,7 @@ const hints: Record<string, Hint> = {
   invalid_scene:
     "No such scene, or it is private to another account. Use scenes_list / store_browse to find a valid id.",
   login_required:
-    "The API token was refused: revoked, expired, or wrong for this server. Create a new one at /account/developer.",
+    "The API token was refused: revoked, expired, or wrong for this server. Create a new one on the frames workspace's Developer page (/account/developer).",
   model_budget_exhausted:
     "The free model pass for conversions is out of budget; retry after retry_after seconds, or convert with the account's own OpenAI key (account_settings_update, openAI.apiKey).",
   model_failed:

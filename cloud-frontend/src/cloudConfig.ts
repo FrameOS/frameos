@@ -1,14 +1,14 @@
 // Server-injected facts the SPA cannot work out for itself.
 //
-// cloud/apps/auth-web/app/frames/[[...path]]/route.ts replaces a named anchor
+// cloud/apps/auth-web/app/frames/[[...path]]/route.ts (and the /account
+// route that delegates to it) replaces a named anchor
 // line in src/index.html with these keys before serving the shell (the same
 // mechanism cloud_ws_origin uses). They exist because the values come from
 // server-side configuration:
 //
 //   * the account/scenes/cloud surfaces can live on three different origins
 //     (FRAMEOS_ACCOUNT_APP_URL / FRAMEOS_SCENES_APP_URL / FRAMEOS_CLOUD_APP_URL),
-//     and getAccountPath() shortens /account/* on a split-host deployment —
-//     none of which a client-only bundle can reconstruct from window.location;
+//     which a client-only bundle cannot reconstruct from window.location;
 //   * the claim-code TTL is FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS, so a
 //     hardcoded "24 hours" would quietly lie on a tuned install;
 //   * cloudOrigin is written into SD images, ESP32 NVS and install commands,
@@ -24,9 +24,15 @@ interface CloudAppConfig {
   cloud_logout_url?: string
   cloud_origin?: string
   cloud_scenes_url?: string
-  /** The account's settings page (service API keys, SSH keys). Read by the
-   * shared SPA's urls.settings() (frontend/src/urls.ts), not here. */
-  cloud_settings_url?: string
+  /** The cloud's /login/reauth page (on the auth origin): where a sensitive
+   * account action sends a session that must re-prove its credentials. Read
+   * by the shared SPA's account pages (settings/account/reauth.ts), not here. */
+  cloud_reauth_url?: string
+  /** The auth origin's /login page: the signed-out store front's Sign in. */
+  cloud_login_url?: string
+  /** Whether the visitor has a session. The shell is served to signed-out
+   * visitors too (the public store); read by frontend/src/utils/cloudMode.ts. */
+  cloud_signed_in?: boolean
   cloud_theme_cookie_domain?: string
   /** Read by livePreviewLogic straight off FRAMEOS_APP_CONFIG: the wasm
    * preview's same-origin HTTP proxy (/api/store/preview-proxy). */

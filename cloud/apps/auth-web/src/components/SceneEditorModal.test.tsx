@@ -1085,8 +1085,11 @@ describe("SceneEditorModal bar", () => {
     expect(document.querySelector(".editor-modal__title")!.textContent).toContain("Loaded");
   });
 
-  it("puts Back first in the bar, going back in history when one of our pages led here", async () => {
-    setReferrer(`${window.location.origin}/store`);
+  it("puts Back first in the bar, going back in history when there is a page to go back to", async () => {
+    // A history with an entry before this one: pushState leaves jsdom's
+    // history at two entries. The referrer does not matter: a self-hosted
+    // backend's scene library links here too.
+    setReferrer("http://localhost:8989/scenes");
     window.history.pushState(null, "", "/s/clock");
     const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
     render(<SceneEditorModal info={info} sceneId="scene-1" />);
@@ -1100,11 +1103,11 @@ describe("SceneEditorModal bar", () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
-  it("asks the Navigation API where the previous entry was, when there is one", async () => {
+  it("asks the Navigation API whether there is a previous entry, when it exists", async () => {
     const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
     const navigation = {
       currentEntry: { index: 1 },
-      entries: () => [{ url: `${window.location.origin}/my-scenes` }, { url: window.location.href }],
+      entries: () => [{ url: "https://www.example.com/" }, { url: window.location.href }],
     };
     Object.defineProperty(window, "navigation", { configurable: true, value: navigation });
     try {
@@ -1113,9 +1116,8 @@ describe("SceneEditorModal bar", () => {
       expect(back).toHaveBeenCalledOnce();
       unmount();
 
-      // A referrer of ours means nothing when the previous entry is not.
-      setReferrer(`${window.location.origin}/store`);
-      navigation.entries = () => [{ url: "https://www.example.com/" }, { url: window.location.href }];
+      // The first entry of the tab: nowhere to go back to.
+      navigation.currentEntry = { index: 0 };
       render(<SceneEditorModal backUrl="/store" sceneId="scene-1" />);
       fireEvent.click(backButton());
       expect(back).toHaveBeenCalledOnce();
@@ -1125,21 +1127,23 @@ describe("SceneEditorModal bar", () => {
     }
   });
 
-  it("goes to the store front when the visitor came from elsewhere", async () => {
-    setReferrer("https://www.example.com/");
+  it("goes to the store front when this is the tab's first page", async () => {
     const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
-    const { unmount } = render(<SceneEditorModal backUrl="/store" sceneId="scene-1" />);
-    fireEvent.click(backButton());
-    expect(back).not.toHaveBeenCalled();
-    expect(pushMock).toHaveBeenCalledWith("/store");
-    unmount();
+    const length = vi.spyOn(window.history, "length", "get").mockReturnValue(1);
+    try {
+      const { unmount } = render(<SceneEditorModal backUrl="/store" sceneId="scene-1" />);
+      fireEvent.click(backButton());
+      expect(back).not.toHaveBeenCalled();
+      expect(pushMock).toHaveBeenCalledWith("/store");
+      unmount();
 
-    // No referrer at all (a typed URL, a bookmark): the store as well.
-    setReferrer("");
-    pushMock.mockClear();
-    render(<SceneEditorModal sceneId="scene-1" />);
-    fireEvent.click(backButton());
-    expect(pushMock).toHaveBeenCalledWith("/");
+      pushMock.mockClear();
+      render(<SceneEditorModal sceneId="scene-1" />);
+      fireEvent.click(backButton());
+      expect(pushMock).toHaveBeenCalledWith("/");
+    } finally {
+      length.mockRestore();
+    }
   });
 });
 

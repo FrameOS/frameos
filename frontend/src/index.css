@@ -465,7 +465,22 @@ html[data-frameos-theme='dark'] .frameos-spinner,
   border-color: var(--frameos-primary);
 }
 
+/* The page background is a fixed layer behind the shell, not a
+   background-attachment: fixed on it: a fixed attachment inside a scrolling
+   column makes Chrome repaint the whole gradient on every scroll frame,
+   which crawled in dark mode. */
 .frameos-app-shell {
+  position: relative;
+  isolation: isolate;
+  background: var(--frameos-page-bg);
+}
+
+.frameos-app-shell::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background: linear-gradient(
       135deg,
       rgba(255, 255, 255, 0.68),
@@ -473,13 +488,13 @@ html[data-frameos-theme='dark'] .frameos-spinner,
       rgb(var(--frameos-color-brass-rgb) / 0.12)
     ),
     var(--frameos-page-bg);
-  background-attachment: fixed;
-  background-position: center top;
-  background-repeat: no-repeat;
-  background-size: 100vw 100vh;
 }
 
 .frameos-app-shell.frameos-theme-dark {
+  color: #e5e7eb;
+}
+
+.frameos-app-shell.frameos-theme-dark::before {
   background: linear-gradient(
       135deg,
       var(--frameos-color-graphite),
@@ -487,11 +502,6 @@ html[data-frameos-theme='dark'] .frameos-spinner,
       color-mix(in srgb, var(--frameos-color-graphite) 98%, #000000)
     ),
     var(--frameos-page-bg);
-  background-attachment: fixed;
-  background-position: center top;
-  background-repeat: no-repeat;
-  background-size: 100vw 100vh;
-  color: #e5e7eb;
 }
 
 .frameos-panel,
@@ -1200,6 +1210,26 @@ html[data-frameos-theme='dark'] .frameos-checkbox {
   background: #fef2f2;
   border-color: rgba(248, 113, 113, 0.5);
   color: #b91c1c;
+}
+
+/* The feature's name under each rail icon (tall rail only). */
+.frameos-nav-label {
+  color: #64748b;
+}
+.frameos-nav-label-active {
+  color: #0f172a;
+}
+.frameos-theme-dark .frameos-nav-label {
+  color: #94a3b8;
+}
+.frameos-theme-dark .frameos-nav-label-active {
+  color: #f8fafc;
+}
+.frameos-nav-logo-current {
+  background: rgba(15, 23, 42, 0.06);
+}
+.frameos-theme-dark .frameos-nav-logo-current {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .frameos-theme-dark .frameos-nav-button:not(.frameos-primary-active),

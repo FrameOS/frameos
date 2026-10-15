@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { accounts, createDb } from "@frameos-cloud/db";
 import { NewSceneWithAi } from "../../../src/components/NewSceneWithAi";
 import {
-  getAccountUrl,
+  getAccountSettingsUrl,
   getCloudBaseUrl,
   getMyScenesUrl,
   getScenesBaseUrl,
@@ -60,12 +60,12 @@ export default async function NewScenePage({
   return (
     <NewSceneWithAi
       aiDisabled={aiDisabled}
-      aiSettingsUrl={getAccountUrl("/account/usage#ai")}
+      aiSettingsUrl={`${getAccountSettingsUrl("usage")}#ai`}
       handoffKey={fromConverter ? convertedScenesHandoffKey : undefined}
       initialPrompt={prompt}
       loginUrl={new URL("/login", getCloudBaseUrl()).toString()}
       myScenesUrl={getMyScenesUrl()}
-      settingsUrl={`${getAccountUrl("/account/settings")}#settings-openai`}
+      settingsUrl={`${getAccountSettingsUrl("services")}#settings-openai`}
     />
   );
 }

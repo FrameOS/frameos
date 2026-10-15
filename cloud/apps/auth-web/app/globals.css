@@ -413,68 +413,6 @@ html.theme-dark .button-primary {
   font-size: 13px;
 }
 
-/* Headings that sit between cards on a page (the usage page's "Account
-   usage" and "AI usage"), and the blocks inside a card that each carry a
-   small heading of their own. */
-.page-section-title {
-  margin: 0 0 4px;
-  font-size: 22px;
-  line-height: 1.2;
-}
-
-.page-section-title--spaced {
-  margin-top: 36px;
-}
-
-.usage-block {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-
-.usage-block h3 {
-  font-size: 15px;
-}
-
-.usage-block .table {
-  margin: 10px 0;
-}
-
-.usage-block__note {
-  margin-top: 8px;
-}
-
-.usage-card .copy + .copy {
-  margin-top: 8px;
-}
-
-.usage-details__summary {
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 600;
-  list-style: none;
-}
-
-.usage-details__summary::-webkit-details-marker {
-  display: none;
-}
-
-.usage-details__summary::before {
-  content: "›";
-  display: inline-block;
-  width: 14px;
-  transition: transform 0.12s ease;
-}
-
-.usage-details[open] .usage-details__summary::before {
-  transform: rotate(90deg);
-}
-
-.usage-details .table,
-.usage-details .copy {
-  margin-top: 10px;
-}
-
 .compact-header {
   align-items: center;
   margin-bottom: 0;
@@ -573,82 +511,6 @@ html.theme-dark .button-primary {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
   gap: 12px;
-}
-
-/* /account/settings: the service-key cards and the SSH key list. */
-.account-settings__fields {
-  margin-top: 14px;
-}
-
-.account-settings__hint {
-  font-size: 13px;
-}
-
-.account-settings__check {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-/* A Save with nothing to save: visibly inert, not a green promise. */
-.account-settings__actions .button:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.account-settings__textarea {
-  min-height: 0;
-  padding: 10px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-  resize: vertical;
-}
-
-/* The new-token form on /account/developer: one row — the name grows, the
-   two selects and the button take what they need — over a one-line hint.
-   Not .actions: that grid stretches a button to the card's full width,
-   which is right in the 420px auth card and wrong in a wide content card. */
-.api-token-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
-  align-items: end;
-  gap: 12px;
-}
-
-.api-token-form__name {
-  min-width: 0;
-}
-
-.api-token-form .input {
-  min-height: 40px;
-}
-
-.api-token-form select.input {
-  padding-right: 32px;
-}
-
-.api-token-form .button {
-  min-height: 40px;
-}
-
-.api-token-form__hint {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-@media (max-width: 760px) {
-  .api-token-form {
-    grid-template-columns: 1fr;
-  }
-
-  .api-token-form .button {
-    justify-self: start;
-  }
 }
 
 .device-request-card {
@@ -778,21 +640,6 @@ html.theme-dark .button-primary {
 .button-danger:hover {
   border-color: color-mix(in srgb, var(--danger), transparent 35%);
   background: color-mix(in srgb, var(--danger), transparent 92%);
-}
-
-.totp-qr {
-  width: 200px;
-  max-width: 100%;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #fff;
-}
-
-.totp-qr svg {
-  display: block;
-  width: 100%;
-  height: auto;
 }
 
 .code-input {
@@ -1097,13 +944,6 @@ html.theme-dark .button-primary {
 
 .table-thumb--empty {
   border-style: dashed;
-}
-
-/* Context note in the backend-viewer modal bar. */
-.backend-modal-context {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 400;
 }
 
 .tag-pill--active {
@@ -2813,6 +2653,7 @@ a.stat-tile:hover {
 }
 
 .editor-modal__preview {
+  position: relative;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
@@ -3045,9 +2886,38 @@ a.stat-tile:hover {
 }
 
 .editor-modal__ai {
+  position: relative;
   min-width: 0;
   min-height: 0;
   background: var(--surface);
+}
+
+/* The X in the top-right corner of the AI and preview panels. */
+.editor-modal__panel-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.editor-modal__panel-close:hover {
+  border-color: var(--accent, #888);
+  color: var(--text);
+}
+
+.editor-modal__panel-close svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* The Info column (left of the diagram): the scene page's gallery,
@@ -4381,80 +4251,6 @@ html.theme-dark .action-card__ghost {
 .nim-converter__lines code {
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-/* The account activity page (ActivityFeed.tsx): the filter row, the chart
-   you drag across to pick a time range, and the list that dims while a new
-   slice loads instead of blanking. Bars wear the accent; text never does. */
-.activity-filters {
-  margin-bottom: 12px;
-}
-
-.activity-chart-card {
-  padding: 14px 18px 10px;
-  margin-bottom: 12px;
-}
-
-.activity-chart {
-  position: relative;
-  width: 100%;
-  cursor: crosshair;
-  user-select: none;
-}
-
-.activity-chart--empty {
-  opacity: 0.5;
-}
-
-.activity-chart svg {
-  display: block;
-}
-
-.activity-chart__bar {
-  fill: var(--primary);
-}
-
-.activity-chart__bar--dim {
-  fill: var(--primary);
-  opacity: 0.3;
-}
-
-.activity-chart__selection {
-  fill: var(--primary-soft);
-}
-
-.activity-chart__baseline {
-  stroke: var(--line);
-  stroke-width: 1;
-}
-
-.activity-chart__tick {
-  fill: var(--muted);
-  font-size: 11px;
-}
-
-.activity-chart__tooltip {
-  position: absolute;
-  top: -4px;
-  transform: translate(-50%, -100%);
-  padding: 3px 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-.activity-chart__hint {
-  margin-top: 8px;
-  font-size: 13px;
-}
-
-.activity-list--stale {
-  opacity: 0.55;
-  transition: opacity 0.15s ease;
 }
 
 .link-button {

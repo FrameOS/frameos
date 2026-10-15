@@ -475,6 +475,7 @@ export function NewSceneWithAi({
         ) : null}
       </SceneEditorBar>
       <SceneEditorWorkspace
+        onClosePanel={togglePanel}
         ai={{
           ...aiEntry,
           getScenes: () => latestScenesRef.current,

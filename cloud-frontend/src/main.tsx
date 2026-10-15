@@ -8,8 +8,13 @@ import '../../frontend/src/utils/configureMonaco'
 import { App } from './scenes/App'
 import './index.css'
 import { initKea } from '../../frontend/src/initKea'
-import { registerAddFramePanel, registerFramePanel } from '../../frontend/src/scenes/workspace/addFramePanelRegistry'
+import {
+  registerAddFramePanel,
+  registerFirstRunPanel,
+  registerFramePanel,
+} from '../../frontend/src/scenes/workspace/addFramePanelRegistry'
 import { CloudAddFrameDrawer } from './components/CloudAddFrameDrawer'
+import { CloudFirstRunAddFrame } from './components/CloudFirstRunAddFrame'
 import { CloudFrameSdImageCard } from './components/CloudFrameSdImageCard'
 import { CloudFrameUsbRelink } from './components/CloudFrameUsbRelink'
 import { cloudAssetsBasePath, cloudRouteBasePath, legacyCloudPathRedirect } from './routes'
@@ -44,6 +49,8 @@ if (typeof window !== 'undefined') {
 // is handed down instead — registered before the first render, so FramesHome
 // sees it the moment it mounts.
 registerAddFramePanel(CloudAddFrameDrawer)
+// And the same panel as the page's content while the fleet is empty.
+registerFirstRunPanel(CloudFirstRunAddFrame)
 
 // Same handoff for the two per-frame enrollment operations the deploy drawer
 // offers — redeploying to a wiped ESP32, and writing another SD card for a Pi.

@@ -1,13 +1,16 @@
-export type WorkspaceMode = 'frames' | 'frame' | 'scenes' | 'apps' | 'photos' | 'settings'
+export type WorkspaceMode = 'home' | 'frames' | 'frame' | 'scenes' | 'apps' | 'photos' | 'settings'
 
 export function workspaceModeForScene(scene: string | null | undefined): WorkspaceMode | null {
+  if (scene === 'home') {
+    return 'home'
+  }
   if (scene === 'frames') {
     return 'frames'
   }
   if (scene === 'frame') {
     return 'frame'
   }
-  if (scene === 'sceneWorkspace') {
+  if (scene === 'sceneWorkspace' || scene === 'storeFront') {
     return 'scenes'
   }
   if (scene === 'appsWorkspace') {

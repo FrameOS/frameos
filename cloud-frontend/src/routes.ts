@@ -41,22 +41,30 @@ export function cloudSceneUrl(frameId: string, sceneId?: string): string {
 }
 
 /**
- * The account settings page (service API keys, SSH keys). An account page,
- * not a scene of this SPA — the path only; Next.js server code links to it
- * through getAccountUrl("/account/settings"), which knows the split-host
- * shortening, and the SPA reads the finished URL from the injected
- * cloud_settings_url (frontend/src/urls.ts). The old /frames/settings scene
- * is redirected here by the [[...path]] route.
+ * Where the account's pages live: /account/<page>. They are scenes of this
+ * SPA (frontend/src/scenes/settings/account/accountPages.ts lists the
+ * pages; the bare path lands on the first) but keep the address the Next.js
+ * account pages had, so the shell is served here as well as under
+ * cloudRouteBasePath (app/account/[[...section]]/route.ts). Mirrored in
+ * frontend/src/urls.ts settingsUrl, which cannot import this file.
  */
-export function cloudSettingsUrl(): string {
-  return '/account/settings'
+export const cloudAccountBasePath = '/account'
+
+/** A settings page of the account, or the bare /account for the first. */
+export function cloudSettingsUrl(page?: string): string {
+  return page ? `${cloudAccountBasePath}/${encodeURIComponent(page)}` : cloudAccountBasePath
 }
+
+/** The apps and photos pages: beside the mount, at the origin root. */
+export const cloudAppsBasePath = '/apps'
+export const cloudPhotosBasePath = '/photos'
 
 /**
  * The workspace URLs before August 2026 doubled the segment
- * (/frames/frames/<id>, /frames/scenes/<frameId>/<sceneId>). Old bookmarks and
- * emails still carry them; this maps one to its current shape, or returns
- * null when the path is already current.
+ * (/frames/frames/<id>, /frames/scenes/<frameId>/<sceneId>), and until
+ * 2026.10 the apps and photos pages sat under the mount (/frames/apps/…,
+ * /frames/photos, /frames/scenes). Old bookmarks and emails still carry them; this maps one
+ * to its current shape, or returns null when the path is already current.
  */
 export function legacyCloudPathRedirect(pathname: string): string | null {
   const frameMatch = /^\/frames\/frames\/([^/]+)\/?$/.exec(pathname)
@@ -66,6 +74,20 @@ export function legacyCloudPathRedirect(pathname: string): string | null {
   const sceneMatch = /^\/frames\/scenes\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname)
   if (sceneMatch) {
     return `${cloudRouteBasePath}/${sceneMatch[1]}/scenes${sceneMatch[2] ? `/${sceneMatch[2]}` : ''}`
+  }
+  if (/^\/frames\/photos\/?$/.test(pathname)) {
+    return cloudPhotosBasePath
+  }
+  if (/^\/frames\/scenes\/?$/.test(pathname)) {
+    return '/scenes'
+  }
+  const appsMatch = /^\/frames\/apps(?:\/(.*))?$/.exec(pathname)
+  if (appsMatch) {
+    const tail = (appsMatch[1] ?? '').replace(/\/$/, '')
+    if (!tail || tail === 'system' || tail.startsWith('system/')) {
+      return `${cloudAppsBasePath}${tail ? `/${tail}` : ''}`
+    }
+    return `${cloudAppsBasePath}/frames/${tail}`
   }
   return null
 }

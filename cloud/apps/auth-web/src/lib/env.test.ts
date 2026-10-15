@@ -13,6 +13,7 @@ import {
   getScenesBaseUrl,
   getSessionCookieDomain,
   hasGoogleOAuth,
+  getAccountSettingsUrl,
 } from "./env";
 
 const originalAppUrl = process.env.FRAMEOS_CLOUD_APP_URL;
@@ -62,33 +63,53 @@ describe("env", () => {
     expect(getScenesBaseUrl()).toBe("https://scenes.frameos.net");
   });
 
-  it("maps clean account paths only when the account origin is split", () => {
+  it("keeps the account pages at /account on every origin layout, renaming the moved sections", () => {
     process.env.FRAMEOS_CLOUD_APP_URL = "http://localhost:3000";
     delete process.env.FRAMEOS_ACCOUNT_APP_URL;
     expect(getAccountBaseUrl()).toBe("http://localhost:3000");
+    // A page keeps its address; the bare /account and the sections that
+    // were renamed in 2026.10 land on their page.
+    expect(getAccountPath("/account/developer")).toBe("/account/developer");
     expect(getAccountPath("/account/scenes")).toBe("/account/scenes");
-    expect(getAccountUrl("/account")).toBe("http://localhost:3000/account");
-
-    process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
-    expect(getAccountPath("/account/installs")).toBe("/backends");
-    expect(getAccountPath("/account/scenes")).toBe("/scenes");
-    expect(getAccountUrl("/account/scenes")).toBe(
-      "https://account.frameos.net/scenes",
+    expect(getAccountUrl("/account")).toBe("http://localhost:3000/account/backends");
+    expect(getAccountUrl("/account/settings")).toBe(
+      "http://localhost:3000/account/services",
     );
 
-    // Account merged into cloud with a split scenes host (production shape)
-    // still uses clean paths — only a fully single-origin dev setup keeps
-    // the raw /account/* routes.
+    // Split origins: no more shortening to /backends and friends — the
+    // surface router redirects those old spellings back to /account/….
+    process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
+    expect(getAccountPath("/account/installs")).toBe("/account/backends");
+    expect(getAccountPath("/account/installs/")).toBe("/account/backends");
+    expect(getAccountPath("/account/developer")).toBe("/account/developer");
+    expect(getAccountPath("/account/scenes")).toBe("/account/scenes");
+    expect(getAccountUrl("/account/usage")).toBe(
+      "https://account.frameos.net/account/usage",
+    );
+    // A fragment or a query rides along; the AI section moved onto the
+    // usage page's anchor, so a bare link to it gets that anchor.
+    expect(getAccountPath("/account/usage#ai")).toBe("/account/usage#ai");
+    expect(getAccountPath("/account/ai")).toBe("/account/usage#ai");
+    expect(getAccountPath("/account/ai#top")).toBe("/account/usage#top");
+    expect(getAccountPath("/account/settings?kind=frames")).toBe(
+      "/account/services?kind=frames",
+    );
+    expect(getAccountSettingsUrl("developer")).toBe(
+      "https://account.frameos.net/account/developer",
+    );
+    expect(getAccountSettingsUrl()).toBe("https://account.frameos.net/account/backends");
+
+    // Account merged into cloud with a split scenes host (production shape).
     delete process.env.FRAMEOS_ACCOUNT_APP_URL;
     process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
     process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
-    expect(getAccountPath("/account/installs")).toBe("/backends");
-    expect(getAccountUrl("/account/scenes")).toBe(
-      "https://cloud.frameos.net/scenes",
+    expect(getAccountPath("/account/installs")).toBe("/account/backends");
+    expect(getAccountUrl("/account/security")).toBe(
+      "https://cloud.frameos.net/account/security",
     );
     process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
 
-    // The old account frame table shortens straight into the fleet SPA,
+    // The old account frame table redirects straight into the fleet SPA,
     // which is the one frames page now.
     expect(getAccountPath("/account/frames")).toBe("/frames");
     expect(getAccountUrl("/account/frames")).toBe(

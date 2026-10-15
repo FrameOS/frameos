@@ -4,6 +4,7 @@ import {
   accountBalanceMicros,
   accountMarginBasisPoints,
   customerReceivableCode,
+  customerStatement,
   listPlans,
   readAccountPlan,
   readBillingSettings,
@@ -57,7 +58,8 @@ export async function GET(request: NextRequest) {
   const accountId = session.accountId;
   const now = new Date();
   const dayWindow = utcDayWindow(now);
-  const [[account], thisMonth, lastMonth, today, turns, settings, plan, plans, owed, credentials] =
+  const receivable = customerReceivableCode(accountId);
+  const [[account], thisMonth, lastMonth, today, turns, settings, plan, plans, owed, credentials, statement] =
     await Promise.all([
       db
         .select({ aiDisabledAt: accounts.aiDisabledAt })
@@ -74,10 +76,11 @@ export async function GET(request: NextRequest) {
       // What the books say they owe — the receivable, which is what the
       // month-end invoice collects and the only number that includes a
       // subscription charge, a credit or a reversal (§9.2 item 11).
-      accountBalanceMicros(db, customerReceivableCode(accountId)),
+      accountBalanceMicros(db, receivable),
       // Which key the next turn would run on decides which cap applies to
       // it (§5.3): the shared key has its own, smaller, "our money" cap.
       resolveAiCredentials(db, accountId),
+      customerStatement(db, receivable, { limit: 1000 }),
     ]);
   if (!account) {
     return jsonError("login_required", 401);
@@ -106,6 +109,21 @@ export async function GET(request: NextRequest) {
       balance: {
         // Positive = owed to us; negative = a credit in their favour.
         receivable_micros: owed.toString(),
+        // The statement lines that are not metered turns — subscription
+        // charges, credits, refunds, write-offs — newest first, the last ten:
+        // the turns are `turns`; these are the rest of what the balance is
+        // made of.
+        recent_lines: statement.lines
+          .filter((line) => line.entryType !== "ai_usage_charge")
+          .slice(-10)
+          .reverse()
+          .map((line) => ({
+            amount_micros: line.amountMicros.toString(),
+            description: line.description,
+            direction: line.direction,
+            id: line.entryId,
+            occurred_at: line.occurredAt.toISOString(),
+          })),
       },
       enabled: account.aiDisabledAt === null,
       margin_basis_points: marginBasisPoints,

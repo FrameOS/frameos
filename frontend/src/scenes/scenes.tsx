@@ -2,7 +2,7 @@ import type { ComponentType } from 'react'
 import { urls } from '../urls'
 import { getRouteBasePath } from '../utils/getBasePath'
 import { isInFrameAdminMode } from '../utils/frameAdmin'
-import { isCloudMode } from '../utils/cloudMode'
+import { cloudSignedIn, isCloudMode } from '../utils/cloudMode'
 import { NotFound } from './NotFound'
 
 export type SceneComponent = ComponentType<Record<string, any>>
@@ -12,6 +12,11 @@ export type SceneComponent = ComponentType<Record<string, any>>
 export const Error404 = NotFound
 
 const sceneLoaders = {
+  // The cloud's home page (hello, recent frames and albums, usage); the
+  // self-hosted shells never route to it.
+  home: () => import('./home/CloudHome'),
+  // The signed-out scene store (the cloud's /store, the scenes host's root).
+  storeFront: () => import('./store/PublicStoreFront'),
   frames: () => import('./frames/Frames'),
   frame: () => import('./frame/Frame'),
   sceneWorkspace: () => import('./workspace/SceneWorkspace'),
@@ -81,22 +86,40 @@ export function preloadSceneComponent(scene: LoadableSceneKey): void {
 // page, and the shell's rail — which compares that scene with the mode the
 // rendered page passed it — showed the Frame button as forever pending.
 //
-// The settings scene is not registered at all where it never renders: on the
-// cloud the settings page is an account page (urls.settings() links out to
-// it), and in frame-admin mode urls.settings() IS a frame tool path
-// (/frames/<id>/settings) that the frame scene renders.
+// The settings scene is one page of anchored sections self-hosted and a set
+// of pages on the cloud (/account/<page>, outside the /frames mount; see
+// settings/account/accountPages.ts). It is not registered in frame-admin
+// mode, where urls.settings() IS a frame tool path (/frames/<id>/settings)
+// that the frame scene renders.
 export const getRoutes = () =>
   ({
     ...(getRouteBasePath() ? { [getRouteBasePath() + '/']: 'frames' } : {}),
+    ...(isCloudMode() ? { [urls.home()]: 'home', [urls.store()]: 'storeFront', '/': 'storeFront' } : {}),
     [urls.frames()]: isInFrameAdminMode() ? 'frame' : 'frames',
-    ...(isInFrameAdminMode() || isCloudMode() ? {} : { [urls.settings()]: 'settings' }),
+    ...(isInFrameAdminMode()
+      ? {}
+      : isCloudMode()
+      ? { [urls.settings()]: 'settings', [urls.settings(':page')]: 'settings' }
+      : { [urls.settings()]: 'settings' }),
     [urls.scenes()]: 'sceneWorkspace',
+    // Signed out, the cloud's /scenes is the public store, not the workspace.
+    ...(isCloudMode() && !cloudSignedIn() ? { [urls.scenes()]: 'storeFront' } : {}),
     [urls.scenes(':frameId')]: 'sceneWorkspace',
     [urls.scenes(':frameId', ':sceneId')]: 'sceneWorkspace',
     [urls.apps()]: 'appsWorkspace',
     [urls.apps(':frameId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId', ':nodeId')]: 'appsWorkspace',
+    // On the cloud the system apps have routes of their own (/apps and
+    // /apps/system/<keyword>, beside /apps/frames/…); self-hosted they are
+    // the frame routes with "system" in the frame's place.
+    ...(isCloudMode()
+      ? {
+          [urls.appsHome()]: 'appsWorkspace',
+          [urls.systemApps()]: 'appsWorkspace',
+          [urls.systemApps(':keyword')]: 'appsWorkspace',
+        }
+      : {}),
     // The on-device admin panel is one frame; the library lives on a control plane.
     ...(isInFrameAdminMode() ? {} : { [urls.photos()]: 'photosWorkspace' }),
     [urls.login()]: 'login',

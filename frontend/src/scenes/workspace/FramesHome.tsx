@@ -48,7 +48,7 @@ import { shortSceneVersion } from '../../utils/sceneOrigin'
 import { FrameosShell } from './FrameosShell'
 import { isMobileWorkspaceViewport, sceneMatchesSearch, workspaceLogic } from './workspaceLogic'
 import type { AddScenePage, OverviewFrameSection, WorkspaceUtilityPanel } from './workspaceLogic'
-import { registeredAddFramePanel } from './addFramePanelRegistry'
+import { registeredAddFramePanel, registeredFirstRunPanel } from './addFramePanelRegistry'
 import { frameToolDefinitionsForMode } from './frameToolDefinitions'
 import { addFrameFlows, addSceneActionIsAllowed, workspaceMode } from './workspaceSurfaces'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
@@ -1811,28 +1811,44 @@ export function FramesHome(): JSX.Element {
   const { formVisible } = useValues(newFrameForm)
   const { closeSceneControl, closeTemplateDrawer } = useActions(workspaceLogic)
   const { sceneControlSelection, templateDrawerFrameId } = useValues(workspaceLogic)
-  const { archivedFramesExpanded, inactiveFramesExpanded, framesLoading } = useValues(framesModel)
+  const { archivedFramesExpanded, frames, framesEverLoaded, inactiveFramesExpanded, framesLoading } =
+    useValues(framesModel)
   const { toggleArchivedFramesExpanded, toggleInactiveFramesExpanded } = useActions(framesModel)
   const hasFrameSections =
     overviewActiveFrameSections.length + overviewInactiveFrameSections.length + overviewArchivedFrameSections.length > 0
   // The self-hosted form is a narrow 390px drawer; the cloud enrollment panel
   // is a full-width one, like the template and scene control drawers.
   const addFramePanelIsCompact = formVisible && addFrameFlows[workspaceMode()] === 'backendForm'
+  // First run: the list has arrived and it is empty (never "no frames" on
+  // its own — during the first load `frames` is legitimately empty, and the
+  // panel would flash at every visitor). A control plane that registered a
+  // first-run panel gets it in the middle of the page, with the rail and the
+  // (empty) frame tree around it; the panel IS the add-frame flow, so the
+  // "+" button and its drawer step aside until a frame exists. The moment
+  // one does — a freshly enrolled frame arriving over the websocket — the
+  // normal list takes over, live.
+  const FirstRunPanel = framesEverLoaded && Object.keys(frames).length === 0 ? registeredFirstRunPanel() : null
 
   return (
     <FrameosShell
       mode="frames"
       title="Frames"
       browserTitle={null}
-      tree={<FrameTree />}
-      primaryActionLabel="Add frame"
-      onPrimaryAction={() => {
-        closeSceneControl()
-        closeTemplateDrawer()
-        showForm()
-      }}
+      tree={FirstRunPanel ? null : <FrameTree />}
+      // Nothing to search while the fleet is empty.
+      topBar={FirstRunPanel ? null : undefined}
+      primaryActionLabel={FirstRunPanel ? undefined : 'Add frame'}
+      onPrimaryAction={
+        FirstRunPanel
+          ? undefined
+          : () => {
+              closeSceneControl()
+              closeTemplateDrawer()
+              showForm()
+            }
+      }
       rightPanel={
-        formVisible ? (
+        formVisible && !FirstRunPanel ? (
           <AddFramePanel />
         ) : templateDrawerFrameId ? (
           <TemplateDrawer />
@@ -1843,7 +1859,9 @@ export function FramesHome(): JSX.Element {
       rightPanelSize={addFramePanelIsCompact ? 'compact' : 'normal'}
     >
       <div className="space-y-12 pb-12">
-        {hasFrameSections ? (
+        {FirstRunPanel ? (
+          <FirstRunPanel />
+        ) : hasFrameSections ? (
           <>
             <FrameSectionGroup title="Active" sections={overviewActiveFrameSections} />
             <FrameSectionGroup

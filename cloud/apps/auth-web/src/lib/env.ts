@@ -131,26 +131,51 @@ function safeOrigin(url: string): string | undefined {
   }
 }
 
-export function getAccountPath(path: string) {
-  // Only local development runs every surface on one origin; there the
-  // /account/* app routes are the real URLs and nothing shortens. In
-  // production the account surface shares the cloud origin (with scenes on
-  // its own host), and clean paths still apply.
-  if (getAppOrigins().size === 1) {
-    return path;
-  }
+// The account's pages are scenes of the frames workspace SPA since 2026.10
+// (frontend/src/scenes/settings/account/accountPages.ts), served at
+// /account/<page> — the address the Next.js account pages had, kept on
+// purpose. Some sections were renamed or merged on the way, and the bare
+// /account lands on the first page; this table maps every old
+// /account/<section> that is not a page of its own onto its page, so a
+// link built with getAccountUrl("/account/…") — and every bookmark the
+// surface router (surfaces.ts) and the account route handler redirect —
+// lands right. The SPA's keys are the public URL segments; a new page is an
+// entry in the SPA's list, and a renamed one a row here (the cloud-frames
+// routes test keeps the two in step). /account/frames was the account's
+// frame table before the /frames workspace replaced it.
+export const accountSectionRedirects: ReadonlyMap<string, string> = new Map([
+  ["/account", "/account/backends"],
+  ["/account/installs", "/account/backends"],
+  ["/account/settings", "/account/services"],
+  // AI usage moved onto the usage page in 2026.10; the anchor still lands.
+  ["/account/ai", "/account/usage#ai"],
+  ["/account/frames", "/frames"],
+]);
 
-  if (path === "/account" || path === "/account/installs") {
-    return "/backends";
+export function getAccountPath(path: string) {
+  // A fragment or a query rides along: "/account/usage#ai" is the usage
+  // page's AI anchor, which the map above may itself carry.
+  const suffixAt = path.search(/[?#]/);
+  const bare = suffixAt === -1 ? path : path.slice(0, suffixAt);
+  const suffix = suffixAt === -1 ? "" : path.slice(suffixAt);
+  const target = accountSectionRedirects.get(bare.replace(/\/+$/, "") || "/");
+  if (target) {
+    return target.includes("#") && suffix.startsWith("#") ? target.slice(0, target.indexOf("#")) + suffix : target + suffix;
   }
-  if (path.startsWith("/account/")) {
-    return path.slice("/account".length);
-  }
+  // Every other path is its own address, on one origin or three: the
+  // account pages are no longer shortened to /backends and friends on a
+  // split host (surfaces.ts redirects those old spellings here).
   return path;
 }
 
 export function getAccountUrl(path = "/account") {
   return new URL(getAccountPath(path), getAccountBaseUrl()).toString();
+}
+
+// A settings page of the account (the frames workspace's settings scene);
+// without a page, wherever the bare /account lands.
+export function getAccountSettingsUrl(page?: string) {
+  return getAccountUrl(page ? `/account/${page}` : "/account");
 }
 
 // The fleet workspace SPA (app/frames/[[...path]]) — the one and only frames
@@ -159,10 +184,17 @@ export function getFramesUrl() {
   return new URL("/frames", getAccountBaseUrl()).toString();
 }
 
-// The public store front. On its own host (production: scenes.frameos.net)
-// it is the root; when the store shares an origin with the cloud app (local
-// development) the root belongs to the signed-in workspace redirect, so the
-// store front answers at /store instead (app/store/page.tsx serves both).
+// The SPA's home page (app/home/[[...path]]): where the root of the cloud
+// host sends a visitor, and what the store's root falls back to in dev.
+export function getHomeUrl() {
+  return new URL("/home", getAccountBaseUrl()).toString();
+}
+
+// The public store front — a page of the frames workspace SPA since 2026.10
+// (app/store/route.ts, app/route.ts). On its own host (production:
+// scenes.frameos.net) it is the root; when the store shares an origin with
+// the cloud app (local development) the root belongs to the workspace's
+// home page, so the store front answers at /store instead.
 export function getStorePath() {
   return new URL(getScenesBaseUrl()).origin ===
     new URL(getCloudBaseUrl()).origin

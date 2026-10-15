@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 describe("proxy", () => {
-  it("rewrites through the plain-HTTP localhost listener behind TLS termination", async () => {
+  it("redirects the old clean account paths into the frames workspace", async () => {
     process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
     process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
     process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
@@ -24,9 +24,14 @@ describe("proxy", () => {
       }),
     );
 
-    expect(response.headers.get("x-middleware-rewrite")).toBe(
-      "http://localhost:3000/account/installs",
+    // 307 and no-store: which path serves which page is deployment config
+    // (the account pages moved into the SPA in 2026.10), and a permanent
+    // redirect would freeze into browser caches.
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://account.frameos.net/account/backends",
     );
+    expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
   // The session refresh runs here (it is the only place in Next 16 that may

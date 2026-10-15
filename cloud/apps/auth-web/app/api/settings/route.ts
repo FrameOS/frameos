@@ -40,8 +40,8 @@ export const runtime = "nodejs";
 // unchanged in cloud mode: GET returns the merged {group: value} object,
 // POST replaces each posted group wholesale and returns the updated merge.
 // Which groups and fields are storable is the account-settings.ts allowlist.
-// The account settings page (app/account/settings) renders the same merged
-// object server-side and posts here from its form.
+// The frames workspace's Service keys and SSH keys pages (the shared SPA's
+// settingsLogic and sshKeysLogic) read and post this.
 //
 // Secrets are sealed at rest and MASKED on the way out (account-settings.ts):
 // GET answers `••••••••cdef` for a key, and a form that posts that mask back

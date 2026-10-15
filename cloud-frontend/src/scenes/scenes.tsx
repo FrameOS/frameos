@@ -1,32 +1,51 @@
 import { lazy } from 'react'
 
 import { urls } from '../../../frontend/src/urls'
+import { cloudSignedIn } from '../../../frontend/src/utils/cloudMode'
 import { NotFound } from '../../../frontend/src/scenes/NotFound'
 
 export const scenes = {
   error404: NotFound,
+  home: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudHomePage }))),
+  storeFront: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudStoreFront }))),
   frames: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudFramesHome }))),
   frame: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudFrame }))),
   sceneWorkspace: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudSceneWorkspace }))),
   appsWorkspace: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudAppsWorkspace }))),
   photosWorkspace: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudPhotosWorkspace }))),
+  settings: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudSettings }))),
 }
 
 // Routes come from the shared urls module so they always match the links
 // the shared components generate. With route_base_path = '/frames' these
-// resolve to /frames, /frames/:id, /frames/:id/scenes/... and
-// /frames/apps/... kea-router takes the first matching pattern, so the
-// literal /frames/* routes come before the parametric /frames/:id.
+// resolve to /frames, /frames/:id and /frames/:id/scenes/...; the apps and
+// photos pages sit beside the mount at the origin root (/apps, /apps/system,
+// /apps/frames/:frameId/…, /photos — the Next.js app serves the shell there
+// too). kea-router takes the first matching pattern, so the literal
+// /frames/* routes come before the parametric /frames/:id.
 // The SPA's own login/signup scenes are deliberately absent: Next.js owns
-// auth on the cloud (apiFetch redirects to /login on 401). So is the
-// settings scene: the account's service API keys and SSH keys are an
-// account page (/account/settings), and urls.settings() links out to it;
-// the old /frames/settings is redirected there server-side.
+// auth on the cloud (apiFetch redirects to /login on 401). The settings
+// scene is the account's pages — backends, service keys, SSH keys, usage,
+// backups, activity, security, developer — one route each under /account
+// (frontend/src/scenes/settings/account/accountPages.ts), the address they
+// had as Next.js pages. That is outside the /frames mount, so Next serves
+// this shell at /account/** too (app/account/[[...section]]/route.ts).
 export const getRoutes = () =>
   ({
+    [urls.home()]: 'home',
+    // The store front: /store on the cloud host, the root of the scenes host
+    // (the cloud host's root never reaches the SPA — Next sends it to /home).
+    [urls.store()]: 'storeFront',
+    '/': 'storeFront',
     [urls.frames()]: 'frames',
     [urls.frames() + '/']: 'frames',
-    [urls.scenes()]: 'sceneWorkspace',
+    [urls.settings()]: 'settings',
+    [urls.settings(':page')]: 'settings',
+    // The scenes library, or — signed out — the public store at the same address.
+    [urls.scenes()]: cloudSignedIn() ? 'sceneWorkspace' : 'storeFront',
+    [urls.appsHome()]: 'appsWorkspace',
+    [urls.systemApps()]: 'appsWorkspace',
+    [urls.systemApps(':keyword')]: 'appsWorkspace',
     [urls.apps()]: 'appsWorkspace',
     [urls.apps(':frameId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId')]: 'appsWorkspace',

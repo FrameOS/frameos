@@ -18,6 +18,7 @@ import {
   maxScheduleEvents,
   maxScenesPayloadBytes,
 } from "../../../../src/lib/frames";
+import { getSupportEmail } from "../../../../src/lib/legal";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
 import {
@@ -129,6 +130,9 @@ export async function GET(request: NextRequest) {
           max_tags_per_scene: maxTagsPerScene,
         },
       },
+      // Where to ask for more than the limits allow (the usage page's
+      // "Need more?" card); empty when the deployment has no support address.
+      support_email: getSupportEmail() || null,
       usage,
     },
     { headers: { "cache-control": "no-store" } },

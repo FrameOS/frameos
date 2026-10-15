@@ -3,6 +3,7 @@ import { auditEvents, frames, storeScenes } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import {
   activityConditions,
+  activityGroups,
   parseActivityFilters,
 } from "../../../../src/lib/account-activity";
 import {
@@ -20,11 +21,12 @@ export const runtime = "nodejs";
 const defaultLimit = 50;
 const maxLimit = 200;
 
-// The account's activity feed (app/account/activity): audit_events for the
+// The account's activity feed (the workspace's Activity page): audit_events for the
 // session's account, newest first, filtered by `q`, `group`, `from` and `to`
 // (src/lib/account-activity.ts) and paged with the same keyset cursor the
 // per-frame feed uses: `?before=<iso>&before_id=<uuid>`. Each row carries the
 // name of the frame or scene it is about, resolved within the account.
+// `groups` names the event families `group` accepts, for the page's filter.
 export async function GET(request: NextRequest) {
   const limited = await rateLimitResponse(request, "account:activity", {
     limit: 600,
@@ -131,6 +133,10 @@ export async function GET(request: NextRequest) {
           scene_name: target.sceneId ? (sceneNames.get(target.sceneId) ?? null) : null,
         };
       }),
+      groups: Object.entries(activityGroups).map(([value, group]) => ({
+        label: group.label,
+        value,
+      })),
       has_more: hasMore,
       next_cursor:
         hasMore && last ? { before: last.createdAt.toISOString(), before_id: last.id } : null,

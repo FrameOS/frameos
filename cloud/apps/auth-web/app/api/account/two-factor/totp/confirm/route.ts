@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
       : await regenerateRecoveryCodes(db, context.accountId);
   // A personal API token never answers a second factor, so every one minted
   // before this moment would keep walking past the factor just enrolled.
-  // Revoke them all; the owner re-mints from /account/developer, which asks
+  // Revoke them all; the owner re-mints from the Developer page, which asks
   // for fresh credentials and is now behind 2FA.
   const apiTokensRevoked = await revokeApiTokensForAccount(db, context.accountId);
   await recordAuditEvent(db, {

@@ -17,6 +17,9 @@ vi.mock("../../../../src/lib/csrf", () => ({
 }));
 vi.mock("../../../../src/lib/session", () => ({
   readSession: vi.fn(),
+  // GET reports whether the session may mint (hasRecentAuth); no cookie in
+  // these tests, so it may not.
+  readSessionToken: vi.fn(() => Promise.resolve(undefined)),
 }));
 vi.mock("../../../../src/lib/audit", () => ({
   recordAuditEvent: vi.fn(() => Promise.resolve()),
@@ -185,13 +188,27 @@ describe("GET /api/account/api-tokens", () => {
       new NextRequest("https://cloud.example/api/account/api-tokens"),
     );
     const payload = (await response.json()) as {
+      api_tokens: Record<string, unknown>[];
+      can_create: boolean;
       default_ttl_days: number;
+      live_count: number;
       max_tokens: number;
+      mcp_url: string;
+      password_required: boolean;
+      reauth_required: boolean;
       tokens: Record<string, unknown>[];
     };
     expect(payload.max_tokens).toBe(25);
     expect(payload.default_ttl_days).toBe(90);
     expect(payload.tokens[0]).toMatchObject({ id: "tok-1", token_hint: "fc_api_abcd" });
+    // The shared SPA's Developer page reads the backend's listing shape too.
+    expect(payload.api_tokens[0]).toMatchObject({ hint: "fc_api_abcd", id: "tok-1" });
+    expect(payload.live_count).toBe(1);
+    expect(payload.password_required).toBe(false);
+    expect(payload.mcp_url).toMatch(/\/api\/mcp$/);
+    // No session cookie here: the session has not proved itself recently.
+    expect(payload.can_create).toBe(false);
+    expect(payload.reauth_required).toBe(true);
     expect(JSON.stringify(payload)).not.toContain("should-not-leak");
   });
 });

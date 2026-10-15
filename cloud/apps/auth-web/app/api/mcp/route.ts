@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: "login_required",
-        hint: "Send `Authorization: Bearer fc_api_…` with a personal API token from /account/developer.",
+        hint: "Send `Authorization: Bearer fc_api_…` with a personal API token from the frames workspace's Developer page (/account/developer).",
       },
       {
         headers: { "www-authenticate": 'Bearer realm="FrameOS Cloud"' },

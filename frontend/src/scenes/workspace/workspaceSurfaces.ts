@@ -95,6 +95,45 @@ export function addSceneActionIsAllowed(mode: WorkspaceMode, action: AddSceneAct
   return allows(allowedAddSceneActions, mode, action)
 }
 
+/**
+ * The scenes library: the pages at the top of the Scenes side panel, before
+ * the installed scenes of a frame. The public store comes from the cloud
+ * the plane is linked to (scenes.frameos.net by default) on every plane;
+ * private scenes are the account's cloud drive (the cloud itself, or a
+ * backend linked with the store scope) and, on a backend, its own saved
+ * scenes. The on-device panel keeps nothing of its own, so it browses the
+ * store only.
+ */
+export type ScenesLibraryPage = 'store' | 'cloud' | 'local' | 'installed'
+
+export const scenesLibraryPages: Record<WorkspaceMode, readonly ScenesLibraryPage[]> = {
+  backend: ['store', 'cloud', 'local', 'installed'],
+  cloud: ['store', 'cloud', 'installed'],
+  frameAdmin: ['store', 'installed'],
+}
+
+export function scenesLibraryPageIsAvailable(
+  page: string,
+  mode: WorkspaceMode = workspaceMode()
+): page is ScenesLibraryPage {
+  return (scenesLibraryPages[mode] as readonly string[]).includes(page)
+}
+
+/** The side panel's wording: on the cloud the drive IS the account's own
+ * scenes; a backend tells its cloud copies from its local ones. */
+export function scenesLibraryPageLabel(page: ScenesLibraryPage, mode: WorkspaceMode = workspaceMode()): string {
+  switch (page) {
+    case 'store':
+      return 'Public scene store'
+    case 'cloud':
+      return 'My cloud scenes'
+    case 'local':
+      return 'Private local scenes'
+    case 'installed':
+      return 'Installed scenes'
+  }
+}
+
 /** The Photos section (docs/photos.md). The on-device panel is one frame with
  * no library of its own. */
 export const photosLibraryModes: readonly WorkspaceMode[] = ['backend', 'cloud']
@@ -272,6 +311,9 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
   // handling; QR control code — disabled with a note on firmware older than
   // 2026.8.30, but always present), and Power on an ESP32.
   cloud: [
+    // The owner's log-shipping switch (the telemetry scopes on the link);
+    // renders above Defaults, after the service keys.
+    'frame-settings-telemetry',
     'frame-settings-defaults',
     'frame-settings-error-behavior',
     'frame-settings-qr',
@@ -296,11 +338,10 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
  * the per-frame settings panel above. `null` means "everything the page
  * renders": the backend owns all of it, and the on-device admin never mounts
  * this page at all (urls.settings() routes it to the frame's own settings
- * panel instead). The cloud does not mount it either any more: its service
- * API keys and SSH keys are an account page
- * (cloud/apps/auth-web/app/account/settings), and urls.settings() links out
- * to it. The cloud list below is the subset that page carries, kept so the
- * shared component's mode contract stays complete.
+ * panel instead). On the cloud the page is the account's "Service keys"
+ * page (globalSettingsLayouts: one page per section), and this is the list
+ * of services that page edits — the storable groups of the cloud's
+ * /api/settings (account-settings.ts) — plus the SSH keys page's section.
  */
 export const allowedGlobalSettingsSections: Record<WorkspaceMode, readonly string[] | null> = {
   backend: null,
@@ -320,6 +361,29 @@ export const allowedGlobalSettingsSections: Record<WorkspaceMode, readonly strin
 export function globalSettingsSectionIsAllowed(mode: WorkspaceMode, sectionId: string): boolean {
   const allowed = allowedGlobalSettingsSections[mode]
   return allowed === null || allowed.includes(sectionId)
+}
+
+/**
+ * How the global settings page is laid out.
+ *
+ *   anchors  one page, every section on it, the side panel a list of anchors
+ *            that scroll to them (the self-hosted backend's settings form,
+ *            one Save for everything).
+ *   pages    one page per section, the side panel a list of routes
+ *            (/settings/<page>): the cloud's account pages — backends,
+ *            service keys, SSH keys, usage, backups, activity, security and
+ *            developer (scenes/settings/account/accountPages.ts), which used
+ *            to be Next.js pages outside this SPA.
+ *
+ * The on-device admin never mounts this page (urls.settings() routes it to
+ * the frame's own settings panel); its entry only keeps the record total.
+ */
+export type GlobalSettingsLayout = 'anchors' | 'pages'
+
+export const globalSettingsLayouts: Record<WorkspaceMode, GlobalSettingsLayout> = {
+  backend: 'anchors',
+  frameAdmin: 'anchors',
+  cloud: 'pages',
 }
 
 /**

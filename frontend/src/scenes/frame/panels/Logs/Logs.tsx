@@ -820,8 +820,9 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
                 // enrollment before 2026-08-03) ships nothing, silently. Name
                 // the cause and point at the switch instead of "No logs yet".
                 <span className="text-center px-4">
-                  Log shipping is off for this frame — turn on “Ship logs and metrics to the cloud” under Settings →
-                  Logs and metrics.
+                  Log shipping is off for this frame. Turn on “Ship logs and metrics to the cloud” under Settings → Log
+                  shipping here, or under Cloud features on the frame's own settings page. Logs arrive only while the
+                  frame is managed from FrameOS Cloud.
                 </span>
               ) : (
                 'No logs yet'

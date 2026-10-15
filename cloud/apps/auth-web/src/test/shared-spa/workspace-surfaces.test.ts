@@ -28,6 +28,9 @@ import {
   isEsp32CloudFrame,
   isVirtualFrame,
   photosLibraryIsAvailable,
+  scenesLibraryPageIsAvailable,
+  scenesLibraryPageLabel,
+  scenesLibraryPages,
   sceneToolPanelDisabledReason,
   sceneToolPanelIsAllowed,
   sceneUtilityPanelIsAllowed,
@@ -172,7 +175,7 @@ describe("cloud mode hides everything the protocol cannot do", () => {
   });
 
   it("keeps only the service-key sections of the GLOBAL settings page, plus SSH public keys", () => {
-    // The cloud's /frames/settings page persists service API keys
+    // The cloud's /account page persists service API keys
     // (account_settings via /api/settings) and the account's SSH public
     // keys for the SD card builder, and nothing else: no local account,
     // deploy defaults, build environment, font store, backend PostHog or
@@ -734,11 +737,15 @@ describe("allow-list hygiene", () => {
     // frame's FrameOS Cloud link box and its self-upgrade, which exist only
     // where the frame itself is the server.
     const frameAdminOnlySettingsSections = ["frame-settings-cloud", "frame-settings-upgrade"];
+    // And on the cloud's: the owner's log-shipping switch edits the telemetry
+    // scopes of the frame's cloud link, which only the cloud holds (a
+    // self-hosted backend reads a frame's logs over its own channel).
+    const cloudOnlySettingsSections = ["frame-settings-telemetry"];
     const lists = [
       [allowedFrameToolPanels, "frame tools", cloudOnlyFrameTools, []],
       [allowedSceneToolPanels, "scene tools", [], []],
       [allowedSceneUtilityPanels, "scene utilities", [], []],
-      [allowedFrameSettingsSections, "settings sections", [], frameAdminOnlySettingsSections],
+      [allowedFrameSettingsSections, "settings sections", cloudOnlySettingsSections, frameAdminOnlySettingsSections],
       [allowedAddSceneActions, "add scene actions", [], []],
     ] as const;
     for (const [list, label, cloudOnly, frameAdminOnly] of lists) {
@@ -829,5 +836,28 @@ describe("isEsp32Frame", () => {
     // hardware.platform is the enrollment report; a backend frame's device
     // identity is embedded.platform.
     expect(isEsp32Frame({ hardware: { platform: "esp32-s3" } }, "backend")).toBe(false);
+  });
+});
+
+describe("Scenes library", () => {
+  // The pages at the top of the Scenes side panel, before a frame's
+  // installed scenes. The public store comes from the linked cloud on every
+  // plane; a backend also has the account's cloud drive and its own saved
+  // scenes, the cloud only its drive, the on-device panel nothing of its own.
+  it("lists the store first on every plane, then the private pages the plane has", () => {
+    expect(scenesLibraryPages.backend).toEqual(["store", "cloud", "local", "installed"]);
+    expect(scenesLibraryPages.cloud).toEqual(["store", "cloud", "installed"]);
+    expect(scenesLibraryPages.frameAdmin).toEqual(["store", "installed"]);
+    expect(scenesLibraryPageIsAvailable("local", "backend")).toBe(true);
+    expect(scenesLibraryPageIsAvailable("local", "cloud")).toBe(false);
+    expect(scenesLibraryPageIsAvailable("cloud", "frameAdmin")).toBe(false);
+    expect(scenesLibraryPageIsAvailable("not-a-page", "backend")).toBe(false);
+  });
+
+  it("names the drive my cloud scenes on every plane", () => {
+    expect(scenesLibraryPageLabel("store", "cloud")).toBe("Public scene store");
+    expect(scenesLibraryPageLabel("cloud", "cloud")).toBe("My cloud scenes");
+    expect(scenesLibraryPageLabel("cloud", "backend")).toBe("My cloud scenes");
+    expect(scenesLibraryPageLabel("local", "backend")).toBe("Private local scenes");
   });
 });

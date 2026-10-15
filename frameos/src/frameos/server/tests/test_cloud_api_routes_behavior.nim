@@ -7,6 +7,7 @@
 import std/[json, os, strutils, times, unittest]
 
 import ../../channels
+import ../../cloud/link_state
 import ../rate_limit
 import ./helpers/http_harness
 from ../routes/cloud_api_routes import safeCloudErrorCode
@@ -244,6 +245,54 @@ suite "the two cloud switches on the admin page":
     check payload{"cloud_login_enabled"}.getBool(false)
     # Linked but not managed: the panel must be able to say so.
     check payload{"mode"}.getStr("") == ""
+    # No telemetry scope on this link: the switch is offered as unavailable.
+    check not payload{"telemetry_available"}.getBool(true)
+    check not payload{"telemetry_enabled"}.getBool(true)
+
+  test "log shipping is a local switch over the telemetry grant":
+    var state = connectedLoginLink(true)
+    state["scope"] = %"frame:link frame:managed auth:login telemetry:logs telemetry:metrics"
+    let cookie = switchAdminCookie()
+    writeLinkState(state)
+    let status = parseJson(httpRequest(server.port, "GET", "/api/cloud/status",
+      headers = [("Cookie", cookie)]).body)
+    # Granted and never switched off: on by default.
+    check status{"telemetry_available"}.getBool(false)
+    check status{"telemetry_enabled"}.getBool(false)
+
+    let off = httpRequest(server.port, "POST", "/api/cloud/telemetry",
+      headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
+      body = $(%*{"enabled": false}))
+    check off.status == 200
+    let offPayload = parseJson(off.body)
+    check not offPayload{"telemetry_enabled"}.getBool(true)
+    # The grant is untouched; only this frame stopped pushing.
+    check offPayload{"telemetry_available"}.getBool(false)
+    let stored = parseJson(readFile(workDir / "state" / "cloud_link.json"))
+    check stored{"scope"}.getStr("").contains("telemetry:logs")
+    check not stored{"telemetry_enabled"}.getBool(true)
+    # What the hub session gates on loses the telemetry scopes while off.
+    check "telemetry:logs" notin effectiveLinkScopes(stored)
+    check "frame:managed" in effectiveLinkScopes(stored)
+
+    let on = httpRequest(server.port, "POST", "/api/cloud/telemetry",
+      headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
+      body = $(%*{"enabled": true}))
+    check on.status == 200
+    check parseJson(on.body){"telemetry_enabled"}.getBool(false)
+    check "telemetry:metrics" in effectiveLinkScopes(
+      parseJson(readFile(workDir / "state" / "cloud_link.json")))
+
+  test "log shipping cannot be switched on without the grant":
+    var state = connectedLoginLink(true)
+    let cookie = switchAdminCookie()
+    state["scope"] = %"frame:link frame:managed auth:login"
+    writeLinkState(state)
+    let refused = httpRequest(server.port, "POST", "/api/cloud/telemetry",
+      headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
+      body = $(%*{"enabled": true}))
+    check refused.status == 409
+    check refused.body.contains("connect again")
 
   test "cloud login is a local switch, and turning it off brings the password back":
     # Sign in while the password still works, then put the frame in the state
@@ -323,14 +372,14 @@ suite "the two cloud switches on the admin page":
     check refused.status == 409
     check refused.body.contains("connect again")
 
-  test "both switches are admin-only and validate their body":
+  test "the switches are admin-only and validate their body":
     let cookie = switchAdminCookie()
     writeLinkState(%*{"status": "disconnected"})
-    for path in ["/api/cloud/managed", "/api/cloud/cloud-login"]:
+    for path in ["/api/cloud/managed", "/api/cloud/cloud-login", "/api/cloud/telemetry"]:
       check httpRequest(server.port, "POST", path,
         headers = [("Content-Type", "application/json")],
         body = $(%*{"enabled": true})).status == 401
-    for path in ["/api/cloud/managed", "/api/cloud/cloud-login"]:
+    for path in ["/api/cloud/managed", "/api/cloud/cloud-login", "/api/cloud/telemetry"]:
       check httpRequest(server.port, "POST", path,
         headers = [("Content-Type", "application/json"), ("Cookie", cookie)],
         body = $(%*{})).status == 400

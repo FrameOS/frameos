@@ -231,36 +231,75 @@ describe("frames SPA shell", () => {
     expect(lines).toContain(
       'cloud_logout_url: "https://frameos.net/api/auth/logout",',
     );
-    // On a split-host deployment "/account" shortens to "/backends" — the
-    // SPA cannot know that rule, so the server sends the finished URL.
+    // The account's pages are the SPA's own settings pages at /account/…;
+    // the header's Account link lands on the first.
     expect(lines).toContain(
-      'cloud_account_url: "https://account.frameos.net/backends",',
+      'cloud_account_url: "https://account.frameos.net/account/backends",',
     );
     // Baked into SD images and ESP32 NVS: the deployment's public URL, never
     // the browser's address bar.
     expect(lines).toContain('cloud_origin: "https://account.frameos.net",');
-    // The SPA's settings gear links out to the account page, shortened the
-    // way every other /account/* path is on a split-host deployment.
+    // Sudo mode is a page of the auth origin; the account pages' sensitive
+    // actions send the browser there and back.
     expect(lines).toContain(
-      'cloud_settings_url: "https://account.frameos.net/settings",',
+      'cloud_reauth_url: "https://frameos.net/login/reauth",',
     );
+    // The shell is served signed out too (the store front); no cookie here.
+    expect(lines).toContain("cloud_signed_in: false,");
+    expect(lines).toContain('cloud_login_url: "https://frameos.net/login",');
+    // The settings are the SPA's own scene again (they were an account page
+    // from 2026.9 to 2026.10); nothing to inject for them.
+    expect(lines.join("\n")).not.toContain("cloud_settings_url");
   });
 
-  // The global settings were a SPA scene at /frames/settings until 2026.9;
-  // the scene editors still hold links to it with an #settings-openai
-  // fragment, which the browser carries across a fragment-less redirect.
-  it("redirects the old /frames/settings scene to the account page", async () => {
+  // The account's settings pages are scenes of the SPA at /account/<page>:
+  // the account route serves this same shell, with the same injection, and
+  // first redirects the sections that were renamed on the way in.
+  it("serves the shell for the account pages, redirecting renamed sections", async () => {
     process.env.FRAMEOS_CLOUD_APP_URL = "https://frameos.net";
     process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
     process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
-    for (const path of ["/frames/settings", "/frames/settings/"]) {
-      const response = await get(`https://account.frameos.net${path}`);
-      expect(response.status).toBe(307);
-      expect(response.headers.get("location")).toBe("https://account.frameos.net/settings");
+    const { GET: accountGet } = await import("../../account/[[...section]]/route");
+    for (const path of ["/account/backends", "/account/developer", "/account/not-a-page"]) {
+      const response = await accountGet(
+        new NextRequest(`https://account.frameos.net${path}`),
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/html");
+      expect(await response.text()).toContain(
+        'cloud_reauth_url: "https://frameos.net/login/reauth",',
+      );
+    }
+    for (const [legacy, page] of [
+      ["/account", "/account/backends"],
+      ["/account/", "/account/backends"],
+      ["/account/installs", "/account/backends"],
+      ["/account/settings?x=1", "/account/services?x=1"],
+      ["/account/ai", "/account/usage#ai"],
+    ]) {
+      const response = await accountGet(
+        new NextRequest(`https://account.frameos.net${legacy}`),
+      );
+      expect(response.status, legacy).toBe(307);
+      expect(response.headers.get("location")).toBe(`https://account.frameos.net${page}`);
       expect(response.headers.get("cache-control")).toBe("no-store");
     }
-    // Only that path: a frame that happens to be called "settings-…" is a frame.
-    expect((await get("https://account.frameos.net/frames/settings-x")).status).toBe(200);
+  });
+
+  // The apps and photos pages are the SPA's, beside the /frames mount.
+  it("serves the shell at /apps, /home, /photos, /scenes and /store", async () => {
+    for (const [modulePath, path] of [
+      ["../../apps/[[...path]]/route", "/apps/system/data%2Fclock"],
+      ["../../home/[[...path]]/route", "/home"],
+      ["../../photos/[[...path]]/route", "/photos?folder=Summer"],
+      ["../../store/route", "/store?category=clocks"],
+      ["../../scenes/route", "/scenes?category=clocks"],
+    ] as const) {
+      const { GET: get } = await import(modulePath);
+      const response = await get(new NextRequest(`https://account.frameos.net${path}`));
+      expect(response.status, path).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/html");
+    }
   });
 
   it("substitutes the machine's LAN address for a localhost enrollment origin", async () => {

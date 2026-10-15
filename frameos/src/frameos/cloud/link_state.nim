@@ -172,6 +172,30 @@ proc linkScopes*(state: JsonNode): seq[string] =
   for scope in state{"scope"}.getStr("").splitWhitespace():
     result.add(scope)
 
+const TELEMETRY_SCOPES* = ["telemetry:logs", "telemetry:metrics"]
+
+proc telemetryGranted*(state: JsonNode): bool =
+  ## Whether the provider granted this link log or metrics shipping — a
+  ## connected link carrying a telemetry scope. The local switch below can
+  ## still be off; this is what says the switch may be offered at all.
+  state{"status"}.getStr("") == "connected" and
+    (linkHasScope(state, "telemetry:logs") or linkHasScope(state, "telemetry:metrics"))
+
+proc telemetryEnabled*(state: JsonNode): bool =
+  ## The "Ship logs and metrics to the cloud" switch on the admin page: the
+  ## grant above AND the local switch, which defaults to on. Turning it off
+  ## leaves the grant in place; the hub session simply stops pushing
+  ## (effectiveLinkScopes drops the telemetry scopes it gates on).
+  telemetryGranted(state) and state{"telemetry_enabled"}.getBool(true)
+
+proc effectiveLinkScopes*(state: JsonNode): seq[string] =
+  ## The granted scopes minus the telemetry ones while the local switch is
+  ## off: what the hub client gates its push loops on.
+  let shipping = state{"telemetry_enabled"}.getBool(true)
+  for scope in linkScopes(state):
+    if shipping or scope notin TELEMETRY_SCOPES:
+      result.add(scope)
+
 proc requestedLinkScopes*(state: JsonNode): seq[string] =
   ## The scopes this frame asked for when the local admin started the link
   ## (persisted by POST /api/cloud/connect). Empty for links minted before this

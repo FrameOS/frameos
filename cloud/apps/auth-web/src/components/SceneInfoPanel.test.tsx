@@ -105,9 +105,9 @@ describe("SceneInfoPanel", () => {
     expect(document.querySelectorAll(".scene-gallery img")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: /Remove image/ })).toBeNull();
 
-    // Category and tags link into the store.
+    // The category links into the store; tags are not shown any more.
     expect(screen.getByRole("link", { name: "Weather" }).getAttribute("href")).toBe("/?category=weather");
-    expect(screen.getByRole("link", { name: "e-ink" }).getAttribute("href")).toBe("/?tag=e-ink");
+    expect(screen.queryByText("e-ink")).toBeNull();
 
     // Description as markdown; no owner editors.
     expect(screen.getByText("station").tagName).toBe("STRONG");
@@ -199,11 +199,6 @@ describe("SceneInfoPanel", () => {
     // Removing goes to the draft, never to the server.
     fireEvent.click(screen.getByRole("button", { name: "Remove image 2" }));
     expect(draft.onImagesChange).toHaveBeenCalledWith([shaA]);
-    // So does a tag edit.
-    fireEvent.click(screen.getByRole("button", { name: "Edit tags" }));
-    fireEvent.change(screen.getByRole("textbox", { name: /Tags/ }), { target: { value: "clock, maps" } });
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
-    expect(draft.onListingChange).toHaveBeenCalledWith({ tags: ["clock", "maps"] });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit category" })).toBeTruthy();

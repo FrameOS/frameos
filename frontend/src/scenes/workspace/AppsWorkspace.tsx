@@ -1,7 +1,7 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import { router } from 'kea-router'
 import clsx from 'clsx'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import {
   ArrowLeftIcon,
   ArrowTopRightOnSquareIcon,
@@ -55,6 +55,20 @@ interface AppsWorkspaceProps {
   frameId?: string
   sceneId?: string
   nodeId?: string
+  /** The cloud's /apps/system/:keyword route; self-hosted the keyword rides
+   * in sceneId's place (/apps/system/:sceneId, "system" as the frame). */
+  keyword?: string
+}
+
+// On the cloud the system apps have routes without a frame param — /apps
+// (the home) and /apps/system[/<keyword>], beside /apps/frames/… — so the
+// path says which side of the toggle the route is.
+function isCloudSystemAppsPath(pathname: string): boolean {
+  if (!isCloudMode()) {
+    return false
+  }
+  const systemPath = urls.systemApps()
+  return pathname === urls.appsHome() || pathname === systemPath || pathname.startsWith(`${systemPath}/`)
 }
 
 type AppsSourceMode = 'system' | 'frames'
@@ -65,6 +79,8 @@ interface AppsWorkspaceFrameProps {
   routeSceneId?: string | null
   routeNodeId?: string | null
   routeSystemAppKeyword?: string | null
+  /** ?file=: the file open in the editor (an app without one shows its overview). */
+  routeFile?: string | null
 }
 
 interface AppNodeOption {
@@ -89,6 +105,9 @@ interface SystemAppOption {
   keyword: string
   label: string
   category: string
+  categoryLabel: string
+  /** A repo JavaScript app (repo/apps/<folder>/<name>) rather than a Nim one. */
+  javascript: boolean
 }
 
 function appNodeLanguage(
@@ -158,27 +177,42 @@ function appNodeSceneGroups(appOptions: AppNodeOption[]): AppNodeSceneGroup[] {
   return groups
 }
 
-function defaultApp(frame: FrameType | null): AppNodeOption | null {
-  const scenes = frame?.scenes ?? []
-  const defaultScene = scenes.find((scene) => scene.default) ?? scenes[0] ?? null
-  return appNodeOptions(defaultScene)[0] ?? appNodeOptionsForScenes(scenes)[0] ?? null
+// The folder a repo JS app sits in names what it returns (repo/apps/image,
+// text, json, logic); that is its group here, after the Nim categories.
+const repoAppFolderLabels: Record<string, string> = {
+  image: 'JavaScript: image',
+  text: 'JavaScript: text',
+  json: 'JavaScript: JSON',
+  logic: 'JavaScript: logic',
 }
 
-function defaultAppFromOptions(frame: FrameType | null, appOptions: AppNodeOption[]): AppNodeOption | null {
-  const scenes = frame?.scenes ?? []
-  const defaultScene = scenes.find((scene) => scene.default) ?? scenes[0] ?? null
-  return (defaultScene ? appOptions.find((app) => app.sceneId === defaultScene.id) : null) ?? appOptions[0] ?? null
+function repoAppGroup(keyword: string): { key: string; label: string } {
+  const folder = keyword.split('/')[2] ?? 'other'
+  return { key: `javascript:${folder}`, label: repoAppFolderLabels[folder] ?? `JavaScript: ${folder}` }
 }
 
+// Every catalog app: the repo JavaScript apps by folder, then the built-in
+// Nim apps by category. Both are read only here; the sources of the
+// repo apps are embedded in the bundle, the Nim ones come from the API.
 function systemAppOptions(apps: Record<string, AppConfig>): SystemAppOption[] {
   return Object.entries(apps)
-    .filter(([keyword]) => !isRepoAppKeyword(keyword))
-    .map(([keyword, app]) => ({
-      keyword,
-      label: app.name || keyword,
-      category: (app.category || 'other').toLowerCase(),
-    }))
+    .map(([keyword, app]) => {
+      const javascript = isRepoAppKeyword(keyword)
+      const group = javascript ? repoAppGroup(keyword) : null
+      return {
+        keyword,
+        label: app.name || keyword.slice(keyword.lastIndexOf('/') + 1),
+        category: group?.key ?? (app.category || 'other').toLowerCase(),
+        categoryLabel:
+          group?.label ?? categoryLabels[(app.category || 'other').toLowerCase()] ?? app.category ?? 'Other',
+        javascript,
+      }
+    })
     .toSorted((a, b) => {
+      // The JavaScript apps first: they are what a scene author writes today.
+      if (a.javascript !== b.javascript) {
+        return a.javascript ? -1 : 1
+      }
       const categoryComparison = a.category.localeCompare(b.category)
       return categoryComparison || a.label.localeCompare(b.label)
     })
@@ -191,7 +225,7 @@ function systemAppOptionGroups(
   for (const option of options) {
     let group = groups.find((candidate) => candidate.key === option.category)
     if (!group) {
-      group = { key: option.category, label: categoryLabels[option.category] ?? option.category, options: [] }
+      group = { key: option.category, label: option.categoryLabel, options: [] }
       groups.push(group)
     }
     group.options.push(option)
@@ -199,12 +233,44 @@ function systemAppOptionGroups(
   return groups
 }
 
-function pushFrameAppsUrl(frame: FrameType, app: AppNodeOption | null): void {
-  router.actions.push(urls.apps(frame.id, app?.sceneId, app?.nodeId))
+// The app the side panel was left through. The lists are long, so when
+// the back arrow brings the list back it scrolls that app's row into
+// view, where the eye was. Module state: it only has to outlive one
+// navigation and never needs to be observed.
+let lastOpenedAppKey: string | null = null
+
+function pushFrameAppsUrl(frame: FrameType, app: AppNodeOption | null, file?: string | null): void {
+  if (app) {
+    lastOpenedAppKey = appOptionKey(app)
+  }
+  router.actions.push(
+    urls.apps(frame.id, app?.sceneId, app?.nodeId) + (app && file ? '?file=' + encodeURIComponent(file) : '')
+  )
 }
 
-function pushSystemAppsUrl(keyword?: string | null): void {
-  router.actions.push(urls.systemApps(keyword))
+// A system app has two views: its overview (the list stays in the side
+// panel; files and a readme-style summary on the right) and, once a file is
+// opened (?file=), the editor with the file list in the side panel.
+function pushSystemAppsUrl(keyword?: string | null, file?: string | null): void {
+  if (keyword) {
+    lastOpenedAppKey = keyword
+  }
+  router.actions.push(urls.systemApps(keyword) + (keyword && file ? '?file=' + encodeURIComponent(file) : ''))
+}
+
+// Scrolls the row of the app the list was left through into view, once,
+// when a list mounts; the row's own container scrolls (the side panel).
+function useScrollToLastOpenedApp(listRef: RefObject<HTMLElement | null>): void {
+  useEffect(() => {
+    const key = lastOpenedAppKey
+    if (!key || !listRef.current) {
+      return
+    }
+    const row = [...listRef.current.querySelectorAll<HTMLElement>('[data-app-key]')].find(
+      (element) => element.dataset.appKey === key
+    )
+    row?.scrollIntoView({ block: 'center' })
+  }, [listRef])
 }
 
 function SelectionSelect({
@@ -212,6 +278,7 @@ function SelectionSelect({
   value,
   disabled,
   onChange,
+  leading,
   action,
   children,
 }: {
@@ -219,6 +286,8 @@ function SelectionSelect({
   value: string | number
   disabled?: boolean
   onChange: (value: string) => void
+  /** Rendered before the select (the app list's back button). */
+  leading?: ReactNode
   action?: ReactNode
   children: ReactNode
 }): JSX.Element {
@@ -226,6 +295,7 @@ function SelectionSelect({
     <div>
       <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">{label}</label>
       <div className="flex items-center gap-2">
+        {leading}
         <select
           value={value}
           disabled={disabled}
@@ -249,7 +319,7 @@ function SourceModeToggle({
 }): JSX.Element {
   return (
     <div className="apps-source-mode-toggle grid grid-cols-2 rounded-xl border border-slate-200 bg-white/70 p-1 shadow-sm">
-      {(['frames', 'system'] as AppsSourceMode[]).map((candidate) => {
+      {(['system', 'frames'] as AppsSourceMode[]).map((candidate) => {
         const active = mode === candidate
         return (
           <button
@@ -286,6 +356,112 @@ function EmptyFileList({ label = 'No app selected' }: { label?: string }): JSX.E
   )
 }
 
+// The side panel starts as a list of apps; picking one opens its files
+// under an "App" select, with this button to the left of the select to get
+// the list back. "Back" is the route without an app, so it survives reloads
+// and the rail's apps button remembers whichever view was open.
+function BackToAppListButton({ onClick }: { onClick: () => void }): JSX.Element {
+  return (
+    <button
+      type="button"
+      title="All apps"
+      aria-label="All apps"
+      onClick={onClick}
+      className="frameos-form-control flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white !px-0 !py-0 text-slate-700 shadow-none transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      <ArrowLeftIcon className="h-5 w-5" />
+    </button>
+  )
+}
+
+function AppListGroup({ label, children }: { label: string; children: ReactNode }): JSX.Element {
+  return (
+    <div>
+      <div className="frameos-muted mb-1 px-3 text-xs font-semibold uppercase tracking-wide">{label}</div>
+      <div className="space-y-0.5">{children}</div>
+    </div>
+  )
+}
+
+function AppListRow({
+  appKey,
+  label,
+  detail,
+  onClick,
+}: {
+  appKey: string
+  label: string
+  detail?: string
+  onClick: () => void
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      data-app-key={appKey}
+      onClick={onClick}
+      className={clsx(
+        'frameos-settings-nav-link flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+        appKey === lastOpenedAppKey && 'frameos-settings-nav-link-active'
+      )}
+    >
+      <CubeTransparentIcon className="h-4 w-4 shrink-0 opacity-70" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {detail ? <span className="frameos-muted shrink-0 text-xs">{detail}</span> : null}
+    </button>
+  )
+}
+
+function SystemAppList({ systemApps }: { systemApps: SystemAppOption[] }): JSX.Element {
+  // The app whose overview is open reads as the current one.
+  const listRef = useRef<HTMLElement>(null)
+  useScrollToLastOpenedApp(listRef)
+  if (systemApps.length === 0) {
+    return <EmptyFileList label="No system apps" />
+  }
+  return (
+    <nav ref={listRef} aria-label="System apps" className="space-y-4">
+      {systemAppOptionGroups(systemApps).map((group) => (
+        <AppListGroup key={group.key} label={group.label}>
+          {group.options.map((option) => (
+            <AppListRow
+              key={option.keyword}
+              appKey={option.keyword}
+              label={option.label}
+              detail={option.javascript ? 'JS' : undefined}
+              onClick={() => pushSystemAppsUrl(option.keyword)}
+            />
+          ))}
+        </AppListGroup>
+      ))}
+    </nav>
+  )
+}
+
+function FrameAppList({ frame, appOptions }: { frame: FrameType; appOptions: AppNodeOption[] }): JSX.Element {
+  const listRef = useRef<HTMLElement>(null)
+  useScrollToLastOpenedApp(listRef)
+  if (appOptions.length === 0) {
+    return <EmptyFileList label="No apps on this frame" />
+  }
+  return (
+    <nav ref={listRef} aria-label="Apps" className="space-y-4">
+      {appNodeSceneGroups(appOptions).map((group) => (
+        <AppListGroup key={group.key} label={group.label}>
+          {group.options.map((app) => (
+            <AppListRow
+              key={appOptionKey(app)}
+              appKey={appOptionKey(app)}
+              label={app.label}
+              detail={app.language === 'javascript' ? 'JS' : undefined}
+              onClick={() => pushFrameAppsUrl(frame, app)}
+            />
+          ))}
+        </AppListGroup>
+      ))}
+    </nav>
+  )
+}
+
 function AppsSelector({
   sourceMode,
   frame,
@@ -295,6 +471,7 @@ function AppsSelector({
   appOptions,
   selectedSystemApp,
   systemApps,
+  openFile,
 }: {
   sourceMode: AppsSourceMode
   frame: FrameType | null
@@ -304,6 +481,9 @@ function AppsSelector({
   appOptions: AppNodeOption[]
   selectedSystemApp: SystemAppOption | null
   systemApps: SystemAppOption[]
+  /** The file open in the editor (?file=), if any; without one the app's
+   * overview shows and the list keeps the side panel. */
+  openFile: string | null
 }): JSX.Element {
   const frameGroups = groupFramesByStatus(frames)
   const inFrameAdminMode = isInFrameAdminMode()
@@ -317,10 +497,11 @@ function AppsSelector({
             if (nextMode === sourceMode) {
               return
             }
+            // Either side opens on its list of apps.
             if (nextMode === 'system') {
-              pushSystemAppsUrl(selectedSystemApp?.keyword ?? systemApps[0]?.keyword ?? null)
+              pushSystemAppsUrl(null)
             } else if (frame) {
-              pushFrameAppsUrl(frame, selectedApp ?? defaultApp(frame))
+              pushFrameAppsUrl(frame, null)
             } else {
               router.actions.push(urls.apps())
             }
@@ -342,7 +523,7 @@ function AppsSelector({
             if (!nextFrame) {
               return
             }
-            pushFrameAppsUrl(nextFrame, defaultApp(nextFrame))
+            pushFrameAppsUrl(nextFrame, null)
           }}
         >
           {frameGroups.map((group) => (
@@ -356,12 +537,15 @@ function AppsSelector({
           ))}
         </SelectionSelect>
       ) : null}
-      {sourceMode === 'system' ? (
+      {sourceMode === 'system' && (!selectedSystemApp || !openFile) ? (
+        <SystemAppList systemApps={systemApps} />
+      ) : sourceMode === 'system' ? (
         <>
           <SelectionSelect
             label="App"
             value={selectedSystemApp?.keyword ?? ''}
             disabled={systemApps.length === 0}
+            leading={<BackToAppListButton onClick={() => pushSystemAppsUrl(selectedSystemApp?.keyword ?? null)} />}
             onChange={(value) => pushSystemAppsUrl(value)}
           >
             {systemApps.length === 0 ? (
@@ -380,12 +564,19 @@ function AppsSelector({
           </SelectionSelect>
           {selectedSystemApp ? <SystemAppFileList keyword={selectedSystemApp.keyword} /> : <EmptyFileList />}
         </>
+      ) : !selectedApp || !openFile ? (
+        frame ? (
+          <FrameAppList frame={frame} appOptions={appOptions} />
+        ) : (
+          <div className="frameos-muted px-3 py-2 text-sm">Add a frame before editing its apps.</div>
+        )
       ) : (
         <>
           <SelectionSelect
             label="App"
             value={selectedApp ? appOptionKey(selectedApp) : ''}
             disabled={!frame || appOptions.length === 0}
+            leading={frame ? <BackToAppListButton onClick={() => pushFrameAppsUrl(frame, selectedApp)} /> : null}
             onChange={(value) => {
               const nextApp = appOptions.find((app) => appOptionKey(app) === value) ?? null
               if (frame) {
@@ -409,7 +600,11 @@ function AppsSelector({
             )}
           </SelectionSelect>
           {selectedScene && selectedApp ? (
-            <EditAppFileList sceneId={selectedScene.id} nodeId={selectedApp.nodeId} />
+            <EditAppFileList
+              sceneId={selectedScene.id}
+              nodeId={selectedApp.nodeId}
+              onSelectFile={(file) => (frame ? pushFrameAppsUrl(frame, selectedApp, file) : undefined)}
+            />
           ) : (
             <EmptyFileList />
           )}
@@ -612,7 +807,7 @@ function ActiveAppSaveButton({
 function SystemAppFileList({ keyword }: { keyword: string }): JSX.Element {
   const logic = systemAppSourceLogic({ keyword })
   const { filenames, sourcesLoading, activeFile } = useValues(logic)
-  const { setActiveFile } = useActions(logic)
+  const setActiveFile = (file: string) => pushSystemAppsUrl(keyword, file)
 
   if (sourcesLoading) {
     return (
@@ -653,22 +848,212 @@ function SystemAppFileList({ keyword }: { keyword: string }): JSX.Element {
   )
 }
 
-function SystemAppEditorSurface({ app }: { app: SystemAppOption | null }): JSX.Element {
-  if (!app) {
-    return <AppsEmptyState title="No system app selected" detail="Choose a system app from the left panel." />
-  }
+function formatFileSize(bytes: number): string {
+  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
+}
 
+// An app's overview, the way a repository's front page reads: the files
+// (a click opens one in the editor), then what config.json says about the
+// app — its fields, settings and outputs — as the readme. One piece for
+// the system apps and a frame's own apps.
+function AppOverview({
+  title,
+  meta,
+  githubUrl,
+  filenames,
+  sources,
+  sourcesLoading,
+  configJson,
+  onOpenFile,
+}: {
+  title: string
+  meta: (string | null | undefined)[]
+  githubUrl?: string | null
+  filenames: string[]
+  sources: Record<string, string>
+  sourcesLoading: boolean
+  configJson: Record<string, any> | null
+  onOpenFile: (file: string) => void
+}): JSX.Element {
+  const fields = (Array.isArray(configJson?.fields) ? configJson.fields : []) as Record<string, any>[]
+  const outputs = (Array.isArray(configJson?.output) ? configJson.output : []) as Record<string, any>[]
+  const settings = (Array.isArray(configJson?.settings) ? configJson.settings : []) as string[]
   return (
-    <div className="apps-editor-surface min-h-0 flex-1 overflow-hidden">
-      <SystemAppSourceEditor keyword={app.keyword} />
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-4xl space-y-6 pb-16">
+        <section className="frameos-card overflow-hidden rounded-xl border">
+          <div className="frameos-inset flex items-center justify-between border-b px-4 py-2 text-xs font-semibold uppercase tracking-wide">
+            <span>Files</span>
+            {githubUrl ? (
+              <a
+                href={githubUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="frameos-muted flex items-center gap-1 normal-case tracking-normal hover:underline"
+              >
+                Open in GitHub
+                <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+              </a>
+            ) : null}
+          </div>
+          {sourcesLoading ? (
+            <div className="frameos-muted px-4 py-3 text-sm">Loading files…</div>
+          ) : filenames.length === 0 ? (
+            <div className="frameos-muted px-4 py-3 text-sm">No files.</div>
+          ) : (
+            <div className="divide-y divide-slate-500/10">
+              {filenames.map((file) => (
+                <button
+                  key={file}
+                  type="button"
+                  onClick={() => onOpenFile(file)}
+                  className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition hover:bg-slate-500/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  <CodeBracketIcon className="frameos-muted h-4 w-4 shrink-0" />
+                  <span className="frameos-strong min-w-0 flex-1 truncate font-mono">{file}</span>
+                  <span className="frameos-muted shrink-0 text-xs">{formatFileSize(sources[file]?.length ?? 0)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+        <section className="frameos-card rounded-xl border p-5">
+          <div className="frameos-muted mb-3 text-xs font-semibold uppercase tracking-wide">README</div>
+          <div className="space-y-5 text-sm leading-relaxed">
+            <div>
+              <h2 className="frameos-strong text-lg font-bold">{configJson?.name || title}</h2>
+              {configJson?.description ? <p className="frameos-muted mt-1">{configJson.description}</p> : null}
+              {meta.filter(Boolean).length > 0 ? (
+                <div className="frameos-muted mt-1 text-xs">{meta.filter(Boolean).join(' · ')}</div>
+              ) : null}
+            </div>
+            {fields.length > 0 ? (
+              <div>
+                <h3 className="frameos-strong mb-2 font-semibold">Fields</h3>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="frameos-muted text-left text-xs uppercase tracking-wide">
+                      <th className="py-1 pr-3 font-semibold">Name</th>
+                      <th className="py-1 pr-3 font-semibold">Type</th>
+                      <th className="py-1 pr-3 font-semibold">Default</th>
+                      <th className="py-1 font-semibold">Label</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-500/10">
+                    {fields.map((field, index) => (
+                      <tr key={field.name ?? index}>
+                        <td className="py-1.5 pr-3 font-mono text-xs">{field.name ?? (field.markdown ? '—' : '')}</td>
+                        <td className="py-1.5 pr-3 text-xs">
+                          {field.type ?? (field.markdown ? 'markdown' : '')}
+                          {field.required ? ' · required' : ''}
+                        </td>
+                        <td className="frameos-muted py-1.5 pr-3 font-mono text-xs">
+                          {field.value !== undefined && field.value !== null && field.value !== ''
+                            ? String(field.value)
+                            : ''}
+                        </td>
+                        <td className="py-1.5 text-xs">{field.label ?? field.markdown ?? ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+            {outputs.length > 0 ? (
+              <div>
+                <h3 className="frameos-strong mb-2 font-semibold">Returns</h3>
+                <ul className="frameos-muted list-disc space-y-1 pl-5">
+                  {outputs.map((output, index) => (
+                    <li key={output.name ?? index}>
+                      <span className="font-mono text-xs">{output.name}</span>
+                      {output.type ? <span className="text-xs"> · {output.type}</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {settings.length > 0 ? (
+              <div>
+                <h3 className="frameos-strong mb-2 font-semibold">Uses service keys</h3>
+                <p className="frameos-muted">{settings.join(', ')}</p>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      </div>
     </div>
   )
 }
 
-function SystemAppSourceEditor({ keyword }: { keyword: string }): JSX.Element {
+function SystemAppOverview({ app }: { app: SystemAppOption }): JSX.Element {
+  const logic = systemAppSourceLogic({ keyword: app.keyword })
+  const { filenames, sources, sourcesLoading, configJson } = useValues(logic)
+  return (
+    <AppOverview
+      title={app.label}
+      meta={[app.javascript ? 'JavaScript' : 'Nim', configJson?.version ? `v${configJson.version}` : null]}
+      githubUrl={systemAppGithubUrl(app.keyword)}
+      filenames={filenames}
+      sources={sources}
+      sourcesLoading={sourcesLoading}
+      configJson={configJson}
+      onOpenFile={(file) => pushSystemAppsUrl(app.keyword, file)}
+    />
+  )
+}
+
+// A frame's app: its sources are the scene's (editAppLogic), its readme
+// the app's own config.
+function FrameAppOverview({
+  frame,
+  scene,
+  app,
+}: {
+  frame: FrameType
+  scene: FrameScene
+  app: AppNodeOption
+}): JSX.Element {
+  const logic = editAppLogic({ frameId: frame.id, sceneId: scene.id, nodeId: app.nodeId })
+  const { filenames, sources, sourcesLoading, configJson } = useValues(logic)
+  return (
+    <AppOverview
+      title={app.label}
+      meta={[scene.name, app.language === 'javascript' ? 'JavaScript' : 'Nim', app.keyword]}
+      filenames={filenames}
+      sources={sources}
+      sourcesLoading={sourcesLoading}
+      configJson={configJson}
+      onOpenFile={(file) => pushFrameAppsUrl(frame, app, file)}
+    />
+  )
+}
+
+function SystemAppEditorSurface({ app, file }: { app: SystemAppOption | null; file: string | null }): JSX.Element {
+  if (!app) {
+    return <AppsEmptyState title="No system app selected" detail="Choose a system app from the left panel." />
+  }
+  if (!file) {
+    return <SystemAppOverview app={app} />
+  }
+
+  return (
+    <div className="apps-editor-surface min-h-0 flex-1 overflow-hidden">
+      <SystemAppSourceEditor keyword={app.keyword} file={file} />
+    </div>
+  )
+}
+
+function SystemAppSourceEditor({ keyword, file }: { keyword: string; file: string }): JSX.Element {
   const { theme } = useValues(workspaceLogic)
   const logic = systemAppSourceLogic({ keyword })
   const { sources, sourcesLoading, activeFile, appTypeDeclarations } = useValues(logic)
+  const { setActiveFile } = useActions(logic)
+  // The file is in the URL (?file=); the logic follows it.
+  useEffect(() => {
+    if (file && activeFile !== file) {
+      setActiveFile(file)
+    }
+  }, [file, activeFile, setActiveFile])
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
@@ -749,14 +1134,40 @@ function ActiveAppSelectionMount({
   return null
 }
 
+function FrameAppFileSync({
+  frame,
+  scene,
+  app,
+  file,
+}: {
+  frame: FrameType
+  scene: FrameScene
+  app: AppNodeOption
+  file: string
+}): null {
+  const logic = editAppLogic({ frameId: frame.id, sceneId: scene.id, nodeId: app.nodeId })
+  const { activeFile, filenames } = useValues(logic)
+  const { setActiveFile } = useActions(logic)
+  // The file is in the URL (?file=); the editor follows it once the
+  // sources are in.
+  useEffect(() => {
+    if (file && activeFile !== file && filenames.includes(file)) {
+      setActiveFile(file)
+    }
+  }, [file, activeFile, filenames, setActiveFile])
+  return null
+}
+
 function AppsEditorSurface({
   frame,
   scene,
   app,
+  file,
 }: {
   frame: FrameType
   scene: FrameScene | null
   app: AppNodeOption | null
+  file: string | null
 }): JSX.Element {
   if (!scene) {
     return <AppsEmptyState title="No scene selected" detail="Choose a scene from the left panel." />
@@ -766,9 +1177,14 @@ function AppsEditorSurface({
     return <AppsEmptyState title="No app selected" detail="Choose an app from the left panel." />
   }
 
+  if (!file) {
+    return <FrameAppOverview frame={frame} scene={scene} app={app} />
+  }
+
   return (
     <>
       <ActiveAppSelectionMount frameId={frame.id} sceneId={scene.id} app={app} />
+      <FrameAppFileSync frame={frame} scene={scene} app={app} file={file} />
       <div className="apps-editor-surface min-h-0 flex-1 overflow-hidden">
         <EditApp
           editorKey={editAppEditorKey(scene.id, app.nodeId)}
@@ -800,6 +1216,7 @@ function AppsWorkspaceFrame({
   routeSceneId,
   routeNodeId,
   routeSystemAppKeyword,
+  routeFile,
 }: AppsWorkspaceFrameProps): JSX.Element {
   const frameLogicProps = { frameId }
   const { frame, scenes, unsavedChanges } = useValues(frameLogic(frameLogicProps))
@@ -820,14 +1237,15 @@ function AppsWorkspaceFrame({
   const appOptions = appNodeOptionsForScenes(scenes)
   const visibleAppOptions = inFrameAdminMode ? frameAdminAppOptions(appOptions) : appOptions
   const routeSceneApps = routeSceneId ? visibleAppOptions.filter((app) => app.sceneId === routeSceneId) : []
-  const fallbackApp = defaultAppFromOptions(frame, visibleAppOptions)
+  // The route names the app (or at least the scene: its first app). Without
+  // one the side panel is the list of apps and the editor its empty state;
+  // nothing is picked on the user's behalf.
   const selectedApp =
     (routeSceneId && routeNodeId
       ? visibleAppOptions.find((app) => app.sceneId === routeSceneId && app.nodeId === routeNodeId)
       : null) ??
     (routeNodeId ? visibleAppOptions.find((app) => app.nodeId === routeNodeId) : null) ??
     routeSceneApps[0] ??
-    fallbackApp ??
     null
   const selectedScene = selectedApp
     ? scenes.find((scene) => scene.id === selectedApp.sceneId) ?? null
@@ -836,7 +1254,6 @@ function AppsWorkspaceFrame({
     : null
   const selectedSystemApp =
     (routeSystemAppKeyword ? installedSystemApps.find((option) => option.keyword === routeSystemAppKeyword) : null) ??
-    installedSystemApps[0] ??
     null
 
   return (
@@ -856,6 +1273,7 @@ function AppsWorkspaceFrame({
               appOptions={visibleAppOptions}
               selectedSystemApp={selectedSystemApp}
               systemApps={installedSystemApps}
+              openFile={routeFile ?? null}
             />
           }
           topBar={
@@ -871,9 +1289,9 @@ function AppsWorkspaceFrame({
           rightPanel={null}
         >
           {effectiveSourceMode === 'system' ? (
-            <SystemAppEditorSurface app={selectedSystemApp} />
+            <SystemAppEditorSurface app={selectedSystemApp} file={routeFile ?? null} />
           ) : (
-            <AppsEditorSurface frame={frame} scene={selectedScene} app={selectedApp} />
+            <AppsEditorSurface frame={frame} scene={selectedScene} app={selectedApp} file={routeFile ?? null} />
           )}
         </FrameosShell>
       </BindLogic>
@@ -881,12 +1299,19 @@ function AppsWorkspaceFrame({
   )
 }
 
-function AppsWorkspaceSystemOnly({ routeSystemAppKeyword }: { routeSystemAppKeyword?: string | null }): JSX.Element {
+function AppsWorkspaceSystemOnly({
+  sourceMode,
+  routeSystemAppKeyword,
+  routeFile,
+}: {
+  sourceMode: AppsSourceMode
+  routeSystemAppKeyword?: string | null
+  routeFile?: string | null
+}): JSX.Element {
   const { apps } = useValues(appsModel)
   const installedSystemApps = systemAppOptions(apps)
   const selectedSystemApp =
     (routeSystemAppKeyword ? installedSystemApps.find((option) => option.keyword === routeSystemAppKeyword) : null) ??
-    installedSystemApps[0] ??
     null
 
   return (
@@ -895,7 +1320,7 @@ function AppsWorkspaceSystemOnly({ routeSystemAppKeyword }: { routeSystemAppKeyw
       title="Apps"
       tree={
         <AppsSelector
-          sourceMode="system"
+          sourceMode={sourceMode}
           frame={null}
           frames={[]}
           selectedScene={null}
@@ -903,22 +1328,31 @@ function AppsWorkspaceSystemOnly({ routeSystemAppKeyword }: { routeSystemAppKeyw
           appOptions={[]}
           selectedSystemApp={selectedSystemApp}
           systemApps={installedSystemApps}
+          openFile={routeFile ?? null}
         />
       }
-      topBar={<SystemAppsTopBar app={selectedSystemApp} />}
+      topBar={sourceMode === 'system' ? <SystemAppsTopBar app={selectedSystemApp} /> : null}
       showAiButton={false}
       mainClassName="apps-workspace-main flex h-screen flex-col overflow-hidden pb-5 pr-5 pt-5 max-lg:h-auto max-lg:overflow-visible max-lg:px-4"
     >
-      <SystemAppEditorSurface app={selectedSystemApp} />
+      {sourceMode === 'system' ? (
+        <SystemAppEditorSurface app={selectedSystemApp} file={routeFile ?? null} />
+      ) : (
+        <AppsEmptyState title="No frames yet" detail="Add a frame before editing its apps." />
+      )}
     </FrameosShell>
   )
 }
 
-export function AppsWorkspace({ frameId, sceneId, nodeId }: AppsWorkspaceProps): JSX.Element {
+export function AppsWorkspace({ frameId, sceneId, nodeId, keyword }: AppsWorkspaceProps): JSX.Element {
   const inFrameAdminMode = isInFrameAdminMode()
-  const routeSourceMode: AppsSourceMode = frameId === SYSTEM_APPS_ROUTE_TOKEN ? 'system' : 'frames'
+  const { location } = useValues(router)
+  const routeSourceMode: AppsSourceMode =
+    frameId === SYSTEM_APPS_ROUTE_TOKEN || isCloudSystemAppsPath(location.pathname) ? 'system' : 'frames'
   const sourceMode: AppsSourceMode = inFrameAdminMode ? 'frames' : routeSourceMode
-  const routeSystemAppKeyword = routeSourceMode === 'system' ? decodeRouteKeyword(sceneId) : null
+  const routeSystemAppKeyword = routeSourceMode === 'system' ? decodeRouteKeyword(keyword ?? sceneId) : null
+  const { searchParams } = useValues(router)
+  const routeFile = typeof searchParams.file === 'string' && searchParams.file ? searchParams.file : null
   const routeFrameId = routeSourceMode === 'frames' ? frameId ?? null : null
   const routeSceneId = routeSourceMode === 'frames' ? sceneId ?? null : null
   const routeNodeId = routeSourceMode === 'frames' ? nodeId ?? null : null
@@ -936,22 +1370,15 @@ export function AppsWorkspace({ frameId, sceneId, nodeId }: AppsWorkspaceProps):
   const routeFrame = parsedRouteFrameId ? frames[parsedRouteFrameId] ?? null : null
   const firstFrame = routeFrame ?? selectedFrame ?? activeFramesList[0] ?? framesList[0] ?? null
 
+  // Without a frame the system apps are all there is to browse; the Frames
+  // side of the toggle stays, saying why it is empty, and toggles back.
   if (!firstFrame) {
-    if (sourceMode === 'system') {
-      return <AppsWorkspaceSystemOnly routeSystemAppKeyword={routeSystemAppKeyword} />
-    }
-
     return (
-      <FrameosShell
-        mode="apps"
-        title="Apps"
-        subtitle="No frames"
-        tree={<div className="px-3 py-2 text-slate-400">Add a frame before editing apps.</div>}
-      >
-        <div className="frameos-muted flex h-[60vh] items-center justify-center text-sm font-medium">
-          No frames available.
-        </div>
-      </FrameosShell>
+      <AppsWorkspaceSystemOnly
+        sourceMode={sourceMode}
+        routeSystemAppKeyword={routeSystemAppKeyword}
+        routeFile={routeFile}
+      />
     )
   }
 
@@ -962,6 +1389,7 @@ export function AppsWorkspace({ frameId, sceneId, nodeId }: AppsWorkspaceProps):
       routeSceneId={sourceMode === 'frames' ? routeSceneId : null}
       routeNodeId={sourceMode === 'frames' ? routeNodeId : null}
       routeSystemAppKeyword={routeSystemAppKeyword}
+      routeFile={routeFile}
     />
   )
 }

@@ -50,6 +50,7 @@ export async function buildStoreRepository(
       riskFlags: storeScenes.riskFlags,
       slug: storeScenes.slug,
       tags: storeScenes.tags,
+      updatedAt: storeScenes.updatedAt,
     })
     .from(storeScenes)
     .leftJoin(accounts, eq(accounts.id, storeScenes.accountId))
@@ -101,6 +102,10 @@ export async function buildStoreRepository(
       // reason since it shipped. Older frameos installs ignore extra fields.
       sceneId: scene.id,
       tags: scene.tags.length > 0 ? scene.tags : undefined,
+      // When the scene last changed (a new version, a listing edit), so a
+      // client can show the latest additions first; the index itself keeps
+      // featured scenes first.
+      updated: scene.updatedAt.toISOString(),
       // Human-facing scene page ("View store page" in frameos' templates
       // panel); absolute because it lives outside the /api/store/ prefix
       // that the "./" URLs resolve against.

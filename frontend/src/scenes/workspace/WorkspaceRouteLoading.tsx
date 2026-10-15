@@ -28,9 +28,9 @@ import {
   requestNextFramesHomeScrollTop,
   scrollFramesHomeToTop,
   workspaceLogic,
+  rememberedAppsHref,
 } from './workspaceLogic'
 import { workspaceModeForSceneOrFrames, type WorkspaceMode } from './workspaceModes'
-import { AccountSettingsRailLink } from './AccountSettingsRailLink'
 import { photosLibraryIsAvailable } from './workspaceSurfaces'
 
 function LoadingNavButton({
@@ -39,6 +39,7 @@ function LoadingNavButton({
   pending,
   preloadScene,
   sidebarOpen,
+  label,
   title,
   onActiveClick,
   onInactiveClick,
@@ -49,6 +50,7 @@ function LoadingNavButton({
   pending: boolean
   preloadScene: LoadableSceneKey
   sidebarOpen: boolean
+  label: string
   title: string
   onActiveClick: () => void
   onInactiveClick?: () => void
@@ -59,49 +61,59 @@ function LoadingNavButton({
   const preload = () => preloadSceneComponent(preloadScene)
 
   return (
-    <a
-      href={resolvedHref}
-      title={title}
-      onPointerEnter={preload}
-      onFocus={preload}
-      onMouseDown={preload}
-      onClick={(event: MouseEvent<HTMLAnchorElement>) => {
-        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-          return
-        }
-        event.preventDefault()
-        if (active) {
-          onActiveClick()
-        } else {
-          onInactiveClick?.()
-          router.actions.push(resolvedHref)
-        }
-      }}
-      className={clsx(
-        'frameos-nav-button flex h-12 w-12 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        active
-          ? 'frameos-primary-active text-white shadow-lg'
-          : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
-      )}
-    >
-      {pending ? (
-        <Spinner
-          className="workspace-nav-spinner flex h-7 w-7 items-center justify-center"
-          color={active ? 'white' : undefined}
-        />
-      ) : active ? (
-        <>
-          {sidebarOpen ? (
-            <ChevronUpIcon className="h-7 w-7 lg:hidden" />
-          ) : (
-            <ChevronDownIcon className="h-7 w-7 lg:hidden" />
-          )}
-          <span className="hidden lg:flex">{sidebarOpen ? children : <ChevronRightIcon className="h-7 w-7" />}</span>
-        </>
-      ) : (
-        children
-      )}
-    </a>
+    <div className="flex flex-col items-center">
+      <a
+        href={resolvedHref}
+        title={title}
+        onPointerEnter={preload}
+        onFocus={preload}
+        onMouseDown={preload}
+        onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+            return
+          }
+          event.preventDefault()
+          if (active) {
+            onActiveClick()
+          } else {
+            onInactiveClick?.()
+            router.actions.push(resolvedHref)
+          }
+        }}
+        className={clsx(
+          'frameos-nav-button flex h-12 w-12 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+          active
+            ? 'frameos-primary-active text-white shadow-lg'
+            : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'
+        )}
+      >
+        {pending ? (
+          <Spinner
+            className="workspace-nav-spinner flex h-7 w-7 items-center justify-center"
+            color={active ? 'white' : undefined}
+          />
+        ) : active ? (
+          <>
+            {sidebarOpen ? (
+              <ChevronUpIcon className="h-7 w-7 lg:hidden" />
+            ) : (
+              <ChevronDownIcon className="h-7 w-7 lg:hidden" />
+            )}
+            <span className="hidden lg:flex">{sidebarOpen ? children : <ChevronRightIcon className="h-7 w-7" />}</span>
+          </>
+        ) : (
+          children
+        )}
+      </a>
+      <span
+        className={clsx(
+          'frameos-nav-label mt-1 hidden text-[10px] font-medium leading-none lg:block',
+          active && 'frameos-nav-label-active'
+        )}
+      >
+        {label}
+      </span>
+    </div>
   )
 }
 
@@ -192,12 +204,9 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
   const mode = workspaceModeForSceneOrFrames(scene)
   const spinnerMode = useDelayedInitialSpinnerMode(mode)
   const inFrameAdminMode = isInFrameAdminMode()
-  const homeHref = inFrameAdminMode ? urls.frameControl() : urls.frames()
-  const scenesHref = selectedFrame
-    ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined)
-    : inFrameAdminMode
-    ? urls.frameControlScenes()
-    : urls.scenes()
+  const homeHref = inFrameAdminMode ? urls.frameControl() : urls.home()
+  // The rail's Scenes is the library, whichever frame is open.
+  const scenesHref = inFrameAdminMode ? urls.frameControlScenes() : urls.scenes()
   const frameHref = selectedFrame
     ? urls.frame(selectedFrame.id)
     : inFrameAdminMode
@@ -205,7 +214,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
     : urls.frames()
   const appsHref = inFrameAdminMode
     ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
-    : lastAppsHref ?? urls.systemApps()
+    : rememberedAppsHref(lastAppsHref)
   const workspaceMainStyle = {
     '--workspace-main-offset': secondarySidebarOpen ? '480px' : '128px',
     '--workspace-sidebar-edge': secondarySidebarOpen ? '440px' : '108px',
@@ -231,37 +240,53 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
             secondarySidebarOpen ? 'border-r border-slate-200/80' : 'max-lg:border-r max-lg:border-slate-200/80'
           )}
         >
-          {/* The cloud header already shows the FrameOS Cloud logo; the rail one would duplicate it. */}
-          {!isCloudMode() ? (
-            <a
-              href={homeHref}
-              title={inFrameAdminMode ? 'Frame' : 'Frames home'}
-              onPointerEnter={preloadHome}
-              onFocus={preloadHome}
-              onMouseDown={preloadHome}
-              onClick={(event: MouseEvent<HTMLAnchorElement>) => {
-                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
-                  return
-                }
-                event.preventDefault()
-                if (inFrameAdminMode) {
-                  router.actions.push(homeHref)
-                  return
-                }
-                requestNextFramesHomeScrollTop()
-                if (mode === 'frames') {
-                  scrollFramesHomeToTop('smooth', false)
-                } else {
-                  router.actions.push(homeHref)
-                  scrollFramesHomeToTop()
-                }
-              }}
-              className="workspace-logo-button frameos-icon-button mb-8 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            >
+          <a
+            href={homeHref}
+            title={inFrameAdminMode ? 'Frame' : isCloudMode() ? 'Home' : 'Frames home'}
+            onPointerEnter={preloadHome}
+            onFocus={preloadHome}
+            onMouseDown={preloadHome}
+            onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                return
+              }
+              event.preventDefault()
+              if (inFrameAdminMode) {
+                router.actions.push(homeHref)
+                return
+              }
+              requestNextFramesHomeScrollTop()
+              if (isCloudMode()) {
+                router.actions.push(homeHref)
+              } else if (mode === 'frames') {
+                scrollFramesHomeToTop('smooth', false)
+              } else {
+                router.actions.push(homeHref)
+                scrollFramesHomeToTop()
+              }
+            }}
+            className={clsx(
+              'workspace-logo-button frameos-icon-button flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              isCloudMode() ? 'mb-0' : 'mb-6'
+            )}
+          >
+            {isCloudMode() ? (
+              <img alt="" src={theme === 'dark' ? '/logo-dark.svg' : '/logo-light.svg'} className="h-7 w-auto" />
+            ) : (
               <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-auto" />
-            </a>
+            )}
+          </a>
+          {isCloudMode() ? (
+            <span
+              className={clsx(
+                'frameos-nav-label mb-4 mt-1 hidden text-[10px] font-medium leading-none lg:block',
+                mode === 'home' && 'frameos-nav-label-active'
+              )}
+            >
+              Home
+            </span>
           ) : null}
-          <nav className="flex flex-1 flex-col items-center gap-4">
+          <nav className="flex flex-1 flex-col items-center gap-2 lg:gap-3">
             {!inFrameAdminMode ? (
               <LoadingNavButton
                 active={mode === 'frames'}
@@ -269,6 +294,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
                 pending={spinnerMode === 'frames'}
                 preloadScene="frames"
                 sidebarOpen={secondarySidebarOpen}
+                label="Frames"
                 title="Frames home"
                 onActiveClick={() => {
                   requestNextFramesHomeScrollTop()
@@ -285,6 +311,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
               pending={spinnerMode === 'frame'}
               preloadScene="frames"
               sidebarOpen={secondarySidebarOpen}
+              label="Frame"
               title={secondarySidebarOpen && mode === 'frame' ? 'Hide frame panel' : 'Frame'}
               onActiveClick={() => router.actions.push(frameHref)}
             >
@@ -296,6 +323,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
               pending={spinnerMode === 'scenes'}
               preloadScene="sceneWorkspace"
               sidebarOpen={secondarySidebarOpen}
+              label="Scenes"
               title={secondarySidebarOpen && mode === 'scenes' ? 'Hide scenes panel' : 'Scenes'}
               onActiveClick={toggleSecondarySidebar}
             >
@@ -307,6 +335,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
               pending={spinnerMode === 'apps'}
               preloadScene="appsWorkspace"
               sidebarOpen={secondarySidebarOpen}
+              label="Apps"
               title={secondarySidebarOpen && mode === 'apps' ? 'Hide apps panel' : 'Apps'}
               onActiveClick={toggleSecondarySidebar}
             >
@@ -319,6 +348,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
                 pending={spinnerMode === 'photos'}
                 preloadScene="photosWorkspace"
                 sidebarOpen={secondarySidebarOpen}
+                label="Photos"
                 title={secondarySidebarOpen && mode === 'photos' ? 'Hide photos panel' : 'Photos'}
                 onActiveClick={toggleSecondarySidebar}
               >
@@ -326,29 +356,29 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
               </LoadingNavButton>
             ) : null}
           </nav>
-          <button
-            type="button"
-            title={theme === 'dark' ? 'Use light mode' : 'Use dark mode'}
-            onClick={toggleTheme}
-            className="workspace-theme-button frameos-icon-button mb-4 flex h-12 w-12 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            {theme === 'dark' ? <SunIcon className="h-7 w-7" /> : <MoonIcon className="h-7 w-7" />}
-          </button>
-          {isCloudMode() ? (
-            <AccountSettingsRailLink />
-          ) : (
-            <LoadingNavButton
-              active={mode === 'settings'}
-              href={urls.settings()}
-              pending={spinnerMode === 'settings'}
-              preloadScene="settings"
-              sidebarOpen={secondarySidebarOpen}
-              title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
-              onActiveClick={toggleSecondarySidebar}
+          <div className="mb-2 flex flex-col items-center">
+            <button
+              type="button"
+              title={theme === 'dark' ? 'Use light mode' : 'Use dark mode'}
+              onClick={toggleTheme}
+              className="workspace-theme-button frameos-icon-button flex h-12 w-12 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
-              <Cog6ToothIcon className="h-8 w-8" />
-            </LoadingNavButton>
-          )}
+              {theme === 'dark' ? <SunIcon className="h-7 w-7" /> : <MoonIcon className="h-7 w-7" />}
+            </button>
+            <span className="frameos-nav-label mt-1 hidden text-[10px] font-medium leading-none lg:block">Theme</span>
+          </div>
+          <LoadingNavButton
+            active={mode === 'settings'}
+            href={urls.settings()}
+            pending={spinnerMode === 'settings'}
+            preloadScene="settings"
+            sidebarOpen={secondarySidebarOpen}
+            label="Settings"
+            title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
+            onActiveClick={toggleSecondarySidebar}
+          >
+            <Cog6ToothIcon className="h-8 w-8" />
+          </LoadingNavButton>
         </div>
         <div
           className={clsx(

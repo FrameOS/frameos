@@ -25,6 +25,22 @@ export function registeredAddFramePanel(): ComponentType | null {
   return registeredPanel
 }
 
+// The first-run panel: what the frames home shows in the middle of the
+// workspace when the fleet has loaded and is empty. The cloud registers its
+// enrollment panel (the same one its "Add frame" drawer hosts) so a new
+// account lands on the ways to add a frame instead of an empty page, with
+// the rail and the frame tree around it like on every other page.
+let registeredFirstRun: ComponentType | null = null
+
+export function registerFirstRunPanel(panel: ComponentType): void {
+  registeredFirstRun = panel
+}
+
+/** The registered first-run panel, or null in a bundle without one. */
+export function registeredFirstRunPanel(): ComponentType | null {
+  return registeredFirstRun
+}
+
 /**
  * Panels the deploy drawer shows for ONE frame, keyed by slot.
  *

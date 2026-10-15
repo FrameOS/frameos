@@ -5,7 +5,11 @@ describe("activeHeaderSection", () => {
   it("maps every workspace path to Frames", () => {
     expect(activeHeaderSection("/frames")).toBe("frames");
     expect(activeHeaderSection("/frames/abc/scenes/def")).toBe("frames");
-    expect(activeHeaderSection("/frames/apps/system/data%2Fx")).toBe("frames");
+    expect(activeHeaderSection("/apps")).toBe("frames");
+    expect(activeHeaderSection("/apps/system/data%2Fx")).toBe("frames");
+    expect(activeHeaderSection("/apps/frames/abc")).toBe("frames");
+    expect(activeHeaderSection("/photos")).toBe("frames");
+    expect(activeHeaderSection("/home")).toBe("frames");
   });
 
   it("maps account and admin subpages", () => {

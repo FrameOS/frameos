@@ -1,7 +1,9 @@
+import { A } from 'kea-router'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
 import {
+  ArrowLeftIcon,
   ArrowPathIcon,
   BoltIcon,
   ClipboardDocumentIcon,
@@ -35,6 +37,7 @@ import { FrameBatteryIndicator } from './FrameBatteryIndicator'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { closeSplitGenerator } from './splitScreenLayoutLogic'
+import { urls } from '../../urls'
 import { frameLogic } from '../frame/frameLogic'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { Diagram, DiagramToolbar } from '../frame/panels/Diagram/Diagram'
@@ -53,6 +56,8 @@ import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
+import { ScenesLibraryPage, ScenesSidePanel } from '../store/ScenesLibrary'
+import { scenesLibraryLogic } from '../store/scenesLibraryLogic'
 import { groupFramesByStatus } from './frameStatusGroups'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
@@ -215,6 +220,14 @@ function SceneSelector({
           <div>
             <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
             <div className="flex items-center gap-2" data-testid="frame-sidebar-selector">
+              <A
+                href={urls.scenesHome('installed', { frame: frame.id })}
+                title="Back to the installed scenes"
+                aria-label="Back to the installed scenes"
+                className="frameos-form-control flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                <ArrowLeftIcon className="h-4 w-4" />
+              </A>
               <div className="relative min-w-0 flex-1">
                 <select
                   value={frame.id}
@@ -621,7 +634,7 @@ function UtilityToolbar({
   )
 }
 
-function SceneDiagramOverlay({
+export function SceneDiagramOverlay({
   frameId,
   frameMode,
   scene,
@@ -744,7 +757,7 @@ function SceneCanvasLoadingPlaceholder(): JSX.Element {
   )
 }
 
-function ScenePreviewPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
+export function ScenePreviewPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
   const { frame } = useValues(frameLogic({ frameId }))
   return (
     <div className="space-y-4">
@@ -754,7 +767,7 @@ function ScenePreviewPanel({ frameId, scene }: { frameId: FrameId; scene: FrameS
   )
 }
 
-function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
+export function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
   const { renameScene, confirmSceneUpdate } = useActions(scenesLogic({ frameId }))
   const { sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
   const availableUpdateVersion = sceneUpdateVersions[scene.id]
@@ -995,7 +1008,7 @@ function SceneCanvas({
 }
 
 /** The app being edited from the diagram, over the scene (openAppModal). */
-function SceneAppModal({ frameId }: { frameId: FrameId }): JSX.Element | null {
+export function SceneAppModal({ frameId }: { frameId: FrameId }): JSX.Element | null {
   const { appModalEditor } = useValues(frameEditorsLogic({ frameId }))
   const { closeEditor } = useActions(frameEditorsLogic({ frameId }))
   return appModalEditor ? (
@@ -1003,7 +1016,7 @@ function SceneAppModal({ frameId }: { frameId: FrameId }): JSX.Element | null {
   ) : null
 }
 
-function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): null {
+export function SceneSelectedNodeSync({ frameId, sceneId }: { frameId: FrameId; sceneId: string }): null {
   const { selectedNodeId } = useValues(workspaceLogic)
   const diagram = diagramLogic({ frameId, sceneId })
   const { nodes } = useValues(diagram)
@@ -1069,6 +1082,8 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
           mode="scenes"
           title="Scenes"
           browserTitle={frame.name || frameHost(frame)}
+          // The frame's scene list takes the whole panel; the library's own
+          // links are a step back (the arrow next to the frame selector).
           tree={
             <SceneTree
               frame={frame}
@@ -1109,49 +1124,64 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
   )
 }
 
+// The "Installed scenes" section of the library's side panel: the scene
+// list of one frame (the selected one, or the first), the same tree the
+// frame's own scenes page shows, so a scene is one click from the store.
+function InstalledScenesTree({ frameId }: { frameId: FrameId }): JSX.Element | null {
+  const frameLogicProps = { frameId }
+  const { frame, sortedScenes, unsavedChanges, undeployedChanges } = useValues(frameLogic(frameLogicProps))
+  const { framesList } = useValues(framesModel)
+  const { selectedSceneIdsByFrame } = useValues(workspaceLogic)
+  if (!frame) {
+    return <SceneTreeLoadingPlaceholder />
+  }
+  return (
+    <BindLogic logic={frameLogic} props={frameLogicProps}>
+      <BindLogic logic={frameEditorsLogic} props={frameLogicProps}>
+        <SceneTree
+          frame={frame}
+          frames={framesList}
+          scenes={sortedScenes}
+          selectedSceneId={selectedSceneIdsByFrame[frameId] ?? null}
+          unsavedChanges={unsavedChanges}
+          undeployedChanges={undeployedChanges}
+        />
+        <RenameSceneModal frameId={frameId} />
+      </BindLogic>
+    </BindLogic>
+  )
+}
+
+// The scenes page without a frame: the library (the store, the private
+// scenes; ?page= names which, the store by default), with the installed
+// scenes of a frame under it in the side panel.
+function ScenesHome(): JSX.Element {
+  const { page } = useValues(scenesLibraryLogic)
+  const { selectedFrame } = useValues(workspaceLogic)
+  const { activeFramesList, framesLoading, framesEverLoaded } = useValues(framesModel)
+  const firstFrame = selectedFrame ?? activeFramesList[0] ?? null
+
+  return (
+    <FrameosShell
+      mode="scenes"
+      title="Scenes"
+      showAiButton={false}
+      tree={<ScenesSidePanel activePage={page}>{null}</ScenesSidePanel>}
+    >
+      <ScenesLibraryPage />
+    </FrameosShell>
+  )
+}
+
 export function SceneWorkspace({ frameId, sceneId }: SceneWorkspaceProps): JSX.Element {
   useMountedLogic(sceneWorkspaceLogic({ routeFrameId: frameId ?? null, routeSceneId: sceneId ?? null }))
-  const { selectedFrame } = useValues(workspaceLogic)
-  const { activeFramesList, framesLoading } = useValues(framesModel)
   const routeFrameId = parseRouteFrameId(frameId)
 
   if (routeFrameId !== null) {
     return <SceneWorkspaceFrame frameId={routeFrameId} />
   }
 
-  const firstFrame = selectedFrame ?? activeFramesList[0] ?? null
-
-  if (!firstFrame) {
-    if (framesLoading) {
-      return (
-        <FrameosShell
-          mode="scenes"
-          title="Scenes"
-          tree={<SceneTreeLoadingPlaceholder />}
-          topBar={null}
-          showAiButton={false}
-          mainClassName="scene-workspace-main h-screen overflow-hidden p-0"
-        >
-          <SceneCanvasLoadingPlaceholder />
-        </FrameosShell>
-      )
-    }
-
-    return (
-      <FrameosShell
-        mode="scenes"
-        title="Scenes"
-        subtitle="No frames"
-        tree={<div className="px-3 py-2 text-slate-400">Add a frame before editing scenes.</div>}
-      >
-        <div className="frameos-muted flex h-[60vh] items-center justify-center text-sm font-medium">
-          No frames available.
-        </div>
-      </FrameosShell>
-    )
-  }
-
-  return <SceneWorkspaceFrame frameId={firstFrame.id} />
+  return <ScenesHome />
 }
 
 export default SceneWorkspace

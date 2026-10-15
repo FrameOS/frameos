@@ -32,6 +32,8 @@ interface EditAppFileListProps {
   sceneId: string
   nodeId: string
   className?: string
+  /** Called with the picked file as well, for a page that keeps it in the URL. */
+  onSelectFile?: (file: string) => void
 }
 
 export function appSourceEditorLanguage(file: string): string {
@@ -93,9 +95,13 @@ export function configureAppSourceEditor(monaco: Monaco) {
 // Where a built-in app's source lives in the FrameOS repository: every
 // keyword is a directory under frameos/src/apps (e.g. data/chromiumScreenshot).
 const SYSTEM_APP_SOURCE_URL = 'https://github.com/FrameOS/frameos/tree/main/frameos/src/apps/'
+const REPO_APP_SOURCE_URL = 'https://github.com/FrameOS/frameos/tree/main/'
 
 export function systemAppGithubUrl(keyword: string): string {
-  return SYSTEM_APP_SOURCE_URL + keyword.split('/').map(encodeURIComponent).join('/')
+  const path = keyword.split('/').map(encodeURIComponent).join('/')
+  // A repo JavaScript app's keyword IS its path in the repository
+  // (repo/apps/<folder>/<name>); a Nim app's is its folder under src/apps.
+  return keyword.startsWith('repo/') ? REPO_APP_SOURCE_URL + path : SYSTEM_APP_SOURCE_URL + path
 }
 
 /**
@@ -150,7 +156,7 @@ function ReadOnlyNimAppNotice({
   )
 }
 
-export function EditAppFileList({ sceneId, nodeId, className }: EditAppFileListProps) {
+export function EditAppFileList({ sceneId, nodeId, className, onSelectFile }: EditAppFileListProps) {
   const { frameId } = useValues(frameLogic)
   const logicProps: EditAppLogicProps = {
     frameId,
@@ -181,7 +187,10 @@ export function EditAppFileList({ sceneId, nodeId, className }: EditAppFileListP
           <div key={file} className="flex w-full items-center justify-between gap-2">
             <button
               type="button"
-              onClick={() => setActiveFile(file)}
+              onClick={() => {
+                setActiveFile(file)
+                onSelectFile?.(file)
+              }}
               className={clsx(
                 'app-file-row min-w-0 flex-1 truncate rounded-xl px-3 py-2 text-left text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
                 activeFile === file

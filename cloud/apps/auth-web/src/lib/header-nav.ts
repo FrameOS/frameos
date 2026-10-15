@@ -9,7 +9,13 @@ export function activeHeaderSection(
   pathname: string | null | undefined,
 ): HeaderNavSection | undefined {
   const path = pathname ?? "";
-  if (path === "/frames" || path.startsWith("/frames/")) {
+  // The frames workspace SPA: its mount, and the apps and photos pages it
+  // serves beside it.
+  if (
+    ["/frames", "/home", "/apps", "/photos"].some(
+      (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+    )
+  ) {
     return "frames";
   }
   if (path === "/account" || path.startsWith("/account/")) {

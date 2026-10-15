@@ -332,7 +332,7 @@ describe("sensitive routes require a recent credential check", () => {
     ).toMatchObject({ method: "password" });
   });
 
-  it("rejects an unsafe return_to and falls back to the account page", async () => {
+  it("rejects an unsafe return_to and falls back to the frames workspace", async () => {
     const user = await passwordUser();
     await ageSession(user.token);
     const response = await reauth(
@@ -341,7 +341,7 @@ describe("sensitive routes require a recent credential check", () => {
       }),
     );
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ redirect: "/account" });
+    expect(await response.json()).toMatchObject({ redirect: "/frames" });
   });
 
   it("an authenticator or recovery code works for accounts without a password", async () => {

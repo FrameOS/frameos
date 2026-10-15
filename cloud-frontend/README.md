@@ -6,7 +6,10 @@ shared frontend (`frontend/src`), sibling of the on-device wrapper
 frame workspace, the scene/apps workspaces, socketLogic, the kea models),
 sets `window.FRAMEOS_APP_CONFIG.cloudMode = true`, and esbuilds a static
 bundle that Next.js (`cloud/apps/auth-web`) serves at
-`account.frameos.net/frames/**`. Design: `cloud/docs/cloud-frames.md`
+`account.frameos.net/frames/**` — and at `/account/**`, where the account's
+settings pages (backends, service keys, SSH keys, usage, backups, activity,
+security, developer; `frontend/src/scenes/settings/account/`) keep the
+addresses they had as Next.js pages. Design: `cloud/docs/cloud-frames.md`
 ("Frontend: the fourth adapter"); wire contract: `docs/cloud-frames.md`.
 
 ## Build
@@ -18,7 +21,10 @@ pnpm --dir cloud-frontend build   # -> dist/index.html + dist/static/main.js|css
 `cloud/apps/auth-web`'s `predev`/`prebuild` copy `dist/` into
 `public/frames-app/` (`scripts/copy-frames-app-assets.mjs`, keep-existing
 fallback when dist is missing), and `app/frames/[[...path]]/route.ts`
-serves `index.html` as the SPA fallback for every `/frames/**` path.
+serves `index.html` as the SPA fallback for every `/frames/**` path;
+`app/account/[[...section]]/route.ts` serves the same shell for `/account/**`
+after redirecting the renamed sections (`src/lib/env.ts`
+`accountSectionRedirects`).
 
 ## Base-path contract (the load-bearing decision)
 
@@ -28,7 +34,7 @@ One prefix cannot serve all three concerns, so the wrapper splits them via
 | Concern | Config key | Value | Why |
 |---|---|---|---|
 | API calls | `ingress_path` | `''` (empty) | Cloud paths are already canonical (`/api/frames/...`) at the account origin. `getBasePath()` drives both `apiFetch` and the many direct URL builders (scene images, downloads, upload progress) — an empty base keeps every one of them correct without per-call-site edits. The apiFetch cloud branch additionally skips backend project scoping. |
-| SPA routes | `route_base_path` | `/frames` | `urls.ts` and the route tables build navigation URLs from `getRouteBasePath()`, so all links/routes live under `/frames/**` (`/frames`, `/frames/:id`, `/frames/:id/scenes/...`, `/frames/apps/...`) while API URLs stay at the origin root. |
+| SPA routes | `route_base_path` | `/frames` | `urls.ts` and the route tables build navigation URLs from `getRouteBasePath()`, so the frame links/routes live under `/frames/**` (`/frames`, `/frames/:id`, `/frames/:id/scenes/...`) while API URLs stay at the origin root. The pages that are not about one frame sit beside the mount — `/account/<page>`, `/apps`, `/apps/system/<keyword>`, `/apps/frames/<id>/...`, `/photos` — and `app/account`, `app/apps` and `app/photos` serve the same shell there. |
 | Public assets | `assets_base_path` | `/frames-app` | Root-absolute assets (`/img/...` logos, `/frameos-wasm/*` preview runtime, `/static/monaco/*`) resolve through `getAssetsBasePath()` to Next's `public/frames-app/`, matching esbuild's `publicPath: '/frames-app/static/'`. |
 
 One exception inside that row: `/frames-app/frameos-wasm/*` is rewritten by `next.config.ts` to `/frameos-wasm/*`, the release-pinned runtime that `scripts/copy-wasm-assets.mjs` installs. `public/frames-app/` is a copy of `frontend/public/`, which only holds a wasm bundle on a machine that ran `frameos/tools/build_wasm.sh`; in CI and production it is empty, and without the rewrite every preview worker 404s. A local build there still wins (the rewrite is `afterFiles`).
@@ -53,7 +59,7 @@ instead (that exact bug shipped once; see `route.test.ts`):
 | Anchor | Injects | Why the client can't compute it |
 |---|---|---|
 | `//__FRAMEOS_CLOUD_WS_ORIGIN__` | `cloud_ws_origin` | In dev the frame hub is a second process on its own port; in production nginx proxies it same-origin, so nothing is injected. |
-| `//__FRAMEOS_CLOUD_APP_CONFIG__` | `cloud_account_url`, `cloud_frames_url`, `cloud_logout_url`, `cloud_scenes_url`, `cloud_origin`, `cloud_claim_token_ttl_hours` | The account/scenes/auth surfaces can live on three origins and `/account/*` shortens on a split host (account header); `cloud_origin` is written into SD images and ESP32 NVS, so it must be the deployment's public URL, not the browser's; the claim-code TTL is deployment-tunable. Read through `src/cloudConfig.ts`. |
+| `//__FRAMEOS_CLOUD_APP_CONFIG__` | `cloud_account_url`, `cloud_frames_url`, `cloud_logout_url`, `cloud_scenes_url`, `cloud_reauth_url`, `cloud_origin`, `cloud_claim_token_ttl_hours` | The account/scenes/auth surfaces can live on three origins (account header); `cloud_origin` is written into SD images and ESP32 NVS, so it must be the deployment's public URL, not the browser's; the claim-code TTL is deployment-tunable. Read through `src/cloudConfig.ts`. |
 
 `build.mjs` fails the build if either anchor is not exactly one whole line,
 and the route answers 503 rather than serving a shell wired to the wrong
