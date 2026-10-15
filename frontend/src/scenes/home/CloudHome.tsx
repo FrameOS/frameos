@@ -214,8 +214,6 @@ export function CloudHome(): JSX.Element {
                   key={template.sceneId ?? template.id ?? template.name}
                   template={template}
                   showAuthor={false}
-                  badge={template.visibility === 'public' ? 'Public' : 'Private'}
-                  badgeTone={template.visibility === 'public' ? 'ok' : undefined}
                 />
               ))}
             </OneRowGrid>

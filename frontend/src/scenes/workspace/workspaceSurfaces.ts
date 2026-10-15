@@ -126,7 +126,7 @@ export function scenesLibraryPageLabel(page: ScenesLibraryPage, mode: WorkspaceM
     case 'store':
       return 'Public scene store'
     case 'cloud':
-      return mode === 'cloud' ? 'My scenes' : 'Private cloud scenes'
+      return mode === 'cloud' ? 'My scenes' : 'My cloud scenes'
     case 'local':
       return 'Private local scenes'
   }

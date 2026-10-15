@@ -4,19 +4,20 @@ import { PhotoIcon } from '@heroicons/react/24/outline'
 
 import type { TemplateType } from '../../types'
 import { imageElementIsBlank } from '../../utils/blankImage'
-import { storeShelfForCategory } from '../../utils/storeCategories'
 import type { StoreShelfGroup } from './storeCatalog'
 
 // The store's tiles and shelves, as the cloud's store page drew them:
-// small, 4:3, every fact on the tile. Shared by the signed-in library
+// small, 4:3. The category is the shelf's heading, not a pill on the tile. Shared by the signed-in library
 // (ScenesLibrary.tsx) and the signed-out store front (PublicStoreFront.tsx).
 
 function TileImage({ imageUrl }: { imageUrl: string | null }): JSX.Element {
   const [unusable, setUnusable] = useState(false)
   useEffect(() => setUnusable(false), [imageUrl])
   return (
-    <div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-md border border-slate-500/15 bg-[#1f2937]">
-      <PhotoIcon className="h-8 w-8 text-[#3b4757]" aria-hidden="true" />
+    // Edge to edge at the top of the tile, square at the bottom: the card's
+    // own corners round it, nothing frames it.
+    <div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-slate-500/10">
+      <PhotoIcon className="frameos-muted h-8 w-8 opacity-50" aria-hidden="true" />
       {imageUrl && !unusable ? (
         <img
           src={imageUrl}
@@ -64,19 +65,14 @@ export function Pill({
  * it. The card is one link; the pills beside it are their own buttons. */
 export function SceneTile({
   template,
-  badge,
-  badgeTone,
   showAuthor = true,
   actions,
 }: {
   template: TemplateType
-  badge?: string
-  badgeTone?: 'ok' | 'warn'
   showAuthor?: boolean
   actions?: ReactNode
 }): JSX.Element {
   const href = typeof template.url === 'string' && template.url ? template.url : null
-  const shelf = template.category ? storeShelfForCategory(template.category) : null
   const flags = template.flags ?? []
   const meta = [
     showAuthor && template.author ? `by ${template.author}` : null,
@@ -85,42 +81,35 @@ export function SceneTile({
   const body = (
     <>
       <TileImage imageUrl={typeof template.image === 'string' ? template.image : null} />
-      <h3 className="frameos-strong text-sm font-semibold leading-tight">
-        {template.name}
-        {flags.includes('shell') ? (
-          <span
-            className="ml-1 rounded border border-amber-500/40 bg-amber-500/10 px-1 text-[10px] font-medium text-amber-700"
-            title="This scene configures apps or code that run shell commands on the frame"
-          >
-            runs shell commands
-          </span>
+      <div className="flex flex-col gap-2 px-2.5 pt-2">
+        <h3 className="frameos-strong text-sm font-semibold leading-tight">
+          {template.name}
+          {flags.includes('shell') ? (
+            <span
+              className="ml-1 rounded border border-amber-500/40 bg-amber-500/10 px-1 text-[10px] font-medium text-amber-700"
+              title="This scene configures apps or code that run shell commands on the frame"
+            >
+              runs shell commands
+            </span>
+          ) : null}
+        </h3>
+        {template.description ? (
+          <p className="frameos-muted line-clamp-2 text-xs leading-snug">{template.description}</p>
         ) : null}
-      </h3>
-      {template.description ? (
-        <p className="frameos-muted line-clamp-2 text-xs leading-snug">{template.description}</p>
-      ) : null}
+      </div>
     </>
   )
   return (
-    <div className="frameos-card flex flex-col gap-2 rounded-lg border p-2.5 transition hover:border-blue-400">
+    <div className="frameos-card flex flex-col gap-2 overflow-hidden rounded-lg border pb-2.5 transition hover:border-blue-400">
       {href ? (
-        <a
-          href={href}
-          className="flex flex-col gap-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-        >
+        <a href={href} className="flex flex-col focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
           {body}
         </a>
       ) : (
-        <div className="flex flex-col gap-2">{body}</div>
+        <div className="flex flex-col">{body}</div>
       )}
-      {badge || shelf ? (
-        <div className="flex flex-wrap gap-1">
-          {badge ? <Pill tone={badgeTone}>{badge}</Pill> : null}
-          {shelf ? <Pill>{shelf.title}</Pill> : null}
-        </div>
-      ) : null}
-      {meta.length > 0 ? <div className="frameos-muted mt-auto text-[11px]">{meta.join(' · ')}</div> : null}
-      {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
+      {meta.length > 0 ? <div className="frameos-muted mt-auto px-2.5 text-[11px]">{meta.join(' · ')}</div> : null}
+      {actions ? <div className="flex flex-wrap gap-2 px-2.5">{actions}</div> : null}
     </div>
   )
 }

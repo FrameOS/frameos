@@ -18,7 +18,7 @@ import {
 import { Spinner } from '../../components/Spinner'
 import { urls } from '../../urls'
 import { storeShelfForCategory } from '../../utils/storeCategories'
-import { Note, Pill, SceneTile, StoreShelves, TileGrid, scrollStoreToTop, watchVisibleShelf } from './StoreTiles'
+import { Note, SceneTile, StoreShelves, TileGrid, scrollStoreToTop, watchVisibleShelf } from './StoreTiles'
 import {
   scenesLibraryPageLabel,
   scenesLibraryPages,
@@ -493,8 +493,6 @@ function CloudScenesPage(): JSX.Element {
                       key={template.sceneId ?? template.id ?? template.name}
                       template={template}
                       showAuthor={false}
-                      badge={template.visibility === 'public' ? 'Public' : 'Private'}
-                      badgeTone={template.visibility === 'public' ? 'ok' : undefined}
                     />
                   ))}
                 </TileGrid>

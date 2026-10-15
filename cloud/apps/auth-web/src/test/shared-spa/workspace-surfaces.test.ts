@@ -853,7 +853,7 @@ describe("Scenes library", () => {
   it("names the drive as my scenes on the cloud and as cloud copies elsewhere", () => {
     expect(scenesLibraryPageLabel("store", "cloud")).toBe("Public scene store");
     expect(scenesLibraryPageLabel("cloud", "cloud")).toBe("My scenes");
-    expect(scenesLibraryPageLabel("cloud", "backend")).toBe("Private cloud scenes");
+    expect(scenesLibraryPageLabel("cloud", "backend")).toBe("My cloud scenes");
     expect(scenesLibraryPageLabel("local", "backend")).toBe("Private local scenes");
   });
 });
