@@ -93,9 +93,13 @@ export function configureAppSourceEditor(monaco: Monaco) {
 // Where a built-in app's source lives in the FrameOS repository: every
 // keyword is a directory under frameos/src/apps (e.g. data/chromiumScreenshot).
 const SYSTEM_APP_SOURCE_URL = 'https://github.com/FrameOS/frameos/tree/main/frameos/src/apps/'
+const REPO_APP_SOURCE_URL = 'https://github.com/FrameOS/frameos/tree/main/'
 
 export function systemAppGithubUrl(keyword: string): string {
-  return SYSTEM_APP_SOURCE_URL + keyword.split('/').map(encodeURIComponent).join('/')
+  const path = keyword.split('/').map(encodeURIComponent).join('/')
+  // A repo JavaScript app's keyword IS its path in the repository
+  // (repo/apps/<folder>/<name>); a Nim app's is its folder under src/apps.
+  return keyword.startsWith('repo/') ? REPO_APP_SOURCE_URL + path : SYSTEM_APP_SOURCE_URL + path
 }
 
 /**
