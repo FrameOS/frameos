@@ -1,7 +1,9 @@
+import { A } from 'kea-router'
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
 import {
+  ArrowLeftIcon,
   ArrowPathIcon,
   BoltIcon,
   ClipboardDocumentIcon,
@@ -35,6 +37,7 @@ import { FrameBatteryIndicator } from './FrameBatteryIndicator'
 import { sceneWorkspaceLogic } from './sceneWorkspaceLogic'
 import { workspaceLogic, WorkspaceUtilityPanel } from './workspaceLogic'
 import { closeSplitGenerator } from './splitScreenLayoutLogic'
+import { urls } from '../../urls'
 import { frameLogic } from '../frame/frameLogic'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { Diagram, DiagramToolbar } from '../frame/panels/Diagram/Diagram'
@@ -217,6 +220,14 @@ function SceneSelector({
           <div>
             <label className="frameos-muted mb-2 block text-xs font-semibold uppercase tracking-wide">Frame</label>
             <div className="flex items-center gap-2" data-testid="frame-sidebar-selector">
+              <A
+                href={urls.scenesHome('installed', { frame: frame.id })}
+                title="Back to the installed scenes"
+                aria-label="Back to the installed scenes"
+                className="frameos-form-control flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              >
+                <ArrowLeftIcon className="h-4 w-4" />
+              </A>
               <div className="relative min-w-0 flex-1">
                 <select
                   value={frame.id}
@@ -1071,20 +1082,20 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
           mode="scenes"
           title="Scenes"
           browserTitle={frame.name || frameHost(frame)}
+          // The frame's scene list takes the whole panel; the library's own
+          // links are a step back (the arrow next to the frame selector).
           tree={
-            <ScenesSidePanel activePage={null}>
-              <SceneTree
-                frame={frame}
-                frames={framesList}
-                // Alphabetical, not frame order: the sidebar is how you find a
-                // scene, and a new one (a converted copy, say) landing at the
-                // bottom of a long list is exactly where you do not look.
-                scenes={sortedScenes}
-                selectedSceneId={resolvedSceneId}
-                unsavedChanges={unsavedChanges}
-                undeployedChanges={undeployedChanges}
-              />
-            </ScenesSidePanel>
+            <SceneTree
+              frame={frame}
+              frames={framesList}
+              // Alphabetical, not frame order: the sidebar is how you find a
+              // scene, and a new one (a converted copy, say) landing at the
+              // bottom of a long list is exactly where you do not look.
+              scenes={sortedScenes}
+              selectedSceneId={resolvedSceneId}
+              unsavedChanges={unsavedChanges}
+              undeployedChanges={undeployedChanges}
+            />
           }
           topBar={null}
           showAiButton={false}

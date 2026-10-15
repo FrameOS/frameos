@@ -37,6 +37,7 @@ import {
   WorkspaceUtilityPanel,
 } from './workspaceLogic'
 import { urls } from '../../urls'
+import { isCloudMode } from '../../utils/cloudMode'
 import { frameLogic } from '../frame/frameLogic'
 import { isFollowingFrameOrigin } from '../frame/frameAdminApply'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
@@ -283,6 +284,7 @@ const allFrameSettingsSections = [
   // store-scene service keys sit above Info.
   { id: 'frame-settings-cloud', label: 'Cloud' },
   { id: 'frame-settings-store-scene-services', label: 'Service keys' },
+  { id: 'frame-settings-telemetry', label: 'Log shipping' },
   { id: 'frame-settings-info', label: 'Info' },
   { id: 'frame-settings-upgrade', label: 'Update' },
   { id: 'frame-settings-power', label: 'Power' },
@@ -542,6 +544,16 @@ function FrameTree({
           <FrameSceneSidebarCard frame={frame} unsavedChanges={unsavedChanges} undeployedChanges={undeployedChanges} />
         </div>
       </div>
+      {isCloudMode() && !frame.last_seen_at ? (
+        // A linked frame that has never dialled the hub: the cloud holds a
+        // row for it, and every deploy or command it sends waits in the
+        // queue until the frame is handed over from its own settings page.
+        <div className="frameos-inset rounded-xl border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs leading-relaxed">
+          <span className="frameos-strong font-semibold">Not managed from the cloud yet.</span> This frame has never
+          connected to FrameOS Cloud, so deploys and other commands wait in its queue. Turn on &ldquo;Manage this frame
+          from FrameOS Cloud&rdquo; under Cloud features on the frame&apos;s own settings page.
+        </div>
+      ) : null}
       <div>
         <div className="frameos-muted mb-2 px-2 text-xs font-semibold uppercase tracking-wide">Frame Tools</div>
         <div className="space-y-1">

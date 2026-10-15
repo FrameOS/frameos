@@ -737,11 +737,15 @@ describe("allow-list hygiene", () => {
     // frame's FrameOS Cloud link box and its self-upgrade, which exist only
     // where the frame itself is the server.
     const frameAdminOnlySettingsSections = ["frame-settings-cloud", "frame-settings-upgrade"];
+    // And on the cloud's: the owner's log-shipping switch edits the telemetry
+    // scopes of the frame's cloud link, which only the cloud holds (a
+    // self-hosted backend reads a frame's logs over its own channel).
+    const cloudOnlySettingsSections = ["frame-settings-telemetry"];
     const lists = [
       [allowedFrameToolPanels, "frame tools", cloudOnlyFrameTools, []],
       [allowedSceneToolPanels, "scene tools", [], []],
       [allowedSceneUtilityPanels, "scene utilities", [], []],
-      [allowedFrameSettingsSections, "settings sections", [], frameAdminOnlySettingsSections],
+      [allowedFrameSettingsSections, "settings sections", cloudOnlySettingsSections, frameAdminOnlySettingsSections],
       [allowedAddSceneActions, "add scene actions", [], []],
     ] as const;
     for (const [list, label, cloudOnly, frameAdminOnly] of lists) {

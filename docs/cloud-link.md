@@ -562,16 +562,28 @@ The frame's own admin server adds two switches that a backend has no use for
 ```http
 POST /api/cloud/managed      # {"enabled": bool} — hand this frame to cloud management, or take it back
 POST /api/cloud/cloud-login  # {"enabled": bool} — offer "Sign in with FrameOS Cloud" on this frame's login page
+POST /api/cloud/telemetry    # {"enabled": bool} — ship logs and metrics over the management socket
 ```
 
-Both act on grants the link already carries and never ask the provider for
-more: `/managed` refuses with 409 unless the link holds `frame:managed` (and
-no self-hosted backend owns the frame), `/cloud-login` unless it holds
-`auth:login`. Turning `/managed` on runs flow B of docs/cloud-frames.md over
+All three act on grants the link already carries and never ask the provider
+for more: `/managed` refuses with 409 unless the link holds `frame:managed`
+(and no self-hosted backend owns the frame), `/cloud-login` unless it holds
+`auth:login`, `/telemetry` unless it holds `telemetry:logs` or
+`telemetry:metrics` (the admin page asks for both when it starts a link that
+also asks for `frame:managed`; the cloud's per-frame "Logs and metrics" switch
+grants them to an older link). Turning `/managed` on runs flow B of docs/cloud-frames.md over
 the existing link token; the provider keys the frame on the linked client, so
 switching off and on again re-registers the SAME frame rather than making a
 second one. Turning it off is purely local: the frame stops answering the
 management socket and the account keeps the (now offline) frame.
+
+`/telemetry` is local in both directions too: the status payload's
+`telemetry_available` says whether the grant is there and `telemetry_enabled`
+whether the switch is on (the default). Off drops the telemetry scopes from
+what the hub session gates its push loops on (`effectiveLinkScopes`), and the
+link-generation watch applies it without a reconnect. Logs and metrics only
+travel while the frame is managed from the provider: the management socket is
+what carries them.
 
 `/cloud-login` is local in both directions — the `auth:login` grant stays on
 the link either way. Off means `GET /api/cloud/login/options` stops offering

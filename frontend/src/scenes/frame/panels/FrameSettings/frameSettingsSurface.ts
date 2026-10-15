@@ -187,11 +187,11 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
   },
   {
     key: 'cloud-telemetry',
-    title: 'Logs and metrics',
+    title: 'Log shipping',
     anchor: 'frame-settings-telemetry',
     surfaces: ['cloudLinux', 'cloudEsp32'],
-    nav: [],
-    navNote: 'Absent on frames whose row carries no telemetry flag.',
+    conditions:
+      'Renders only when the frame row carries the telemetry flag (every row the link endpoint builds does; a broadcast-only row does not).',
   },
   {
     key: 'frame-info',

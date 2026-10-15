@@ -311,6 +311,9 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
   // handling; QR control code — disabled with a note on firmware older than
   // 2026.8.30, but always present), and Power on an ESP32.
   cloud: [
+    // The owner's log-shipping switch (the telemetry scopes on the link);
+    // renders above Defaults, after the service keys.
+    'frame-settings-telemetry',
     'frame-settings-defaults',
     'frame-settings-error-behavior',
     'frame-settings-qr',

@@ -466,7 +466,7 @@ export function CloudTelemetrySection(): JSX.Element | null {
   return (
     <>
       <H6 id="frame-settings-telemetry" className="mt-2">
-        Logs and metrics
+        Log shipping
       </H6>
       <div className="pl-2 @md:pl-8 space-y-3">
         <Field name="_noop" label="Ship logs and metrics to the cloud">

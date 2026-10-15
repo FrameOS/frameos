@@ -1363,6 +1363,12 @@ export interface CloudStatus {
   /** Frame admin only: whether this frame's login page offers the cloud
    * button right now. Purely local — the grant stays either way. */
   cloud_login_enabled?: boolean
+  /** Frame admin only: the link carries a telemetry scope, so the "ship logs
+   * and metrics" switch can be used. */
+  telemetry_available?: boolean
+  /** Frame admin only: whether the hub session pushes logs and metrics.
+   * Local switch over the grant; on by default. */
+  telemetry_enabled?: boolean
 }
 
 /** Mirrors GET /api/cloud/login/options (open endpoint for the login/setup screens) */

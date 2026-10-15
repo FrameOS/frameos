@@ -306,7 +306,9 @@ proc snapshotLink(): HubLinkSnapshot {.gcsafe.} =
         providerUrl: providerUrlFromState(state),
         wsPath: state{"ws_path"}.getStr(DEFAULT_MANAGED_WS_PATH),
         accessToken: state{"access_token"}.getStr(""),
-        scopes: linkScopes(state),
+        # Minus the telemetry scopes while the admin page's "ship logs and
+        # metrics" switch is off: the push loops gate on this list.
+        scopes: effectiveLinkScopes(state),
         scenesChecksum: state{"scenes_checksum"}.getStr(""),
         frameId: frameIdFromState(state),
         generation: currentCloudLinkGeneration(),
@@ -1903,10 +1905,11 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
         if scope.kind == JString and scope.getStr("").len > 0:
           announced.add(scope.getStr(""))
       if persistProviderScopes(announced):
-        generation = currentCloudLinkGeneration()
-        for scope in announced:
-          if scope notin ctx.scopes:
-            ctx.scopes.add(scope)
+        # Re-read rather than add the announced scopes as they are: the
+        # local telemetry switch may hold some of them back.
+        let merged = snapshotLink()
+        generation = merged.generation
+        ctx.scopes = merged.scopes
         logsGranted = "telemetry:logs" in ctx.scopes
         metricsGranted = "telemetry:metrics" in ctx.scopes
         log(%*{"event": "cloud:hub:scopesUpdated", "scopes": ctx.scopes.join(" ")})
