@@ -287,12 +287,13 @@ describe("frames SPA shell", () => {
   });
 
   // The apps and photos pages are the SPA's, beside the /frames mount.
-  it("serves the shell at /apps, /home, /photos and /store", async () => {
+  it("serves the shell at /apps, /home, /photos, /scenes and /store", async () => {
     for (const [modulePath, path] of [
       ["../../apps/[[...path]]/route", "/apps/system/data%2Fclock"],
       ["../../home/[[...path]]/route", "/home"],
       ["../../photos/[[...path]]/route", "/photos?folder=Summer"],
       ["../../store/route", "/store?category=clocks"],
+      ["../../scenes/route", "/scenes?category=clocks"],
     ] as const) {
       const { GET: get } = await import(modulePath);
       const response = await get(new NextRequest(`https://account.frameos.net${path}`));

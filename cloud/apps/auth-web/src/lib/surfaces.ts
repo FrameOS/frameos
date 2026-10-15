@@ -29,6 +29,9 @@ const accountPagePrefixes = [
   "/frames",
   "/home",
   "/photos",
+  // The scenes library (exactly /scenes: /scenes/<slug> is a public scene
+  // page's legacy address and is matched as one before this list).
+  "/scenes",
 ] as const;
 // The clean split-host spellings the account sections had until 2026.10
 // (/backends, /settings, …), when the sections became pages of the frames
@@ -93,10 +96,11 @@ function isScenesHostPath(pathname: string) {
   );
 }
 
-// The old homes of the private scene list — /account/scenes and its clean
-// alias /scenes — moved to the scenes host as the store's second tab.
+// The old home of the private scene list — /account/scenes — moved to the
+// scenes host as the store's second tab. (/scenes, once its clean alias,
+// is the SPA's scenes library since 2026.10.)
 function isLegacyMyScenesPath(pathname: string) {
-  return pathname === "/scenes" || pathname === "/account/scenes";
+  return pathname === "/account/scenes";
 }
 
 // Only redirects today; "rewrite" stays in the shape so proxy.ts keeps its

@@ -1,6 +1,7 @@
 import { lazy } from 'react'
 
 import { urls } from '../../../frontend/src/urls'
+import { cloudSignedIn } from '../../../frontend/src/utils/cloudMode'
 import { NotFound } from '../../../frontend/src/scenes/NotFound'
 
 export const scenes = {
@@ -40,7 +41,8 @@ export const getRoutes = () =>
     [urls.frames() + '/']: 'frames',
     [urls.settings()]: 'settings',
     [urls.settings(':page')]: 'settings',
-    [urls.scenes()]: 'sceneWorkspace',
+    // The scenes library, or — signed out — the public store at the same address.
+    [urls.scenes()]: cloudSignedIn() ? 'sceneWorkspace' : 'storeFront',
     [urls.appsHome()]: 'appsWorkspace',
     [urls.systemApps()]: 'appsWorkspace',
     [urls.systemApps(':keyword')]: 'appsWorkspace',

@@ -161,10 +161,10 @@ test.describe('cloud chrome: store front and account pages @e2e', () => {
     await page.goto(`${cloudUrl}/store`, { waitUntil: 'networkidle' })
 
     // Signed in, the store is the scenes library inside the workspace.
-    await expect(page).toHaveURL(/\/frames\/scenes$/)
+    await expect(page).toHaveURL(/\/scenes$/)
     await expect(page.locator('aside.workspace-sidebar')).toBeVisible()
     await expect(page.getByRole('link', { name: 'Public scene store' })).toBeVisible()
-    await expect(page.getByRole('link', { name: 'Private scenes' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'My scenes' })).toBeVisible()
   })
 
   test('the /frames workspace is served with the injected config', async ({ page }) => {

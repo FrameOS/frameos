@@ -2,7 +2,7 @@ import type { ComponentType } from 'react'
 import { urls } from '../urls'
 import { getRouteBasePath } from '../utils/getBasePath'
 import { isInFrameAdminMode } from '../utils/frameAdmin'
-import { isCloudMode } from '../utils/cloudMode'
+import { cloudSignedIn, isCloudMode } from '../utils/cloudMode'
 import { NotFound } from './NotFound'
 
 export type SceneComponent = ComponentType<Record<string, any>>
@@ -102,6 +102,8 @@ export const getRoutes = () =>
       ? { [urls.settings()]: 'settings', [urls.settings(':page')]: 'settings' }
       : { [urls.settings()]: 'settings' }),
     [urls.scenes()]: 'sceneWorkspace',
+    // Signed out, the cloud's /scenes is the public store, not the workspace.
+    ...(isCloudMode() && !cloudSignedIn() ? { [urls.scenes()]: 'storeFront' } : {}),
     [urls.scenes(':frameId')]: 'sceneWorkspace',
     [urls.scenes(':frameId', ':sceneId')]: 'sceneWorkspace',
     [urls.apps()]: 'appsWorkspace',

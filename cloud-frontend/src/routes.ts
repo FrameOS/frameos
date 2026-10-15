@@ -63,7 +63,7 @@ export const cloudPhotosBasePath = '/photos'
  * The workspace URLs before August 2026 doubled the segment
  * (/frames/frames/<id>, /frames/scenes/<frameId>/<sceneId>), and until
  * 2026.10 the apps and photos pages sat under the mount (/frames/apps/…,
- * /frames/photos). Old bookmarks and emails still carry them; this maps one
+ * /frames/photos, /frames/scenes). Old bookmarks and emails still carry them; this maps one
  * to its current shape, or returns null when the path is already current.
  */
 export function legacyCloudPathRedirect(pathname: string): string | null {
@@ -77,6 +77,9 @@ export function legacyCloudPathRedirect(pathname: string): string | null {
   }
   if (/^\/frames\/photos\/?$/.test(pathname)) {
     return cloudPhotosBasePath
+  }
+  if (/^\/frames\/scenes\/?$/.test(pathname)) {
+    return '/scenes'
   }
   const appsMatch = /^\/frames\/apps(?:\/(.*))?$/.exec(pathname)
   if (appsMatch) {

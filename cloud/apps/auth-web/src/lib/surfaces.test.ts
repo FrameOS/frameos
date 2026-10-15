@@ -113,20 +113,28 @@ describe("surface routing", () => {
   it("moves the private scene list onto the scenes host as /my-scenes", () => {
     configureSplitOrigins();
 
-    // Its old homes — /account/scenes and the clean /scenes alias — redirect
-    // from every host; the scenes host serves it.
+    // Its old home — /account/scenes — redirects from every host; the
+    // scenes host serves it. (/scenes, once its clean alias, is the SPA's
+    // scenes library since 2026.10 and lives on the account host.)
     for (const origin of [
       "https://cloud.frameos.net",
       "https://account.frameos.net",
       "https://scenes.frameos.net",
     ]) {
-      for (const legacy of ["/account/scenes?q=clock", "/scenes?q=clock"]) {
-        expectRoute(`${origin}${legacy}`, {
-          kind: "redirect",
-          url: "https://scenes.frameos.net/my-scenes?q=clock",
-        });
-      }
+      expectRoute(`${origin}/account/scenes?q=clock`, {
+        kind: "redirect",
+        url: "https://scenes.frameos.net/my-scenes?q=clock",
+      });
     }
+    for (const origin of ["https://cloud.frameos.net", "https://scenes.frameos.net"]) {
+      expectRoute(`${origin}/scenes?q=clock`, {
+        kind: "redirect",
+        url: "https://account.frameos.net/scenes?q=clock",
+      });
+    }
+    expect(
+      resolveSurfaceRoute(new URL("https://account.frameos.net/scenes?q=clock")),
+    ).toBeUndefined();
     expectRoute("https://cloud.frameos.net/my-scenes", {
       kind: "redirect",
       url: "https://scenes.frameos.net/my-scenes",
@@ -216,6 +224,8 @@ describe("surface routing", () => {
       "/apps/system/data%2Fclock",
       "/home",
       "/photos",
+      "/scenes",
+      "/scenes?page=cloud",
       "/admin/scenes",
       "/device",
     ]) {

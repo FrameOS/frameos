@@ -9,11 +9,9 @@ import {
   storeOriginOf,
   storeShelfCountsOf,
   storeShelvesOf,
-  storeTagCountsOf,
   storeTemplatesOf,
   type StoreShelfCount,
   type StoreShelfGroup,
-  type StoreTagCount,
 } from './storeCatalog'
 
 // The signed-out store front (the cloud's /store and the scenes host's
@@ -21,7 +19,7 @@ import {
 // repositoriesModel and nothing else — the workspace's own logics load
 // account-scoped routes, which apiFetch turns into a trip to /login for a
 // visitor without a session. Search is its own field here (there is no
-// shell search box), the category and tag come from the URL.
+// shell search box), the category comes from the URL.
 
 const STALE_AFTER_MS = 60_000
 
@@ -35,9 +33,7 @@ export interface publicStoreLogicValues {
   storeScenesCount: number
   storeShelfCounts: StoreShelfCount[]
   storeShelves: StoreShelfGroup[]
-  storeTagCounts: StoreTagCount[]
   storeTemplates: TemplateType[]
-  tag: string | null
   visibleShelf: string | null
 }
 
@@ -47,12 +43,8 @@ export interface publicStoreLogicActions {
   loadRepositoriesIfStale: (maxAgeMs: number) => {
     maxAgeMs: number
   } // repositoriesModel
-  setRoute: (
-    category: string | null,
-    tag: string | null
-  ) => {
+  setRoute: (category: string | null) => {
     category: string | null
-    tag: string | null
   }
   setSearch: (search: string) => {
     search: string
@@ -69,13 +61,7 @@ export interface publicStoreLogicMeta {
     storeOrigin: (storeTemplates: TemplateType[]) => string
     storeScenesCount: (storeTemplates: TemplateType[]) => number
     storeShelfCounts: (storeTemplates: TemplateType[]) => StoreShelfCount[]
-    storeTagCounts: (storeTemplates: TemplateType[], category: string | null) => StoreTagCount[]
-    storeShelves: (
-      storeTemplates: TemplateType[],
-      search: string,
-      category: string | null,
-      tag: string | null
-    ) => StoreShelfGroup[]
+    storeShelves: (storeTemplates: TemplateType[], search: string, category: string | null) => StoreShelfGroup[]
   }
 }
 
@@ -90,13 +76,12 @@ export const publicStoreLogic = kea<publicStoreLogicType>([
   })),
   actions({
     setSearch: (search: string) => ({ search }),
-    setRoute: (category: string | null, tag: string | null) => ({ category, tag }),
+    setRoute: (category: string | null) => ({ category }),
     setVisibleShelf: (slug: string | null) => ({ slug }),
   }),
   reducers({
     search: ['', { setSearch: (_, { search }) => search }],
     category: [null as string | null, { setRoute: (_, { category }) => category || null }],
-    tag: [null as string | null, { setRoute: (_, { tag }) => (tag ? tag.toLowerCase() : null) }],
     visibleShelf: [
       null as string | null,
       {
@@ -116,28 +101,16 @@ export const publicStoreLogic = kea<publicStoreLogicType>([
       (s) => [s.storeTemplates],
       (storeTemplates: TemplateType[]): StoreShelfCount[] => storeShelfCountsOf(storeTemplates),
     ],
-    storeTagCounts: [
-      (s) => [s.storeTemplates, s.category],
-      (storeTemplates: TemplateType[], category: string | null): StoreTagCount[] =>
-        storeTagCountsOf(storeTemplates, category),
-    ],
     storeShelves: [
-      (s) => [s.storeTemplates, s.search, s.category, s.tag],
-      (
-        storeTemplates: TemplateType[],
-        search: string,
-        category: string | null,
-        tag: string | null
-      ): StoreShelfGroup[] => storeShelvesOf(storeTemplates, { search, category, tag }),
+      (s) => [s.storeTemplates, s.search, s.category],
+      (storeTemplates: TemplateType[], search: string, category: string | null): StoreShelfGroup[] =>
+        storeShelvesOf(storeTemplates, { search, category }),
     ],
   }),
   urlToAction(({ actions }) => {
     const read = (_: unknown, search: Record<string, unknown>) =>
-      actions.setRoute(
-        typeof search.category === 'string' ? search.category : null,
-        typeof search.tag === 'string' ? search.tag : null
-      )
-    return { [urls.store()]: read, '/': read }
+      actions.setRoute(typeof search.category === 'string' ? search.category : null)
+    return { [urls.scenes()]: read, [urls.store()]: read, '/': read }
   }),
   afterMount(({ actions }) => {
     actions.loadRepositoriesIfStale(STALE_AFTER_MS)

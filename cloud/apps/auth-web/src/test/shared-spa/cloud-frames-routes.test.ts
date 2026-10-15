@@ -29,6 +29,9 @@ function withCloudSpaConfig<T>(run: () => T): T {
   (window as unknown as { FRAMEOS_APP_CONFIG?: unknown }).FRAMEOS_APP_CONFIG = {
     assets_base_path: cloudAssetsBasePath,
     cloudMode: true,
+    // Signed in: the route tables map /scenes to the library; signed out
+    // (no session in the shell) the same address is the public store.
+    cloud_signed_in: true,
     ingress_path: "",
     route_base_path: cloudRouteBasePath,
   };
@@ -138,10 +141,10 @@ describe("cloud SPA route helpers", () => {
     const paths = Object.keys(routes);
     const frameIndex = paths.indexOf("/frames/:id");
     expect(frameIndex).toBeGreaterThan(-1);
-    for (const literal of ["/frames/scenes", "/frames/:frameId/scenes"]) {
-      expect(paths.indexOf(literal)).toBeGreaterThan(-1);
-      expect(paths.indexOf(literal)).toBeLessThan(frameIndex);
-    }
+    expect(paths.indexOf("/frames/:frameId/scenes")).toBeGreaterThan(-1);
+    expect(paths.indexOf("/frames/:frameId/scenes")).toBeLessThan(frameIndex);
+    // The library sits beside the mount, like the apps and photos pages.
+    expect(routes["/scenes"]).toBe("sceneWorkspace");
     // The apps and photos pages sit beside the mount, so they cannot
     // collide with a frame route at all.
     for (const literal of ["/apps", "/apps/system", "/apps/system/:keyword", "/apps/frames", "/apps/frames/:frameId", "/photos"]) {
@@ -162,6 +165,7 @@ describe("cloud SPA route helpers", () => {
     expect(legacyCloudPathRedirect("/account/developer")).toBeNull();
     // Until 2026.10 the apps and photos pages sat under the mount.
     expect(legacyCloudPathRedirect("/frames/photos")).toBe("/photos");
+    expect(legacyCloudPathRedirect("/frames/scenes")).toBe("/scenes");
     expect(legacyCloudPathRedirect("/frames/apps")).toBe("/apps");
     expect(legacyCloudPathRedirect("/frames/apps/system")).toBe("/apps/system");
     expect(legacyCloudPathRedirect("/frames/apps/system/data%2Fclock")).toBe("/apps/system/data%2Fclock");
@@ -184,13 +188,14 @@ describe("cloud SPA route helpers", () => {
     const paths = Object.keys(routes);
     const frameIndex = paths.indexOf("/frames/:id");
     expect(frameIndex).toBeGreaterThan(-1);
-    expect(paths.indexOf("/frames/scenes")).toBeGreaterThan(-1);
-    expect(paths.indexOf("/frames/scenes")).toBeLessThan(frameIndex);
+    expect(routes["/scenes"]).toBe("sceneWorkspace");
     expect(paths).toContain("/frames/:frameId/scenes/:sceneId");
     for (const literal of ["/apps", "/apps/system", "/apps/system/:keyword", "/apps/frames", "/apps/frames/:frameId", "/apps/frames/:frameId/:sceneId/:nodeId"]) {
       expect(routes[literal], literal).toBe("appsWorkspace");
     }
     expect(routes["/photos"]).toBe("photosWorkspace");
-    expect(paths.some((path) => path.startsWith("/frames/apps") || path === "/frames/photos")).toBe(false);
+    expect(
+      paths.some((path) => path.startsWith("/frames/apps") || path === "/frames/photos" || path === "/frames/scenes"),
+    ).toBe(false);
   });
 });
