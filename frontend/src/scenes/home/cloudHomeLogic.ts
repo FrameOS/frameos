@@ -20,7 +20,8 @@ import type { UsageResponse } from '../settings/account/usageLogic'
 // library reads; the albums are the photo library's root folders; the
 // greeting and the usage share the Usage page's logic.
 
-export const HOME_SECTION_LIMIT = 6
+// Enough to fill one row on a wide screen; the grid shows one row only.
+export const HOME_SECTION_LIMIT = 12
 
 function recency(frame: FrameType): number {
   const seen = frame.last_seen_at ? Date.parse(frame.last_seen_at) : NaN
@@ -162,11 +163,21 @@ export const cloudHomeLogic = kea<cloudHomeLogicType>([
       (s) => [s.repositories],
       (repositories: RepositoryType[]): TemplateType[] => storeTemplatesOf(repositories),
     ],
-    // The store index carries no dates; it lists featured scenes first,
-    // then by downloads, which is the order the front of the store shows.
+    // The latest additions to the store: by the `updated` stamp the index
+    // carries (a scene without one sorts last, in the index's own order).
     recentStoreScenes: [
       (s) => [s.storeTemplates],
-      (storeTemplates: TemplateType[]): TemplateType[] => storeTemplates.slice(0, HOME_SECTION_LIMIT),
+      (storeTemplates: TemplateType[]): TemplateType[] =>
+        storeTemplates
+          .map((template, index) => ({ template, index, at: template.updated ? Date.parse(template.updated) : NaN }))
+          .toSorted((a, b) => {
+            if (Number.isNaN(a.at) !== Number.isNaN(b.at)) {
+              return Number.isNaN(a.at) ? 1 : -1
+            }
+            return (Number.isNaN(b.at) ? 0 : b.at) - (Number.isNaN(a.at) ? 0 : a.at) || a.index - b.index
+          })
+          .map(({ template }) => template)
+          .slice(0, HOME_SECTION_LIMIT),
     ],
     recentPrivateScenes: [
       (s) => [s.driveTemplates],

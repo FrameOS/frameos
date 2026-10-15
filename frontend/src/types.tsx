@@ -627,6 +627,8 @@ export interface TemplateType {
   imageHeight?: number
   /** Publisher display name (FrameOS Cloud store scenes). */
   author?: string
+  /** When the scene last changed, ISO 8601 (FrameOS Cloud store scenes). */
+  updated?: string
   /** FrameOS version the scene was exported with (FrameOS Cloud store scenes). */
   frameosVersion?: string
   /** Risk flags computed by the cloud store, e.g. 'shell' for scenes that run shell commands. */

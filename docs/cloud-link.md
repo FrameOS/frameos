@@ -420,7 +420,9 @@ scenes that configure shell-running apps or code — the UI badges these and
 asks for confirmation before install), and `frameosVersion` (the FrameOS
 release the scene was exported with — the backend stamps it into
 `template.json` at export, the provider reads it from there; the UI shows
-"newer than this install" as an upgrade nudge when applicable).
+"newer than this install" as an upgrade nudge when applicable), and
+`updated` (ISO 8601, when the scene last changed — a new version or a
+listing edit; the cloud's home page lists the latest additions by it).
 
 The provider may also serve the extracted scenes JSON of a scene's latest
 version for in-browser live previews (same access rules as the download):

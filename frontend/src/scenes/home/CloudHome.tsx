@@ -12,7 +12,8 @@ import { photoThumbUrl, type PhotoEntry } from '../photos/photosApi'
 import { formatBytes } from '../settings/account/format'
 import { FrameosShell } from '../workspace/FrameosShell'
 import { cloudHomeLogic, HOME_SECTION_LIMIT } from './cloudHomeLogic'
-import { SceneTile, TileGrid as SceneTileGrid } from '../store/StoreTiles'
+import { SceneTile } from '../store/StoreTiles'
+import { workspaceLogic } from '../workspace/workspaceLogic'
 
 // The cloud's home page, behind the rail's logo: a greeting, then the
 // frames, the store's scenes, the private scenes and the albums (a few of
@@ -35,7 +36,7 @@ function Section({
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="frameos-heading text-xl font-bold">{title}</h2>
         <A href={seeAllHref} className="frameos-muted text-sm font-semibold underline-offset-2 hover:underline">
-          {count > HOME_SECTION_LIMIT ? `See all ${count}` : 'See all'}
+          {count > 0 ? `See all ${count}` : 'See all'}
         </A>
       </div>
       {children}
@@ -43,8 +44,14 @@ function Section({
   )
 }
 
-function TileGrid({ children }: { children: ReactNode }): JSX.Element {
-  return <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(180px,1fr))]">{children}</div>
+// One row, however wide the screen: the columns fill the width and every
+// row after the first collapses to nothing. "See all" has the rest.
+function OneRowGrid({ children }: { children: ReactNode }): JSX.Element {
+  return (
+    <div className="grid gap-x-3 gap-y-0 overflow-hidden [grid-auto-rows:0] [grid-template-columns:repeat(auto-fill,minmax(180px,1fr))] [grid-template-rows:auto]">
+      {children}
+    </div>
+  )
 }
 
 function FrameTile({ frame }: { frame: FrameType }): JSX.Element {
@@ -110,6 +117,7 @@ function Empty({ icon, children }: { icon: ReactNode; children: ReactNode }): JS
 }
 
 export function CloudHome(): JSX.Element {
+  const { theme } = useValues(workspaceLogic)
   const {
     greetingName,
     usage,
@@ -131,11 +139,14 @@ export function CloudHome(): JSX.Element {
   return (
     <FrameosShell mode="home" title="Home" browserTitle="Home" tree={null} topBar={null} showAiButton={false}>
       <div className="mx-auto max-w-6xl space-y-10 pb-16 @container">
-        <header>
-          <h1 className="frameos-strong text-3xl font-bold tracking-normal">FrameOS Cloud</h1>
-          <p className="frameos-muted mt-1 text-sm leading-relaxed">
-            {greetingName ? `Hello ${greetingName}. ` : ''}Your frames, your scenes and your photos, in one place.
-          </p>
+        <header className="flex items-center gap-4">
+          <img alt="" src={theme === 'dark' ? '/logo-dark.svg' : '/logo-light.svg'} className="h-12 w-auto shrink-0" />
+          <div className="min-w-0">
+            <h1 className="frameos-strong text-3xl font-bold tracking-normal">FrameOS Cloud</h1>
+            <p className="frameos-muted mt-1 text-sm leading-relaxed">
+              {greetingName ? `Hello ${greetingName}. ` : ''}Your frames, your scenes and your photos, in one place.
+            </p>
+          </div>
         </header>
 
         <Section title="Frames" count={framesList.length} seeAllHref={urls.frames()}>
@@ -153,15 +164,19 @@ export function CloudHome(): JSX.Element {
               .
             </Empty>
           ) : (
-            <TileGrid>
+            <OneRowGrid>
               {recentFrames.map((frame) => (
                 <FrameTile key={frame.id} frame={frame} />
               ))}
-            </TileGrid>
+            </OneRowGrid>
           )}
         </Section>
 
-        <Section title="Scenes" count={storeTemplates.length} seeAllHref={urls.scenesHome('store')}>
+        <Section
+          title="Latest additions to the public scene store"
+          count={storeTemplates.length}
+          seeAllHref={urls.scenesHome('store')}
+        >
           {repositoriesLoading && storeTemplates.length === 0 ? (
             <div className="frameos-muted flex items-center gap-2 text-sm">
               <Spinner className="h-4 w-4" />
@@ -170,11 +185,11 @@ export function CloudHome(): JSX.Element {
           ) : recentStoreScenes.length === 0 ? (
             <Empty icon={<RectangleGroupIcon />}>The scene store is not available right now.</Empty>
           ) : (
-            <SceneTileGrid>
+            <OneRowGrid>
               {recentStoreScenes.map((template) => (
                 <SceneTile key={template.sceneId ?? template.id ?? template.name} template={template} />
               ))}
-            </SceneTileGrid>
+            </OneRowGrid>
           )}
         </Section>
 
@@ -193,7 +208,7 @@ export function CloudHome(): JSX.Element {
               .
             </Empty>
           ) : (
-            <SceneTileGrid>
+            <OneRowGrid>
               {recentPrivateScenes.map((template) => (
                 <SceneTile
                   key={template.sceneId ?? template.id ?? template.name}
@@ -203,7 +218,7 @@ export function CloudHome(): JSX.Element {
                   badgeTone={template.visibility === 'public' ? 'ok' : undefined}
                 />
               ))}
-            </SceneTileGrid>
+            </OneRowGrid>
           )}
         </Section>
 
@@ -222,11 +237,11 @@ export function CloudHome(): JSX.Element {
               .
             </Empty>
           ) : (
-            <TileGrid>
+            <OneRowGrid>
               {recentAlbums.map((album) => (
                 <AlbumTile key={album.path} album={album} />
               ))}
-            </TileGrid>
+            </OneRowGrid>
           )}
         </Section>
 
