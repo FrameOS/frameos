@@ -1834,7 +1834,7 @@ export function FramesHome(): JSX.Element {
       mode="frames"
       title="Frames"
       browserTitle={null}
-      tree={<FrameTree />}
+      tree={FirstRunPanel ? null : <FrameTree />}
       primaryActionLabel={FirstRunPanel ? undefined : 'Add frame'}
       onPrimaryAction={
         FirstRunPanel
