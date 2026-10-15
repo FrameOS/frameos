@@ -191,8 +191,14 @@ says what a frame's drivers say: pointers, the wheel, keys.
 
 `payload` lists each field with its type and, where a number means something,
 its `unit`. `catalog: false` keeps a field out of the editor's filter and
-dispatch forms. `listenDefault` on a field is what a listener with no filter
-on it hears: only events where the field equals that value.
+dispatch forms; `filter: "more"` keeps it in the catalog but folded in the
+event node ("More filters") until a filter is set, so a `button` node shows
+its role and action and not the pin, the label, the hold time and the wake
+flag. A unit whose values are a list the contract keeps (`button-role`,
+`button-action`, `swipe-direction`, `pointer-type`) reaches the editor as the
+field's `options`: a select, never a free text. `listenDefault` on a field is
+what a listener with no filter on it hears: only events where the field
+equals that value.
 
 - **Pointer position.** Every pointer event a scene hears carries `x`, `y` in
   **scene pixels**, rotation and flip applied. On the wire — driver → host,

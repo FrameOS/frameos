@@ -28,7 +28,15 @@ import type { RepositoryType, TemplateType } from '../../types'
 import { urls } from '../../urls'
 import { isCloudMode } from '../../utils/cloudMode'
 import { storeShelfForCategory } from '../../utils/storeCategories'
-import { Note, SceneTile, StoreShelves, TileGrid, scrollStoreToTop, watchVisibleShelf } from './StoreTiles'
+import {
+  Note,
+  SceneTile,
+  StoreShelves,
+  StoreSortSelect,
+  TileGrid,
+  scrollStoreToTop,
+  watchVisibleShelf,
+} from './StoreTiles'
 import {
   scenesLibraryPageLabel,
   scenesLibraryPages,
@@ -443,9 +451,9 @@ function StoreActionCards(): JSX.Element {
 }
 
 function StorePage(): JSX.Element {
-  const { storeShelves, storeScenesCount, repositoriesLoading, search, category, repositories } =
+  const { storeShelves, storeScenesCount, repositoriesLoading, search, category, repositories, storeSort } =
     useValues(scenesLibraryLogic)
-  const { loadRepositories, setVisibleShelf } = useActions(scenesLibraryLogic)
+  const { loadRepositories, setVisibleShelf, setStoreSort } = useActions(scenesLibraryLogic)
   const mode = workspaceMode()
   const shelvesRef = useRef<HTMLDivElement>(null)
 
@@ -465,7 +473,12 @@ function StorePage(): JSX.Element {
       <PageHeader
         title={activeShelf ? activeShelf.title : 'Public scene store'}
         description="Ready-made scenes from the FrameOS community. Open one to see it in the editor, then install it on a frame."
-        actions={<RefreshButton onClick={loadRepositories} loading={repositoriesLoading} />}
+        actions={
+          <div className="flex items-center gap-2">
+            <StoreSortSelect value={storeSort} onChange={setStoreSort} />
+            <RefreshButton onClick={loadRepositories} loading={repositoriesLoading} />
+          </div>
+        }
       />
       <div className="space-y-8" ref={shelvesRef}>
         {repositoriesLoading && storeScenesCount === 0 ? (
@@ -777,7 +790,7 @@ function InstalledScenesPage(): JSX.Element {
     <>
       <PageHeader
         title={focused ? focused.name || frameHost(focused) : 'Installed scenes'}
-        description="The scenes on your frames, frame by frame. Open one to edit it full screen."
+        description="Scenes installed on your frames."
       />
       <div className="space-y-8" ref={shelvesRef}>
         {frames.length === 0 ? (

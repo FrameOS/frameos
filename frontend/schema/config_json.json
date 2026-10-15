@@ -83,6 +83,11 @@
           },
           "type": "array"
         },
+        "filter": {
+          "const": "more",
+          "description": "Event payload fields only (frontend/schema/events.json, from the contract's `filter: \"more\"`): the event node keeps this filter folded until one is set.",
+          "type": "string"
+        },
         "hint": {
           "description": "Info tooltip contents (markdown)",
           "type": "string"

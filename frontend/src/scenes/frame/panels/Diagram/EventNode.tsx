@@ -15,6 +15,7 @@ import { newNodePickerLogic } from './newNodePickerLogic'
 import { dragHandleProps, pickerHandleProps } from './handleA11y'
 import { TextInput } from '../../../../components/TextInput'
 import { NumberTextInput } from '../../../../components/NumberTextInput'
+import { Select } from '../../../../components/Select'
 import { ColorInput } from '../../../../components/ColorInput'
 import { FieldTypeTag } from '../../../../components/FieldTypeTag'
 import { Tooltip } from '../../../../components/Tooltip'
@@ -22,6 +23,7 @@ import { NodeZoomLabel } from './NodeZoomLabel'
 import { eventOffersSceneState } from '../../../../utils/eventsContract'
 import { frameEventForScene } from '../../../../utils/frameEvents'
 import { parseRefreshSeconds, refreshIntervalFieldIndex } from '../../../../utils/refreshInterval'
+import { eventFilterControl, eventFilterFieldsToShow, foldedEventFilterCount } from '../../../../utils/eventFilters'
 
 export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   const { frameId, sceneId } = useValues(diagramLogic)
@@ -31,7 +33,10 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   const { updateScene } = useActions(frameLogic)
 
   const appNodeLogicProps = { frameId, sceneId, nodeId: id }
-  const { node, nodeEdges, isSelected, runtimeNodeError } = useValues(appNodeLogic(appNodeLogicProps))
+  const { node, nodeEdges, isSelected, runtimeNodeError, showMoreEventFilters, frame } = useValues(
+    appNodeLogic(appNodeLogicProps)
+  )
+  const { toggleMoreEventFilters } = useActions(appNodeLogic(appNodeLogicProps))
   const keyword = (node?.data as EventNodeData | undefined)?.keyword ?? ''
   const data = (node?.data as EventNodeData) ?? ({ keyword: '' } satisfies EventNodeData)
   const { openNewNodePicker } = useActions(newNodePickerLogic({ sceneId, frameId }))
@@ -121,32 +126,68 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
 
   const configRows: JSX.Element[] = []
 
-  if (eventFields.length > 0) {
+  // Which filters are on screen and what each one draws is utils/eventFilters.ts:
+  // the catalog folds the rarely used ones (`filter: "more"`) until set, and a
+  // field the contract gives values to is a select, not a text box.
+  const filterTitle = 'Leave empty to match any value for this event field.'
+  const gpioButtons = frame?.hardware?.gpioButtons
+  for (const field of eventFilterFieldsToShow(eventFields, eventFilterConfig, showMoreEventFilters)) {
+    const control = eventFilterControl(keyword, field, gpioButtons)
+    const value = String(eventFilterConfig[field.name] ?? '')
     configRows.push(
-      <tr key="event-filter-helper">
-        <td className="font-sm frameos-node-muted-text w-full text-xs">
-          Leave empty to match any value for this event field.
+      <tr key={`event-filter-${field.name}`}>
+        <td className="font-sm frameos-node-muted-text whitespace-nowrap" title={field.label}>
+          {field.label || field.name}
+        </td>
+        <td>
+          {/* A fixed control width: a select would otherwise size the node to its longest option. */}
+          <div className="w-44">
+            {control.kind === 'select' ? (
+              <Select
+                theme="node"
+                className="nodrag nopan"
+                title={filterTitle}
+                value={value}
+                options={control.options}
+                onChange={(next) => updateEventFilter(field.name, next)}
+              />
+            ) : control.kind === 'number' ? (
+              <NumberTextInput
+                theme="node"
+                title={filterTitle}
+                value={value === '' || !Number.isFinite(Number(value)) ? undefined : Number(value)}
+                placeholder="any"
+                onChange={(next) => updateEventFilter(field.name, next === undefined ? '' : String(next))}
+              />
+            ) : (
+              <TextInput
+                theme="node"
+                title={filterTitle}
+                value={value}
+                placeholder="any"
+                onChange={(next) => updateEventFilter(field.name, next)}
+              />
+            )}
+          </div>
         </td>
       </tr>
     )
   }
-
-  for (const field of eventFields) {
+  const foldedFilters = foldedEventFilterCount(eventFields, eventFilterConfig)
+  if (foldedFilters > 0 || (showMoreEventFilters && eventFields.some((field) => field.filter === 'more'))) {
     configRows.push(
-      <tr key={`event-filter-${field.name}`}>
-        <td className="font-sm frameos-node-muted-text w-full">
-          <div className="flex items-center gap-2">
-            {field.type ? <FieldTypeTag type={field.type} /> : null}
-            <div className="flex-1" title={field.label}>
-              {field.label || field.name}
-            </div>
-            <TextInput
-              value={String(eventFilterConfig[field.name] ?? '')}
-              onChange={(value) => updateEventFilter(field.name, value)}
-              placeholder="any"
-              theme="node"
-            />
-          </div>
+      <tr key="event-filter-more">
+        <td className="w-full" colSpan={2}>
+          <button
+            type="button"
+            className="frameos-node-muted-text text-xs underline nodrag nopan"
+            onClick={(e) => {
+              e.stopPropagation()
+              toggleMoreEventFilters()
+            }}
+          >
+            {showMoreEventFilters ? 'Fewer filters' : `More filters (${foldedFilters})`}
+          </button>
         </td>
       </tr>
     )
@@ -155,7 +196,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
   if (keyword === 'render') {
     configRows.push(
       <tr key="render-dimensions">
-        <td className="font-sm frameos-node-muted-text w-full">
+        <td className="font-sm frameos-node-muted-text w-full" colSpan={2}>
           <div className="flex items-center gap-2">
             <div className="flex-1">Dimensions</div>
             <div className="text-white text-sm">{width && height ? `${width}×${height}` : 'Unknown'}</div>
@@ -165,7 +206,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
     )
     configRows.push(
       <tr key="render-refresh">
-        <td className="font-sm frameos-node-muted-text w-full">
+        <td className="font-sm frameos-node-muted-text w-full" colSpan={2}>
           <div className="flex items-center gap-2">
             <div className="flex-1">Refresh interval</div>
             <Tooltip
@@ -188,7 +229,7 @@ export function EventNode({ id, isConnectable }: NodeProps): JSX.Element {
     )
     configRows.push(
       <tr key="render-background">
-        <td className="font-sm frameos-node-muted-text w-full">
+        <td className="font-sm frameos-node-muted-text w-full" colSpan={2}>
           <div className="flex items-center gap-2">
             <div className="flex-1">Background color</div>
             <ColorInput

@@ -629,6 +629,8 @@ export interface TemplateType {
   author?: string
   /** When the scene last changed, ISO 8601 (FrameOS Cloud store scenes). */
   updated?: string
+  /** How many times the scene was installed (FrameOS Cloud store scenes). */
+  downloads?: number
   /** FrameOS version the scene was exported with (FrameOS Cloud store scenes). */
   frameosVersion?: string
   /** Risk flags computed by the cloud store, e.g. 'shell' for scenes that run shell commands. */
@@ -811,6 +813,11 @@ export interface AppConfigField {
   showIf?: (ConfigFieldCondition | ConfigFieldConditionAnd)[]
   /** Runtime-only: what this input port can negotiate. Never shown in the editor. */
   capabilities?: InputPortCapabilities
+  /**
+   * Event payload fields only (frontend/schema/events.json, from the contract's
+   * `filter: "more"`): the event node keeps this filter folded until one is set.
+   */
+  filter?: 'more'
 }
 
 /**

@@ -3,6 +3,9 @@ import { isCloudMode } from '../../utils/cloudMode'
 import { searchInText } from '../../utils/searchInText'
 import { groupByStoreShelf, storeShelfForCategory, type StoreCategoryShelf } from '../../utils/storeCategories'
 import { isCloudStoreRepository } from '../frame/panels/Templates/templatesLogic'
+import { sortStoreTemplates, type StoreSort } from '../../utils/storeSort'
+
+export { STORE_SORT_OPTIONS, sortStoreTemplates, storeSortOf, type StoreSort } from '../../utils/storeSort'
 
 // The store catalog as the SPA shows it: pure functions over the
 // repositories a plane tracks, shared by the signed-in library
@@ -21,6 +24,7 @@ export interface StoreShelfCount {
 export interface StoreFilters {
   search: string
   category: string | null
+  sort?: StoreSort
 }
 
 export function templateMatchesSearch(search: string, template: TemplateType): boolean {
@@ -87,9 +91,12 @@ export function storeShelfCountsOf(storeTemplates: TemplateType[]): StoreShelfCo
   return groupByStoreShelf(storeTemplates).map(({ shelf, templates }) => ({ shelf, count: templates.length }))
 }
 
-export function storeShelvesOf(storeTemplates: TemplateType[], { search, category }: StoreFilters): StoreShelfGroup[] {
+export function storeShelvesOf(
+  storeTemplates: TemplateType[],
+  { search, category, sort = 'popular' }: StoreFilters
+): StoreShelfGroup[] {
   return groupByStoreShelf(
-    storeTemplates.filter(
+    sortStoreTemplates(storeTemplates, sort).filter(
       (template) =>
         templateMatchesSearch(search, template) &&
         (!category || storeShelfForCategory(template.category).slug === category)

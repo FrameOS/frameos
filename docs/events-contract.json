@@ -197,11 +197,11 @@
       "listen": true,
       "dispatch": false,
       "payload": [
-        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
         {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"},
-        {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons"}
+        {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons", "filter": "more"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
       "renderAfter": "never",
@@ -218,11 +218,11 @@
       "listen": true,
       "dispatch": false,
       "payload": [
-        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
         {"name": "button", "label": "Button", "type": "integer", "required": true, "unit": "pointer-button"},
-        {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons"},
-        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons", "filter": "more"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
         {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
@@ -240,11 +240,11 @@
       "listen": true,
       "dispatch": false,
       "payload": [
-        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
         {"name": "button", "label": "Button", "type": "integer", "required": true, "unit": "pointer-button"},
-        {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons"},
-        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "buttons", "label": "Buttons held", "type": "integer", "required": true, "unit": "pointer-buttons", "filter": "more"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
         {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
@@ -262,9 +262,9 @@
       "listen": true,
       "dispatch": false,
       "payload": [
-        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
         {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
@@ -283,8 +283,8 @@
       "listen": true,
       "dispatch": false,
       "payload": [
-        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"}
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
       "renderAfter": "never",
@@ -334,9 +334,9 @@
       "listen": true,
       "dispatch": false,
       "payload": [
-        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
         {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
@@ -355,9 +355,9 @@
       "listen": true,
       "dispatch": false,
       "payload": [
-        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
         {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
@@ -376,10 +376,10 @@
       "listen": true,
       "dispatch": false,
       "payload": [
-        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "durationMs", "label": "Held for (ms)", "type": "integer", "required": true, "unit": "ms"},
-        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "durationMs", "label": "Held for (ms)", "type": "integer", "required": true, "unit": "ms", "filter": "more"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
         {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
@@ -399,11 +399,11 @@
       "dispatch": false,
       "payload": [
         {"name": "direction", "label": "Direction", "type": "string", "required": true, "unit": "swipe-direction"},
-        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "startX", "label": "Start X", "type": "integer", "required": true, "unit": "scene-px"},
-        {"name": "startY", "label": "Start Y", "type": "integer", "required": true, "unit": "scene-px"},
-        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id"},
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "startX", "label": "Start X", "type": "integer", "required": true, "unit": "scene-px", "filter": "more"},
+        {"name": "startY", "label": "Start Y", "type": "integer", "required": true, "unit": "scene-px", "filter": "more"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
         {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
@@ -422,10 +422,10 @@
       "listen": true,
       "dispatch": false,
       "payload": [
-        {"name": "deltaX", "label": "Delta X", "type": "integer", "required": true, "unit": "wheel-notch"},
-        {"name": "deltaY", "label": "Delta Y", "type": "integer", "required": true, "unit": "wheel-notch"},
-        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"},
-        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer"}
+        {"name": "deltaX", "label": "Delta X", "type": "integer", "required": true, "unit": "wheel-notch", "filter": "more"},
+        {"name": "deltaY", "label": "Delta Y", "type": "integer", "required": true, "unit": "wheel-notch", "filter": "more"},
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
       "renderAfter": "never",
@@ -470,12 +470,12 @@
       "listen": true,
       "dispatch": false,
       "payload": [
-        {"name": "pin", "label": "Pin", "type": "integer", "required": true, "unit": "gpio-pin"},
-        {"name": "label", "label": "Label", "type": "string", "required": true},
+        {"name": "pin", "label": "Pin", "type": "integer", "required": true, "unit": "gpio-pin", "filter": "more"},
+        {"name": "label", "label": "Label", "type": "string", "required": true, "filter": "more"},
         {"name": "role", "label": "Role", "type": "string", "required": true, "unit": "button-role"},
         {"name": "action", "label": "Action", "type": "string", "required": true, "unit": "button-action", "listenDefault": "press"},
-        {"name": "durationMs", "label": "Held for (ms)", "type": "integer", "required": false, "unit": "ms"},
-        {"name": "wake", "label": "Woke the device", "type": "boolean", "required": false},
+        {"name": "durationMs", "label": "Held for (ms)", "type": "integer", "required": false, "unit": "ms", "filter": "more"},
+        {"name": "wake", "label": "Woke the device", "type": "boolean", "required": false, "filter": "more"},
         {"name": "level", "label": "Level", "type": "integer", "required": false, "unit": "gpio-level", "catalog": false}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system"],

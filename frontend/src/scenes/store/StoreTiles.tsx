@@ -1,4 +1,5 @@
 import clsx from 'clsx'
+import { STORE_SORT_OPTIONS, storeSortOf, type StoreSort } from '../../utils/storeSort'
 import { useEffect, useState, type ReactNode } from 'react'
 import { PhotoIcon } from '@heroicons/react/24/outline'
 
@@ -74,9 +75,11 @@ export function SceneTile({
 }): JSX.Element {
   const href = typeof template.url === 'string' && template.url ? template.url : null
   const flags = template.flags ?? []
+  const installs = typeof template.downloads === 'number' && template.downloads > 0 ? template.downloads : null
   const meta = [
     showAuthor && template.author ? `by ${template.author}` : null,
     template.version ? `v${template.version}` : null,
+    installs !== null ? `${installs} ${installs === 1 ? 'install' : 'installs'}` : null,
   ].filter(Boolean)
   const body = (
     <>
@@ -86,7 +89,7 @@ export function SceneTile({
           {template.name}
           {flags.includes('shell') ? (
             <span
-              className="ml-1 rounded border border-amber-500/40 bg-amber-500/10 px-1 text-[10px] font-medium text-amber-700"
+              className="ml-1 inline-block whitespace-nowrap rounded border border-amber-500/40 bg-amber-500/10 px-1 text-[10px] font-medium text-amber-700"
               title="This scene configures apps or code that run shell commands on the frame"
             >
               runs shell commands
@@ -111,6 +114,31 @@ export function SceneTile({
       {meta.length > 0 ? <div className="frameos-muted mt-auto px-2.5 text-[11px]">{meta.join(' · ')}</div> : null}
       {actions ? <div className="flex flex-wrap gap-2 px-2.5">{actions}</div> : null}
     </div>
+  )
+}
+
+/** The order of the scenes on a store page, next to its Refresh button. */
+export function StoreSortSelect({
+  value,
+  onChange,
+}: {
+  value: StoreSort
+  onChange: (sort: StoreSort) => void
+}): JSX.Element {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(storeSortOf(event.target.value))}
+      aria-label="Sort scenes"
+      title="Sort scenes"
+      className="frameos-form-control h-10 rounded-xl border px-3 text-sm font-semibold transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      {STORE_SORT_OPTIONS.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
   )
 }
 

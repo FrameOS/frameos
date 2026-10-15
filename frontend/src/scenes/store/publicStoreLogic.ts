@@ -13,6 +13,7 @@ import {
   type StoreShelfCount,
   type StoreShelfGroup,
 } from './storeCatalog'
+import { storeSortOf, type StoreSort } from '../../utils/storeSort'
 
 // The signed-out store front (the cloud's /store and the scenes host's
 // root). Deliberately lean: it reads the public store index through
@@ -33,6 +34,7 @@ export interface publicStoreLogicValues {
   storeScenesCount: number
   storeShelfCounts: StoreShelfCount[]
   storeShelves: StoreShelfGroup[]
+  storeSort: StoreSort
   storeTemplates: TemplateType[]
   visibleShelf: string | null
 }
@@ -49,6 +51,9 @@ export interface publicStoreLogicActions {
   setSearch: (search: string) => {
     search: string
   }
+  setStoreSort: (sort: StoreSort) => {
+    sort: StoreSort
+  }
   setVisibleShelf: (slug: string | null) => {
     slug: string | null
   }
@@ -61,7 +66,12 @@ export interface publicStoreLogicMeta {
     storeOrigin: (storeTemplates: TemplateType[]) => string
     storeScenesCount: (storeTemplates: TemplateType[]) => number
     storeShelfCounts: (storeTemplates: TemplateType[]) => StoreShelfCount[]
-    storeShelves: (storeTemplates: TemplateType[], search: string, category: string | null) => StoreShelfGroup[]
+    storeShelves: (
+      storeTemplates: TemplateType[],
+      search: string,
+      category: string | null,
+      storeSort: StoreSort
+    ) => StoreShelfGroup[]
   }
 }
 
@@ -76,11 +86,13 @@ export const publicStoreLogic = kea<publicStoreLogicType>([
   })),
   actions({
     setSearch: (search: string) => ({ search }),
+    setStoreSort: (sort: StoreSort) => ({ sort }),
     setRoute: (category: string | null) => ({ category }),
     setVisibleShelf: (slug: string | null) => ({ slug }),
   }),
   reducers({
     search: ['', { setSearch: (_, { search }) => search }],
+    storeSort: ['popular' as StoreSort, { setStoreSort: (_, { sort }) => storeSortOf(sort) }],
     category: [null as string | null, { setRoute: (_, { category }) => category || null }],
     visibleShelf: [
       null as string | null,
@@ -102,9 +114,9 @@ export const publicStoreLogic = kea<publicStoreLogicType>([
       (storeTemplates: TemplateType[]): StoreShelfCount[] => storeShelfCountsOf(storeTemplates),
     ],
     storeShelves: [
-      (s) => [s.storeTemplates, s.search, s.category],
-      (storeTemplates: TemplateType[], search: string, category: string | null): StoreShelfGroup[] =>
-        storeShelvesOf(storeTemplates, { search, category }),
+      (s) => [s.storeTemplates, s.search, s.category, s.storeSort],
+      (storeTemplates: TemplateType[], search: string, category: string | null, sort: StoreSort): StoreShelfGroup[] =>
+        storeShelvesOf(storeTemplates, { search, category, sort }),
     ],
   }),
   urlToAction(({ actions }) => {
