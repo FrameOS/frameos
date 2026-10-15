@@ -2,7 +2,7 @@ import { getRouteBasePath } from './utils/getBasePath'
 import { frameAdminPath, isInFrameAdminMode } from './utils/frameAdmin'
 import { getFrameControlFrameId } from './utils/frameControlMode'
 import type { FrameId } from './utils/frameId'
-import { isCloudMode } from './utils/cloudMode'
+import { isCloudMode, isCloudPublicStore } from './utils/cloudMode'
 
 // Self-hosted: /frames/<id> and /scenes/<frameId>/<sceneId> beside each
 // other under the base path. Cloud: the SPA is mounted AT /frames, so a
@@ -62,20 +62,41 @@ function frameControlScenesUrl(sceneId?: string): string {
   return getRouteBasePath() + '/scenes/' + getFrameControlFrameId() + (sceneId ? '/' + sceneId : '')
 }
 
+function framesUrl(): string {
+  return isInFrameAdminMode() ? getRouteBasePath() + frameAdminPath() : getRouteBasePath() ? getRouteBasePath() : '/'
+}
+
 export const urls = {
   /** Cloud only: the account's usage page (quotas, AI usage). */
   accountUsage: () => settingsUrl('usage'),
-  frames: () =>
-    isInFrameAdminMode() ? getRouteBasePath() + frameAdminPath() : getRouteBasePath() ? getRouteBasePath() : '/',
+  frames: framesUrl,
+  /** Where the rail's logo goes: the cloud's home page (hello, recent
+   * frames and albums, usage), the frames home everywhere else. */
+  home: () => (isCloudMode() ? '/home' : framesUrl()),
   frame: frameUrl,
   frameControl: frameControlUrl,
   scenes: scenesUrl,
   frameControlScenes: frameControlScenesUrl,
+  /** The cloud's signed-out store front (and the scenes host's root). */
+  store: () => '/store',
   /** The scenes library (the store, the private scenes): the scenes page
    * without a frame, with the page in the query so the frame routes stay
-   * what they are. The store is the bare page. */
-  scenesHome: (page?: string | null) =>
-    scenesUrl() + (page && page !== 'store' ? '?page=' + encodeURIComponent(page) : ''),
+   * what they are. The store is the bare page. Signed out on the cloud the
+   * store front at /store is all there is, and its links stay on it. */
+  scenesHome: (page?: string | null, filters?: { category?: string | null; tag?: string | null }) => {
+    const params = new URLSearchParams()
+    if (page && page !== 'store') {
+      params.set('page', page)
+    }
+    if (filters?.category) {
+      params.set('category', filters.category)
+    }
+    if (filters?.tag) {
+      params.set('tag', filters.tag)
+    }
+    const query = params.toString()
+    return (isCloudPublicStore() ? '/store' : scenesUrl()) + (query ? '?' + query : '')
+  },
   /** A frame's apps: /apps/<frameId>/<sceneId>/<nodeId> self-hosted,
    * /apps/frames/<frameId>/… on the cloud (the bare path is the first frame). */
   apps: (frameId?: FrameId, sceneId?: string, nodeId?: string) =>

@@ -1,5 +1,4 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
-import { router } from 'kea-router'
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
 import {
@@ -55,7 +54,7 @@ import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
 import { ScenesLibraryPage, ScenesSidePanel } from '../store/ScenesLibrary'
-import { scenesLibraryPageIsAvailable, type ScenesLibraryPage as ScenesLibraryPageKey } from './workspaceSurfaces'
+import { scenesLibraryLogic } from '../store/scenesLibraryLogic'
 import { groupFramesByStatus } from './frameStatusGroups'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
@@ -1146,11 +1145,9 @@ function InstalledScenesTree({ frameId }: { frameId: FrameId }): JSX.Element | n
 // scenes; ?page= names which, the store by default), with the installed
 // scenes of a frame under it in the side panel.
 function ScenesHome(): JSX.Element {
-  const { searchParams } = useValues(router)
+  const { page } = useValues(scenesLibraryLogic)
   const { selectedFrame } = useValues(workspaceLogic)
   const { activeFramesList, framesLoading, framesEverLoaded } = useValues(framesModel)
-  const requestedPage = typeof searchParams.page === 'string' ? searchParams.page : 'store'
-  const page: ScenesLibraryPageKey = scenesLibraryPageIsAvailable(requestedPage) ? requestedPage : 'store'
   const firstFrame = selectedFrame ?? activeFramesList[0] ?? null
 
   return (
@@ -1170,7 +1167,7 @@ function ScenesHome(): JSX.Element {
         </ScenesSidePanel>
       }
     >
-      <ScenesLibraryPage page={page} />
+      <ScenesLibraryPage />
     </FrameosShell>
   )
 }
