@@ -18,16 +18,7 @@ import {
 import { Spinner } from '../../components/Spinner'
 import { urls } from '../../urls'
 import { storeShelfForCategory } from '../../utils/storeCategories'
-import {
-  Note,
-  Pill,
-  SceneTile,
-  StoreShelves,
-  StoreTagCloud,
-  TileGrid,
-  scrollStoreToTop,
-  watchVisibleShelf,
-} from './StoreTiles'
+import { Note, Pill, SceneTile, StoreShelves, TileGrid, scrollStoreToTop, watchVisibleShelf } from './StoreTiles'
 import {
   scenesLibraryPageLabel,
   scenesLibraryPages,
@@ -39,7 +30,7 @@ import { scenesLibraryLogic } from './scenesLibraryLogic'
 // The scenes library: the pages at the top of the Scenes side panel and
 // what the page area shows for them — the store front as the cloud's own
 // store page draws it (the three ways to a new scene, shelves of small
-// tiles, the tag cloud), the private scenes the same way. A store or drive
+// tiles), the private scenes the same way. A store or drive
 // scene opens on its own page (the template's `url`: the scene page of
 // whichever cloud the plane is linked to), which is the full-screen editor
 // it has always been; a frame's installed scenes keep the editor here.
@@ -63,9 +54,28 @@ export function ScenesSidePanel({
   children: ReactNode
 }): JSX.Element {
   const mode = workspaceMode()
-  const { storeShelfCounts, category, storeScenesCount, visibleShelf } = useValues(scenesLibraryLogic)
-  // Under "All scenes" the highlighted category follows the shelf in view.
+  const {
+    storeShelfCounts,
+    category,
+    storeScenesCount,
+    visibleShelf,
+    driveTemplates,
+    hasDriveScope,
+    templates,
+    visibility,
+  } = useValues(scenesLibraryLogic)
+  const publishedCount = driveTemplates.filter((template) => template.visibility === 'public').length
+  const privateCount = driveTemplates.length - publishedCount
+  // On My scenes the highlighted shelf follows the page the same way.
+  const highlightedVisibility = visibility ?? visibleShelf
+  // On the unfiltered store the highlighted category follows the shelf in view.
   const highlightedCategory = category ?? visibleShelf
+  // Each page's count sits at the right of its entry.
+  const pageCounts: Record<ScenesLibraryPageKey, number | null> = {
+    store: storeScenesCount,
+    cloud: hasDriveScope ? driveTemplates.length : null,
+    local: templates.length,
+  }
   return (
     <div className="space-y-5">
       <nav aria-label="Scene library" className="space-y-1">
@@ -83,11 +93,24 @@ export function ScenesSidePanel({
                 )}
               >
                 <Icon aria-hidden className="h-5 w-5 shrink-0 opacity-80" />
-                <span className="min-w-0 truncate">{scenesLibraryPageLabel(page, mode)}</span>
+                <span className="min-w-0 flex-1 truncate">{scenesLibraryPageLabel(page, mode)}</span>
+                {pageCounts[page] !== null ? <span className="frameos-muted text-xs">{pageCounts[page]}</span> : null}
               </A>
+              {page === 'cloud' && active && hasDriveScope && driveTemplates.length > 0 ? (
+                <div className="mt-1 space-y-0.5 pl-6">
+                  {myScenesShelves.map(({ key, title }) => (
+                    <SubPageLink
+                      key={key}
+                      label={title}
+                      count={key === 'public' ? publishedCount : privateCount}
+                      active={highlightedVisibility === key}
+                      href={urls.scenesHome('cloud', { visibility: key })}
+                    />
+                  ))}
+                </div>
+              ) : null}
               {page === 'store' && active && storeShelfCounts.length > 0 ? (
                 <div className="mt-1 space-y-0.5 pl-6">
-                  <CategoryLink label="All scenes" count={storeScenesCount} active={!highlightedCategory} slug={null} />
                   {storeShelfCounts.map(({ shelf, count }) => (
                     <CategoryLink
                       key={shelf.slug}
@@ -111,6 +134,11 @@ export function ScenesSidePanel({
   )
 }
 
+const myScenesShelves = [
+  { key: 'public' as const, title: 'Published in the store', match: (visibility?: string) => visibility === 'public' },
+  { key: 'private' as const, title: 'Private scenes', match: (visibility?: string) => visibility !== 'public' },
+]
+
 function CategoryLink({
   label,
   count,
@@ -122,9 +150,23 @@ function CategoryLink({
   active: boolean
   slug: string | null
 }): JSX.Element {
+  return <SubPageLink label={label} count={count} active={active} href={urls.scenesHome('store', { category: slug })} />
+}
+
+function SubPageLink({
+  label,
+  count,
+  active,
+  href,
+}: {
+  label: string
+  count: number
+  active: boolean
+  href: string
+}): JSX.Element {
   return (
     <A
-      href={urls.scenesHome('store', { category: slug })}
+      href={href}
       aria-current={active ? 'page' : undefined}
       className={clsx(
         'frameos-settings-nav-link flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
@@ -311,8 +353,7 @@ function StoreActionCards(): JSX.Element {
 }
 
 function StorePage(): JSX.Element {
-  const { storeShelves, storeScenesCount, storeTagCounts, repositoriesLoading, search, category, tag } =
-    useValues(scenesLibraryLogic)
+  const { storeShelves, storeScenesCount, repositoriesLoading, search, category } = useValues(scenesLibraryLogic)
   const { loadRepositories, setVisibleShelf } = useActions(scenesLibraryLogic)
   const mode = workspaceMode()
   const shelvesRef = useRef<HTMLDivElement>(null)
@@ -320,13 +361,13 @@ function StorePage(): JSX.Element {
   // Which shelf is at the top of the viewport, for the side panel. Only on
   // the unfiltered store: a filtered page shows one shelf anyway.
   useEffect(() => {
-    if (category || tag) {
+    if (category) {
       return
     }
     return watchVisibleShelf(shelvesRef.current, setVisibleShelf)
-  }, [category, tag, storeShelves.length, setVisibleShelf])
-  const goTo = (filters: { category?: string | null; tag?: string | null }) =>
-    router.actions.push(urls.scenesHome('store', { category, tag, ...filters }))
+  }, [category, storeShelves.length, setVisibleShelf])
+  const goTo = (filters: { category?: string | null }) =>
+    router.actions.push(urls.scenesHome('store', { category, ...filters }))
   const activeShelf = category ? storeShelfForCategory(category) : null
   return (
     <>
@@ -336,15 +377,6 @@ function StorePage(): JSX.Element {
         actions={<RefreshButton onClick={loadRepositories} loading={repositoriesLoading} />}
       />
       <div className="space-y-8" ref={shelvesRef}>
-        {tag ? (
-          <div className="flex items-center gap-2 text-sm">
-            <span className="frameos-muted">Tagged</span>
-            <Pill onClick={() => goTo({ tag: null })}>
-              {tag}
-              <XMarkIcon className="ml-1 h-3 w-3" />
-            </Pill>
-          </div>
-        ) : null}
         {repositoriesLoading && storeScenesCount === 0 ? (
           <div className="frameos-muted flex items-center gap-2 text-sm">
             <Spinner className="h-4 w-4" />
@@ -355,19 +387,15 @@ function StorePage(): JSX.Element {
             shelves={storeShelves}
             activeCategory={category}
             shelfHref={(slug) => urls.scenesHome('store', { category: slug })}
-            onTag={(value) => goTo({ tag: value.toLowerCase() })}
             emptyMessage={
               storeScenesCount === 0
                 ? mode === 'frameAdmin'
                   ? "The scene store could not be reached. Check the frame's connection and try again."
                   : 'The public scene store is not available right now. Check the connection to FrameOS Cloud in Settings.'
-                : search
-                ? `No store scenes match "${search}".`
-                : 'No store scenes match these filters.'
+                : `No store scenes match "${search}".`
             }
           />
         )}
-        <StoreTagCloud tags={storeTagCounts} activeTag={tag} onTag={(value) => goTo({ tag: value })} />
       </div>
     </>
   )
@@ -382,13 +410,22 @@ function CloudScenesPage(): JSX.Element {
     cloudConnected,
     cloudEnabled,
     search,
+    visibility,
   } = useValues(scenesLibraryLogic)
-  const { loadDrive } = useActions(scenesLibraryLogic)
+  const { loadDrive, setVisibleShelf } = useActions(scenesLibraryLogic)
   const mode = workspaceMode()
   const title = scenesLibraryPageLabel('cloud', mode)
+  const shelvesRef = useRef<HTMLDivElement>(null)
+  const shownShelves = visibility ? myScenesShelves.filter((shelf) => shelf.key === visibility) : myScenesShelves
+  useEffect(() => {
+    if (visibility) {
+      return
+    }
+    return watchVisibleShelf(shelvesRef.current, setVisibleShelf)
+  }, [visibility, drivePageTemplates.length, setVisibleShelf])
   const description =
     mode === 'cloud'
-      ? 'Your own scenes, private to your account until you publish them to the store.'
+      ? 'Your own scenes: the ones you have published to the store, and the ones private to your account.'
       : 'Your copies in FrameOS Cloud, private to your account: install them on any frame, from any backend you link.'
   if (!cloudEnabled) {
     return (
@@ -420,7 +457,7 @@ function CloudScenesPage(): JSX.Element {
         description={description}
         actions={<RefreshButton onClick={loadDrive} loading={driveTemplatesLoading} />}
       />
-      <div className="space-y-8">
+      <div className="space-y-8" ref={shelvesRef}>
         {mode === 'cloud' ? <StoreActionCards /> : null}
         {driveTemplatesLoading && driveTemplates.length === 0 ? (
           <div className="frameos-muted flex items-center gap-2 text-sm">
@@ -434,17 +471,36 @@ function CloudScenesPage(): JSX.Element {
               : `No private scenes match "${search}".`}
           </Note>
         ) : (
-          <TileGrid>
-            {drivePageTemplates.map((template) => (
-              <SceneTile
-                key={template.sceneId ?? template.id ?? template.name}
-                template={template}
-                showAuthor={false}
-                badge={template.visibility === 'public' ? 'Public' : 'Private'}
-                badgeTone={template.visibility === 'public' ? 'ok' : undefined}
-              />
-            ))}
-          </TileGrid>
+          // Two shelves: what the account has published to the store, and
+          // what it keeps to itself (or the one the side panel picked).
+          shownShelves.map(({ key, title, match }) => {
+            const templates = drivePageTemplates.filter((template) => match(template.visibility))
+            return templates.length === 0 ? null : (
+              <section key={key} data-shelf={key} className="scroll-mt-4 space-y-3">
+                <h2 className="frameos-heading flex items-baseline gap-2 text-lg font-bold">
+                  {visibility ? (
+                    title
+                  ) : (
+                    <A href={urls.scenesHome('cloud', { visibility: key })} className="hover:underline">
+                      {title}
+                    </A>
+                  )}
+                  <span className="frameos-muted text-xs font-medium">{templates.length}</span>
+                </h2>
+                <TileGrid>
+                  {templates.map((template) => (
+                    <SceneTile
+                      key={template.sceneId ?? template.id ?? template.name}
+                      template={template}
+                      showAuthor={false}
+                      badge={template.visibility === 'public' ? 'Public' : 'Private'}
+                      badgeTone={template.visibility === 'public' ? 'ok' : undefined}
+                    />
+                  ))}
+                </TileGrid>
+              </section>
+            )
+          })
         )}
       </div>
     </>
@@ -515,12 +571,12 @@ function LocalScenesPage(): JSX.Element {
 
 /** The page area for the library page the URL names. */
 export function ScenesLibraryPage(): JSX.Element {
-  const { page, category, tag } = useValues(scenesLibraryLogic)
+  const { page, category, visibility } = useValues(scenesLibraryLogic)
   // A new page or filter starts at the top; the scroll position of the
   // previous one would otherwise carry over into the shell's <main>.
   useEffect(() => {
     scrollStoreToTop()
-  }, [page, category, tag])
+  }, [page, category, visibility])
   return (
     <div className="mx-auto max-w-6xl pb-16 @container">
       {page === 'store' ? <StorePage /> : page === 'cloud' ? <CloudScenesPage /> : <LocalScenesPage />}

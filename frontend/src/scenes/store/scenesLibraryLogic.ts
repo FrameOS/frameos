@@ -16,12 +16,10 @@ import {
   storeOriginOf,
   storeShelfCountsOf,
   storeShelvesOf,
-  storeTagCountsOf,
   storeTemplatesOf,
   templateMatchesSearch,
   type StoreShelfCount,
   type StoreShelfGroup,
-  type StoreTagCount,
 } from './storeCatalog'
 
 // The scenes library behind the Scenes rail button: the public store, the
@@ -31,7 +29,7 @@ import {
 // come from whichever cloud the plane is linked to — on a backend the
 // seeded store repository and the drive proxy, on the device the public
 // index proxy, on the cloud its own routes. The page and the store's
-// filters live in the URL (?page=, ?category=, ?tag=), read here.
+// filter live in the URL (?page=, ?category=), read here.
 
 const STALE_AFTER_MS = 60_000
 
@@ -55,11 +53,10 @@ export interface scenesLibraryLogicValues {
   storeScenesCount: number
   storeShelfCounts: StoreShelfCount[]
   storeShelves: StoreShelfGroup[]
-  storeTagCounts: StoreTagCount[]
   storeTemplates: TemplateType[]
-  tag: string | null
   uploadError: string | null
   uploading: boolean
+  visibility: 'private' | 'public' | null
   visibleShelf: string | null
 }
 
@@ -90,11 +87,11 @@ export interface scenesLibraryLogicActions {
   setRoute: (
     page: string | null,
     category: string | null,
-    tag: string | null
+    visibility: string | null
   ) => {
     category: string | null
     page: string | null
-    tag: string | null
+    visibility: string | null
   }
   setVisibleShelf: (slug: string | null) => {
     slug: string | null
@@ -114,13 +111,7 @@ export interface scenesLibraryLogicMeta {
     storeOrigin: (storeTemplates: TemplateType[]) => string
     storeScenesCount: (storeTemplates: TemplateType[]) => number
     storeShelfCounts: (storeTemplates: TemplateType[]) => StoreShelfCount[]
-    storeTagCounts: (storeTemplates: TemplateType[], category: string | null) => StoreTagCount[]
-    storeShelves: (
-      storeTemplates: TemplateType[],
-      search: string,
-      category: string | null,
-      tag: string | null
-    ) => StoreShelfGroup[]
+    storeShelves: (storeTemplates: TemplateType[], search: string, category: string | null) => StoreShelfGroup[]
     drivePageTemplates: (driveTemplates: TemplateType[], search: string) => TemplateType[]
     localPageTemplates: (templates: TemplateType[], search: string) => TemplateType[]
   }
@@ -156,7 +147,11 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
     ],
   })),
   actions({
-    setRoute: (page: string | null, category: string | null, tag: string | null) => ({ page, category, tag }),
+    setRoute: (page: string | null, category: string | null, visibility: string | null) => ({
+      page,
+      category,
+      visibility,
+    }),
     /** A scene zip: to the account's private scenes on the cloud, to the
      * local saved scenes on a backend. */
     uploadSceneZip: (file: File) => ({ file }),
@@ -178,10 +173,11 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
         setRoute: (_, { category }) => category || null,
       },
     ],
-    tag: [
-      null as string | null,
+    // My scenes: "public" (published to the store) or "private", or both.
+    visibility: [
+      null as 'public' | 'private' | null,
       {
-        setRoute: (_, { tag }) => (tag ? tag.toLowerCase() : null),
+        setRoute: (_, { visibility }) => (visibility === 'public' || visibility === 'private' ? visibility : null),
       },
     ],
     uploading: [
@@ -221,19 +217,10 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
       (s) => [s.storeTemplates],
       (storeTemplates: TemplateType[]): StoreShelfCount[] => storeShelfCountsOf(storeTemplates),
     ],
-    storeTagCounts: [
-      (s) => [s.storeTemplates, s.category],
-      (storeTemplates: TemplateType[], category: string | null): StoreTagCount[] =>
-        storeTagCountsOf(storeTemplates, category),
-    ],
     storeShelves: [
-      (s) => [s.storeTemplates, s.search, s.category, s.tag],
-      (
-        storeTemplates: TemplateType[],
-        search: string,
-        category: string | null,
-        tag: string | null
-      ): StoreShelfGroup[] => storeShelvesOf(storeTemplates, { search, category, tag }),
+      (s) => [s.storeTemplates, s.search, s.category],
+      (storeTemplates: TemplateType[], search: string, category: string | null): StoreShelfGroup[] =>
+        storeShelvesOf(storeTemplates, { search, category }),
     ],
     drivePageTemplates: [
       (s) => [s.driveTemplates, s.search],
@@ -288,7 +275,7 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
       actions.setRoute(
         typeof search.page === 'string' ? search.page : null,
         typeof search.category === 'string' ? search.category : null,
-        typeof search.tag === 'string' ? search.tag : null
+        typeof search.visibility === 'string' ? search.visibility : null
       )
     },
   })),

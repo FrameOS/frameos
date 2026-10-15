@@ -11,7 +11,6 @@ import { SceneDescriptionEditor } from "./SceneDescriptionEditor";
 import { SceneFrameosVersionEditor } from "./SceneFrameosVersionEditor";
 import { SceneImageGallery } from "./SceneImageGallery";
 import { SceneMarkdown } from "./SceneMarkdown";
-import { SceneTagsEditor } from "./SceneTagsEditor";
 import { ShareLinkControls } from "./ShareLinkControls";
 import { StoreSceneActions } from "./StoreSceneActions";
 
@@ -127,7 +126,9 @@ export function SceneInfoPanel({
   const listing: SceneListingData = draft?.listing ?? shown?.listing ?? scene;
   const images = draft?.images ?? shown?.images ?? latestImages;
 
-  const showTags = listing.category || listing.tags.length > 0 || editing;
+  // Tags stay in the listing (and the database) but are not shown or
+  // edited here any more (2026.10); the category is.
+  const showTags = listing.category || editing;
 
   return (
     <div className="scene-info scene-info--panel">
@@ -190,18 +191,6 @@ export function SceneInfoPanel({
               category={listing.category}
               key={listing.category ?? ""}
               onChange={(category) => draft.onListingChange({ category })}
-            />
-          ) : null}
-          {listing.tags.map((tag) => (
-            <Link className="tag-pill" href={`/?tag=${encodeURIComponent(tag)}`} key={tag}>
-              {tag}
-            </Link>
-          ))}
-          {editing ? (
-            <SceneTagsEditor
-              key={listing.tags.join(",")}
-              onChange={(tags) => draft.onListingChange({ tags })}
-              tags={listing.tags}
             />
           ) : null}
         </div>

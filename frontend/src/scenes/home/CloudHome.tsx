@@ -138,7 +138,7 @@ export function CloudHome(): JSX.Element {
 
   return (
     <FrameosShell mode="home" title="Home" browserTitle="Home" tree={null} topBar={null} showAiButton={false}>
-      <div className="mx-auto max-w-6xl space-y-10 pb-16 @container">
+      <div className="mx-auto max-w-6xl space-y-10 pb-16 pt-6 @container">
         <header className="flex items-center gap-4">
           <img alt="" src={theme === 'dark' ? '/logo-dark.svg' : '/logo-light.svg'} className="h-12 w-auto shrink-0" />
           <div className="min-w-0">
@@ -193,7 +193,7 @@ export function CloudHome(): JSX.Element {
           )}
         </Section>
 
-        <Section title="Private scenes" count={driveTemplates.length} seeAllHref={urls.scenesHome('cloud')}>
+        <Section title="My scenes" count={driveTemplates.length} seeAllHref={urls.scenesHome('cloud')}>
           {driveTemplatesLoading && driveTemplates.length === 0 ? (
             <div className="frameos-muted flex items-center gap-2 text-sm">
               <Spinner className="h-4 w-4" />

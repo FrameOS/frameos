@@ -39,7 +39,6 @@ export function SceneCard({
   const category = scene.category
     ? (getStoreCategory(scene.category)?.title ?? scene.category)
     : null;
-  const tags = scene.tags ?? [];
   const card = (
     <Link className="scene-card" href={`/s/${scene.slug}`}>
       {scene.hasPreview ? (
@@ -68,7 +67,7 @@ export function SceneCard({
         ) : null}
       </h3>
       {scene.description ? <p className="copy">{scene.description}</p> : null}
-      {scene.visibility || category || tags.length > 0 ? (
+      {scene.visibility || category ? (
         <div className="tag-list">
           {scene.visibility && scene.status === "pulled" ? (
             <span className="pill pill-warning">Pulled</span>
@@ -84,13 +83,6 @@ export function SceneCard({
           {category ? (
             <span className="tag-pill tag-pill--category">{category}</span>
           ) : null}
-          {tags.slice(0, 4).map((tag) => (
-            // The whole card is a link; tags render as plain pills here and
-            // are clickable filters on the scene page.
-            <span className="tag-pill" key={tag}>
-              {tag}
-            </span>
-          ))}
         </div>
       ) : null}
       <div className="scene-card__meta">

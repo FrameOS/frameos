@@ -9,13 +9,12 @@ import { urls } from '../../urls'
 import { authThemeLogic } from '../auth/authThemeLogic'
 import { storeShelfForCategory } from '../../utils/storeCategories'
 import { publicStoreLogic } from './publicStoreLogic'
-import { StoreShelves, StoreTagCloud, scrollStoreToTop, watchVisibleShelf } from './StoreTiles'
+import { StoreShelves, scrollStoreToTop, watchVisibleShelf } from './StoreTiles'
 
 // The scene store for a visitor without a session: the cloud's /store and
 // the scenes host's root. The same shelves the signed-in library shows,
 // without the workspace around them — a slim header with a search box and
-// a way to sign in, the categories as a row of pills, the shelves, the tag
-// cloud. Opening a scene goes to its page, which signs the visitor in when
+// a way to sign in, the categories as a row of pills, the shelves. Opening a scene goes to its page, which signs the visitor in when
 // it needs to.
 
 function injected(key: string): string | undefined {
@@ -30,37 +29,35 @@ export function PublicStoreFront(): JSX.Element {
     storeShelves,
     storeScenesCount,
     storeShelfCounts,
-    storeTagCounts,
     storeOrigin,
     repositoriesLoading,
     search,
     category,
-    tag,
     visibleShelf,
   } = useValues(publicStoreLogic)
   const { setSearch, setVisibleShelf } = useActions(publicStoreLogic)
   const shelvesRef = useRef<HTMLDivElement>(null)
-  const goTo = (filters: { category?: string | null; tag?: string | null }) =>
-    router.actions.push(urls.scenesHome('store', { category, tag, ...filters }))
+  const goTo = (filters: { category?: string | null }) =>
+    router.actions.push(urls.scenesHome('store', { category, ...filters }))
   const highlightedCategory = category ?? visibleShelf
   const activeShelf = category ? storeShelfForCategory(category) : null
   const loginUrl = injected('cloud_login_url') ?? '/login'
 
   useEffect(() => {
     scrollStoreToTop()
-  }, [category, tag])
+  }, [category])
   useEffect(() => {
-    if (category || tag) {
+    if (category) {
       return
     }
     return watchVisibleShelf(shelvesRef.current, setVisibleShelf)
-  }, [category, tag, storeShelves.length, setVisibleShelf])
+  }, [category, storeShelves.length, setVisibleShelf])
 
   return (
     <div className={clsx('frameos-app-shell min-h-screen text-slate-900', `frameos-theme-${theme}`)}>
       <header className="frameos-panel sticky top-0 z-20 border-b border-white/80 bg-white/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-4 py-3">
-          <a href={urls.store()} className="flex items-center gap-2" title="FrameOS Cloud scene store">
+          <a href={urls.scenesHome('store')} className="flex items-center gap-2" title="FrameOS Cloud scene store">
             <img alt="" src={theme === 'dark' ? '/logo-dark.svg' : '/logo-light.svg'} className="h-7 w-auto" />
             <span className="frameos-strong text-base font-bold">FrameOS Cloud</span>
             <span className="frameos-muted text-sm">Scene store</span>
@@ -105,7 +102,7 @@ export function PublicStoreFront(): JSX.Element {
               .map((entry) => (
                 <a
                   key={entry.slug ?? 'all'}
-                  href={urls.scenesHome('store', { category: entry.slug, tag })}
+                  href={urls.scenesHome('store', { category: entry.slug })}
                   onClick={(event) => {
                     if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) {
                       event.preventDefault()
@@ -135,17 +132,13 @@ export function PublicStoreFront(): JSX.Element {
               shelves={storeShelves}
               activeCategory={category}
               shelfHref={(slug) => urls.scenesHome('store', { category: slug })}
-              onTag={(value) => goTo({ tag: value.toLowerCase() })}
               emptyMessage={
                 storeScenesCount === 0
                   ? 'The scene store is not available right now.'
-                  : search
-                  ? `No store scenes match "${search}".`
-                  : 'No store scenes match these filters.'
+                  : `No store scenes match "${search}".`
               }
             />
           )}
-          <StoreTagCloud tags={storeTagCounts} activeTag={tag} onTag={(value) => goTo({ tag: value })} />
         </div>
       </main>
     </div>

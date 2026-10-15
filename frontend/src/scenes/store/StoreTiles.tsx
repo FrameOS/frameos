@@ -5,7 +5,7 @@ import { PhotoIcon } from '@heroicons/react/24/outline'
 import type { TemplateType } from '../../types'
 import { imageElementIsBlank } from '../../utils/blankImage'
 import { storeShelfForCategory } from '../../utils/storeCategories'
-import type { StoreShelfGroup, StoreTagCount } from './storeCatalog'
+import type { StoreShelfGroup } from './storeCatalog'
 
 // The store's tiles and shelves, as the cloud's store page drew them:
 // small, 4:3, every fact on the tile. Shared by the signed-in library
@@ -67,19 +67,16 @@ export function SceneTile({
   badge,
   badgeTone,
   showAuthor = true,
-  onTag,
   actions,
 }: {
   template: TemplateType
   badge?: string
   badgeTone?: 'ok' | 'warn'
   showAuthor?: boolean
-  onTag?: (tag: string) => void
   actions?: ReactNode
 }): JSX.Element {
   const href = typeof template.url === 'string' && template.url ? template.url : null
   const shelf = template.category ? storeShelfForCategory(template.category) : null
-  const tags = (template.tags ?? []).slice(0, 4)
   const flags = template.flags ?? []
   const meta = [
     showAuthor && template.author ? `by ${template.author}` : null,
@@ -116,15 +113,10 @@ export function SceneTile({
       ) : (
         <div className="flex flex-col gap-2">{body}</div>
       )}
-      {badge || shelf || tags.length > 0 ? (
+      {badge || shelf ? (
         <div className="flex flex-wrap gap-1">
           {badge ? <Pill tone={badgeTone}>{badge}</Pill> : null}
           {shelf ? <Pill>{shelf.title}</Pill> : null}
-          {tags.map((tag) => (
-            <Pill key={tag} onClick={onTag ? () => onTag(tag) : undefined}>
-              {tag}
-            </Pill>
-          ))}
         </div>
       ) : null}
       {meta.length > 0 ? <div className="frameos-muted mt-auto text-[11px]">{meta.join(' · ')}</div> : null}
@@ -147,14 +139,12 @@ export function StoreShelves({
   activeCategory,
   emptyMessage,
   shelfHref,
-  onTag,
 }: {
   shelves: StoreShelfGroup[]
   activeCategory: string | null
   emptyMessage: ReactNode
   /** A link to one shelf's page, shown as the shelf title when all shelves are listed. */
   shelfHref?: (slug: string) => string
-  onTag?: (tag: string) => void
 }): JSX.Element {
   if (shelves.length === 0) {
     return <Note>{emptyMessage}</Note>
@@ -177,47 +167,12 @@ export function StoreShelves({
           ) : null}
           <TileGrid>
             {templates.map((template) => (
-              <SceneTile key={template.sceneId ?? template.id ?? template.name} template={template} onTag={onTag} />
+              <SceneTile key={template.sceneId ?? template.id ?? template.name} template={template} />
             ))}
           </TileGrid>
         </section>
       ))}
     </>
-  )
-}
-
-/** Every tag in the store with its count; the active one is lit. */
-export function StoreTagCloud({
-  tags,
-  activeTag,
-  onTag,
-}: {
-  tags: StoreTagCount[]
-  activeTag: string | null
-  onTag: (tag: string | null) => void
-}): JSX.Element | null {
-  if (tags.length === 0) {
-    return null
-  }
-  return (
-    <section className="space-y-2">
-      <h2 className="frameos-heading text-lg font-bold">Tags</h2>
-      <div className="flex flex-wrap gap-1.5">
-        {tags.map(({ tag, count }) => (
-          <button
-            key={tag}
-            type="button"
-            onClick={() => onTag(activeTag === tag ? null : tag)}
-            className={clsx(
-              'frameos-inset rounded-full border px-2.5 py-0.5 text-xs transition hover:border-blue-400',
-              activeTag === tag && 'frameos-primary-active border-transparent text-white'
-            )}
-          >
-            {tag} <span className="opacity-60">{count}</span>
-          </button>
-        ))}
-      </div>
-    </section>
   )
 }
 

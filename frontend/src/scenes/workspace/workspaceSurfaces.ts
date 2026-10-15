@@ -119,14 +119,14 @@ export function scenesLibraryPageIsAvailable(
   return (scenesLibraryPages[mode] as readonly string[]).includes(page)
 }
 
-/** The side panel's wording: on the cloud the drive IS the private scenes;
- * a backend tells its cloud copies from its local ones. */
+/** The side panel's wording: on the cloud the drive IS the account's own
+ * scenes; a backend tells its cloud copies from its local ones. */
 export function scenesLibraryPageLabel(page: ScenesLibraryPage, mode: WorkspaceMode = workspaceMode()): string {
   switch (page) {
     case 'store':
       return 'Public scene store'
     case 'cloud':
-      return mode === 'cloud' ? 'Private scenes' : 'Private cloud scenes'
+      return mode === 'cloud' ? 'My scenes' : 'Private cloud scenes'
     case 'local':
       return 'Private local scenes'
   }

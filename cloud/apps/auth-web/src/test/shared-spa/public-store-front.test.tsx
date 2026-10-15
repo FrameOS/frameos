@@ -90,11 +90,12 @@ describe("the signed-out store front", () => {
     expect(screen.getByText("Big clock").closest("a")?.getAttribute("href")).toBe(
       "https://scenes.example/s/big-clock",
     );
-    // Categories as a row of pills, tags at the bottom.
+    // Categories as a row of pills.
     const categories = screen.getByRole("navigation", { name: "Categories" });
     expect(within(categories).getByRole("link", { name: /Weather/ })).toBeTruthy();
     expect(within(categories).getByRole("link", { name: /All scenes/ })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: /e-ink/ }).length).toBeGreaterThan(0);
+    // Tags are not shown anywhere any more.
+    expect(screen.queryByText("e-ink")).toBeNull();
     // Only the public index was asked for.
     for (const [url] of apiFetchMock.mock.calls) {
       expect(url.startsWith("/api/store/repository.json")).toBe(true);
