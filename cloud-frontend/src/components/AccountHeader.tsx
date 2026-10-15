@@ -7,7 +7,7 @@ import { accountNavUrls } from '../cloudConfig'
 // The FrameOS Cloud chrome, rendered from the same stylesheet as
 // cloud/apps/auth-web's shells (cloud-chrome.css, imported via src/index.css):
 // the cloud logo, the wordmark (linking to /frames, the cloud's home), then
-// Frames / Scenes / Account / Sign out. It
+// Frames / Scenes / Account. It
 // sits ABOVE the workspace shell and never re-renders per route — App.tsx
 // renders it once, outside the scene Suspense boundary, and the shell below it
 // gets the rest of the viewport (see the .frameos-cloud-app rules in
@@ -19,10 +19,11 @@ import { accountNavUrls } from '../cloudConfig'
 // always served by that app (app/frames/[[...path]]/route.ts), so the
 // root-absolute path holds in dev and prod alike.
 //
-// Sign out is a POST form, not a link: GET logout is trivially triggerable
-// from an <img> on any page, so the route only accepts POST. The three link
-// targets and the logout URL come from the server through the shell config —
-// account, scenes and auth can live on three different origins.
+// Sign out is not here: it sits at the bottom of the settings side panel
+// (frontend/src/scenes/settings/account/CloudSettings.tsx), a POST form to
+// the auth origin's logout route. The three link targets come from the
+// server through the shell config — account, scenes and auth can live on
+// three different origins.
 //
 // The "Admin" entry AppShell shows to superadmins is deliberately absent: this
 // bundle has no session, and a link that 403s for almost everyone is worse
@@ -35,7 +36,7 @@ import { accountNavUrls } from '../cloudConfig'
 // panel behind the hamburger (cloud-chrome.css), mirroring auth-web's
 // HeaderNav.tsx.
 export function AccountHeader(): ReactElement {
-  const { accountUrl, framesUrl, logoutUrl, scenesUrl } = accountNavUrls()
+  const { accountUrl, framesUrl, scenesUrl } = accountNavUrls()
   const { location } = useValues(router)
   const onAccountPages = location.pathname === '/account' || location.pathname.startsWith('/account/')
   const [open, setOpen] = useState(false)
@@ -160,11 +161,6 @@ export function AccountHeader(): ReactElement {
         >
           Account
         </a>
-        <form action={logoutUrl} method="post">
-          <button className="frameos-account-header__link" type="submit">
-            Sign out
-          </button>
-        </form>
       </nav>
     </header>
   )

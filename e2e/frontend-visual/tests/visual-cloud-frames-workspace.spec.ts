@@ -54,7 +54,8 @@ test.describe('cloud /frames workspace @e2e', () => {
       for (const link of ['Scenes', 'Frames', 'Account']) {
         await expect(header.getByRole('link', { name: link, exact: true })).toBeVisible()
       }
-      await expect(header.getByRole('button', { name: 'Sign out' })).toBeVisible()
+      // Sign out moved to the bottom of the settings side panel (2026.10).
+      await expect(header.getByRole('button', { name: 'Sign out' })).toHaveCount(0)
 
       // The theme signal the two surfaces share.
       await expect(page.locator('html')).toHaveAttribute('data-frameos-theme', theme)
