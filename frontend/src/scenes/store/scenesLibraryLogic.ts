@@ -114,7 +114,7 @@ export interface scenesLibraryLogicMeta {
     storeOrigin: (storeTemplates: TemplateType[]) => string
     storeScenesCount: (storeTemplates: TemplateType[]) => number
     storeShelfCounts: (storeTemplates: TemplateType[]) => StoreShelfCount[]
-    storeTagCounts: (storeTemplates: TemplateType[]) => StoreTagCount[]
+    storeTagCounts: (storeTemplates: TemplateType[], category: string | null) => StoreTagCount[]
     storeShelves: (
       storeTemplates: TemplateType[],
       search: string,
@@ -222,8 +222,9 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
       (storeTemplates: TemplateType[]): StoreShelfCount[] => storeShelfCountsOf(storeTemplates),
     ],
     storeTagCounts: [
-      (s) => [s.storeTemplates],
-      (storeTemplates: TemplateType[]): StoreTagCount[] => storeTagCountsOf(storeTemplates),
+      (s) => [s.storeTemplates, s.category],
+      (storeTemplates: TemplateType[], category: string | null): StoreTagCount[] =>
+        storeTagCountsOf(storeTemplates, category),
     ],
     storeShelves: [
       (s) => [s.storeTemplates, s.search, s.category, s.tag],

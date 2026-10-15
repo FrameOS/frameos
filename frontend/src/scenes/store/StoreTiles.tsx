@@ -84,7 +84,6 @@ export function SceneTile({
   const meta = [
     showAuthor && template.author ? `by ${template.author}` : null,
     template.version ? `v${template.version}` : null,
-    template.frameosVersion ? `FrameOS ${template.frameosVersion}+` : null,
   ].filter(Boolean)
   const body = (
     <>

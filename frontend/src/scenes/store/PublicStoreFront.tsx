@@ -91,7 +91,7 @@ export function PublicStoreFront(): JSX.Element {
       <main className="mx-auto max-w-6xl space-y-8 px-4 pb-16 pt-6 @container">
         <div>
           <h1 className="frameos-strong text-3xl font-bold tracking-normal">
-            {activeShelf ? activeShelf.title : 'Scene store'}
+            {activeShelf ? activeShelf.title : 'Public scene store'}
           </h1>
           <p className="frameos-muted mt-1 max-w-3xl text-sm leading-relaxed">
             Ready-made scenes from the FrameOS community. Open one to see it in the editor, sign in to save your own and

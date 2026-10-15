@@ -1,7 +1,7 @@
 import { useValues } from 'kea'
 import { A } from 'kea-router'
 import type { ReactNode } from 'react'
-import { ComputerDesktopIcon, FolderIcon, PhotoIcon } from '@heroicons/react/24/outline'
+import { ComputerDesktopIcon, FolderIcon, PhotoIcon, RectangleGroupIcon } from '@heroicons/react/24/outline'
 
 import { FrameImage } from '../../components/FrameImage'
 import { Spinner } from '../../components/Spinner'
@@ -12,10 +12,12 @@ import { photoThumbUrl, type PhotoEntry } from '../photos/photosApi'
 import { formatBytes } from '../settings/account/format'
 import { FrameosShell } from '../workspace/FrameosShell'
 import { cloudHomeLogic, HOME_SECTION_LIMIT } from './cloudHomeLogic'
+import { SceneTile, TileGrid as SceneTileGrid } from '../store/StoreTiles'
 
-// The cloud's home page, behind the rail's logo: a greeting, the frames and
-// albums touched most recently (a few, then "See all"), and the account's
-// usage at a glance. Everything on it is a door into the page that owns it.
+// The cloud's home page, behind the rail's logo: a greeting, then the
+// frames, the store's scenes, the private scenes and the albums (a few of
+// each, then "See all") and the account's usage at a glance. Everything on
+// it is a door into the page that owns it.
 
 function Section({
   title,
@@ -118,18 +120,21 @@ export function CloudHome(): JSX.Element {
     recentAlbums,
     albums,
     albumsLoading,
+    storeTemplates,
+    recentStoreScenes,
+    repositoriesLoading,
+    driveTemplates,
+    recentPrivateScenes,
+    driveTemplatesLoading,
   } = useValues(cloudHomeLogic)
 
   return (
     <FrameosShell mode="home" title="Home" browserTitle="Home" tree={null} topBar={null} showAiButton={false}>
       <div className="mx-auto max-w-6xl space-y-10 pb-16 @container">
         <header>
-          <div className="frameos-muted text-xs font-semibold uppercase tracking-wide">FrameOS Cloud</div>
-          <h1 className="frameos-strong mt-1 text-3xl font-bold tracking-normal">
-            {greetingName ? `Hello ${greetingName}` : 'Hello'}
-          </h1>
+          <h1 className="frameos-strong text-3xl font-bold tracking-normal">FrameOS Cloud</h1>
           <p className="frameos-muted mt-1 text-sm leading-relaxed">
-            Your frames, your albums and your scenes, in one place.
+            {greetingName ? `Hello ${greetingName}. ` : ''}Your frames, your scenes and your photos, in one place.
           </p>
         </header>
 
@@ -156,7 +161,53 @@ export function CloudHome(): JSX.Element {
           )}
         </Section>
 
-        <Section title="Albums" count={albums.length} seeAllHref={urls.photos()}>
+        <Section title="Scenes" count={storeTemplates.length} seeAllHref={urls.scenesHome('store')}>
+          {repositoriesLoading && storeTemplates.length === 0 ? (
+            <div className="frameos-muted flex items-center gap-2 text-sm">
+              <Spinner className="h-4 w-4" />
+              Loading the scene store…
+            </div>
+          ) : recentStoreScenes.length === 0 ? (
+            <Empty icon={<RectangleGroupIcon />}>The scene store is not available right now.</Empty>
+          ) : (
+            <SceneTileGrid>
+              {recentStoreScenes.map((template) => (
+                <SceneTile key={template.sceneId ?? template.id ?? template.name} template={template} />
+              ))}
+            </SceneTileGrid>
+          )}
+        </Section>
+
+        <Section title="Private scenes" count={driveTemplates.length} seeAllHref={urls.scenesHome('cloud')}>
+          {driveTemplatesLoading && driveTemplates.length === 0 ? (
+            <div className="frameos-muted flex items-center gap-2 text-sm">
+              <Spinner className="h-4 w-4" />
+              Loading your scenes…
+            </div>
+          ) : recentPrivateScenes.length === 0 ? (
+            <Empty icon={<RectangleGroupIcon />}>
+              No private scenes yet.{' '}
+              <A href={urls.scenesHome('cloud')} className="font-semibold underline-offset-2 hover:underline">
+                Make one
+              </A>
+              .
+            </Empty>
+          ) : (
+            <SceneTileGrid>
+              {recentPrivateScenes.map((template) => (
+                <SceneTile
+                  key={template.sceneId ?? template.id ?? template.name}
+                  template={template}
+                  showAuthor={false}
+                  badge={template.visibility === 'public' ? 'Public' : 'Private'}
+                  badgeTone={template.visibility === 'public' ? 'ok' : undefined}
+                />
+              ))}
+            </SceneTileGrid>
+          )}
+        </Section>
+
+        <Section title="Photos" count={albums.length} seeAllHref={urls.photos()}>
           {albumsLoading && albums.length === 0 ? (
             <div className="frameos-muted flex items-center gap-2 text-sm">
               <Spinner className="h-4 w-4" />

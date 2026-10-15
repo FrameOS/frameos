@@ -346,14 +346,17 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
               </LoadingNavButton>
             ) : null}
           </nav>
-          <button
-            type="button"
-            title={theme === 'dark' ? 'Use light mode' : 'Use dark mode'}
-            onClick={toggleTheme}
-            className="workspace-theme-button frameos-icon-button mb-4 flex h-12 w-12 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-          >
-            {theme === 'dark' ? <SunIcon className="h-7 w-7" /> : <MoonIcon className="h-7 w-7" />}
-          </button>
+          <div className="mb-2 flex flex-col items-center">
+            <button
+              type="button"
+              title={theme === 'dark' ? 'Use light mode' : 'Use dark mode'}
+              onClick={toggleTheme}
+              className="workspace-theme-button frameos-icon-button flex h-12 w-12 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              {theme === 'dark' ? <SunIcon className="h-7 w-7" /> : <MoonIcon className="h-7 w-7" />}
+            </button>
+            <span className="frameos-nav-label mt-1 hidden text-[10px] font-medium leading-none lg:block">Theme</span>
+          </div>
           <LoadingNavButton
             active={mode === 'settings'}
             href={urls.settings()}

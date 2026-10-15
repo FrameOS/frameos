@@ -189,8 +189,8 @@ function repoAppGroup(keyword: string): { key: string; label: string } {
   return { key: `javascript:${folder}`, label: repoAppFolderLabels[folder] ?? `JavaScript: ${folder}` }
 }
 
-// Every catalog app: the built-in Nim apps by category, then the repo
-// JavaScript apps by folder. Both are read only here; the sources of the
+// Every catalog app: the repo JavaScript apps by folder, then the built-in
+// Nim apps by category. Both are read only here; the sources of the
 // repo apps are embedded in the bundle, the Nim ones come from the API.
 function systemAppOptions(apps: Record<string, AppConfig>): SystemAppOption[] {
   return Object.entries(apps)
@@ -207,8 +207,9 @@ function systemAppOptions(apps: Record<string, AppConfig>): SystemAppOption[] {
       }
     })
     .toSorted((a, b) => {
+      // The JavaScript apps first: they are what a scene author writes today.
       if (a.javascript !== b.javascript) {
-        return a.javascript ? 1 : -1
+        return a.javascript ? -1 : 1
       }
       const categoryComparison = a.category.localeCompare(b.category)
       return categoryComparison || a.label.localeCompare(b.label)

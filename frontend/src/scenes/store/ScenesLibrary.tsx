@@ -331,7 +331,7 @@ function StorePage(): JSX.Element {
   return (
     <>
       <PageHeader
-        title={activeShelf ? activeShelf.title : 'Scene store'}
+        title={activeShelf ? activeShelf.title : 'Public scene store'}
         description="Ready-made scenes from the FrameOS community. Open one to see it in the editor, then install it on a frame."
         actions={<RefreshButton onClick={loadRepositories} loading={repositoriesLoading} />}
       />

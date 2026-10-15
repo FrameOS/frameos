@@ -78,9 +78,14 @@ export function storeShelfCountsOf(storeTemplates: TemplateType[]): StoreShelfCo
   return groupByStoreShelf(storeTemplates).map(({ shelf, templates }) => ({ shelf, count: templates.length }))
 }
 
-export function storeTagCountsOf(storeTemplates: TemplateType[]): StoreTagCount[] {
+/** The tags of the scenes on the page: within the category when one is
+ * chosen, so the cloud and its counts describe what is listed. */
+export function storeTagCountsOf(storeTemplates: TemplateType[], category: string | null = null): StoreTagCount[] {
   const counts = new Map<string, number>()
-  for (const template of storeTemplates) {
+  const templates = category
+    ? storeTemplates.filter((template) => storeShelfForCategory(template.category).slug === category)
+    : storeTemplates
+  for (const template of templates) {
     for (const tag of new Set((template.tags ?? []).map((value) => value.toLowerCase()))) {
       counts.set(tag, (counts.get(tag) ?? 0) + 1)
     }
