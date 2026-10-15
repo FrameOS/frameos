@@ -13,7 +13,6 @@ import { FramesHome } from '../../../../frontend/src/scenes/workspace/FramesHome
 import { PhotosWorkspace } from '../../../../frontend/src/scenes/photos/PhotosWorkspace'
 import { Settings } from '../../../../frontend/src/scenes/settings/Settings'
 import { SceneWorkspace } from '../../../../frontend/src/scenes/workspace/SceneWorkspace'
-import { CloudFirstRunAddFrame } from '../../components/CloudFirstRunAddFrame'
 
 interface CloudSceneProps {
   id?: string
@@ -47,29 +46,14 @@ function CloudGate({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-// An account with no frames gets the first-run screen instead of an empty
-// workspace: header, one centered enrollment card, nothing else.
-//
-// The condition is "the list has arrived AND it is empty", never "no frames"
-// on its own — during the first load `frames` is legitimately empty, and
-// rendering the first-run screen then would flash it at every visitor. (The
-// mirror image of that mistake — gating on `framesLoaded`, which actually
-// means "has at least one frame" — is what once left new accounts stuck on
-// "Loading..." forever; see CloudGate above.)
-function CloudFleet(): ReactNode {
-  const { frames, framesEverLoaded } = useValues(framesModel)
-
-  if (framesEverLoaded && Object.keys(frames).length === 0) {
-    return <CloudFirstRunAddFrame />
-  }
-
-  return <FramesHome />
-}
-
+// An account with no frames gets the enrollment panel in the middle of the
+// workspace (CloudFirstRunAddFrame, registered in main.tsx as the shared
+// frames home's first-run panel), with the rail and the frame tree around
+// it like on every other page.
 export function CloudFramesHome() {
   return (
     <CloudGate>
-      <CloudFleet />
+      <FramesHome />
     </CloudGate>
   )
 }

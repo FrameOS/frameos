@@ -41,8 +41,8 @@ test.describe('cloud /frames workspace @e2e', () => {
       await serveCloudWorkspace(page, { frames: [] })
 
       await page.goto(`${CLOUD_ORIGIN}/frames`, { waitUntil: 'domcontentloaded' })
-      // An empty fleet renders the enrollment panel as the page, centered
-      // under the shared account header: a chooser of the four ways in.
+      // An empty fleet renders the enrollment panel in the middle of the
+      // workspace, rail and frame tree around it: a chooser of the four ways in.
       await expect(page.getByRole('heading', { name: 'Add a frame' })).toBeVisible()
       for (const title of Object.values(addFramePathTitles)) {
         await expect(page.getByRole('button', { name: title })).toBeVisible()
