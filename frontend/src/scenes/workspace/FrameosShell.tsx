@@ -580,7 +580,8 @@ export function FrameosShell({
               }
             }}
             className={clsx(
-              'workspace-logo-button frameos-icon-button mb-6 flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              'workspace-logo-button frameos-icon-button flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
+              isCloudMode() ? 'mb-0' : 'mb-6',
               mode === 'home' && 'frameos-nav-logo-current'
             )}
           >
@@ -591,6 +592,16 @@ export function FrameosShell({
               <FrameosLogo variant={theme === 'dark' ? 'white-colors' : 'color'} className="h-10 w-auto" />
             )}
           </a>
+          {isCloudMode() ? (
+            <span
+              className={clsx(
+                'frameos-nav-label mb-4 mt-1 hidden text-[10px] font-medium leading-none lg:block',
+                mode === 'home' && 'frameos-nav-label-active'
+              )}
+            >
+              Home
+            </span>
+          ) : null}
           <nav className="flex flex-1 flex-col items-center gap-2 lg:gap-3">
             {!inFrameAdminMode ? (
               <NavButton
