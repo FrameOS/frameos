@@ -41,9 +41,10 @@ import { FrameImage } from '../../components/FrameImage'
 import { frameHost } from '../../decorators/frame'
 import { frameIdsEqual } from '../../utils/frameId'
 import { groupFramesByStatus } from '../workspace/frameStatusGroups'
-import type { FrameType } from '../../types'
+import type { FrameScene, FrameType } from '../../types'
 import { InstallSceneModal } from './InstallSceneModal'
 import { storeRepositoryOf } from './storeCatalog'
+import { WorkspaceSceneDropDown } from '../workspace/WorkspaceSceneDropDown'
 
 // The scenes library: the pages at the top of the Scenes side panel and
 // what the page area shows for them — the store front as the cloud's own
@@ -728,27 +729,34 @@ function LocalScenesPage(): JSX.Element {
   )
 }
 
-// A frame's scene: its picture, its name, a way into the full-screen editor.
-function InstalledSceneTile({ frame, scene }: { frame: FrameType; scene: { id: string; name?: string } }): JSX.Element {
+// A frame's scene: its picture, its name, a way into the editor, and the
+// scene's own "..." menu (the one the scenes panel has).
+function InstalledSceneTile({ frame, scene }: { frame: FrameType; scene: FrameScene }): JSX.Element {
   return (
-    <A
-      href={urls.sceneEditor(frame.id, scene.id)}
-      className="frameos-card flex flex-col gap-2 overflow-hidden rounded-lg border border-white/90 pb-2.5 shadow-lg shadow-slate-300/35 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-300/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-    >
-      <FrameImage
-        frameId={frame.id}
-        sceneId={scene.id}
-        thumb
-        refreshable={false}
-        objectFit="cover"
-        className="aspect-[4/3] w-full overflow-hidden bg-slate-800"
-        wasmFallback={{ sceneId: scene.id }}
+    <div className="frameos-card relative flex flex-col gap-2 overflow-hidden rounded-lg border border-white/90 pb-2.5 shadow-lg shadow-slate-300/35 transition hover:-translate-y-0.5 hover:shadow-xl hover:shadow-slate-300/50 focus-within:ring-2 focus-within:ring-blue-400">
+      <A href={urls.scenes(frame.id, scene.id)} className="flex flex-col gap-2 focus:outline-none">
+        <FrameImage
+          frameId={frame.id}
+          sceneId={scene.id}
+          thumb
+          refreshable={false}
+          objectFit="cover"
+          className="aspect-[4/3] w-full overflow-hidden bg-slate-800"
+          wasmFallback={{ sceneId: scene.id }}
+        />
+        <div className="px-2.5 pr-10 pt-1">
+          <h3 className="frameos-strong text-sm font-semibold leading-tight">{scene.name || 'Untitled scene'}</h3>
+          <div className="frameos-muted mt-0.5 text-[11px]">{frame.name || frameHost(frame)}</div>
+        </div>
+      </A>
+      <WorkspaceSceneDropDown
+        frame={frame}
+        scene={scene}
+        scenes={frame.scenes ?? []}
+        buttonColor="none"
+        className="absolute bottom-2 right-2"
       />
-      <div className="px-2.5 pt-1">
-        <h3 className="frameos-strong text-sm font-semibold leading-tight">{scene.name || 'Untitled scene'}</h3>
-        <div className="frameos-muted mt-0.5 text-[11px]">{frame.name || frameHost(frame)}</div>
-      </div>
-    </A>
+    </div>
   )
 }
 

@@ -193,7 +193,7 @@ export function CloudHome(): JSX.Element {
           )}
         </Section>
 
-        <Section title="My scenes" count={driveTemplates.length} seeAllHref={urls.scenesHome('cloud')}>
+        <Section title="My cloud scenes" count={driveTemplates.length} seeAllHref={urls.scenesHome('cloud')}>
           {driveTemplatesLoading && driveTemplates.length === 0 ? (
             <div className="frameos-muted flex items-center gap-2 text-sm">
               <Spinner className="h-4 w-4" />

@@ -881,13 +881,6 @@ function AppOverview({
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto max-w-4xl space-y-6 pb-16">
-        <div>
-          <h1 className="frameos-strong text-2xl font-bold">{title}</h1>
-          {configJson?.description ? (
-            <p className="frameos-muted mt-1 max-w-3xl text-sm leading-relaxed">{configJson.description}</p>
-          ) : null}
-          <div className="frameos-muted mt-1 text-xs">{meta.filter(Boolean).join(' · ')}</div>
-        </div>
         <section className="frameos-card overflow-hidden rounded-xl border">
           <div className="frameos-inset flex items-center justify-between border-b px-4 py-2 text-xs font-semibold uppercase tracking-wide">
             <span>Files</span>
@@ -930,6 +923,9 @@ function AppOverview({
             <div>
               <h2 className="frameos-strong text-lg font-bold">{configJson?.name || title}</h2>
               {configJson?.description ? <p className="frameos-muted mt-1">{configJson.description}</p> : null}
+              {meta.filter(Boolean).length > 0 ? (
+                <div className="frameos-muted mt-1 text-xs">{meta.filter(Boolean).join(' · ')}</div>
+              ) : null}
             </div>
             {fields.length > 0 ? (
               <div>
@@ -995,11 +991,7 @@ function SystemAppOverview({ app }: { app: SystemAppOption }): JSX.Element {
   return (
     <AppOverview
       title={app.label}
-      meta={[
-        app.categoryLabel,
-        app.javascript ? 'JavaScript' : 'Nim',
-        configJson?.version ? `v${configJson.version}` : null,
-      ]}
+      meta={[app.javascript ? 'JavaScript' : 'Nim', configJson?.version ? `v${configJson.version}` : null]}
       githubUrl={systemAppGithubUrl(app.keyword)}
       filenames={filenames}
       sources={sources}

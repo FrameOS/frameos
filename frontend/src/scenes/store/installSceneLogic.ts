@@ -4,7 +4,7 @@ import type { MakeLogicType } from 'kea'
 import { router } from 'kea-router'
 
 import { framesModel } from '../../models/framesModel'
-import type { FrameId, FrameType, RepositoryType, TemplateType } from '../../types'
+import type { FrameId, FrameScene, FrameType, RepositoryType, TemplateType } from '../../types'
 import { urls } from '../../urls'
 import { frameIdsEqual } from '../../utils/frameId'
 import { showErrorMessage, showSuccessMessage } from '../../utils/workingMessage'
@@ -39,6 +39,7 @@ export interface installSceneLogicValues {
   framesList: FrameType[] // framesModel
   frameGroups: FrameStatusGroup[]
   installableFrames: FrameType[]
+  installedFrameIds: FrameId[]
   installing: boolean
   selectedFrameIds: FrameId[]
   target: InstallSceneTarget | null
@@ -72,6 +73,7 @@ export interface installSceneLogicMeta {
   __keaTypeGenInternalSelectorTypes: {
     installableFrames: (framesList: FrameType[]) => FrameType[]
     frameGroups: (installableFrames: FrameType[]) => FrameStatusGroup[]
+    installedFrameIds: (installableFrames: FrameType[], target: InstallSceneTarget | null) => FrameId[]
   }
 }
 
@@ -81,6 +83,23 @@ export type installSceneLogicType = MakeLogicType<
   Record<string, any>
 > &
   installSceneLogicMeta
+
+function sceneComesFrom(
+  origin: FrameScene['origin'],
+  target: Extract<InstallSceneTarget, { kind: 'install' }>
+): boolean {
+  if (!origin) {
+    return false
+  }
+  if (target.template.sceneId && origin.storeSceneId === target.template.sceneId) {
+    return true
+  }
+  const templateId = target.template.id
+  if (!templateId || origin.templateId !== templateId) {
+    return false
+  }
+  return target.repository ? origin.repositoryId === target.repository.id : !origin.repositoryId
+}
 
 export const installSceneLogic = kea<installSceneLogicType>([
   path(['src', 'scenes', 'store', 'installSceneLogic']),
@@ -140,6 +159,17 @@ export const installSceneLogic = kea<installSceneLogicType>([
       (s) => [s.installableFrames],
       (installableFrames: FrameType[]): FrameStatusGroup[] => groupFramesByStatus(installableFrames),
     ],
+    // The frames that already have the scene (by the origin every install
+    // stamps: the store scene's id, or the repository and template).
+    installedFrameIds: [
+      (s) => [s.installableFrames, s.target],
+      (installableFrames: FrameType[], target: InstallSceneTarget | null): FrameId[] =>
+        target?.kind === 'install'
+          ? installableFrames
+              .filter((frame) => (frame.scenes ?? []).some((scene) => sceneComesFrom(scene.origin, target)))
+              .map((frame) => frame.id)
+          : [],
+    ],
   }),
   listeners(({ actions, values }) => ({
     install: async () => {
@@ -161,7 +191,7 @@ export const installSceneLogic = kea<installSceneLogicType>([
             throw new Error('The new scene was not created')
           }
           actions.closeInstall()
-          router.actions.push(urls.sceneEditor(frameId, scene.id))
+          router.actions.push(urls.scenes(frameId, scene.id))
           return
         }
         if (target.kind === 'ai') {

@@ -18,7 +18,6 @@ import { accountNavUrls } from '../../cloudConfig'
 import { PhotosWorkspace } from '../../../../frontend/src/scenes/photos/PhotosWorkspace'
 import { Settings } from '../../../../frontend/src/scenes/settings/Settings'
 import { SceneWorkspace } from '../../../../frontend/src/scenes/workspace/SceneWorkspace'
-import { SceneEditorPage } from '../../../../frontend/src/scenes/workspace/SceneEditorPage'
 
 interface CloudSceneProps {
   id?: string
@@ -102,14 +101,6 @@ export function CloudSceneWorkspace({ frameId, sceneId }: CloudSceneProps) {
   return (
     <CloudGate>
       <SceneWorkspace frameId={frameId} sceneId={sceneId} />
-    </CloudGate>
-  )
-}
-
-export function CloudSceneEditor({ frameId, sceneId }: CloudSceneProps) {
-  return (
-    <CloudGate>
-      <SceneEditorPage frameId={frameId} sceneId={sceneId} />
     </CloudGate>
   )
 }

@@ -7,7 +7,6 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   ChevronUpIcon,
-  CloudArrowUpIcon,
   Cog6ToothIcon,
   CodeBracketIcon,
   ComputerDesktopIcon,
@@ -43,7 +42,6 @@ import { chatLogic } from '../frame/panels/Chat/chatLogic'
 import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
-import { DeployToFrameIcon } from './FrameChangeStatusIcon'
 import { frameChangeDrawerKind, photosLibraryIsAvailable } from './workspaceSurfaces'
 import { FrameRenameModal } from './FrameActionsMenu'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
@@ -363,44 +361,6 @@ function WorkspaceChatDrawerContent({
   )
 }
 
-function FrameStatusHeaderButton({ frameId }: { frameId: FrameId }): JSX.Element | null {
-  const { frame, undeployedChanges, unsavedChanges } = useValues(frameLogic({ frameId }))
-  const { hideDeployPlanModal } = useActions(frameLogic({ frameId }))
-  const { frameChangeDrawerSelection } = useValues(workspaceLogic)
-  const { closeFrameChangeDrawer, openFrameChangeDrawer } = useActions(workspaceLogic)
-  const statusLabel = unsavedChanges ? 'Unsaved' : undeployedChanges ? 'Undeployed' : null
-  const drawerKind = frameChangeDrawerKind(frame, unsavedChanges)
-  const drawerIsOpen = frameChangeDrawerSelection?.frameId === frameId && frameChangeDrawerSelection.kind === drawerKind
-  const StatusIcon = unsavedChanges ? CloudArrowUpIcon : DeployToFrameIcon
-
-  if (!statusLabel) {
-    return null
-  }
-
-  return (
-    <button
-      type="button"
-      title={`${statusLabel} changes`}
-      aria-label={drawerIsOpen ? 'Close changes' : drawerKind === 'unsaved' ? 'Open unsaved changes' : 'Open deploy'}
-      onClick={() => {
-        if (drawerIsOpen) {
-          hideDeployPlanModal()
-          closeFrameChangeDrawer()
-          return
-        }
-        openFrameChangeDrawer(frameId, drawerKind)
-      }}
-      className={clsx(
-        'workspace-unsaved-header-button flex h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
-        'frameos-warning-button'
-      )}
-    >
-      <StatusIcon className="h-5 w-5 shrink-0" />
-      <span className="workspace-unsaved-header-label">{statusLabel}</span>
-    </button>
-  )
-}
-
 export function FrameosShell({
   mode,
   title,
@@ -441,11 +401,8 @@ export function FrameosShell({
   // map is empty during the first load too.
   const showFrameButton = inFrameAdminMode || !framesEverLoaded || Object.keys(frames).length > 0
   const homeHref = inFrameAdminMode ? urls.frameControl() : urls.home()
-  const scenesHref = selectedFrame
-    ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined)
-    : inFrameAdminMode
-    ? urls.frameControlScenes()
-    : urls.scenes()
+  // The rail's Scenes is the library, whichever frame is open.
+  const scenesHref = inFrameAdminMode ? urls.frameControlScenes() : urls.scenes()
   const frameHref = selectedFrame
     ? urls.frame(selectedFrame.id)
     : inFrameAdminMode
@@ -501,10 +458,6 @@ export function FrameosShell({
         onClick={() => openChatDrawer(selectedFrame.id, chatSceneId, chatNodeId ?? null)}
         floating={topBar === null}
       />
-    ) : null
-  const unsavedHeaderButton =
-    selectedFrame && mode !== 'home' && mode !== 'frames' && mode !== 'settings' && mode !== 'photos' ? (
-      <FrameStatusHeaderButton frameId={selectedFrame.id} />
     ) : null
   const workspaceMainStyle = {
     '--workspace-main-offset': secondaryPanelOpen ? '480px' : '128px',
@@ -695,7 +648,6 @@ export function FrameosShell({
               </NavButton>
             ) : null}
           </nav>
-          {unsavedHeaderButton}
           <div className="mb-2 flex flex-col items-center">
             <button
               type="button"

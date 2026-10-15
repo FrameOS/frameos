@@ -1264,17 +1264,15 @@ type NavigationApi = {
   entries(): { url: string | null }[];
 };
 
-/** Whether the previous history entry is a page of ours. The Navigation
- * API knows (a client-side route change leaves document.referrer as it
- * was); where it is missing, the referrer plus a history to go back in. */
-function cameFromOurPage(): boolean {
-  const origin = `${window.location.origin}/`;
+// Whether the browser has a page to go back to: a self-hosted backend's
+// scene library links here too, and its back should land there, not on the
+// store front. (A back is only ever to where this tab has been.)
+function canGoBack(): boolean {
   const navigation = (window as unknown as { navigation?: NavigationApi }).navigation;
   if (navigation?.currentEntry) {
-    const previous = navigation.entries()[navigation.currentEntry.index - 1];
-    return Boolean(previous?.url?.startsWith(origin));
+    return navigation.currentEntry.index > 0;
   }
-  return document.referrer.startsWith(origin) && window.history.length > 1;
+  return window.history.length > 1;
 }
 
 /** The listing the page recorded for a version (null: the latest) — the
@@ -1822,10 +1820,10 @@ export function SceneEditorModal({
     commitPanels(next);
   }
 
-  // Back: to the page that led here when it was one of ours (the store, My
-  // scenes, a publisher page), else to the store front.
+  // Back: to the page that led here (the store, My scenes, a publisher
+  // page, a backend's scene library), else to the store front.
   function goBack() {
-    if (cameFromOurPage()) {
+    if (canGoBack()) {
       window.history.back();
       return;
     }

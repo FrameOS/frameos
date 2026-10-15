@@ -20,8 +20,6 @@ const sceneLoaders = {
   frames: () => import('./frames/Frames'),
   frame: () => import('./frame/Frame'),
   sceneWorkspace: () => import('./workspace/SceneWorkspace'),
-  // One installed scene, full screen (the library's tiles open it).
-  sceneEditor: () => import('./workspace/SceneEditorPage'),
   appsWorkspace: () => import('./workspace/AppsWorkspace'),
   photosWorkspace: () => import('./photos/PhotosWorkspace'),
   settings: () => import('./settings/Settings'),
@@ -107,7 +105,6 @@ export const getRoutes = () =>
     // Signed out, the cloud's /scenes is the public store, not the workspace.
     ...(isCloudMode() && !cloudSignedIn() ? { [urls.scenes()]: 'storeFront' } : {}),
     [urls.scenes(':frameId')]: 'sceneWorkspace',
-    [urls.sceneEditor(':frameId', ':sceneId')]: 'sceneEditor',
     [urls.scenes(':frameId', ':sceneId')]: 'sceneWorkspace',
     [urls.apps()]: 'appsWorkspace',
     [urls.apps(':frameId')]: 'appsWorkspace',

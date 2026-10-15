@@ -83,9 +83,6 @@ export const urls = {
   frameControl: frameControlUrl,
   scenes: scenesUrl,
   frameControlScenes: frameControlScenesUrl,
-  /** The full-screen editor of one installed scene (scenes/editor): the
-   * frame's scene route with /edit after it. */
-  sceneEditor: (frameId: FrameId, sceneId: string) => scenesUrl(frameId, sceneId) + '/edit',
   /** The old address of the store front, kept as an alias of the library;
    * the scenes host's root is the store front too. */
   store: () => '/store',

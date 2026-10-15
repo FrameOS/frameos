@@ -205,11 +205,8 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
   const spinnerMode = useDelayedInitialSpinnerMode(mode)
   const inFrameAdminMode = isInFrameAdminMode()
   const homeHref = inFrameAdminMode ? urls.frameControl() : urls.home()
-  const scenesHref = selectedFrame
-    ? urls.scenes(selectedFrame.id, selectedSceneId ?? undefined)
-    : inFrameAdminMode
-    ? urls.frameControlScenes()
-    : urls.scenes()
+  // The rail's Scenes is the library, whichever frame is open.
+  const scenesHref = inFrameAdminMode ? urls.frameControlScenes() : urls.scenes()
   const frameHref = selectedFrame
     ? urls.frame(selectedFrame.id)
     : inFrameAdminMode
