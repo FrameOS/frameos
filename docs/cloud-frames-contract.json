@@ -271,13 +271,13 @@
       "parity": {"only": "esp32", "why": "ESP32 ADC battery sense; a Pi has no ADC."}
     },
     "buzzer_pin": {
-      "$comment": "The board's passive buzzer (reTerminal E-series: 45, reTerminal Sticky: 48), PWM-driven: it sounds while a registered GPIO button press is held (a second at most), chirps when a press wakes the chip, and buzzes lower (see buzzer_tone_hz) for a press the frame could not queue. -1 = none / silent. Applied live (the next tone reads it). Same reserved-pin refusal as battery_pin; the firmware also leaves a pin alone that is a display, button, battery or SD pin.",
+      "$comment": "The board's passive buzzer (reTerminal E-series: 45, reTerminal Sticky: 48), PWM-driven: a registered GPIO button press clicks it (14 ms at buzzer_tone_hz) and the release clicks it again at 0.7 of that pitch, the hold silent in between (until firmware 2026.10.15 the press tone ran until the release, a second at most); a press that wakes the chip chirps; a press the frame could not queue gets the same two clicks from a 100 Hz base. -1 = none / silent. Applied live (the next tone reads it). Same reserved-pin refusal as battery_pin; the firmware also leaves a pin alone that is a display, button, battery or SD pin.",
       "rule": {"type": "int", "min": -1, "max": 48},
       "profiles": {"esp32": {"since": "2026.10.12"}},
       "parity": {"only": "esp32", "why": "The press chirp lives in the ESP32 firmware's button task (fos_buzzer.c); no Pi frame preset has a buzzer and the Linux gpioButton driver drives no outputs."}
     },
     "buzzer_tone_hz": {
-      "$comment": "Pitch of the buzzer_pin tone, in Hz (default 2000; the reTerminal Sticky preset sets 4000, its buzzer's resonance). A press the frame could not take buzzes a quarter of it. Applied live.",
+      "$comment": "Pitch of the buzzer_pin press click, in Hz (default 2000; the reTerminal Sticky preset sets 4000, its buzzer's resonance); the release click is 0.7 of it. A press the frame could not take clicks from a fixed 100 Hz base instead. Applied live.",
       "rule": {"type": "int", "min": 100, "max": 10000},
       "profiles": {"esp32": {"since": "2026.10.12"}},
       "parity": {"only": "esp32", "why": "The pitch of buzzer_pin's tone, which only the ESP32 firmware's button task sounds (fos_buzzer.c)."}

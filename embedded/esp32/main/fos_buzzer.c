@@ -18,16 +18,28 @@
 #define BUZZER_MODE LEDC_LOW_SPEED_MODE
 #define BUZZER_TIMER ((ledc_timer_t)(LEDC_TIMER_MAX - 1))
 #define BUZZER_CHANNEL ((ledc_channel_t)(LEDC_CHANNEL_MAX - 1))
-#define BUZZER_RESOLUTION LEDC_TIMER_10_BIT
+/* 12 bits: on the 80 MHz APB clock the divider (1 … 1023, 8 fractional
+ * bits) then reaches 20 Hz … 19.5 kHz, which covers the refused press's
+ * 70 Hz up click and the contract's 10 kHz ceiling on one clock. At 10 bits
+ * anything under 77 Hz fails ledc_set_freq and the click keeps the previous
+ * pitch. */
+#define BUZZER_RESOLUTION LEDC_TIMER_12_BIT
 #define BUZZER_HALF_DUTY (1u << (BUZZER_RESOLUTION - 1))
 
 /* The LEDC timer's first frequency; every tone sets its own. */
 #define TIMER_START_HZ 2000
 #define CHIRP_MS 60
-/* A refused press: a quarter of the press tone, so it reads as "no" next to
- * the press's "yes" whatever pitch the frame is set to. */
-#define REJECT_MS 50
-#define REJECT_MIN_HZ 150
+/* The press: a click on the way down at the press pitch and one on the way
+ * up at 0.7 of it, 14 ms each. Picked by ear against the alternatives
+ * (pulses, sweeps, tunes) for being clear at a tap and not a drone at a
+ * one-second hold. */
+#define CLICK_MS 14
+#define CLICK_UP_NUM 7
+#define CLICK_UP_DEN 10
+/* A refused press: the same pair from a 100 Hz base, so it reads as "no"
+ * next to the press's "yes" whatever pitch the frame is set to. */
+#define REJECT_DOWN_HZ 100
+#define REJECT_UP_HZ (REJECT_DOWN_HZ * CLICK_UP_NUM / CLICK_UP_DEN)
 
 static SemaphoreHandle_t s_lock = NULL;
 static esp_timer_handle_t s_stop_timer = NULL;
@@ -162,18 +174,14 @@ static uint32_t tone_hz(void)
     return hz;
 }
 
-void fos_buzzer_press_start(void)
+void fos_buzzer_click_down(void)
 {
-    fos_buzzer_tone(tone_hz(), FOS_BUZZER_PRESS_MAX_MS);
+    fos_buzzer_tone(tone_hz(), CLICK_MS);
 }
 
-void fos_buzzer_press_end(void)
+void fos_buzzer_click_up(void)
 {
-    if (!s_lock) return;
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    esp_timer_stop(s_stop_timer);
-    if (s_pin >= 0) ledc_stop(BUZZER_MODE, BUZZER_CHANNEL, 0);
-    xSemaphoreGive(s_lock);
+    fos_buzzer_tone(tone_hz() * CLICK_UP_NUM / CLICK_UP_DEN, CLICK_MS);
 }
 
 void fos_buzzer_chirp(void)
@@ -181,8 +189,12 @@ void fos_buzzer_chirp(void)
     fos_buzzer_tone(tone_hz(), CHIRP_MS);
 }
 
-void fos_buzzer_reject(void)
+void fos_buzzer_reject_down(void)
 {
-    uint32_t hz = tone_hz() / 4;
-    fos_buzzer_tone(hz < REJECT_MIN_HZ ? REJECT_MIN_HZ : hz, REJECT_MS);
+    fos_buzzer_tone(REJECT_DOWN_HZ, CLICK_MS);
+}
+
+void fos_buzzer_reject_up(void)
+{
+    fos_buzzer_tone(REJECT_UP_HZ, CLICK_MS);
 }

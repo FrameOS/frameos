@@ -55,8 +55,11 @@ static bool s_press_sent[FOS_GPIO_BUTTONS_MAX];
  * slot reserved and must follow, or the dispatcher would hold the key forever
  * and make `longPress` / `repeat` out of it. */
 static bool s_release_owed[FOS_GPIO_BUTTONS_MAX];
-/* This key's press started the buzzer; its release ends it. */
-static bool s_beeping[FOS_GPIO_BUTTONS_MAX];
+/* What this key's press clicked, so its release clicks the matching
+ * up click: nothing (held at boot, or no buzzer), the press pair, or the
+ * refused pair. */
+typedef enum { CLICK_NONE = 0, CLICK_PRESS, CLICK_REFUSED } click_t;
+static click_t s_clicked[FOS_GPIO_BUTTONS_MAX];
 static bool s_enabled[FOS_GPIO_BUTTONS_MAX];
 
 static void json_escape(const char *src, char *dst, size_t dst_len)
@@ -124,34 +127,31 @@ static void press_edge(size_t index, size_t count)
      * owed: an accepted press is always followed by its release. Only this
      * task sends (the render task only takes), so the reservation holds. */
     if (uxQueueSpacesAvailable(s_queue) < releases_owed(count) + 2) {
-        /* Not received: say so with the low buzz instead of the beep. */
+        /* Not received: say so with the dull click instead of the bright one. */
         log_dropped(fos_config()->gpio_buttons[index].pin);
-        fos_buzzer_reject();
+        s_clicked[index] = CLICK_REFUSED;
+        fos_buzzer_reject_down();
         return;
     }
     if (!enqueue_event(index, 0, false)) return;
     s_release_owed[index] = true;
-    /* Registered: sound the buzzer now, from this task, so the feedback does
-     * not wait for the render task (which may be 30 s into a panel
-     * refresh). It sounds until the release, at most a second. */
-    s_beeping[index] = true;
-    fos_buzzer_press_start();
+    /* Registered: click now, from this task, so the feedback does not wait
+     * for the render task (which may be 30 s into a panel refresh). The
+     * release clicks again, lower (release_edge). */
+    s_clicked[index] = CLICK_PRESS;
+    fos_buzzer_click_down();
 }
 
-static void release_edge(size_t index, size_t count)
+static void release_edge(size_t index)
 {
     if (s_release_owed[index]) {
         enqueue_event(index, 1, false); /* its slot was reserved */
         s_release_owed[index] = false;
     }
-    if (s_beeping[index]) {
-        s_beeping[index] = false;
-        bool other_held = false;
-        for (size_t i = 0; i < count; i++) {
-            if (s_beeping[i]) other_held = true;
-        }
-        if (!other_held) fos_buzzer_press_end();
-    }
+    click_t clicked = s_clicked[index];
+    s_clicked[index] = CLICK_NONE;
+    if (clicked == CLICK_PRESS) fos_buzzer_click_up();
+    else if (clicked == CLICK_REFUSED) fos_buzzer_reject_up();
 }
 
 static void buttons_task(void *arg)
@@ -188,7 +188,7 @@ static void buttons_task(void *arg)
                 press_edge(i, config->gpio_button_count);
             } else if (level != 0 && s_press_sent[i]) {
                 s_press_sent[i] = false;
-                release_edge(i, config->gpio_button_count);
+                release_edge(i);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(BUTTON_POLL_MS));
