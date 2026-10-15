@@ -95,6 +95,43 @@ export function addSceneActionIsAllowed(mode: WorkspaceMode, action: AddSceneAct
   return allows(allowedAddSceneActions, mode, action)
 }
 
+/**
+ * The scenes library: the pages at the top of the Scenes side panel, before
+ * the installed scenes of a frame. The public store comes from the cloud
+ * the plane is linked to (scenes.frameos.net by default) on every plane;
+ * private scenes are the account's cloud drive (the cloud itself, or a
+ * backend linked with the store scope) and, on a backend, its own saved
+ * scenes. The on-device panel keeps nothing of its own, so it browses the
+ * store only.
+ */
+export type ScenesLibraryPage = 'store' | 'cloud' | 'local'
+
+export const scenesLibraryPages: Record<WorkspaceMode, readonly ScenesLibraryPage[]> = {
+  backend: ['store', 'cloud', 'local'],
+  cloud: ['store', 'cloud'],
+  frameAdmin: ['store'],
+}
+
+export function scenesLibraryPageIsAvailable(
+  page: string,
+  mode: WorkspaceMode = workspaceMode()
+): page is ScenesLibraryPage {
+  return (scenesLibraryPages[mode] as readonly string[]).includes(page)
+}
+
+/** The side panel's wording: on the cloud the drive IS the private scenes;
+ * a backend tells its cloud copies from its local ones. */
+export function scenesLibraryPageLabel(page: ScenesLibraryPage, mode: WorkspaceMode = workspaceMode()): string {
+  switch (page) {
+    case 'store':
+      return 'Public scene store'
+    case 'cloud':
+      return mode === 'cloud' ? 'Private scenes' : 'Private cloud scenes'
+    case 'local':
+      return 'Private local scenes'
+  }
+}
+
 /** The Photos section (docs/photos.md). The on-device panel is one frame with
  * no library of its own. */
 export const photosLibraryModes: readonly WorkspaceMode[] = ['backend', 'cloud']

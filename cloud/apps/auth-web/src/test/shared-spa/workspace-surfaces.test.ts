@@ -28,6 +28,9 @@ import {
   isEsp32CloudFrame,
   isVirtualFrame,
   photosLibraryIsAvailable,
+  scenesLibraryPageIsAvailable,
+  scenesLibraryPageLabel,
+  scenesLibraryPages,
   sceneToolPanelDisabledReason,
   sceneToolPanelIsAllowed,
   sceneUtilityPanelIsAllowed,
@@ -829,5 +832,28 @@ describe("isEsp32Frame", () => {
     // hardware.platform is the enrollment report; a backend frame's device
     // identity is embedded.platform.
     expect(isEsp32Frame({ hardware: { platform: "esp32-s3" } }, "backend")).toBe(false);
+  });
+});
+
+describe("Scenes library", () => {
+  // The pages at the top of the Scenes side panel, before a frame's
+  // installed scenes. The public store comes from the linked cloud on every
+  // plane; a backend also has the account's cloud drive and its own saved
+  // scenes, the cloud only its drive, the on-device panel nothing of its own.
+  it("lists the store first on every plane, then the private pages the plane has", () => {
+    expect(scenesLibraryPages.backend).toEqual(["store", "cloud", "local"]);
+    expect(scenesLibraryPages.cloud).toEqual(["store", "cloud"]);
+    expect(scenesLibraryPages.frameAdmin).toEqual(["store"]);
+    expect(scenesLibraryPageIsAvailable("local", "backend")).toBe(true);
+    expect(scenesLibraryPageIsAvailable("local", "cloud")).toBe(false);
+    expect(scenesLibraryPageIsAvailable("cloud", "frameAdmin")).toBe(false);
+    expect(scenesLibraryPageIsAvailable("not-a-page", "backend")).toBe(false);
+  });
+
+  it("names the drive as the private scenes on the cloud and as cloud copies elsewhere", () => {
+    expect(scenesLibraryPageLabel("store", "cloud")).toBe("Public scene store");
+    expect(scenesLibraryPageLabel("cloud", "cloud")).toBe("Private scenes");
+    expect(scenesLibraryPageLabel("cloud", "backend")).toBe("Private cloud scenes");
+    expect(scenesLibraryPageLabel("local", "backend")).toBe("Private local scenes");
   });
 });

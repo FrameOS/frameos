@@ -71,6 +71,11 @@ export const urls = {
   frameControl: frameControlUrl,
   scenes: scenesUrl,
   frameControlScenes: frameControlScenesUrl,
+  /** The scenes library (the store, the private scenes): the scenes page
+   * without a frame, with the page in the query so the frame routes stay
+   * what they are. The store is the bare page. */
+  scenesHome: (page?: string | null) =>
+    scenesUrl() + (page && page !== 'store' ? '?page=' + encodeURIComponent(page) : ''),
   /** A frame's apps: /apps/<frameId>/<sceneId>/<nodeId> self-hosted,
    * /apps/frames/<frameId>/… on the cloud (the bare path is the first frame). */
   apps: (frameId?: FrameId, sceneId?: string, nodeId?: string) =>

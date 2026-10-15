@@ -1,4 +1,5 @@
 import { BindLogic, useActions, useMountedLogic, useValues } from 'kea'
+import { router } from 'kea-router'
 import clsx from 'clsx'
 import copy from 'copy-to-clipboard'
 import {
@@ -53,6 +54,8 @@ import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
+import { ScenesLibraryPage, ScenesSidePanel } from '../store/ScenesLibrary'
+import { scenesLibraryPageIsAvailable, type ScenesLibraryPage as ScenesLibraryPageKey } from './workspaceSurfaces'
 import { groupFramesByStatus } from './frameStatusGroups'
 import { FrameActionsMenu } from './FrameActionsMenu'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
@@ -1070,17 +1073,19 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
           title="Scenes"
           browserTitle={frame.name || frameHost(frame)}
           tree={
-            <SceneTree
-              frame={frame}
-              frames={framesList}
-              // Alphabetical, not frame order: the sidebar is how you find a
-              // scene, and a new one (a converted copy, say) landing at the
-              // bottom of a long list is exactly where you do not look.
-              scenes={sortedScenes}
-              selectedSceneId={resolvedSceneId}
-              unsavedChanges={unsavedChanges}
-              undeployedChanges={undeployedChanges}
-            />
+            <ScenesSidePanel activePage={null}>
+              <SceneTree
+                frame={frame}
+                frames={framesList}
+                // Alphabetical, not frame order: the sidebar is how you find a
+                // scene, and a new one (a converted copy, say) landing at the
+                // bottom of a long list is exactly where you do not look.
+                scenes={sortedScenes}
+                selectedSceneId={resolvedSceneId}
+                unsavedChanges={unsavedChanges}
+                undeployedChanges={undeployedChanges}
+              />
+            </ScenesSidePanel>
           }
           topBar={null}
           showAiButton={false}
@@ -1109,49 +1114,76 @@ function SceneWorkspaceFrame({ frameId }: SceneWorkspaceFrameProps): JSX.Element
   )
 }
 
+// The "Installed scenes" section of the library's side panel: the scene
+// list of one frame (the selected one, or the first), the same tree the
+// frame's own scenes page shows, so a scene is one click from the store.
+function InstalledScenesTree({ frameId }: { frameId: FrameId }): JSX.Element | null {
+  const frameLogicProps = { frameId }
+  const { frame, sortedScenes, unsavedChanges, undeployedChanges } = useValues(frameLogic(frameLogicProps))
+  const { framesList } = useValues(framesModel)
+  const { selectedSceneIdsByFrame } = useValues(workspaceLogic)
+  if (!frame) {
+    return <SceneTreeLoadingPlaceholder />
+  }
+  return (
+    <BindLogic logic={frameLogic} props={frameLogicProps}>
+      <BindLogic logic={frameEditorsLogic} props={frameLogicProps}>
+        <SceneTree
+          frame={frame}
+          frames={framesList}
+          scenes={sortedScenes}
+          selectedSceneId={selectedSceneIdsByFrame[frameId] ?? null}
+          unsavedChanges={unsavedChanges}
+          undeployedChanges={undeployedChanges}
+        />
+        <RenameSceneModal frameId={frameId} />
+      </BindLogic>
+    </BindLogic>
+  )
+}
+
+// The scenes page without a frame: the library (the store, the private
+// scenes; ?page= names which, the store by default), with the installed
+// scenes of a frame under it in the side panel.
+function ScenesHome(): JSX.Element {
+  const { searchParams } = useValues(router)
+  const { selectedFrame } = useValues(workspaceLogic)
+  const { activeFramesList, framesLoading, framesEverLoaded } = useValues(framesModel)
+  const requestedPage = typeof searchParams.page === 'string' ? searchParams.page : 'store'
+  const page: ScenesLibraryPageKey = scenesLibraryPageIsAvailable(requestedPage) ? requestedPage : 'store'
+  const firstFrame = selectedFrame ?? activeFramesList[0] ?? null
+
+  return (
+    <FrameosShell
+      mode="scenes"
+      title="Scenes"
+      showAiButton={false}
+      tree={
+        <ScenesSidePanel activePage={page}>
+          {firstFrame ? (
+            <InstalledScenesTree frameId={firstFrame.id} />
+          ) : framesLoading || !framesEverLoaded ? (
+            <SceneTreeLoadingPlaceholder />
+          ) : (
+            <div className="frameos-muted px-2 py-1 text-sm">Add a frame to install scenes on it.</div>
+          )}
+        </ScenesSidePanel>
+      }
+    >
+      <ScenesLibraryPage page={page} />
+    </FrameosShell>
+  )
+}
+
 export function SceneWorkspace({ frameId, sceneId }: SceneWorkspaceProps): JSX.Element {
   useMountedLogic(sceneWorkspaceLogic({ routeFrameId: frameId ?? null, routeSceneId: sceneId ?? null }))
-  const { selectedFrame } = useValues(workspaceLogic)
-  const { activeFramesList, framesLoading } = useValues(framesModel)
   const routeFrameId = parseRouteFrameId(frameId)
 
   if (routeFrameId !== null) {
     return <SceneWorkspaceFrame frameId={routeFrameId} />
   }
 
-  const firstFrame = selectedFrame ?? activeFramesList[0] ?? null
-
-  if (!firstFrame) {
-    if (framesLoading) {
-      return (
-        <FrameosShell
-          mode="scenes"
-          title="Scenes"
-          tree={<SceneTreeLoadingPlaceholder />}
-          topBar={null}
-          showAiButton={false}
-          mainClassName="scene-workspace-main h-screen overflow-hidden p-0"
-        >
-          <SceneCanvasLoadingPlaceholder />
-        </FrameosShell>
-      )
-    }
-
-    return (
-      <FrameosShell
-        mode="scenes"
-        title="Scenes"
-        subtitle="No frames"
-        tree={<div className="px-3 py-2 text-slate-400">Add a frame before editing scenes.</div>}
-      >
-        <div className="frameos-muted flex h-[60vh] items-center justify-center text-sm font-medium">
-          No frames available.
-        </div>
-      </FrameosShell>
-    )
-  }
-
-  return <SceneWorkspaceFrame frameId={firstFrame.id} />
+  return <ScenesHome />
 }
 
 export default SceneWorkspace
