@@ -439,7 +439,7 @@ export function FrameosShell({
     : urls.frames()
   const appsHref = inFrameAdminMode
     ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
-    : lastAppsHref ?? urls.systemApps()
+    : lastAppsHref ?? urls.appsHome()
   const showAiButton =
     showAiButtonProp ?? (mode !== 'frames' && mode !== 'settings' && mode !== 'photos' && !!selectedFrame)
   const chatSceneId = mode === 'scenes' || mode === 'apps' ? selectedSceneId : null

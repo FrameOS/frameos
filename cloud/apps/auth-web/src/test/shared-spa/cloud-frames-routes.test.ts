@@ -122,7 +122,7 @@ describe("cloud SPA route helpers", () => {
   // The shared SPA has its OWN sceneLogic and route table
   // (frontend/src/scenes/scenes.tsx), and the workspace shell reads THAT one
   // to decide which rail button is pending — not the wrapper's. With
-  // /frames/:id registered first it reported "frame" for /frames/apps, and
+  // /frames/:id registered first it reported "frame" for /frames/scenes, and
   // the Frame button span forever on the apps page.
   it("orders the shared SPA's route table for the cloud mount too", async () => {
     // Same variable-specifier trick as above; absolute so vitest resolves it
@@ -138,15 +138,14 @@ describe("cloud SPA route helpers", () => {
     const paths = Object.keys(routes);
     const frameIndex = paths.indexOf("/frames/:id");
     expect(frameIndex).toBeGreaterThan(-1);
-    for (const literal of [
-      "/frames/apps",
-      "/frames/apps/:frameId",
-      "/frames/scenes",
-      "/frames/:frameId/scenes",
-      "/frames/photos",
-    ]) {
+    for (const literal of ["/frames/scenes", "/frames/:frameId/scenes"]) {
       expect(paths.indexOf(literal)).toBeGreaterThan(-1);
       expect(paths.indexOf(literal)).toBeLessThan(frameIndex);
+    }
+    // The apps and photos pages sit beside the mount, so they cannot
+    // collide with a frame route at all.
+    for (const literal of ["/apps", "/apps/system", "/apps/system/:keyword", "/apps/frames", "/apps/frames/:frameId", "/photos"]) {
+      expect(routes[literal], literal).toBe(literal === "/photos" ? "photosWorkspace" : "appsWorkspace");
     }
     expect(paths.indexOf("/frames/:frameId/scenes/:sceneId")).toBeLessThan(paths.indexOf("/frames/:id/:tool"));
     // The settings pages live outside the mount, so they cannot collide
@@ -160,30 +159,38 @@ describe("cloud SPA route helpers", () => {
     expect(legacyCloudPathRedirect("/frames/scenes/abc/def")).toBe("/frames/abc/scenes/def");
     expect(legacyCloudPathRedirect("/frames/scenes/abc")).toBe("/frames/abc/scenes");
     expect(legacyCloudPathRedirect("/frames/abc")).toBeNull();
-    expect(legacyCloudPathRedirect("/frames/apps/system/x")).toBeNull();
     expect(legacyCloudPathRedirect("/account/developer")).toBeNull();
+    // Until 2026.10 the apps and photos pages sat under the mount.
+    expect(legacyCloudPathRedirect("/frames/photos")).toBe("/photos");
+    expect(legacyCloudPathRedirect("/frames/apps")).toBe("/apps");
+    expect(legacyCloudPathRedirect("/frames/apps/system")).toBe("/apps/system");
+    expect(legacyCloudPathRedirect("/frames/apps/system/data%2Fclock")).toBe("/apps/system/data%2Fclock");
+    expect(legacyCloudPathRedirect("/frames/apps/abc")).toBe("/apps/frames/abc");
+    expect(legacyCloudPathRedirect("/frames/apps/abc/scene/node")).toBe("/apps/frames/abc/scene/node");
+    expect(legacyCloudPathRedirect("/apps/system/x")).toBeNull();
+    expect(legacyCloudPathRedirect("/photos")).toBeNull();
   });
 
   // kea-router takes the first pattern that matches. With frames at
-  // /frames/:id, the literal /frames/apps and /frames/scenes routes have to
-  // be registered before it or they render as a frame named "apps".
+  // /frames/:id, the literal /frames/scenes route has to be registered
+  // before it or it renders as a frame named "scenes". The apps and photos
+  // pages live beside the mount (/apps/…, /photos) in both route tables.
   it("registers the literal /frames/* routes before /frames/:id", async () => {
     const scenesModulePath = "@frameos/cloud-frontend/src/scenes/scenes";
     const { getRoutes } = (await import(scenesModulePath)) as {
       getRoutes: () => Record<string, string>;
     };
-    const paths = Object.keys(withCloudSpaConfig(() => getRoutes()));
+    const routes = withCloudSpaConfig(() => getRoutes());
+    const paths = Object.keys(routes);
     const frameIndex = paths.indexOf("/frames/:id");
     expect(frameIndex).toBeGreaterThan(-1);
-    for (const literal of [
-      "/frames/apps",
-      "/frames/apps/:frameId",
-      "/frames/scenes",
-      "/frames/photos",
-    ]) {
-      expect(paths.indexOf(literal)).toBeGreaterThan(-1);
-      expect(paths.indexOf(literal)).toBeLessThan(frameIndex);
-    }
+    expect(paths.indexOf("/frames/scenes")).toBeGreaterThan(-1);
+    expect(paths.indexOf("/frames/scenes")).toBeLessThan(frameIndex);
     expect(paths).toContain("/frames/:frameId/scenes/:sceneId");
+    for (const literal of ["/apps", "/apps/system", "/apps/system/:keyword", "/apps/frames", "/apps/frames/:frameId", "/apps/frames/:frameId/:sceneId/:nodeId"]) {
+      expect(routes[literal], literal).toBe("appsWorkspace");
+    }
+    expect(routes["/photos"]).toBe("photosWorkspace");
+    expect(paths.some((path) => path.startsWith("/frames/apps") || path === "/frames/photos")).toBe(false);
   });
 });

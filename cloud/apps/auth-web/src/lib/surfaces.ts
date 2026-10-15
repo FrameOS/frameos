@@ -17,14 +17,17 @@ const authPagePrefixes = [
 ] as const;
 
 // "/frames" is the cloud frames SPA (app/frames/[[...path]]), an account
-// surface, and "/account" its settings pages (app/account/[[...section]]
-// serves the same shell); "/frames-app" holds its static assets and is
-// treated as an asset path below.
+// surface; "/account" (its settings pages), "/apps" and "/photos" are the
+// same shell served at the SPA's other roots (app/account, app/apps and
+// app/photos delegate to the frames route). "/frames-app" holds its static
+// assets and is treated as an asset path below.
 const accountPagePrefixes = [
   "/account",
   "/admin",
+  "/apps",
   "/device",
   "/frames",
+  "/photos",
 ] as const;
 // The clean split-host spellings the account sections had until 2026.10
 // (/backends, /settings, …), when the sections became pages of the frames

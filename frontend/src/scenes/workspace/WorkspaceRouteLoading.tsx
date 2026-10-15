@@ -204,7 +204,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
     : urls.frames()
   const appsHref = inFrameAdminMode
     ? urls.apps(selectedFrame?.id ?? getFrameControlFrameId())
-    : lastAppsHref ?? urls.systemApps()
+    : lastAppsHref ?? urls.appsHome()
   const workspaceMainStyle = {
     '--workspace-main-offset': secondarySidebarOpen ? '480px' : '128px',
     '--workspace-sidebar-edge': secondarySidebarOpen ? '440px' : '108px',

@@ -283,6 +283,19 @@ describe("frames SPA shell", () => {
     }
   });
 
+  // The apps and photos pages are the SPA's, beside the /frames mount.
+  it("serves the shell at /apps and /photos", async () => {
+    for (const [segment, path] of [
+      ["apps", "/apps/system/data%2Fclock"],
+      ["photos", "/photos?folder=Summer"],
+    ] as const) {
+      const { GET: get } = await import(`../../${segment}/[[...path]]/route`);
+      const response = await get(new NextRequest(`https://account.frameos.net${path}`));
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/html");
+    }
+  });
+
   it("substitutes the machine's LAN address for a localhost enrollment origin", async () => {
     // A frame flashed against `pnpm dev` receives cloud_url over serial; if
     // that is http://localhost:3000 the device dials itself and never

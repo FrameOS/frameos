@@ -102,6 +102,16 @@ export const getRoutes = () =>
     [urls.apps(':frameId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId')]: 'appsWorkspace',
     [urls.apps(':frameId', ':sceneId', ':nodeId')]: 'appsWorkspace',
+    // On the cloud the system apps have routes of their own (/apps and
+    // /apps/system/<keyword>, beside /apps/frames/…); self-hosted they are
+    // the frame routes with "system" in the frame's place.
+    ...(isCloudMode()
+      ? {
+          [urls.appsHome()]: 'appsWorkspace',
+          [urls.systemApps()]: 'appsWorkspace',
+          [urls.systemApps(':keyword')]: 'appsWorkspace',
+        }
+      : {}),
     // The on-device admin panel is one frame; the library lives on a control plane.
     ...(isInFrameAdminMode() ? {} : { [urls.photos()]: 'photosWorkspace' }),
     [urls.login()]: 'login',

@@ -55,11 +55,16 @@ export function cloudSettingsUrl(page?: string): string {
   return page ? `${cloudAccountBasePath}/${encodeURIComponent(page)}` : cloudAccountBasePath
 }
 
+/** The apps and photos pages: beside the mount, at the origin root. */
+export const cloudAppsBasePath = '/apps'
+export const cloudPhotosBasePath = '/photos'
+
 /**
  * The workspace URLs before August 2026 doubled the segment
- * (/frames/frames/<id>, /frames/scenes/<frameId>/<sceneId>). Old bookmarks and
- * emails still carry them; this maps one to its current shape, or returns
- * null when the path is already current.
+ * (/frames/frames/<id>, /frames/scenes/<frameId>/<sceneId>), and until
+ * 2026.10 the apps and photos pages sat under the mount (/frames/apps/…,
+ * /frames/photos). Old bookmarks and emails still carry them; this maps one
+ * to its current shape, or returns null when the path is already current.
  */
 export function legacyCloudPathRedirect(pathname: string): string | null {
   const frameMatch = /^\/frames\/frames\/([^/]+)\/?$/.exec(pathname)
@@ -69,6 +74,17 @@ export function legacyCloudPathRedirect(pathname: string): string | null {
   const sceneMatch = /^\/frames\/scenes\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname)
   if (sceneMatch) {
     return `${cloudRouteBasePath}/${sceneMatch[1]}/scenes${sceneMatch[2] ? `/${sceneMatch[2]}` : ''}`
+  }
+  if (/^\/frames\/photos\/?$/.test(pathname)) {
+    return cloudPhotosBasePath
+  }
+  const appsMatch = /^\/frames\/apps(?:\/(.*))?$/.exec(pathname)
+  if (appsMatch) {
+    const tail = (appsMatch[1] ?? '').replace(/\/$/, '')
+    if (!tail || tail === 'system' || tail.startsWith('system/')) {
+      return `${cloudAppsBasePath}${tail ? `/${tail}` : ''}`
+    }
+    return `${cloudAppsBasePath}/frames/${tail}`
   }
   return null
 }

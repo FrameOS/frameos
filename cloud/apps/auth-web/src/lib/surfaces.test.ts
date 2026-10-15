@@ -212,6 +212,9 @@ describe("surface routing", () => {
       "/frames/5",
       "/account/backends",
       "/account/developer",
+      "/apps",
+      "/apps/system/data%2Fclock",
+      "/photos",
       "/admin/scenes",
       "/device",
     ]) {
@@ -227,10 +230,19 @@ describe("surface routing", () => {
       kind: "redirect",
       url: "https://scenes.frameos.net/s/sunrise",
     });
-    // The scenes host sends account pages to the merged cloud host.
+    // The scenes host sends account pages to the merged cloud host, the
+    // SPA's apps and photos pages included.
     expectRoute("https://scenes.frameos.net/account/backups", {
       kind: "redirect",
       url: "https://cloud.frameos.net/account/backups",
+    });
+    expectRoute("https://scenes.frameos.net/photos", {
+      kind: "redirect",
+      url: "https://cloud.frameos.net/photos",
+    });
+    expectRoute("https://scenes.frameos.net/apps/frames/abc", {
+      kind: "redirect",
+      url: "https://cloud.frameos.net/apps/frames/abc",
     });
     // The old account frame table redirects into the frames SPA.
     expectRoute("https://cloud.frameos.net/account/frames", {

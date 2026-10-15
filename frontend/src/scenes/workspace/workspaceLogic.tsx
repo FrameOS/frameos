@@ -7,6 +7,7 @@ import { frameIdsEqual, parseRouteFrameId } from '../../utils/frameId'
 import { urls } from '../../urls'
 import { applyFrameosTheme } from '../../utils/frameosTheme'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { isCloudMode } from '../../utils/cloudMode'
 import { getFrameControlFrameId } from '../../utils/frameControlMode'
 import { DeployDrawerView, frameLogic } from '../frame/frameLogic'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
@@ -212,10 +213,10 @@ function isWorkspaceRoutePathForFrame(pathname: string, frameId: FrameId): boole
 }
 
 // The frame id a pathname carries at `token`'s place in `tokenizedPath`,
-// checking what comes before AND after it. On the cloud every workspace
-// route starts with /frames/ — /frames/<id>, /frames/<id>/scenes/…,
-// /frames/apps/<id>/… — so matching the prefix alone would read "apps" as a
-// frame id; the tail after the id has to be the pattern's tail too.
+// checking what comes before AND after it. On the cloud a frame route is
+// /frames/<id> or /frames/<id>/scenes/…, and the frames mount also holds
+// literal pages, so matching the prefix alone would read a literal segment
+// as a frame id; the tail after the id has to be the pattern's tail too.
 function pathFrameIdAfterToken(pathname: string, tokenizedPath: string, token: string): FrameId | null {
   const tokenIndex = tokenizedPath.indexOf(token)
   if (tokenIndex === -1) {
@@ -2144,12 +2145,20 @@ export const workspaceLogic = kea<workspaceLogicType>([
       [framesPath]: rootRouteHandler,
       [`${framesPath.replace(/\/$/, '')}/`]: rootRouteHandler,
       // Literal paths before /frames/:id — on the cloud that pattern would
-      // otherwise swallow /frames/apps (same rule in scenes.tsx getRoutes).
+      // otherwise swallow /frames/scenes (same rule in scenes.tsx getRoutes).
       [urls.scenes(':frameId')]: applySceneOrAppRoute,
       [urls.scenes(':frameId', ':sceneId')]: applySceneOrAppRoute,
       [urls.apps(':frameId')]: applySceneOrAppRoute,
       [urls.apps(':frameId', ':sceneId')]: applySceneOrAppRoute,
       [urls.apps(':frameId', ':sceneId', ':nodeId')]: applySceneOrAppRoute,
+      // The cloud's system apps routes carry no frame (scenes.tsx getRoutes).
+      ...(isCloudMode()
+        ? {
+            [urls.appsHome()]: applySceneOrAppRoute,
+            [urls.systemApps()]: applySceneOrAppRoute,
+            [urls.systemApps(':keyword')]: applySceneOrAppRoute,
+          }
+        : {}),
       // Not a frame: on the cloud /frames/:id would read it as frame "photos".
       [urls.photos()]: (_params, _search, hash) => {
         syncSecondarySidebarFromHashForMobile(hash)

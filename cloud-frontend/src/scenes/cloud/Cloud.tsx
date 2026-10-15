@@ -19,6 +19,7 @@ interface CloudSceneProps {
   frameId?: string
   sceneId?: string
   nodeId?: string
+  keyword?: string
   page?: string
 }
 
@@ -74,10 +75,10 @@ export function CloudSceneWorkspace({ frameId, sceneId }: CloudSceneProps) {
   )
 }
 
-export function CloudAppsWorkspace({ frameId, sceneId, nodeId }: CloudSceneProps) {
+export function CloudAppsWorkspace({ frameId, sceneId, nodeId, keyword }: CloudSceneProps) {
   return (
     <CloudGate>
-      <AppsWorkspace frameId={frameId} sceneId={sceneId} nodeId={nodeId} />
+      <AppsWorkspace frameId={frameId} sceneId={sceneId} nodeId={nodeId} keyword={keyword} />
     </CloudGate>
   )
 }

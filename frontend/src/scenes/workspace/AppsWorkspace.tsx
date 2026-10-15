@@ -55,6 +55,20 @@ interface AppsWorkspaceProps {
   frameId?: string
   sceneId?: string
   nodeId?: string
+  /** The cloud's /apps/system/:keyword route; self-hosted the keyword rides
+   * in sceneId's place (/apps/system/:sceneId, "system" as the frame). */
+  keyword?: string
+}
+
+// On the cloud the system apps have routes without a frame param — /apps
+// (the home) and /apps/system[/<keyword>], beside /apps/frames/… — so the
+// path says which side of the toggle the route is.
+function isCloudSystemAppsPath(pathname: string): boolean {
+  if (!isCloudMode()) {
+    return false
+  }
+  const systemPath = urls.systemApps()
+  return pathname === urls.appsHome() || pathname === systemPath || pathname.startsWith(`${systemPath}/`)
 }
 
 type AppsSourceMode = 'system' | 'frames'
@@ -1040,11 +1054,13 @@ function AppsWorkspaceSystemOnly({
   )
 }
 
-export function AppsWorkspace({ frameId, sceneId, nodeId }: AppsWorkspaceProps): JSX.Element {
+export function AppsWorkspace({ frameId, sceneId, nodeId, keyword }: AppsWorkspaceProps): JSX.Element {
   const inFrameAdminMode = isInFrameAdminMode()
-  const routeSourceMode: AppsSourceMode = frameId === SYSTEM_APPS_ROUTE_TOKEN ? 'system' : 'frames'
+  const { location } = useValues(router)
+  const routeSourceMode: AppsSourceMode =
+    frameId === SYSTEM_APPS_ROUTE_TOKEN || isCloudSystemAppsPath(location.pathname) ? 'system' : 'frames'
   const sourceMode: AppsSourceMode = inFrameAdminMode ? 'frames' : routeSourceMode
-  const routeSystemAppKeyword = routeSourceMode === 'system' ? decodeRouteKeyword(sceneId) : null
+  const routeSystemAppKeyword = routeSourceMode === 'system' ? decodeRouteKeyword(keyword ?? sceneId) : null
   const routeFrameId = routeSourceMode === 'frames' ? frameId ?? null : null
   const routeSceneId = routeSourceMode === 'frames' ? sceneId ?? null : null
   const routeNodeId = routeSourceMode === 'frames' ? nodeId ?? null : null
