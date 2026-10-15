@@ -14,7 +14,7 @@ import {
   defaultAccountPageKey,
 } from "../../../../../../frontend/src/scenes/settings/account/accountPages";
 import { urls } from "../../../../../../frontend/src/urls";
-import { accountSectionSpaPaths } from "../../lib/env";
+import { accountSectionRedirects } from "../../lib/env";
 
 // Next.js server components link INTO the SPA (the account frame table used
 // to; the pending-enrollment and activity emails still do). The SPA mounts
@@ -69,33 +69,37 @@ describe("cloud SPA route helpers", () => {
     expect(cloudFrameUrl("abc", "settings")).toBe(fromSpa);
   });
 
-  // The settings are the account's pages, scenes of this SPA under
-  // /frames/settings/<page> (frontend/src/scenes/settings/account); the
-  // Next.js side links to them through cloudSettingsUrl and through
-  // env.ts's section table, which this keeps in step with the SPA's keys.
+  // The settings are the account's pages, scenes of this SPA at their old
+  // /account/<page> addresses (frontend/src/scenes/settings/account), outside
+  // the /frames mount; the Next.js side links to them through
+  // cloudSettingsUrl and env.ts's redirect table, which this keeps in step
+  // with the SPA's keys.
   it("agrees with the SPA's own urls.settings(), page by page", () => {
-    expect(cloudSettingsUrl()).toBe("/frames/settings");
+    expect(cloudSettingsUrl()).toBe("/account");
     expect(cloudSettingsUrl()).toBe(withCloudSpaConfig(() => urls.settings()));
     for (const page of accountPages) {
-      expect(cloudSettingsUrl(page.key)).toBe(`/frames/settings/${page.key}`);
+      expect(cloudSettingsUrl(page.key)).toBe(`/account/${page.key}`);
       expect(cloudSettingsUrl(page.key)).toBe(
         withCloudSpaConfig(() => urls.settings(page.key)),
       );
     }
-    expect(withCloudSpaConfig(() => urls.accountUsage())).toBe("/frames/settings/usage");
+    expect(withCloudSpaConfig(() => urls.accountUsage())).toBe("/account/usage");
   });
 
-  it("maps every old account section onto a page the SPA has, and nothing else", () => {
-    const pageKeys = new Set(accountPages.map((page) => page.key));
-    for (const [section, spaPath] of accountSectionSpaPaths) {
-      if (section === "/account") {
-        expect(spaPath).toBe(cloudSettingsUrl());
+  it("redirects every renamed account section onto a page the SPA has", () => {
+    const pageKeys = new Set<string>(accountPages.map((page) => page.key));
+    for (const [section, target] of accountSectionRedirects) {
+      if (section === "/account/frames") {
+        expect(target).toBe(cloudFramesUrl());
         continue;
       }
-      const match = /^\/frames\/settings\/([^/#?]+)/.exec(spaPath);
-      expect(match, `${section} → ${spaPath}`).not.toBeNull();
-      expect(pageKeys.has(match![1] as (typeof accountPages)[number]["key"]), `${section} → ${spaPath}`).toBe(true);
+      const match = /^\/account\/([^/#?]+)/.exec(target);
+      expect(match, `${section} → ${target}`).not.toBeNull();
+      expect(pageKeys.has(match![1]!), `${section} → ${target}`).toBe(true);
+      // A page's own address never redirects (the route would loop).
+      expect(pageKeys.has(section.slice("/account/".length)), section).toBe(false);
     }
+    expect(accountSectionRedirects.get("/account")).toBe(cloudSettingsUrl(defaultAccountPageKey));
     expect(defaultAccountPageKey).toBe(accountPages[0]?.key);
   });
 
@@ -110,8 +114,8 @@ describe("cloud SPA route helpers", () => {
       scenes: Record<string, unknown>;
     };
     const routes = withCloudSpaConfig(() => getRoutes());
-    expect(routes["/frames/settings"]).toBe("settings");
-    expect(routes["/frames/settings/:page"]).toBe("settings");
+    expect(routes["/account"]).toBe("settings");
+    expect(routes["/account/:page"]).toBe("settings");
     expect(scenes).toHaveProperty("settings");
   });
 
@@ -145,11 +149,10 @@ describe("cloud SPA route helpers", () => {
       expect(paths.indexOf(literal)).toBeLessThan(frameIndex);
     }
     expect(paths.indexOf("/frames/:frameId/scenes/:sceneId")).toBeLessThan(paths.indexOf("/frames/:id/:tool"));
-    // The settings pages are literal routes too: /frames/settings/services
-    // must never render as the frame "settings" with the tool "services".
-    expect(paths.indexOf("/frames/settings")).toBeLessThan(frameIndex);
-    expect(paths.indexOf("/frames/settings/:page")).toBeLessThan(frameIndex);
-    expect(paths.indexOf("/frames/settings/:page")).toBeLessThan(paths.indexOf("/frames/:id/:tool"));
+    // The settings pages live outside the mount, so they cannot collide
+    // with a frame route at all.
+    expect(routes["/account"]).toBe("settings");
+    expect(routes["/account/:page"]).toBe("settings");
   });
 
   it("rewrites the pre-2026.8 doubled-segment URLs", () => {
@@ -158,13 +161,12 @@ describe("cloud SPA route helpers", () => {
     expect(legacyCloudPathRedirect("/frames/scenes/abc")).toBe("/frames/abc/scenes");
     expect(legacyCloudPathRedirect("/frames/abc")).toBeNull();
     expect(legacyCloudPathRedirect("/frames/apps/system/x")).toBeNull();
-    // /frames/settings is a scene of its own, not a legacy path.
-    expect(legacyCloudPathRedirect("/frames/settings")).toBeNull();
+    expect(legacyCloudPathRedirect("/account/developer")).toBeNull();
   });
 
   // kea-router takes the first pattern that matches. With frames at
-  // /frames/:id, the literal /frames/settings and /frames/apps routes have
-  // to be registered before it or they render as a frame named "settings".
+  // /frames/:id, the literal /frames/apps and /frames/scenes routes have to
+  // be registered before it or they render as a frame named "apps".
   it("registers the literal /frames/* routes before /frames/:id", async () => {
     const scenesModulePath = "@frameos/cloud-frontend/src/scenes/scenes";
     const { getRoutes } = (await import(scenesModulePath)) as {
@@ -178,8 +180,6 @@ describe("cloud SPA route helpers", () => {
       "/frames/apps/:frameId",
       "/frames/scenes",
       "/frames/photos",
-      "/frames/settings",
-      "/frames/settings/:page",
     ]) {
       expect(paths.indexOf(literal)).toBeGreaterThan(-1);
       expect(paths.indexOf(literal)).toBeLessThan(frameIndex);

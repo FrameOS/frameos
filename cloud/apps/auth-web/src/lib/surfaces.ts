@@ -17,8 +17,9 @@ const authPagePrefixes = [
 ] as const;
 
 // "/frames" is the cloud frames SPA (app/frames/[[...path]]), an account
-// surface; "/frames-app" holds its static assets and is treated as an
-// asset path below.
+// surface, and "/account" its settings pages (app/account/[[...section]]
+// serves the same shell); "/frames-app" holds its static assets and is
+// treated as an asset path below.
 const accountPagePrefixes = [
   "/account",
   "/admin",
@@ -26,9 +27,10 @@ const accountPagePrefixes = [
   "/frames",
 ] as const;
 // The clean split-host spellings the account sections had until 2026.10
-// (/backends, /settings, …), when the sections became pages of the /frames
-// workspace SPA. Bookmarks and emails still carry them; each redirects to
-// its page through getAccountPath's table (env.ts accountSectionSpaPaths).
+// (/backends, /settings, …), when the sections became pages of the frames
+// workspace SPA at their /account/<page> addresses. Bookmarks and emails
+// still carry them; each redirects to its page through getAccountPath
+// (env.ts accountSectionRedirects renames the sections that moved).
 const legacyAccountSectionPaths = new Map([
   ["/backends", "/account/installs"],
   ["/installs", "/account/installs"],
@@ -146,8 +148,8 @@ export function resolveSurfaceRoute(
     if (matchesAny(pathname, accountPagePrefixes)) {
       const cleanPath = getAccountPath(pathname);
       if (accountIsCloud && cleanPath === pathname) {
-        // Paths that keep their full form (/admin, /device, the /frames SPA)
-        // are served here — redirecting would loop.
+        // Paths that keep their full form (/admin, /device, the /frames SPA
+        // and its /account pages) are served here — redirecting would loop.
         return undefined;
       }
       return redirectTo(requestUrl, account, cleanPath);

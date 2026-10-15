@@ -41,14 +41,18 @@ export function cloudSceneUrl(frameId: string, sceneId?: string): string {
 }
 
 /**
- * The account's settings pages, scenes of this SPA: /frames/settings/<page>
- * (frontend/src/scenes/settings/account/accountPages.ts lists the pages;
- * the bare path lands on the first). Next.js server code links to them
- * through getAccountUrl("/account/<section>"), whose table maps the old
- * account sections onto these.
+ * Where the account's pages live: /account/<page>. They are scenes of this
+ * SPA (frontend/src/scenes/settings/account/accountPages.ts lists the
+ * pages; the bare path lands on the first) but keep the address the Next.js
+ * account pages had, so the shell is served here as well as under
+ * cloudRouteBasePath (app/account/[[...section]]/route.ts). Mirrored in
+ * frontend/src/urls.ts settingsUrl, which cannot import this file.
  */
+export const cloudAccountBasePath = '/account'
+
+/** A settings page of the account, or the bare /account for the first. */
 export function cloudSettingsUrl(page?: string): string {
-  return page ? `${cloudRouteBasePath}/settings/${encodeURIComponent(page)}` : `${cloudRouteBasePath}/settings`
+  return page ? `${cloudAccountBasePath}/${encodeURIComponent(page)}` : cloudAccountBasePath
 }
 
 /**

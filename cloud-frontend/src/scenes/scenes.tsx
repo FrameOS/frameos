@@ -21,9 +21,10 @@ export const scenes = {
 // The SPA's own login/signup scenes are deliberately absent: Next.js owns
 // auth on the cloud (apiFetch redirects to /login on 401). The settings
 // scene is the account's pages — backends, service keys, SSH keys, usage,
-// backups, activity, security, developer — one route each under
-// /frames/settings (frontend/src/scenes/settings/account/accountPages.ts);
-// the old /account/* pages redirect here.
+// backups, activity, security, developer — one route each under /account
+// (frontend/src/scenes/settings/account/accountPages.ts), the address they
+// had as Next.js pages. That is outside the /frames mount, so Next serves
+// this shell at /account/** too (app/account/[[...section]]/route.ts).
 export const getRoutes = () =>
   ({
     [urls.frames()]: 'frames',

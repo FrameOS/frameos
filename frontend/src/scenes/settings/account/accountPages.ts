@@ -1,6 +1,6 @@
 // The cloud's account pages, as the settings side panel lists them.
 //
-// Each is its own route — /frames/settings/<key> — and its own scene of the
+// Each is its own route — /account/<key> — and its own scene of the
 // shared SPA (CloudSettings.tsx draws the one whose key is in the URL). They
 // used to be Next.js pages under /account with a tab bar; the keys here are
 // what the cloud redirects those old URLs onto (cloud/apps/auth-web
@@ -87,7 +87,7 @@ export const accountPages: readonly AccountPage[] = [
   },
 ]
 
-/** The page /frames/settings lands on: the first in the list. */
+/** The page the bare /account lands on: the first in the list. */
 export const defaultAccountPageKey: AccountPageKey = 'backends'
 
 export function isAccountPageKey(value: string | null | undefined): value is AccountPageKey {

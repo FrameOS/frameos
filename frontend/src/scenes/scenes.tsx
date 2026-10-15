@@ -82,7 +82,7 @@ export function preloadSceneComponent(scene: LoadableSceneKey): void {
 // rendered page passed it — showed the Frame button as forever pending.
 //
 // The settings scene is one page of anchored sections self-hosted and a set
-// of pages on the cloud (/frames/settings/<page>, see
+// of pages on the cloud (/account/<page>, outside the /frames mount; see
 // settings/account/accountPages.ts). It is not registered in frame-admin
 // mode, where urls.settings() IS a frame tool path (/frames/<id>/settings)
 // that the frame scene renders.

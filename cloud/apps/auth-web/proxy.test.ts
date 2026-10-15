@@ -29,7 +29,7 @@ describe("proxy", () => {
     // redirect would freeze into browser caches.
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "https://account.frameos.net/frames/settings/backends",
+      "https://account.frameos.net/account/backends",
     );
     expect(response.headers.get("cache-control")).toBe("no-store");
   });

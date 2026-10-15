@@ -18,8 +18,7 @@ export const runtime = "nodejs";
 // Config the SPA cannot work out for itself, injected into the shell before
 // it is served (cloud-frontend/src/cloudConfig.ts consumes it):
 //
-//   * the account/scenes/auth surfaces may sit on three different origins, and
-//     getAccountPath() shortens /account/* on a split-host deployment;
+//   * the account/scenes/auth surfaces may sit on three different origins;
 //   * the enrollment origin is written into SD images, ESP32 NVS and install
 //     commands, so it must be the deployment's public URL rather than whatever
 //     host the admin is browsing through (a tunnel, a LAN IP, 127.0.0.1);
@@ -189,11 +188,14 @@ function anchorMissing(anchor: string, purpose: string) {
 
 // SPA fallback for the cloud frames UI: every /frames/** path serves the
 // @frameos/cloud-frontend shell (copied into public/frames-app by
-// scripts/copy-frames-app-assets.mjs). The bundle's static assets are
-// root-absolute /frames-app/* references that Next serves from public/
-// directly, so this route only ever answers with the HTML shell. The SPA
-// itself redirects to /login on 401 — the shell is served unauthenticated,
-// like every other static asset. See cloud-frontend/README.md.
+// scripts/copy-frames-app-assets.mjs), and so does every /account/** path —
+// the account's settings pages are scenes of the same SPA at their old
+// addresses (app/account/[[...section]]/route.ts delegates here). The
+// bundle's static assets are root-absolute /frames-app/* references that
+// Next serves from public/ directly, so this route only ever answers with
+// the HTML shell. The SPA itself redirects to /login on 401 — the shell is
+// served unauthenticated, like every other static asset. See
+// cloud-frontend/README.md.
 export async function GET(request: NextRequest) {
   let html: string;
   try {

@@ -107,7 +107,7 @@ export function CloudPhotosWorkspace() {
 }
 
 // The account pages (frontend/src/scenes/settings/account): the shared
-// settings scene draws them in cloud mode, one per /frames/settings/<page>.
+// settings scene draws them in cloud mode, one per /account/<page>.
 export function CloudSettings({ page }: CloudSceneProps) {
   return (
     <CloudGate>

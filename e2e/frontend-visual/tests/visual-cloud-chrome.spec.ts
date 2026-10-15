@@ -7,7 +7,7 @@ import { settleForScreenshot } from './visual-helpers'
 /**
  * Visual + e2e coverage for the shared FrameOS Cloud chrome on the Next.js
  * pages: the store front (cloud/apps/auth-web/app/page.tsx, PublicShell) and
- * the Backends page of the /frames workspace (/frames/settings/backends, the
+ * the Backends page of the frames workspace SPA (/account/backends, the
  * former /account/installs), both under the same frameos-account-header and
  * mist/graphite palette (app/cloud-chrome.css). Dark mode is carried by the shared
  * frameos_theme cookie (app/layout.tsx renders html.theme-dark straight from
@@ -136,9 +136,10 @@ test.describe('cloud chrome: store front and account pages @e2e', () => {
       await page.setViewportSize({ width: 1280, height: 900 })
       await signIn(page)
       await setTheme(page, theme)
-      // The old URL redirects into the workspace's settings pages.
+      // The old section name redirects to the page, which the frames
+      // workspace SPA now renders at the account's own address.
       await page.goto(`${cloudUrl}/account/installs`, { waitUntil: 'networkidle' })
-      await expect(page).toHaveURL(/\/frames\/settings\/backends$/)
+      await expect(page).toHaveURL(/\/account\/backends$/)
 
       await expectThemeClass(page, theme)
       await expect(page.getByRole('heading', { name: 'Linked backends' })).toBeVisible()

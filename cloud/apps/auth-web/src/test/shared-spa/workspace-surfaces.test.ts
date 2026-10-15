@@ -172,7 +172,7 @@ describe("cloud mode hides everything the protocol cannot do", () => {
   });
 
   it("keeps only the service-key sections of the GLOBAL settings page, plus SSH public keys", () => {
-    // The cloud's /frames/settings page persists service API keys
+    // The cloud's /account page persists service API keys
     // (account_settings via /api/settings) and the account's SSH public
     // keys for the SD card builder, and nothing else: no local account,
     // deploy defaults, build environment, font store, backend PostHog or

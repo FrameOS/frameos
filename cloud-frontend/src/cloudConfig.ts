@@ -1,14 +1,14 @@
 // Server-injected facts the SPA cannot work out for itself.
 //
-// cloud/apps/auth-web/app/frames/[[...path]]/route.ts replaces a named anchor
+// cloud/apps/auth-web/app/frames/[[...path]]/route.ts (and the /account
+// route that delegates to it) replaces a named anchor
 // line in src/index.html with these keys before serving the shell (the same
 // mechanism cloud_ws_origin uses). They exist because the values come from
 // server-side configuration:
 //
 //   * the account/scenes/cloud surfaces can live on three different origins
 //     (FRAMEOS_ACCOUNT_APP_URL / FRAMEOS_SCENES_APP_URL / FRAMEOS_CLOUD_APP_URL),
-//     and getAccountPath() shortens /account/* on a split-host deployment —
-//     none of which a client-only bundle can reconstruct from window.location;
+//     which a client-only bundle cannot reconstruct from window.location;
 //   * the claim-code TTL is FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS, so a
 //     hardcoded "24 hours" would quietly lie on a tuned install;
 //   * cloudOrigin is written into SD images, ESP32 NVS and install commands,

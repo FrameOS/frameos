@@ -132,25 +132,24 @@ function safeOrigin(url: string): string | undefined {
 }
 
 // The account's pages are scenes of the frames workspace SPA since 2026.10
-// (frontend/src/scenes/settings/account/accountPages.ts): one route each
-// under /frames/settings. These are the old /account/<section> app routes
-// (and their clean split-host spellings, /backends and the like) mapped
-// onto them, so every link built with getAccountUrl("/account/…") — and
-// every bookmark the surface router (surfaces.ts) redirects — lands on the
-// right page. The SPA's own keys are the public URL segments; a new page
-// is a row here AND an entry in the SPA's list, which the cloud-frames
-// routes test keeps in step.
-export const accountSectionSpaPaths: ReadonlyMap<string, string> = new Map([
-  ["/account", "/frames/settings"],
-  ["/account/installs", "/frames/settings/backends"],
-  ["/account/settings", "/frames/settings/services"],
-  ["/account/usage", "/frames/settings/usage"],
+// (frontend/src/scenes/settings/account/accountPages.ts), served at
+// /account/<page> — the address the Next.js account pages had, kept on
+// purpose. Some sections were renamed or merged on the way, and the bare
+// /account lands on the first page; this table maps every old
+// /account/<section> that is not a page of its own onto its page, so a
+// link built with getAccountUrl("/account/…") — and every bookmark the
+// surface router (surfaces.ts) and the account route handler redirect —
+// lands right. The SPA's keys are the public URL segments; a new page is an
+// entry in the SPA's list, and a renamed one a row here (the cloud-frames
+// routes test keeps the two in step). /account/frames was the account's
+// frame table before the /frames workspace replaced it.
+export const accountSectionRedirects: ReadonlyMap<string, string> = new Map([
+  ["/account", "/account/backends"],
+  ["/account/installs", "/account/backends"],
+  ["/account/settings", "/account/services"],
   // AI usage moved onto the usage page in 2026.10; the anchor still lands.
-  ["/account/ai", "/frames/settings/usage#ai"],
-  ["/account/backups", "/frames/settings/backups"],
-  ["/account/activity", "/frames/settings/activity"],
-  ["/account/security", "/frames/settings/security"],
-  ["/account/developer", "/frames/settings/developer"],
+  ["/account/ai", "/account/usage#ai"],
+  ["/account/frames", "/frames"],
 ]);
 
 export function getAccountPath(path: string) {
@@ -159,22 +158,13 @@ export function getAccountPath(path: string) {
   const suffixAt = path.search(/[?#]/);
   const bare = suffixAt === -1 ? path : path.slice(0, suffixAt);
   const suffix = suffixAt === -1 ? "" : path.slice(suffixAt);
-  const spaPath = accountSectionSpaPaths.get(bare.replace(/\/+$/, "") || "/");
-  if (spaPath) {
-    return spaPath.includes("#") && suffix.startsWith("#") ? spaPath.slice(0, spaPath.indexOf("#")) + suffix : spaPath + suffix;
+  const target = accountSectionRedirects.get(bare.replace(/\/+$/, "") || "/");
+  if (target) {
+    return target.includes("#") && suffix.startsWith("#") ? target.slice(0, target.indexOf("#")) + suffix : target + suffix;
   }
-
-  // Only local development runs every surface on one origin; there the
-  // remaining /account/* app routes are the real URLs and nothing shortens.
-  // In production the account surface shares the cloud origin (with scenes
-  // on its own host), and clean paths still apply.
-  if (getAppOrigins().size === 1) {
-    return path;
-  }
-
-  if (bare.startsWith("/account/")) {
-    return path.slice("/account".length);
-  }
+  // Every other path is its own address, on one origin or three: the
+  // account pages are no longer shortened to /backends and friends on a
+  // split host (surfaces.ts redirects those old spellings here).
   return path;
 }
 
@@ -182,9 +172,10 @@ export function getAccountUrl(path = "/account") {
   return new URL(getAccountPath(path), getAccountBaseUrl()).toString();
 }
 
-// The settings pages of the fleet workspace (the former account pages).
+// A settings page of the account (the frames workspace's settings scene);
+// without a page, wherever the bare /account lands.
 export function getAccountSettingsUrl(page?: string) {
-  return getAccountUrl(page ? `/frames/settings/${page}` : "/account");
+  return getAccountUrl(page ? `/account/${page}` : "/account");
 }
 
 // The fleet workspace SPA (app/frames/[[...path]]) — the one and only frames

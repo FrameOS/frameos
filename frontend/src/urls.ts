@@ -32,9 +32,11 @@ function scenesUrl(frameId?: FrameId, sceneId?: string): string {
 // sections (/settings#settings-openai). On the cloud it is a set of pages —
 // the account's backends, service keys, SSH keys, usage, backups, activity,
 // security and developer pages (scenes/settings/account/accountPages.ts) —
-// each at /frames/settings/<page>; the bare /frames/settings lands on the
-// first. Both live under the SPA's own mount, so the rail gear is an
-// in-app route on every control plane.
+// each at /account/<page>, the address the account pages have always had;
+// the bare /account lands on the first. The cloud serves this SPA's shell
+// at /account/** as well as at its /frames mount (cloud-frontend/src/routes.ts
+// cloudAccountBasePath mirrors the constant), so the rail gear is an in-app
+// route on every control plane.
 function settingsUrl(page?: string): string {
   if (isInFrameAdminMode()) {
     return frameControlUrl('settings')
@@ -42,6 +44,9 @@ function settingsUrl(page?: string): string {
   // `:page` is the router pattern (scenes.tsx); encoding it would register
   // `/settings/%3Apage` and the page routes would never match.
   const segment = page ? '/' + (page.startsWith(':') ? page : encodeURIComponent(page)) : ''
+  if (isCloudMode()) {
+    return '/account' + segment
+  }
   return getRouteBasePath() + '/settings' + segment
 }
 

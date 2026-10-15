@@ -842,11 +842,11 @@ describe("SceneLivePreviewPanel paid scenes", () => {
       <SceneLivePreviewPanel
         sceneId="scene-1"
         scenes={[openAiScene]}
-        settingsUrl="https://cloud.example/frames/settings#settings-openai"
+        settingsUrl="https://cloud.example/account/services#settings-openai"
       />,
     );
     const link = (await screen.findByRole("link", { name: "account settings" })) as HTMLAnchorElement;
-    expect(link.href).toBe("https://cloud.example/frames/settings#settings-openai");
+    expect(link.href).toBe("https://cloud.example/account/services#settings-openai");
     expect(link.target).toBe("_blank");
   });
 

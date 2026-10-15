@@ -159,7 +159,7 @@ export default function TermsPage() {
       <h2>8. Ending it</h2>
       <p className="copy">
         You can stop at any moment: delete your account from the{" "}
-        <a href="/frames/settings/security">account security page</a>. It takes effect
+        <a href="/account/security">account security page</a>. It takes effect
         immediately and removes your data — export it first if you want a copy
         (there is a button on the same page).
       </p>

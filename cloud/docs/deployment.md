@@ -581,7 +581,7 @@ FRAMEOS_SESSION_COOKIE_DOMAIN=frameos.net
 
 `FRAMEOS_WEBAUTHN_RP_ID` is unset in production: passkeys default to the cloud
 origin's hostname (`cloud.frameos.net`), which is also where `/login` and
-`/frames/settings/security` run. Set it to the common parent domain only if those two
+`/account/security` run. Set it to the common parent domain only if those two
 surfaces are ever split across subdomains (see `docs/auth.md`).
 
 The cookie domain is required when the two app URLs have different origins.

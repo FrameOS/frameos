@@ -493,7 +493,7 @@ is why the check sits with whoever writes the card.
 
 An account that controls physical devices needs more than email + password:
 
-- Passkeys and TOTP 2FA — **shipped** (optional, `/frames/settings/security`; design
+- Passkeys and TOTP 2FA — **shipped** (optional, `/account/security`; design
   and routes in `cloud/docs/auth.md`, "Two-Factor Authentication"). Both
   session-minting routes gate on it; a passkey with user verification also
   signs in passwordlessly.
@@ -634,7 +634,7 @@ New tables, hanging off existing machinery:
 Scenes themselves need no new storage: store scenes and private account
 scenes (`store_scenes` + versions) are already the unit of content. "My
 frames" becomes a sibling of the account's **Backends** page (the linked
-self-hosted backends; `/frames/settings/backends` in the workspace,
+self-hosted backends; `/account/backends` in the workspace,
 `/account/installs` and `/backends` as the old URLs that redirect there,
 `connected_backends` + `linked_clients` in the schema — one page, four
 names).
@@ -642,13 +642,19 @@ names).
 The account pages themselves — Backends, Service keys, SSH keys, Usage,
 Backups, Activity, Security, Developer — are pages of the frames workspace
 SPA since 2026.10 (`frontend/src/scenes/settings/account/`, listed in
-`accountPages.ts`, one route each under `/frames/settings/<page>`), behind
-the rail's gear like the self-hosted settings. They read JSON routes under
-`/api/account/*` (`installs`, `backups`, `security`, `usage`, `ai`,
-`activity`, `two-factor`, `api-tokens`) and `/api/settings`. The Next.js app
-keeps only the redirects: `app/account/[[...section]]` and the surface
-router map every old `/account/<section>` and clean `/<section>` URL onto
-its page through `getAccountPath` (`src/lib/env.ts`). Sudo-mode refusals
+`accountPages.ts`), behind the rail's gear like the self-hosted settings,
+but at the `/account/<page>` addresses the Next.js pages had: the SPA's
+shell is served at `/account/**` as well as `/frames/**`
+(`app/account/[[...section]]/route.ts` delegates to the frames route), and
+its router registers `/account` and `/account/:page` next to the `/frames`
+routes. They read JSON routes under `/api/account/*` (`installs`,
+`backups`, `security`, `usage`, `ai`, `activity`, `two-factor`,
+`api-tokens`) and `/api/settings`. The sections that were renamed on the
+way (`/account/installs` → `backends`, `/account/settings` → `services`,
+`/account/ai` → `usage#ai`, the bare `/account` → the first page) and the
+clean split-host spellings (`/backends`, `/developer`, …) redirect through
+`getAccountPath` (`src/lib/env.ts accountSectionRedirects`) and the
+surface router; nothing shortens `/account/*` any more. Sudo-mode refusals
 (`403 reauth_required`) send the browser to the auth origin's
 `/login/reauth` (injected as `cloud_reauth_url`) and back.
 

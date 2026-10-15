@@ -12,7 +12,7 @@ the store, the scene AI — to scripts and AI agents in two layers:
    under `apps/auth-web/app/api`, so the routes remain the single place
    behaviour, validation, quotas and audit live.
 
-Both are managed on the frames workspace's Developer page (`/frames/settings/developer`).
+Both are managed on the frames workspace's Developer page (`/account/developer`).
 
 ## API tokens
 

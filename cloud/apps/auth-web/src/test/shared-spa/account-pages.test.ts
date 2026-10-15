@@ -62,9 +62,9 @@ describe("re-authentication", () => {
     (window as unknown as { FRAMEOS_APP_CONFIG?: unknown }).FRAMEOS_APP_CONFIG = {
       cloud_reauth_url: "https://cloud.example/login/reauth",
     };
-    const href = new URL(reauthHref("https://account.example/frames/settings/developer"));
+    const href = new URL(reauthHref("https://account.example/account/developer"));
     expect(href.origin + href.pathname).toBe("https://cloud.example/login/reauth");
-    expect(href.searchParams.get("return_to")).toBe("https://account.example/frames/settings/developer");
+    expect(href.searchParams.get("return_to")).toBe("https://account.example/account/developer");
     // Without injection the page is on this origin.
     delete (window as unknown as { FRAMEOS_APP_CONFIG?: unknown }).FRAMEOS_APP_CONFIG;
     expect(new URL(reauthHref("http://localhost/x")).pathname).toBe("/login/reauth");
@@ -75,7 +75,7 @@ describe("re-authentication", () => {
     vi.spyOn(window, "location", "get").mockReturnValue({
       ...window.location,
       assign,
-      href: "http://localhost/frames/settings/backends",
+      href: "http://localhost/account/backends",
     } as unknown as Location);
     expect(
       redirectToReauthIfRequired({ status: 403 } as Response, { error: "reauth_required" }, "revoke-install:abc"),

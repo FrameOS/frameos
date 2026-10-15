@@ -51,7 +51,7 @@ function renderPanel(overrides: Partial<Parameters<typeof SceneAiPanel>[0]> = {}
       height={480}
       onScenes={onScenes}
       selectedSceneId="scene-1"
-      settingsUrl="https://cloud.example/frames/settings#settings-openai"
+      settingsUrl="https://cloud.example/account/services#settings-openai"
       signedIn
       storeSceneId="store-1"
       width={800}
@@ -263,7 +263,7 @@ describe("SceneAiPanel", () => {
 
     expect(await screen.findByText("The AI needs an OpenAI API key.")).toBeDefined();
     const link = screen.getByRole("link", { name: /API key for AI chat/ }) as HTMLAnchorElement;
-    expect(link.href).toBe("https://cloud.example/frames/settings#settings-openai");
+    expect(link.href).toBe("https://cloud.example/account/services#settings-openai");
     // The prompt stays in the transcript; no empty assistant bubble is left behind.
     expect(screen.getByText("hello")).toBeDefined();
     expect(screen.queryByText("Thinking…")).toBeNull();

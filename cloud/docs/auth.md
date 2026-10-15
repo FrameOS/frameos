@@ -100,7 +100,7 @@ sessions" button all still take effect on the very next request.
 
 An account that controls physical frames can add a second step to sign-in. It
 is opt-in, managed on the frames workspace's Security page
-(`/frames/settings/security`), and ON exactly when the account has
+(`/account/security`), and ON exactly when the account has
 a confirmed authenticator-app secret or at least one passkey — the credentials
 are the flag (`account_totp`, `account_passkeys`, migration 0034), so nothing
 can drift out of sync with them.

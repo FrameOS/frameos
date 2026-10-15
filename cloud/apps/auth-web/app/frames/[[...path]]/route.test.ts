@@ -231,10 +231,10 @@ describe("frames SPA shell", () => {
     expect(lines).toContain(
       'cloud_logout_url: "https://frameos.net/api/auth/logout",',
     );
-    // The account's pages are the SPA's own settings pages; the header's
-    // Account link lands on them.
+    // The account's pages are the SPA's own settings pages at /account/…;
+    // the header's Account link lands on the first.
     expect(lines).toContain(
-      'cloud_account_url: "https://account.frameos.net/frames/settings",',
+      'cloud_account_url: "https://account.frameos.net/account/backends",',
     );
     // Baked into SD images and ESP32 NVS: the deployment's public URL, never
     // the browser's address bar.
@@ -249,16 +249,37 @@ describe("frames SPA shell", () => {
     expect(lines.join("\n")).not.toContain("cloud_settings_url");
   });
 
-  // The settings pages are scenes of the SPA: the shell is served for them
-  // like for any other /frames/** path (no server-side redirect any more).
-  it("serves the shell for the settings pages", async () => {
+  // The account's settings pages are scenes of the SPA at /account/<page>:
+  // the account route serves this same shell, with the same injection, and
+  // first redirects the sections that were renamed on the way in.
+  it("serves the shell for the account pages, redirecting renamed sections", async () => {
     process.env.FRAMEOS_CLOUD_APP_URL = "https://frameos.net";
     process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
     process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
-    for (const path of ["/frames/settings", "/frames/settings/", "/frames/settings/services"]) {
-      const response = await get(`https://account.frameos.net${path}`);
+    const { GET: accountGet } = await import("../../account/[[...section]]/route");
+    for (const path of ["/account/backends", "/account/developer", "/account/not-a-page"]) {
+      const response = await accountGet(
+        new NextRequest(`https://account.frameos.net${path}`),
+      );
       expect(response.status).toBe(200);
       expect(response.headers.get("content-type")).toContain("text/html");
+      expect(await response.text()).toContain(
+        'cloud_reauth_url: "https://frameos.net/login/reauth",',
+      );
+    }
+    for (const [legacy, page] of [
+      ["/account", "/account/backends"],
+      ["/account/", "/account/backends"],
+      ["/account/installs", "/account/backends"],
+      ["/account/settings?x=1", "/account/services?x=1"],
+      ["/account/ai", "/account/usage#ai"],
+    ]) {
+      const response = await accountGet(
+        new NextRequest(`https://account.frameos.net${legacy}`),
+      );
+      expect(response.status, legacy).toBe(307);
+      expect(response.headers.get("location")).toBe(`https://account.frameos.net${page}`);
+      expect(response.headers.get("cache-control")).toBe("no-store");
     }
   });
 

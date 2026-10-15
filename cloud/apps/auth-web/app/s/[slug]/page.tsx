@@ -17,7 +17,7 @@ import { SceneMarkdown } from "../../../src/components/SceneMarkdown";
 import { SceneViewTracker } from "../../../src/components/SceneViewTracker";
 import {
   getAccountBaseUrl,
-  getAccountUrl,
+  getAccountSettingsUrl,
   getCloudBaseUrl,
   getScenesBaseUrl,
   getStorePath,
@@ -421,7 +421,7 @@ export default async function ScenePage({
           look behind it. Only the owner can save a new version. */}
       <SceneEditorModal
         aiDisabled={aiDisabled}
-        aiSettingsUrl={getAccountUrl("/account/usage#ai")}
+        aiSettingsUrl={`${getAccountSettingsUrl("usage")}#ai`}
         backUrl={getStorePath()}
         canFork={Boolean(session?.accountId)}
         canPreview={scene.status !== "pulled"}
@@ -435,7 +435,7 @@ export default async function ScenePage({
         signupUrl={new URL("/signup", getCloudBaseUrl()).toString()}
         pinnedVersion={pinnedVersion ? pinnedVersion.version : null}
         sceneId={scene.id}
-        settingsUrl={`${getAccountUrl("/account/settings")}#settings-openai`}
+        settingsUrl={`${getAccountSettingsUrl("services")}#settings-openai`}
         share={share}
         signedIn={Boolean(session?.accountId)}
         versions={info.versions}
