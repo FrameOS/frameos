@@ -1835,6 +1835,8 @@ export function FramesHome(): JSX.Element {
       title="Frames"
       browserTitle={null}
       tree={FirstRunPanel ? null : <FrameTree />}
+      // Nothing to search while the fleet is empty.
+      topBar={FirstRunPanel ? null : undefined}
       primaryActionLabel={FirstRunPanel ? undefined : 'Add frame'}
       onPrimaryAction={
         FirstRunPanel
