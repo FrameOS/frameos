@@ -796,7 +796,7 @@ describe("SceneLivePreviewPanel panel dither", () => {
 });
 
 describe("SceneLivePreviewPanel paid scenes", () => {
-  // OpenAI bills per request; a render is one.
+  // OpenAI bills every request; a render is one.
   const openAiScene = {
     ...clockScene,
     nodes: [{ data: { keyword: "data/openaiText" }, id: "n1", type: "app" }],
@@ -811,7 +811,7 @@ describe("SceneLivePreviewPanel paid scenes", () => {
     // still no runtime.
     await screen.findByText("OpenAI");
     expect(screen.getByRole("status", { name: "" }).textContent).toContain("OpenAI");
-    expect(screen.getByText(/bills per request/)).toBeTruthy();
+    expect(screen.getByText(/bills every request/)).toBeTruthy();
     expect(previews).toHaveLength(0);
     // Auto apply is not on offer, however it was remembered.
     expect(screen.queryByRole("checkbox", { name: "Auto apply" })).toBeNull();
@@ -819,7 +819,7 @@ describe("SceneLivePreviewPanel paid scenes", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Run preview/ }));
     await waitFor(() => expect(previews).toHaveLength(1));
-    expect(screen.queryByText(/bills per request/)).toBeNull();
+    expect(screen.queryByText(/bills every request/)).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "Auto apply" })).toBeNull();
 
     // An editor change takes the go-ahead back instead of re-rendering.
@@ -831,7 +831,7 @@ describe("SceneLivePreviewPanel paid scenes", () => {
     vi.useRealTimers();
     expect(previews).toHaveLength(1);
     expect(previews[0]!.destroy).toHaveBeenCalled();
-    expect(screen.getByText(/bills per request/)).toBeTruthy();
+    expect(screen.getByText(/bills every request/)).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Run preview/ }));
     await waitFor(() => expect(previews).toHaveLength(2));
@@ -884,7 +884,7 @@ describe("SceneLivePreviewPanel paid scenes", () => {
   it("offers auto apply for a scene without paid services", async () => {
     render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[clockScene]} />);
     await waitFor(() => expect(previews).toHaveLength(1));
-    expect(screen.queryByText(/bills per request/)).toBeNull();
+    expect(screen.queryByText(/bills every request/)).toBeNull();
     expect(screen.getByRole("checkbox", { name: "Auto apply" })).toBeTruthy();
   });
 });

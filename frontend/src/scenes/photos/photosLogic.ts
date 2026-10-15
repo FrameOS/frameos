@@ -140,6 +140,7 @@ export interface photosLogicValues {
   } | null
   resizeTargets: string[] | null
   rootEntries: PhotoEntry[]
+  saveShownScene: boolean
   search: string
   selectedEntries: PhotoEntry[]
   selectedPaths: string[]
@@ -384,6 +385,9 @@ export interface photosLogicActions {
       total: number
     } | null
   }
+  setSaveShownScene: (save: boolean) => {
+    save: boolean
+  }
   setSearch: (search: string) => {
     search: string
   }
@@ -597,6 +601,8 @@ export const photosLogic = kea<photosLogicType>([
     /** Show `target` (or the picker's) on a frame: install its scene there and make it current. */
     showOnFrame: (frameId: FrameId, target: PhotoShowTarget | null = null) => ({ frameId, target }),
     rememberShowFrame: (frameId: FrameId) => ({ frameId }),
+    /** "Show on frame": install the scene on the frame (true) or only preview it there (false). */
+    setSaveShownScene: (save: boolean) => ({ save }),
     openResize: (paths: string[]) => ({ paths }),
     closeResize: true,
     /** Replace each photo with itself resized (docs/photos.md "POST /api/photos/resize"). */
@@ -863,6 +869,11 @@ export const photosLogic = kea<photosLogicType>([
       {
         rememberShowFrame: (_, { frameId }) => ({ frameId, at: Date.now() }),
       },
+    ],
+    saveShownScene: [
+      false,
+      { persist: true, storageKey: 'photosLogic.saveShownScene' },
+      { setSaveShownScene: (_, { save }) => save },
     ],
     resizeTargets: [
       null as string[] | null,
@@ -1210,7 +1221,11 @@ export const photosLogic = kea<photosLogicType>([
           actions.showNotice('error', 'Move the photo into an album first: the library root cannot be shared.')
           return
         }
-        preselectPhotoAlbums(frameId, chosen.albums, { photo: chosen.photo, activate: true })
+        preselectPhotoAlbums(frameId, chosen.albums, {
+          photo: chosen.photo,
+          activate: true,
+          save: values.saveShownScene,
+        })
         actions.rememberShowFrame(frameId)
         actions.closeShowPicker()
         router.actions.push(urls.frame(frameId), { drawer: 'templates', drawerPage: 'photos' })

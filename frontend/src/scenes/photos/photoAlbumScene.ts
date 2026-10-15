@@ -68,6 +68,62 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
     type,
   })
 
+  // One photo: nothing to shuffle through and no interval to pick, so the
+  // scene keeps only the fit; the scene's own refresh interval re-renders it.
+  if (options.photo) {
+    return {
+      id: uuidv4(),
+      name: options.name,
+      settings: {
+        backgroundColor: options.backgroundColor ?? '#000000',
+        refreshInterval: seconds,
+        execution: 'interpreted',
+      },
+      fields: [
+        {
+          name: 'fit',
+          label: 'Fit',
+          type: 'select',
+          options: PHOTO_ALBUM_FITS.map(({ value, label }) => ({ value, label })),
+          persist: 'disk',
+          access: 'public',
+          value: options.fit,
+        },
+      ],
+      nodes: [
+        node(ids.event, 'event', { keyword: 'render' }, -320, 120),
+        node(ids.renderImage, 'app', { keyword: 'render/image', config: {} }, 200, 140),
+        node(
+          ids.album,
+          'app',
+          {
+            keyword: PHOTO_ALBUM_APP_KEY,
+            config: { album: options.albumUrl, photo: options.photo },
+            cache: { enabled: false },
+          },
+          -260,
+          -200
+        ),
+        node(ids.fit, 'state', { keyword: 'fit' }, 120, 40),
+      ],
+      edges: [
+        edge(ids.event, 'next', ids.renderImage, 'prev', 'appNodeEdge'),
+        edge(ids.album, 'fieldOutput', ids.renderImage, 'fieldInput/image', 'codeNodeEdge'),
+        edge(ids.fit, 'fieldOutput', ids.renderImage, 'fieldInput/placement', 'codeNodeEdge'),
+      ],
+      apps: {
+        [PHOTO_ALBUM_APP_KEY]: buildSceneApp(
+          PHOTO_ALBUM_APP_KEY,
+          embeddedRepoAppConfigs[PHOTO_ALBUM_APP_ORIGIN],
+          sources,
+          {
+            origin: PHOTO_ALBUM_APP_ORIGIN,
+          }
+        ),
+      },
+    } as FrameScene
+  }
+
   return {
     id: uuidv4(),
     name: options.name,
@@ -122,11 +178,7 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
         'app',
         {
           keyword: PHOTO_ALBUM_APP_KEY,
-          config: {
-            album: options.albumUrl,
-            counterStateKey: 'photoIndex',
-            ...(options.photo ? { photo: options.photo } : {}),
-          },
+          config: { album: options.albumUrl, counterStateKey: 'photoIndex' },
           cache: { enabled: false },
         },
         -260,

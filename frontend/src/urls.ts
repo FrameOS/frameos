@@ -35,9 +35,15 @@ function scenesUrl(frameId?: FrameId, sceneId?: string): string {
 // and shortens /account/* on a split-host deployment; the fallback is only
 // for a shell served without injection.
 function cloudAccountSettingsUrl(): string {
-  const injected =
-    typeof window !== 'undefined' ? (window as any).FRAMEOS_APP_CONFIG?.cloud_settings_url : undefined
+  const injected = typeof window !== 'undefined' ? (window as any).FRAMEOS_APP_CONFIG?.cloud_settings_url : undefined
   return typeof injected === 'string' && injected ? injected : '/account/settings'
+}
+
+// The account's usage page (quotas, AI usage), beside the settings page on
+// the same account surface: the injected settings URL with its last segment
+// swapped, so the split-host shortening it already carries holds.
+function cloudAccountUsageUrl(): string {
+  return cloudAccountSettingsUrl().replace(/\/settings\/?$/, '/usage')
 }
 
 function frameControlUrl(tool?: string): string {
@@ -49,6 +55,8 @@ function frameControlScenesUrl(sceneId?: string): string {
 }
 
 export const urls = {
+  /** Cloud only: the account's usage page. */
+  accountUsage: () => cloudAccountUsageUrl(),
   frames: () =>
     isInFrameAdminMode() ? getRouteBasePath() + frameAdminPath() : getRouteBasePath() ? getRouteBasePath() : '/',
   frame: frameUrl,

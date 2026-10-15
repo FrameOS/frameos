@@ -302,8 +302,9 @@ scene is up to the caller (the frame routes, or the MCP's
 - `name`: the scene's name, at most 256 characters; default the folder's
   name.
 - The SPA's builder also makes a single-photo scene (`photo`: the file's
-  path relative to the folder, in the app node's config): the same scene,
-  with the app asking for that photo by `path` instead of moving a counter.
+  path relative to the folder, in the app node's config): the app asks for
+  that photo by `path` instead of moving a counter, and the scene keeps only
+  the `fit` field, with no counter, order or interval of its own.
 - `frame_id`: backend only, and required there: the link in the scene is the
   address that frame uses to reach the backend (its `server_scheme`,
   `server_host` and `server_port`), so 404 for a frame of another project and

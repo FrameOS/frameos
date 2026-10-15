@@ -41,6 +41,7 @@ import { frameHost } from '../../decorators/frame'
 import { urls } from '../../urls'
 import type { FrameId, FrameType } from '../../types'
 import { inHassioIngress } from '../../utils/inHassioIngress'
+import { isCloudMode } from '../../utils/cloudMode'
 import { formatFrameRelativeTime, frameIsActive } from '../../decorators/frame'
 import { photosLogic, type PhotoShowTarget, type PhotoUpload } from './photosLogic'
 import {
@@ -360,29 +361,49 @@ function SidebarFolderRow({
 function StorageMeter({ status }: { status: PhotosStatus }): JSX.Element {
   const limit = status.quota_bytes ?? (status.free_bytes !== null ? status.used_bytes + status.free_bytes : null)
   const percent = limit ? Math.min(100, Math.max(0, (status.used_bytes / limit) * 100)) : null
-  return (
-    <div className="frameos-inset rounded-2xl border p-3 text-xs">
+  const cloud = isCloudMode()
+  const body = (
+    <>
       <div className="flex items-baseline justify-between gap-2">
         <span className="frameos-muted font-semibold uppercase tracking-wide">Storage</span>
-        <span className="frameos-strong font-semibold">{humanFileSize(status.used_bytes) || '0 B'}</span>
+        <span className="frameos-strong font-semibold">
+          {humanFileSize(status.used_bytes) || '0 B'}
+          {status.quota_bytes !== null ? (
+            <span className="frameos-muted font-normal"> of {humanFileSize(status.quota_bytes)}</span>
+          ) : null}
+        </span>
       </div>
       {percent !== null ? (
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-400/20">
           <div className="frameos-primary-fill h-full rounded-full" style={{ width: `${percent}%` }} />
         </div>
       ) : null}
-      <div className="frameos-muted mt-1.5 truncate">
-        {status.quota_bytes !== null
-          ? `of ${humanFileSize(status.quota_bytes)}`
-          : status.free_bytes !== null
-          ? `${humanFileSize(status.free_bytes)} free on disk`
-          : ''}
-      </div>
+      {status.quota_bytes === null && status.free_bytes !== null ? (
+        <div className="frameos-muted mt-1.5 truncate">{humanFileSize(status.free_bytes)} free on disk</div>
+      ) : null}
       {status.location ? (
         <div className="frameos-muted mt-1 break-all font-mono text-[11px]">{status.location}</div>
       ) : null}
-    </div>
+    </>
   )
+  if (cloud) {
+    // On the cloud the quota is the account's: the box is the way to the
+    // usage page, where it is explained and can be raised.
+    return (
+      <a
+        href={urls.accountUsage()}
+        title="Your usage and quotas"
+        className="frameos-inset block rounded-2xl border p-3 text-xs transition hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
+        {body}
+        <div className="frameos-muted mt-1.5 flex items-center gap-1">
+          See your usage
+          <ChevronRightIcon className="h-3 w-3" />
+        </div>
+      </a>
+    )
+  }
+  return <div className="frameos-inset rounded-2xl border p-3 text-xs">{body}</div>
 }
 
 function PhotosSidebar(): JSX.Element {
@@ -918,6 +939,8 @@ function FileTile({ entry, selected }: { entry: PhotoEntry; selected: boolean })
 function ListRow({ entry, selected, shared }: { entry: PhotoEntry; selected: boolean; shared: boolean }) {
   const interactions = useEntryInteractions(entry, selected)
   const drop = useFolderDrop(entry.path)
+  // The grid's fill / whole-photo toggle applies here too, small as the thumbnails are.
+  const { thumbnailFit } = useValues(photosLogic)
   const handlers = entry.kind === 'folder' ? drop.handlers : {}
   return (
     <div
@@ -935,7 +958,7 @@ function ListRow({ entry, selected, shared }: { entry: PhotoEntry; selected: boo
         {entry.kind === 'folder' ? (
           entry.cover ? (
             <>
-              <FolderCover entry={entry} className="h-10 w-10" />
+              <FolderCover entry={entry} className="h-10 w-10" fit={thumbnailFit} />
               {/* The grid's mark: a cover alone looks like a photo. */}
               <span className="absolute bottom-0.5 left-0.5 flex h-4 w-4 items-center justify-center rounded bg-black/45 text-white">
                 <FolderIcon className="h-3 w-3" />
@@ -945,7 +968,7 @@ function ListRow({ entry, selected, shared }: { entry: PhotoEntry; selected: boo
             <FolderIcon className="frameos-folder-icon h-5 w-5" />
           )
         ) : (
-          <PhotoThumb entry={entry} className="h-10 w-10" iconClassName="h-5 w-5" />
+          <PhotoThumb entry={entry} className="h-10 w-10" iconClassName="h-5 w-5" fit={thumbnailFit} />
         )}
       </div>
       <div className="min-w-0 flex-1">
@@ -1210,6 +1233,51 @@ function previewSizeOptions(frames: PhotoPreviewTarget[], framesList: FrameType[
   ]
 }
 
+type OverlayOption = { value: string; label: string } | { label: string; options: { value: string; label: string }[] }
+
+/** A select in the lightbox's dark header: the shared Select carries the light theme. */
+function OverlaySelect({
+  value,
+  onChange,
+  options,
+  title,
+  className,
+}: {
+  value: string
+  onChange: (value: string) => void
+  options: OverlayOption[]
+  title?: string
+  className?: string
+}): JSX.Element {
+  return (
+    <select
+      value={value}
+      title={title}
+      onChange={(event) => onChange(event.target.value)}
+      className={clsx(
+        'h-9 rounded-xl border border-white/20 bg-white/10 px-2 text-sm text-white outline-none focus:ring-2 focus:ring-blue-400',
+        className
+      )}
+    >
+      {options.map((option) =>
+        'options' in option ? (
+          <optgroup key={option.label} label={option.label}>
+            {option.options.map((child) => (
+              <option key={child.value} value={child.value}>
+                {child.label}
+              </option>
+            ))}
+          </optgroup>
+        ) : (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        )
+      )}
+    </select>
+  )
+}
+
 /** Full fidelity, a frame, or a panel family: what the photo is previewed as, and at what size. */
 function PreviewTargetSelect({ overlay = false }: { overlay?: boolean }): JSX.Element {
   const { previewTargets, previewTarget, previewSizeKey, fit } = useValues(photoColorsLogic)
@@ -1217,31 +1285,32 @@ function PreviewTargetSelect({ overlay = false }: { overlay?: boolean }): JSX.El
   const { framesList } = useValues(framesModel)
   const { original, frames, panels } = previewTargetOptions(previewTargets)
   const sizeOptions = previewSizeOptions(frames, framesList)
+  const fitOptions = [
+    { value: 'cover', label: 'Fill' },
+    { value: 'contain', label: 'Whole photo' },
+  ]
+  const onFit = (value: string): void => setFit(value === 'contain' ? 'contain' : 'cover')
+  const sizeTitle = 'The size the photo is placed at'
+  const fitTitle = 'How the photo meets the panel'
   const sizeControls =
     previewTarget.group !== 'original' ? (
-      <>
-        <Select
-          value={previewSizeKey}
-          onChange={setPreviewSize}
-          options={sizeOptions}
-          title="The size the photo is placed at"
-          className={
-            overlay
-              ? 'h-9 max-w-[12rem] rounded-xl border border-white/20 bg-white/10 px-2 text-sm text-white'
-              : undefined
-          }
-        />
-        <Select
-          value={fit}
-          onChange={(value) => setFit(value === 'contain' ? 'contain' : 'cover')}
-          options={[
-            { value: 'cover', label: 'Fill' },
-            { value: 'contain', label: 'Whole photo' },
-          ]}
-          title="How the photo meets the panel"
-          className={overlay ? 'h-9 rounded-xl border border-white/20 bg-white/10 px-2 text-sm text-white' : undefined}
-        />
-      </>
+      overlay ? (
+        <>
+          <OverlaySelect
+            value={previewSizeKey}
+            onChange={setPreviewSize}
+            options={sizeOptions}
+            title={sizeTitle}
+            className="max-w-[12rem]"
+          />
+          <OverlaySelect value={fit} onChange={onFit} options={fitOptions} title={fitTitle} />
+        </>
+      ) : (
+        <>
+          <Select value={previewSizeKey} onChange={setPreviewSize} options={sizeOptions} title={sizeTitle} />
+          <Select value={fit} onChange={onFit} options={fitOptions} title={fitTitle} />
+        </>
+      )
     ) : null
   const toOption = (target: PhotoPreviewTarget) => ({
     value: target.key,
@@ -1287,27 +1356,12 @@ function PreviewTargetSelect({ overlay = false }: { overlay?: boolean }): JSX.El
   return (
     <label className="flex items-center gap-2 text-xs text-white/70" onClick={(event) => event.stopPropagation()}>
       <span className="max-sm:hidden">View</span>
-      <select
+      <OverlaySelect
         value={previewTarget.key}
-        onChange={(event) => setPreviewTarget(event.target.value)}
-        className="h-9 max-w-[14rem] rounded-xl border border-white/20 bg-white/10 px-2 text-sm text-white outline-none focus:ring-2 focus:ring-blue-400"
-      >
-        {options.map((option) =>
-          'options' in option ? (
-            <optgroup key={option.label} label={option.label}>
-              {option.options.map((child) => (
-                <option key={child.value} value={child.value}>
-                  {child.label}
-                </option>
-              ))}
-            </optgroup>
-          ) : (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          )
-        )}
-      </select>
+        onChange={setPreviewTarget}
+        options={options}
+        className="max-w-[14rem]"
+      />
       {sizeControls}
       {rotate}
     </label>
@@ -1872,8 +1926,8 @@ function InstallPicker(): JSX.Element | null {
 
 /** "Show on frame": the frame that shows the album, or the one photo, right away. */
 function ShowPicker(): JSX.Element | null {
-  const { showPickerTarget } = useValues(photosLogic)
-  const { closeShowPicker, showOnFrame } = useActions(photosLogic)
+  const { showPickerTarget, saveShownScene } = useValues(photosLogic)
+  const { closeShowPicker, showOnFrame, setSaveShownScene } = useActions(photosLogic)
   if (showPickerTarget === null) {
     return null
   }
@@ -1885,10 +1939,27 @@ function ShowPicker(): JSX.Element | null {
   return (
     <FramePicker
       title="Show on frame"
-      description={`Pick the frame that shows ${what} now. A scene is installed on it when it has none for this yet, then made the current one.`}
+      description={`Pick the frame that shows ${what} now.`}
       onPick={(frameId) => showOnFrame(frameId, showPickerTarget)}
       onClose={closeShowPicker}
-    />
+    >
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={saveShownScene}
+          onChange={(event) => setSaveShownScene(event.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="frameos-strong font-semibold">Save as a scene on the frame</span>
+          <span className="frameos-muted block text-xs">
+            {saveShownScene
+              ? "The scene joins the frame's scenes and stays after it shows something else."
+              : 'Otherwise the frame only previews it: it shows now, and the frame keeps the scenes it has.'}
+          </span>
+        </span>
+      </label>
+    </FramePicker>
   )
 }
 
@@ -1897,11 +1968,14 @@ function FramePicker({
   description,
   onPick,
   onClose,
+  children,
 }: {
   title: string
   description: string
   onPick: (frameId: FrameId) => void
   onClose: () => void
+  /** Options under the description, above the frames. */
+  children?: ReactNode
 }): JSX.Element {
   const { framesList } = useValues(framesModel)
   const frames = framesList.filter((frame) => !frame.archived)
@@ -1919,6 +1993,7 @@ function FramePicker({
     <Modal title={title} onClose={onClose} panelClassName="max-w-[28rem]">
       <div className="space-y-3 p-5">
         <p className="frameos-muted text-sm">{description}</p>
+        {children}
         {frames.length ? (
           <div className="max-h-[50vh] space-y-3 overflow-y-auto">
             {groups.map((group) => (
@@ -2006,8 +2081,18 @@ function ResizeDialog(): JSX.Element | null {
   const { closeResize, resizeEntries } = useActions(photosLogic)
   const { sizeKey, sizeChoices, width, height, fit, format, quality, upscale, background, colors, options, valid } =
     useValues(photoResizeLogic)
-  const { setSize, setWidth, setHeight, setFit, setFormat, setQuality, setUpscale, setBackground, setColors } =
-    useActions(photoResizeLogic)
+  const {
+    setSize,
+    setWidth,
+    setHeight,
+    swapSides,
+    setFit,
+    setFormat,
+    setQuality,
+    setUpscale,
+    setBackground,
+    setColors,
+  } = useActions(photoResizeLogic)
   if (resizeTargets === null) {
     return null
   }
@@ -2066,7 +2151,17 @@ function ResizeDialog(): JSX.Element | null {
               className={fieldClassName}
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm">
+          <label className="relative flex flex-col gap-1 text-sm">
+            {/* Turn the box on its side: a portrait frame from a landscape preset, in one click. */}
+            <button
+              type="button"
+              onClick={swapSides}
+              title="Swap width and height"
+              aria-label="Swap width and height"
+              className="frameos-icon-button absolute -left-[1.4rem] top-7 flex h-6 w-6 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100"
+            >
+              <ArrowPathRoundedSquareIcon className="h-4 w-4" />
+            </button>
             <span className="frameos-strong font-semibold">Height</span>
             <input
               type="number"

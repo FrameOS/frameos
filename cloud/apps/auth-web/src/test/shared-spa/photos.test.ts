@@ -254,9 +254,17 @@ describe("buildPhotoAlbumScene", () => {
     const album = (single.nodes as unknown as TestNode[]).find((node) => node.data.keyword === "photoAlbum")!;
     expect(album.data.config).toEqual({
       album: "http://10.0.0.5:8989/api/photos/shared/pk_x",
-      counterStateKey: "photoIndex",
       photo: "trip/beach.jpg",
     });
+    // Nothing to shuffle through and no interval to pick: only the fit stays.
+    expect((single.fields as { name: string }[]).map((field) => field.name)).toEqual(["fit"]);
+    expect((single.nodes as unknown as TestNode[]).map((node) => node.data.keyword)).toEqual([
+      "render",
+      "render/image",
+      "photoAlbum",
+      "fit",
+    ]);
+    expect(single.settings.refreshInterval).toBe(600);
     // Without a photo the config is as before: the fixture pins that shape.
     const album2 = (scene.nodes as unknown as TestNode[]).find((node) => node.data.keyword === "photoAlbum")!;
     expect("photo" in (album2.data.config as object)).toBe(false);

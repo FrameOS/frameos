@@ -1889,6 +1889,11 @@ a.tag-pill:hover {
   gap: 10px;
 }
 
+/* The stale-keys notice sits above the preview, first thing in the panel. */
+.preview-settings--stale {
+  border-color: color-mix(in srgb, var(--warning), transparent 50%);
+}
+
 .preview-settings__title {
   display: flex;
   align-items: center;

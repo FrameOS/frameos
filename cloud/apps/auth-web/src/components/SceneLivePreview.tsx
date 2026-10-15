@@ -53,7 +53,9 @@ import {
   type RefObject,
 } from "react";
 import {
+  embeddedSourceSettingsForScenes,
   gatedServicesForScenes,
+  paidServicesForScenes,
   requiredSettingsForScenes,
   type PreviewSettingsGroup,
 } from "../lib/preview-settings";
@@ -341,6 +343,20 @@ export function SceneLivePreviewPanel({
   const [paidRunJson, setPaidRunJson] = useState<string | null>(null);
   const previewGated =
     paidServices.length > 0 && paidRunJson !== editorScenesJson;
+  // The gate's two reasons, named apart: a service that bills every request
+  // (OpenAI), and a service the scene's own bundled code reads keys for. A
+  // scene can have either or both; the copy must not blame OpenAI for an
+  // Immich scene.
+  const gateReasons = useMemo(() => {
+    if (!scenes) {
+      return { billed: [] as string[], embedded: [] as string[] };
+    }
+    const billed = paidServicesForScenes(scenes).map((group) => group.title);
+    const embedded = embeddedSourceSettingsForScenes(scenes)
+      .map((group) => group.title)
+      .filter((title) => !billed.includes(title));
+    return { billed, embedded };
+  }, [scenes]);
 
   // "Auto apply": every change in the state form is applied and rendered
   // (debounced) without pressing "Apply & render". Never offered for a paid
@@ -1059,6 +1075,19 @@ export function SceneLivePreviewPanel({
 
   return (
     <div className="live-preview-panel stack">
+      {storedKeysStale && requiredSettings.length > 0 ? (
+        <div className="card preview-settings preview-settings--stale" role="status">
+          <h4 className="preview-settings__title">
+            <KeyRound aria-hidden size={16} />
+            Your saved keys were not loaded
+          </h4>
+          <p className="copy preview-settings__hint">
+            This scene needs {joinNames(requiredSettings.map((group) => group.title))}, and this
+            session signed in a while ago. <a href={reauthHref()}>Confirm it is you</a> to use the
+            keys saved in your account here, or type keys for this tab in the box below the preview.
+          </p>
+        </div>
+      ) : null}
       <div className="live-preview-panel__header stack">
         <div className="live-preview-panel__bar">
         <div className="button-row live-preview-panel__actions">
@@ -1261,11 +1290,13 @@ export function SceneLivePreviewPanel({
               This preview waits for you to start it
             </p>
             <p className="live-preview__gate-copy">
-              This scene calls {joinNames(paidServices.map((group) => group.title))}
-              with your stored keys — and a scene&apos;s own code decides what it
-              sends where, while OpenAI bills per request. To keep that under
-              your control, nothing renders until you ask for it — and every
-              change to the scene needs a fresh go-ahead.
+              {gateReasons.billed.length > 0 && gateReasons.embedded.length > 0
+                ? `This scene calls ${joinNames(gateReasons.billed)}, which bills every request to your key, and brings its own code for ${joinNames(gateReasons.embedded)}, which decides what it sends where with your stored keys.`
+                : gateReasons.billed.length > 0
+                  ? `This scene calls ${joinNames(gateReasons.billed)}, which bills every request to your key.`
+                  : `This scene brings its own code for ${joinNames(gateReasons.embedded)} and runs it with your stored keys. That code decides what it sends where.`}{" "}
+              Nothing renders until you ask for it, and every change to the
+              scene needs a fresh go-ahead.
             </p>
             <button
               className="button button-primary"
@@ -1546,14 +1577,6 @@ export function SceneLivePreviewPanel({
               ? "This scene uses services that need credentials"
               : "This scene uses keys saved in your account"}
           </h4>
-          {storedKeysStale ? (
-            <p className="copy preview-settings__hint">
-              Your saved keys were not loaded: this session signed in a while
-              ago.{" "}
-              <a href={reauthHref()}>Confirm it is you</a> to use them here,
-              or type keys below for this tab.
-            </p>
-          ) : null}
           {anyCredentialsFormShown ? (
             <p className="copy preview-settings__hint">
               Keys saved in your{" "}
