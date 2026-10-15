@@ -13,7 +13,7 @@ import { Spinner } from '../../components/Spinner'
 import { Tag } from '../../components/Tag'
 import { TextInput } from '../../components/TextInput'
 import { confirmDialog } from '../../utils/confirmDialogLogic'
-import { apiTokensLogic, type ApiToken } from './apiTokensLogic'
+import { apiTokensLogic, apiTokensReauthHref, type ApiToken } from './apiTokensLogic'
 
 function formatDay(value: string | null): string {
   if (!value) {
@@ -126,7 +126,17 @@ function CreateTokenForm(): JSX.Element {
           </span>
         ) : null}
         {!listing.can_create ? (
-          <span className="frameos-muted text-xs">Tokens are created from a browser session, not with a token.</span>
+          listing.reauth_required ? (
+            <span className="frameos-muted text-xs">
+              Creating a token turns this session into a durable credential, so it asks you to{' '}
+              <a className="frameos-link hover:underline" href={apiTokensReauthHref()}>
+                confirm your credentials
+              </a>{' '}
+              first.
+            </span>
+          ) : (
+            <span className="frameos-muted text-xs">Tokens are created from a browser session, not with a token.</span>
+          )
         ) : null}
       </div>
     )
@@ -148,9 +158,11 @@ function CreateTokenForm(): JSX.Element {
         <Field name="expires_in_days" label={`Expires in days (1 to ${listing.max_ttl_days})`}>
           <NumberTextInput min={1} max={listing.max_ttl_days} />
         </Field>
-        <Field name="current_password" label="Current password">
-          <TextInput type="password" autoComplete="current-password" />
-        </Field>
+        {listing.password_required !== false ? (
+          <Field name="current_password" label="Current password">
+            <TextInput type="password" autoComplete="current-password" />
+          </Field>
+        ) : null}
       </div>
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
@@ -197,39 +209,53 @@ export function IngressApiTokensSection(): JSX.Element {
   )
 }
 
+// The token list, the one-time secret of a token just minted, and the
+// create form: the card both control planes draw (the backend's settings
+// page under "API tokens and MCP", the cloud's Developer page).
+export function ApiTokensCard({ intro }: { intro?: React.ReactNode }): JSX.Element {
+  const { listing, listingLoading, liveTokens, pastTokens } = useValues(apiTokensLogic)
+  return (
+    <Box className="settings-api-tokens-card space-y-4 p-4">
+      {intro ? <p className="text-sm leading-relaxed">{intro}</p> : null}
+      {listingLoading && listing.api_tokens.length === 0 ? (
+        <Spinner />
+      ) : liveTokens.length === 0 && pastTokens.length === 0 ? (
+        <div className="frameos-muted text-sm">No API tokens yet.</div>
+      ) : (
+        <table className="w-full text-sm">
+          <tbody>
+            {liveTokens.map((token) => (
+              <TokenRow key={token.id} token={token} live />
+            ))}
+            {pastTokens.map((token) => (
+              <TokenRow key={token.id} token={token} live={false} />
+            ))}
+          </tbody>
+        </table>
+      )}
+      <CreatedTokenNotice />
+      <CreateTokenForm />
+    </Box>
+  )
+}
+
 export function ApiTokensSection(): JSX.Element {
-  const { listing, listingLoading, liveTokens, pastTokens, mcpInstructionsOpen } = useValues(apiTokensLogic)
+  const { mcpInstructionsOpen } = useValues(apiTokensLogic)
   const { toggleMcpInstructions } = useActions(apiTokensLogic)
   return (
     <div className="space-y-4">
       <H6 id="settings-developer" className="pt-4">
         API tokens and MCP
       </H6>
-      <Box className="settings-api-tokens-card space-y-4 p-4">
-        <p className="text-sm leading-relaxed">
-          A personal API token stands in for your account on the JSON API and the MCP server: frames, scenes, settings
-          and the scene AI, everything you can do here. Tokens cannot create tokens or change your email or password.
-          They are shown once and stored hashed.
-        </p>
-        {listingLoading && listing.api_tokens.length === 0 ? (
-          <Spinner />
-        ) : liveTokens.length === 0 && pastTokens.length === 0 ? (
-          <div className="frameos-muted text-sm">No API tokens yet.</div>
-        ) : (
-          <table className="w-full text-sm">
-            <tbody>
-              {liveTokens.map((token) => (
-                <TokenRow key={token.id} token={token} live />
-              ))}
-              {pastTokens.map((token) => (
-                <TokenRow key={token.id} token={token} live={false} />
-              ))}
-            </tbody>
-          </table>
-        )}
-        <CreatedTokenNotice />
-        <CreateTokenForm />
-      </Box>
+      <ApiTokensCard
+        intro={
+          <>
+            A personal API token stands in for your account on the JSON API and the MCP server: frames, scenes, settings
+            and the scene AI, everything you can do here. Tokens cannot create tokens or change your email or password.
+            They are shown once and stored hashed.
+          </>
+        }
+      />
       <div>
         <Button
           size="small"

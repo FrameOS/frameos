@@ -53,7 +53,7 @@ instead (that exact bug shipped once; see `route.test.ts`):
 | Anchor | Injects | Why the client can't compute it |
 |---|---|---|
 | `//__FRAMEOS_CLOUD_WS_ORIGIN__` | `cloud_ws_origin` | In dev the frame hub is a second process on its own port; in production nginx proxies it same-origin, so nothing is injected. |
-| `//__FRAMEOS_CLOUD_APP_CONFIG__` | `cloud_account_url`, `cloud_frames_url`, `cloud_logout_url`, `cloud_scenes_url`, `cloud_origin`, `cloud_claim_token_ttl_hours` | The account/scenes/auth surfaces can live on three origins and `/account/*` shortens on a split host (account header); `cloud_origin` is written into SD images and ESP32 NVS, so it must be the deployment's public URL, not the browser's; the claim-code TTL is deployment-tunable. Read through `src/cloudConfig.ts`. |
+| `//__FRAMEOS_CLOUD_APP_CONFIG__` | `cloud_account_url`, `cloud_frames_url`, `cloud_logout_url`, `cloud_scenes_url`, `cloud_reauth_url`, `cloud_origin`, `cloud_claim_token_ttl_hours` | The account/scenes/auth surfaces can live on three origins and `/account/*` shortens on a split host (account header); `cloud_origin` is written into SD images and ESP32 NVS, so it must be the deployment's public URL, not the browser's; the claim-code TTL is deployment-tunable. Read through `src/cloudConfig.ts`. |
 
 `build.mjs` fails the build if either anchor is not exactly one whole line,
 and the route answers 503 rather than serving a shell wired to the wrong

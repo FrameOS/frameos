@@ -3,7 +3,7 @@ import { createDb } from "@frameos-cloud/db";
 import { AuthCard } from "../../../src/components/AuthCard";
 import { ReauthForm } from "../../../src/components/ReauthForm";
 import { safeAuthReturnPath } from "../../../src/lib/auth-cookies";
-import { getAccountUrl, hasDatabaseUrl, hasGoogleOAuth } from "../../../src/lib/env";
+import { getFramesUrl, hasDatabaseUrl, hasGoogleOAuth } from "../../../src/lib/env";
 import { hasRecentAuth, reauthMethods } from "../../../src/lib/recent-auth";
 import { readSession } from "../../../src/lib/session";
 
@@ -21,7 +21,7 @@ export default async function ReauthPage({ searchParams }: ReauthPageProps) {
   const rawReturnTo = Array.isArray(params.return_to)
     ? params.return_to[0]
     : params.return_to;
-  const returnTo = safeAuthReturnPath(rawReturnTo) ?? getAccountUrl();
+  const returnTo = safeAuthReturnPath(rawReturnTo) ?? getFramesUrl();
 
   const session = await readSession();
   if (!session?.accountId || !hasDatabaseUrl()) {

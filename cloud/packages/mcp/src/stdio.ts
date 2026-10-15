@@ -13,7 +13,7 @@ import { createFrameosMcpServer, posthog } from "./server";
 const token = process.env.FRAMEOS_CLOUD_TOKEN?.trim();
 if (!token) {
   process.stderr.write(
-    "frameos-cloud-mcp: set FRAMEOS_CLOUD_TOKEN to a personal API token (create one at /account/developer)\n",
+    "frameos-cloud-mcp: set FRAMEOS_CLOUD_TOKEN to a personal API token (create one on the frames workspace's Developer page, /frames/settings/developer)\n",
   );
   process.exit(2);
 }

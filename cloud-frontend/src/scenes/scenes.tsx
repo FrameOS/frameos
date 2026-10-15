@@ -10,6 +10,7 @@ export const scenes = {
   sceneWorkspace: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudSceneWorkspace }))),
   appsWorkspace: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudAppsWorkspace }))),
   photosWorkspace: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudPhotosWorkspace }))),
+  settings: lazy(() => import('./cloud/Cloud').then((module) => ({ default: module.CloudSettings }))),
 }
 
 // Routes come from the shared urls module so they always match the links
@@ -18,14 +19,17 @@ export const scenes = {
 // /frames/apps/... kea-router takes the first matching pattern, so the
 // literal /frames/* routes come before the parametric /frames/:id.
 // The SPA's own login/signup scenes are deliberately absent: Next.js owns
-// auth on the cloud (apiFetch redirects to /login on 401). So is the
-// settings scene: the account's service API keys and SSH keys are an
-// account page (/account/settings), and urls.settings() links out to it;
-// the old /frames/settings is redirected there server-side.
+// auth on the cloud (apiFetch redirects to /login on 401). The settings
+// scene is the account's pages — backends, service keys, SSH keys, usage,
+// backups, activity, security, developer — one route each under
+// /frames/settings (frontend/src/scenes/settings/account/accountPages.ts);
+// the old /account/* pages redirect here.
 export const getRoutes = () =>
   ({
     [urls.frames()]: 'frames',
     [urls.frames() + '/']: 'frames',
+    [urls.settings()]: 'settings',
+    [urls.settings(':page')]: 'settings',
     [urls.scenes()]: 'sceneWorkspace',
     [urls.apps()]: 'appsWorkspace',
     [urls.apps(':frameId')]: 'appsWorkspace',

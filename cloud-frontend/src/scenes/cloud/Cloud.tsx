@@ -11,6 +11,7 @@ import { socketLogic } from '../../../../frontend/src/scenes/socketLogic'
 import { AppsWorkspace } from '../../../../frontend/src/scenes/workspace/AppsWorkspace'
 import { FramesHome } from '../../../../frontend/src/scenes/workspace/FramesHome'
 import { PhotosWorkspace } from '../../../../frontend/src/scenes/photos/PhotosWorkspace'
+import { Settings } from '../../../../frontend/src/scenes/settings/Settings'
 import { SceneWorkspace } from '../../../../frontend/src/scenes/workspace/SceneWorkspace'
 import { CloudFirstRunAddFrame } from '../../components/CloudFirstRunAddFrame'
 
@@ -19,6 +20,7 @@ interface CloudSceneProps {
   frameId?: string
   sceneId?: string
   nodeId?: string
+  page?: string
 }
 
 // There is no explicit session check here: the models load through
@@ -100,6 +102,16 @@ export function CloudPhotosWorkspace() {
   return (
     <CloudGate>
       <PhotosWorkspace />
+    </CloudGate>
+  )
+}
+
+// The account pages (frontend/src/scenes/settings/account): the shared
+// settings scene draws them in cloud mode, one per /frames/settings/<page>.
+export function CloudSettings({ page }: CloudSceneProps) {
+  return (
+    <CloudGate>
+      <Settings page={page} />
     </CloudGate>
   )
 }

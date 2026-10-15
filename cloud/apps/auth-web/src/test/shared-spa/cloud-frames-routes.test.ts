@@ -9,7 +9,12 @@ import {
   legacyCloudPathRedirect,
   cloudSettingsUrl,
 } from "@frameos/cloud-frontend/src/routes";
+import {
+  accountPages,
+  defaultAccountPageKey,
+} from "../../../../../../frontend/src/scenes/settings/account/accountPages";
 import { urls } from "../../../../../../frontend/src/urls";
+import { accountSectionSpaPaths } from "../../lib/env";
 
 // Next.js server components link INTO the SPA (the account frame table used
 // to; the pending-enrollment and activity emails still do). The SPA mounts
@@ -64,22 +69,37 @@ describe("cloud SPA route helpers", () => {
     expect(cloudFrameUrl("abc", "settings")).toBe(fromSpa);
   });
 
-  // The global settings are an account page, not a SPA scene. The SPA links
-  // out to the server-injected URL (it may be another origin, and shortens
-  // on a split-host deployment) and falls back to the account path when the
-  // shell was served without injection.
-  it("links urls.settings() out to the account settings page", () => {
-    expect(cloudSettingsUrl()).toBe("/account/settings");
+  // The settings are the account's pages, scenes of this SPA under
+  // /frames/settings/<page> (frontend/src/scenes/settings/account); the
+  // Next.js side links to them through cloudSettingsUrl and through
+  // env.ts's section table, which this keeps in step with the SPA's keys.
+  it("agrees with the SPA's own urls.settings(), page by page", () => {
+    expect(cloudSettingsUrl()).toBe("/frames/settings");
     expect(cloudSettingsUrl()).toBe(withCloudSpaConfig(() => urls.settings()));
-    (window as unknown as { FRAMEOS_APP_CONFIG?: unknown }).FRAMEOS_APP_CONFIG = {
-      cloudMode: true,
-      cloud_settings_url: "https://account.example/settings",
-      route_base_path: cloudRouteBasePath,
-    };
-    expect(urls.settings()).toBe("https://account.example/settings");
+    for (const page of accountPages) {
+      expect(cloudSettingsUrl(page.key)).toBe(`/frames/settings/${page.key}`);
+      expect(cloudSettingsUrl(page.key)).toBe(
+        withCloudSpaConfig(() => urls.settings(page.key)),
+      );
+    }
+    expect(withCloudSpaConfig(() => urls.accountUsage())).toBe("/frames/settings/usage");
   });
 
-  it("has no settings scene in the cloud SPA any more", async () => {
+  it("maps every old account section onto a page the SPA has, and nothing else", () => {
+    const pageKeys = new Set(accountPages.map((page) => page.key));
+    for (const [section, spaPath] of accountSectionSpaPaths) {
+      if (section === "/account") {
+        expect(spaPath).toBe(cloudSettingsUrl());
+        continue;
+      }
+      const match = /^\/frames\/settings\/([^/#?]+)/.exec(spaPath);
+      expect(match, `${section} → ${spaPath}`).not.toBeNull();
+      expect(pageKeys.has(match![1] as (typeof accountPages)[number]["key"]), `${section} → ${spaPath}`).toBe(true);
+    }
+    expect(defaultAccountPageKey).toBe(accountPages[0]?.key);
+  });
+
+  it("registers the settings scene and its page route in the cloud SPA", async () => {
     // The specifier is a variable ON PURPOSE: scenes.tsx transitively
     // imports the whole React SPA, and a static (or literal-dynamic) import
     // would drag all of it into this app's stricter tsc program — vitest
@@ -90,8 +110,9 @@ describe("cloud SPA route helpers", () => {
       scenes: Record<string, unknown>;
     };
     const routes = withCloudSpaConfig(() => getRoutes());
-    expect(Object.values(routes)).not.toContain("settings");
-    expect(scenes).not.toHaveProperty("settings");
+    expect(routes["/frames/settings"]).toBe("settings");
+    expect(routes["/frames/settings/:page"]).toBe("settings");
+    expect(scenes).toHaveProperty("settings");
   });
 
   // The shared SPA has its OWN sceneLogic and route table
@@ -124,9 +145,11 @@ describe("cloud SPA route helpers", () => {
       expect(paths.indexOf(literal)).toBeLessThan(frameIndex);
     }
     expect(paths.indexOf("/frames/:frameId/scenes/:sceneId")).toBeLessThan(paths.indexOf("/frames/:id/:tool"));
-    // Not registered on the cloud at all: it would be "/account/settings",
-    // which is not under the SPA's mount.
-    expect(Object.values(routes)).not.toContain("settings");
+    // The settings pages are literal routes too: /frames/settings/services
+    // must never render as the frame "settings" with the tool "services".
+    expect(paths.indexOf("/frames/settings")).toBeLessThan(frameIndex);
+    expect(paths.indexOf("/frames/settings/:page")).toBeLessThan(frameIndex);
+    expect(paths.indexOf("/frames/settings/:page")).toBeLessThan(paths.indexOf("/frames/:id/:tool"));
   });
 
   it("rewrites the pre-2026.8 doubled-segment URLs", () => {
@@ -135,7 +158,7 @@ describe("cloud SPA route helpers", () => {
     expect(legacyCloudPathRedirect("/frames/scenes/abc")).toBe("/frames/abc/scenes");
     expect(legacyCloudPathRedirect("/frames/abc")).toBeNull();
     expect(legacyCloudPathRedirect("/frames/apps/system/x")).toBeNull();
-    // /frames/settings is redirected server-side by the [[...path]] route.
+    // /frames/settings is a scene of its own, not a legacy path.
     expect(legacyCloudPathRedirect("/frames/settings")).toBeNull();
   });
 
@@ -150,7 +173,14 @@ describe("cloud SPA route helpers", () => {
     const paths = Object.keys(withCloudSpaConfig(() => getRoutes()));
     const frameIndex = paths.indexOf("/frames/:id");
     expect(frameIndex).toBeGreaterThan(-1);
-    for (const literal of ["/frames/apps", "/frames/apps/:frameId", "/frames/scenes", "/frames/photos"]) {
+    for (const literal of [
+      "/frames/apps",
+      "/frames/apps/:frameId",
+      "/frames/scenes",
+      "/frames/photos",
+      "/frames/settings",
+      "/frames/settings/:page",
+    ]) {
       expect(paths.indexOf(literal)).toBeGreaterThan(-1);
       expect(paths.indexOf(literal)).toBeLessThan(frameIndex);
     }

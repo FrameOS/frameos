@@ -249,7 +249,7 @@ export default function PrivacyPage() {
         <li>
           <strong>Export</strong> — download everything on your account as a
           JSON file from your{" "}
-          <a href="/account/security">account security page</a>, any time.
+          <a href="/frames/settings/security">account security page</a>, any time.
         </li>
         <li>
           <strong>Deletion</strong> — delete your account from the same page.

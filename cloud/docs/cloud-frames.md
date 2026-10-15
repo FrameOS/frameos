@@ -493,7 +493,7 @@ is why the check sits with whoever writes the card.
 
 An account that controls physical devices needs more than email + password:
 
-- Passkeys and TOTP 2FA — **shipped** (optional, `/account/security`; design
+- Passkeys and TOTP 2FA — **shipped** (optional, `/frames/settings/security`; design
   and routes in `cloud/docs/auth.md`, "Two-Factor Authentication"). Both
   session-minting routes gate on it; a passkey with user verification also
   signs in passwordlessly.
@@ -634,9 +634,23 @@ New tables, hanging off existing machinery:
 Scenes themselves need no new storage: store scenes and private account
 scenes (`store_scenes` + versions) are already the unit of content. "My
 frames" becomes a sibling of the account's **Backends** page (the linked
-self-hosted backends; `/backends` in clean URLs, `/account/installs` in the
-app route, `connected_backends` + `linked_clients` in the schema — one page,
-three older names).
+self-hosted backends; `/frames/settings/backends` in the workspace,
+`/account/installs` and `/backends` as the old URLs that redirect there,
+`connected_backends` + `linked_clients` in the schema — one page, four
+names).
+
+The account pages themselves — Backends, Service keys, SSH keys, Usage,
+Backups, Activity, Security, Developer — are pages of the frames workspace
+SPA since 2026.10 (`frontend/src/scenes/settings/account/`, listed in
+`accountPages.ts`, one route each under `/frames/settings/<page>`), behind
+the rail's gear like the self-hosted settings. They read JSON routes under
+`/api/account/*` (`installs`, `backups`, `security`, `usage`, `ai`,
+`activity`, `two-factor`, `api-tokens`) and `/api/settings`. The Next.js app
+keeps only the redirects: `app/account/[[...section]]` and the surface
+router map every old `/account/<section>` and clean `/<section>` URL onto
+its page through `getAccountPath` (`src/lib/env.ts`). Sudo-mode refusals
+(`403 reauth_required`) send the browser to the auth origin's
+`/login/reauth` (injected as `cloud_reauth_url`) and back.
 
 ## Frontend: the fourth adapter
 

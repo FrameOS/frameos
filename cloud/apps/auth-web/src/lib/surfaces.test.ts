@@ -49,19 +49,22 @@ describe("surface routing", () => {
     });
   });
 
-  it("moves legacy account URLs onto clean account-domain paths", () => {
+  // The account pages are pages of the /frames workspace since 2026.10; the
+  // old /account/* app routes redirect into it, section by section.
+  it("moves legacy account URLs into the frames workspace on the account domain", () => {
     configureSplitOrigins();
 
     for (const [legacy, canonical] of [
-      ["/account", "/backends"],
-      ["/account/installs", "/backends"],
+      ["/account", "/frames/settings"],
+      ["/account/installs", "/frames/settings/backends"],
       ["/account/frames", "/frames"],
-      ["/account/ai", "/ai"],
-      ["/account/usage", "/usage"],
-      ["/account/settings", "/settings"],
-      ["/account/backups", "/backups"],
-      ["/account/activity", "/activity"],
-      ["/account/developer", "/developer"],
+      ["/account/ai", "/frames/settings/usage#ai"],
+      ["/account/usage", "/frames/settings/usage"],
+      ["/account/settings", "/frames/settings/services"],
+      ["/account/backups", "/frames/settings/backups"],
+      ["/account/activity", "/frames/settings/activity"],
+      ["/account/security", "/frames/settings/security"],
+      ["/account/developer", "/frames/settings/developer"],
       ["/admin/scenes", "/admin/scenes"],
       ["/device", "/device"],
     ]) {
@@ -136,31 +139,35 @@ describe("surface routing", () => {
     ).toBeUndefined();
   });
 
-  it("rewrites clean account paths to the existing app routes", () => {
+  // The clean paths the sections had on a split host (/backends, /settings,
+  // …) are in bookmarks and old emails; each redirects to its page.
+  it("redirects the old clean account paths into the frames workspace", () => {
     configureSplitOrigins();
 
-    for (const [external, internal] of [
-      ["/backends", "/account/installs"],
-      ["/ai", "/account/ai"],
-      ["/usage", "/account/usage"],
-      ["/settings", "/account/settings"],
-      ["/backups", "/account/backups"],
-      ["/activity", "/account/activity"],
-      ["/security", "/account/security"],
-      ["/developer", "/account/developer"],
+    for (const [legacy, page] of [
+      ["/backends", "/frames/settings/backends"],
+      ["/installs", "/frames/settings/backends"],
+      ["/ai", "/frames/settings/usage#ai"],
+      ["/usage", "/frames/settings/usage"],
+      ["/settings", "/frames/settings/services"],
+      ["/backups", "/frames/settings/backups"],
+      ["/activity", "/frames/settings/activity"],
+      ["/security", "/frames/settings/security"],
+      ["/developer", "/frames/settings/developer"],
     ]) {
-      expectRoute(`https://account.frameos.net${external}`, {
-        kind: "rewrite",
-        url: `https://account.frameos.net${internal}`,
+      expectRoute(`https://account.frameos.net${legacy}`, {
+        kind: "redirect",
+        url: `https://account.frameos.net${page}`,
       });
     }
     expectRoute("https://account.frameos.net/", {
       kind: "redirect",
       url: "https://account.frameos.net/frames",
     });
-    expectRoute("https://account.frameos.net/installs", {
+    // The query rides along: a filtered backups bookmark stays filtered.
+    expectRoute("https://account.frameos.net/backups?kind=frames", {
       kind: "redirect",
-      url: "https://account.frameos.net/backends",
+      url: "https://account.frameos.net/frames/settings/backups?kind=frames",
     });
   });
 
@@ -172,40 +179,42 @@ describe("surface routing", () => {
       kind: "redirect",
       url: "https://cloud.frameos.net/frames",
     });
-    // Legacy /account/* URLs shorten in place on the same host.
+    // Legacy /account/* URLs redirect into the workspace on the same host.
     expectRoute("https://cloud.frameos.net/account/backups", {
       kind: "redirect",
-      url: "https://cloud.frameos.net/backups",
+      url: "https://cloud.frameos.net/frames/settings/backups",
     });
     expectRoute("https://cloud.frameos.net/account/installs", {
       kind: "redirect",
-      url: "https://cloud.frameos.net/backends",
+      url: "https://cloud.frameos.net/frames/settings/backends",
     });
-    // Clean paths rewrite to the app routes.
+    // So do the clean paths they once shortened to.
     expectRoute("https://cloud.frameos.net/backends", {
-      kind: "rewrite",
-      url: "https://cloud.frameos.net/account/installs",
+      kind: "redirect",
+      url: "https://cloud.frameos.net/frames/settings/backends",
     });
     expectRoute("https://cloud.frameos.net/security", {
-      kind: "rewrite",
-      url: "https://cloud.frameos.net/account/security",
+      kind: "redirect",
+      url: "https://cloud.frameos.net/frames/settings/security",
     });
     expectRoute("https://cloud.frameos.net/ai", {
-      kind: "rewrite",
-      url: "https://cloud.frameos.net/account/ai",
+      kind: "redirect",
+      url: "https://cloud.frameos.net/frames/settings/usage#ai",
     });
     expectRoute("https://cloud.frameos.net/developer", {
-      kind: "rewrite",
-      url: "https://cloud.frameos.net/account/developer",
+      kind: "redirect",
+      url: "https://cloud.frameos.net/frames/settings/developer",
     });
     expectRoute("https://cloud.frameos.net/settings", {
-      kind: "rewrite",
-      url: "https://cloud.frameos.net/account/settings",
+      kind: "redirect",
+      url: "https://cloud.frameos.net/frames/settings/services",
     });
     // Full-form paths serve directly instead of redirect-looping.
     for (const path of [
       "/frames",
       "/frames/5",
+      "/frames/settings",
+      "/frames/settings/backends",
       "/admin/scenes",
       "/device",
     ]) {
@@ -224,7 +233,7 @@ describe("surface routing", () => {
     // The scenes host sends account pages to the merged cloud host.
     expectRoute("https://scenes.frameos.net/account/backups", {
       kind: "redirect",
-      url: "https://cloud.frameos.net/backups",
+      url: "https://cloud.frameos.net/frames/settings/backups",
     });
     // The old account frame table redirects into the frames SPA.
     expectRoute("https://cloud.frameos.net/account/frames", {
@@ -300,7 +309,7 @@ describe("surface routing", () => {
 
     expectRoute("https://scenes.frameos.net/account/backups", {
       kind: "redirect",
-      url: "https://account.frameos.net/backups",
+      url: "https://account.frameos.net/frames/settings/backups",
     });
     expectRoute("https://scenes.frameos.net/login", {
       kind: "redirect",
@@ -329,7 +338,7 @@ describe("surface routing", () => {
     );
     expect(route?.kind).toBe("redirect");
     expect(route?.destination.toString()).toBe(
-      "https://account.frameos.net/backups",
+      "https://account.frameos.net/frames/settings/backups",
     );
   });
 });

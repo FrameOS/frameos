@@ -28,22 +28,21 @@ function scenesUrl(frameId?: FrameId, sceneId?: string): string {
   return getRouteBasePath() + '/scenes' + (frameId ? '/' + frameId : '') + (frameId && sceneId ? '/' + sceneId : '')
 }
 
-// On the cloud the global settings (service API keys, SSH keys) are a tab of
-// the account pages, not a scene of this SPA. The finished URL is injected
-// by the server (cloud/apps/auth-web/app/frames/[[...path]]/route.ts —
-// cloud_settings_url) because the account surface may live on another origin
-// and shortens /account/* on a split-host deployment; the fallback is only
-// for a shell served without injection.
-function cloudAccountSettingsUrl(): string {
-  const injected = typeof window !== 'undefined' ? (window as any).FRAMEOS_APP_CONFIG?.cloud_settings_url : undefined
-  return typeof injected === 'string' && injected ? injected : '/account/settings'
-}
-
-// The account's usage page (quotas, AI usage), beside the settings page on
-// the same account surface: the injected settings URL with its last segment
-// swapped, so the split-host shortening it already carries holds.
-function cloudAccountUsageUrl(): string {
-  return cloudAccountSettingsUrl().replace(/\/settings\/?$/, '/usage')
+// The global settings page. Self-hosted it is one long page of anchored
+// sections (/settings#settings-openai). On the cloud it is a set of pages —
+// the account's backends, service keys, SSH keys, usage, backups, activity,
+// security and developer pages (scenes/settings/account/accountPages.ts) —
+// each at /frames/settings/<page>; the bare /frames/settings lands on the
+// first. Both live under the SPA's own mount, so the rail gear is an
+// in-app route on every control plane.
+function settingsUrl(page?: string): string {
+  if (isInFrameAdminMode()) {
+    return frameControlUrl('settings')
+  }
+  // `:page` is the router pattern (scenes.tsx); encoding it would register
+  // `/settings/%3Apage` and the page routes would never match.
+  const segment = page ? '/' + (page.startsWith(':') ? page : encodeURIComponent(page)) : ''
+  return getRouteBasePath() + '/settings' + segment
 }
 
 function frameControlUrl(tool?: string): string {
@@ -55,8 +54,8 @@ function frameControlScenesUrl(sceneId?: string): string {
 }
 
 export const urls = {
-  /** Cloud only: the account's usage page. */
-  accountUsage: () => cloudAccountUsageUrl(),
+  /** Cloud only: the account's usage page (quotas, AI usage). */
+  accountUsage: () => settingsUrl('usage'),
   frames: () =>
     isInFrameAdminMode() ? getRouteBasePath() + frameAdminPath() : getRouteBasePath() ? getRouteBasePath() : '/',
   frame: frameUrl,
@@ -75,12 +74,7 @@ export const urls = {
     getRouteBasePath() + '/photos' + (folder ? '?' + new URLSearchParams({ folder }).toString() : ''),
   systemApps: (keyword?: string | null) =>
     getRouteBasePath() + '/apps/system' + (keyword ? '/' + encodeURIComponent(keyword) : ''),
-  settings: () =>
-    isInFrameAdminMode()
-      ? frameControlUrl('settings')
-      : isCloudMode()
-      ? cloudAccountSettingsUrl()
-      : getRouteBasePath() + '/settings',
+  settings: settingsUrl,
   login: () => getRouteBasePath() + '/login',
   logout: () => getRouteBasePath() + '/logout',
   signup: () => getRouteBasePath() + '/signup',

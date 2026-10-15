@@ -81,15 +81,20 @@ export function preloadSceneComponent(scene: LoadableSceneKey): void {
 // page, and the shell's rail — which compares that scene with the mode the
 // rendered page passed it — showed the Frame button as forever pending.
 //
-// The settings scene is not registered at all where it never renders: on the
-// cloud the settings page is an account page (urls.settings() links out to
-// it), and in frame-admin mode urls.settings() IS a frame tool path
-// (/frames/<id>/settings) that the frame scene renders.
+// The settings scene is one page of anchored sections self-hosted and a set
+// of pages on the cloud (/frames/settings/<page>, see
+// settings/account/accountPages.ts). It is not registered in frame-admin
+// mode, where urls.settings() IS a frame tool path (/frames/<id>/settings)
+// that the frame scene renders.
 export const getRoutes = () =>
   ({
     ...(getRouteBasePath() ? { [getRouteBasePath() + '/']: 'frames' } : {}),
     [urls.frames()]: isInFrameAdminMode() ? 'frame' : 'frames',
-    ...(isInFrameAdminMode() || isCloudMode() ? {} : { [urls.settings()]: 'settings' }),
+    ...(isInFrameAdminMode()
+      ? {}
+      : isCloudMode()
+      ? { [urls.settings()]: 'settings', [urls.settings(':page')]: 'settings' }
+      : { [urls.settings()]: 'settings' }),
     [urls.scenes()]: 'sceneWorkspace',
     [urls.scenes(':frameId')]: 'sceneWorkspace',
     [urls.scenes(':frameId', ':sceneId')]: 'sceneWorkspace',

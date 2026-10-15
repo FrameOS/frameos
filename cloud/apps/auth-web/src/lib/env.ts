@@ -131,19 +131,48 @@ function safeOrigin(url: string): string | undefined {
   }
 }
 
+// The account's pages are scenes of the frames workspace SPA since 2026.10
+// (frontend/src/scenes/settings/account/accountPages.ts): one route each
+// under /frames/settings. These are the old /account/<section> app routes
+// (and their clean split-host spellings, /backends and the like) mapped
+// onto them, so every link built with getAccountUrl("/account/…") — and
+// every bookmark the surface router (surfaces.ts) redirects — lands on the
+// right page. The SPA's own keys are the public URL segments; a new page
+// is a row here AND an entry in the SPA's list, which the cloud-frames
+// routes test keeps in step.
+export const accountSectionSpaPaths: ReadonlyMap<string, string> = new Map([
+  ["/account", "/frames/settings"],
+  ["/account/installs", "/frames/settings/backends"],
+  ["/account/settings", "/frames/settings/services"],
+  ["/account/usage", "/frames/settings/usage"],
+  // AI usage moved onto the usage page in 2026.10; the anchor still lands.
+  ["/account/ai", "/frames/settings/usage#ai"],
+  ["/account/backups", "/frames/settings/backups"],
+  ["/account/activity", "/frames/settings/activity"],
+  ["/account/security", "/frames/settings/security"],
+  ["/account/developer", "/frames/settings/developer"],
+]);
+
 export function getAccountPath(path: string) {
+  // A fragment or a query rides along: "/account/usage#ai" is the usage
+  // page's AI anchor, which the map above may itself carry.
+  const suffixAt = path.search(/[?#]/);
+  const bare = suffixAt === -1 ? path : path.slice(0, suffixAt);
+  const suffix = suffixAt === -1 ? "" : path.slice(suffixAt);
+  const spaPath = accountSectionSpaPaths.get(bare.replace(/\/+$/, "") || "/");
+  if (spaPath) {
+    return spaPath.includes("#") && suffix.startsWith("#") ? spaPath.slice(0, spaPath.indexOf("#")) + suffix : spaPath + suffix;
+  }
+
   // Only local development runs every surface on one origin; there the
-  // /account/* app routes are the real URLs and nothing shortens. In
-  // production the account surface shares the cloud origin (with scenes on
-  // its own host), and clean paths still apply.
+  // remaining /account/* app routes are the real URLs and nothing shortens.
+  // In production the account surface shares the cloud origin (with scenes
+  // on its own host), and clean paths still apply.
   if (getAppOrigins().size === 1) {
     return path;
   }
 
-  if (path === "/account" || path === "/account/installs") {
-    return "/backends";
-  }
-  if (path.startsWith("/account/")) {
+  if (bare.startsWith("/account/")) {
     return path.slice("/account".length);
   }
   return path;
@@ -151,6 +180,11 @@ export function getAccountPath(path: string) {
 
 export function getAccountUrl(path = "/account") {
   return new URL(getAccountPath(path), getAccountBaseUrl()).toString();
+}
+
+// The settings pages of the fleet workspace (the former account pages).
+export function getAccountSettingsUrl(page?: string) {
+  return getAccountUrl(page ? `/frames/settings/${page}` : "/account");
 }
 
 // The fleet workspace SPA (app/frames/[[...path]]) — the one and only frames

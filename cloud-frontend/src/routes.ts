@@ -41,15 +41,14 @@ export function cloudSceneUrl(frameId: string, sceneId?: string): string {
 }
 
 /**
- * The account settings page (service API keys, SSH keys). An account page,
- * not a scene of this SPA — the path only; Next.js server code links to it
- * through getAccountUrl("/account/settings"), which knows the split-host
- * shortening, and the SPA reads the finished URL from the injected
- * cloud_settings_url (frontend/src/urls.ts). The old /frames/settings scene
- * is redirected here by the [[...path]] route.
+ * The account's settings pages, scenes of this SPA: /frames/settings/<page>
+ * (frontend/src/scenes/settings/account/accountPages.ts lists the pages;
+ * the bare path lands on the first). Next.js server code links to them
+ * through getAccountUrl("/account/<section>"), whose table maps the old
+ * account sections onto these.
  */
-export function cloudSettingsUrl(): string {
-  return '/account/settings'
+export function cloudSettingsUrl(page?: string): string {
+  return page ? `${cloudRouteBasePath}/settings/${encodeURIComponent(page)}` : `${cloudRouteBasePath}/settings`
 }
 
 /**

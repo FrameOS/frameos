@@ -163,7 +163,7 @@ export function registerAccountTools(server: McpServer, ctx: ToolContext) {
     {
       annotations: { readOnlyHint: true },
       description:
-        "List the account's personal API tokens (name, hint, access, last use, expiry). Secrets are never returned; new tokens are created in the browser at /account/developer.",
+        "List the account's personal API tokens (name, hint, access, last use, expiry). Secrets are never returned; new tokens are created in the browser on the frames workspace's Developer page (/frames/settings/developer).",
       inputSchema: {},
     },
     async () =>

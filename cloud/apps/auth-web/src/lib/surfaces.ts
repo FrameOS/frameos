@@ -25,13 +25,14 @@ const accountPagePrefixes = [
   "/device",
   "/frames",
 ] as const;
-// Every section in AccountNav needs a row here: the nav links to the clean
-// path (getAccountPath), and without a rewrite back to the app route the
-// clean path is a 404 in production — which is exactly how /ai shipped.
-const accountSectionRewrites = new Map([
+// The clean split-host spellings the account sections had until 2026.10
+// (/backends, /settings, …), when the sections became pages of the /frames
+// workspace SPA. Bookmarks and emails still carry them; each redirects to
+// its page through getAccountPath's table (env.ts accountSectionSpaPaths).
+const legacyAccountSectionPaths = new Map([
   ["/backends", "/account/installs"],
+  ["/installs", "/account/installs"],
   ["/usage", "/account/usage"],
-  // AI usage moved onto the usage page; the old clean path still lands.
   ["/ai", "/account/ai"],
   ["/settings", "/account/settings"],
   ["/backups", "/account/backups"],
@@ -92,6 +93,8 @@ function isLegacyMyScenesPath(pathname: string) {
   return pathname === "/scenes" || pathname === "/account/scenes";
 }
 
+// Only redirects today; "rewrite" stays in the shape so proxy.ts keeps its
+// branch for the next path that has to be served under another name.
 export type SurfaceRoute = {
   destination: URL;
   kind: "redirect" | "rewrite";
@@ -150,12 +153,9 @@ export function resolveSurfaceRoute(
       return redirectTo(requestUrl, account, cleanPath);
     }
     if (accountIsCloud) {
-      if (pathname === "/installs") {
-        return redirectTo(requestUrl, account, "/backends");
-      }
-      const internalPath = accountSectionRewrites.get(pathname);
-      if (internalPath) {
-        return rewriteTo(requestUrl, internalPath);
+      const legacyPath = legacyAccountSectionPaths.get(pathname);
+      if (legacyPath) {
+        return redirectTo(requestUrl, account, getAccountPath(legacyPath));
       }
     }
   }
@@ -197,28 +197,23 @@ export function resolveSurfaceRoute(
       }
       return redirectTo(requestUrl, account, cleanPath);
     }
-    if (pathname === "/installs") {
-      return redirectTo(requestUrl, account, "/backends");
-    }
-    const internalPath = accountSectionRewrites.get(pathname);
-    if (internalPath) {
-      return rewriteTo(requestUrl, internalPath);
+    const legacyPath = legacyAccountSectionPaths.get(pathname);
+    if (legacyPath) {
+      return redirectTo(requestUrl, account, getAccountPath(legacyPath));
     }
   }
 
   return undefined;
 }
 
-function redirectTo(source: URL, origin: URL, pathname: string): SurfaceRoute {
-  const destination = new URL(origin);
-  destination.pathname = pathname;
+function redirectTo(source: URL, origin: URL, path: string): SurfaceRoute {
+  // `path` may carry its own fragment (an account section that moved onto
+  // an anchor of a page); the request's own fragment never reaches a server
+  // anyway, and its query rides along.
+  const destination = new URL(path, origin);
   destination.search = source.search;
-  destination.hash = source.hash;
+  if (!destination.hash) {
+    destination.hash = source.hash;
+  }
   return { destination, kind: "redirect" };
-}
-
-function rewriteTo(source: URL, pathname: string): SurfaceRoute {
-  const destination = new URL(source);
-  destination.pathname = pathname;
-  return { destination, kind: "rewrite" };
 }

@@ -20,7 +20,9 @@ import {
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { getCloudBaseUrl } from "../../../../src/lib/env";
 import {
+  hasRecentAuth,
   recentApprovalMaxAgeSeconds,
   requireRecentAuth,
 } from "../../../../src/lib/recent-auth";
@@ -29,8 +31,12 @@ import { readSession } from "../../../../src/lib/session";
 export const runtime = "nodejs";
 
 // Personal API tokens (src/lib/api-tokens.ts). GET lists the live ones —
-// never the secret, only its hint. POST mints one and returns the secret
-// exactly once. Minting turns a browser session into a durable credential,
+// never the secret, only its hint — in two spellings: `tokens` (the
+// documented one, cloud/docs/mcp.md) and the self-hosted backend's listing
+// shape (`api_tokens` with `hint`, `live_count`, `can_create`, `mcp_url`),
+// which the shared SPA's Developer page reads on both control planes
+// (frontend/src/scenes/settings/apiTokensLogic.tsx). POST mints one and
+// returns the secret exactly once. Minting turns a browser session into a durable credential,
 // which is the same promotion approving a device link makes, so it asks for
 // the same recent proof of the credentials (2 h) — and it is never allowed
 // from a token itself: a leaked token must not be able to breed new ones.
@@ -51,11 +57,24 @@ export async function GET(request: NextRequest) {
   if (!db) {
     return response;
   }
+  const tokens = await listApiTokens(db, session.accountId);
+  // Minting needs a browser session that proved its credentials recently;
+  // the page shows the create form or the re-authentication link from this.
+  const recent = session.apiToken
+    ? false
+    : await hasRecentAuth(db, recentApprovalMaxAgeSeconds);
   return NextResponse.json({
+    api_tokens: tokens.map((token) => ({ ...token, hint: token.token_hint })),
+    can_create: recent,
     default_ttl_days: defaultApiTokenTtlDays,
+    live_count: tokens.length,
     max_tokens: maxApiTokensPerAccount,
     max_ttl_days: maxApiTokenTtlDays,
-    tokens: await listApiTokens(db, session.accountId),
+    mcp_url: new URL("/api/mcp", getCloudBaseUrl()).toString(),
+    password_required: false,
+    reauth_required: !session.apiToken && !recent,
+    token_example: "fc_api_…",
+    tokens,
   });
 }
 

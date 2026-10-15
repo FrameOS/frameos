@@ -33,7 +33,6 @@ import {
   workspaceLogic,
 } from './workspaceLogic'
 import { workspaceModeForScene, type WorkspaceMode } from './workspaceModes'
-import { AccountSettingsRailLink } from './AccountSettingsRailLink'
 import { framesModel } from '../../models/framesModel'
 import { frameHost } from '../../decorators/frame'
 import { frameLogic } from '../frame/frameLogic'
@@ -640,23 +639,19 @@ export function FrameosShell({
           >
             {theme === 'dark' ? <SunIcon className="h-7 w-7" /> : <MoonIcon className="h-7 w-7" />}
           </button>
-          {isCloudMode() ? (
-            <AccountSettingsRailLink />
-          ) : (
-            <NavButton
-              active={activeMode === 'settings'}
-              current={mode === 'settings'}
-              href={urls.settings()}
-              pending={pendingMode === 'settings'}
-              preloadScene="settings"
-              sidebarOpen={secondarySidebarOpen}
-              title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
-              onActiveClick={toggleSecondarySidebar}
-              onInactiveClick={prepareFirstLevelNavigation}
-            >
-              <Cog6ToothIcon className="h-8 w-8" />
-            </NavButton>
-          )}
+          <NavButton
+            active={activeMode === 'settings'}
+            current={mode === 'settings'}
+            href={urls.settings()}
+            pending={pendingMode === 'settings'}
+            preloadScene="settings"
+            sidebarOpen={secondarySidebarOpen}
+            title={secondarySidebarOpen && mode === 'settings' ? 'Hide settings panel' : 'Settings'}
+            onActiveClick={toggleSecondarySidebar}
+            onInactiveClick={prepareFirstLevelNavigation}
+          >
+            <Cog6ToothIcon className="h-8 w-8" />
+          </NavButton>
         </div>
         <div
           className={clsx(

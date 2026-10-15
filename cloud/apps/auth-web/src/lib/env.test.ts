@@ -13,6 +13,7 @@ import {
   getScenesBaseUrl,
   getSessionCookieDomain,
   hasGoogleOAuth,
+  getAccountSettingsUrl,
 } from "./env";
 
 const originalAppUrl = process.env.FRAMEOS_CLOUD_APP_URL;
@@ -62,27 +63,43 @@ describe("env", () => {
     expect(getScenesBaseUrl()).toBe("https://scenes.frameos.net");
   });
 
-  it("maps clean account paths only when the account origin is split", () => {
+  it("maps the account sections onto the frames workspace on every origin layout", () => {
     process.env.FRAMEOS_CLOUD_APP_URL = "http://localhost:3000";
     delete process.env.FRAMEOS_ACCOUNT_APP_URL;
     expect(getAccountBaseUrl()).toBe("http://localhost:3000");
+    // Single-origin dev: the sections still live in the SPA, only paths
+    // outside the table keep their raw /account/* form.
     expect(getAccountPath("/account/scenes")).toBe("/account/scenes");
-    expect(getAccountUrl("/account")).toBe("http://localhost:3000/account");
+    expect(getAccountUrl("/account")).toBe("http://localhost:3000/frames/settings");
+    expect(getAccountUrl("/account/settings")).toBe(
+      "http://localhost:3000/frames/settings/services",
+    );
 
     process.env.FRAMEOS_ACCOUNT_APP_URL = "https://account.frameos.net";
-    expect(getAccountPath("/account/installs")).toBe("/backends");
+    expect(getAccountPath("/account/installs")).toBe("/frames/settings/backends");
+    expect(getAccountPath("/account/installs/")).toBe("/frames/settings/backends");
     expect(getAccountPath("/account/scenes")).toBe("/scenes");
     expect(getAccountUrl("/account/scenes")).toBe(
       "https://account.frameos.net/scenes",
     );
+    // A fragment or a query rides along; the AI section moved onto the
+    // usage page's anchor, so a bare link to it gets that anchor.
+    expect(getAccountPath("/account/usage#ai")).toBe("/frames/settings/usage#ai");
+    expect(getAccountPath("/account/ai")).toBe("/frames/settings/usage#ai");
+    expect(getAccountPath("/account/ai#top")).toBe("/frames/settings/usage#top");
+    expect(getAccountPath("/account/backups?kind=frames")).toBe(
+      "/frames/settings/backups?kind=frames",
+    );
+    expect(getAccountSettingsUrl("developer")).toBe(
+      "https://account.frameos.net/frames/settings/developer",
+    );
+    expect(getAccountSettingsUrl()).toBe("https://account.frameos.net/frames/settings");
 
-    // Account merged into cloud with a split scenes host (production shape)
-    // still uses clean paths — only a fully single-origin dev setup keeps
-    // the raw /account/* routes.
+    // Account merged into cloud with a split scenes host (production shape).
     delete process.env.FRAMEOS_ACCOUNT_APP_URL;
     process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
     process.env.FRAMEOS_SCENES_APP_URL = "https://scenes.frameos.net";
-    expect(getAccountPath("/account/installs")).toBe("/backends");
+    expect(getAccountPath("/account/installs")).toBe("/frames/settings/backends");
     expect(getAccountUrl("/account/scenes")).toBe(
       "https://cloud.frameos.net/scenes",
     );

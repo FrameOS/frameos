@@ -92,9 +92,11 @@ export async function reauthenticatedResponse(
   });
   return NextResponse.json({
     ok: true,
+    // Without a safe return path, back to the workspace (the former account
+    // home redirects there anyway).
     redirect:
       (typeof returnTo === "string" ? safeAuthReturnPath(returnTo) : undefined) ??
-      "/account",
+      "/frames",
     ...extra,
   });
 }

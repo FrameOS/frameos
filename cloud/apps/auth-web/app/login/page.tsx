@@ -6,7 +6,7 @@ import {
   authCookieNames,
   safeAuthReturnPath,
 } from "../../src/lib/auth-cookies";
-import { getAccountUrl, hasGoogleOAuth } from "../../src/lib/env";
+import { getFramesUrl, hasGoogleOAuth } from "../../src/lib/env";
 import { readSession } from "../../src/lib/session";
 
 export const metadata = { title: "Sign in" };
@@ -31,7 +31,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   if (!error) {
     const session = await readSession();
     if (session) {
-      redirect(returnTo ?? getAccountUrl());
+      redirect(returnTo ?? getFramesUrl());
     }
   }
 
