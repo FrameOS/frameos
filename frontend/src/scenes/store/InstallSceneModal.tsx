@@ -12,19 +12,39 @@ import { installSceneLogic } from './installSceneLogic'
 // install. Mounted once per library page.
 export function InstallSceneModal(): JSX.Element | null {
   const { target, selectedFrameIds, installing, frameGroups, installableFrames } = useValues(installSceneLogic)
-  const { closeInstall, toggleFrame, install } = useActions(installSceneLogic)
+  const { closeInstall, toggleFrame, selectFrame, install } = useActions(installSceneLogic)
   if (!target) {
     return null
   }
   const selected = (id: (typeof installableFrames)[number]['id']) =>
     selectedFrameIds.some((candidate) => frameIdsEqual(candidate, id))
+  // A new scene goes on one frame; an install can go on several.
+  const single = target.kind !== 'install'
+  const title =
+    target.kind === 'install'
+      ? `Install "${target.template.name}"`
+      : target.kind === 'ai'
+      ? 'Create a scene with AI'
+      : 'New blank scene'
+  const prompt =
+    target.kind === 'install'
+      ? 'Choose the frames this scene should be installed on.'
+      : 'Choose the frame the new scene goes on. It opens in the editor; nothing is deployed until you save.'
+  const submitLabel =
+    target.kind === 'install'
+      ? selectedFrameIds.length > 1
+        ? `Install on ${selectedFrameIds.length} frames`
+        : 'Install'
+      : target.kind === 'ai'
+      ? 'Create with AI'
+      : 'Create'
   return (
     <Modal
       open
       onClose={closeInstall}
-      title={`Install "${target.template.name}"`}
+      title={title}
       footer={
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center justify-end gap-2 px-5 py-4">
           <button
             type="button"
             onClick={closeInstall}
@@ -39,22 +59,22 @@ export function InstallSceneModal(): JSX.Element | null {
             className="frameos-primary-action flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white disabled:opacity-50"
           >
             {installing ? <Spinner className="h-4 w-4" color="white" /> : null}
-            {selectedFrameIds.length > 1 ? `Install on ${selectedFrameIds.length} frames` : 'Install'}
+            {submitLabel}
           </button>
         </div>
       }
     >
       {installableFrames.length === 0 ? (
-        <p className="frameos-muted text-sm">
-          No frames to install on yet.{' '}
+        <p className="frameos-muted p-5 text-sm">
+          No frames yet.{' '}
           <a href={urls.frames()} className="font-semibold underline-offset-2 hover:underline">
             Add a frame
           </a>{' '}
           first.
         </p>
       ) : (
-        <div className="space-y-4">
-          <p className="frameos-muted text-sm">Choose the frames this scene should be installed on.</p>
+        <div className="space-y-4 p-5">
+          <p className="frameos-muted text-sm">{prompt}</p>
           {frameGroups.map((group) => (
             <div key={group.key}>
               <div className="frameos-muted mb-1 text-xs font-semibold uppercase tracking-wide">{group.label}</div>
@@ -68,9 +88,10 @@ export function InstallSceneModal(): JSX.Element | null {
                     )}
                   >
                     <input
-                      type="checkbox"
+                      type={single ? 'radio' : 'checkbox'}
+                      name={single ? 'install-scene-frame' : undefined}
                       checked={selected(frame.id)}
-                      onChange={() => toggleFrame(frame.id)}
+                      onChange={() => (single ? selectFrame(frame.id) : toggleFrame(frame.id))}
                       className="h-4 w-4"
                     />
                     <span className="min-w-0 flex-1 truncate font-medium">{frame.name || frameHost(frame)}</span>

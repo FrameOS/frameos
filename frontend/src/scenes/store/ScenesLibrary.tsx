@@ -11,15 +11,22 @@ import {
   BuildingStorefrontIcon,
   CloudIcon,
   DocumentPlusIcon,
+  EllipsisHorizontalIcon,
   FolderIcon,
+  PencilSquareIcon,
   SparklesIcon,
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 
+import { DropdownMenu } from '../../components/DropdownMenu'
+import { Modal } from '../../components/Modal'
 import { Spinner } from '../../components/Spinner'
+import { TextArea } from '../../components/TextArea'
+import { TextInput } from '../../components/TextInput'
 import type { RepositoryType, TemplateType } from '../../types'
 import { urls } from '../../urls'
+import { isCloudMode } from '../../utils/cloudMode'
 import { storeShelfForCategory } from '../../utils/storeCategories'
 import { Note, SceneTile, StoreShelves, TileGrid, scrollStoreToTop, watchVisibleShelf } from './StoreTiles'
 import {
@@ -323,8 +330,13 @@ function ActionCard({
 function StoreActionCards(): JSX.Element {
   const { storeOrigin, uploading, uploadError } = useValues(scenesLibraryLogic)
   const { uploadSceneZip } = useActions(scenesLibraryLogic)
+  const { openNewScene } = useActions(installSceneLogic)
   const [open, setOpen] = useState<'ai' | 'zip' | null>(null)
+  const [prompt, setPrompt] = useState('')
   const fileInput = useRef<HTMLInputElement>(null)
+  // The cloud's scene pages are the frame-less editor; a backend has none,
+  // so a new scene starts on one of its frames (the frame picker).
+  const local = !isCloudMode()
   const newSceneUrl = `${storeOrigin}/my-scenes/new`
   const canUpload = workspaceMode() !== 'frameAdmin'
   return (
@@ -332,7 +344,11 @@ function StoreActionCards(): JSX.Element {
       <div className="grid gap-3 @lg:grid-cols-3">
         <ActionCard
           title="Create a scene with AI"
-          description="Describe what you want on the display. The assistant builds it in the editor; you tweak it and save it to your scenes."
+          description={
+            local
+              ? 'Describe what you want on the display. The assistant builds it on a frame of your choice; you tweak it in the editor and save.'
+              : 'Describe what you want on the display. The assistant builds it in the editor; you tweak it and save it to your scenes.'
+          }
           icon={<SparklesIcon />}
           tint="gold"
           pressed={open === 'ai'}
@@ -340,10 +356,15 @@ function StoreActionCards(): JSX.Element {
         />
         <ActionCard
           title="New blank scene"
-          description="Start from an empty scene and build it yourself in the editor. The AI panel is there if you want it later."
+          description={
+            local
+              ? 'Start from an empty scene on a frame of your choice and build it yourself in the editor.'
+              : 'Start from an empty scene and build it yourself in the editor. The AI panel is there if you want it later.'
+          }
           icon={<DocumentPlusIcon />}
           tint="slate"
-          href={newSceneUrl}
+          href={local ? undefined : newSceneUrl}
+          onClick={local ? () => openNewScene(null) : undefined}
         />
         {canUpload ? (
           <ActionCard
@@ -362,14 +383,26 @@ function StoreActionCards(): JSX.Element {
       </div>
       {open === 'ai' ? (
         <form
-          action={newSceneUrl}
+          action={local ? undefined : newSceneUrl}
           method="get"
+          onSubmit={
+            local
+              ? (event) => {
+                  event.preventDefault()
+                  if (prompt.trim()) {
+                    openNewScene(prompt.trim())
+                  }
+                }
+              : undefined
+          }
           className="frameos-card flex flex-wrap items-center gap-2 rounded-2xl border p-3"
         >
           <input
             name="prompt"
             autoFocus
             maxLength={2000}
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
             placeholder="A clock with today's weather for Berlin, big text on dark green…"
             className="frameos-input h-11 min-w-0 flex-1 rounded-xl border px-3 text-sm outline-none focus:ring-2 focus:ring-blue-400"
           />
@@ -567,17 +600,74 @@ function CloudScenesPage(): JSX.Element {
   )
 }
 
+// A local saved scene's name and description.
+function EditLocalSceneModal(): JSX.Element | null {
+  const { editTemplateForm, savingTemplate, editTemplateError } = useValues(scenesLibraryLogic)
+  const { closeEditTemplate, setEditTemplateValues, saveEditTemplate } = useActions(scenesLibraryLogic)
+  if (!editTemplateForm) {
+    return null
+  }
+  const canSave = editTemplateForm.name.trim().length > 0 && !savingTemplate
+  return (
+    <Modal open onClose={closeEditTemplate} title="Edit scene">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (canSave) {
+            saveEditTemplate()
+          }
+        }}
+        className="space-y-4 p-5"
+      >
+        <label className="block">
+          <span className="frameos-muted mb-2 block text-sm font-semibold">Name</span>
+          <TextInput
+            autoFocus
+            value={editTemplateForm.name}
+            onChange={(name: string) => setEditTemplateValues({ name })}
+          />
+        </label>
+        <label className="block">
+          <span className="frameos-muted mb-2 block text-sm font-semibold">Description</span>
+          <TextArea
+            rows={4}
+            value={editTemplateForm.description}
+            onChange={(description: string) => setEditTemplateValues({ description })}
+          />
+        </label>
+        {editTemplateError ? <p className="text-sm text-red-600">{editTemplateError}</p> : null}
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={closeEditTemplate}
+            className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!canSave}
+            className="frameos-primary-action flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {savingTemplate ? <Spinner className="h-4 w-4" color="white" /> : null}
+            Save
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 function LocalScenesPage(): JSX.Element {
   const { localPageTemplates, templates, templatesLoading, search } = useValues(scenesLibraryLogic)
-  const { exportTemplate, removeTemplate } = useActions(scenesLibraryLogic)
-  const actionClass =
-    'frameos-form-control flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+  const { exportTemplate, removeTemplate, openEditTemplate } = useActions(scenesLibraryLogic)
   return (
     <>
       <PageHeader
         title={scenesLibraryPageLabel('local')}
-        description="Scenes saved on this backend. Install one from a frame's Add scene drawer, or download it as a zip."
+        description="Scenes saved on this backend. Install one on a frame, or download it as a zip."
       />
+      <EditLocalSceneModal />
       <div className="space-y-8">
         <StoreActionCards />
         {templatesLoading && templates.length === 0 ? (
@@ -602,22 +692,30 @@ function LocalScenesPage(): JSX.Element {
                   template.id ? (
                     <>
                       <InstallButton template={template} repository={null} />
-                      <button type="button" className={actionClass} onClick={() => exportTemplate(template.id!, 'zip')}>
-                        <ArrowDownTrayIcon className="h-4 w-4" />
-                        Download .zip
-                      </button>
-                      <button
-                        type="button"
-                        className={clsx(actionClass, 'text-red-600')}
-                        onClick={() => {
-                          if (window.confirm(`Delete "${template.name}" from this backend?`)) {
-                            removeTemplate(template.id!)
-                          }
-                        }}
-                      >
-                        <TrashIcon className="h-4 w-4" />
-                        Delete
-                      </button>
+                      <DropdownMenu
+                        buttonTitle="More"
+                        buttonContent={<EllipsisHorizontalIcon className="h-4 w-4" />}
+                        buttonColor="none"
+                        className="frameos-form-control h-7 w-7 items-center rounded-md border !px-0 !py-0 !shadow-none transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-400"
+                        items={[
+                          {
+                            label: 'Edit',
+                            icon: <PencilSquareIcon className="h-4 w-4" />,
+                            onClick: () => openEditTemplate(template),
+                          },
+                          {
+                            label: 'Download .zip',
+                            icon: <ArrowDownTrayIcon className="h-4 w-4" />,
+                            onClick: () => exportTemplate(template.id!, 'zip'),
+                          },
+                          {
+                            label: 'Delete',
+                            icon: <TrashIcon className="h-4 w-4" />,
+                            confirm: `Delete "${template.name}" from this backend?`,
+                            onClick: () => removeTemplate(template.id!),
+                          },
+                        ]}
+                      />
                     </>
                   ) : null
                 }
@@ -643,7 +741,7 @@ function InstalledSceneTile({ frame, scene }: { frame: FrameType; scene: { id: s
         thumb
         refreshable={false}
         objectFit="cover"
-        className="aspect-[4/3] w-full overflow-hidden bg-slate-500/10"
+        className="aspect-[4/3] w-full overflow-hidden bg-slate-800"
         wasmFallback={{ sceneId: scene.id }}
       />
       <div className="px-2.5 pt-1">
