@@ -143,6 +143,18 @@ uses QuickJS only to execute the resulting JavaScript.
 - Leaves error locations alone: with no generated source there is nothing to
   map, and QuickJS already names the app's own file and line.
 
+## App tests
+
+`app_tests.nim` runs an app's `<name>.test.ts` in the app's own interpreter:
+the prelude, then `app_test_harness.js` (describe / it / expect / mock /
+makeApp, as a script that wraps the prelude's `frameos` and `console`), then
+the test file as the main module, and `__frameosRunAppTests()` returns the
+report as JSON. The wasm build exports it as `frameos_wasm_run_app_tests`
+for the editor's Run button; `tests/test_js_app_tests.nim` runs every repo
+app's tests through it. A test file is never loaded on a frame: the app's
+main module does not import it, and the control planes strip `*.test.*`
+from what an ESP32 receives.
+
 ## Module Loading
 
 An app's `sources` map is the whole module graph. `app_runtime.nim` evaluates
@@ -202,6 +214,7 @@ Focused tests for this directory live in:
 - `src/frameos/js_runtime/tests/test_js_app_runtime.nim`
 - `src/frameos/js_runtime/tests/test_scene_runtime_cleanup.nim`
 - `src/frameos/js_runtime/tests/test_source_map_lines.nim`
+- `src/frameos/js_runtime/tests/test_js_app_tests.nim` (the test harness, and every repo app's own tests)
 
 TypeScript and JSX parsing itself is tested in the quickts repository
 (`make test-quickts` there). Add a case there when a construct fails to parse.

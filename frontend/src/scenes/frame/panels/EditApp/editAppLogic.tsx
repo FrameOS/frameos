@@ -23,6 +23,9 @@ import { validateNimSource, type SourceError } from '../../../../utils/validateN
 import { apiFetch } from '../../../../utils/apiFetch'
 import { diagramLogic } from '../Diagram/diagramLogic'
 import { buildAppTypeDeclarations } from '../../../../utils/appTypeDeclarations'
+import { appTestFiles, isAppTestFile } from '../../../../utils/appTestFiles'
+import { runAppTestFile, type AppTestReport } from '../../../../utils/appTestRunner'
+import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
 import {
   appOrigin,
   buildSceneApp,
@@ -41,6 +44,12 @@ import type { SceneApp } from '../../../../types'
 import type { NodeData } from '../../../../types'
 
 export interface ModelMarker extends editor.IMarkerData {}
+
+/** One run of a test file: in flight, the harness's report, or why it could not run. */
+export type AppTestRun =
+  | { status: 'running'; at: number }
+  | { status: 'done'; report: AppTestReport; at: number }
+  | { status: 'failed'; error: string; at: number }
 
 export interface EditAppLogicProps {
   frameId: FrameId
@@ -66,8 +75,11 @@ function firstSourceFile(sources: Record<string, string>): string {
 export interface editAppLogicValues {
   apps: Record<string, AppConfig> // appsLogic
   scene: FrameScene | null // diagramLogic
+  frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
   activeFile: string
+  activeFileIsTest: boolean
+  activeTestRun: AppTestRun | null
   app: Node<AppNodeData, 'app'> | null
   appData: AppNodeData | null
   appTypeDeclarations: string
@@ -88,6 +100,8 @@ export interface editAppLogicValues {
   sourceErrors: Record<string, SourceError[]>
   sources: Record<string, string>
   sourcesLoading: boolean
+  testFiles: string[]
+  testRuns: Record<string, AppTestRun>
   title: string
 }
 
@@ -111,6 +125,9 @@ export interface editAppLogicActions {
   } // frameLogic
   addFile: () => {
     value: true
+  }
+  clearTestRun: (file: string) => {
+    file: string
   }
   deleteFile: (file: string) => {
     file: string
@@ -142,6 +159,9 @@ export interface editAppLogicActions {
   resetEnhanceSuggestion: () => {
     value: true
   }
+  runTests: (file: string) => {
+    file: string
+  }
   saveChanges: () => {
     value: true
   }
@@ -157,6 +177,13 @@ export interface editAppLogicActions {
   ) => {
     errors: SourceError[]
     file: string
+  }
+  setTestRun: (
+    file: string,
+    run: AppTestRun
+  ) => {
+    file: string
+    run: AppTestRun
   }
   updateFile: (
     file: string,
@@ -198,6 +225,9 @@ export interface editAppLogicMeta {
     changedFiles: (sources: Record<string, string>, initialSources: Record<string, string>) => Record<string, boolean>
     configJson: (sources: Record<string, string>) => Partial<AppConfig> | null
     appTypeDeclarations: (configJson: Partial<AppConfig> | null) => string
+    testFiles: (sources: Record<string, string>) => string[]
+    activeFileIsTest: (activeFile: string) => boolean
+    activeTestRun: (testRuns: Record<string, AppTestRun>, activeFile: string) => AppTestRun | null
     title: (
       savedKeyword: string | null,
       nodeId: string,
@@ -221,7 +251,7 @@ export const editAppLogic = kea<editAppLogicType>([
     actions: [frameLogic({ frameId }), ['updateNodeData', 'updateScene']],
     values: [
       frameLogic({ frameId }),
-      ['frameForm'],
+      ['frame', 'frameForm'],
       appsLogic({ frameId }),
       ['apps'],
       diagramLogic({ frameId, sceneId }),
@@ -241,6 +271,10 @@ export const editAppLogic = kea<editAppLogicType>([
     resetEnhanceSuggestion: true,
     addFile: true,
     deleteFile: (file: string) => ({ file }),
+    /** Run one test file (`<name>.test.ts`) in the frameos-wasm interpreter and keep its report. */
+    runTests: (file: string) => ({ file }),
+    setTestRun: (file: string, run: AppTestRun) => ({ file, run }),
+    clearTestRun: (file: string) => ({ file }),
   }),
   selectors({
     app: [
@@ -348,6 +382,22 @@ export const editAppLogic = kea<editAppLogicType>([
         setSourceErrors: (state, { file, errors }) => ({ ...state, [file]: errors }),
       },
     ],
+    testRuns: [
+      {} as Record<string, AppTestRun>,
+      {
+        setTestRun: (state, { file, run }) => ({ ...state, [file]: run }),
+        clearTestRun: (state, { file }) => {
+          const next = { ...state }
+          delete next[file]
+          return next
+        },
+        deleteFile: (state, { file }) => {
+          const next = { ...state }
+          delete next[file]
+          return next
+        },
+      },
+    ],
   })),
   selectors({
     requiresCompiledOnSave: [
@@ -393,6 +443,12 @@ export const editAppLogic = kea<editAppLogicType>([
     appTypeDeclarations: [
       (s) => [s.configJson],
       (configJson: editAppLogicValues['configJson']): string => buildAppTypeDeclarations(configJson),
+    ],
+    testFiles: [(s) => [s.sources], (sources: Record<string, string>): string[] => appTestFiles(sources)],
+    activeFileIsTest: [(s) => [s.activeFile], (activeFile: string): boolean => isAppTestFile(activeFile)],
+    activeTestRun: [
+      (s) => [s.testRuns, s.activeFile],
+      (testRuns: Record<string, AppTestRun>, activeFile: string): AppTestRun | null => testRuns[activeFile] ?? null,
     ],
     title: [
       (s, p) => [s.savedKeyword, p.nodeId, s.apps, s.sceneApp, s.configJson],
@@ -528,8 +584,35 @@ export const editAppLogic = kea<editAppLogicType>([
       }
       actions.setSourceErrors(file, errors ?? [])
     },
+    runTests: async ({ file }) => {
+      if (!isAppTestFile(file) || !(file in values.sources)) {
+        return
+      }
+      actions.setTestRun(file, { status: 'running', at: Date.now() })
+      try {
+        const report = await runAppTestFile({
+          sources: values.sources,
+          testFile: file,
+          frame: {
+            width: values.frameForm?.width ?? values.frame?.width,
+            height: values.frameForm?.height ?? values.frame?.height,
+            timezone: values.frameForm?.timezone ?? values.frame?.timezone,
+          },
+          embedded: isEsp32Frame(values.frame),
+        })
+        actions.setTestRun(file, { status: 'done', report, at: Date.now() })
+      } catch (error) {
+        actions.setTestRun(file, {
+          status: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+          at: Date.now(),
+        })
+      }
+    },
     addFile: () => {
-      const fileName = window.prompt('Enter file name (e.g. helper.ts, icons.tsx, data.json)')?.trim()
+      const fileName = window
+        .prompt('Enter file name (e.g. helper.ts, icons.tsx, data.json, or app.test.ts for tests)')
+        ?.trim()
       if (!fileName) {
         return
       }

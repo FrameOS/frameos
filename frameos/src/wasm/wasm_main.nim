@@ -20,6 +20,7 @@ import frameos/planner
 import frameos/utils/image as frameos_image
 import frameos/utils/memory
 import frameos/js_runtime/runtime as jsRuntime
+import frameos/js_runtime/app_tests
 import lib/tz
 import frameos/version
 
@@ -48,6 +49,7 @@ var
   sceneStateBuffer: string
   lastErrorBuffer: string
   versionBuffer: string
+  appTestsBuffer: string
   # Backend-persisted scene state, seeded via frameos_wasm_set_scene_state
   # before the scene's first render and merged into scene.state at init.
   pendingSceneStates = initTable[string, JsonNode]()
@@ -422,6 +424,20 @@ proc frameos_wasm_scene_state(): cstring {.exportc, cdecl.} =
 
 proc frameos_wasm_last_error(): cstring {.exportc, cdecl.} =
   lastErrorBuffer.cstring
+
+proc frameos_wasm_run_app_tests(appJson: cstring, testFile: cstring): cstring {.exportc, cdecl.} =
+  ## Run one test file of a JavaScript app (`appJson`: the app as a scene
+  ## carries it, or just `{"sources": {...}}`) in this runtime's interpreter
+  ## and return the report (js_runtime/app_tests.nim) as JSON. Needs
+  ## frameos_wasm_init first, for the frame the tests see.
+  try:
+    let app = parseJson($appJson)
+    let sources = if app.kind == JObject and app.hasKey("sources"): app["sources"] else: app
+    appTestsBuffer = $runJsAppTests(sources, $testFile, frameConfig)
+  except Exception as e:
+    appTestsBuffer = $(%*{"ok": false, "error": "could not run the tests: " & e.msg,
+      "counts": {"passed": 0, "failed": 0, "skipped": 0, "total": 0}, "durationMs": 0, "children": [], "logs": []})
+  appTestsBuffer.cstring
 
 # The FrameOS version this runtime was built from, in the same published form
 # a frame reports ("2026.9.0", no build hash) — so a preview can say which

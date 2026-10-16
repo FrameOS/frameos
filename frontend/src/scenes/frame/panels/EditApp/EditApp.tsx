@@ -9,7 +9,11 @@ import schema from '../../../../../schema/config_json.json'
 import type { editor as importedEditor } from 'monaco-editor'
 import type { Monaco } from '@monaco-editor/react'
 import clsx from 'clsx'
-import { TrashIcon } from '@heroicons/react/24/solid'
+import { PlayIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { Spinner } from '../../../../components/Spinner'
+import { appTestTypeDeclarations } from '../../../../utils/appTypeDeclarations'
+import { isAppTestFile } from '../../../../utils/appTestFiles'
+import { AppTestReportView, reportSummary } from './AppTestReportView'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { javascriptAppSourceFiles } from '../../../../utils/sceneApps'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
@@ -164,8 +168,8 @@ export function EditAppFileList({ sceneId, nodeId, className, onSelectFile }: Ed
     nodeId,
   }
   const logic = editAppLogic(logicProps)
-  const { filenames, sourcesLoading, activeFile, changedFiles, modelMarkers } = useValues(logic)
-  const { setActiveFile, addFile, deleteFile } = useActions(logic)
+  const { filenames, sourcesLoading, activeFile, changedFiles, modelMarkers, testRuns } = useValues(logic)
+  const { setActiveFile, addFile, deleteFile, runTests } = useActions(logic)
 
   if (sourcesLoading) {
     return (
@@ -209,7 +213,32 @@ export function EditAppFileList({ sceneId, nodeId, className, onSelectFile }: Ed
             >
               {changedFiles[file] ? '* ' : ''}
               {file}
+              {testRuns[file]?.status === 'done' ? (
+                <span
+                  className={clsx(
+                    'ml-1.5 inline-block h-2 w-2 rounded-full align-middle',
+                    testRuns[file].report.ok ? 'bg-emerald-500' : 'bg-red-500'
+                  )}
+                  title={reportSummary(testRuns[file].report)}
+                />
+              ) : null}
             </button>
+            {isAppTestFile(file) ? (
+              <button
+                type="button"
+                onClick={() => runTests(file)}
+                disabled={testRuns[file]?.status === 'running'}
+                title="Run these tests in the FrameOS runtime"
+                aria-label={`Run ${file}`}
+                className="app-file-action frameos-icon-button flex h-8 w-8 shrink-0 items-center justify-center rounded-lg !px-0 !py-0 shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-50"
+              >
+                {testRuns[file]?.status === 'running' ? (
+                  <Spinner className="h-4 w-4" />
+                ) : (
+                  <PlayIcon className="h-4 w-4" />
+                )}
+              </button>
+            ) : null}
             {[...javascriptAppSourceFiles, 'app.nim', 'config.json'].includes(file) ? null : (
               <DropdownMenu
                 buttonColor="none"
@@ -268,8 +297,10 @@ export function EditApp({
     appTypeDeclarations,
     scene,
     hasChanges,
+    activeFileIsTest,
+    activeTestRun,
   } = useValues(logic)
-  const { forkAndSaveChanges, updateFile, saveChanges, discardChanges } = useActions(logic)
+  const { forkAndSaveChanges, updateFile, saveChanges, discardChanges, runTests } = useActions(logic)
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
@@ -347,6 +378,15 @@ export function EditApp({
         appTypeDeclarations,
         inmemoryModelPath('app-editor', [nodeId], 'frameos-app-javascript.d.ts')
       ),
+      // What a test file can use on top: describe, it, expect, mock, makeApp.
+      monaco.languages.typescript.typescriptDefaults.addExtraLib(
+        appTestTypeDeclarations,
+        inmemoryModelPath('app-editor', [nodeId], 'frameos-app-tests-typescript.d.ts')
+      ),
+      monaco.languages.typescript.javascriptDefaults.addExtraLib(
+        appTestTypeDeclarations,
+        inmemoryModelPath('app-editor', [nodeId], 'frameos-app-tests-javascript.d.ts')
+      ),
     ]
 
     return () => {
@@ -417,6 +457,32 @@ export function EditApp({
             </Button>
           </div>
         ) : null}
+        {activeFileIsTest ? (
+          <div className="edit-app-toolbar flex shrink-0 items-center gap-2 text-xs">
+            <div className="frameos-muted min-w-0 flex-1 truncate">
+              {activeTestRun?.status === 'done'
+                ? reportSummary(activeTestRun.report)
+                : activeTestRun?.status === 'running'
+                ? 'Running…'
+                : 'Tests run in the FrameOS runtime, with every request mocked.'}
+            </div>
+            <Button
+              size="tiny"
+              color="primary"
+              onClick={() => runTests(activeFile)}
+              disabled={activeTestRun?.status === 'running'}
+              className="flex shrink-0 items-center gap-1 whitespace-nowrap !px-2 !text-xs"
+              title="Run these tests in the FrameOS runtime"
+            >
+              {activeTestRun?.status === 'running' ? (
+                <Spinner className="h-3 w-3" color="white" />
+              ) : (
+                <PlayIcon className="h-3 w-3" />
+              )}
+              Run tests
+            </Button>
+          </div>
+        ) : null}
         <div className="frameos-inset overflow-hidden rounded-md border font-mono text-sm w-full flex-1">
           <Editor
             height="100%"
@@ -434,6 +500,11 @@ export function EditApp({
             }}
           />
         </div>
+        {activeFileIsTest && activeTestRun ? (
+          <div className="frameos-inset app-test-report max-h-[45%] shrink-0 overflow-auto rounded-md border">
+            <AppTestReportView run={activeTestRun} />
+          </div>
+        ) : null}
       </div>
     </div>
   )

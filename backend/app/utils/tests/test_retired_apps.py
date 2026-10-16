@@ -97,3 +97,30 @@ def test_retired_app_config_is_the_replacements_config():
     assert retired_app_config("data/frameOSGallery").get("settings") is None
     assert retired_app_config("data/clock") is None
     assert retired_app_config(None) is None
+
+
+def test_embedded_runtime_gets_no_app_test_files():
+    """An ESP32 keeps every scene in 512 KiB and never runs an app's tests
+    (docs/js-apps-and-code-nodes.md, "Testing an app")."""
+    from app.utils.retired_apps import is_app_test_file, scenes_for_embedded_runtime, strip_app_test_files
+
+    assert is_app_test_file("app.test.ts")
+    assert is_app_test_file("lib/Helper.TEST.tsx")
+    assert not is_app_test_file("app.ts")
+    assert not is_app_test_file("test.ts")
+    scenes = [
+        {
+            "id": "a",
+            "apps": {
+                "panel": {"sources": {"app.ts": "x", "app.test.ts": "y", "util.test.js": "z", "config.json": "{}"}},
+                "odd": {"sources": "not a map"},
+            },
+        },
+        {"id": "b"},
+        "not a scene",
+    ]
+    stripped = scenes_for_embedded_runtime(scenes, "2026.10.15")
+    assert stripped[0]["apps"]["panel"]["sources"] == {"app.ts": "x", "config.json": "{}"}
+    # A copy: the stored scene keeps its tests.
+    assert "app.test.ts" in scenes[0]["apps"]["panel"]["sources"]
+    assert strip_app_test_files([]) == []

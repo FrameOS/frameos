@@ -12,6 +12,7 @@ import type {
   PreviewFrame,
   PreviewRuntimeInfo,
   SceneInfo,
+  AppTestReport,
 } from './types'
 
 /** What a render cost under a simulated device ceiling. */
@@ -115,6 +116,11 @@ interface PendingFrame {
   buffer: ArrayBuffer
 }
 
+interface PendingAppTestsRequest {
+  resolve: (report: AppTestReport) => void
+  reject: (error: Error) => void
+}
+
 interface PendingAssetRequest {
   resolve: (result: Record<string, any>) => void
   reject: (error: Error) => void
@@ -128,6 +134,8 @@ export class FrameOSPreview {
   private destroyed = false
   private assetRequests = new Map<number, PendingAssetRequest>()
   private nextAssetRequestId = 1
+  private appTestsRequests = new Map<number, PendingAppTestsRequest>()
+  private nextAppTestsRequestId = 1
 
   /** Latest scene info from the runtime (set once `ready` fires). */
   sceneInfo: SceneInfo | null = null
@@ -235,6 +243,18 @@ export class FrameOSPreview {
       case 'assetsChanged':
         this.options.onAssetsChanged?.()
         break
+      case 'appTestsResult': {
+        const pending = this.appTestsRequests.get(msg.requestId)
+        if (pending) {
+          this.appTestsRequests.delete(msg.requestId)
+          if (msg.ok) {
+            pending.resolve(msg.report as AppTestReport)
+          } else {
+            pending.reject(new Error(String(msg.error ?? 'could not run the app tests')))
+          }
+        }
+        break
+      }
       case 'assetsResult': {
         const pending = this.assetRequests.get(msg.requestId)
         if (!pending) {
@@ -356,6 +376,29 @@ export class FrameOSPreview {
   setFastMode(enabled: boolean): void {
     this.fastMode = enabled
     this.worker?.postMessage({ type: 'setFastMode', enabled })
+  }
+
+  /**
+   * Run one test file of a JavaScript app (`<name>.test.ts` among its
+   * sources) in this runtime's interpreter, with the frame this preview was
+   * given, and resolve with the harness's report. Rejects when the file does
+   * not load or the bundle predates app tests (FrameOS 2026.10.16).
+   */
+  runAppTests(app: { sources: Record<string, string> }, testFile: string): Promise<AppTestReport> {
+    return new Promise((resolve, reject) => {
+      if (!this.worker || this.destroyed) {
+        reject(new Error('preview is not running'))
+        return
+      }
+      const requestId = this.nextAppTestsRequestId++
+      this.appTestsRequests.set(requestId, { resolve, reject })
+      this.worker.postMessage({
+        type: 'runAppTests',
+        requestId,
+        appJson: JSON.stringify({ sources: app.sources }),
+        testFile,
+      })
+    })
   }
 
   private assetRequest(

@@ -222,7 +222,7 @@
       "photoAlbum": {
         "origin": "repo/apps/image/photoAlbum",
         "keys": ["cache", "category", "description", "fields", "name", "origin", "output", "sources", "version"],
-        "files": ["app.ts", "config.json"]
+        "files": ["app.test.ts", "app.ts", "config.json"]
       }
     }
   }

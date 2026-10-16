@@ -639,6 +639,15 @@ declare const frameos: {
   remember(key: string, value: FrameOSJson): boolean;
   recall(key: string): FrameOSJson | undefined;
 };
+
+/** console.log and friends log like frameos.log; warn says so; error goes to the error log (FrameOS 2026.10.16+). */
+declare const console: {
+  log(...args: any[]): void;
+  info(...args: any[]): void;
+  debug(...args: any[]): void;
+  warn(...args: any[]): void;
+  error(...args: any[]): void;
+};
 ```
 <!-- END GENERATED: js-api -->
 

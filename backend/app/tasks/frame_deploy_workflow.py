@@ -58,7 +58,7 @@ from app.utils.frame_http import _fetch_frame_http_bytes
 from app.utils.remote_exec import upload_file
 from app.utils.ssh_authorized_keys import _install_authorized_keys
 from app.utils.ssh_key_utils import normalize_ssh_keys, select_ssh_keys_for_frame
-from app.utils.retired_apps import frame_runtime_version, scenes_for_runtime
+from app.utils.retired_apps import frame_runtime_version, scenes_for_embedded_runtime
 from app.utils.versions import current_frameos_version, current_remote_version, version_tuple
 
 REMOTE_RUNTIME_APT_PACKAGES = ("hostapd",)
@@ -1125,7 +1125,7 @@ class FrameDeployWorkflow:
     async def _upload_embedded_scenes_and_reload(self, frame: Frame) -> None:
         # As this firmware reads them: one that predates a retired Nim app's
         # replacement gets the Nim keyword (utils/retired_apps.py).
-        scenes = scenes_for_runtime(
+        scenes = scenes_for_embedded_runtime(
             frame.scenes if isinstance(frame.scenes, list) else [], frame_runtime_version(frame)
         )
         payload = json.dumps(scenes, separators=(",", ":")).encode("utf-8")

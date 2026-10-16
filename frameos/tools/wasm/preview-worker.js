@@ -906,7 +906,40 @@ self.onmessage = (ev) => {
     case 'assets':
       void handleAssetsRequest(msg)
       break
+    case 'runAppTests':
+      handleRunAppTests(msg)
+      break
     default:
       break
+  }
+}
+
+// {type: 'runAppTests', requestId, appJson, testFile} -> {type: 'appTestsResult',
+// requestId, ok, report | error}: one test file of a JavaScript app, run in
+// this runtime's interpreter (src/frameos/js_runtime/app_tests.nim). Needs the
+// init that loaded the scenes; the tests see the frame it was given.
+function handleRunAppTests(msg) {
+  const requestId = msg.requestId
+  if (!Module) {
+    post({ type: 'appTestsResult', requestId, ok: false, error: 'the preview runtime is not running' })
+    return
+  }
+  if (typeof Module._frameos_wasm_run_app_tests !== 'function') {
+    post({
+      type: 'appTestsResult',
+      requestId,
+      ok: false,
+      error: 'This FrameOS runtime bundle cannot run app tests; it needs FrameOS 2026.10.16 or newer.',
+    })
+    return
+  }
+  try {
+    const text = call('frameos_wasm_run_app_tests', 'string', ['string', 'string'], [
+      String(msg.appJson || '{}'),
+      String(msg.testFile || ''),
+    ])
+    post({ type: 'appTestsResult', requestId, ok: true, report: JSON.parse(text) })
+  } catch (e) {
+    post({ type: 'appTestsResult', requestId, ok: false, error: String(e && e.message ? e.message : e) })
   }
 }
