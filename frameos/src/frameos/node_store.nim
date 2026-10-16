@@ -25,14 +25,19 @@ when defined(frameosEmbedded):
 else:
   import frameos/utils/system
 
+  const HostFreeMarginBytes = 100 * 1024 * 1024
+    ## What a write must leave free on a host's card, the margin saveAsset and
+    ## writeAsset already keep.
+
+proc renameEntry(source, destination: cstring): cint {.importc: "rename", header: "<stdio.h>".}
+  ## libc's rename, not std/os moveFile: moveFile's copy fallback handles
+  ## symlinks, and ESP-IDF's newlib has no `symlink` to link against.
+
 const
   NodeStoreFileMaxBytes* = when defined(frameosEmbedded): 512 * 1024 else: 32 * 1024 * 1024
     ## The largest file one node may keep. On the ESP32 it is the same ceiling
     ## as a node's `frameos.remember` budget; the state partition also holds
     ## the scene store, and the free-space check below keeps its margin.
-  HostFreeMarginBytes = 100 * 1024 * 1024
-    ## What a write must leave free on a host's card, the margin saveAsset and
-    ## writeAsset already keep.
   SaneClockEpoch* = 1704067200.0
     ## 2024-01-01. Before the clock is set (an ESP32's cold boot ahead of
     ## SNTP) the time says 1970: a value stored then would look 50 years old
@@ -133,7 +138,8 @@ proc writeNodeStoreFile*(path, contents: string): string =
       # SPIFFS will not rename onto an existing name.
       if fileExists(path):
         removeFile(path)
-    moveFile(temp, path)
+    if renameEntry(temp.cstring, path.cstring) != 0:
+      raise newException(OSError, osErrorMsg(osLastError()))
     ""
   except CatchableError as e:
     try:
