@@ -8,6 +8,8 @@ import {
   defaultPhotoAlbumSeconds,
   isPhotoAlbumFit,
   isPhotoAlbumOrder,
+  isPhotoAlbumShapes,
+  photoAlbumShapes,
 } from "../../../../src/lib/photos/album-scene";
 import { photoOwnerContext, withPhotoErrors } from "../../../../src/lib/photos/http";
 import { createPhotoShare, photoShareJson, photoShareUrl } from "../../../../src/lib/photos/library";
@@ -17,7 +19,7 @@ export const runtime = "nodejs";
 
 const maxSceneNameLength = 256;
 
-// POST /api/photos/scene {"path", "seconds"?, "order"?, "fit"?, "name"?} ->
+// POST /api/photos/scene {"path", "seconds"?, "order"?, "fit"?, "shapes"?, "name"?} ->
 // {"scene": Scene, "share": Share}: a ready scene that plays the folder,
 // with the folder's share link in it (made now if it has none). Installing
 // it is the frame routes' business. `frame_id` is the backend's (its links
@@ -47,6 +49,10 @@ export async function POST(request: NextRequest) {
   const fit = body.fit ?? "cover";
   if (!isPhotoAlbumFit(fit)) {
     return jsonError("invalid_fit", 400);
+  }
+  const shapes = body.shapes ?? photoAlbumShapes.map((shape) => shape.value);
+  if (!isPhotoAlbumShapes(shapes)) {
+    return jsonError("invalid_shapes", 400);
   }
   const name = body.name ?? null;
   if (name !== null && (typeof name !== "string" || name.length > maxSceneNameLength)) {
@@ -79,6 +85,7 @@ export async function POST(request: NextRequest) {
       name: (name ?? "").trim() || photoBasename(share.path),
       order,
       seconds,
+      shapes,
     });
     return NextResponse.json({ scene, share: photoShareJson(share, origin) });
   });

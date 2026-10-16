@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  filterPhotoShapes,
   mulberry32,
   parsePhotoOrder,
+  parsePhotoShapes,
+  photoShape,
   pickPhoto,
-  seededShuffle,
   seedFromString,
+  seededShuffle,
   sortPhotos,
 } from "./pick";
 
@@ -121,5 +124,36 @@ describe("pickPhoto", () => {
       index: 7,
       photo: null,
     });
+  });
+});
+
+describe("photo shapes", () => {
+  it("names a photo's shape by its pixels, or not at all", () => {
+    expect(photoShape(40, 30)).toBe("landscape");
+    expect(photoShape(30, 40)).toBe("portrait");
+    expect(photoShape(30, 30)).toBe("square");
+    expect(photoShape(null, 30)).toBeNull();
+    expect(photoShape(0, 0)).toBeNull();
+  });
+
+  it("parses the query and the body, every shape being no filter", () => {
+    expect(parsePhotoShapes(null)).toBeNull();
+    expect(parsePhotoShapes("")).toBeNull();
+    expect(parsePhotoShapes("landscape,portrait,square")).toBeNull();
+    expect(parsePhotoShapes("square, landscape")).toEqual(["landscape", "square"]);
+    expect(parsePhotoShapes(["portrait"])).toEqual(["portrait"]);
+    expect(parsePhotoShapes("landscape,round")).toBeUndefined();
+  });
+
+  it("keeps the photos of the chosen shapes, and photos of unknown size only without a choice", () => {
+    const photos = [
+      { height: 30, path: "l", width: 40 },
+      { height: 40, path: "p", width: 30 },
+      { height: 30, path: "s", width: 30 },
+      { height: null, path: "u", width: null },
+    ];
+    expect(filterPhotoShapes(photos, null).map((photo) => photo.path)).toEqual(["l", "p", "s", "u"]);
+    expect(filterPhotoShapes(photos, ["portrait"]).map((photo) => photo.path)).toEqual(["p"]);
+    expect(filterPhotoShapes(photos, ["landscape", "square"]).map((photo) => photo.path)).toEqual(["l", "s"]);
   });
 });

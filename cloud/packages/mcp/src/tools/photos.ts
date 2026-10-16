@@ -342,9 +342,14 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext) {
           .describe("random (default) shows every photo once before any repeats; sequential goes by path."),
         path: photoPath.describe("Folder to play (not the root)."),
         seconds: z.number().min(1).optional().describe("How long each photo stays. Default 3600."),
+        shapes: z
+          .array(z.enum(["landscape", "portrait", "square"]))
+          .min(1)
+          .optional()
+          .describe("Which photos to play, by shape. Default: all three."),
       },
     },
-    async ({ activate, fit, frame_id, name, order, path, seconds }) =>
+    async ({ activate, fit, frame_id, name, order, path, seconds, shapes }) =>
       run(async () => {
         // The frame first: the scene route shares the folder, and a wrong
         // frame id must not leave a link behind (the backend checks too).
@@ -352,7 +357,7 @@ export function registerPhotoTools(server: McpServer, ctx: ToolContext) {
         const made = await api.json<{ scene: Record<string, unknown>; share: Record<string, unknown> }>(
           "POST",
           "/api/photos/scene",
-          { body: { fit, frame_id, name, order, path, seconds } },
+          { body: { fit, frame_id, name, order, path, seconds, shapes } },
         );
         const installed = await installSceneOnFrame(ctx, {
           activate,

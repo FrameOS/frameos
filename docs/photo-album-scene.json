@@ -1,11 +1,12 @@
 {
-  "about": "The scene an album plays on a frame (docs/photos.md, \"Installing photo scenes\"). Three builders make it: the SPA (frontend/src/scenes/photos/photoAlbumScene.ts), the backend (backend/app/utils/photo_album_scene.py) and the cloud (cloud/apps/auth-web/src/lib/photos/album-scene.ts). Each test builds `input` and compares it with `scene` after the same normalization: node ids become `ref` (type:keyword), edge and scene ids go, and the bundled app keeps its origin, its keys and its file names. Change a builder, change all three and this file.",
+  "about": "The scene an album plays on a frame (docs/photos.md, \"Installing photo scenes\"). `shapes` in the input is the photo shapes the scene plays (its three boolean fields); every shape when left out. Three builders make it: the SPA (frontend/src/scenes/photos/photoAlbumScene.ts), the backend (backend/app/utils/photo_album_scene.py) and the cloud (cloud/apps/auth-web/src/lib/photos/album-scene.ts). Each test builds `input` and compares it with `scene` after the same normalization: node ids become `ref` (type:keyword), edge and scene ids go, and the bundled app keeps its origin, its keys and its file names. Change a builder, change all three and this file.",
   "input": {
     "name": "Summer 2026",
     "albumUrl": "https://frames.example/api/photos/shared/pk_fixture",
     "seconds": 600,
     "order": "newest",
-    "fit": "contain"
+    "fit": "contain",
+    "shapes": ["landscape", "square"]
   },
   "scene": {
     "name": "Summer 2026",
@@ -49,6 +50,30 @@
         "persist": "disk",
         "access": "public",
         "value": "contain"
+      },
+      {
+        "name": "landscape",
+        "label": "Landscape photos",
+        "type": "boolean",
+        "persist": "disk",
+        "access": "public",
+        "value": "true"
+      },
+      {
+        "name": "portrait",
+        "label": "Portrait photos",
+        "type": "boolean",
+        "persist": "disk",
+        "access": "public",
+        "value": "false"
+      },
+      {
+        "name": "square",
+        "label": "Square photos",
+        "type": "boolean",
+        "persist": "disk",
+        "access": "public",
+        "value": "true"
       },
       {
         "name": "photoIndex",
@@ -104,6 +129,24 @@
         "position": { "x": -520, "y": -140 }
       },
       {
+        "ref": "state:landscape",
+        "type": "state",
+        "data": { "keyword": "landscape" },
+        "position": { "x": -520, "y": -60 }
+      },
+      {
+        "ref": "state:portrait",
+        "type": "state",
+        "data": { "keyword": "portrait" },
+        "position": { "x": -520, "y": 20 }
+      },
+      {
+        "ref": "state:square",
+        "type": "state",
+        "data": { "keyword": "square" },
+        "position": { "x": -520, "y": 100 }
+      },
+      {
         "ref": "state:fit",
         "type": "state",
         "data": { "keyword": "fit" },
@@ -144,6 +187,27 @@
         "sourceHandle": "fieldOutput",
         "target": "app:photoAlbum",
         "targetHandle": "fieldInput/order",
+        "type": "codeNodeEdge"
+      },
+      {
+        "source": "state:landscape",
+        "sourceHandle": "fieldOutput",
+        "target": "app:photoAlbum",
+        "targetHandle": "fieldInput/landscape",
+        "type": "codeNodeEdge"
+      },
+      {
+        "source": "state:portrait",
+        "sourceHandle": "fieldOutput",
+        "target": "app:photoAlbum",
+        "targetHandle": "fieldInput/portrait",
+        "type": "codeNodeEdge"
+      },
+      {
+        "source": "state:square",
+        "sourceHandle": "fieldOutput",
+        "target": "app:photoAlbum",
+        "targetHandle": "fieldInput/square",
         "type": "codeNodeEdge"
       },
       {

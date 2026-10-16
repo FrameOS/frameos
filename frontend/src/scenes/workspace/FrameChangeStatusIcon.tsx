@@ -4,6 +4,8 @@ import type { MouseEvent, SVGProps } from 'react'
 import { ArrowPathIcon, ArrowsRightLeftIcon, CloudArrowUpIcon } from '@heroicons/react/24/outline'
 
 import { frameDeployProgress, frameFirmwareUpdateProgress } from '../../decorators/frame'
+import { HourglassIcon } from '../../components/HourglassIcon'
+import { onlyAwaitingDeviceAck } from '../frame/frameDeployUtils'
 
 import { frameLogic } from '../frame/frameLogic'
 import { workspaceLogic } from './workspaceLogic'
@@ -66,12 +68,18 @@ export function FrameChangeStatusIcon({
   const deployProgress = frame ? frameDeployProgress(frame) : null
   const deploying = deployProgress?.status === 'running'
   const firmwareUpdating = firmwareProgress?.kind === 'running' || deploying
+  // The last push is queued and unacked, and that is all that is pending:
+  // the frame applies it when it syncs, so the tile waits rather than asks.
+  const awaitingAck =
+    !unsavedChanges && !firmwareUpdating && !hasFrameSyncChanges && onlyAwaitingDeviceAck(undeployedChangeDetails)
   const statusLabel = unsavedChanges
     ? 'Unsaved'
     : firmwareUpdating
     ? 'Updating'
     : hasFrameSyncChanges
     ? 'Sync'
+    : awaitingAck
+    ? 'Waiting'
     : undeployedChanges
     ? 'Undeployed'
     : null
@@ -84,7 +92,7 @@ export function FrameChangeStatusIcon({
       ? deployProgress.title
       : firmwareUpdating && firmwareProgress
       ? firmwareProgress.title
-      : statusLabel === 'Undeployed' && undeployedChangeDetails.length > 0
+      : (statusLabel === 'Undeployed' || statusLabel === 'Waiting') && undeployedChangeDetails.length > 0
       ? undeployedChangeDetails.map((change) => change.label).join(', ')
       : `${statusLabel} changes`
   // The deploy drawer is the 'deploy' menu action's dialog, so this icon may
@@ -103,6 +111,8 @@ export function FrameChangeStatusIcon({
     ? ArrowPathIcon
     : hasFrameSyncChanges
     ? ArrowsRightLeftIcon
+    : awaitingAck
+    ? HourglassIcon
     : DeployToFrameIcon
   const isDashboard = variant === 'dashboard'
   const wrapperClassName = isDashboard

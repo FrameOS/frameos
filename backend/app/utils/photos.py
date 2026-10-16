@@ -1377,6 +1377,43 @@ def shared_photo_json(token: str, photo: SharedPhoto) -> dict[str, Any]:
     }
 
 
+SHARE_SHAPES = ("landscape", "portrait", "square")
+
+
+def photo_shape(width: Optional[int], height: Optional[int]) -> Optional[str]:
+    """landscape, portrait or square by the photo's pixels; None when the
+    dimensions are not known."""
+    if not width or not height:
+        return None
+    if width > height:
+        return "landscape"
+    if height > width:
+        return "portrait"
+    return "square"
+
+
+def parse_shapes(value: str) -> Optional[list[str]]:
+    """`shapes=landscape,square` on the share routes and `shapes` in a scene
+    body: the shapes to play, in SHARE_SHAPES order and without repeats.
+    None for every shape (an empty value), or when the list names them all;
+    ValueError for a name that is not a shape."""
+    names = [name.strip() for name in value.split(",") if name.strip()]
+    for name in names:
+        if name not in SHARE_SHAPES:
+            raise ValueError(f"shapes must be some of {', '.join(SHARE_SHAPES)}")
+    chosen = [shape for shape in SHARE_SHAPES if shape in names]
+    return None if not chosen or len(chosen) == len(SHARE_SHAPES) else chosen
+
+
+def filter_shapes(photos: list[SharedPhoto], shapes: Optional[list[str]]) -> list[SharedPhoto]:
+    """The photos of the chosen shapes. With every shape (None) nothing is
+    dropped, a photo of unknown size included; with a choice, only photos
+    whose size is known and fits."""
+    if shapes is None:
+        return photos
+    return [photo for photo in photos if photo_shape(photo.row.width, photo.row.height) in shapes]
+
+
 def pick_photo(photos: list[SharedPhoto], order: str, index: int, token: str) -> Optional[SharedPhoto]:
     """The photo at `index mod count` in `order`. `random` is a shuffle seeded
     by the token and the cycle (`index // count`): every photo once per cycle,

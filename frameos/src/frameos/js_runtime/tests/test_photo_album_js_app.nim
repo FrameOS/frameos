@@ -135,6 +135,9 @@ proc mockPhotosLoop() {.thread.} =
       elif token == "pk_broken":
         client.reply("200 OK", "application/json", $(%*{"index": index, "count": 1, "photo":
           {"path": "broken.jpg", "name": "broken.jpg", "url": "/api/photos/shared/pk_broken/file?path=broken.jpg"}}))
+      elif queryParam(query, "shapes") != "" and "landscape" notin queryParam(query, "shapes").split(','):
+        # `shapes`: every mock photo is landscape, so a choice without it finds none.
+        client.reply("200 OK", "application/json", $(%*{"index": index, "count": 0, "photo": newJNull()}))
       else:
         client.reply("200 OK", "application/json",
           $(%*{"index": index, "count": Names.len, "photo": photoAt(token, queryParam(query, "order"), index, base)}))
@@ -336,6 +339,33 @@ suite "photo album code app":
     check h.render(%*{"album": "http://127.0.0.1:9/api/photos/shared/pk_rel", "counterStateKey": "photoIndex"}).size() == (200, 120)
     check h.errorLogged("Could not reach the album")
     check not h.scene.state.hasKey("photoIndex")
+
+  test "the shape toggles reach the share route, and all off asks for nothing":
+    let h = newHarness()
+    let album = shareLink("pk_rel")
+    # Every shape on (a boolean, or the "true" a state field hands over): no
+    # `shapes` in the query, which is also what an older server understands.
+    check h.render(%*{"album": album, "order": "sequential", "counterStateKey": "photoIndex",
+      "landscape": true, "portrait": "true", "square": true}).size() == (5, 3)
+    check h.scene.state["photoIndex"].getInt() == 1
+    # Portrait only: the mock's photos are all landscape, so none match and
+    # the counter stays put.
+    check h.render(%*{"album": album, "order": "sequential", "counterStateKey": "photoIndex",
+      "landscape": "false", "portrait": true, "square": false}).size() == (200, 120)
+    check h.logged("This album has no photos of the chosen shapes.")
+    check not h.anyErrorLogged()
+    check h.scene.state["photoIndex"].getInt() == 1
+    # Landscape among the chosen shapes: the album plays on.
+    check h.render(%*{"album": album, "order": "sequential", "counterStateKey": "photoIndex",
+      "landscape": true, "portrait": false, "square": false}).size() == (6, 4)
+    # A scene from before the toggles has none: every shape.
+    check h.render(%*{"album": album, "order": "sequential", "counterStateKey": "photoIndex"}).size() == (7, 5)
+    # Every shape off: nothing is asked for and the counter does not move.
+    let g = newHarness()
+    check g.render(%*{"album": album, "counterStateKey": "photoIndex",
+      "landscape": false, "portrait": false, "square": false}).size() == (200, 120)
+    check g.errorLogged("Turn on at least one photo shape")
+    check not g.scene.state.hasKey("photoIndex")
 
   test "a missing or non-http album link paints the message instead of throwing":
     for album in [%"", %"   ", %"ftp://example.com/api/photos/shared/pk_x", %"pk_rel", %"https://", newJNull(), %42]:

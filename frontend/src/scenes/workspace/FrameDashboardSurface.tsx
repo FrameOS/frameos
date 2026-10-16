@@ -37,6 +37,7 @@ import type { FrameScene, FrameType, ScheduledEvent } from '../../types'
 import { scheduledEventTitle } from '../../utils/scheduleEvents'
 import { DeployProgressBar } from '../../components/DeployProgressBar'
 import { frameLogic } from '../frame/frameLogic'
+import { onlyAwaitingDeviceAck } from '../frame/frameDeployUtils'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
 import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
@@ -441,6 +442,10 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
   // notify_update_available verb is waiting for a frame that is asleep (or
   // off) — offering "upgrade" again reads as if the first click was lost.
   const upgradeQueued = onlyFrameosUpgrade && frameUpgradeIsQueued(frame)
+  // The last push is queued and unacked, and nothing else is pending: the
+  // same hourglass as a queued upgrade, since both mean "the frame will".
+  const awaitingAck = !unsavedChanges && onlyAwaitingDeviceAck(undeployedChangeDetails)
+  const queued = upgradeQueued || awaitingAck
   // The device's own word while a firmware update runs (hub-folded ota
   // lines): a download in progress is the one thing happening on this
   // frame, so it outranks "upgrade queued" and "waiting to sync".
@@ -479,23 +484,25 @@ function FrameDashboardStatusLine({ frame }: { frame: FrameType }): JSX.Element 
           className={clsx(
             'frameos-change-status-link relative rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
             frameIsUpToDate ? 'frameos-change-status-link--up-to-date' : null,
-            upgradeQueued && !firmwareUpdating ? 'pr-3' : null
+            queued && !firmwareUpdating ? 'pr-3' : null
           )}
           title={
             firmwareProgress
               ? firmwareProgress.title
               : upgradeQueued
               ? 'The upgrade is queued and applies when the frame next wakes'
+              : awaitingAck
+              ? 'The last push is queued and applies when the frame next syncs'
               : undefined
           }
         >
           {changeLabel}
-          {firmwareUpdating ? <UpdatingMarker /> : upgradeQueued ? <QueuedMarker /> : null}
+          {firmwareUpdating ? <UpdatingMarker /> : queued ? <QueuedMarker /> : null}
         </button>
       ) : (
-        <span className={clsx('relative font-medium', upgradeQueued && !firmwareUpdating ? 'pr-3' : null)}>
+        <span className={clsx('relative font-medium', queued && !firmwareUpdating ? 'pr-3' : null)}>
           {changeLabel}
-          {firmwareUpdating ? <UpdatingMarker /> : upgradeQueued ? <QueuedMarker /> : null}
+          {firmwareUpdating ? <UpdatingMarker /> : queued ? <QueuedMarker /> : null}
         </span>
       )}
       <span> - </span>

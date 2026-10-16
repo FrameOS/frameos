@@ -28,6 +28,15 @@ export const photoAlbumFits = [
   { label: "Show the whole photo", value: "contain" },
 ] as const;
 
+// The shapes a scene can play, as its three boolean fields (one each): a
+// photo is landscape, portrait or square by its pixels.
+export const photoAlbumShapes = [
+  { label: "Landscape photos", value: "landscape" },
+  { label: "Portrait photos", value: "portrait" },
+  { label: "Square photos", value: "square" },
+] as const;
+
+export type PhotoAlbumShape = (typeof photoAlbumShapes)[number]["value"];
 export type PhotoAlbumOrder = (typeof photoAlbumOrders)[number]["value"];
 export type PhotoAlbumFit = (typeof photoAlbumFits)[number]["value"];
 
@@ -37,6 +46,16 @@ export function isPhotoAlbumOrder(value: unknown): value is PhotoAlbumOrder {
 
 export function isPhotoAlbumFit(value: unknown): value is PhotoAlbumFit {
   return photoAlbumFits.some((option) => option.value === value);
+}
+
+/** A scene body's `shapes`: a non-empty list of distinct shape names. */
+export function isPhotoAlbumShapes(value: unknown): value is PhotoAlbumShape[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((item) => photoAlbumShapes.some((option) => option.value === item)) &&
+    new Set(value).size === value.length
+  );
 }
 
 /** The scene-local app the scene carries: config.json's keys, origin, sources. */
@@ -55,7 +74,10 @@ export function buildPhotoAlbumScene(options: {
   name: string;
   order: PhotoAlbumOrder;
   seconds: number;
+  /** The shapes the scene plays; every shape when left out. */
+  shapes?: readonly PhotoAlbumShape[];
 }): Record<string, unknown> {
+  const shapes = options.shapes ?? photoAlbumShapes.map((shape) => shape.value);
   const seconds =
     Number.isFinite(options.seconds) && options.seconds > 0
       ? options.seconds
@@ -64,10 +86,13 @@ export function buildPhotoAlbumScene(options: {
     album: randomUUID(),
     event: randomUUID(),
     fit: randomUUID(),
+    landscape: randomUUID(),
     order: randomUUID(),
+    portrait: randomUUID(),
     renderImage: randomUUID(),
     seconds: randomUUID(),
     sleep: randomUUID(),
+    square: randomUUID(),
   };
   const node = (id: string, type: string, data: Record<string, unknown>, x: number, y: number) => ({
     data,
@@ -91,6 +116,9 @@ export function buildPhotoAlbumScene(options: {
       edge(ids.renderImage, "next", ids.sleep, "prev", "appNodeEdge"),
       edge(ids.seconds, "fieldOutput", ids.sleep, "fieldInput/duration", "codeNodeEdge"),
       edge(ids.order, "fieldOutput", ids.album, "fieldInput/order", "codeNodeEdge"),
+      ...photoAlbumShapes.map((shape) =>
+        edge(ids[shape.value], "fieldOutput", ids.album, `fieldInput/${shape.value}`, "codeNodeEdge"),
+      ),
       edge(ids.fit, "fieldOutput", ids.renderImage, "fieldInput/placement", "codeNodeEdge"),
     ],
     fields: [
@@ -121,6 +149,14 @@ export function buildPhotoAlbumScene(options: {
         type: "select",
         value: options.fit,
       },
+      ...photoAlbumShapes.map((shape) => ({
+        access: "public",
+        label: shape.label,
+        name: shape.value,
+        persist: "disk",
+        type: "boolean",
+        value: shapes.includes(shape.value) ? "true" : "false",
+      })),
       {
         access: "private",
         label: "Position in the album",
@@ -149,6 +185,9 @@ export function buildPhotoAlbumScene(options: {
       node(ids.sleep, "app", { config: {}, keyword: "logic/nextSleepDuration" }, 640, 140),
       node(ids.seconds, "state", { keyword: "seconds" }, 560, 40),
       node(ids.order, "state", { keyword: "order" }, -520, -140),
+      ...photoAlbumShapes.map((shape, position) =>
+        node(ids[shape.value], "state", { keyword: shape.value }, -520, -60 + 80 * position),
+      ),
       node(ids.fit, "state", { keyword: "fit" }, 120, 40),
     ],
     settings: {

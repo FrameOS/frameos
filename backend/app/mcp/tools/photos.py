@@ -333,6 +333,7 @@ def register_photo_tools(server: McpServer, ctx: ToolContext) -> None:
         seconds: float | None = None,
         order: str | None = None,
         fit: str | None = None,
+        shapes: list[str] | None = None,
         name: str | None = None,
         activate: bool = False,
         deploy: str = "fast",
@@ -340,7 +341,7 @@ def register_photo_tools(server: McpServer, ctx: ToolContext) -> None:
     ):
         async def go():
             body: dict[str, Any] = {"path": path, "frame_id": frame_id}
-            for key, value in (("seconds", seconds), ("order", order), ("fit", fit), ("name", name)):
+            for key, value in (("seconds", seconds), ("order", order), ("fit", fit), ("shapes", shapes), ("name", name)):
                 if value is not None:
                     body[key] = value
             made = await api.json("POST", "/api/photos/scene", project_id=project_id, json=body)
@@ -374,6 +375,7 @@ def register_photo_tools(server: McpServer, ctx: ToolContext) -> None:
             "seconds": {"type": "number", "minimum": 1, "description": "How long each photo stays. Default 3600."},
             "order": {"type": "string", "enum": ["random", "sequential", "newest", "oldest"], "description": "random (default) shows every photo once before any repeats; sequential goes by path."},
             "fit": {"type": "string", "enum": ["cover", "contain"], "description": "cover (default) fills the screen; contain shows the whole photo."},
+            "shapes": {"type": "array", "items": {"type": "string", "enum": ["landscape", "portrait", "square"]}, "minItems": 1, "description": "Which photos to play, by shape. Default: all three."},
             "name": {"type": "string", "maxLength": 256, "description": "Scene name. Default: the folder's name."},
             "activate": {"type": "boolean"},
             "deploy": DEPLOY,

@@ -9,7 +9,7 @@ docs/photo-album-scene.json pins all three to one shape."""
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Sequence
 
 from app.utils.retired_apps import replacement_app_entry
 
@@ -27,8 +27,16 @@ PHOTO_ALBUM_FITS = [
     {"value": "cover", "label": "Fill the screen"},
     {"value": "contain", "label": "Show the whole photo"},
 ]
+# The shapes a scene can play, as its three boolean fields (one each): a
+# photo is landscape, portrait or square by its pixels.
+PHOTO_ALBUM_SHAPES = [
+    {"value": "landscape", "label": "Landscape photos"},
+    {"value": "portrait", "label": "Portrait photos"},
+    {"value": "square", "label": "Square photos"},
+]
 ORDER_VALUES = tuple(option["value"] for option in PHOTO_ALBUM_ORDERS)
 FIT_VALUES = tuple(option["value"] for option in PHOTO_ALBUM_FITS)
+SHAPE_VALUES = tuple(option["value"] for option in PHOTO_ALBUM_SHAPES)
 
 
 def _number(value: float) -> int | float:
@@ -36,9 +44,14 @@ def _number(value: float) -> int | float:
     return int(value) if float(value).is_integer() else float(value)
 
 
-def build_photo_album_scene(*, name: str, album_url: str, seconds: float, order: str, fit: str) -> dict[str, Any]:
+def build_photo_album_scene(
+    *, name: str, album_url: str, seconds: float, order: str, fit: str, shapes: Sequence[str] = SHAPE_VALUES
+) -> dict[str, Any]:
     seconds_value = _number(seconds if seconds > 0 else DEFAULT_SECONDS)
-    ids = {key: str(uuid.uuid4()) for key in ("event", "render_image", "album", "sleep", "seconds", "order", "fit")}
+    ids = {
+        key: str(uuid.uuid4())
+        for key in ("event", "render_image", "album", "sleep", "seconds", "order", "fit", *SHAPE_VALUES)
+    }
 
     def node(node_id: str, node_type: str, data: dict[str, Any], x: int, y: int) -> dict[str, Any]:
         return {"id": node_id, "type": node_type, "data": data, "position": {"x": x, "y": y}}
@@ -89,6 +102,17 @@ def build_photo_album_scene(*, name: str, album_url: str, seconds: float, order:
                 "access": "public",
                 "value": fit,
             },
+            *(
+                {
+                    "name": shape["value"],
+                    "label": shape["label"],
+                    "type": "boolean",
+                    "persist": "disk",
+                    "access": "public",
+                    "value": "true" if shape["value"] in shapes else "false",
+                }
+                for shape in PHOTO_ALBUM_SHAPES
+            ),
             {
                 "name": "photoIndex",
                 "label": "Position in the album",
@@ -115,6 +139,10 @@ def build_photo_album_scene(*, name: str, album_url: str, seconds: float, order:
             node(ids["sleep"], "app", {"keyword": "logic/nextSleepDuration", "config": {}}, 640, 140),
             node(ids["seconds"], "state", {"keyword": "seconds"}, 560, 40),
             node(ids["order"], "state", {"keyword": "order"}, -520, -140),
+            *(
+                node(ids[shape], "state", {"keyword": shape}, -520, -60 + 80 * position)
+                for position, shape in enumerate(SHAPE_VALUES)
+            ),
             node(ids["fit"], "state", {"keyword": "fit"}, 120, 40),
         ],
         "edges": [
@@ -123,6 +151,7 @@ def build_photo_album_scene(*, name: str, album_url: str, seconds: float, order:
             edge(ids["render_image"], "next", ids["sleep"], "prev", "appNodeEdge"),
             edge(ids["seconds"], "fieldOutput", ids["sleep"], "fieldInput/duration", "codeNodeEdge"),
             edge(ids["order"], "fieldOutput", ids["album"], "fieldInput/order", "codeNodeEdge"),
+            *(edge(ids[shape], "fieldOutput", ids["album"], f"fieldInput/{shape}", "codeNodeEdge") for shape in SHAPE_VALUES),
             edge(ids["fit"], "fieldOutput", ids["render_image"], "fieldInput/placement", "codeNodeEdge"),
         ],
         "apps": {PHOTO_ALBUM_APP_KEY: replacement_app_entry(PHOTO_ALBUM_APP_ORIGIN)},

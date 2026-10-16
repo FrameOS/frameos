@@ -282,7 +282,7 @@ Tokens are `pk_` plus at least 32 URL-safe random characters.
 ### `POST /api/photos/scene`
 
 ```json
-{"path": "Summer 2026", "seconds": 3600, "order": "random", "fit": "cover", "name": "Summer", "frame_id": 4}
+{"path": "Summer 2026", "seconds": 3600, "order": "random", "fit": "cover", "shapes": ["landscape", "square"], "name": "Summer", "frame_id": 4}
 ```
 
 → `{"scene": Scene, "share": Share}`: a ready scene that plays the folder
@@ -299,6 +299,9 @@ scene is up to the caller (the frame routes, or the MCP's
 - `seconds`: how long each photo stays, a positive number, default 3600.
 - `order`: `random` (default), `sequential`, `newest` or `oldest`.
 - `fit`: `cover` (default) or `contain`.
+- `shapes`: which photos the scene plays, by shape: a non-empty list of
+  distinct names from `landscape`, `portrait` and `square` (the scene's
+  three boolean fields, see Installing photo scenes); default all three.
 - `name`: the scene's name, at most 256 characters; default the folder's
   name.
 - The SPA's builder also makes a single-photo scene (`photo`: the file's
@@ -352,7 +355,7 @@ segment at a time, as the owner's listing), at most 10000. `path` is
 relative to the shared folder. `colors` is the photo's color profile or
 `null`, as in an Entry.
 
-### `GET /api/photos/shared/{token}/photo?order=<order>&index=<n>`
+### `GET /api/photos/shared/{token}/photo?order=<order>&index=<n>[&shapes=<shapes>]`
 
 One photo, so a frame never downloads the whole listing. With
 `?path=<path>` (relative to the shared folder) it is that photo, as
@@ -372,6 +375,12 @@ Otherwise:
   by the token and `floor(index / count)`, so every photo shows once before
   any repeats and the next cycle has a new order. The two planes do not need
   to shuffle identically.
+- `shapes`: a comma-separated list of `landscape`, `portrait` and `square`
+  (a photo's shape is by its pixels: wider than tall, taller than wide, or
+  exactly as wide as tall); only photos of those shapes count, and `count`
+  is their number. Empty, absent or all three means every photo, a photo
+  of unknown size included; with a choice a photo of unknown size never
+  shows. A name that is not a shape is a 400.
 - An empty album answers `{"index": n, "count": 0, "photo": null}`.
 
 ### `GET /api/photos/shared/{token}/file?path=<path>`
@@ -499,14 +508,18 @@ drawer) makes one scene per ticked album on one frame: it creates the frame's
 own share link to the album, builds a scene around `repo/apps/image/photoAlbum`
 with the link in the app node's config, and installs it like any other scene
 (the frame's scenes list; the deploy follows). Settings: how long each photo stays, the
-order, and how a photo fits the screen.
+order, how a photo fits the screen, and which shapes of photo play. The
+drawer also takes an album link from elsewhere (another FrameOS backend or the
+cloud) to play as is, and makes a new album on the spot.
 
 The scene: a `render` event into `render/image`, whose image comes from the
 photoAlbum app node (`album` and `counterStateKey: "photoIndex"` in its
 config, the app's config and sources in the scene's `apps.photoAlbum`), then
 `logic/nextSleepDuration`. Its fields are `seconds` (the refresh interval),
 `order` and `fit` (public, saved to disk, wired into the app and the
-placement) and `photoIndex` (private, saved to disk: the frame's place in the
+placement), `landscape`, `portrait` and `square` (public booleans, saved to
+disk, wired into the app: which photo shapes it asks for, every one by
+default) and `photoIndex` (private, saved to disk: the frame's place in the
 album). Three builders make it: the SPA's (no round trip), the backend's and
 the cloud's (both behind `POST /api/photos/scene`).
 `docs/photo-album-scene.json` holds the scene they must all build; the SPA's
