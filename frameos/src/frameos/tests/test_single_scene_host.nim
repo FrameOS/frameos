@@ -43,7 +43,9 @@ localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode,
 host.makeCurrent("fixtures/dispatcher/switchFrom".SceneId)
 doAssert host.scene.isNil, "the scene is built by its first use, not by being made current"
 
-doAssert host.send(eoDriver, "button", %*{"pin": 5, "label": "RIGHT", "level": 0}),
+# The wake press is a `down` with `wake: true`: a `press` at once (no second
+# down can have come while the chip slept), which the scene's listener hears.
+doAssert host.send(eoDriver, "button", %*{"pin": 5, "label": "RIGHT", "level": 0, "wake": true}),
   "a button sent before the first render is dispatched"
 doAssert not host.scene.isNil
 doAssert selected == @["fixtures/dispatcher/switchTo"], "selected " & $selected
@@ -184,7 +186,9 @@ proc renderOnce() {.cdecl.} =
     doAssert false, "render raised: " & e.msg
 
 proc pressOnce() {.cdecl.} =
-  discard abortHost.send(eoDriver, "button", %*{"pin": 5, "label": "RIGHT", "level": 0})
+  # A press as said (no line, nothing to time): delivered at once, so the
+  # scene's handler runs inside this send.
+  discard abortHost.send(eoDriver, "button", %*{"pin": 5, "label": "RIGHT", "action": "press"})
 
 proc count(needle: string): int =
   for line in logLines:
