@@ -83,7 +83,9 @@ type
     executionTimeoutMs*: int ## interpreter time per entry; 0 disables
     memoryLimitMb*: int      ## JS heap ceiling PER SCENE, shared by every runtime the scene creates; 0 leaves it unlimited
     maxStackKb*: int         ## JS stack ceiling; 0 keeps QuickJS's default
-    assetSandbox*: string    ## "frame" (shared, default) or "scene" (per-scene subtree)
+    assetSandbox*: string    ## "store" (default: store-origin scenes get a per-scene subtree, the
+                             ## owner's share the frame's folder), "scene" (every scene its own
+                             ## subtree) or "frame" (nothing confined); frameos/asset_scope.nim
     renderDeadlineMs*: int   ## wall-clock ceiling per render/event, native calls included; 0 disables
     dispatchBudget*: int     ## dispatch nodes one render/event may fire; 0 leaves it unbounded
 

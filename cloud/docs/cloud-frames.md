@@ -350,14 +350,21 @@ granted" above), so an undeclared-then-declared key never arrives. On the
 device the declaration gate stays as the second layer, and the audit trail
 is the mitigation for a self-hosted frame.
 
-**Filesystem access is frame-wide by default, not per-scene.** Every asset
-call resolves through `resolveAssetPath`, which rejects absolute paths and
+**Filesystem access follows the scene's provenance.** Every scene-supplied
+path — the JS asset calls, `saveAsset`, the `data/localImage` app's `path` —
+resolves through `frameos/asset_scope.nim`, which rejects absolute paths and
 `..` segments and then re-checks containment against the *real* path, so a
-symlink planted inside the assets folder is not a way out. But the root is the
-frame's shared assets folder: uploaded images are a shared resource and scenes
-are expected to read each other's. Frames that want the stricter model set
-`js.assetSandbox` to `"scene"` in `frame.json`, which confines each scene to
-`<assets>/scenes/<sceneId>/`.
+symlink planted inside the assets folder is not a way out. The root depends
+on where the scene came from: a scene the owner wrote gets the frame's shared
+assets folder (uploaded images are a shared resource and the owner's scenes
+are expected to read each other's), while a store-origin scene (the same
+`storeOrigin` bit the shell-apps gate keys on, whichever control plane
+installed it) is confined to `<assets>/scenes/<sceneId>/` — not the fonts,
+not other scenes' files, not `.frameos/scene_images`, and `localImage` can no
+longer name a folder elsewhere on disk. That is `js.assetSandbox: "store"`,
+the default since 2026.10.16; `"scene"` confines every scene and `"frame"`
+none (the old behavior). The browser preview confines nothing under
+`"store"`: it is the author's own machine.
 
 **Runaway scenes are bounded.** Scene JS runs on the render thread, so an
 infinite loop used to mean a frame that never drew again. Every entry into the

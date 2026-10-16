@@ -6,6 +6,7 @@ import frameos/apps as frameos_apps
 import frameos/js_runtime/runtime
 import frameos/js_runtime/run_budget
 import frameos/types
+import frameos/asset_scope
 import frameos/values
 import frameos/utils/http_client
 import frameos/utils/app_images
@@ -565,73 +566,17 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
   return nimStringToJS(ctx, $response)
 
 proc assetsRoot(e: JsAppEvalEnv): string =
-  ## The sandbox root for this app's asset calls.
-  ##
-  ## Default is the frame-wide assets folder: uploaded images are a shared
-  ## resource and scenes are expected to read each other's, so per-scene
-  ## isolation would break the common case. Frames that would rather have the
-  ## stricter model — every scene confined to its own subtree, the posture
-  ## cloud/docs/cloud-frames.md describes for provider-installed scenes — set
-  ## `js.assetSandbox` to "scene" in frame.json.
-  let frameConfig = e.owner.frameConfig
-  result = if frameConfig == nil or frameConfig.assetsPath == "": "/srv/assets"
-           else: frameConfig.assetsPath
-  result.removeSuffix('/')
-  if frameConfig != nil and frameConfig.js != nil and frameConfig.js.assetSandbox == "scene":
-    let sceneId = if e.owner.scene == nil: "" else: e.owner.scene.id.string
-    if sceneId.len > 0:
-      # Scene ids come from the diagram and can carry slashes ("tests/js").
-      # Flatten them so one scene cannot address another's subtree.
-      var safeId = ""
-      for ch in sceneId:
-        safeId.add(if ch in {'a'..'z', 'A'..'Z', '0'..'9', '-', '_'}: ch else: '_')
-      result = result / "scenes" / safeId
-
-proc containsPathTraversal(relPath: string): bool =
-  ## True when any path *segment* is "..". A substring test would also reject
-  ## innocent names like "backup..old.json".
-  for segment in relPath.split({'/', '\\'}):
-    if segment == "..":
-      return true
-  return false
+  ## The root for this app's asset calls: the frame-wide assets folder for a
+  ## scene the owner wrote, the scene's own `<assets>/scenes/<sceneId>/` for
+  ## a store-origin scene (or for every scene when frame.json says so). The
+  ## rule and the containment check live in frameos/asset_scope.nim, shared
+  ## with `saveAsset` and the `data/localImage` app.
+  sceneAssetsRoot(e.owner.frameConfig, e.owner.scene)
 
 proc resolveAssetPath(e: JsAppEvalEnv, relPath: string): string =
-  ## Absolute path inside the assets folder, or "" when the path is empty,
-  ## absolute, or escapes the folder.
-  ##
-  ## The containment check runs against the *real* path, not the lexical one:
-  ## normalizedPath does not follow symlinks, so a link planted inside the
-  ## assets folder used to be a legal way out of it.
-  if relPath.len == 0 or relPath.startsWith("/") or relPath.isAbsolute() or
-      containsPathTraversal(relPath):
-    return ""
-  let root = assetsRoot(e)
-  let full = normalizedPath(root / relPath)
-  if not (full == root or full.startsWith(root & "/")):
-    return ""
-
-  when not defined(frameosEmbedded):
-    # Resolve the deepest ancestor that actually exists: the target itself may
-    # legitimately not exist yet (a write), but everything leading to it must
-    # still be inside the sandbox once symlinks are followed. Nothing exists
-    # to be a symlink until the root does, so an absent root skips the check.
-    if dirExists(root):
-      try:
-        let realRoot = expandFilename(root)
-        var probe = full
-        while not fileExists(probe) and not dirExists(probe):
-          let parent = probe.parentDir()
-          if parent == probe or parent.len < root.len:
-            break
-          probe = parent
-        if fileExists(probe) or dirExists(probe):
-          let realProbe = expandFilename(probe)
-          if not (realProbe == realRoot or realProbe.startsWith(realRoot & "/")):
-            return ""
-      except CatchableError:
-        return ""
-
-  return full
+  ## Absolute path inside this app's asset root, or "" when the path is
+  ## empty, absolute, or escapes the root (lexically or through a symlink).
+  resolveSceneAssetPath(e.owner.frameConfig, e.owner.scene, relPath)
 
 const EmbeddedAssetReadMaxBytes = 2 * 1024 * 1024
 

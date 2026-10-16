@@ -98,7 +98,13 @@ namespaces the app's `config.json` declares under `settings`),
 calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,
 `appendAsset`, `deleteAsset`, `loadAssetImage`, and the stream calls
 `openAssetStream`, `createStream`, `streamRead`, `streamWrite`,
-`streamAtEnd`, `streamRewind`, `streamClose` (base64 in and out).
+`streamAtEnd`, `streamRewind`, `streamClose` (base64 in and out). Asset
+paths are relative to the scene's asset root: the frame's assets folder for
+a scene the owner wrote, the scene's own `scenes/<sceneId>/` subtree for a
+scene installed from the scene store (`frameos/src/frameos/asset_scope.nim`;
+the frame's `js.assetSandbox` setting picks `store` (default), `scene` or
+`frame`). Nothing outside the root resolves, and a symlink inside it is not
+a way out.
 `app.state` **is** the scene's state — read any
 key from it, write with `frameos.setState(key, value)` and state nodes see the
 change. What an app does **not** have are the code-node time helpers
@@ -136,7 +142,8 @@ return photo.image
   (an HTTP status, a transport failure, a body that is not an image). It
   never throws, so the app decides what to say (and throws it, see below).
 - `options.saveAsset` keeps the downloaded file as a frame asset, the way
-  the built-in photo apps do (`saved/<app>/<name>.<md5>.<ext>`; `mode:
+  the built-in photo apps do (`saved/<app>/<name>.<md5>.<ext>` under the
+  scene's asset root; `mode:
   "auto"` honours the frame's save-assets setting, `"always"` saves
   regardless). The extension is reduced to a short alphanumeric suffix.
   Frames without storage (ESP32) never save and report no `savedAs`.

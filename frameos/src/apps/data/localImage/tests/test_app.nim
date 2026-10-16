@@ -1,4 +1,4 @@
-import std/[json, os, strutils, times, unittest]
+import std/[json, os, sequtils, strutils, times, unittest]
 import pixie
 
 import ../app
@@ -232,3 +232,50 @@ suite "data/localImage app":
     let emptyFolder = app.get(ExecutionContext(hasImage: true, image: contextImage))
     check emptyFolder.width == 7
     check emptyFolder.height == 5
+
+  test "a store-origin scene reads only its own subtree of the assets folder":
+    let root = uniqueTempDir("frameos-local-image-store")
+    defer: removeDir(root)
+
+    writePpm(root / "shared.ppm", 255, 0, 0)
+    let sceneRoot = root / "scenes" / "store_photos"
+    createDir(sceneRoot / "album")
+    writePpm(sceneRoot / "album" / "mine.ppm", 0, 255, 0)
+
+    let logs = LogStore(items: @[])
+    let scene = InterpretedFrameScene(id: "store/photos".SceneId, state: %*{}, logger: newLogger(logs),
+                                      storeOrigin: true)
+    # Any path outside the scene's subtree is an error frame, not a listing.
+    let outside = App(
+      scene: scene,
+      frameConfig: makeFrameConfig(root),
+      appConfig: AppConfig(path: root, order: "alphabetical", metadataStateKey: "meta")
+    )
+    let errorImage = outside.get(ExecutionContext(hasImage: false))
+    check errorImage.width == 8
+    check errorImage.height == 6
+    check not scene.state.hasKey("meta")
+    check logs.items.anyIt(it{"error"}.getStr().contains("scene store"))
+
+    # An empty path is the scene's own folder; a relative one is inside it.
+    for path in ["", "album", sceneRoot / "album"]:
+      let inside = App(
+        scene: scene,
+        frameConfig: makeFrameConfig(root),
+        appConfig: AppConfig(path: path, order: "alphabetical", metadataStateKey: "meta")
+      )
+      let image = inside.get(ExecutionContext(hasImage: false))
+      check image.width == 1
+      check image.height == 1
+      check scene.state["meta"]["path"].getStr() == sceneRoot / "album" / "mine.ppm"
+      check scene.state["meta"]["total"].getInt() == 1
+
+    # The owner's scene keeps reading anywhere, as before.
+    let own = App(
+      scene: FrameScene(state: %*{}, logger: newLogger(logs)),
+      frameConfig: makeFrameConfig(root),
+      appConfig: AppConfig(path: root, order: "alphabetical", metadataStateKey: "meta")
+    )
+    let ownImage = own.get(ExecutionContext(hasImage: false))
+    check ownImage.width == 1
+    check own.scene.state["meta"]["total"].getInt() == 2

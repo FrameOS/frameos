@@ -278,6 +278,17 @@ render tries again. `frameos.fetchImage` never throws; it answers
 decodes natively, and the bytes never enter the JS heap. Return its `image`.
 Use it for every photo, and `httpRequest` only for the JSON around it.
 
+**Assets.** Asset paths are relative, and the folder they resolve against
+depends on where the scene came from. A scene you wrote on your own frame
+reads and writes the frame's assets folder (`app.frame.assetsPath`,
+`/srv/assets` by default): uploaded photos, fonts, what other scenes saved.
+A scene installed from the scene store gets a folder of its own inside it,
+`scenes/<sceneId>/`, and sees nothing outside it; `saveAsset` lands there
+too, and the `data/localImage` app's `path` is held to the same folder. So
+a store scene keeps its own files under relative names and does not rely on
+a photo being at a fixed place on the frame. (The frame's `js.assetSandbox`
+setting can confine every scene, or none.)
+
 **Big responses.** A response body becomes a JS string. When the app needs
 only what follows some marker in a large page, pass
 `httpRequest(url, { find: "marker", findLength: 400 })`: the body stays native

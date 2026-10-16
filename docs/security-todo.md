@@ -48,10 +48,6 @@ is left there is in the medium / low list.
   their choosing. Require a panel-shown code for the control-plane/admin
   fields (a headless frame then needs the local admin password instead), and
   strip current config from the unauthenticated setup page.
-- Store-origin scenes: `localImage.path` reads anywhere on disk, and the JS
-  asset API is frame-wide (fonts, other scenes' assets,
-  `.frameos/scene_images` writable). The `scene` asset sandbox is the answer
-  and is opt-in — default it for store-origin scenes.
 - Interpreter budgets (wall-clock deadline, JS heap ceiling, dispatch
   budget) are per run, not per scene per minute.
 - ESP32 OTA does not compare the image's own `esp_app_desc` version with the
