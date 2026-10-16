@@ -2,11 +2,20 @@ import std/[json, os, strutils, tables, unittest]
 
 import ../channels
 import ../cloud/device_flow
+from ../cloud/link_state import DEFAULT_CLOUD_PROVIDER_URL
 import ../network/backend
 import ../network_state
 import ../portal
 import ../privileged
+import ../setup_gate
 import ../types
+
+# The setup path reads frame.json on the request's own thread
+# (portalRequestConfig). Point it at a file that does not exist so a stray
+# frameos/frame.json on a dev machine cannot stand in for the configs these
+# tests build by hand; the control-mode suite points it at its own temp file.
+let missingConfigPath = getTempDir() / ("frameos-test-portal-missing-frame-" & $getCurrentProcessId() & ".json")
+putEnv("FRAMEOS_CONFIG", missingConfigPath)
 
 type HookMode = enum
   hmWifiList
@@ -280,9 +289,17 @@ suite "portal network orchestration":
     fresh.frameConfig.frameAdminAuth = nil
     let noPass = parseSetupOptions({"ssid": "x", "adminEnabled": "1", "adminUser": "admin"}.toTable, fresh.frameConfig)
     check setupOptionsProblem(noPass, fresh.frameConfig).contains("password")
-    let noUser = parseSetupOptions({"ssid": "x", "adminEnabled": "1", "adminUser": " ", "adminPass": "pw"}.toTable,
+    # A blank user keeps the stored one (the gated form no longer shows it);
+    # with none stored either, there is no user to enable the UI for.
+    let blankUser = parseSetupOptions({"ssid": "x", "adminEnabled": "1", "adminUser": " ", "adminPass": "pw"}.toTable,
       fresh.frameConfig)
-    check setupOptionsProblem(noUser, fresh.frameConfig).contains("user")
+    check blankUser.adminUser == "admin"
+    check setupOptionsProblem(blankUser, fresh.frameConfig) == ""
+    let noStoredUser = makeFrameOS()
+    noStoredUser.frameConfig.frameAdminAuth = %*{"enabled": false, "user": "", "pass": ""}
+    let noUser = parseSetupOptions({"ssid": "x", "adminEnabled": "1", "adminUser": " ", "adminPass": "pw"}.toTable,
+      noStoredUser.frameConfig)
+    check setupOptionsProblem(noUser, noStoredUser.frameConfig).contains("user")
     let complete = parseSetupOptions({"ssid": "x", "adminEnabled": "1", "adminUser": "admin", "adminPass": "pw"}.toTable,
       fresh.frameConfig)
     check setupOptionsProblem(complete, fresh.frameConfig) == ""
@@ -294,6 +311,117 @@ suite "portal network orchestration":
     # Not enabling it needs nothing.
     let off = parseSetupOptions({"ssid": "x"}.toTable, fresh.frameConfig)
     check setupOptionsProblem(off, fresh.frameConfig) == ""
+
+  test "the setup form shows a fresh frame its values and a stranger none of them":
+    # Open: no panel, no admin password, no control plane. Everything shows.
+    let fresh = makeFrameOS()
+    fresh.frameConfig.serverHost = ""
+    fresh.frameConfig.device = "web_only"
+    fresh.frameConfig.deviceConfig = DeviceConfig(httpUploadUrl: "http://nas.local/frame.png")
+    check setupGateModeFor(fresh.frameConfig) == sgOpen
+    let openHtml = setupHtml(fresh)
+    check not openHtml.contains("name=\"setupCode\"")
+    check openHtml.contains("http://nas.local/frame.png")
+    check openHtml.contains("""<fieldset id="gated">""")
+    # A panel: the code field, and the current values stay off the page.
+    let panel = makeFrameOS()
+    panel.frameConfig.device = "pimoroni.inky_impression_13"
+    panel.frameConfig.serverHost = "backend.example.com"
+    panel.frameConfig.serverPort = 8990
+    panel.frameConfig.frameAdminAuth = %*{"enabled": true, "user": "marius", "pass": "secret"}
+    panel.frameConfig.deviceConfig = DeviceConfig(httpUploadUrl: "http://nas.local/frame.png")
+    check setupGateModeFor(panel.frameConfig) == sgPanelCode
+    let gatedHtml = setupHtml(panel)
+    check gatedHtml.contains("""name="setupCode" inputmode="numeric"""")
+    check gatedHtml.contains("shows a 6-digit setup code")
+    check not gatedHtml.contains("backend.example.com")
+    check not gatedHtml.contains("8990")
+    check not gatedHtml.contains("marius")
+    check not gatedHtml.contains("nas.local")
+    check gatedHtml.contains("""placeholder="Leave blank to keep the current server" data-keep="1"""")
+    check gatedHtml.contains("""value="backend" selected""")
+    check gatedHtml.contains("""name="adminEnabled" value="1" checked>""")
+    # Headless with an admin password: the password field instead.
+    let headless = makeFrameOS()
+    headless.frameConfig.device = "web_only"
+    headless.frameConfig.frameAdminAuth = %*{"enabled": true, "user": "admin", "pass": "secret"}
+    check setupGateModeFor(headless.frameConfig) == sgAdminPassword
+    let passwordHtml = setupHtml(headless)
+    check passwordHtml.contains("""type="password" name="setupCode"""")
+    check passwordHtml.contains("no display to show a setup code. Enter its admin password")
+    # Headless, managed, no admin password: only Wi-Fi, hostname and zone.
+    let locked = makeFrameOS()
+    locked.frameConfig.device = "web_only"
+    locked.frameConfig.serverHost = "backend.example.com"
+    check setupGateModeFor(locked.frameConfig) == sgLocked
+    let lockedHtml = setupHtml(locked)
+    check lockedHtml.contains("""<fieldset id="gated" disabled class="hidden">""")
+    check lockedHtml.contains("only\n      the Wi-Fi settings can be changed here")
+    check not lockedHtml.contains("name=\"setupCode\"")
+    check lockedHtml.contains("""name="ssid" required""")
+
+  test "a blank gated field keeps what the frame has":
+    let frame = makeFrameOS()
+    frame.frameConfig.serverHost = "backend.example.com"
+    frame.frameConfig.serverPort = 8990
+    frame.frameConfig.frameAdminAuth = %*{"enabled": true, "user": "marius", "pass": "secret"}
+    frame.frameConfig.deviceConfig = DeviceConfig(httpUploadUrl: "http://nas.local/frame.png")
+    let blank = parseSetupOptions({"ssid": "x", "controlMode": "backend", "serverHost": "", "serverPort": "",
+      "adminEnabled": "1", "adminUser": "", "httpUploadUrl": " ", "cloudUrl": ""}.toTable, frame.frameConfig)
+    check blank.serverHost == "backend.example.com"
+    check blank.serverPort == "8990"
+    check blank.adminUser == "marius"
+    check blank.httpUploadUrl == "http://nas.local/frame.png"
+    check blank.cloudUrl == DEFAULT_CLOUD_PROVIDER_URL
+    let typed = parseSetupOptions({"ssid": "x", "serverHost": "other.example.com", "adminUser": "root"}.toTable,
+      frame.frameConfig)
+    check typed.serverHost == "other.example.com"
+    check typed.adminUser == "root"
+
+  test "the gate: Wi-Fi only passes, a gated field needs the code, the fifth wrong code redraws":
+    let open = makeFrameOS()
+    open.frameConfig.serverHost = ""
+    open.frameConfig.device = "web_only"
+    let panel = makeFrameOS()
+    panel.frameConfig.device = "framebuffer"
+    panel.frameConfig.frameAdminAuth = %*{"enabled": true, "user": "admin", "pass": "secret"}
+    clearSetupCode()
+    # Nothing gated in the request: no code needed, whatever the frame.
+    check setupGateProblem({"ssid": "x", "password": "y", "hostname": "h", "timeZone": "UTC"}.toTable,
+      panel.frameConfig) == ("", false)
+    check not setupRequestIsGated({"ssid": "x"}.toTable)
+    check setupRequestIsGated({"ssid": "x", "device": "web_only"}.toTable)
+    check setupRequestIsGated({"httpUploadUrl": "http://x"}.toTable)
+    # An open frame needs nothing even for gated fields.
+    check setupGateProblem({"ssid": "x", "device": "framebuffer"}.toTable, open.frameConfig) == ("", false)
+    # A panel frame: the code, or its admin password.
+    let code = startSetupCode()
+    check setupGateProblem({"ssid": "x", "device": "framebuffer"}.toTable, panel.frameConfig).problem.contains(
+      "setup code")
+    check setupGateProblem({"ssid": "x", "device": "framebuffer", "setupCode": "secret"}.toTable,
+      panel.frameConfig) == ("", false)
+    let accepted = setupGateProblem({"ssid": "x", "device": "framebuffer", "setupCode": code}.toTable,
+      panel.frameConfig)
+    check accepted.problem == ""
+    check accepted.remint
+    var last: tuple[problem: string, remint: bool]
+    for _ in 0 ..< SetupGateMaxAttempts:
+      last = setupGateProblem({"ssid": "x", "device": "framebuffer", "setupCode": "000000"}.toTable,
+        panel.frameConfig)
+    check last.problem.contains("new code")
+    check last.remint
+    clearSetupCode()
+
+  test "the hotspot mints the setup code when it comes up and drops it when it goes down":
+    clearSetupCode()
+    hookMode = hmStartApOk
+    let frame = makeFrameOS()
+    startAp(frame)
+    check frame.network.hotspotStatus == HotspotStatus.enabled
+    check activeSetupCode().len == SetupCodeLength
+    hookMode = hmStopAp
+    stopAp(frame)
+    check activeSetupCode() == ""
 
   test "setupHtml offers a show-password toggle for both password fields":
     let html = setupHtml(makeFrameOS())
@@ -746,7 +874,7 @@ suite "portal setup control mode":
     removeFile(setupDir / "frame.json")
     removeFile(setupDir / "pending.json")
     removeFile(setupDir / "link_code_pending.json")
-    delEnv("FRAMEOS_CONFIG")
+    putEnv("FRAMEOS_CONFIG", missingConfigPath)
     delEnv("FRAMEOS_CLOUD_ENROLL_PENDING_PATH")
     delEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH")
 
@@ -847,6 +975,29 @@ suite "portal setup control mode":
     check explicit.controlModeExplicit
     check persistPortalSetup(frame, explicit)
     check parseFile(setupDir / "frame.json"){"serverHost"}.getStr("missing") == ""
+
+  test "the saved setup reaches the runtime's config through a reload, not through field writes":
+    writeFile(setupDir / "frame.json", $(%*{"serverHost": "backend.example.com", "serverPort": 8989,
+      "frameAdminAuth": {"enabled": false, "user": "admin", "pass": ""}}))
+    let frame = makeFrameOS()
+    frame.frameConfig.serverHost = "backend.example.com"
+    let liveAdmin = frame.frameConfig.frameAdminAuth
+    let options = parseSetupOptions({"ssid": "x", "hostname": "kitchen", "timeZone": "Europe/Tallinn",
+      "device": "pimoroni.inky_impression_13", "adminEnabled": "1", "adminUser": "admin", "adminPass": "pw"}.toTable,
+      portalRequestConfig(frame))
+    check persistPortalSetup(frame, options)
+    let saved = parseFile(setupDir / "frame.json")
+    check saved{"device"}.getStr("") == "pimoroni.inky_impression_13"
+    check saved{"gpioButtons"}.len == 4
+    check saved{"frameAdminAuth"}{"pass"}.getStr("") == "pw"
+    # The live config was swapped from the file: same object, new values,
+    # and the admin node is a fresh parse, not the worker's JsonNode.
+    check frame.frameConfig.device == "pimoroni.inky_impression_13"
+    check frame.frameConfig.timeZone == "Europe/Tallinn"
+    check frame.frameConfig.frameHost == "kitchen.local"
+    check frame.frameConfig.gpioButtons.len == 4
+    check frame.frameConfig.frameAdminAuth{"pass"}.getStr("") == "pw"
+    check frame.frameConfig.frameAdminAuth != liveAdmin
 
   test "cloud mode clears serverHost and queues the typed claim code":
     writeFile(setupDir / "frame.json", $(%*{"serverHost": "localhost", "serverPort": 8989}))

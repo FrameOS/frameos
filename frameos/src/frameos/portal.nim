@@ -14,6 +14,7 @@ import frameos/cloud/enrollment
 import frameos/cloud/link_state
 import frameos/privileged
 import frameos/network_state
+import frameos/setup_gate
 from frameos/cloud/contract import isIanaZone
 from frameos/setup import setupTimezone
 import drivers/drivers as frameDrivers
@@ -731,9 +732,9 @@ proc makeDisplayOption(device, driverName: string): SetupDisplayOption =
     httpUploadUrlRequired: device == "http.upload",
   )
 
-proc setupDisplayOptions*(frameOS: FrameOS): seq[SetupDisplayOption] =
+proc setupDisplayOptions*(frameConfig: FrameConfig): seq[SetupDisplayOption] =
   var drivers = availableDriverNames()
-  let currentDriver = driverNameForDevice(frameOS.frameConfig.device)
+  let currentDriver = driverNameForDevice(frameConfig.device)
   if drivers.len == 0 and currentDriver.len > 0:
     drivers.add(currentDriver)
 
@@ -800,8 +801,8 @@ proc setupDisplayOptions*(frameOS: FrameOS): seq[SetupDisplayOption] =
       if variant == "EPD_7in3e":
         result.addDisplayOption(makeDisplayOption("waveshare.rpi_zero_photopainter_7in3e", driver))
 
-  if result.len == 0 and frameOS.frameConfig.device.len > 0:
-    result.addDisplayOption(makeDisplayOption(frameOS.frameConfig.device, currentDriver))
+  if result.len == 0 and frameConfig.device.len > 0:
+    result.addDisplayOption(makeDisplayOption(frameConfig.device, currentDriver))
 
 proc displayOptionsJson(options: seq[SetupDisplayOption]): JsonNode =
   result = newJObject()
@@ -833,14 +834,17 @@ proc defaultDeviceConfig(): DeviceConfig =
     pins: PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1),
   )
 
-proc ensureDeviceConfig(frameConfig: FrameConfig): DeviceConfig =
-  if frameConfig.deviceConfig.isNil:
-    frameConfig.deviceConfig = defaultDeviceConfig()
-  result = frameConfig.deviceConfig
-  if result.pins.isNil:
-    result.pins = PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1)
+proc deviceConfigOf(frameConfig: FrameConfig): DeviceConfig =
+  ## The config's device section, or the defaults when it has none. Read
+  ## only: the callers work on a private config (portalRequestConfig), never
+  ## on the runtime's, so nothing is assigned back into it.
+  if frameConfig == nil or frameConfig.deviceConfig.isNil:
+    return defaultDeviceConfig()
+  frameConfig.deviceConfig
 
-proc applyDeviceConfigDefaults(device: string, deviceConfig: JsonNode, runtimeDeviceConfig: DeviceConfig = nil) =
+proc applyDeviceConfigDefaults(device: string, deviceConfig: JsonNode) =
+  ## Fills the pin defaults of the one board that needs them into the
+  ## frame.json payload. The runtime picks them up from the reload.
   if device != "waveshare.rpi_zero_photopainter_7in3e" or deviceConfig == nil or deviceConfig.kind != JObject:
     return
 
@@ -854,25 +858,9 @@ proc applyDeviceConfigDefaults(device: string, deviceConfig: JsonNode, runtimeDe
       return fallback
     pins{key}.getInt(fallback)
 
-  let rst = pinValue("rst", 17)
-  let dc = pinValue("dc", 25)
-  let cs = pinValue("cs", 8)
-  let busy = pinValue("busy", 24)
-  let sclk = pinValue("sclk", 11)
-  let mosi = pinValue("mosi", 10)
-  let pwr = pinValue("pwr", 27)
+  for (key, fallback) in [("rst", 17), ("dc", 25), ("cs", 8), ("busy", 24), ("sclk", 11), ("mosi", 10), ("pwr", 27)]:
+    discard pinValue(key, fallback)
   deviceConfig["pins"] = pins
-
-  if not runtimeDeviceConfig.isNil:
-    if runtimeDeviceConfig.pins.isNil:
-      runtimeDeviceConfig.pins = PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1)
-    runtimeDeviceConfig.pins.rst = rst
-    runtimeDeviceConfig.pins.dc = dc
-    runtimeDeviceConfig.pins.cs = cs
-    runtimeDeviceConfig.pins.busy = busy
-    runtimeDeviceConfig.pins.sclk = sclk
-    runtimeDeviceConfig.pins.mosi = mosi
-    runtimeDeviceConfig.pins.pwr = pwr
 
 proc gpioButtonsForDeviceJson(device: string): JsonNode =
   result = newJArray()
@@ -883,14 +871,11 @@ proc gpioButtonsForDeviceJson(device: string): JsonNode =
   for pair in pairs:
     result.add(%*{"pin": pair[0], "label": pair[1]})
 
-proc applyGpioButtonsForDevice(frameConfig: FrameConfig, data: JsonNode, device: string) =
+proc applyGpioButtonsForDevice(data: JsonNode, device: string) =
   let buttons = gpioButtonsForDeviceJson(device)
   if buttons.len == 0:
     return
   data["gpioButtons"] = buttons
-  frameConfig.gpioButtons = @[]
-  for item in buttons.items:
-    frameConfig.gpioButtons.add(GPIOButton(pin: item{"pin"}.getInt(), label: item{"label"}.getStr()))
 
 proc loggableSetupParams*(params: Table[string, string]): JsonNode =
   result = newJObject()
@@ -922,6 +907,82 @@ proc defaultControlMode*(frameConfig: FrameConfig): string {.gcsafe.} =
     return "backend"
   "none"
 
+proc portalRequestConfig*(frameOS: FrameOS): FrameConfig =
+  ## The frame's config for one setup request, on a mummy worker or the
+  ## connect thread: this thread's own parse of frame.json, as readConfig
+  ## gives it to every other worker (AGENTS.md, "Refs do not cross threads").
+  ## The setup path used to read the runtime's live FrameConfig and even
+  ## assign into it (`frameAdminAuth`, `deviceConfig`) from the worker that
+  ## took POST /setup; ORC refcounts are not atomic, so a nested ref shared
+  ## that way is freed under one of the two threads sooner or later.
+  ##
+  ## The live object only stands in when there is no readable frame.json,
+  ## which on a frame means never, and in the tests means a config built by
+  ## hand on the test's own thread.
+  try:
+    result = readConfig()
+  except CatchableError:
+    result = FrameConfig()
+    if frameOS != nil and frameOS.frameConfig != nil:
+      result[] = frameOS.frameConfig[]
+    setConfigDefaults(result)
+
+proc reloadLiveConfig(frameOS: FrameOS) =
+  ## After frame.json was written: the runtime's config follows the file,
+  ## through the same raw swap the runner's reload uses (nothing of the
+  ## outgoing config is freed, so a reader mid-field never sees freed
+  ## memory). Replaces the field-by-field writes persistPortalSetup used to
+  ## make into the live config from the worker thread.
+  if frameOS == nil or frameOS.frameConfig == nil:
+    return
+  updateFrameConfigFrom(frameOS.frameConfig, readConfig())
+
+proc managedByControlPlane*(frameConfig: FrameConfig): bool {.gcsafe.} =
+  ## Whether someone already manages this frame: a self-hosted backend in
+  ## frame.json or a completed cloud link. A claim token or link code still
+  ## waiting for the network does NOT count: a cloud-personalized generic
+  ## image boots headless (no display driver yet) with exactly that queued,
+  ## and the portal is where its owner picks the display — until the
+  ## enrollment completes the frame is nobody's yet, and locking it would
+  ## lock out the person setting it up.
+  otherControlPlaneActive(frameConfig) or cloudLinkIsManaged()
+
+proc setupGateModeFor*(frameConfig: FrameConfig): SetupGateMode {.gcsafe.} =
+  ## Which proof `POST /setup` needs for the gated fields on this frame
+  ## (setup_gate.nim has the rules).
+  setupGateMode(frameConfig, managedByControlPlane(frameConfig))
+
+const SetupGatedParams* = [
+  ## The form fields a stranger on the hotspot must not be able to set: the
+  ## control plane, the admin login, the display (driver setup runs as root;
+  ## `httpUploadUrl` is where every render is POSTed). Wi-Fi, hostname and
+  ## time zone stay open. A request that carries none of these (a script or
+  ## an older portal page posting Wi-Fi only) needs no code.
+  "controlMode", "cloudUrl", "claimToken", "serverHost", "serverPort",
+  "device", "width", "height", "vcom", "partial", "partialMaxAreaPercent", "partialMaxRefreshesBeforeFull",
+  "httpUploadUrl", "runDriverSetup", "adminEnabled", "adminUser", "adminPass",
+]
+
+proc setupRequestIsGated*(params: Table[string, string]): bool =
+  for key in SetupGatedParams:
+    if params.hasKey(key):
+      return true
+  false
+
+proc setupGateProblem*(params: Table[string, string], frameConfig: FrameConfig):
+    tuple[problem: string, remint: bool] {.gcsafe.} =
+  ## "" when the submission may change the gated fields: it carries none of
+  ## them, the frame is open, or the code / admin password it typed is right.
+  ## `remint` says the panel code changed (the hotspot scene has to redraw).
+  if not setupRequestIsGated(params):
+    return ("", false)
+  let mode = setupGateModeFor(frameConfig)
+  let adminAuth = if frameConfig.frameAdminAuth == nil: %*{} else: frameConfig.frameAdminAuth
+  let verdict = checkSetupSecret(params.getOrDefault("setupCode", ""), mode, adminAuth{"pass"}.getStr(""))
+  if verdict.ok:
+    return ("", verdict.remint)
+  (verdict.detail, verdict.remint)
+
 proc adminUiPreselected*(frameConfig: FrameConfig): bool =
   ## Whether the setup form's "Enable admin UI" box starts ticked. Ticked
   ## when the admin UI is already on, and on a frame that has never had an
@@ -951,8 +1012,14 @@ proc setupOptionsProblem*(options: PortalSetupOptions, frameConfig: FrameConfig)
 
 proc parseSetupOptions*(params: Table[string, string], frameConfig: FrameConfig): PortalSetupOptions =
   let device = params.getOrDefault("device", frameConfig.device)
-  let deviceConfig = ensureDeviceConfig(frameConfig)
+  let deviceConfig = deviceConfigOf(frameConfig)
   let adminAuth = if frameConfig.frameAdminAuth == nil: %*{} else: frameConfig.frameAdminAuth
+  # The form no longer shows a stranger the current values of these (the
+  # setup page is unauthenticated), so a blank in the submission means
+  # "keep", not "clear".
+  proc keepIfBlank(key, current: string): string =
+    let typed = params.getOrDefault(key, "").strip()
+    if typed.len > 0: typed else: current
   var controlMode = params.getOrDefault("controlMode", "").strip().toLowerAscii()
   let controlModeExplicit = controlMode in ["cloud", "backend", "none"]
   if not controlModeExplicit:
@@ -966,10 +1033,10 @@ proc parseSetupOptions*(params: Table[string, string], frameConfig: FrameConfig)
     password: params.getOrDefault("password", ""),
     controlMode: controlMode,
     controlModeExplicit: controlModeExplicit,
-    cloudUrl: params.getOrDefault("cloudUrl", defaultCloudUrl).strip(),
+    cloudUrl: keepIfBlank("cloudUrl", defaultCloudUrl),
     claimToken: params.getOrDefault("claimToken", "").strip(),
-    serverHost: params.getOrDefault("serverHost", frameConfig.serverHost),
-    serverPort: params.getOrDefault("serverPort", $(if frameConfig.serverPort > 0: frameConfig.serverPort else: 8989)),
+    serverHost: keepIfBlank("serverHost", frameConfig.serverHost),
+    serverPort: keepIfBlank("serverPort", $(if frameConfig.serverPort > 0: frameConfig.serverPort else: 8989)),
     hostname: params.getOrDefault("hostname", setupHostnameValue(frameConfig)),
     timeZone: (block:
       # Only an IANA-shaped name is ever written or handed to the root side;
@@ -989,10 +1056,10 @@ proc parseSetupOptions*(params: Table[string, string], frameConfig: FrameConfig)
       params.getOrDefault("partialMaxRefreshesBeforeFull", $deviceConfig.partialMaxRefreshesBeforeFull),
       deviceConfig.partialMaxRefreshesBeforeFull,
     ),
-    httpUploadUrl: params.getOrDefault("httpUploadUrl", deviceConfig.httpUploadUrl),
+    httpUploadUrl: keepIfBlank("httpUploadUrl", deviceConfig.httpUploadUrl),
     runDriverSetup: parseBoolParam(params.getOrDefault("runDriverSetup", "")),
     adminEnabled: parseBoolParam(params.getOrDefault("adminEnabled", "")),
-    adminUser: params.getOrDefault("adminUser", adminAuth{"user"}.getStr("admin")).strip(),
+    adminUser: keepIfBlank("adminUser", adminAuth{"user"}.getStr("admin")),
     adminPass: params.getOrDefault("adminPass", ""),
   )
   let defaults = partialDefaultsForDevice(device)
@@ -1050,7 +1117,12 @@ proc runDriverSetupFromSavedConfig*(frameOS: FrameOS, options: PortalSetupOption
   false
 
 proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
-  let frameConfig = frameOS.frameConfig
+  ## Writes the form into frame.json and reloads the runtime's config from
+  ## it. Runs on the mummy worker that took POST /setup: every read here is
+  ## of this thread's own parse of the file (portalRequestConfig), and the
+  ## live config changes only through reloadLiveConfig's swap at the end —
+  ## never field by field from this thread.
+  let frameConfig = portalRequestConfig(frameOS)
   let filename = getConfigFilename()
   let device = options.device.strip()
   let oldFrameHost = frameConfig.frameHost
@@ -1069,39 +1141,35 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
     if data == nil or data.kind != JObject:
       data = newJObject()
 
+    var serverHost = frameConfig.serverHost
     if not options.controlModeExplicit:
       # Nothing about the control plane changes: serverHost, the queued
       # claim and the panel link code all stay as they are.
       discard
     elif options.controlMode == "backend":
       if options.serverHost.strip().len > 0:
-        data["serverHost"] = %options.serverHost.strip()
-        frameConfig.serverHost = options.serverHost.strip()
+        serverHost = options.serverHost.strip()
+        data["serverHost"] = %serverHost
     else:
       # Cloud-enrolled and standalone frames must not carry a serverHost: a
       # non-loopback value means "a self-hosted backend owns this frame" and
       # blocks cloud enrollment (enrollment.nim, otherControlPlaneActive).
+      serverHost = ""
       data["serverHost"] = %""
-      frameConfig.serverHost = ""
     data["serverPort"] = %serverPort
-    frameConfig.serverPort = serverPort
 
     data["frameHost"] = %frameHost
-    frameConfig.frameHost = frameHost
     if options.timeZone.strip().len > 0 and isIanaZone(options.timeZone.strip()):
       data["timeZone"] = %options.timeZone.strip()
-      frameConfig.timeZone = options.timeZone.strip()
     # The image ships as "FrameOS Setup"; a card that has just been given a
     # hostname is named after it (the same rule cloud enrollment applies —
     # a backend that adopted such a card showed "FrameOS Setup", 2026-09-08).
     let currentName = data{"name"}.getStr("").strip()
     if currentName.len == 0 or currentName == oldFrameHost or currentName in ImagePlaceholderNames:
       data["name"] = %hostnameBase
-      frameConfig.name = hostnameBase
 
     if device.len > 0:
       data["device"] = %device
-      frameConfig.device = device
 
     let dims = nativeDeviceDimensions(device)
     var width = options.width
@@ -1112,10 +1180,8 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
       height = dims.height
     if width > 0:
       data["width"] = %width
-      frameConfig.width = width
     if height > 0:
       data["height"] = %height
-      frameConfig.height = height
 
     var deviceConfig = data{"deviceConfig"}
     if deviceConfig == nil or deviceConfig.kind != JObject:
@@ -1125,17 +1191,10 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
     deviceConfig["partialMaxAreaPercent"] = %options.partialMaxAreaPercent
     deviceConfig["partialMaxRefreshesBeforeFull"] = %options.partialMaxRefreshesBeforeFull
     deviceConfig["uploadUrl"] = %options.httpUploadUrl.strip()
-
-    let runtimeDeviceConfig = ensureDeviceConfig(frameConfig)
-    applyDeviceConfigDefaults(device, deviceConfig, runtimeDeviceConfig)
+    applyDeviceConfigDefaults(device, deviceConfig)
     data["deviceConfig"] = deviceConfig
-    runtimeDeviceConfig.vcom = options.vcom
-    runtimeDeviceConfig.partial = options.partial
-    runtimeDeviceConfig.partialMaxAreaPercent = options.partialMaxAreaPercent
-    runtimeDeviceConfig.partialMaxRefreshesBeforeFull = options.partialMaxRefreshesBeforeFull
-    runtimeDeviceConfig.httpUploadUrl = options.httpUploadUrl.strip()
 
-    applyGpioButtonsForDevice(frameConfig, data, device)
+    applyGpioButtonsForDevice(data, device)
 
     let existingAdmin = if frameConfig.frameAdminAuth == nil: %*{} else: frameConfig.frameAdminAuth
     let adminUser = options.adminUser.strip()
@@ -1148,13 +1207,13 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
       data["frameAdminAuth"] = %*{"enabled": true, "user": adminUser, "pass": adminPass}
     else:
       data["frameAdminAuth"] = %*{"enabled": false, "user": adminUser, "pass": ""}
-    frameConfig.frameAdminAuth = data["frameAdminAuth"]
 
-    # Atomic and private: this runs from the unauthenticated first-boot
-    # POST /setup with frameAdminAuth.pass in clear, so a power cut mid-write
-    # must leave the old frame.json, not a truncated one the frame cannot
-    # boot from — and the file must never sit at 0644.
+    # Atomic and private: this runs from the first-boot POST /setup with
+    # frameAdminAuth.pass in clear, so a power cut mid-write must leave the
+    # old frame.json, not a truncated one the frame cannot boot from — and
+    # the file must never sit at 0644.
     writePrivateFile(filename, pretty(data, indent = 4) & "\n")
+    reloadLiveConfig(frameOS)
     if not writeHostname(hostnameBase):
       return false
 
@@ -1184,13 +1243,13 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
 
     pLog("portal:setup:persisted", %*{
       "controlMode": options.controlMode,
-      "serverHost": frameConfig.serverHost,
-      "serverPort": frameConfig.serverPort,
-      "frameHost": frameConfig.frameHost,
-      "device": frameConfig.device,
-      "width": frameConfig.width,
-      "height": frameConfig.height,
-      "adminEnabled": frameConfig.frameAdminAuth{"enabled"}.getBool(false),
+      "serverHost": serverHost,
+      "serverPort": serverPort,
+      "frameHost": frameHost,
+      "device": data{"device"}.getStr(""),
+      "width": data{"width"}.getInt(0),
+      "height": data{"height"}.getInt(0),
+      "adminEnabled": data["frameAdminAuth"]{"enabled"}.getBool(false),
     })
     rememberError("")
     true
@@ -1383,6 +1442,7 @@ proc stopAp*(frameOS: FrameOS) {.gcsafe.} =
   frameOS.network.hotspotStatus = HotspotStatus.disabled
   if frameOS.server != nil:
     stopHotspotListener(frameOS.server.mummy)
+  clearSetupCode()
   pLog("portal:stopAp:done")
 
 proc finishStartedHotspot(frameOS: FrameOS): bool {.gcsafe.} =
@@ -1390,8 +1450,13 @@ proc finishStartedHotspot(frameOS: FrameOS): bool {.gcsafe.} =
   ## (hotspot listener, hotspot scene, auto-timeout) behaves identically.
   frameOS.network.hotspotStatus = HotspotStatus.enabled
   if frameOS.server != nil:
-    let (port, address) = startHotspotListener(frameOS.server.mummy, frameOS.frameConfig)
-    pLog("portal:startAp:listener", %*{"port": port, "address": address})
+    let listeners = startHotspotListener(frameOS.server.mummy, frameOS.frameConfig)
+    pLog("portal:startAp:listener", %*{"port": listeners.port, "address": listeners.address,
+                                        "captivePort": listeners.captivePort})
+  # The code the setup form asks for before it touches anything but Wi-Fi
+  # (setup_gate.nim); the hotspot scene draws it. Minted before the scene
+  # is shown so its first render already carries it.
+  discard startSetupCode()
   let hotspotStarted = getMonoTime()
   frameOS.network.hotspotStartedAt = epochTime()
   pLog("portal:startAp:done")
@@ -1949,6 +2014,7 @@ summary{font-size:.875rem;font-weight:600;cursor:pointer;margin-bottom:1rem}
 .secondary:hover{background:#4b5563}
 .steps{margin:.5rem 0 1rem;padding-left:1.25rem}
 .hidden{display:none}
+fieldset{border:0;padding:0;margin:0;min-width:0}
 select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath fill='%23d1d5db' d='M5.23 7.21a.75.75 0 0 1 1.06 0L10 10.92l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.23 8.27a.75.75 0 0 1 0-1.06z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right .75rem center;background-size:1rem}
 </style>"""
 
@@ -1957,20 +2023,69 @@ proc layout*(inner: string): string =
 <meta charset="utf-8"><title>FrameOS Setup</title>{styleBlock}</head>
 <body><div class="card">{inner}</div></body></html>"""
 
-proc setupHtml*(frameOS: FrameOS): string =
-  let frameConfig = frameOS.frameConfig
-  let deviceConfig = if frameConfig.deviceConfig.isNil: defaultDeviceConfig() else: frameConfig.deviceConfig
+proc setupGateHtml(gate: SetupGateMode, hasAdminPass: bool): string =
+  ## The field the gated sections need, with what it asks for. Nothing for
+  ## an open frame; for a locked one the sections are disabled instead.
+  case gate
+  of sgOpen, sgLocked:
+    ""
+  of sgPanelCode:
+    let alsoPassword = if hasAdminPass: " The frame's admin password works too." else: ""
+    """
+  <details open>
+    <summary>Setup code</summary>
+    <p class="muted">The frame shows a 6-digit setup code on its display. It unlocks the display,
+      admin and management settings below.""" & alsoPassword & """</p>
+    <label>Setup code
+      <input id="setup-code" type="text" name="setupCode" inputmode="numeric" autocomplete="one-time-code" required>
+    </label>
+  </details>
+"""
+  of sgAdminPassword:
+    """
+  <details open>
+    <summary>Admin password</summary>
+    <p class="muted">This frame has no display to show a setup code. Enter its admin password to
+      change the display, admin and management settings below.</p>
+    <label>Admin password
+      <input id="setup-code" type="password" name="setupCode" autocomplete="current-password" required>
+    </label>
+    <label class="inline reveal"><input type="checkbox" data-reveal="setup-code">Show password</label>
+  </details>
+"""
+
+const setupLockedNote = """
+  <details open>
+    <summary>Display, admin and management</summary>
+    <p class="muted">This frame has no display to show a setup code and no admin password, so only
+      the Wi-Fi settings can be changed here. Manage the rest from the backend or cloud account that
+      manages it.</p>
+  </details>
+"""
+
+proc setupHtml*(frameOS: FrameOS, config: FrameConfig = nil): string =
+  ## The setup form. Reads a private config (portalRequestConfig), never
+  ## the runtime's. What it prefills depends on the gate: a frame anyone may
+  ## set up (sgOpen) shows its current values; otherwise the gated fields
+  ## start blank — the page is unauthenticated, and a blank means "keep" on
+  ## the way back in (parseSetupOptions).
+  let frameConfig = if config != nil: config else: portalRequestConfig(frameOS)
+  let gate = setupGateModeFor(frameConfig)
+  let showCurrent = gate == sgOpen
+  let deviceConfig = deviceConfigOf(frameConfig)
   let adminAuth = if frameConfig.frameAdminAuth == nil: %*{} else: frameConfig.frameAdminAuth
-  let adminUser = adminAuth{"user"}.getStr("admin")
+  let adminUser = if showCurrent: adminAuth{"user"}.getStr("admin") else: ""
   let hasAdminPass = adminAuth{"pass"}.getStr("").len > 0
   let adminChecked = if adminUiPreselected(frameConfig): " checked" else: ""
-  let adminPassExistingAttr = if hasAdminPass: "1" else: "0"
+  let adminPassExistingAttr = if hasAdminPass or not showCurrent: "1" else: "0"
   let adminPassPlaceholder =
-    if hasAdminPass:
+    if not showCurrent:
+      "Leave blank to keep the current password"
+    elif hasAdminPass:
       "Leave blank to keep current password"
     else:
       "Required when admin UI is enabled"
-  let options = setupDisplayOptions(frameOS)
+  let options = setupDisplayOptions(frameConfig)
 
   var currentDevice = frameConfig.device
   var currentOption = SetupDisplayOption()
@@ -1992,11 +2107,17 @@ proc setupHtml*(frameOS: FrameOS): string =
   let displayWidth = if frameConfig.width > 0: frameConfig.width elif currentOption.width > 0: currentOption.width else: 800
   let displayHeight = if frameConfig.height > 0: frameConfig.height elif currentOption.height > 0: currentOption.height else: 480
   let framePort = if frameConfig.framePort > 0: frameConfig.framePort else: 8787
-  let serverHost = frameConfig.serverHost
-  let serverPort = if frameConfig.serverPort > 0: frameConfig.serverPort else: 8989
+  let serverHost = if showCurrent: frameConfig.serverHost else: ""
+  let serverHostKeep = if not showCurrent and frameConfig.serverHost.strip().len > 0: "1" else: "0"
+  let serverHostPlaceholder = if serverHostKeep == "1": "Leave blank to keep the current server" else: "my.frameos.server"
+  let serverPort = if showCurrent: $(if frameConfig.serverPort > 0: frameConfig.serverPort else: 8989) else: ""
+  let uploadUrl = if showCurrent: deviceConfig.httpUploadUrl else: ""
 
   let pending = pendingCloudEnrollment()
-  let hasPendingClaim = pending != nil
+  let hasPendingClaim = showCurrent and pending != nil
+  # The preselected control mode stays: a form that posted "none" for a
+  # backend-managed frame would orphan it, and whether a frame is managed
+  # is no secret (its /login answers either way). The host and claim are.
   let controlMode = defaultControlMode(frameConfig)
   let cloudUrl =
     if hasPendingClaim: pending{"provider_url"}.getStr(DEFAULT_CLOUD_PROVIDER_URL)
@@ -2035,6 +2156,11 @@ proc setupHtml*(frameOS: FrameOS): string =
   let hostnameLinkSuffix = ".local" &
     (if (linkScheme == "http" and linkPort == 80) or (linkScheme == "https" and linkPort == 443): "" else: ":" & $linkPort) & "/"
   let currentTimeZone = if frameConfig.timeZone.strip().len > 0: frameConfig.timeZone.strip() else: "UTC"
+  let gateHtml = setupGateHtml(gate, hasAdminPass)
+  # A disabled fieldset's fields are not submitted: a locked frame's form
+  # carries only the open fields, and the script still finds every element.
+  let gatedAttr = if gate == sgLocked: " disabled class=\"hidden\"" else: ""
+  let lockedNote = if gate == sgLocked: setupLockedNote else: ""
   let body = fmt"""
 <h1>Set up your Frame</h1>
 <p>If the connection fails, reconnect to this access point and try again.</p>
@@ -2066,7 +2192,8 @@ proc setupHtml*(frameOS: FrameOS): string =
     </label>
     <p class="muted">Clocks and schedules on the frame follow this zone.</p>
   </details>
-
+{gateHtml}
+  <fieldset id="gated"{gatedAttr}>
   <details open>
     <summary>Display</summary>
     <label>Driver
@@ -2106,7 +2233,7 @@ proc setupHtml*(frameOS: FrameOS): string =
       <label>Upload URL
         <input type="url" name="httpUploadUrl"
                placeholder="http://example.local/frame.png"
-               value="{htmlEscape(deviceConfig.httpUploadUrl)}">
+               value="{htmlEscape(uploadUrl)}">
       </label>
     </div>
   </details>
@@ -2151,18 +2278,19 @@ proc setupHtml*(frameOS: FrameOS): string =
     <div id="backend-fields"{backendFieldsClass}>
       <label>Server Host
         <input id="server-host" type="text" name="serverHost"
-              placeholder="my.frameos.server"
+              placeholder="{htmlEscape(serverHostPlaceholder)}" data-keep="{serverHostKeep}"
               value="{htmlEscape(serverHost)}">
       </label>
 
       <label>Server Port
         <input type="number" min="1" max="65535"
-              name="serverPort"
+              name="serverPort" placeholder="8989"
               value="{serverPort}">
       </label>
     </div>
   </details>
-
+  </fieldset>
+{lockedNote}
   <button type="submit" style="margin-top:1rem">Save &amp; Connect</button>
 </form>
 """
@@ -2192,7 +2320,7 @@ function updateControlUi() {
   const mode = controlModeSel.value;
   cloudFields.classList.toggle('hidden', mode !== 'cloud');
   backendFields.classList.toggle('hidden', mode !== 'backend');
-  serverHostInput.required = mode === 'backend';
+  serverHostInput.required = mode === 'backend' && serverHostInput.dataset.keep !== '1';
   // Optional either way: with no claim code, saving queues a link code that
   // the frame shows on its own display once online.
   claimTokenInput.required = false;
@@ -2403,6 +2531,11 @@ proc confirmHtml*(frameOS: FrameOS, ssid = ""): string =
     "<p id=\"progress\">The frame is " & joining & ". Reconnect this device to the same network — " &
       "this page follows the frame over as soon as it can reach it at <a href=\"" &
       htmlEscape(frameUrl) & "\">" & htmlEscape(frameUrl) & "</a>.</p>\n" &
+    # A captive-portal sheet is a restricted browser that may not run this
+    # page's timers, and it closes once the hotspot is gone: the link above
+    # is the way over, and it has to read right without the script.
+    "<noscript><p>Once this device is back on your network, open <a href=\"" & htmlEscape(frameUrl) & "\">" &
+      htmlEscape(frameUrl) & "</a>.</p></noscript>\n" &
     "<p id=\"setup-error\" class=\"hidden\" style=\"color:#f87171\"></p>\n" &
     cloudNote &
     "<p>If you enabled the admin UI, open <a href=\"" & htmlEscape(adminUrl) & "\">" & htmlEscape(adminUrl) & "</a>.</p>\n" &
