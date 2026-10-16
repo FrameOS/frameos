@@ -1058,10 +1058,10 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     dispatchPreviewEvent: ({ name, payload }) => {
       cache.worker?.postMessage({ type: 'event', name, payload })
     },
-    // A GPIO button in the preview is held like a real one: the press edge on
-    // pointer down, the release edge on pointer up (level 0 is pressed — the
-    // line is pulled up). The runtime adds the role, the long press and the
-    // repeats, and the release's `durationMs`.
+    // A GPIO button in the preview is held like a real one: the `down` edge on
+    // pointer down, the `up` edge on pointer up (level 0 is down: the line is
+    // pulled up). The runtime adds the role, the `up`'s `durationMs`, and the
+    // press, double press or long presses the edges add up to.
     pressGpioButton: ({ button }) => {
       cache.heldGpioPins = cache.heldGpioPins ?? new Set<number>()
       if (cache.heldGpioPins.has(button.pin)) {
@@ -1071,7 +1071,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       cache.worker?.postMessage({
         type: 'event',
         name: 'button',
-        payload: { pin: button.pin, label: button.label, level: 0, action: 'press' },
+        payload: { pin: button.pin, label: button.label, level: 0, action: 'down' },
       })
     },
     releaseGpioButton: ({ button }) => {
@@ -1082,7 +1082,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       cache.worker?.postMessage({
         type: 'event',
         name: 'button',
-        payload: { pin: button.pin, label: button.label, level: 1, action: 'release' },
+        payload: { pin: button.pin, label: button.label, level: 1, action: 'up' },
       })
     },
     forcePreviewRender: () => {

@@ -466,7 +466,7 @@
       "name": "button",
       "class": "input",
       "device": "button",
-      "description": "When a GPIO button is pressed, held or released. A listener with no `action` filter hears presses only. `durationMs` and `heldSeconds` (whole seconds, the ESP32 buzzer ticks one per second while the key is down) come with longPress, repeat and release.",
+      "description": "A GPIO button, in two layers. The hardware layer says what the line did, the moment it did it: `down` and `up` (with `durationMs`). The button layer says what the person meant, once that is clear, and each press is exactly one of: `press` (a short press with no second one within `doublePressMs` of its release, so it waits that long), `doublePress` (on the second down) or `longPress` (on the up of a press held at least `longPressMs`, with `durationMs` and `heldSeconds`; nothing while the key is down). A listener with no `action` filter hears `press` only. `atMs` is when the driver saw the edge, on the frame's monotonic clock: every rule is timed from it, so a press made while the panel was refreshing keeps its timing.",
       "listen": true,
       "dispatch": false,
       "payload": [
@@ -477,6 +477,7 @@
         {"name": "durationMs", "label": "Held for (ms)", "type": "integer", "required": false, "unit": "ms", "filter": "more"},
         {"name": "heldSeconds", "label": "Held for (s)", "type": "integer", "required": false, "unit": "s", "filter": "more"},
         {"name": "wake", "label": "Woke the device", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "atMs", "label": "Seen at (ms)", "type": "integer", "required": false, "unit": "ms", "catalog": false},
         {"name": "level", "label": "Level", "type": "integer", "required": false, "unit": "gpio-level", "catalog": false}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system"],
@@ -612,7 +613,7 @@
     "directions": ["left", "right", "up", "down"]
   },
   "buttons": {
-    "$comment": "GPIO buttons. `roles` is what a button MEANS, so a store scene filters on `role: \"next\"` and not on a silkscreen label; a frame configures a role per button (`gpioButtons[].role`), and `roleByLabel` is the default for a button without one, by its label (case-insensitive). `actions`: `press` on the edge, `longPress` once after `longPressMs` held, `repeat` every `repeatMs` after that, `release` with `durationMs`.",
+    "$comment": "GPIO buttons. One event, `button`, in two layers; `action` says which. Hardware: `down` and `up`, delivered the moment the driver reports the edge (`up` with `durationMs`), for a scene that wants the key itself (a counter that counts every tap, hold-to-show). Button: what the person meant, and each press is exactly one of them: `press` once a short press is over and `doublePressMs` has passed since its release with no second down; `doublePress` on the second down within that window (the pair is that and nothing more: no `press`, no `longPress`, and the third down starts over); `longPress` on the `up` of a press held at least `longPressMs`, once, after the `up`, with the same `durationMs` and `heldSeconds` (nothing is delivered while a key is held). The rules are timed from the edges' `atMs`, never from when they were delivered. `roles` is what a button MEANS, so a store scene filters on `role: \"next\"` and not on a silkscreen label; a frame configures a role per button (`gpioButtons[].role`), and `roleByLabel` is the default for a button without one, by its label (case-insensitive). The ESP32 buzzer clicks on `down`, lower on every `up`, and higher on the second `down` of a `doublePress`; while a key is held it sounds a short falling pair at every whole `longPressMs`, counting the hold (the scene's `longPress` still comes once, with the `up`); a `press` adds no sound of its own.",
     "roles": ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"],
     "roleByLabel": {
       "A": "primary", "B": "next", "C": "prev", "D": "back", "BOOT": "primary", "KEY1": "next", "KEY2": "prev",
@@ -620,9 +621,9 @@
       "SELECT": "primary", "HOME": "menu", "MENU": "menu", "EXIT": "back", "BACK": "back", "NEXT": "next",
       "RIGHT": "next", "PREV": "prev", "LEFT": "prev", "UP": "up", "DOWN": "down", "REFRESH": "refresh"
     },
-    "actions": ["press", "longPress", "repeat", "release"],
-    "longPressMs": 500,
-    "repeatMs": 250
+    "actions": ["down", "up", "press", "doublePress", "longPress"],
+    "doublePressMs": 350,
+    "longPressMs": 1000
   },
   "keyboard": {
     "$comment": "`codes`: the Linux KEY_* number -> the W3C KeyboardEvent.code (physical, layout-independent; what a browser produces for free). `named`: the `key` of a code that is not printable. `layouts`: what a printable code means as [unshifted, shifted, altGr]; a letter key is its letter unless listed; `inherits` fills what a layout does not list. The frame's `keyboardLayout` setting picks one; `us` is the default.",

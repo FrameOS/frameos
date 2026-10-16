@@ -150,8 +150,9 @@ double frameos_nim_scene_interval(void);
 double frameos_nim_next_sleep(void);
 /* True once when a scene event requested a redraw (clears the flag). */
 bool frameos_nim_render_requested(void);
-/* Time passing for the dispatcher's input state (a held button becomes a
- * `longPress`, then `repeat`s): true when it made an event, in which case the
+/* Time passing for the dispatcher's input state (a held button is a
+ * `longPress` at every whole second, a short press whose double-press window
+ * closed a `press`): true when it made an event, in which case the
  * render flag may be set. Tries the runtime lock once and does nothing when a
  * render holds it — the hold is reported on release then. */
 bool frameos_nim_tick(void);

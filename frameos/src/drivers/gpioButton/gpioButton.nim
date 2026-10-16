@@ -1,13 +1,22 @@
 import json, strformat, strutils, tables
+import std/monotimes
 import lib/lgpio
 import frameos/driver_context
 import frameos/channels
 
-const debounce = 100000
+# Microseconds the level must stay put before lgpio reports an edge. Contact
+# bounce on a tactile switch is over within a few ms; until 2026.10.16 this
+# was 100 ms, which swallowed any tap shorter than that and the second press
+# of a quick double tap. The ESP32 locks bounce out for 30 ms after an edge
+# (fos_button_timing.c); this keeps a Pi on the same scale.
+const debounce = 30000
 const lineFlag = LG_SET_PULL_UP
-# Both edges: a scene hears the release too, with how long the key was held,
-# and the dispatcher makes `longPress` and `repeat` out of the hold
-# (frameos/input_state.nim). The line is pulled up, so a press is level 0.
+# Both edges, as `down` and `up`: the hardware layer a scene can hear as it
+# is, and what the dispatcher makes `press`, `doublePress` and `longPress` out
+# of (frameos/input_state.nim). Each edge says when this thread saw it
+# (`atMs`, the monotonic clock the dispatcher's tick reads), so a hold is
+# measured from the edge and not from when the runner got round to it. The
+# line is pulled up, so a press is level 0.
 const edge = LG_BOTH_EDGES
 
 let pinLabels = newTable[int, string]()
@@ -20,12 +29,13 @@ proc log(message: string) =
 
 proc alertsHandler(num_alerts: cint, alerts: lgGpioAlert_p, userdata: pointer) {.cdecl.} =
   let alerts = cast[ptr UncheckedArray[lgGpioAlert_t]](alerts)
+  let atMs = getMonoTime().ticks div 1_000_000
   for i in 0 .. num_alerts - 1:
     let gpio = alerts[i].report.gpio.int
     let level = alerts[i].report.level.int
     let label = pinLabels.getOrDefault(gpio)
     sendEvent("button", %*{"pin": gpio, "label": label, "level": level,
-      "action": (if level == 0: "press" else: "release")}, eoDriver)
+      "action": (if level == 0: "down" else: "up"), "atMs": atMs}, eoDriver)
 
 proc determineGPIODevice(): int =
   try:

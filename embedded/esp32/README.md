@@ -510,8 +510,8 @@ registered `gpio_buttons` pin that sits on a wake-capable pad — an RTC IO
 source (`ext1` any-low on the S3, `esp_deep_sleep_enable_gpio_wakeup` on the
 C3; the RTC_PERIPH domain stays powered so the internal pull-ups hold), next
 to the timer. A press brings the frame back early: the boot notes which pin
-woke it (`fos_buttons_wake_boot`), replays the press to the scene as the usual
-`button` event (`"wake": true`) on the first render pass, and that pass
+woke it (`fos_buttons_wake_boot`), hands that press to the scene as the usual
+`button` edges (`"wake": true` on its `down`) on the first render pass, and that pass
 renders instead of counting as a command check-in. A key still held at the
 moment of sleep is skipped for that sleep only (any-low would wake the chip
 instantly). `buttons:listening` lists `"wake"` per pin, the `sleep` line
@@ -519,7 +519,8 @@ lists `wakeButtons`, `status` prints `wake_on_button`, and the `metrics`
 sample carries `wakeCause` (`timer` / `button` / `power_on` / `restart` /
 `panic` / `watchdog` / `brownout`) so a battery graph can be read against
 what actually woke the frame. The pure pin arithmetic is `fos_wake.c`, host
-tested by `main/tests/test_fos_wake.c`.
+tested by `main/tests/test_fos_wake.c`; a button's debounce and press kinds
+are `fos_button_timing.c`, host tested by `main/tests/test_button_timing.c`.
 
 **A press while awake.** The press cuts the render task's wait short
 (`fos_client_wake_for_events`) so the scene hears the `button` event within a
@@ -699,22 +700,65 @@ A press the button task registers clicks the board's buzzer (`fos_buzzer.c`,
 a 14 ms square wave at 2 kHz through an LEDC PWM channel) and its release
 clicks again at 0.7 of that pitch: the two clicks of a mechanical key, so a
 tap and a one-second hold both sound right and nothing drones (until
-2026.10.15 the press tone ran until the release, a second at most). While
-the key stays down a 7 ms tick at the press pitch sounds at every whole
-second, counting the hold out loud; the dispatcher reports the same count
-as `heldSeconds` next to `durationMs` on the `longPress`, `repeat` and
-`release` events, so a scene can act on the second the listener heard
-("click, tick, tick, tick, click": a three-second hold). The down click
-starts from the button task the moment the press is queued, so the feedback
-does not wait for a render that may be 30 s into a panel refresh. A press
-that wakes the chip from deep sleep is the same press: its down click sounds
-as soon as the chip boots (`fos_buttons_wake_boot`), the button task starts
-right after it, and the ticks and the up click follow the finger (until
-2026.10.16 a wake got a 60 ms chirp of its own and no release click).
+2026.10.15 the press tone ran until the release, a second at most). Every
+event a scene can hear sounds the instant it happens, played by the button
+task when its timing (`fos_button_timing.c`, the dispatcher's rules on the
+same stamps and the contract's numbers) says so:
+
+| Event | Sound (pitch × `buzzer_tone_hz`, ms) |
+| --- | --- |
+| `down` | 1× 14 |
+| `up` | 0.7× 14, every up: a tap's, a double press's, a long press's |
+| `doublePress` | its second down is 1.5× 14 instead of 1× |
+| a key held | 1× 8 then 0.5× 20 at every whole second it stays down |
+| `press` | none of its own: its clicks were the down and the up |
+| refused | down 100 Hz 14, up 70 Hz 14 |
+
+So a tap is "click, clack" and the scene hears `down`, `up`, and the `press`
+350 ms later; a double tap is 2000, 1400, 3000, 1400 Hz (the second down
+higher); a 2.5 s hold is "click, dun, dun, clack", and the scene
+hears its one `longPress` with the `up`: the duns count the hold out loud, they
+are not events. Until 2026.10.16 a hold
+chirped at 0.5 s and then every second, which was too many sounds. The down click starts from the button task the
+moment the edge is queued, so the feedback does not wait for a render that
+may be 30 s into a panel refresh. A press that wakes the chip from deep sleep
+clicks down as soon as the chip boots (`fos_buttons_wake_boot`) and is a press
+like any other from then on: held, it duns each second and its up is a
+`longPress`; a tap followed by a quick second tap is a `doublePress`. The
+chip cannot see its keys while it boots: 0.75 s on the E1002 from the reset
+to the button task's first look, 0.6 s of it the bootloader checking the
+3 MB app. That first look decides the stamps. A key still down
+began at the reset (`atMs` 0), so its hold counts from there and the first
+dun can sound the moment the task starts. A key already up was a tap, its
+`down` and `up` stamped then, which opens the double-press window. A second
+tap made and let go entirely during the boot is not seen, so a double press
+that wakes the frame needs its second tap after that first look. (Until
+2026.10.16 the wake press was replayed as a plain `press` with no hold, so it
+could be neither; before that it got a 60 ms chirp of its own and no release
+click.) The PSRAM memory test is off at boot since 2026.10.16: it took
+0.41 s of every boot, deep-sleep wakes included (the task started at 1.18 s).
 
 Presses during a render are registered: the button task keeps polling, and
 the render task drains the queue in one go before its next pass (one render
-for the whole burst). The queue holds 64 edges, 32 press/release pairs, and a
+for the whole burst). Each queued edge carries when the button task saw it
+(`atMs`, the esp_timer clock, which is also the Nim side's monotonic clock),
+so the dispatcher measures a hold between the two edges and not from the
+drain: a tap made 5 s into a 30 s refresh is a tap with its `durationMs`,
+two taps in that time are a `doublePress`, and a hold that was long enough
+is a `longPress` with its `up`. Until 2026.10.16 every edge was timed when it
+was drained, so a tap during a render arrived as a 30 s hold.
+
+A `press` is decided 350 ms after its `up`, and only a tick of the
+dispatcher delivers it. So while a key is down or a tap is in its window
+(`fos_buttons_busy`), the idle wait runs in 50 ms slices instead of 1 s ones,
+and a frame about to deep-sleep waits, up to 10 s, until the decision is
+delivered (and renders if the scene asked).
+
+The debounce takes the first change of level as the edge (polled every
+20 ms) and ignores changes for 30 ms after it, which is contact bounce. Until
+2026.10.16 an edge needed the level settled for 80 ms first: that swallowed a
+tap shorter than 80 ms and the second press of a quick double tap. The
+queue holds 64 edges (12 bytes each), 32 press/release pairs, and a
 press is accepted only when its release also fits, so the dispatcher never
 sees a key that stays down. A press with no room is dropped, logged as
 `button:dropped`, and gets the same two clicks from a 100 Hz base instead

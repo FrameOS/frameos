@@ -833,7 +833,7 @@ export const buttonRoleByLabel: Record<string, string> = {
   "DOWN": "down",
   "REFRESH": "refresh"
 }
-export const buttonActions: readonly string[] = ["press", "longPress", "repeat", "release"]
+export const buttonActions: readonly string[] = ["down", "up", "press", "doublePress", "longPress"]
 
 /** Keyboard layouts a frame's `keyboardLayout` setting can name. */
 export const keyboardLayouts: readonly { id: string; label: string }[] = [
@@ -925,8 +925,8 @@ interface FrameOSEventPayloads {
   turnOn: Record<string, never>;
   /** Turn the screen off */
   turnOff: Record<string, never>;
-  /** When a GPIO button is pressed, held or released. A listener with no \`action\` filter hears presses only. \`durationMs\` and \`heldSeconds\` (whole seconds, the ESP32 buzzer ticks one per second while the key is down) come with longPress, repeat and release. */
-  button: { pin: number; label: string; role: string; action: string; durationMs?: number; heldSeconds?: number; wake?: boolean; level?: number };
+  /** A GPIO button, in two layers. The hardware layer says what the line did, the moment it did it: \`down\` and \`up\` (with \`durationMs\`). The button layer says what the person meant, once that is clear, and each press is exactly one of: \`press\` (a short press with no second one within \`doublePressMs\` of its release, so it waits that long), \`doublePress\` (on the second down) or \`longPress\` (on the up of a press held at least \`longPressMs\`, with \`durationMs\` and \`heldSeconds\`; nothing while the key is down). A listener with no \`action\` filter hears \`press\` only. \`atMs\` is when the driver saw the edge, on the frame's monotonic clock: every rule is timed from it, so a press made while the panel was refreshing keeps its timing. */
+  button: { pin: number; label: string; role: string; action: string; durationMs?: number; heldSeconds?: number; wake?: boolean; atMs?: number; level?: number };
   /** Set the scene's public state. This is not used for private state changes. */
   setSceneState: { state?: any; render?: boolean };
   /** Switch the frame to another scene. An optional \`state\` object is applied to that scene's public state. */

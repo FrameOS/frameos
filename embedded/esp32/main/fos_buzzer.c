@@ -31,16 +31,23 @@
 /* The press: a click on the way down at the press pitch and one on the way
  * up at 0.7 of it, 14 ms each. Picked by ear against the alternatives
  * (pulses, sweeps, tunes) for being clear at a tap and not a drone at a
- * one-second hold. The hold's second ticks are the down click at half the
- * length: audibly the same sound, smaller. */
+ * one-second hold. */
 #define CLICK_MS 14
-#define TICK_MS 7
 #define CLICK_UP_NUM 7
 #define CLICK_UP_DEN 10
 /* A refused press: the same pair from a 100 Hz base, so it reads as "no"
  * next to the press's "yes" whatever pitch the frame is set to. */
 #define REJECT_DOWN_HZ 100
 #define REJECT_UP_HZ (REJECT_DOWN_HZ * CLICK_UP_NUM / CLICK_UP_DEN)
+/* The second down of a double press: the down click at 1.5 of the press
+ * pitch, so the two taps are heard as one double press. */
+#define DOUBLE_DOWN_NUM 3
+#define DOUBLE_DOWN_DEN 2
+/* A key held, at every whole second it stays down: a short note at the
+ * press pitch falling to a longer one an octave down, a "dun" that counts
+ * the hold out loud. */
+#define LONG_HEAD_MS 8
+#define LONG_TAIL_MS 20
 
 static SemaphoreHandle_t s_lock = NULL;
 static esp_timer_handle_t s_stop_timer = NULL;
@@ -48,6 +55,10 @@ static bool s_timer_ready = false;
 static uint32_t s_freq_hz = 0;
 static int s_pin = -1;         /* the pin the channel drives, -1 = none */
 static int s_refused_pin = -1; /* said why once; quiet until the pin changes */
+/* The sequence sounding now: the stop timer steps through it. */
+static fos_buzzer_note_t s_notes[FOS_BUZZER_NOTES_MAX];
+static size_t s_note_count = 0;
+static size_t s_note_next = 0;
 
 /* A pin the chip reserves or the board already uses for something else: a
  * PWM on a button's pull-up or the panel's SPI lines would break the thing it
@@ -123,14 +134,35 @@ static bool attach(int pin)
     return true;
 }
 
+/* Sound one note (a rest stops the output) and arm the timer for its end.
+ * Caller holds s_lock and has attached the pin. */
+static void start_note_locked(const fos_buzzer_note_t *note)
+{
+    if (note->freq_hz == 0) {
+        ledc_stop(BUZZER_MODE, BUZZER_CHANNEL, 0);
+    } else {
+        if (note->freq_hz != s_freq_hz && ledc_set_freq(BUZZER_MODE, BUZZER_TIMER, note->freq_hz) == ESP_OK) {
+            s_freq_hz = note->freq_hz;
+        }
+        ledc_set_duty(BUZZER_MODE, BUZZER_CHANNEL, BUZZER_HALF_DUTY);
+        ledc_update_duty(BUZZER_MODE, BUZZER_CHANNEL);
+    }
+    esp_timer_start_once(s_stop_timer, (uint64_t)note->duration_ms * 1000);
+}
+
 static void stop_tone(void *arg)
 {
     (void)arg;
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    /* Active again: a new tone restarted the timer while this callback
-     * waited for the lock, and that tone is not over yet. */
+    /* Active again: a new sound restarted the timer while this callback
+     * waited for the lock, and it is not over yet. */
     if (s_pin >= 0 && !esp_timer_is_active(s_stop_timer)) {
-        ledc_stop(BUZZER_MODE, BUZZER_CHANNEL, 0);
+        if (s_note_next < s_note_count) {
+            start_note_locked(&s_notes[s_note_next++]);
+        } else {
+            ledc_stop(BUZZER_MODE, BUZZER_CHANNEL, 0);
+            s_note_count = s_note_next = 0;
+        }
     }
     xSemaphoreGive(s_lock);
 }
@@ -150,21 +182,30 @@ void fos_buzzer_init(void)
     }
 }
 
-void fos_buzzer_tone(uint32_t freq_hz, uint32_t duration_ms)
+void fos_buzzer_play(const fos_buzzer_note_t *notes, size_t count)
 {
-    if (!s_lock || freq_hz == 0 || duration_ms == 0) return;
+    if (!s_lock || !notes || count == 0) return;
+    if (count > FOS_BUZZER_NOTES_MAX) count = FOS_BUZZER_NOTES_MAX;
     int pin = fos_config()->buzzer_pin;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     if (attach(pin)) {
-        if (freq_hz != s_freq_hz && ledc_set_freq(BUZZER_MODE, BUZZER_TIMER, freq_hz) == ESP_OK) {
-            s_freq_hz = freq_hz;
+        esp_timer_stop(s_stop_timer); /* a sound already playing: start over */
+        s_note_count = 0;
+        for (size_t i = 0; i < count; i++) {
+            if (notes[i].duration_ms == 0) continue;
+            s_notes[s_note_count++] = notes[i];
         }
-        esp_timer_stop(s_stop_timer); /* a tone already sounding: start over */
-        ledc_set_duty(BUZZER_MODE, BUZZER_CHANNEL, BUZZER_HALF_DUTY);
-        ledc_update_duty(BUZZER_MODE, BUZZER_CHANNEL);
-        esp_timer_start_once(s_stop_timer, (uint64_t)duration_ms * 1000);
+        s_note_next = 0;
+        if (s_note_count > 0) start_note_locked(&s_notes[s_note_next++]);
     }
     xSemaphoreGive(s_lock);
+}
+
+void fos_buzzer_tone(uint32_t freq_hz, uint32_t duration_ms)
+{
+    if (freq_hz == 0 || duration_ms == 0) return;
+    const fos_buzzer_note_t note = {freq_hz, duration_ms};
+    fos_buzzer_play(&note, 1);
 }
 
 /* The configured pitch, kept inside the contract's bounds whatever NVS held. */
@@ -185,10 +226,30 @@ void fos_buzzer_click_up(void)
     fos_buzzer_tone(tone_hz() * CLICK_UP_NUM / CLICK_UP_DEN, CLICK_MS);
 }
 
-void fos_buzzer_tick(void)
+/* A multiple of the press pitch, inside what the LEDC timer and the contract
+ * allow. */
+static uint32_t scaled_hz(uint32_t num, uint32_t den)
 {
-    fos_buzzer_tone(tone_hz(), TICK_MS);
+    uint32_t hz = tone_hz() * num / den;
+    if (hz < FOS_BUZZER_TONE_HZ_MIN) return FOS_BUZZER_TONE_HZ_MIN;
+    if (hz > FOS_BUZZER_TONE_HZ_MAX) return FOS_BUZZER_TONE_HZ_MAX;
+    return hz;
 }
+
+void fos_buzzer_double_down(void)
+{
+    fos_buzzer_tone(scaled_hz(DOUBLE_DOWN_NUM, DOUBLE_DOWN_DEN), CLICK_MS);
+}
+
+void fos_buzzer_long_press(void)
+{
+    const fos_buzzer_note_t notes[] = {
+        {tone_hz(), LONG_HEAD_MS},
+        {scaled_hz(1, 2), LONG_TAIL_MS},
+    };
+    fos_buzzer_play(notes, sizeof(notes) / sizeof(notes[0]));
+}
+
 
 void fos_buzzer_reject_down(void)
 {

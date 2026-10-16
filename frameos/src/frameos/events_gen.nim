@@ -64,9 +64,9 @@ const
   GestureDoubleTapMs* = 350
   GestureLongPressMs* = 500
   GestureSwipeMinPx* = 48
-  ## A GPIO button held: `longPress` once, then `repeat` every so often.
-  ButtonLongPressMs* = 500
-  ButtonRepeatMs* = 250
+  ## A GPIO button: a short press waits `ButtonDoublePressMs` for a second down; a hold is a `longPress` at every whole `ButtonLongPressMs`.
+  ButtonDoublePressMs* = 350
+  ButtonLongPressMs* = 1000
   ButtonRoles*: array[9, string] = ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]
   PointerTypes*: array[3, string] = ["mouse", "touch", "pen"]
   ## Origins a scene opts into per custom event (`origins` on its declaration).
@@ -408,7 +408,7 @@ proc eventPayloadKeyCount*(name: string): int =
   of evLongPress: 5
   of evSwipe: 7
   of evWheel: 4
-  of evButton: 8
+  of evButton: 9
   of evSetSceneState: 2
   of evSetCurrentScene: 2
   of evUploadScenes: 3
@@ -540,7 +540,8 @@ proc eventPayloadKey*(name: string, index: int): string =
     of 4: "durationMs"
     of 5: "heldSeconds"
     of 6: "wake"
-    of 7: "level"
+    of 7: "atMs"
+    of 8: "level"
     else: ""
   of evSetSceneState:
     case index

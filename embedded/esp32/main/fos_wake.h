@@ -29,3 +29,12 @@ uint64_t fos_wake_button_mask(const int *pins, size_t count, uint64_t valid_mask
  * latched pins is a configured button (a stale status, or a pin some other
  * subsystem armed). */
 int fos_wake_button_index(const int *pins, size_t count, uint64_t status_mask);
+
+/* The button task stamps every edge with the low 32 bits of its clock (ms
+ * since boot, esp_timer) to keep the queue item small; the render task widens
+ * the stamp back when it drains the queue, against its own reading of the
+ * same clock. Correct for any edge younger than 2^32 ms (49 days): the
+ * difference is taken in 32 bits, so a wrap between the two readings cancels.
+ * A stamp that reads later than `now_ms` (the clocks are one; it cannot) is
+ * treated as 2^32 ms old, which is what the arithmetic says. */
+int64_t fos_wake_edge_at_ms(uint32_t at_ms_low, int64_t now_ms);

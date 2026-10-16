@@ -32,3 +32,9 @@ int fos_wake_button_index(const int *pins, size_t count, uint64_t status_mask)
     }
     return best;
 }
+
+int64_t fos_wake_edge_at_ms(uint32_t at_ms_low, int64_t now_ms)
+{
+    uint32_t ago = (uint32_t)now_ms - at_ms_low;
+    return now_ms - (int64_t)ago;
+}

@@ -1710,6 +1710,25 @@ static void client_task(void *arg)
          * by a keep-awake, whose follow-up pass must then check in, not
          * render again. */
         s_next_render_due = clock_ok ? time(NULL) + (time_t)sleep_s : 0;
+        /* A key still down, or a tap inside its double-press window: the
+         * dispatcher has a `longPress`, `press` or `doublePress` still to
+         * deliver, and only a tick delivers it. A battery frame that slept
+         * now would lose it (the tap's window is 350 ms; a held key is let
+         * go within seconds, and 10 s caps a stuck one). Wait it out,
+         * ticking, and render if the scene asked. */
+        if (deep_sleep_now && config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available() &&
+            fos_buttons_busy()) {
+            int64_t settle_start_us = esp_timer_get_time();
+            while (fos_buttons_busy() && esp_timer_get_time() - settle_start_us < 10 * 1000000LL) {
+                vTaskDelay(pdMS_TO_TICKS(20));
+                fos_buttons_process_events();
+            }
+            fos_buttons_process_events();
+            if (frameos_nim_render_requested()) {
+                force_render = true;
+                continue;
+            }
+        }
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
         bool button_pending = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available() &&
                               fos_buttons_pending();
@@ -1855,7 +1874,11 @@ static void client_task(void *arg)
          * setting the redraw flag) take effect promptly. */
         uint32_t remaining_ms = sleep_s * 1000;
         while (remaining_ms > 0) {
-            uint32_t slice = remaining_ms > 1000 ? 1000 : remaining_ms;
+            /* 50 ms while a button is busy: its `press` is due 350 ms after
+             * the tap and its `longPress`es on each second, and only the
+             * process_events below delivers them. */
+            uint32_t max_slice = fos_buttons_busy() ? 50 : 1000;
+            uint32_t slice = remaining_ms > max_slice ? max_slice : remaining_ms;
             int64_t slice_start_us = esp_timer_get_time();
             EventBits_t bits = xEventGroupWaitBits(s_events,
                                                    RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT,
