@@ -603,7 +603,14 @@ def gen_c(doc):
     ]
     for action in doc["buttons"]["actions"]:
         out.append(f"#define FOS_BUTTON_ACTION_{upper_snake(action)} {c_str(action)}")
-    out.append("")
+    out += [
+        "/* The dispatcher's button timing (`buttons` in the contract): what the button task",
+        " * mirrors for the buzzer, so a chirp and the event it stands for share one clock. */",
+        f"#define FOS_BUTTON_DOUBLE_PRESS_MS {int(doc['buttons']['doublePressMs'])}",
+        f"#define FOS_BUTTON_LONG_PRESS_MS {int(doc['buttons']['longPressMs'])}",
+        f"#define FOS_BUTTON_REPEAT_MS {int(doc['buttons']['repeatMs'])}",
+        "",
+    ]
     for event in doc["events"]:
         out.append(f"#define FOS_EVENT_{upper_snake(event['name'])} {c_str(event['name'])}")
     out += ["", "typedef enum {"]

@@ -63,6 +63,18 @@ touch, both 2026-09-19):
   `longPress` then `release`, both with `durationMs` near 2000 and
   `heldSeconds: 2`, the same count the buzzer ticked; a key held across the
   end of a refresh gets its `longPress` at 500 ms of hold, not at the drain.
+- [ ] **Button sounds and debounce on the E1004** (2026.10.16): the fastest
+  tap you can make is a `press` + `release` (no lost taps); the fastest
+  double tap you can make is `press`, `release`, `press`, `doublePress`,
+  `release`, and its second tap plays the rising two-note sound, not the
+  plain click; a 3 s hold sounds "click, dun, tick, tick, click" with the dun
+  at the `longPress` and each tick at a `repeat` (`heldSeconds` 1, 2); no key
+  double-registers from contact bounce (press slowly, rock the key). Listen
+  for whether the double's notes (1.5x and 2x the press pitch) and the long
+  press's low note (0.5x) carry on the piezo; retune in `fos_buzzer.c` if
+  not. Pi with buttons (Inky Impression): the same fastest tap and double
+  tap register with the 30 ms lgpio debounce, and a slow press does not
+  bounce into two.
 - [ ] **"Turn display off / on" end to end on the Pi 5** (menu → event →
   driver). The write the driver makes (`echo 1 > /sys/class/graphics/fb0/blank`)
   was run by hand as uid 990 and took `bl_power` 0 → 4 and DPMS On → Off.

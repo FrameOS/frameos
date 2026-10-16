@@ -519,7 +519,8 @@ lists `wakeButtons`, `status` prints `wake_on_button`, and the `metrics`
 sample carries `wakeCause` (`timer` / `button` / `power_on` / `restart` /
 `panic` / `watchdog` / `brownout`) so a battery graph can be read against
 what actually woke the frame. The pure pin arithmetic is `fos_wake.c`, host
-tested by `main/tests/test_fos_wake.c`.
+tested by `main/tests/test_fos_wake.c`; a button's debounce and press kinds
+are `fos_button_timing.c`, host tested by `main/tests/test_button_timing.c`.
 
 **A press while awake.** The press cuts the render task's wait short
 (`fos_client_wake_for_events`) so the scene hears the `button` event within a
@@ -699,12 +700,22 @@ A press the button task registers clicks the board's buzzer (`fos_buzzer.c`,
 a 14 ms square wave at 2 kHz through an LEDC PWM channel) and its release
 clicks again at 0.7 of that pitch: the two clicks of a mechanical key, so a
 tap and a one-second hold both sound right and nothing drones (until
-2026.10.15 the press tone ran until the release, a second at most). While
-the key stays down a 7 ms tick at the press pitch sounds at every whole
-second, counting the hold out loud; the dispatcher reports the same count
-as `heldSeconds` next to `durationMs` on the `longPress`, `repeat` and
-`release` events, so a scene can act on the second the listener heard
-("click, tick, tick, tick, click": a three-second hold). The down click
+2026.10.15 the press tone ran until the release, a second at most). Every
+kind of press a scene can hear has its own sound, played the instant the
+button task's timing (`fos_button_timing.c`, the dispatcher's rules on the
+same stamps and the contract's numbers) says it happened:
+
+| Action | Sound (pitch × `buzzer_tone_hz`, ms) |
+| --- | --- |
+| `press` | down 1× 14, up 0.7× 14 |
+| `doublePress` | the second press's down plays 1.5× 10, rest 6, 2× 10 instead; its up is the press's |
+| `longPress` | at 500 ms held: 1× 8 then 0.5× 20 |
+| `repeat` | at every whole second held: 1× 7 |
+| refused | down 100 Hz 14, up 70 Hz 14 |
+
+So a three-second hold is "click, dun, tick, tick, click" and the
+dispatcher delivers `press`, `longPress`, `repeat` (`heldSeconds` 1),
+`repeat` (2), `release` (3) at those instants. The down click
 starts from the button task the moment the press is queued, so the feedback
 does not wait for a render that may be 30 s into a panel refresh. A press
 that wakes the chip from deep sleep is the same press: its down click sounds
@@ -721,8 +732,13 @@ drain: a tap made 5 s into a 30 s refresh is a tap with its `durationMs`,
 two taps in that time are a `doublePress`, and a hold that was long enough
 gets its `longPress` right before the `release` (there was no tick to deliver
 it earlier). Until 2026.10.16 every edge was timed when it was drained, so a
-tap during a render arrived as a 30 s hold. The buzzer's hold ticks count
-from the same instant, so `heldSeconds` says what the finger heard. The
+tap during a render arrived as a 30 s hold. The buzzer's hold sounds count
+from the same instant, so `heldSeconds` says what the finger heard.
+
+The debounce takes the first change of level as the edge (polled every
+20 ms) and ignores changes for 30 ms after it, which is contact bounce. Until
+2026.10.16 an edge needed the level settled for 80 ms first: that swallowed a
+tap shorter than 80 ms and the second press of a quick double tap. The
 queue holds 64 edges (12 bytes each), 32 press/release pairs, and a
 press is accepted only when its release also fits, so the dispatcher never
 sees a key that stays down. A press with no room is dropped, logged as

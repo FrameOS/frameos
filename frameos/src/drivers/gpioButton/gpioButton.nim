@@ -4,7 +4,12 @@ import lib/lgpio
 import frameos/driver_context
 import frameos/channels
 
-const debounce = 100000
+# Microseconds the level must stay put before lgpio reports an edge. Contact
+# bounce on a tactile switch is over within a few ms; until 2026.10.16 this
+# was 100 ms, which swallowed any tap shorter than that and the second press
+# of a quick double tap. The ESP32 locks bounce out for 30 ms after an edge
+# (fos_button_timing.c); this keeps a Pi on the same scale.
+const debounce = 30000
 const lineFlag = LG_SET_PULL_UP
 # Both edges: a scene hears the release too, with how long the key was held,
 # and the dispatcher makes `doublePress`, `longPress` and `repeat` out of the

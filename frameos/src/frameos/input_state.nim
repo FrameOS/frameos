@@ -49,7 +49,7 @@ type
     origin: EventOrigin
     downAt: MonoTime
     longPressed: bool
-    lastRepeatAt: MonoTime
+    repeats: int ## `repeat`s delivered: one per whole `ButtonRepeatMs` of hold
     twice: bool  ## the second press of a double press: its release starts no third
 
   ButtonTap = object
@@ -170,18 +170,23 @@ proc heldButton(state: InputState, pin: int): int =
   -1
 
 proc tickButtons(state: var InputState, now: MonoTime, output: var seq[InputDelivery]) =
+  ## A hold reaching `ButtonLongPressMs` is a `longPress`, once; after it, a
+  ## `repeat` at every whole `ButtonRepeatMs` of hold, measured from the
+  ## press (not from the long press), so with 1000 ms one `repeat` is one
+  ## more second held and `heldSeconds` counts them — the seconds the ESP32
+  ## buzzer ticks. One event per call: a late tick catches up with one
+  ## `repeat` carrying the real hold, not a burst.
   for hold in state.buttons.mitems:
     let held = msSince(now, hold.downAt)
     if not hold.longPressed:
       if held >= ButtonLongPressMs:
         hold.longPressed = true
-        hold.lastRepeatAt = now
         var press = buttonPayload(hold.pin, hold.label, hold.role, "longPress")
         press["durationMs"] = %held
         press.withHeldSeconds()
         output.add(InputDelivery(name: evButton, origin: hold.origin, payload: press))
-    elif msSince(now, hold.lastRepeatAt) >= ButtonRepeatMs:
-      hold.lastRepeatAt = now
+    elif held div ButtonRepeatMs > hold.repeats:
+      hold.repeats = held div ButtonRepeatMs
       var repeat = buttonPayload(hold.pin, hold.label, hold.role, "repeat")
       repeat["durationMs"] = %held
       repeat.withHeldSeconds()

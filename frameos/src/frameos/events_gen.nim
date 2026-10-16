@@ -67,7 +67,7 @@ const
   ## A GPIO button held: `longPress` once, then `repeat` every so often.
   ButtonDoublePressMs* = 350
   ButtonLongPressMs* = 500
-  ButtonRepeatMs* = 250
+  ButtonRepeatMs* = 1000
   ButtonRoles*: array[9, string] = ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]
   PointerTypes*: array[3, string] = ["mouse", "touch", "pen"]
   ## Origins a scene opts into per custom event (`origins` on its declaration).

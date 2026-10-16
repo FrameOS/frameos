@@ -2759,6 +2759,64 @@
     ]
    },
    {
+    "name": "a short tap is a short tap",
+    "why": "The ESP32 button task used to need 80 ms of settled level before it accepted an edge, which swallowed a quick tap whole; now it takes the first change and locks out bounce for 30 ms. The dispatcher never cared: an edge is an edge.",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ]
+     },
+     {
+      "at": 1030,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 1030
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 30,
+         "heldSeconds": 0
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
     "name": "a hold through a render gets its long press on the release",
     "why": "No tick came between the edges (both sat in the queue), so the longPress that was due lands right before the release, with the hold it had.",
     "steps": [
@@ -3057,6 +3115,123 @@
     ]
    },
    {
+    "name": "a fast double tap is a double press",
+    "why": "Two 40 ms taps 100 ms apart, as a thumb does them. The gap that counts is from the first release to the second press.",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ]
+     },
+     {
+      "at": 1040,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 1040
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 40
+        }
+       }
+      ]
+     },
+     {
+      "at": 1140,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1140
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "doublePress"
+        }
+       }
+      ]
+     },
+     {
+      "at": 1180,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 1180
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 40
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
     "name": "a slow second press is just a press",
     "steps": [
      {
@@ -3281,18 +3456,19 @@
          "label": "B",
          "role": "next",
          "action": "longPress",
-         "durationMs": 500
+         "durationMs": 500,
+         "heldSeconds": 0
         }
        }
       ]
      },
      {
-      "at": 1749,
+      "at": 1999,
       "tick": true,
       "delivered": []
      },
      {
-      "at": 1750,
+      "at": 2000,
       "tick": true,
       "delivered": [
        {
@@ -3302,13 +3478,36 @@
          "label": "B",
          "role": "next",
          "action": "repeat",
-         "durationMs": 750
+         "durationMs": 1000,
+         "heldSeconds": 1
         }
        }
       ]
      },
      {
-      "at": 1800,
+      "at": 2500,
+      "tick": true,
+      "delivered": []
+     },
+     {
+      "at": 3000,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "repeat",
+         "durationMs": 2000,
+         "heldSeconds": 2
+        }
+       }
+      ]
+     },
+     {
+      "at": 3300,
       "send": {
        "origin": "driver",
        "event": "button",
@@ -3317,7 +3516,7 @@
         "label": "B",
         "level": 1,
         "action": "release",
-        "atMs": 1800
+        "atMs": 3300
        }
       },
       "delivered": [
@@ -3328,12 +3527,14 @@
          "label": "B",
          "role": "next",
          "action": "release",
-         "durationMs": 800
+         "durationMs": 2300,
+         "heldSeconds": 2
         }
        }
       ]
      }
-    ]
+    ],
+    "why": "A repeat comes at every whole repeatMs of hold counted from the press, not from the long press: with 1000 ms, one repeat is one more second held and heldSeconds says how many."
    },
    {
     "name": "a long press that already fired is not repeated on a late release",
@@ -3553,6 +3754,91 @@
       "at": 6000,
       "tick": true,
       "delivered": []
+     }
+    ]
+   },
+   {
+    "name": "a late tick catches up with one repeat, not a burst",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ]
+     },
+     {
+      "at": 1500,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "longPress",
+         "durationMs": 500
+        }
+       }
+      ]
+     },
+     {
+      "at": 4600,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "repeat",
+         "durationMs": 3600,
+         "heldSeconds": 3
+        }
+       }
+      ]
+     },
+     {
+      "at": 4700,
+      "tick": true,
+      "delivered": []
+     },
+     {
+      "at": 5000,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "repeat",
+         "durationMs": 4000,
+         "heldSeconds": 4
+        }
+       }
+      ]
      }
     ]
    }

@@ -466,7 +466,7 @@
       "name": "button",
       "class": "input",
       "device": "button",
-      "description": "When a GPIO button is pressed, pressed twice, held or released. A listener with no `action` filter hears presses only. `durationMs` and `heldSeconds` (whole seconds, the ESP32 buzzer ticks one per second while the key is down) come with longPress, repeat and release. `atMs` is when the driver saw the edge, on the frame's monotonic clock: the hold is measured from it, so a press made while the panel was refreshing keeps its timing.",
+      "description": "When a GPIO button is pressed, pressed twice, held or released. A listener with no `action` filter hears presses only. A `doublePress` always follows a `press`; `longPress` comes once at 500 ms of hold and `repeat` at every further whole second, `durationMs` and `heldSeconds` (whole seconds, what the ESP32 buzzer ticks out loud) with them and with the release. `atMs` is when the driver saw the edge, on the frame's monotonic clock: the hold is measured from it, so a press made while the panel was refreshing keeps its timing.",
       "listen": true,
       "dispatch": false,
       "payload": [
@@ -613,7 +613,7 @@
     "directions": ["left", "right", "up", "down"]
   },
   "buttons": {
-    "$comment": "GPIO buttons. `roles` is what a button MEANS, so a store scene filters on `role: \"next\"` and not on a silkscreen label; a frame configures a role per button (`gpioButtons[].role`), and `roleByLabel` is the default for a button without one, by its label (case-insensitive). `actions`: `press` on the edge, `doublePress` after the press that comes within `doublePressMs` of the previous short press's release (the third press starts over), `longPress` once after `longPressMs` held (on the release when no tick came first), `repeat` every `repeatMs` after that, `release` with `durationMs`. Time is the edge's `atMs` when the driver gives one, else when the edge arrived.",
+    "$comment": "GPIO buttons. One event, `button`; `action` says which kind of press, so a scene with one key still has four things to bind. `roles` is what a button MEANS, so a store scene filters on `role: \"next\"` and not on a silkscreen label; a frame configures a role per button (`gpioButtons[].role`), and `roleByLabel` is the default for a button without one, by its label (case-insensitive). `actions`, all made by the one dispatcher (input_state.nim) from the edges a driver reports, each stamped with when it saw it (`atMs`): `press` on every down edge; `doublePress` right after the `press` that comes within `doublePressMs` of the previous short press's release (so a double press is always a `press` first; the third press in a row starts over, and a press that was held into a `longPress` does not pair); `longPress` once at `longPressMs` of hold (delivered with the `release` when no tick came first); `repeat` at every whole `repeatMs` of hold after that, so with 1000 ms a `repeat` is one more second held and `heldSeconds` counts them; `release` with `durationMs`. The ESP32 buzzer plays the same rules from the same stamps: a click pair for a press, a two-note click for the double, a low thunk at `longPressMs`, a tick at every `repeat`.",
     "roles": ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"],
     "roleByLabel": {
       "A": "primary", "B": "next", "C": "prev", "D": "back", "BOOT": "primary", "KEY1": "next", "KEY2": "prev",
@@ -624,7 +624,7 @@
     "actions": ["press", "doublePress", "longPress", "repeat", "release"],
     "doublePressMs": 350,
     "longPressMs": 500,
-    "repeatMs": 250
+    "repeatMs": 1000
   },
   "keyboard": {
     "$comment": "`codes`: the Linux KEY_* number -> the W3C KeyboardEvent.code (physical, layout-independent; what a browser produces for free). `named`: the `key` of a code that is not printable. `layouts`: what a printable code means as [unshifted, shifted, altGr]; a letter key is its letter unless listed; `inherits` fills what a layout does not list. The frame's `keyboardLayout` setting picks one; `us` is the default.",

@@ -286,16 +286,29 @@ key meant for a scene, Ctrl+Alt+Del included, and lets go when it stops;
 pointers plugged in after boot are found (inotify on `/dev/input`).
 
 **Buttons.** `button {pin, label, role, action, durationMs?, heldSeconds?, wake?, atMs?, level}`.
-`action` is `press` on the edge, `doublePress` right after the press that
-comes within `buttons.doublePressMs` of the previous short press's release
-(the third press in a row starts over; a press that became a `longPress`
-does not count), `longPress` once after `buttons.longPressMs` held, `repeat`
-every `buttons.repeatMs` after that (both from the dispatcher's tick; when no
-tick came first, the `longPress` is delivered on the release, before it, with
-the hold it had), `release` with `durationMs`. `heldSeconds` is the hold in
-whole seconds, next to `durationMs` on those three: what the ESP32 buzzer
-ticks out loud, one tick per second the key is down, so a scene can act on the
-count the listener heard. `atMs` is when the driver saw the edge, in
+One event, `button`; `action` says which kind of press, so a scene with a
+single key still has several things to bind, and a listener names the one it
+wants. `action` is `press` on every down edge, `doublePress` right after the
+press that comes within `buttons.doublePressMs` (350) of the previous short
+press's release (the third press in a row starts over; a press that became a
+`longPress` does not count), `longPress` once at `buttons.longPressMs` (500)
+held, `repeat` at every whole `buttons.repeatMs` (1000) of hold after that,
+counted from the press (both from the dispatcher's tick; when no tick came
+first, the `longPress` is delivered on the release, before it, with the hold
+it had, and a late tick catches up with one `repeat`, not a burst), `release`
+with `durationMs`. `heldSeconds` is the hold in whole seconds, next to
+`durationMs` on those three: with a 1000 ms `repeatMs` each `repeat` is one
+more second held, which is what the ESP32 buzzer ticks out loud, so a scene
+can act on the count the listener heard. A `doublePress` always comes right
+after a `press` of the same key: a scene that binds both hears the second tap
+as both, and nothing waits to see whether a second tap follows (on an e-paper
+frame a press must start its render at once). The ESP32 buzzer gives each
+kind its own sound at the instant the dispatcher makes it
+(`embedded/esp32/README.md`, "Button beep"). Debounce is kept to contact
+bounce, 30 ms on both: the ESP32 takes the first change as the edge and
+ignores changes for 30 ms after it, a Pi asks lgpio for 30 ms of steady
+level. Until 2026.10.16 they waited 80 ms and 100 ms, which lost quick taps
+and the second tap of a quick double. `atMs` is when the driver saw the edge, in
 milliseconds on the frame's monotonic clock (the one the dispatcher's tick
 reads: `CLOCK_MONOTONIC` on Linux, `esp_timer` on the ESP32), on a press and a
 release, passed on to the scene. Time is the edge's: the hold is measured from

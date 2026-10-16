@@ -24,6 +24,11 @@
 #define FOS_BUTTON_ACTION_LONG_PRESS "longPress"
 #define FOS_BUTTON_ACTION_REPEAT "repeat"
 #define FOS_BUTTON_ACTION_RELEASE "release"
+/* The dispatcher's button timing (`buttons` in the contract): what the button task
+ * mirrors for the buzzer, so a chirp and the event it stands for share one clock. */
+#define FOS_BUTTON_DOUBLE_PRESS_MS 350
+#define FOS_BUTTON_LONG_PRESS_MS 500
+#define FOS_BUTTON_REPEAT_MS 1000
 
 #define FOS_EVENT_INIT "init"
 #define FOS_EVENT_RENDER "render"
