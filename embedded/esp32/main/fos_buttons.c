@@ -176,13 +176,15 @@ static void press_edge(size_t index, size_t count, int64_t at_ms)
     }
     s_release_owed[index] = true;
     /* Registered: click now, from this task, so the feedback does not wait
-     * for the render task (which may be 30 s into a panel refresh). Every
-     * `down` clicks the same, the second of a double press too; its `up`
-     * says it was a double (release_edge). A held key sounds each second
+     * for the render task (which may be 30 s into a panel refresh). A `down`
+     * clicks; the second down of a double press (the dispatcher makes it a
+     * `doublePress`, by the same rule on the same stamps) clicks higher.
+     * Every `up` is the same lower click. A held key sounds each second
      * (hold_sounds); the `press` a short tap becomes 350 ms after its `up`
      * adds no sound: its clicks were the down and the up. */
     s_clicked[index] = twice ? CLICK_DOUBLE : CLICK_PRESS;
-    fos_buzzer_click_down();
+    if (twice) fos_buzzer_double_down();
+    else fos_buzzer_click_down();
 }
 
 /* A key still down: the long-press sound at every whole longPressMs held
@@ -216,11 +218,9 @@ static void release_edge(size_t index, int64_t at_ms)
     }
     s_wake_held[index] = false;
     s_clicked[index] = CLICK_NONE;
-    /* Every up clicks lower than its down, a long press's too (its seconds
-     * were sounded while it was held); the up of a double press clicks
-     * higher, so the pair ends on a rise where a tap falls. */
-    if (clicked == CLICK_DOUBLE) fos_buzzer_double_up();
-    else if (clicked == CLICK_PRESS) fos_buzzer_click_up();
+    /* Every up is the same lower click: a tap's, a double press's, a long
+     * press's (its seconds were sounded while it was held). */
+    if (clicked == CLICK_PRESS || clicked == CLICK_DOUBLE) fos_buzzer_click_up();
     else if (clicked == CLICK_REFUSED) fos_buzzer_reject_up();
 }
 

@@ -67,13 +67,13 @@ touch, both 2026-09-19):
 - [ ] **Button sounds and debounce on the E1004** (2026.10.16): the fastest
   tap you can make is `down`, `up`, `press` (no lost taps); the fastest
   double tap you can make is `down`, `up`, `down`, `doublePress`, `up` with
-  no `press`, and sounds "click, clack, click, clink": the second down a
-  plain click, its release higher (1.5x) instead of lower; a 2.5 s hold
+  no `press`, and sounds 2000, 1400, 3000, 1400 Hz: the second down higher
+  (1.5x), every up the same lower click; a 2.5 s hold
   sounds "click, dun, dun, clack", a dun at 1 s and 2 s, and logs one
   `longPress` with the `up`; no key double-registers from contact bounce
   (press slowly, rock the key). On a battery frame, tap once right before it
   would sleep: the `press` still lands (the log shows it before the sleep
-  line). Listen for whether the double's high release (1.5x the press
+  line). Listen for whether the double's high second down (1.5x the press
   pitch) and the hold's low note (0.5x) carry on the piezo; retune in
   `fos_buzzer.c` if not. Pi with buttons (Inky Impression): the same fastest
   tap and double tap register with the 30 ms lgpio debounce, and a slow press

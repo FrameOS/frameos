@@ -707,16 +707,16 @@ same stamps and the contract's numbers) says so:
 
 | Event | Sound (pitch × `buzzer_tone_hz`, ms) |
 | --- | --- |
-| `down` | 1× 14, every down, a double press's second too |
-| `up` | 0.7× 14, every up, a long press's too |
-| `doublePress` | its up is 1.5× 14 instead of 0.7×: the pair ends on a rise |
+| `down` | 1× 14 |
+| `up` | 0.7× 14, every up: a tap's, a double press's, a long press's |
+| `doublePress` | its second down is 1.5× 14 instead of 1× |
 | a key held | 1× 8 then 0.5× 20 at every whole second it stays down |
 | `press` | none of its own: its clicks were the down and the up |
 | refused | down 100 Hz 14, up 70 Hz 14 |
 
 So a tap is "click, clack" and the scene hears `down`, `up`, and the `press`
-350 ms later; a double tap is "click, clack, click, clink", ending on a rise
-where a tap falls; a 2.5 s hold is "click, dun, dun, clack", and the scene
+350 ms later; a double tap is 2000, 1400, 3000, 1400 Hz (the second down
+higher); a 2.5 s hold is "click, dun, dun, clack", and the scene
 hears its one `longPress` with the `up`: the duns count the hold out loud, they
 are not events. Until 2026.10.16 a hold
 chirped at 0.5 s and then every second, which was too many sounds. The down click starts from the button task the

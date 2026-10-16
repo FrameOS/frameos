@@ -14,9 +14,9 @@
  * by the button task when its timing (fos_button_timing.c, the dispatcher's
  * rules on the same stamps) says so:
  *
- *   down         [tone 14], every down, the second of a double press too
- *   up           [0.7 tone 14], every up, a long press's too
- *   doublePress  its up is [1.5 tone 14] instead: the pair ends on a rise
+ *   down         [tone 14]
+ *   up           [0.7 tone 14], every up: a tap's, a double press's, a long press's
+ *   doublePress  its second down is [1.5 tone 14] instead of the down click
  *   held         [tone 8, 0.5 tone 20] at every whole longPressMs the key is
  *                down (1 s, 2 s, ...); the scene's `longPress` comes once, with the up
  *   press        nothing of its own: its clicks were the down and the up
@@ -44,10 +44,9 @@ void fos_buzzer_init(void);
 void fos_buzzer_click_down(void);
 /* Its release: the same click at 0.7 of the press pitch. */
 void fos_buzzer_click_up(void);
-/* The release of a double press's second press, in place of the up click:
- * the same click at 1.5 of the press pitch, so the pair ends on a rise
- * where a tap falls. */
-void fos_buzzer_double_up(void);
+/* The second down of a double press, in place of the down click: the same
+ * click at 1.5 of the press pitch, so a double tap is heard as one. */
+void fos_buzzer_double_down(void);
 /* A key held: at every whole longPressMs it stays down, a short note falling
  * to a longer low one. */
 void fos_buzzer_long_press(void);

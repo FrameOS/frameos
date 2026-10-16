@@ -39,10 +39,10 @@
  * next to the press's "yes" whatever pitch the frame is set to. */
 #define REJECT_DOWN_HZ 100
 #define REJECT_UP_HZ (REJECT_DOWN_HZ * CLICK_UP_NUM / CLICK_UP_DEN)
-/* The release of a double press's second press: the up click, but at 1.5
- * of the press pitch where a tap's falls to 0.7, so the pair ends on a rise. */
-#define DOUBLE_UP_NUM 3
-#define DOUBLE_UP_DEN 2
+/* The second down of a double press: the down click at 1.5 of the press
+ * pitch, so the two taps are heard as one double press. */
+#define DOUBLE_DOWN_NUM 3
+#define DOUBLE_DOWN_DEN 2
 /* A key held, at every whole second it stays down: a short note at the
  * press pitch falling to a longer one an octave down, a "dun" that counts
  * the hold out loud. */
@@ -236,9 +236,9 @@ static uint32_t scaled_hz(uint32_t num, uint32_t den)
     return hz;
 }
 
-void fos_buzzer_double_up(void)
+void fos_buzzer_double_down(void)
 {
-    fos_buzzer_tone(scaled_hz(DOUBLE_UP_NUM, DOUBLE_UP_DEN), CLICK_MS);
+    fos_buzzer_tone(scaled_hz(DOUBLE_DOWN_NUM, DOUBLE_DOWN_DEN), CLICK_MS);
 }
 
 void fos_buzzer_long_press(void)
