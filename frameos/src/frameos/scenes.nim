@@ -12,6 +12,7 @@ import frameos/values
 import frameos/refresh_interval
 import frameos/js_runtime/runtime
 import frameos/js_runtime/app_runtime
+import frameos/node_store
 
 # Where to store the persisted states
 const SCENE_STATE_JSON_FOLDER = "./state"
@@ -183,6 +184,9 @@ proc cleanupSceneRuntime*(scene: FrameScene) =
     interpreted.cacheTimes = initTable[NodeId, float]()
     interpreted.cacheKeys = initTable[NodeId, JsonNode]()
     interpreted.cacheExprs = initTable[NodeId, JsonNode]()
+    interpreted.cacheRestoreTried = initTable[NodeId, bool]()
+    interpreted.cachePersistedAt = initTable[NodeId, float]()
+    interpreted.cacheFingerprints = initTable[NodeId, string]()
     cleanupSceneJs(interpreted)
 
 proc cleanupSceneTableRuntime*(scenes: Table[SceneId, FrameScene]) =
@@ -211,6 +215,9 @@ proc publishExportedScenes(
   inc exportedScenesGeneration
   exportedScenes = nextExportedScenes
   snapshotPublicStateFields(exportedScenes)
+  # The node cache and remembered values of a scene that is gone
+  # (frameos/node_store); the scenes that stay keep theirs.
+  discard sweepNodeStore(nextExportedScenes.keys.toSeq.mapIt(it.string))
   if logger != nil:
     logger.log(%*{
       "event": "reload:step",
@@ -698,6 +705,7 @@ proc cleanupOrphanedUploadedStateFiles*() =
     return
   uploadedStateCleanupRan = true
   var keepFiles = initTable[string, bool]()
+  var keepSceneIds: seq[string] = @[]
   try:
     if storedFileExists(UPLOADED_SCENES_JSON_PATH):
       let uploadedPayload = parseJson(readTextFile(UPLOADED_SCENES_JSON_PATH))
@@ -705,8 +713,13 @@ proc cleanupOrphanedUploadedStateFiles*() =
       for sceneId in sceneIds:
         let filename = &"scene-{sanitizePathString(sceneId.string)}.json"
         keepFiles[filename] = true
+        keepSceneIds.add(sceneId.string)
   except JsonParsingError, IOError:
     discard
+  withLock sceneRegistryLock:
+    for sceneId in exportedScenes.keys:
+      keepSceneIds.add(sceneId.string)
+  discard sweepNodeStore(keepSceneIds)
   for filePath in walkFiles(&"{SCENE_STATE_JSON_FOLDER}/scene-uploaded_*.json"):
     try:
       if not keepFiles.hasKey(splitFile(filePath).name & ".json"):

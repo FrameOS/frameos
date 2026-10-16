@@ -166,6 +166,8 @@ class CacheConfig(BaseModel):
     expressionEnabled: bool = Field(False, description="Enable caching only when expression is true?")
     expression: Optional[str] = Field(None, description="Custom expression code/logic")
     expressionType: Optional[FieldTypeEnum] = Field(None, description="Type of the expression output")
+    staleEnabled: bool = Field(False, description="Keep serving the cached value when a refresh fails?")
+    staleDuration: Optional[str] = Field(None, description="Seconds a cached value may be served after a failed refresh, counted from when it was fetched")
 
 
 #
