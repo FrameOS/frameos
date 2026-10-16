@@ -707,25 +707,25 @@ same stamps and the contract's numbers) says so:
 
 | Event | Sound (pitch × `buzzer_tone_hz`, ms) |
 | --- | --- |
-| `down` | 1× 14 |
-| `up` | 0.7× 14 |
-| `doublePress` | 1.5× 10, rest 6, 2× 10, in place of its down click; its up is 2.5× 12, in place of the up click |
-| `longPress` | 1× 8 then 0.5× 20, in place of its up click |
+| `down` | 1× 14, every down, a double press's second too |
+| `up` | 0.7× 14, every up, a long press's too |
+| `doublePress` | its up is 1.5× 14 instead of 0.7×: the pair ends on a rise |
+| a key held | 1× 8 then 0.5× 20 at every whole second it stays down |
 | `press` | none of its own: its clicks were the down and the up |
 | refused | down 100 Hz 14, up 70 Hz 14 |
 
 So a tap is "click, clack" and the scene hears `down`, `up`, and the `press`
-350 ms later; a double tap is "click, clack, di-di, dee", rising to its end
-where a tap falls; a hold of a
-second or more is "click", silence while held, then "dun" on the release,
-when the scene hears `up` and `longPress` together. Until 2026.10.16 a hold
+350 ms later; a double tap is "click, clack, click, clink", ending on a rise
+where a tap falls; a 2.5 s hold is "click, dun, dun, clack", and the scene
+hears its one `longPress` with the `up`: the duns count the hold out loud, they
+are not events. Until 2026.10.16 a hold
 chirped at 0.5 s and then every second, which was too many sounds. The down click starts from the button task the
 moment the edge is queued, so the feedback does not wait for a render that
 may be 30 s into a panel refresh. A press that wakes the chip from deep sleep
 clicks down as soon as the chip boots (`fos_buttons_wake_boot`), the button
 task starts right after it, and the up click follows the finger; it is a
-`press` at once and its release is a plain up click, since the dispatcher
-hears a replayed press and keeps no hold for it (until 2026.10.16 a wake got a 60 ms
+`press` at once, its hold makes no duns and its release is a plain up click,
+since the dispatcher hears a replayed press and keeps no hold for it (until 2026.10.16 a wake got a 60 ms
 chirp of its own and no release click).
 
 Presses during a render are registered: the button task keeps polling, and

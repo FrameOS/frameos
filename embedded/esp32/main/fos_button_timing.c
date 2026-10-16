@@ -30,7 +30,18 @@ bool fos_button_timing_press(fos_button_timing_t *b, int64_t at_ms)
     b->down = true;
     b->pressed_at_ms = at_ms;
     b->twice = twice;
+    b->seconds = 0;
     return twice;
+}
+
+bool fos_button_timing_hold_tick(fos_button_timing_t *b, int64_t now_ms)
+{
+    if (!b->down || b->twice) return false;
+    int64_t held = now_ms - b->pressed_at_ms;
+    uint32_t whole = held > 0 ? (uint32_t)(held / FOS_BUTTON_LONG_PRESS_MS) : 0;
+    if (whole <= b->seconds) return false;
+    b->seconds = whole;
+    return true;
 }
 
 uint32_t fos_button_timing_release(fos_button_timing_t *b, int64_t at_ms, bool *long_press)

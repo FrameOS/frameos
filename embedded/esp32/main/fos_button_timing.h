@@ -40,6 +40,7 @@ typedef struct {
     int64_t released_at_ms; /* the last release edge's stamp */
     bool tap_ended;         /* that release ended a short, single press: a double may follow */
     bool twice;             /* this press is the second of a double press: no long press */
+    uint32_t seconds;       /* whole FOS_BUTTON_LONG_PRESS_MS this hold has sounded */
 } fos_button_timing_t;
 
 /* The line as first read: a key already down counts as pressed at `now_ms`
@@ -55,6 +56,13 @@ fos_button_edge_t fos_button_timing_sample(fos_button_timing_t *b, int level, in
  * press's release. The third press in a row starts over, as in the
  * dispatcher. */
 bool fos_button_timing_press(fos_button_timing_t *b, int64_t at_ms);
+
+/* The key is still down at `now_ms`: true at every whole
+ * FOS_BUTTON_LONG_PRESS_MS of hold counted from the press (1 s, 2 s, ...),
+ * when the buzzer counts the hold out loud. The scene hears nothing then:
+ * its `longPress` comes once, with the `up`. Never for the second press of a
+ * double press. One per call: a late call catches up with one. */
+bool fos_button_timing_hold_tick(fos_button_timing_t *b, int64_t now_ms);
 
 /* Book an accepted release at `at_ms`; returns how long the key was down
  * (at least 1). A short single press leaves `tap_ended` set: the dispatcher

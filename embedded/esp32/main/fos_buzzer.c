@@ -39,19 +39,13 @@
  * next to the press's "yes" whatever pitch the frame is set to. */
 #define REJECT_DOWN_HZ 100
 #define REJECT_UP_HZ (REJECT_DOWN_HZ * CLICK_UP_NUM / CLICK_UP_DEN)
-/* The second press of a double press: two short notes climbing above the
- * press pitch with a gap the ear can hear, so it reads as "twice" and not
- * as a longer click. */
-#define DOUBLE_NOTE_MS 10
-#define DOUBLE_REST_MS 6
-/* ...and its release climbs once more, above the double's last note, where a
- * press's release falls to 0.7 of the pitch. */
-#define DOUBLE_UP_NUM 5
+/* The release of a double press's second press: the up click, but at 1.5
+ * of the press pitch where a tap's falls to 0.7, so the pair ends on a rise. */
+#define DOUBLE_UP_NUM 3
 #define DOUBLE_UP_DEN 2
-#define DOUBLE_UP_MS 12
-/* A long press, on its release in place of the up click: a short note at
- * the press pitch falling to a longer one an octave down, a "dun" that says
- * the hold was something else than a press. */
+/* A key held, at every whole second it stays down: a short note at the
+ * press pitch falling to a longer one an octave down, a "dun" that counts
+ * the hold out loud. */
 #define LONG_HEAD_MS 8
 #define LONG_TAIL_MS 20
 
@@ -242,19 +236,9 @@ static uint32_t scaled_hz(uint32_t num, uint32_t den)
     return hz;
 }
 
-void fos_buzzer_double_down(void)
-{
-    const fos_buzzer_note_t notes[] = {
-        {scaled_hz(3, 2), DOUBLE_NOTE_MS},
-        {0, DOUBLE_REST_MS},
-        {scaled_hz(2, 1), DOUBLE_NOTE_MS},
-    };
-    fos_buzzer_play(notes, sizeof(notes) / sizeof(notes[0]));
-}
-
 void fos_buzzer_double_up(void)
 {
-    fos_buzzer_tone(scaled_hz(DOUBLE_UP_NUM, DOUBLE_UP_DEN), DOUBLE_UP_MS);
+    fos_buzzer_tone(scaled_hz(DOUBLE_UP_NUM, DOUBLE_UP_DEN), CLICK_MS);
 }
 
 void fos_buzzer_long_press(void)

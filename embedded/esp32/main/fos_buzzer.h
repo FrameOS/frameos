@@ -14,12 +14,11 @@
  * by the button task when its timing (fos_button_timing.c, the dispatcher's
  * rules on the same stamps) says so:
  *
- *   down         [tone 14]
- *   up           [0.7 tone 14]
- *   doublePress  [1.5 tone 10, rest 6, 2 tone 10], in place of its down click,
- *                and [2.5 tone 12] in place of its up click: the pair rises to the end
- *   longPress    [tone 8, 0.5 tone 20], in place of its up click (a press held
- *                at least longPressMs; nothing sounds while the key is held)
+ *   down         [tone 14], every down, the second of a double press too
+ *   up           [0.7 tone 14], every up, a long press's too
+ *   doublePress  its up is [1.5 tone 14] instead: the pair ends on a rise
+ *   held         [tone 8, 0.5 tone 20] at every whole longPressMs the key is
+ *                down (1 s, 2 s, ...); the scene's `longPress` comes once, with the up
  *   press        nothing of its own: its clicks were the down and the up
  *   refused      down [100 Hz 14], up [70 Hz 14]
  *
@@ -45,14 +44,12 @@ void fos_buzzer_init(void);
 void fos_buzzer_click_down(void);
 /* Its release: the same click at 0.7 of the press pitch. */
 void fos_buzzer_click_up(void);
-/* The second press of a double press, in place of its down click: two
- * quick rising notes. */
-void fos_buzzer_double_down(void);
-/* Its release, in place of the up click: one note above the double's last,
- * so the double press rises to its end where a press falls. */
+/* The release of a double press's second press, in place of the up click:
+ * the same click at 1.5 of the press pitch, so the pair ends on a rise
+ * where a tap falls. */
 void fos_buzzer_double_up(void);
-/* A `longPress` (the up of a press held at least longPressMs), in place of
- * its up click: a short note falling to a longer low one. */
+/* A key held: at every whole longPressMs it stays down, a short note falling
+ * to a longer low one. */
 void fos_buzzer_long_press(void);
 /* A press the frame could not take (its queue is full): the same two
  * clicks, from a 100 Hz base instead of the press pitch — a dull "no" next

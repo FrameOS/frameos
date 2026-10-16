@@ -175,23 +175,32 @@ static void press_edge(size_t index, size_t count, int64_t at_ms)
         return;
     }
     s_release_owed[index] = true;
-    /* Registered: sound it now, from this task, so the feedback does not
-     * wait for the render task (which may be 30 s into a panel refresh). The
-     * `down` clicks; the second down of a double press (the dispatcher makes
-     * it a `doublePress`, by the same rule on the same stamps) plays the
-     * double's notes instead. The `up` sounds in release_edge (the long
-     * press's sound when the hold was one); the `press` a short tap becomes
-     * 350 ms after its `up` adds no sound: its clicks were the down and the
-     * up. A held key is silent. */
+    /* Registered: click now, from this task, so the feedback does not wait
+     * for the render task (which may be 30 s into a panel refresh). Every
+     * `down` clicks the same, the second of a double press too; its `up`
+     * says it was a double (release_edge). A held key sounds each second
+     * (hold_sounds); the `press` a short tap becomes 350 ms after its `up`
+     * adds no sound: its clicks were the down and the up. */
     s_clicked[index] = twice ? CLICK_DOUBLE : CLICK_PRESS;
-    if (twice) fos_buzzer_double_down();
-    else fos_buzzer_click_down();
+    fos_buzzer_click_down();
+}
+
+/* A key still down: the long-press sound at every whole longPressMs held
+ * (1 s, 2 s, ...), counting the hold out loud. The scene hears its
+ * `longPress` once, with the `up`; this says "it is one now, and still
+ * going". Not for the second press of a double press (no long press comes of
+ * it), and not for the key that woke the chip (the dispatcher keeps no hold
+ * for a replayed press). */
+static void hold_sounds(size_t index, int64_t now_ms)
+{
+    if (!fos_button_timing_hold_tick(&s_timing[index], now_ms)) return;
+    if (s_clicked[index] != CLICK_PRESS || s_wake_held[index]) return;
+    fos_buzzer_long_press();
 }
 
 static void release_edge(size_t index, int64_t at_ms)
 {
-    bool long_press = false;
-    uint32_t held_ms = fos_button_timing_release(&s_timing[index], at_ms, &long_press);
+    uint32_t held_ms = fos_button_timing_release(&s_timing[index], at_ms, NULL);
     click_t clicked = s_clicked[index];
     /* Only a press the dispatcher heard as one can start a double press:
      * not a refused one, not a key down since boot, not the wake press
@@ -207,13 +216,10 @@ static void release_edge(size_t index, int64_t at_ms)
     }
     s_wake_held[index] = false;
     s_clicked[index] = CLICK_NONE;
-    /* The up of a press held at least longPressMs is a `longPress` too (the
-     * dispatcher's rule, fos_button_timing_release): its sound in place of
-     * the up click, as the double's notes take the down click's place. Not
-     * for the key that woke the chip: the dispatcher heard a replayed press
-     * and keeps no hold for it, so it makes no `longPress` of the up. */
-    if (clicked == CLICK_PRESS && long_press && !s_wake_held[index]) fos_buzzer_long_press();
-    else if (clicked == CLICK_DOUBLE) fos_buzzer_double_up();
+    /* Every up clicks lower than its down, a long press's too (its seconds
+     * were sounded while it was held); the up of a double press clicks
+     * higher, so the pair ends on a rise where a tap falls. */
+    if (clicked == CLICK_DOUBLE) fos_buzzer_double_up();
     else if (clicked == CLICK_PRESS) fos_buzzer_click_up();
     else if (clicked == CLICK_REFUSED) fos_buzzer_reject_up();
 }
@@ -265,6 +271,7 @@ static void buttons_task(void *arg)
                 if (s_timing[i].down) release_edge(i, now);
                 break;
             default:
+                if (s_timing[i].down) hold_sounds(i, now);
                 break;
             }
             s_busy[i] = fos_button_timing_busy(&s_timing[i], now, BUTTON_BUSY_SLACK_MS);

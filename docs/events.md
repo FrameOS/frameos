@@ -314,11 +314,11 @@ while the key was held and `repeat` every second after; the dispatcher still
 takes those edges by their `level`.
 
 Each event has its sound on an ESP32 with a buzzer, at the instant it
-happens: a click on `down`, a lower one on `up`, two rising notes for a
-`doublePress` (in place of its down click) and a higher note for its `up`, so
-a double press rises to its end where a tap falls, a short falling pair for a
-`longPress` (in place of its up click). A `press` adds none: its clicks were
-the down and the up
+happens: a click on every `down`, a lower one on every `up`, and a higher
+one for the `up` of a `doublePress`, so a double press ends on a rise where a
+tap falls. While a key is held a short falling pair sounds at every whole
+second, counting the hold out loud; the scene's `longPress` still comes once,
+with the `up`. A `press` adds no sound: its clicks were the down and the up
 (`embedded/esp32/README.md`, "Button beep").
 
 `atMs` is when the driver saw the edge, in milliseconds on the frame's

@@ -158,6 +158,33 @@ static void test_a_key_held_at_boot(void)
     CHECK(fos_button_timing_release(&b, 7000, NULL) == 2000, "held 2000 from the first read");
 }
 
+static void test_a_held_key_sounds_every_second(void)
+{
+    const int64_t L = FOS_BUTTON_LONG_PRESS_MS;
+    fos_button_timing_t b;
+    fos_button_timing_init(&b, 1, 0);
+    fos_button_timing_press(&b, 1000);
+    CHECK(!fos_button_timing_hold_tick(&b, 1000 + L / 2), "nothing at half a second");
+    CHECK(!fos_button_timing_hold_tick(&b, 1000 + L - 1), "nor just before a second");
+    CHECK(fos_button_timing_hold_tick(&b, 1000 + L), "the first at 1 s");
+    CHECK(!fos_button_timing_hold_tick(&b, 1000 + L + 500), "nothing between");
+    CHECK(fos_button_timing_hold_tick(&b, 1000 + 2 * L), "the second at 2 s");
+    /* The task was starved: one catch-up, not a burst. */
+    CHECK(fos_button_timing_hold_tick(&b, 1000 + 5 * L + 600), "late: one");
+    CHECK(b.seconds == 5, "counting the seconds, got %u", (unsigned)b.seconds);
+    CHECK(!fos_button_timing_hold_tick(&b, 1000 + 5 * L + 700), "and no more until 6 s");
+    bool long_press = false;
+    fos_button_timing_release(&b, 1000 + 5 * L + 800, &long_press);
+    CHECK(long_press, "its up is the scene's one longPress");
+    CHECK(!fos_button_timing_hold_tick(&b, 1000 + 7 * L), "released: silent");
+    /* The second press of a double press counts nothing. */
+    fos_button_timing_press(&b, 20000);
+    fos_button_timing_release(&b, 20040, NULL);
+    CHECK(fos_button_timing_press(&b, 20140), "a double");
+    CHECK(!fos_button_timing_hold_tick(&b, 20140 + 3 * L), "a held double press is silent");
+    fos_button_timing_release(&b, 20140 + 3 * L + 10, NULL);
+}
+
 static void test_busy_until_the_dispatcher_has_decided(void)
 {
     const int64_t W = FOS_BUTTON_DOUBLE_PRESS_MS;
@@ -186,6 +213,7 @@ int main(void)
     test_the_line_is_long_press_ms();
     test_the_second_press_of_a_double_makes_no_long_press();
     test_a_key_held_at_boot();
+    test_a_held_key_sounds_every_second();
     test_busy_until_the_dispatcher_has_decided();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
