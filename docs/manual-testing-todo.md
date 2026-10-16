@@ -68,7 +68,7 @@ touch, both 2026-09-19):
   tap you can make is `down`, `up`, `press` (no lost taps); the fastest
   double tap you can make is `down`, `up`, `down`, `doublePress`, `up` with
   no `press`, and its second tap plays the rising two-note sound, not the
-  plain click; a 2.5 s hold sounds "click", silence, then "dun" on the
+  plain click, and its release a higher note, not the lower up click; a 2.5 s hold sounds "click", silence, then "dun" on the
   release instead of the up click, with the `longPress`; no key
   double-registers from contact bounce (press slowly, rock the key). On a
   battery frame, tap once right before it would sleep: the `press` still

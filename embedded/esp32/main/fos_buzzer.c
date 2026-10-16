@@ -44,6 +44,11 @@
  * as a longer click. */
 #define DOUBLE_NOTE_MS 10
 #define DOUBLE_REST_MS 6
+/* ...and its release climbs once more, above the double's last note, where a
+ * press's release falls to 0.7 of the pitch. */
+#define DOUBLE_UP_NUM 5
+#define DOUBLE_UP_DEN 2
+#define DOUBLE_UP_MS 12
 /* A long press, on its release in place of the up click: a short note at
  * the press pitch falling to a longer one an octave down, a "dun" that says
  * the hold was something else than a press. */
@@ -245,6 +250,11 @@ void fos_buzzer_double_down(void)
         {scaled_hz(2, 1), DOUBLE_NOTE_MS},
     };
     fos_buzzer_play(notes, sizeof(notes) / sizeof(notes[0]));
+}
+
+void fos_buzzer_double_up(void)
+{
+    fos_buzzer_tone(scaled_hz(DOUBLE_UP_NUM, DOUBLE_UP_DEN), DOUBLE_UP_MS);
 }
 
 void fos_buzzer_long_press(void)

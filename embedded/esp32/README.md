@@ -709,13 +709,14 @@ same stamps and the contract's numbers) says so:
 | --- | --- |
 | `down` | 1× 14 |
 | `up` | 0.7× 14 |
-| `doublePress` | 1.5× 10, rest 6, 2× 10, in place of its down click |
+| `doublePress` | 1.5× 10, rest 6, 2× 10, in place of its down click; its up is 2.5× 12, in place of the up click |
 | `longPress` | 1× 8 then 0.5× 20, in place of its up click |
 | `press` | none of its own: its clicks were the down and the up |
 | refused | down 100 Hz 14, up 70 Hz 14 |
 
 So a tap is "click, clack" and the scene hears `down`, `up`, and the `press`
-350 ms later; a double tap is "click, clack, di-di, clack"; a hold of a
+350 ms later; a double tap is "click, clack, di-di, dee", rising to its end
+where a tap falls; a hold of a
 second or more is "click", silence while held, then "dun" on the release,
 when the scene hears `up` and `longPress` together. Until 2026.10.16 a hold
 chirped at 0.5 s and then every second, which was too many sounds. The down click starts from the button task the

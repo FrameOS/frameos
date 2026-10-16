@@ -315,7 +315,8 @@ takes those edges by their `level`.
 
 Each event has its sound on an ESP32 with a buzzer, at the instant it
 happens: a click on `down`, a lower one on `up`, two rising notes for a
-`doublePress` (in place of its down click), a short falling pair for a
+`doublePress` (in place of its down click) and a higher note for its `up`, so
+a double press rises to its end where a tap falls, a short falling pair for a
 `longPress` (in place of its up click). A `press` adds none: its clicks were
 the down and the up
 (`embedded/esp32/README.md`, "Button beep").

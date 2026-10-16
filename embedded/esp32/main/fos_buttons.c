@@ -213,7 +213,8 @@ static void release_edge(size_t index, int64_t at_ms)
      * for the key that woke the chip: the dispatcher heard a replayed press
      * and keeps no hold for it, so it makes no `longPress` of the up. */
     if (clicked == CLICK_PRESS && long_press && !s_wake_held[index]) fos_buzzer_long_press();
-    else if (clicked == CLICK_PRESS || clicked == CLICK_DOUBLE) fos_buzzer_click_up();
+    else if (clicked == CLICK_DOUBLE) fos_buzzer_double_up();
+    else if (clicked == CLICK_PRESS) fos_buzzer_click_up();
     else if (clicked == CLICK_REFUSED) fos_buzzer_reject_up();
 }
 

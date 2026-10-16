@@ -16,7 +16,8 @@
  *
  *   down         [tone 14]
  *   up           [0.7 tone 14]
- *   doublePress  [1.5 tone 10, rest 6, 2 tone 10], in place of its down click
+ *   doublePress  [1.5 tone 10, rest 6, 2 tone 10], in place of its down click,
+ *                and [2.5 tone 12] in place of its up click: the pair rises to the end
  *   longPress    [tone 8, 0.5 tone 20], in place of its up click (a press held
  *                at least longPressMs; nothing sounds while the key is held)
  *   press        nothing of its own: its clicks were the down and the up
@@ -47,6 +48,9 @@ void fos_buzzer_click_up(void);
 /* The second press of a double press, in place of its down click: two
  * quick rising notes. */
 void fos_buzzer_double_down(void);
+/* Its release, in place of the up click: one note above the double's last,
+ * so the double press rises to its end where a press falls. */
+void fos_buzzer_double_up(void);
 /* A `longPress` (the up of a press held at least longPressMs), in place of
  * its up click: a short note falling to a longer low one. */
 void fos_buzzer_long_press(void);
