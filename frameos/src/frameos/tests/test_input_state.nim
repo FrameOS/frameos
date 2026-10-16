@@ -292,81 +292,124 @@ block test_a_key_from_the_preview_is_taken_as_it_is:
   doAssert output[0].payload["linuxCode"].getInt() == 25
   doAssert output[1].name == evTextInput
 
-block test_a_button_has_a_role_and_an_action:
+proc actions(output: seq[InputDelivery]): seq[string] =
+  for d in output:
+    result.add(d.payload["action"].getStr())
+
+block test_a_button_has_a_role_and_two_layers:
   var state = initInputState(config(800, 480))
   var output: seq[InputDelivery]
-  # A driver from before releases: a press, and nothing follows.
+  # The hardware layer at once: the down edge, with the role its label carries.
   doAssert state.applyNamedInput(evButton, %*{"pin": 6, "label": "B", "level": 0}, eoDriver, at(0), output)
-  doAssert output.names == @[evButton]
-  doAssert output[0].payload["action"].getStr() == "press" and output[0].payload["role"].getStr() == "next"
-  doAssert output[0].payload["level"].getInt() == 0
-  # The configured role wins over the label's default.
+  doAssert output.actions == @["down"]
+  doAssert output[0].payload["role"].getStr() == "next" and output[0].payload["level"].getInt() == 0
+  # The configured role wins over the label's default. A driver from before
+  # 2026.10.16 named its edges press / release: the level decides.
   output.setLen(0)
   discard state.applyNamedInput(evButton, %*{"pin": 5, "label": "A", "level": 0, "action": "press"}, eoDriver, at(0), output)
-  doAssert output[0].payload["role"].getStr() == "menu"
-  # Held: longPress once, then repeats, then the release with how long.
+  doAssert output.actions == @["down"] and output[0].payload["role"].getStr() == "menu"
+  # Held: a longPress at every whole second, none before.
   output.setLen(0)
   state.tick(at(ButtonLongPressMs - 1), output)
   doAssert output.len == 0
   state.tick(at(ButtonLongPressMs), output)
-  doAssert output.names == @[evButton, evButton] # pin 6's hold from above, and pin 5's (in table order)
+  doAssert output.actions == @["longPress", "longPress"] # pin 6's hold and pin 5's (in table order)
   for d in output:
-    doAssert d.payload["action"].getStr() == "longPress" and d.payload["pin"].getInt() in [5, 6]
     doAssert d.payload["durationMs"].getInt() == ButtonLongPressMs
-    doAssert d.payload["heldSeconds"].getInt() == ButtonLongPressMs div 1000
+    doAssert d.payload["heldSeconds"].getInt() == 1
     doAssert d.payload["role"].getStr() == (if d.payload["pin"].getInt() == 5: "menu" else: "next")
   output.setLen(0)
-  state.tick(at(ButtonLongPressMs + ButtonRepeatMs), output)
-  doAssert output.names == @[evButton, evButton]
-  for d in output:
-    doAssert d.payload["action"].getStr() == "repeat"
+  state.tick(at(2 * ButtonLongPressMs), output)
+  doAssert output.actions == @["longPress", "longPress"]
+  doAssert output[0].payload["heldSeconds"].getInt() == 2
+  # The up says how long; a long press is not also a press.
   output.setLen(0)
   discard state.applyNamedInput(evButton, %*{"pin": 5, "label": "A", "level": 1, "action": "release"}, eoDriver,
-    at(2000), output)
-  doAssert output[0].payload["action"].getStr() == "release" and output[0].payload["durationMs"].getInt() == 2000
-  # The hold in whole seconds too: what the ESP32 buzzer ticked while the key was down.
-  doAssert output[0].payload["heldSeconds"].getInt() == 2
-  doAssert output[0].payload["role"].getStr() == "menu"
-  # A release whose hold the host measured itself (the ESP32's wake press, held
-  # through the boot): its durationMs is kept, and heldSeconds made from it.
+    at(2500), output)
+  doAssert output.actions == @["up"] and output[0].payload["durationMs"].getInt() == 2500
+  doAssert output[0].payload["heldSeconds"].getInt() == 2 and output[0].payload["role"].getStr() == "menu"
   output.setLen(0)
-  discard state.applyNamedInput(evButton, %*{"pin": 9, "label": "BOOT", "level": 1, "action": "release",
-    "durationMs": 3400}, eoDriver, at(2500), output)
+  state.tick(at(4000), output)
+  doAssert output.actions == @["longPress"] and output[0].payload["pin"].getInt() == 6 # still held
+  doAssert state.buttonsHeld == 1 and state.buttonsBusy == 1
+  # An up whose hold only the host saw (the ESP32's wake press, held through
+  # the boot): its durationMs is kept, and heldSeconds made from it.
+  output.setLen(0)
+  discard state.applyNamedInput(evButton, %*{"pin": 9, "label": "BOOT", "level": 1, "action": "up",
+    "durationMs": 3400}, eoDriver, at(4500), output)
+  doAssert output.actions == @["up"]
   doAssert output[0].payload["durationMs"].getInt() == 3400 and output[0].payload["heldSeconds"].getInt() == 3
-  # A press that woke the device has no hold to follow.
+  # The down that woke the device is a press at once, with no hold to follow.
+  # (Time first: pin 6, still held, is due its fifth long press at 5 s.)
   output.setLen(0)
-  discard state.applyNamedInput(evButton, %*{"pin": 9, "label": "BOOT", "level": 0, "action": "press", "wake": true},
-    eoDriver, at(3000), output)
-  doAssert output[0].payload["wake"].getBool() and output[0].payload["role"].getStr() == "primary"
+  state.tick(at(5000), output)
+  doAssert output.actions == @["longPress"] and output[0].payload["heldSeconds"].getInt() == 5
   output.setLen(0)
-  state.tick(at(3000 + ButtonLongPressMs), output)
+  discard state.applyNamedInput(evButton, %*{"pin": 9, "label": "BOOT", "level": 0, "action": "down", "wake": true},
+    eoDriver, at(5000), output)
+  doAssert output.actions == @["down", "press"]
+  doAssert output[1].payload["wake"].getBool() and output[1].payload["role"].getStr() == "primary"
+  output.setLen(0)
+  state.tick(at(5000 + 3 * ButtonLongPressMs), output)
   for d in output:
     doAssert d.payload["pin"].getInt() != 9
   # A label nobody knows has no role.
   output.setLen(0)
-  discard state.applyNamedInput(evButton, %*{"pin": 20, "label": "Zork", "level": 0}, eoDriver, at(4000), output)
-  doAssert output[0].payload["role"].getStr() == ""
+  discard state.applyNamedInput(evButton, %*{"pin": 20, "label": "Zork", "level": 0}, eoDriver, at(9000), output)
+  doAssert output[^1].payload["action"].getStr() == "down" and output[^1].payload["role"].getStr() == ""
+
+block test_a_tap_waits_for_a_second_one:
+  var state = initInputState(config(800, 480))
+  var output: seq[InputDelivery]
+  discard state.applyNamedInput(evButton, %*{"pin": 6, "label": "B", "action": "down"}, eoDriver, at(0), output)
+  discard state.applyNamedInput(evButton, %*{"pin": 6, "label": "B", "action": "up"}, eoDriver, at(80), output)
+  doAssert output.actions == @["down", "up"] and output[1].payload["durationMs"].getInt() == 80
+  # Still in its window: nothing yet, and the host must keep ticking.
+  output.setLen(0)
+  state.tick(at(80 + ButtonDoublePressMs), output)
+  doAssert output.len == 0 and state.buttonsHeld == 0 and state.buttonsBusy == 1
+  state.tick(at(80 + ButtonDoublePressMs + 1), output)
+  doAssert output.actions == @["press"] and output[0].payload["durationMs"].getInt() == 80
+  doAssert state.buttonsBusy == 0
+  # A second down inside the window: the pair is one doublePress, no press.
+  output.setLen(0)
+  discard state.applyNamedInput(evButton, %*{"pin": 6, "label": "B", "action": "down"}, eoDriver, at(1000), output)
+  discard state.applyNamedInput(evButton, %*{"pin": 6, "label": "B", "action": "up"}, eoDriver, at(1050), output)
+  discard state.applyNamedInput(evButton, %*{"pin": 6, "label": "B", "action": "down"}, eoDriver, at(1200), output)
+  discard state.applyNamedInput(evButton, %*{"pin": 6, "label": "B", "action": "up"}, eoDriver, at(1250), output)
+  state.tick(at(3000), output)
+  doAssert output.actions == @["down", "up", "down", "doublePress", "up"], $output.actions
+
+block test_someone_elses_press_is_delivered_as_said:
+  # HTTP, the cloud, a schedule or a scene: no line moved, nothing to time.
+  var state = initInputState(config(800, 480))
+  var output: seq[InputDelivery]
+  doAssert state.applyNamedInput(evButton, %*{"label": "A"}, eoHttpWrite, at(0), output)
+  doAssert output.actions == @["press"] and output[0].payload["role"].getStr() == "primary"
+  output.setLen(0)
+  discard state.applyNamedInput(evButton, %*{"label": "A", "action": "longPress", "durationMs": 1200}, eoCloud, at(0), output)
+  doAssert output.actions == @["longPress"] and output[0].payload["heldSeconds"].getInt() == 1
+  doAssert state.buttonsBusy == 0
 
 block test_a_stamped_edge_is_timed_by_its_stamp:
-  # The ESP32 drains its button queue between renders: a press and its
-  # release made during a 30 s refresh arrive together, half a minute old,
-  # each saying when the button task saw it. The hold is theirs.
+  # The ESP32 drains its button queue between renders: a down and its up made
+  # during a 30 s refresh arrive together, half a minute old, each saying
+  # when the button task saw it. The hold is theirs.
   var state = initInputState(config(800, 480))
   var output: seq[InputDelivery]
   let base = t0.ticks div 1_000_000
-  discard state.applyNamedInput(evButton, %*{"pin": 6, "label": "B", "level": 0, "action": "press",
+  discard state.applyNamedInput(evButton, %*{"pin": 6, "label": "B", "level": 0, "action": "down",
     "atMs": base + 1000}, eoDriver, at(31000), output)
-  doAssert output.names == @[evButton] and output[0].payload["action"].getStr() == "press"
-  doAssert output[0].payload["atMs"].getInt() == base + 1000
+  doAssert output.actions == @["down"] and output[0].payload["atMs"].getInt() == base + 1000
   output.setLen(0)
-  discard state.applyNamedInput(evButton, %*{"pin": 6, "label": "B", "level": 1, "action": "release",
+  discard state.applyNamedInput(evButton, %*{"pin": 6, "label": "B", "level": 1, "action": "up",
     "atMs": base + 1200}, eoDriver, at(31000), output)
-  doAssert output.names == @[evButton] and output[0].payload["action"].getStr() == "release"
-  doAssert output[0].payload["durationMs"].getInt() == 200
-  # Nothing is held afterwards: no long press out of a tap.
+  doAssert output.actions == @["up"] and output[0].payload["durationMs"].getInt() == 200
+  # Its window closed long ago: the next tick makes it a press, not a long one.
   output.setLen(0)
   state.tick(at(31000), output)
-  doAssert output.len == 0 and state.buttonsHeld == 0
+  doAssert output.actions == @["press"] and output[0].payload["atMs"].getInt() == base + 1000
+  doAssert state.buttonsBusy == 0
 
 block test_the_corpus:
   # docs/event-fixtures.json `inputState`: the cases every host answers alike.

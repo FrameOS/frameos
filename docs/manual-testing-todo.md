@@ -52,29 +52,31 @@ touch, both 2026-09-19):
   (`driver:evdev … listening`), is grabbed (`grabbed: true`; Ctrl+Alt+Del does
   nothing), and the Keyboard test shows `Shift+H` as `H` under the `us` layout
   and `z` for KEY_Y under `de` (`inputSettings.keyboardLayout`); a GPIO button
-  held 500 ms logs a `longPress` then `repeat`s and the release carries
-  `durationMs`, and the Counter sample still counts one per press. On an
-  ESP32 (E1002 bench): a press logs `action: press`, the release `release`
-  with `durationMs`, and a scene's `button` listener without an `action`
-  filter runs once per press. Timing through a render (E1004, a ~30 s
-  refresh): a tap made mid-refresh logs `release` with a `durationMs` of
-  about 100, not 30000, and no `longPress`; two quick taps mid-refresh log a
-  `doublePress` after the second `press`; a key held 2 s mid-refresh logs
-  `longPress` then `release`, both with `durationMs` near 2000 and
-  `heldSeconds: 2`, the same count the buzzer ticked; a key held across the
-  end of a refresh gets its `longPress` at 500 ms of hold, not at the drain.
+  held 2.5 s logs `down`, a `longPress` at 1 s and 2 s, and an `up` with
+  `durationMs`, and the Counter sample still counts one per tap (taps slower
+  than 350 ms apart; a quick double is a `doublePress`, which it does not
+  count). On an ESP32 (E1002 bench): a tap logs `down` and `up` at once and a
+  `press` 350 ms later, and a scene's `button` listener without an `action`
+  filter runs once per tap. Timing through a render (E1004, a ~30 s
+  refresh): a tap made mid-refresh logs an `up` with a `durationMs` of about
+  100, not 30000, then a `press` and no `longPress`; two quick taps
+  mid-refresh log one `doublePress` and no `press`; a key held 2 s
+  mid-refresh logs one `longPress` then the `up`, both with `durationMs` near
+  2000 and `heldSeconds: 2`; a key held across the end of a refresh gets a
+  `longPress` at the drain with its real hold, then one a second.
 - [ ] **Button sounds and debounce on the E1004** (2026.10.16): the fastest
-  tap you can make is a `press` + `release` (no lost taps); the fastest
-  double tap you can make is `press`, `release`, `press`, `doublePress`,
-  `release`, and its second tap plays the rising two-note sound, not the
-  plain click; a 3 s hold sounds "click, dun, tick, tick, click" with the dun
-  at the `longPress` and each tick at a `repeat` (`heldSeconds` 1, 2); no key
-  double-registers from contact bounce (press slowly, rock the key). Listen
-  for whether the double's notes (1.5x and 2x the press pitch) and the long
-  press's low note (0.5x) carry on the piezo; retune in `fos_buzzer.c` if
-  not. Pi with buttons (Inky Impression): the same fastest tap and double
-  tap register with the 30 ms lgpio debounce, and a slow press does not
-  bounce into two.
+  tap you can make is `down`, `up`, `press` (no lost taps); the fastest
+  double tap you can make is `down`, `up`, `down`, `doublePress`, `up` with
+  no `press`, and its second tap plays the rising two-note sound, not the
+  plain click; a 2.5 s hold sounds "click, dun, dun, clack" with each dun at
+  a `longPress` (`heldSeconds` 1, 2) and nothing at half a second; no key
+  double-registers from contact bounce (press slowly, rock the key). On a
+  battery frame, tap once right before it would sleep: the `press` still
+  lands (the log shows it before the sleep line). Listen for whether the
+  double's notes (1.5x and 2x the press pitch) and the long press's low note
+  (0.5x) carry on the piezo; retune in `fos_buzzer.c` if not. Pi with buttons
+  (Inky Impression): the same fastest tap and double tap register with the
+  30 ms lgpio debounce, and a slow press does not bounce into two.
 - [ ] **"Turn display off / on" end to end on the Pi 5** (menu → event →
   driver). The write the driver makes (`echo 1 > /sys/class/graphics/fb0/blank`)
   was run by hand as uid 990 and took `bl_power` 0 → 4 and DPMS On → Off.

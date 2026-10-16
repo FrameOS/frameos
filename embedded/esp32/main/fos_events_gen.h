@@ -19,16 +19,15 @@
 /* `button {action}`: the firmware reports the edges, each with `atMs` (when it saw
  * it); doublePress, longPress and repeat are the Nim dispatcher's
  * (frameos/input_state.nim), like on every host. */
+#define FOS_BUTTON_ACTION_DOWN "down"
+#define FOS_BUTTON_ACTION_UP "up"
 #define FOS_BUTTON_ACTION_PRESS "press"
 #define FOS_BUTTON_ACTION_DOUBLE_PRESS "doublePress"
 #define FOS_BUTTON_ACTION_LONG_PRESS "longPress"
-#define FOS_BUTTON_ACTION_REPEAT "repeat"
-#define FOS_BUTTON_ACTION_RELEASE "release"
 /* The dispatcher's button timing (`buttons` in the contract): what the button task
  * mirrors for the buzzer, so a chirp and the event it stands for share one clock. */
 #define FOS_BUTTON_DOUBLE_PRESS_MS 350
-#define FOS_BUTTON_LONG_PRESS_MS 500
-#define FOS_BUTTON_REPEAT_MS 1000
+#define FOS_BUTTON_LONG_PRESS_MS 1000
 
 #define FOS_EVENT_INIT "init"
 #define FOS_EVENT_RENDER "render"

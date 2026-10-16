@@ -4,8 +4,8 @@
 ## keyboard layout, and which GPIO buttons are held. Out of that it makes the
 ## events a scene hears — one `pointerMove` per motion report with the position
 ## every pointer event carries, `textInput` from a key, `tap` / `doubleTap` /
-## `longPress` / `swipe` from a down and an up, `doublePress` / `longPress` /
-## `repeat` / `release {durationMs}` from a button's edges — so the three hosts
+## `longPress` / `swipe` from a down and an up, a button's `down` / `up` and
+## the `press` / `doublePress` / `longPress` they add up to — so the three hosts
 ## agree on all of it, and a driver or a preview has to say only what it saw.
 ##
 ## Pure: no clock (every entry point takes `now`), no channel, no scene. Fed by
@@ -48,15 +48,20 @@ type
     label, role: string
     origin: EventOrigin
     downAt: MonoTime
-    longPressed: bool
-    repeats: int ## `repeat`s delivered: one per whole `ButtonRepeatMs` of hold
-    twice: bool  ## the second press of a double press: its release starts no third
+    atMs: int   ## the down edge's `atMs`, -1 without one: the `press` it may become says it
+    longs: int  ## `longPress`es delivered: one per whole `ButtonLongPressMs` held
+    twice: bool ## the second down of a double press: that and nothing more
 
   ButtonTap = object
-    ## A short press that ended: the next press of the same pin within
-    ## `ButtonDoublePressMs` of this release is a `doublePress`.
+    ## A short press that is over and not yet a `press`: a down of the same
+    ## pin within `ButtonDoublePressMs` of this release makes the pair a
+    ## `doublePress` instead; once the window has passed it is a `press`.
     pin: int
+    label, role: string
+    origin: EventOrigin
     releasedAt: MonoTime
+    atMs: int
+    durationMs: int
 
 when not defined(frameosEmbedded):
   type PointerRecord = object
@@ -169,115 +174,154 @@ proc heldButton(state: InputState, pin: int): int =
       return index
   -1
 
-proc tickButtons(state: var InputState, now: MonoTime, output: var seq[InputDelivery]) =
-  ## A hold reaching `ButtonLongPressMs` is a `longPress`, once; after it, a
-  ## `repeat` at every whole `ButtonRepeatMs` of hold, measured from the
-  ## press (not from the long press), so with 1000 ms one `repeat` is one
-  ## more second held and `heldSeconds` counts them — the seconds the ESP32
-  ## buzzer ticks. One event per call: a late tick catches up with one
-  ## `repeat` carrying the real hold, not a burst.
-  for hold in state.buttons.mitems:
-    let held = msSince(now, hold.downAt)
-    if not hold.longPressed:
-      if held >= ButtonLongPressMs:
-        hold.longPressed = true
-        var press = buttonPayload(hold.pin, hold.label, hold.role, "longPress")
-        press["durationMs"] = %held
-        press.withHeldSeconds()
-        output.add(InputDelivery(name: evButton, origin: hold.origin, payload: press))
-    elif held div ButtonRepeatMs > hold.repeats:
-      hold.repeats = held div ButtonRepeatMs
-      var repeat = buttonPayload(hold.pin, hold.label, hold.role, "repeat")
-      repeat["durationMs"] = %held
-      repeat.withHeldSeconds()
-      output.add(InputDelivery(name: evButton, origin: hold.origin, payload: repeat))
+proc tapPress(tap: ButtonTap): InputDelivery =
+  var press = buttonPayload(tap.pin, tap.label, tap.role, "press")
+  if tap.atMs >= 0:
+    press["atMs"] = %tap.atMs
+  press["durationMs"] = %tap.durationMs
+  press.withHeldSeconds()
+  InputDelivery(name: evButton, origin: tap.origin, payload: press)
 
-proc forgetTap(state: var InputState, pin: int) =
+proc tickButtons(state: var InputState, now: MonoTime, output: var seq[InputDelivery]) =
+  ## Time passing for the button layer. A short press whose double-press
+  ## window has closed is a `press`. A hold is a `longPress` at every whole
+  ## `ButtonLongPressMs` (1 s, 2 s, ...; `heldSeconds` counts them), measured
+  ## from the down, so each one is the instant the ESP32 buzzer sounds it. One
+  ## per hold per call: a late tick catches up with one `longPress` carrying
+  ## the real hold, not a burst. The second down of a double press makes none.
   var index = 0
   while index < state.buttonTaps.len:
-    if state.buttonTaps[index].pin == pin:
+    if msSince(now, state.buttonTaps[index].releasedAt) > ButtonDoublePressMs:
+      output.add(state.buttonTaps[index].tapPress())
       state.buttonTaps.delete(index)
     else:
       inc index
+  for hold in state.buttons.mitems:
+    if hold.twice:
+      continue
+    let held = msSince(now, hold.downAt)
+    let whole = held div ButtonLongPressMs
+    if whole > hold.longs:
+      hold.longs = whole
+      var long = buttonPayload(hold.pin, hold.label, hold.role, "longPress")
+      long["durationMs"] = %held
+      long.withHeldSeconds()
+      output.add(InputDelivery(name: evButton, origin: hold.origin, payload: long))
+
+proc tapFor(state: InputState, pin: int): int =
+  for index, tap in state.buttonTaps:
+    if tap.pin == pin:
+      return index
+  -1
 
 proc button(state: var InputState, payload: JsonNode, origin: EventOrigin, now: MonoTime,
             output: var seq[InputDelivery]) =
-  ## `button` as a driver says it — `{pin, label, level, atMs}` plus `action`
-  ## (an edge) and `wake` — or as a preview, a schedule, the cloud or a scene
-  ## re-sends it. A payload with no `action` is a press: that is all a driver
-  ## from before 2026.9.23 ever sent.
+  ## `button` in two layers (docs/events.md, "Buttons").
+  ##
+  ## An edge — a payload with `level` (0 is down: the line is pulled up), or
+  ## the action `down` / `up` — is the hardware layer: delivered at once, and
+  ## fed to the button layer, which makes `press` / `doublePress` /
+  ## `longPress` out of the edges, each press exactly one of them. Drivers
+  ## until 2026.10.16 named their edges `press` / `release`; the `level`
+  ## decides, so they still work.
+  ##
+  ## Anything else — HTTP, the cloud, a schedule or a scene saying a button
+  ## was pressed — moved no line and has nothing to time: it is delivered as
+  ## said, with no `action` meaning `press`.
   ##
   ## Time is the edge's: a driver that says when it saw the edge (`atMs`) has
-  ## the hold measured from there, and the holds advance to that moment first
-  ## (the `longPress` due before a late-delivered release is delivered before
-  ## it, with the hold it really had). A host must therefore not tick to now
-  ## on an event's way in: a tick is time passing between events.
+  ## every rule timed from there, and the button layer advances to that
+  ## moment before the edge applies (the `press` whose window closed before
+  ## this down comes first; a `longPress` due before a late `up` comes before
+  ## it, with the hold it had). A host must therefore not tick to now on an
+  ## event's way in: a tick is time passing between events.
   let pin = payload{"pin"}.getInt(-1)
   let label = payload{"label"}.getStr()
   var role = payload{"role"}.getStr()
   if role.len == 0:
     role = state.buttonRole(pin, label)
-  let action = payload{"action"}.getStr("press")
+  let action = payload{"action"}.getStr()
+  let edge = payload.isInt("level") or action in ["down", "up"]
+  if not edge:
+    var said = buttonPayload(pin, label, role, if action.len == 0: "press" else: action)
+    for key in ["atMs", "durationMs", "wake"]:
+      if payload.kind == JObject and payload.hasKey(key):
+        said[key] = payload[key]
+    said.withHeldSeconds()
+    output.add(InputDelivery(name: evButton, origin: origin, payload: said))
+    return
+  let down = if payload.isInt("level"): payload["level"].getInt() == 0 else: action == "down"
   let wake = payload{"wake"}.getBool()
+  let atMs = if payload.isInt("atMs"): payload["atMs"].getInt() else: -1
   let at = payload.seenAt(now)
-  if at < now:
-    state.tickButtons(at, output)
-  var delivered = buttonPayload(pin, label, role, action)
-  if payload.hasKey("level"):
-    delivered["level"] = payload["level"]
+  state.tickButtons(at, output)
+  var line = buttonPayload(pin, label, role, if down: "down" else: "up")
+  line["level"] = %(if down: 0 else: 1)
   if wake:
-    delivered["wake"] = %true
-  if payload.isInt("atMs"):
-    delivered["atMs"] = payload["atMs"]
+    line["wake"] = %true
+  if atMs >= 0:
+    line["atMs"] = %atMs
   let held = state.heldButton(pin)
-  var doublePress = false
-  case action
-  of "press":
+  if down:
     if held >= 0:
-      state.buttons.delete(held)
-    # The second short press in a row, soon enough after the first let go:
-    # a `doublePress` follows the `press`. The third starts over.
-    for tap in state.buttonTaps:
-      if tap.pin == pin and msSince(at, tap.releasedAt) <= ButtonDoublePressMs:
-        doublePress = true
-    state.forgetTap(pin)
-    # A boot the button caused: the key was released seconds ago, so there
-    # is no hold to follow.
-    if not wake:
-      state.buttons.add(ButtonHold(pin: pin, label: label, role: role, origin: origin, downAt: at,
-        twice: doublePress))
-  of "release":
-    if held >= 0:
-      let duration = msSince(at, state.buttons[held].downAt)
-      if not state.buttons[held].longPressed and duration >= ButtonLongPressMs:
-        # Held long enough, and no tick came in between (a host that cannot
-        # tick, or both edges delivered in one go): the long press lands
-        # here, before the release, with the hold it had.
-        var press = buttonPayload(pin, label, role, "longPress")
-        press["durationMs"] = %duration
-        press.withHeldSeconds()
-        output.add(InputDelivery(name: evButton, origin: state.buttons[held].origin, payload: press))
-        state.buttons[held].longPressed = true
-      delivered["durationMs"] = %duration
-      if not state.buttons[held].longPressed and not state.buttons[held].twice:
-        state.buttonTaps.add(ButtonTap(pin: pin, releasedAt: at))
-      state.buttons.delete(held)
-    elif not payload.hasKey("durationMs"):
-      delivered["durationMs"] = %0
+      state.buttons.delete(held) # its `up` never came
+    output.add(InputDelivery(name: evButton, origin: origin, payload: line))
+    if wake:
+      # The press that woke the device, replayed seconds later: no second
+      # down can have come while it slept, and there is no hold to follow
+      # (the release, if the key is still down, says how long it was).
+      var press = buttonPayload(pin, label, role, "press")
+      press["wake"] = %true
+      if atMs >= 0:
+        press["atMs"] = %atMs
+      output.add(InputDelivery(name: evButton, origin: origin, payload: press))
+      return
+    let tap = state.tapFor(pin)
+    let twice = tap >= 0 # tickButtons(at) delivered any whose window had closed
+    if twice:
+      state.buttonTaps.delete(tap)
+    state.buttons.add(ButtonHold(pin: pin, label: label, role: role, origin: origin, downAt: at,
+      atMs: atMs, twice: twice))
+    if twice:
+      var double = buttonPayload(pin, label, role, "doublePress")
+      if atMs >= 0:
+        double["atMs"] = %atMs
+      output.add(InputDelivery(name: evButton, origin: origin, payload: double))
   else:
-    discard
-  if payload.isInt("durationMs") and not delivered.hasKey("durationMs"):
-    delivered["durationMs"] = payload["durationMs"]
-  delivered.withHeldSeconds()
-  output.add(InputDelivery(name: evButton, origin: origin, payload: delivered))
-  if doublePress:
-    var twice = buttonPayload(pin, label, role, "doublePress")
-    if payload.isInt("atMs"):
-      twice["atMs"] = payload["atMs"]
-    output.add(InputDelivery(name: evButton, origin: origin, payload: twice))
+    var duration = 0
+    if held >= 0:
+      let hold = state.buttons[held]
+      duration = msSince(at, hold.downAt)
+      var longs = hold.longs
+      if not hold.twice and longs == 0 and duration >= ButtonLongPressMs:
+        # Held long enough, and no tick came while it was (a host in a
+        # render, or both edges delivered in one go): the long press it
+        # was, before the up, with the hold it had.
+        var long = buttonPayload(pin, label, role, "longPress")
+        long["durationMs"] = %duration
+        long.withHeldSeconds()
+        output.add(InputDelivery(name: evButton, origin: hold.origin, payload: long))
+        longs = 1
+      if not hold.twice and longs == 0:
+        state.buttonTaps.add(ButtonTap(pin: pin, label: hold.label, role: hold.role, origin: hold.origin,
+          releasedAt: at, atMs: hold.atMs, durationMs: duration))
+      state.buttons.delete(held)
+    elif payload.isInt("durationMs"):
+      # A hold only the host saw (the ESP32's wake press, held through the
+      # boot): its own count.
+      duration = payload["durationMs"].getInt()
+    line["durationMs"] = %duration
+    line.withHeldSeconds()
+    output.add(InputDelivery(name: evButton, origin: origin, payload: line))
 
 proc buttonsHeld*(state: InputState): int =
   state.buttons.len
+
+proc buttonsBusy*(state: InputState): int =
+  ## Keys down plus short presses still in their double-press window: what a
+  ## host must keep ticking for, so the `press` and the `longPress`es arrive
+  ## on time.
+  state.buttons.len + state.buttonTaps.len
 
 when not defined(frameosEmbedded):
   proc isStr(payload: JsonNode, key: string): bool =
@@ -692,8 +736,9 @@ proc applyNamedInput*(state: var InputState, name: string, payload: JsonNode, or
     state.applyNamedPointerOrKey(name, payload, origin, now, output)
 
 proc tick*(state: var InputState, now: MonoTime, output: var seq[InputDelivery]) =
-  ## Time passing: a pointer or a button held long enough is a `longPress`, a
-  ## button held longer `repeat`s, a cursor nobody moved hides. A host calls
+  ## Time passing: a pointer held long enough is a `longPress`, a button held
+  ## is one at every whole second, a short press whose double-press window
+  ## closed is a `press`, a cursor nobody moved hides. A host calls
   ## this between events, never on one's way in: an edge that was seen
   ## earlier (`atMs`) advances the holds to its own time. A host that cannot
   ## tick (the ESP32 in a render) gets the long press on release instead.

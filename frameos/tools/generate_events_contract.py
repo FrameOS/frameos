@@ -196,7 +196,7 @@ def load():
                 fail(f"{where}: schedule.since must be a FrameOS version")
 
     for section, keys in (("gestures", ("tapSlopPx", "tapMs", "doubleTapMs", "longPressMs", "swipeMinPx")),
-                          ("buttons", ("doublePressMs", "longPressMs", "repeatMs"))):
+                          ("buttons", ("doublePressMs", "longPressMs"))):
         for key in keys:
             if not isinstance(doc[section].get(key), int) or doc[section][key] <= 0:
                 fail(f"{section}.{key}: a positive integer")
@@ -205,8 +205,8 @@ def load():
     buttons = doc["buttons"]
     if not buttons.get("roles") or any(not NAME_RE.fullmatch(r) for r in buttons["roles"]):
         fail("buttons.roles: camelCase identifiers")
-    if buttons.get("actions") != ["press", "doublePress", "longPress", "repeat", "release"]:
-        fail("buttons.actions: press, doublePress, longPress, repeat, release")
+    if buttons.get("actions") != ["down", "up", "press", "doublePress", "longPress"]:
+        fail("buttons.actions: down, up, press, doublePress, longPress")
     for label, role in buttons["roleByLabel"].items():
         if label != label.upper() or role not in buttons["roles"]:
             fail(f"buttons.roleByLabel.{label}: an upper-case label and one of buttons.roles")
@@ -383,10 +383,9 @@ def gen_nim(doc):
         f"  GestureDoubleTapMs* = {int(doc['gestures']['doubleTapMs'])}",
         f"  GestureLongPressMs* = {int(doc['gestures']['longPressMs'])}",
         f"  GestureSwipeMinPx* = {int(doc['gestures']['swipeMinPx'])}",
-        "  ## A GPIO button held: `longPress` once, then `repeat` every so often.",
+        "  ## A GPIO button: a short press waits `ButtonDoublePressMs` for a second down; a hold is a `longPress` at every whole `ButtonLongPressMs`.",
         f"  ButtonDoublePressMs* = {int(doc['buttons']['doublePressMs'])}",
         f"  ButtonLongPressMs* = {int(doc['buttons']['longPressMs'])}",
-        f"  ButtonRepeatMs* = {int(doc['buttons']['repeatMs'])}",
         f"  ButtonRoles*: array[{len(doc['buttons']['roles'])}, string] = [{', '.join(nim_str(r) for r in doc['buttons']['roles'])}]",
         f"  PointerTypes*: array[{len(doc['pointer']['types'])}, string] = [{', '.join(nim_str(t) for t in doc['pointer']['types'])}]",
         "  ## Origins a scene opts into per custom event (`origins` on its declaration).",
@@ -608,7 +607,6 @@ def gen_c(doc):
         " * mirrors for the buzzer, so a chirp and the event it stands for share one clock. */",
         f"#define FOS_BUTTON_DOUBLE_PRESS_MS {int(doc['buttons']['doublePressMs'])}",
         f"#define FOS_BUTTON_LONG_PRESS_MS {int(doc['buttons']['longPressMs'])}",
-        f"#define FOS_BUTTON_REPEAT_MS {int(doc['buttons']['repeatMs'])}",
         "",
     ]
     for event in doc["events"]:

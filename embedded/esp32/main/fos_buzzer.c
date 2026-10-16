@@ -31,10 +31,8 @@
 /* The press: a click on the way down at the press pitch and one on the way
  * up at 0.7 of it, 14 ms each. Picked by ear against the alternatives
  * (pulses, sweeps, tunes) for being clear at a tap and not a drone at a
- * one-second hold. The hold's second ticks are the down click at half the
- * length: audibly the same sound, smaller. */
+ * one-second hold. */
 #define CLICK_MS 14
-#define TICK_MS 7
 #define CLICK_UP_NUM 7
 #define CLICK_UP_DEN 10
 /* A refused press: the same pair from a 100 Hz base, so it reads as "no"
@@ -46,9 +44,9 @@
  * as a longer click. */
 #define DOUBLE_NOTE_MS 10
 #define DOUBLE_REST_MS 6
-/* The long press: a short note at the press pitch falling to a longer one an
- * octave down, a "dun" that says the hold has turned into something else
- * before the ticks start counting it. */
+/* A long press, at every whole second held: a short note at the press pitch
+ * falling to a longer one an octave down, a "dun" that says the hold has
+ * turned into something else, once per second it stays that way. */
 #define LONG_HEAD_MS 8
 #define LONG_TAIL_MS 20
 
@@ -258,10 +256,6 @@ void fos_buzzer_long_press(void)
     fos_buzzer_play(notes, sizeof(notes) / sizeof(notes[0]));
 }
 
-void fos_buzzer_tick(void)
-{
-    fos_buzzer_tone(tone_hz(), TICK_MS);
-}
 
 void fos_buzzer_reject_down(void)
 {

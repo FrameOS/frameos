@@ -43,6 +43,11 @@ uint64_t fos_buttons_wake_mask(void);
  * task drains it at the start of a pass and in its idle wait, so a battery
  * frame about to deep-sleep right after a render asks this first. */
 bool fos_buttons_pending(void);
+/* A key is down or a short press is inside its double-press window: the
+ * dispatcher still has a `press`, `doublePress` or `longPress` to deliver.
+ * The render task waits in short slices while this holds, and a deep sleep
+ * waits for it to end, so the decision is delivered and not lost. */
+bool fos_buttons_busy(void);
 /* Arm the registered buttons as deep-sleep wake sources. `*armed_mask`
  * (may be NULL) receives the GPIO bit mask actually armed — 0 when no
  * button can wake this chip, or every key is currently held. Call right

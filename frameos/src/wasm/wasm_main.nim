@@ -365,9 +365,9 @@ proc frameos_wasm_event(eventName: cstring, payloadJson: cstring): bool {.export
     false
 
 proc frameos_wasm_tick(): bool {.exportc, cdecl.} =
-  ## Time passing with nothing sent — the worker calls this while a pointer is
-  ## held, so a long press is delivered while the finger is still down, as on
-  ## a frame. True when it made an event; ask frameos_wasm_render_requested.
+  ## Time passing with nothing sent — the worker calls this while a pointer or
+  ## a button is held or a button press waits for a possible second one, so a
+  ## long press is delivered while the finger is still down, as on a frame. True when it made an event; ask frameos_wasm_render_requested.
   try:
     host.tick()
   except Exception as e:
@@ -375,9 +375,12 @@ proc frameos_wasm_tick(): bool {.exportc, cdecl.} =
     false
 
 proc frameos_wasm_pointers_down(): cint {.exportc, cdecl.} =
-  ## How many pointers the runtime believes are held: the worker ticks while
-  ## any is.
-  if host.events.isNil: 0.cint else: host.events.inputState.pointersDown.cint
+  ## How much input the runtime is still timing: pointers held, GPIO buttons
+  ## held, and button presses waiting out their double-press window. The
+  ## worker ticks while any is, so a long press lands while the finger is
+  ## down and a `press` once its window closes.
+  if host.events.isNil: 0.cint
+  else: (host.events.inputState.pointersDown + host.events.inputState.buttonsBusy).cint
 
 proc frameos_wasm_render_requested(): bool {.exportc, cdecl.} =
   host.renderRequested

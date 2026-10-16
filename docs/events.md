@@ -285,50 +285,72 @@ key meant for a scene, Ctrl+Alt+Del included, and lets go when it stops;
 `inputSettings.grabKeyboard` (default on) turns that off. Keyboards and
 pointers plugged in after boot are found (inotify on `/dev/input`).
 
-**Buttons.** `button {pin, label, role, action, durationMs?, heldSeconds?, wake?, atMs?, level}`.
-One event, `button`; `action` says which kind of press, so a scene with a
-single key still has several things to bind, and a listener names the one it
-wants. `action` is `press` on every down edge, `doublePress` right after the
-press that comes within `buttons.doublePressMs` (350) of the previous short
-press's release (the third press in a row starts over; a press that became a
-`longPress` does not count), `longPress` once at `buttons.longPressMs` (500)
-held, `repeat` at every whole `buttons.repeatMs` (1000) of hold after that,
-counted from the press (both from the dispatcher's tick; when no tick came
-first, the `longPress` is delivered on the release, before it, with the hold
-it had, and a late tick catches up with one `repeat`, not a burst), `release`
-with `durationMs`. `heldSeconds` is the hold in whole seconds, next to
-`durationMs` on those three: with a 1000 ms `repeatMs` each `repeat` is one
-more second held, which is what the ESP32 buzzer ticks out loud, so a scene
-can act on the count the listener heard. A `doublePress` always comes right
-after a `press` of the same key: a scene that binds both hears the second tap
-as both, and nothing waits to see whether a second tap follows (on an e-paper
-frame a press must start its render at once). The ESP32 buzzer gives each
-kind its own sound at the instant the dispatcher makes it
-(`embedded/esp32/README.md`, "Button beep"). Debounce is kept to contact
-bounce, 30 ms on both: the ESP32 takes the first change as the edge and
-ignores changes for 30 ms after it, a Pi asks lgpio for 30 ms of steady
-level. Until 2026.10.16 they waited 80 ms and 100 ms, which lost quick taps
-and the second tap of a quick double. `atMs` is when the driver saw the edge, in
-milliseconds on the frame's monotonic clock (the one the dispatcher's tick
-reads: `CLOCK_MONOTONIC` on Linux, `esp_timer` on the ESP32), on a press and a
-release, passed on to the scene. Time is the edge's: the hold is measured from
-the press's `atMs` to the release's, the double-press window between them, and
-the holds advance to an edge's time before it is applied, never to the moment
-it was delivered. An ESP32 drains its button queue only between render passes,
-so a tap made during a 30 s refresh used to arrive as a 30 s hold; now it is a
-tap, and two taps in that time are a `doublePress`. A producer with no clock to
-offer (an HTTP request, the cloud, a scene) leaves `atMs` out and is timed at
-delivery. **A listener with no `action` filter hears presses only**
-(`listenDefault`): every listener from before releases existed is exactly that,
-and must not run twice per press. `role` is what the button means —
+**Buttons.** `button {pin, label, role, action, durationMs?, heldSeconds?, wake?, atMs?, level?}`.
+One event, `button`, in two layers; `action` says which.
+
+- **Hardware layer: `down` and `up`.** What the line did, delivered the moment
+  the driver reports it: `down` on the press, `up` on the release with
+  `durationMs`. For a scene that wants the key itself: a counter that counts
+  every tap, hold-to-show.
+- **Button layer: `press`, `doublePress`, `longPress`.** What the person
+  meant, and each press is exactly one of them. `press` is a short press, once
+  it is over and `buttons.doublePressMs` (350) has passed since its `up` with
+  no second down, so it arrives 350 ms after the release. `doublePress` is the
+  second down inside that window; the pair is that and nothing more (no
+  `press`, no `longPress`), and a third down starts over. `longPress` comes at
+  every whole `buttons.longPressMs` (1000) the key is held, 1 s, 2 s, …, with
+  `heldSeconds` counting them; a long press is not also a `press`.
+
+A tap is therefore `down`, `up`, then `press`; a double tap `down`, `up`,
+`down`, `doublePress`, `up`; a 2.2 s hold `down`, `longPress` (1),
+`longPress` (2), `up`. **A listener with no `action` filter hears `press`
+only** (`listenDefault`): every listener from before the layers existed is
+exactly that. A fast double tap reaches such a listener as nothing, since it
+is a `doublePress`; a scene that must count every tap listens for `down`.
+Drivers until 2026.10.16 sent their edges as `press` / `release`, and until
+then `press` was the down edge itself, `release` the up, and `repeat` a
+second held; the dispatcher still takes those edges by their `level`.
+
+Each event has its sound on an ESP32 with a buzzer, at the instant it
+happens: a click on `down`, a lower one on `up`, two rising notes for a
+`doublePress` (in place of its down click), a short falling pair at every
+`longPress`. A `press` adds none: its clicks were the down and the up
+(`embedded/esp32/README.md`, "Button beep").
+
+`atMs` is when the driver saw the edge, in milliseconds on the frame's
+monotonic clock (the one the dispatcher's tick reads: `CLOCK_MONOTONIC` on
+Linux, `esp_timer` on the ESP32), on `down` and `up` and passed on to the
+`press` and `doublePress` they make. Every rule is timed from it: the hold
+from the `down`'s `atMs` to the `up`'s, the double-press window between an
+`up` and the next `down`, and the layer advances to an edge's time before the
+edge applies, never to the moment it was delivered. An ESP32 drains its button
+queue only between render passes, so a tap made during a 30 s refresh used to
+arrive as a 30 s hold; now it is a tap, two taps in that time a
+`doublePress`, and a hold through the refresh one `longPress` before its
+`up`, with the hold it had (a late tick catches up with one, never a burst).
+The hosts tick while a key is down or a tap is in its window: the ESP32 waits
+in 50 ms slices then, and does not deep-sleep until the decision is
+delivered; the preview ticks every 50 ms.
+
+Debounce is kept to contact bounce, 30 ms on both kinds of frame: the ESP32
+takes the first change as the edge and ignores changes for 30 ms after it, a
+Pi asks lgpio for 30 ms of steady level. Until 2026.10.16 they waited 80 ms and
+100 ms, which lost quick taps and the second tap of a quick double.
+
+Anything that is not an edge (no `level`, and an `action` other than `down` /
+`up`) is someone saying a button was pressed: HTTP, the cloud, a schedule, a
+scene. It moved no line and has nothing to time, so it is delivered as said,
+no `action` meaning `press`. `role` is what the button means:
 `buttons.roles`: `primary`, `secondary`, `next`, `prev`, `up`, `down`, `back`,
-`menu`, `refresh` — so a store scene filters on `role: "next"` instead of a
+`menu`, `refresh`. A store scene filters on `role: "next"` instead of a
 silkscreen label: a frame configures one per button (`gpioButtons[].role`,
 Linux frames), and `buttons.roleByLabel` is the default for a button without
 one (`A` primary, `B` next, `C` prev, `D` back, `BOOT` primary, `KEY1` next,
 `LEFT` prev, `RIGHT` next, `OK` primary, `HOME` menu, `EXIT` back, …). `wake:
-true` is the replayed press that booted an ESP32 out of deep sleep; there is
-no hold to follow it. `level` is the line (0 pressed: the line is pulled up).
+true` marks the replayed `down` that booted an ESP32 out of deep sleep; it is
+a `press` at once (no second down can have come while the chip slept), and
+there is no hold to follow it. `level` is the line on an edge (0 down: the
+line is pulled up).
 
 **Privacy.** Key events are logged by name only (`log: name-only`), never with
 what was typed; pointer events not at all.

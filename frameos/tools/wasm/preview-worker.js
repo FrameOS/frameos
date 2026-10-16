@@ -834,8 +834,10 @@ function flushPendingMoves() {
   pendingMoves.clear()
 }
 
-// While a pointer is held, the runtime is ticked so a long press is delivered
-// while the finger is still down, as on a frame (frameos_wasm_tick).
+// While a pointer or a GPIO button is held, or a button press waits out its
+// double-press window, the runtime is ticked so a long press is delivered while
+// the finger is still down and the press once the window closes, as on a frame
+// (frameos_wasm_tick; frameos_wasm_pointers_down counts all three).
 let tickTimer = null
 
 function tickWhileHeld() {
@@ -868,9 +870,9 @@ function handleEvent(name, payload) {
   }
   flushPendingMoves()
   dispatchEvent(name, payload)
-  if ((name === 'pointerDown' || name === 'mouseDown') && tickTimer === null && Module &&
+  if ((name === 'pointerDown' || name === 'mouseDown' || name === 'button') && tickTimer === null && Module &&
       typeof Module._frameos_wasm_tick === 'function') {
-    tickTimer = setInterval(tickWhileHeld, 100)
+    tickTimer = setInterval(tickWhileHeld, 50)
   }
 }
 

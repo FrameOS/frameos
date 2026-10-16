@@ -64,10 +64,9 @@ const
   GestureDoubleTapMs* = 350
   GestureLongPressMs* = 500
   GestureSwipeMinPx* = 48
-  ## A GPIO button held: `longPress` once, then `repeat` every so often.
+  ## A GPIO button: a short press waits `ButtonDoublePressMs` for a second down; a hold is a `longPress` at every whole `ButtonLongPressMs`.
   ButtonDoublePressMs* = 350
-  ButtonLongPressMs* = 500
-  ButtonRepeatMs* = 1000
+  ButtonLongPressMs* = 1000
   ButtonRoles*: array[9, string] = ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]
   PointerTypes*: array[3, string] = ["mouse", "touch", "pen"]
   ## Origins a scene opts into per custom event (`origins` on its declaration).

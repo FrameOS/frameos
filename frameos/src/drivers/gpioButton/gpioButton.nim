@@ -11,9 +11,9 @@ import frameos/channels
 # (fos_button_timing.c); this keeps a Pi on the same scale.
 const debounce = 30000
 const lineFlag = LG_SET_PULL_UP
-# Both edges: a scene hears the release too, with how long the key was held,
-# and the dispatcher makes `doublePress`, `longPress` and `repeat` out of the
-# edges (frameos/input_state.nim). Each edge says when this thread saw it
+# Both edges, as `down` and `up`: the hardware layer a scene can hear as it
+# is, and what the dispatcher makes `press`, `doublePress` and `longPress` out
+# of (frameos/input_state.nim). Each edge says when this thread saw it
 # (`atMs`, the monotonic clock the dispatcher's tick reads), so a hold is
 # measured from the edge and not from when the runner got round to it. The
 # line is pulled up, so a press is level 0.
@@ -35,7 +35,7 @@ proc alertsHandler(num_alerts: cint, alerts: lgGpioAlert_p, userdata: pointer) {
     let level = alerts[i].report.level.int
     let label = pinLabels.getOrDefault(gpio)
     sendEvent("button", %*{"pin": gpio, "label": label, "level": level,
-      "action": (if level == 0: "press" else: "release"), "atMs": atMs}, eoDriver)
+      "action": (if level == 0: "down" else: "up"), "atMs": atMs}, eoDriver)
 
 proc determineGPIODevice(): int =
   try:

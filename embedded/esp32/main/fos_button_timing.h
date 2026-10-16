@@ -1,8 +1,9 @@
 /*
- * One GPIO button's timing, pure: the debounce, and the press kinds the Nim
- * dispatcher makes out of the edges (docs/events-contract.json `buttons`),
- * mirrored here so the buzzer can sound them the instant they happen, from
- * the button task, while the render task may be 30 s into a panel refresh.
+ * One GPIO button's timing, pure: the debounce, and the button layer the Nim
+ * dispatcher makes out of the edges (docs/events-contract.json `buttons`:
+ * `press`, `doublePress`, `longPress`), mirrored here so the buzzer can sound
+ * each event the instant it happens, from the button task, while the render
+ * task may be 30 s into a panel refresh.
  * The scene hears the dispatcher's events (frameos/input_state.nim), not
  * this module's; both read the same stamps and the same contract numbers
  * (FOS_BUTTON_*_MS in fos_events_gen.h), so what the finger hears is what
@@ -33,8 +34,7 @@ typedef enum {
 
 typedef enum {
     FOS_BUTTON_HOLD_NONE = 0,
-    FOS_BUTTON_HOLD_LONG,   /* the hold reached FOS_BUTTON_LONG_PRESS_MS: `longPress` */
-    FOS_BUTTON_HOLD_REPEAT, /* another whole FOS_BUTTON_REPEAT_MS of hold: `repeat` */
+    FOS_BUTTON_HOLD_LONG, /* another whole FOS_BUTTON_LONG_PRESS_MS held: a `longPress` */
 } fos_button_hold_t;
 
 typedef struct {
@@ -44,9 +44,8 @@ typedef struct {
     int64_t pressed_at_ms;  /* the press edge's stamp */
     int64_t released_at_ms; /* the last release edge's stamp */
     bool tap_ended;         /* that release ended a short, single press: a double may follow */
-    bool twice;             /* this press is the second of a double press */
-    bool longed;            /* this hold has passed FOS_BUTTON_LONG_PRESS_MS */
-    uint32_t repeats;       /* whole FOS_BUTTON_REPEAT_MS of this hold reported so far */
+    bool twice;             /* this press is the second of a double press: no long press */
+    uint32_t longs;         /* `longPress`es this hold has reached: one per whole FOS_BUTTON_LONG_PRESS_MS */
 } fos_button_timing_t;
 
 /* The line as first read: a key already down counts as pressed at `now_ms`
@@ -63,12 +62,19 @@ fos_button_edge_t fos_button_timing_sample(fos_button_timing_t *b, int level, in
  * dispatcher. */
 bool fos_button_timing_press(fos_button_timing_t *b, int64_t at_ms);
 
-/* The key is still down at `now_ms`: what the hold just reached. LONG once,
- * at FOS_BUTTON_LONG_PRESS_MS; then REPEAT at every whole
- * FOS_BUTTON_REPEAT_MS of hold counted from the press (one per call: a late
- * call catches up with one). */
+/* The key is still down at `now_ms`: LONG at every whole
+ * FOS_BUTTON_LONG_PRESS_MS of hold counted from the press (1 s, 2 s, ...;
+ * `longs` counts them), never for the second press of a double press. One
+ * per call: a late call catches up with one. */
 fos_button_hold_t fos_button_timing_hold(fos_button_timing_t *b, int64_t now_ms);
 
 /* Book an accepted release at `at_ms`; returns how long the key was down
- * (at least 1). A short single press leaves `tap_ended` set. */
+ * (at least 1). A short single press leaves `tap_ended` set: the dispatcher
+ * makes it a `press` once FOS_BUTTON_DOUBLE_PRESS_MS pass with no second down. */
 uint32_t fos_button_timing_release(fos_button_timing_t *b, int64_t at_ms);
+
+/* The dispatcher still has something to decide about this key at `now_ms`:
+ * it is down (a `longPress` is coming each second), or its last short press
+ * is inside the double-press window (a `press` or a `doublePress` is
+ * coming). `slack_ms` past the window covers the tick that delivers it. */
+bool fos_button_timing_busy(const fos_button_timing_t *b, int64_t now_ms, int64_t slack_ms);
