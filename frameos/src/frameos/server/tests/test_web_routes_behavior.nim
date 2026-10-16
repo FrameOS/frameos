@@ -2,7 +2,7 @@ import std/[json, os, strutils, unittest]
 
 import zippy
 
-import ../../[channels, types]
+import ../../[channels, setup_gate, types]
 import ./helpers/http_harness
 import ../[auth, state]
 from ../routes/web_routes import cachedAvailableNetworks, resetWifiScanCacheForTest
@@ -19,8 +19,14 @@ suite "web route behavior":
   test "root route handles hotspot and access-key redirects":
     var config = defaultFrameConfig()
     configureServerState(config, hotspotActive = true)
-    let hotspotResponse = httpRequest(server.port, "GET", "/")
+    let hotspotResponse = httpRequest(server.port, "GET", "/", headers = [("Host", "10.42.0.1:" & $config.framePort)])
     check hotspotResponse.status == 200
+    check hotspotResponse.body.contains("Set up your Frame")
+    # The same page asked for on the captive listener's port (a bare Host is
+    # port 80) is sent to the setup URL instead of being served twice.
+    let captive = httpRequest(server.port, "GET", "/", headers = [("Host", "10.42.0.1")])
+    check captive.status == 302
+    check captive.header("location") == "http://10.42.0.1:" & $config.framePort & "/"
 
     configureServerState(config, hotspotActive = false)
     let unauthorized = httpRequest(server.port, "GET", "/")
@@ -91,6 +97,38 @@ suite "web route behavior":
     configureServerState(config, hotspotActive = false)
     check httpRequest(server.port, "GET", "/generate_204", headers = [("Host", "connectivitycheck.gstatic.com")]).status == 404
     check httpRequest(server.port, "GET", "/some/app/page").status == 404
+
+  test "the setup form's gated fields need the code on the panel":
+    # A frame with a display: the hotspot minted a code, the form asks for
+    # it, and a POST that carries any gated field without it is refused.
+    var config = defaultFrameConfig()
+    config.device = "pimoroni.inky_impression_13"
+    config.serverHost = ""
+    configureServerState(config, hotspotActive = true)
+    let code = startSetupCode()
+    let form = httpRequest(server.port, "GET", "/", headers = [("Host", "10.42.0.1:" & $config.framePort)])
+    check form.status == 200
+    check form.body.contains("""name="setupCode" inputmode="numeric"""")
+    # No current values for a stranger: the fieldset is live but blank.
+    check not form.body.contains("""id="server-host" type="text" name="serverHost"
+              placeholder="my.frameos.server" data-keep="0"
+              value="localhost""")
+
+    let noCode = httpRequest(server.port, "POST", "/setup",
+      headers = [("Content-Type", "application/x-www-form-urlencoded")],
+      body = "ssid=home&password=pw&hostname=kitchen&device=web_only&adminEnabled=1&adminUser=x&adminPass=y")
+    check noCode.status == 403
+    check noCode.body.contains("setup code")
+    check activeSetupCode() == code
+    let wrong = httpRequest(server.port, "POST", "/setup",
+      headers = [("Content-Type", "application/x-www-form-urlencoded")],
+      body = "ssid=home&password=pw&hostname=kitchen&device=web_only&setupCode=000000")
+    check wrong.status == 403
+    check wrong.body.contains("does not match")
+    check setupGateAttemptsLeft() == SetupGateMaxAttempts - 1
+    # (A Wi-Fi-only POST passes the gate — test_portal covers it; here it
+    # would persist a frame.json into the harness's config path.)
+    clearSetupCode()
 
   test "admin and control routes enforce session/redirect expectations":
     var config = defaultFrameConfig()

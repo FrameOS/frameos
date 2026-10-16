@@ -6,6 +6,7 @@ import std/monotimes
 
 import frameos/values
 import frameos/utils/url
+import frameos/setup_gate
 import frameos/types
 import frameos/apps
 import frameos/channels
@@ -65,7 +66,7 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext) =
       self.node4.run(context)
       nextNode = -1.NodeId
     of 3.NodeId: # render/text
-      self.node3.appConfig.text = fmt("^({int(48 * panelScale(frameConfig))})Welcome to FrameOS!^({int(28 * panelScale(frameConfig))})\n\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{hotspotSetupPort(frameConfig)}/^(no-underline) to continue.")
+      self.node3.appConfig.text = fmt("^({int(48 * panelScale(frameConfig))})Welcome to FrameOS!^({int(28 * panelScale(frameConfig))})\n\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{hotspotSetupPort(frameConfig)}/^(no-underline) to continue.{setupCodeLine()}")
       self.node3.run(context)
       nextNode = -1.NodeId
     of 2.NodeId: # render/split
@@ -179,7 +180,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.node3 = render_textApp.App(nodeName: "render/text", nodeId: 3.NodeId, scene: scene.FrameScene,
     frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     vAlign: "top",
-    text: fmt("^({int(48 * panelScale(frameConfig))})Welcome to FrameOS!^({int(28 * panelScale(frameConfig))})\n\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{hotspotSetupPort(frameConfig)}/^(no-underline) to continue."),
+    text: fmt("^({int(48 * panelScale(frameConfig))})Welcome to FrameOS!^({int(28 * panelScale(frameConfig))})\n\n1. Scan the first QR code or join the Wifi “{frameConfig.network.wifiHotspotSsid}” (pw “{frameConfig.network.wifiHotspotPassword}”).\n2. Then scan the second QR code or open ^(underline)http://10.42.0.1:{hotspotSetupPort(frameConfig)}/^(no-underline) to continue.{setupCodeLine()}"),
     richText: "basic-caret",
     inputImage: none(Image),
     position: "center",
