@@ -30,27 +30,15 @@ bool fos_button_timing_press(fos_button_timing_t *b, int64_t at_ms)
     b->down = true;
     b->pressed_at_ms = at_ms;
     b->twice = twice;
-    b->longs = 0;
     return twice;
 }
 
-fos_button_hold_t fos_button_timing_hold(fos_button_timing_t *b, int64_t now_ms)
-{
-    if (!b->down || b->twice) return FOS_BUTTON_HOLD_NONE;
-    int64_t held = now_ms - b->pressed_at_ms;
-    uint32_t whole = held > 0 ? (uint32_t)(held / FOS_BUTTON_LONG_PRESS_MS) : 0;
-    if (whole <= b->longs) return FOS_BUTTON_HOLD_NONE;
-    b->longs = whole;
-    return FOS_BUTTON_HOLD_LONG;
-}
-
-uint32_t fos_button_timing_release(fos_button_timing_t *b, int64_t at_ms)
+uint32_t fos_button_timing_release(fos_button_timing_t *b, int64_t at_ms, bool *long_press)
 {
     int64_t held = at_ms - b->pressed_at_ms;
-    /* A hold that passed the long press without a poll noticing (the task
-     * was starved) is a long press all the same, as in the dispatcher. */
-    bool long_press = b->longs > 0 || held >= FOS_BUTTON_LONG_PRESS_MS;
-    b->tap_ended = b->down && !long_press && !b->twice;
+    bool long_hold = held >= FOS_BUTTON_LONG_PRESS_MS;
+    if (long_press) *long_press = b->down && long_hold && !b->twice;
+    b->tap_ended = b->down && !long_hold && !b->twice;
     b->down = false;
     b->released_at_ms = at_ms;
     b->twice = false;

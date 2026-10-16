@@ -308,30 +308,21 @@ block test_a_button_has_a_role_and_two_layers:
   output.setLen(0)
   discard state.applyNamedInput(evButton, %*{"pin": 5, "label": "A", "level": 0, "action": "press"}, eoDriver, at(0), output)
   doAssert output.actions == @["down"] and output[0].payload["role"].getStr() == "menu"
-  # Held: a longPress at every whole second, none before.
-  output.setLen(0)
-  state.tick(at(ButtonLongPressMs - 1), output)
-  doAssert output.len == 0
-  state.tick(at(ButtonLongPressMs), output)
-  doAssert output.actions == @["longPress", "longPress"] # pin 6's hold and pin 5's (in table order)
-  for d in output:
-    doAssert d.payload["durationMs"].getInt() == ButtonLongPressMs
-    doAssert d.payload["heldSeconds"].getInt() == 1
-    doAssert d.payload["role"].getStr() == (if d.payload["pin"].getInt() == 5: "menu" else: "next")
+  # Held: nothing while the key is down, however long.
   output.setLen(0)
   state.tick(at(2 * ButtonLongPressMs), output)
-  doAssert output.actions == @["longPress", "longPress"]
-  doAssert output[0].payload["heldSeconds"].getInt() == 2
-  # The up says how long; a long press is not also a press.
-  output.setLen(0)
+  doAssert output.len == 0
+  # The up says how long, and a hold of at least longPressMs is one longPress,
+  # after the up, with the same duration. A long press is not also a press.
   discard state.applyNamedInput(evButton, %*{"pin": 5, "label": "A", "level": 1, "action": "release"}, eoDriver,
     at(2500), output)
-  doAssert output.actions == @["up"] and output[0].payload["durationMs"].getInt() == 2500
-  doAssert output[0].payload["heldSeconds"].getInt() == 2 and output[0].payload["role"].getStr() == "menu"
+  doAssert output.actions == @["up", "longPress"]
+  doAssert output[0].payload["durationMs"].getInt() == 2500 and output[0].payload["role"].getStr() == "menu"
+  doAssert output[1].payload["durationMs"].getInt() == 2500 and output[1].payload["heldSeconds"].getInt() == 2
   output.setLen(0)
   state.tick(at(4000), output)
-  doAssert output.actions == @["longPress"] and output[0].payload["pin"].getInt() == 6 # still held
-  doAssert state.buttonsHeld == 1 and state.buttonsBusy == 1
+  doAssert output.len == 0
+  doAssert state.buttonsHeld == 1 and state.buttonsBusy == 1 # pin 6, still down
   # An up whose hold only the host saw (the ESP32's wake press, held through
   # the boot): its durationMs is kept, and heldSeconds made from it.
   output.setLen(0)
@@ -340,10 +331,6 @@ block test_a_button_has_a_role_and_two_layers:
   doAssert output.actions == @["up"]
   doAssert output[0].payload["durationMs"].getInt() == 3400 and output[0].payload["heldSeconds"].getInt() == 3
   # The down that woke the device is a press at once, with no hold to follow.
-  # (Time first: pin 6, still held, is due its fifth long press at 5 s.)
-  output.setLen(0)
-  state.tick(at(5000), output)
-  doAssert output.actions == @["longPress"] and output[0].payload["heldSeconds"].getInt() == 5
   output.setLen(0)
   discard state.applyNamedInput(evButton, %*{"pin": 9, "label": "BOOT", "level": 0, "action": "down", "wake": true},
     eoDriver, at(5000), output)

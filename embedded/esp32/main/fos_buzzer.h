@@ -17,7 +17,8 @@
  *   down         [tone 14]
  *   up           [0.7 tone 14]
  *   doublePress  [1.5 tone 10, rest 6, 2 tone 10], in place of its down click
- *   longPress    [tone 8, 0.5 tone 20], at every whole longPressMs held (1 s, 2 s, ...)
+ *   longPress    [tone 8, 0.5 tone 20], in place of its up click (a press held
+ *                at least longPressMs; nothing sounds while the key is held)
  *   press        nothing of its own: its clicks were the down and the up
  *   refused      down [100 Hz 14], up [70 Hz 14]
  *
@@ -46,8 +47,8 @@ void fos_buzzer_click_up(void);
 /* The second press of a double press, in place of its down click: two
  * quick rising notes. */
 void fos_buzzer_double_down(void);
-/* A `longPress` (each whole second the key is held): a short note falling to
- * a longer low one. */
+/* A `longPress` (the up of a press held at least longPressMs), in place of
+ * its up click: a short note falling to a longer low one. */
 void fos_buzzer_long_press(void);
 /* A press the frame could not take (its queue is full): the same two
  * clicks, from a 100 Hz base instead of the press pitch — a dull "no" next

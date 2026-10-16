@@ -710,21 +710,21 @@ same stamps and the contract's numbers) says so:
 | `down` | 1× 14 |
 | `up` | 0.7× 14 |
 | `doublePress` | 1.5× 10, rest 6, 2× 10, in place of its down click |
-| `longPress` | 1× 8 then 0.5× 20, at every whole second held |
+| `longPress` | 1× 8 then 0.5× 20, in place of its up click |
 | `press` | none of its own: its clicks were the down and the up |
 | refused | down 100 Hz 14, up 70 Hz 14 |
 
 So a tap is "click, clack" and the scene hears `down`, `up`, and the `press`
-350 ms later; a double tap is "click, clack, di-di, clack"; a 2.5 s hold is
-"click, dun, dun, clack" with `longPress` at 1 s and 2 s (`heldSeconds` 1
-and 2). Until 2026.10.16 a hold chirped at 0.5 s and then every second, which
-was one sound too many. The down click starts from the button task the
+350 ms later; a double tap is "click, clack, di-di, clack"; a hold of a
+second or more is "click", silence while held, then "dun" on the release,
+when the scene hears `up` and `longPress` together. Until 2026.10.16 a hold
+chirped at 0.5 s and then every second, which was too many sounds. The down click starts from the button task the
 moment the edge is queued, so the feedback does not wait for a render that
 may be 30 s into a panel refresh. A press that wakes the chip from deep sleep
 clicks down as soon as the chip boots (`fos_buttons_wake_boot`), the button
 task starts right after it, and the up click follows the finger; it is a
-`press` at once and gets no long-press sounds, since the dispatcher hears a
-replayed press and keeps no hold for it (until 2026.10.16 a wake got a 60 ms
+`press` at once and its release is a plain up click, since the dispatcher
+hears a replayed press and keeps no hold for it (until 2026.10.16 a wake got a 60 ms
 chirp of its own and no release click).
 
 Presses during a render are registered: the button task keeps polling, and
@@ -734,16 +734,14 @@ for the whole burst). Each queued edge carries when the button task saw it
 so the dispatcher measures a hold between the two edges and not from the
 drain: a tap made 5 s into a 30 s refresh is a tap with its `durationMs`,
 two taps in that time are a `doublePress`, and a hold that was long enough
-gets one `longPress` right before its `up` (there was no tick to deliver it
-earlier). Until 2026.10.16 every edge was timed when it was drained, so a
-tap during a render arrived as a 30 s hold. The buzzer's long-press sounds
-count from the same instant, so `heldSeconds` says what the finger heard.
+is a `longPress` with its `up`. Until 2026.10.16 every edge was timed when it
+was drained, so a tap during a render arrived as a 30 s hold.
 
-A `press` is decided 350 ms after its `up`, and a `longPress` each second a
-key is held, and only a tick of the dispatcher delivers them. So while a key
-is down or a tap is in its window (`fos_buttons_busy`), the idle wait runs in
-50 ms slices instead of 1 s ones, and a frame about to deep-sleep waits, up to
-10 s, until the decision is delivered (and renders if the scene asked).
+A `press` is decided 350 ms after its `up`, and only a tick of the
+dispatcher delivers it. So while a key is down or a tap is in its window
+(`fos_buttons_busy`), the idle wait runs in 50 ms slices instead of 1 s ones,
+and a frame about to deep-sleep waits, up to 10 s, until the decision is
+delivered (and renders if the scene asked).
 
 The debounce takes the first change of level as the edge (polled every
 20 ms) and ignores changes for 30 ms after it, which is contact bounce. Until

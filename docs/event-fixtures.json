@@ -3568,8 +3568,8 @@
     ]
    },
    {
-    "name": "a hold is a longPress at every whole second",
-    "why": "longPressMs is 1000: the first at 1 s, the next at 2 s, heldSeconds counting them, the instants the ESP32 buzzer sounds them. A long press is not also a press.",
+    "name": "a hold is one longPress, on its up",
+    "why": "Nothing is delivered while the key is down, however long. The up decides: held at least longPressMs (1000), it is a longPress, after the up, with the same duration and the down's atMs. A long press is not also a press.",
     "steps": [
      {
       "at": 1000,
@@ -3597,48 +3597,14 @@
       ]
      },
      {
-      "at": 1999,
-      "tick": true,
-      "delivered": []
-     },
-     {
       "at": 2000,
-      "tick": true,
-      "delivered": [
-       {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "longPress",
-         "durationMs": 1000,
-         "heldSeconds": 1
-        }
-       }
-      ]
-     },
-     {
-      "at": 2500,
       "tick": true,
       "delivered": []
      },
      {
       "at": 3000,
       "tick": true,
-      "delivered": [
-       {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "longPress",
-         "durationMs": 2000,
-         "heldSeconds": 2
-        }
-       }
-      ]
+      "delivered": []
      },
      {
       "at": 3200,
@@ -3664,6 +3630,18 @@
          "durationMs": 2200,
          "heldSeconds": 2
         }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "longPress",
+         "atMs": 1000,
+         "durationMs": 2200,
+         "heldSeconds": 2
+        }
        }
       ]
      },
@@ -3675,8 +3653,8 @@
     ]
    },
    {
-    "name": "a hold through a render gets one longPress before its up",
-    "why": "No tick came while the key was down (both edges sat in the queue): the long press it was lands before the up, with the hold it had; there is no burst of the seconds missed.",
+    "name": "a hold through a render is a longPress",
+    "why": "Both edges sat in the queue; their stamps say the key was down 2.5 s.",
     "steps": [
      {
       "at": 31000,
@@ -3724,7 +3702,7 @@
          "pin": 6,
          "label": "B",
          "role": "next",
-         "action": "longPress",
+         "action": "up",
          "durationMs": 2500,
          "heldSeconds": 2
         }
@@ -3735,7 +3713,8 @@
          "pin": 6,
          "label": "B",
          "role": "next",
-         "action": "up",
+         "action": "longPress",
+         "atMs": 1000,
          "durationMs": 2500,
          "heldSeconds": 2
         }
@@ -3750,8 +3729,8 @@
     ]
    },
    {
-    "name": "a key still held when the render ends gets one longPress, then one a second",
-    "why": "The down was queued at 1000; the drain comes at 30000 with the key still down. The first tick catches up with one longPress carrying the real hold; after that, one per whole second again.",
+    "name": "a key still held when the render ends makes nothing until its up",
+    "why": "The down was queued at 1000 and drained at 30000 with the key still down: no tick makes anything of a hold; the up does.",
     "steps": [
      {
       "at": 30000,
@@ -3782,28 +3761,26 @@
      {
       "at": 30000,
       "tick": true,
-      "delivered": [
-       {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "longPress",
-         "durationMs": 29000,
-         "heldSeconds": 29
-        }
-       }
-      ]
-     },
-     {
-      "at": 30500,
-      "tick": true,
       "delivered": []
      },
      {
       "at": 31000,
       "tick": true,
+      "delivered": []
+     },
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "up",
+        "atMs": 31000
+       }
+      },
       "delivered": [
        {
         "event": "button",
@@ -3811,7 +3788,19 @@
          "pin": 6,
          "label": "B",
          "role": "next",
+         "action": "up",
+         "durationMs": 30000,
+         "heldSeconds": 30
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
          "action": "longPress",
+         "atMs": 1000,
          "durationMs": 30000,
          "heldSeconds": 30
         }
@@ -3821,8 +3810,8 @@
     ]
    },
    {
-    "name": "a late tick catches up with one longPress, not a burst",
-    "why": "A host that could not tick for 3.7 s delivers one longPress with the hold it has, then keeps to whole seconds.",
+    "name": "a hold just short of longPressMs is a press, and one exactly that long a longPress",
+    "why": "The line is longPressMs held: 999 ms is a short press (it waits for a second down, then is a press), 1000 ms a long one.",
     "steps": [
      {
       "at": 1000,
@@ -3850,46 +3839,7 @@
       ]
      },
      {
-      "at": 4700,
-      "tick": true,
-      "delivered": [
-       {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "longPress",
-         "durationMs": 3700,
-         "heldSeconds": 3
-        }
-       }
-      ]
-     },
-     {
-      "at": 4800,
-      "tick": true,
-      "delivered": []
-     },
-     {
-      "at": 5000,
-      "tick": true,
-      "delivered": [
-       {
-        "event": "button",
-        "payload": {
-         "pin": 6,
-         "label": "B",
-         "role": "next",
-         "action": "longPress",
-         "durationMs": 4000,
-         "heldSeconds": 4
-        }
-       }
-      ]
-     },
-     {
-      "at": 5100,
+      "at": 1999,
       "send": {
        "origin": "driver",
        "event": "button",
@@ -3898,7 +3848,7 @@
         "label": "B",
         "level": 1,
         "action": "up",
-        "atMs": 5100
+        "atMs": 1999
        }
       },
       "delivered": [
@@ -3909,8 +3859,94 @@
          "label": "B",
          "role": "next",
          "action": "up",
-         "durationMs": 4100,
-         "heldSeconds": 4
+         "durationMs": 999,
+         "heldSeconds": 0
+        }
+       }
+      ]
+     },
+     {
+      "at": 2349,
+      "tick": true,
+      "delivered": []
+     },
+     {
+      "at": 2350,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press",
+         "atMs": 1000,
+         "durationMs": 999
+        }
+       }
+      ]
+     },
+     {
+      "at": 3000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "down",
+        "atMs": 3000
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "down"
+        }
+       }
+      ]
+     },
+     {
+      "at": 4000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "up",
+        "atMs": 4000
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "up",
+         "durationMs": 1000,
+         "heldSeconds": 1
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "longPress",
+         "atMs": 3000,
+         "durationMs": 1000,
+         "heldSeconds": 1
         }
        }
       ]
@@ -3919,7 +3955,7 @@
    },
    {
     "name": "the second down of a double press makes no longPress",
-    "why": "Each press is exactly one of press, doublePress or longPress: a double press held is still a double press.",
+    "why": "Each press is exactly one of press, doublePress or longPress: a double press held is still a double press, and its up makes nothing more.",
     "steps": [
      {
       "at": 1000,

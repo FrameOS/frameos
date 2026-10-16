@@ -44,9 +44,9 @@
  * as a longer click. */
 #define DOUBLE_NOTE_MS 10
 #define DOUBLE_REST_MS 6
-/* A long press, at every whole second held: a short note at the press pitch
- * falling to a longer one an octave down, a "dun" that says the hold has
- * turned into something else, once per second it stays that way. */
+/* A long press, on its release in place of the up click: a short note at
+ * the press pitch falling to a longer one an octave down, a "dun" that says
+ * the hold was something else than a press. */
 #define LONG_HEAD_MS 8
 #define LONG_TAIL_MS 20
 

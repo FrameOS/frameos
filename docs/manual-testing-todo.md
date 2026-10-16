@@ -52,8 +52,8 @@ touch, both 2026-09-19):
   (`driver:evdev … listening`), is grabbed (`grabbed: true`; Ctrl+Alt+Del does
   nothing), and the Keyboard test shows `Shift+H` as `H` under the `us` layout
   and `z` for KEY_Y under `de` (`inputSettings.keyboardLayout`); a GPIO button
-  held 2.5 s logs `down`, a `longPress` at 1 s and 2 s, and an `up` with
-  `durationMs`, and the Counter sample still counts one per tap (taps slower
+  held 2.5 s logs `down`, then on the release an `up` and a `longPress`, both
+  with `durationMs` near 2500, and the Counter sample still counts one per tap (taps slower
   than 350 ms apart; a quick double is a `doublePress`, which it does not
   count). On an ESP32 (E1002 bench): a tap logs `down` and `up` at once and a
   `press` 350 ms later, and a scene's `button` listener without an `action`
@@ -61,15 +61,15 @@ touch, both 2026-09-19):
   refresh): a tap made mid-refresh logs an `up` with a `durationMs` of about
   100, not 30000, then a `press` and no `longPress`; two quick taps
   mid-refresh log one `doublePress` and no `press`; a key held 2 s
-  mid-refresh logs one `longPress` then the `up`, both with `durationMs` near
-  2000 and `heldSeconds: 2`; a key held across the end of a refresh gets a
-  `longPress` at the drain with its real hold, then one a second.
+  mid-refresh logs the `up` then a `longPress`, both with `durationMs` near
+  2000 and `heldSeconds: 2`; a key held across the end of a refresh logs
+  nothing until it is let go.
 - [ ] **Button sounds and debounce on the E1004** (2026.10.16): the fastest
   tap you can make is `down`, `up`, `press` (no lost taps); the fastest
   double tap you can make is `down`, `up`, `down`, `doublePress`, `up` with
   no `press`, and its second tap plays the rising two-note sound, not the
-  plain click; a 2.5 s hold sounds "click, dun, dun, clack" with each dun at
-  a `longPress` (`heldSeconds` 1, 2) and nothing at half a second; no key
+  plain click; a 2.5 s hold sounds "click", silence, then "dun" on the
+  release instead of the up click, with the `longPress`; no key
   double-registers from contact bounce (press slowly, rock the key). On a
   battery frame, tap once right before it would sleep: the `press` still
   lands (the log shows it before the sleep line). Listen for whether the

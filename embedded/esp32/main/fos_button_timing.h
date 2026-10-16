@@ -32,11 +32,6 @@ typedef enum {
     FOS_BUTTON_EDGE_RELEASE,
 } fos_button_edge_t;
 
-typedef enum {
-    FOS_BUTTON_HOLD_NONE = 0,
-    FOS_BUTTON_HOLD_LONG, /* another whole FOS_BUTTON_LONG_PRESS_MS held: a `longPress` */
-} fos_button_hold_t;
-
 typedef struct {
     int level;              /* the last accepted level: 0 down (pulled up), 1 up */
     int64_t changed_at_ms;  /* when it was accepted; the lockout counts from here */
@@ -45,7 +40,6 @@ typedef struct {
     int64_t released_at_ms; /* the last release edge's stamp */
     bool tap_ended;         /* that release ended a short, single press: a double may follow */
     bool twice;             /* this press is the second of a double press: no long press */
-    uint32_t longs;         /* `longPress`es this hold has reached: one per whole FOS_BUTTON_LONG_PRESS_MS */
 } fos_button_timing_t;
 
 /* The line as first read: a key already down counts as pressed at `now_ms`
@@ -62,19 +56,16 @@ fos_button_edge_t fos_button_timing_sample(fos_button_timing_t *b, int level, in
  * dispatcher. */
 bool fos_button_timing_press(fos_button_timing_t *b, int64_t at_ms);
 
-/* The key is still down at `now_ms`: LONG at every whole
- * FOS_BUTTON_LONG_PRESS_MS of hold counted from the press (1 s, 2 s, ...;
- * `longs` counts them), never for the second press of a double press. One
- * per call: a late call catches up with one. */
-fos_button_hold_t fos_button_timing_hold(fos_button_timing_t *b, int64_t now_ms);
-
 /* Book an accepted release at `at_ms`; returns how long the key was down
  * (at least 1). A short single press leaves `tap_ended` set: the dispatcher
- * makes it a `press` once FOS_BUTTON_DOUBLE_PRESS_MS pass with no second down. */
-uint32_t fos_button_timing_release(fos_button_timing_t *b, int64_t at_ms);
+ * makes it a `press` once FOS_BUTTON_DOUBLE_PRESS_MS pass with no second down.
+ * `*long_press` (may be NULL) says whether the dispatcher makes this up a
+ * `longPress`: held at least FOS_BUTTON_LONG_PRESS_MS, and not the second
+ * press of a double press. */
+uint32_t fos_button_timing_release(fos_button_timing_t *b, int64_t at_ms, bool *long_press);
 
 /* The dispatcher still has something to decide about this key at `now_ms`:
- * it is down (a `longPress` is coming each second), or its last short press
- * is inside the double-press window (a `press` or a `doublePress` is
- * coming). `slack_ms` past the window covers the tick that delivers it. */
+ * it is down (its `up` decides a `longPress` or a short press), or its
+ * last short press is inside the double-press window (a `press` or a
+ * `doublePress` is coming). `slack_ms` past the window covers the tick that delivers it. */
 bool fos_button_timing_busy(const fos_button_timing_t *b, int64_t now_ms, int64_t slack_ms);

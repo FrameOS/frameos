@@ -297,24 +297,27 @@ One event, `button`, in two layers; `action` says which.
   it is over and `buttons.doublePressMs` (350) has passed since its `up` with
   no second down, so it arrives 350 ms after the release. `doublePress` is the
   second down inside that window; the pair is that and nothing more (no
-  `press`, no `longPress`), and a third down starts over. `longPress` comes at
-  every whole `buttons.longPressMs` (1000) the key is held, 1 s, 2 s, …, with
-  `heldSeconds` counting them; a long press is not also a `press`.
+  `press`, no `longPress`), and a third down starts over. `longPress` is the
+  `up` of a press held at least `buttons.longPressMs` (1000), once, right
+  after that `up`, with the same `durationMs` and `heldSeconds`; nothing is
+  delivered while a key is held, and a long press is not also a `press`.
 
 A tap is therefore `down`, `up`, then `press`; a double tap `down`, `up`,
-`down`, `doublePress`, `up`; a 2.2 s hold `down`, `longPress` (1),
-`longPress` (2), `up`. **A listener with no `action` filter hears `press`
+`down`, `doublePress`, `up`; a 2.2 s hold `down`, then `up` and `longPress`
+(`heldSeconds` 2) together. **A listener with no `action` filter hears `press`
 only** (`listenDefault`): every listener from before the layers existed is
 exactly that. A fast double tap reaches such a listener as nothing, since it
 is a `doublePress`; a scene that must count every tap listens for `down`.
 Drivers until 2026.10.16 sent their edges as `press` / `release`, and until
-then `press` was the down edge itself, `release` the up, and `repeat` a
-second held; the dispatcher still takes those edges by their `level`.
+then `press` was the down edge itself, `release` the up, `longPress` came
+while the key was held and `repeat` every second after; the dispatcher still
+takes those edges by their `level`.
 
 Each event has its sound on an ESP32 with a buzzer, at the instant it
 happens: a click on `down`, a lower one on `up`, two rising notes for a
-`doublePress` (in place of its down click), a short falling pair at every
-`longPress`. A `press` adds none: its clicks were the down and the up
+`doublePress` (in place of its down click), a short falling pair for a
+`longPress` (in place of its up click). A `press` adds none: its clicks were
+the down and the up
 (`embedded/esp32/README.md`, "Button beep").
 
 `atMs` is when the driver saw the edge, in milliseconds on the frame's
@@ -326,11 +329,11 @@ from the `down`'s `atMs` to the `up`'s, the double-press window between an
 edge applies, never to the moment it was delivered. An ESP32 drains its button
 queue only between render passes, so a tap made during a 30 s refresh used to
 arrive as a 30 s hold; now it is a tap, two taps in that time a
-`doublePress`, and a hold through the refresh one `longPress` before its
-`up`, with the hold it had (a late tick catches up with one, never a burst).
-The hosts tick while a key is down or a tap is in its window: the ESP32 waits
-in 50 ms slices then, and does not deep-sleep until the decision is
-delivered; the preview ticks every 50 ms.
+`doublePress`, and a hold through the refresh a `longPress` with the hold it
+had. A `press` needs a tick to be delivered, so the hosts tick while a key is
+down or a tap is in its window: the ESP32 waits in 50 ms slices then, and
+does not deep-sleep until the decision is delivered; the preview ticks every
+50 ms.
 
 Debounce is kept to contact bounce, 30 ms on both kinds of frame: the ESP32
 takes the first change as the edge and ignores changes for 30 ms after it, a
