@@ -31,8 +31,8 @@ static const char *TAG = "fos_buttons";
 /* Edges, not presses: a press and its release take two. The render task
  * drains the queue only between passes, so this is how many edges a render
  * can sit on — an E1004 refresh is ~30 s. At 16 the ninth press of a burst
- * was dropped; 64 keeps 32 presses. Items are 12 bytes (the label is read
- * from the config when the event is delivered): 768 bytes of internal RAM. */
+ * was dropped; 64 keeps 32 presses. Items are 8 bytes (the label is read
+ * from the config when the event is delivered): 512 bytes of internal RAM. */
 #define BUTTON_QUEUE_LEN 64
 /* The debounce (a lockout after each accepted edge) and the press kinds the
  * buzzer sounds are fos_button_timing.c's, on the contract's numbers. */
@@ -41,11 +41,7 @@ static const char *TAG = "fos_buttons";
 typedef struct {
     uint8_t index; /* into config->gpio_buttons, which only a restart rebinds */
     uint8_t level; /* 0: pressed (the line is pulled up), 1: released */
-    bool wake;     /* the press that woke the chip from deep sleep, replayed */
-    /* A release: how long the key was down, when this task knows better
-     * than the dispatcher — the hold of the press that woke the chip, which
-     * the dispatcher only hears as a replay. 0: the dispatcher's own count. */
-    uint32_t duration_ms;
+    bool wake;     /* the down that woke the chip from deep sleep, stamped at boot */
     /* When this task saw the edge, ms since boot (esp_timer), low 32 bits:
      * the dispatcher measures the hold and the double-press window from it,
      * not from when the render task got round to the queue. Widened back to
@@ -60,9 +56,6 @@ static bool s_started = false;
 static int s_wake_pin = -1;
 static char s_wake_label[FOS_GPIO_BUTTON_LABEL_LEN] = "";
 static uint64_t s_wake_mask = 0;
-/* When this boot's wake press clicked (ms since boot): its release's
- * `durationMs` counts from there, the press itself being a little older. */
-static int64_t s_wake_clicked_ms = 0;
 /* Each key's debounce and press kinds (fos_button_timing.h): `down` is
  * "a press was accepted, or the key was down at boot". */
 static fos_button_timing_t s_timing[FOS_GPIO_BUTTONS_MAX];
@@ -81,10 +74,6 @@ static click_t s_clicked[FOS_GPIO_BUTTONS_MAX];
  * task (fos_buttons_busy): a bool, so no torn read. */
 static volatile bool s_busy[FOS_GPIO_BUTTONS_MAX];
 #define BUTTON_BUSY_SLACK_MS 100
-/* The key is the one that woke the chip and has been down since: its release
- * carries the hold measured from the wake click, since the dispatcher only
- * heard a replayed press. */
-static bool s_wake_held[FOS_GPIO_BUTTONS_MAX];
 static bool s_enabled[FOS_GPIO_BUTTONS_MAX];
 
 static void json_escape(const char *src, char *dst, size_t dst_len)
@@ -118,14 +107,13 @@ static int64_t now_ms(void)
     return esp_timer_get_time() / 1000;
 }
 
-static bool enqueue_event(size_t index, int level, bool wake, uint32_t duration_ms, int64_t at_ms)
+static bool enqueue_event(size_t index, int level, bool wake, int64_t at_ms)
 {
     if (!s_queue) return false;
     fos_button_event_t event = {
         .index = (uint8_t)index,
         .level = (uint8_t)(level != 0),
         .wake = wake,
-        .duration_ms = duration_ms,
         .at_ms = (uint32_t)at_ms,
     };
     if (xQueueSend(s_queue, &event, 0) != pdTRUE) {
@@ -169,7 +157,7 @@ static void press_edge(size_t index, size_t count, int64_t at_ms)
         fos_buzzer_reject_down();
         return;
     }
-    if (!enqueue_event(index, 0, false, 0, at_ms)) {
+    if (!enqueue_event(index, 0, false, at_ms)) {
         s_clicked[index] = CLICK_NONE;
         s_timing[index].twice = false;
         return;
@@ -188,35 +176,30 @@ static void press_edge(size_t index, size_t count, int64_t at_ms)
 }
 
 /* A key still down: the long-press sound at every whole longPressMs held
- * (1 s, 2 s, ...), counting the hold out loud. The scene hears its
- * `longPress` once, with the `up`; this says "it is one now, and still
- * going". Not for the second press of a double press (no long press comes of
- * it), and not for the key that woke the chip (the dispatcher keeps no hold
- * for a replayed press). */
+ * (1 s, 2 s, ...), counting the hold out loud, the key that woke the chip
+ * too (counted from its wake click). The scene hears its `longPress` once,
+ * with the `up`; this says "it is one now, and still going". Not for the
+ * second press of a double press: no long press comes of it. */
 static void hold_sounds(size_t index, int64_t now_ms)
 {
     if (!fos_button_timing_hold_tick(&s_timing[index], now_ms)) return;
-    if (s_clicked[index] != CLICK_PRESS || s_wake_held[index]) return;
+    if (s_clicked[index] != CLICK_PRESS) return;
     fos_buzzer_long_press();
 }
 
 static void release_edge(size_t index, int64_t at_ms)
 {
-    uint32_t held_ms = fos_button_timing_release(&s_timing[index], at_ms, NULL);
+    fos_button_timing_release(&s_timing[index], at_ms, NULL);
     click_t clicked = s_clicked[index];
     /* Only a press the dispatcher heard as one can start a double press:
-     * not a refused one, not a key down since boot, not the wake press
-     * (a replay, which the dispatcher keeps no hold for). */
-    if ((clicked != CLICK_PRESS && clicked != CLICK_DOUBLE) || s_wake_held[index]) {
+     * not a refused one, not a key down since boot. The wake press is one. */
+    if (clicked != CLICK_PRESS && clicked != CLICK_DOUBLE) {
         s_timing[index].tap_ended = false;
     }
     if (s_release_owed[index]) {
-        /* The wake press's hold only this task saw: say it. Any other
-         * release leaves `durationMs` to the dispatcher. */
-        enqueue_event(index, 1, false, s_wake_held[index] ? held_ms : 0, at_ms); /* slot reserved */
+        enqueue_event(index, 1, false, at_ms); /* its slot was reserved */
         s_release_owed[index] = false;
     }
-    s_wake_held[index] = false;
     s_clicked[index] = CLICK_NONE;
     /* Every up is the same lower click: a tap's, a double press's, a long
      * press's (its seconds were sounded while it was held). */
@@ -234,18 +217,31 @@ static void buttons_task(void *arg)
         /* Held at boot: no press was queued, but its release is real. */
         s_release_owed[i] = s_timing[i].down;
         s_clicked[i] = CLICK_NONE;
-        s_wake_held[i] = false;
         if (config->gpio_buttons[i].pin != s_wake_pin) continue;
-        /* The wake press clicked down at boot (fos_buttons_wake_boot): the
-         * same press as any other from here on. Still held: its hold counts
-         * from that click and its release clicks up. Let go already: the up
-         * click now, so the pair is complete, a little late. */
+        /* The key that woke the chip: its down clicked at boot
+         * (fos_buttons_wake_boot), and from here on it is a press like any
+         * other, so holding it is a long press and a quick second tap a
+         * double press. The chip cannot see a key while it boots (0.75 s on
+         * the E1002, most of it the bootloader checking the app), so the
+         * first look decides the stamps:
+         * - still down: the press began at the reset (esp_timer 0), so the
+         *   hold counts from there: its duns, and the `longPress` its `up`
+         *   makes, match the hold the finger made;
+         * - already up: a tap. Its `down` and `up` are stamped now, when they
+         *   were first seen, so the double-press window opens now and a
+         *   second tap within doublePressMs pairs with it. A second tap made
+         *   and let go entirely during the boot is not seen. */
         if (s_timing[i].down) {
             s_clicked[i] = CLICK_PRESS;
-            s_timing[i].pressed_at_ms = s_wake_clicked_ms;
-            s_wake_held[i] = true;
+            s_timing[i].pressed_at_ms = 0;
+            enqueue_event(i, 0, true, 0);
         } else {
-            fos_buzzer_click_up();
+            int64_t seen_ms = now_ms();
+            enqueue_event(i, 0, true, seen_ms);
+            fos_button_timing_press(&s_timing[i], seen_ms);
+            s_release_owed[i] = true;
+            s_clicked[i] = CLICK_PRESS;
+            release_edge(i, seen_ms);
         }
     }
 
@@ -353,18 +349,6 @@ esp_err_t fos_buttons_start(void)
         frameos_nim_log_hook(line);
     }
 
-    /* This boot is a button wake: replay the press so the scene sees it. The
-     * key was released seconds ago (Wi-Fi, TLS, scene load all came first),
-     * so the poll loop below has no edge to detect. Queued now, dispatched
-     * on the render task's first pass once the scene is resident. */
-    if (s_wake_pin >= 0) {
-        for (size_t i = 0; i < config->gpio_button_count; i++) {
-            if (!s_enabled[i] || config->gpio_buttons[i].pin != s_wake_pin) continue;
-            enqueue_event(i, 0, true, 0, s_wake_clicked_ms);
-            break;
-        }
-    }
-
     BaseType_t created = xTaskCreate(buttons_task, "fos_buttons", 3072, NULL, 4, NULL);
     if (created != pdPASS) {
         vQueueDelete(s_queue);
@@ -391,19 +375,13 @@ void fos_buttons_process_events(void)
          * clock (esp_timer, the CLOCK_MONOTONIC the Nim side reads too). The
          * role, the `up`'s `durationMs` and the button layer (`press`,
          * `doublePress`, `longPress`) are the Nim dispatcher's
-         * (input_state.nim), timed from `atMs` — except the up of the press
-         * that woke the chip, whose hold only this task saw: it carries
-         * `durationMs`, which the dispatcher keeps. */
-        char held[32] = "";
-        if (event.level != 0 && event.duration_ms > 0) {
-            snprintf(held, sizeof(held), ",\"durationMs\":%u", (unsigned)event.duration_ms);
-        }
+         * (input_state.nim), timed from `atMs`. */
         char payload[224];
         snprintf(payload, sizeof(payload),
-                 "{\"pin\":%d,\"label\":\"%s\",\"level\":%d,\"action\":\"%s\"%s%s,\"atMs\":%lld}",
+                 "{\"pin\":%d,\"label\":\"%s\",\"level\":%d,\"action\":\"%s\"%s,\"atMs\":%lld}",
                  button->pin, label, event.level,
                  event.level == 0 ? FOS_BUTTON_ACTION_DOWN : FOS_BUTTON_ACTION_UP,
-                 event.wake ? ",\"wake\":true" : "", held,
+                 event.wake ? ",\"wake\":true" : "",
                  (long long)fos_wake_edge_at_ms(event.at_ms, now_ms()));
         /* `driver`: a press is hardware talking, and the contract lets it say
          * input and nothing else. fos_events.c hands it to the scene and asks
@@ -498,7 +476,6 @@ void fos_buttons_wake_boot(void)
      * are up, seconds later. The button task (started right after this)
      * follows the hold and clicks up on the release. */
     fos_buzzer_click_down();
-    s_wake_clicked_ms = esp_timer_get_time() / 1000;
     /* printf: INFO is compiled out, and this is the one line that explains an
      * off-schedule boot on the USB console. */
     printf("woke from deep sleep: button GPIO %d (%s)\n", s_wake_pin, s_wake_label);

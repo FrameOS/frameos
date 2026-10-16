@@ -57,6 +57,7 @@ type
     atMs: int       ## the down edge's `atMs`, -1 without one: the `press` or `longPress` it becomes says it
     durationMs: int ## a waiting tap's hold
     twice: bool     ## the second down of a double press: that and nothing more
+    wake: bool      ## began with the down that woke the device: its button-layer event says so
 
 when not defined(frameosEmbedded):
   type PointerRecord = object
@@ -184,7 +185,7 @@ proc tickButtons(state: var InputState, now: MonoTime, output: var seq[InputDeli
   while index < state.buttons.len:
     let key = state.buttons[index]
     if not key.down and msSince(now, key.releasedAt) > ButtonDoublePressMs:
-      output.addButton(key.origin, key.pin, key.label, key.role, "press", key.atMs, key.durationMs)
+      output.addButton(key.origin, key.pin, key.label, key.role, "press", key.atMs, key.durationMs, wake = key.wake)
       state.buttons.delete(index)
     else:
       inc index
@@ -228,23 +229,21 @@ proc button(state: var InputState, payload: JsonNode, origin: EventOrigin, now: 
   if down:
     output.addButton(origin, pin, label, role, "down", atMs, level = 0, wake = wake)
     # A key still waiting out its window makes this down the double press;
-    # one still held missed its `up`, and this down starts over.
+    # one still held missed its `up`, and this down starts over. The down
+    # that woke the device is a press like any other: the ESP32 stamps it
+    # (at the reset when the key is still down once it can look, else when
+    # it first saw it), and its hold, its `up` and a second tap follow.
     let twice = index >= 0 and not state.buttons[index].down
+    let startedByWake = wake or (twice and state.buttons[index].wake)
     if index >= 0:
       state.buttons.delete(index)
-    if wake:
-      # The press that woke the device, replayed seconds later: no second
-      # down can have come while it slept, and there is no hold to follow
-      # (the release, if the key is still down, says how long it was).
-      output.addButton(origin, pin, label, role, "press", atMs, wake = true)
-      return
     state.buttons.add(ButtonKey(pin: pin, label: label, role: role, origin: origin, down: true,
-      downAt: at, atMs: atMs, twice: twice))
+      downAt: at, atMs: atMs, twice: twice, wake: startedByWake))
     if twice:
-      output.addButton(origin, pin, label, role, "doublePress", atMs)
+      output.addButton(origin, pin, label, role, "doublePress", atMs, wake = startedByWake)
   elif index < 0 or not state.buttons[index].down:
-    # No down to measure from: a hold only the host saw (the ESP32's wake
-    # press, held through the boot) carries its own count.
+    # No down to measure from (a key held since before the driver started):
+    # the host's own count if it gave one.
     output.addButton(origin, pin, label, role, "up", atMs, max(given, 0), level = 1)
   else:
     let key = state.buttons[index]
@@ -261,7 +260,7 @@ proc button(state: var InputState, payload: JsonNode, origin: EventOrigin, now: 
         # Held at least `ButtonLongPressMs`: a long press, decided now that
         # it is over, with how long it was. Once, never while held. (A
         # double press is that and nothing more.)
-        output.addButton(key.origin, pin, label, role, "longPress", key.atMs, duration)
+        output.addButton(key.origin, pin, label, role, "longPress", key.atMs, duration, wake = key.wake)
 
 proc buttonsHeld*(state: InputState): int =
   for key in state.buttons:

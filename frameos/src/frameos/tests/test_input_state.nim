@@ -323,23 +323,24 @@ block test_a_button_has_a_role_and_two_layers:
   state.tick(at(4000), output)
   doAssert output.len == 0
   doAssert state.buttonsHeld == 1 and state.buttonsBusy == 1 # pin 6, still down
-  # An up whose hold only the host saw (the ESP32's wake press, held through
-  # the boot): its durationMs is kept, and heldSeconds made from it.
+  # An up with no down to measure from (a key held since before the driver
+  # started): the host's count if it gave one, with heldSeconds made from it.
   output.setLen(0)
   discard state.applyNamedInput(evButton, %*{"pin": 9, "label": "BOOT", "level": 1, "action": "up",
     "durationMs": 3400}, eoDriver, at(4500), output)
   doAssert output.actions == @["up"]
   doAssert output[0].payload["durationMs"].getInt() == 3400 and output[0].payload["heldSeconds"].getInt() == 3
-  # The down that woke the device is a press at once, with no hold to follow.
+  # The down that woke the device is a press like any other: it waits for its
+  # up, and the press it becomes says it woke the device.
   output.setLen(0)
   discard state.applyNamedInput(evButton, %*{"pin": 9, "label": "BOOT", "level": 0, "action": "down", "wake": true},
     eoDriver, at(5000), output)
-  doAssert output.actions == @["down", "press"]
-  doAssert output[1].payload["wake"].getBool() and output[1].payload["role"].getStr() == "primary"
-  output.setLen(0)
-  state.tick(at(5000 + 3 * ButtonLongPressMs), output)
-  for d in output:
-    doAssert d.payload["pin"].getInt() != 9
+  doAssert output.actions == @["down"] and output[0].payload["wake"].getBool()
+  discard state.applyNamedInput(evButton, %*{"pin": 9, "label": "BOOT", "level": 1, "action": "up"},
+    eoDriver, at(5050), output)
+  state.tick(at(5050 + ButtonDoublePressMs + 1), output)
+  doAssert output.actions == @["down", "up", "press"], $output.actions
+  doAssert output[2].payload["wake"].getBool() and output[2].payload["role"].getStr() == "primary"
   # A label nobody knows has no role.
   output.setLen(0)
   discard state.applyNamedInput(evButton, %*{"pin": 20, "label": "Zork", "level": 0}, eoDriver, at(9000), output)

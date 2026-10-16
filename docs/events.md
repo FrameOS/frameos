@@ -350,10 +350,16 @@ silkscreen label: a frame configures one per button (`gpioButtons[].role`,
 Linux frames), and `buttons.roleByLabel` is the default for a button without
 one (`A` primary, `B` next, `C` prev, `D` back, `BOOT` primary, `KEY1` next,
 `LEFT` prev, `RIGHT` next, `OK` primary, `HOME` menu, `EXIT` back, …). `wake:
-true` marks the replayed `down` that booted an ESP32 out of deep sleep; it is
-a `press` at once (no second down can have come while the chip slept), and
-there is no hold to follow it. `level` is the line on an edge (0 down: the
-line is pulled up).
+true` marks the `down` that booted an ESP32 out of deep sleep, and the
+`press`, `doublePress` or `longPress` it becomes: that press is a press like
+any other, so holding the key that woke the frame is a long press and a quick
+second tap a double press. An ESP32 cannot see its keys while it boots (0.75
+s on an E1002), so the button task's first look decides the stamps: a key still down
+began at the reset (`atMs` 0) and its hold counts from there; a key already up
+was a tap, its `down` and `up` stamped when first seen, which opens the
+double-press window then. A second tap made and let go entirely during the
+boot is not seen. `level` is the line on an edge (0 down: the line is pulled
+up).
 
 **Privacy.** Key events are logged by name only (`log: name-only`), never with
 what was typed; pointer events not at all.

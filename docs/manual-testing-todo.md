@@ -73,7 +73,10 @@ touch, both 2026-09-19):
   `longPress` with the `up`; no key double-registers from contact bounce
   (press slowly, rock the key). On a battery frame, tap once right before it
   would sleep: the `press` still lands (the log shows it before the sleep
-  line). Listen for whether the double's high second down (1.5x the press
+  line). From deep sleep: hold a key to wake the frame for 2.5 s: duns from
+  the moment the task starts, then a `longPress` (`wake: true`); tap to wake,
+  then tap again just after the first click: a `doublePress`; a plain tap to
+  wake: a `press`. Listen for whether the double's high second down (1.5x the press
   pitch) and the hold's low note (0.5x) carry on the piezo; retune in
   `fos_buzzer.c` if not. Pi with buttons (Inky Impression): the same fastest
   tap and double tap register with the 30 ms lgpio debounce, and a slow press

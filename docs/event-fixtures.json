@@ -4081,8 +4081,8 @@
     ]
    },
    {
-    "name": "the down that woke the device is a press at once",
-    "why": "The ESP32 replays the press that woke it seconds later: no second down can have come while it slept, and there is no hold to follow. The up, if the key was still down at boot, carries the hold the button task measured.",
+    "name": "the tap that woke the device is a press like any other",
+    "why": "An ESP32 cannot see its keys while it boots (about a second). A wake key already up by then was a tap: the button task stamps its down and up when it first saw them (1180), and the scene's first pass, seconds later, gets down, up, and the press once the window is over, marked wake.",
     "steps": [
      {
       "at": 6000,
@@ -4094,7 +4094,7 @@
         "label": "B",
         "level": 0,
         "action": "down",
-        "atMs": 1000,
+        "atMs": 1180,
         "wake": true
        }
       },
@@ -4107,9 +4107,41 @@
          "role": "next",
          "action": "down",
          "wake": true,
-         "atMs": 1000
+         "atMs": 1180
         }
-       },
+       }
+      ]
+     },
+     {
+      "at": 6000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "up",
+        "atMs": 1180
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "up",
+         "durationMs": 0
+        }
+       }
+      ]
+     },
+     {
+      "at": 6000,
+      "tick": true,
+      "delivered": [
        {
         "event": "button",
         "payload": {
@@ -4118,13 +4150,47 @@
          "role": "next",
          "action": "press",
          "wake": true,
-         "atMs": 1000
+         "atMs": 1180
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a hold that woke the device is a longPress",
+    "why": "Still down when the button task first looks: the press began at the reset (atMs 0), so the hold counts from there, and its up makes the longPress the finger meant.",
+    "steps": [
+     {
+      "at": 6000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "down",
+        "atMs": 0,
+        "wake": true
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "down",
+         "wake": true,
+         "atMs": 0
         }
        }
       ]
      },
      {
-      "at": 7000,
+      "at": 6000,
       "tick": true,
       "delivered": []
      },
@@ -4138,7 +4204,7 @@
         "label": "B",
         "level": 1,
         "action": "up",
-        "durationMs": 2500
+        "atMs": 2500
        }
       },
       "delivered": [
@@ -4152,11 +4218,149 @@
          "durationMs": 2500,
          "heldSeconds": 2
         }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "longPress",
+         "wake": true,
+         "atMs": 0,
+         "durationMs": 2500
+        }
        }
       ]
      },
      {
       "at": 8000,
+      "tick": true,
+      "delivered": []
+     }
+    ]
+   },
+   {
+    "name": "a double press can start with the tap that woke the device",
+    "why": "The wake tap's up is stamped when the button task first saw it (1180); a second down within doublePressMs of that pairs with it.",
+    "steps": [
+     {
+      "at": 6000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "down",
+        "atMs": 1180,
+        "wake": true
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "down",
+         "wake": true
+        }
+       }
+      ]
+     },
+     {
+      "at": 6000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "up",
+        "atMs": 1180
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "up"
+        }
+       }
+      ]
+     },
+     {
+      "at": 6000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "down",
+        "atMs": 1400
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "down",
+         "atMs": 1400
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "doublePress",
+         "wake": true,
+         "atMs": 1400
+        }
+       }
+      ]
+     },
+     {
+      "at": 6000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "up",
+        "atMs": 1460
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "up",
+         "durationMs": 60
+        }
+       }
+      ]
+     },
+     {
+      "at": 6000,
       "tick": true,
       "delivered": []
      }

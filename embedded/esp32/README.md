@@ -510,8 +510,8 @@ registered `gpio_buttons` pin that sits on a wake-capable pad — an RTC IO
 source (`ext1` any-low on the S3, `esp_deep_sleep_enable_gpio_wakeup` on the
 C3; the RTC_PERIPH domain stays powered so the internal pull-ups hold), next
 to the timer. A press brings the frame back early: the boot notes which pin
-woke it (`fos_buttons_wake_boot`), replays the press to the scene as the usual
-`button` event (`"wake": true`) on the first render pass, and that pass
+woke it (`fos_buttons_wake_boot`), hands that press to the scene as the usual
+`button` edges (`"wake": true` on its `down`) on the first render pass, and that pass
 renders instead of counting as a command check-in. A key still held at the
 moment of sleep is skipped for that sleep only (any-low would wake the chip
 instantly). `buttons:listening` lists `"wake"` per pin, the `sleep` line
@@ -722,11 +722,21 @@ are not events. Until 2026.10.16 a hold
 chirped at 0.5 s and then every second, which was too many sounds. The down click starts from the button task the
 moment the edge is queued, so the feedback does not wait for a render that
 may be 30 s into a panel refresh. A press that wakes the chip from deep sleep
-clicks down as soon as the chip boots (`fos_buttons_wake_boot`), the button
-task starts right after it, and the up click follows the finger; it is a
-`press` at once, its hold makes no duns and its release is a plain up click,
-since the dispatcher hears a replayed press and keeps no hold for it (until 2026.10.16 a wake got a 60 ms
-chirp of its own and no release click).
+clicks down as soon as the chip boots (`fos_buttons_wake_boot`) and is a press
+like any other from then on: held, it duns each second and its up is a
+`longPress`; a tap followed by a quick second tap is a `doublePress`. The
+chip cannot see its keys while it boots: 0.75 s on the E1002 from the reset
+to the button task's first look, 0.6 s of it the bootloader checking the
+3 MB app. That first look decides the stamps. A key still down
+began at the reset (`atMs` 0), so its hold counts from there and the first
+dun can sound the moment the task starts. A key already up was a tap, its
+`down` and `up` stamped then, which opens the double-press window. A second
+tap made and let go entirely during the boot is not seen, so a double press
+that wakes the frame needs its second tap after that first look. (Until
+2026.10.16 the wake press was replayed as a plain `press` with no hold, so it
+could be neither; before that it got a 60 ms chirp of its own and no release
+click.) The PSRAM memory test is off at boot since 2026.10.16: it took
+0.41 s of every boot, deep-sleep wakes included (the task started at 1.18 s).
 
 Presses during a render are registered: the button task keeps polling, and
 the render task drains the queue in one go before its next pass (one render

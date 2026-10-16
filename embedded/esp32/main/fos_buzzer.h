@@ -24,9 +24,8 @@
  *
  * (notes as [pitch ms], `tone` the configured `buzzer_tone_hz`; the segment
  * lists are what the Buzzer Lab auditions.) A press that wakes the chip
- * clicks down as soon as the chip boots and up on the release; it gets no
- * long-press sounds, because the dispatcher hears it as a replayed press and
- * makes no `longPress` of it.
+ * clicks down as soon as the chip boots and is a press like any other from
+ * then on: its duns, its up, a second tap's higher click.
  *
  * The pin is the live config's `buzzer_pin` (-1 = none) and the pitch its
  * `buzzer_tone_hz`, both read again on every tone: a settings push moves,

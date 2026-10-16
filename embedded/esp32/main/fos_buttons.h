@@ -27,9 +27,9 @@ esp_err_t fos_buttons_start(void);
 void fos_buttons_process_events(void);
 
 /* Call once, early in boot: if this boot is a deep-sleep wake caused by a
- * registered button, remember which so fos_buttons_start can replay the
- * press to the scene (by then the key has long been released — the task's
- * own edge detector never sees it). */
+ * registered button, click and remember which, so the button task's first
+ * look can queue that press's `down` (and its `up`, when the key is already
+ * released) like any other press's. */
 void fos_buttons_wake_boot(void);
 /* True when this boot was a button wake; fills the pin and label (either
  * may be NULL). Stays true for the whole boot — the render loop reads it once
