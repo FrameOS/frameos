@@ -313,6 +313,7 @@ block test_a_button_has_a_role_and_an_action:
   for d in output:
     doAssert d.payload["action"].getStr() == "longPress" and d.payload["pin"].getInt() in [5, 6]
     doAssert d.payload["durationMs"].getInt() == ButtonLongPressMs
+    doAssert d.payload["heldSeconds"].getInt() == ButtonLongPressMs div 1000
     doAssert d.payload["role"].getStr() == (if d.payload["pin"].getInt() == 5: "menu" else: "next")
   output.setLen(0)
   state.tick(at(ButtonLongPressMs + ButtonRepeatMs), output)
@@ -323,7 +324,15 @@ block test_a_button_has_a_role_and_an_action:
   discard state.applyNamedInput(evButton, %*{"pin": 5, "label": "A", "level": 1, "action": "release"}, eoDriver,
     at(2000), output)
   doAssert output[0].payload["action"].getStr() == "release" and output[0].payload["durationMs"].getInt() == 2000
+  # The hold in whole seconds too: what the ESP32 buzzer ticked while the key was down.
+  doAssert output[0].payload["heldSeconds"].getInt() == 2
   doAssert output[0].payload["role"].getStr() == "menu"
+  # A release whose hold the host measured itself (the ESP32's wake press, held
+  # through the boot): its durationMs is kept, and heldSeconds made from it.
+  output.setLen(0)
+  discard state.applyNamedInput(evButton, %*{"pin": 9, "label": "BOOT", "level": 1, "action": "release",
+    "durationMs": 3400}, eoDriver, at(2500), output)
+  doAssert output[0].payload["durationMs"].getInt() == 3400 and output[0].payload["heldSeconds"].getInt() == 3
   # A press that woke the device has no hold to follow.
   output.setLen(0)
   discard state.applyNamedInput(evButton, %*{"pin": 9, "label": "BOOT", "level": 0, "action": "press", "wake": true},

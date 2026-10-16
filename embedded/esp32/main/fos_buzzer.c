@@ -28,12 +28,13 @@
 
 /* The LEDC timer's first frequency; every tone sets its own. */
 #define TIMER_START_HZ 2000
-#define CHIRP_MS 60
 /* The press: a click on the way down at the press pitch and one on the way
  * up at 0.7 of it, 14 ms each. Picked by ear against the alternatives
  * (pulses, sweeps, tunes) for being clear at a tap and not a drone at a
- * one-second hold. */
+ * one-second hold. The hold's second ticks are the down click at half the
+ * length: audibly the same sound, smaller. */
 #define CLICK_MS 14
+#define TICK_MS 7
 #define CLICK_UP_NUM 7
 #define CLICK_UP_DEN 10
 /* A refused press: the same pair from a 100 Hz base, so it reads as "no"
@@ -184,9 +185,9 @@ void fos_buzzer_click_up(void)
     fos_buzzer_tone(tone_hz() * CLICK_UP_NUM / CLICK_UP_DEN, CLICK_MS);
 }
 
-void fos_buzzer_chirp(void)
+void fos_buzzer_tick(void)
 {
-    fos_buzzer_tone(tone_hz(), CHIRP_MS);
+    fos_buzzer_tone(tone_hz(), TICK_MS);
 }
 
 void fos_buzzer_reject_down(void)

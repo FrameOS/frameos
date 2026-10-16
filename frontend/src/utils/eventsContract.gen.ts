@@ -925,8 +925,8 @@ interface FrameOSEventPayloads {
   turnOn: Record<string, never>;
   /** Turn the screen off */
   turnOff: Record<string, never>;
-  /** When a GPIO button is pressed, held or released. A listener with no \`action\` filter hears presses only. */
-  button: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; level?: number };
+  /** When a GPIO button is pressed, held or released. A listener with no \`action\` filter hears presses only. \`durationMs\` and \`heldSeconds\` (whole seconds, the ESP32 buzzer ticks one per second while the key is down) come with longPress, repeat and release. */
+  button: { pin: number; label: string; role: string; action: string; durationMs?: number; heldSeconds?: number; wake?: boolean; level?: number };
   /** Set the scene's public state. This is not used for private state changes. */
   setSceneState: { state?: any; render?: boolean };
   /** Switch the frame to another scene. An optional \`state\` object is applied to that scene's public state. */
