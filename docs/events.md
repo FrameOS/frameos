@@ -285,14 +285,27 @@ key meant for a scene, Ctrl+Alt+Del included, and lets go when it stops;
 `inputSettings.grabKeyboard` (default on) turns that off. Keyboards and
 pointers plugged in after boot are found (inotify on `/dev/input`).
 
-**Buttons.** `button {pin, label, role, action, durationMs?, heldSeconds?, wake?, level}`.
-`action` is `press` on the edge, `longPress` once after `buttons.longPressMs`
-held, `repeat` every `buttons.repeatMs` after that (both from the dispatcher's
-tick; a host that cannot tick reports the hold on release), `release` with
-`durationMs`. `heldSeconds` is the hold in whole seconds, next to
-`durationMs` on those three: what the ESP32 buzzer ticks out loud, one tick
-per second the key is down, so a scene can act on the count the listener
-heard. **A listener with no `action` filter hears presses only**
+**Buttons.** `button {pin, label, role, action, durationMs?, heldSeconds?, wake?, atMs?, level}`.
+`action` is `press` on the edge, `doublePress` right after the press that
+comes within `buttons.doublePressMs` of the previous short press's release
+(the third press in a row starts over; a press that became a `longPress`
+does not count), `longPress` once after `buttons.longPressMs` held, `repeat`
+every `buttons.repeatMs` after that (both from the dispatcher's tick; when no
+tick came first, the `longPress` is delivered on the release, before it, with
+the hold it had), `release` with `durationMs`. `heldSeconds` is the hold in
+whole seconds, next to `durationMs` on those three: what the ESP32 buzzer
+ticks out loud, one tick per second the key is down, so a scene can act on the
+count the listener heard. `atMs` is when the driver saw the edge, in
+milliseconds on the frame's monotonic clock (the one the dispatcher's tick
+reads: `CLOCK_MONOTONIC` on Linux, `esp_timer` on the ESP32), on a press and a
+release, passed on to the scene. Time is the edge's: the hold is measured from
+the press's `atMs` to the release's, the double-press window between them, and
+the holds advance to an edge's time before it is applied, never to the moment
+it was delivered. An ESP32 drains its button queue only between render passes,
+so a tap made during a 30 s refresh used to arrive as a 30 s hold; now it is a
+tap, and two taps in that time are a `doublePress`. A producer with no clock to
+offer (an HTTP request, the cloud, a scene) leaves `atMs` out and is timed at
+delivery. **A listener with no `action` filter hears presses only**
 (`listenDefault`): every listener from before releases existed is exactly that,
 and must not run twice per press. `role` is what the button means —
 `buttons.roles`: `primary`, `secondary`, `next`, `prev`, `up`, `down`, `back`,

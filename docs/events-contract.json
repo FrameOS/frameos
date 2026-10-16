@@ -466,7 +466,7 @@
       "name": "button",
       "class": "input",
       "device": "button",
-      "description": "When a GPIO button is pressed, held or released. A listener with no `action` filter hears presses only. `durationMs` and `heldSeconds` (whole seconds, the ESP32 buzzer ticks one per second while the key is down) come with longPress, repeat and release.",
+      "description": "When a GPIO button is pressed, pressed twice, held or released. A listener with no `action` filter hears presses only. `durationMs` and `heldSeconds` (whole seconds, the ESP32 buzzer ticks one per second while the key is down) come with longPress, repeat and release. `atMs` is when the driver saw the edge, on the frame's monotonic clock: the hold is measured from it, so a press made while the panel was refreshing keeps its timing.",
       "listen": true,
       "dispatch": false,
       "payload": [
@@ -477,6 +477,7 @@
         {"name": "durationMs", "label": "Held for (ms)", "type": "integer", "required": false, "unit": "ms", "filter": "more"},
         {"name": "heldSeconds", "label": "Held for (s)", "type": "integer", "required": false, "unit": "s", "filter": "more"},
         {"name": "wake", "label": "Woke the device", "type": "boolean", "required": false, "filter": "more"},
+        {"name": "atMs", "label": "Seen at (ms)", "type": "integer", "required": false, "unit": "ms", "catalog": false},
         {"name": "level", "label": "Level", "type": "integer", "required": false, "unit": "gpio-level", "catalog": false}
       ],
       "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system"],
@@ -612,7 +613,7 @@
     "directions": ["left", "right", "up", "down"]
   },
   "buttons": {
-    "$comment": "GPIO buttons. `roles` is what a button MEANS, so a store scene filters on `role: \"next\"` and not on a silkscreen label; a frame configures a role per button (`gpioButtons[].role`), and `roleByLabel` is the default for a button without one, by its label (case-insensitive). `actions`: `press` on the edge, `longPress` once after `longPressMs` held, `repeat` every `repeatMs` after that, `release` with `durationMs`.",
+    "$comment": "GPIO buttons. `roles` is what a button MEANS, so a store scene filters on `role: \"next\"` and not on a silkscreen label; a frame configures a role per button (`gpioButtons[].role`), and `roleByLabel` is the default for a button without one, by its label (case-insensitive). `actions`: `press` on the edge, `doublePress` after the press that comes within `doublePressMs` of the previous short press's release (the third press starts over), `longPress` once after `longPressMs` held (on the release when no tick came first), `repeat` every `repeatMs` after that, `release` with `durationMs`. Time is the edge's `atMs` when the driver gives one, else when the edge arrived.",
     "roles": ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"],
     "roleByLabel": {
       "A": "primary", "B": "next", "C": "prev", "D": "back", "BOOT": "primary", "KEY1": "next", "KEY2": "prev",
@@ -620,7 +621,8 @@
       "SELECT": "primary", "HOME": "menu", "MENU": "menu", "EXIT": "back", "BACK": "back", "NEXT": "next",
       "RIGHT": "next", "PREV": "prev", "LEFT": "prev", "UP": "up", "DOWN": "down", "REFRESH": "refresh"
     },
-    "actions": ["press", "longPress", "repeat", "release"],
+    "actions": ["press", "doublePress", "longPress", "repeat", "release"],
+    "doublePressMs": 350,
     "longPressMs": 500,
     "repeatMs": 250
   },

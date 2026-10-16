@@ -1,5 +1,5 @@
 {
- "$comment": "Conformance corpus of the scene event contract (docs/events-contract.json, prose in docs/events.md). Add a case here first; a runner that disagrees is the bug. Runners: frameos/src/frameos/tests/test_event_fixtures.nim (the Nim runtime every host compiles: allow-list, log policy, and what the interpreter does with a delivered event), embedded/esp32/main/tests/test_fos_events.c through backend/app/tasks/tests/test_esp32_events_contract.py (the firmware's C tables), backend/app/utils/tests/test_events_contract.py (the backend), cloud/apps/auth-web/src/test/events-contract.test.ts (the cloud's event route and schedule validator) and cloud/apps/auth-web/src/test/shared-spa/events-contract.test.ts (the shared SPA and the frameos-wasm package). `dispatcher`: frameos/src/frameos/tests/test_event_loop.nim — queueing, origins, the command/event split and the render rule, which every host gets from the one dispatcher.",
+ "$comment": "Conformance corpus of the scene event contract (docs/events-contract.json, prose in docs/events.md). Add a case here first; a runner that disagrees is the bug. Runners: frameos/src/frameos/tests/test_event_fixtures.nim (the Nim runtime every host compiles: allow-list, log policy, and what the interpreter does with a delivered event), embedded/esp32/main/tests/test_fos_events.c through backend/app/tasks/tests/test_esp32_events_contract.py (the firmware's C tables), backend/app/utils/tests/test_events_contract.py (the backend), cloud/apps/auth-web/src/test/events-contract.test.ts (the cloud's event route and schedule validator) and cloud/apps/auth-web/src/test/shared-spa/events-contract.test.ts (the shared SPA and the frameos-wasm package). `dispatcher`: frameos/src/frameos/tests/test_event_loop.nim — queueing, origins, the command/event split and the render rule, which every host gets from the one dispatcher. `inputState`: frameos/src/frameos/tests/test_input_state.nim — what the input state makes of button edges and time (frameos/src/frameos/input_state.nim), the same on every host.",
  "version": 1,
  "origins": {
   "$comment": "May `origin` emit `event`? Every origin is asked: the dispatcher stamps and checks each envelope. `allowed` is what an edge that cannot see the scene answers — the scheduler, a hub verb, the firmware's C table, a control plane's validator: for a custom event from an origin a scene can opt into (`customEvents.declarableOrigins`) that is true, and the dispatcher then asks the scene showing (see `dispatcher`).",
@@ -2684,6 +2684,875 @@
       "budget": 8,
       "handled": 8,
       "pending": 1
+     }
+    ]
+   }
+  ]
+ },
+ "inputState": {
+  "$comment": "The input state's button half (frameos/src/frameos/input_state.nim), alone, on one pin (GPIO 6, label B, role next by label). Per step: `at` = the runner's clock in ms when the step happens; `send` = one `button` payload applied at that time, or `tick` = time passing. `atMs` values in payloads are on the same clock as `at` (the runner shifts both onto its monotonic clock). `delivered` = exactly what came out, in order: event name, and a subset of the payload.",
+  "cases": [
+   {
+    "name": "a tap made during a render is a tap",
+    "why": "The ESP32 drains its button queue between render passes. Both edges arrive 30 s after the fact; the hold is the 200 ms between their stamps, not the 30 s to delivery.",
+    "steps": [
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press",
+         "level": 0,
+         "atMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 1200
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 200,
+         "heldSeconds": 0,
+         "atMs": 1200
+        }
+       }
+      ]
+     },
+     {
+      "at": 31000,
+      "tick": true,
+      "delivered": []
+     }
+    ]
+   },
+   {
+    "name": "a hold through a render gets its long press on the release",
+    "why": "No tick came between the edges (both sat in the queue), so the longPress that was due lands right before the release, with the hold it had.",
+    "steps": [
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ]
+     },
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 3000
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "longPress",
+         "durationMs": 2000,
+         "heldSeconds": 2
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 2000,
+         "heldSeconds": 2
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "two taps during a render are a double press, the third starts over",
+    "why": "doublePressMs is measured between the first tap's release and the second press, on the edges' own stamps. The third press in a row is a plain press; the fourth pairs with it.",
+    "steps": [
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ]
+     },
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 1100
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 100
+        }
+       }
+      ]
+     },
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1300
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "doublePress",
+         "atMs": 1300
+        }
+       }
+      ]
+     },
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 1400
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 100
+        }
+       }
+      ]
+     },
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1600
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ]
+     },
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 1700
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 100
+        }
+       }
+      ]
+     },
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1800
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       },
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "doublePress"
+        }
+       }
+      ]
+     },
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 1900
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 100
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a slow second press is just a press",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ]
+     },
+     {
+      "at": 1100,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 1100
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 100
+        }
+       }
+      ]
+     },
+     {
+      "at": 1500,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1500
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a long press does not start a double press",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ]
+     },
+     {
+      "at": 1500,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "longPress",
+         "durationMs": 500,
+         "heldSeconds": 0
+        }
+       }
+      ]
+     },
+     {
+      "at": 1600,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 1600
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 600,
+         "heldSeconds": 0
+        }
+       }
+      ]
+     },
+     {
+      "at": 1700,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1700
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "ticks measure the hold from the edge, not from its delivery",
+    "steps": [
+     {
+      "at": 1030,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press",
+         "atMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 1499,
+      "tick": true,
+      "delivered": []
+     },
+     {
+      "at": 1500,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "longPress",
+         "durationMs": 500
+        }
+       }
+      ]
+     },
+     {
+      "at": 1749,
+      "tick": true,
+      "delivered": []
+     },
+     {
+      "at": 1750,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "repeat",
+         "durationMs": 750
+        }
+       }
+      ]
+     },
+     {
+      "at": 1800,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 1800
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 800
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a long press that already fired is not repeated on a late release",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ]
+     },
+     {
+      "at": 1600,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "longPress",
+         "durationMs": 600
+        }
+       }
+      ]
+     },
+     {
+      "at": 31000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 1700
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 700
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "an edge with no stamp is timed at delivery",
+    "why": "A producer with no clock to offer (a 2026.9 driver, an HTTP request, the cloud, a scene): the edge happened when it arrived.",
+    "steps": [
+     {
+      "at": 0,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press"
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ]
+     },
+     {
+      "at": 300,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release"
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 300
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a stamp from the future reads as now",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 99999
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ]
+     },
+     {
+      "at": 1300,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 1,
+        "action": "release",
+        "atMs": 100300
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "release",
+         "durationMs": 300
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "the replayed wake press has no hold to follow",
+    "steps": [
+     {
+      "at": 5000,
+      "send": {
+       "origin": "driver",
+       "event": "button",
+       "payload": {
+        "pin": 6,
+        "label": "B",
+        "level": 0,
+        "action": "press",
+        "atMs": 0,
+        "wake": true
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": 6,
+         "label": "B",
+         "role": "next",
+         "action": "press",
+         "wake": true,
+         "atMs": 0
+        }
+       }
+      ]
+     },
+     {
+      "at": 6000,
+      "tick": true,
+      "delivered": []
      }
     ]
    }

@@ -1,4 +1,5 @@
 import json, strformat, strutils, tables
+import std/monotimes
 import lib/lgpio
 import frameos/driver_context
 import frameos/channels
@@ -6,8 +7,11 @@ import frameos/channels
 const debounce = 100000
 const lineFlag = LG_SET_PULL_UP
 # Both edges: a scene hears the release too, with how long the key was held,
-# and the dispatcher makes `longPress` and `repeat` out of the hold
-# (frameos/input_state.nim). The line is pulled up, so a press is level 0.
+# and the dispatcher makes `doublePress`, `longPress` and `repeat` out of the
+# edges (frameos/input_state.nim). Each edge says when this thread saw it
+# (`atMs`, the monotonic clock the dispatcher's tick reads), so a hold is
+# measured from the edge and not from when the runner got round to it. The
+# line is pulled up, so a press is level 0.
 const edge = LG_BOTH_EDGES
 
 let pinLabels = newTable[int, string]()
@@ -20,12 +24,13 @@ proc log(message: string) =
 
 proc alertsHandler(num_alerts: cint, alerts: lgGpioAlert_p, userdata: pointer) {.cdecl.} =
   let alerts = cast[ptr UncheckedArray[lgGpioAlert_t]](alerts)
+  let atMs = getMonoTime().ticks div 1_000_000
   for i in 0 .. num_alerts - 1:
     let gpio = alerts[i].report.gpio.int
     let level = alerts[i].report.level.int
     let label = pinLabels.getOrDefault(gpio)
     sendEvent("button", %*{"pin": gpio, "label": label, "level": level,
-      "action": (if level == 0: "press" else: "release")}, eoDriver)
+      "action": (if level == 0: "press" else: "release"), "atMs": atMs}, eoDriver)
 
 proc determineGPIODevice(): int =
   try:

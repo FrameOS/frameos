@@ -56,7 +56,13 @@ touch, both 2026-09-19):
   `durationMs`, and the Counter sample still counts one per press. On an
   ESP32 (E1002 bench): a press logs `action: press`, the release `release`
   with `durationMs`, and a scene's `button` listener without an `action`
-  filter runs once per press.
+  filter runs once per press. Timing through a render (E1004, a ~30 s
+  refresh): a tap made mid-refresh logs `release` with a `durationMs` of
+  about 100, not 30000, and no `longPress`; two quick taps mid-refresh log a
+  `doublePress` after the second `press`; a key held 2 s mid-refresh logs
+  `longPress` then `release`, both with `durationMs` near 2000 and
+  `heldSeconds: 2`, the same count the buzzer ticked; a key held across the
+  end of a refresh gets its `longPress` at 500 ms of hold, not at the drain.
 - [ ] **"Turn display off / on" end to end on the Pi 5** (menu → event →
   driver). The write the driver makes (`echo 1 > /sys/class/graphics/fb0/blank`)
   was run by hand as uid 990 and took `bl_power` 0 → 4 and DPMS On → Off.

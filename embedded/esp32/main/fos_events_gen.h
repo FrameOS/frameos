@@ -16,9 +16,11 @@
 #define FOS_POINTER_WIRE_MAX 32767
 #define FOS_CUSTOM_EVENT_MAX_NAME_LENGTH 63
 
-/* `button {action}`: the firmware reports the edges; longPress and repeat are the
- * Nim dispatcher's (frameos/input_state.nim), like on every host. */
+/* `button {action}`: the firmware reports the edges, each with `atMs` (when it saw
+ * it); doublePress, longPress and repeat are the Nim dispatcher's
+ * (frameos/input_state.nim), like on every host. */
 #define FOS_BUTTON_ACTION_PRESS "press"
+#define FOS_BUTTON_ACTION_DOUBLE_PRESS "doublePress"
 #define FOS_BUTTON_ACTION_LONG_PRESS "longPress"
 #define FOS_BUTTON_ACTION_REPEAT "repeat"
 #define FOS_BUTTON_ACTION_RELEASE "release"

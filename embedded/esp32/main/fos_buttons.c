@@ -30,8 +30,8 @@ static const char *TAG = "fos_buttons";
 /* Edges, not presses: a press and its release take two. The render task
  * drains the queue only between passes, so this is how many edges a render
  * can sit on — an E1004 refresh is ~30 s. At 16 the ninth press of a burst
- * was dropped; 64 keeps 32 presses. Items are 8 bytes (the label is read
- * from the config when the event is delivered). */
+ * was dropped; 64 keeps 32 presses. Items are 12 bytes (the label is read
+ * from the config when the event is delivered): 768 bytes of internal RAM. */
 #define BUTTON_QUEUE_LEN 64
 #define BUTTON_POLL_MS 20
 #define BUTTON_DEBOUNCE_MS 80
@@ -47,6 +47,12 @@ typedef struct {
      * than the dispatcher — the hold of the press that woke the chip, which
      * the dispatcher only hears as a replay. 0: the dispatcher's own count. */
     uint32_t duration_ms;
+    /* When this task saw the edge, ms since boot (esp_timer), low 32 bits:
+     * the dispatcher measures the hold and the double-press window from it,
+     * not from when the render task got round to the queue. Widened back to
+     * 64 bits on delivery (fos_wake_edge_at_ms), so it wraps only for an edge
+     * that sat in the queue for 49 days. */
+    uint32_t at_ms;
 } fos_button_event_t;
 
 static QueueHandle_t s_queue = NULL;
@@ -106,7 +112,12 @@ static void log_dropped(int pin)
     frameos_nim_log_hook(dropped);
 }
 
-static bool enqueue_event(size_t index, int level, bool wake, uint32_t duration_ms)
+static int64_t now_ms(void)
+{
+    return esp_timer_get_time() / 1000;
+}
+
+static bool enqueue_event(size_t index, int level, bool wake, uint32_t duration_ms, int64_t at_ms)
 {
     if (!s_queue) return false;
     fos_button_event_t event = {
@@ -114,6 +125,7 @@ static bool enqueue_event(size_t index, int level, bool wake, uint32_t duration_
         .level = (uint8_t)(level != 0),
         .wake = wake,
         .duration_ms = duration_ms,
+        .at_ms = (uint32_t)at_ms,
     };
     if (xQueueSend(s_queue, &event, 0) != pdTRUE) {
         log_dropped(fos_config()->gpio_buttons[index].pin);
@@ -140,7 +152,7 @@ static size_t releases_owed(size_t count)
     return owed;
 }
 
-static void press_edge(size_t index, size_t count)
+static void press_edge(size_t index, size_t count, int64_t at_ms)
 {
     /* Room for the press AND its release, on top of the releases already
      * owed: an accepted press is always followed by its release. Only this
@@ -152,14 +164,15 @@ static void press_edge(size_t index, size_t count)
         fos_buzzer_reject_down();
         return;
     }
-    if (!enqueue_event(index, 0, false, 0)) return;
+    if (!enqueue_event(index, 0, false, 0, at_ms)) return;
     s_release_owed[index] = true;
     /* Registered: click now, from this task, so the feedback does not wait
      * for the render task (which may be 30 s into a panel refresh). The
      * release clicks again, lower (release_edge); every whole second in
-     * between ticks (buttons_task). */
+     * between ticks (buttons_task), counted from the same instant the
+     * dispatcher's `heldSeconds` counts from. */
     s_clicked[index] = CLICK_PRESS;
-    s_pressed_ms[index] = esp_timer_get_time() / 1000;
+    s_pressed_ms[index] = at_ms;
     s_ticks[index] = 0;
     fos_buzzer_click_down();
 }
@@ -174,15 +187,15 @@ static void hold_ticks(size_t index, int64_t now_ms)
     }
 }
 
-static void release_edge(size_t index)
+static void release_edge(size_t index, int64_t at_ms)
 {
     if (s_release_owed[index]) {
         uint32_t held_ms = 0;
         if (s_wake_held[index]) {
-            held_ms = (uint32_t)(esp_timer_get_time() / 1000 - s_wake_clicked_ms);
+            held_ms = (uint32_t)(at_ms - s_wake_clicked_ms);
             if (held_ms == 0) held_ms = 1;
         }
-        enqueue_event(index, 1, false, held_ms); /* its slot was reserved */
+        enqueue_event(index, 1, false, held_ms, at_ms); /* its slot was reserved */
         s_release_owed[index] = false;
     }
     s_wake_held[index] = false;
@@ -199,7 +212,7 @@ static void buttons_task(void *arg)
     for (size_t i = 0; i < config->gpio_button_count; i++) {
         if (!s_enabled[i]) continue;
         s_last_level[i] = gpio_get_level(config->gpio_buttons[i].pin);
-        s_last_change_ms[i] = esp_timer_get_time() / 1000;
+        s_last_change_ms[i] = now_ms();
         s_press_sent[i] = s_last_level[i] == 0;
         /* Held at boot: no press was queued, but its release is real. */
         s_release_owed[i] = s_press_sent[i];
@@ -221,30 +234,34 @@ static void buttons_task(void *arg)
     }
 
     while (true) {
-        int64_t now_ms = esp_timer_get_time() / 1000;
+        int64_t now = now_ms();
         for (size_t i = 0; i < config->gpio_button_count; i++) {
             if (!s_enabled[i]) continue;
             const fos_gpio_button_t *button = &config->gpio_buttons[i];
             int level = gpio_get_level(button->pin);
             if (level != s_last_level[i]) {
                 s_last_level[i] = level;
-                s_last_change_ms[i] = now_ms;
+                s_last_change_ms[i] = now;
             }
-            if (now_ms - s_last_change_ms[i] < BUTTON_DEBOUNCE_MS) {
+            if (now - s_last_change_ms[i] < BUTTON_DEBOUNCE_MS) {
                 continue;
             }
             /* Both edges: the release too, so the Nim dispatcher can say how
-             * long the key was held and make `longPress` and `repeat` out of
-             * the hold (frameos/input_state.nim), the same on every host. A
-             * key held at boot was "sent" already; its release is real. */
+             * long the key was held and make `doublePress`, `longPress` and
+             * `repeat` out of the edges (frameos/input_state.nim), the same on
+             * every host. Each edge is stamped with when the line settled
+             * (the change, not the end of the debounce), so a tap made while
+             * the render task is 30 s into a refresh is still a tap when the
+             * queue is drained. A key held at boot was "sent" already; its
+             * release is real. */
             if (level == 0 && !s_press_sent[i]) {
                 s_press_sent[i] = true;
-                press_edge(i, config->gpio_button_count);
+                press_edge(i, config->gpio_button_count, s_last_change_ms[i]);
             } else if (level != 0 && s_press_sent[i]) {
                 s_press_sent[i] = false;
-                release_edge(i);
+                release_edge(i, s_last_change_ms[i]);
             } else if (level == 0) {
-                hold_ticks(i, now_ms);
+                hold_ticks(i, now);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(BUTTON_POLL_MS));
@@ -331,7 +348,7 @@ esp_err_t fos_buttons_start(void)
     if (s_wake_pin >= 0) {
         for (size_t i = 0; i < config->gpio_button_count; i++) {
             if (!s_enabled[i] || config->gpio_buttons[i].pin != s_wake_pin) continue;
-            enqueue_event(i, 0, true, 0);
+            enqueue_event(i, 0, true, 0, s_wake_clicked_ms);
             break;
         }
     }
@@ -357,21 +374,25 @@ void fos_buttons_process_events(void)
         const fos_gpio_button_t *button = &config->gpio_buttons[event.index];
         char label[FOS_GPIO_BUTTON_LABEL_LEN * 2];
         json_escape(button->label, label, sizeof(label));
-        /* An edge and nothing more: `action` is which one, `wake` whether it
-         * booted the chip. The role, the hold's `longPress` / `repeat` and the
-         * release's `durationMs` are the Nim dispatcher's (input_state.nim) —
-         * except the release of the press that woke the chip, whose hold only
-         * this task saw: it carries `durationMs`, which the dispatcher keeps. */
+        /* An edge and when it was seen, nothing more: `action` is which one,
+         * `wake` whether it booted the chip, `atMs` the button task's clock
+         * (esp_timer, the CLOCK_MONOTONIC the Nim side reads too). The role,
+         * `doublePress`, the hold's `longPress` / `repeat` and the release's
+         * `durationMs` are the Nim dispatcher's (input_state.nim), measured
+         * from `atMs` — except the release of the press that woke the chip,
+         * whose hold only this task saw: it carries `durationMs`, which the
+         * dispatcher keeps. */
         char held[32] = "";
         if (event.level != 0 && event.duration_ms > 0) {
             snprintf(held, sizeof(held), ",\"durationMs\":%u", (unsigned)event.duration_ms);
         }
-        char payload[192];
+        char payload[224];
         snprintf(payload, sizeof(payload),
-                 "{\"pin\":%d,\"label\":\"%s\",\"level\":%d,\"action\":\"%s\"%s%s}",
+                 "{\"pin\":%d,\"label\":\"%s\",\"level\":%d,\"action\":\"%s\"%s%s,\"atMs\":%lld}",
                  button->pin, label, event.level,
                  event.level == 0 ? FOS_BUTTON_ACTION_PRESS : FOS_BUTTON_ACTION_RELEASE,
-                 event.wake ? ",\"wake\":true" : "", held);
+                 event.wake ? ",\"wake\":true" : "", held,
+                 (long long)fos_wake_edge_at_ms(event.at_ms, now_ms()));
         /* `driver`: a press is hardware talking, and the contract lets it say
          * input and nothing else. fos_events.c hands it to the scene and asks
          * for the render when a listener took it; this is the render task, so

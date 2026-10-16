@@ -714,7 +714,16 @@ right after it, and the ticks and the up click follow the finger (until
 
 Presses during a render are registered: the button task keeps polling, and
 the render task drains the queue in one go before its next pass (one render
-for the whole burst). The queue holds 64 edges, 32 press/release pairs, and a
+for the whole burst). Each queued edge carries when the button task saw it
+(`atMs`, the esp_timer clock, which is also the Nim side's monotonic clock),
+so the dispatcher measures a hold between the two edges and not from the
+drain: a tap made 5 s into a 30 s refresh is a tap with its `durationMs`,
+two taps in that time are a `doublePress`, and a hold that was long enough
+gets its `longPress` right before the `release` (there was no tick to deliver
+it earlier). Until 2026.10.16 every edge was timed when it was drained, so a
+tap during a render arrived as a 30 s hold. The buzzer's hold ticks count
+from the same instant, so `heldSeconds` says what the finger heard. The
+queue holds 64 edges (12 bytes each), 32 press/release pairs, and a
 press is accepted only when its release also fits, so the dispatcher never
 sees a key that stays down. A press with no room is dropped, logged as
 `button:dropped`, and gets the same two clicks from a 100 Hz base instead

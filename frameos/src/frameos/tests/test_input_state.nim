@@ -2,7 +2,7 @@
 ## a driver, a preview or a request said. Positions are scene pixels on the
 ## way out; the wire is 0..PointerWireMax across the panel on the way in.
 
-import std/[json, monotimes, times]
+import std/[json, monotimes, os, strutils, times]
 import ../input_state
 import ../driver_abi
 import ../events
@@ -346,5 +346,66 @@ block test_a_button_has_a_role_and_an_action:
   output.setLen(0)
   discard state.applyNamedInput(evButton, %*{"pin": 20, "label": "Zork", "level": 0}, eoDriver, at(4000), output)
   doAssert output[0].payload["role"].getStr() == ""
+
+block test_a_stamped_edge_is_timed_by_its_stamp:
+  # The ESP32 drains its button queue between renders: a press and its
+  # release made during a 30 s refresh arrive together, half a minute old,
+  # each saying when the button task saw it. The hold is theirs.
+  var state = initInputState(config(800, 480))
+  var output: seq[InputDelivery]
+  let base = t0.ticks div 1_000_000
+  discard state.applyNamedInput(evButton, %*{"pin": 6, "label": "B", "level": 0, "action": "press",
+    "atMs": base + 1000}, eoDriver, at(31000), output)
+  doAssert output.names == @[evButton] and output[0].payload["action"].getStr() == "press"
+  doAssert output[0].payload["atMs"].getInt() == base + 1000
+  output.setLen(0)
+  discard state.applyNamedInput(evButton, %*{"pin": 6, "label": "B", "level": 1, "action": "release",
+    "atMs": base + 1200}, eoDriver, at(31000), output)
+  doAssert output.names == @[evButton] and output[0].payload["action"].getStr() == "release"
+  doAssert output[0].payload["durationMs"].getInt() == 200
+  # Nothing is held afterwards: no long press out of a tap.
+  output.setLen(0)
+  state.tick(at(31000), output)
+  doAssert output.len == 0 and state.buttonsHeld == 0
+
+block test_the_corpus:
+  # docs/event-fixtures.json `inputState`: the cases every host answers alike.
+  const fixturesPath = currentSourcePath().parentDir / ".." / ".." / ".." / ".." / "docs" / "event-fixtures.json"
+  let fixtures = parseFile(fixturesPath)
+  let base = t0.ticks div 1_000_000
+
+  proc subsetOf(expected, actual: JsonNode): bool =
+    for key, value in expected.pairs:
+      if not actual.hasKey(key) or actual[key] != value:
+        return false
+    true
+
+  var ran = 0
+  for c in fixtures["inputState"]["cases"]:
+    var state = initInputState(config(800, 480))
+    for step in c["steps"]:
+      var output: seq[InputDelivery]
+      let now = at(step["at"].getInt())
+      if step{"tick"}.getBool():
+        state.tick(now, output)
+      else:
+        var payload = copy(step["send"]["payload"])
+        if payload.hasKey("atMs"):
+          payload["atMs"] = %(payload["atMs"].getInt() + base)
+        let origin = parseEnum[EventOrigin](step["send"]{"origin"}.getStr("driver"))
+        doAssert state.applyNamedInput(step["send"]["event"].getStr(), payload, origin, now, output)
+      let expected = step["delivered"]
+      doAssert output.len == expected.len, c["name"].getStr() & " at " & $step["at"] & ": delivered " &
+        $output.len & " events, expected " & $expected.len & ": " & $output.names
+      for index, want in expected.elems:
+        doAssert output[index].name == want["event"].getStr(), c["name"].getStr() & " at " & $step["at"]
+        var got = output[index].payload
+        var wantPayload = copy(want["payload"])
+        if wantPayload.hasKey("atMs"):
+          wantPayload["atMs"] = %(wantPayload["atMs"].getInt() + base)
+        doAssert subsetOf(wantPayload, got), c["name"].getStr() & " at " & $step["at"] & " [" & $index &
+          "]: got " & $got & ", expected " & $wantPayload
+    inc ran
+  doAssert ran >= 10
 
 echo "input state ok"
