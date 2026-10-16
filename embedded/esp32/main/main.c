@@ -160,10 +160,18 @@ void app_main(void)
     ESP_ERROR_CHECK(fos_config_init());
     fos_config_t *config = fos_config();
 
-    /* Before the wake check below: a button wake chirps the buzzer. */
+    /* Before the wake check below: a button wake clicks the buzzer. */
     fos_buzzer_init();
     /* Before anything else reads the wake status: was this a button press? */
     fos_buttons_wake_boot();
+    /* Buttons this early so the press that woke the chip is followed while
+     * the finger is still down: the hold's second ticks and the release
+     * click sound in time, Wi-Fi and the scene load notwithstanding. A
+     * button wake also replays its press into the queue here, and the
+     * render loop's first pass (fos_client_resume, below) dispatches it. */
+    if (fos_buttons_start() != ESP_OK) {
+        ESP_LOGW(TAG, "GPIO buttons unavailable");
+    }
 
     fos_battery_init(config->battery_pin, config->battery_divider, config->battery_enable_pin);
     if (fos_battery_present()) {
@@ -429,12 +437,8 @@ void app_main(void)
         fos_wifi_set_portal_exit_cb(on_portal_exit);
     }
 
-    /* Buttons before the render loop: a button wake replays its press into
-     * the queue here, and the loop's first pass is what dispatches it. */
-    if (fos_buttons_start() != ESP_OK) {
-        ESP_LOGW(TAG, "GPIO buttons unavailable");
-    }
-    /* Render loop runs in both cases: local mode works fully offline. */
+    /* Render loop runs in both cases: local mode works fully offline. The
+     * button task started at the top of boot; its queue waits for this. */
     fos_client_resume();
 
     ESP_LOGI(TAG, "boot complete: wifi=%s ip=%s portal=%s",

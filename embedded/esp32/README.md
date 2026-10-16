@@ -697,13 +697,20 @@ could only be changed over the console.
 
 A press the button task registers clicks the board's buzzer (`fos_buzzer.c`,
 a 14 ms square wave at 2 kHz through an LEDC PWM channel) and its release
-clicks again at 0.7 of that pitch, with the hold silent in between: the two
-clicks of a mechanical key, so a tap and a one-second hold both sound right
-and nothing drones (until 2026.10.15 the press tone ran until the release, a
-second at most). The down click starts from the button task the moment the
-press is queued, so the feedback does not wait for a render that may be 30 s
-into a panel refresh. A press that wakes the chip from deep sleep gets a 60 ms
-chirp as soon as it boots.
+clicks again at 0.7 of that pitch: the two clicks of a mechanical key, so a
+tap and a one-second hold both sound right and nothing drones (until
+2026.10.15 the press tone ran until the release, a second at most). While
+the key stays down a 7 ms tick at the press pitch sounds at every whole
+second, counting the hold out loud; the dispatcher reports the same count
+as `heldSeconds` next to `durationMs` on the `longPress`, `repeat` and
+`release` events, so a scene can act on the second the listener heard
+("click, tick, tick, tick, click": a three-second hold). The down click
+starts from the button task the moment the press is queued, so the feedback
+does not wait for a render that may be 30 s into a panel refresh. A press
+that wakes the chip from deep sleep is the same press: its down click sounds
+as soon as the chip boots (`fos_buttons_wake_boot`), the button task starts
+right after it, and the ticks and the up click follow the finger (until
+2026.10.16 a wake got a 60 ms chirp of its own and no release click).
 
 Presses during a render are registered: the button task keeps polling, and
 the render task drains the queue in one go before its next pass (one render

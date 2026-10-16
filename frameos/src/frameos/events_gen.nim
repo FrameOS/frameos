@@ -408,7 +408,7 @@ proc eventPayloadKeyCount*(name: string): int =
   of evLongPress: 5
   of evSwipe: 7
   of evWheel: 4
-  of evButton: 7
+  of evButton: 8
   of evSetSceneState: 2
   of evSetCurrentScene: 2
   of evUploadScenes: 3
@@ -538,8 +538,9 @@ proc eventPayloadKey*(name: string, index: int): string =
     of 2: "role"
     of 3: "action"
     of 4: "durationMs"
-    of 5: "wake"
-    of 6: "level"
+    of 5: "heldSeconds"
+    of 6: "wake"
+    of 7: "level"
     else: ""
   of evSetSceneState:
     case index

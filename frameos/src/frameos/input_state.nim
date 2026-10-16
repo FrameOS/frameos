@@ -121,6 +121,13 @@ proc isInt(payload: JsonNode, key: string): bool =
   let node = payload{key}
   not node.isNil and node.kind == JInt
 
+proc withHeldSeconds(payload: JsonNode) =
+  ## `heldSeconds`: the hold in whole seconds, next to `durationMs`. What the
+  ## ESP32 buzzer counts out loud (one tick per second the key is down), so a
+  ## scene can act on the same count the listener heard.
+  if payload.isInt("durationMs"):
+    payload["heldSeconds"] = %(payload["durationMs"].getInt() div 1000)
+
 # ------------------------------------------------------------------- buttons
 
 proc buttonRole*(state: InputState, pin: int, label: string): string =
@@ -176,6 +183,7 @@ proc button(state: var InputState, payload: JsonNode, origin: EventOrigin, now: 
     discard
   if payload.isInt("durationMs") and not delivered.hasKey("durationMs"):
     delivered["durationMs"] = payload["durationMs"]
+  delivered.withHeldSeconds()
   output.add(InputDelivery(name: evButton, origin: origin, payload: delivered))
 
 proc tickButtons(state: var InputState, now: MonoTime, output: var seq[InputDelivery]) =
@@ -187,11 +195,13 @@ proc tickButtons(state: var InputState, now: MonoTime, output: var seq[InputDeli
         hold.lastRepeatAt = now
         var press = buttonPayload(hold.pin, hold.label, hold.role, "longPress")
         press["durationMs"] = %held
+        press.withHeldSeconds()
         output.add(InputDelivery(name: evButton, origin: hold.origin, payload: press))
     elif msSince(now, hold.lastRepeatAt) >= ButtonRepeatMs:
       hold.lastRepeatAt = now
       var repeat = buttonPayload(hold.pin, hold.label, hold.role, "repeat")
       repeat["durationMs"] = %held
+      repeat.withHeldSeconds()
       output.add(InputDelivery(name: evButton, origin: hold.origin, payload: repeat))
 
 proc buttonsHeld*(state: InputState): int =

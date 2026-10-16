@@ -285,11 +285,14 @@ key meant for a scene, Ctrl+Alt+Del included, and lets go when it stops;
 `inputSettings.grabKeyboard` (default on) turns that off. Keyboards and
 pointers plugged in after boot are found (inotify on `/dev/input`).
 
-**Buttons.** `button {pin, label, role, action, durationMs?, wake?, level}`.
+**Buttons.** `button {pin, label, role, action, durationMs?, heldSeconds?, wake?, level}`.
 `action` is `press` on the edge, `longPress` once after `buttons.longPressMs`
 held, `repeat` every `buttons.repeatMs` after that (both from the dispatcher's
 tick; a host that cannot tick reports the hold on release), `release` with
-`durationMs`. **A listener with no `action` filter hears presses only**
+`durationMs`. `heldSeconds` is the hold in whole seconds, next to
+`durationMs` on those three: what the ESP32 buzzer ticks out loud, one tick
+per second the key is down, so a scene can act on the count the listener
+heard. **A listener with no `action` filter hears presses only**
 (`listenDefault`): every listener from before releases existed is exactly that,
 and must not run twice per press. `role` is what the button means —
 `buttons.roles`: `primary`, `secondary`, `next`, `prev`, `up`, `down`, `back`,

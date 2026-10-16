@@ -609,7 +609,7 @@
   },
   {
     "name": "button",
-    "description": "When a GPIO button is pressed, held or released. A listener with no `action` filter hears presses only.",
+    "description": "When a GPIO button is pressed, held or released. A listener with no `action` filter hears presses only. `durationMs` and `heldSeconds` (whole seconds, the ESP32 buzzer ticks one per second while the key is down) come with longPress, repeat and release.",
     "canListen": true,
     "fields": [
       {
@@ -659,6 +659,13 @@
       {
         "name": "durationMs",
         "label": "Held for (ms)",
+        "type": "integer",
+        "required": false,
+        "filter": "more"
+      },
+      {
+        "name": "heldSeconds",
+        "label": "Held for (s)",
         "type": "integer",
         "required": false,
         "filter": "more"
