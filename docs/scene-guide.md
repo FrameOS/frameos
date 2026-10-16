@@ -47,10 +47,14 @@ Every node is `{ id, type, data }`. Positions are optional.
 | `scene` | `{ keyword, config }` | Draws another scene, by its id, inside this one (usually in a `render/split` cell). |
 
 `cache` on an app or code node is
-`{ enabled, inputEnabled, durationEnabled, duration }`: keep the output until
-the inputs change (`inputEnabled`), until `duration` seconds have passed
-(`durationEnabled`), or both. Cache every network fetch on a sensible
-schedule.
+`{ enabled, inputEnabled, durationEnabled, duration, staleEnabled, staleDuration }`:
+keep the output until the inputs change (`inputEnabled`), until `duration`
+seconds have passed (`durationEnabled`), or both. Cache every network fetch on
+a sensible schedule. With `staleEnabled`, a refresh that fails (no network, a
+failing API) shows the last value for the same inputs until it is
+`staleDuration` seconds old, and the failure only shows after that: a few
+hours for weather, a day for a photo or a generated text, never for a live
+sensor. Cached values outlive a restart and an ESP32's sleep, except images.
 
 ## Edges
 
@@ -259,7 +263,7 @@ all its scenes in 512 KiB.
 | the value | goes in | lasts |
 |---|---|---|
 | what the rest of the scene should see: a position a button changes, a photo's metadata | `frameos.setState(key, value)`, read back as `app.state[key]` | the scene's state: every node reads it, state nodes see changes, a declared field can persist and show in the frame's controls |
-| the app's own, needed on the next render: a fetched list, a position | `frameos.remember(key, value)`, read back with `frameos.recall(key)` | until the scene unloads, private to the node; JSON, at most 512 KB per node on an ESP32; `remember` answers `false` when it does not fit, and `null` forgets |
+| the app's own, needed on the next render: a fetched list, a position | `frameos.remember(key, value)`, read back with `frameos.recall(key)` | across renders, restarts and an ESP32's sleep, until the app's code changes or the scene is removed; private to the node; JSON, at most 512 KB per node on an ESP32; `remember` answers `false` when it does not fit, and `null` forgets |
 | scratch for this render: lookup tables built when the module loads, intermediate results | module-level variables | one render |
 
 An ESP32 starts every render with a fresh module, so a counter in a module
@@ -271,7 +275,10 @@ from the clock (`Date.now()`), not from the frame before.
 
 **Errors.** Throw. An error thrown from `get()` fails the node: it is logged
 with its source line, an image field gets the message painted, and the next
-render tries again. `frameos.fetchImage` never throws; it answers
+render tries again. A node whose cache has `staleEnabled` shows its last value
+instead while it is young enough. Never return an error as the output (an
+`{ error }` object, an empty list): a cache keeps it like data, and the stale
+value is never used. `frameos.fetchImage` never throws; it answers
 `{ image: null, error }`, and the app throws with a message of its own.
 
 **Photos.** `frameos.fetchImage(url, { headers, saveAsset })` downloads and
@@ -286,7 +293,9 @@ and the answer is `{ status, found }`, the text at each occurrence.
 **Newer than some frames.** `frameos.remember` / `recall`, `httpRequest`'s
 `find`, `fetchImage`'s `exif`, `app.frame.embedded` / `debug`, and a throw
 painting its message all need FrameOS 2026.10.13; a frame on an older release
-lacks them. A scene meant for such frames keeps to the rest.
+lacks them. A scene meant for such frames keeps to the rest. A cache's
+`staleEnabled`, and cached and remembered values that outlive a restart, need
+2026.10.16; older frames ignore the setting and keep both in memory only.
 
 **Code style.** Normal formatting, one statement per line, descriptive names,
 short comments where the logic is not obvious. People open and edit this code
@@ -665,6 +674,9 @@ declare const console: {
   apps exporting `run`.
 - A JS app keeps what must outlast a render with `frameos.remember` (private)
   or `frameos.setState` (shared), never in a module variable.
+- Every network fetch is cached, a failed fetch throws instead of returning an
+  error value, and the cache has `staleEnabled` unless an old value would
+  mislead.
 - SVG uses only the supported tags, gradients use `userSpaceOnUse`, and every
   dynamic string is escaped.
 - Sizes come from the frame, not from constants.

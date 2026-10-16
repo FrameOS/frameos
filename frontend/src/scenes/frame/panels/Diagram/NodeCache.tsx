@@ -118,6 +118,28 @@ export function NodeCache({ nodeType }: NodeCacheProps): JSX.Element {
                   </div>
                 </div>
               )}
+              <Label>
+                <div className="space-y-1 flex flex-row gap-1 items-center">
+                  <input
+                    type="checkbox"
+                    checked={!!getValue('staleEnabled')}
+                    onChange={(e) => setValue('staleEnabled', !!e.target.checked)}
+                  />
+                  Keep the last value if a refresh fails
+                </div>
+              </Label>
+              {getValue('staleEnabled') ? (
+                <div className="flex w-full gap-1 pl-4 items-center">
+                  until it is
+                  <TextInput
+                    value={getValue('staleDuration')}
+                    className="!w-20"
+                    onChange={(value) => setValue('staleDuration', value)}
+                    placeholder="21600"
+                  />
+                  seconds old
+                </div>
+              ) : null}
             </>
           ) : null}
         </div>
@@ -137,6 +159,7 @@ export function NodeCache({ nodeType }: NodeCacheProps): JSX.Element {
               : '',
             data.cache?.expressionEnabled ? 'expr' : '',
             data.cache?.inputEnabled ? 'inputs' : '',
+            data.cache?.staleEnabled ? 'fallback' : '',
           ]
             .filter(Boolean)
             .join(', ') || 'Cache: ∞'}

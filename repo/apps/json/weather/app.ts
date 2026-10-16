@@ -27,6 +27,10 @@ export function forecastUrl(c, latitude, longitude, timezone, date) {
   )
 }
 
+// What Open-Meteo says about the location itself (none given, no match) is a
+// {location, error} reply the panel shows. A fetch that fails throws: the node
+// fails, its cache keeps nothing, and a cache with staleEnabled serves the last
+// forecast instead.
 export function get(app) {
   const c = app.config
   const location = c.location
@@ -54,6 +58,6 @@ export function get(app) {
       forecast,
     }
   } catch (e) {
-    return { location, error: e.message }
+    throw new Error(`Weather for ${location}: ${e.message}`)
   }
 }

@@ -16,6 +16,7 @@ import frameos/utils/image
 import frameos/utils/paths
 import frameos/utils/system
 import frameos/js_runtime/burrito
+import frameos/node_store
 
 type
   JsAppRuntime* = ref object
@@ -40,9 +41,13 @@ type
     ## `frameos.remember` / `recall`: values the app keeps between renders, as
     ## JSON text. Held here and not in the interpreter because an ESP32 tears
     ## every idle interpreter down after a render (releaseIdleJsAppRuntimes),
-    ## and module state goes with it; this survives until the scene does.
+    ## and module state goes with it. Kept on storage too, one file per node
+    ## (frameos/node_store), so a restart, a scene reload and an ESP32's deep
+    ## sleep keep them; a change to the app's code starts it over.
     memory*: Table[string, string]
     memoryBytes*: int
+    memoryRestored: bool
+    memoryDirty: bool
     ## A script evaluated after the prelude and before the main module: the
     ## test harness (app_tests.nim). Empty for an app on a frame.
     extraPrelude*: string
@@ -251,6 +256,77 @@ proc jsSetState(ctx: ptr JSContext, key: JSValue, valueJson: JSValue): JSValue {
 const JsAppMemoryMaxBytes* = when defined(frameosEmbedded): 512 * 1024 else: 16 * 1024 * 1024
   ## What one node may keep with `frameos.remember`, all keys together.
 
+proc memoryStorePath(owner: AppRoot): string =
+  if owner.isNil or owner.scene.isNil:
+    return ""
+  nodeStorePath(owner.scene.id.string, owner.nodeId.int, "m")
+
+proc memoryFingerprint(runtime: JsAppRuntime): string =
+  ## Only the app's code: what it remembered is still its own after the node's
+  ## config changes (a new album keeps the position logic the app wrote), but
+  ## new code may read it differently.
+  fnv1a64Hex(runtime.source, if runtime.sources.isNil: "" else: $runtime.sources)
+
+proc restoreJsAppMemory(runtime: JsAppRuntime, owner: AppRoot) =
+  ## What this node remembered before the runtime last stopped, read the first
+  ## time the app asks. Anything that does not fit the budget or was written
+  ## by other code is dropped.
+  if runtime.memoryRestored:
+    return
+  runtime.memoryRestored = true
+  let path = memoryStorePath(owner)
+  let contents = readNodeStoreFile(path)
+  if contents.len == 0:
+    return
+  try:
+    let stored = parseJson(contents)
+    let values = stored{"values"}
+    if stored.kind != JObject or stored{"fp"}.getStr() != memoryFingerprint(runtime) or
+        values.isNil or values.kind != JObject:
+      removeNodeStoreFile(path)
+      return
+    var restored = initTable[string, string]()
+    var bytes = 0
+    for key, value in values.pairs:
+      if key.len == 0 or value.kind != JString:
+        continue
+      restored[key] = value.getStr()
+      bytes += key.len + value.getStr().len
+    if bytes > JsAppMemoryMaxBytes:
+      removeNodeStoreFile(path)
+      return
+    # A value remembered before the restore asked (none can be: remember and
+    # recall both restore first) would win; the stored ones fill the rest.
+    for key, value in restored.pairs:
+      if not runtime.memory.hasKey(key):
+        runtime.memory[key] = value
+        runtime.memoryBytes += key.len + value.len
+  except CatchableError:
+    removeNodeStoreFile(path)
+
+proc persistJsAppMemory(runtime: JsAppRuntime, owner: AppRoot) =
+  ## Writes the node's remembered values after a call that changed them.
+  if not runtime.memoryDirty:
+    return
+  runtime.memoryDirty = false
+  let path = memoryStorePath(owner)
+  if path.len == 0:
+    return
+  if runtime.memory.len == 0:
+    removeNodeStoreFile(path)
+    return
+  var values = newJObject()
+  for key, value in runtime.memory.pairs:
+    values[key] = %value
+  let refusal = writeNodeStoreFile(path,
+    $(%*{"v": 1, "fp": memoryFingerprint(runtime), "values": values}))
+  if refusal.len > 0:
+    frameos_apps.log(owner, %*{
+      "event": "jsApp:remember:persist:skipped",
+      "nodeId": owner.nodeId.int,
+      "reason": refusal
+    })
+
 proc jsRemember(ctx: ptr JSContext, key: JSValue, valueJson: JSValue): JSValue {.nimcall.} =
   ## Keep a JSON value for this node across renders and interpreter restarts.
   ## null or undefined forgets the key. False when it would not fit.
@@ -262,11 +338,15 @@ proc jsRemember(ctx: ptr JSContext, key: JSValue, valueJson: JSValue): JSValue {
     return nimBoolToJS(ctx, false)
   let valueStr = toNimString(ctx, valueJson)
   let runtime = e.runtime
+  restoreJsAppMemory(runtime, e.owner)
   let previous = runtime.memory.getOrDefault(memoryKey, "")
   if valueStr.len == 0 or valueStr == "null":
     if runtime.memory.hasKey(memoryKey):
       runtime.memoryBytes -= memoryKey.len + previous.len
       runtime.memory.del(memoryKey)
+      runtime.memoryDirty = true
+    return nimBoolToJS(ctx, true)
+  if runtime.memory.hasKey(memoryKey) and previous == valueStr:
     return nimBoolToJS(ctx, true)
   let replaced = if runtime.memory.hasKey(memoryKey): memoryKey.len + previous.len else: 0
   let after = runtime.memoryBytes - replaced + memoryKey.len + valueStr.len
@@ -276,6 +356,7 @@ proc jsRemember(ctx: ptr JSContext, key: JSValue, valueJson: JSValue): JSValue {
     return nimBoolToJS(ctx, false)
   runtime.memory[memoryKey] = valueStr
   runtime.memoryBytes = after
+  runtime.memoryDirty = true
   nimBoolToJS(ctx, true)
 
 proc jsRecall(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
@@ -283,6 +364,7 @@ proc jsRecall(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
   if e == nil or e.runtime.isNil:
     return nimStringToJS(ctx, "")
+  restoreJsAppMemory(e.runtime, e.owner)
   nimStringToJS(ctx, e.runtime.memory.getOrDefault(toNimString(ctx, key), ""))
 
 proc jsFetchText(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
@@ -1926,6 +2008,9 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
       if jsAppEnvByCtx.hasKey(ctx):
         jsAppEnvByCtx.del(ctx)
       when defined(memProbe): memProbe("    js invoke " & fnName & " AFTER")
+  # What the call remembered goes to storage now, thrown or not: the next
+  # render may be a fresh boot.
+  persistJsAppMemory(runtime, owner)
 
   if JS_IsException(result) != 0:
     let details = mappedJsExceptionDetails(ctx)

@@ -1,4 +1,6 @@
-// OpenAI text: one chat completion over frameos.httpRequest; most errors are logged and give "".
+// OpenAI text: one chat completion over frameos.httpRequest. A missing prompt or
+// key is logged and gives "". A request that fails throws: the node fails, its
+// cache keeps nothing, and a cache with staleEnabled serves the last reply.
 const bytes = (text) => {
   let n = 0
   for (const ch of text) {
@@ -35,15 +37,15 @@ export function get(app) {
       const e = json?.error
       detail = typeof e?.message === 'string' ? e.message : typeof e === 'string' ? e : JSON.stringify(json)
     } catch {}
-    return fail(`Error making request ${r.status}: ${detail}`)
+    throw new Error(`Error making request ${r.status}: ${detail}`)
   }
+  if (!r.status) throw new Error(`OpenAI API error: ${r.error}`)
+  let reply
   try {
-    if (!r.status) throw new Error(r.error)
-    const reply = JSON.parse(r.body)?.choices?.[0]?.message?.content ?? ''
-    frameos.log({ replyChars: bytes(reply) })
-    return reply
+    reply = JSON.parse(r.body)?.choices?.[0]?.message?.content ?? ''
   } catch (e) {
-    fail(`OpenAI API error: ${e.message}`)
-    return `OpenAI API error: ${e.message}`
+    throw new Error(`OpenAI API error: ${e.message}`)
   }
+  frameos.log({ replyChars: bytes(reply) })
+  return reply
 }

@@ -9,7 +9,9 @@ own files: security findings in `docs/security-todo.md`, architecture
 convergence in `docs/convergence-todo.md`, store
 content in `docs/scenes-todo.md`, the JSX widget UI in `docs/ui-todo.md`,
 cloud billing in `cloud/docs/accounting-todo.md`, ESP32/Pico firmware in
-`docs/embedded-todo.md`, and the boxes that need a bench in
+`docs/embedded-todo.md`, local assets, caches and network failures (serve
+stale, bounded image libraries, paid-source budgets, the bird journal) in
+`docs/local-assets-todo.md`, and the boxes that need a bench in
 `docs/manual-testing-todo.md`.
 
 **Compiled scenes are deprecated (2026-08-30).** No editor action produces

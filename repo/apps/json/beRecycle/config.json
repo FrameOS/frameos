@@ -33,5 +33,5 @@
     { "markdown": "[{ summary, startTime, endTime, timezone }]" }
   ],
   "output": [{ "name": "events", "type": "json" }],
-  "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "14400" }
+  "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "14400", "staleEnabled": true, "staleDuration": "604800" }
 }

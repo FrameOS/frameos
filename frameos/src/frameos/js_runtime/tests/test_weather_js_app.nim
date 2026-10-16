@@ -1,7 +1,8 @@
 ## The Weather (Open-Meteo) code app (repo/apps/json/weather) run for real
 ## through the JS app runtime. Every `frameos.httpRequest` is answered by
 ## `jsHttpRequestHook`, so this pins the geocoding and forecast URLs, the
-## output object and the `{location, error}` replies, without Open-Meteo.
+## output object, the `{location, error}` replies about the location and the
+## throw on a failed fetch, without Open-Meteo.
 
 import std/[json, os, strutils, times, unittest]
 
@@ -205,33 +206,39 @@ suite "Weather (Open-Meteo) code app":
     geocodeReply = (200, """{"results": []}""")
     check empty.weather(defaults("Atlantis"))["error"].getStr() == "No matching locations found."
 
-  test "HTTP errors, transport failures and bad replies are {location, error} replies":
+  test "HTTP errors, transport failures and bad replies fail the node":
+    # A failed fetch is not data: the node throws, so a cache never stores it
+    # and a cache with staleEnabled serves the last forecast instead.
+    proc failure(h: Harness, config: JsonNode): string =
+      try:
+        discard h.call(config)
+        ""
+      except JsAppError as e:
+        e.msg
+
     let geocodeDown = newHarness()
     geocodeReply = (500, "upstream down")
-    check geocodeDown.weather(defaults("Brussels")) == %*{"location": "Brussels", "error": "HTTP 500: upstream down"}
+    check geocodeDown.failure(defaults("Brussels")) == "Weather for Brussels: HTTP 500: upstream down"
 
     let forecastDown = newHarness()
     forecastReply = (400, """{"error": true, "reason": "Invalid timezone"}""")
-    check forecastDown.weather(defaults("Brussels")) ==
-      %*{"location": "Brussels", "error": "HTTP 400: {\"error\": true, \"reason\": \"Invalid timezone\"}"}
+    check forecastDown.failure(defaults("Brussels")) ==
+      "Weather for Brussels: HTTP 400: {\"error\": true, \"reason\": \"Invalid timezone\"}"
 
     let noBody = newHarness()
     forecastReply = (503, "")
-    check noBody.weather(defaults("Brussels"))["error"].getStr() == "HTTP 503"
+    check noBody.failure(defaults("Brussels")) == "Weather for Brussels: HTTP 503"
 
     let offline = newHarness()
     transportError = "Could not resolve geocoding-api.open-meteo.com"
-    check offline.weather(defaults("Brussels")) ==
-      %*{"location": "Brussels", "error": "Could not resolve geocoding-api.open-meteo.com"}
+    check offline.failure(defaults("Brussels")) ==
+      "Weather for Brussels: Could not resolve geocoding-api.open-meteo.com"
 
     let garbage = newHarness()
     forecastReply = (200, "<html>")
-    let payload = garbage.weather(defaults("Brussels"))
-    check payload["location"].getStr() == "Brussels"
-    check payload["error"].getStr().len > 0
-    check payload.len == 2
+    check garbage.failure(defaults("Brussels")).startsWith("Weather for Brussels: ")
 
     let noCoordinates = newHarness()
     geocodeReply = (200, """{"results": [{"name": "Somewhere"}]}""")
-    check noCoordinates.weather(defaults("Somewhere")) == %*{"location": "Somewhere", "error": "key not found: latitude"}
+    check noCoordinates.failure(defaults("Somewhere")) == "Weather for Somewhere: key not found: latitude"
     check requests.len == 1
