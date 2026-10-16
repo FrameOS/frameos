@@ -35,19 +35,17 @@ is left there is in the medium / low list.
   already signed and verified against the release key on both planes. A
   self-hosted backend reached over plain http still carries the bearer in
   clear on every request; an https backend is the fix for that.)
-- **`POST /setup` on the Pi hotspot is unauthenticated while it is up**, and
-  the hotspot keeps its well-known default PSK (`frame1234`) — decided
+- The Pi hotspot keeps its well-known default PSK (`frame1234`) — decided
   2026-09-03: a Pi with no configured display could not show a minted one.
-  Release images bake the default with `wifiHotspot: "bootOnly"` for 300 s;
-  the setup form accepts `controlMode`, `cloudUrl`, `claimToken`,
-  `serverHost`, `adminUser/Pass`, `runDriverSetup`, `device` and
-  `httpUploadUrl` and persists them to `frame.json` (`portal.nim`
-  `parseSetupOptions` / `persistPortalSetup`), so anyone in radio range
-  during a boot where the home AP is down can re-enrol the frame, repoint
-  `serverHost`, or make the frame POST every rendered image to a URL of
-  their choosing. Require a panel-shown code for the control-plane/admin
-  fields (a headless frame then needs the local admin password instead), and
-  strip current config from the unauthenticated setup page.
+  The PSK only buys the Wi-Fi form: the control-plane,
+  admin and display fields of `POST /setup` need the setup code drawn on
+  the panel (or the admin password; `frameos/src/frameos/setup_gate.nim`,
+  `cloud/docs/cloud-frames.md` "sandbox posture"), and the page shows a
+  stranger none of the current values. What is left open by design: a
+  fresh frame (no panel, no admin password, no control plane) is anyone's,
+  and so is a cloud-personalized image whose claim token has not been
+  redeemed yet — its owner has to be able to pick the display in the
+  portal, and until the enrollment completes the frame is nobody's.
 - Interpreter budgets (wall-clock deadline, JS heap ceiling, dispatch
   budget) are per run, not per scene per minute.
 - Smaller: the frame's TLS material and admin login ride the

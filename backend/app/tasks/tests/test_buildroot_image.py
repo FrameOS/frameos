@@ -48,6 +48,7 @@ from app.tasks.buildroot_image import (
     render_buildroot_frameos_service,
     stage_buildroot_frameos_service,
     stage_buildroot_network_service_dropin,
+    stage_buildroot_captive_dns_dropin,
     stage_buildroot_resolved_dropin,
     render_expand_sd_card_script,
     render_expand_sd_card_service,
@@ -1984,6 +1985,7 @@ async def test_partition_patches_stay_local_when_this_host_has_the_tools(tmp_pat
         for dropin in (
             "etc/systemd/resolved.conf.d/10-frameos.conf",
             "etc/systemd/system/network.service.d/10-frameos.conf",
+            "etc/NetworkManager/dnsmasq-shared.d/10-frameos-captive.conf",
         ):
             path = service_root / dropin
             if path.is_file():
@@ -2018,6 +2020,7 @@ async def test_partition_patches_stay_local_when_this_host_has_the_tools(tmp_pat
     # boards.
     assert "[Resolve]\nDNSSEC=no\n" in staged_dropins["etc/systemd/resolved.conf.d/10-frameos.conf"]
     assert "/sys/class/net/eth0" in staged_dropins["etc/systemd/system/network.service.d/10-frameos.conf"]
+    assert "address=/#/10.42.0.1\n" in staged_dropins["etc/NetworkManager/dnsmasq-shared.d/10-frameos-captive.conf"]
 
 
 def test_stage_buildroot_network_service_dropin(tmp_path):
@@ -2039,6 +2042,18 @@ def test_stage_buildroot_resolved_dropin(tmp_path):
 
     dropin = tmp_path / "etc" / "systemd" / "resolved.conf.d" / "10-frameos.conf"
     assert "[Resolve]\nDNSSEC=no\n" in dropin.read_text(encoding="utf-8")
+
+
+def test_stage_buildroot_captive_dns_dropin(tmp_path):
+    stage_buildroot_captive_dns_dropin(tmp_path)
+
+    dropin = tmp_path / "etc" / "NetworkManager" / "dnsmasq-shared.d" / "10-frameos-captive.conf"
+    text = dropin.read_text(encoding="utf-8")
+    # NetworkManager's shared-mode dnsmasq reads this directory; every name
+    # resolving to the hotspot is what makes a phone's connectivity probe
+    # reach the frame's captive listener and open the sign-in sheet.
+    assert text.endswith("address=/#/10.42.0.1\n")
+    assert (dropin.stat().st_mode & 0o777) == 0o644
 
 
 @pytest.mark.asyncio

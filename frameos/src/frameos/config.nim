@@ -439,11 +439,17 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   ## fields — freeing the JsonNodes, strings and seqs a worker may be in the
   ## middle of reading (the writer-side twin of the auth-cache
   ## use-after-free). So the swap is done with raw copies that run no
-  ## destructor at all, and both the outgoing payload and `source` (whose
-  ## buffers `target` now shares) are parked in a list that is never
-  ## released. A reload happens on a deploy, so this leaks one config's
+  ## destructor at all, and the outgoing payload is parked in a list that is
+  ## never released. A reload happens on a deploy, so this leaks one config's
   ## worth of small objects per deploy — a price worth paying for readers
   ## that never see freed memory.
+  ##
+  ## `source` is emptied rather than parked: `target` now holds its buffers
+  ## with their refcounts (one owner, as before the swap), so a `source` that
+  ## kept pointing at them would be a second, uncounted owner — harmless
+  ## while nothing reads it, but its destruction at process exit freed what
+  ## a dead `target` had already freed (a test binary that swapped a config
+  ## built on the stack died with SIGSEGV on the way out, 2026-10-16).
   if target == nil or source == nil:
     return
   {.gcsafe.}:
@@ -451,8 +457,8 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
     withLock retiredConfigLock:
       copyMem(addr retired[], addr target[], sizeof(target[]))
       copyMem(addr target[], addr source[], sizeof(target[]))
+      zeroMem(addr source[], sizeof(source[]))
       retiredFrameConfigs.add(retired)
-      retiredFrameConfigs.add(source)
 
 proc replaceFrameConfigSettings*(target: FrameConfig, settings: sink JsonNode) =
   ## `target.settings = settings` for a config other threads are reading.

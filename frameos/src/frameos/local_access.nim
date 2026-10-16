@@ -196,7 +196,7 @@ proc lanAccessEnabled*(frameConfig: FrameConfig): bool =
   resolveLocalNetworkAccess(frameConfig != nil and frameConfig.network != nil and
     frameConfig.network.allowLocalNetworkAccess)
 
-proc randomDigits(count: int): string =
+proc randomDigits*(count: int): string =
   ## Rejection-sampled so every digit is uniform; a plain `byte mod 10` would
   ## make 0-5 slightly likelier, and this code is an authentication factor.
   result = newStringOfCap(count)
@@ -221,7 +221,7 @@ proc randomDigits(count: int): string =
       continue
     result.add(chr(ord('0') + (value.int mod 10)))
 
-proc constantTimeEquals(first, second: string): bool =
+proc constantTimeEquals*(first, second: string): bool =
   if first.len != second.len:
     return false
   var diff = 0
