@@ -426,7 +426,7 @@ schedule or the cloud may send one only when its declaration lists them in
 | `wheel` | yes |  | `deltaX` integer, `deltaY` integer, `x` integer, `y` integer | Pi, preview | When a mouse wheel is scrolled. |
 | `turnOn` | yes | yes |  | all | Turn the screen on |
 | `turnOff` | yes | yes |  | all | Turn the screen off |
-| `button` | yes |  | `pin` integer, `label` string, `role` string, `action` string, `durationMs`? integer, `wake`? boolean, `level`? integer | all | When a GPIO button is pressed, held or released. |
+| `button` | yes |  | `pin` integer, `label` string, `role` string, `action` string, `durationMs`? integer, `heldSeconds`? integer, `wake`? boolean, `level`? integer | all | When a GPIO button is pressed, held or released. |
 | `setSceneState` |  | yes | `state`? json, `render`? boolean | all | Set the scene's public state. |
 | `setCurrentScene` |  | yes | `sceneId` scene, `state`? json | all | Switch the frame to another scene. |
 <!-- END GENERATED: events -->
@@ -545,8 +545,8 @@ interface FrameOSEventPayloads {
   turnOn: Record<string, never>;
   /** Turn the screen off */
   turnOff: Record<string, never>;
-  /** When a GPIO button is pressed, held or released. A listener with no `action` filter hears presses only. */
-  button: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; level?: number };
+  /** When a GPIO button is pressed, held or released. A listener with no `action` filter hears presses only. `durationMs` and `heldSeconds` (whole seconds, the ESP32 buzzer ticks one per second while the key is down) come with longPress, repeat and release. */
+  button: { pin: number; label: string; role: string; action: string; durationMs?: number; heldSeconds?: number; wake?: boolean; level?: number };
   /** Set the scene's public state. This is not used for private state changes. */
   setSceneState: { state?: any; render?: boolean };
   /** Switch the frame to another scene. An optional `state` object is applied to that scene's public state. */
