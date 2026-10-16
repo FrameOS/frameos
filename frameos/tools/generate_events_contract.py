@@ -163,6 +163,8 @@ def load():
                 fail(f"{where}.{fname}: the only wire form is \"pointer\"")
             if "listenDefault" in field and (not isinstance(field["listenDefault"], str) or not event["listen"]):
                 fail(f"{where}.{fname}: listenDefault is the value a listener without a filter on this field hears")
+            if "filter" in field and (field["filter"] != "more" or not event["listen"] or not field.get("catalog", True)):
+                fail(f"{where}.{fname}: filter: \"more\" folds a catalog field of a listenable event until a filter is set")
         if sum(1 for f in event.get("payload", []) if "listenDefault" in f) > 1:
             fail(f"{where}: one listenDefault field per event (the generated lookup returns one)")
         if "synthesized" in event and (not isinstance(event["synthesized"], bool) or "driver" not in event["origins"]):
@@ -262,8 +264,20 @@ def log_events(doc):
     return {name: lines for name, lines in doc["logEvents"].items() if not name.startswith("$")}
 
 
+def unit_options(doc):
+    """The payload units whose values are a list the contract already keeps: the
+    editor offers these as a select instead of a free text filter."""
+    return {
+        "button-role": doc["buttons"]["roles"],
+        "button-action": doc["buttons"]["actions"],
+        "swipe-direction": doc["gestures"]["directions"],
+        "pointer-type": doc["pointer"]["types"],
+    }
+
+
 def catalog(doc):
     """The editor's view: what a scene can listen for or dispatch, in contract order."""
+    options = unit_options(doc)
     out = []
     for event in doc["events"]:
         if not (event["listen"] or event["dispatch"]):
@@ -277,7 +291,9 @@ def catalog(doc):
             entry["aliasOf"] = event["aliasOf"]
         entry["fields"] = [
             {"name": f["name"], "label": f["label"], "type": f["type"], "required": f["required"],
-             **({"listenDefault": f["listenDefault"]} if "listenDefault" in f else {})}
+             **({"options": options[f["unit"]]} if f.get("unit") in options else {}),
+             **({"listenDefault": f["listenDefault"]} if "listenDefault" in f else {}),
+             **({"filter": f["filter"]} if "filter" in f else {})}
             for f in event.get("payload", [])
             if f.get("catalog", True)
         ]

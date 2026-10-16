@@ -349,6 +349,30 @@ def frame_runtime_version(frame: Any) -> str | None:
     return _known_frameos_version(frame)
 
 
+APP_TEST_FILE_SUFFIXES = (".test.ts", ".test.tsx", ".test.js", ".test.jsx")
+
+
+def is_app_test_file(name: str) -> bool:
+    """`<name>.test.ts` (or .tsx/.js/.jsx): a JavaScript app's own tests,
+    run in the editor (docs/js-apps-and-code-nodes.md, "Testing an app")."""
+    return name.lower().endswith(APP_TEST_FILE_SUFFIXES)
+
+
+def strip_app_test_files(scenes: list) -> list:
+    """`scenes` with every app's test files taken out of its `sources`, in
+    place: an ESP32 keeps all its scenes in 512 KiB and never runs them."""
+    for scene in scenes:
+        apps = scene.get("apps") if isinstance(scene, dict) else None
+        if not isinstance(apps, dict):
+            continue
+        for app in apps.values():
+            sources = app.get("sources") if isinstance(app, dict) else None
+            if isinstance(sources, dict):
+                for name in [name for name in sources if isinstance(name, str) and is_app_test_file(name)]:
+                    del sources[name]
+    return scenes
+
+
 def scenes_for_runtime(scenes: Any, runtime_version: str | None) -> list:
     """A copy of `scenes` as a runtime of `runtime_version` must receive them."""
     result = copy.deepcopy(scenes) if isinstance(scenes, list) else []
@@ -356,3 +380,8 @@ def scenes_for_runtime(scenes: Any, runtime_version: str | None) -> list:
     restore_apps_in_scenes(result, lacking)
     retire_apps_in_scenes(result, [keyword for keyword in RETIRED_APPS if keyword not in lacking])
     return result
+
+
+def scenes_for_embedded_runtime(scenes: Any, runtime_version: str | None) -> list:
+    """As scenes_for_runtime, for an ESP32: also without the apps' test files."""
+    return strip_app_test_files(scenes_for_runtime(scenes, runtime_version))

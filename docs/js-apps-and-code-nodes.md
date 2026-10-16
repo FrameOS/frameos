@@ -258,6 +258,59 @@ imports them with relative paths:
 - Each file is evaluated once per app, however many files import it, and
   errors name the file and line they came from (`util.ts:5`).
 
+### Testing an app
+
+A file named `<something>.test.ts` (or `.tsx`, `.js`, `.jsx`) among an
+app's sources is a test file. The editor shows a Run button next to it and
+runs it in the frameos-wasm runtime: the same interpreter the app runs in,
+with the app prelude installed, then the test harness, then the test file as
+the main module, so `import { get } from './app'` resolves like any other
+import. The report is a nested section per `describe`, a row per test, and
+under a failed test the message, what was expected and received, the stack
+and what the test (and the app) logged. The repo apps each carry an
+`app.test.ts`; `frameos/src/frameos/js_runtime/tests/test_js_app_tests.nim`
+runs every one of them on the Linux runtime without a browser.
+
+```ts
+import { get } from './app'
+
+describe('weather', () => {
+  it('fetches the forecast for the location', () => {
+    const http = mock.httpRequest((url) => mock.json({ current_weather: { temperature: 5.7 } }))
+    const app = makeApp({ config: { location: 'Brussels' }, settings: { openAI: { apiKey: 'k' } } })
+    const out = get(app, makeContext())
+    expect(out.forecast.current_weather.temperature).toBe(5.7)
+    expect(http.calls[0][0]).toContain('name=Brussels')
+    expect(app.state.lastFetch).toBeDefined()
+  })
+})
+```
+
+- `describe` / `it` (or `test`), `.skip`, `beforeEach` / `afterEach` /
+  `beforeAll` / `afterAll`, and `expect` with the usual matchers (`toBe`,
+  `toEqual`, `toMatchObject`, `toContain`, `toMatch`, `toThrow`,
+  `toHaveBeenCalledWith`, `.not`, …). Tests are synchronous, like apps.
+- `makeApp({config, state, frame, settings})` is the app object the runtime
+  would hand `get()`: config.json's field defaults, typed like the runtime
+  types them, under what the test sets; `app.frame` is 800x480 in UTC unless
+  given. It is also where the app's side effects land: `frameos.setState`
+  writes `app.state`, `remember` / `recall` use `app.memory`, `setNextSleep`
+  sets `app.nextSleep`, `getSetting` reads `app.settings`. `makeContext()` is
+  a render context.
+- Everything that would leave the interpreter (`httpRequest`, `fetchText`,
+  `fetchJson`, `fetchImage`, assets, streams) throws until the test mocks
+  it, so a test never touches the network: `mock.httpRequest(impl)`,
+  `mock.fetchImage(impl)` and so on replace that `frameos` function for the
+  test and return the mock (`.calls` is what the app asked). `fetchText` and
+  `fetchJson` go through the mocked `httpRequest` by default. `mock.json(body)`,
+  `mock.response(status, body)` and `mock.image({width, height})` build
+  replies. Mocks are restored after each test.
+- `frameos.log`, `frameos.error` and `console.*` are collected into the
+  test's report rather than the frame's log.
+- A test file is never run on a frame and never imported by the app. An
+  ESP32 does not even receive it: both control planes take `*.test.*` out of
+  an app's `sources` on the way to an embedded frame.
+
 ### The export that runs
 
 | category | export the runtime calls | how the node is wired |
@@ -427,3 +480,4 @@ render allocates — not terse code:
 - SVG uses only the supported tags; gradients are top-level `linearGradient` with `userSpaceOnUse`.
 - Nothing big is embedded as an object literal or kept alive between renders (see "Write for the smallest frame").
 - A JS app keeps what must outlast a render with `frameos.remember` (private) or `frameos.setState` (shared), never in a module variable.
+- An app's tests live in `app.test.ts` next to it (see "Testing an app") and run from the editor; they are not sent to an ESP32.

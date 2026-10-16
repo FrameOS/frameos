@@ -346,7 +346,11 @@ export function cloudUndeployedChangeDetails(
 ): ChangeDetail[] {
   const details: ChangeDetail[] = []
   if (frame?.assigned_checksum && frame.assigned_checksum !== frame.scenes_checksum) {
-    details.push({ label: 'Waiting for the frame to apply the last push', requiresFullDeploy: false })
+    details.push({
+      label: 'Waiting for the frame to apply the last push',
+      requiresFullDeploy: false,
+      awaitingDeviceAck: true,
+    })
   }
   // A device a release behind is something to DO on this frame — it was the
   // deploy drawer's own `2026.8.20 → 2026.8.21` row, while the button that

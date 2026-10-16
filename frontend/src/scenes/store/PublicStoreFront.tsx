@@ -9,7 +9,7 @@ import { urls } from '../../urls'
 import { authThemeLogic } from '../auth/authThemeLogic'
 import { storeShelfForCategory } from '../../utils/storeCategories'
 import { publicStoreLogic } from './publicStoreLogic'
-import { StoreShelves, scrollStoreToTop, watchVisibleShelf } from './StoreTiles'
+import { StoreShelves, StoreSortSelect, scrollStoreToTop, watchVisibleShelf } from './StoreTiles'
 
 // The scene store for a visitor without a session: the cloud's /store and
 // the scenes host's root. The same shelves the signed-in library shows,
@@ -35,8 +35,9 @@ export function PublicStoreFront(): JSX.Element {
     search,
     category,
     visibleShelf,
+    storeSort,
   } = useValues(publicStoreLogic)
-  const { setSearch, setVisibleShelf } = useActions(publicStoreLogic)
+  const { setSearch, setVisibleShelf, setStoreSort } = useActions(publicStoreLogic)
   const shelvesRef = useRef<HTMLDivElement>(null)
   const goTo = (filters: { category?: string | null }) =>
     router.actions.push(urls.scenesHome('store', { category, ...filters }))
@@ -76,6 +77,7 @@ export function PublicStoreFront(): JSX.Element {
                 className="frameos-input h-10 w-full rounded-xl border bg-white/90 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-blue-400"
               />
             </div>
+            <StoreSortSelect value={storeSort} onChange={setStoreSort} />
             <a
               href={`${storeOrigin}/my-scenes/new`}
               className="frameos-form-control flex h-10 items-center rounded-xl border px-3 text-sm font-semibold transition hover:bg-slate-50"

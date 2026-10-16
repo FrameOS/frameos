@@ -2998,12 +2998,14 @@ function CloudDeployStatus({
       />
     )
   } else {
+    // Queued and unacked: the frame applies it when it next syncs, so this is
+    // a wait, not a warning, and the deploy button below shows an hourglass.
     scenesRow = (
       <CloudStatusRow
         label="Scenes & settings"
         value={scenesValue}
-        detail="The device has not confirmed the last push yet."
-        tone="warn"
+        detail="The last push is waiting for the frame. It applies when the frame next syncs; nothing to do."
+        tone="muted"
       />
     )
   }
@@ -3069,6 +3071,13 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
     unsavedChangeDetails.length === 0 &&
     Boolean(frame.assigned_checksum) &&
     frame.assigned_checksum === frame.scenes_checksum
+  // Nothing unsaved and the last push is still queued for the device: a
+  // click would only re-send what is already on its way, so the button
+  // waits (hourglass, not primary) like the tile and the status line.
+  const awaitingAck =
+    unsavedChangeDetails.length === 0 &&
+    Boolean(frame.assigned_checksum) &&
+    frame.assigned_checksum !== frame.scenes_checksum
 
   return (
     <section className="space-y-2">
@@ -3095,25 +3104,31 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
             {
               label: 'This deploy sends',
               value:
-                unsavedChangeDetails.length === 0
-                  ? 'No unsaved changes — this re-sends the current scenes'
-                  : unsavedChangeDetails.map((change) => change.label).join(', '),
+                unsavedChangeDetails.length > 0
+                  ? unsavedChangeDetails.map((change) => change.label).join(', ')
+                  : awaitingAck
+                  ? 'Nothing new. The last push is still on its way; this would send it again.'
+                  : 'No unsaved changes. This re-sends the current scenes.',
             },
           ]}
         />
         <button
           type="button"
-          title="Save this frame's settings and deploy its scenes to the device"
+          title={
+            awaitingAck
+              ? 'The last push is queued for the frame; pressing this sends it again'
+              : "Save this frame's settings and deploy its scenes to the device"
+          }
           onClick={() => {
             saveAndDeployFrame()
             onPushed()
           }}
           className={clsx(
-            inSync ? 'frameos-secondary-button' : 'frameos-primary-action',
+            inSync || awaitingAck ? 'frameos-secondary-button' : 'frameos-primary-action',
             'inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
           )}
         >
-          <CloudArrowUpIcon className="h-4 w-4" />
+          {awaitingAck ? <HourglassIcon className="h-4 w-4" /> : <CloudArrowUpIcon className="h-4 w-4" />}
           Deploy scenes &amp; settings
         </button>
       </div>

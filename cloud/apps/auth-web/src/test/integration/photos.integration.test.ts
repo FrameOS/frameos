@@ -877,6 +877,20 @@ describe("photo library: share links", () => {
     expect(
       (await getSharedPhoto(get(`/api/photos/shared/${album.token}/photo?order=shuffle`), tokenParams(album.token))).status,
     ).toBe(400);
+    // `shapes`: only the photos of those shapes count (every file here is 30x20, landscape).
+    const landscape = await getSharedPhoto(
+      get(`/api/photos/shared/${album.token}/photo?order=sequential&index=0&shapes=landscape,square`),
+      tokenParams(album.token),
+    );
+    expect(await landscape.json()).toMatchObject({ count: 4, index: 0, photo: { path: "b 2.png" } });
+    const portrait = await getSharedPhoto(
+      get(`/api/photos/shared/${album.token}/photo?order=sequential&index=0&shapes=portrait`),
+      tokenParams(album.token),
+    );
+    expect(await portrait.json()).toEqual({ count: 0, index: 0, photo: null });
+    expect(
+      (await getSharedPhoto(get(`/api/photos/shared/${album.token}/photo?shapes=round`), tokenParams(album.token))).status,
+    ).toBe(400);
 
     // Streamed without a CDN alias...
     const file = await getSharedFile(
@@ -954,6 +968,12 @@ describe("photo library: album scenes", () => {
     expect(forKitchen.share.token).not.toBe(general.token);
     const album = forKitchen.scene.nodes.find((node) => node.data.keyword === "photoAlbum");
     expect(album?.data.config).toEqual({ album: forKitchen.share.url, counterStateKey: "photoIndex" });
+    // Every shape by default; `shapes` picks the scene's toggles.
+    expect(forKitchen.scene.fields.map((field) => field.value)).toEqual(["3600", "random", "cover", "true", "true", "true", "0"]);
+    const portraits = (await (
+      await postScene(postJson("/api/photos/scene", { frame_id: kitchen.id, path: "Summer 2026", shapes: ["portrait"] }))
+    ).json()) as SceneAnswer;
+    expect(portraits.scene.fields.map((field) => field.value)).toEqual(["3600", "random", "cover", "false", "true", "false", "0"]);
     // The same frame again: the same link. POST /shares with the frame too.
     const again = (await (
       await postScene(postJson("/api/photos/scene", { frame_id: kitchen.id, path: "Summer 2026" }))
@@ -1039,9 +1059,9 @@ describe("photo library: album scenes", () => {
     expect(album?.data.config).toEqual({ album: body.share.url, counterStateKey: "photoIndex" });
     expect(body.scene.name).toBe("Summer 2026");
     expect(body.scene.settings).toEqual({ backgroundColor: "#000000", execution: "interpreted", refreshInterval: 600 });
-    expect(body.scene.fields.map((field) => field.value)).toEqual(["600", "newest", "contain", "0"]);
+    expect(body.scene.fields.map((field) => field.value)).toEqual(["600", "newest", "contain", "true", "true", "true", "0"]);
     expect(body.scene.apps.photoAlbum.origin).toBe("repo/apps/image/photoAlbum");
-    expect(Object.keys(body.scene.apps.photoAlbum.sources).sort()).toEqual(["app.ts", "config.json"]);
+    expect(Object.keys(body.scene.apps.photoAlbum.sources).sort()).toEqual(["app.test.ts", "app.ts", "config.json"]);
 
     // Without a frame, the folder's general link: the one POST /shares hands
     // out, made (and audited) once.
@@ -1053,7 +1073,7 @@ describe("photo library: album scenes", () => {
     expect((await share("Summer 2026")).token).toBe(body.share.token);
     expect(again.scene.name).toBe("Beach");
     expect(again.scene.settings.refreshInterval).toBe(3600);
-    expect(again.scene.fields.map((field) => field.value)).toEqual(["3600", "random", "cover", "0"]);
+    expect(again.scene.fields.map((field) => field.value)).toEqual(["3600", "random", "cover", "true", "true", "true", "0"]);
     expect(again.scene.id).not.toBe(body.scene.id);
     const audited = await db
       .select({ eventType: auditEvents.eventType })
@@ -1078,6 +1098,10 @@ describe("photo library: album scenes", () => {
       [{ order: "upside-down" }, 400],
       [{ order: ["random"] }, 400],
       [{ fit: "stretch" }, 400],
+      [{ shapes: [] }, 400],
+      [{ shapes: ["round"] }, 400],
+      [{ shapes: "landscape" }, 400],
+      [{ shapes: ["landscape", "landscape"] }, 400],
       [{ name: 5 }, 400],
       [{ name: "x".repeat(257) }, 400],
       [{ path: "" }, 400],

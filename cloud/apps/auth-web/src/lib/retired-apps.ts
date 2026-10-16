@@ -264,6 +264,39 @@ export function scenesForRuntime<T>(scenes: T[], runtimeVersion: string | null |
   return result;
 }
 
+/** `<name>.test.ts` (or .tsx/.js/.jsx): a JavaScript app's own tests, run in the editor. */
+export function isAppTestFile(name: string): boolean {
+  return /\.test\.(ts|tsx|js|jsx)$/i.test(name);
+}
+
+// `scenes` with every app's test files taken out of its `sources`, in place:
+// an ESP32 keeps all its scenes in 512 KiB and never runs them.
+export function stripAppTestFiles<T>(scenes: T[]): T[] {
+  for (const scene of scenes) {
+    const apps = (scene as { apps?: unknown }).apps;
+    if (!apps || typeof apps !== "object") {
+      continue;
+    }
+    for (const app of Object.values(apps as Record<string, unknown>)) {
+      const sources = (app as { sources?: unknown } | null)?.sources;
+      if (!sources || typeof sources !== "object") {
+        continue;
+      }
+      for (const name of Object.keys(sources as Record<string, unknown>)) {
+        if (isAppTestFile(name)) {
+          delete (sources as Record<string, unknown>)[name];
+        }
+      }
+    }
+  }
+  return scenes;
+}
+
+// As scenesForRuntime, for an ESP32: also without the apps' test files.
+export function scenesForEmbeddedRuntime<T>(scenes: T[], runtimeVersion: string | null | undefined): T[] {
+  return stripAppTestFiles(scenesForRuntime(scenes, runtimeVersion));
+}
+
 // A converted copy, for readers that show, edit or render scenes.
 export function withRetiredAppsReplaced<T>(scenes: T[]): T[] {
   const result = structuredClone(scenes);

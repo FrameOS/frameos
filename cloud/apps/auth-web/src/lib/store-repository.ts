@@ -85,6 +85,10 @@ export async function buildStoreRepository(
       author: scene.authorName ?? undefined,
       category: scene.category ?? undefined,
       description: scene.description ?? undefined,
+      // How many times the scene was installed, so the store pages can show
+      // it and sort by it (the index itself comes featured first, then by
+      // this count). Older frameos installs ignore extra fields.
+      downloads: scene.downloadCount,
       flags: scene.riskFlags.length > 0 ? scene.riskFlags : undefined,
       frameosVersion: scene.frameosVersion ?? undefined,
       id: scene.slug,

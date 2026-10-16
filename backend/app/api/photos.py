@@ -105,9 +105,29 @@ class PhotoSceneBody(BaseModel):
     seconds: Any = None
     order: Any = None
     fit: Any = None
+    shapes: Any = None
 
 
 MAX_SCENE_NAME_LENGTH = 256
+
+
+def _scene_shapes(value: Any) -> list[str]:
+    """The `shapes` of a scene body: a list of distinct shape names, at least
+    one; absent means every shape."""
+    if value is None:
+        return list(photos.SHARE_SHAPES)
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) for item in value)
+        or len(set(value)) != len(value)
+    ):
+        raise _bad_request(f"shapes must be a list of distinct names from {', '.join(photos.SHARE_SHAPES)}")
+    try:
+        chosen = photos.parse_shapes(",".join(value))
+    except ValueError as error:
+        raise _bad_request(str(error))
+    return list(photos.SHARE_SHAPES) if chosen is None else chosen
 
 
 async def _ready_store() -> ObjectStore:
@@ -405,6 +425,7 @@ async def photos_album_scene(data: PhotoSceneBody, db: Session = Depends(get_db)
     fit = "cover" if data.fit is None else data.fit
     if fit not in FIT_VALUES:
         raise _bad_request(f"fit must be one of {', '.join(FIT_VALUES)}")
+    shapes = _scene_shapes(data.shapes)
     if data.name is not None and (not isinstance(data.name, str) or len(data.name) > MAX_SCENE_NAME_LENGTH):
         raise _bad_request(f"name must be text of at most {MAX_SCENE_NAME_LENGTH} characters")
     if isinstance(data.frame_id, bool) or not isinstance(data.frame_id, int):
@@ -420,6 +441,7 @@ async def photos_album_scene(data: PhotoSceneBody, db: Session = Depends(get_db)
         seconds=seconds,
         order=order,
         fit=fit,
+        shapes=shapes,
     )
     return {"scene": scene, "share": photos.share_json(share)}
 
@@ -492,11 +514,16 @@ async def photos_shared_photo(
     order: str = "random",
     index: int = Query(0),
     path: str = "",
+    shapes: str = "",
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ):
     if order not in photos.SHARE_ORDERS:
         raise _bad_request(f"order must be one of {', '.join(photos.SHARE_ORDERS)}")
+    try:
+        chosen_shapes = photos.parse_shapes(shapes)
+    except ValueError as error:
+        raise _bad_request(str(error))
     shared = await _shared_folder(request, token, db, redis)
 
     def build() -> dict:
@@ -507,6 +534,8 @@ async def photos_shared_photo(
                 raise _not_found()
             return {"index": 0, "count": 1, "photo": photos.shared_photo_json(token, photo)}
         files, _updated_at = photos.share_index(db, shared)
+        # `shapes`: only landscape, portrait or square photos, as the scene's toggles say.
+        files = photos.filter_shapes(files, chosen_shapes)
         photo = photos.pick_photo(files, order, index, token)
         return {
             "index": index,

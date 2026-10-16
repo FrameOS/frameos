@@ -3,6 +3,20 @@
 // in a scene state field: on an ESP32 the JS heap does not outlive a render.
 
 const ORDERS = ['random', 'sequential', 'newest', 'oldest']
+const SHAPES = ['landscape', 'portrait', 'square']
+
+// A shape toggle: off only when it says so (false, or "false" from a state
+// field); unset is on, so an older scene plays every photo.
+export function shapeOn(value: unknown): boolean {
+  return !(value === false || String(value ?? '').trim().toLowerCase() === 'false')
+}
+
+// The `shapes=` query for the share route: the shapes that are on, or '' for
+// every shape (the server's default, which older servers also give).
+export function shapesQuery(config: Record<string, unknown>): string {
+  const on = SHAPES.filter((shape) => shapeOn(config[shape]))
+  return on.length === SHAPES.length ? '' : `&shapes=${on.join(',')}`
+}
 
 // The share link, or '' when it is not an http(s) URL.
 export function albumLink(value: unknown): string {
@@ -68,7 +82,9 @@ export function get(app: FrameOSApp, context: FrameOSContext): unknown {
   const key = single ? '' : String(app.config.counterStateKey ?? '').trim()
   const index = key ? position(app.state[key]) : Math.floor(Math.random() * 1000000)
 
-  const query = single ? `path=${encodeURIComponent(single)}` : `order=${order}&index=${index}`
+  const shapes = single ? '' : shapesQuery(app.config)
+  if (shapes === '&shapes=') return fail('Turn on at least one photo shape: landscape, portrait or square.')
+  const query = single ? `path=${encodeURIComponent(single)}` : `order=${order}&index=${index}${shapes}`
   const r = frameos.httpRequest(`${link}/photo?${query}`, { timeoutMs: 20000 })
   if (r.status === 404) return fail(single ? 'This photo is no longer in the album.' : 'This album link no longer works.')
   if (r.status !== 200) {
@@ -82,8 +98,9 @@ export function get(app: FrameOSApp, context: FrameOSContext): unknown {
   const count = position(data.count)
   const photo = data.photo
   if (!count || !photo || typeof photo !== 'object') {
-    frameos.log('This album has no photos yet.')
-    return show('This album has no photos yet.')
+    const message = shapes ? 'This album has no photos of the chosen shapes.' : 'This album has no photos yet.'
+    frameos.log(message)
+    return show(message)
   }
 
   // Move on before the download, so one broken photo cannot stall the frame.

@@ -73,4 +73,9 @@ export {
   type SelectFieldOption,
   type ShowIfCondition,
   type StateField,
+  type AppTestError,
+  type AppTestLogLine,
+  type AppTestReport,
+  type AppTestResult,
+  type AppTestSuiteResult,
 } from './types'

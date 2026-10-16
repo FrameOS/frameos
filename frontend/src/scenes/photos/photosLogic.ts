@@ -18,6 +18,7 @@ import { secureToken } from '../../utils/secureToken'
 import type { FrameId, FrameType } from '../../types'
 import { framesModel } from '../../models/framesModel'
 import { preselectPhotoAlbums } from './installPhotoScenesLogic'
+import { ALL_PHOTO_ALBUM_SHAPES, normalizePhotoAlbumShapes, type PhotoAlbumShape } from './photoAlbumScene'
 import { readDroppedItems, type DroppedItem } from './photoDrop'
 import { entriesByOrientation, withUploadedPhoto, type PhotoOrientation, type PhotoThumbnailFit } from './photoEntries'
 import {
@@ -131,6 +132,7 @@ export interface photosLogicValues {
   mutating: boolean
   newFolderParent: string | null
   notice: PhotosNotice | null
+  photoShapes: PhotoAlbumShape[]
   ready: boolean
   recentShowFrame: FrameType | null
   renameTarget: string | null
@@ -429,6 +431,9 @@ export interface photosLogicActions {
   stepLightbox: (delta: number) => {
     delta: number
   }
+  togglePhotoShape: (shape: PhotoAlbumShape) => {
+    shape: PhotoAlbumShape
+  }
   updateEntry: (entry: PhotoEntry) => {
     entry: PhotoEntry
   }
@@ -603,6 +608,8 @@ export const photosLogic = kea<photosLogicType>([
     rememberShowFrame: (frameId: FrameId) => ({ frameId }),
     /** "Show on frame": install the scene on the frame (true) or only preview it there (false). */
     setSaveShownScene: (save: boolean) => ({ save }),
+    /** The frame pickers' shape toggles: which photos (landscape, portrait, square) the scenes play. */
+    togglePhotoShape: (shape: PhotoAlbumShape) => ({ shape }),
     openResize: (paths: string[]) => ({ paths }),
     closeResize: true,
     /** Replace each photo with itself resized (docs/photos.md "POST /api/photos/resize"). */
@@ -874,6 +881,14 @@ export const photosLogic = kea<photosLogicType>([
       false,
       { persist: true, storageKey: 'photosLogic.saveShownScene' },
       { setSaveShownScene: (_, { save }) => save },
+    ],
+    photoShapes: [
+      ALL_PHOTO_ALBUM_SHAPES as PhotoAlbumShape[],
+      { persist: true, storageKey: 'photosLogic.photoShapes' },
+      {
+        togglePhotoShape: (state, { shape }) =>
+          normalizePhotoAlbumShapes(state.includes(shape) ? state.filter((item) => item !== shape) : [...state, shape]),
+      },
     ],
     resizeTargets: [
       null as string[] | null,
@@ -1207,7 +1222,7 @@ export const photosLogic = kea<photosLogicType>([
         }
       },
       installOnFrame: ({ frameId }) => {
-        preselectPhotoAlbums(frameId, values.installPickerAlbums ?? [])
+        preselectPhotoAlbums(frameId, values.installPickerAlbums ?? [], { shapes: values.photoShapes })
         actions.closeInstallPicker()
         // The frame page opens its Add scene drawer on the photos page from the URL.
         router.actions.push(urls.frame(frameId), { drawer: 'templates', drawerPage: 'photos' })
@@ -1225,6 +1240,7 @@ export const photosLogic = kea<photosLogicType>([
           photo: chosen.photo,
           activate: true,
           save: values.saveShownScene,
+          shapes: values.photoShapes,
         })
         actions.rememberShowFrame(frameId)
         actions.closeShowPicker()

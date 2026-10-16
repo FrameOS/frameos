@@ -48,6 +48,7 @@ export interface appNodeLogicValues {
   effectiveApps: Record<string, AppConfig> // diagramLogic
   nodes: DiagramNode[] // diagramLogic
   runtimeNodeErrorsByNodeId: Record<string, RuntimeNodeError> // diagramLogic
+  frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
   scenes: FrameScene[] // frameLogic
   allDefaultValues: Record<string, unknown>
@@ -84,6 +85,7 @@ export interface appNodeLogicValues {
   runtimeNodeError: RuntimeNodeError | null
   scene: FrameScene | null
   sceneIsCompiled: boolean
+  showMoreEventFilters: boolean
   showNextPrev: boolean
   showOutput: boolean
   sourceConfigJson: [Partial<AppConfig> | null, string | Error | null]
@@ -120,6 +122,9 @@ export interface appNodeLogicActions {
     field: string
   }
   select: () => {
+    value: true
+  }
+  toggleMoreEventFilters: () => {
     value: true
   }
 }
@@ -229,7 +234,7 @@ export const appNodeLogic = kea<appNodeLogicType>([
       diagramLogic({ frameId, sceneId }),
       ['nodes', 'edges', 'scene as currentScene', 'effectiveApps', 'runtimeNodeErrorsByNodeId'],
       frameLogic({ frameId }),
-      ['frameForm', 'scenes'],
+      ['frame', 'frameForm', 'scenes'],
     ],
     actions: [
       diagramLogic({ frameId, sceneId }),
@@ -241,6 +246,11 @@ export const appNodeLogic = kea<appNodeLogicType>([
     // Renaming an argument lives in CodeNode (CodeArg's Update button): it
     // rewrites the node's codeArgs and the edges' target handles in place.
     deleteCodeField: (field: string) => ({ field }),
+    /** An event node's folded filters (`filter: "more"` in the catalog) shown or hidden. */
+    toggleMoreEventFilters: true,
+  }),
+  reducers({
+    showMoreEventFilters: [false as boolean, { toggleMoreEventFilters: (state: boolean) => !state }],
   }),
   selectors({
     nodeId: [() => [(_, props) => props.nodeId], (nodeId): string => nodeId],

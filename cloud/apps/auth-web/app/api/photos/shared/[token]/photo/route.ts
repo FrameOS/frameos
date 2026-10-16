@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { jsonError } from "../../../../../../src/lib/device-flow";
 import { sharedPhotoContext, sharedPhotoJson } from "../../../../../../src/lib/photos/http";
 import { sharedPhotoAt, sharedPhotoColors, sharedPhotos } from "../../../../../../src/lib/photos/library";
-import { parsePhotoOrder, pickPhoto } from "../../../../../../src/lib/photos/pick";
+import {
+  filterPhotoShapes,
+  parsePhotoOrder,
+  parsePhotoShapes,
+  pickPhoto,
+} from "../../../../../../src/lib/photos/pick";
 
 export const runtime = "nodejs";
 
@@ -19,6 +24,11 @@ export async function GET(
   const order = parsePhotoOrder(query.get("order"));
   if (!order) {
     return jsonError("invalid_order", 400);
+  }
+  // `shapes`: only landscape, portrait or square photos, as the scene's toggles say.
+  const shapes = parsePhotoShapes(query.get("shapes"));
+  if (shapes === undefined) {
+    return jsonError("invalid_shapes", 400);
   }
   const rawIndex = query.get("index");
   const index = rawIndex === null || rawIndex === "" ? 0 : Number(rawIndex);
@@ -43,7 +53,7 @@ export async function GET(
     );
   }
   const { photos } = await sharedPhotos(db, share, { withColors: false });
-  const picked = pickPhoto(photos, { index, order, token });
+  const picked = pickPhoto(filterPhotoShapes(photos, shapes), { index, order, token });
   const photo = picked.photo
     ? { ...picked.photo, colors: await sharedPhotoColors(db, share, picked.photo.path) }
     : null;

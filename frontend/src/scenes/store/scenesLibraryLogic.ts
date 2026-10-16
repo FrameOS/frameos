@@ -22,6 +22,7 @@ import {
   type StoreShelfCount,
   type StoreShelfGroup,
 } from './storeCatalog'
+import { storeSortOf, type StoreSort } from '../../utils/storeSort'
 
 // The scenes library behind the Scenes rail button: the public store, the
 // account's private cloud scenes and (on a backend) its local saved scenes.
@@ -67,6 +68,7 @@ export interface scenesLibraryLogicValues {
   storeScenesCount: number
   storeShelfCounts: StoreShelfCount[]
   storeShelves: StoreShelfGroup[]
+  storeSort: StoreSort
   storeTemplates: TemplateType[]
   uploadError: string | null
   uploading: boolean
@@ -123,6 +125,9 @@ export interface scenesLibraryLogicActions {
     page: string | null
     visibility: string | null
   }
+  setStoreSort: (sort: StoreSort) => {
+    sort: StoreSort
+  }
   setVisibleShelf: (slug: string | null) => {
     slug: string | null
   }
@@ -141,7 +146,12 @@ export interface scenesLibraryLogicMeta {
     storeOrigin: (storeTemplates: TemplateType[]) => string
     storeScenesCount: (storeTemplates: TemplateType[]) => number
     storeShelfCounts: (storeTemplates: TemplateType[]) => StoreShelfCount[]
-    storeShelves: (storeTemplates: TemplateType[], search: string, category: string | null) => StoreShelfGroup[]
+    storeShelves: (
+      storeTemplates: TemplateType[],
+      search: string,
+      category: string | null,
+      storeSort: StoreSort
+    ) => StoreShelfGroup[]
     drivePageTemplates: (driveTemplates: TemplateType[], search: string) => TemplateType[]
     localPageTemplates: (templates: TemplateType[], search: string) => TemplateType[]
   }
@@ -179,6 +189,7 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
     ],
   })),
   actions({
+    setStoreSort: (sort: StoreSort) => ({ sort }),
     setRoute: (page: string | null, category: string | null, visibility: string | null, frame: string | null) => ({
       page,
       category,
@@ -201,6 +212,8 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
     saveEditTemplateFinished: (error: string | null) => ({ error }),
   }),
   reducers({
+    // The order of the store's shelves, kept for the session.
+    storeSort: ['popular' as StoreSort, { setStoreSort: (_, { sort }) => storeSortOf(sort) }],
     page: [
       'store' as ScenesLibraryPage,
       {
@@ -291,9 +304,9 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
       (storeTemplates: TemplateType[]): StoreShelfCount[] => storeShelfCountsOf(storeTemplates),
     ],
     storeShelves: [
-      (s) => [s.storeTemplates, s.search, s.category],
-      (storeTemplates: TemplateType[], search: string, category: string | null): StoreShelfGroup[] =>
-        storeShelvesOf(storeTemplates, { search, category }),
+      (s) => [s.storeTemplates, s.search, s.category, s.storeSort],
+      (storeTemplates: TemplateType[], search: string, category: string | null, sort: StoreSort): StoreShelfGroup[] =>
+        storeShelvesOf(storeTemplates, { search, category, sort }),
     ],
     drivePageTemplates: [
       (s) => [s.driveTemplates, s.search],

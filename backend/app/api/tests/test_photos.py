@@ -1408,6 +1408,7 @@ def test_album_scene_matches_the_fixture():
         seconds=given["seconds"],
         order=given["order"],
         fit=given["fit"],
+        shapes=given["shapes"],
     )
     assert normalized_album_scene(scene) == fixture["scene"]
     # Exactly as the SPA writes it, numbers included.
@@ -1435,7 +1436,14 @@ async def test_album_scene_route(async_client, no_auth_client, db, redis):
 
     response = await async_client.post(
         "/api/photos/scene",
-        json={"path": "Summer 2026", "frame_id": frame.id, "seconds": 600, "order": "newest", "fit": "contain"},
+        json={
+            "path": "Summer 2026",
+            "frame_id": frame.id,
+            "seconds": 600,
+            "order": "newest",
+            "fit": "contain",
+            "shapes": ["square", "landscape"],
+        },
     )
     assert response.status_code == 200, response.text
     body = response.json()
@@ -1451,7 +1459,7 @@ async def test_album_scene_route(async_client, no_auth_client, db, redis):
     }
     assert scene["name"] == "Summer 2026"
     assert scene["settings"]["refreshInterval"] == 600
-    assert [field["value"] for field in scene["fields"]] == ["600", "newest", "contain", "0"]
+    assert [field["value"] for field in scene["fields"]] == ["600", "newest", "contain", "true", "false", "true", "0"]
     # The link the scene carries plays.
     assert (await no_auth_client.get(f"/api/photos/shared/{token}")).json()["count"] == 1
 
@@ -1466,7 +1474,7 @@ async def test_album_scene_route(async_client, no_auth_client, db, redis):
     assert db.query(PhotoShare).count() == 2
     assert again["scene"]["name"] == "Beach"
     assert again["scene"]["settings"]["refreshInterval"] == 3600
-    assert [field["value"] for field in again["scene"]["fields"]] == ["3600", "random", "cover", "0"]
+    assert [field["value"] for field in again["scene"]["fields"]] == ["3600", "random", "cover", "true", "true", "true", "0"]
     assert again["scene"]["id"] != scene["id"]
 
     # The address is the frame's: https and an IPv6 literal.
@@ -1495,6 +1503,10 @@ async def test_album_scene_route_refusals(async_client, db, redis):
         {"order": "upside-down"},
         {"order": ["random"]},
         {"fit": "stretch"},
+        {"shapes": []},
+        {"shapes": ["round"]},
+        {"shapes": "landscape"},
+        {"shapes": ["landscape", "landscape"]},
         {"name": 5},
         {"name": "x" * 257},
         {"frame_id": None},
@@ -1615,6 +1627,38 @@ async def test_resize_refuses_what_the_contract_refuses(async_client):
     ):
         response = await async_client.post("/api/photos/resize", json=body)
         assert response.status_code == status, (body, response.text)
+
+
+@pytest.mark.asyncio
+async def test_a_shared_photo_by_shape(async_client, no_auth_client, redis):
+    """`shapes=`: only landscape, portrait or square photos count."""
+    lib = library(async_client)
+    write(lib, "Summer/l.jpg", jpeg_bytes(40, 30))
+    write(lib, "Summer/p.jpg", jpeg_bytes(30, 40))
+    write(lib, "Summer/s.jpg", jpeg_bytes(30, 30))
+    link = await share(async_client, "Summer")
+
+    async def pick(shapes: str, index: int = 0) -> dict:
+        response = await no_auth_client.get(
+            f"/api/photos/shared/{link['token']}/photo",
+            params={"order": "sequential", "index": index, "shapes": shapes},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    assert (await pick("portrait"))["count"] == 1
+    assert (await pick("portrait"))["photo"]["path"] == "p.jpg"
+    assert (await pick("portrait", 7))["photo"]["path"] == "p.jpg"
+    both = await pick("square, landscape")
+    assert both["count"] == 2 and both["photo"]["path"] == "l.jpg"
+    assert (await pick("square,landscape", 1))["photo"]["path"] == "s.jpg"
+    # Empty, or every shape: every photo.
+    assert (await pick(""))["count"] == 3
+    assert (await pick("landscape,portrait,square"))["count"] == 3
+    response = await no_auth_client.get(
+        f"/api/photos/shared/{link['token']}/photo", params={"shapes": "landscape,round"}
+    )
+    assert response.status_code == 400
 
 
 @pytest.mark.asyncio

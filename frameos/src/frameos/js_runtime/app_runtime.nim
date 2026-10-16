@@ -43,6 +43,9 @@ type
     ## and module state goes with it; this survives until the scene does.
     memory*: Table[string, string]
     memoryBytes*: int
+    ## A script evaluated after the prelude and before the main module: the
+    ## test harness (app_tests.nim). Empty for an app on a frame.
+    extraPrelude*: string
 
   JsAppEvalEnv = ref object
     runtime: JsAppRuntime
@@ -207,10 +210,12 @@ proc jsAppLog(ctx: ptr JSContext, level: JSValue, payloadJson: JSValue): JSValue
         logPayload["nodeName"] = %* e.owner.nodeName
       e.owner.scene.logger.log(logPayload)
     else:
+      # console.warn: a log line that says so, since the logger has no level of its own for it.
+      let prefix = if lvl == "warn": "warning: " else: ""
       if lvl == "error":
         frameos_apps.logError(e.owner, jsAppLogMessage(payload))
       else:
-        frameos_apps.log(e.owner, jsAppLogMessage(payload))
+        frameos_apps.log(e.owner, prefix & jsAppLogMessage(payload))
   except CatchableError:
     if lvl == "error":
       frameos_apps.logError(e.owner, payloadStr)
@@ -1567,6 +1572,16 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
       return kept ? JSON.parse(kept) : undefined;
     },
   };
+  // console.log and friends, so an app written like any other JavaScript
+  // logs like frameos.log: strings as they are, the rest as JSON, one line
+  // per call. warn is a log line that says so; error goes to the error log.
+  const console = {
+    log: (...args) => jsAppLog("log", JSON.stringify(args, __jsReplacer)),
+    info: (...args) => jsAppLog("log", JSON.stringify(args, __jsReplacer)),
+    debug: (...args) => jsAppLog("log", JSON.stringify(args, __jsReplacer)),
+    warn: (...args) => jsAppLog("warn", JSON.stringify(args, __jsReplacer)),
+    error: (...args) => jsAppLog("error", JSON.stringify(args, __jsReplacer)),
+  };
   globalThis.__frameosModule = {};
   const exports = globalThis.__frameosModule;
   function __frameosWrapApp(app) {
@@ -1597,6 +1612,11 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
       : undefined;
   }
   """ & sceneJsPrelude)
+  # The test harness, when this runtime runs an app's tests (app_tests.nim):
+  # after the prelude so it can wrap `frameos`, before the module so the
+  # module's describe() calls land in it.
+  if runtime.extraPrelude.len > 0:
+    discard runtime.js.eval(runtime.extraPrelude, "frameos-test-harness.js")
   # Named after the real file so `./helper` resolves beside it and error
   # locations read `app.ts:12:3`.
   let filename = runtime.sourceName
@@ -1921,6 +1941,31 @@ proc invoke(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context
     if raiseOnError:
       raise newException(JsAppError, details.message)
     return jsNull(ctx)
+
+proc callAppGlobalForText*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode,
+    context: ExecutionContext, fnName: string): string =
+  ## Call a global JavaScript function (not a module export) in the app's
+  ## context, the bridge set up as for `get`, and hand back what it returned
+  ## as text. The test harness returns its report this way (app_tests.nim). A
+  ## throw, or a module that does not load, is a JsAppError.
+  try:
+    ensureReady(runtime, owner.frameConfig, if owner.scene.isNil: "" else: owner.scene.id.string)
+  except CatchableError as error:
+    raise newException(JsAppError, error.msg)
+  let ctx = runtime.js.context
+  runtime.midCall:
+    jsAppEnvByCtx[ctx] = JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson, context: context)
+    let payload =
+      try:
+        callGlobalFunction(ctx, fnName, [])
+      finally:
+        if jsAppEnvByCtx.hasKey(ctx):
+          jsAppEnvByCtx.del(ctx)
+    defer: JS_FreeValue(ctx, payload)
+    if JS_IsException(payload) != 0:
+      let details = mappedJsExceptionDetails(ctx)
+      raise newException(JsAppError, details.message)
+    return toNimString(ctx, payload)
 
 proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
   if runtime.initialized:

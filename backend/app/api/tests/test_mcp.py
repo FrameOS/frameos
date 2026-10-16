@@ -450,7 +450,7 @@ async def test_photos_tools_against_the_real_routes(async_client, db: Session, r
     assert installed["installed"] == [{"id": scenes[0]["id"], "name": "Summer 2026"}]
     album = next(node for node in scenes[0]["nodes"] if node["data"]["keyword"] == "photoAlbum")
     assert album["data"]["config"]["album"] == f"http://10.0.0.5:{frame.server_port}/api/photos/shared/{token}"
-    assert set(scenes[0]["apps"]["photoAlbum"]["sources"]) == {"app.ts", "config.json"}
+    assert set(scenes[0]["apps"]["photoAlbum"]["sources"]) == {"app.test.ts", "app.ts", "config.json"}
 
     missing_frame = await call(async_client, "photo_album_install", {"confirm": True, "frame_id": frame.id + 100, "path": "Summer 2026"})
     assert missing_frame.get("isError") is True

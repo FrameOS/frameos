@@ -46,7 +46,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.utils.tz_slice import tz_slice
-from app.utils.retired_apps import frame_runtime_version, scenes_for_runtime
+from app.utils.retired_apps import frame_runtime_version, scenes_for_embedded_runtime
 from app.database import get_db
 from app.drivers.devices import device_dimensions
 from app.models.frame import Frame, get_frame_json, normalize_frame_admin_auth, normalize_https_proxy
@@ -383,7 +383,7 @@ def embedded_scenes_payload(db: Session, frame: Frame) -> bytes:
     if source is None:
         source = frame.scenes or []
     scenes = [scene for scene in source if isinstance(scene, dict)]
-    scenes = scenes_for_runtime(scenes, frame_runtime_version(frame))
+    scenes = scenes_for_embedded_runtime(scenes, frame_runtime_version(frame))
     return json.dumps(scenes, separators=(",", ":"), sort_keys=True).encode("utf-8")
 
 

@@ -381,7 +381,14 @@ describe("the photo album scene fixture", () => {
   const fixture = JSON.parse(
     readFileSync(new URL("../../../../../../docs/photo-album-scene.json", import.meta.url), "utf8"),
   ) as {
-    input: { albumUrl: string; fit: "cover" | "contain"; name: string; order: "newest"; seconds: number };
+    input: {
+      albumUrl: string;
+      fit: "cover" | "contain";
+      name: string;
+      order: "newest";
+      seconds: number;
+      shapes: ("landscape" | "portrait" | "square")[];
+    };
     scene: unknown;
   };
 
@@ -418,6 +425,19 @@ describe("the photo album scene fixture", () => {
   it("is what the SPA builds", () => {
     const scene = buildPhotoAlbumScene(fixture.input) as unknown as Built;
     expect(normalized(scene)).toEqual(fixture.scene);
+  });
+
+  it("plays every shape unless told otherwise", () => {
+    const { shapes: _shapes, ...everyShape } = fixture.input;
+    const scene = buildPhotoAlbumScene(everyShape) as unknown as Built;
+    const fields = scene.fields as { name: string; value: string }[];
+    expect(fields.filter((field) => ["landscape", "portrait", "square"].includes(field.name)).map((f) => f.value)).toEqual([
+      "true",
+      "true",
+      "true",
+    ]);
+    const cloud = buildCloudPhotoAlbumScene(everyShape) as unknown as Built;
+    expect(normalized(cloud)).toEqual(normalized(scene));
   });
 
   it("is what the cloud's scene route builds, with the same app", () => {

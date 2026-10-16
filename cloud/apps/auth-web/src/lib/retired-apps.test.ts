@@ -4,10 +4,12 @@ import { describe, expect, it } from "vitest";
 
 import { RETIRED_APPS } from "./retired-apps.gen";
 import {
+  isAppTestFile,
   keywordsRuntimeLacks,
   replacementAppEntry,
   restoreAppsInScenes,
   retireAppsInScenes,
+  scenesForEmbeddedRuntime,
   scenesForRuntime,
   withRetiredAppsReplaced,
 } from "./retired-apps";
@@ -79,6 +81,25 @@ describe("retired apps (docs/retired-apps-fixtures.json)", () => {
     expect(keywordsRuntimeLacks("2026.10.13")).toEqual([]);
     expect(keywordsRuntimeLacks(null)).toEqual([]);
     expect(keywordsRuntimeLacks("nightly")).toEqual([]);
+  });
+
+  it("an embedded runtime gets no app test files", () => {
+    const scenes = [
+      {
+        apps: {
+          panel: { sources: { "app.ts": "x", "app.test.ts": "y", "util.TEST.jsx": "z", "config.json": "{}" } },
+          odd: { sources: "not a map" },
+        },
+        id: "a",
+      },
+      { id: "b" },
+    ];
+    expect(isAppTestFile("app.test.ts")).toBe(true);
+    expect(isAppTestFile("app.ts")).toBe(false);
+    expect(isAppTestFile("test.ts")).toBe(false);
+    const stripped = scenesForEmbeddedRuntime(scenes, "2026.10.15");
+    expect((stripped[0] as (typeof scenes)[0]).apps!.panel!.sources).toEqual({ "app.ts": "x", "config.json": "{}" });
+    expect(Object.keys(scenes[0]!.apps!.panel!.sources)).toContain("app.test.ts");
   });
 
   it("converts a copy for readers", () => {

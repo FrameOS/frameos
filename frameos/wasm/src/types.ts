@@ -163,3 +163,48 @@ export function sceneEventButtons(scene: FrameOSScene | undefined | null): Scene
   }
   return events
 }
+
+/** One line a test (or the app under it) logged: `frameos.log`, `console.*`. */
+export interface AppTestLogLine {
+  level: 'log' | 'warn' | 'error'
+  text: string
+}
+
+export interface AppTestError {
+  message: string
+  stack: string
+  expected?: string
+  received?: string
+}
+
+export interface AppTestResult {
+  kind: 'test'
+  name: string
+  status: 'passed' | 'failed' | 'skipped'
+  durationMs: number
+  logs: AppTestLogLine[]
+  error?: AppTestError
+}
+
+export interface AppTestSuiteResult {
+  kind: 'suite'
+  name: string
+  status: 'passed' | 'failed' | 'skipped'
+  children: (AppTestResult | AppTestSuiteResult)[]
+  error?: AppTestError
+}
+
+/**
+ * The report of one app test file, as the runtime's harness builds it
+ * (src/frameos/js_runtime/app_test_harness.js). `error` is set, and the
+ * tree empty, when the file itself did not load.
+ */
+export interface AppTestReport {
+  ok: boolean
+  file?: string
+  error?: string
+  counts: { passed: number; failed: number; skipped: number; total: number }
+  durationMs: number
+  children: (AppTestResult | AppTestSuiteResult)[]
+  logs: AppTestLogLine[]
+}

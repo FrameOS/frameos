@@ -20,6 +20,17 @@ export interface ChangeDetail {
     previousVersion?: string | null
     currentVersion: string
   }
+  /** Cloud: the last push is queued and the device has not acked it yet. Nothing to do but wait. */
+  awaitingDeviceAck?: boolean
+}
+
+/**
+ * Every pending change is the last push waiting for the device's ack: the
+ * frame syncs on its own, so the tile, the status line and the deploy button
+ * show an hourglass rather than asking for a click that changes nothing.
+ */
+export function onlyAwaitingDeviceAck(details: readonly ChangeDetail[]): boolean {
+  return details.length > 0 && details.every((change) => change.awaitingDeviceAck)
 }
 
 export interface SummaryItem {

@@ -3461,6 +3461,22 @@ html[data-frameos-theme='dark']
   background: rgba(0, 0, 0, 0);
 }
 select.with-triangle {
+  background-image: url("data:image/svg+xml;utf8,<svg fill='%236b7280' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>");
+  background-repeat: no-repeat;
+  background-position-x: 100%;
+  background-position-y: 0;
+}
+
+/* The dark node control sets `background` as a shorthand, which also resets
+ * the repeat and the position: restate them here, or the caret tiles across
+ * the whole select. The :hover and :focus forms outrank the dark control's
+ * own hover rule for the same reason. */
+.frameos-theme-dark select.with-triangle,
+.frameos-theme-dark select.with-triangle:hover,
+.frameos-theme-dark select.with-triangle:focus,
+html[data-frameos-theme='dark'] select.with-triangle,
+html[data-frameos-theme='dark'] select.with-triangle:hover,
+html[data-frameos-theme='dark'] select.with-triangle:focus {
   background-image: url("data:image/svg+xml;utf8,<svg fill='white' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>");
   background-repeat: no-repeat;
   background-position-x: 100%;

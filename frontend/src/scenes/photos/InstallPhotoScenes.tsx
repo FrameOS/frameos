@@ -6,6 +6,8 @@ import type { FrameType } from '../../types'
 import { Spinner } from '../../components/Spinner'
 import { Select } from '../../components/Select'
 import { RefreshIntervalInput } from '../../components/RefreshIntervalInput'
+import { TextInput } from '../../components/TextInput'
+import { ShapeToggles } from './ShapeToggles'
 import { urls } from '../../urls'
 import { installPhotoScenesLogic } from './installPhotoScenesLogic'
 import { photoThumbUrl } from './photosApi'
@@ -16,9 +18,35 @@ import { photoCountLabel } from './photoPaths'
  * install one scene per album on this frame. */
 export function InstallPhotoScenes({ frame }: { frame: FrameType }): JSX.Element {
   const logic = installPhotoScenesLogic({ frameId: frame.id })
-  const { library, libraryLoading, choices, selectedAlbums, seconds, order, fit, installing, error, canInstall } =
-    useValues(logic)
-  const { toggleAlbum, setSeconds, setOrder, setFit, install } = useActions(logic)
+  const {
+    library,
+    libraryLoading,
+    choices,
+    selectedAlbums,
+    seconds,
+    order,
+    fit,
+    shapes,
+    customLink,
+    customLinkValid,
+    newAlbumName,
+    creatingAlbum,
+    installing,
+    error,
+    canInstall,
+  } = useValues(logic)
+  const {
+    toggleAlbum,
+    setSeconds,
+    setOrder,
+    setFit,
+    toggleShape,
+    setCustomLink,
+    setNewAlbumName,
+    createAlbum,
+    install,
+  } = useActions(logic)
+  const sceneCount = selectedAlbums.length + (customLinkValid ? 1 : 0)
 
   if (!library && libraryLoading) {
     return (
@@ -114,6 +142,45 @@ export function InstallPhotoScenes({ frame }: { frame: FrameType }): JSX.Element
         )}
       </div>
 
+      <form
+        className="flex items-end gap-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          createAlbum()
+        }}
+      >
+        <label className="block min-w-0 flex-1 space-y-1.5">
+          <span className="frameos-form-label text-sm font-medium">New album</span>
+          <TextInput
+            value={newAlbumName}
+            onChange={setNewAlbumName}
+            placeholder="Summer 2026"
+            disabled={creatingAlbum}
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={!newAlbumName.trim() || creatingAlbum}
+          className="frameos-secondary-button flex h-[42px] shrink-0 items-center gap-2 rounded-xl px-3 text-sm font-semibold shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {creatingAlbum ? <Spinner className="h-4 w-4" /> : <FolderIcon className="h-4 w-4" />}
+          Create
+        </button>
+      </form>
+
+      <label className="block space-y-1.5">
+        <span className="frameos-form-label text-sm font-medium">Album link from elsewhere</span>
+        <TextInput
+          value={customLink}
+          onChange={setCustomLink}
+          placeholder="https://cloud.frameos.net/api/photos/shared/pk_..."
+          type="url"
+        />
+        <span className="frameos-muted block text-xs">
+          A share link from another FrameOS backend or the cloud, played as it is.
+        </span>
+      </label>
+
       <label className="block space-y-1.5">
         <span className="frameos-form-label text-sm font-medium">Seconds to show one photo</span>
         <RefreshIntervalInput value={seconds} onChange={setSeconds} />
@@ -130,6 +197,8 @@ export function InstallPhotoScenes({ frame }: { frame: FrameType }): JSX.Element
         </label>
       </div>
 
+      <ShapeToggles value={shapes} onToggle={toggleShape} />
+
       {error ? <div className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-800">{error}</div> : null}
 
       <button
@@ -139,11 +208,7 @@ export function InstallPhotoScenes({ frame }: { frame: FrameType }): JSX.Element
         className="frameos-primary-action flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white shadow-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {installing ? <Spinner className="h-4 w-4" color="white" /> : <PhotoIcon className="h-5 w-5" />}
-        {selectedAlbums.length > 1
-          ? `Install ${selectedAlbums.length} scenes`
-          : selectedAlbums.length === 1
-          ? 'Install scene'
-          : 'Pick an album'}
+        {sceneCount > 1 ? `Install ${sceneCount} scenes` : sceneCount === 1 ? 'Install scene' : 'Pick an album'}
       </button>
       <p className="frameos-muted text-xs">
         Each album becomes a scene on {frame.name || 'this frame'}. Deploy to send it to the frame.

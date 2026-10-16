@@ -139,31 +139,40 @@
         "name": "x",
         "label": "X",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "y",
         "label": "Y",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerId",
         "label": "Pointer",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerType",
         "label": "Pointer type",
         "type": "string",
-        "required": true
+        "required": true,
+        "options": [
+          "mouse",
+          "touch",
+          "pen"
+        ]
       },
       {
         "name": "buttons",
         "label": "Buttons held",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       }
     ]
   },
@@ -176,13 +185,15 @@
         "name": "x",
         "label": "X",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "y",
         "label": "Y",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "button",
@@ -194,19 +205,26 @@
         "name": "buttons",
         "label": "Buttons held",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerId",
         "label": "Pointer",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerType",
         "label": "Pointer type",
         "type": "string",
-        "required": true
+        "required": true,
+        "options": [
+          "mouse",
+          "touch",
+          "pen"
+        ]
       }
     ]
   },
@@ -219,13 +237,15 @@
         "name": "x",
         "label": "X",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "y",
         "label": "Y",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "button",
@@ -237,19 +257,26 @@
         "name": "buttons",
         "label": "Buttons held",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerId",
         "label": "Pointer",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerType",
         "label": "Pointer type",
         "type": "string",
-        "required": true
+        "required": true,
+        "options": [
+          "mouse",
+          "touch",
+          "pen"
+        ]
       }
     ]
   },
@@ -262,25 +289,33 @@
         "name": "x",
         "label": "X",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "y",
         "label": "Y",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerId",
         "label": "Pointer",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerType",
         "label": "Pointer type",
         "type": "string",
-        "required": true
+        "required": true,
+        "options": [
+          "mouse",
+          "touch",
+          "pen"
+        ]
       }
     ]
   },
@@ -294,13 +329,15 @@
         "name": "x",
         "label": "X",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "y",
         "label": "Y",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       }
     ]
   },
@@ -341,25 +378,33 @@
         "name": "x",
         "label": "X",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "y",
         "label": "Y",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerId",
         "label": "Pointer",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerType",
         "label": "Pointer type",
         "type": "string",
-        "required": true
+        "required": true,
+        "options": [
+          "mouse",
+          "touch",
+          "pen"
+        ]
       }
     ]
   },
@@ -372,25 +417,33 @@
         "name": "x",
         "label": "X",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "y",
         "label": "Y",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerId",
         "label": "Pointer",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerType",
         "label": "Pointer type",
         "type": "string",
-        "required": true
+        "required": true,
+        "options": [
+          "mouse",
+          "touch",
+          "pen"
+        ]
       }
     ]
   },
@@ -403,31 +456,40 @@
         "name": "x",
         "label": "X",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "y",
         "label": "Y",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "durationMs",
         "label": "Held for (ms)",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerId",
         "label": "Pointer",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerType",
         "label": "Pointer type",
         "type": "string",
-        "required": true
+        "required": true,
+        "options": [
+          "mouse",
+          "touch",
+          "pen"
+        ]
       }
     ]
   },
@@ -440,43 +502,59 @@
         "name": "direction",
         "label": "Direction",
         "type": "string",
-        "required": true
+        "required": true,
+        "options": [
+          "left",
+          "right",
+          "up",
+          "down"
+        ]
       },
       {
         "name": "x",
         "label": "X",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "y",
         "label": "Y",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "startX",
         "label": "Start X",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "startY",
         "label": "Start Y",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerId",
         "label": "Pointer",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "pointerType",
         "label": "Pointer type",
         "type": "string",
-        "required": true
+        "required": true,
+        "options": [
+          "mouse",
+          "touch",
+          "pen"
+        ]
       }
     ]
   },
@@ -489,25 +567,29 @@
         "name": "deltaX",
         "label": "Delta X",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "deltaY",
         "label": "Delta Y",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "x",
         "label": "X",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "y",
         "label": "Y",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       }
     ]
   },
@@ -534,38 +616,59 @@
         "name": "pin",
         "label": "Pin",
         "type": "integer",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "label",
         "label": "Label",
         "type": "string",
-        "required": true
+        "required": true,
+        "filter": "more"
       },
       {
         "name": "role",
         "label": "Role",
         "type": "string",
-        "required": true
+        "required": true,
+        "options": [
+          "primary",
+          "secondary",
+          "next",
+          "prev",
+          "up",
+          "down",
+          "back",
+          "menu",
+          "refresh"
+        ]
       },
       {
         "name": "action",
         "label": "Action",
         "type": "string",
         "required": true,
+        "options": [
+          "press",
+          "longPress",
+          "repeat",
+          "release"
+        ],
         "listenDefault": "press"
       },
       {
         "name": "durationMs",
         "label": "Held for (ms)",
         "type": "integer",
-        "required": false
+        "required": false,
+        "filter": "more"
       },
       {
         "name": "wake",
         "label": "Woke the device",
         "type": "boolean",
-        "required": false
+        "required": false,
+        "filter": "more"
       }
     ]
   },

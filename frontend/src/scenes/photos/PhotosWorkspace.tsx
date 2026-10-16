@@ -53,7 +53,8 @@ import {
   photoResizeLogic,
   type ResizeSizeChoice,
 } from './photoResizeLogic'
-import { aspectMarkRect, type PhotoThumbnailFit } from './photoEntries'
+import { type PhotoThumbnailFit } from './photoEntries'
+import { AspectMark, ShapeToggles } from './ShapeToggles'
 import { photoColorsLogic } from './photoColorsLogic'
 import {
   PREVIEW_SIZE_PRESETS,
@@ -260,26 +261,6 @@ function FolderCover({
         )}
       />
     </div>
-  )
-}
-
-/** A small outline with the photo's aspect ratio, next to its dimensions. */
-function AspectMark({ width, height }: { width: number; height: number }): JSX.Element {
-  const box = 14
-  const rect = aspectMarkRect(width, height, box)
-  return (
-    <svg width={box} height={box} viewBox={`0 0 ${box} ${box}`} className="shrink-0 opacity-70" aria-hidden="true">
-      <rect
-        x={rect.x}
-        y={rect.y}
-        width={rect.width}
-        height={rect.height}
-        rx="1.5"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-    </svg>
   )
 }
 
@@ -514,6 +495,7 @@ function PhotosTopBar(): JSX.Element {
     uploadFiles,
     refresh,
     openInstallPicker,
+    openShowPicker,
     openShare,
     selectAll,
     selectByOrientation,
@@ -642,6 +624,17 @@ function PhotosTopBar(): JSX.Element {
             <ComputerDesktopIcon className="h-5 w-5" />
             <span className="hidden @3xl:inline">Install on frame</span>
           </button>
+          {installAlbums.length ? (
+            <button
+              type="button"
+              onClick={() => openShowPicker({ albums: installAlbums, photo: null })}
+              title="Show these albums on a frame now"
+              className={clsx(toolbarButtonClassName, 'frameos-secondary-button')}
+            >
+              <PlayIcon className="h-5 w-5" />
+              <span className="hidden @3xl:inline">Show on frame</span>
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
@@ -1009,9 +1002,17 @@ function ListRow({ entry, selected, shared }: { entry: PhotoEntry; selected: boo
 }
 
 function SelectionBar(): JSX.Element | null {
-  const { selectedEntries, albums, folder } = useValues(photosLogic)
-  const { clearSelection, deleteEntries, moveEntries, openRename, openInstallPicker, openResize } =
-    useActions(photosLogic)
+  const { selectedEntries, visibleEntries, albums, folder } = useValues(photosLogic)
+  const {
+    clearSelection,
+    selectAll,
+    deleteEntries,
+    moveEntries,
+    openRename,
+    openInstallPicker,
+    openShowPicker,
+    openResize,
+  } = useActions(photosLogic)
   if (!selectedEntries.length) {
     return null
   }
@@ -1031,7 +1032,18 @@ function SelectionBar(): JSX.Element | null {
       <button type="button" aria-label="Clear selection" onClick={clearSelection} className={iconButtonClassName}>
         <XMarkIcon className="h-5 w-5" />
       </button>
-      <span className="frameos-strong mr-auto text-sm font-semibold">{selectedEntries.length} selected</span>
+      <span className="frameos-strong text-sm font-semibold">{selectedEntries.length} selected</span>
+      {selectedEntries.length < visibleEntries.length ? (
+        <button
+          type="button"
+          onClick={selectAll}
+          className="frameos-link mr-auto text-sm font-semibold underline-offset-2 hover:underline"
+        >
+          Select all ({visibleEntries.length})
+        </button>
+      ) : (
+        <span className="mr-auto" />
+      )}
       {moveTargets.length ? (
         <DropdownMenu
           className="w-fit"
@@ -1050,14 +1062,24 @@ function SelectionBar(): JSX.Element | null {
         />
       ) : null}
       {folders.length ? (
-        <button
-          type="button"
-          onClick={() => openInstallPicker(folders)}
-          className={clsx(toolbarButtonClassName, 'frameos-secondary-button h-9')}
-        >
-          <ComputerDesktopIcon className="h-4 w-4" />
-          Install on frame
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={() => openInstallPicker(folders)}
+            className={clsx(toolbarButtonClassName, 'frameos-secondary-button h-9')}
+          >
+            <ComputerDesktopIcon className="h-4 w-4" />
+            Install on frame
+          </button>
+          <button
+            type="button"
+            onClick={() => openShowPicker({ albums: folders, photo: null })}
+            className={clsx(toolbarButtonClassName, 'frameos-secondary-button h-9')}
+          >
+            <PlayIcon className="h-4 w-4" />
+            Show on frame
+          </button>
+        </>
       ) : null}
       {resizable.length ? (
         <button
@@ -1906,8 +1928,8 @@ function ShareDialog(): JSX.Element | null {
 }
 
 function InstallPicker(): JSX.Element | null {
-  const { installPickerAlbums } = useValues(photosLogic)
-  const { closeInstallPicker, installOnFrame } = useActions(photosLogic)
+  const { installPickerAlbums, photoShapes } = useValues(photosLogic)
+  const { closeInstallPicker, installOnFrame, togglePhotoShape } = useActions(photosLogic)
   if (installPickerAlbums === null) {
     return null
   }
@@ -1925,14 +1947,16 @@ function InstallPicker(): JSX.Element | null {
       }
       onPick={installOnFrame}
       onClose={closeInstallPicker}
-    />
+    >
+      <ShapeToggles value={photoShapes} onToggle={togglePhotoShape} />
+    </FramePicker>
   )
 }
 
 /** "Show on frame": the frame that shows the album, or the one photo, right away. */
 function ShowPicker(): JSX.Element | null {
-  const { showPickerTarget, saveShownScene } = useValues(photosLogic)
-  const { closeShowPicker, showOnFrame, setSaveShownScene } = useActions(photosLogic)
+  const { showPickerTarget, saveShownScene, photoShapes } = useValues(photosLogic)
+  const { closeShowPicker, showOnFrame, setSaveShownScene, togglePhotoShape } = useActions(photosLogic)
   if (showPickerTarget === null) {
     return null
   }
@@ -1948,22 +1972,11 @@ function ShowPicker(): JSX.Element | null {
       onPick={(frameId) => showOnFrame(frameId, showPickerTarget)}
       onClose={closeShowPicker}
     >
-      <label className="flex items-start gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={saveShownScene}
-          onChange={(event) => setSaveShownScene(event.target.checked)}
-          className="mt-0.5"
-        />
-        <span>
-          <span className="frameos-strong font-semibold">Save as a scene on the frame</span>
-          <span className="frameos-muted block text-xs">
-            {saveShownScene
-              ? "The scene joins the frame's scenes and stays after it shows something else."
-              : 'Otherwise the frame only previews it: it shows now, and the frame keeps the scenes it has.'}
-          </span>
-        </span>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={saveShownScene} onChange={(event) => setSaveShownScene(event.target.checked)} />
+        <span className="frameos-strong font-semibold">Save as a scene on the frame</span>
       </label>
+      {showPickerTarget.photo ? null : <ShapeToggles value={photoShapes} onToggle={togglePhotoShape} />}
     </FramePicker>
   )
 }

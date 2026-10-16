@@ -30,7 +30,7 @@ import { deviceDeliverableFields } from "./frame-service-settings";
 import { commandTtlForFrame } from "./frame-sleep";
 import { deployProgressKindForCommand, startDeployProgress } from "./deploy-progress";
 import { requiredSettingsForScenes } from "./preview-settings";
-import { scenesForRuntime } from "./retired-apps";
+import { scenesForEmbeddedRuntime, scenesForRuntime } from "./retired-apps";
 import { withStoreSceneOrigin } from "./scene-origin";
 import { compiledSceneNames } from "./store";
 import { maxSceneZipUncompressedBytes } from "./store";
@@ -1451,6 +1451,7 @@ export async function buildScenesPayloadForFrame(
       accountId: frames.accountId,
       assignedSceneState: frames.assignedSceneState,
       frameosVersion: frames.frameosVersion,
+      hardware: frames.hardware,
     })
     .from(frames)
     .where(eq(frames.id, frameId))
@@ -1571,7 +1572,9 @@ export async function buildScenesPayloadForFrame(
     // other one the JavaScript app (retired-apps.ts). The checksums below are
     // of this form, so a firmware update that changes it shows — and the hub
     // redeploys on it (frame-hub, firmware version change).
-    const stamped = scenesForRuntime(
+    // ...and an ESP32 without the apps' test files, which it never runs and
+    // has no room for.
+    const stamped = (frameHardwareIsEsp32(frameRow) ? scenesForEmbeddedRuntime : scenesForRuntime)(
       withStoreSceneOrigin(extracted.scenes, {
         id: assignment.sceneId,
         slug: assignment.sceneSlug,

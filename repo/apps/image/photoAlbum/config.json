@@ -36,6 +36,30 @@
       "hint": "random shows every photo once before any repeats. sequential goes by folder and file name, newest and oldest by date."
     },
     {
+      "name": "landscape",
+      "type": "boolean",
+      "value": true,
+      "required": false,
+      "label": "Landscape photos",
+      "hint": "Play photos that are wider than tall."
+    },
+    {
+      "name": "portrait",
+      "type": "boolean",
+      "value": true,
+      "required": false,
+      "label": "Portrait photos",
+      "hint": "Play photos that are taller than wide."
+    },
+    {
+      "name": "square",
+      "type": "boolean",
+      "value": true,
+      "required": false,
+      "label": "Square photos",
+      "hint": "Play photos that are exactly as wide as tall."
+    },
+    {
       "name": "counterStateKey",
       "type": "string",
       "value": "photoIndex",

@@ -49,6 +49,52 @@ export function seededShuffle<T>(items: readonly T[], seed: string): T[] {
   return result;
 }
 
+export const photoShapes = ["landscape", "portrait", "square"] as const;
+export type PhotoShape = (typeof photoShapes)[number];
+
+/** landscape, portrait or square by the photo's pixels; null when its size is not known. */
+export function photoShape(width: number | null | undefined, height: number | null | undefined): PhotoShape | null {
+  if (!width || !height) {
+    return null;
+  }
+  return width > height ? "landscape" : height > width ? "portrait" : "square";
+}
+
+/**
+ * `shapes=landscape,square` on the share routes and `shapes` in a scene
+ * body: the shapes to play, in `photoShapes` order and without repeats.
+ * null for every shape (an empty value, or all of them named); undefined
+ * for a name that is not a shape.
+ */
+export function parsePhotoShapes(value: string | readonly string[] | null | undefined): PhotoShape[] | null | undefined {
+  const names = (Array.isArray(value) ? value : String(value ?? "").split(","))
+    .map((name) => String(name).trim())
+    .filter(Boolean);
+  if (names.some((name) => !(photoShapes as readonly string[]).includes(name))) {
+    return undefined;
+  }
+  const chosen = photoShapes.filter((shape) => names.includes(shape));
+  return chosen.length === 0 || chosen.length === photoShapes.length ? null : chosen;
+}
+
+/**
+ * The photos of the chosen shapes. With every shape (null) nothing is
+ * dropped, a photo of unknown size included; with a choice, only photos
+ * whose size is known and fits.
+ */
+export function filterPhotoShapes<T extends { height: number | null; width: number | null }>(
+  photos: readonly T[],
+  shapes: readonly PhotoShape[] | null,
+): T[] {
+  if (!shapes) {
+    return [...photos];
+  }
+  return photos.filter((photo) => {
+    const shape = photoShape(photo.width, photo.height);
+    return shape !== null && shapes.includes(shape);
+  });
+}
+
 export type OrderablePhoto = { mtime: number; path: string };
 
 /** The album in `order`, before any shuffle: by path, or by mtime then path. */

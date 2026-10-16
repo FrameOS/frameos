@@ -8,6 +8,8 @@ const PHOTO_ALBUM_APP_KEY = 'photoAlbum'
 
 export type PhotoAlbumOrder = 'random' | 'sequential' | 'newest' | 'oldest'
 export type PhotoAlbumFit = 'cover' | 'contain'
+/** A photo is landscape, portrait or square by its pixels (docs/photos.md, the share routes' `shapes`). */
+export type PhotoAlbumShape = 'landscape' | 'portrait' | 'square'
 
 export const PHOTO_ALBUM_ORDERS: { value: PhotoAlbumOrder; label: string }[] = [
   { value: 'random', label: 'Shuffle' },
@@ -21,6 +23,20 @@ export const PHOTO_ALBUM_FITS: { value: PhotoAlbumFit; label: string }[] = [
   { value: 'contain', label: 'Show the whole photo' },
 ]
 
+/** The scene's three shape toggles, one boolean field each, in field order. */
+export const PHOTO_ALBUM_SHAPES: { value: PhotoAlbumShape; label: string }[] = [
+  { value: 'landscape', label: 'Landscape photos' },
+  { value: 'portrait', label: 'Portrait photos' },
+  { value: 'square', label: 'Square photos' },
+]
+
+export const ALL_PHOTO_ALBUM_SHAPES: PhotoAlbumShape[] = PHOTO_ALBUM_SHAPES.map((shape) => shape.value)
+
+/** `shapes` as the scene bodies and share routes take them: known names, in order, no repeats. */
+export function normalizePhotoAlbumShapes(shapes: readonly string[] | null | undefined): PhotoAlbumShape[] {
+  return ALL_PHOTO_ALBUM_SHAPES.filter((shape) => (shapes ?? ALL_PHOTO_ALBUM_SHAPES).includes(shape))
+}
+
 export interface PhotoAlbumSceneOptions {
   name: string
   /** The share link the frame plays (docs/photos.md, "Share routes"). */
@@ -28,6 +44,8 @@ export interface PhotoAlbumSceneOptions {
   seconds: number
   order: PhotoAlbumOrder
   fit: PhotoAlbumFit
+  /** The shapes the scene plays; every shape when left out. */
+  shapes?: readonly PhotoAlbumShape[]
   backgroundColor?: string
   /** One photo of the album, by its path relative to the folder: the scene shows it alone. */
   photo?: string
@@ -44,6 +62,7 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
     throw new Error('The Photo album app is missing from this build.')
   }
   const seconds = Number.isFinite(options.seconds) && options.seconds > 0 ? options.seconds : 3600
+  const shapes = options.shapes ?? ALL_PHOTO_ALBUM_SHAPES
   const ids = {
     event: uuidv4(),
     renderImage: uuidv4(),
@@ -52,6 +71,9 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
     seconds: uuidv4(),
     order: uuidv4(),
     fit: uuidv4(),
+    landscape: uuidv4(),
+    portrait: uuidv4(),
+    square: uuidv4(),
   }
   const node = (id: string, type: string, data: Record<string, any>, x: number, y: number) => ({
     id,
@@ -161,6 +183,14 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
         access: 'public',
         value: options.fit,
       },
+      ...PHOTO_ALBUM_SHAPES.map((shape) => ({
+        name: shape.value,
+        label: shape.label,
+        type: 'boolean' as const,
+        persist: 'disk' as const,
+        access: 'public' as const,
+        value: shapes.includes(shape.value) ? 'true' : 'false',
+      })),
       {
         name: 'photoIndex',
         label: 'Position in the album',
@@ -187,6 +217,9 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
       node(ids.sleep, 'app', { keyword: 'logic/nextSleepDuration', config: {} }, 640, 140),
       node(ids.seconds, 'state', { keyword: 'seconds' }, 560, 40),
       node(ids.order, 'state', { keyword: 'order' }, -520, -140),
+      ...PHOTO_ALBUM_SHAPES.map((shape, position) =>
+        node(ids[shape.value], 'state', { keyword: shape.value }, -520, -60 + 80 * position)
+      ),
       node(ids.fit, 'state', { keyword: 'fit' }, 120, 40),
     ],
     edges: [
@@ -195,6 +228,9 @@ export function buildPhotoAlbumScene(options: PhotoAlbumSceneOptions): FrameScen
       edge(ids.renderImage, 'next', ids.sleep, 'prev', 'appNodeEdge'),
       edge(ids.seconds, 'fieldOutput', ids.sleep, 'fieldInput/duration', 'codeNodeEdge'),
       edge(ids.order, 'fieldOutput', ids.album, 'fieldInput/order', 'codeNodeEdge'),
+      ...PHOTO_ALBUM_SHAPES.map((shape) =>
+        edge(ids[shape.value], 'fieldOutput', ids.album, `fieldInput/${shape.value}`, 'codeNodeEdge')
+      ),
       edge(ids.fit, 'fieldOutput', ids.renderImage, 'fieldInput/placement', 'codeNodeEdge'),
     ],
     apps: {
