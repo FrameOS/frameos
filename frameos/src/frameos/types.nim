@@ -484,6 +484,9 @@ type
     cacheTimes*: Table[NodeId, float]
     cacheKeys*: Table[NodeId, JsonNode]
     cacheExprs*: Table[NodeId, JsonNode]
+    cacheRestoreTried*: Table[NodeId, bool]  # node ids whose stored entry was looked for (frameos/node_store)
+    cachePersistedAt*: Table[NodeId, float]  # when each node's entry was last written to storage
+    cacheFingerprints*: Table[NodeId, string] # what produced each node's value, for the stored copy
     imageFusionPlans*: Table[NodeId, ImageFusionPlan] # consumer node -> planned image edge
     imageBoundsPlans*: Table[NodeId, ImageBoundsPlan] # consumer node -> bounded unfused edge
     runNodeStack*: seq[NodeId] # nodes currently inside runNode, outermost first (recursion guard)

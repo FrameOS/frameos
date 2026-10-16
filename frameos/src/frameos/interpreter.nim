@@ -12,6 +12,8 @@ import frameos/retired_apps
 import frameos/channels
 import frameos/js_runtime/run_budget
 import frameos/node_config
+import frameos/node_store
+from frameos/version import compiledFrameOSVersion
 import frameos/event_log
 import frameos/events
 import frameos/planner
@@ -256,6 +258,190 @@ proc valueToKeyJson(v: Value): JsonNode =
     # string/text/float/int/bool/node/scene/none
     result = valueToJson(v)
 
+const CachePersistMinIntervalSec = 60.0
+  ## A node whose inputs change on every render misses on every render; its
+  ## file is rewritten at most this often, so a clock-keyed code node does not
+  ## wear the card. What is on storage may then be a little older than what is
+  ## in memory, which is still a value for the inputs it records.
+
+proc cacheFingerprint(scene: InterpretedFrameScene, nodeId: NodeId): string =
+  ## What produced a node's value, for the stored copy (frameos/node_store):
+  ## the runtime version, the node as the scene declares it (config, code,
+  ## cache settings), its app's sources and the frame's geometry. A redeploy
+  ## that changes any of them must not be answered with a value the old node
+  ## computed, which the in-memory cache never had to worry about: a reload
+  ## emptied it.
+  if scene.cacheFingerprints.hasKey(nodeId):
+    return scene.cacheFingerprints[nodeId]
+  var data = ""
+  var sources = ""
+  if scene.nodes.hasKey(nodeId):
+    let node = scene.nodes[nodeId]
+    if not node.data.isNil:
+      data = $node.data
+      let keyword = node.data{"keyword"}.getStr()
+      if keyword.len > 0:
+        let appSources = appSourcesFromSceneApps(scene, keyword)
+        if not appSources.isNil:
+          sources = $appSources
+  let fc = scene.frameConfig
+  let geometry = if fc.isNil: "" else: $fc.width & "x" & $fc.height & "r" & $fc.rotate
+  result = fnv1a64Hex(compiledFrameOSVersion(), scene.id.string, $nodeId.int, data, sources, geometry)
+  scene.cacheFingerprints[nodeId] = result
+
+proc cacheValueToStored(v: Value): JsonNode =
+  ## The stored form of a cached value, nil for a kind the store does not
+  ## keep: images (pixels on a card are what the photo apps' kept downloads
+  ## are for, docs/local-assets-todo.md) and spooled bodies.
+  case v.kind
+  of fkString: %*{"kind": "string", "value": v.s}
+  of fkText: %*{"kind": "text", "value": v.s}
+  of fkFloat: %*{"kind": "float", "value": v.f}
+  of fkInteger: %*{"kind": "integer", "value": v.i}
+  of fkBoolean: %*{"kind": "boolean", "value": v.b}
+  of fkColor: %*{"kind": "color", "value": v.col.toHtmlHex}
+  of fkJson: %*{"kind": "json", "value": (if v.j.isNil: newJNull() else: v.j)}
+  of fkNode: %*{"kind": "node", "value": v.nId.int}
+  of fkScene: %*{"kind": "scene", "value": v.sId.string}
+  of fkNone: %*{"kind": "none"}
+  else: nil
+
+proc storedToCacheValue(entry: JsonNode): Option[Value] =
+  let value = entry{"value"}
+  try:
+    case entry{"kind"}.getStr()
+    of "string": some(VString(value.getStr()))
+    of "text": some(VText(value.getStr()))
+    of "float": some(VFloat(value.getFloat()))
+    of "integer": some(VInt(value.getBiggestInt()))
+    of "boolean": some(VBool(value.getBool()))
+    of "color": some(VColor(parseHtmlColor(value.getStr())))
+    of "json": some(VJson(if value.isNil: newJNull() else: value))
+    of "node": some(VNode(NodeId(value.getInt())))
+    of "scene": some(VScene(SceneId(value.getStr())))
+    of "none": some(VNone())
+    else: none(Value)
+  except CatchableError:
+    none(Value)
+
+proc restoreStoredCacheEntry(scene: InterpretedFrameScene, nodeId: NodeId) =
+  ## The node's stored value, put back in the memory cache the first time the
+  ## node runs in this scene instance: after a restart, a scene switch and
+  ## back, or an ESP32's wake. From there the cache's own rules apply to it,
+  ## its stored time included, so a forecast fetched ten minutes before the
+  ## frame went to sleep is still a hit when it wakes.
+  if scene.cacheRestoreTried.hasKey(nodeId):
+    return
+  scene.cacheRestoreTried[nodeId] = true
+  if scene.cacheValues.hasKey(nodeId) or not clockIsSane():
+    return
+  let path = nodeStorePath(scene.id.string, nodeId.int)
+  let contents = readNodeStoreFile(path)
+  if contents.len == 0:
+    return
+  var entry: JsonNode
+  try:
+    entry = parseJson(contents)
+  except CatchableError:
+    removeNodeStoreFile(path)
+    return
+  let at = if entry.kind == JObject: entry{"at"}.getFloat(0.0) else: 0.0
+  if entry.kind != JObject or entry{"fp"}.getStr() != cacheFingerprint(scene, nodeId) or
+      at < SaneClockEpoch or at > epochTime() + 300.0:
+    # Written by a node that is not this one any more, or at a time this
+    # clock cannot place: nothing the cache could vouch for.
+    removeNodeStoreFile(path)
+    return
+  let value = storedToCacheValue(entry)
+  if value.isNone:
+    removeNodeStoreFile(path)
+    return
+  scene.cacheValues[nodeId] = value.get()
+  scene.cacheTimes[nodeId] = at
+  if entry.hasKey("key"):
+    scene.cacheKeys[nodeId] = entry["key"]
+  if entry.hasKey("expr"):
+    scene.cacheExprs[nodeId] = entry["expr"]
+  scene.logger.log(%*{
+    "event": "interpreter:cache:restored",
+    "sceneId": scene.id.string,
+    "nodeId": nodeId.int,
+    "ageSeconds": int(epochTime() - at),
+    "bytes": contents.len
+  })
+
+proc persistCacheEntry(scene: InterpretedFrameScene, nodeId: NodeId, value: Value) =
+  ## Writes the entry the memory cache just took (frameos/node_store). Best
+  ## effort: a value the store will not take stays in memory only.
+  let path = nodeStorePath(scene.id.string, nodeId.int)
+  if path.len == 0 or not clockIsSane():
+    return
+  let now = epochTime()
+  if scene.cachePersistedAt.getOrDefault(nodeId, 0.0) + CachePersistMinIntervalSec > now:
+    return
+  let stored = cacheValueToStored(value)
+  if stored.isNil:
+    return
+  stored["v"] = %1
+  stored["fp"] = %cacheFingerprint(scene, nodeId)
+  stored["at"] = %scene.cacheTimes.getOrDefault(nodeId, now)
+  if scene.cacheKeys.hasKey(nodeId):
+    stored["key"] = scene.cacheKeys[nodeId]
+  if scene.cacheExprs.hasKey(nodeId):
+    stored["expr"] = scene.cacheExprs[nodeId]
+  scene.cachePersistedAt[nodeId] = now
+  let refusal = writeNodeStoreFile(path, $stored)
+  if refusal.len > 0:
+    scene.logger.log(%*{
+      "event": "interpreter:cache:persist:skipped",
+      "sceneId": scene.id.string,
+      "nodeId": nodeId.int,
+      "reason": refusal
+    })
+
+proc serveStaleCacheEntry(scene: InterpretedFrameScene, nodeId: NodeId,
+    context: ExecutionContext, staleSec: float, inputsMatch: bool,
+    reason, error: string, extraLog: JsonNode): Option[Value] =
+  ## The stored value in place of a refresh that failed, when the node allows
+  ## one (`staleEnabled`), the value is for the inputs the node has now, and
+  ## it is younger than the window. Logged every time it is served, with its
+  ## age: a frame showing old data must say so.
+  if staleSec <= 0 or not inputsMatch or not scene.cacheValues.hasKey(nodeId) or
+      not scene.cacheTimes.hasKey(nodeId):
+    return none(Value)
+  let age = max(0.0, epochTime() - scene.cacheTimes[nodeId])
+  if age > staleSec:
+    return none(Value)
+  var served = scene.cacheValues[nodeId]
+  var tier = "memory"
+  if served.kind == fkImageSpool:
+    let img = materializeImageSpool(served.imgSp)
+    if img.isNil:
+      return none(Value)
+    served = VImage(img)
+    tier = "storage"
+  if served.kind == fkImage and context != nil:
+    # The producer may have taken the decode target before it failed. The
+    # chain did not fuse: a forwarding transformer must not mutate this,
+    # the cache's own copy, in place (the consumer's failure path withdraws
+    # the same clearance).
+    context.inPlaceImageNodes = @[]
+  var payload = %*{
+    "event": "interpreter:cache:stale",
+    "sceneId": scene.id.string,
+    "nodeId": nodeId.int,
+    "reason": reason,
+    "ageSeconds": int(age),
+    "staleSeconds": int(staleSec),
+    "tier": tier
+  }
+  if error.len > 0:
+    payload["error"] = %error
+  if extraLog.kind == JObject:
+    for k in extraLog.keys: payload[k] = extraLog[k]
+  scene.logger.log(payload)
+  some(served)
+
 proc withCache(scene: InterpretedFrameScene,
                nodeId: NodeId,
                context: ExecutionContext,
@@ -263,6 +449,7 @@ proc withCache(scene: InterpretedFrameScene,
                builtAnyInput: bool, builtInputKey: JsonNode,
                cacheExprActive: bool, cacheExprValue: JsonNode,
                allowStore: bool,
+               staleSec: float,
                extraLog: JsonNode,
                compute: proc (): Value): Value =
   ## Generic cache handler shared by app/code data nodes.
@@ -272,12 +459,28 @@ proc withCache(scene: InterpretedFrameScene,
   ## degraded inputs (a producer failed and was zero-filled): that result must
   ## never be pinned in the cache as though it were real data.
   ##
+  ## `staleSec` > 0 lets a failed refresh, or one computed from degraded
+  ## inputs, fall back on the stored value while it is younger than that
+  ## (serveStaleCacheEntry). Only for the same inputs: a forecast for the old
+  ## city is not a stale forecast for the new one. A cache expression that
+  ## changed is a refresh that was due, like an expired duration.
+  ##
+  ## Entries outlive the scene instance on storage (frameos/node_store), so
+  ## both rules hold across a restart and an ESP32's sleep.
+  ##
   ## `context` is only read by the image disk tier: to refuse snapshotting the
   ## live canvas on store, and to size the spill cap.
   if not cacheEnabled:
     return compute()
 
+  restoreStoredCacheEntry(scene, nodeId)
   var useCached = scene.cacheValues.hasKey(nodeId)
+
+  # Whether the stored value is for the inputs the node has now, whatever its
+  # age: what a failed refresh may fall back on.
+  var inputsMatch = useCached
+  if inputsMatch and cacheInputEnabled and builtAnyInput:
+    inputsMatch = scene.cacheKeys.hasKey(nodeId) and scene.cacheKeys[nodeId] == builtInputKey
 
   if useCached and cacheDurationEnabled:
     if not scene.cacheTimes.hasKey(nodeId):
@@ -295,12 +498,8 @@ proc withCache(scene: InterpretedFrameScene,
     elif scene.cacheExprs[nodeId] != cacheExprValue:
       useCached = false
 
-  if useCached and cacheInputEnabled and builtAnyInput:
-    if not scene.cacheKeys.hasKey(nodeId):
-      useCached = false
-    else:
-      if scene.cacheKeys[nodeId] != builtInputKey:
-        useCached = false
+  if useCached and not inputsMatch:
+    useCached = false
 
   if useCached:
     var served = scene.cacheValues[nodeId]
@@ -342,12 +541,27 @@ proc withCache(scene: InterpretedFrameScene,
   if TRACING:
     scene.logger.log(payload)
 
-  let fresh = compute()
+  var fresh: Value
+  try:
+    fresh = compute()
+  except Exception as e:
+    # Whatever the node raised is what its consumer would have painted or
+    # zero-filled; the stored value is better, while it is young enough.
+    let stale = serveStaleCacheEntry(scene, nodeId, context, staleSec, inputsMatch,
+      "refreshFailed", e.msg, extraLog)
+    if stale.isSome:
+      return stale.get()
+    raise
   if not allowStore:
     # Degraded inputs: return the value for this pass only. Leaving the stored
     # entry (and its key/time/expression) untouched means a later healthy pass
     # can still hit it, and a stale-but-real value is never replaced by one
-    # computed from zero-filled data.
+    # computed from zero-filled data. Within the stale window that real value
+    # is what this pass shows, too.
+    let stale = serveStaleCacheEntry(scene, nodeId, context, staleSec, inputsMatch,
+      "inputsDegraded", "", extraLog)
+    if stale.isSome:
+      return stale.get()
     return fresh
   var toStore = fresh
   let memoryLimit = cachedImageMemoryLimit()
@@ -367,12 +581,14 @@ proc withCache(scene: InterpretedFrameScene,
       return fresh
     toStore = VImageSpool(spool)
   scene.cacheValues[nodeId] = toStore
-  if cacheDurationEnabled:
-    scene.cacheTimes[nodeId] = epochTime()
+  # Always timed, duration or not: the age is what the stale window and the
+  # stored copy are measured by.
+  scene.cacheTimes[nodeId] = epochTime()
   if cacheExprActive:
     scene.cacheExprs[nodeId] = cacheExprValue
   if cacheInputEnabled and builtAnyInput:
     scene.cacheKeys[nodeId] = builtInputKey
+  persistCacheEntry(scene, nodeId, toStore)
   fresh
 
 # -------------------------
@@ -573,7 +789,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
 
       # ---- Read per-node cache config ----
       let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
-           cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode.data)
+           cacheExpressionEnabled, cacheExpression, cacheStaleSec) = readCacheConfig(currentNode.data)
 
       # ---- Negotiated decode target ----
       # Whether this node's image input can be produced straight into a target
@@ -791,7 +1007,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
                            cacheExprActive, cacheExprValue,
-                           true,
+                           true, cacheStaleSec,
                            %*{"keyword": keyword}):
           (proc (): Value =
             getInterpretedApp(keyword, app, context)
@@ -969,7 +1185,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       var defaultedArgs: seq[DefaultedArg] = @[]
 
       let (cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
-           cacheExpressionEnabled, cacheExpression) = readCacheConfig(currentNode.data)
+           cacheExpressionEnabled, cacheExpression, cacheStaleSec) = readCacheConfig(currentNode.data)
 
       if self.codeInputsForNodeId.hasKey(currentNodeId):
         let connectedArgs = self.codeInputsForNodeId[currentNodeId]
@@ -1064,7 +1280,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                            cacheEnabled, cacheInputEnabled, cacheDurationEnabled, cacheDurationSec,
                            builtAnyInput, builtInputKey,
                            cacheExprActive, cacheExprValue,
-                           defaultedArgs.len == 0,
+                           defaultedArgs.len == 0, cacheStaleSec,
                            %*{"nodeType": "code"},
                            computeFresh)
       else:
@@ -1336,6 +1552,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     cacheTimes: initTable[NodeId, float](),
     cacheKeys: initTable[NodeId, JsonNode](),
     cacheExprs: initTable[NodeId, JsonNode](),
+    cacheRestoreTried: initTable[NodeId, bool](),
+    cachePersistedAt: initTable[NodeId, float](),
+    cacheFingerprints: initTable[NodeId, string](),
     imageFusionPlans: initTable[NodeId, ImageFusionPlan](),
   )
   scene.execNode = proc(nodeId: NodeId, context: ExecutionContext) =

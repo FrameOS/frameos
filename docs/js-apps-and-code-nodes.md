@@ -199,7 +199,11 @@ app needs no error panel of its own), a code node that reads the value gets
 the zero value of its arg's type, and the node cache keeps nothing, so the
 next render tries again. That is what the photo apps do for a missing key or
 a failed download. (Before 2026.10.13 the consumer got `null` instead, and a
-cached node kept it.)
+cached node kept it.) When the node's cache has `staleEnabled`, the consumer
+gets the last value for the same inputs instead, while it is younger than
+`staleDuration` (FrameOS 2026.10.16). An app that returns its error as the
+value (`{ error }`, an empty string) gets none of this: the cache keeps the
+error like data.
 
 Keep apps small: a scene carries a copy of every app it uses (its
 `config.json` twice: as keys and as a file), an ESP32 stores all its scenes
@@ -213,7 +217,7 @@ Three places, the same rule on every device:
 | the value | goes in | lasts |
 |---|---|---|
 | what the rest of the scene should see: a position a button changes, the photo's metadata | `frameos.setState(key, value)`, read back as `app.state[key]` | the scene's state: every node reads it, state nodes see changes, declared fields can persist and show in the frame's controls |
-| the app's own, needed on the next render: a fetched photo list, a position | `frameos.remember(key, value)`, read back with `frameos.recall(key)` | until the scene unloads (not across a restart); private to the node |
+| the app's own, needed on the next render: a fetched photo list, a position | `frameos.remember(key, value)`, read back with `frameos.recall(key)` | across renders, restarts and an ESP32's sleep (one file per node, `frameos/node_store.nim`), until the app's code changes or the scene is removed; private to the node |
 | scratch for this render: lookup tables built when the module loads, intermediate results | module-level variables | one render |
 
 Module-level variables last as long as the app's interpreter, and an ESP32

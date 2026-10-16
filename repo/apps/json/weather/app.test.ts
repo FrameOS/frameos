@@ -80,13 +80,16 @@ describe('weather', () => {
     expect(http.calls[1][0]).toContain('timezone=Europe%2FBrussels')
   })
 
-  it('answers {location, error} replies instead of throwing', () => {
+  it('answers {location, error} about the location itself', () => {
     expect(get(makeApp({ config: { ...config, location: '' } }))).toEqual({ location: '', error: 'Location is required.' })
     mock.httpRequest(() => mock.json({ results: [] }))
     expect(get(makeApp({ config }))).toEqual({ location: 'Brussels', error: 'No matching locations found.' })
+  })
+
+  it('throws when a fetch fails, so the cache keeps nothing and can serve the last forecast', () => {
     mock.httpRequest(() => mock.response(500, 'down'))
-    expect(get(makeApp({ config }))).toEqual({ location: 'Brussels', error: 'HTTP 500: down' })
+    expect(() => get(makeApp({ config }))).toThrow('Weather for Brussels: HTTP 500: down')
     mock.httpRequest(() => ({ status: 0, error: 'offline' }))
-    expect(get(makeApp({ config }))).toEqual({ location: 'Brussels', error: 'offline' })
+    expect(() => get(makeApp({ config }))).toThrow('Weather for Brussels: offline')
   })
 })

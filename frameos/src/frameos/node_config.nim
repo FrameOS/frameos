@@ -30,7 +30,11 @@ proc jFloatOr*(j: JsonNode, key: string, default: float): float =
 
 type NodeCacheConfig* = tuple[
   enabled, inputEnabled, durationEnabled: bool, durationSec: float,
-  expressionEnabled: bool, expression: string]
+  expressionEnabled: bool, expression: string, staleSec: float]
+  ## `staleSec` > 0: when refreshing the value fails, serve the stored one
+  ## while it is younger than this many seconds (`staleEnabled` +
+  ## `staleDuration` in the scene JSON). 0 is today's rule: a failed refresh
+  ## fails the node.
 
 proc readCacheConfig*(data: JsonNode): NodeCacheConfig =
   var enabled = false
@@ -39,6 +43,7 @@ proc readCacheConfig*(data: JsonNode): NodeCacheConfig =
   var durationSec = 0.0
   var expressionEnabled = false
   var expression = ""
+  var staleSec = 0.0
   if not data.isNil and data.kind == JObject and
       data.hasKey("cache") and data["cache"].kind == JObject:
     let cc = data["cache"]
@@ -55,7 +60,10 @@ proc readCacheConfig*(data: JsonNode): NodeCacheConfig =
         expression = cc{"expression"}.getStr("").strip()
         if expression == "":
           expressionEnabled = false
-  (enabled, inputEnabled, durationEnabled, durationSec, expressionEnabled, expression)
+      if jBoolOr(cc, "staleEnabled", false):
+        # An unparseable window means "no stale value", never "forever".
+        staleSec = max(0.0, jFloatOr(cc, "staleDuration", 0.0))
+  (enabled, inputEnabled, durationEnabled, durationSec, expressionEnabled, expression, staleSec)
 
 proc configFieldString*(data: JsonNode, field: string): tuple[present: bool, value: string] =
   ## A node's configured value for `field`, rendered the way the planner

@@ -22,6 +22,7 @@ import frameos/values
 import frameos/planner
 import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_runtime
+import frameos/node_store
 
 # ------------------------------------------------------------------ C hooks
 
@@ -517,6 +518,9 @@ proc loadScenes*(payload: string): int =
   replaceInterpretedScenesCache(newScenes)
   when defined(memProbe): memProbe("  loadScene: scenes cache replaced")
   scenesLoadedCount = newScenes.len
+  # The node cache and remembered values of scenes that are gone
+  # (frameos/node_store): /state is small.
+  discard sweepNodeStore(newScenes.keys.toSeq.mapIt(it.string))
 
   # Keep the current scene across updates when it still exists; otherwise
   # fall back to the first scene in the payload.
@@ -564,6 +568,9 @@ proc setSceneCatalog*(indexJson: string): int =
   if entries.len == 0:
     log("setSceneCatalog: no scenes in index")
     return 0
+  # Same for the scenes no longer on flash. loadScene below never sweeps: it
+  # makes one scene of the catalog resident, the others keep their files.
+  discard sweepNodeStore(entries.mapIt(it.id))
   # The default is what boots when nothing was selected before; fall back to
   # the first entry so an index without one still starts something.
   let defaultId = parsed{"default"}.getStr()

@@ -974,6 +974,10 @@ export interface CacheConfig {
   expressionEnabled?: boolean
   expression?: string
   expressionType?: FieldType
+
+  /** When a refresh fails, serve the cached value while it is younger than staleDuration seconds (FrameOS 2026.10.16+). */
+  staleEnabled?: boolean
+  staleDuration?: string
 }
 
 export type NodeType = 'app' | 'source' | 'dispatch' | 'code' | 'event' | 'state' | 'scene'

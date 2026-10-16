@@ -37,18 +37,22 @@ line in the map).
 5. **`docs/embedded-todo.md`** — the Pico's four small bugs and its missing
    host tests, all fixed on draft PR #499, which rewrites the file when it
    merges. The ESP32's open work lives in the other files.
-6. **`docs/ui-todo.md`** — JSX widgets that render and react on the frame.
+6. **`docs/local-assets-todo.md`** — what a frame keeps on its own storage
+   and does when the network or an API is gone. Serve-stale caches and the
+   node store shipped; **next up: item 2**, a bounded library of kept images
+   per node with a `fetchImage` fallback. Then OpenAI image as a rotating
+   library with a budget, the freshness ledger for the status surface, and
+   the bird field journal's plate budget.
+7. **`docs/ui-todo.md`** — JSX widgets that render and react on the frame.
    Designed, not started. Lower priority for now, not parked.
-7. **`docs/scenes-todo.md`** — 49 store scene ideas, which
+8. **`docs/scenes-todo.md`** — 49 store scene ideas, which
    `build-todo-scenes.ts` builds from. Lower priority for now, not parked.
-8. **`cloud/STORE-TODO.md`** — the store's design record (decisions, threat
+9. **`cloud/STORE-TODO.md`** — the store's design record (decisions, threat
    model, protocol), no open work; its open questions are below. The name
    stays because code comments cite its decision numbers.
-9. **Open PRs with their own todo file**, joining this map when they merge:
-   #555 (`docs/local-assets-todo.md`: serve-stale caches, bounded image
-   libraries, paid-source budgets). Draft #496 and its
-   `docs/scene-rhythm-todo.md` are superseded by #582, whose open work is the
-   "Scenes inside scenes" section below.
+10. **Superseded:** draft #496 and its `docs/scene-rhythm-todo.md` are
+    replaced by #582, whose open work is the "Scenes inside scenes" section
+    below.
 
 ---
 
