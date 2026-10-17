@@ -4,7 +4,6 @@ import { Button } from '../../../../../components/Button'
 import { Field } from '../../../../../components/Field'
 import { Modal } from '../../../../../components/Modal'
 import { Spinner } from '../../../../../components/Spinner'
-import { Switch } from '../../../../../components/Switch'
 import { TextInput } from '../../../../../components/TextInput'
 import { Tooltip } from '../../../../../components/Tooltip'
 import type { FrameId } from '../../../../../types'
@@ -21,7 +20,7 @@ import { SectionBody, SectionHeading } from './FrameSettingsSection'
 export function LanAccessSection(): JSX.Element {
   const { frameId } = useValues(frameLogic)
   const { lanAccess, disabling, disableError, pendingNote } = useValues(lanAccessLogic({ frameId }))
-  const { switchChanged } = useActions(lanAccessLogic({ frameId }))
+  const { openModal, turnOff } = useActions(lanAccessLogic({ frameId }))
   const unknown = lanAccess === null
 
   return (
@@ -36,14 +35,27 @@ export function LanAccessSection(): JSX.Element {
       <SectionBody>
         <Field name="_noop" label="Let scenes reach the local network">
           <div className="w-full space-y-1">
-            <div className="flex items-center gap-2">
-              <Switch
-                value={lanAccess === true}
-                onChange={switchChanged}
-                disabled={unknown || disabling}
-                label={unknown ? 'Unknown' : lanAccess ? 'On' : 'Off'}
-              />
-              {disabling ? <Spinner /> : null}
+            {/* Buttons, not a switch: every other setting here waits for Save,
+                and this one applies at once, so it must not look like the others. */}
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-semibold">{unknown ? 'Unknown' : lanAccess ? 'On' : 'Off'}</span>
+              {lanAccess === true ? (
+                <Button
+                  type="button"
+                  size="small"
+                  color="secondary"
+                  className="inline-flex items-center gap-1.5"
+                  disabled={disabling}
+                  onClick={turnOff}
+                >
+                  {disabling ? <Spinner /> : null}
+                  Turn off
+                </Button>
+              ) : lanAccess === false ? (
+                <Button type="button" size="small" color="secondary" onClick={openModal}>
+                  Turn on
+                </Button>
+              ) : null}
             </div>
             {unknown ? (
               <div className="frameos-muted text-xs" data-testid="lan-access-unknown">
@@ -132,13 +144,26 @@ function LanAccessModal({ frameId }: { frameId: FrameId }): JSX.Element | null {
                   <Button type="button" size="small" color="secondary" disabled={!canRequestCode} onClick={showCode}>
                     Show a new code
                   </Button>
-                  <Button type="submit" size="small" color="primary" disabled={!canConfirm}>
+                  <Button
+                    type="submit"
+                    size="small"
+                    color="primary"
+                    className="inline-flex items-center gap-1.5"
+                    disabled={!canConfirm}
+                  >
                     {phase === 'confirming' ? <Spinner color="white" /> : null}
                     Turn on
                   </Button>
                 </>
               ) : (
-                <Button type="button" size="small" color="primary" disabled={!canRequestCode} onClick={showCode}>
+                <Button
+                  type="button"
+                  size="small"
+                  color="primary"
+                  className="inline-flex items-center gap-1.5"
+                  disabled={!canRequestCode}
+                  onClick={showCode}
+                >
                   {phase === 'requesting' ? <Spinner color="white" /> : null}
                   Show code on the frame
                 </Button>

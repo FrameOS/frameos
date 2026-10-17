@@ -3,6 +3,7 @@ import { MakeLogicType, actions, connect, kea, key, listeners, path, props, redu
 import type { FrameId, FrameType } from '../../../../types'
 import { framesModel } from '../../../../models/framesModel'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { confirmDialog } from '../../../../utils/confirmDialogLogic'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 
 /**
@@ -255,8 +256,8 @@ export interface lanAccessLogicActions {
   showCodeSuccess: (result: LanAccessChallengeResult) => {
     result: LanAccessChallengeResult
   }
-  switchChanged: (enabled: boolean) => {
-    enabled: boolean
+  turnOff: () => {
+    value: true
   }
 }
 
@@ -294,7 +295,7 @@ export const lanAccessLogic = kea<lanAccessLogicType>([
     actions: [framesModel, ['loadFrame', 'setFrameLanAccess']],
   })),
   actions({
-    switchChanged: (enabled: boolean) => ({ enabled }),
+    turnOff: true,
     openModal: true,
     closeModal: true,
     showCode: true,
@@ -457,15 +458,20 @@ export const lanAccessLogic = kea<lanAccessLogicType>([
     ],
   }),
   listeners(({ actions, values, props }) => ({
-    switchChanged: ({ enabled }) => {
-      // An unknown value cannot be changed from here (the switch is
-      // disabled, but its label still clicks).
-      if (values.lanAccess === null || enabled === values.lanAccess) {
+    turnOff: async () => {
+      if (values.lanAccess !== true || values.disabling) {
         return
       }
-      if (enabled) {
-        actions.openModal()
-      } else {
+      // Off is one click away, on is a walk to the frame: say so first.
+      const confirmed = await confirmDialog({
+        title: 'Turn off LAN access?',
+        message:
+          'Scenes on this frame will no longer reach devices on your home network.\n\n' +
+          'To turn it back on, someone has to be at the frame: it shows a code on its screen that you type in here.',
+        confirmLabel: 'Turn off',
+        danger: true,
+      })
+      if (confirmed) {
         actions.disable()
       }
     },

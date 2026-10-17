@@ -5,7 +5,8 @@
 
 export const LAN_ACCESS_HELP =
   'Lets scenes reach devices on your home network, like Home Assistant or a NAS. When off, requests to local ' +
-  'addresses are blocked. Keep devices the frame should not reach on a separate network as well.'
+  'addresses are blocked. Remember, security is layered: for true isolation, still manage access at the network ' +
+  'level.'
 
 /** How every device-side "blocked" error starts (Pi and ESP32 alike). */
 export const LAN_ACCESS_BLOCKED_LOG_PREFIX = 'LAN access is off for this frame'

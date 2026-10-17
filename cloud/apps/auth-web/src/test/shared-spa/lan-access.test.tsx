@@ -151,7 +151,7 @@ describe("LAN access on the backend and the cloud", () => {
       const logic = mountLogic();
       expect(logic.values.lanAccess).toBe(false);
 
-      logic.actions.switchChanged(true);
+      logic.actions.openModal();
       expect(logic.values.phase).toBe("start");
       expect(posts()).toEqual([]);
 
@@ -175,18 +175,26 @@ describe("LAN access on the backend and the cloud", () => {
     });
   }
 
-  it("turns LAN access off with no code and no dialog", async () => {
+  it("turns LAN access off with no code, after saying how it comes back", async () => {
     routes["POST /api/frames/1/lan_access"] = (body) => {
       frameRow = { ...frameRow, lan_access: body.enabled === true };
       return Response.json({ status: "applied", lan_access: false });
     };
     const logic = mountLogic(makeFrame({ lan_access: true }));
+    // No dialog host is mounted here, so confirmDialog asks window.confirm.
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
 
-    logic.actions.switchChanged(false);
-    expect(logic.values.phase).toBe("closed");
-    expect(logic.values.disabling).toBe(true);
+    logic.actions.turnOff();
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    expect(confirm.mock.calls[0]?.[0]).toMatch(/someone has to be at the frame/);
+    expect(logic.values.disabling).toBe(false);
+    expect(posts()).toEqual([]);
+
+    logic.actions.turnOff();
     await waitFor(() => expect(logic.values.lanAccess).toBe(false));
+    expect(logic.values.phase).toBe("closed");
     expect(posts()).toEqual([{ path: "/api/frames/1/lan_access", body: { enabled: false } }]);
+    confirm.mockRestore();
   });
 
   it("tells the owner when a sleeping frame will show the code, and keeps the input", async () => {
@@ -194,7 +202,7 @@ describe("LAN access on the backend and the cloud", () => {
     routes["POST /api/frames/1/lan_access"] = () => Response.json({ status: "queued" });
     const logic = mountLogic();
 
-    logic.actions.switchChanged(true);
+    logic.actions.openModal();
     logic.actions.showCode();
     await waitFor(() => expect(logic.values.phase).toBe("queued"));
     logic.actions.setCode("654321");
@@ -214,7 +222,7 @@ describe("LAN access on the backend and the cloud", () => {
     routes["POST /api/frames/1/lan_access"] = () => Response.json({ error: "invalid_code" }, { status: 403 });
     const logic = mountLogic();
 
-    logic.actions.switchChanged(true);
+    logic.actions.openModal();
     logic.actions.showCode();
     await waitFor(() => expect(logic.values.phase).toBe("shown"));
     logic.actions.setCode("000000");
@@ -241,7 +249,7 @@ describe("LAN access on the backend and the cloud", () => {
     routes["POST /api/frames/1/lan_access/challenge"] = () =>
       Response.json({ detail: { detail: "This frame has no screen.", error: "no_panel" } }, { status: 409 });
     const logic = mountLogic();
-    logic.actions.switchChanged(true);
+    logic.actions.openModal();
     logic.actions.showCode();
     await waitFor(() => expect(logic.values.error?.token).toBe("no_panel"));
     expect(logic.values.error?.message).toBe("This frame has no screen.");
@@ -253,8 +261,7 @@ describe("LAN access on the backend and the cloud", () => {
   it("leaves an unknown value alone", () => {
     const logic = mountLogic(makeFrame({ lan_access: null }));
     expect(logic.values.lanAccess).toBeNull();
-    logic.actions.switchChanged(true);
-    logic.actions.switchChanged(false);
+    logic.actions.turnOff();
     expect(logic.values.phase).toBe("closed");
     expect(posts()).toEqual([]);
   });
@@ -279,7 +286,7 @@ describe("LAN access on the frame's own admin page", () => {
     };
     const logic = mountLogic();
 
-    logic.actions.switchChanged(true);
+    logic.actions.openModal();
     logic.actions.showCode();
     await waitFor(() => expect(logic.values.phase).toBe("shown"));
     logic.actions.setCode("246810");
@@ -288,8 +295,10 @@ describe("LAN access on the frame's own admin page", () => {
     expect(logic.values.lanAccess).toBe(true);
 
     logic.actions.closeModal();
-    logic.actions.switchChanged(false);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    logic.actions.turnOff();
     await waitFor(() => expect(logic.values.lanAccess).toBe(false));
+    confirm.mockRestore();
 
     expect(posts()).toEqual([
       { path: "/api/network/local-access/challenge", body: { scope: "localNetwork" } },
@@ -304,7 +313,7 @@ describe("LAN access on the frame's own admin page", () => {
       Response.json({ error: "too_many_attempts" }, { status: 403 });
     const logic = mountLogic();
 
-    logic.actions.switchChanged(true);
+    logic.actions.openModal();
     logic.actions.showCode();
     await waitFor(() => expect(logic.values.phase).toBe("shown"));
     logic.actions.setCode("111111");
@@ -353,7 +362,7 @@ describe("the LAN access section in the settings panel", () => {
     const popper = document.getElementById("popper") as HTMLElement;
     expect(await within(popper).findByText(/Lets scenes reach devices on your home network/)).toBeTruthy();
 
-    fireEvent.click(within(section).getByRole("switch"));
+    fireEvent.click(within(section).getByRole("button", { name: "Turn on" }));
     const dialog = await screen.findByTestId("lan-access-modal");
     fireEvent.click(within(dialog).getByRole("button", { name: "Show code on the frame" }));
     const input = await within(dialog).findByLabelText("Code from the frame");
@@ -375,9 +384,8 @@ describe("the LAN access section in the settings panel", () => {
   it("says a cloud frame must update first when it does not report LAN access", () => {
     const section = renderPanel(makeFrame({ ...cloudPi, lan_access: null } as Partial<FrameType>));
     expect(within(section).getByTestId("lan-access-unknown").textContent).toMatch(/Update its FrameOS first/);
-    const button = section.querySelector("button");
-    expect(button?.disabled).toBe(true);
-    fireEvent.click(within(section).getByRole("switch"));
+    // Nothing to press: neither "Turn on" nor "Turn off" for a value nobody knows.
+    expect(within(section).queryByRole("button")).toBeNull();
     expect(screen.queryByTestId("lan-access-modal")).toBeNull();
   });
 });
