@@ -11,6 +11,7 @@ import React, { useEffect, useState } from 'react'
 import { TextArea } from '../../../../components/TextArea'
 import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { DropdownMenu } from '../../../../components/DropdownMenu'
+import { buttonColor } from '../../../../components/Button'
 import { Markdown } from '../../../../components/Markdown'
 import {
   ClipboardDocumentIcon,
@@ -51,6 +52,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
     isCustomApp,
     isSceneApp,
     isJavaScriptSceneApp,
+    isJavaScriptApp,
     isNimAppInInterpretedScene,
     isLegacyNimApp,
     isDataApp,
@@ -160,7 +162,7 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
           <div className="flex-1 flex items-center gap-2 min-w-0">
             <span className="truncate">
               {name}
-              {isSceneApp ? ' (scene)' : isCustomApp ? ' (edited)' : ''}
+              {isSceneApp ? (isJavaScriptApp ? '' : ' (scene)') : isCustomApp ? ' (edited)' : ''}
             </span>
             {isLegacyNimApp ? (
               <span
@@ -182,47 +184,67 @@ export function AppNode({ id, isConnectable }: NodeProps<AppNodeData | DispatchN
               </span>
             ) : null}
           </div>
-          <DropdownMenu
-            className="w-fit"
-            buttonColor="none"
-            horizontal
-            items={[
-              ...(isDispatch || isScene || hideReadOnlyNimAppAction
-                ? []
-                : [
-                    {
-                      label: appMenuEditLabel,
-                      // Over the scene, in a modal: the diagram stays where it was.
-                      onClick: () => openAppModal(sceneId, id, data),
-                      icon: <PencilSquareIcon className="w-5 h-5" />,
-                    },
-                    ...(isSceneApp && !isJavaScriptSceneApp
-                      ? [
-                          {
-                            label: 'Fork App',
-                            onClick: () => forkSceneApp(id),
-                            icon: <DocumentDuplicateIcon className="w-5 h-5" />,
-                          },
-                        ]
-                      : []),
-                  ]),
-              {
-                label: 'Copy as JSON',
-                onClick: () => copyAppJSON(id),
-                icon: <ClipboardDocumentIcon className="w-5 h-5" />,
-              },
-              {
-                label: 'Duplicate',
-                onClick: () => duplicateNode(id),
-                icon: <DocumentDuplicateIcon className="w-5 h-5" />,
-              },
-              {
-                label: 'Delete Node',
-                onClick: () => deleteApp(id),
-                icon: <TrashIcon className="w-5 h-5" />,
-              },
-            ]}
-          />
+          <div className="flex items-center gap-1">
+            {isJavaScriptApp ? (
+              <button
+                type="button"
+                title={appMenuEditLabel}
+                aria-label={appMenuEditLabel}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  openAppModal(sceneId, id, data)
+                }}
+                className={clsx(
+                  buttonColor('none'),
+                  'inline-flex justify-center px-1 py-1 text-sm font-medium rounded-md focus:outline-none shadow-sm'
+                )}
+              >
+                <PencilSquareIcon className="w-5 h-5" aria-hidden="true" />
+              </button>
+            ) : null}
+            <DropdownMenu
+              className="w-fit"
+              buttonColor="none"
+              horizontal
+              items={[
+                ...(isDispatch || isScene || hideReadOnlyNimAppAction
+                  ? []
+                  : [
+                      {
+                        label: appMenuEditLabel,
+                        // Over the scene, in a modal: the diagram stays where it was.
+                        onClick: () => openAppModal(sceneId, id, data),
+                        icon: <PencilSquareIcon className="w-5 h-5" />,
+                      },
+                      ...(isSceneApp && !isJavaScriptSceneApp
+                        ? [
+                            {
+                              label: 'Fork App',
+                              onClick: () => forkSceneApp(id),
+                              icon: <DocumentDuplicateIcon className="w-5 h-5" />,
+                            },
+                          ]
+                        : []),
+                    ]),
+                {
+                  label: 'Copy as JSON',
+                  onClick: () => copyAppJSON(id),
+                  icon: <ClipboardDocumentIcon className="w-5 h-5" />,
+                },
+                {
+                  label: 'Duplicate',
+                  onClick: () => duplicateNode(id),
+                  icon: <DocumentDuplicateIcon className="w-5 h-5" />,
+                },
+                {
+                  label: 'Delete Node',
+                  onClick: () => deleteApp(id),
+                  icon: <TrashIcon className="w-5 h-5" />,
+                },
+              ]}
+            />
+          </div>
           {showNextPrev ? (
             <Handle
               // NextNodeHandle

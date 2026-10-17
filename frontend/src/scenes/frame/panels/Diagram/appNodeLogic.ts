@@ -23,6 +23,7 @@ import equal from 'fast-deep-equal'
 import { frameLogic } from '../../frameLogic'
 import {
   hasJavaScriptAppSource,
+  isJavaScriptCatalogApp,
   isRepoAppKeyword,
   sceneAppToAppConfig,
   hasCompiledNimAppSource,
@@ -68,6 +69,7 @@ export interface appNodeLogicValues {
   isCustomApp: boolean
   isDataApp: boolean
   isDispatch: boolean
+  isJavaScriptApp: boolean
   isJavaScriptSceneApp: boolean
   isLegacyNimApp: boolean
   isNimAppInInterpretedScene: boolean
@@ -163,6 +165,7 @@ export interface appNodeLogicMeta {
     isScene: (node: DiagramNode | null) => boolean
     isSceneApp: (currentScene: FrameScene | null, node: DiagramNode | null) => boolean
     isJavaScriptSceneApp: (isSceneApp: boolean, sources: Record<string, string> | null) => boolean
+    isJavaScriptApp: (node: DiagramNode | null, sources: Record<string, string> | null) => boolean
     isNimAppInInterpretedScene: (
       currentScene: FrameScene | null,
       node: DiagramNode | null,
@@ -396,6 +399,20 @@ export const appNodeLogic = kea<appNodeLogicType>([
       (s) => [s.isSceneApp, s.sources],
       (isSceneApp: appNodeLogicValues['isSceneApp'], sources: appNodeLogicValues['sources']): boolean =>
         isSceneApp && hasJavaScriptAppSource(sources),
+    ],
+    // Any app node that runs JavaScript (a scene app, an edited copy, a
+    // catalog app by keyword): its title bar gets an Edit button of its own.
+    isJavaScriptApp: [
+      (s) => [s.node, s.sources],
+      (node: appNodeLogicValues['node'], sources: appNodeLogicValues['sources']): boolean => {
+        if (node?.type !== 'app') {
+          return false
+        }
+        if (sources) {
+          return hasJavaScriptAppSource(sources)
+        }
+        return 'keyword' in node.data && isJavaScriptCatalogApp(node.data.keyword)
+      },
     ],
     isNimAppInInterpretedScene: [
       (s) => [s.currentScene, s.node, s.sources, s.frameForm],
