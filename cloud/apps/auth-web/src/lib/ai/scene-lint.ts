@@ -572,6 +572,18 @@ export function lintScene(
 
   // --- scene-local JS apps --------------------------------------------------
   if (sceneApps) {
+    // An app no node runs never runs. In a delivered scene that is an edit
+    // that wrote the app and forgot the node (and the edges) using it, which
+    // the editor shows as no change at all while the reply describes one.
+    const nodeKeywords = new Set(nodes.map((node) => str(obj(node.data)?.keyword)).filter(Boolean));
+    for (const keyword of Object.keys(sceneApps)) {
+      if (!nodeKeywords.has(keyword)) {
+        push(
+          "error",
+          `Scene app "${keyword}" is in the scene's apps but no node runs it: add an app node with keyword "${keyword}" and wire it in (an event chain, or a fieldOutput edge into the node that uses its result), or remove the app.`,
+        );
+      }
+    }
     for (const [keyword, raw] of Object.entries(sceneApps)) {
       for (const field of fieldsOf(obj(raw))) {
         const issue = optionShapeIssue(field.options);

@@ -301,6 +301,23 @@ describe("lintScenes", () => {
     ]);
   });
 
+  // The chess-puzzle turn that answered "the button flow now runs a toggle
+  // node" while adding only apps.toggleSolution: the editor showed nothing.
+  it("rejects a scene app that no node runs", () => {
+    const { errors } = messages([
+      scene({
+        apps: {
+          toggleSolution: {
+            sources: { "app.ts": "export function get(app) { frameos.setState('revealed', true); return null }" },
+          },
+        },
+      }),
+    ]);
+    expect(errors).toEqual([
+      expect.stringContaining('Scene app "toggleSolution" is in the scene\'s apps but no node runs it'),
+    ]);
+  });
+
   it("accepts scene-local JS apps declared in the scene's apps map", () => {
     const { errors } = messages([
       scene({

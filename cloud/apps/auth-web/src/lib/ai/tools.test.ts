@@ -208,3 +208,77 @@ describe("create_scenes delivery", () => {
     expect(ctx.delivered).toEqual([]);
   });
 });
+
+// The chess-puzzle turn: patch_scene added apps.toggleSolution and no node
+// running it, the editor showed no change, and the reply described a toggle
+// node in the button flow. An app no node runs now bounces back to the model.
+describe("patch_scene and scene apps no node runs", () => {
+  const toggleApp = {
+    sources: { "app.ts": "export function get(app) {\n  frameos.setState('revealed', true)\n  return null\n}\n" },
+  };
+
+  function current(apps?: Record<string, unknown>): Record<string, unknown> {
+    return {
+      edges: [
+        { id: "e1", source: "ev", sourceHandle: "next", target: "text", targetHandle: "prev", type: "appNodeEdge" },
+      ],
+      id: "puzzle",
+      name: "Puzzle",
+      nodes: [
+        { data: { keyword: "render" }, id: "ev", type: "event" },
+        { data: { config: { text: "hi" }, keyword: "render/text" }, id: "text", type: "app" },
+      ],
+      settings: { execution: "interpreted" },
+      ...(apps ? { apps } : {}),
+    };
+  }
+
+  function context(scene: Record<string, unknown>): ToolContext & { delivered: unknown[][] } {
+    const delivered: unknown[][] = [];
+    return {
+      accountId: "a1",
+      currentScene: scene,
+      db: {} as ToolContext["db"],
+      delivered,
+      emitScenes: (event: { scenes: unknown[] }) => delivered.push(event.scenes),
+      prompt: "test",
+    } as unknown as ToolContext & { delivered: unknown[][] };
+  }
+
+  it("refuses an app added without the node that runs it", async () => {
+    const ctx = context(current());
+    const output = JSON.parse(
+      await executeTool("patch_scene", { apps: { toggleSolution: toggleApp } }, ctx),
+    ) as { issues: string[]; ok: boolean };
+    expect(output.ok).toBe(false);
+    expect(output.issues.join("\n")).toContain('Scene app "toggleSolution" is in the scene\'s apps but no node runs it');
+    expect(ctx.delivered).toEqual([]);
+  });
+
+  it("delivers the app together with its node", async () => {
+    const ctx = context(current());
+    const output = JSON.parse(
+      await executeTool(
+        "patch_scene",
+        {
+          apps: { toggleSolution: toggleApp },
+          set_edges: [{ id: "e2", source: "button", sourceHandle: "next", target: "toggle", targetHandle: "prev" }],
+          set_nodes: [
+            { data: { keyword: "button" }, id: "button", type: "event" },
+            { data: { config: {}, keyword: "toggleSolution" }, id: "toggle", type: "app" },
+          ],
+        },
+        ctx,
+      ),
+    ) as { ok: boolean };
+    expect(output.ok).toBe(true);
+    expect(ctx.delivered).toHaveLength(1);
+  });
+
+  it("does not hold an unrelated edit hostage to an app the scene already had unused", async () => {
+    const ctx = context(current({ toggleSolution: toggleApp }));
+    const output = JSON.parse(await executeTool("patch_scene", { name: "Puzzle of the day" }, ctx)) as { ok: boolean };
+    expect(output.ok).toBe(true);
+    expect(ctx.delivered).toHaveLength(1);
+  });
+});
