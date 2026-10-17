@@ -65,14 +65,11 @@ bool fos_panel_code_box(const fos_panel_surface_t *s, const char *title, size_t 
 
 /* The packed bytes under the box (whole bytes per row, both planes of a
  * two-plane format), for taking the code out again before anything reads
- * the buffer as an image. */
-size_t fos_panel_box_bytes(const fos_panel_surface_t *s, const fos_panel_code_box_t *box);
-void fos_panel_box_save(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
-                        uint8_t *out);
-/* Put the saved bytes back; with `saved` NULL (no memory for a copy) the box
- * is painted white instead, so the code still never outlives the blit. */
-void fos_panel_box_restore(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
-                           const uint8_t *saved);
+ * the buffer as an image: copied into `buf` (`restore` false) or from it
+ * back onto the panel (`restore` true). Returns how many bytes that is; a
+ * NULL `buf` only counts them. */
+size_t fos_panel_box_copy(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
+                          uint8_t *buf, bool restore);
 
 void fos_panel_draw_code(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
                          const char *title, const char *code);

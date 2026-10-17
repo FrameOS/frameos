@@ -234,7 +234,7 @@ suite "scene persistence helpers":
   test "a store stamp on a scene is not a cloud origin":
     # Until 2026.10.16 a scene stamped with a store id armed the LAN deny on
     # any frame. The origin is who installed the payload (the cloud), never a
-    # stamp in the scene's own JSON; and since 2026.10.17 the LAN deny follows
+    # stamp in the scene's own JSON; and since the LAN access switch the LAN deny follows
     # the frame's LAN access switch, not any origin.
     let storeScenes = %*[{
       "id": "store-test", "name": "Store scene",

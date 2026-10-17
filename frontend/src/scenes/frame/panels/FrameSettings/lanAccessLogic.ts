@@ -21,7 +21,7 @@ import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 export const LAN_ACCESS_CODE_LENGTH = 6
 const LAN_ACCESS_CODE_PATTERN = /^\d{6}$/
 
-export type LanAccessChallengeResult = { status: 'shown'; expiresInSeconds: number | null } | { status: 'queued' }
+export type LanAccessChallengeResult = { status: 'shown' } | { status: 'queued' }
 export type LanAccessSetResult = { status: 'applied'; lanAccess: boolean } | { status: 'queued' }
 
 export interface LanAccessErrorInfo {
@@ -114,20 +114,14 @@ export async function requestLanAccessChallenge(frameId: FrameId): Promise<LanAc
     if (!response.ok) {
       throw await lanAccessErrorFrom(response)
     }
-    const payload = await readJson(response)
-    const expires = payload.expiresInSeconds
-    return { status: 'shown', expiresInSeconds: typeof expires === 'number' ? expires : null }
+    return { status: 'shown' }
   }
   const response = await postJson(`/api/frames/${frameId}/lan_access/challenge`, {})
   if (!response.ok) {
     throw await lanAccessErrorFrom(response)
   }
   const payload = await readJson(response)
-  if (payload.status === 'queued') {
-    return { status: 'queued' }
-  }
-  const expires = payload.expires_in_seconds
-  return { status: 'shown', expiresInSeconds: typeof expires === 'number' ? expires : null }
+  return { status: payload.status === 'queued' ? 'queued' : 'shown' }
 }
 
 /** Turn LAN access on (with the code from the panel) or off (no code). */

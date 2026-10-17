@@ -73,12 +73,16 @@ static void budget_note_wrong_locked(int64_t now_s)
     s_budget.wrong++;
 }
 
+/* volatile: the compiler may not drop a store to a buffer it can prove is
+ * dead, and a used code has no business lingering in RAM. */
+static void wipe(volatile char *p, size_t len)
+{
+    while (len--) *p++ = 0;
+}
+
 static void wipe_locked(void)
 {
-    /* volatile: the compiler may not drop a store to a buffer it can prove
-     * is dead, and a used code has no business lingering in RAM. */
-    volatile char *p = s_code;
-    for (size_t i = 0; i < sizeof(s_code); i++) p[i] = 0;
+    wipe(s_code, sizeof(s_code));
     s_pending = false;
     s_expires_at = 0;
     s_attempts_left = 0;
@@ -115,45 +119,28 @@ uint32_t fos_lan_access_start(int64_t now_s, fos_lan_access_rng_t rng)
     char code[FOS_LAN_ACCESS_CODE_LEN + 1];
     fos_lan_access_mint(rng, code); /* outside the lock: rng() may be slow */
     LAN_LOCK();
-    if (budget_spent_locked(now_s)) {
-        LAN_UNLOCK();
-        volatile char *p = code;
-        for (size_t i = 0; i < sizeof(code); i++) p[i] = 0;
-        return 0;
+    uint32_t generation = 0;
+    if (!budget_spent_locked(now_s)) {
+        memcpy(s_code, code, sizeof(s_code));
+        s_pending = true;
+        s_expires_at = now_s + FOS_LAN_ACCESS_TTL_SEC;
+        s_attempts_left = FOS_LAN_ACCESS_MAX_ATTEMPTS;
+        if (++s_generation == 0) s_generation = 1;
+        generation = s_generation;
     }
-    memcpy(s_code, code, sizeof(s_code));
-    s_pending = true;
-    s_expires_at = now_s + FOS_LAN_ACCESS_TTL_SEC;
-    s_attempts_left = FOS_LAN_ACCESS_MAX_ATTEMPTS;
-    if (++s_generation == 0) s_generation = 1;
-    const uint32_t generation = s_generation;
     LAN_UNLOCK();
-    volatile char *p = code;
-    for (size_t i = 0; i < sizeof(code); i++) p[i] = 0;
+    wipe(code, sizeof(code));
     return generation;
-}
-
-static bool is_space(char c)
-{
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f';
 }
 
 fos_lan_access_result_t fos_lan_access_consume(const char *code, int64_t now_s)
 {
-    /* Surrounding whitespace is not part of the code (a pasted "123456\n"),
-     * the same trim the Pi applies; nothing but whitespace is no code. */
-    if (code == NULL) return FOS_LAN_ACCESS_CODE_REQUIRED;
-    while (is_space(*code)) code++;
-    if (code[0] == '\0') return FOS_LAN_ACCESS_CODE_REQUIRED;
-    /* Length is not the secret (it is always six); bounded so a long string
-     * costs nothing — anything past the bound is simply not the code. */
+    if (code == NULL || code[0] == '\0') return FOS_LAN_ACCESS_CODE_REQUIRED;
+    /* The control planes send the six digits with any spaces already
+     * stripped; anything else is simply a wrong code. Length is not the
+     * secret (it is always six); counting stops just past it. */
     size_t given = 0;
-    while (given < 64 && code[given] != '\0') given++;
-    if (code[given] != '\0') {
-        given = FOS_LAN_ACCESS_CODE_LEN + 1;
-    } else {
-        while (given > 0 && is_space(code[given - 1])) given--;
-    }
+    while (given <= FOS_LAN_ACCESS_CODE_LEN && code[given] != '\0') given++;
     fos_lan_access_result_t result;
     LAN_LOCK();
     if (budget_spent_locked(now_s)) {
@@ -225,13 +212,9 @@ uint32_t fos_lan_access_seconds_left(int64_t now_s)
 
 const char *fos_lan_access_result_token(fos_lan_access_result_t result)
 {
-    switch (result) {
-        case FOS_LAN_ACCESS_OK: return NULL;
-        case FOS_LAN_ACCESS_CODE_REQUIRED: return "code_required";
-        case FOS_LAN_ACCESS_CODE_EXPIRED: return "code_expired";
-        case FOS_LAN_ACCESS_INVALID_CODE: return "invalid_code";
-        case FOS_LAN_ACCESS_TOO_MANY_ATTEMPTS: return "too_many_attempts";
-        case FOS_LAN_ACCESS_RATE_LIMITED: return "rate_limited";
-    }
-    return "invalid_code";
+    /* In fos_lan_access_result_t order; OK has no token. */
+    static const char *const tokens[] = {
+        NULL, "code_required", "code_expired", "invalid_code", "too_many_attempts", "rate_limited",
+    };
+    return (unsigned)result < sizeof(tokens) / sizeof(tokens[0]) ? tokens[result] : "invalid_code";
 }

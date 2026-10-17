@@ -1126,7 +1126,6 @@ suite "LAN access verbs":
       "scope": "shellApps"})
     check reply.ack{"ok"}.getBool(false) == true
     check reply.ack{"id"}.getStr("") == "c"
-    check reply.ack{"expires_in_seconds"}.getInt(0) == 300
     let code = activeLocalAccessCode()
     check code.len == LocalAccessCodeLength
     # Only ever LAN access from a control plane, whatever the message says.
@@ -1155,7 +1154,6 @@ suite "LAN access verbs":
     let reply = handleCloudVerb(panelContext(recorded), %*{"id": "s", "type": "lan_access_set",
       "enabled": false})
     check reply.ack{"ok"}.getBool(false) == true
-    check reply.ack{"lan_access"}.getBool(true) == false
     check storedLocalNetworkAccess() == some(false)
     let policy = localNetworkPolicySnapshot()
     check policy.active
@@ -1195,7 +1193,6 @@ suite "LAN access verbs":
     let applied = handleCloudVerb(panelContext(recorded), %*{"id": "on", "type": "lan_access_set",
       "enabled": true, "code": fresh})
     check applied.ack{"ok"}.getBool(false) == true
-    check applied.ack{"lan_access"}.getBool(false) == true
     check lanAccessEnabled()
     check activeLocalAccessCode() == ""
     check not localNetworkPolicySnapshot().active
@@ -1278,7 +1275,7 @@ suite "the private-network policy follows the LAN access switch":
     setLocalNetworkPolicy(false)
 
   test "a standalone frame with LAN access off is denied too":
-    # No cloud link at all: until 2026.10.17 this frame was never denied.
+    # No cloud link at all: before the LAN access switch this frame was never denied.
     persistLocalNetworkAccess(false)
     refreshLocalNetworkPolicy(FrameConfig(device: "framebuffer"))
     let policy = localNetworkPolicySnapshot()

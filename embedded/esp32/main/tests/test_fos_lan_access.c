@@ -186,13 +186,13 @@ static void test_wrong_shapes_are_wrong_codes(void)
           "an inner space is part of what was typed");
     CHECK(fos_lan_access_consume("444444", 40000) == FOS_LAN_ACCESS_OK, "fifth try right");
 
-    /* Surrounding whitespace is trimmed, as on the Pi (a pasted code). */
+    /* The control planes strip spaces before the code reaches the device;
+     * what still carries one is not the code. */
     start_with(454545, 40100);
-    CHECK(fos_lan_access_consume("   \t\n", 40100) == FOS_LAN_ACCESS_CODE_REQUIRED,
-          "whitespace only is no code, and costs nothing");
-    CHECK(fos_lan_access_consume(" 454545\n", 40100) == FOS_LAN_ACCESS_OK, "trimmed");
+    CHECK(fos_lan_access_consume(" 454545", 40100) == FOS_LAN_ACCESS_INVALID_CODE, "padded");
+    CHECK(fos_lan_access_consume("454545", 40100) == FOS_LAN_ACCESS_OK, "exact");
     start_with(464646, 40200);
-    CHECK(fos_lan_access_consume("464646 ", 40200) == FOS_LAN_ACCESS_OK, "trailing space");
+    CHECK(fos_lan_access_consume("464646", 40200) == FOS_LAN_ACCESS_OK, "exact again");
     start_with(474747, 40300);
     char long_code[200];
     memset(long_code, '4', sizeof(long_code) - 1);

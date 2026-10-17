@@ -142,13 +142,11 @@ type
     # NetworkManager (armv6 buildroot) auto-detect the wpa_supplicant backend;
     # this pins it for debugging. FRAMEOS_NETWORK_BACKEND overrides it.
     networkBackend*: string
-    # The frame's LAN access (docs/lan-access.md), as readConfig resolved it
-    # from state/local_access.json: never read from frame.json, never written
-    # by a settings save or set_settings. It moves through the panel-code
-    # ceremony (frameos/local_access.nim); this copy is for readers that hold
-    # a config anyway. frame.json `network.lanAccess`, the value chosen at
-    # creation, is only a seed and has no field here.
-    allowLocalNetworkAccess*: bool
+    # No LAN access field: the switch lives in state/local_access.json and is
+    # read with local_access.lanAccessEnabled() (docs/lan-access.md).
+    # frame.json's `network.lanAccess` is only a creation seed
+    # (config.frameJsonLanAccessSeed), and an old `allowLocalNetworkAccess`
+    # there is skipped like any unknown key.
 
   # Part of FrameConfig
   AgentConfig* = ref object

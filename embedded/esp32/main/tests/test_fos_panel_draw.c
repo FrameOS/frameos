@@ -4,7 +4,7 @@
  * format and rotation the firmware drives.
  *
  * What matters most is that the code never outlives the blit: after
- * fos_panel_box_restore() the buffer the snapshot, /image, image_get and the
+ * fos_panel_box_copy(..., restore) the buffer the snapshot, /image, image_get and the
  * backend push read must be the render, byte for byte. Next, that the box
  * reads upright on a rotated frame: the scene-orientation reader below is
  * the BMP preview's mapping (fos_http.c preview_bmp_row), written out again.
@@ -159,9 +159,9 @@ static void check_one(fos_pixel_format_t format, int width, int height, int rota
               box.digit_scale);
     }
 
-    const size_t saved_len = fos_panel_box_bytes(&s, &box);
+    const size_t saved_len = fos_panel_box_copy(&s, &box, NULL, false);
     uint8_t *saved = malloc(saved_len ? saved_len : 1);
-    fos_panel_box_save(&s, &box, saved);
+    CHECK(fos_panel_box_copy(&s, &box, saved, false) == saved_len, "the copy is the counted size");
     fos_panel_draw_code(&s, &box, title, "042917");
 
     /* Ink and paper only, inside the box; nothing outside it moved. */
@@ -215,14 +215,14 @@ static void check_one(fos_pixel_format_t format, int width, int height, int rota
     }
 
     /* Restored: the render, byte for byte. */
-    fos_panel_box_restore(&s, &box, saved);
+    fos_panel_box_copy(&s, &box, saved, true);
     CHECK(memcmp(buf, original, len) == 0, "fmt %d %dx%d rot %d: restore is not exact", format,
           width, height, rotate);
 
-    /* Without a copy: the box goes white, nothing else changes, and the
-     * code is gone either way. */
+    /* Without a copy (fos_client.c, out of memory): the box is painted
+     * white, nothing else changes, and the code is gone either way. */
     fos_panel_draw_code(&s, &box, title, "042917");
-    fos_panel_box_restore(&s, &box, NULL);
+    fos_panel_fill_rect(&s, box.x, box.y, box.w, box.h, false);
     int not_white = 0;
     moved_outside = 0;
     for (int py = 0; py < height; py++) {
@@ -273,7 +273,7 @@ static void test_small_and_odd(void)
 
     fos_panel_surface_t unknown = {oled, 72, 40, (fos_pixel_format_t)0, 0};
     CHECK(!fos_panel_code_box(&unknown, "LAN access code", 6, &box), "unknown format: no box");
-    CHECK(fos_panel_box_bytes(&unknown, &box) == 0, "unknown format: nothing to save");
+    CHECK(fos_panel_box_copy(&unknown, &box, NULL, false) == 0, "unknown format: nothing to save");
 }
 
 static void test_text_metrics(void)

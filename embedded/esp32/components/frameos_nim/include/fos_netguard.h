@@ -112,16 +112,13 @@ fos_netguard_verdict_t fos_netguard_check_url(const char *url, char *reason, siz
 /* fos_netguard_check_url() == FOS_NETGUARD_ALLOWED. */
 bool fos_netguard_url_allowed(const char *url, char *reason, size_t reason_len);
 
-/* The error a scene gets for a FOS_NETGUARD_BLOCKED request (the redirect
- * hop's when `redirect`), the same sentence on every frame type:
- *
- *   LAN access is off for this frame (<reason>). Turn on LAN access in the frame settings.
- *
- * The prefix is what the SPA matches to offer a link to the setting, and the
- * last sentence is what the owner acts on, so `reason` is what gets cut when
- * `out` is short; only a buffer too small for both ends keeps the prefix
- * alone. Returns the length written. */
-size_t fos_netguard_block_message(char *out, size_t out_len, const char *reason, bool redirect);
+/* The error a scene gets for a FOS_NETGUARD_BLOCKED request, the same
+ * sentence on every frame type: the first %s is "" or "redirect: " (the hop
+ * that was refused), the second the reason. The prefix is what the SPA
+ * matches to offer a link to the setting, the last sentence is what the owner
+ * acts on: the glue's buffers are sized so neither is ever cut. */
+#define FOS_NETGUARD_BLOCK_FMT \
+    "LAN access is off for this frame (%s%s). Turn on LAN access in the frame settings."
 
 #ifdef __cplusplus
 }

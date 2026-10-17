@@ -287,7 +287,7 @@ const char *fos_cloud_ws_url(void) { return s_ws_url; }
 
 /* docs/lan-access.md: one switch per frame, LAN access, decides whether scene
  * HTTP may reach private/link-local addresses — on every frame, standalone,
- * backend-managed or cloud-managed alike (until 2026.10.17 the deny applied
+ * backend-managed or cloud-managed alike (before the switch the deny applied
  * only while cloud-managed or rendering cloud-pushed scenes). The value is
  * config->allow_local_network (NVS `lan_access`, absent = on: a frame from
  * before the switch keeps working); turning it on from a control plane takes
@@ -378,16 +378,8 @@ static void apply_network_policy(void)
     if (state != logged_state) {
         /* ESP_LOGW, not LOGI: LOGI is compiled out in every profile and a
          * change of this must be visible on the serial stream. */
-        if (state == 1) {
-            ESP_LOGW(TAG, "LAN access is off: scene HTTP to private/link-local addresses "
-                          "is blocked (the frame's backend and cloud provider stay "
-                          "reachable); turn it on in the frame settings, or "
-                          "`set allow_local_network 1` over USB");
-        } else if (logged_state == 1) {
-            ESP_LOGW(TAG, "LAN access is on: scenes may reach private addresses");
-        } else {
-            ESP_LOGI(TAG, "LAN access is on: scenes may reach private addresses");
-        }
+        ESP_LOGW(TAG, "LAN access %s", state ? "off: scene HTTP to private addresses is blocked"
+                                              : "on");
         logged_state = state;
     }
 }
@@ -1362,10 +1354,7 @@ static void ws_send_auth(const cJSON *root)
     cJSON_Delete(msg);
 }
 
-/* `with_lan_access`: the LAN access verbs' acks also say where the switch now
- * stands (`lan_access`), so a control plane can update its mirror from the
- * ack alone. */
-static void ws_ack_ex(const cJSON *id, bool ok, const char *error, bool with_lan_access)
+static void ws_ack(const cJSON *id, bool ok, const char *error)
 {
     cJSON *msg = cJSON_CreateObject();
     if (!msg) return;
@@ -1373,16 +1362,8 @@ static void ws_ack_ex(const cJSON *id, bool ok, const char *error, bool with_lan
     cJSON_AddStringToObject(msg, "type", "ack");
     cJSON_AddBoolToObject(msg, "ok", ok);
     if (!ok && error) cJSON_AddStringToObject(msg, "error", error);
-    if (with_lan_access) {
-        cJSON_AddBoolToObject(msg, "lan_access", fos_config()->allow_local_network);
-    }
     ws_send_json(msg);
     cJSON_Delete(msg);
-}
-
-static void ws_ack(const cJSON *id, bool ok, const char *error)
-{
-    ws_ack_ex(id, ok, error, false);
 }
 
 /* get_state reply. The hub takes a `state` message without `states` as the
@@ -2743,9 +2724,13 @@ static bool backend_verb_allowed(const char *type)
  * cannot open its owner's LAN without someone standing in front of it.
  * Turning it off takes nothing. The code is never in an ack or a log line. */
 
-static uint32_t lan_access_rng(void)
+/* `{"event":"lan_access:<event>","source":"esp32"[,"reason":"<reason>"]}` */
+static void lan_access_log(const char *event, const char *reason)
 {
-    return esp_random();
+    char line[96];
+    snprintf(line, sizeof(line), "{\"event\":\"lan_access:%s\",\"source\":\"esp32\"%s%s%s}", event,
+             reason ? ",\"reason\":\"" : "", reason ? reason : "", reason ? "\"" : "");
+    frameos_nim_log_hook(line);
 }
 
 /* `lan_access_challenge {}`: show a code. Acked at once; the render task
@@ -2754,27 +2739,25 @@ static uint32_t lan_access_rng(void)
  * wrong-code budget spent, `rate_limited` and the pending code stays. */
 static void ws_handle_lan_access_challenge(const cJSON *id)
 {
+    const char *refused = NULL;
     if (!fos_display_present()) {
-        ws_ack_ex(id, false, "no_panel", true); /* headless: nowhere to show it */
-        return;
+        refused = "no_panel"; /* headless: nowhere to show it */
+    } else if (fos_lan_access_start(fos_lan_access_now(), esp_random) == 0) {
+        refused = "rate_limited";
     }
-    if (fos_lan_access_start(fos_lan_access_now(), lan_access_rng) == 0) {
-        frameos_nim_log_hook("{\"event\":\"lan_access:refused\",\"source\":\"esp32\","
-                             "\"reason\":\"rate_limited\"}");
-        ws_ack_ex(id, false, "rate_limited", true);
-        return;
-    }
-    frameos_nim_log_hook("{\"event\":\"lan_access:challenge\",\"source\":\"esp32\"}");
-    ws_ack_ex(id, true, NULL, true);
-    fos_client_wake_for_events();
+    lan_access_log(refused ? "refused" : "challenge", refused);
+    ws_ack(id, refused == NULL, refused);
+    if (!refused) fos_client_wake_for_events();
 }
 
-/* `lan_access_set {enabled, code?}`. */
+/* `lan_access_set {enabled, code?}`. The new value reaches the planes through
+ * the state that follows (hardware.lanAccess on the socket, the `lan_access`
+ * state field on the backend's queue), not through the ack. */
 static void ws_handle_lan_access_set(const cJSON *root, const cJSON *id, bool from_backend)
 {
     const cJSON *enabled = cJSON_GetObjectItem(root, "enabled");
     if (!cJSON_IsBool(enabled)) {
-        ws_ack_ex(id, false, "invalid_lan_access", true);
+        ws_ack(id, false, "invalid_lan_access");
         return;
     }
     const bool want = cJSON_IsTrue(enabled);
@@ -2784,14 +2767,10 @@ static void ws_handle_lan_access_set(const cJSON *root, const cJSON *id, bool fr
             cJSON_IsString(code) ? code->valuestring : NULL, fos_lan_access_now());
         if (result != FOS_LAN_ACCESS_OK) {
             const char *token = fos_lan_access_result_token(result);
-            char line[112];
-            snprintf(line, sizeof(line),
-                     "{\"event\":\"lan_access:refused\",\"source\":\"esp32\",\"reason\":\"%s\"}",
-                     token);
-            frameos_nim_log_hook(line);
+            lan_access_log("refused", token);
             /* The fifth wrong code ended the challenge: off the panel. */
             if (result == FOS_LAN_ACCESS_TOO_MANY_ATTEMPTS) fos_client_wake_for_events();
-            ws_ack_ex(id, false, token, true);
+            ws_ack(id, false, token);
             return;
         }
         fos_client_wake_for_events(); /* answered: off the panel */
@@ -2805,17 +2784,14 @@ static void ws_handle_lan_access_set(const cJSON *root, const cJSON *id, bool fr
     config->allow_local_network = want;
     if (fos_config_save() != ESP_OK) {
         config->allow_local_network = before;
-        ws_ack_ex(id, false, "persist_failed", true);
+        ws_ack(id, false, "persist_failed");
         return;
     }
     /* Now, not on the next cloud-task tick: the exemptions do not depend on
      * the switch, so the policy bit is all that changes. */
     fos_netguard_set_policy(!want);
-    frameos_nim_log_hook(want ? "{\"event\":\"lan_access:set\",\"source\":\"esp32\",\"enabled\":true}"
-                              : "{\"event\":\"lan_access:set\",\"source\":\"esp32\",\"enabled\":false}");
-    ws_ack_ex(id, true, NULL, true);
-    /* hardware.lanAccess for the cloud's mirror. Over the backend's queue the
-     * ack's state fields carry `lan_access` instead. */
+    lan_access_log(want ? "on" : "off", NULL);
+    ws_ack(id, true, NULL);
     if (!from_backend) ws_send_state(NULL);
 }
 

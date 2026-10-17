@@ -329,12 +329,16 @@ suite "LAN access is persisted outside frame.json":
     writeFile("frame.json", $(%*{"network": {"allowLocalNetworkAccess": false}}))
     check frameJsonLanAccessSeed("frame.json").isNone
     check seedLocalNetworkAccess(frameJsonLanAccessSeed("frame.json")) == true
-    check readConfig("frame.json").network.allowLocalNetworkAccess == true
+    check lanAccessEnabled()
+    # ...and the old key does not break parsing the file.
+    check readConfig("frame.json").network.networkCheck == false
 
-  test "readConfig carries the stored value, whatever frame.json says":
+  test "frame.json's LAN access keys change nothing once a value is stored":
+    # An old frame.json still carries `allowLocalNetworkAccess`: it parses
+    # like any unknown key, and neither it nor the seed overrides the state.
     writeFile("frame.json", $(%*{"network": {"allowLocalNetworkAccess": true, "lanAccess": true}}))
     persistLocalNetworkAccess(false)
-    check readConfig("frame.json").network.allowLocalNetworkAccess == false
-    persistLocalNetworkAccess(true)
-    writeFile("frame.json", $(%*{"network": {"allowLocalNetworkAccess": false, "lanAccess": false}}))
-    check readConfig("frame.json").network.allowLocalNetworkAccess == true
+    check readConfig("frame.json").network.networkCheck == false
+    check not lanAccessEnabled()
+    check seedLocalNetworkAccess(frameJsonLanAccessSeed("frame.json")) == false
+    check not lanAccessEnabled()

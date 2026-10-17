@@ -1125,7 +1125,7 @@ static void lan_overlay_begin(lan_overlay_t *ov, uint8_t *buf, int width, int he
     if (s_last_frame == buf) {
         /* The lend hook could not drop the preview snapshot (a stream stalled
          * past 30 s) so this buffer is still served as the frame's image. */
-        ESP_LOGW(TAG, "LAN access code not drawn: the render buffer is still the preview");
+        ESP_LOGW(TAG, "LAN access code skipped: buffer still lent");
     } else {
         ov->surface = (fos_panel_surface_t){
             .buf = buf, .width = width, .height = height, .format = format,
@@ -1133,9 +1133,9 @@ static void lan_overlay_begin(lan_overlay_t *ov, uint8_t *buf, int width, int he
         };
         if (fos_panel_code_box(&ov->surface, "LAN access code", FOS_LAN_ACCESS_CODE_LEN,
                                &ov->box)) {
-            size_t bytes = fos_panel_box_bytes(&ov->surface, &ov->box);
+            size_t bytes = fos_panel_box_copy(&ov->surface, &ov->box, NULL, false);
             ov->saved = bytes ? fos_big_malloc(bytes) : NULL;
-            if (ov->saved) fos_panel_box_save(&ov->surface, &ov->box, ov->saved);
+            if (ov->saved) fos_panel_box_copy(&ov->surface, &ov->box, ov->saved, false);
             fos_panel_draw_code(&ov->surface, &ov->box, "LAN access code", code);
             ov->drawn = true;
             frameos_nim_log_hook("{\"event\":\"lan_access:shown\",\"source\":\"esp32\"}");
@@ -1148,7 +1148,12 @@ static void lan_overlay_begin(lan_overlay_t *ov, uint8_t *buf, int width, int he
 static void lan_overlay_end(lan_overlay_t *ov)
 {
     if (!ov->drawn) return;
-    fos_panel_box_restore(&ov->surface, &ov->box, ov->saved);
+    if (ov->saved) {
+        fos_panel_box_copy(&ov->surface, &ov->box, ov->saved, true);
+    } else {
+        /* No memory for a copy: a white box, still never the code. */
+        fos_panel_fill_rect(&ov->surface, ov->box.x, ov->box.y, ov->box.w, ov->box.h, false);
+    }
     free(ov->saved);
     ov->saved = NULL;
     ov->drawn = false;

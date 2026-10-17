@@ -17,9 +17,9 @@
 #include "esp_err.h"
 
 /* Who installed the scenes a frame is holding: fos_cloud.c reports the
- * applied payload's checksum only for cloud-installed scenes. (Until
- * 2026.10.17 it also keyed the LAN deny; the frame's LAN access switch alone
- * decides that now.) Persisted in /state/scene-index.json (top-level
+ * applied payload's checksum only for cloud-installed scenes. (Before the
+ * LAN access switch it also keyed the LAN deny; the switch alone decides
+ * that now.) Persisted in /state/scene-index.json (top-level
  * "source") and mirrored in NVS so the answer survives reboots and the
  * store→apply window. */
 typedef enum {

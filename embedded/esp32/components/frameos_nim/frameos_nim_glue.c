@@ -1781,10 +1781,7 @@ static esp_http_client_handle_t http_open_request(
     default:
         ESP_LOGW(TAG, "%s %s: blocked, LAN access is off: %s",
                  method ? method : "GET", url ? url : "(null)", netguard_reason);
-        if (err_buf != NULL && err_buf_len > 0) {
-            fos_netguard_block_message(err_buf, err_buf_len, netguard_reason, false);
-        }
-        return NULL;
+        HTTP_OPEN_FAIL(FOS_NETGUARD_BLOCK_FMT, "", netguard_reason);
     }
 
     esp_http_client_method_t http_method = HTTP_METHOD_GET;
@@ -1890,10 +1887,7 @@ static esp_http_client_handle_t http_open_request(
                          method ? method : "GET", url, netguard_reason);
                 esp_http_client_close(client);
                 esp_http_client_cleanup(client);
-                if (err_buf != NULL && err_buf_len > 0) {
-                    fos_netguard_block_message(err_buf, err_buf_len, netguard_reason, true);
-                }
-                return NULL;
+                HTTP_OPEN_FAIL(FOS_NETGUARD_BLOCK_FMT, "redirect: ", netguard_reason);
             }
         }
         err = esp_http_client_open(client, body_len);
@@ -1936,6 +1930,12 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
                                s_http_spill_dir[0] != '\0';
 
     char open_err[192];
+    /* The whole LAN access sentence fits whatever the reason (96 bytes with
+     * its NUL), so the start the SPA matches and the end the owner reads are
+     * never cut. The stream path's buffer is the same 192 bytes
+     * (http_client.nim, openStreamHandle). */
+    _Static_assert(sizeof(FOS_NETGUARD_BLOCK_FMT) - 4 + sizeof("redirect: ") - 1 + 95 < sizeof(open_err),
+                   "open_err must hold the whole LAN access message");
     int64_t content_length = -1;
     esp_http_client_handle_t client = http_open_request(
         method, url, body, body_len, headers, headers_len, timeout_ms,

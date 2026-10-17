@@ -763,16 +763,8 @@ proc setLocalNetworkAccess*(enabled: bool): JsonNode =
   ## reach this field, and why it is persisted under state/ rather than in
   ## frame.json.
   persistLocalNetworkAccess(enabled)
-
-  # The policy reads the state file's value (lanAccessEnabled), not this
-  # object; the copy is kept for readers that hold a config anyway. The
-  # callers recompute the deny at once (hub_client.refreshLocalNetworkPolicy),
+  # The callers recompute the deny at once (hub_client.refreshLocalNetworkPolicy),
   # and the hub thread would within two seconds regardless.
-  if globalFrameConfig != nil and globalFrameConfig.network != nil:
-    globalFrameConfig.network.allowLocalNetworkAccess = enabled
-  if globalFrameOS != nil and globalFrameOS.frameConfig != nil and
-      globalFrameOS.frameConfig.network != nil:
-    globalFrameOS.frameConfig.network.allowLocalNetworkAccess = enabled
   localNetworkAccessPayload()
 
 type LanAccessOutcome* = object

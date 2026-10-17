@@ -420,48 +420,27 @@ static bool ends_with(const char *s, const char *suffix)
 static void test_block_message(void)
 {
     /* docs/lan-access.md: the SPA matches the prefix to offer a link to the
-     * setting, and the owner acts on the last sentence. Both ends survive
-     * every reason, every buffer that can hold them. */
+     * setting, and the owner acts on the last sentence. The glue formats
+     * FOS_NETGUARD_BLOCK_FMT into 192 bytes with a reason of at most 95
+     * characters: both ends always survive. */
     const char *prefix = "LAN access is off for this frame";
     const char *suffix = "Turn on LAN access in the frame settings.";
     char msg[192];
 
-    fos_netguard_block_message(msg, sizeof(msg), "192.168.1.5 is a private address", false);
+    snprintf(msg, sizeof(msg), FOS_NETGUARD_BLOCK_FMT, "", "192.168.1.5 is a private address");
     CHECK(strcmp(msg, "LAN access is off for this frame (192.168.1.5 is a private address). "
                       "Turn on LAN access in the frame settings.") == 0, "plain: %s", msg);
-
-    fos_netguard_block_message(msg, sizeof(msg), "10.0.0.1 is a private address", true);
+    snprintf(msg, sizeof(msg), FOS_NETGUARD_BLOCK_FMT, "redirect: ", "10.0.0.1 is a private address");
     CHECK(strcmp(msg, "LAN access is off for this frame (redirect: 10.0.0.1 is a private "
                       "address). Turn on LAN access in the frame settings.") == 0,
           "redirect: %s", msg);
 
-    fos_netguard_block_message(msg, sizeof(msg), "", false);
-    CHECK(strcmp(msg, "LAN access is off for this frame. Turn on LAN access in the frame "
-                      "settings.") == 0, "no reason: %s", msg);
-    fos_netguard_block_message(msg, sizeof(msg), NULL, true);
-    CHECK(starts_with(msg, prefix) && ends_with(msg, suffix), "NULL reason: %s", msg);
-
-    /* The glue's reason buffer is 96 bytes and the Nim side's 192: a reason
-     * that long, or longer, is cut in the middle, never at the end. */
-    char long_reason[400];
+    char long_reason[96];
     memset(long_reason, 'x', sizeof(long_reason) - 1);
     long_reason[sizeof(long_reason) - 1] = '\0';
-    size_t sizes[] = {192, 128, 96, 90};
-    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
-        char small[192];
-        size_t len = fos_netguard_block_message(small, sizes[i], long_reason, i % 2 == 1);
-        CHECK(len == strlen(small) && len < sizes[i], "size %zu: length %zu", sizes[i], len);
-        CHECK(starts_with(small, prefix), "size %zu: prefix lost: %s", sizes[i], small);
-        CHECK(ends_with(small, suffix), "size %zu: suffix lost: %s", sizes[i], small);
-    }
-
-    /* Too small for both ends: the prefix, as much as fits. */
-    char tiny[24];
-    fos_netguard_block_message(tiny, sizeof(tiny), "192.168.1.5 is a private address", false);
-    CHECK(strncmp(tiny, prefix, sizeof(tiny) - 1) == 0 && strlen(tiny) == sizeof(tiny) - 1,
-          "tiny: %s", tiny);
-    CHECK(fos_netguard_block_message(NULL, 10, "x", false) == 0, "NULL out");
-    CHECK(fos_netguard_block_message(tiny, 0, "x", false) == 0, "zero-length out");
+    int written = snprintf(msg, sizeof(msg), FOS_NETGUARD_BLOCK_FMT, "redirect: ", long_reason);
+    CHECK(written > 0 && (size_t)written < sizeof(msg), "longest message is %d bytes", written);
+    CHECK(starts_with(msg, prefix) && ends_with(msg, suffix), "longest: %s", msg);
 
     /* What the scene really gets for a name that resolves privately: the
      * name and, for an IPv4 answer, the address it resolved to. */
@@ -476,9 +455,6 @@ static void test_block_message(void)
         /* An IPv6-first resolver answers ::1 first; no dotted quad then. */
         CHECK(strcmp(reason, "localhost resolves to a private address") == 0, "reason %s", reason);
     }
-    fos_netguard_block_message(msg, sizeof(msg), reason, false);
-    CHECK(starts_with(msg, "LAN access is off for this frame (localhost resolves to"), "%s", msg);
-    CHECK(ends_with(msg, suffix), "%s", msg);
     fos_netguard_set_policy(false);
 }
 

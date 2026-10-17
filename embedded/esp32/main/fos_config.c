@@ -319,9 +319,6 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u8(nvs, "debug", s_config.debug_logging ? 1 : 0), "debug");
     FOS_NVS_SET(nvs_set_u8(nvs, "fusion", s_config.image_fusion ? 1 : 0), "fusion");
     FOS_NVS_SET(nvs_set_u8(nvs, "lan_access", s_config.allow_local_network ? 1 : 0), "lan_access");
-    /* Mirrored for firmware before the switch, after a downgrade (it reads
-     * only this key, as the cloud-managed escape hatch). */
-    FOS_NVS_SET(nvs_set_u8(nvs, "allow_lan", s_config.allow_local_network ? 1 : 0), "allow_lan");
     FOS_NVS_SET(nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0), "tls_enable");
     FOS_NVS_SET(nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0), "admin_auth");
     FOS_NVS_SET(nvs_set_u32(nvs, "tls_port", s_config.tls_port), "tls_port");

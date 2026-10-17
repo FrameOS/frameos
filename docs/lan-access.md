@@ -117,7 +117,7 @@ presence.
 | | Truth | Mirror the UI reads |
 | --- | --- | --- |
 | Pi / Linux | `state/local_access.json` `allowLocalNetworkAccess` (`frameos/local_access.nim`); never `frame.json`, which a deploy overwrites | device `GET /api/frames/1` top-level `lan_access`; the hub's `hardware.lanAccess` |
-| ESP32 | NVS `lan_access` (`fos_config.c`; the older `allow_lan` is mirrored for a downgrade but not read) | hello/state `hardware.lanAccess`; `lan_access` in every backend command ack's state fields |
+| ESP32 | NVS `lan_access` (`fos_config.c`; the older `allow_lan` is ignored) | hello/state `hardware.lanAccess`; `lan_access` in every backend command ack's state fields |
 | Backend | | `frame.lan_access`, updated when a toggle is applied and from ESP32 acks |
 | FrameOS Cloud | | `frames.hardware.lanAccess`, exposed as `lan_access` on the frame (`null` = firmware too old to report it) |
 
@@ -152,7 +152,7 @@ queues both device verbs (`docs/cloud-frames-contract.json`):
 
 - `lan_access_challenge` `{}` -> ack, or `no_panel`, `rate_limited`,
   `challenge_failed`.
-- `lan_access_set` `{enabled, code?}` -> ack with `lan_access`, or
+- `lan_access_set` `{enabled, code?}` -> ack, or
   `invalid_lan_access`, `code_required`, `invalid_code`, `code_expired`,
   `too_many_attempts`, `rate_limited`, `persist_failed`. The device sends a
   fresh `state` when the value changes, whoever changed it.

@@ -25,7 +25,6 @@
 import json, jsony, pixie, os, strutils, parseutils, locks, options
 import zippy
 import frameos/hal/files
-import frameos/local_access
 import frameos/types
 import frameos/utils/font
 import frameos/utils/image
@@ -191,7 +190,6 @@ proc newHook*(v: var NetworkConfig) =
     wifiHotspotTimeoutSeconds: 300,
     wifiCountry: "",
     networkBackend: "auto",
-    allowLocalNetworkAccess: false,
   )
 
 proc newHook*(v: var JsRuntimeConfig) =
@@ -381,12 +379,6 @@ proc readConfig*(configPath = ""): FrameConfig =
   result = parseFrameConfig(if path.endsWith(".gz"): uncompress(encoded) else: encoded)
   if commandLineParams().contains("--debug"):
     result.debug = true
-  # LAN access lives in state/, not here — a backend deploy rewrites frame.json
-  # wholesale (frameos/local_access.nim). Fold the stored value in on every
-  # load, including the reload after a deploy, so the in-memory config agrees
-  # with what the frame is actually enforcing. Whatever frame.json says under
-  # this key is ignored: it is a leftover, never a setting.
-  result.network.allowLocalNetworkAccess = lanAccessEnabled()
 
 proc frameJsonLanAccessSeed*(configPath = ""): Option[bool] =
   ## frame.json `network.lanAccess`, the LAN access chosen when the frame was

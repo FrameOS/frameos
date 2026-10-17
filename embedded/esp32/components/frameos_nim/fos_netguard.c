@@ -560,32 +560,3 @@ fos_netguard_verdict_t fos_netguard_check_url(const char *url, char *reason, siz
     }
     return allowed ? FOS_NETGUARD_ALLOWED : FOS_NETGUARD_BLOCKED;
 }
-
-/* ----------------------------------------------------------- the message */
-
-#define BLOCK_PREFIX "LAN access is off for this frame"
-#define BLOCK_SUFFIX ". Turn on LAN access in the frame settings."
-
-size_t fos_netguard_block_message(char *out, size_t out_len, const char *reason, bool redirect)
-{
-    if (out == NULL || out_len == 0) return 0;
-    const char *detail = reason != NULL ? reason : "";
-    const char *lead = detail[0] ? (redirect ? " (redirect: " : " (") : "";
-    const char *close = detail[0] ? ")" : "";
-    /* What the prefix, the lead-in and the suffix take; the reason gets the
-     * rest. It is the part that may be cut — never the two ends the SPA and
-     * the owner read. */
-    const size_t fixed = strlen(BLOCK_PREFIX) + strlen(lead) + strlen(close) + strlen(BLOCK_SUFFIX);
-    if (fixed >= out_len) {
-        /* Too small for the whole sentence: keep what fits of the prefix,
-         * which is what a reader matches on. */
-        snprintf(out, out_len, "%s", BLOCK_PREFIX);
-        return strlen(out);
-    }
-    size_t room = out_len - 1 - fixed;
-    size_t detail_len = strlen(detail);
-    if (detail_len > room) detail_len = room;
-    int written = snprintf(out, out_len, "%s%s%.*s%s%s", BLOCK_PREFIX, lead, (int)detail_len,
-                           detail, close, BLOCK_SUFFIX);
-    return written < 0 ? 0 : strlen(out);
-}

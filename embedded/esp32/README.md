@@ -490,18 +490,17 @@ HTTP request and every redirect hop goes through `fos_netguard_check_url`
 LAN access is off for this frame (homeassistant.local resolves to private address 192.168.1.5). Turn on LAN access in the frame settings.
 ```
 
-(`fos_netguard_block_message`: the prefix is what the SPA's logs panel
-matches; the reason is what gets cut when the buffer is short). That applies
-on every frame, standalone, backend-managed or cloud-managed: until
-2026.10.17 the deny was armed only while cloud-managed or rendering
-cloud-pushed scenes. The frame's own control planes stay reachable by exact
+(`FOS_NETGUARD_BLOCK_FMT`: the prefix is what the SPA's logs panel matches,
+and the error buffers always hold the whole sentence). That applies on every
+frame, standalone, backend-managed or cloud-managed: before the switch the
+deny was armed only while cloud-managed or rendering cloud-pushed scenes. The frame's own control planes stay reachable by exact
 `host:port`: `cloud_url` and the `ws_url` override when stored, and
 `backend_url` (`apply_network_policy` in `fos_cloud.c`).
 
 The value is `config->allow_local_network`, NVS `lan_access`. A frame with
 no `lan_access` key predates the switch and reads as **on**; the older
-`allow_lan` is written as a mirror for a downgrade but never read (every save
-wrote it, so its 0 was the old default, not a choice). The flashers send
+`allow_lan` is no longer read or written (every save wrote it, so its 0 was
+the old default, not a choice). The flashers send
 `set allow_local_network 0|1` at provisioning, and the USB console's `set`
 changes it directly (the cable is physical presence). `status` prints it on
 the `net_policy:` line.
@@ -530,14 +529,15 @@ backend's command queue (`backend_verb_allowed`):
   `false` saves at once and takes a pending code off the panel; `true` needs
   the code (`code_required`, then `rate_limited` before the challenge is
   looked at, `code_expired`, `invalid_code`, `too_many_attempts`), then saves
-  (`persist_failed`). Every ack carries `lan_access`; a successful one on
-  the socket is followed by a `state` message.
+  (`persist_failed`). A successful one on the socket is followed by a
+  `state` message.
 
 The cloud reads the value from `hardware.lanAccess` (hello and every
 `state`), the backend from `lan_access` in the state fields of every
 commands pull and ack (`fos_cloud_add_state_fields`). The code itself is in
 no ack and no log line: the log says `lan_access:challenge`,
-`lan_access:shown`, `lan_access:refused` (with the token) and `lan_access:set`.
+`lan_access:shown`, `lan_access:refused` (with the token), `lan_access:on`
+and `lan_access:off`.
 
 ## Power management (M4)
 
@@ -857,7 +857,7 @@ switch scenes without holding them. It also carries a top-level
 `"source": "local" | "backend" | "cloud"` key recording who installed the
 payload (missing = `local` on pre-upgrade stores); `fos_cloud.c` reports the
 applied payload's checksum to the cloud only for cloud-installed scenes. (It
-also keyed the private-network deny until 2026.10.17; the LAN access switch
+also keyed the private-network deny before the LAN access switch; the switch
 alone decides that now.) The source is mirrored in NVS so it survives the
 store→apply window across a reboot.
 

@@ -381,7 +381,7 @@ proc refreshLocalNetworkPolicy*(frameConfig: FrameConfig) {.gcsafe.} =
   ## Recomputes the private-network HTTP deny (utils/http_client.nim): active
   ## iff the frame's LAN access is off (frameos/local_access.nim,
   ## lanAccessEnabled), on every frame — standalone, backend-managed and
-  ## cloud-managed alike. Until 2026.10.17 it was armed only while the frame
+  ## cloud-managed alike. Before the LAN access switch it was armed only while the frame
   ## was cloud-managed or still ran provider-pushed scenes, and a local
   ## override lifted it; the switch alone decides now (docs/lan-access.md).
   ##
@@ -1384,15 +1384,12 @@ proc handleLanAccessChallenge(ctx: CloudVerbContext, id: JsonNode): CloudVerbRep
       ctx.audit("lan_access_challenge", false, outcome.error)
       return CloudVerbReply(ack: ackError(id, outcome.error))
     ctx.audit("lan_access_challenge", true)
-    var ack = ackOk(id)
-    ack["expires_in_seconds"] = %LocalAccessChallengeTtlSeconds.int
-    CloudVerbReply(ack: ack)
+    CloudVerbReply(ack: ackOk(id))
 
 proc handleLanAccessSet(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
   ## `lan_access_set` `{enabled, code?}`: off at once, on with the code from
-  ## the panel. The ack carries the value now in force; the next `state`
-  ## message reports it as hardware.lanAccess (runHubSession). The audit line
-  ## never has the code.
+  ## the panel. The next `state` message reports the value as
+  ## hardware.lanAccess (runHubSession). The audit line never has the code.
   {.gcsafe.}:
     # Only `enabled` and `code` cross over: whatever else the message holds
     # (a `scope`, say) is not the provider's to choose.
@@ -1406,13 +1403,8 @@ proc handleLanAccessSet(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): Clo
       ctx.audit("lan_access_set", false, outcome.error)
       return CloudVerbReply(ack: ackError(id, outcome.error))
     refreshLocalNetworkPolicy(ctx.frameConfig)
-    let enabled = lanAccessEnabled()
-    if not ctx.auditFn.isNil:
-      ctx.auditFn(%*{"event": "cloud:audit", "verb": "lan_access_set", "ok": true,
-                     "lanAccess": enabled})
-    var ack = ackOk(id)
-    ack["lan_access"] = %enabled
-    CloudVerbReply(ack: ack)
+    ctx.audit("lan_access_set", true)
+    CloudVerbReply(ack: ackOk(id))
 
 proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gcsafe.} =
   ## Dispatches one provider→frame message. The verb table below is the

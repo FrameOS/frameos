@@ -266,112 +266,57 @@ bool fos_panel_code_box(const fos_panel_surface_t *s, const char *title, size_t 
     const int sw = fos_panel_scene_width(s);
     const int sh = fos_panel_scene_height(s);
     const int digits_w1 = (int)code_len * 6 - 1; /* at scale 1 */
-    if (sw < digits_w1 + 4 || sh < 7 + 4) return false;
 
     /* Digits up to 3/5 of the width and 2/5 of the height: readable from
-     * across a room, with the scene still around them. */
-    int digit_scale = max_int(1, min_int((sw * 3 / 5) / digits_w1, (sh * 2 / 5) / 7));
-    int pad = max_int(2, digit_scale * 2);
-    const int inner_max = sw - 2 * pad;
-    while (digit_scale > 1 && digits_w1 * digit_scale > inner_max) digit_scale--;
-    int title_scale = 0;
-    if (title != NULL && title[0]) {
-        title_scale = fos_panel_fit_scale(title, max_int(1, digit_scale * 2 / 5), inner_max);
-        if (fos_panel_text_width(title, title_scale) > inner_max ||
-            7 * (title_scale + digit_scale) + 2 * pad + 2 > sh) {
-            title_scale = 0; /* a tiny panel shows the digits alone */
-        }
+     * across a room, with the scene still around them; at least scale 1 on a
+     * small panel, if the box fits at all. A title at a third of the digits'
+     * scale is narrower than the digits whenever it is no longer than they
+     * are wide at that scale ("LAN access code" is). */
+    const int digit_scale = max_int(1, min_int((sw * 3 / 5) / digits_w1, (sh * 2 / 5) / 7));
+    int title_scale = digit_scale / 3; /* 0 on a tiny panel: the digits alone */
+    if (title == NULL || fos_panel_text_width(title, title_scale) > digits_w1 * digit_scale) {
+        title_scale = 0;
     }
-    const int gap = title_scale ? max_int(2, digit_scale) : 0;
-    const int inner_w = max_int(digits_w1 * digit_scale,
-                                title_scale ? fos_panel_text_width(title, title_scale) : 0);
-    const int inner_h = 7 * digit_scale + (title_scale ? 7 * title_scale + gap : 0);
-
-    box->w = min_int(inner_w + 2 * pad, sw);
-    box->h = min_int(inner_h + 2 * pad, sh);
-    box->x = (sw - box->w) / 2;
-    box->y = (sh - box->h) / 2;
-    box->pad = pad;
-    box->gap = gap;
+    box->pad = 2 * digit_scale;
+    box->gap = title_scale ? digit_scale : 0;
     box->title_scale = title_scale;
     box->digit_scale = digit_scale;
+    box->w = digits_w1 * digit_scale + 2 * box->pad;
+    box->h = 7 * digit_scale + 2 * box->pad + (title_scale ? 7 * title_scale + box->gap : 0);
+    if (box->w > sw || box->h > sh) return false;
+    box->x = (sw - box->w) / 2;
+    box->y = (sh - box->h) / 2;
 
-    /* The scene rectangle on the panel (scene_to_panel of its corners). */
-    switch (s->rotate) {
-        case 90:
-            box->px = sh - (box->y + box->h); box->py = box->x;
-            box->pw = box->h; box->ph = box->w;
-            break;
-        case 180:
-            box->px = sw - (box->x + box->w); box->py = sh - (box->y + box->h);
-            box->pw = box->w; box->ph = box->h;
-            break;
-        case 270:
-            box->px = box->y; box->py = sw - (box->x + box->w);
-            box->pw = box->h; box->ph = box->w;
-            break;
-        default:
-            box->px = box->x; box->py = box->y;
-            box->pw = box->w; box->ph = box->h;
-            break;
-    }
-    return box->pw > 0 && box->ph > 0 && box->px >= 0 && box->py >= 0 &&
-           box->px + box->pw <= s->width && box->py + box->ph <= s->height;
+    /* The scene rectangle on the panel: its two opposite corners mapped. */
+    int ax, ay, bx, by;
+    scene_to_panel(s, box->x, box->y, &ax, &ay);
+    scene_to_panel(s, box->x + box->w - 1, box->y + box->h - 1, &bx, &by);
+    box->px = min_int(ax, bx);
+    box->py = min_int(ay, by);
+    box->pw = max_int(ax, bx) - box->px + 1;
+    box->ph = max_int(ay, by) - box->py + 1;
+    return true;
 }
 
-static void box_span(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
-                     size_t *stride, size_t *first, size_t *span)
+size_t fos_panel_box_copy(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
+                          uint8_t *buf, bool restore)
 {
-    const int bpp = bits_per_pixel(s->format);
-    *stride = row_bytes(s->width, bpp);
-    *first = ((size_t)box->px * (size_t)bpp) / 8u;
-    *span = row_bytes(box->px + box->pw, bpp) - *first;
-}
-
-size_t fos_panel_box_bytes(const fos_panel_surface_t *s, const fos_panel_code_box_t *box)
-{
-    if (s == NULL || box == NULL || bits_per_pixel(s->format) == 0) return 0;
-    size_t stride, first, span;
-    box_span(s, box, &stride, &first, &span);
-    return span * (size_t)box->ph * (two_planes(s->format) ? 2u : 1u);
-}
-
-void fos_panel_box_save(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
-                        uint8_t *out)
-{
-    if (s == NULL || box == NULL || out == NULL || bits_per_pixel(s->format) == 0) return;
-    size_t stride, first, span;
-    box_span(s, box, &stride, &first, &span);
+    const int bpp = s != NULL && box != NULL ? bits_per_pixel(s->format) : 0;
+    if (bpp == 0) return 0;
+    const size_t stride = row_bytes(s->width, bpp);
+    const size_t first = ((size_t)box->px * (size_t)bpp) / 8u;
+    const size_t span = row_bytes(box->px + box->pw, bpp) - first;
     const int planes = two_planes(s->format) ? 2 : 1;
-    for (int plane = 0; plane < planes; plane++) {
-        const uint8_t *base = s->buf + (size_t)plane * stride * (size_t)s->height;
-        for (int row = box->py; row < box->py + box->ph; row++) {
-            memcpy(out, base + (size_t)row * stride + first, span);
-            out += span;
+    if (buf != NULL) {
+        for (int plane = 0; plane < planes; plane++) {
+            uint8_t *base = s->buf + (size_t)plane * stride * (size_t)s->height + first;
+            for (int row = box->py; row < box->py + box->ph; row++, buf += span) {
+                uint8_t *at = base + (size_t)row * stride;
+                memcpy(restore ? at : buf, restore ? buf : at, span);
+            }
         }
     }
-}
-
-void fos_panel_box_restore(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
-                           const uint8_t *saved)
-{
-    if (s == NULL || box == NULL || s->buf == NULL || bits_per_pixel(s->format) == 0) return;
-    if (saved == NULL) {
-        for (int py = box->py; py < box->py + box->ph; py++) {
-            for (int px = box->px; px < box->px + box->pw; px++) put_panel(s, px, py, false);
-        }
-        return;
-    }
-    size_t stride, first, span;
-    box_span(s, box, &stride, &first, &span);
-    const int planes = two_planes(s->format) ? 2 : 1;
-    for (int plane = 0; plane < planes; plane++) {
-        uint8_t *base = s->buf + (size_t)plane * stride * (size_t)s->height;
-        for (int row = box->py; row < box->py + box->ph; row++) {
-            memcpy(base + (size_t)row * stride + first, saved, span);
-            saved += span;
-        }
-    }
+    return span * (size_t)box->ph * (size_t)planes;
 }
 
 void fos_panel_draw_code(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
