@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 
@@ -25,7 +26,13 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 ESP32_DIR = REPO_ROOT / "embedded" / "esp32"
 MAIN = ESP32_DIR / "main"
 
-SUITES = {
+class Suite(TypedDict):
+    sources: list[Path]
+    includes: list[Path]
+    min_checks: int
+
+
+SUITES: dict[str, Suite] = {
     "lan_access": {
         "sources": [MAIN / "fos_lan_access.c", MAIN / "tests" / "test_fos_lan_access.c"],
         "includes": [MAIN],
