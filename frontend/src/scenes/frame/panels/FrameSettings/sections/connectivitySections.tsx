@@ -503,7 +503,8 @@ export function FrameAdminPanelSection(): JSX.Element {
         {isEmbeddedMode ? (
           'Frame setup access'
         ) : (
-          <>
+          // The Tooltip is a block: an inline-flex row keeps the "i" beside the title.
+          <span className="inline-flex items-center gap-1.5">
             Frame admin panel
             <Tooltip
               label="About the frame admin panel"
@@ -528,7 +529,7 @@ export function FrameAdminPanelSection(): JSX.Element {
                 </div>
               }
             />
-          </>
+          </span>
         )}
       </SectionHeading>
       {isEmbeddedMode ? (

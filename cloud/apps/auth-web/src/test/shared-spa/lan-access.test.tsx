@@ -345,21 +345,26 @@ describe("the LAN access section in the settings panel", () => {
     const section = renderPanel(makeFrame({ ...cloudPi, lan_access: false } as Partial<FrameType>));
     expect(section.textContent).toContain("Off");
     // The help is behind the "i" next to the heading, not under the switch.
+    // Every query below is scoped (the heading, the dialog): role queries over
+    // the whole settings panel cost hundreds of milliseconds each in jsdom.
     expect(section.textContent).not.toContain("Lets scenes reach devices on your home network");
-    fireEvent.click(screen.getByRole("button", { name: "LAN access help" }));
-    expect(await screen.findByText(/Lets scenes reach devices on your home network/)).toBeTruthy();
+    const heading = section.previousElementSibling as HTMLElement;
+    fireEvent.click(within(heading).getByRole("button", { name: "LAN access help" }));
+    const popper = document.getElementById("popper") as HTMLElement;
+    expect(await within(popper).findByText(/Lets scenes reach devices on your home network/)).toBeTruthy();
 
     fireEvent.click(within(section).getByRole("switch"));
-    fireEvent.click(await screen.findByRole("button", { name: "Show code on the frame" }));
-    const input = await screen.findByLabelText("Code from the frame");
+    const dialog = await screen.findByTestId("lan-access-modal");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Show code on the frame" }));
+    const input = await within(dialog).findByLabelText("Code from the frame");
     expect(input.getAttribute("autocomplete")).toBe("one-time-code");
     expect(input.getAttribute("inputmode")).toBe("numeric");
-    expect(screen.getByText("Enter the code showing on your frame.")).toBeTruthy();
+    expect(within(dialog).getByText("Enter the code showing on your frame.")).toBeTruthy();
     fireEvent.change(input, { target: { value: "135790" } });
-    fireEvent.click(screen.getByRole("button", { name: "Turn on" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Turn on" }));
 
-    expect(await screen.findByText("LAN access is on.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(await within(dialog).findByText("LAN access is on.")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
     await waitFor(() => expect(section.textContent).toContain("On"));
     expect(posts().map((post) => post.path)).toEqual([
       "/api/frames/1/lan_access/challenge",
