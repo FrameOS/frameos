@@ -2,10 +2,10 @@
 // One-off: recompute store_scene_versions.risk_flags from each version's own
 // scenes, with the publish-time detector (detectRiskFlags in src/lib/store.ts,
 // i.e. frontend/src/utils/sceneAccess.ts). Versions published before the
-// "assets" and "files" flags existed carry "shell" at most, so the store
-// shows them without "reads assets folder" / "reads all files" until this
-// runs. store_scenes.risk_flags, the copy of the latest version's flags the
-// store lists by, is updated with it.
+// "files", "assets" and "assets-write" flags existed carry "shell" at most,
+// so the store shows them without "reads all files" / "reads assets folder" /
+// "writes assets folder" until this runs. store_scenes.risk_flags, the copy
+// of the latest version's flags the store lists by, is updated with it.
 //
 // Versions are immutable and the detector is a pure function of their bytes,
 // so this is safe to re-run whenever the detector learns something new.

@@ -255,8 +255,14 @@ export function SceneInfoPanel({
         </p>
       ) : scene.riskFlags.includes("assets") ? (
         <p className="notice">
-          This scene reads and writes the frame&apos;s assets folder: uploaded photos, fonts and
-          what other scenes saved there. Installing it allows that.
+          This scene reads the frame&apos;s assets folder: uploaded photos, fonts and what other
+          scenes saved there. Installing it allows that.
+        </p>
+      ) : null}
+      {scene.riskFlags.includes("assets-write") ? (
+        <p className="notice-error" role="alert">
+          This scene writes and deletes files in the frame&apos;s assets folder, where your
+          uploaded photos and other scenes&apos; files are. Installing it allows that.
         </p>
       ) : null}
 

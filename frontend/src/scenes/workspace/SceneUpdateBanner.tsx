@@ -31,10 +31,13 @@ export function SceneUpdateBanner({
   size?: 'small' | 'normal'
   className?: string
 }): JSX.Element | null {
-  const { sceneUpdateVersions, updatingSceneIds } = useValues(sceneUpdatesLogic({ frameId }))
+  const { sceneUpdateVersions, updatingSceneIds, checkingUpdateSceneId } = useValues(sceneUpdatesLogic({ frameId }))
   const { confirmSceneUpdate } = useActions(sceneUpdatesLogic({ frameId }))
   const version = sceneUpdateVersions[sceneId]
   const updating = Boolean(updatingSceneIds[sceneId])
+  // Reading the new version before the dialog opens (what it gains).
+  const checking = checkingUpdateSceneId === sceneId
+  const busy = updating || checking
   if (!version && !updating) {
     return null
   }
@@ -43,11 +46,13 @@ export function SceneUpdateBanner({
     <button
       type="button"
       data-scene-update-banner={sceneId}
-      disabled={updating}
-      aria-busy={updating}
+      disabled={busy}
+      aria-busy={busy}
       title={
         updating
           ? 'Updating this scene to the latest version'
+          : checking
+          ? 'Checking what the latest version changes'
           : `Version ${shortSceneVersion(version)} of this scene is available — click to update`
       }
       onClick={(event) => {
@@ -57,16 +62,16 @@ export function SceneUpdateBanner({
       className={clsx(
         'pointer-events-auto flex items-center rounded-full border border-sky-500/45 bg-white/95 font-semibold text-sky-700 shadow-sm backdrop-blur-sm transition hover:bg-sky-50 hover:text-sky-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',
         size === 'small' ? 'gap-1 px-1.5 py-0.5 text-[10px]' : 'gap-1.5 px-2.5 py-1 text-xs',
-        updating && 'cursor-progress',
+        busy && 'cursor-progress',
         className
       )}
     >
-      {updating ? (
+      {busy ? (
         <Spinner className={clsx(iconClassName, '[&>svg]:h-full [&>svg]:w-full')} />
       ) : (
         <ArrowUpCircleIcon className={iconClassName} />
       )}
-      <span>{updating ? 'Updating…' : 'Update'}</span>
+      <span>{updating ? 'Updating…' : checking ? 'Checking…' : 'Update'}</span>
     </button>
   )
 }

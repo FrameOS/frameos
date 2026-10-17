@@ -10,6 +10,7 @@ import {
   assetAccessRefusesContent,
   sceneAccess,
   sceneAccessFlagLabels,
+  sceneAccessFlagsForScene,
   sceneHomeFolder,
 } from '../../../../utils/sceneAccess'
 
@@ -38,7 +39,7 @@ export interface sceneSettingsLogicMeta {
     scene: (scenes: FrameScene[], sceneId: string | null) => FrameScene | null
     sceneIndex: (scenes: FrameScene[], sceneId: string | null) => number
     sceneAccess: (scene: FrameScene | null) => SceneAccess | null
-    assetAccessOptions: (scene: FrameScene | null, sceneAccess: SceneAccess | null) => Option[]
+    assetAccessOptions: (scene: FrameScene | null) => Option[]
     assetAccessNote: (sceneAccess: SceneAccess | null) => string | null
   }
 }
@@ -76,24 +77,25 @@ export const sceneSettingsLogic = kea<sceneSettingsLogicType>([
       (scene: sceneSettingsLogicValues['scene']): SceneAccess | null => (scene ? sceneAccess(scene) : null),
     ],
     assetAccessOptions: [
-      (s) => [s.scene, s.sceneAccess],
-      (scene: sceneSettingsLogicValues['scene'], access: sceneSettingsLogicValues['sceneAccess']): Option[] =>
-        ASSET_ACCESS_VALUES.map((value) => ({
+      (s) => [s.scene],
+      (scene: sceneSettingsLogicValues['scene']): Option[] => {
+        // What "auto" comes to: the flags the content shows with nothing
+        // declared, reading and writing alike (shell has its own chip).
+        const auto = scene
+          ? sceneAccessFlagsForScene({ ...scene, settings: { ...scene.settings, assetAccess: 'auto' } })
+              .filter((flag) => flag !== 'shell')
+              .map((flag) => sceneAccessFlagLabels[flag])
+          : []
+        return ASSET_ACCESS_VALUES.map((value) => ({
           value,
           label:
             value === 'auto'
-              ? // What "auto" comes to: the content's reach, whatever is declared.
-                `Auto (${
-                  access?.detected === 'files'
-                    ? sceneAccessFlagLabels.files
-                    : access?.detected === 'assets'
-                    ? sceneAccessFlagLabels.assets
-                    : 'no files'
-                })`
+              ? `Auto (${auto.length > 0 ? auto.join(', ') : 'no files'})`
               : value === 'cache-home-only'
               ? `${assetAccessLabels[value]} (assets/${sceneHomeFolder(scene?.id ?? '')})`
               : assetAccessLabels[value],
-        })),
+        }))
+      },
     ],
     assetAccessNote: [
       (s) => [s.sceneAccess],

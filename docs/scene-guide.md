@@ -297,10 +297,15 @@ in `settings.assetAccess`:
   refused.
 - `"all-files"`: a Local Image node may read any folder on the frame.
 
-`fetchImage({ saveAsset })` is the frame caching a download, not the scene
-reading the folder: it raises no flag. Installing a scene is the approval of
-what its flags say, so declare the narrowest access that works. (Frames
-before FrameOS 2026.10.16 ignore the setting.)
+Writing is its own flag: `writeAsset`, `appendAsset`, `deleteAsset` or a
+stream opened with `"w"` or `"a"` shows "writes assets folder" under every
+value but `"cache-home-only"`, whose writes stay in the scene's own folder.
+Writes only ever land inside the assets folder, so "reads all files" never
+means writing outside it. `fetchImage({ saveAsset })` is the frame caching a
+download, not the scene using the folder: it raises no flag. Installing a
+scene is the approval of what its flags say, and updating one says which
+flags the new version adds, so declare the narrowest access that works.
+(Frames before FrameOS 2026.10.16 ignore the setting.)
 
 **Big responses.** A response body becomes a JS string. When the app needs
 only what follows some marker in a large page, pass

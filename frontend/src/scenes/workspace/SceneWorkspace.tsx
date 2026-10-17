@@ -50,6 +50,7 @@ import { SceneState } from '../frame/panels/SceneState/SceneState'
 import { RenameSceneModal } from '../frame/panels/Scenes/RenameSceneModal'
 import { SceneSettings } from '../frame/panels/Scenes/SceneSettings'
 import { scenesLogic } from '../frame/panels/Scenes/scenesLogic'
+import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
 import { EditAppModal } from '../frame/panels/EditApp/EditAppModal'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
@@ -775,7 +776,10 @@ export function ScenePreviewPanel({ frameId, scene }: { frameId: FrameId; scene:
 export function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: FrameScene }): JSX.Element {
   const { renameScene, confirmSceneUpdate } = useActions(scenesLogic({ frameId }))
   const { sceneUpdateVersions } = useValues(scenesLogic({ frameId }))
+  const { checkingUpdateSceneId } = useValues(sceneUpdatesLogic({ frameId }))
   const availableUpdateVersion = sceneUpdateVersions[scene.id]
+  // Reading the new version before the dialog opens (what it gains).
+  const checkingUpdate = checkingUpdateSceneId === scene.id
   const nodes = scene.nodes ?? []
   const edges = scene.edges ?? []
   const sceneApps = scene.apps ?? {}
@@ -842,10 +846,12 @@ export function SceneInfoPanel({ frameId, scene }: { frameId: FrameId; scene: Fr
           <button
             type="button"
             onClick={() => confirmSceneUpdate(scene.id)}
+            disabled={checkingUpdate}
+            aria-busy={checkingUpdate}
             className="frameos-secondary-button inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           >
-            <ArrowPathIcon className="h-4 w-4" />
-            <span>Update to latest</span>
+            <ArrowPathIcon className={clsx('h-4 w-4', checkingUpdate && 'animate-spin')} />
+            <span>{checkingUpdate ? 'Checking…' : 'Update to latest'}</span>
           </button>
         </div>
       ) : null}

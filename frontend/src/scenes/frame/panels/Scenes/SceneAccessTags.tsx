@@ -10,15 +10,19 @@ interface SceneAccessTagsProps {
   tagClassName?: string
 }
 
+// Red for what reaches past the scene's own reading of your photos: shell
+// commands, any file on the frame, and writing or deleting in the assets folder.
 const flagColor: Record<SceneAccessFlag, 'red' | 'orange'> = {
   shell: 'red',
   files: 'red',
   assets: 'orange',
+  'assets-write': 'red',
 }
 
 /**
  * The chips a scene shows for what it reaches for on the frame: "runs shell
- * commands", "reads all files", "reads assets folder". Read from the scene's
+ * commands", "reads all files", "reads assets folder", "writes assets
+ * folder". Read from the scene's
  * own JSON (or the store's flags for a catalog entry), so they say the same
  * thing wherever the scene shows up.
  */

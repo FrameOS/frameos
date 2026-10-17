@@ -1,206 +1,223 @@
 {
-  "description": "Corpus for frontend/src/utils/sceneAccess.ts: what a scene declares (settings.assetAccess), what its content reaches for, and the flags the control planes show. docs/scene-guide.md \"Assets\" is the prose. Replayed by cloud/apps/auth-web/src/test/shared-spa/scene-access.test.ts.",
+  "description": "Corpus for frontend/src/utils/sceneAccess.ts: what a scene declares (settings.assetAccess), what its content reaches for, the flags the control planes show, and what changes between two versions. docs/scene-guide.md \"Assets\" is the prose. Replayed by cloud/apps/auth-web/src/test/shared-spa/scene-access.test.ts.",
   "scenes": [
     {
       "name": "an empty scene reaches for nothing",
-      "scene": { "id": "s", "nodes": [], "edges": [] },
-      "expect": { "declared": "auto", "detected": "none", "effective": "none", "flags": [] }
+      "scene": {"id": "s", "nodes": [], "edges": []},
+      "expect": {"declared": "auto", "detected": "none", "effective": "none", "flags": [], "writes": false}
     },
     {
       "name": "a JS code node reading an asset",
-      "scene": {
-        "id": "s",
-        "nodes": [{ "id": "c", "type": "code", "data": { "codeJS": "const raw = frameos.readAsset('notes.txt')" } }],
-        "edges": []
-      },
-      "expect": { "declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"] }
+      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "const raw = frameos.readAsset('notes.txt')"}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"], "writes": false}
     },
     {
       "name": "a scene-local app source listing assets",
-      "scene": {
-        "id": "s",
-        "nodes": [
-          {
-            "id": "a",
-            "type": "app",
-            "data": {
-              "keyword": "jsImage",
-              "sources": { "app.ts": "export function get() { return frameos.listAssets('photos') }" }
-            }
-          }
-        ],
-        "edges": []
-      },
-      "expect": { "declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"] }
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "jsImage", "sources": {"app.ts": "export function get() { return frameos.listAssets('photos') }"}}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"], "writes": false}
     },
     {
       "name": "saving a fetched image is caching, not reading the folder",
-      "scene": {
-        "id": "s",
-        "nodes": [
-          {
-            "id": "a",
-            "type": "app",
-            "data": {
-              "keyword": "unsplash",
-              "sources": { "app.ts": "frameos.fetchImage(url, { saveAsset: { name: 'x', mode: 'auto' } })" }
-            }
-          }
-        ],
-        "edges": []
-      },
-      "expect": { "declared": "auto", "detected": "none", "effective": "none", "flags": [] }
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "unsplash", "sources": {"app.ts": "frameos.fetchImage(url, { saveAsset: { name: 'x', mode: 'auto' } })"}}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "none", "effective": "none", "flags": [], "writes": false}
     },
     {
       "name": "Local Image with no path reads the assets folder",
-      "scene": {
-        "id": "s",
-        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": {} } }],
-        "edges": []
-      },
-      "expect": { "declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"] }
+      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {}}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"], "writes": false}
     },
     {
       "name": "Local Image inside /srv/assets",
-      "scene": {
-        "id": "s",
-        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "/srv/assets/photos" } } }],
-        "edges": []
-      },
-      "expect": { "declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"] }
+      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/srv/assets/photos"}}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"], "writes": false}
     },
     {
       "name": "Local Image with the ESP32 spelling",
-      "scene": {
-        "id": "s",
-        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "sd://photos" } } }],
-        "edges": []
-      },
-      "expect": { "declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"] }
+      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "sd://photos"}}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"], "writes": false}
     },
     {
       "name": "Local Image outside the assets folder",
-      "scene": {
-        "id": "s",
-        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "/home/pi/Pictures" } } }],
-        "edges": []
-      },
-      "expect": { "declared": "auto", "detected": "files", "effective": "files", "flags": ["files"] }
+      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/home/pi/Pictures"}}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "files", "effective": "files", "flags": ["files"], "writes": false}
     },
     {
       "name": "a folder that only starts like the assets folder",
-      "scene": {
-        "id": "s",
-        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "/srv/assets-old/x.jpg" } } }],
-        "edges": []
-      },
-      "expect": { "declared": "auto", "detected": "files", "effective": "files", "flags": ["files"] }
+      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/srv/assets-old/x.jpg"}}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "files", "effective": "files", "flags": ["files"], "writes": false}
     },
     {
       "name": "a traversal out of the assets folder",
-      "scene": {
-        "id": "s",
-        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "/srv/assets/../frameos" } } }],
-        "edges": []
-      },
-      "expect": { "declared": "auto", "detected": "files", "effective": "files", "flags": ["files"] }
+      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/srv/assets/../frameos"}}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "files", "effective": "files", "flags": ["files"], "writes": false}
     },
     {
       "name": "a relative Local Image path is relative to the runtime, not the assets folder",
-      "scene": {
-        "id": "s",
-        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "photos" } } }],
-        "edges": []
-      },
-      "expect": { "declared": "auto", "detected": "files", "effective": "files", "flags": ["files"] }
+      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "photos"}}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "files", "effective": "files", "flags": ["files"], "writes": false}
     },
     {
       "name": "a Local Image path wired from a state field can name any folder",
-      "scene": {
-        "id": "s",
-        "nodes": [
-          { "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": {} } },
-          { "id": "f", "type": "state", "data": { "keyword": "imageFolder" } }
-        ],
-        "edges": [{ "id": "e", "source": "f", "sourceHandle": "fieldOutput", "target": "l", "targetHandle": "fieldInput/path" }]
-      },
-      "expect": { "declared": "auto", "detected": "files", "effective": "files", "flags": ["files"] }
+      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {}}}, {"id": "f", "type": "state", "data": {"keyword": "imageFolder"}}], "edges": [{"id": "e", "source": "f", "sourceHandle": "fieldOutput", "target": "l", "targetHandle": "fieldInput/path"}]},
+      "expect": {"declared": "auto", "detected": "files", "effective": "files", "flags": ["files"], "writes": false}
     },
     {
       "name": "own folder only: asset calls stay in the scene's subtree, no flag",
-      "scene": {
-        "id": "s",
-        "settings": { "assetAccess": "cache-home-only" },
-        "nodes": [{ "id": "c", "type": "code", "data": { "codeJS": "frameos.writeAsset('state.json', b64)" } }],
-        "edges": []
-      },
-      "expect": { "declared": "cache-home-only", "detected": "assets", "effective": "home", "flags": [] }
+      "scene": {"id": "s", "settings": {"assetAccess": "cache-home-only"}, "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.writeAsset('state.json', b64)"}}], "edges": []},
+      "expect": {"declared": "cache-home-only", "detected": "assets", "effective": "home", "flags": [], "writes": true}
     },
     {
       "name": "a declared reach is shown even when nothing in the content uses it",
-      "scene": { "id": "s", "settings": { "assetAccess": "all-files" }, "nodes": [], "edges": [] },
-      "expect": { "declared": "all-files", "detected": "none", "effective": "files", "flags": ["files"] }
+      "scene": {"id": "s", "settings": {"assetAccess": "all-files"}, "nodes": [], "edges": []},
+      "expect": {"declared": "all-files", "detected": "none", "effective": "files", "flags": ["files"], "writes": false}
     },
     {
       "name": "all-assets caps a Local Image that points outside (the frame refuses it)",
-      "scene": {
-        "id": "s",
-        "settings": { "assetAccess": "all-assets" },
-        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "/etc" } } }],
-        "edges": []
-      },
-      "expect": { "declared": "all-assets", "detected": "files", "effective": "assets", "flags": ["assets"] }
+      "scene": {"id": "s", "settings": {"assetAccess": "all-assets"}, "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/etc"}}}], "edges": []},
+      "expect": {"declared": "all-assets", "detected": "files", "effective": "assets", "flags": ["assets"], "writes": false}
     },
     {
       "name": "an unknown value is auto",
-      "scene": {
-        "id": "s",
-        "settings": { "assetAccess": "everything" },
-        "nodes": [{ "id": "c", "type": "code", "data": { "codeJS": "frameos.deleteAsset('x')" } }],
-        "edges": []
-      },
-      "expect": { "declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"] }
+      "scene": {"id": "s", "settings": {"assetAccess": "everything"}, "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.deleteAsset('x')"}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets", "assets-write"], "writes": true}
     },
     {
       "name": "the screenshot app runs a shell command",
-      "scene": {
-        "id": "s",
-        "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "data/chromiumScreenshot", "config": {} } }],
-        "edges": []
-      },
-      "expect": { "declared": "auto", "detected": "none", "effective": "none", "flags": ["shell"] }
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "data/chromiumScreenshot", "config": {}}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "none", "effective": "none", "flags": ["shell"], "writes": false}
     },
     {
       "name": "Nim process APIs in a code node",
-      "scene": {
-        "id": "s",
-        "nodes": [{ "id": "c", "type": "code", "data": { "code": "discard execShellCmd(\"reboot\")" } }],
-        "edges": []
-      },
-      "expect": { "declared": "auto", "detected": "none", "effective": "none", "flags": ["shell"] }
+      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"code": "discard execShellCmd(\"reboot\")"}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "none", "effective": "none", "flags": ["shell"], "writes": false}
+    },
+    {
+      "name": "a writer reaches the assets folder and writes it",
+      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.writeAsset('notes.txt', b64)"}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "writes": true, "flags": ["assets", "assets-write"]}
+    },
+    {
+      "name": "reads all files never covers writes assets folder",
+      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/mnt/usb"}}}, {"id": "c", "type": "code", "data": {"codeJS": "frameos.appendAsset('log.txt', b64)"}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "files", "effective": "files", "writes": true, "flags": ["files", "assets-write"]}
+    },
+    {
+      "name": "a stream opened to read",
+      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "const s = frameos.openAssetStream('big.json', \"r\")"}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "writes": false, "flags": ["assets"]}
+    },
+    {
+      "name": "a stream with no mode reads",
+      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "const s = frameos.openAssetStream(dir + '/big.json')"}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "writes": false, "flags": ["assets"]}
+    },
+    {
+      "name": "a stream opened to write",
+      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "const s = frameos.openAssetStream(`cache/${name}`, 'w')"}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "writes": true, "flags": ["assets", "assets-write"]}
+    },
+    {
+      "name": "a stream opened to append, written over two arguments with calls in them",
+      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.openAssetStream(join(a, b), `a`)"}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "writes": true, "flags": ["assets", "assets-write"]}
+    },
+    {
+      "name": "a stream whose mode is not a literal counts as writing",
+      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.openAssetStream(path, mode)"}}], "edges": []},
+      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "writes": true, "flags": ["assets", "assets-write"]}
+    },
+    {
+      "name": "all-assets without a write call shows no write flag",
+      "scene": {"id": "s", "settings": {"assetAccess": "all-assets"}, "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.listAssets('photos')"}}], "edges": []},
+      "expect": {"declared": "all-assets", "detected": "assets", "effective": "assets", "writes": false, "flags": ["assets"]}
+    },
+    {
+      "name": "all-files with a writer",
+      "scene": {"id": "s", "settings": {"assetAccess": "all-files"}, "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.deleteAsset('old.jpg')"}}], "edges": []},
+      "expect": {"declared": "all-files", "detected": "assets", "effective": "files", "writes": true, "flags": ["files", "assets-write"]}
     }
   ],
   "sets": [
     {
       "name": "reads all files covers reads assets folder across a set",
       "scenes": [
-        { "id": "a", "nodes": [{ "id": "c", "type": "code", "data": { "codeJS": "frameos.readAsset('x')" } }], "edges": [] },
-        { "id": "b", "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "/mnt/usb" } } }], "edges": [] }
+        {"id": "a", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.readAsset('x')"}}], "edges": []},
+        {"id": "b", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/mnt/usb"}}}], "edges": []}
       ],
       "flags": ["files"]
     },
     {
       "name": "flags come in display order: shell, files, assets",
       "scenes": [
-        { "id": "a", "nodes": [{ "id": "c", "type": "code", "data": { "codeJS": "frameos.readAsset('x')" } }], "edges": [] },
-        { "id": "b", "nodes": [{ "id": "s", "type": "app", "data": { "keyword": "data/rstpSnapshot", "config": {} } }], "edges": [] }
+        {"id": "a", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.readAsset('x')"}}], "edges": []},
+        {"id": "b", "nodes": [{"id": "s", "type": "app", "data": {"keyword": "data/rstpSnapshot", "config": {}}}], "edges": []}
       ],
       "flags": ["shell", "assets"]
     },
     {
+      "name": "a writer next to a reader of all files and a shell app",
+      "scenes": [
+        {"id": "a", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.writeAsset('x', b64)"}}], "edges": []},
+        {"id": "b", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/home/pi"}}}], "edges": []},
+        {"id": "c", "nodes": [{"id": "s", "type": "app", "data": {"keyword": "data/chromiumScreenshot", "config": {}}}], "edges": []}
+      ],
+      "flags": ["shell", "files", "assets-write"]
+    },
+    {
       "name": "not a list",
-      "scenes": { "id": "a" },
+      "scenes": {"id": "a"},
       "flags": []
+    }
+  ],
+  "changes": [
+    {
+      "name": "nothing changes",
+      "before": ["assets"],
+      "after": ["assets"],
+      "gained": [],
+      "lost": []
+    },
+    {
+      "name": "reads assets folder becomes reads all files",
+      "before": ["assets"],
+      "after": ["files"],
+      "gained": ["files"],
+      "lost": []
+    },
+    {
+      "name": "reads all files narrows to the assets folder",
+      "before": ["files"],
+      "after": ["assets"],
+      "gained": [],
+      "lost": ["files"]
+    },
+    {
+      "name": "a new version starts writing",
+      "before": ["assets"],
+      "after": ["assets", "assets-write"],
+      "gained": ["assets-write"],
+      "lost": []
+    },
+    {
+      "name": "from nothing to everything",
+      "before": [],
+      "after": ["shell", "files", "assets-write"],
+      "gained": ["shell", "files", "assets-write"],
+      "lost": []
+    },
+    {
+      "name": "reading all files covers a dropped assets read",
+      "before": ["assets", "assets-write"],
+      "after": ["files"],
+      "gained": ["files"],
+      "lost": ["assets-write"]
+    },
+    {
+      "name": "unknown catalog flags are ignored",
+      "before": ["nsfw"],
+      "after": ["nsfw", "assets"],
+      "gained": ["assets"],
+      "lost": []
     }
   ]
 }

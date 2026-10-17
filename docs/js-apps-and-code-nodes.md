@@ -103,9 +103,11 @@ paths are relative to the scene's asset root: the frame's assets folder, or
 the scene's own `scenes/<sceneId>/` subtree when the scene declares
 `settings.assetAccess: "cache-home-only"` or the frame's `js.assetSandbox`
 is `"scene"` (`frameos/src/frameos/asset_scope.nim`). Nothing outside the
-root resolves, and a symlink inside it is not a way out. Calling any of the
-asset functions flags the scene "reads assets folder" in the editor and the
-store unless it declares its own folder (`frontend/src/utils/sceneAccess.ts`,
+root resolves, and a symlink inside it is not a way out. Calling the
+asset functions flags the scene "reads assets folder", and the writing ones
+(`writeAsset`, `appendAsset`, `deleteAsset`, a stream opened with `"w"` or
+`"a"`) "writes assets folder", in the editor and the store unless it declares
+its own folder (`frontend/src/utils/sceneAccess.ts`,
 [scene-guide.md](scene-guide.md) "Assets").
 `app.state` **is** the scene's state — read any
 key from it, write with `frameos.setState(key, value)` and state nodes see the
