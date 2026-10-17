@@ -229,6 +229,33 @@
   moderation: it scores `sexual/minors` on text only. Any new table holding photo objects goes into
   `cloud/scripts/object-store-sweep.sh`, or the sweep deletes the photos.
 
+## Local network access: cloud frames only, `docs/lan-access.md`
+
+- On a cloud-managed frame (or one still running cloud-pushed scenes) scenes
+  may not reach the LAN (Home Assistant, a NAS, `192.168.x.x`) unless the
+  frame's **Local network access** is on; the provider's own endpoint is exempt
+  by exact `host:port`. Standalone and self-hosted backend frames have no
+  block and no switch: their access is the network's call (the owner's
+  decision, 2026-10-18). Never make it a permission apps or scenes declare
+  (2026-10-17).
+- Turning it **on** takes the six-digit code the frame draws on its panel
+  (cloud `lan_access_challenge` / `lan_access_set`, or the Pi's
+  `/api/network/local-access*` with an admin session). Off is free. The device
+  holds the truth (`state/local_access.json`; ESP32 NVS `allow_lan`, off when
+  absent) and reports it as `hardware.lanAccess`; the cloud keeps no copy.
+- **A presence code must never leave the device in an image.** Draw it after
+  the stored image (Pi: after `setLastImage`; ESP32: restore the rectangle
+  before `store_snapshot`). Keep it away from every sink: `GET /image` (incl.
+  e-ink drivers' own `toPng`), `image_get`, scene snapshots, the ESP32 BMP push,
+  the `http.upload` driver.
+- A check must pin the connect to the address it checked: the Pi connects by
+  address, the ESP32 through `fos_netguard_pin_t` and lwIP's resolve hook.
+  Checking a name and letting the client resolve it again is a DNS-rebinding
+  hole.
+- The blocked-request text starts with `Local network access is off for this
+  frame`. The SPA's logs panel matches that prefix, so keep it on both
+  runtimes.
+
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】
 - `frontend/` – React + TypeScript single-page application built with esbuild, Tailwind, and kea state management. Compiled assets live in `frontend/dist` and are served by the backend when present. 【F:frontend/package.json†L1-L66】【F:backend/app/fastapi.py†L38-L86】

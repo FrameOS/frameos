@@ -269,7 +269,8 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     proc openStreamHandle(stream: HttpBodyStream) =
       var status: cint = 0
       var contentLength: int64 = -1
-      var errBuf = newString(192)
+      # 224: the whole "local network access is off" sentence (frameos_nim_glue.c).
+      var errBuf = newString(224)
       let headerPtr = if stream.headerBlock.len > 0: unsafeAddr stream.headerBlock[0] else: nil
       stream.handle = fos_nim_http_stream_open(stream.url.cstring, headerPtr,
         stream.headerBlock.len.csize_t, stream.timeoutMs.cint, addr status,
@@ -695,8 +696,8 @@ else:
   # onto routers and IoT devices. The check sits on the one address every
   # request funnels through (literal or resolved, redirects included). The
   # policy is flipped by frameos/cloud/hub_client.nim from the cloud link
-  # state; the only override is the local-admin-settable
-  # `network.allowLocalNetworkAccess` in frame.json.
+  # state; the only override is the frame's local network access, turned on
+  # with the code from the panel (frameos/local_access.nim).
 
   var
     localNetworkPolicyLock: Lock
@@ -761,6 +762,16 @@ else:
       if b[0] == 0xff: return true                            # ff00::/8 multicast
       false
 
+  proc lanAccessOffMessage*(hostname: string, address: string): string {.gcsafe.} =
+    ## What a refused request fails with. The SPA's logs panel matches the
+    ## prefix to offer a link to the setting, and the ESP32 (fos_netguard)
+    ## says the same words: keep the start and the end exactly as they are.
+    let target =
+      if address.len == 0 or cmpIgnoreCase(hostname, address) == 0: hostname
+      else: hostname & " (" & address & ")"
+    "Local network access is off for this frame, so " & target &
+      " cannot be reached. Turn on local network access in the frame settings."
+
   proc setLocalNetworkPolicy*(blockLocal: bool, exemptHostPorts: seq[string] = @[]) {.gcsafe.} =
     ## Activates/deactivates the private-network deny and replaces the exempt
     ## "host:port" list (the cloud provider's own API endpoint, which the local
@@ -786,9 +797,7 @@ else:
           if key notin localNetworkPolicyExempt and isPrivateNetworkAddress(address):
             blocked = true
       if blocked:
-        raise newException(IOError,
-          "local network access is blocked on cloud-managed frames (" &
-          hostname & " resolves to " & address & ")")
+        raise newException(IOError, lanAccessOffMessage(hostname, address))
 
   proc resolveHostBounded(host: string): string {.gcsafe.}
 

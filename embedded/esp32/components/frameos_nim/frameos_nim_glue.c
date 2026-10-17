@@ -1765,9 +1765,13 @@ static esp_http_client_handle_t http_open_request(
      * scene HTTP request goes through, and on a cloud-managed frame a scene is
      * something a provider installed — so it does not get to reach the owner's
      * router. Checked before the client even exists; the redirect loop below
-     * re-checks every hop, because a 302 to 192.168.1.1 is the same request. */
+     * re-checks every hop, because a 302 to 192.168.1.1 is the same request.
+     * Each connect is pinned to the address its check resolved
+     * (fos_netguard_pin_t): ESP-IDF resolves the host again when it connects,
+     * and a rebinding name answers that second query with a private one. */
     char netguard_reason[96];
-    switch (fos_netguard_check_url(url, netguard_reason, sizeof(netguard_reason))) {
+    fos_netguard_pin_t pin;
+    switch (fos_netguard_check_url_pinned(url, netguard_reason, sizeof(netguard_reason), &pin)) {
     case FOS_NETGUARD_ALLOWED:
         break;
     case FOS_NETGUARD_UNRESOLVED:
@@ -1781,8 +1785,7 @@ static esp_http_client_handle_t http_open_request(
     default:
         ESP_LOGW(TAG, "%s %s: blocked by the local-network policy: %s",
                  method ? method : "GET", url ? url : "(null)", netguard_reason);
-        HTTP_OPEN_FAIL("local network access is blocked on cloud-managed frames (%s)",
-                             netguard_reason);
+        HTTP_OPEN_FAIL(FOS_NETGUARD_BLOCK_FMT, "", netguard_reason);
     }
 
     esp_http_client_method_t http_method = HTTP_METHOD_GET;
@@ -1819,7 +1822,12 @@ static esp_http_client_handle_t http_open_request(
         esp_http_client_set_header(client, "Content-Type", "application/json");
     }
 
+    if (!fos_netguard_pin_for_task(&pin)) {
+        esp_http_client_cleanup(client);
+        HTTP_OPEN_FAIL("too many requests in flight");
+    }
     esp_err_t err = esp_http_client_open(client, body_len);
+    fos_netguard_unpin_for_task();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "%s %s: connect failed: %s", method ? method : "GET", url,
                  esp_err_to_name(err));
@@ -1868,14 +1876,15 @@ static esp_http_client_handle_t http_open_request(
         if (!redirect_url_ok || !http_same_origin(url, redirect_url)) {
             drop_cross_origin_headers(client);
         }
+        memset(&pin, 0, sizeof(pin));
         if (fos_netguard_policy_active()) {
             fos_netguard_verdict_t verdict = FOS_NETGUARD_BLOCKED;
             netguard_reason[0] = '\0';
             if (!redirect_url_ok) {
                 strlcpy(netguard_reason, "redirect target unreadable", sizeof(netguard_reason));
             } else {
-                verdict = fos_netguard_check_url(redirect_url, netguard_reason,
-                                                 sizeof(netguard_reason));
+                verdict = fos_netguard_check_url_pinned(redirect_url, netguard_reason,
+                                                        sizeof(netguard_reason), &pin);
             }
             if (verdict == FOS_NETGUARD_UNRESOLVED) {
                 ESP_LOGW(TAG, "%s %s: redirect: %s", method ? method : "GET", url, netguard_reason);
@@ -1888,11 +1897,16 @@ static esp_http_client_handle_t http_open_request(
                          method ? method : "GET", url, netguard_reason);
                 esp_http_client_close(client);
                 esp_http_client_cleanup(client);
-                HTTP_OPEN_FAIL("local network access is blocked on cloud-managed frames "
-                                     "(redirect target: %s)", netguard_reason);
+                HTTP_OPEN_FAIL(FOS_NETGUARD_BLOCK_FMT, "redirect: ", netguard_reason);
             }
         }
+        if (!fos_netguard_pin_for_task(&pin)) {
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            HTTP_OPEN_FAIL("too many requests in flight");
+        }
         err = esp_http_client_open(client, body_len);
+        fos_netguard_unpin_for_task();
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "%s %s: redirect connect failed: %s", method ? method : "GET", url,
                      esp_err_to_name(err));
@@ -1931,7 +1945,13 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
     const bool spill_allowed = out_spill_path != NULL && out_spill_len != NULL &&
                                s_http_spill_dir[0] != '\0';
 
-    char open_err[192];
+    char open_err[224];
+    /* The whole local network access sentence fits whatever the reason (96
+     * bytes with its NUL), so the start the SPA matches and the end the owner
+     * reads are never cut. The stream path's buffer is the same 224 bytes
+     * (http_client.nim, openStreamHandle). */
+    _Static_assert(sizeof(FOS_NETGUARD_BLOCK_FMT) - 4 + sizeof("redirect: ") - 1 + 95 < sizeof(open_err),
+                   "open_err must hold the whole local network access message");
     int64_t content_length = -1;
     esp_http_client_handle_t client = http_open_request(
         method, url, body, body_len, headers, headers_len, timeout_ms,

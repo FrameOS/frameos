@@ -953,6 +953,24 @@ export const cloudFramesContract = {
       ]
     },
     {
+      "type": "lan_access_challenge",
+      "scope": null,
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
+    },
+    {
+      "type": "lan_access_set",
+      "scope": null,
+      "content": false,
+      "profiles": [
+        "linux",
+        "esp32"
+      ]
+    },
+    {
       "type": "scenes_get",
       "scope": null,
       "content": false,
@@ -972,6 +990,20 @@ export const cloudFramesContract = {
     "set_settings": [
       "invalid_settings",
       "setting_not_allowed",
+      "persist_failed"
+    ],
+    "lan_access_challenge": [
+      "no_panel",
+      "rate_limited",
+      "challenge_failed"
+    ],
+    "lan_access_set": [
+      "invalid_lan_access",
+      "code_required",
+      "invalid_code",
+      "code_expired",
+      "too_many_attempts",
+      "rate_limited",
       "persist_failed"
     ],
     "backend_managed": "a device whose content a self-hosted backend owns refuses every `content` verb with this"

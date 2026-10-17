@@ -186,6 +186,24 @@ addToLibrary({
         }
       }
 
+      // A cloud frame's local network access (docs/lan-access.md), when the
+      // host page says what it is (`frameosLanAccess: false`): a preview of a
+      // cloud frame with it off refuses a private host the way the frame
+      // would, neither direct nor through the proxy, and in the frame's words —
+      // the SPA's logs panel matches the start of them to link to the setting.
+      // A same-origin target keeps its own path (the proxy only, above).
+      if (Module['frameosLanAccess'] === false && refusedDirect !== 'same-origin') {
+        var lanTarget = null
+        try {
+          lanTarget = inBrowser ? new URL(url, self.location.href) : new URL(url)
+        } catch (e) {}
+        if (lanTarget && (lanTarget.protocol === 'http:' || lanTarget.protocol === 'https:') &&
+            frameosIsPrivateHost(lanTarget.hostname)) {
+          throw new Error('Local network access is off for this frame, so ' + lanTarget.hostname +
+            ' cannot be reached. Turn on local network access in the frame settings.')
+        }
+      }
+
       // Synchronous XHR: the Nim/pixie pipeline is fully synchronous and this
       // module runs in a Web Worker, where sync XHR is permitted.
       var directRequest = function () {

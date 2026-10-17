@@ -8,6 +8,7 @@ import { FrameSettingsProvider, useFrameSettings, type FrameSettingsProps } from
 import { GpioButtonsSection, InputSettingsSection } from './fields/sharedFields'
 import { ColorsSection } from './fields/colorsSection'
 import { FrameSettingsSection } from './sections/FrameSettingsSection'
+import { LanAccessSection } from './sections/lanAccessSection'
 import { SettingsHeaderActions } from './SettingsHeaderActions'
 import {
   CloudServiceSettingsSection,
@@ -177,6 +178,12 @@ function FrameSettingsPanel(): JSX.Element {
         </FrameSettingsSection>
         <FrameSettingsSection sectionKey="network">
           <NetworkSection />
+        </FrameSettingsSection>
+        {/* Inside the form only for its place next to Network: it binds no
+            field, the device changes the value (lanAccessLogic), and its code
+            dialog stops its own submit from reaching frameForm. */}
+        <FrameSettingsSection sectionKey="lan-access">
+          <LanAccessSection />
         </FrameSettingsSection>
         <FrameSettingsSection sectionKey="mountpoints">
           <MountpointsSection />

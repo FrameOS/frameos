@@ -330,6 +330,8 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     // The account's SSH keys, written into SD cards built for this frame
     // (cloud Linux frames only; FrameSettings skips it on an ESP32).
     'frame-settings-ssh',
+    // The device-verified local network access switch (lan_access_challenge/_set).
+    'frame-settings-lan-access',
   ],
 }
 
@@ -843,6 +845,7 @@ const esp32CloudFrameSettingsSections: readonly string[] = [
   'frame-settings-power',
   'frame-settings-palette',
   'frame-settings-colors',
+  'frame-settings-lan-access',
 ]
 
 /**

@@ -376,6 +376,10 @@ proc start*(self: FrameOS) {.async.} =
   if sweptSpills > 0:
     self.logger.log(%*{"event": "spool:sweep", "removed": sweptSpills})
 
+  # The private-network deny before the first render, not after: the runner
+  # renders straight away, and the deny starts out open (http_client.nim)
+  # until something sets it. startCloudManagement below sets it again.
+  refreshLocalNetworkPolicy(self.frameConfig)
   self.runner.start(firstSceneId)
   # The runner owns the panel from here; the boot canvas is dead weight.
   bootCanvas = nil

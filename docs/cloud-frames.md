@@ -1379,8 +1379,9 @@ local address — loopback (`127/8`, `::1`), RFC1918 (`10/8`, `172.16/12`,
 `192.168/16`), link-local (`169.254/16`, `fe80::/10`), CGNAT (`100.64/10`),
 `0.0.0.0/8`, broadcast, IPv6 ULA — whether the URL names the address
 literally or a DNS name (redirects included) resolves to one. Blocked
-requests fail with `local network access is blocked on cloud-managed frames`
-in the scene logs. A name that does not resolve is not a block: the request
+requests fail with `Local network access is off for this frame, so <host>
+(<address>) cannot be reached. Turn on local network access in the frame
+settings.` in the scene logs (the logs panel links that to the setting). A name that does not resolve is not a block: the request
 still fails (nothing to classify, and the connect would resolve the name
 again), but as `could not resolve <host>`, on both runtimes; the ESP32 asks
 its resolver three times, a quarter second apart, before it says so, because
@@ -1390,12 +1391,15 @@ server is still settling. Two exceptions:
 - the provider's own API endpoint (exact `host:port` from the stored
   `provider_url`) stays reachable, so development providers on the LAN work —
   the local admin linked that endpoint deliberately;
-- the owner can lift the deny per frame with the `frame.json` field
-  `network.allowLocalNetworkAccess` (default `false`). It is settable only
-  through the local admin surface: the key is not in the `set_settings`
-  allowlist, so no provider verb can flip it — this is the local-presence
-  elevation for scenes that legitimately need LAN access (e.g. Home
-  Assistant).
+- the owner can lift the deny per frame by turning on its **local network
+  access** (`docs/lan-access.md`), for scenes that legitimately need the LAN
+  (e.g. Home Assistant). Turning it on takes a six-digit code the frame draws
+  on its panel, typed into the frame settings on the cloud
+  (`lan_access_challenge`, then `lan_access_set {enabled, code}`) or on the
+  frame's own admin page; turning it off takes nothing. It is not a
+  `set_settings` key (a fixture pins it), so no provider verb can flip it
+  without someone who can see the panel. The device reports it as
+  `hardware.lanAccess` in hello and every `state`.
 
 Standalone and backend-managed frames are unaffected. The deny keys on
 *provider-origin scenes*, not on the link alone: the device stamps every
@@ -1403,8 +1407,8 @@ Standalone and backend-managed frames are unaffected. The deny keys on
 `"source": "cloud"` persisted with `state/uploaded.json`; ESP32: a top-level
 `"source"` in `/state/scene-index.json`), and a frame demoted out of the
 managed state keeps the deny for as long as those scenes remain resident.
-Replacing them — a local upload, a backend deploy — lifts it; the
-`allowLocalNetworkAccess` elevation above overrides in either state. The
+Replacing them — a local upload, a backend deploy — lifts it; local network
+access above overrides in either state. The
 origin stamp is also re-checked at scene load time against the refused-app
 list, so a persisted cloud payload can never reach a process-spawning app by
 being replayed at boot.

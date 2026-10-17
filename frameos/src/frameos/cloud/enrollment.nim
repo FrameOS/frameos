@@ -54,6 +54,7 @@ import std/httpclient
 import frameos/types
 import frameos/upgrade
 from frameos/config import getConfigFilename
+from frameos/local_access import lanAccessEnabled
 import frameos/utils/http_client
 import ./contract
 import ./identity
@@ -177,6 +178,10 @@ proc hardwarePayload*(frameConfig: FrameConfig): JsonNode =
       if button != nil:
         buttons.add(%*{"pin": button.pin, "label": button.label})
   result["gpioButtons"] = buttons
+  # The frame's local network access (docs/lan-access.md). A provider keeps no
+  # copy of its own: it shows this, and moves it only through the lan_access
+  # verbs.
+  result["lanAccess"] = %lanAccessEnabled(frameConfig)
   # "color" only lives in raw frame.json (device color variant); include it
   # when present, drop it otherwise — providers must drop unknown/missing
   # optional fields anyway.

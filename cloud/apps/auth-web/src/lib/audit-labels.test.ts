@@ -24,6 +24,7 @@ const frameEventTypes = [
   "frame.deleted",
   "frame.disconnected",
   "frame.enrolled",
+  "frame.lan_access_changed",
   "frame.firmware_version_changed",
   "frame.re_enrolled",
   "frame.rebind_token_created",

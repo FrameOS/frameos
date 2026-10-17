@@ -326,7 +326,13 @@ describe("the esp32 cloud device profile", () => {
     // Power, Colors (the firmware took the `colors` block in 2026.10.2) and
     // Palette (the colour list, 2026.10.4) — the sections CloudEsp32Sections
     // renders under their own heading.
-    const esp32Sections = ["frame-settings-power", "frame-settings-palette", "frame-settings-colors"];
+    // Local network access too: the switch is a device verb, not a pushed setting.
+    const esp32Sections = [
+      "frame-settings-power",
+      "frame-settings-palette",
+      "frame-settings-colors",
+      "frame-settings-lan-access",
+    ];
     for (const section of esp32Sections) {
       expect(frameSettingsSectionIsAllowed("cloud", section, esp32Frame), section).toBe(true);
     }
@@ -739,8 +745,10 @@ describe("allow-list hygiene", () => {
     const frameAdminOnlySettingsSections = ["frame-settings-cloud", "frame-settings-upgrade"];
     // And on the cloud's: the owner's log-shipping switch edits the telemetry
     // scopes of the frame's cloud link, which only the cloud holds (a
-    // self-hosted backend reads a frame's logs over its own channel).
-    const cloudOnlySettingsSections = ["frame-settings-telemetry"];
+    // self-hosted backend reads a frame's logs over its own channel). And
+    // local network access: only a cloud frame has the private-network block
+    // it lifts (docs/lan-access.md).
+    const cloudOnlySettingsSections = ["frame-settings-telemetry", "frame-settings-lan-access"];
     const lists = [
       [allowedFrameToolPanels, "frame tools", cloudOnlyFrameTools, []],
       [allowedSceneToolPanels, "scene tools", [], []],

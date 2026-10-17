@@ -49,6 +49,9 @@ main/                     boot orchestration + platform modules
   fos_sd_probe.c          SD presence probe used by the assets layer
   fos_framebuffer.c       canvas allocation (RGBX vs RGB565 by PSRAM) and dither/pack
   fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
+  fos_panel_draw.c        5x7 font + rectangles straight into a packed panel buffer, rotation
+                          aware: the status screen and the local network access code box (host-tested)
+  fos_lan_access.c        the local network access code: mint, TTL, attempts, constant-time check (host-tested)
   fos_board.c             board table: pins, panel defaults, battery divider per board
   fos_buttons.c           GPIO button map → `gpio` edges (origin `driver`, via fos_events.c)
   fos_battery.c           battery ADC sampling; fos_battery_filter.c its outlier filter
@@ -70,7 +73,8 @@ partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (4032K each) + 8M st
 partitions_ota_32mb.csv   32MB: nvs + otadata + ota_0/ota_1 (4032K each) + 24M state
 build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/
 main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
-                          header carries its command line). The netguard, SD probe, board,
+                          header carries its command line). The netguard, local network access code
+                          (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), SD probe, board,
                           power, wake, battery-filter, version and scene-event (contract table +
                           fos_events.c dispatch) tests run from the backend's
                           pytest suite (backend/app/tasks/tests/test_esp32_*.py, which also
@@ -474,6 +478,58 @@ provisioned with ESP-IDF flash encryption. The firmware never prints or
 echoes them, but physical access to an unencrypted module means physical
 access to the link — see the "Secrets at rest on ESP32" note in
 `docs/cloud-frames.md`.
+
+## Local network access
+
+While the frame is cloud-managed or renders cloud-pushed scenes, every scene
+HTTP request and every redirect hop goes through `fos_netguard_check_url_pinned`
+(`frameos_nim_glue.c`), and a private answer fails the node with
+
+```
+Local network access is off for this frame (homeassistant.local resolves to private address 192.168.1.5). Turn on local network access in the frame settings.
+```
+
+(`FOS_NETGUARD_BLOCK_FMT`: the prefix is what the SPA's logs panel matches,
+and the error buffers always hold the whole sentence). The connect is pinned to
+the address the check resolved: `fos_netguard_pin_for_task()` holds it for the
+calling task across `esp_http_client_open()`, and
+`lwip_hook_netconn_external_resolve` (`CONFIG_LWIP_HOOK_NETCONN_EXT_RESOLVE_CUSTOM`,
+`sdkconfig.defaults`) answers that task's lookup of the name with it, so a
+DNS-rebinding name cannot answer the connect's own query with a private
+address. `docs/lan-access.md` is the cross-plane spec.
+
+The switch is `config->allow_local_network`, NVS `allow_lan`, off when absent.
+The USB console's `set allow_local_network 1` turns it on directly (the cable
+is physical presence), and the cloud changes it with two verbs on its socket
+(the backend's command queue does not carry them, `backend_verb_allowed`):
+
+- `lan_access_challenge {}`: mints six digits (`fos_lan_access.c`, rejection
+  sampled from `esp_random()`, 300 s, five tries, constant-time compare) and
+  acks; `no_panel` on a headless board, `rate_limited` once ten wrong codes
+  have been given within an hour of the first of them, across challenges (a
+  right code does not reset that; the count lives in RTC memory and the
+  clock is system time, so neither a `reboot` nor a deep-sleep wake refills
+  it, only a power cycle does). The render task picks it up within a
+  second and renders: after the packed buffer is hashed, `render_once` saves
+  the bytes under a centred box, draws "Local network access code" and the
+  digits (`fos_panel_draw.c`, upright for the frame's `rotate`), blits, and
+  puts the saved bytes back before `store_snapshot`, so `/image`, `image_get`
+  and the image push never carry the code (with no memory for the copy the box
+  is painted white instead). The display-state hash is forgotten, so the first
+  render after the code ends refreshes the panel even when the scene did not
+  change, and a pending code holds the deep sleep
+  (`keep_awake_remaining_seconds`). Every end (the right code, the fifth
+  wrong one, expiry, a new challenge) renders once more.
+- `lan_access_set {enabled, code?}`: `invalid_lan_access` without a bool;
+  `false` saves at once and takes a pending code off the panel; `true` needs
+  the code (`code_required`, then `rate_limited` before the challenge is
+  looked at, `code_expired`, `invalid_code`, `too_many_attempts`), then saves
+  (`persist_failed`). A successful one is followed by a `state` message.
+
+The cloud reads the value from `hardware.lanAccess` (hello and every
+`state`). The code itself is in no ack and no log line: the log says
+`lan_access:challenge`, `lan_access:shown`, `lan_access:refused` (with the
+token), `lan_access:on` and `lan_access:off`.
 
 ## Power management (M4)
 

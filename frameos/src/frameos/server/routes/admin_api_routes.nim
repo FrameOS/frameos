@@ -8,6 +8,7 @@ import frameos/channels
 import frameos/local_access
 import frameos/upgrade
 import frameos/cloud/link_state
+from frameos/cloud/hub_client import refreshLocalNetworkPolicy
 import ../auth
 import ../api
 import ../rate_limit
@@ -105,10 +106,10 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   # ---- private-network elevation (local-presence ceremony) -----------------
-  # cloud/docs/cloud-frames.md, "sandbox posture": lifting the LAN deny on a
-  # cloud-managed frame takes more than an admin session, which is only a
-  # password on a LAN-reachable page. Ask for a challenge, read the six digits
-  # off the panel, send them back.
+  # docs/lan-access.md: lifting the LAN deny on a cloud-managed frame takes
+  # more than an admin session, which is only a password on a LAN-reachable
+  # page. Ask for a challenge, read the six digits off the panel, send them
+  # back. The decisions live in server/api.nim, shared with the cloud verbs.
 
   router.get("/api/network/local-access", proc(request: Request) {.gcsafe.} =
     if not hasAdminAccess(request):
@@ -126,20 +127,24 @@ proc addAdminApiRoutes*(router: var Router) =
       jsonResponse(request, Http429, %*{"detail": "Too many attempts"})
       return
     {.gcsafe.}:
-      try:
-        let challenge = startLocalAccessChallenge()
-        # A sleeping scene renders on its own schedule, and the code is useless
-        # until it is actually on the panel, so ask for a frame now.
-        sendEvent("render", %*{}, eoHttpAdmin)
-        # No "code" in the response on purpose: a caller who could read it
-        # without seeing the panel is precisely who this keeps out.
-        jsonResponse(request, Http200, %*{
-          "status": "ok",
-          "codeLength": challenge.code.len,
-          "expiresInSeconds": LocalAccessChallengeTtlSeconds,
-        })
-      except CatchableError as error:
-        respondInternalError(request, "network:local-access:error", error, "Failed to start the challenge")
+      let payload = try:
+          parseJson(if request.body.strip().len == 0: "{}" else: request.body)
+        except JsonParsingError:
+          jsonResponse(request, Http400, %*{"detail": "Invalid JSON", "error": "invalid_lan_access"})
+          return
+      let scopeNode = payload{"scope"}
+      let scope =
+        if scopeNode == nil or scopeNode.kind == JNull: LocalAccessScopeLocalNetwork
+        elif scopeNode.kind == JString: scopeNode.getStr()
+        else: $scopeNode
+      # The device as frame.json has it, parsed on this worker
+      # (requestFrameConfig), never a field read off the runner's config.
+      let outcome = startLanAccessChallenge(requestFrameConfig().device, scope)
+      if outcome.error.len > 0:
+        jsonResponse(request, HttpCode(outcome.status),
+          %*{"detail": outcome.detail, "error": outcome.error})
+      else:
+        jsonResponse(request, Http200, outcome.payload)
   )
 
   router.post("/api/network/local-access", proc(request: Request) {.gcsafe.} =
@@ -153,31 +158,16 @@ proc addAdminApiRoutes*(router: var Router) =
       let payload = try:
           parseJson(if request.body.strip().len == 0: "{}" else: request.body)
         except JsonParsingError:
-          jsonResponse(request, Http400, %*{"detail": "Invalid JSON"})
+          jsonResponse(request, Http400, %*{"detail": "Invalid JSON", "error": "invalid_lan_access"})
           return
-      let verdict = consumeLocalAccessCode(payload{"code"}.getStr(""))
-      if not verdict.ok:
-        # Repaint either way: a spent or failed ceremony must not leave a live
-        # code on the panel for the next person walking past.
-        sendEvent("render", %*{}, eoHttpAdmin)
-        jsonResponse(request, Http403, %*{"detail": verdict.detail})
+      let outcome = applyLanAccessChange(payload)
+      if outcome.error.len > 0:
+        jsonResponse(request, HttpCode(outcome.status),
+          %*{"detail": outcome.detail, "error": outcome.error})
         return
-      try:
-        # `scope` picks which locally-established fact the matched code
-        # unlocks: the LAN deny (default) or Chromium unsandboxed as root.
-        let scope = payload{"scope"}.getStr("localNetwork")
-        let updated =
-          case scope
-          of "localNetwork": setLocalNetworkAccess(payload{"enabled"}.getBool(true))
-          of "shellApps": setShellAppsAccess(payload{"enabled"}.getBool(true))
-          else:
-            sendEvent("render", %*{}, eoHttpAdmin)
-            jsonResponse(request, Http400, %*{"detail": "Unknown scope: " & scope})
-            return
-        sendEvent("render", %*{}, eoHttpAdmin)
-        jsonResponse(request, Http200, updated)
-      except CatchableError as error:
-        respondInternalError(request, "network:local-access:error", error, "Failed to apply the change")
+      # Apply the deny now rather than on the hub thread's next pass.
+      refreshLocalNetworkPolicy(requestFrameConfig())
+      jsonResponse(request, Http200, outcome.payload)
   )
 
   router.get("/api/upgrade/status", proc(request: Request) {.gcsafe.} =

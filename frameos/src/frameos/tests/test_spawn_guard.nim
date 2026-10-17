@@ -89,15 +89,15 @@ suite "spawn targets":
     # A sub-resource host goes through the same once-only check: a public
     # literal pins to itself, a private one is refused.
     check spawnSubresourcePin("203.0.113.7", 443) == ("", "203.0.113.7")
-    check spawnSubresourcePin("10.0.0.5", 80).refusal.contains("blocked")
-    check spawnSubresourcePin("localhost", 8787).refusal.contains("blocked")
+    check spawnSubresourcePin("10.0.0.5", 80).refusal.contains("Local network access is off for this frame")
+    check spawnSubresourcePin("localhost", 8787).refusal.contains("Local network access is off for this frame")
     check spawnSubresourcePin("", 80).refusal.contains("host")
-    check spawnTarget("rtsp://192.168.1.20/live", ["rtsp"]).refusal.contains("blocked")
-    check spawnTarget("http://127.0.0.1:8787/", ["http"]).refusal.contains("blocked")
+    check spawnTarget("rtsp://192.168.1.20/live", ["rtsp"]).refusal.contains("Local network access is off for this frame")
+    check spawnTarget("http://127.0.0.1:8787/", ["http"]).refusal.contains("Local network access is off for this frame")
     # A name resolves once; the child then gets that answer, never a second
     # lookup of the name (the rebinding hole). localhost is the one name a
     # test can resolve without the network, and it classifies as private.
-    check spawnTarget("http://localhost/", ["http"]).refusal.contains("blocked")
+    check spawnTarget("http://localhost/", ["http"]).refusal.contains("Local network access is off for this frame")
     check spawnTargetRefusal("http://example.com:notaport/", ["http", "https"]).contains("port")
 
   test "the private-network policy applies to the child's target too":
@@ -107,8 +107,8 @@ suite "spawn targets":
     # On (cloud-managed, or a store scene resident): the same classifier the
     # HTTP client uses says no before anything is spawned.
     setLocalNetworkPolicy(true)
-    check spawnTargetRefusal("http://127.0.0.1/admin", ["http", "https"]).contains("blocked")
-    check spawnTargetRefusal("rtsp://192.168.1.20:554/live", ["rtsp", "http"]).contains("blocked")
+    check spawnTargetRefusal("http://127.0.0.1/admin", ["http", "https"]).contains("Local network access is off for this frame")
+    check spawnTargetRefusal("rtsp://192.168.1.20:554/live", ["rtsp", "http"]).contains("Local network access is off for this frame")
     # An exempt endpoint stays reachable, as for the HTTP client.
     setLocalNetworkPolicy(true, @["192.168.1.20:554"])
     check spawnTargetRefusal("rtsp://192.168.1.20:554/live", ["rtsp", "http"]) == ""

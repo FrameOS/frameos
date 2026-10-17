@@ -1,0 +1,329 @@
+// @vitest-environment jsdom
+//
+// A cloud frame's local network access switch (docs/lan-access.md): turning it
+// on asks the frame to draw a code on its panel and sends the code back;
+// turning it off goes straight through.
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const fetchMock = vi.hoisted(() => vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>());
+vi.mock("../../../../../../frontend/src/utils/apiFetch", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, apiFetch: (input: RequestInfo | URL, init?: RequestInit) => fetchMock(input, init) };
+});
+
+import { initKea } from "../../../../../../frontend/src/initKea";
+import { BindLogic } from "../../../../../../frontend/node_modules/kea";
+import { framesModel } from "../../../../../../frontend/src/models/framesModel";
+import { frameLogic } from "../../../../../../frontend/src/scenes/frame/frameLogic";
+import { FrameSettings } from "../../../../../../frontend/src/scenes/frame/panels/FrameSettings/FrameSettings";
+import {
+  lanAccessErrorMessage,
+  lanAccessLogic,
+} from "../../../../../../frontend/src/scenes/frame/panels/FrameSettings/lanAccessLogic";
+import { pendingCommandLabel } from "../../../../../../frontend/src/scenes/workspace/framePendingCommandsLogic";
+import type { FrameType } from "../../../../../../frontend/src/types";
+
+type TestWindow = Window & {
+  FRAMEOS_APP_CONFIG?: Record<string, unknown>;
+  FRAMEOS_EMBEDDED_NO_BACKEND?: boolean;
+};
+const testWindow = window as TestWindow;
+
+let frameRow: FrameType;
+let routes: Record<string, (body: Record<string, unknown>) => Response>;
+
+function requestUrl(input: RequestInfo | URL): string {
+  return typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+}
+
+function posts(): { path: string; body: Record<string, unknown> }[] {
+  return fetchMock.mock.calls
+    .filter(([, init]) => init?.method === "POST")
+    .map(([input, init]) => ({
+      path: requestUrl(input),
+      body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+    }));
+}
+
+function makeFrame(overrides: Partial<FrameType> = {}): FrameType {
+  return {
+    id: 1,
+    project_id: 1,
+    name: "Kitchen",
+    frame_host: "10.0.0.5",
+    frame_port: 8787,
+    frame_access_key: "",
+    frame_access: "private",
+    ssh_port: 22,
+    server_port: 8989,
+    status: "ready",
+    interval: 300,
+    metrics_interval: 60,
+    scaling_mode: "contain",
+    background_color: "#000000",
+    device: "waveshare.EPD_7in5_V2",
+    lan_access: false,
+    ...overrides,
+  } as unknown as FrameType;
+}
+
+beforeEach(() => {
+  // With apiFetch mocked the flag only keeps socketLogic from opening a
+  // WebSocket jsdom cannot.
+  testWindow.FRAMEOS_EMBEDDED_NO_BACKEND = true;
+  // headlessui's Dialog measures itself; jsdom has no ResizeObserver.
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  document.body.innerHTML = '<div id="popper"></div><div id="root"></div>';
+  frameRow = makeFrame();
+  routes = {};
+  fetchMock.mockReset();
+  fetchMock.mockImplementation(async (input, init) => {
+    const method = init?.method ?? "GET";
+    const path = requestUrl(input);
+    const handler = routes[`${method} ${path}`];
+    if (handler) {
+      return handler(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    }
+    if (method === "GET" && path === `/api/frames/${frameRow.id}`) {
+      return Response.json({ frame: frameRow });
+    }
+    if (method === "GET" && path === "/api/frames") {
+      return Response.json({ frames: [frameRow] });
+    }
+    if (method === "GET" && path.startsWith("/api/assets")) {
+      return Response.json([]);
+    }
+    if (method === "GET" && path.endsWith("/logs")) {
+      return Response.json({ logs: [] });
+    }
+    return Response.json({}, { status: 404 });
+  });
+  initKea();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  delete testWindow.FRAMEOS_APP_CONFIG;
+  delete testWindow.FRAMEOS_EMBEDDED_NO_BACKEND;
+});
+
+function mountLogic(frame: FrameType = frameRow) {
+  frameRow = frame;
+  framesModel.mount();
+  framesModel.actions.loadFramesSuccess({ [String(frame.id)]: frame } as Record<string, FrameType>);
+  const logic = lanAccessLogic({ frameId: frame.id });
+  logic.mount();
+  return logic;
+}
+
+describe("Local network access on the cloud", () => {
+  beforeEach(() => {
+    testWindow.FRAMEOS_APP_CONFIG = { cloudMode: true };
+  });
+
+  it("shows a code, takes it back and mirrors the result", async () => {
+    routes["POST /api/frames/1/lan_access/challenge"] = () =>
+      Response.json({ status: "shown", expires_in_seconds: 300 });
+    routes["POST /api/frames/1/lan_access"] = (body) => {
+      frameRow = { ...frameRow, lan_access: body.enabled === true };
+      return Response.json({ status: "applied", lan_access: body.enabled });
+    };
+    const logic = mountLogic();
+    expect(logic.values.lanAccess).toBe(false);
+
+    logic.actions.openModal();
+    expect(logic.values.phase).toBe("start");
+    expect(posts()).toEqual([]);
+
+    logic.actions.showCode();
+    expect(logic.values.phase).toBe("requesting");
+    await waitFor(() => expect(logic.values.phase).toBe("shown"));
+
+    // Pasted with spaces, typed with letters: only six digits count.
+    logic.actions.setCode("12 34 5x6789");
+    expect(logic.values.code).toBe("123456");
+    expect(logic.values.canConfirm).toBe(true);
+
+    logic.actions.confirmCode();
+    await waitFor(() => expect(logic.values.phase).toBe("done"));
+    expect(posts()).toEqual([
+      { path: "/api/frames/1/lan_access/challenge", body: {} },
+      { path: "/api/frames/1/lan_access", body: { enabled: true, code: "123456" } },
+    ]);
+    expect(framesModel.values.frames[1]?.lan_access).toBe(true);
+    expect(logic.values.lanAccess).toBe(true);
+  });
+
+  it("turns local network access off with no code, after saying how it comes back", async () => {
+    routes["POST /api/frames/1/lan_access"] = (body) => {
+      frameRow = { ...frameRow, lan_access: body.enabled === true };
+      return Response.json({ status: "applied", lan_access: false });
+    };
+    const logic = mountLogic(makeFrame({ lan_access: true }));
+    // No dialog host is mounted here, so confirmDialog asks window.confirm.
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+
+    logic.actions.turnOff();
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    expect(confirm.mock.calls[0]?.[0]).toMatch(/someone has to be at the frame/);
+    expect(logic.values.disabling).toBe(false);
+    expect(posts()).toEqual([]);
+
+    logic.actions.turnOff();
+    await waitFor(() => expect(logic.values.lanAccess).toBe(false));
+    expect(logic.values.phase).toBe("closed");
+    expect(posts()).toEqual([{ path: "/api/frames/1/lan_access", body: { enabled: false } }]);
+    confirm.mockRestore();
+  });
+
+  it("tells the owner when a sleeping frame will show the code, and keeps the input", async () => {
+    routes["POST /api/frames/1/lan_access/challenge"] = () => Response.json({ status: "queued" });
+    routes["POST /api/frames/1/lan_access"] = () => Response.json({ status: "queued" });
+    const logic = mountLogic();
+
+    logic.actions.openModal();
+    logic.actions.showCode();
+    await waitFor(() => expect(logic.values.phase).toBe("queued"));
+    logic.actions.setCode("654321");
+    expect(logic.values.canConfirm).toBe(true);
+
+    logic.actions.confirmCode();
+    await waitFor(() => expect(logic.values.phase).toBe("applyQueued"));
+    // Nothing applied yet: the switch stays off until the frame reports it.
+    expect(logic.values.lanAccess).toBe(false);
+    logic.actions.closeModal();
+    expect(logic.values.pendingNote).toBe("The frame checks the code when it wakes up.");
+  });
+
+  it("maps the device's tokens to plain copy and clears a wrong code", async () => {
+    routes["POST /api/frames/1/lan_access/challenge"] = () =>
+      Response.json({ status: "shown", expires_in_seconds: 300 });
+    routes["POST /api/frames/1/lan_access"] = () => Response.json({ error: "invalid_code" }, { status: 403 });
+    const logic = mountLogic();
+
+    logic.actions.openModal();
+    logic.actions.showCode();
+    await waitFor(() => expect(logic.values.phase).toBe("shown"));
+    logic.actions.setCode("000000");
+    logic.actions.confirmCode();
+    await waitFor(() => expect(logic.values.error?.token).toBe("invalid_code"));
+    expect(logic.values.error?.message).toBe("That code does not match the one on the frame.");
+    expect(logic.values.phase).toBe("shown");
+    expect(logic.values.code).toBe("");
+    // Typing again answers it.
+    logic.actions.setCode("1");
+    expect(logic.values.error).toBeNull();
+  });
+
+  it("prefers the cloud's own detail, and falls back per token", async () => {
+    expect(lanAccessErrorMessage("code_expired")).toBe("The code expired. Show a new one.");
+    expect(lanAccessErrorMessage("too_many_attempts")).toBe("Too many wrong codes. Show a new one.");
+    expect(lanAccessErrorMessage("unsupported")).toBe("Update this frame's FrameOS first.");
+    expect(lanAccessErrorMessage("no_panel")).toBe(
+      "This frame has no screen to show a code on, so local network access cannot be turned on.",
+    );
+    expect(lanAccessErrorMessage("timeout", null, 504)).toMatch(/Could not reach the frame/);
+    expect(lanAccessErrorMessage("invalid_code", "Wrong code, 3 tries left.")).toBe("Wrong code, 3 tries left.");
+
+    routes["POST /api/frames/1/lan_access/challenge"] = () =>
+      Response.json({ detail: "This frame has no screen.", error: "no_panel" }, { status: 409 });
+    const logic = mountLogic();
+    logic.actions.openModal();
+    logic.actions.showCode();
+    await waitFor(() => expect(logic.values.error?.token).toBe("no_panel"));
+    expect(logic.values.error?.message).toBe("This frame has no screen.");
+    // Asking again cannot help a frame with nothing to draw on.
+    expect(logic.values.canRequestCode).toBe(false);
+    expect(logic.values.phase).toBe("start");
+  });
+
+  it("leaves an unknown value alone", () => {
+    const logic = mountLogic(makeFrame({ lan_access: null }));
+    expect(logic.values.lanAccess).toBeNull();
+    logic.actions.turnOff();
+    expect(logic.values.phase).toBe("closed");
+    expect(posts()).toEqual([]);
+  });
+});
+
+describe("the local network access section in the settings panel", () => {
+  function renderPanel(frame: FrameType) {
+    testWindow.FRAMEOS_APP_CONFIG = { cloudMode: true };
+    frameRow = frame;
+    framesModel.mount();
+    framesModel.actions.loadFramesSuccess({ [String(frame.id)]: frame } as Record<string, FrameType>);
+    render(
+      <BindLogic logic={frameLogic} props={{ frameId: frame.id }}>
+        <FrameSettings />
+      </BindLogic>,
+    );
+    const heading = document.getElementById("frame-settings-lan-access");
+    expect(heading?.textContent).toBe("Local network access");
+    // The section's body: the switch, its help and notes.
+    return heading!.nextElementSibling as HTMLElement;
+  }
+
+  const cloudPi = { managed_by: "cloud", hardware: { platform: "raspberry-pi-64" }, frameos_version: "2026.10.17" };
+
+  it("walks the code dialog: show the code, type it, turn on", async () => {
+    routes["POST /api/frames/1/lan_access/challenge"] = () =>
+      Response.json({ status: "shown", expires_in_seconds: 300 });
+    routes["POST /api/frames/1/lan_access"] = () => {
+      frameRow = { ...frameRow, lan_access: true };
+      return Response.json({ status: "applied", lan_access: true });
+    };
+    const section = renderPanel(makeFrame({ ...cloudPi, lan_access: false } as Partial<FrameType>));
+    expect(section.textContent).toContain("Off");
+    // The help is behind the "i" next to the heading, not under the switch.
+    // Every query below is scoped (the heading, the dialog): role queries over
+    // the whole settings panel cost hundreds of milliseconds each in jsdom.
+    expect(section.textContent).not.toContain("Lets scenes reach devices on your home network");
+    const heading = section.previousElementSibling as HTMLElement;
+    fireEvent.click(within(heading).getByRole("button", { name: "Local network access help" }));
+    const popper = document.getElementById("popper") as HTMLElement;
+    expect(await within(popper).findByText(/Lets scenes reach devices on your home network/)).toBeTruthy();
+
+    fireEvent.click(within(section).getByRole("button", { name: "Turn on" }));
+    const dialog = await screen.findByTestId("lan-access-modal");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Show code on the frame" }));
+    const input = await within(dialog).findByLabelText("Code from the frame");
+    expect(input.getAttribute("autocomplete")).toBe("one-time-code");
+    expect(input.getAttribute("inputmode")).toBe("numeric");
+    expect(within(dialog).getByText("Enter the code showing on your frame.")).toBeTruthy();
+    fireEvent.change(input, { target: { value: "135790" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Turn on" }));
+
+    expect(await within(dialog).findByText("Local network access is on.")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(section.textContent).toContain("On"));
+    expect(posts().map((post) => post.path)).toEqual([
+      "/api/frames/1/lan_access/challenge",
+      "/api/frames/1/lan_access",
+    ]);
+  });
+
+  it("says a cloud frame must update first when it does not report local network access", () => {
+    const section = renderPanel(makeFrame({ ...cloudPi, lan_access: null } as Partial<FrameType>));
+    expect(within(section).getByTestId("lan-access-unknown").textContent).toMatch(/Update its FrameOS first/);
+    // Nothing to press: neither "Turn on" nor "Turn off" for a value nobody knows.
+    expect(within(section).queryByRole("button")).toBeNull();
+    expect(screen.queryByTestId("lan-access-modal")).toBeNull();
+  });
+});
+
+describe("pending commands", () => {
+  it("names the two local network access verbs", () => {
+    const command = { id: "c1", status: "pending", created_at: null, expires_at: null, sent_at: null };
+    expect(pendingCommandLabel({ ...command, type: "lan_access_challenge" })).toBe("Show local network access code");
+    expect(pendingCommandLabel({ ...command, type: "lan_access_set" })).toBe("Change local network access");
+  });
+});

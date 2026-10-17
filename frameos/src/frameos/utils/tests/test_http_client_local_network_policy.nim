@@ -92,8 +92,19 @@ suite "local network policy enforcement":
       check false
     except IOError as error:
       message = error.msg
-    check "local network access is blocked on cloud-managed frames" in message
-    check "127.0.0.1" in message
+    # The SPA's logs panel matches the start to link to the setting, and the
+    # ESP32 says the same words: both ends are a contract.
+    check message == "Local network access is off for this frame, so 127.0.0.1 cannot be reached. " &
+      "Turn on local network access in the frame settings."
+
+  test "the refusal names the host and the address it resolved to":
+    check lanAccessOffMessage("homeassistant.local", "192.168.1.5") ==
+      "Local network access is off for this frame, so homeassistant.local (192.168.1.5) cannot be reached. " &
+      "Turn on local network access in the frame settings."
+    # A literal address is not repeated.
+    check lanAccessOffMessage("10.0.0.5", "10.0.0.5") ==
+      "Local network access is off for this frame, so 10.0.0.5 cannot be reached. " &
+      "Turn on local network access in the frame settings."
 
   test "policy active: the exempt provider host:port stays reachable":
     setLocalNetworkPolicy(true, @["127.0.0.1:" & $TestPort])

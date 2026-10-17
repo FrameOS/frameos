@@ -1387,6 +1387,11 @@ export async function startFrameHub(
           : typeof msg.error === "string"
             ? msg.error.slice(0, 512)
             : "error",
+        // A lan_access_set carries the code the owner read off the panel.
+        // Once the device has answered it is spent (right, wrong or
+        // expired), and the row outlives it by the retention window: keep
+        // the switch position, drop the code.
+        payload: sql`case when ${frameCommands.type} = 'lan_access_set' and jsonb_typeof(${frameCommands.payload}) = 'object' then ${frameCommands.payload} - 'code' else ${frameCommands.payload} end`,
         status: ok ? "acked" : "failed",
       })
       .where(
