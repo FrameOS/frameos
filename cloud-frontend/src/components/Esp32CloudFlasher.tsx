@@ -622,9 +622,7 @@ export function Esp32CloudFlasher({
   // frame id, so redemption re-keys that row (docs/cloud-frames.md,
   // "Re-enrollment") — which also means there is no new frame to watch for
   // and no name to ask for: both already exist.
-  // `lanAccess` is the frame's current local network access, so a re-linked board keeps
-  // it. A new frame's board gets off (docs/lan-access.md).
-  reenrollFrame?: { id: string; name: string; lanAccess?: boolean | undefined }
+  reenrollFrame?: { id: string; name: string }
   // "Start it with the scenes from <frame>", chosen in the add-frame panel.
   // Rides on the claim code and is applied when the owner confirms the new
   // frame; ignored in re-enrollment mode, where the frame keeps its own.
@@ -647,9 +645,6 @@ export function Esp32CloudFlasher({
   const [wifiSsid, setWifiSsid] = useState(remembered?.ssid ?? '')
   const [wifiPassword, setWifiPassword] = useState(remembered?.password ?? '')
   const [rememberWifi, setRememberWifi] = useState(remembered !== undefined)
-  // Off for a new frame: its scenes cannot reach local addresses until the
-  // frame settings turn local network access on with the code from the panel.
-  const lanAccess = reenrollFrame?.lanAccess === true
   const [error, setError] = useState<string | undefined>()
   // Panel selection needs the all-panels firmware; the picker only shows when
   // the latest release actually publishes it (older releases hard-fail the
@@ -1020,14 +1015,6 @@ export function Esp32CloudFlasher({
           text: `set time_zone ${quoteConsoleArgument(timeZone)}`,
         })
       }
-      // Before `wifi`, which reboots. Always sent: a board that never stored
-      // a value treats local network access as on.
-      commands.push({
-        display: `set allow_local_network ${lanAccess ? 1 : 0}`,
-        expect: consolePrompt,
-        required: false,
-        text: `set allow_local_network ${lanAccess ? 1 : 0}`,
-      })
       if (wifiSsid) {
         // `wifi` saves credentials and reboots; enrollment starts on boot.
         commands.push({

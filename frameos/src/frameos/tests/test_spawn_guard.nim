@@ -104,7 +104,7 @@ suite "spawn targets":
     # Off: a LAN address is the owner's business.
     check spawnTargetRefusal("http://127.0.0.1/admin", ["http", "https"]) == ""
     check spawnTargetRefusal("http://192.168.1.1/", ["http", "https"]) == ""
-    # On (the frame's local network access is off): the same classifier the
+    # On (cloud-managed, or a store scene resident): the same classifier the
     # HTTP client uses says no before anything is spawned.
     setLocalNetworkPolicy(true)
     check spawnTargetRefusal("http://127.0.0.1/admin", ["http", "https"]).contains("Local network access is off for this frame")

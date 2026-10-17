@@ -305,12 +305,13 @@ and no more.
 using the folder: it needs no permission. (Frames before FrameOS 2026.10.16
 ignore the lists.)
 
-**Local network.** A frame reaches addresses on its own network (a Home
-Assistant at `homeassistant.local`, a NAS, anything at `192.168.x.x`) only
-while its local network access is on. That is a frame setting the owner chooses, not
-something an app or a scene asks for. With it off, such a request fails with
-"Local network access is off for this frame". A scene that needs a local service says so
-in its description, so the owner knows to turn it on.
+**Local network.** On a cloud-managed frame, scenes reach addresses on the
+frame's own network (a Home Assistant at `homeassistant.local`, a NAS,
+anything at `192.168.x.x`) only while its local network access is on. That is
+a frame setting the owner turns on, not something an app or a scene asks for.
+With it off, such a request fails with "Local network access is off for this
+frame". A scene that needs a local service says so in its description, so the
+owner knows to turn it on. Standalone and self-hosted frames are not limited.
 
 **Big responses.** A response body becomes a JS string. When the app needs
 only what follows some marker in a large page, pass

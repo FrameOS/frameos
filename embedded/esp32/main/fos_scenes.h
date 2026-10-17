@@ -16,12 +16,11 @@
 #include <stdint.h>
 #include "esp_err.h"
 
-/* Who installed the scenes a frame is holding: fos_cloud.c reports the
- * applied payload's checksum only for cloud-installed scenes. (Before the
- * Local network access switch it also keyed the LAN deny; the switch alone decides
- * that now.) Persisted in /state/scene-index.json (top-level
- * "source") and mirrored in NVS so the answer survives reboots and the
- * store→apply window. */
+/* Who installed the scenes a frame is holding. Not cosmetic: fos_cloud.c keys
+ * the RFC1918 LAN deny (fos_netguard) on this, so provider-pushed scenes stay
+ * fenced off the owner's LAN even after the frame is demoted from cloud
+ * management. Persisted in /state/scene-index.json (top-level "source") and
+ * mirrored in NVS so the answer survives reboots and the store→apply window. */
 typedef enum {
     FOS_SCENES_SOURCE_LOCAL = 0,   /* HTTP POST /uploadScenes, USB console, portal */
     FOS_SCENES_SOURCE_BACKEND,     /* fos_scenes_sync() from the configured backend */

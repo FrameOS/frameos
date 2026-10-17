@@ -99,11 +99,7 @@ export function CloudFrameUsbRelink({ frame }: { frame: FrameType }): ReactEleme
             </div>
             <Esp32CloudFlasher
               cloudOrigin={cloudOrigin()}
-              reenrollFrame={{
-                id: String(frame.id),
-                name: frame.name || 'this frame',
-                lanAccess: frame.lan_access === true,
-              }}
+              reenrollFrame={{ id: String(frame.id), name: frame.name || 'this frame' }}
               portHandoff={portHandoff}
             />
           </>

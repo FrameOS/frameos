@@ -107,20 +107,6 @@ describe("AddFramePanel", () => {
     ).toBe(false);
   });
 
-  // New frames start with local network access off, and Add frame offers no
-  // choice. The install script has no SD card or USB console to say so, so
-  // the claim code does (docs/lan-access.md).
-  it("mints the install command's code with local network access off", async () => {
-    renderPanel();
-    openPath(/install script/i);
-    await screen.findByText(/FRAMEOS_CLAIM_TOKEN=FRCT_from_server/);
-    const bodyOf = (call: Parameters<typeof fetch>) =>
-      JSON.parse(String(call[1]?.body)) as { lan_access?: boolean };
-    expect(mintCalls()).toHaveLength(1);
-    expect(bodyOf(mintCalls()[0]!).lan_access).toBe(false);
-    expect(screen.queryByRole("switch", { name: /local network access/i })).toBeNull();
-  });
-
   it("mints once per opening, not once per render", async () => {
     const view = renderPanel();
     openPath(/install script/i);

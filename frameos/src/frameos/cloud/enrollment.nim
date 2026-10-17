@@ -178,9 +178,10 @@ proc hardwarePayload*(frameConfig: FrameConfig): JsonNode =
       if button != nil:
         buttons.add(%*{"pin": button.pin, "label": button.label})
   result["gpioButtons"] = buttons
-  # The frame's local network access (docs/lan-access.md). A provider keeps no copy of
-  # its own: it shows this, and moves it only through the lan_access verbs.
-  result["lanAccess"] = %lanAccessEnabled()
+  # The frame's local network access (docs/lan-access.md). A provider keeps no
+  # copy of its own: it shows this, and moves it only through the lan_access
+  # verbs.
+  result["lanAccess"] = %lanAccessEnabled(frameConfig)
   # "color" only lives in raw frame.json (device color variant); include it
   # when present, drop it otherwise — providers must drop unknown/missing
   # optional fields anyway.

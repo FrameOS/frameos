@@ -161,7 +161,7 @@ suite "cloud hub verb dispatcher":
     # refused wholesale by the closed allowlist.
     for smuggled in ["network", "allowLocalNetworkAccess", "allow_local_network_access",
                      "network.allowLocalNetworkAccess", "networkConfig", "lan_access",
-                     "lanAccess", "network.lanAccess"]:
+                     "lanAccess"]:
       let recorded = Recorded()
       var settings = %*{"name": "innocent"}
       settings[smuggled] = if smuggled == "network": %*{"allowLocalNetworkAccess": true}
@@ -1080,10 +1080,15 @@ suite "cloud hub verb dispatcher":
     check "notify_update_available" in auditedVerbs(recorded)
 
 proc panelContext(recorded: Recorded): CloudVerbContext =
-  ## A frame with a physical panel, and a backend on the LAN.
+  ## A frame with a physical panel.
   result = makeContext(recorded)
   result.frameConfig = FrameConfig(mode: "rpios", device: "waveshare.EPD_7in5_V2",
-    width: 800, height: 480, serverHost: "192.168.1.10", serverPort: 8989)
+    width: 800, height: 480)
+
+proc linkManaged(providerUrl = "http://10.0.0.2:3000") =
+  withLock cloudLinkLock:
+    saveCloudLinkState(%*{"mode": "managed", "status": "connected", "access_token": "t",
+                          "provider_url": providerUrl})
 
 suite "Local network access verbs":
   ## The state file and the link state are relative paths, so every case runs
@@ -1097,6 +1102,9 @@ suite "Local network access verbs":
     createDir(sandbox)
     setCurrentDir(sandbox)
     forgetStoredLocalNetworkAccess()
+    # A new link generation: the policy caches the link per generation.
+    withLock cloudLinkLock:
+      saveCloudLinkState(%*{})
     clearLocalAccessChallenge()
     resetLocalAccessWrongCodes()
 
@@ -1149,6 +1157,7 @@ suite "Local network access verbs":
     check storedLocalNetworkAccess().isNone
 
   test "lan_access_set off needs no code and applies the deny":
+    linkManaged()
     persistLocalNetworkAccess(true)
     let recorded = Recorded()
     let reply = handleCloudVerb(panelContext(recorded), %*{"id": "s", "type": "lan_access_set",
@@ -1157,8 +1166,8 @@ suite "Local network access verbs":
     check storedLocalNetworkAccess() == some(false)
     let policy = localNetworkPolicySnapshot()
     check policy.active
-    # The frame's own backend stays reachable.
-    check "192.168.1.10:8989" in policy.exemptHostPorts
+    # The provider's own endpoint stays reachable.
+    check policy.exemptHostPorts == @["10.0.0.2:3000"]
     check "lan_access_set" in auditedVerbs(recorded)
 
   test "lan_access_set on needs the code from the panel":
@@ -1171,7 +1180,7 @@ suite "Local network access verbs":
     # No challenge was started.
     check handleCloudVerb(ctx, %*{"type": "lan_access_set", "enabled": true, "code": "123456"}).ack{"error"}.getStr("") ==
       "code_expired"
-    check not lanAccessEnabled()
+    check not lanAccessEnabled(nil)
 
     discard handleCloudVerb(ctx, %*{"type": "lan_access_challenge"})
     let code = activeLocalAccessCode()
@@ -1185,7 +1194,7 @@ suite "Local network access verbs":
     check activeLocalAccessCode() == ""
     check handleCloudVerb(ctx, %*{"type": "lan_access_set", "enabled": true, "code": code}).ack{"error"}.getStr("") ==
       "code_expired"
-    check not lanAccessEnabled()
+    check not lanAccessEnabled(nil)
 
     discard handleCloudVerb(ctx, %*{"type": "lan_access_challenge"})
     let recorded = Recorded()
@@ -1193,7 +1202,7 @@ suite "Local network access verbs":
     let applied = handleCloudVerb(panelContext(recorded), %*{"id": "on", "type": "lan_access_set",
       "enabled": true, "code": fresh})
     check applied.ack{"ok"}.getBool(false) == true
-    check lanAccessEnabled()
+    check lanAccessEnabled(nil)
     check activeLocalAccessCode() == ""
     check not localNetworkPolicySnapshot().active
     for line in recorded.audits:
@@ -1228,7 +1237,7 @@ suite "Local network access verbs":
     check handleCloudVerb(ctx, %*{"type": "lan_access_set", "enabled": true, "code": code}).ack{"error"}.getStr("") ==
       "rate_limited"
     check activeLocalAccessCode() == code
-    check not lanAccessEnabled()
+    check not lanAccessEnabled(nil)
     # Off is never limited.
     check handleCloudVerb(ctx, %*{"type": "lan_access_set", "enabled": false}).ack{"ok"}.getBool(false)
     ageLocalAccessWrongCodesForTest(LocalAccessWrongCodeWindowSeconds)
@@ -1240,13 +1249,14 @@ suite "Local network access verbs":
     let reply = handleCloudVerb(panelContext(Recorded()), %*{"type": "lan_access_set",
       "enabled": true, "code": code, "scope": "shellApps"})
     check reply.ack{"error"}.getStr("") == "code_expired"
-    check not lanAccessEnabled()
+    check not lanAccessEnabled(nil)
     check not storedAllowShellApps()
     # Not spent either: it is still there for the frame's own admin page.
     check activeLocalAccessCode() == code
 
   test "lan_access_set answers persist_failed when the state cannot be written":
     # A plain file where the state directory should be.
+    removeDir("state")
     writeFile("state", "not a directory")
     let reply = handleCloudVerb(panelContext(Recorded()), %*{"type": "lan_access_set", "enabled": false})
     check reply.ack{"error"}.getStr("") == "persist_failed"
@@ -1257,7 +1267,7 @@ suite "Local network access verbs":
     persistLocalNetworkAccess(true)
     check helloStatePayload(FrameConfig(device: "web_only"), "")["hardware"]["lanAccess"].getBool(false) == true
 
-suite "the private-network policy follows the local network access switch":
+suite "the private-network policy on a cloud-managed frame":
   var previousDir = ""
   var sandbox = ""
 
@@ -1267,6 +1277,9 @@ suite "the private-network policy follows the local network access switch":
     createDir(sandbox)
     setCurrentDir(sandbox)
     forgetStoredLocalNetworkAccess()
+    # A new link generation: the policy caches the link per generation.
+    withLock cloudLinkLock:
+      saveCloudLinkState(%*{})
 
   teardown:
     setCurrentDir(previousDir)
@@ -1274,43 +1287,37 @@ suite "the private-network policy follows the local network access switch":
     forgetStoredLocalNetworkAccess()
     setLocalNetworkPolicy(false)
 
-  test "a standalone frame with local network access off is denied too":
-    # No cloud link at all: before the local network access switch this frame was never denied.
+  test "a standalone frame is never denied, whatever local network access says":
     persistLocalNetworkAccess(false)
+    refreshLocalNetworkPolicy(FrameConfig(device: "framebuffer"))
+    check not localNetworkPolicySnapshot().active
+
+  test "a managed frame is denied while local network access is off, its provider exempt":
+    linkManaged("http://Dev.Local:3000")
     refreshLocalNetworkPolicy(FrameConfig(device: "framebuffer"))
     let policy = localNetworkPolicySnapshot()
     check policy.active
-    # Nothing linked, nothing exempt: not even the default provider.
-    check policy.exemptHostPorts.len == 0
+    check policy.exemptHostPorts == @["dev.local:3000"]
 
-  test "Local network access on lifts the deny, linked or not":
+  test "local network access on lifts the deny on a managed frame":
+    linkManaged()
     persistLocalNetworkAccess(true)
     refreshLocalNetworkPolicy(FrameConfig(device: "framebuffer"))
     check not localNetworkPolicySnapshot().active
-    withLock cloudLinkLock:
-      saveCloudLinkState(%*{"mode": "managed", "status": "connected", "access_token": "t",
-                            "provider_url": "http://10.0.0.2:3000"})
-    refreshLocalNetworkPolicy(FrameConfig(device: "framebuffer"))
-    check not localNetworkPolicySnapshot().active
-
-  test "a frame without a value predates the switch and is not denied":
-    refreshLocalNetworkPolicy(FrameConfig(device: "framebuffer"))
-    check not localNetworkPolicySnapshot().active
-
-  test "the frame's own control planes stay exempt by exact host:port":
+    # Off again applies at the next refresh, from the state file's cache.
     persistLocalNetworkAccess(false)
-    withLock cloudLinkLock:
-      saveCloudLinkState(%*{"status": "disconnected", "provider_url": "http://Dev.Local:3000"})
-    refreshLocalNetworkPolicy(FrameConfig(device: "framebuffer", serverHost: "FrameOS.lan", serverPort: 8989))
-    let policy = localNetworkPolicySnapshot()
-    check policy.active
-    check policy.exemptHostPorts == @["dev.local:3000", "frameos.lan:8989"]
-    # No backend configured: only the provider.
-    refreshLocalNetworkPolicy(FrameConfig(device: "framebuffer", serverHost: "", serverPort: 8989))
-    check localNetworkPolicySnapshot().exemptHostPorts == @["dev.local:3000"]
-    check backendExemptHostPort(FrameConfig(serverHost: " 192.168.1.10 ", serverPort: 8989)) ==
-      "192.168.1.10:8989"
-    check backendExemptHostPort(nil) == ""
+    refreshLocalNetworkPolicy(FrameConfig(device: "framebuffer"))
+    check localNetworkPolicySnapshot().active
+
+  test "with nothing stored, frame.json's legacy elevation still counts":
+    linkManaged()
+    refreshLocalNetworkPolicy(FrameConfig(device: "framebuffer",
+      network: NetworkConfig(allowLocalNetworkAccess: true)))
+    check not localNetworkPolicySnapshot().active
+    persistLocalNetworkAccess(false)
+    refreshLocalNetworkPolicy(FrameConfig(device: "framebuffer",
+      network: NetworkConfig(allowLocalNetworkAccess: true)))
+    check localNetworkPolicySnapshot().active
 
 suite "interpreted scene payload validation":
   test "plain node-graph scenes validate":

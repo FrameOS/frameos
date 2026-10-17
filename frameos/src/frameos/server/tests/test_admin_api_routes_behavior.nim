@@ -455,17 +455,18 @@ suite "Local network access routes":
     setLocalNetworkPolicy(false)
     frameDriverPngHook = nil
 
-  test "an admin session or the backend's key, never the access key":
+  test "an admin session, never the access key or the backend's key":
     configureServerState(lanConfig("waveshare.EPD_7in5_V2"))
     let cookie = adminLogin()
     check httpRequest(server.port, "GET", "/api/network/local-access").status == 401
-    # The frame access key opens the viewer, not this.
+    # The frame access key opens the viewer, not this; the backend's
+    # serverApiKey has no part in a cloud frame's ceremony either.
     check httpRequest(server.port, "GET", "/api/network/local-access?k=test-key").status == 401
-    check postJson("/api/network/local-access/challenge", %*{},
-      ("Authorization", "Bearer test-key")).status == 401
-    check postJson("/api/network/local-access", %*{"enabled": false},
-      ("Authorization", "Bearer test-key")).status == 401
-    # The serverApiKey bearer is POST-only by design.
+    for bearer in ["test-key", "api"]:
+      check postJson("/api/network/local-access/challenge", %*{},
+        ("Authorization", "Bearer " & bearer)).status == 401
+      check postJson("/api/network/local-access", %*{"enabled": false},
+        ("Authorization", "Bearer " & bearer)).status == 401
     check httpRequest(server.port, "GET", "/api/network/local-access",
       headers = [("Authorization", "Bearer api")]).status == 401
     let viaSession = httpRequest(server.port, "GET", "/api/network/local-access",
@@ -474,24 +475,22 @@ suite "Local network access routes":
     let payload = parseJson(viaSession.body)
     for key in ["allowLocalNetworkAccess", "allowShellApps", "challengePending", "challengeSecondsLeft"]:
       check payload.hasKey(key)
-    check postJson("/api/network/local-access/challenge", %*{},
-      ("Authorization", "Bearer api")).status == 200
-    check postJson("/api/network/local-access", %*{"enabled": false},
-      ("Authorization", "Bearer api")).status == 200
+    check postJson("/api/network/local-access/challenge", %*{}, ("Cookie", cookie)).status == 200
+    check postJson("/api/network/local-access", %*{"enabled": false}, ("Cookie", cookie)).status == 200
 
   test "a frame without a panel cannot show a code":
     for device in ["web_only", "http.upload"]:
       configureServerState(lanConfig(device))
       let response = postJson("/api/network/local-access/challenge", %*{},
-        ("Authorization", "Bearer api"))
+        ("Cookie", adminLogin()))
       check response.status == 409
       check parseJson(response.body)["error"].getStr() == "no_panel"
       check activeLocalAccessCode() == ""
 
   test "a challenge shows a code on the panel and never in the answer":
     configureServerState(lanConfig("waveshare.EPD_7in5_V2"))
-    let response = postJson("/api/network/local-access/challenge", %*{},
-      ("Authorization", "Bearer api"))
+    let admin = ("Cookie", adminLogin())
+    let response = postJson("/api/network/local-access/challenge", %*{}, admin)
     check response.status == 200
     let body = parseJson(response.body)
     check body["status"].getStr() == "ok"
@@ -501,8 +500,7 @@ suite "Local network access routes":
     check code.len == 6
     check code notin response.body
     check localAccessPanelText() == "Local network access code\n" & code
-    let unknown = postJson("/api/network/local-access/challenge", %*{"scope": "everything"},
-      ("Authorization", "Bearer api"))
+    let unknown = postJson("/api/network/local-access/challenge", %*{"scope": "everything"}, admin)
     check unknown.status == 400
     check parseJson(unknown.body)["error"].getStr() == "invalid_lan_access"
     # The bad request left the pending code alone.
@@ -510,43 +508,42 @@ suite "Local network access routes":
 
   test "off needs no code; on needs the one on the panel":
     configureServerState(lanConfig("waveshare.EPD_7in5_V2"))
-    let bearer = ("Authorization", "Bearer api")
-    let off = postJson("/api/network/local-access", %*{"enabled": false}, bearer)
+    let admin = ("Cookie", adminLogin())
+    let off = postJson("/api/network/local-access", %*{"enabled": false}, admin)
     check off.status == 200
     check parseJson(off.body)["allowLocalNetworkAccess"].getBool(true) == false
-    check not lanAccessEnabled()
-    # Applied at once, with the frame's backend exempt.
-    check localNetworkPolicySnapshot().active
-    check "localhost:8989" in localNetworkPolicySnapshot().exemptHostPorts
+    check not lanAccessEnabled(nil)
+    # A standalone frame: nothing to block, whatever the switch says.
+    check not localNetworkPolicySnapshot().active
 
-    let noCode = postJson("/api/network/local-access", %*{"enabled": true}, bearer)
+    let noCode = postJson("/api/network/local-access", %*{"enabled": true}, admin)
     check noCode.status == 403
     check parseJson(noCode.body)["error"].getStr() == "code_required"
-    let noChallenge = postJson("/api/network/local-access", %*{"enabled": true, "code": "123456"}, bearer)
+    let noChallenge = postJson("/api/network/local-access", %*{"enabled": true, "code": "123456"}, admin)
     check noChallenge.status == 403
     check parseJson(noChallenge.body)["error"].getStr() == "code_expired"
 
-    discard postJson("/api/network/local-access/challenge", %*{}, bearer)
+    discard postJson("/api/network/local-access/challenge", %*{}, admin)
     let code = activeLocalAccessCode()
     let wrong = if code == "111111": "222222" else: "111111"
-    let bad = postJson("/api/network/local-access", %*{"enabled": true, "code": wrong}, bearer)
+    let bad = postJson("/api/network/local-access", %*{"enabled": true, "code": wrong}, admin)
     check bad.status == 403
     check parseJson(bad.body)["error"].getStr() == "invalid_code"
-    check not lanAccessEnabled()
+    check not lanAccessEnabled(nil)
 
-    let on = postJson("/api/network/local-access", %*{"enabled": true, "code": code}, bearer)
+    let on = postJson("/api/network/local-access", %*{"enabled": true, "code": code}, admin)
     check on.status == 200
     check parseJson(on.body)["allowLocalNetworkAccess"].getBool(false) == true
-    check lanAccessEnabled()
+    check lanAccessEnabled(nil)
     check activeLocalAccessCode() == ""
     check not localNetworkPolicySnapshot().active
     check parseJson(readFile(LocalAccessStatePath))["allowLocalNetworkAccess"].getBool(false)
 
   test "the scope is checked before the code is spent":
     configureServerState(lanConfig("waveshare.EPD_7in5_V2"))
-    let bearer = ("Authorization", "Bearer api")
+    let admin = ("Cookie", adminLogin())
     persistLocalNetworkAccess(false)
-    discard postJson("/api/network/local-access/challenge", %*{}, bearer)
+    discard postJson("/api/network/local-access/challenge", %*{}, admin)
     let code = activeLocalAccessCode()
     # More bad requests than there are tries: none of them costs one.
     for _ in 0 .. LocalAccessMaxAttempts:
@@ -554,81 +551,70 @@ suite "Local network access routes":
                    %*{"enabled": true, "code": code, "scope": 7},
                    %*{"enabled": "yes", "code": code},
                    %*{"code": code}]:
-        let response = postJson("/api/network/local-access", body, bearer)
+        let response = postJson("/api/network/local-access", body, admin)
         check response.status == 400
         check parseJson(response.body)["error"].getStr() == "invalid_lan_access"
       resetRateLimits()
     check activeLocalAccessCode() == code
     let invalidJson = httpRequest(server.port, "POST", "/api/network/local-access",
-      headers = [("Content-Type", "application/json"), bearer], body = "{nope")
+      headers = [("Content-Type", "application/json"), admin], body = "{nope")
     check invalidJson.status == 400
     # A local network access code is not a shell apps code.
     let shell = postJson("/api/network/local-access",
-      %*{"enabled": true, "code": code, "scope": "shellApps"}, bearer)
+      %*{"enabled": true, "code": code, "scope": "shellApps"}, admin)
     check shell.status == 403
     check parseJson(shell.body)["error"].getStr() == "code_expired"
     check not storedAllowShellApps()
-    check postJson("/api/network/local-access", %*{"enabled": true, "code": code}, bearer).status == 200
-    check lanAccessEnabled()
+    check postJson("/api/network/local-access", %*{"enabled": true, "code": code}, admin).status == 200
+    check lanAccessEnabled(nil)
 
   test "off takes a pending code off the panel":
     configureServerState(lanConfig("waveshare.EPD_7in5_V2"))
-    let bearer = ("Authorization", "Bearer api")
-    discard postJson("/api/network/local-access/challenge", %*{}, bearer)
+    let admin = ("Cookie", adminLogin())
+    discard postJson("/api/network/local-access/challenge", %*{}, admin)
     check activeLocalAccessCode().len == 6
-    check postJson("/api/network/local-access", %*{"enabled": false}, bearer).status == 200
+    check postJson("/api/network/local-access", %*{"enabled": false}, admin).status == 200
     check activeLocalAccessCode() == ""
 
   test "ten wrong codes in an hour answer 429 rate_limited to both routes":
     configureServerState(lanConfig("waveshare.EPD_7in5_V2"))
-    let bearer = ("Authorization", "Bearer api")
+    let admin = ("Cookie", adminLogin())
     persistLocalNetworkAccess(false)
     for round in 0 ..< 2:
       resetRateLimits()
-      check postJson("/api/network/local-access/challenge", %*{}, bearer).status == 200
+      check postJson("/api/network/local-access/challenge", %*{}, admin).status == 200
       let code = activeLocalAccessCode()
       let wrong = if code == "111111": "222222" else: "111111"
       for attempt in 1 .. LocalAccessMaxAttempts:
-        check postJson("/api/network/local-access", %*{"enabled": true, "code": wrong}, bearer).status == 403
+        check postJson("/api/network/local-access", %*{"enabled": true, "code": wrong}, admin).status == 403
     resetRateLimits()
-    let challenge = postJson("/api/network/local-access/challenge", %*{}, bearer)
+    let challenge = postJson("/api/network/local-access/challenge", %*{}, admin)
     check challenge.status == 429
     let body = parseJson(challenge.body)
     check body["error"].getStr() == "rate_limited"
     check body["detail"].getStr() == "Too many wrong codes in the last hour. Try again later."
     let code = startLocalAccessChallenge().code
-    let submit = postJson("/api/network/local-access", %*{"enabled": true, "code": code}, bearer)
+    let submit = postJson("/api/network/local-access", %*{"enabled": true, "code": code}, admin)
     check submit.status == 429
     check parseJson(submit.body)["error"].getStr() == "rate_limited"
     check activeLocalAccessCode() == code
-    check not lanAccessEnabled()
+    check not lanAccessEnabled(nil)
 
   test "the shell apps scope runs the same ceremony":
     configureServerState(lanConfig("waveshare.EPD_7in5_V2"))
-    let bearer = ("Authorization", "Bearer api")
-    discard postJson("/api/network/local-access/challenge", %*{"scope": "shellApps"}, bearer)
+    let admin = ("Cookie", adminLogin())
+    discard postJson("/api/network/local-access/challenge", %*{"scope": "shellApps"}, admin)
     let code = activeLocalAccessCode()
     check localAccessPanelText() == "Shell apps code\n" & code
     let on = postJson("/api/network/local-access",
-      %*{"enabled": true, "code": code, "scope": "shellApps"}, bearer)
+      %*{"enabled": true, "code": code, "scope": "shellApps"}, admin)
     check on.status == 200
     check parseJson(on.body)["allowShellApps"].getBool(false)
     check storedAllowShellApps()
     let off = postJson("/api/network/local-access",
-      %*{"enabled": false, "scope": "shellApps"}, bearer)
+      %*{"enabled": false, "scope": "shellApps"}, admin)
     check off.status == 200
     check not storedAllowShellApps()
-
-  test "the frame payload reports lan_access at the top level":
-    configureServerState(lanConfig("waveshare.EPD_7in5_V2"))
-    let cookie = adminLogin()
-    persistLocalNetworkAccess(false)
-    let frame = httpRequest(server.port, "GET", "/api/frames/1", headers = [("Cookie", cookie)])
-    check frame.status == 200
-    check parseJson(frame.body)["frame"]["lan_access"].getBool(true) == false
-    persistLocalNetworkAccess(true)
-    let again = httpRequest(server.port, "GET", "/api/frames/1", headers = [("Cookie", cookie)])
-    check parseJson(again.body)["frame"]["lan_access"].getBool(false) == true
 
   test "GET /image never hands out the driver's copy while a code may be on the panel":
     configureServerState(lanConfig("waveshare.EPD_7in5_V2"))

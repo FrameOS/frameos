@@ -42,7 +42,6 @@ from app.tasks.buildroot_image import (
     ensure_buildroot_frame_defaults,
 )
 from app.tasks.embedded_firmware import ensure_embedded_frame_defaults
-from app.utils.lan_access import mirror_lan_access, reported_lan_access
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
 from app.utils.network import device_server_host_error, is_safe_host
 from app.utils.retired_apps import frame_runtime_version, retire_apps_in_scenes, scenes_for_runtime
@@ -1824,9 +1823,6 @@ async def adopt_standalone_frame(
         device=remote_frame.get("device"),
         interval=remote_frame.get("interval"),
         project_id=project_id,
-        # A running frame keeps its switch; a runtime too old to report it
-        # is from before the switch, when every frame had local network access.
-        lan_access=reported_lan_access(remote_frame) is not False,
     )
     frame.frame_port = frame_port
 
@@ -1992,9 +1988,6 @@ async def get_frame_sync_status(
     fetch_frame_http_bytes: FrameFetch,
 ) -> dict[str, Any]:
     remote_frame = await _load_live_frame_api_payload(frame, redis, fetch_frame_http_bytes)
-    # Not a sync key (no settings save moves it): the row just follows what
-    # the device reports, the way the ESP32 hello keeps it current.
-    mirrored = await mirror_lan_access(db, redis, frame, reported_lan_access(remote_frame))
     sync_status = _build_frame_sync_status(frame, remote_frame)
     repaired_baseline = False
     if (
@@ -2009,7 +2002,7 @@ async def get_frame_sync_status(
         sync_status = _build_frame_sync_status(frame, remote_frame)
         repaired_baseline = True
     response: dict[str, Any] = {"sync": sync_status}
-    if repaired_baseline or mirrored:
+    if repaired_baseline:
         response["frame"] = frame.to_dict()
     return response
 

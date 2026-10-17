@@ -187,11 +187,11 @@ static int cmd_status(int argc, char **argv)
         printf("cloud_error: %s\n", fos_cloud_last_error());
     }
     /* Whether scene HTTP can currently reach the LAN. Worth a line of its own:
-     * when the deny is on, a scene calling a local API fails, and this is
-     * where the switch behind it is named. */
-    printf("net_policy:  scene HTTP to private addresses %s [lan_access=%s]\n",
-           fos_netguard_policy_active() ? "BLOCKED" : "allowed",
-           config->allow_local_network ? "on" : "off");
+     * when the deny is on, a scene calling a local API fails with a message
+     * that looks like a network fault, and this is where that gets explained. */
+    printf("net_policy:  scene HTTP to private addresses %s%s\n",
+           fos_netguard_policy_active() ? "BLOCKED (cloud-managed or cloud-pushed scenes)" : "allowed",
+           config->allow_local_network ? " [allow_local_network=1]" : "");
     printf("hostname:    %s\n", config->hostname[0] ? config->hostname : "(unset)");
     printf("https:       %s port=%u cert=%s key=%s server=%s\n",
            config->tls_enable ? "enabled" : "disabled",
@@ -771,10 +771,12 @@ static int cmd_set(int argc, char **argv)
     else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
     else if (strcmp(key, "debug") == 0) config->debug_logging = atoi(value) != 0;
     else if (strcmp(key, "fusion") == 0) config->image_fusion = atoi(value) != 0;
-    /* The local network access switch (docs/lan-access.md): 1 lets scenes reach
-     * private/link-local addresses, 0 blocks them. The USB cable is physical
-     * presence, so no panel code here; the flashers send it at provisioning.
-     * See fos_config.h. Takes effect within a few seconds, no restart. */
+    /* 0 (default): while this frame is enrolled with a cloud provider, scene
+     * HTTP to private/link-local addresses is denied — the provider installs
+     * the scenes and the frame sits inside the owner's LAN. 1 lifts that, for
+     * an owner who deliberately wants cloud scenes talking to a local API.
+     * Console-only by design: see fos_config.h. Takes effect within a second,
+     * no restart. */
     else if (strcmp(key, "allow_local_network") == 0)
         config->allow_local_network = atoi(value) != 0;
     else if (strcmp(key, "assets_path") == 0) strlcpy(config->assets_path, value, sizeof(config->assets_path));

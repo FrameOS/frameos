@@ -394,26 +394,23 @@ proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode)
       continue
     putJsonIfPresent(result, payload, apiKey, configKey)
 
-  # Local network access never rides along with a bulk config save. The cloud is
-  # already blocked from it by CLOUD_SETTINGS_ALLOWLIST, but the admin page
-  # came through here too, and an admin session is a password on a
+  # The private-network elevation never rides along with a bulk config save.
+  # The cloud is already blocked from it by CLOUD_SETTINGS_ALLOWLIST, but the
+  # admin page came through here too, and an admin session is a password on a
   # LAN-reachable page — not proof that anyone is standing at the frame. It
-  # moves only through the on-panel ceremony (frameos/local_access.nim, and
-  # setLocalNetworkAccess below), so whatever the payload claims under either
-  # spelling — the legacy `allowLocalNetworkAccess` or the creation seed
-  # `lanAccess` — what frame.json already had wins.
+  # moves only through the on-panel ceremony in frameos/local_access.nim now,
+  # so whatever the payload claims, the stored value wins.
   if result{"network"} != nil and result["network"].kind == JObject:
-    for key in ["allowLocalNetworkAccess", "lanAccess"]:
-      let stored =
-        if existing != nil and existing.kind == JObject and
-            existing{"network"} != nil and existing["network"].kind == JObject:
-          existing["network"]{key}
-        else:
-          nil
-      if stored != nil:
-        result["network"][key] = copy(stored)
-      elif result["network"].hasKey(key):
-        result["network"].delete(key)
+    let stored =
+      if existing != nil and existing.kind == JObject and
+          existing{"network"} != nil and existing["network"].kind == JObject:
+        existing["network"]{"allowLocalNetworkAccess"}
+      else:
+        nil
+    if stored != nil:
+      result["network"]["allowLocalNetworkAccess"] = copy(stored)
+    elif result["network"].hasKey("allowLocalNetworkAccess"):
+      result["network"].delete("allowLocalNetworkAccess")
 
   if payload.hasKey("frame_admin_auth"):
     putJsonIfPresent(result, payload, "frame_admin_auth", "frameAdminAuth")
@@ -741,8 +738,11 @@ proc frameApiUpdateChangesConfig*(payload: JsonNode): bool =
 
 proc localNetworkAccessPayload*(): JsonNode =
   ## `GET /api/network/local-access`, and the answer of a successful change.
+  # Through the state file's cache, so a change made a moment ago shows here.
+  let enabled = resolveLocalNetworkAccess(globalFrameConfig != nil and
+    globalFrameConfig.network != nil and globalFrameConfig.network.allowLocalNetworkAccess)
   %*{
-    "allowLocalNetworkAccess": lanAccessEnabled(),
+    "allowLocalNetworkAccess": enabled,
     # Chromium unsandboxed as root (chromiumScreenshot); same ceremony,
     # second fact.
     "allowShellApps": storedAllowShellApps(),
@@ -1071,9 +1071,6 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
         buildroot["platform"] = %board
     result["buildroot"] = buildroot
 
-  # The frame's local network access, as the SPA reads it on every surface
-  # (FrameType.lan_access). Not under `network`: no save can change it.
-  result["lan_access"] = %lanAccessEnabled()
   result["id"] = %frameApiId()
   result["project_id"] = %0
   result["ssh_user"] = %""

@@ -292,9 +292,9 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     key: 'lan-access',
     title: 'Local network access',
     anchor: 'frame-settings-lan-access',
-    surfaces: ['backend', 'frameAdmin', 'cloudLinux', 'cloudEsp32'],
+    surfaces: ['cloudLinux', 'cloudEsp32'],
     conditions:
-      'Next to Network but bound to no form field: the device changes the value (a code on its panel to turn it on) and the plane mirrors it. The switch is disabled while the frame reports no value (cloud firmware that predates it).',
+      'Cloud frames only: standalone and backend-managed frames have no block. Bound to no form field: the device changes the value (a code on its panel to turn it on) and the cloud mirrors it. The switch is disabled while the frame reports no value (firmware that predates it).',
   },
   {
     key: 'mountpoints',

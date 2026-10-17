@@ -6,7 +6,6 @@ import frameos/apps
 import frameos/config
 import frameos/display_detect
 import frameos/input_sources
-import frameos/local_access
 import frameos/logger
 import frameos/metrics
 import frameos/runner
@@ -377,6 +376,10 @@ proc start*(self: FrameOS) {.async.} =
   if sweptSpills > 0:
     self.logger.log(%*{"event": "spool:sweep", "removed": sweptSpills})
 
+  # The private-network deny before the first render, not after: the runner
+  # renders straight away, and the deny starts out open (http_client.nim)
+  # until something sets it. startCloudManagement below sets it again.
+  refreshLocalNetworkPolicy(self.frameConfig)
   self.runner.start(firstSceneId)
   # The runner owns the panel from here; the boot canvas is dead weight.
   bootCanvas = nil
@@ -405,11 +408,5 @@ proc startFrameOS*() {.async.} =
   if interpretedScenesLoadError().len > 0:
     reloadInterpretedScenes()
   setupRenderMemory()
-  # Local network access gets its stored answer before anything reads it: readConfig
-  # (in newFrameOS), the private-network policy (startCloudManagement), the
-  # admin API. Single-threaded here, and idempotent across the retry loop:
-  # once the state file has a value, frame.json is never consulted again
-  # (frameos/local_access.nim, seedLocalNetworkAccess).
-  discard seedLocalNetworkAccess(frameJsonLanAccessSeed())
   var frameOS = newFrameOS()
   await frameOS.start()

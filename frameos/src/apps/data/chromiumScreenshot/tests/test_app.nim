@@ -269,7 +269,7 @@ suite "data/chromiumScreenshot app":
       case host
       of "cdn.example.net": ("", "203.0.113.7")
       of "fonts.example.org": ("", "198.51.100.9")
-      else: ("Local network access is off for this frame, so " & host & " cannot be reached. Turn on local network access in the frame settings.", "")
+      else: ("local network access is blocked on cloud-managed frames (" & host & ")", "")
 
     # A literal public page host: no lookup needed for the page itself, the
     # deny is on, so the gate is armed.

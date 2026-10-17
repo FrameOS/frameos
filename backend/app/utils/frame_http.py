@@ -223,22 +223,11 @@ def _tls_connect_error_detail(frame: Frame, error: str) -> Optional[str]:
 # Which ones is the event contract's (docs/events-contract.json): what the
 # `http:write` origin may not emit.
 _CONTROL_EVENT_NAMES = REFUSED_BY_ORIGIN["http:write"]
-# The local network access switch's two POSTs (frameos/local_access.nim): the device
-# takes an admin session or the serverApiKey bearer there, never the access
-# key. The bearer is honored on POSTs only, so the backend never reads the GET.
-_CONTROL_PATHS = frozenset(
-    {
-        "/uploadScenes",
-        "/reload",
-        "/api/network/local-access",
-        "/api/network/local-access/challenge",
-    }
-)
 
 
 def _is_control_path(path: str) -> bool:
     bare = path.split("?", 1)[0].rstrip("/")
-    if bare in _CONTROL_PATHS:
+    if bare in ("/uploadScenes", "/reload"):
         return True
     if bare.startswith("/event/"):
         return bare[len("/event/") :] in _CONTROL_EVENT_NAMES

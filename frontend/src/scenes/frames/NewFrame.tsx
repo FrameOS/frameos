@@ -108,7 +108,7 @@ function RemoteControlField({
         <div className="frameos-form-label text-sm font-semibold text-slate-700">FrameOS remote control</div>
         <Tooltip
           label="FrameOS remote control help"
-          className="frameos-muted inline-flex h-5 w-5 items-center justify-center rounded-full"
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full"
           titleClassName="w-72"
           title={
             <div className="space-y-1">

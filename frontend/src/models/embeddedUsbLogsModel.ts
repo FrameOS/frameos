@@ -1319,8 +1319,6 @@ export type EmbeddedUsbConfigKey =
   | 'buzzer_tone_hz'
   | 'pins'
   | 'gpio_buttons'
-  // Local network access (0/1), written when the frame is set up.
-  | 'allow_local_network'
 
 export interface EmbeddedUsbWifiNetwork {
   ssid: string

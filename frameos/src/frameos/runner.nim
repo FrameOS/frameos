@@ -632,7 +632,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         # challenge. Repaint now: the code is useless until it is on the
         # panel, and must not stay up for the next person walking past. This
         # is the one place that does it, whoever ended the challenge (the
-        # admin page, the backend, a cloud verb, the clock). Never the digits
+        # admin page, a cloud verb, the clock). Never the digits
         # in the log line.
         let localAccessWanted = self.localAccessPanelWanted()
         if localAccessWanted != self.localAccessShownFor:

@@ -228,15 +228,6 @@ describe("renderCloudConfig", () => {
     expect(text).not.toContain("wifi_ssid=");
     expect(text).not.toContain("wifi_country=");
     expect(text).not.toContain("time_zone=");
-    expect(text).not.toContain("lan_access=");
-  });
-
-  it("writes local network access as 1 or 0 when the builder chose it", () => {
-    // The first-boot script turns it into state/local_access.json.
-    const render = (lanAccess: boolean) =>
-      decoder.decode(renderCloudConfig({ claimToken: "FRCT_x", cloudUrl: "https://c.example", lanAccess }));
-    expect(render(true)).toContain("\nlan_access=1\n");
-    expect(render(false)).toContain("\nlan_access=0\n");
   });
 
   it("writes the WiFi country upper-cased and rejects anything but a country code", () => {

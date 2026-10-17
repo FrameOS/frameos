@@ -1761,13 +1761,17 @@ static esp_http_client_handle_t http_open_request(
     *out_status = 0;
     *out_content_length = -1;
     if (err_buf != NULL && err_buf_len > 0) err_buf[0] = '\0';
-    /* Private-network policy (fos_netguard.h): the frame's local network access switch.
-     * This is the one funnel every scene HTTP request goes through, and with
-     * Local network access off a scene does not get to reach the owner's router.
-     * Checked before the client even exists; the redirect loop below
-     * re-checks every hop, because a 302 to 192.168.1.1 is the same request. */
+    /* Private-network policy (fos_netguard.h). This is the one funnel every
+     * scene HTTP request goes through, and on a cloud-managed frame a scene is
+     * something a provider installed — so it does not get to reach the owner's
+     * router. Checked before the client even exists; the redirect loop below
+     * re-checks every hop, because a 302 to 192.168.1.1 is the same request.
+     * Each connect is pinned to the address its check resolved
+     * (fos_netguard_pin_t): ESP-IDF resolves the host again when it connects,
+     * and a rebinding name answers that second query with a private one. */
     char netguard_reason[96];
-    switch (fos_netguard_check_url(url, netguard_reason, sizeof(netguard_reason))) {
+    fos_netguard_pin_t pin;
+    switch (fos_netguard_check_url_pinned(url, netguard_reason, sizeof(netguard_reason), &pin)) {
     case FOS_NETGUARD_ALLOWED:
         break;
     case FOS_NETGUARD_UNRESOLVED:
@@ -1779,7 +1783,7 @@ static esp_http_client_handle_t http_open_request(
         HTTP_OPEN_FAIL("%s", netguard_reason);
     case FOS_NETGUARD_BLOCKED:
     default:
-        ESP_LOGW(TAG, "%s %s: blocked, local network access is off: %s",
+        ESP_LOGW(TAG, "%s %s: blocked by the local-network policy: %s",
                  method ? method : "GET", url ? url : "(null)", netguard_reason);
         HTTP_OPEN_FAIL(FOS_NETGUARD_BLOCK_FMT, "", netguard_reason);
     }
@@ -1818,7 +1822,12 @@ static esp_http_client_handle_t http_open_request(
         esp_http_client_set_header(client, "Content-Type", "application/json");
     }
 
+    if (!fos_netguard_pin_for_task(&pin)) {
+        esp_http_client_cleanup(client);
+        HTTP_OPEN_FAIL("too many requests in flight");
+    }
     esp_err_t err = esp_http_client_open(client, body_len);
+    fos_netguard_unpin_for_task();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "%s %s: connect failed: %s", method ? method : "GET", url,
                  esp_err_to_name(err));
@@ -1867,14 +1876,15 @@ static esp_http_client_handle_t http_open_request(
         if (!redirect_url_ok || !http_same_origin(url, redirect_url)) {
             drop_cross_origin_headers(client);
         }
+        memset(&pin, 0, sizeof(pin));
         if (fos_netguard_policy_active()) {
             fos_netguard_verdict_t verdict = FOS_NETGUARD_BLOCKED;
             netguard_reason[0] = '\0';
             if (!redirect_url_ok) {
                 strlcpy(netguard_reason, "redirect target unreadable", sizeof(netguard_reason));
             } else {
-                verdict = fos_netguard_check_url(redirect_url, netguard_reason,
-                                                 sizeof(netguard_reason));
+                verdict = fos_netguard_check_url_pinned(redirect_url, netguard_reason,
+                                                        sizeof(netguard_reason), &pin);
             }
             if (verdict == FOS_NETGUARD_UNRESOLVED) {
                 ESP_LOGW(TAG, "%s %s: redirect: %s", method ? method : "GET", url, netguard_reason);
@@ -1883,14 +1893,20 @@ static esp_http_client_handle_t http_open_request(
                 HTTP_OPEN_FAIL("redirect: %s", netguard_reason);
             }
             if (verdict != FOS_NETGUARD_ALLOWED) {
-                ESP_LOGW(TAG, "%s %s: redirect blocked, local network access is off: %s",
+                ESP_LOGW(TAG, "%s %s: redirect blocked by the local-network policy: %s",
                          method ? method : "GET", url, netguard_reason);
                 esp_http_client_close(client);
                 esp_http_client_cleanup(client);
                 HTTP_OPEN_FAIL(FOS_NETGUARD_BLOCK_FMT, "redirect: ", netguard_reason);
             }
         }
+        if (!fos_netguard_pin_for_task(&pin)) {
+            esp_http_client_close(client);
+            esp_http_client_cleanup(client);
+            HTTP_OPEN_FAIL("too many requests in flight");
+        }
         err = esp_http_client_open(client, body_len);
+        fos_netguard_unpin_for_task();
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "%s %s: redirect connect failed: %s", method ? method : "GET", url,
                      esp_err_to_name(err));

@@ -4,19 +4,14 @@ import type { FrameId, FrameType } from '../../../../types'
 import { framesModel } from '../../../../models/framesModel'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { confirmDialog } from '../../../../utils/confirmDialogLogic'
-import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 
 /**
- * The frame's local network access switch (docs: "Local network access").
+ * A cloud frame's local network access switch (docs: "Local network access").
  *
  * Not a frame form field. Turning it on needs a code the frame draws on its
  * own panel, so the change happens on the device first and the frame row only
- * mirrors the result. Turning it off goes straight through.
- *
- * The backend and the cloud serve the same two routes
- * (`/api/frames/{id}/lan_access[/challenge]`); the frame's own admin page
- * talks to the device's `/api/network/local-access` routes and is normalized
- * to the same results here.
+ * mirrors the result. Turning it off goes straight through. The cloud's two
+ * routes are `/api/frames/{id}/lan_access[/challenge]`.
  */
 
 export const LAN_ACCESS_CODE_LENGTH = 6
@@ -84,10 +79,7 @@ async function readJson(response: Response): Promise<Record<string, unknown>> {
 }
 
 async function lanAccessErrorFrom(response: Response): Promise<LanAccessError> {
-  const payload = await readJson(response)
-  // `{detail, error}` at the top level; FastAPI's HTTPException nests a dict
-  // detail one level down, so accept that too.
-  const body = isRecord(payload.detail) ? payload.detail : payload
+  const body = await readJson(response)
   const token = typeof body.error === 'string' ? body.error : null
   const detail = typeof body.detail === 'string' ? body.detail : typeof body.message === 'string' ? body.message : null
   return new LanAccessError(token, lanAccessErrorMessage(token, detail, response.status), response.status)
@@ -110,13 +102,6 @@ function postJson(path: string, body: Record<string, unknown>): Promise<Response
 
 /** Ask the frame to draw a code on its panel. */
 export async function requestLanAccessChallenge(frameId: FrameId): Promise<LanAccessChallengeResult> {
-  if (isInFrameAdminMode()) {
-    const response = await postJson('/api/network/local-access/challenge', { scope: 'localNetwork' })
-    if (!response.ok) {
-      throw await lanAccessErrorFrom(response)
-    }
-    return { status: 'shown' }
-  }
   const response = await postJson(`/api/frames/${frameId}/lan_access/challenge`, {})
   if (!response.ok) {
     throw await lanAccessErrorFrom(response)
@@ -128,15 +113,6 @@ export async function requestLanAccessChallenge(frameId: FrameId): Promise<LanAc
 /** Turn local network access on (with the code from the panel) or off (no code). */
 export async function setLanAccess(frameId: FrameId, enabled: boolean, code?: string): Promise<LanAccessSetResult> {
   const body: Record<string, unknown> = { enabled, ...(enabled && code ? { code } : {}) }
-  if (isInFrameAdminMode()) {
-    const response = await postJson('/api/network/local-access', { ...body, scope: 'localNetwork' })
-    if (!response.ok) {
-      throw await lanAccessErrorFrom(response)
-    }
-    const payload = await readJson(response)
-    const value = payload.allowLocalNetworkAccess
-    return { status: 'applied', lanAccess: typeof value === 'boolean' ? value : enabled }
-  }
   const response = await postJson(`/api/frames/${frameId}/lan_access`, body)
   if (!response.ok) {
     throw await lanAccessErrorFrom(response)

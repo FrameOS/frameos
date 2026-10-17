@@ -452,9 +452,8 @@ drains either way.
 table above; the rest of `frame.json` is the device's, whatever else moves
 later: deployment mode, driver wiring (VCOM, pins, explicit dimensions — the
 driver key itself is a setting since 2026.9.22), flash and GPIO wiring,
-SD-card wiring, Wi-Fi/hotspot credentials, local network access (two verbs of its own:
-turning it on takes the panel code), frame HTTP/admin/TLS access and keys,
-SSH/backend/agent configuration, mountpoints,
+SD-card wiring, Wi-Fi/hotspot credentials, private-network elevation, frame
+HTTP/admin/TLS access and keys, SSH/backend/agent configuration, mountpoints,
 HTTP-upload URLs and headers, arbitrary update URLs (the tz-updater URL
 included — the device carries its own across a push), and service API secrets.
 Raw `assets_path` and `log_to_file` paths are not exposed either; if they are
@@ -1374,39 +1373,45 @@ While managed:
 
 ### Local network access
 
-Whether a frame's scenes may reach its LAN is the frame's **Local network access**
-switch, on every frame and not only managed ones; `docs/lan-access.md` is the
-spec. With it off the HTTP stack denies requests whose target resolves to a
-private or local address — loopback (`127/8`, `::1`), RFC1918 (`10/8`,
-`172.16/12`, `192.168/16`), link-local (`169.254/16`, `fe80::/10`), CGNAT
-(`100.64/10`), `0.0.0.0/8`, broadcast, IPv6 ULA — whether the URL names the
-address literally or a DNS name (redirects included) resolves to one. Blocked
-requests fail with `Local network access is off for this frame, so <host> (<address>)
-cannot be reached. Turn on local network access in the frame settings.` in the scene
-logs. A name that does not resolve is not a block: the request still fails
-(nothing to classify, and the connect would resolve the name again), but as
-`could not resolve <host>`, on both runtimes; the ESP32 asks its resolver
-three times, a quarter second apart, before it says so, because the first
-lookup after a wake from deep sleep can fail while DHCP's DNS server is still
-settling. The frame's own control planes stay reachable by exact `host:port`:
-the provider's API endpoint (from the stored `provider_url`, so development
-providers on the LAN work) and a self-hosted backend's `serverHost:serverPort`.
+Cloud-installed scenes run *inside the owner's LAN*, so while a frame is
+managed its HTTP stack denies requests whose target resolves to a private or
+local address — loopback (`127/8`, `::1`), RFC1918 (`10/8`, `172.16/12`,
+`192.168/16`), link-local (`169.254/16`, `fe80::/10`), CGNAT (`100.64/10`),
+`0.0.0.0/8`, broadcast, IPv6 ULA — whether the URL names the address
+literally or a DNS name (redirects included) resolves to one. Blocked
+requests fail with `Local network access is off for this frame, so <host>
+(<address>) cannot be reached. Turn on local network access in the frame
+settings.` in the scene logs (the logs panel links that to the setting). A name that does not resolve is not a block: the request
+still fails (nothing to classify, and the connect would resolve the name
+again), but as `could not resolve <host>`, on both runtimes; the ESP32 asks
+its resolver three times, a quarter second apart, before it says so, because
+the first lookup after a wake from deep sleep can fail while DHCP's DNS
+server is still settling. Two exceptions:
 
-The provider cannot turn local network access on by itself. `lan_access` is not a
-`set_settings` key (a fixture pins it). The verbs are `lan_access_challenge`,
-which makes the frame draw a six-digit code on its panel, and `lan_access_set
-{enabled, code?}`, which turns it off freely but turns it on only with that
-code, typed in by someone who can see the panel. The code never leaves the
-device in an image or a reply. A frame with no panel answers `no_panel`. The
-device reports the value as `hardware.lanAccess` in hello and every `state`.
+- the provider's own API endpoint (exact `host:port` from the stored
+  `provider_url`) stays reachable, so development providers on the LAN work —
+  the local admin linked that endpoint deliberately;
+- the owner can lift the deny per frame by turning on its **local network
+  access** (`docs/lan-access.md`), for scenes that legitimately need the LAN
+  (e.g. Home Assistant). Turning it on takes a six-digit code the frame draws
+  on its panel, typed into the frame settings on the cloud
+  (`lan_access_challenge`, then `lan_access_set {enabled, code}`) or on the
+  frame's own admin page; turning it off takes nothing. It is not a
+  `set_settings` key (a fixture pins it), so no provider verb can flip it
+  without someone who can see the panel. The device reports it as
+  `hardware.lanAccess` in hello and every `state`.
 
-A frame from before the switch existed, with no value stored, reads as on.
-Until then, the deny followed provider-origin scenes on managed frames only
-(the `"source": "cloud"` stamp on `state/uploaded.json`, a top-level
-`"source"` in the ESP32's `/state/scene-index.json`). The stamp stays, but
-only for the refused-app check: a persisted cloud payload is re-checked
-against that list at scene load time, so it can never reach a
-process-spawning app by being replayed at boot.
+Standalone and backend-managed frames are unaffected. The deny keys on
+*provider-origin scenes*, not on the link alone: the device stamps every
+`set_scenes` payload with a runtime origin as it stores it (Pi/Linux:
+`"source": "cloud"` persisted with `state/uploaded.json`; ESP32: a top-level
+`"source"` in `/state/scene-index.json`), and a frame demoted out of the
+managed state keeps the deny for as long as those scenes remain resident.
+Replacing them — a local upload, a backend deploy — lifts it; local network
+access above overrides in either state. The
+origin stamp is also re-checked at scene load time against the refused-app
+list, so a persisted cloud payload can never reach a process-spawning app by
+being replayed at boot.
 
 ## Compatibility
 

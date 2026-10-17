@@ -509,8 +509,6 @@ describe("SdImageBuilder", () => {
     expect(regionText).toContain("wifi_ssid=MyNet\n");
     expect(regionText).toContain("wifi_password=hunter2\n");
     expect(regionText).toContain("wifi_country=FR\n");
-    // A new frame's card starts with local network access off.
-    expect(regionText).toContain("lan_access=0\n");
   });
 
   it("requires a root password or an explicit passwordless-root opt-in", async () => {

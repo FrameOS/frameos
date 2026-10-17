@@ -260,10 +260,6 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
         body: JSON.stringify({
           ...(sceneSourceFrameId ? { scene_source_frame_id: sceneSourceFrameId } : {}),
           ...claimTokenTimeZoneFields(),
-          // New frames start with local network access off. The install script has no
-          // SD card or USB console to say so, so the claim code does and
-          // enrollment turns it off (docs/lan-access.md).
-          lan_access: false,
         }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',

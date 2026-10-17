@@ -142,11 +142,11 @@ type
     # NetworkManager (armv6 buildroot) auto-detect the wpa_supplicant backend;
     # this pins it for debugging. FRAMEOS_NETWORK_BACKEND overrides it.
     networkBackend*: string
-    # No local network access field: the switch lives in state/local_access.json and is
-    # read with local_access.lanAccessEnabled() (docs/lan-access.md).
-    # frame.json's `network.lanAccess` is only a creation seed
-    # (config.frameJsonLanAccessSeed), and an old `allowLocalNetworkAccess`
-    # there is skipped like any unknown key.
+    # Local-presence override for the cloud-managed default-deny on private
+    # network HTTP (docs/cloud-frames.md). Settable only through the local
+    # admin settings path — deliberately absent from the cloud set_settings
+    # allowlist.
+    allowLocalNetworkAccess*: bool
 
   # Part of FrameConfig
   AgentConfig* = ref object

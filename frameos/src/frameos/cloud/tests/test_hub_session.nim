@@ -225,15 +225,7 @@ suite "cloud hub session over a live socket":
               return true
         false)
 
-  test "being managed arms nothing: Local network access is the frame's switch":
-    # No state file in this sandbox: a frame from before the switch, on. The
-    # hello says so, and the deny stays off although the frame is managed.
-    withLock stubLock:
-      check recorded.hello{"hardware"}{"lanAccess"}.getBool(false) == true
-    check not localNetworkPolicySnapshot().active
-
-  test "Local network access off denies a managed frame too, with its provider exempt":
-    persistLocalNetworkAccess(false)
+  test "managed mode activates the private-network deny with a provider exemption":
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       localNetworkPolicySnapshot().active)
     let snapshot = localNetworkPolicySnapshot()
@@ -241,14 +233,24 @@ suite "cloud hub session over a live socket":
     # exempt — the local admin linked it deliberately.
     check snapshot.exemptHostPorts == @["127.0.0.1:" & $TestPort]
 
-  test "a local network access change made anywhere reaches the provider as a state":
+  test "the local admin override lifts the deny while managed":
+    frameConfig.network = NetworkConfig(allowLocalNetworkAccess: true)
+    check waitUntil(10.0, proc(): bool {.gcsafe.} =
+      not localNetworkPolicySnapshot().active)
+    frameConfig.network = NetworkConfig(allowLocalNetworkAccess: false)
+    check waitUntil(10.0, proc(): bool {.gcsafe.} =
+      localNetworkPolicySnapshot().active)
+
+  test "local network access reaches the provider in hello and as a state":
+    withLock stubLock:
+      check recorded.hello{"hardware"}{"lanAccess"}.getBool(true) == false
     proc lanAccessStates(value: bool): int {.gcsafe.} =
       for state in repliesOfType("state"):
         if state{"hardware"}{"lanAccess"} != nil and
             state{"hardware"}{"lanAccess"}.getBool(not value) == value:
           result += 1
     let onBefore = lanAccessStates(true)
-    # As the frame's admin page (or the backend relaying a toggle) does it.
+    # As the ceremony does it (the lan_access_set verb, the admin page).
     persistLocalNetworkAccess(true)
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       not localNetworkPolicySnapshot().active)
@@ -293,12 +295,7 @@ suite "cloud hub session over a live socket":
       {.gcsafe.}:
         withLock stubLock:
           result = recorded.closed)
-    # Standalone again, and still denied: the deny is the local network access
-    # switch's (off since the test above), not the link's. Recomputed here
-    # rather than waited for: it is what the hub thread's next pass does.
-    refreshLocalNetworkPolicy(frameConfig)
-    check localNetworkPolicySnapshot().active
-    persistLocalNetworkAccess(true)
+    # Standalone again: the private-network deny is gone.
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       not localNetworkPolicySnapshot().active)
 

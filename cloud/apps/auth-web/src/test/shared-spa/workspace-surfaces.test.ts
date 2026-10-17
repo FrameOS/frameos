@@ -745,8 +745,10 @@ describe("allow-list hygiene", () => {
     const frameAdminOnlySettingsSections = ["frame-settings-cloud", "frame-settings-upgrade"];
     // And on the cloud's: the owner's log-shipping switch edits the telemetry
     // scopes of the frame's cloud link, which only the cloud holds (a
-    // self-hosted backend reads a frame's logs over its own channel).
-    const cloudOnlySettingsSections = ["frame-settings-telemetry"];
+    // self-hosted backend reads a frame's logs over its own channel). And
+    // local network access: only a cloud frame has the private-network block
+    // it lifts (docs/lan-access.md).
+    const cloudOnlySettingsSections = ["frame-settings-telemetry", "frame-settings-lan-access"];
     const lists = [
       [allowedFrameToolPanels, "frame tools", cloudOnlyFrameTools, []],
       [allowedSceneToolPanels, "scene tools", [], []],

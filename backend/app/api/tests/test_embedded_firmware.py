@@ -1065,7 +1065,6 @@ def test_provisioning_plan_carries_every_setting_the_image_would_bake_in():
         "rotate",
         "scaling_mode",
         "server_send_logs",
-        "allow_local_network",  # the local network access switch: USB is physical presence
         # max_http_response_bytes only when it differs from the default
         "admin_user",
         "admin_pass",
@@ -1091,9 +1090,6 @@ def test_provisioning_plan_carries_every_setting_the_image_would_bake_in():
     assert settings["rotate"] == "90"
     assert settings["scaling_mode"] == "contain"
     assert settings["server_send_logs"] == "1"
-    # A frame with no stored value is from before the switch: on. A frame
-    # created through the form has one (off unless it was turned on).
-    assert settings["allow_local_network"] == "1"
     assert settings["admin_user"] == frame.frame_admin_auth["user"]
     assert settings["admin_pass"] == frame.frame_admin_auth["pass"]
     assert settings["admin_auth"] == "1"

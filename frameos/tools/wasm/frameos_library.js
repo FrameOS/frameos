@@ -186,11 +186,11 @@ addToLibrary({
         }
       }
 
-      // The frame's own local network access switch (docs/lan-access.md), when the host
-      // page says what it is (`frameosLanAccess: false`): a preview of a frame
-      // with local network access off refuses a private host the way the frame would,
-      // neither direct nor through the proxy, and in the frame's words — the
-      // SPA's logs panel matches the start of them to link to the setting.
+      // A cloud frame's local network access (docs/lan-access.md), when the
+      // host page says what it is (`frameosLanAccess: false`): a preview of a
+      // cloud frame with it off refuses a private host the way the frame
+      // would, neither direct nor through the proxy, and in the frame's words —
+      // the SPA's logs panel matches the start of them to link to the setting.
       // A same-origin target keeps its own path (the proxy only, above).
       if (Module['frameosLanAccess'] === false && refusedDirect !== 'same-origin') {
         var lanTarget = null

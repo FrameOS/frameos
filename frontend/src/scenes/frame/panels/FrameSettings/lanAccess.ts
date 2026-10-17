@@ -1,4 +1,4 @@
-// The frame's local network access switch: copy and names shared by the settings
+// A cloud frame's local network access switch: copy and names shared by the settings
 // section (lanAccessLogic) and the Logs panel. No imports.
 
 export const LAN_ACCESS_HELP =

@@ -140,9 +140,6 @@ class FrameBase(BaseModel):
     schedule: Optional[Dict[str, Any]]
     gpio_buttons: Optional[List[Dict[str, Any]]]
     network: Optional[Dict[str, Any]]
-    # The frame-level local network access switch, as the device last reported it (the
-    # backend mirrors it; POST /frames/{id}/lan_access changes it).
-    lan_access: Optional[bool] = None
     agent: Optional[Dict[str, Any]]
     mountpoints: Optional[Dict[str, Any]]
     error_behavior: Optional[FrameErrorBehavior] = None
@@ -193,9 +190,6 @@ class FrameCreateRequest(BaseModel):
     ssh_keys: Optional[List[str]] = None
     platform: Optional[str] = None
     network: Optional[Dict[str, Any]] = None
-    # Local network access for the new frame. Add frame always sends false
-    # (docs/lan-access.md); left out, the frame starts with it off too.
-    lan_access: Optional[bool] = None
     gpio_buttons: Optional[List[Dict[str, Any]]] = None
     agent: Optional[Dict[str, Any]] = None
     embedded: Optional[Dict[str, Any]] = None
@@ -208,10 +202,6 @@ class FrameCreateRequest(BaseModel):
         return _validate_input_settings(value)
 
 class FrameUpdateRequest(BaseModel):
-    # No `lan_access` on purpose: a settings save never moves it (the key is
-    # dropped). Turning it on takes the code on the panel, and so it has its
-    # own route (POST /frames/{id}/lan_access). Frame import and frame sync
-    # read their keys off this model, so neither can carry it either.
     scenes: Optional[List[Any]] = None
     mode: Optional[Literal["rpios", "buildroot", "embedded"]] = None
     name: Optional[str] = None

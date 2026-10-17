@@ -354,7 +354,6 @@ handle_cloud_config() {
   cloud_root_password=''
   cloud_time_zone=''
   cloud_authorized_keys=''
-  cloud_lan_access=''
   cloud_recognized=0
   cloud_unknown_keys=''
   cloud_enrolled=0
@@ -362,7 +361,6 @@ handle_cloud_config() {
   cloud_display_applied=0
   cloud_root_applied=0
   cloud_hostname_applied=0
-  cloud_lan_access_applied=0
   while IFS= read -r cloud_line || [ -n "$cloud_line" ]; do
     # Tolerate CRLF line endings, comments, and surrounding whitespace.
     cloud_line="$(printf '%s' "$cloud_line" | tr -d '\\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -399,18 +397,6 @@ handle_cloud_config() {
       upload_url) cloud_upload_url="$cloud_value"; cloud_recognized=1 ;;
       root_password) cloud_root_password="$cloud_value"; cloud_recognized=1 ;;
       time_zone) cloud_time_zone="$cloud_value"; cloud_recognized=1 ;;
-      # The local network access switch picked in the provider's SD-image builder:
-      # 1/true or 0/false. Anything else is dropped with a warning.
-      lan_access)
-        case "$(printf '%s' "$cloud_value" | tr 'A-Z' 'a-z')" in
-          1|true|yes|on) cloud_lan_access=1 ;;
-          0|false|no|off) cloud_lan_access=0 ;;
-          *)
-            echo "Warning: ignoring lan_access '$cloud_value' (expected 0 or 1)"
-            cloud_lan_access=''
-            ;;
-        esac
-        cloud_recognized=1 ;;
       # Repeatable: one OpenSSH public key per line, for /root/.ssh/authorized_keys.
       authorized_key)
         if [ -n "$cloud_value" ]; then
@@ -443,7 +429,7 @@ handle_cloud_config() {
       # would destroy the user's only copy of what they typed. Warn loudly,
       # keep the file, do not enroll.
       echo "Warning: $CLOUD_FILE has KEY=value lines but no recognized keys; unrecognized:$cloud_unknown_keys"
-      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, wifi_country, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key, lan_access"
+      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, wifi_country, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key"
       echo "Warning: leaving $CLOUD_FILE in place; fix the keys and reboot to enroll"
     else
       echo "No personalization keys in $CLOUD_FILE (placeholder or comments only); leaving it in place"
@@ -600,56 +586,6 @@ os.replace(tmp, path)'; then
     fi
   fi
 
-  # The local network access switch lives in the runtime's state file
-  # (frameos/local_access.nim), the device's truth. Only a card that holds
-  # no value yet takes the builder's: what someone at the frame set stays.
-  if [ -n "$cloud_lan_access" ]; then
-    lan_state_dir="$SRV_DIR"/frameos/current/state
-    mkdir -p "$lan_state_dir" 2>/dev/null || true
-    if [ ! -d "$lan_state_dir" ]; then
-      # Same fallback as the enrollment state below: current/state may be a
-      # dangling symlink before the first release is staged.
-      lan_state_dir="$SRV_DIR"/frameos/state
-      mkdir -p "$lan_state_dir" 2>/dev/null || true
-    fi
-    lan_access_file="$lan_state_dir"/local_access.json
-    if [ -e "$lan_access_file" ]; then
-      echo "Keeping the local network access setting already in $lan_access_file"
-      cloud_lan_access_applied=1
-    elif [ ! -d "$lan_state_dir" ]; then
-      echo "Warning: no state directory; cannot apply lan_access"
-    else
-      if [ "$cloud_lan_access" = "1" ]; then
-        lan_access_json=true
-      else
-        lan_access_json=false
-      fi
-      old_umask="$(umask)"
-      umask 077
-      if command -v python3 >/dev/null 2>&1 && \\
-        FRAMEOS_LAN_ACCESS="$lan_access_json" \\
-        python3 -c 'import json, os
-print(json.dumps({"allowLocalNetworkAccess": os.environ["FRAMEOS_LAN_ACCESS"] == "true"}))' > "$lan_access_file" 2>/dev/null; then
-        :
-      else
-        # No usable python3 (busybox-only image): the value is a literal.
-        printf '{"allowLocalNetworkAccess": %s}\\n' "$lan_access_json" > "$lan_access_file"
-      fi
-      umask "$old_umask"
-      chmod 600 "$lan_access_file" 2>/dev/null || true
-      # The runtime runs as `frameos` on generic images and rewrites this
-      # file in place when the switch changes; see the enrollment state below
-      # for the directory's ownership.
-      if grep -q '^frameos:' "$ETC_DIR"/passwd 2>/dev/null; then
-        chown frameos:frameos "$lan_access_file" 2>/dev/null || chown frameos "$lan_access_file" 2>/dev/null || true
-        chown root:frameos "$lan_state_dir" 2>/dev/null || true
-        chmod 1770 "$lan_state_dir" 2>/dev/null || true
-      fi
-      cloud_lan_access_applied=1
-      echo "Wrote local network access ($lan_access_json) to $lan_access_file"
-    fi
-  fi
-
   if [ -z "$claim_token" ]; then
     echo "Warning: no claim_token in $CLOUD_FILE; skipping cloud enrollment state"
   else
@@ -727,11 +663,11 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
   # (e.g. "claim_tokn=FRCT_..." next to a valid cloud_url: recognized keys
   # exist, but no enrollment), so keep it and say why. /boot is mounted
   # root-only (umask=077), so keeping it does not leak to other users.
-  if [ "$cloud_enrolled" -eq 0 ] && [ "$cloud_wifi_applied" -eq 0 ] && [ "$cloud_display_applied" -eq 0 ] && [ "$cloud_root_applied" -eq 0 ] && [ "$cloud_lan_access_applied" -eq 0 ]; then
+  if [ "$cloud_enrolled" -eq 0 ] && [ "$cloud_wifi_applied" -eq 0 ] && [ "$cloud_display_applied" -eq 0 ] && [ "$cloud_root_applied" -eq 0 ]; then
     echo "Warning: nothing was applied from $CLOUD_FILE; leaving it in place instead of shredding it"
     if [ -n "$cloud_unknown_keys" ]; then
       echo "Warning: unrecognized keys:$cloud_unknown_keys"
-      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, wifi_country, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key, lan_access"
+      echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, wifi_country, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key"
     fi
     echo "Warning: fix $CLOUD_FILE and reboot to enroll"
     return 0
@@ -741,7 +677,7 @@ print(json.dumps(data))' > "$pending_file" 2>/dev/null; then
     # WiFi was applied but the enrollment keys were mistyped: shredding here
     # would destroy the claim token the user meant to type.
     echo "Warning: no cloud enrollment happened; unrecognized keys:$cloud_unknown_keys"
-    echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, wifi_country, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key, lan_access"
+    echo "Warning: recognized keys are cloud_url, claim_token, name, wifi_ssid, wifi_password, wifi_country, device, width, height, rotate, vcom, upload_url, root_password, time_zone, authorized_key"
     echo "Warning: leaving $CLOUD_FILE in place; fix the keys and reboot to enroll"
     return 0
   fi

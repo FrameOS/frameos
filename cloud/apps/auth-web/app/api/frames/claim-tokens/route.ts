@@ -75,11 +75,6 @@ export async function POST(request: NextRequest) {
     timezoneCandidate && isValidTimeZoneName(timezoneCandidate)
       ? timezoneCandidate
       : null;
-  // Local network access for an install-script frame: Add frame sends false,
-  // since new frames start with it off (docs/lan-access.md). Only a boolean
-  // counts; anything else leaves it to the device, like the SD card and USB
-  // paths that carry the value themselves.
-  const lanAccess = typeof body.lan_access === "boolean" ? body.lan_access : null;
 
   // Re-enrollment: bind the token to one of the account's own frames.
   // frameForAccount IS the ownership check (and screens the uuid shape), so
@@ -232,7 +227,6 @@ export async function POST(request: NextRequest) {
       accountId: session.accountId,
       boundFrameId: boundFrame?.id ?? null,
       expiresAt,
-      lanAccess,
       maxUses,
       name: name ?? null,
       sceneSourceFrameId: sceneSourceFrame?.id ?? null,

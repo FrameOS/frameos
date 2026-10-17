@@ -1,5 +1,5 @@
-// Local network access, the frame-level switch: when it is off, scene HTTP may not
-// reach private/local addresses. The device holds the truth (its state file
+// Local network access, the frame-level switch: when it is off, scene HTTP on a
+// cloud-managed frame may not reach private/local addresses. The device holds the truth (its state file
 // on Linux, NVS on an ESP32) and reports it as `hardware.lanAccess` in hello
 // and in every `state`; the cloud keeps no column of its own. Turning it ON
 // is verified on the device: `lan_access_challenge` draws a six-digit code on
@@ -142,8 +142,8 @@ export type FrameCommandOutcome =
   | { state: "missing" };
 
 /**
- * The HTTP answer for a local network access verb's outcome. Same shapes as the
- * self-hosted backend's routes (the shared SPA calls both):
+ * The HTTP answer for a local network access verb's outcome, as the shared
+ * SPA reads it:
  *
  *  - challenge acked: 200 {status: "shown", expires_in_seconds: 300}
  *  - set acked:       200 {status: "applied", lan_access: <enabled>}

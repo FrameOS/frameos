@@ -212,17 +212,21 @@ suite "scene persistence helpers":
 
   test "uploaded payloads record their runtime origin":
     # hub_client stamps source=cloud on the set_scenes verb; a local admin
-    # upload carries no source. The stamp keys the load-time refused-app
-    # re-check and the provider copy's shadowing of a same-id scene.
+    # upload carries no source. The stamp keys the post-demotion LAN deny.
     let scenes = %*[{
       "id": "origin-test", "name": "Origin",
       "nodes": [{"id": "1", "type": "app", "data": {"keyword": "data/clock"}}],
       "edges": [],
     }]
+    var hookFired = 0
+    uploadedScenesChangedHook = proc() {.gcsafe.} = inc hookFired
+    defer: uploadedScenesChangedHook = nil
+
     let (cloudMain, _) = updateUploadedScenesFromPayload(
       %*{"scenes": scenes, "source": "cloud"}, persistPayload = true)
     check cloudMain.isSome
     check cloudUploadedScenesResident()
+    check hookFired == 1
     # The stamp survives in the persisted payload (what a reboot rehydrates).
     check parseJson(readFile(uploadedFile)){"source"}.getStr("") == "cloud"
 
@@ -230,12 +234,12 @@ suite "scene persistence helpers":
       %*{"scenes": scenes}, persistPayload = false)
     check localMain.isSome
     check not cloudUploadedScenesResident()
+    check hookFired == 2
 
-  test "a store stamp on a scene is not a cloud origin":
+  test "a store stamp on a scene arms nothing; the source does":
     # Until 2026.10.16 a scene stamped with a store id armed the LAN deny on
-    # any frame. The origin is who installed the payload (the cloud), never a
-    # stamp in the scene's own JSON; and since the local network access switch the LAN deny follows
-    # the frame's local network access switch, not any origin.
+    # any frame. The deny keys on who installed the payload now (the cloud),
+    # never on a stamp in the scene's own JSON.
     let storeScenes = %*[{
       "id": "store-test", "name": "Store scene",
       "origin": {"href": "https://scenes.frameos.net/s/x", "storeSceneId": "11111111-2222-3333-4444-555555555555"},

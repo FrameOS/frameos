@@ -199,11 +199,7 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "send_logs", &u8) == ESP_OK) s_config.server_send_logs = u8 != 0;
     if (nvs_get_u8(nvs, "debug", &u8) == ESP_OK) s_config.debug_logging = u8 != 0;
     if (nvs_get_u8(nvs, "fusion", &u8) == ESP_OK) s_config.image_fusion = u8 != 0;
-    /* The local network access switch (docs/lan-access.md). `lan_access` absent is a
-     * frame from before the switch existed, and keeps the default: on. The
-     * older `allow_lan` is NOT read: every save wrote it, so its 0 on nearly
-     * every frame is the old default, not a choice anyone made. */
-    if (nvs_get_u8(nvs, "lan_access", &u8) == ESP_OK) s_config.allow_local_network = u8 != 0;
+    if (nvs_get_u8(nvs, "allow_lan", &u8) == ESP_OK) s_config.allow_local_network = u8 != 0;
     if (nvs_get_u8(nvs, "tls_enable", &u8) == ESP_OK) s_config.tls_enable = u8 != 0;
     if (nvs_get_u8(nvs, "admin_auth", &u8) == ESP_OK) s_config.admin_auth_enabled = u8 != 0;
     if (nvs_get_u32(nvs, "tls_port", &u32) == ESP_OK) s_config.tls_port = (uint16_t)u32;
@@ -318,7 +314,7 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u8(nvs, "send_logs", s_config.server_send_logs ? 1 : 0), "send_logs");
     FOS_NVS_SET(nvs_set_u8(nvs, "debug", s_config.debug_logging ? 1 : 0), "debug");
     FOS_NVS_SET(nvs_set_u8(nvs, "fusion", s_config.image_fusion ? 1 : 0), "fusion");
-    FOS_NVS_SET(nvs_set_u8(nvs, "lan_access", s_config.allow_local_network ? 1 : 0), "lan_access");
+    FOS_NVS_SET(nvs_set_u8(nvs, "allow_lan", s_config.allow_local_network ? 1 : 0), "allow_lan");
     FOS_NVS_SET(nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0), "tls_enable");
     FOS_NVS_SET(nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0), "admin_auth");
     FOS_NVS_SET(nvs_set_u32(nvs, "tls_port", s_config.tls_port), "tls_port");

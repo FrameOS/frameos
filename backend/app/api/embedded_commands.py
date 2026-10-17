@@ -46,7 +46,6 @@ from app.redis import get_redis
 from app.utils.deploy_progress import fold as fold_deploy_progress
 from app.utils.deploy_progress import fold_command as fold_deploy_progress_command
 from app.utils.embedded_commands import command_label
-from app.utils.lan_access import mirror_lan_access, reported_lan_access
 from app.utils.frame_commands import (
     ack_frame_command,
     ack_pull_backed_commands,
@@ -163,18 +162,6 @@ async def _note_outcome(db: Session, redis: Redis, frame: Frame, command: FrameC
         await new_log(db, redis, int(frame.id), "stderr", f"Frame refused: {label} ({command.error})")
 
 
-async def _mirror_lan_access_after_ack(
-    db: Session, redis: Redis, frame: Frame, command: FrameCommand, body: dict[str, Any], was_live: bool
-) -> None:
-    """The switch as the ack's state fields report it; for an ack without
-    them (older firmware), what an applied lan_access_set set."""
-    value = reported_lan_access(body)
-    if value is None and was_live and command.type == "lan_access_set" and command.status == "acked":
-        enabled = (command.payload or {}).get("enabled") if isinstance(command.payload, dict) else None
-        value = enabled if isinstance(enabled, bool) else None
-    await mirror_lan_access(db, redis, frame, value)
-
-
 @api_public.post("/frames/{id:int}/embedded/commands")
 async def api_embedded_device_commands(
     id: int,
@@ -188,9 +175,6 @@ async def api_embedded_device_commands(
     now = utcnow()
 
     await _remember_device_state(redis, frame, body)
-    # The local network access switch rides the hello's state fields: the row mirrors
-    # the device (a `set allow_local_network` on the USB console included).
-    await mirror_lan_access(db, redis, frame, reported_lan_access(body))
 
     # The cloud hello's name for it, and the older name this route first had.
     scenes_etag = _str_field(body, "scenes_checksum") or _str_field(body, "scenes_etag")
@@ -243,7 +227,6 @@ async def api_embedded_device_command_ack(
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Unknown command")
     db.commit()
     await _remember_device_state(redis, frame, body)
-    await _mirror_lan_access_after_ack(db, redis, frame, command, body, was_live)
     if was_live:
         await _note_outcome(db, redis, frame, command)
         await _fold_deploy_progress_command(db, redis, frame, command)

@@ -105,17 +105,14 @@ proc addAdminApiRoutes*(router: var Router) =
         respondInternalError(request, "settings:update:error", error, "Failed to save the settings")
   )
 
-  # ---- Local network access (the panel-code ceremony) ---------------------------------
-  # docs/lan-access.md: turning the frame's local network access on takes more than an
-  # admin session, which is only a password on a LAN-reachable page, or the
-  # backend's key, which is only a deploy: ask for a challenge, read the six
-  # digits off the panel, send them back. Turning it off takes nothing more.
-  # Who may ask is hasControlAccess: an admin session, or the backend with its
-  # serverApiKey bearer (POST only, by design, so the backend uses the two
-  # POSTs). The decisions live in server/api.nim, shared with the cloud verbs.
+  # ---- private-network elevation (local-presence ceremony) -----------------
+  # docs/lan-access.md: lifting the LAN deny on a cloud-managed frame takes
+  # more than an admin session, which is only a password on a LAN-reachable
+  # page. Ask for a challenge, read the six digits off the panel, send them
+  # back. The decisions live in server/api.nim, shared with the cloud verbs.
 
   router.get("/api/network/local-access", proc(request: Request) {.gcsafe.} =
-    if not hasControlAccess(request):
+    if not hasAdminAccess(request):
       jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
       return
     {.gcsafe.}:
@@ -123,7 +120,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.post("/api/network/local-access/challenge", proc(request: Request) {.gcsafe.} =
-    if not hasControlAccess(request):
+    if not hasAdminAccess(request):
       jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
       return
     if rateLimitExceeded(request, "network:local-access", LOCAL_ACCESS_LIMIT, LOCAL_ACCESS_WINDOW):
@@ -151,7 +148,7 @@ proc addAdminApiRoutes*(router: var Router) =
   )
 
   router.post("/api/network/local-access", proc(request: Request) {.gcsafe.} =
-    if not hasControlAccess(request):
+    if not hasAdminAccess(request):
       jsonResponse(request, Http401, %*{"detail": "Unauthorized"})
       return
     if rateLimitExceeded(request, "network:local-access", LOCAL_ACCESS_LIMIT, LOCAL_ACCESS_WINDOW):
@@ -168,8 +165,7 @@ proc addAdminApiRoutes*(router: var Router) =
         jsonResponse(request, HttpCode(outcome.status),
           %*{"detail": outcome.detail, "error": outcome.error})
         return
-      # Apply the deny now rather than on the hub thread's next pass, with
-      # this worker's own parse of frame.json for the backend exemption.
+      # Apply the deny now rather than on the hub thread's next pass.
       refreshLocalNetworkPolicy(requestFrameConfig())
       jsonResponse(request, Http200, outcome.payload)
   )

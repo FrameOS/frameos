@@ -1,10 +1,8 @@
 // @vitest-environment jsdom
 //
-// The frame's local network access switch (docs/lan-access.md): turning it on asks the
-// frame to draw a code on its panel and sends the code back; turning it off
-// goes straight through. The backend and the cloud serve the same two routes;
-// the frame's own admin page talks to the device's local-access routes and is
-// normalized to the same states.
+// A cloud frame's local network access switch (docs/lan-access.md): turning it
+// on asks the frame to draw a code on its panel and sends the code back;
+// turning it off goes straight through.
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -23,10 +21,8 @@ import {
   lanAccessErrorMessage,
   lanAccessLogic,
 } from "../../../../../../frontend/src/scenes/frame/panels/FrameSettings/lanAccessLogic";
-import { framePayload } from "../../../../../../frontend/src/scenes/frames/newFrameForm";
 import { pendingCommandLabel } from "../../../../../../frontend/src/scenes/workspace/framePendingCommandsLogic";
-import { isProjectScopedApiPath } from "../../../../../../frontend/src/utils/projectApi";
-import type { FrameType, NewFrameFormType } from "../../../../../../frontend/src/types";
+import type { FrameType } from "../../../../../../frontend/src/types";
 
 type TestWindow = Window & {
   FRAMEOS_APP_CONFIG?: Record<string, unknown>;
@@ -129,51 +125,43 @@ function mountLogic(frame: FrameType = frameRow) {
   return logic;
 }
 
-describe("Local network access on the backend and the cloud", () => {
-  // No config: the backend's SPA. The cloud calls the same paths, and the real
-  // apiFetch project-scopes them on the backend the way restart and reboot are.
-  it("calls the frame routes, which the backend project-scopes", () => {
-    expect(isProjectScopedApiPath("/api/frames/1/lan_access")).toBe(true);
-    expect(isProjectScopedApiPath("/api/frames/1/lan_access/challenge")).toBe(true);
+describe("Local network access on the cloud", () => {
+  beforeEach(() => {
+    testWindow.FRAMEOS_APP_CONFIG = { cloudMode: true };
   });
 
-  for (const plane of ["backend", "cloud"] as const) {
-    it(`${plane}: shows a code, takes it back and mirrors the result`, async () => {
-      if (plane === "cloud") {
-        testWindow.FRAMEOS_APP_CONFIG = { cloudMode: true };
-      }
-      routes["POST /api/frames/1/lan_access/challenge"] = () =>
-        Response.json({ status: "shown", expires_in_seconds: 300 });
-      routes["POST /api/frames/1/lan_access"] = (body) => {
-        frameRow = { ...frameRow, lan_access: body.enabled === true };
-        return Response.json({ status: "applied", lan_access: body.enabled });
-      };
-      const logic = mountLogic();
-      expect(logic.values.lanAccess).toBe(false);
+  it("shows a code, takes it back and mirrors the result", async () => {
+    routes["POST /api/frames/1/lan_access/challenge"] = () =>
+      Response.json({ status: "shown", expires_in_seconds: 300 });
+    routes["POST /api/frames/1/lan_access"] = (body) => {
+      frameRow = { ...frameRow, lan_access: body.enabled === true };
+      return Response.json({ status: "applied", lan_access: body.enabled });
+    };
+    const logic = mountLogic();
+    expect(logic.values.lanAccess).toBe(false);
 
-      logic.actions.openModal();
-      expect(logic.values.phase).toBe("start");
-      expect(posts()).toEqual([]);
+    logic.actions.openModal();
+    expect(logic.values.phase).toBe("start");
+    expect(posts()).toEqual([]);
 
-      logic.actions.showCode();
-      expect(logic.values.phase).toBe("requesting");
-      await waitFor(() => expect(logic.values.phase).toBe("shown"));
+    logic.actions.showCode();
+    expect(logic.values.phase).toBe("requesting");
+    await waitFor(() => expect(logic.values.phase).toBe("shown"));
 
-      // Pasted with spaces, typed with letters: only six digits count.
-      logic.actions.setCode("12 34 5x6789");
-      expect(logic.values.code).toBe("123456");
-      expect(logic.values.canConfirm).toBe(true);
+    // Pasted with spaces, typed with letters: only six digits count.
+    logic.actions.setCode("12 34 5x6789");
+    expect(logic.values.code).toBe("123456");
+    expect(logic.values.canConfirm).toBe(true);
 
-      logic.actions.confirmCode();
-      await waitFor(() => expect(logic.values.phase).toBe("done"));
-      expect(posts()).toEqual([
-        { path: "/api/frames/1/lan_access/challenge", body: {} },
-        { path: "/api/frames/1/lan_access", body: { enabled: true, code: "123456" } },
-      ]);
-      expect(framesModel.values.frames[1]?.lan_access).toBe(true);
-      expect(logic.values.lanAccess).toBe(true);
-    });
-  }
+    logic.actions.confirmCode();
+    await waitFor(() => expect(logic.values.phase).toBe("done"));
+    expect(posts()).toEqual([
+      { path: "/api/frames/1/lan_access/challenge", body: {} },
+      { path: "/api/frames/1/lan_access", body: { enabled: true, code: "123456" } },
+    ]);
+    expect(framesModel.values.frames[1]?.lan_access).toBe(true);
+    expect(logic.values.lanAccess).toBe(true);
+  });
 
   it("turns local network access off with no code, after saying how it comes back", async () => {
     routes["POST /api/frames/1/lan_access"] = (body) => {
@@ -236,7 +224,7 @@ describe("Local network access on the backend and the cloud", () => {
     expect(logic.values.error).toBeNull();
   });
 
-  it("prefers the plane's own detail, nested or not, and falls back per token", async () => {
+  it("prefers the cloud's own detail, and falls back per token", async () => {
     expect(lanAccessErrorMessage("code_expired")).toBe("The code expired. Show a new one.");
     expect(lanAccessErrorMessage("too_many_attempts")).toBe("Too many wrong codes. Show a new one.");
     expect(lanAccessErrorMessage("unsupported")).toBe("Update this frame's FrameOS first.");
@@ -247,7 +235,7 @@ describe("Local network access on the backend and the cloud", () => {
     expect(lanAccessErrorMessage("invalid_code", "Wrong code, 3 tries left.")).toBe("Wrong code, 3 tries left.");
 
     routes["POST /api/frames/1/lan_access/challenge"] = () =>
-      Response.json({ detail: { detail: "This frame has no screen.", error: "no_panel" } }, { status: 409 });
+      Response.json({ detail: "This frame has no screen.", error: "no_panel" }, { status: 409 });
     const logic = mountLogic();
     logic.actions.openModal();
     logic.actions.showCode();
@@ -264,64 +252,6 @@ describe("Local network access on the backend and the cloud", () => {
     logic.actions.turnOff();
     expect(logic.values.phase).toBe("closed");
     expect(posts()).toEqual([]);
-  });
-});
-
-describe("Local network access on the frame's own admin page", () => {
-  beforeEach(() => {
-    testWindow.FRAMEOS_APP_CONFIG = { frameMode: "frame", frameAdminMode: true };
-  });
-
-  it("uses the device's local-access routes and normalizes their answers", async () => {
-    routes["POST /api/network/local-access/challenge"] = () =>
-      Response.json({ status: "ok", codeLength: 6, expiresInSeconds: 300 });
-    routes["POST /api/network/local-access"] = (body) => {
-      frameRow = { ...frameRow, lan_access: body.enabled === true };
-      return Response.json({
-        allowLocalNetworkAccess: body.enabled === true,
-        allowShellApps: false,
-        challengePending: false,
-        challengeSecondsLeft: 0,
-      });
-    };
-    const logic = mountLogic();
-
-    logic.actions.openModal();
-    logic.actions.showCode();
-    await waitFor(() => expect(logic.values.phase).toBe("shown"));
-    logic.actions.setCode("246810");
-    logic.actions.confirmCode();
-    await waitFor(() => expect(logic.values.phase).toBe("done"));
-    expect(logic.values.lanAccess).toBe(true);
-
-    logic.actions.closeModal();
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
-    logic.actions.turnOff();
-    await waitFor(() => expect(logic.values.lanAccess).toBe(false));
-    confirm.mockRestore();
-
-    expect(posts()).toEqual([
-      { path: "/api/network/local-access/challenge", body: { scope: "localNetwork" } },
-      { path: "/api/network/local-access", body: { enabled: true, code: "246810", scope: "localNetwork" } },
-      { path: "/api/network/local-access", body: { enabled: false, scope: "localNetwork" } },
-    ]);
-  });
-
-  it("reads the device's `{detail, error}` refusals", async () => {
-    routes["POST /api/network/local-access/challenge"] = () => Response.json({ status: "ok" });
-    routes["POST /api/network/local-access"] = () =>
-      Response.json({ error: "too_many_attempts" }, { status: 403 });
-    const logic = mountLogic();
-
-    logic.actions.openModal();
-    logic.actions.showCode();
-    await waitFor(() => expect(logic.values.phase).toBe("shown"));
-    logic.actions.setCode("111111");
-    logic.actions.confirmCode();
-    await waitFor(() => expect(logic.values.error?.token).toBe("too_many_attempts"));
-    expect(logic.values.error?.message).toBe("Too many wrong codes. Show a new one.");
-    // A new code is one click away.
-    expect(logic.values.canRequestCode).toBe(true);
   });
 });
 
@@ -387,17 +317,6 @@ describe("the local network access section in the settings panel", () => {
     // Nothing to press: neither "Turn on" nor "Turn off" for a value nobody knows.
     expect(within(section).queryByRole("button")).toBeNull();
     expect(screen.queryByTestId("lan-access-modal")).toBeNull();
-  });
-});
-
-describe("Local network access when a frame is added", () => {
-  const base: NewFrameFormType = { name: "Kitchen", frame_host: "pi@10.0.0.5", server_host: "10.0.0.2" };
-
-  it("is sent off for every install method: Add frame offers no choice", () => {
-    for (const install_method of ["ssh", "script", "sd_card", "embedded"] as const) {
-      expect(framePayload({ ...base, install_method }).lan_access, install_method).toBe(false);
-      expect(framePayload({ ...base, install_method, lan_access: true }).lan_access, install_method).toBe(false);
-    }
   });
 });
 

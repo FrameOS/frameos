@@ -1,6 +1,6 @@
 /*
  * Private-network egress policy for scene HTTP — see fos_netguard.h for what
- * this is for: the enforcement behind the frame's local network access switch.
+ * this is for and why it exists on cloud-managed frames.
  *
  * Deliberately log-free and IDF-free apart from the FreeRTOS spinlock and the
  * getaddrinfo() in fos_netguard_url_allowed(): the callers own the ESP_LOGW,
@@ -38,6 +38,14 @@
 #ifdef ESP_PLATFORM
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lwip/err.h"
+#include "lwip/ip_addr.h"
+#include "sdkconfig.h"
+/* Without the hook a pin is held and never consulted, and the connect
+ * resolves the name a second time: the rebinding hole, silently back. */
+#if !defined(CONFIG_LWIP_HOOK_NETCONN_EXT_RESOLVE_CUSTOM)
+#error "fos_netguard needs CONFIG_LWIP_HOOK_NETCONN_EXT_RESOLVE_CUSTOM=y (sdkconfig.defaults); a stale sdkconfig overrides it, delete it"
+#endif
 /* The policy is written by the cloud task and read by whichever task is
  * rendering, so the two words below need a lock. A spinlock rather than a
  * mutex because it is statically initialised: there is no init call to forget,
@@ -431,6 +439,18 @@ static void netguard_sleep_ms(unsigned ms)
 #endif
 }
 
+#ifndef ESP_PLATFORM
+static int (*s_test_getaddrinfo)(const char *, const char *, const struct addrinfo *,
+                                 struct addrinfo **) = NULL;
+
+void fos_netguard_set_test_getaddrinfo(int (*fn)(const char *node, const char *service,
+                                                 const struct addrinfo *hints,
+                                                 struct addrinfo **res))
+{
+    s_test_getaddrinfo = fn;
+}
+#endif
+
 static int netguard_getaddrinfo(const char *host, struct addrinfo **result)
 {
     struct addrinfo hints;
@@ -441,6 +461,11 @@ static int netguard_getaddrinfo(const char *host, struct addrinfo **result)
     for (int attempt = 0; attempt < NETGUARD_RESOLVE_ATTEMPTS; attempt++) {
         if (attempt > 0) netguard_sleep_ms(NETGUARD_RESOLVE_RETRY_MS);
         *result = NULL;
+#ifndef ESP_PLATFORM
+        if (s_test_getaddrinfo != NULL) {
+            rc = s_test_getaddrinfo(host, NULL, &hints, result);
+        } else
+#endif
         rc = getaddrinfo(host, NULL, &hints, result);
         if (rc == 0 && *result != NULL) return 0;
         if (*result != NULL) freeaddrinfo(*result);
@@ -460,9 +485,27 @@ bool fos_netguard_url_allowed(const char *url, char *reason, size_t reason_len)
     return fos_netguard_check_url(url, reason, reason_len) == FOS_NETGUARD_ALLOWED;
 }
 
+uint32_t fos_netguard_host_hash(const char *host)
+{
+    uint32_t hash = 2166136261u;
+    for (const unsigned char *c = (const unsigned char *)(host ? host : ""); *c; c++) {
+        unsigned char ch = *c;
+        if (ch >= 'A' && ch <= 'Z') ch = (unsigned char)(ch - 'A' + 'a');
+        hash = (hash ^ ch) * 16777619u;
+    }
+    return hash;
+}
+
 fos_netguard_verdict_t fos_netguard_check_url(const char *url, char *reason, size_t reason_len)
 {
+    return fos_netguard_check_url_pinned(url, reason, reason_len, NULL);
+}
+
+fos_netguard_verdict_t fos_netguard_check_url_pinned(const char *url, char *reason,
+                                                     size_t reason_len, fos_netguard_pin_t *pin)
+{
     if (reason != NULL && reason_len > 0) reason[0] = '\0';
+    if (pin != NULL) memset(pin, 0, sizeof(*pin));
 
     NETGUARD_LOCK();
     const bool blocking = s_block_local;
@@ -521,12 +564,20 @@ fos_netguard_verdict_t fos_netguard_check_url(const char *url, char *reason, siz
      * to private address 192.168.1.5" tells the owner which device it was. */
     uint8_t private_v4[4];
     bool have_private_v4 = false;
+    /* The first IPv4 answer, which the connect is pinned to when every answer
+     * is public. */
+    uint8_t first_v4[4];
+    bool have_first_v4 = false;
     for (const struct addrinfo *ai = result; ai != NULL && allowed; ai = ai->ai_next) {
         if (ai->ai_addr == NULL) continue;
         if (ai->ai_family == AF_INET) {
             const struct sockaddr_in *sin = (const struct sockaddr_in *)(const void *)ai->ai_addr;
             uint8_t bytes[4];
             memcpy(bytes, &sin->sin_addr, sizeof(bytes));
+            if (!have_first_v4) {
+                memcpy(first_v4, bytes, sizeof(first_v4));
+                have_first_v4 = true;
+            }
             if (ipv4_is_private(bytes)) {
                 allowed = false;
                 memcpy(private_v4, bytes, sizeof(private_v4));
@@ -557,6 +608,95 @@ fos_netguard_verdict_t fos_netguard_check_url(const char *url, char *reason, siz
         } else if (reason != NULL && reason_len > 0) {
             snprintf(reason, reason_len, "%s resolves to a private address", host);
         }
+        return FOS_NETGUARD_BLOCKED;
     }
-    return allowed ? FOS_NETGUARD_ALLOWED : FOS_NETGUARD_BLOCKED;
+    if (pin != NULL) {
+        if (!have_first_v4) {
+            if (reason != NULL && reason_len > 0) {
+                snprintf(reason, reason_len, "could not resolve %s to an IPv4 address", host);
+            }
+            return FOS_NETGUARD_UNRESOLVED;
+        }
+        pin->active = true;
+        pin->host_hash = fos_netguard_host_hash(host);
+        memcpy(pin->v4, first_v4, sizeof(pin->v4));
+    }
+    return FOS_NETGUARD_ALLOWED;
 }
+
+/* ------------------------------------------------------------- DNS pinning */
+
+#ifdef ESP_PLATFORM
+/* One pin per task with a scene request between its check and its connect:
+ * the render task, and a JS fetch or an asset download alongside it. */
+#define NETGUARD_PIN_SLOTS 4
+
+typedef struct {
+    TaskHandle_t task; /* NULL = free */
+    uint32_t host_hash;
+    uint8_t v4[4];
+} netguard_task_pin_t;
+
+static netguard_task_pin_t s_pins[NETGUARD_PIN_SLOTS];
+
+bool fos_netguard_pin_for_task(const fos_netguard_pin_t *pin)
+{
+    if (pin == NULL || !pin->active) return true;
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    bool stored = false;
+    NETGUARD_LOCK();
+    netguard_task_pin_t *slot = NULL;
+    for (size_t i = 0; i < NETGUARD_PIN_SLOTS; i++) {
+        if (s_pins[i].task == self) {
+            slot = &s_pins[i];
+            break;
+        }
+        if (slot == NULL && s_pins[i].task == NULL) slot = &s_pins[i];
+    }
+    if (slot != NULL) {
+        slot->task = self;
+        slot->host_hash = pin->host_hash;
+        memcpy(slot->v4, pin->v4, sizeof(slot->v4));
+        stored = true;
+    }
+    NETGUARD_UNLOCK();
+    return stored;
+}
+
+void fos_netguard_unpin_for_task(void)
+{
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    NETGUARD_LOCK();
+    for (size_t i = 0; i < NETGUARD_PIN_SLOTS; i++) {
+        if (s_pins[i].task == self) memset(&s_pins[i], 0, sizeof(s_pins[i]));
+    }
+    NETGUARD_UNLOCK();
+}
+
+/* lwIP calls this from netconn_gethostbyname() on the resolving task, before
+ * any DNS query: every getaddrinfo() on the device, so it stays a few
+ * compares. A task holding a pin for this name gets the checked address;
+ * everyone else (the cloud socket, OTA, the log push) resolves as usual. */
+int lwip_hook_netconn_external_resolve(const char *name, ip_addr_t *addr, u8_t addrtype, err_t *err)
+{
+    (void)addrtype;
+    if (name == NULL || addr == NULL || err == NULL) return 0;
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    const uint32_t hash = fos_netguard_host_hash(name);
+    uint8_t v4[4];
+    bool hit = false;
+    NETGUARD_LOCK();
+    for (size_t i = 0; i < NETGUARD_PIN_SLOTS; i++) {
+        if (s_pins[i].task == self && s_pins[i].host_hash == hash) {
+            memcpy(v4, s_pins[i].v4, sizeof(v4));
+            hit = true;
+            break;
+        }
+    }
+    NETGUARD_UNLOCK();
+    if (!hit) return 0;
+    IP_ADDR4(addr, v4[0], v4[1], v4[2], v4[3]);
+    *err = ERR_OK;
+    return 1;
+}
+#endif

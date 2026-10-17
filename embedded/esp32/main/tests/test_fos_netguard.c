@@ -12,14 +12,21 @@
  * (backend/app/tasks/tests/test_esp32_netguard.py does exactly that in CI.)
  *
  * The bias under test is one-directional, like the SD probe next door but for
- * the opposite reason: a wrong "public" lets a scene on a frame with local
- * network access off reach the owner's router, a wrong "private" costs a scene one
- * unreachable host. So
+ * the opposite reason: a wrong "public" lets a cloud-installed scene reach the
+ * owner's router, a wrong "private" costs a scene one unreachable host. So
  * every input this cannot parse must come back private, and most of the cases
  * below assert exactly that.
  */
+/* getaddrinfo() and friends under -std=c11, as in fos_netguard.c. */
+#if defined(__STRICT_ANSI__) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200112L
+#endif
+
+#include <netdb.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/socket.h>
 
 #include "fos_netguard.h"
 
@@ -405,6 +412,71 @@ static void test_unresolvable_is_not_a_block(void)
     CHECK(verdict == FOS_NETGUARD_ALLOWED, "policy off never resolves: verdict %d", (int)verdict);
 }
 
+/* Names for test_pin, answered with numeric getaddrinfo() results so the
+ * library's own freeaddrinfo() frees them. */
+static int fake_getaddrinfo(const char *node, const char *service, const struct addrinfo *hints,
+                            struct addrinfo **res)
+{
+    const char *answer = NULL;
+    if (strcasecmp(node, "gallery.example") == 0) answer = "93.184.216.34";
+    else if (strcasecmp(node, "rebind.example") == 0) answer = "192.168.1.1";
+    else if (strcasecmp(node, "v6only.example") == 0) answer = "2606:2800:220:1::248";
+    if (answer == NULL) return EAI_NONAME;
+    struct addrinfo numeric = *hints;
+    numeric.ai_flags |= AI_NUMERICHOST;
+    return getaddrinfo(answer, service, &numeric, res);
+}
+
+static void test_pin(void)
+{
+    /* DNS rebinding: the connect must go to the address the check saw, not a
+     * second answer. The check hands that address out for a name it resolved,
+     * and only then. */
+    fos_netguard_set_test_getaddrinfo(fake_getaddrinfo);
+    fos_netguard_set_policy(true);
+    fos_netguard_clear_exempt();
+    char reason[96] = "";
+    fos_netguard_pin_t pin;
+
+    fos_netguard_verdict_t verdict =
+        fos_netguard_check_url_pinned("https://Gallery.example/a.jpg", reason, sizeof(reason), &pin);
+    CHECK(verdict == FOS_NETGUARD_ALLOWED, "public name: verdict %d (%s)", (int)verdict, reason);
+    CHECK(pin.active, "a resolved public name is pinned");
+    CHECK(pin.v4[0] == 93 && pin.v4[1] == 184 && pin.v4[2] == 216 && pin.v4[3] == 34,
+          "pinned to the answer the check classified");
+    CHECK(pin.host_hash == fos_netguard_host_hash("gallery.EXAMPLE"), "the hash ignores case");
+    CHECK(pin.host_hash != fos_netguard_host_hash("gallery.example.evil"), "and is the name's");
+
+    verdict = fos_netguard_check_url_pinned("http://rebind.example/", reason, sizeof(reason), &pin);
+    CHECK(verdict == FOS_NETGUARD_BLOCKED, "private name: verdict %d", (int)verdict);
+    CHECK(!pin.active, "nothing pinned for a block");
+    CHECK(strstr(reason, "rebind.example resolves to private address 192.168.1.1") != NULL,
+          "reason %s", reason);
+
+    /* The frame connects over IPv4 only: with no IPv4 answer there is nothing
+     * safe to pin, so the pinned check refuses what the plain one allows. */
+    verdict = fos_netguard_check_url_pinned("http://v6only.example/", reason, sizeof(reason), &pin);
+    CHECK(verdict == FOS_NETGUARD_UNRESOLVED, "v6-only name: verdict %d", (int)verdict);
+    CHECK(!pin.active, "nothing pinned without an IPv4 answer");
+    CHECK(fos_netguard_check_url("http://v6only.example/", reason, sizeof(reason)) ==
+              FOS_NETGUARD_ALLOWED,
+          "the plain check is unchanged");
+
+    verdict = fos_netguard_check_url_pinned("http://93.184.216.34/", reason, sizeof(reason), &pin);
+    CHECK(verdict == FOS_NETGUARD_ALLOWED && !pin.active, "a literal needs no pin");
+
+    CHECK(fos_netguard_set_exempt("gallery.example", 443), "exempt should be stored");
+    verdict = fos_netguard_check_url_pinned("https://gallery.example/", reason, sizeof(reason), &pin);
+    CHECK(verdict == FOS_NETGUARD_ALLOWED && !pin.active, "an exempt host is not resolved");
+    fos_netguard_clear_exempt();
+
+    fos_netguard_set_policy(false);
+    verdict = fos_netguard_check_url_pinned("https://gallery.example/", reason, sizeof(reason), &pin);
+    CHECK(verdict == FOS_NETGUARD_ALLOWED && !pin.active, "policy off: nothing resolved or pinned");
+
+    fos_netguard_set_test_getaddrinfo(NULL);
+}
+
 static bool starts_with(const char *s, const char *prefix)
 {
     return strncmp(s, prefix, strlen(prefix)) == 0;
@@ -472,6 +544,7 @@ int main(void)
     test_exemptions();
     test_name_resolution();
     test_unresolvable_is_not_a_block();
+    test_pin();
     test_block_message();
 
     /* Leave the guard off: a test binary is a frame with local network access on. */

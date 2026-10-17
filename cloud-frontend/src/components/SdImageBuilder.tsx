@@ -263,9 +263,6 @@ export function SdImageBuilder({
         // enough to say so. Unknown board = no seed, and the select holds its
         // "Pick a board…" placeholder.
         buildrootPlatform?: string | undefined
-        // The frame's current local network access, so a new card keeps it. A new
-        // frame's card writes off (docs/lan-access.md).
-        lanAccess?: boolean | undefined
       }
     | undefined
 }): ReactElement {
@@ -284,9 +281,6 @@ export function SdImageBuilder({
   // access point on 2.4 GHz channel 12 or 13 (common in Europe).
   const [wifiCountry, setWifiCountry] = useState(() => browserWifiCountry())
   const [rememberWifi, setRememberWifi] = useState(remembered !== undefined)
-  // Off for a new frame: its scenes cannot reach local addresses until the
-  // frame settings turn local network access on with the code from the panel.
-  const lanAccess = reenrollFrame?.lanAccess === true
   // Console login on the device: either a real root password (written into
   // the image in-browser, applied via chpasswd on first boot — which also
   // re-enables SSH password login), or an explicit opt-in to the image
@@ -347,7 +341,6 @@ export function SdImageBuilder({
       rootPassword: rootPassword || undefined,
       timeZone: browserTimeZone(),
       sshPublicKeys,
-      lanAccess,
     })
   } catch {
     // A value the region cannot hold (quotes, control characters): the
@@ -600,7 +593,6 @@ export function SdImageBuilder({
         rootPassword: rootPassword || undefined,
         timeZone: browserTimeZone(),
         sshPublicKeys,
-        lanAccess,
       })
 
       setStatus(`Downloading ${board.asset.name}…`)

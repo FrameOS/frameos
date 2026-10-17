@@ -455,9 +455,6 @@ describe("Esp32CloudFlasher", () => {
       // The browser's zone rides along: a frame left on UTC shows the wrong
       // time until someone debugs it.
       ...timeZoneWrites(),
-      // Local network access, off for a new frame, before `wifi` reboots
-      // the board.
-      "set allow_local_network 0",
       'wifi "My Home WiFi" "pa ss\\"word"',
     ]);
     // The claim token carries the browser's zone: enrollment seeds the
@@ -482,8 +479,12 @@ describe("Esp32CloudFlasher", () => {
     });
   });
 
-  // Re-enrollment: the mint binds the code to the frame being re-linked.
-  function mockReenrollApi() {
+  it("leaves the time zone alone when re-enrolling an existing frame", async () => {
+    // A re-flashed board links back to a frame that already has a cloud
+    // `timezone` setting, and re-enrollment pushes nothing (rebindEnrollment
+    // keeps settings as they are). Writing this browser's zone over serial
+    // would put the board on a zone the workspace does not show — and the
+    // mint carries no zone either, only the frame binding.
     mockCloudApi();
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
@@ -505,15 +506,6 @@ describe("Esp32CloudFlasher", () => {
       }
       return Promise.reject(new Error(`unexpected fetch: ${url}`));
     });
-  }
-
-  it("leaves the time zone alone when re-enrolling an existing frame", async () => {
-    // A re-flashed board links back to a frame that already has a cloud
-    // `timezone` setting, and re-enrollment pushes nothing (rebindEnrollment
-    // keeps settings as they are). Writing this browser's zone over serial
-    // would put the board on a zone the workspace does not show — and the
-    // mint carries no zone either, only the frame binding.
-    mockReenrollApi();
     const port = createHealthyPort();
     stubSerial(port);
     render(
@@ -534,7 +526,6 @@ describe("Esp32CloudFlasher", () => {
       `set cloud_url "${window.location.origin}"`,
       'set claim_token "FRCT_rebind"',
       'set panel "EPD_7in5_V2"',
-      "set allow_local_network 0",
       "restart",
     ]);
     expect(port.writes.some((line) => line.startsWith("set time_zone"))).toBe(false);
@@ -613,31 +604,8 @@ describe("Esp32CloudFlasher", () => {
       'set claim_token "FRCT_minted"',
       'set panel "EPD_13in3e"',
       ...timeZoneWrites(),
-      "set allow_local_network 0",
       "restart",
     ]);
-  });
-
-  // A new frame's board always gets local network access off (the tests
-  // above); a re-linked board keeps what its frame has, before `restart`.
-  it("keeps a re-linked frame's local network access", async () => {
-    mockReenrollApi();
-    const port = createHealthyPort();
-    stubSerial(port);
-    render(
-      <Esp32CloudFlasher
-        cloudOrigin={window.location.origin}
-        reenrollFrame={{ id: "abc-123", name: "Kitchen", lanAccess: true }}
-      />,
-    );
-    expect(screen.queryByRole("switch", { name: /local network access/i })).toBeNull();
-    fireEvent.change(await screen.findByLabelText("Frame hardware"), {
-      target: { value: "panel:EPD_7in5_V2" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /connect & re-enroll/i }));
-    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
-
-    expect(port.writes.slice(-2)).toEqual(["set allow_local_network 1", "restart"]);
   });
 
   it("remembers WiFi credentials in localStorage only when asked to", async () => {

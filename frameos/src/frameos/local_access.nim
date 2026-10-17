@@ -1,16 +1,17 @@
-## The frame's local network access switch, and the local-presence ceremony that turns
-## it on (docs/lan-access.md).
+## Local-presence ceremony for local network access (docs/lan-access.md).
 ##
-## Local network access decides whether scenes may reach private and local addresses
-## (utils/http_client.nim, the private-network deny): off, the deny applies on
-## every frame, standalone, backend-managed and cloud-managed alike. The value
-## is chosen when the frame is created (frame.json `network.lanAccess`, read
-## once as a seed, see seedLocalNetworkAccess) and can be turned off by any
-## control plane at any time. Turning it ON for a frame that has it off takes
-## more than an admin session, which is only a password on a LAN-reachable
-## page, or a control plane, which is only an account: ask for a challenge,
-## read the code off the panel, send it back. Someone who cannot see the
-## screen cannot complete it.
+## Local network access is the one switch that undoes the default-deny
+## protecting a cloud-managed frame's LAN (utils/http_client.nim; the deny is
+## armed in cloud/hub_client.nim, refreshLocalNetworkPolicy). Keeping it out of
+## the cloud settings allowlist stops the *provider* from flipping it, but that
+## alone does not prove whoever flipped it is standing in front of the frame —
+## an admin session is a password on a LAN-reachable page, and a cloud account
+## is only an account, not presence.
+##
+## So turning it on takes a two-step ceremony, from the frame's admin API or
+## the cloud's `lan_access_challenge` / `lan_access_set` verbs: ask for a
+## challenge, read the code off the panel, send it back. Someone who cannot see
+## the screen cannot complete it. Turning it off takes nothing.
 ##
 ## The challenge is process-local and deliberately not persisted: a pending
 ## challenge should not survive a reboot. Every value here is read from the
@@ -20,6 +21,7 @@
 import std/[json, locks, options, os, strutils, times]
 
 import frameos/hal/files
+import frameos/types
 
 const
   LocalAccessCodeLength* = 6
@@ -28,10 +30,10 @@ const
   LocalAccessChallengeTtlSeconds* = 300.0
   LocalAccessMaxAttempts* = 5
   # Across challenges: five tries each would otherwise be a loop of "new
-  # challenge, five guesses" for whoever holds a session or the backend's key.
-  # At most this many wrong codes per window; while they are spent, neither a
-  # new challenge nor a code is taken (`rate_limited`). A right code does not
-  # give any back.
+  # challenge, five guesses" for whoever holds an admin session or the cloud
+  # account. At most this many wrong codes per window; while they are spent,
+  # neither a new challenge nor a code is taken (`rate_limited`). A right code
+  # does not give any back.
   LocalAccessWrongCodeLimit* = 10
   LocalAccessWrongCodeWindowSeconds* = 3600.0
 
@@ -43,15 +45,16 @@ const
 
   LocalAccessStatePath* = "./state/local_access.json"
     ## Deliberately NOT frame.json. A backend deploy uploads a freshly
-    ## generated frame.json over SSH — it never round-trips the device's copy
-    ## — so a setting stored there is reset by the next unrelated deploy, or,
-    ## worse, turned on by one: the backend's `network.lanAccess` is only the
-    ## value chosen when the frame was created (seedLocalNetworkAccess).
+    ## generated frame.json over SSH — it never round-trips the device's copy,
+    ## and `get_frame_json` in the backend does not emit this field — so a
+    ## setting stored there is silently reset by the next unrelated deploy.
+    ## Fail-safe, but baffling: the ceremony is completed, and a week later
+    ## the Home Assistant scene stops working for no visible reason.
     ##
     ## Putting it under state/ also says the right thing about what it is.
-    ## Once the frame runs, this is a device-local fact: turning it on was
-    ## established by someone physically present, and fleet configuration has
-    ## no business overriding it.
+    ## This is a device-local fact established by someone physically present.
+    ## It is not fleet configuration, and the backend has no business
+    ## expressing an opinion about it.
 
 type
   LocalAccessChallenge* = object
@@ -62,7 +65,7 @@ type
 
   LocalAccessVerdict* = object
     ## What one code check came to. `error` is "" when the code matched, and
-    ## otherwise the token the control planes answer with
+    ## otherwise the token the admin API and the cloud verb answer with
     ## (docs/cloud-frames-contract.json, `lan_access_set`): `code_required`,
     ## `code_expired`, `invalid_code` or `too_many_attempts`.
     ok*: bool
@@ -123,19 +126,11 @@ proc writeStateFile(update: JsonNode) =
     data[key] = value
   data["updatedAt"] = %now().format("yyyy-MM-dd'T'HH:mm:sszzz")
   ensureParentDir(LocalAccessStatePath)
-  when defined(frameosEmbedded):
-    writeTextFile(LocalAccessStatePath, $data & "\n")
-  else:
-    # Written aside and renamed into place: a power cut mid-write must not
-    # leave a truncated file, which reads as no answer and would be seeded
-    # afresh at the next start (seedLocalNetworkAccess).
-    let staging = LocalAccessStatePath & ".tmp"
-    writeTextFile(staging, $data & "\n")
-    moveFile(staging, LocalAccessStatePath)
+  writeTextFile(LocalAccessStatePath, $data & "\n")
 
 proc storedLocalNetworkAccess*(): Option[bool] =
-  ## What the state file says, or none() when nothing was ever stored: a frame
-  ## from before the switch, until seedLocalNetworkAccess has run.
+  ## What the state file says, or none() when the ceremony has never been run
+  ## on this device.
   withLock localAccessLock:
     if persistedAccessCacheLoaded:
       return persistedAccessCache
@@ -184,38 +179,22 @@ proc forgetStoredLocalNetworkAccess*() =
     persistedShellAppsCache = none(bool)
     persistedShellAppsCacheLoaded = false
 
-proc seedLocalNetworkAccess*(frameJsonSeed: Option[bool]): bool =
-  ## Runs once per runtime start, single-threaded, before anything computes
-  ## the policy (frameos.nim, startFrameOS). A frame whose state file has no
-  ## answer yet gets one: the value chosen when it was created (frame.json
-  ## `network.lanAccess`, config.frameJsonLanAccessSeed) when frame.json has
-  ## it, and `true` when it does not, because a frame with no value anywhere
-  ## predates the switch and reached its LAN until now. After that the state
-  ## file is the only truth, so a later deploy's frame.json cannot turn it on.
-  ##
-  ## The older frame.json `network.allowLocalNetworkAccess` is not a seed:
-  ## settings saves wrote `false` into many files without anyone choosing it.
-  ##
-  ## A state file that cannot be written leaves the seeded value in memory for
-  ## this run (and the next start tries again). Returns the effective value.
+proc resolveLocalNetworkAccess*(frameJsonValue: bool): bool =
+  ## The state file wins. `frameJsonValue` is the legacy fallback: frames
+  ## elevated before the setting moved carry it in frame.json, and revoking
+  ## that silently on upgrade would be its own outage. Migration happens on
+  ## the next completed ceremony, or leave it — the fallback is permanent.
   let stored = storedLocalNetworkAccess()
-  if stored.isSome:
-    return stored.get()
-  result = if frameJsonSeed.isSome: frameJsonSeed.get() else: true
-  try:
-    persistLocalNetworkAccess(result)
-  except CatchableError:
-    withLock localAccessLock:
-      persistedAccessCache = some(result)
-      persistedAccessCacheLoaded = true
+  if stored.isSome: stored.get() else: frameJsonValue
 
-proc lanAccessEnabled*(): bool =
-  ## The frame's local network access, the one value every reader goes through: the
-  ## policy (hub_client.refreshLocalNetworkPolicy), readConfig, the admin API
-  ## and the hub's `hardware.lanAccess`. Unknown means on, for the same reason
-  ## seedLocalNetworkAccess seeds `true`.
-  let stored = storedLocalNetworkAccess()
-  if stored.isSome: stored.get() else: true
+proc lanAccessEnabled*(frameConfig: FrameConfig): bool =
+  ## The frame's local network access as every reader sees it: the deny
+  ## (hub_client.refreshLocalNetworkPolicy), the hub's `hardware.lanAccess`
+  ## and the admin API. Through the state file's cache rather than the config
+  ## field alone, so a change made through the ceremony applies at once to a
+  ## config parsed before it.
+  resolveLocalNetworkAccess(frameConfig != nil and frameConfig.network != nil and
+    frameConfig.network.allowLocalNetworkAccess)
 
 proc randomDigits(count: int): string =
   ## Rejection-sampled so every digit is uniform; a plain `byte mod 10` would

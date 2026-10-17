@@ -689,16 +689,15 @@ else:
       withLock dnsCacheLock:
         dnsCache.clear()
 
-  # ---- private-network policy (local network access off) -------------------------------
-  # docs/lan-access.md: scenes run *inside the owner's LAN*, and a scene from
-  # the store, a shared album or a compromised account must not become an
-  # SSRF pivot onto routers and IoT devices. With the frame's local network access off,
-  # HTTP to private/link-local addresses is denied on every frame. The check
-  # sits on the one address every request funnels through (literal or
-  # resolved, redirects included). The policy is set by
-  # frameos/cloud/hub_client.nim (refreshLocalNetworkPolicy) from the LAN
-  # access switch (frameos/local_access.nim), with the frame's own control
-  # planes exempt by exact host:port.
+  # ---- private-network policy (cloud-managed frames) ------------------------
+  # docs/cloud-frames.md: scenes installed by a cloud provider run *inside the
+  # owner's LAN*, so on a managed frame HTTP to private/link-local addresses is
+  # denied by default — otherwise a compromised account becomes an SSRF pivot
+  # onto routers and IoT devices. The check sits on the one address every
+  # request funnels through (literal or resolved, redirects included). The
+  # policy is flipped by frameos/cloud/hub_client.nim from the cloud link
+  # state; the only override is the frame's local network access, turned on
+  # with the code from the panel (frameos/local_access.nim).
 
   var
     localNetworkPolicyLock: Lock
@@ -708,7 +707,7 @@ else:
   initLock(localNetworkPolicyLock)
 
   proc isPrivateNetworkAddress*(address: string): bool {.gcsafe.} =
-    ## True for addresses a scene must not reach with local network access off: loopback,
+    ## True for addresses a cloud-installed scene must not reach: loopback,
     ## RFC1918, link-local, CGNAT, 0.0.0.0/8, broadcast — and their IPv6
     ## equivalents (loopback/unspecified, ULA, link-local, mapped IPv4).
     ## Unparseable input classifies as private: the caller is about to hand
@@ -775,8 +774,8 @@ else:
 
   proc setLocalNetworkPolicy*(blockLocal: bool, exemptHostPorts: seq[string] = @[]) {.gcsafe.} =
     ## Activates/deactivates the private-network deny and replaces the exempt
-    ## "host:port" list (the frame's own control planes: the cloud provider's
-    ## API endpoint and the self-hosted backend, either possibly on the LAN).
+    ## "host:port" list (the cloud provider's own API endpoint, which the local
+    ## admin linked deliberately — possibly a dev provider on the LAN).
     {.gcsafe.}:
       withLock localNetworkPolicyLock:
         localNetworkPolicyBlock = blockLocal

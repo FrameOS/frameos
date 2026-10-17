@@ -57,13 +57,10 @@ function agentPayload(frame: NewFrameFormType): NonNullable<NewFrameFormType['ag
   }
 }
 
-export function framePayload(frame: NewFrameFormType): NewFrameFormType {
+function framePayload(frame: NewFrameFormType): NewFrameFormType {
   // width/height are not part of FrameCreateRequest (the backend would drop
   // them silently); they are applied with a follow-up update after creation.
-  const { rememberWifi: _rememberWifi, width: _width, height: _height, ...formValues } = frame
-  // New frames start with local network access off; the frame settings turn
-  // it on with the code from the panel (docs/lan-access.md).
-  const frameValues = { ...formValues, lan_access: false }
+  const { rememberWifi: _rememberWifi, width: _width, height: _height, ...frameValues } = frame
   const installMethod = installMethodOf(frame)
   const agent = agentPayload(frame)
 

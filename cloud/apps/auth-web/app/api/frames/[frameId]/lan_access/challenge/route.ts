@@ -4,8 +4,7 @@ import { handleLanAccessChallenge } from "../../../../../../src/lib/frame-lan-ac
 export const runtime = "nodejs";
 
 // Asks the frame to draw a local network access code on its panel (the queued
-// `lan_access_challenge` verb): the same POST the self-hosted backend serves.
-// The owner then types the code into POST /api/frames/{id}/lan_access.
+// `lan_access_challenge` verb, docs/lan-access.md). The owner then types the code into POST /api/frames/{id}/lan_access.
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
