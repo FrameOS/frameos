@@ -348,15 +348,14 @@ describe("risk flags", () => {
       (repo.templates as Record<string, unknown>[])[0]?.flags,
     ).toEqual(["shell"]);
 
-    // Code nodes calling process APIs are flagged too.
+    // A JavaScript code node cannot run processes (QuickJS has no process
+    // API), so naming one flags nothing: a scene asks for what its apps ask
+    // for. (A Nim code node, data.code with no codeJS, is a legacy compiled
+    // scene and is refused before it could be flagged.)
     const codeScenes = [
       {
         id: "scene-1",
-        nodes: [
-          // A JavaScript code node: a Nim one (data.code, no codeJS) is a
-          // legacy compiled scene and is refused before it can be flagged.
-          { data: { codeJS: 'execShellCmd("rm -rf /")' }, id: "n1", type: "code" },
-        ],
+        nodes: [{ data: { codeJS: 'execShellCmd("rm -rf /")' }, id: "n1", type: "code" }],
       },
     ];
     const codePublished = await publish(accessToken, {
@@ -370,7 +369,7 @@ describe("risk flags", () => {
       string,
       unknown
     >;
-    expect(codeScene.risk_flags).toEqual(["shell"]);
+    expect(codeScene.risk_flags).toEqual([]);
 
     // Plain scenes stay unflagged.
     const plain = await publish(accessToken, { name: "Plain" });

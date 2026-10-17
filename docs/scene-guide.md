@@ -278,6 +278,33 @@ render tries again. `frameos.fetchImage` never throws; it answers
 decodes natively, and the bytes never enter the JS heap. Return its `image`.
 Use it for every photo, and `httpRequest` only for the JSON around it.
 
+**Assets and permissions.** Asset paths are relative to the frame's assets
+folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,
+fonts, what other scenes saved. What an app may do there is its own
+config.json's `"permissions"` list:
+
+- `"assets"`: read the assets folder (`listAssets`, `readAsset`,
+  `loadAssetImage`, a stream opened with `"r"`, ...).
+- `"assets-write"`: also write and delete in it (`writeAsset`,
+  `appendAsset`, `deleteAsset`, a stream opened with `"w"` or `"a"`).
+- `"files"` and `"shell"` belong to built-in apps: Local Image reads any
+  folder, the screenshot and camera apps run processes.
+
+Saving the scene fills a JavaScript app's list from its code, so you rarely
+write it. The frame gives the app exactly that list: with neither `"assets"`
+nor `"assets-write"`, its asset calls live in a folder of its own,
+`scenes/<sceneId>/`; with `"assets"` alone, its writes are refused. An app
+with no list asks for nothing, and a list written by hand is replaced on the
+next save. A scene asks for what its apps ask for, nothing more, and every
+surface shows it as tags ("reads assets folder", "writes assets folder",
+"reads all files", "runs shell commands", and "uses OpenAI key" for each
+settings namespace an app reads). Installing a scene is the approval of its
+tags, and an update says which ones it adds, so ask for what the app needs
+and no more.
+`fetchImage({ saveAsset })` is the frame caching a download, not the app
+using the folder: it needs no permission. (Frames before FrameOS 2026.10.16
+ignore the lists.)
+
 **Big responses.** A response body becomes a JS string. When the app needs
 only what follows some marker in a large page, pass
 `httpRequest(url, { find: "marker", findLength: 400 })`: the body stays native

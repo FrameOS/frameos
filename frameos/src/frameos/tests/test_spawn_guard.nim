@@ -1,4 +1,7 @@
-## Provenance-keyed refusal of the process-spawning apps (spawn_guard.nim).
+## What the process-spawning apps may hand to a child (spawn_guard.nim), and
+## the local-access fact that lets Chromium run unsandboxed as root. Who may
+## run the apps at all is the install's call ("runs shell commands",
+## frontend/src/utils/sceneAccess.ts), not the frame's.
 
 import std/[json, options, os, strutils, times, unittest]
 
@@ -7,13 +10,7 @@ import frameos/spawn_guard
 import frameos/types
 import frameos/utils/http_client
 
-proc storeScene(): FrameScene =
-  InterpretedFrameScene(id: "store".SceneId, storeOrigin: true)
-
-proc ownScene(): FrameScene =
-  InterpretedFrameScene(id: "own".SceneId, storeOrigin: false)
-
-suite "spawning apps and store-origin scenes":
+suite "the shell-apps fact":
   var previousDir = ""
   var sandbox = ""
 
@@ -30,22 +27,6 @@ suite "spawning apps and store-origin scenes":
     setCurrentDir(previousDir)
     removeDir(sandbox)
     forgetStoredLocalNetworkAccess()
-
-  test "a scene the owner wrote may run them":
-    check spawningAppRefusal(ownScene(), "chromiumScreenshot") == ""
-    # Compiled/legacy scenes are not InterpretedFrameScene at all: also allowed.
-    check spawningAppRefusal(FrameScene(id: "legacy".SceneId), "rstpSnapshot") == ""
-    check spawningAppRefusal(nil, "rstpSnapshot") == ""
-
-  test "a store scene is refused until the local admin allows it at the panel":
-    let refusal = spawningAppRefusal(storeScene(), "chromiumScreenshot")
-    check refusal.len > 0
-    check refusal.contains("scene store")
-    check refusal.contains("chromiumScreenshot")
-    persistAllowShellApps(true)
-    check spawningAppRefusal(storeScene(), "chromiumScreenshot") == ""
-    persistAllowShellApps(false)
-    check spawningAppRefusal(storeScene(), "rstpSnapshot").len > 0
 
   test "the shell-apps fact lives beside the LAN elevation without clobbering it":
     persistLocalNetworkAccess(true)

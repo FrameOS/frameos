@@ -1,5 +1,7 @@
 import { AppConfig, FrameOSSettings, FrameScene } from '../../../types'
 import { sceneAppToAppConfig } from '../../../utils/sceneApps'
+// Titles shared with the scene tags ("uses OpenAI key"), so the two cannot drift.
+import { settingsKeyTitle } from '../../../utils/sceneAccess'
 
 export const settingsDetails: Record<
   string,
@@ -12,18 +14,18 @@ export const settingsDetails: Record<
   }
 > = {
   openAI: {
-    title: 'OpenAI',
+    title: settingsKeyTitle('openAI'),
     tagLabel: 'OpenAI API key missing',
     description: 'The OpenAI API key is used within OpenAI apps on frames.',
     fields: [{ label: 'API key for frames', secret: true, path: ['openAI', 'apiKey'] }],
   },
   unsplash: {
-    title: 'Unsplash',
+    title: settingsKeyTitle('unsplash'),
     tagLabel: 'Unsplash access key missing',
     fields: [{ label: 'Access key', secret: true, path: ['unsplash', 'accessKey'] }],
   },
   homeAssistant: {
-    title: 'Home Assistant',
+    title: settingsKeyTitle('homeAssistant'),
     tagLabel: 'Home Assistant access token missing',
     fields: [
       { label: 'Home assistant URL', path: ['homeAssistant', 'url'] },
@@ -35,7 +37,7 @@ export const settingsDetails: Record<
     ],
   },
   immich: {
-    title: 'Immich',
+    title: settingsKeyTitle('immich'),
     tagLabel: 'Immich API key missing',
     fields: [
       { label: 'Server URL', path: ['immich', 'url'] },
@@ -43,13 +45,13 @@ export const settingsDetails: Record<
     ],
   },
   github: {
-    title: 'GitHub',
+    title: settingsKeyTitle('github'),
     tagLabel: 'GitHub personal access token missing',
     freeLimitedUsage: true,
     fields: [{ label: 'API key', secret: true, path: ['github', 'api_key'] }],
   },
   frameOS: {
-    title: 'FrameOS Gallery',
+    title: settingsKeyTitle('frameOS'),
     tagLabel: 'FrameOS Gallery API key missing',
     fields: [{ label: 'API key', secret: true, path: ['frameOS', 'apiKey'] }],
   },

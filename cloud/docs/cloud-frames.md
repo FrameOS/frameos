@@ -350,14 +350,30 @@ granted" above), so an undeclared-then-declared key never arrives. On the
 device the declaration gate stays as the second layer, and the audit trail
 is the mitigation for a self-hosted frame.
 
-**Filesystem access is frame-wide by default, not per-scene.** Every asset
-call resolves through `resolveAssetPath`, which rejects absolute paths and
-`..` segments and then re-checks containment against the *real* path, so a
-symlink planted inside the assets folder is not a way out. But the root is the
-frame's shared assets folder: uploaded images are a shared resource and scenes
-are expected to read each other's. Frames that want the stricter model set
-`js.assetSandbox` to `"scene"` in `frame.json`, which confines each scene to
-`<assets>/scenes/<sceneId>/`.
+**Filesystem access is what each app asks for, and the scene shows the sum.**
+A JS app names what it needs in its `config.json` `permissions` (`assets`
+reads the frame's assets folder, `assets-write` also changes it; `files` and
+`shell` belong to the built-in Local Image and the two process-spawning
+apps). The editor sets the list from the app's code on every save. The frame
+enforces it per app (`JsAssetGrant`, `js_runtime/app_runtime.nim`), and asking for nothing gets
+nothing: an app with no list, or one that asks for none of them, keeps its
+files in the scene's own `<assets>/scenes/<sceneId>/`,
+one that asks to read cannot write, and every path is still checked against
+the real path so a symlink planted inside the folder is not a way out.
+Scenes stored before the lists existed get them from the control planes: the
+cloud stamps every store app that lacks a list when it builds the push for a
+firmware that reads them (`withStoreSceneOrigin`, `APP_PERMISSIONS_FROM`),
+so a frame's firmware update across 2026.10.16 changes its payload and the
+hub's firmware-change resync re-pushes the same assignments on the scene it
+is showing; the self-hosted backend's migration `5e2a9c71d4b8` writes them
+into every stored frame and template. A
+scene's tags (and the store's `risk_flags` at publish) are the union of its
+apps' permissions plus the API keys they use (`key:<namespace>`), from one
+detector shared by the SPA and the store (`frontend/src/utils/sceneAccess.ts`,
+corpus `docs/scene-access-fixtures.json`); installing a flagged scene is the
+approval. `saveAsset` (a `fetchImage` download kept as an asset) is the
+frame's own caching and stays in `saved/`. The frame's `js.assetSandbox:
+"scene"` still confines every JS app to the scene's folder.
 
 **Runaway scenes are bounded.** Scene JS runs on the render thread, so an
 infinite loop used to mean a frame that never drew again. Every entry into the
@@ -393,13 +409,24 @@ capped at five attempts — someone who cannot see the screen cannot complete it
 On ESP32 the equivalent is `set allow_local_network 1` on the USB console,
 which is physical presence by construction.
 
-The same ceremony carries a second, Pi-only fact: whether scenes from the
-public scene store may run the two built-in apps that spawn a child process
-(`data/chromiumScreenshot`, `data/rstpSnapshot`) — `POST
-/api/network/local-access` with `{"scope": "shellApps", "enabled": true,
-"code": …}` (`frameos/spawn_guard.nim`). Off by default: a store scene is
-anyone's code, and those two apps reach the network without the HTTP client's
-private-network check.
+The same ceremony carries a second, Pi-only fact: whether
+`data/chromiumScreenshot` may run its browser unsandboxed on a frame where
+FrameOS runs as root — `POST /api/network/local-access` with
+`{"scope": "shellApps", "enabled": true, "code": …}`. Off by default.
+
+**Shell apps and the LAN deny follow the scene's content and the installer,
+not its provenance.** Until 2026.10.16 a scene stamped with a store id
+(`origin.storeSceneId`) needed that ceremony before it could run either
+process-spawning app (`data/chromiumScreenshot`, `data/rstpSnapshot`), and
+its presence armed the private-network deny on any frame, self-hosted ones
+included. A stamp is not something the frame can keep true across copies,
+forks and imports, so neither check reads it any more. A scene that uses
+either app says so in its own JSON, every surface shows it as "runs shell
+commands", and installing it is the approval; cloud-managed frames still
+refuse both apps outright. Whatever the scene, the URL such an app hands to
+its child process passes the same private-network policy as the HTTP client
+(`frameos/spawn_guard.nim`). The deny itself is armed by who installed the
+scenes: a cloud-managed frame, or scenes the cloud pushed.
 
 Both are persisted in `state/local_access.json`, deliberately not in `frame.json`.
 A backend deploy uploads a freshly generated `frame.json` over SSH and never

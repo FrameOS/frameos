@@ -13,6 +13,12 @@
 
 import { appCatalog, sceneEvents, type AiAppConfig } from "./context";
 import type { JsonObject } from "./scene-utils";
+import {
+  SCENE_PERMISSIONS,
+  appPermissionShortfall,
+  isScenePermission,
+  sceneAccess,
+} from "../../../../../../frontend/src/utils/sceneAccess";
 
 export type LintLevel = "error" | "warning";
 
@@ -613,6 +619,40 @@ export function lintScene(
     const mismatch = valueLooksLike("color", settings.backgroundColor);
     if (mismatch) {
       push("warning", `settings.backgroundColor: ${mismatch}.`);
+    }
+  }
+  // --- permissions ----------------------------------------------------------
+  // Each app asks for what it may do on the frame in its config.json; the
+  // frame gives it exactly that (frontend/src/utils/sceneAccess.ts).
+  for (const [keyword, app] of Object.entries(sceneApps ?? {})) {
+    const configText = obj(obj(app)?.sources)?.["config.json"];
+    if (typeof configText !== "string") {
+      continue;
+    }
+    let config: JsonObject | undefined;
+    try {
+      config = obj(JSON.parse(configText));
+    } catch {
+      continue;
+    }
+    const permissions = config?.permissions;
+    if (
+      permissions !== undefined &&
+      (!Array.isArray(permissions) || !permissions.every((permission) => isScenePermission(permission)))
+    ) {
+      push(
+        "error",
+        `Scene app "${keyword}" (config.json): "permissions" must be a list of ${SCENE_PERMISSIONS.map((permission) => `"${permission}"`).join(", ")}.`,
+      );
+    }
+  }
+  for (const app of sceneAccess(scene).apps) {
+    const shortfall = appPermissionShortfall(app);
+    if (shortfall.length > 0) {
+      push(
+        "warning",
+        `Scene app "${app.keyword}" ${app.reasons.join(" and ")}, but the permissions in its config.json do not include ${shortfall.map((permission) => `"${permission}"`).join(" or ")}: the frame refuses those calls until the list asks for them.`,
+      );
     }
   }
 

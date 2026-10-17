@@ -21,6 +21,8 @@ import { isCloudMode } from '../../../../utils/cloudMode'
 import { fetchStoreSceneScenesJson, updateCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
 import { activeSceneFromLastState } from '../../../../utils/cloudFrameScenes'
 import { confirmDialog } from '../../../../utils/confirmDialogLogic'
+import { sceneAccessChanges, sceneAccessFlagChanges, sceneAccessFlags } from '../../../../utils/sceneAccess'
+import { type SceneUpdateAccess, sceneUpdateAccessNotice } from '../../../../utils/sceneUpdateAccess'
 import type { FrameType, RepositoryType, TemplateType } from '../../../../types'
 
 // How old the catalogs may be before a surface showing scenes asks again. The
@@ -35,6 +37,28 @@ const CATALOG_MAX_AGE_MS = 15 * 60 * 1000
 // this the network is the problem and the next poll finishes the job.
 const REHYDRATE_WAIT_MS = 20_000
 
+// How long the update dialog waits for the new versions' content to say which
+// permissions they gain. Past this it opens without the new content (a
+// repository template's catalog flags stand in) rather than hold the update up.
+const UPDATE_ACCESS_WAIT_MS = 3_000
+
+/** `promise`'s value, or null when it fails or takes longer than `ms`. */
+function settleWithin<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise<T | null>((resolve) => {
+    const timer = window.setTimeout(() => resolve(null), ms)
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer)
+        resolve(value)
+      },
+      () => {
+        window.clearTimeout(timer)
+        resolve(null)
+      }
+    )
+  })
+}
+
 export interface SceneUpdatesLogicProps {
   frameId: FrameId
 }
@@ -47,6 +71,7 @@ export interface sceneUpdatesLogicValues {
   frameForm: Partial<FrameType> // frameLogic
   unsavedChanges: boolean // frameLogic
   repositories: RepositoryType[] // repositoriesModel
+  checkingUpdateSceneId: string | null
   installedScenes: FrameScene[]
   sceneUpdateVersions: Record<string, string>
   updateRepositories: RepositoryType[]
@@ -73,6 +98,9 @@ export interface sceneUpdatesLogicActions {
   }
   scenesUpdateFinished: (sceneIds: string[]) => {
     sceneIds: string[]
+  }
+  setCheckingUpdateSceneId: (sceneId: string | null) => {
+    sceneId: string | null
   }
   updateSceneFromRepo: (sceneId: string) => {
     sceneId: string
@@ -186,8 +214,8 @@ async function updateCloudScenes(
           ? 'This frame already has the latest version'
           : 'This frame already has the latest versions'
         : result.connected
-          ? `${what} on ${single ? 'its' : 'their'} way to the frame`
-          : `${what} queued — the frame takes ${single ? 'it' : 'them'} when it next connects`,
+        ? `${what} on ${single ? 'its' : 'their'} way to the frame`
+        : `${what} queued — the frame takes ${single ? 'it' : 'them'} when it next connects`,
     })
   } catch (error) {
     longRunningTasksModel.actions.taskFailed({
@@ -243,8 +271,18 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
     /** "Update all scenes": every named scene, in one go (one push on the cloud). */
     updateScenesFromRepo: (sceneIds: string[]) => ({ sceneIds }),
     scenesUpdateFinished: (sceneIds: string[]) => ({ sceneIds }),
+    setCheckingUpdateSceneId: (sceneId: string | null) => ({ sceneId }),
   }),
   reducers({
+    // The scene whose update dialog is waiting for the new version's content
+    // (what it gains, utils/sceneAccess.ts): the banner says "Checking…" and a
+    // second click does not open a second dialog over the first.
+    checkingUpdateSceneId: [
+      null as string | null,
+      {
+        setCheckingUpdateSceneId: (_, { sceneId }) => sceneId,
+      },
+    ],
     // Scenes with an update in flight — the banner spins over these, from the
     // click until the workspace shows the new version.
     updatingSceneIds: [
@@ -336,11 +374,13 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
       updateWaiters.delete(sceneId)
       waiters.forEach((resolve) => resolve())
     }
-
     return {
       confirmSceneUpdate: async ({ sceneId }) => {
         const version = values.sceneUpdateVersions[sceneId]
         if (!version || values.updatingSceneIds[sceneId]) {
+          return
+        }
+        if (values.checkingUpdateSceneId === sceneId) {
           return
         }
         const scene = values.installedScenes.find((s) => s.id === sceneId)
@@ -349,12 +389,29 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
         // flags the owner can see. With more than one, the dialog offers the
         // lot next to the one that was clicked.
         const allSceneIds = Object.keys(values.sceneUpdateVersions).filter((id) => !values.updatingSceneIds[id])
+        const offersUpdateAll = allSceneIds.length > 1
+        // Which of them gain a permission (utils/sceneAccess.ts): said in the
+        // dialog, and a red button when the clicked scene's gain reaches past
+        // the frame's own data.
+        actions.setCheckingUpdateSceneId(sceneId)
+        let access: ReturnType<typeof sceneUpdateAccessNotice>
+        try {
+          access = sceneUpdateAccessNotice(
+            sceneId,
+            await loadUpdateAccess(offersUpdateAll ? allSceneIds : [sceneId], sceneId),
+            offersUpdateAll
+          )
+        } finally {
+          actions.setCheckingUpdateSceneId(null)
+        }
+        const withAccess = (message: string): string => (access.message ? `${message}\n\n${access.message}` : message)
         // The dialog runs the update itself and stays open, spinning, until it
         // is done — on the cloud that is a server round trip plus a re-list.
         await confirmDialog({
           onConfirm: () => runSceneUpdate(sceneId),
           busyLabel: 'Updating…',
-          ...(allSceneIds.length > 1
+          danger: access.danger,
+          ...(offersUpdateAll
             ? {
                 extraAction: {
                   label: `Update all scenes (${allSceneIds.length})`,
@@ -366,17 +423,19 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
           ...(isCloudMode()
             ? {
                 title: 'Update to the latest version?',
-                message:
+                message: withAccess(
                   `Version ${shortSceneVersion(version)} of ${name} replaces the one on this frame and is deployed ` +
-                  'right away. Unsaved changes to the scene are lost.',
+                    'right away. Unsaved changes to the scene are lost.'
+                ),
                 confirmLabel: 'Update to latest',
               }
             : {
                 title: 'Update to the latest version?',
-                message:
+                message: withAccess(
                   `The latest published version of ${name} replaces this copy; the values you set on its fields ` +
-                  'are kept, any other local changes to the scene are lost. Save and deploy afterwards to send it ' +
-                  'to the frame.',
+                    'are kept, any other local changes to the scene are lost. Save and deploy afterwards to send it ' +
+                    'to the frame.'
+                ),
                 confirmLabel: 'Update to latest',
               }),
         })
@@ -404,6 +463,81 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
       },
     }
 
+    /**
+     * What updating `sceneIds` changes in what they may do on the frame, one
+     * entry per group that moves together: a store scene's pack on the cloud,
+     * a template's installed scenes on the backend (applySceneUpdate updates
+     * them as one). Read from the NEW content with the detector the tags use,
+     * not from catalog flags, which can predate a detector change; a
+     * repository template's catalog flags stand in when its content cannot be
+     * loaded in time. Groups with neither are left out.
+     */
+    async function loadUpdateAccess(sceneIds: string[], clickedSceneId: string): Promise<SceneUpdateAccess[]> {
+      const installedScenes = values.installedScenes
+      const groups: Array<{
+        before: FrameScene[]
+        load: () => Promise<FrameScene[] | null>
+        catalogFlags?: readonly string[]
+      }> = []
+      if (isCloudMode()) {
+        const sources = values.frame?.cloud_scene_sources ?? {}
+        const storeSceneIdOf = (scene: FrameScene): string | undefined =>
+          sources[scene.id]?.scene_id ?? scene.origin?.storeSceneId
+        const seen = new Set<string>()
+        for (const sceneId of sceneIds) {
+          const scene = installedScenes.find((s) => s.id === sceneId)
+          const storeSceneId = scene ? storeSceneIdOf(scene) : undefined
+          const version = sources[sceneId]?.update_version
+          if (!storeSceneId || !version || seen.has(storeSceneId)) {
+            continue
+          }
+          seen.add(storeSceneId)
+          groups.push({
+            before: installedScenes.filter((s) => storeSceneIdOf(s) === storeSceneId),
+            load: () => fetchStoreSceneScenesJson(storeSceneId, version),
+          })
+        }
+      } else {
+        for (const sceneId of sceneIds) {
+          if (groups.some((group) => group.before.some((s) => s.id === sceneId))) {
+            continue
+          }
+          const scene = installedScenes.find((s) => s.id === sceneId)
+          const origin = scene?.origin
+          const match = findTemplateForOrigin(values.updateRepositories, origin)
+          if (!scene || !origin || !match) {
+            continue
+          }
+          const before = installedScenes.filter((s) => s.id === scene.id || sameTemplateOrigin(s.origin, origin))
+          // The template's scenes this update writes over: those with an
+          // installed counterpart (applySceneUpdate), or all of them.
+          const templateSceneIds = new Set(before.map((s) => s.origin?.sceneId).filter(Boolean))
+          groups.push({
+            before,
+            load: async () => {
+              const templateScenes = await loadRepositoryTemplateScenes(match.repository, match.template)
+              const updated = templateScenes.filter((s) => templateSceneIds.has(s.id))
+              return updated.length > 0 ? updated : templateScenes
+            },
+            catalogFlags: match.template.flags,
+          })
+        }
+      }
+      const updates = await Promise.all(
+        groups.map(async ({ before, load, catalogFlags }): Promise<SceneUpdateAccess | null> => {
+          const after = await settleWithin(load(), UPDATE_ACCESS_WAIT_MS)
+          const changes = after
+            ? sceneAccessChanges(before, after)
+            : catalogFlags
+            ? sceneAccessFlagChanges(sceneAccessFlags(before), catalogFlags)
+            : null
+          const named = before.find((s) => s.id === clickedSceneId) ?? before[0]
+          return changes ? { sceneIds: before.map((s) => s.id), name: named?.name || 'Untitled scene', changes } : null
+        })
+      )
+      return updates.filter((update): update is SceneUpdateAccess => update !== null)
+    }
+
     async function applySceneUpdates(sceneIds: string[]): Promise<void> {
       if (isCloudMode()) {
         // One request, one push: the frame is sent the new set once.
@@ -412,7 +546,7 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
           props.frameId,
           scenes,
           values.frame,
-          values.unsavedChanges ? (values.frameForm.scenes ?? null) : null,
+          values.unsavedChanges ? values.frameForm.scenes ?? null : null,
           (formScenes) => actions.setFrameFormValues({ scenes: formScenes })
         )
         return
@@ -434,7 +568,7 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
           props.frameId,
           [scene],
           values.frame,
-          values.unsavedChanges ? (values.frameForm.scenes ?? null) : null,
+          values.unsavedChanges ? values.frameForm.scenes ?? null : null,
           (scenes) => actions.setFrameFormValues({ scenes })
         )
         return

@@ -14,6 +14,7 @@
     "scene:sweep-duplicate-copies": "node scripts/sweep-duplicate-scene-copies.mjs",
     "scene:set-preview": "node scripts/set-scene-preview.mjs",
     "scene:sync-preview": "node scripts/sync-scene-preview.mjs",
+    "scene:backfill-risk-flags": "tsx scripts/backfill-risk-flags.ts",
     "ai:render": "tsx evals/render-scene.ts",
     "start": "next start",
     "prelint": "node scripts/generate-ai-context.mjs",

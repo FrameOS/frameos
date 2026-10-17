@@ -77,25 +77,6 @@ suite "data/rstpSnapshot app":
     check pinned[headersAt + 1] == "Host: cam.example\r\n"
     check pinned[pinned.find("-i") + 1] == "http://10.0.0.9/snap.jpg"
 
-  test "a store-origin scene is refused before ffmpeg is spawned":
-    let previousHook = rtspSnapshotFfmpegRunHook
-    defer:
-      rtspSnapshotFfmpegRunHook = previousHook
-      forgetStoredLocalNetworkAccess()
-
-    hookMode = hmSuccess
-    capturedCommand = ""
-    rtspSnapshotFfmpegRunHook = fakeFfmpegRunner
-
-    let store = LogStore(items: @[])
-    let scene = InterpretedFrameScene(id: "store".SceneId, logger: newLogger(store), storeOrigin: true)
-    let app = makeApp(scene, FrameConfig(width: 9, height: 6))
-    let outputImage = app.get(ExecutionContext(hasImage: false))
-
-    check outputImage.width == 9
-    check outputImage.height == 6
-    check capturedCommand == ""
-
   test "a file:// target never reaches ffmpeg":
     let previousHook = rtspSnapshotFfmpegRunHook
     defer:

@@ -553,6 +553,8 @@ suite "js app runtime":
 
     let runtime = newJsAppRuntime(
       category = "data",
+      # The frame-wide folder, read and write (the app asks for "assets-write").
+      assetGrant = agReadWrite,
       outputType = "json",
       source = """export function get(app, context) {
           return {
@@ -612,6 +614,57 @@ suite "js app runtime":
     # reachable by name any more.
     check not payload["sharedVisible"].getBool()
 
+  test "an app's config.json permissions decide what its asset calls reach":
+    let assetsDir = getTempDir() / "frameos-js-asset-permissions-test"
+    removeDir(assetsDir)
+    createDir(assetsDir)
+    defer: removeDir(assetsDir)
+    writeFile(assetsDir / "shared.txt", "frame wide")
+
+    let config = testConfig()
+    config.assetsPath = assetsDir
+    let logger = testLogger(config)
+    let scene = FrameScene(id: "tests/perms".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 27.NodeId, nodeName: "jsPerms", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false,
+                                   loopIndex: 0, loopKey: ".", nextSleep: -1)
+    proc run(permissions: JsonNode, name: string): JsonNode =
+      let runtime = newJsAppRuntime(
+        category = "data",
+        outputType = "json",
+        source = "export function get(app, context) { return {" &
+          "wrote: frameos.writeAsset('" & name & ".txt', 'aGVsbG8=')," &
+          "sharedVisible: frameos.assetExists('shared.txt')," &
+          "deleted: frameos.deleteAsset('shared.txt')," &
+          "stream: frameos.openAssetStream('" & name & "-stream.txt', 'w') !== null } }",
+        assetGrant = assetGrantFromConfig(%*{"permissions": permissions})
+      )
+      runtime.get(owner, %*{}, context).asJson()
+
+    # None of the asset permissions: the scene's own folder, read and write.
+    let own = run(%*[], "own")
+    check own["wrote"].getBool() and own["stream"].getBool()
+    check not own["sharedVisible"].getBool()
+    check fileExists(assetsDir / "scenes" / "tests_perms" / "own.txt")
+    # "assets" (or "files"): reads the frame's folder, changes nothing.
+    for permissions in [%*["assets"], %*["files", "shell"]]:
+      let reader = run(permissions, "reader")
+      check reader["sharedVisible"].getBool()
+      check not reader["wrote"].getBool()
+      check not reader["deleted"].getBool()
+      check not reader["stream"].getBool()
+    check fileExists(assetsDir / "shared.txt")
+    check not fileExists(assetsDir / "reader.txt")
+    # No list, or a value that is not one, asks for nothing.
+    check assetGrantFromConfig(%*{"permissions": "assets-write"}) == agOwnFolder
+    check assetGrantFromConfig(%*{}) == agOwnFolder
+    check assetGrantFromConfig(%*{"permissions": nil}) == agOwnFolder
+    # "assets-write": reads and changes the frame's folder.
+    let writer = run(%*["assets", "assets-write"], "writer")
+    check writer["wrote"].getBool() and writer["sharedVisible"].getBool() and writer["deleted"].getBool()
+    check fileExists(assetsDir / "writer.txt")
+    check not fileExists(assetsDir / "shared.txt")
+
   test "loads asset images within display bounds":
     let assetsDir = getTempDir() / "frameos-js-asset-image-test"
     removeDir(assetsDir)
@@ -631,6 +684,8 @@ suite "js app runtime":
 
     let runtime = newJsAppRuntime(
       category = "data",
+      # The frame-wide folder, read and write (the app asks for "assets-write").
+      assetGrant = agReadWrite,
       outputType = "image",
       source = """export function get(app, context) {
           return frameos.loadAssetImage("plate.png")
@@ -658,6 +713,8 @@ suite "js app runtime":
 
     let runtime = newJsAppRuntime(
       category = "data",
+      # The frame-wide folder, read and write (the app asks for "assets-write").
+      assetGrant = agReadWrite,
       outputType = "json",
       source = """export function get(app, context) {
           // String stream: write, rewind, read back in small chunks.

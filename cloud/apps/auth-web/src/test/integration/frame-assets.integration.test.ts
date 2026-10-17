@@ -449,7 +449,7 @@ describe("POST /api/frames/{id}/event/{event}", () => {
             edges: [],
             id: "scene1",
             name: "Shelly",
-            nodes: [{ data: { keyword: "data/shell" }, id: "n1", type: "app" }],
+            nodes: [{ data: { keyword: "data/chromiumScreenshot" }, id: "n1", type: "app" }],
           },
         ],
       }),

@@ -255,6 +255,11 @@ export function frameContractProfile(frame: { hardware: unknown }): ContractProf
   return frameHardwareIsEsp32(frame) ? "esp32" : "linux";
 }
 
+// The first FrameOS that gives a JavaScript app exactly its config.json
+// `permissions` (and an app with no list nothing): JsAssetGrant in
+// frameos/src/frameos/js_runtime/app_runtime.nim.
+export const APP_PERMISSIONS_FROM = "2026.10.16";
+
 /** The three-way answer above, for any floor. */
 export function frameSupportsSettingsFrom(
   minVersion: string,
@@ -1574,13 +1579,22 @@ export async function buildScenesPayloadForFrame(
     // redeploys on it (frame-hub, firmware version change).
     // ...and an ESP32 without the apps' test files, which it never runs and
     // has no room for.
+    // ...and, for a firmware that reads them, with every JavaScript app's
+    // config.json `permissions` (scene-origin.ts): a firmware update across
+    // APP_PERMISSIONS_FROM changes the payload, which is what makes the hub
+    // send the lists the moment the frame starts enforcing them.
+    const targetVersion = runtimeVersion !== undefined ? runtimeVersion : frameRow.frameosVersion;
     const stamped = (frameHardwareIsEsp32(frameRow) ? scenesForEmbeddedRuntime : scenesForRuntime)(
-      withStoreSceneOrigin(extracted.scenes, {
-        id: assignment.sceneId,
-        slug: assignment.sceneSlug,
-        version: versionRow.version,
-      }),
-      runtimeVersion !== undefined ? runtimeVersion : frameRow.frameosVersion,
+      withStoreSceneOrigin(
+        extracted.scenes,
+        {
+          id: assignment.sceneId,
+          slug: assignment.sceneSlug,
+          version: versionRow.version,
+        },
+        { appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, targetVersion) },
+      ),
+      targetVersion,
     );
     scenes.push(...stamped);
     sceneNames.push(assignment.sceneName);

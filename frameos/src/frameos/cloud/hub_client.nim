@@ -403,22 +403,12 @@ proc refreshLocalNetworkPolicy*(frameConfig: FrameConfig) {.gcsafe.} =
     # Computed outside the generation cache: the uploaded scene set changes
     # independently of the link state.
     let providerScenes = cloudUploadedScenesResident()
-    # Provenance, not transport: a scene from the public store is anyone's
-    # code whether the cloud pushed it, a self-hosted backend deployed it or
-    # the owner uploaded it, so it gets the same deny on a backend-managed or
-    # standalone frame (docs/security-todo.md). The frame's own backend stays
-    # reachable — it is on the LAN by design (scene images, the frame API).
-    let storeScenes = storeOriginScenesResident()
-    if storeScenes and not managed and frameConfig != nil and frameConfig.serverHost.len > 0:
-      let backendHostPort =
-        if frameConfig.serverHost.contains("://"):
-          providerExemptHostPort(frameConfig.serverHost)
-        else:
-          frameConfig.serverHost.toLowerAscii() & ":" &
-            $(if frameConfig.serverPort > 0: frameConfig.serverPort else: 8989)
-      if backendHostPort.len > 0:
-        exempt.add(backendHostPort)
-    setLocalNetworkPolicy((managed or providerScenes or storeScenes) and not localOverride, exempt)
+    # Keyed on who installed the scenes (the cloud), not on where a scene
+    # came from: until 2026.10.16 a store-origin scene (origin.storeSceneId)
+    # armed the deny on any frame, but provenance is not something the frame
+    # can keep true across copies and imports. What a scene reaches for is
+    # shown when it is installed (frontend/src/utils/sceneAccess.ts).
+    setLocalNetworkPolicy((managed or providerScenes) and not localOverride, exempt)
 
 proc demoteManagedLink(reason: string) {.gcsafe.} =
   ## Persistent 401: the provider revoked this frame. Return to standalone —

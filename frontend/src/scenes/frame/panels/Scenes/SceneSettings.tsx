@@ -9,6 +9,9 @@ import { ColorInput } from '../../../../components/ColorInput'
 import { Select } from '../../../../components/Select'
 import { TextArea } from '../../../../components/TextArea'
 import { AdvancedSection } from '../../../../components/AdvancedSection'
+import { Tooltip } from '../../../../components/Tooltip'
+import { SceneAccessTags } from './SceneAccessTags'
+import clsx from 'clsx'
 import { sceneRequiresCompilation } from '../../../../utils/sceneApps'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../../../utils/sceneExecution'
 import { REFRESH_INTERVAL_FIELD_NAME, refreshIntervalFieldIndex } from '../../../../utils/refreshInterval'
@@ -34,7 +37,7 @@ function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
 export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSettingsProps): JSX.Element {
   const { frameId, frameForm, convertingSceneId } = useValues(frameLogic)
   const { convertSceneToInterpreted } = useActions(frameLogic)
-  const { sceneIndex, scene } = useValues(sceneSettingsLogic({ frameId, sceneId }))
+  const { sceneIndex, scene, permissionRows, permissionApps } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
   }
@@ -171,6 +174,45 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
               </div>
             ) : null}
           </Group>
+          <div className={clsx(fieldClassName, 'space-y-2')}>
+            <div className="flex items-center gap-1">
+              <SceneSettingsLabel>Permissions</SceneSettingsLabel>
+              <Tooltip
+                title={
+                  <div className="space-y-2">
+                    <p>
+                      What this scene's apps may do on the frame. Each app asks in its config.json under "permissions",
+                      and the frame gives it exactly that list.
+                    </p>
+                    <p>A JavaScript app's list is set from its code every time the scene is saved.</p>
+                    <p>Frames before FrameOS 2026.10.16 ignore the lists.</p>
+                  </div>
+                }
+              />
+            </div>
+            {permissionRows.length === 0 ? (
+              <div className="frameos-muted text-xs">This scene's apps ask for nothing.</div>
+            ) : (
+              <ul className="space-y-1">
+                {permissionRows.map((row) => (
+                  <li key={row.flag} className="flex flex-wrap items-center gap-2 text-xs">
+                    <SceneAccessTags flags={[row.flag]} />
+                    <span className="frameos-muted">asked by {row.askedBy.join(', ')}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {permissionApps.length > 0 ? (
+              <ul className="frameos-muted space-y-1 text-xs">
+                {permissionApps.map((app) => (
+                  <li key={app.name}>
+                    {app.name}: {app.source}
+                    {app.warning ? <div className="app-compiled-warning mt-1 rounded p-1.5">{app.warning}</div> : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
           {onClose ? (
             <div className="flex justify-end">
               <Button size="small" onClick={onClose}>

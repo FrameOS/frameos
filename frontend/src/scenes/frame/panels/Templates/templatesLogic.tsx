@@ -15,7 +15,14 @@ import { isCloudMode } from '../../../../utils/cloudMode'
 import { longRunningTasksModel, reportTaskOutcome } from '../../../../models/longRunningTasksModel'
 import { framesModel } from '../../../../models/framesModel'
 import { settingsLogic } from '../../../settings/settingsLogic'
-import { scenesRunShellCommands, templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
+import { templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
+import {
+  sceneAccessFlagIsRisky,
+  sceneAccessFlagLabel,
+  sceneAccessFlags,
+  templateAccessFlags,
+  withAppPermissions,
+} from '../../../../utils/sceneAccess'
 import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { templateWithSceneOrigins } from '../../../../utils/sceneOrigin'
@@ -654,7 +661,9 @@ export const templatesLogic = kea<templatesLogicType>([
           // Never ship a `secret: true` field value in a template or a store zip.
           const exportedScenes = (values.frameForm.scenes || [])
             .filter((scene) => exportScenes.includes(scene.id))
-            .map((scene) => stripSecretFieldValues(scene, values.apps))
+            // Saved the way a save leaves them: each JS app's permissions
+            // filled from its code (utils/sceneAccess.ts).
+            .map((scene) => withAppPermissions(stripSecretFieldValues(scene, values.apps)))
 
           if (target === 'cloud') {
             const response = await apiFetch('/api/cloud/store/publish', {
@@ -1132,17 +1141,24 @@ export const templatesLogic = kea<templatesLogicType>([
           window.alert('No scenes found at this URL.')
           return
         }
-        // Same gate as applyRemoteToFrame. A URL carries no catalog flags, so
-        // the scenes themselves are inspected for apps that run shell commands.
+        // A URL carries no catalog flags and shows no tile, so this dialog is
+        // the only place the user sees what the scenes' apps ask for: every
+        // flag asks (utils/sceneAccess.ts), shell, files and writes as a danger.
+        const accessFlags = sceneAccessFlags(scenes)
         if (
-          scenesRunShellCommands(scenes, values.apps) &&
+          accessFlags.length > 0 &&
           !(await confirmDialog({
-            title: 'These scenes run shell commands',
+            title: accessFlags.includes('shell')
+              ? 'These scenes run shell commands'
+              : accessFlags.some((flag) => !flag.startsWith('key:'))
+              ? 'These scenes use files on the frame'
+              : 'These scenes use your API keys',
             message:
-              'The scenes at this URL configure apps or custom code that run shell commands on the frame. ' +
-              'Only install them if you trust the source.',
+              `What the scenes at this URL do on the frame: ${accessFlags
+                .map((flag) => sceneAccessFlagLabel(flag))
+                .join(', ')}. ` + 'Installing them allows that. Only install them if you trust the source.',
             confirmLabel: 'Install anyway',
-            danger: true,
+            danger: accessFlags.some(sceneAccessFlagIsRisky),
           }))
         ) {
           return
@@ -1191,7 +1207,7 @@ export const templatesLogic = kea<templatesLogicType>([
       // drag-and-drop alike; "Add scene from URL" (addUrlToFrame) has no
       // catalog flags and inspects the scenes instead, with the same dialog.
       if (
-        template.flags?.includes('shell') &&
+        templateAccessFlags(template).includes('shell') &&
         !(await confirmDialog({
           title: 'This scene runs shell commands',
           message:

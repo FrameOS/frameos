@@ -3,6 +3,7 @@
   "description": "Show an image from the SD card",
   "category": "data",
   "version": "1.0.0",
+  "permissions": ["files"],
   "fields": [
     {
       "name": "path",

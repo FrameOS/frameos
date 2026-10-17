@@ -4,6 +4,11 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { getStoreCategory } from "../lib/categories";
 import { formatDate } from "../lib/format";
+import {
+  keyFlagNamespace,
+  knownSceneAccessFlags,
+  settingsKeyTitle,
+} from "../../../../../frontend/src/utils/sceneAccess";
 import type { InstallableFrame } from "./InstallOnFrameBox";
 import { ReportSceneButton } from "./ReportSceneButton";
 import { SceneCategoryEditor } from "./SceneCategoryEditor";
@@ -129,6 +134,11 @@ export function SceneInfoPanel({
   // Tags stay in the listing (and the database) but are not shown or
   // edited here any more (2026.10); the category is.
   const showTags = listing.category || editing;
+  // The API keys the scene's apps read (key:<namespace> risk flags).
+  const keyTitles = knownSceneAccessFlags(scene.riskFlags)
+    .map((flag) => keyFlagNamespace(flag))
+    .filter((namespace): namespace is string => namespace !== null)
+    .map((namespace) => settingsKeyTitle(namespace));
 
   return (
     <div className="scene-info scene-info--panel">
@@ -246,6 +256,29 @@ export function SceneInfoPanel({
           This scene configures apps or custom code that run shell commands on the frame. Only
           install it if you trust the publisher — review the scene after installing, before
           deploying it.
+        </p>
+      ) : null}
+      {scene.riskFlags.includes("files") ? (
+        <p className="notice-error" role="alert">
+          This scene can read any file on the frame, outside the assets folder too. Installing it
+          allows that.
+        </p>
+      ) : scene.riskFlags.includes("assets") ? (
+        <p className="notice">
+          This scene reads the frame&apos;s assets folder: uploaded photos, fonts and what other
+          scenes saved there. Installing it allows that.
+        </p>
+      ) : null}
+      {scene.riskFlags.includes("assets-write") ? (
+        <p className="notice-error" role="alert">
+          This scene writes and deletes files in the frame&apos;s assets folder, where your
+          uploaded photos and other scenes&apos; files are. Installing it allows that.
+        </p>
+      ) : null}
+      {keyTitles.length > 0 ? (
+        <p className="notice">
+          This scene&apos;s apps read these keys from the frame&apos;s settings:{" "}
+          {keyTitles.join(", ")}.
         </p>
       ) : null}
 

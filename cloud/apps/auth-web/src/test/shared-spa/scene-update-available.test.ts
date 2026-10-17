@@ -285,6 +285,48 @@ describe("cloud: several scenes with an update", () => {
     });
   });
 
+  it("says which scenes gain a permission, in red when it is the clicked one", async () => {
+    // Version 5 of the other scene adds an app that writes assets; version 3 had none.
+    const store = apiFetchMock.getMockImplementation()!;
+    apiFetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.includes(`/scenes/${otherStoreSceneId}/scenes.json`) && !url.endsWith("?version=3")) {
+        const [scene] = sceneJson(5) as Record<string, unknown>[];
+        return Response.json([
+          {
+            ...scene,
+            id: "rt-2",
+            name: "Clock",
+            nodes: [{ id: "c", type: "app", position: { x: 0, y: 0 }, data: { keyword: "notes" } }],
+            apps: { notes: { sources: { "app.ts": "frameos.writeAsset('x', y)", "config.json": "{}" } } },
+          },
+        ]);
+      }
+      return store(input, init);
+    });
+    confirmMock.mockResolvedValue(false);
+    framesModel.mount();
+    const logic = sceneUpdatesLogic({ frameId: frameId as unknown as FrameType["id"] });
+    logic.mount();
+    await waitFor(() => expect(logic.values.sceneUpdateVersions).toEqual({ "rt-1": "5", "rt-2": "5" }));
+
+    logic.actions.confirmSceneUpdate("rt-1");
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    const fromOther = confirmMock.mock.calls[0]![0] as ConfirmRequest & { danger?: boolean };
+    expect(fromOther.message).toContain(
+      'Updating all scenes also adds new permissions: "Clock" reads assets folder, writes assets folder.',
+    );
+    expect(fromOther.message).not.toContain("New permissions in this version");
+    expect(fromOther.danger).toBe(false);
+
+    logic.actions.confirmSceneUpdate("rt-2");
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(2));
+    const fromClock = confirmMock.mock.calls[1]![0] as ConfirmRequest & { danger?: boolean };
+    expect(fromClock.message).toContain("New permissions in this version: reads assets folder, writes assets folder.");
+    expect(fromClock.danger).toBe(true);
+    expect(calls(/scenes\/update/)).toEqual([]);
+  });
+
   it("the main button still updates only the scene that was clicked", async () => {
     framesModel.mount();
     const logic = sceneUpdatesLogic({ frameId: frameId as unknown as FrameType["id"] });

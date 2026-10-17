@@ -1,4 +1,5 @@
 import { sceneRequiresCompilation } from "@frameos-cloud/scene-convert";
+import { sceneAccessFlags } from "../../../../../frontend/src/utils/sceneAccess";
 import { randomBytes } from "node:crypto";
 import { strToU8, unzlibSync, zipSync } from "fflate";
 import { unzipBounded } from "./zip-bounded";
@@ -107,18 +108,18 @@ export function sanitizeTagCandidates(value: unknown): string[] {
   return tags;
 }
 
-// Risk flags computed from the scenes JSON at publish. "shell" marks scenes
-// that can run commands on the frame: apps known to shell out
-// (data/chromiumScreenshot, data/rstpSnapshot run /bin/sh -c) or custom code
-// nodes calling Nim process APIs. This is a warning badge, not a sandbox —
-// code nodes are arbitrary Nim compiled onto the device, so absence of the
-// flag is no guarantee (documented in STORE-TODO threat model).
+// Risk flags computed from the scenes JSON at publish and stored per version
+// (store_scene_versions.risk_flags): what the scene's apps ask for in their
+// config.json, "shell" (runs shell commands), "files" (reads any file on the
+// frame), "assets" (reads the frame's assets folder), "assets-write" (writes
+// or deletes in it), and "key:<namespace>" for each API key they read. The
+// SPA computes the same flags for scenes that arrive without a catalog entry,
+// from the same function (frontend/src/utils/sceneAccess.ts, corpus
+// docs/scene-access-fixtures.json). The frame gives each JS app exactly the
+// list it asks for; an app without a list (published before 2026.10.16) is
+// shown what its code calls for and gets that list stamped when it leaves
+// the store (scene-origin.ts).
 export const riskFlagShell = "shell";
-
-const shellAppKeywordPattern =
-  /(shell|exec|terminal|command|chromiumscreenshot|rstpsnapshot)/i;
-const shellCodePattern =
-  /\b(execShellCmd|execCmdEx|execCmd|execProcess|startProcess|runShellWithParentStreams|runShellCapture|osproc|quoteShell|child_process)\b/;
 
 // The scenes that would force a source build on a self-hosted frame and that
 // no cloud frame can run at all: Nim code nodes with no codeJS, Nim app
@@ -147,31 +148,7 @@ export const compiledSceneHint =
   "Legacy compiled scenes (Nim code nodes, Nim apps) cannot run on a cloud frame. Convert it to an interpreted scene at /nim-converter (docs/nim-to-js-conversion.md) and publish the result.";
 
 export function detectRiskFlags(scenes: unknown): string[] {
-  const flags = new Set<string>();
-  if (!Array.isArray(scenes)) {
-    return [];
-  }
-  for (const scene of scenes) {
-    const nodes = (scene as { nodes?: unknown } | null)?.nodes;
-    if (Array.isArray(nodes)) {
-      for (const node of nodes) {
-        const data = (node as { data?: unknown } | null)?.data;
-        const keyword = (data as { keyword?: unknown } | null)?.keyword;
-        if (
-          typeof keyword === "string" &&
-          shellAppKeywordPattern.test(keyword)
-        ) {
-          flags.add(riskFlagShell);
-        }
-      }
-    }
-    // Full-text sweep catches shell APIs in code nodes, edited app sources,
-    // and config values, wherever they hide in the node graph.
-    if (shellCodePattern.test(JSON.stringify(scene))) {
-      flags.add(riskFlagShell);
-    }
-  }
-  return [...flags].sort();
+  return sceneAccessFlags(scenes);
 }
 
 // The app keywords configured in a scene's node graph (e.g. "data/openWeather",

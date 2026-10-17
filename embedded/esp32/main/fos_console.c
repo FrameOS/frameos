@@ -190,7 +190,7 @@ static int cmd_status(int argc, char **argv)
      * when the deny is on, a scene calling a local API fails with a message
      * that looks like a network fault, and this is where that gets explained. */
     printf("net_policy:  scene HTTP to private addresses %s%s\n",
-           fos_netguard_policy_active() ? "BLOCKED (cloud-managed or store-origin scenes)" : "allowed",
+           fos_netguard_policy_active() ? "BLOCKED (cloud-managed or cloud-pushed scenes)" : "allowed",
            config->allow_local_network ? " [allow_local_network=1]" : "");
     printf("hostname:    %s\n", config->hostname[0] ? config->hostname : "(unset)");
     printf("https:       %s port=%u cert=%s key=%s server=%s\n",

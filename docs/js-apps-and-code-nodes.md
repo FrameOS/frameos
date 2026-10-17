@@ -98,7 +98,23 @@ namespaces the app's `config.json` declares under `settings`),
 calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,
 `appendAsset`, `deleteAsset`, `loadAssetImage`, and the stream calls
 `openAssetStream`, `createStream`, `streamRead`, `streamWrite`,
-`streamAtEnd`, `streamRewind`, `streamClose` (base64 in and out).
+`streamAtEnd`, `streamRewind`, `streamClose` (base64 in and out). Asset
+paths are relative to the frame's assets folder; nothing outside it
+resolves, and a symlink inside it is not a way out. What the app may do
+there is its `config.json` `"permissions"` list: `"assets"` to read,
+`"assets-write"` to also write and delete. Saving the scene fills the list
+from the code (the read calls, and `writeAsset`, `appendAsset`,
+`deleteAsset` or a stream opened with `"w"` or `"a"`), replacing whatever
+it said before. The frame gives the app exactly its list
+(`frameos/src/frameos/js_runtime/app_runtime.nim`): with neither, the
+asset calls live in the scene's own `scenes/<sceneId>/` folder; with
+`"assets"` alone, writes are refused. An app with no list asks for nothing
+(scenes stored before the lists existed got theirs from the backend's
+migration and the cloud's read-time stamp), and a frame whose `js.assetSandbox` is
+`"scene"` keeps every app in the scene's folder. The scene's tags in the
+editor and the store are its apps' lists together
+(`frontend/src/utils/sceneAccess.ts`, [scene-guide.md](scene-guide.md)
+"Assets and permissions").
 `app.state` **is** the scene's state — read any
 key from it, write with `frameos.setState(key, value)` and state nodes see the
 change. What an app does **not** have are the code-node time helpers
@@ -136,7 +152,8 @@ return photo.image
   (an HTTP status, a transport failure, a body that is not an image). It
   never throws, so the app decides what to say (and throws it, see below).
 - `options.saveAsset` keeps the downloaded file as a frame asset, the way
-  the built-in photo apps do (`saved/<app>/<name>.<md5>.<ext>`; `mode:
+  the built-in photo apps do (`saved/<app>/<name>.<md5>.<ext>` under the
+  scene's asset root; `mode:
   "auto"` honours the frame's save-assets setting, `"always"` saves
   regardless). The extension is reduced to a short alphanumeric suffix.
   Frames without storage (ESP32) never save and report no `savedAs`.

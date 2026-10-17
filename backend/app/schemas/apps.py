@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, RootModel, Field
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Literal, Optional, Union, Any
 from enum import Enum
 
 #
@@ -184,6 +184,14 @@ class AppConfigSchema(BaseModel):
     settings: Optional[List[str]] = Field(
         None,
         description="List of global settings keys that this app depends on (pulled from system settings)."
+    )
+    permissions: Optional[List[Literal["shell", "files", "assets", "assets-write"]]] = Field(
+        None,
+        description=(
+            "What the app may do on the frame: shell (run shell commands), files (read any file), "
+            "assets (read the assets folder), assets-write (write it). A JavaScript app's list is filled "
+            "from its code when the scene is saved, and the frame gives the app exactly this list."
+        )
     )
 
     # The fields array can contain either an interactive form field or a block of markdown

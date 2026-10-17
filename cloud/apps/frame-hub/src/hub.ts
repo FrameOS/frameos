@@ -32,6 +32,7 @@ import {
 // header comment in cloud/apps/auth-web/src/lib/frames.ts).
 import { authenticateLinkedClient, linkedClientScopes } from "../../auth-web/src/lib/backend-auth";
 import {
+  APP_PERMISSIONS_FROM,
   buildScenesPayloadForFrame,
   enqueueFrameCommand,
   frameCommandsNotifyChannel,
@@ -40,6 +41,7 @@ import {
   framePreviewIsWatched,
   frameTelemetryLogsScope,
   frameTelemetryMetricsScope,
+  frameSupportsSettingsFrom,
   markFramePreviewWatched,
   maxAssetFileBytes,
   parseAssetEntries,
@@ -1127,9 +1129,10 @@ export async function startFrameHub(
   // was sent — a keyword the new one may no longer have — so rebuild the
   // assigned set for the version it reports now and, if that moved the
   // checksum, push the same assignments again, on the scene it is showing.
-  // Only an update across a retired app's runtime does this: any other
-  // difference between the assigned checksum and a fresh build stays the
-  // owner's call, as it always was.
+  // Only an update across a retired app's runtime, or across the first one
+  // that reads apps' config.json `permissions` (the payload gains the lists,
+  // scene-origin.ts), does this: any other difference between the assigned
+  // checksum and a fresh build stays the owner's call, as it always was.
   async function resyncScenesForFirmwareChange(
     session: DeviceSession,
     fromVersion: string | null | undefined,
@@ -1140,7 +1143,14 @@ export async function startFrameHub(
     }
     const before = keywordsRuntimeLacks(fromVersion);
     const after = keywordsRuntimeLacks(toVersion);
-    if (before.length === after.length && before.every((keyword) => after.includes(keyword))) {
+    const crossesPermissions =
+      frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, fromVersion) !==
+      frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, toVersion);
+    if (
+      !crossesPermissions &&
+      before.length === after.length &&
+      before.every((keyword) => after.includes(keyword))
+    ) {
       return;
     }
     const frameId = session.frame.id;

@@ -1,4 +1,5 @@
 import { strToU8, zipSync } from "fflate";
+import { withAppPermissions } from "../../../../../frontend/src/utils/sceneAccess";
 import { getScenesBaseUrl } from "./env";
 import { unzipBounded } from "./zip-bounded";
 
@@ -46,21 +47,38 @@ export function storeSceneOrigin(
   };
 }
 
-/** Every scene object of a scenes.json array with its `origin` replaced by this source. */
+/**
+ * Every scene object of a scenes.json array with its `origin` replaced by
+ * this source, and every JavaScript app that has no config.json
+ * `permissions` given the list its code calls for (withAppPermissions,
+ * frontend/src/utils/sceneAccess.ts). A frame from 2026.10.16 gives an app
+ * exactly its list and an app with none nothing, and store versions are
+ * immutable zips, many published before the lists existed: this is where
+ * they get one. A list the publisher wrote is left as it is: it is what the
+ * store's tags show.
+ *
+ * `appPermissions: false` leaves the apps alone: the device push for a
+ * firmware that predates the lists, so the payload changes exactly when the
+ * firmware starts reading them and the hub's firmware-change resync
+ * (frame-hub, `fromVersion`) delivers them.
+ */
 export function withStoreSceneOrigin<T>(
   scenes: readonly T[],
   source: StoreSceneOriginSource,
+  options: { appPermissions?: boolean } = {},
 ): T[] {
+  const appPermissions = options.appPermissions !== false;
   const origin = storeSceneOrigin(source);
   return scenes.map((scene) => {
     if (!scene || typeof scene !== "object" || Array.isArray(scene)) {
       return scene;
     }
     const id = (scene as { id?: unknown }).id;
-    return {
+    const stamped = {
       ...scene,
       origin: { ...origin, ...(typeof id === "string" ? { sceneId: id } : {}) },
     } as T;
+    return appPermissions ? withAppPermissions(stamped, { onlyMissing: true }) : stamped;
   });
 }
 
