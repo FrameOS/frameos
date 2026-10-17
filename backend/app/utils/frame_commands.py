@@ -39,6 +39,10 @@ from app.models.frame_command import FrameCommand
 COMMAND_TTL_SECONDS = 5 * 60
 # A firmware update notice keeps for a day (the cloud's updateNotifyTtlMs).
 UPDATE_NOTIFY_TTL_SECONDS = 24 * 60 * 60
+# A LAN access code request may wait for a sleeping frame a little longer
+# than the code it starts lives on the device (300 s); the cloud's
+# lanAccessChallengeTtlMs. lan_access_set keeps the base TTL.
+LAN_ACCESS_CHALLENGE_TTL_SECONDS = 10 * 60
 # The firmware caps one sleep at 7 days; an hour covers wake alignment.
 MAX_SLEEP_WAIT_SECONDS = 7 * 86400 + 3600
 # A command written to the device but never acked goes back to pending and
@@ -62,6 +66,9 @@ SUPERSEDED_TYPES: frozenset[str] = frozenset(
         "render",
         "reboot",
         "restart_runtime",
+        # One code on the panel at a time, and the newest answer counts.
+        "lan_access_challenge",
+        "lan_access_set",
     }
 )
 # Never handed to the device as a verb: the device already pulls its scenes
@@ -81,8 +88,15 @@ QUEUEABLE_TYPES: frozenset[str] = frozenset(
         "notify_update_available",
         "set_scenes",
         "set_settings",
+        "lan_access_challenge",
+        "lan_access_set",
     }
 )
+# Payload keys the queue holds only until the device has answered: the code
+# someone read off the panel. Dropped from the row the moment it is no longer
+# live (acked, failed, expired, superseded, cancelled), and never part of
+# what the owner's listing shows (frame_command_public echoes no payloads).
+SECRET_PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {"lan_access_set": ("code",)}
 # No TTL: a deploy waits for the frame however long it sleeps (the cloud's
 # set_scenes / set_settings pushes carry none either).
 _NO_TTL_TYPES: frozenset[str] = PULL_BACKED_TYPES
@@ -108,7 +122,19 @@ def base_ttl_seconds(command_type: str) -> int | None:
         return None
     if command_type == "notify_update_available":
         return UPDATE_NOTIFY_TTL_SECONDS
+    if command_type == "lan_access_challenge":
+        return LAN_ACCESS_CHALLENGE_TTL_SECONDS
     return COMMAND_TTL_SECONDS
+
+
+def forget_command_secrets(command: FrameCommand) -> None:
+    """Drop the payload keys only the device may read (SECRET_PAYLOAD_KEYS)
+    from a command that is no longer live. Does not commit."""
+    keys = SECRET_PAYLOAD_KEYS.get(command.type)
+    payload = command.payload if isinstance(command.payload, dict) else None
+    if not keys or not payload or not any(key in payload for key in keys):
+        return
+    command.payload = {key: value for key, value in payload.items() if key not in keys}
 
 
 def command_ttl_for_frame(
@@ -218,6 +244,7 @@ def supersede_pending_commands(db: Session, frame: Frame, command_type: str, now
     for row in _live_rows(db, frame).filter(FrameCommand.type == command_type).all():
         row.status = "expired"
         row.error = "superseded"
+        forget_command_secrets(row)
         count += 1
     db.flush()
     return count
@@ -271,6 +298,7 @@ def expire_stale_commands(db: Session, frame: Frame, now: datetime | None = None
     for row in _live_rows(db, frame).filter(_expired_filter(now)).all():
         row.status = "expired"
         row.error = "ttl"
+        forget_command_secrets(row)
         count += 1
     db.flush()
     return count
@@ -290,6 +318,7 @@ def cancel_frame_command(db: Session, frame: Frame, command_id: str, now: dateti
         return False
     command.status = "expired"
     command.error = "cancelled"
+    forget_command_secrets(command)
     db.commit()
     return True
 
@@ -311,6 +340,7 @@ def drain_frame_commands(db: Session, frame: Frame, now: datetime | None = None)
         if row.type in DELIVERED_ONCE_TYPES:
             row.status = "expired"
             row.error = "delivered_once"
+            forget_command_secrets(row)
         else:
             row.status = "pending"
             row.sent_at = None
@@ -347,6 +377,7 @@ def ack_frame_command(
     command.status = "acked" if ok else "failed"
     command.error = None if ok else (error or "failed")
     command.acked_at = now
+    forget_command_secrets(command)
     return command
 
 

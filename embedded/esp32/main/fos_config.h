@@ -114,15 +114,18 @@ typedef struct {
                                     * interpreter (value bytes, heap delta,
                                     * fusion tier) — see docs/value-pipeline.md */
     bool server_send_logs;         /* upload runtime/render logs to backend */
-    /* Escape hatch for the cloud-managed private-network deny
-     * (components/frameos_nim/include/fos_netguard.h), matching
-     * `network.allowLocalNetworkAccess` in the native build's frame.json: 1
-     * lets scenes on an enrolled frame keep talking to the LAN.
+    /* The LAN access switch (docs/lan-access.md): 1 lets scenes reach
+     * private/link-local addresses, 0 has fos_netguard deny them on every
+     * frame, managed or not. NVS `lan_access` (absent = 1, a frame from
+     * before the switch), the Pi's state/local_access.json
+     * `allowLocalNetworkAccess`.
      *
-     * Local-only on purpose. It is reachable from the USB console and nowhere
-     * else — not in the cloud `set_settings` allowlist, not in the backend
-     * settings poll, not in the local HTTP API — because a provider that could
-     * flip its own leash would not have one. */
+     * Not a setting: not in the cloud `set_settings` allowlist, not in the
+     * backend settings poll, not in the local HTTP API. The USB console's
+     * `set allow_local_network` writes it directly (the cable is physical
+     * presence); a control plane turns it off with `lan_access_set`, and on
+     * only with the code the frame shows on its panel (fos_lan_access.h) —
+     * a provider that could lift its own leash would not have one. */
     bool allow_local_network;
     bool tls_enable;               /* serve the frame HTTP API over HTTPS too */
     uint16_t tls_port;             /* HTTPS port, default mirrors Pi Caddy proxy */

@@ -7,7 +7,9 @@
 //
 // Messages in:
 //   {type: 'init', width, height, timeZone, scenesJson, sceneId, settingsJson, proxyUrl,
-//    fastMode?, saveAssets?, browserAssets?}
+//    fastMode?, saveAssets?, browserAssets?, lanAccess?}
+//        lanAccess: the previewed frame's LAN access switch (docs/lan-access.md); `false` makes the
+//        runtime refuse private hosts the way that frame would. Absent = no frame to copy, nothing refused.
 //   {type: 'render'}                       force a render now
 //   {type: 'event', name, payload}         dispatch a scene event. Pointer input is three of them, shaped the way
 //                                          frameos/src/drivers/evdev sends it on a frame: 'mouseMove' {x, y} with
@@ -741,6 +743,9 @@ async function init(msg) {
     // no CORS) so data apps that fetch external URLs work like on the device.
     if (msg.proxyUrl) {
       Module['frameosProxyUrl'] = msg.proxyUrl
+    }
+    if (msg.lanAccess === false) {
+      Module['frameosLanAccess'] = false
     }
 
     await mountBrowserAssets(msg.browserAssets)

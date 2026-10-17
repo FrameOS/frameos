@@ -454,6 +454,43 @@ describe("claim token time zone", () => {
   });
 });
 
+describe("claim token LAN access", () => {
+  // The install script has no SD card or USB console to carry the Add frame
+  // "LAN access" choice, so the claim token does (docs/lan-access.md). Off
+  // goes down as a lan_access_set command at enrollment; on, or no choice,
+  // queues nothing, because a frame with no stored value is already on.
+  async function enrollWith(body: Record<string, unknown>) {
+    await signIn();
+    const keys = deviceKeypair();
+    const mint = await mintClaimToken(
+      postJson("/api/frames/claim-tokens", body, { origin: baseUrl }),
+    );
+    expect(mint.status).toBe(200);
+    const { claim_token } = (await mint.json()) as { claim_token: string };
+    const response = await enroll(claim_token, keys.publicKeyBase64);
+    expect(response.status).toBe(200);
+    const { frame_id } = (await response.json()) as { frame_id: string };
+    return db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.frameId, frame_id));
+  }
+
+  it("queues lan_access_set off when the owner left it off", async () => {
+    const commands = await enrollWith({ name: "Hall", lan_access: false });
+    const sets = commands.filter((command) => command.type === "lan_access_set");
+    expect(sets).toHaveLength(1);
+    expect(sets[0]?.payload).toEqual({ enabled: false });
+    expect(sets[0]?.expiresAt).toBeNull();
+  });
+
+  it("queues nothing when it is on or not chosen", async () => {
+    for (const body of [{ lan_access: true }, {}, { lan_access: "no" }]) {
+      const commands = await enrollWith(body);
+      expect(commands.some((command) => command.type === "lan_access_set")).toBe(false);
+    }
+  });
+});
 describe("cloud-managed frame enrollment", () => {
   it("enrolls with a single-use claim token, born active (auto-confirmed)", async () => {
     const accountId = await signIn();

@@ -8,6 +8,7 @@ import time
 from typing import Any, Optional
 from sqlalchemy import JSON
 from sqlalchemy import ForeignKey, Integer, String, Double, DateTime, Boolean, Text
+from sqlalchemy import true as sql_true
 from sqlalchemy.orm import Session, mapped_column, object_session
 from app.utils.scene_execution import scene_is_interpreted
 from app.database import Base
@@ -459,6 +460,17 @@ class Frame(Base):
     schedule = mapped_column(JSON, nullable=True)
     gpio_buttons = mapped_column(JSON, nullable=True)
     network = mapped_column(JSON, nullable=True)
+    # LAN access, the frame-level switch: may scene HTTP reach private/local
+    # addresses (app/utils/lan_access.py)? The DEVICE holds the
+    # truth (state/local_access.json on Linux, NVS `lan_access` on an ESP32);
+    # this column mirrors it, is the creation seed (frame.json
+    # `network.lanAccess`, ESP32 provisioning) and, for frames the backend
+    # renders itself (virtual, thin clients), is what its renderer obeys. Only
+    # the create route and the /lan_access routes move it — never the settings
+    # update, and it is not a deploy-tracked key. The database default is ON
+    # (a row that predates the column is a frame that worked with LAN access);
+    # the ORM default is OFF (a frame created now starts with what was chosen).
+    lan_access = mapped_column(Boolean, nullable=False, default=False, server_default=sql_true())
     agent = mapped_column(JSON, nullable=True)
     mountpoints = mapped_column(JSON, nullable=True)
     error_behavior = mapped_column(JSON, nullable=True)
@@ -546,6 +558,7 @@ class Frame(Base):
             'schedule': self.schedule,
             'gpio_buttons': device_gpio_button_defaults(self.device) or self.gpio_buttons,
             'network': self.network,
+            'lan_access': None if self.lan_access is None else bool(self.lan_access),
             'agent': self.agent,
             'mountpoints': normalize_mountpoints(self.mountpoints),
             'error_behavior': normalize_error_behavior(self.error_behavior),
@@ -638,6 +651,7 @@ async def new_frame(
     device: Optional[str] = None,
     interval: Optional[float] = None,
     project_id: Optional[int] = None,
+    lan_access: bool = False,
 ) -> Frame:
     if '@' in frame_host:
         # rsplit: passwords may contain '@'
@@ -720,6 +734,9 @@ async def new_frame(
             "wifiHotspotPassword": "frame1234",
             "wifiHotspotTimeoutSeconds": 300,
         },
+        # Chosen in the add-frame form; no code is asked at creation. A row
+        # created any other way says so (adoption: what the device reports).
+        lan_access=bool(lan_access),
         agent={
             "agentEnabled": False,
             "agentRunCommands": False,
@@ -1072,6 +1089,15 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "url": timezone_updater["url"],
         },
     }
+    # The creation seed of the device's LAN access switch: a runtime whose
+    # state file holds no value yet persists this once, and after that never
+    # reads it again, so a deploy cannot flip what someone at the frame set.
+    # The SD card's frameos-setup.json is this dict, so it carries the seed
+    # too. getattr: the release-image builder's stub has no such column, and a
+    # generic card carries no seed (no value anywhere means ON).
+    lan_access = getattr(frame, "lan_access", None)
+    if isinstance(lan_access, bool):
+        frame_json["network"]["lanAccess"] = lan_access
     if explicit_timezone:
         frame_json["timeZone"] = explicit_timezone
     elif (frame.mode or "rpios") == "buildroot":

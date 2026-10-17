@@ -3,7 +3,7 @@
 // The ESP32 browser flasher inside the workspace's "Add frame" panel. It lives
 // in cloud-frontend/, which has no test runner, so it is tested from auth-web's
 // vitest across the package boundary (see the other shared-spa tests).
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bootWaitFailureMessage,
@@ -455,6 +455,8 @@ describe("Esp32CloudFlasher", () => {
       // The browser's zone rides along: a frame left on UTC shows the wrong
       // time until someone debugs it.
       ...timeZoneWrites(),
+      // LAN access, off unless chosen, before `wifi` reboots the board.
+      "set allow_local_network 0",
       'wifi "My Home WiFi" "pa ss\\"word"',
     ]);
     // The claim token carries the browser's zone: enrollment seeds the
@@ -526,6 +528,7 @@ describe("Esp32CloudFlasher", () => {
       `set cloud_url "${window.location.origin}"`,
       'set claim_token "FRCT_rebind"',
       'set panel "EPD_7in5_V2"',
+      "set allow_local_network 0",
       "restart",
     ]);
     expect(port.writes.some((line) => line.startsWith("set time_zone"))).toBe(false);
@@ -604,8 +607,29 @@ describe("Esp32CloudFlasher", () => {
       'set claim_token "FRCT_minted"',
       'set panel "EPD_13in3e"',
       ...timeZoneWrites(),
+      "set allow_local_network 0",
       "restart",
     ]);
+  });
+
+  it("sends LAN access as chosen at setup", async () => {
+    mockCloudApi();
+    const port = createHealthyPort();
+    stubSerial(port);
+    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
+    await screen.findByRole("button", { name: /connect & flash/i });
+    await fillRequiredFields();
+    const toggle = screen.getByTestId("lan-access-toggle");
+    // Off by default: scenes on a new frame cannot reach local addresses.
+    expect(toggle.textContent).toContain("Off");
+    fireEvent.click(within(toggle).getByRole("switch"));
+    expect(toggle.textContent).toContain("On");
+    clickFlash();
+    await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
+
+    const lanAccessWrite = port.writes.indexOf("set allow_local_network 1");
+    expect(lanAccessWrite).toBeGreaterThan(-1);
+    expect(port.writes.slice(lanAccessWrite + 1)).toEqual(["restart"]);
   });
 
   it("remembers WiFi credentials in localStorage only when asked to", async () => {

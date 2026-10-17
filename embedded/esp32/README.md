@@ -49,6 +49,9 @@ main/                     boot orchestration + platform modules
   fos_sd_probe.c          SD presence probe used by the assets layer
   fos_framebuffer.c       canvas allocation (RGBX vs RGB565 by PSRAM) and dither/pack
   fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
+  fos_panel_draw.c        5x7 font + rectangles straight into a packed panel buffer, rotation
+                          aware: the status screen and the LAN access code box (host-tested)
+  fos_lan_access.c        the LAN access code: mint, TTL, attempts, constant-time check (host-tested)
   fos_board.c             board table: pins, panel defaults, battery divider per board
   fos_buttons.c           GPIO button map → `button` events (origin `driver`, via fos_events.c)
   fos_battery.c           battery ADC sampling; fos_battery_filter.c its outlier filter
@@ -70,7 +73,8 @@ partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (4032K each) + 8M st
 partitions_ota_32mb.csv   32MB: nvs + otadata + ota_0/ota_1 (4032K each) + 24M state
 build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/
 main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
-                          header carries its command line). The netguard, SD probe, board,
+                          header carries its command line). The netguard, LAN access code
+                          (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), SD probe, board,
                           power, wake, battery-filter, version and scene-event (contract table +
                           fos_events.c dispatch) tests run from the backend's
                           pytest suite (backend/app/tasks/tests/test_esp32_*.py, which also
@@ -475,6 +479,66 @@ echoes them, but physical access to an unencrypted module means physical
 access to the link — see the "Secrets at rest on ESP32" note in
 `docs/cloud-frames.md`.
 
+## LAN access
+
+One switch per frame decides whether scenes may reach private and local
+addresses (`docs/lan-access.md` is the cross-plane spec). Off, every scene
+HTTP request and every redirect hop goes through `fos_netguard_check_url`
+(`frameos_nim_glue.c`) and a private answer fails the node with
+
+```
+LAN access is off for this frame (homeassistant.local resolves to private address 192.168.1.5). Turn on LAN access in the frame settings.
+```
+
+(`fos_netguard_block_message`: the prefix is what the SPA's logs panel
+matches; the reason is what gets cut when the buffer is short). That applies
+on every frame, standalone, backend-managed or cloud-managed: until
+2026.10.17 the deny was armed only while cloud-managed or rendering
+cloud-pushed scenes. The frame's own control planes stay reachable by exact
+`host:port`: `cloud_url` and the `ws_url` override when stored, and
+`backend_url` (`apply_network_policy` in `fos_cloud.c`).
+
+The value is `config->allow_local_network`, NVS `lan_access`. A frame with
+no `lan_access` key predates the switch and reads as **on**; the older
+`allow_lan` is written as a mirror for a downgrade but never read (every save
+wrote it, so its 0 was the old default, not a choice). The flashers send
+`set allow_local_network 0|1` at provisioning, and the USB console's `set`
+changes it directly (the cable is physical presence). `status` prints it on
+the `net_policy:` line.
+
+A control plane changes it with two verbs, on the cloud socket and on the
+backend's command queue (`backend_verb_allowed`):
+
+- `lan_access_challenge {}`: mints six digits (`fos_lan_access.c`, rejection
+  sampled from `esp_random()`, 300 s, five tries, constant-time compare) and
+  acks; `no_panel` on a headless board, `rate_limited` once ten wrong codes
+  have been given within an hour of the first of them, across challenges (a
+  right code does not reset that; the count lives in RTC memory and the
+  clock is system time, so neither a `reboot` nor a deep-sleep wake refills
+  it, only a power cycle does). The render task picks it up within a
+  second and renders: after the packed buffer is hashed, `render_once` saves
+  the bytes under a centred box, draws "LAN access code" and the digits
+  (`fos_panel_draw.c`, upright for the frame's `rotate`), blits, and puts the
+  saved bytes back before `store_snapshot`, so `/image`, `image_get` and the
+  BMP push to the backend never carry the code (with no memory for the copy
+  the box is painted white instead). The display-state hash is forgotten, so
+  the first render after the code ends refreshes the panel even when the
+  scene did not change, and a pending code holds the deep sleep
+  (`keep_awake_remaining_seconds`). Every end (the right code, the fifth
+  wrong one, expiry, a new challenge) renders once more.
+- `lan_access_set {enabled, code?}`: `invalid_lan_access` without a bool;
+  `false` saves at once and takes a pending code off the panel; `true` needs
+  the code (`code_required`, then `rate_limited` before the challenge is
+  looked at, `code_expired`, `invalid_code`, `too_many_attempts`), then saves
+  (`persist_failed`). Every ack carries `lan_access`; a successful one on
+  the socket is followed by a `state` message.
+
+The cloud reads the value from `hardware.lanAccess` (hello and every
+`state`), the backend from `lan_access` in the state fields of every
+commands pull and ack (`fos_cloud_add_state_fields`). The code itself is in
+no ack and no log line: the log says `lan_access:challenge`,
+`lan_access:shown`, `lan_access:refused` (with the token) and `lan_access:set`.
+
 ## Power management (M4)
 
 `deep_sleep` powers the chip down between refreshes; with a panel attached the
@@ -791,11 +855,11 @@ both do not fit), and only the **active** scene is parsed and resident. The
 index carries ids, names and refresh intervals, so the frame can list and
 switch scenes without holding them. It also carries a top-level
 `"source": "local" | "backend" | "cloud"` key recording who installed the
-payload (missing = `local` on pre-upgrade stores); `fos_cloud.c` keys the
-private-network egress deny on it, so provider-pushed scenes stay fenced off
-the owner's LAN even after the frame is demoted from cloud management. The
-source is mirrored in NVS so it survives the store→apply window across a
-reboot.
+payload (missing = `local` on pre-upgrade stores); `fos_cloud.c` reports the
+applied payload's checksum to the cloud only for cloud-installed scenes. (It
+also keyed the private-network deny until 2026.10.17; the LAN access switch
+alone decides that now.) The source is mirrored in NVS so it survives the
+store→apply window across a reboot.
 
 Slot numbers rather than scene ids, because `CONFIG_SPIFFS_OBJ_NAME_LEN` is
 32 and a scene id is a 36-character uuid: `/<uuid>.json` cannot be opened at

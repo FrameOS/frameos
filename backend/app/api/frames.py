@@ -4709,6 +4709,9 @@ async def api_frame_new(
             data.device,
             data.interval,
             project_id=project_id,
+            # What the form chose, for every install method; no code at
+            # creation. Left out: off.
+            lan_access=data.lan_access is True,
         )
         if data.device_config is not None:
             frame.device_config = dict(data.device_config)
@@ -4890,6 +4893,9 @@ async def api_frame_import(
             data.get("device"),
             data.get("interval"),
             project_id=current_project_id(),
+            # An export is a frame that already exists: it keeps the switch it
+            # had, and one exported before the switch existed had LAN access.
+            lan_access=data.get("lan_access") is not False,
         )
 
         for key, value in importable.items():

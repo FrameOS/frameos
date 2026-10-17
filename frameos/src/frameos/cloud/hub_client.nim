@@ -61,6 +61,7 @@ import frameos/device_setup
 import frameos/events
 import frameos/interpreter
 import frameos/js_runtime/app_runtime
+import frameos/local_access
 import frameos/scenes
 import frameos/server/api
 import frameos/server/settings_apply
@@ -353,69 +354,75 @@ proc providerExemptHostPort(providerUrl: string): string =
     else: "80"
   parsed.hostname.toLowerAscii() & ":" & port
 
+proc backendExemptHostPort*(frameConfig: FrameConfig): string =
+  ## "host:port" for the self-hosted backend this frame reports to
+  ## (frame.json serverHost/serverPort): photo share links, the log push and
+  ## the image push to a backend on the LAN must keep working with LAN access
+  ## off. "" for a frame with no backend.
+  if frameConfig == nil:
+    return ""
+  let host = frameConfig.serverHost.strip()
+  if host.len == 0 or frameConfig.serverPort <= 0:
+    return ""
+  host.toLowerAscii() & ":" & $frameConfig.serverPort
+
 var
   ## Cached link half of the policy. The hub thread calls the proc below every
-  ## ~2s and the local admin toggle must apply immediately, but the link state
+  ## ~2s and the LAN access switch must apply immediately, but the link state
   ## only ever changes with a generation bump — so re-parse cloud_link.json
   ## then, not on every tick.
   policyCacheLock: Lock
   policyCacheGeneration = -1
-  policyCacheManaged = false
   policyCacheExempt: seq[string]
 
 initLock(policyCacheLock)
 
 proc refreshLocalNetworkPolicy*(frameConfig: FrameConfig) {.gcsafe.} =
-  ## Recomputes the managed-frame private-network HTTP deny
-  ## (utils/http_client.nim): active iff the frame is cloud-managed — or
-  ## still running provider-pushed scenes after losing the link — and the
-  ## local admin has not set `network.allowLocalNetworkAccess` in frame.json.
-  ## Called at startup, whenever the hub thread observes link-state or config
-  ## changes, and (via uploadedScenesChangedHook) whenever the uploaded scene
-  ## set is replaced; standalone and backend-managed frames always end up
-  ## with the policy off.
+  ## Recomputes the private-network HTTP deny (utils/http_client.nim): active
+  ## iff the frame's LAN access is off (frameos/local_access.nim,
+  ## lanAccessEnabled), on every frame — standalone, backend-managed and
+  ## cloud-managed alike. Until 2026.10.17 it was armed only while the frame
+  ## was cloud-managed or still ran provider-pushed scenes, and a local
+  ## override lifted it; the switch alone decides now (docs/lan-access.md).
   ##
-  ## The scene-origin term closes the demotion hole: demoteManagedLink keeps
-  ## rendering the provider's last-pushed scenes, and before origin was
-  ## recorded that meant those scenes kept running with the deny switched
-  ## off. Now the deny follows the scenes, not the link — replacing them
-  ## locally (or via a backend deploy) is what lifts it.
+  ## The frame's own control planes stay reachable by exact host:port: the
+  ## provider endpoint whenever a provider URL is stored, and the self-hosted
+  ## backend (serverHost:serverPort). Called at startup, on every hub idle
+  ## pass (~2 s), whenever the link state changes, and by the routes and the
+  ## verb that change the switch, so a change applies at once.
   {.gcsafe.}:
     # Sampled before the (possibly cached) read so a save that races us always
     # leaves the cache key behind the state file, never ahead of it.
     let generation = currentCloudLinkGeneration()
-    var managed = false
     var exempt: seq[string] = @[]
     withLock policyCacheLock:
       if generation != policyCacheGeneration:
-        let link = snapshotLink()
-        policyCacheManaged = link.managed
+        # The provider the link names, not the default one a frame that was
+        # never linked falls back to: an exemption is a hole, so only for an
+        # endpoint someone chose.
+        var providerUrl = ""
+        withLock cloudLinkLock:
+          let state = loadCloudLinkState()
+          if state{"provider_url"}.getStr("").strip().len > 0 or isManagedLink(state):
+            providerUrl = providerUrlFromState(state)
         policyCacheExempt = @[]
-        if link.managed:
-          let hostPort = providerExemptHostPort(link.providerUrl)
-          if hostPort.len > 0:
-            policyCacheExempt.add(hostPort)
+        let hostPort = providerExemptHostPort(providerUrl)
+        if hostPort.len > 0:
+          policyCacheExempt.add(hostPort)
         policyCacheGeneration = generation
-      managed = policyCacheManaged
       exempt = policyCacheExempt
-    let localOverride = frameConfig != nil and frameConfig.network != nil and
-      frameConfig.network.allowLocalNetworkAccess
-    # Computed outside the generation cache: the uploaded scene set changes
-    # independently of the link state.
-    let providerScenes = cloudUploadedScenesResident()
-    # Keyed on who installed the scenes (the cloud), not on where a scene
-    # came from: until 2026.10.16 a store-origin scene (origin.storeSceneId)
-    # armed the deny on any frame, but provenance is not something the frame
-    # can keep true across copies and imports. What a scene reaches for is
-    # shown when it is installed (frontend/src/utils/sceneAccess.ts).
-    setLocalNetworkPolicy((managed or providerScenes) and not localOverride, exempt)
+    # Read on every call rather than cached with the link: frame.json can
+    # change under a running frame (a deploy, a settings save).
+    let backend = backendExemptHostPort(frameConfig)
+    if backend.len > 0 and backend notin exempt:
+      exempt.add(backend)
+    setLocalNetworkPolicy(not lanAccessEnabled(), exempt)
 
 proc demoteManagedLink(reason: string) {.gcsafe.} =
   ## Persistent 401: the provider revoked this frame. Return to standalone —
-  ## keep rendering the last pushed scenes, never touch them. The LAN deny
-  ## deliberately survives this: refreshLocalNetworkPolicy keys on the
-  ## persisted scene origin, so provider-pushed scenes keep their network
-  ## restrictions until the local admin (or a backend deploy) replaces them.
+  ## keep rendering the last pushed scenes, never touch them. The LAN deny is
+  ## not the link's to lift: it follows the frame's LAN access switch, which
+  ## a demotion leaves as it was.
   {.gcsafe.}:
     withLock cloudLinkLock:
       let state = loadCloudLinkState()
@@ -1364,6 +1371,49 @@ proc handleGetMetrics(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
   ack["metrics"] = ctx.getMetricsFn()
   CloudVerbReply(ack: ack)
 
+proc handleLanAccessChallenge(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
+  ## `lan_access_challenge` (docs/lan-access.md): show a code on the panel for
+  ## turning LAN access on. The same decision the frame's admin route makes
+  ## (server/api.nim, startLanAccessChallenge); only ever the `localNetwork`
+  ## scope, never `shellApps`, from a control plane. The ack does not carry
+  ## the code — nothing that leaves the frame does.
+  {.gcsafe.}:
+    let device = if ctx.frameConfig != nil: ctx.frameConfig.device else: ""
+    let outcome = startLanAccessChallenge(device, LocalAccessScopeLocalNetwork)
+    if outcome.error.len > 0:
+      ctx.audit("lan_access_challenge", false, outcome.error)
+      return CloudVerbReply(ack: ackError(id, outcome.error))
+    ctx.audit("lan_access_challenge", true)
+    var ack = ackOk(id)
+    ack["expires_in_seconds"] = %LocalAccessChallengeTtlSeconds.int
+    CloudVerbReply(ack: ack)
+
+proc handleLanAccessSet(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
+  ## `lan_access_set` `{enabled, code?}`: off at once, on with the code from
+  ## the panel. The ack carries the value now in force; the next `state`
+  ## message reports it as hardware.lanAccess (runHubSession). The audit line
+  ## never has the code.
+  {.gcsafe.}:
+    # Only `enabled` and `code` cross over: whatever else the message holds
+    # (a `scope`, say) is not the provider's to choose.
+    var payload = %*{}
+    if msg.hasKey("enabled"):
+      payload["enabled"] = msg["enabled"]
+    if msg.hasKey("code"):
+      payload["code"] = msg["code"]
+    let outcome = applyLanAccessChange(payload)
+    if outcome.error.len > 0:
+      ctx.audit("lan_access_set", false, outcome.error)
+      return CloudVerbReply(ack: ackError(id, outcome.error))
+    refreshLocalNetworkPolicy(ctx.frameConfig)
+    let enabled = lanAccessEnabled()
+    if not ctx.auditFn.isNil:
+      ctx.auditFn(%*{"event": "cloud:audit", "verb": "lan_access_set", "ok": true,
+                     "lanAccess": enabled})
+    var ack = ackOk(id)
+    ack["lan_access"] = %enabled
+    CloudVerbReply(ack: ack)
+
 proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gcsafe.} =
   ## Dispatches one provider→frame message. The verb table below is the
   ## complete cloud-profile capability surface of this frame; anything else —
@@ -1414,6 +1464,10 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     result = handleAssetRename(ctx, id, msg)
   of "image_get":
     result = handleImageGet(ctx, id)
+  of "lan_access_challenge":
+    result = handleLanAccessChallenge(ctx, id)
+  of "lan_access_set":
+    result = handleLanAccessSet(ctx, id, msg)
   of "scenes_get":
     result = handleScenesGet(ctx, id)
   of "render":
@@ -1857,6 +1911,10 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
   # a Pi 5 — and the workspace showed the image default (800x480) until the
   # next reconnect.
   var lastReportedDisplay = $frameConfig.width & "x" & $frameConfig.height
+  # LAN access as hello reports it (hardware.lanAccess). Whatever changes it —
+  # the `lan_access_set` verb, the frame's admin page, the backend relaying a
+  # toggle — the provider learns it from the next `state` message.
+  var lastReportedLanAccess = lanAccessEnabled()
   # Starts at the current value, so a reconnect does not announce a render that
   # happened while the link was down: the provider's own staleness check covers
   # that, and a fleet reconnecting after a hub restart must not all ask to be
@@ -2028,13 +2086,16 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
           await socket.send($(%*{"type": "metrics", "metrics": sample}))
       if now - lastStateCheckAt >= HubStateCheckSeconds:
         lastStateCheckAt = now
-        # Pick up local settings changes (allowLocalNetworkAccess toggled on
-        # the admin page) without waiting for a link-state generation bump.
+        # Pick up a LAN access change made elsewhere (the admin page, the
+        # backend) without waiting for a link-state generation bump.
         refreshLocalNetworkPolicy(frameConfig)
         let (sceneId, _) = getAllPublicStates()
         let display = $frameConfig.width & "x" & $frameConfig.height
-        if sceneId.string != lastActiveScene or display != lastReportedDisplay:
+        let lanAccess = lanAccessEnabled()
+        if sceneId.string != lastActiveScene or display != lastReportedDisplay or
+            lanAccess != lastReportedLanAccess:
           lastActiveScene = sceneId.string
+          lastReportedLanAccess = lanAccess
           if display != lastReportedDisplay:
             log(%*{"event": "cloud:hardware:changed", "display": display,
                    "previous": lastReportedDisplay})
@@ -2093,8 +2154,8 @@ proc cloudHubThreadMain(frameConfig: FrameConfig) {.thread.} =
     var enrollBackoff = HubEnrollBackoffMinSeconds
     var nextEnrollAttemptAt = 0.0
     while not hubStopRequested.load(moRelaxed):
-      # Keep the private-network HTTP policy in sync with the link state and
-      # the local override on every pass (idle pass = every ~2s).
+      # Keep the private-network HTTP policy in sync with the LAN access
+      # switch and the link's exemption on every pass (idle pass = every ~2s).
       refreshLocalNetworkPolicy(frameConfig)
       # ---- claim-token handoff -------------------------------------------
       # Checked every pass so a pending file written after boot (setup portal,
@@ -2194,13 +2255,9 @@ proc startCloudManagement*(frameConfig: FrameConfig) {.gcsafe.} =
   ## the frame is enrolled (mode=managed in cloud_link.json) or a pending
   ## claim-token enrollment file appears at boot.
   {.gcsafe.}:
-    # A local upload replacing provider scenes must lift (or a rehydrate must
-    # raise) the deny without waiting for a hub tick — the hub thread idles
-    # on a standalone or demoted frame.
-    uploadedScenesChangedHook = proc() {.gcsafe.} =
-      refreshLocalNetworkPolicy(frameConfig)
     # Policy is correct from the first render onwards, not only once the
-    # thread has spun up.
+    # thread has spun up. On every frame: a standalone one with LAN access
+    # off is denied too.
     refreshLocalNetworkPolicy(frameConfig)
     if hubThreadStarted:
       return

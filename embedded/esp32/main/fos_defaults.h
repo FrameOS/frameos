@@ -91,10 +91,12 @@
 #ifndef FRAMEOS_DEFAULT_ADMIN_AUTH_PASS
 #define FRAMEOS_DEFAULT_ADMIN_AUTH_PASS ""
 #endif
-/* Off: an enrolled frame's scenes come from the provider, so they do not get
- * to reach the owner's LAN. See fos_netguard.h and `set allow_local_network`. */
+/* The LAN access switch when NVS holds no `lan_access` key: on, because a
+ * frame from before the switch existed must keep reaching its LAN. A new
+ * frame gets what was chosen when it was set up (the flashers send
+ * `set allow_local_network 0|1`). See docs/lan-access.md and fos_netguard.h. */
 #ifndef FRAMEOS_DEFAULT_ALLOW_LOCAL_NETWORK
-#define FRAMEOS_DEFAULT_ALLOW_LOCAL_NETWORK 0
+#define FRAMEOS_DEFAULT_ALLOW_LOCAL_NETWORK 1
 #endif
 #ifndef FRAMEOS_DEFAULT_ASSETS_PATH
 #define FRAMEOS_DEFAULT_ASSETS_PATH "/srv/assets"

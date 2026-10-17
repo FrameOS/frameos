@@ -18,7 +18,7 @@ const PLAYWRIGHT_COMMAND_TIMEOUT_MS = 5 * 60 * 1000
 # before the browser was handed it, but a page is a chain of requests —
 # redirects, sub-resources, iframes — and each of those is a fresh host the
 # guard never saw. While the frame's private-network deny is on (ALLOWED
-# set: cloud-managed frames), every request the page makes goes through
+# set: LAN access off), every request the page makes goes through
 # here and only a host:port this runtime has already resolved and
 # classified may continue; the rest is aborted and written to
 # BLOCKED_HOSTS_PATH so the runtime can resolve each of them ONCE (the way

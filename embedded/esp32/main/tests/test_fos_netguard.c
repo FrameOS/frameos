@@ -12,8 +12,9 @@
  * (backend/app/tasks/tests/test_esp32_netguard.py does exactly that in CI.)
  *
  * The bias under test is one-directional, like the SD probe next door but for
- * the opposite reason: a wrong "public" lets a cloud-installed scene reach the
- * owner's router, a wrong "private" costs a scene one unreachable host. So
+ * the opposite reason: a wrong "public" lets a scene on a frame with LAN
+ * access off reach the owner's router, a wrong "private" costs a scene one
+ * unreachable host. So
  * every input this cannot parse must come back private, and most of the cases
  * below assert exactly that.
  */
@@ -404,6 +405,83 @@ static void test_unresolvable_is_not_a_block(void)
     CHECK(verdict == FOS_NETGUARD_ALLOWED, "policy off never resolves: verdict %d", (int)verdict);
 }
 
+static bool starts_with(const char *s, const char *prefix)
+{
+    return strncmp(s, prefix, strlen(prefix)) == 0;
+}
+
+static bool ends_with(const char *s, const char *suffix)
+{
+    size_t len = strlen(s);
+    size_t suffix_len = strlen(suffix);
+    return len >= suffix_len && strcmp(s + len - suffix_len, suffix) == 0;
+}
+
+static void test_block_message(void)
+{
+    /* docs/lan-access.md: the SPA matches the prefix to offer a link to the
+     * setting, and the owner acts on the last sentence. Both ends survive
+     * every reason, every buffer that can hold them. */
+    const char *prefix = "LAN access is off for this frame";
+    const char *suffix = "Turn on LAN access in the frame settings.";
+    char msg[192];
+
+    fos_netguard_block_message(msg, sizeof(msg), "192.168.1.5 is a private address", false);
+    CHECK(strcmp(msg, "LAN access is off for this frame (192.168.1.5 is a private address). "
+                      "Turn on LAN access in the frame settings.") == 0, "plain: %s", msg);
+
+    fos_netguard_block_message(msg, sizeof(msg), "10.0.0.1 is a private address", true);
+    CHECK(strcmp(msg, "LAN access is off for this frame (redirect: 10.0.0.1 is a private "
+                      "address). Turn on LAN access in the frame settings.") == 0,
+          "redirect: %s", msg);
+
+    fos_netguard_block_message(msg, sizeof(msg), "", false);
+    CHECK(strcmp(msg, "LAN access is off for this frame. Turn on LAN access in the frame "
+                      "settings.") == 0, "no reason: %s", msg);
+    fos_netguard_block_message(msg, sizeof(msg), NULL, true);
+    CHECK(starts_with(msg, prefix) && ends_with(msg, suffix), "NULL reason: %s", msg);
+
+    /* The glue's reason buffer is 96 bytes and the Nim side's 192: a reason
+     * that long, or longer, is cut in the middle, never at the end. */
+    char long_reason[400];
+    memset(long_reason, 'x', sizeof(long_reason) - 1);
+    long_reason[sizeof(long_reason) - 1] = '\0';
+    size_t sizes[] = {192, 128, 96, 90};
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        char small[192];
+        size_t len = fos_netguard_block_message(small, sizes[i], long_reason, i % 2 == 1);
+        CHECK(len == strlen(small) && len < sizes[i], "size %zu: length %zu", sizes[i], len);
+        CHECK(starts_with(small, prefix), "size %zu: prefix lost: %s", sizes[i], small);
+        CHECK(ends_with(small, suffix), "size %zu: suffix lost: %s", sizes[i], small);
+    }
+
+    /* Too small for both ends: the prefix, as much as fits. */
+    char tiny[24];
+    fos_netguard_block_message(tiny, sizeof(tiny), "192.168.1.5 is a private address", false);
+    CHECK(strncmp(tiny, prefix, sizeof(tiny) - 1) == 0 && strlen(tiny) == sizeof(tiny) - 1,
+          "tiny: %s", tiny);
+    CHECK(fos_netguard_block_message(NULL, 10, "x", false) == 0, "NULL out");
+    CHECK(fos_netguard_block_message(tiny, 0, "x", false) == 0, "zero-length out");
+
+    /* What the scene really gets for a name that resolves privately: the
+     * name and, for an IPv4 answer, the address it resolved to. */
+    fos_netguard_set_policy(true);
+    fos_netguard_clear_exempt();
+    char reason[96] = "";
+    CHECK(fos_netguard_check_url("http://localhost:8123/api", reason, sizeof(reason)) ==
+              FOS_NETGUARD_BLOCKED, "localhost must be blocked");
+    CHECK(starts_with(reason, "localhost resolves to"), "reason %s", reason);
+    CHECK(strstr(reason, "private") != NULL, "reason %s", reason);
+    if (strstr(reason, "address 127.") == NULL) {
+        /* An IPv6-first resolver answers ::1 first; no dotted quad then. */
+        CHECK(strcmp(reason, "localhost resolves to a private address") == 0, "reason %s", reason);
+    }
+    fos_netguard_block_message(msg, sizeof(msg), reason, false);
+    CHECK(starts_with(msg, "LAN access is off for this frame (localhost resolves to"), "%s", msg);
+    CHECK(ends_with(msg, suffix), "%s", msg);
+    fos_netguard_set_policy(false);
+}
+
 int main(void)
 {
     test_ipv4_private_ranges();
@@ -418,8 +496,9 @@ int main(void)
     test_exemptions();
     test_name_resolution();
     test_unresolvable_is_not_a_block();
+    test_block_message();
 
-    /* Leave the guard off: a test binary is not a cloud-managed frame. */
+    /* Leave the guard off: a test binary is a frame with LAN access on. */
     fos_netguard_set_policy(false);
     fos_netguard_clear_exempt();
 

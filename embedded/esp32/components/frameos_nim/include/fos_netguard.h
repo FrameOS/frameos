@@ -1,11 +1,14 @@
 /*
- * Private-network egress policy for scene HTTP.
+ * Private-network egress policy for scene HTTP: the enforcement half of the
+ * frame's LAN access switch (docs/lan-access.md).
  *
- * docs/cloud-frames.md: scenes installed by a cloud provider run *inside the
- * owner's LAN*, so on a cloud-managed frame HTTP to private/link-local
- * addresses is denied — otherwise a compromised provider account (or a
- * malicious JS app pushed through one) turns every frame into an SSRF pivot
- * onto routers, NAS boxes and IoT devices that trust anything on the wire.
+ * A frame sits inside the owner's LAN, and its scenes come from whoever can
+ * install them: a cloud provider, a backend, a store scene. With LAN access
+ * off, scene HTTP to private/link-local addresses is denied, so a scene (or
+ * a compromised account that pushed one) cannot use the frame as an SSRF
+ * pivot onto routers, NAS boxes and IoT devices that trust anything on the
+ * wire. fos_cloud.c owns the trigger (config->allow_local_network, NVS
+ * `lan_access`) and the exemptions (the frame's own control planes).
  *
  * The native (Pi/Linux) build has had this since the cloud link shipped, in
  * frameos/src/frameos/utils/http_client.nim (isPrivateNetworkAddress /
@@ -26,9 +29,10 @@
 extern "C" {
 #endif
 
-/* How many "host:port" exemptions the policy holds. Two is the real need (the
- * provider's API endpoint plus a dev frame-hub on another port); four leaves
- * room without putting a meaningful array on a caller's stack. */
+/* How many "host:port" exemptions the policy holds. Three is the real need
+ * (the provider's API endpoint, a dev frame-hub on another port, the
+ * self-hosted backend); four leaves room without putting a meaningful array
+ * on a caller's stack. */
 #define FOS_NETGUARD_EXEMPT_MAX 4
 /* Longest exempted host kept. A hostname longer than this simply does not get
  * exempted — it never lets an extra address through. */
@@ -39,8 +43,9 @@ extern "C" {
  * wrong name). */
 #define FOS_NETGUARD_HOST_LEN 256
 
-/* Turn the deny on or off. Off (the default) is the standalone /
- * backend-managed frame: the owner's own scenes may talk to the owner's LAN. */
+/* Turn the deny on or off. Off (the default here) is LAN access on: scenes
+ * may talk to the owner's LAN. fos_cloud.c sets it from the LAN access
+ * switch at boot and on every cloud-task tick. */
 void fos_netguard_set_policy(bool block_local);
 
 /* True when the deny is currently active. */
@@ -50,16 +55,17 @@ bool fos_netguard_policy_active(void);
  * the provider we are enrolled with right now. */
 void fos_netguard_clear_exempt(void);
 
-/* Keep `host:port` reachable while the deny is active. The local admin linked
- * this provider deliberately — possibly a dev provider on the LAN — so its own
- * endpoint must not be collateral damage. `port` <= 0 means "any port on this
+/* Keep `host:port` reachable while the deny is active: the frame's own control
+ * planes (the cloud provider it is linked to, the self-hosted backend), which
+ * the owner configured deliberately and which may well sit on the LAN, so a
+ * photo share link or a dev provider is not collateral damage. `port` <= 0 means "any port on this
  * host". Matching is case-insensitive on the host, exactly like the native
  * build's lowercase "host:port" exempt list. Returns false when the list is
  * full or the entry does not fit. */
 bool fos_netguard_set_exempt(const char *host, int port);
 
 /* Is `ip` (a bare IPv4 or IPv6 literal, no brackets, no port) an address a
- * cloud-installed scene must not reach? Covers loopback, RFC1918, link-local,
+ * scene must not reach with LAN access off? Covers loopback, RFC1918, link-local,
  * CGNAT, 0/8, multicast, reserved — and the IPv6 equivalents including the
  * wrappers that carry an IPv4 address (::ffff:a.b.c.d, ::a.b.c.d, 64:ff9b::/96).
  *
@@ -105,6 +111,17 @@ fos_netguard_verdict_t fos_netguard_check_url(const char *url, char *reason, siz
 
 /* fos_netguard_check_url() == FOS_NETGUARD_ALLOWED. */
 bool fos_netguard_url_allowed(const char *url, char *reason, size_t reason_len);
+
+/* The error a scene gets for a FOS_NETGUARD_BLOCKED request (the redirect
+ * hop's when `redirect`), the same sentence on every frame type:
+ *
+ *   LAN access is off for this frame (<reason>). Turn on LAN access in the frame settings.
+ *
+ * The prefix is what the SPA matches to offer a link to the setting, and the
+ * last sentence is what the owner acts on, so `reason` is what gets cut when
+ * `out` is short; only a buffer too small for both ends keeps the prefix
+ * alone. Returns the length written. */
+size_t fos_netguard_block_message(char *out, size_t out_len, const char *reason, bool redirect);
 
 #ifdef __cplusplus
 }

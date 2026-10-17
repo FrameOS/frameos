@@ -118,6 +118,8 @@ export default tseslint.config(
       "**/src/test/shared-spa/custom-event-origins.test.ts",
       // Mounts frameLogic for Save & Deploy; out of the tsconfig too.
       "**/src/test/shared-spa/save-and-deploy-waits-for-save.test.ts",
+      // Mounts lanAccessLogic and renders FrameSettings; out of the tsconfig too.
+      "**/src/test/shared-spa/lan-access.test.tsx",
     ],
   },
   js.configs.recommended,

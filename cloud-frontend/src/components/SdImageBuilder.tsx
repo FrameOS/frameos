@@ -22,6 +22,7 @@ import {
 } from '../lib/release-signing'
 import { useValues } from 'kea'
 import { SshKeysSection } from '../../../frontend/src/components/sshKeys/SshKeysSection'
+import { LanAccessToggle } from './LanAccessToggle'
 import { sshKeysLogic } from '../../../frontend/src/components/sshKeys/sshKeysLogic'
 
 // The zone the card's frame should keep its clock in: the browser's, since
@@ -263,6 +264,8 @@ export function SdImageBuilder({
         // enough to say so. Unknown board = no seed, and the select holds its
         // "Pick a board…" placeholder.
         buildrootPlatform?: string | undefined
+        // The frame's current LAN access, so a new card keeps it.
+        lanAccess?: boolean | undefined
       }
     | undefined
 }): ReactElement {
@@ -281,6 +284,8 @@ export function SdImageBuilder({
   // access point on 2.4 GHz channel 12 or 13 (common in Europe).
   const [wifiCountry, setWifiCountry] = useState(() => browserWifiCountry())
   const [rememberWifi, setRememberWifi] = useState(remembered !== undefined)
+  // Off unless chosen: scenes on a new frame cannot reach local addresses.
+  const [lanAccess, setLanAccess] = useState(reenrollFrame?.lanAccess === true)
   // Console login on the device: either a real root password (written into
   // the image in-browser, applied via chpasswd on first boot — which also
   // re-enables SSH password login), or an explicit opt-in to the image
@@ -341,6 +346,7 @@ export function SdImageBuilder({
       rootPassword: rootPassword || undefined,
       timeZone: browserTimeZone(),
       sshPublicKeys,
+      lanAccess,
     })
   } catch {
     // A value the region cannot hold (quotes, control characters): the
@@ -593,6 +599,7 @@ export function SdImageBuilder({
         rootPassword: rootPassword || undefined,
         timeZone: browserTimeZone(),
         sshPublicKeys,
+        lanAccess,
       })
 
       setStatus(`Downloading ${board.asset.name}…`)
@@ -964,6 +971,7 @@ export function SdImageBuilder({
               />
               Remember WiFi credentials in this browser (never sent to the cloud)
             </label>
+            <LanAccessToggle disabled={building} value={lanAccess} onChange={setLanAccess} />
           </FormGroup>
           <FormGroup
             title="Root access"

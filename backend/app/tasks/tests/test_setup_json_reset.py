@@ -950,3 +950,71 @@ def test_wpa_mirror_keeps_a_raw_hex_psk_on_wpa2_only(tmp_path):
     assert "SAE" not in conf
     assert "ieee80211w" not in conf
     assert "psk=" + "a" * 64 in conf
+
+
+def _lan_access_file(sandbox: Sandbox) -> Path:
+    return sandbox.srv / "frameos" / "current" / "state" / "local_access.json"
+
+
+def test_cloud_lan_access_seeds_the_runtimes_state_file(tmp_path):
+    # The SD-image builder's switch: the runtime reads state/local_access.json
+    # (frameos/local_access.nim), the device's truth.
+    sandbox = Sandbox(tmp_path)
+    cloud_file = sandbox.write_cloud_file("claim_token=FRCT-lan\nlan_access=0\n")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(_lan_access_file(sandbox).read_text(encoding="utf-8")) == {"allowLocalNetworkAccess": False}
+    assert _mode(_lan_access_file(sandbox)) == 0o600
+    # Consumed once, like every other key; the claim token is not touched by it.
+    assert not cloud_file.exists()
+    assert json.loads(sandbox.pending_file.read_text(encoding="utf-8"))["claim_token"] == "FRCT-lan"
+
+    # Without python3 the fallback writes the same file.
+    _lan_access_file(sandbox).unlink()
+    sandbox.write_cloud_file("claim_token=FRCT-lan2\nlan_access=TRUE\n")
+    result = sandbox.run(disable_python3=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(_lan_access_file(sandbox).read_text(encoding="utf-8")) == {"allowLocalNetworkAccess": True}
+
+
+def test_cloud_lan_access_never_overwrites_a_value_the_frame_already_has(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    state = _lan_access_file(sandbox)
+    state.parent.mkdir(parents=True)
+    state.write_text('{"allowLocalNetworkAccess": true, "updatedAt": "2026-10-01T00:00:00+00:00"}\n', encoding="utf-8")
+    cloud_file = sandbox.write_cloud_file("lan_access=0\n")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(state.read_text(encoding="utf-8"))["allowLocalNetworkAccess"] is True
+    assert "Keeping the LAN access setting" in result.stdout
+    # A lan_access-only file is still consumed.
+    assert not cloud_file.exists()
+
+
+def test_cloud_lan_access_that_is_not_a_switch_is_dropped_with_a_warning(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    sandbox.write_cloud_file("claim_token=FRCT-lan3\nlan_access=maybe\n")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ignoring lan_access 'maybe'" in result.stdout
+    assert not _lan_access_file(sandbox).exists()
+
+
+def test_cloud_lan_access_hands_the_file_to_the_runtime_user(tmp_path):
+    sandbox = Sandbox(tmp_path)
+    (sandbox.etc / "passwd").write_text("root:x:0:0:root:/root:/bin/sh\nframeos:x:990:990::/:/bin/false\n")
+    sandbox.write_cloud_file("lan_access=1\n")
+
+    result = sandbox.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(_lan_access_file(sandbox).read_text(encoding="utf-8")) == {"allowLocalNetworkAccess": True}
+    # chown may fail in this sandbox (no frameos account); the chmod proves
+    # the account-detected branch ran, as for the enrollment state.
+    assert _mode(_lan_access_file(sandbox).parent) == 0o1770

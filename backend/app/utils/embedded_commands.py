@@ -47,6 +47,8 @@ COMMAND_LABELS: dict[str, str] = {
     "notify_update_available": "Check for a firmware update",
     "set_scenes": "Deploy scenes",
     "set_settings": "Deploy settings",
+    "lan_access_challenge": "Show the LAN access code",
+    "lan_access_set": "LAN access",
 }
 
 

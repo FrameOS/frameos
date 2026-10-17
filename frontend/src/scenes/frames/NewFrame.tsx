@@ -27,6 +27,7 @@ import {
   virtualColorModes,
 } from '../../devices'
 import { defaultRemoteControl, newFrameForm } from './newFrameForm'
+import { LAN_ACCESS_HELP } from '../frame/panels/FrameSettings/lanAccess'
 import {
   FrameEmbeddedHardwarePreset,
   FrameInstallMethod,
@@ -136,6 +137,26 @@ function RemoteControlField({
               : 'Disabled — this backend reaches the frame'}
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// Chosen at setup, so no code on the panel is needed. Changing it later in
+// the frame settings asks the frame to show one.
+function LanAccessField({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean
+  onChange: (enabled: boolean) => void
+}): JSX.Element {
+  return (
+    <div className="space-y-2">
+      <div className="frameos-form-label text-sm font-semibold text-slate-700">LAN access</div>
+      <div className="frame-tool-panel space-y-1">
+        <Switch value={enabled} onChange={onChange} label={enabled ? 'On' : 'Off'} aria-label="LAN access" />
+        <div className="frameos-form-hint text-xs leading-relaxed text-slate-500">{LAN_ACCESS_HELP}</div>
       </div>
     </div>
   )
@@ -1106,6 +1127,10 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
           </FormField>
           {renderNewFrameDriverConfig(newFrame, setNewFrameValue)}
           <RemoteControlField enabled={remoteControlFor('ssh')} onChange={setRemoteControl} />
+          <LanAccessField
+            enabled={newFrame.lan_access === true}
+            onChange={(value) => setNewFrameValue('lan_access', value)}
+          />
           <div className="flex gap-2 pt-2">
             <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button
@@ -1170,6 +1195,10 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
             </select>
           </FormField>
           {renderNewFrameDriverConfig(newFrame, setNewFrameValue)}
+          <LanAccessField
+            enabled={newFrame.lan_access === true}
+            onChange={(value) => setNewFrameValue('lan_access', value)}
+          />
           <div className="flex gap-2 pt-2">
             <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button
@@ -1302,6 +1331,10 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
           <Field name="rememberWifi">
             <Checkbox label="Remember wifi details for next time" />
           </Field>
+          <LanAccessField
+            enabled={newFrame.lan_access === true}
+            onChange={(value) => setNewFrameValue('lan_access', value)}
+          />
           <div className="flex gap-2 pt-2">
             <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button
@@ -1466,6 +1499,10 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
           <Field name="rememberWifi">
             <Checkbox label="Remember wifi details for next time" />
           </Field>
+          <LanAccessField
+            enabled={newFrame.lan_access === true}
+            onChange={(value) => setNewFrameValue('lan_access', value)}
+          />
           <div className="flex gap-2 pt-2">
             <AddFrameSubmitButton loading={isNewFrameSubmitting} />
             <button

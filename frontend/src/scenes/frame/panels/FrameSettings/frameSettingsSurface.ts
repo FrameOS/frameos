@@ -289,6 +289,14 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     surfaces: ['backend', 'frameAdmin'],
   },
   {
+    key: 'lan-access',
+    title: 'LAN access',
+    anchor: 'frame-settings-lan-access',
+    surfaces: ['backend', 'frameAdmin', 'cloudLinux', 'cloudEsp32'],
+    conditions:
+      'Next to Network but bound to no form field: the device changes the value (a code on its panel to turn it on) and the plane mirrors it. The switch is disabled while the frame reports no value (cloud firmware that predates it).',
+  },
+  {
     key: 'mountpoints',
     title: 'Mountpoints',
     anchor: 'frame-settings-mountpoints',

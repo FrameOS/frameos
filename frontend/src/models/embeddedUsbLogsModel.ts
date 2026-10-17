@@ -1319,6 +1319,8 @@ export type EmbeddedUsbConfigKey =
   | 'buzzer_tone_hz'
   | 'pins'
   | 'gpio_buttons'
+  // LAN access (0/1), chosen when the frame is set up.
+  | 'allow_local_network'
 
 export interface EmbeddedUsbWifiNetwork {
   ssid: string

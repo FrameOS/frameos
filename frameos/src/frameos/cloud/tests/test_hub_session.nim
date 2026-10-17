@@ -13,6 +13,7 @@ import ../identity
 import ../link_state
 import ../../types
 import ../../channels
+import ../../local_access
 import ../../utils/http_client
 
 const TestPort = 19468
@@ -224,7 +225,15 @@ suite "cloud hub session over a live socket":
               return true
         false)
 
-  test "managed mode activates the private-network deny with a provider exemption":
+  test "being managed arms nothing: LAN access is the frame's switch":
+    # No state file in this sandbox: a frame from before the switch, on. The
+    # hello says so, and the deny stays off although the frame is managed.
+    withLock stubLock:
+      check recorded.hello{"hardware"}{"lanAccess"}.getBool(false) == true
+    check not localNetworkPolicySnapshot().active
+
+  test "LAN access off denies a managed frame too, with its provider exempt":
+    persistLocalNetworkAccess(false)
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       localNetworkPolicySnapshot().active)
     let snapshot = localNetworkPolicySnapshot()
@@ -232,13 +241,25 @@ suite "cloud hub session over a live socket":
     # exempt — the local admin linked it deliberately.
     check snapshot.exemptHostPorts == @["127.0.0.1:" & $TestPort]
 
-  test "the local admin override lifts the deny while managed":
-    frameConfig.network = NetworkConfig(allowLocalNetworkAccess: true)
+  test "a LAN access change made anywhere reaches the provider as a state":
+    proc lanAccessStates(value: bool): int {.gcsafe.} =
+      for state in repliesOfType("state"):
+        if state{"hardware"}{"lanAccess"} != nil and
+            state{"hardware"}{"lanAccess"}.getBool(not value) == value:
+          result += 1
+    let onBefore = lanAccessStates(true)
+    # As the frame's admin page (or the backend relaying a toggle) does it.
+    persistLocalNetworkAccess(true)
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       not localNetworkPolicySnapshot().active)
-    frameConfig.network = NetworkConfig(allowLocalNetworkAccess: false)
+    check waitUntil(10.0, proc(): bool {.gcsafe.} =
+      lanAccessStates(true) > onBefore)
+    let offBefore = lanAccessStates(false)
+    persistLocalNetworkAccess(false)
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       localNetworkPolicySnapshot().active)
+    check waitUntil(10.0, proc(): bool {.gcsafe.} =
+      lanAccessStates(false) > offBefore)
 
   test "an oversized inbound message drops the session instead of allocating":
     # ws 0.5.0 would happily assemble whatever length the provider claims; the
@@ -272,7 +293,12 @@ suite "cloud hub session over a live socket":
       {.gcsafe.}:
         withLock stubLock:
           result = recorded.closed)
-    # Standalone again: the private-network deny is gone.
+    # Standalone again, and still denied: the deny is the LAN access
+    # switch's (off since the test above), not the link's. Recomputed here
+    # rather than waited for: it is what the hub thread's next pass does.
+    refreshLocalNetworkPolicy(frameConfig)
+    check localNetworkPolicySnapshot().active
+    persistLocalNetworkAccess(true)
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       not localNetworkPolicySnapshot().active)
 

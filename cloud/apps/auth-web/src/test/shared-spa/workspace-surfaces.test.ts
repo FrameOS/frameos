@@ -326,7 +326,13 @@ describe("the esp32 cloud device profile", () => {
     // Power, Colors (the firmware took the `colors` block in 2026.10.2) and
     // Palette (the colour list, 2026.10.4) — the sections CloudEsp32Sections
     // renders under their own heading.
-    const esp32Sections = ["frame-settings-power", "frame-settings-palette", "frame-settings-colors"];
+    // LAN access too: the switch is a device verb, not a pushed setting.
+    const esp32Sections = [
+      "frame-settings-power",
+      "frame-settings-palette",
+      "frame-settings-colors",
+      "frame-settings-lan-access",
+    ];
     for (const section of esp32Sections) {
       expect(frameSettingsSectionIsAllowed("cloud", section, esp32Frame), section).toBe(true);
     }

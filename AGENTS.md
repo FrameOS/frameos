@@ -229,6 +229,29 @@
   moderation: it scores `sexual/minors` on text only. Any new table holding photo objects goes into
   `cloud/scripts/object-store-sweep.sh`, or the sweep deletes the photos.
 
+## LAN access: one switch per frame, `docs/lan-access.md`
+
+- Whether a frame's scenes may reach its LAN (Home Assistant, a NAS,
+  `192.168.x.x`) is the frame's **LAN access** switch, on every frame type and
+  both control planes. It is chosen in every add-frame form (next to Wi-Fi) and
+  changed in the frame settings. It is never a permission apps or scenes declare
+  (the owner's decision, 2026-10-17). Off blocks private addresses in the scene
+  HTTP policy, except the frame's own control planes by exact `host:port`.
+- Turning it **on** after setup takes the six-digit code the frame draws on its
+  panel (`lan_access_challenge` / `lan_access_set`, or the Pi's
+  `/api/network/local-access*`). Off is free. The device holds the truth
+  (`state/local_access.json`; ESP32 NVS `lan_access`). The planes mirror it
+  (backend `frame.lan_access`, cloud `hardware.lanAccess`), and frame.json's
+  `network.lanAccess` is only a seed read once. A frame with no stored value
+  predates the switch and is on.
+- **A presence code must never leave the device in an image.** Draw it after
+  the stored image (Pi: after `setLastImage`; ESP32: restore the rectangle
+  before `store_snapshot`). Keep it away from every sink: `GET /image` (incl.
+  e-ink drivers' own `toPng`), `image_get`, scene snapshots, the ESP32 BMP push,
+  the `http.upload` driver.
+- The blocked-request text starts with `LAN access is off for this frame`. The
+  SPA's logs panel matches that prefix, so keep it on both runtimes.
+
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】
 - `frontend/` – React + TypeScript single-page application built with esbuild, Tailwind, and kea state management. Compiled assets live in `frontend/dist` and are served by the backend when present. 【F:frontend/package.json†L1-L66】【F:backend/app/fastapi.py†L38-L86】

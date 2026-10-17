@@ -20,6 +20,8 @@ idf_component_register(
         "fos_ota.c"
         "fos_minisig.c"
         "fos_status_screen.c"
+        "fos_panel_draw.c"
+        "fos_lan_access.c"
         "fos_console.c"
         "fos_scenes.c"
         "fos_scene_state.c"

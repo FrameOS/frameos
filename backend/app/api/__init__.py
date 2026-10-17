@@ -36,6 +36,7 @@ from .virtual_frame import *  # noqa: E402, F403
 from .firmware_release import *  # noqa: E402, F403
 from .frame_bootstrap import *  # noqa: E402, F403
 from .frames import *  # noqa: E402, F403
+from .frame_lan_access import *  # noqa: E402, F403
 from .fonts import *  # noqa: E402, F403
 from .log import *  # noqa: E402, F403
 from .photos import *  # noqa: E402, F403

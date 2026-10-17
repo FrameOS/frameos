@@ -1160,6 +1160,85 @@ describe("command redelivery", () => {
   });
 });
 
+// The frame-level LAN access switch: the device reports it as
+// hardware.lanAccess (hello and state), and the code the owner types rides
+// lan_access_set to the device and is dropped from the row once answered.
+describe("LAN access", () => {
+  it("stores the reported switch from hello and from state", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey, { hardware: { lanAccess: false, platform: "esp32s3" } });
+    await waitFor(async () => {
+      const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      return (row?.hardware as Record<string, unknown> | null)?.lanAccess === false ? row : undefined;
+    }, "lanAccess from hello");
+    device.send({
+      hardware: { lanAccess: true, platform: "esp32s3" },
+      id: randomUUID(),
+      states: { active_scene: "clock" },
+      type: "state",
+    });
+    const row = await waitFor(async () => {
+      const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      return (r?.hardware as Record<string, unknown> | null)?.lanAccess === true ? r : undefined;
+    }, "lanAccess from state");
+    expect(row.hardware).toEqual({ lanAccess: true, platform: "esp32s3" });
+    device.ws.close();
+  });
+
+  it("delivers the code and drops it from the row once the device answers", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey, { hardware: { lanAccess: false, platform: "buildroot" } });
+
+    const refused = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { code: "000000", enabled: true },
+      ttlMs: 60_000,
+      type: "lan_access_set",
+    });
+    const first = await device.next((msg) => msg.id === refused?.id, "first lan_access_set");
+    expect(first).toMatchObject({ code: "000000", enabled: true, type: "lan_access_set" });
+    device.send({ error: "invalid_code", id: first.id, ok: false, type: "ack" });
+    const failed = await waitFor(async () => {
+      const [r] = await db.select().from(frameCommands).where(eq(frameCommands.id, String(first.id)));
+      return r?.status === "failed" ? r : undefined;
+    }, "refused lan_access_set");
+    expect(failed.error).toBe("invalid_code");
+    expect(failed.payload).toEqual({ enabled: true });
+
+    const accepted = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { code: "482913", enabled: true },
+      ttlMs: 60_000,
+      type: "lan_access_set",
+    });
+    const second = await device.next((msg) => msg.id === accepted?.id, "second lan_access_set");
+    device.send({ id: second.id, lan_access: true, ok: true, type: "ack" });
+    const acked = await waitFor(async () => {
+      const [r] = await db.select().from(frameCommands).where(eq(frameCommands.id, String(second.id)));
+      return r?.status === "acked" ? r : undefined;
+    }, "accepted lan_access_set");
+    expect(acked.payload).toEqual({ enabled: true });
+
+    // Any other verb's payload is left as it was.
+    const other = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { code: "kept", scene_id: "scene-a" },
+      ttlMs: 60_000,
+      type: "set_current_scene",
+    });
+    const third = await device.next((msg) => msg.id === other?.id, "set_current_scene");
+    device.send({ id: third.id, ok: true, type: "ack" });
+    const untouched = await waitFor(async () => {
+      const [r] = await db.select().from(frameCommands).where(eq(frameCommands.id, String(third.id)));
+      return r?.status === "acked" ? r : undefined;
+    }, "set_current_scene acked");
+    expect(untouched.payload).toEqual({ code: "kept", scene_id: "scene-a" });
+    device.ws.close();
+  });
+});
+
 // The hub writes the device side of the per-frame audit trail itself
 // (cloud/docs/cloud-frames.md "Account hardening"): account-scoped rows with
 // actor.kind = "device" and target.frameId, which auth-web's

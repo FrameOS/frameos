@@ -1,6 +1,6 @@
 /*
  * Private-network egress policy for scene HTTP — see fos_netguard.h for what
- * this is for and why it exists on cloud-managed frames.
+ * this is for: the enforcement behind the frame's LAN access switch.
  *
  * Deliberately log-free and IDF-free apart from the FreeRTOS spinlock and the
  * getaddrinfo() in fos_netguard_url_allowed(): the callers own the ESP_LOGW,
@@ -517,13 +517,21 @@ fos_netguard_verdict_t fos_netguard_check_url(const char *url, char *reason, siz
     }
 
     bool allowed = true;
+    /* The private IPv4 answer, for the message: "homeassistant.local resolves
+     * to private address 192.168.1.5" tells the owner which device it was. */
+    uint8_t private_v4[4];
+    bool have_private_v4 = false;
     for (const struct addrinfo *ai = result; ai != NULL && allowed; ai = ai->ai_next) {
         if (ai->ai_addr == NULL) continue;
         if (ai->ai_family == AF_INET) {
             const struct sockaddr_in *sin = (const struct sockaddr_in *)(const void *)ai->ai_addr;
             uint8_t bytes[4];
             memcpy(bytes, &sin->sin_addr, sizeof(bytes));
-            if (ipv4_is_private(bytes)) allowed = false;
+            if (ipv4_is_private(bytes)) {
+                allowed = false;
+                memcpy(private_v4, bytes, sizeof(private_v4));
+                have_private_v4 = true;
+            }
 /* lwIP collapses AF_INET6 onto AF_UNSPEC and omits struct sockaddr_in6 when
  * built without IPv6, so testing for definedness is useless — it is always
  * defined. Without the branch an IPv6 answer falls into the else below and is
@@ -542,9 +550,42 @@ fos_netguard_verdict_t fos_netguard_check_url(const char *url, char *reason, siz
     freeaddrinfo(result);
 
     if (!allowed) {
-        if (reason != NULL && reason_len > 0) {
+        if (reason != NULL && reason_len > 0 && have_private_v4) {
+            snprintf(reason, reason_len, "%s resolves to private address %u.%u.%u.%u", host,
+                     (unsigned)private_v4[0], (unsigned)private_v4[1],
+                     (unsigned)private_v4[2], (unsigned)private_v4[3]);
+        } else if (reason != NULL && reason_len > 0) {
             snprintf(reason, reason_len, "%s resolves to a private address", host);
         }
     }
     return allowed ? FOS_NETGUARD_ALLOWED : FOS_NETGUARD_BLOCKED;
+}
+
+/* ----------------------------------------------------------- the message */
+
+#define BLOCK_PREFIX "LAN access is off for this frame"
+#define BLOCK_SUFFIX ". Turn on LAN access in the frame settings."
+
+size_t fos_netguard_block_message(char *out, size_t out_len, const char *reason, bool redirect)
+{
+    if (out == NULL || out_len == 0) return 0;
+    const char *detail = reason != NULL ? reason : "";
+    const char *lead = detail[0] ? (redirect ? " (redirect: " : " (") : "";
+    const char *close = detail[0] ? ")" : "";
+    /* What the prefix, the lead-in and the suffix take; the reason gets the
+     * rest. It is the part that may be cut — never the two ends the SPA and
+     * the owner read. */
+    const size_t fixed = strlen(BLOCK_PREFIX) + strlen(lead) + strlen(close) + strlen(BLOCK_SUFFIX);
+    if (fixed >= out_len) {
+        /* Too small for the whole sentence: keep what fits of the prefix,
+         * which is what a reader matches on. */
+        snprintf(out, out_len, "%s", BLOCK_PREFIX);
+        return strlen(out);
+    }
+    size_t room = out_len - 1 - fixed;
+    size_t detail_len = strlen(detail);
+    if (detail_len > room) detail_len = room;
+    int written = snprintf(out, out_len, "%s%s%.*s%s%s", BLOCK_PREFIX, lead, (int)detail_len,
+                           detail, close, BLOCK_SUFFIX);
+    return written < 0 ? 0 : strlen(out);
 }

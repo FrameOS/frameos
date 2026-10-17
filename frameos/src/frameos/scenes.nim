@@ -360,11 +360,6 @@ var
   uploadedScenesSource {.guard: uploadedScenePayloadLock.} = ""
   uploadedStateCleanupRan = false
 
-# Lets the cloud module recompute the LAN-deny policy when the uploaded scene
-# set (and with it the recorded source) changes — scenes.nim cannot import
-# hub_client, which imports this module. Registered by startCloudManagement.
-var uploadedScenesChangedHook*: proc() {.gcsafe.} = nil
-
 proc setUploadedScenePayload*(payload: string) =
   withLock uploadedScenePayloadLock:
     uploadedScenePayload = payload
@@ -375,9 +370,10 @@ proc setUploadedScenesSource(source: string) =
 
 proc cloudUploadedScenesResident*(): bool =
   ## True while the resident uploaded scene set was pushed by a cloud
-  ## provider. Keeps the private-network deny keyed to the scenes themselves:
-  ## a frame demoted out of the managed state still runs them, so it keeps
-  ## the deny until they are replaced.
+  ## provider: such a set is re-checked for refused apps at load time, and
+  ## shadows the frame's own scene of the same public id (runner.nim,
+  ## selectScene). Until 2026.10.17 it also armed the private-network deny;
+  ## the frame's LAN access switch alone decides that now.
   {.gcsafe.}:
     var isCloud = false
     withLock uploadedScenePayloadLock:
@@ -541,10 +537,6 @@ proc updateUploadedScenesFromPayload*(
   updateUploadedScenes(newScenes)
   setUploadedScenePayload(payloadString)
   setUploadedScenesSource(payloadSource)
-  # The LAN-deny policy keys on the recorded source; recompute it now rather
-  # than on the next hub tick (the hub thread idles on a demoted frame).
-  if not uploadedScenesChangedHook.isNil:
-    uploadedScenesChangedHook()
   for sceneId in oldUploaded.keys:
     if sceneId.string.startsWith("uploaded/") and not newScenes.hasKey(sceneId):
       removePersistedState(sceneId)

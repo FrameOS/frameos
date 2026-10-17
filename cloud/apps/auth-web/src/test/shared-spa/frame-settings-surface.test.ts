@@ -148,4 +148,14 @@ describe("what each surface may render", () => {
     expect(frameSettingsSectionRenders("ssh", "frameAdmin")).toBe(false);
     expect(frameSettingsSectionRenders("remote-agent", "frameAdmin")).toBe(false);
   });
+
+  it("renders and links LAN access on every surface", () => {
+    // One switch per frame, on every control plane and the frame's own page.
+    for (const surface of surfaces) {
+      expect(frameSettingsSectionRenders("lan-access", surface), surface).toBe(true);
+    }
+    for (const mode of modes) {
+      expect(allowedFrameSettingsSections[mode], mode).toContain("frame-settings-lan-access");
+    }
+  });
 });

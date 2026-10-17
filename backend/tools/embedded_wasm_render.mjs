@@ -29,8 +29,7 @@
 // that bridge so scene apps' HTTP works exactly like on a physical frame —
 // the device fetches xkcd/weather/etc directly, and so does this. Like on
 // the device, scene HTTP is kept off the local network unless the frame's
-// `network.allowLocalNetworkAccess` says otherwise (`allowLocalNetwork` in
-// the request): every hop of a redirect chain is resolved and classified
+// LAN access switch is on (`allowLocalNetwork` in the request): every hop of a redirect chain is resolved and classified
 // before it is connected, credentials are dropped when a redirect leaves the
 // origin, and the cloud metadata address is always refused. This is the
 // third runtime scene code runs in (after the Pi and the ESP32) and it sits
@@ -122,7 +121,9 @@ async function checkTarget(url, allowLocal) {
       throw new Error('blocked: cloud metadata address');
     }
     if (!allowLocal && isLocalAddress(address)) {
-      throw new Error('blocked: local network access is off for this frame (network.allowLocalNetworkAccess)');
+      // The devices' wording, so the workspace links the line to the switch.
+      const name = host === address ? host : host + ' (' + address + ')';
+      throw new Error('LAN access is off for this frame, so ' + name + ' cannot be reached. Turn on LAN access in the frame settings.');
     }
   }
 }
@@ -245,8 +246,8 @@ async function readStdin() {
 
 const request = JSON.parse(await readStdin())
 const { assetsDir, width, height } = request
-// The frame's network.allowLocalNetworkAccess, decided by the Python caller.
-// Off by default, exactly like on the device.
+// The frame's LAN access switch, decided by the Python caller (frame.lan_access).
+// Off unless the request says otherwise.
 ALLOW_LOCAL_NETWORK = request.allowLocalNetwork === true
 if (!assetsDir || !Number.isInteger(width) || !Number.isInteger(height)) {
   fail('assetsDir, width and height are required')

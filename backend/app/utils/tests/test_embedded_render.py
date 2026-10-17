@@ -100,3 +100,49 @@ async def test_render_queue_refuses_past_the_waiter_cap(monkeypatch, tmp_path):
     assert all(result == b"\x00" * 16 for result in results)
     assert embedded_render.render_queue_depth() == 0
     assert await render() == b"\x00" * 16
+
+
+@pytest.mark.asyncio
+async def test_the_renderer_obeys_the_frames_lan_access_switch(monkeypatch, tmp_path):
+    """Scenes the backend renders run on the backend's own network: they may
+    reach the LAN only with the frame's switch on (frame.lan_access), never
+    because of the legacy network.allowLocalNetworkAccess key."""
+    import json
+    from types import SimpleNamespace
+
+    from app.utils import embedded_render
+
+    requests: list[dict] = []
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self, request_bytes):
+            requests.append(json.loads(request_bytes))
+            return b"\x00" * 16, b""
+
+        def kill(self):
+            pass
+
+        async def wait(self):
+            return 0
+
+    async def fake_exec(*_args, **_kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(embedded_render.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(embedded_render.shutil, "which", lambda _name: "/usr/bin/node")
+    monkeypatch.setattr(embedded_render, "wasm_assets_dir", lambda: tmp_path)
+    monkeypatch.setattr(embedded_render, "RENDER_HARNESS", Path(embedded_render.__file__))
+    monkeypatch.setattr(embedded_render, "_render_semaphore", asyncio.Semaphore(embedded_render.RENDER_CONCURRENCY))
+    monkeypatch.setattr(embedded_render, "_render_waiters", 0)
+
+    scenes = [{"id": "s", "nodes": [], "edges": []}]
+    for lan_access, network, expected in (
+        (True, {}, True),
+        (False, {"allowLocalNetworkAccess": True}, False),
+        (None, {"allowLocalNetworkAccess": True}, False),
+    ):
+        frame = SimpleNamespace(id=1, name="f", timezone=None, network=network, scenes=scenes, lan_access=lan_access)
+        assert await embedded_render.render_scene_rgba(frame, 2, 2) == b"\x00" * 16
+        assert requests[-1]["allowLocalNetwork"] is expected

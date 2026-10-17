@@ -385,82 +385,86 @@ read — does not count against the budget, so a slow-but-honest scene is not
 mistaken for a spinning one. A blown budget is logged as a scene error and the
 node's value is defaulted, exactly like any other failing node.
 
-**RFC1918 / link-local HTTP is blocked by default** on cloud-managed frames,
-on both the native and the ESP32 builds. A malicious scene is *inside the
-owner's LAN*; without this, a compromised account becomes an SSRF pivot onto
-routers and IoT devices — exactly the outcome this design exists to prevent.
+**LAN access is one switch per frame** (`docs/lan-access.md`). With it off,
+RFC1918 / link-local / loopback HTTP from scenes is refused, on both the native
+and the ESP32 builds. A malicious scene is *inside the owner's LAN*; without
+this, a compromised account becomes an SSRF pivot onto routers and IoT devices.
 The check is on the resolved address rather than the hostname, so a
 DNS-rebinding answer does not slip past, and every redirect hop is re-checked.
 Native: `isPrivateNetworkAddress` / `enforceLocalNetworkPolicy` in
 `utils/http_client.nim`. ESP32: `fos_netguard.c`, enforced in
 `frameos_nim_glue.c` around each `esp_http_client_open()`. Keep the two
-classifiers in step.
+classifiers in step. It is one layer, not the boundary: what the frame can
+reach at all is the network's call (a separate network or VLAN for devices it
+must never touch).
 
-**Elevation requires a local-presence ceremony.** A scene that legitimately
-needs LAN access (Home Assistant, say) needs `network.allowLocalNetworkAccess`,
-and that switch is deliberately hard to reach. It is absent from
-`CLOUD_SETTINGS_ALLOWLIST`, so the provider cannot set it; it is stripped from
-the bulk config save, so neither the cloud verb nor the admin page's frame save
-can carry it. It moves only through the ceremony in `frameos/local_access.nim`:
-`POST /api/network/local-access/challenge` puts a six-digit code on the panel
-for three minutes, and `POST /api/network/local-access` applies the change only
-if that code comes back. The code is never in an API response, single-use, and
-capped at five attempts — someone who cannot see the screen cannot complete it.
-On ESP32 the equivalent is `set allow_local_network 1` on the USB console,
-which is physical presence by construction.
+The owner picks the value when the frame is created (every add-frame form, next
+to Wi-Fi; off by default), and frames that existed before the switch read as
+on. The switch applies to every frame. Before it existed (October 2026), the
+deny was armed only on cloud-managed frames and frames still running
+cloud-pushed scenes, and lifting it took the frame's own admin page.
+
+**Turning it on takes a code read off the panel.** The provider cannot set it:
+it is not in `CLOUD_SETTINGS_ALLOWLIST`, the bulk config save strips it, and a
+fixture pins `lan_access` as `setting_not_allowed`. The frame settings' "LAN
+access" switch sends `lan_access_challenge` (the routes are
+`POST /api/frames/{id}/lan_access/challenge` and `POST /api/frames/{id}/lan_access`,
+the same on the backend). The frame draws a six-digit code on its panel for
+five minutes. The owner types it into the page, and `lan_access_set {enabled:
+true, code}` turns LAN access on only if it matches. The code is never in an
+API response or a command listing, never in an image the frame sends
+(`image_get`, `/image`, the ESP32's BMP push, the `http.upload` driver), single
+use and capped at five attempts. Someone who cannot see the screen cannot
+complete it. Turning it off needs no code. On ESP32,
+`set allow_local_network 1` on the USB console is the other way on, physical
+presence by construction. On the Pi the ceremony is `frameos/local_access.nim`;
+`POST /api/network/local-access/challenge` and `POST /api/network/local-access`
+on the frame's admin API take an admin session or the backend's serverApiKey
+bearer.
 
 The same ceremony carries a second, Pi-only fact: whether
 `data/chromiumScreenshot` may run its browser unsandboxed on a frame where
 FrameOS runs as root — `POST /api/network/local-access` with
 `{"scope": "shellApps", "enabled": true, "code": …}`. Off by default.
 
-**Shell apps and the LAN deny follow the scene's content and the installer,
-not its provenance.** Until 2026.10.16 a scene stamped with a store id
+**Shell apps follow the scene's content and the installer, not its
+provenance.** Until 2026.10.16 a scene stamped with a store id
 (`origin.storeSceneId`) needed that ceremony before it could run either
 process-spawning app (`data/chromiumScreenshot`, `data/rstpSnapshot`), and
 its presence armed the private-network deny on any frame, self-hosted ones
 included. A stamp is not something the frame can keep true across copies,
-forks and imports, so neither check reads it any more. A scene that uses
+forks and imports, so no check reads it any more. A scene that uses
 either app says so in its own JSON, every surface shows it as "runs shell
 commands", and installing it is the approval; cloud-managed frames still
 refuse both apps outright. Whatever the scene, the URL such an app hands to
 its child process passes the same private-network policy as the HTTP client
-(`frameos/spawn_guard.nim`). The deny itself is armed by who installed the
-scenes: a cloud-managed frame, or scenes the cloud pushed.
+(`frameos/spawn_guard.nim`).
 
 Both are persisted in `state/local_access.json`, deliberately not in `frame.json`.
 A backend deploy uploads a freshly generated `frame.json` over SSH and never
 round-trips the device's copy, so a setting stored there is quietly reset by
 the next unrelated deploy — fail-safe, but baffling to debug a week later when
 the Home Assistant scene stops working. Under `state/` it also says the right
-thing about what this is: a device-local fact established by someone standing
-in front of the frame, not fleet configuration the backend has an opinion
-about. `frame.json` is still read as a fallback so frames elevated before the
-setting moved keep working; on ESP32 the equivalent store is NVS, which deploys
-do not touch either.
+thing about what this is: a device-local fact. `frame.json`'s
+`network.lanAccess` is only the creation-time seed, read once when the state
+file has no value; on ESP32 the store is NVS (`lan_access`), which deploys do
+not touch either.
 
-Scene origin is now tracked at runtime, on both platforms, and the device
+Scene origin is tracked at runtime, on both platforms, and the device
 stamps it itself — a payload key is never trusted. On Pi/Linux the hub
 client's `set_scenes` handler marks the uploadScenes event `source: "cloud"`;
 the payload persists verbatim to `state/uploaded.json`, so the stamp survives
 reboots, and every rehydrate funnels through the same
 `updateUploadedScenesFromPayload` chokepoint. On ESP32 the scene index
 (`/state/scene-index.json`) records a top-level `source` of
-`local` / `backend` / `cloud`. Two things key off it:
-
-- **The private-network deny follows the scenes, not the link.** A frame
-  demoted out of the managed state keeps rendering the provider's last-pushed
-  scenes, and now keeps the deny with them (`refreshLocalNetworkPolicy` on
-  Pi, `apply_network_policy` on ESP32). Replacing the scenes locally or via a
-  backend deploy is what lifts it; the local elevation ceremony still
-  overrides.
-- **The refused-app check runs at load time, not only at transport time.** A
-  persisted cloud-origin payload is re-checked against
-  `CLOUD_REFUSED_APP_KEYWORDS` (`cloud/scene_guard.nim`) on every load, so a
-  file edited on disk — or written before a keyword joined the list — cannot
-  reach those apps by being replayed at boot. (On ESP32 the two refused apps
-  are not compiled into the firmware at all, so transport/load refusal is
-  structural there.)
+`local` / `backend` / `cloud`. Since the LAN switch it no longer arms the
+private-network deny; what keys off it is the refused-app check, which runs at
+load time, not only at transport time. A persisted cloud-origin payload is
+re-checked against `CLOUD_REFUSED_APP_KEYWORDS` (`cloud/scene_guard.nim`) on
+every load, so a file edited on disk — or written before a keyword joined the
+list — cannot reach those apps by being replayed at boot. (On ESP32 the two
+refused apps are not compiled into the firmware at all, so transport/load
+refusal is structural there.)
 
 ### Signed OTA
 

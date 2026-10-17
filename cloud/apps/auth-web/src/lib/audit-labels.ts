@@ -49,6 +49,7 @@ export const eventLabels: Record<string, string> = {
   "frame.deleted": "Frame deleted",
   "frame.disconnected": "Frame disconnected",
   "frame.enrolled": "Frame enrolled",
+  "frame.lan_access_changed": "Frame LAN access changed",
   "frame.firmware_version_changed": "Frame firmware version changed",
   "frame.re_enrolled": "Frame re-enrolled (re-keyed in place)",
   "frame.rebind_token_created": "Frame re-enrollment code created",

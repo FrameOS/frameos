@@ -509,6 +509,8 @@ describe("SdImageBuilder", () => {
     expect(regionText).toContain("wifi_ssid=MyNet\n");
     expect(regionText).toContain("wifi_password=hunter2\n");
     expect(regionText).toContain("wifi_country=FR\n");
+    // LAN access is off unless the switch next to the WiFi fields says so.
+    expect(regionText).toContain("lan_access=0\n");
   });
 
   it("requires a root password or an explicit passwordless-root opt-in", async () => {

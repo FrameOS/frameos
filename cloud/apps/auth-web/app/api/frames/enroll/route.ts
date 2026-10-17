@@ -15,7 +15,9 @@ import {
   requireDatabase,
   safeLocalOrigin,
 } from "../../../../src/lib/device-flow";
+import { lanAccessSetVerb } from "../../../../src/lib/frame-lan-access";
 import {
+  enqueueFrameCommand,
   enqueueFrameSettingsPush,
   frameSupportsTimeZoneSetting,
   countFramesForAccount,
@@ -281,6 +283,7 @@ async function enrollWithClaimToken(
     | {
         accessTokenValue: string;
         frame: typeof frames.$inferSelect;
+        lanAccess: boolean | null;
         timezone: string | null;
         tokenId: string;
       }
@@ -372,6 +375,7 @@ async function enrollWithClaimToken(
       return {
         accessTokenValue: accessToken.token,
         frame: insertedFrame,
+        lanAccess: token.lanAccess,
         timezone: token.timezone,
         tokenId: token.id,
       };
@@ -403,6 +407,21 @@ async function enrollWithClaimToken(
     // the frame opens its session.
     await enqueueFrameSettingsPush(db, result.frame, {
       timezone: result.timezone,
+    });
+  }
+
+  if (result.lanAccess === false) {
+    // "LAN access" left off in Add frame, on a path with no SD card or USB
+    // console to carry it (the install script). Turning it off needs no code
+    // on the frame, so the choice goes down as a command; a frame with no
+    // stored value would otherwise come up with it on (docs/lan-access.md).
+    // Firmware without the verb answers unknown_verb, and keeps the old rule.
+    // No TTL: like set_scenes it carries state, so it waits for the frame's
+    // first session however late that is.
+    await enqueueFrameCommand(db, {
+      frameId: result.frame.id,
+      payload: { enabled: false },
+      type: lanAccessSetVerb,
     });
   }
 

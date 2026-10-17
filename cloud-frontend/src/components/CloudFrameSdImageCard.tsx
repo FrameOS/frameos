@@ -110,6 +110,7 @@ export function CloudFrameSdImageCard({ frame }: { frame: FrameType }): ReactEle
               height: seededHeight,
               rotate: frame.rotate,
               buildrootPlatform,
+              lanAccess: frame.lan_access === true,
             }}
           />
         ) : (

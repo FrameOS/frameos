@@ -399,6 +399,9 @@ describe("browser event shaping", () => {
       // The last-pushed settings ride along as top-level fields, in the
       // device's spelling — that is what the SPA's frameForm hydrates from.
       interval: 300,
+      // The hardware report carries no lanAccess: firmware from before the
+      // switch, which the cloud cannot manage it on.
+      lan_access: null,
       last_metrics: { cpu: 1 },
       last_seen_at: now,
       last_state: { active_scene: "s1" },
@@ -468,6 +471,20 @@ describe("browser event shaping", () => {
         providerClientMetadata: { requestedScopes: ["frame:managed"] },
       }).service_settings_enabled,
     ).toBe(false);
+
+    // The LAN access switch is the device's own report, hello or state:
+    // a boolean when the firmware sends one, null for anything else.
+    expect(frameUpdateEvent(frame).lan_access).toBeNull();
+    for (const [hardware, expected] of [
+      [{ lanAccess: true, platform: "esp32s3" }, true],
+      [{ lanAccess: false }, false],
+      [{ lanAccess: "yes" }, null],
+      [{ lanAccess: 1 }, null],
+      [{ platform: "buildroot" }, null],
+      [[true], null],
+    ] as const) {
+      expect(frameUpdateEvent({ ...frame, hardware }).lan_access, JSON.stringify(hardware)).toBe(expected);
+    }
   });
 });
 

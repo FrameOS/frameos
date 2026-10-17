@@ -1761,10 +1761,10 @@ static esp_http_client_handle_t http_open_request(
     *out_status = 0;
     *out_content_length = -1;
     if (err_buf != NULL && err_buf_len > 0) err_buf[0] = '\0';
-    /* Private-network policy (fos_netguard.h). This is the one funnel every
-     * scene HTTP request goes through, and on a cloud-managed frame a scene is
-     * something a provider installed — so it does not get to reach the owner's
-     * router. Checked before the client even exists; the redirect loop below
+    /* Private-network policy (fos_netguard.h): the frame's LAN access switch.
+     * This is the one funnel every scene HTTP request goes through, and with
+     * LAN access off a scene does not get to reach the owner's router.
+     * Checked before the client even exists; the redirect loop below
      * re-checks every hop, because a 302 to 192.168.1.1 is the same request. */
     char netguard_reason[96];
     switch (fos_netguard_check_url(url, netguard_reason, sizeof(netguard_reason))) {
@@ -1779,10 +1779,12 @@ static esp_http_client_handle_t http_open_request(
         HTTP_OPEN_FAIL("%s", netguard_reason);
     case FOS_NETGUARD_BLOCKED:
     default:
-        ESP_LOGW(TAG, "%s %s: blocked by the local-network policy: %s",
+        ESP_LOGW(TAG, "%s %s: blocked, LAN access is off: %s",
                  method ? method : "GET", url ? url : "(null)", netguard_reason);
-        HTTP_OPEN_FAIL("local network access is blocked on cloud-managed frames (%s)",
-                             netguard_reason);
+        if (err_buf != NULL && err_buf_len > 0) {
+            fos_netguard_block_message(err_buf, err_buf_len, netguard_reason, false);
+        }
+        return NULL;
     }
 
     esp_http_client_method_t http_method = HTTP_METHOD_GET;
@@ -1884,12 +1886,14 @@ static esp_http_client_handle_t http_open_request(
                 HTTP_OPEN_FAIL("redirect: %s", netguard_reason);
             }
             if (verdict != FOS_NETGUARD_ALLOWED) {
-                ESP_LOGW(TAG, "%s %s: redirect blocked by the local-network policy: %s",
+                ESP_LOGW(TAG, "%s %s: redirect blocked, LAN access is off: %s",
                          method ? method : "GET", url, netguard_reason);
                 esp_http_client_close(client);
                 esp_http_client_cleanup(client);
-                HTTP_OPEN_FAIL("local network access is blocked on cloud-managed frames "
-                                     "(redirect target: %s)", netguard_reason);
+                if (err_buf != NULL && err_buf_len > 0) {
+                    fos_netguard_block_message(err_buf, err_buf_len, netguard_reason, true);
+                }
+                return NULL;
             }
         }
         err = esp_http_client_open(client, body_len);

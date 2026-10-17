@@ -394,23 +394,26 @@ proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode)
       continue
     putJsonIfPresent(result, payload, apiKey, configKey)
 
-  # The private-network elevation never rides along with a bulk config save.
-  # The cloud is already blocked from it by CLOUD_SETTINGS_ALLOWLIST, but the
-  # admin page came through here too, and an admin session is a password on a
+  # LAN access never rides along with a bulk config save. The cloud is
+  # already blocked from it by CLOUD_SETTINGS_ALLOWLIST, but the admin page
+  # came through here too, and an admin session is a password on a
   # LAN-reachable page — not proof that anyone is standing at the frame. It
-  # moves only through the on-panel ceremony in frameos/local_access.nim now,
-  # so whatever the payload claims, the stored value wins.
+  # moves only through the on-panel ceremony (frameos/local_access.nim, and
+  # setLocalNetworkAccess below), so whatever the payload claims under either
+  # spelling — the legacy `allowLocalNetworkAccess` or the creation seed
+  # `lanAccess` — what frame.json already had wins.
   if result{"network"} != nil and result["network"].kind == JObject:
-    let stored =
-      if existing != nil and existing.kind == JObject and
-          existing{"network"} != nil and existing["network"].kind == JObject:
-        existing["network"]{"allowLocalNetworkAccess"}
-      else:
-        nil
-    if stored != nil:
-      result["network"]["allowLocalNetworkAccess"] = copy(stored)
-    elif result["network"].hasKey("allowLocalNetworkAccess"):
-      result["network"].delete("allowLocalNetworkAccess")
+    for key in ["allowLocalNetworkAccess", "lanAccess"]:
+      let stored =
+        if existing != nil and existing.kind == JObject and
+            existing{"network"} != nil and existing["network"].kind == JObject:
+          existing["network"]{key}
+        else:
+          nil
+      if stored != nil:
+        result["network"][key] = copy(stored)
+      elif result["network"].hasKey(key):
+        result["network"].delete(key)
 
   if payload.hasKey("frame_admin_auth"):
     putJsonIfPresent(result, payload, "frame_admin_auth", "frameAdminAuth")
@@ -737,10 +740,9 @@ proc frameApiUpdateChangesConfig*(payload: JsonNode): bool =
   previewFrameApiUpdate(payload).change.any
 
 proc localNetworkAccessPayload*(): JsonNode =
-  let enabled = globalFrameConfig != nil and globalFrameConfig.network != nil and
-    globalFrameConfig.network.allowLocalNetworkAccess
+  ## `GET /api/network/local-access`, and the answer of a successful change.
   %*{
-    "allowLocalNetworkAccess": enabled,
+    "allowLocalNetworkAccess": lanAccessEnabled(),
     # Chromium unsandboxed as root (chromiumScreenshot); same ceremony,
     # second fact.
     "allowShellApps": storedAllowShellApps(),
@@ -755,21 +757,114 @@ proc setShellAppsAccess*(enabled: bool): JsonNode =
   localNetworkAccessPayload()
 
 proc setLocalNetworkAccess*(enabled: bool): JsonNode =
-  ## Applies the private-network elevation. Only ever called after the on-panel
-  ## code has been matched — see frameos/local_access.nim for why the bulk
-  ## config save is not allowed to reach this field, and why it is persisted
-  ## under state/ rather than in frame.json.
+  ## Applies LAN access. Turning it on is only ever called after the on-panel
+  ## code has been matched (applyLanAccessChange) — see
+  ## frameos/local_access.nim for why the bulk config save is not allowed to
+  ## reach this field, and why it is persisted under state/ rather than in
+  ## frame.json.
   persistLocalNetworkAccess(enabled)
 
-  # The hub thread re-reads this object every couple of seconds and recomputes
-  # the deny from it (hub_client.nim, refreshLocalNetworkPolicy), so the change
-  # takes effect without a restart.
+  # The policy reads the state file's value (lanAccessEnabled), not this
+  # object; the copy is kept for readers that hold a config anyway. The
+  # callers recompute the deny at once (hub_client.refreshLocalNetworkPolicy),
+  # and the hub thread would within two seconds regardless.
   if globalFrameConfig != nil and globalFrameConfig.network != nil:
     globalFrameConfig.network.allowLocalNetworkAccess = enabled
   if globalFrameOS != nil and globalFrameOS.frameConfig != nil and
       globalFrameOS.frameConfig.network != nil:
     globalFrameOS.frameConfig.network.allowLocalNetworkAccess = enabled
   localNetworkAccessPayload()
+
+type LanAccessOutcome* = object
+  ## One answer of the LAN access ceremony, shared by the frame's own admin
+  ## API (server/routes/admin_api_routes.nim) and the cloud verbs
+  ## (cloud/hub_client.nim) so the two cannot drift. `error` is "" on success
+  ## and otherwise the contract's token (docs/cloud-frames-contract.json,
+  ## `lan_access_challenge` / `lan_access_set`); `status` is the HTTP status
+  ## the route answers with; `payload` is localNetworkAccessPayload() after a
+  ## successful change. Never carries the code.
+  status*: int
+  error*: string
+  detail*: string
+  payload*: JsonNode
+
+proc lanAccessRefusal(status: int, error, detail: string): LanAccessOutcome =
+  LanAccessOutcome(status: status, error: error, detail: detail)
+
+proc startLanAccessChallenge*(device: string,
+                              scope = LocalAccessScopeLocalNetwork): LanAccessOutcome =
+  ## Shows a fresh code on the panel. `device` is the frame's (frame.json
+  ## `device`): a frame with no physical panel has nowhere to show it and
+  ## answers `no_panel`; a frame whose wrong-code budget is spent answers
+  ## `rate_limited`. The runner picks the new code up within a sleep slice
+  ## and repaints (runner.nim), so nothing here asks for a render.
+  if not isLocalAccessScope(scope):
+    return lanAccessRefusal(400, "invalid_lan_access", "Unknown scope: " & scope)
+  if not localAccessPanelDevice(device):
+    return lanAccessRefusal(409, "no_panel",
+      "This frame has no screen to show a code on. Choose LAN access when setting the frame up.")
+  # Before the pending challenge is replaced: a new one must not be a way
+  # around the wrong-code budget.
+  if localAccessRateLimited():
+    return lanAccessRefusal(429, "rate_limited", LocalAccessRateLimitedDetail)
+  try:
+    let challenge = startLocalAccessChallenge(scope)
+    # No "code" anywhere in the answer, on purpose: a caller who could read it
+    # without seeing the panel is precisely who this keeps out.
+    LanAccessOutcome(status: 200, payload: %*{
+      "status": "ok",
+      "codeLength": challenge.code.len,
+      "expiresInSeconds": LocalAccessChallengeTtlSeconds,
+    })
+  except CatchableError as error:
+    log(%*{"event": "network:local-access:error", "stage": "challenge", "error": error.msg})
+    lanAccessRefusal(500, "challenge_failed", "Failed to start the challenge")
+
+proc applyLanAccessChange*(payload: JsonNode): LanAccessOutcome =
+  ## `{enabled, code?, scope?}`. Turning a fact off needs no code and clears
+  ## any pending challenge; turning it on needs the code on the panel, for the
+  ## scope it was shown for, while the wrong-code budget lasts (`rate_limited`
+  ## otherwise, local_access.nim). Every check that costs nothing — the shape,
+  ## the scope — runs BEFORE the code is looked at, so a malformed request
+  ## never spends one of its five tries.
+  if payload == nil or payload.kind != JObject:
+    return lanAccessRefusal(400, "invalid_lan_access", "Expected an object with `enabled`")
+  let enabledNode = payload{"enabled"}
+  if enabledNode == nil or enabledNode.kind != JBool:
+    return lanAccessRefusal(400, "invalid_lan_access", "`enabled` must be true or false")
+  let scopeNode = payload{"scope"}
+  var scope = LocalAccessScopeLocalNetwork
+  if scopeNode != nil and scopeNode.kind != JNull:
+    if scopeNode.kind != JString or not isLocalAccessScope(scopeNode.getStr()):
+      return lanAccessRefusal(400, "invalid_lan_access",
+        "Unknown scope: " & (if scopeNode.kind == JString: scopeNode.getStr() else: $scopeNode))
+    scope = scopeNode.getStr()
+  let codeNode = payload{"code"}
+  if codeNode != nil and codeNode.kind notin {JString, JNull}:
+    return lanAccessRefusal(400, "invalid_lan_access", "`code` must be a string")
+  let enabled = enabledNode.getBool()
+  if enabled:
+    let verdict = consumeLocalAccessCode(
+      if codeNode != nil and codeNode.kind == JString: codeNode.getStr() else: "", scope)
+    if not verdict.ok:
+      # A spent challenge (too many tries, expiry) leaves the panel on its
+      # own: the runner sees the code is gone and repaints.
+      return lanAccessRefusal(if verdict.error == "rate_limited": 429 else: 403,
+        verdict.error, verdict.detail)
+  else:
+    # Off takes no code, and leaves none behind: whatever challenge was
+    # pending comes off the panel (the runner repaints when it notices).
+    clearLocalAccessChallenge()
+  try:
+    let updated =
+      if scope == LocalAccessScopeShellApps: setShellAppsAccess(enabled)
+      else: setLocalNetworkAccess(enabled)
+    log(%*{"event": "network:local-access", "scope": scope, "enabled": enabled})
+    LanAccessOutcome(status: 200, payload: updated)
+  except CatchableError as error:
+    log(%*{"event": "network:local-access:error", "stage": "persist", "scope": scope,
+           "error": error.msg})
+    lanAccessRefusal(500, "persist_failed", "Failed to save the change")
 
 proc storedFrameApiPayload(configJson: JsonNode): JsonNode =
   if configJson.kind == JObject and configJson{"frameApi"} != nil and configJson{"frameApi"}.kind == JObject:
@@ -984,6 +1079,9 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
         buildroot["platform"] = %board
     result["buildroot"] = buildroot
 
+  # The frame's LAN access, as the SPA reads it on every surface
+  # (FrameType.lan_access). Not under `network`: no save can change it.
+  result["lan_access"] = %lanAccessEnabled()
   result["id"] = %frameApiId()
   result["project_id"] = %0
   result["ssh_user"] = %""
@@ -1088,6 +1186,17 @@ proc rememberFrameImagePng(generation: int, source: string, png: string) {.gcsaf
       frameImageCache = CachedFrameImage(generation: generation, rotate: globalFrameConfig.rotate,
         flip: globalFrameConfig.flip, source: source, png: png)
 
+when defined(testing):
+  var frameDriverPngHook*: proc(rotate: int, flip: string): string {.nimcall, gcsafe.} = nil
+    ## Test seam for the drivers' own PNG: no driver is loaded in a test, and
+    ## the LAN access code's interplay with that PNG is what needs a test.
+
+proc frameDriverPng(rotate: int, flip: string): string =
+  when defined(testing):
+    if frameDriverPngHook != nil:
+      return frameDriverPngHook(rotate, flip)
+  drivers.toPng(rotate, flip)
+
 proc frameImageHeaders(sceneId: SceneId, lastUpdate: float): mummy.HttpHeaders =
   ## The headers a `/image` answer carries — the same set for GET and HEAD,
   ## because the admin page reads the sync hints off a HEAD after every
@@ -1133,7 +1242,14 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
 
   var headers = frameImageHeaders(sceneId, lastUpdate)
   let renderGeneration = driverRenderGenerationValue()
-  let cached = cachedFrameImagePng(renderGeneration)
+  # A LAN access code on the panel (frameos/local_access.nim) is in the
+  # drivers' own PNG — e-ink drivers encode the pixels they last sent — but
+  # never in the stored last image. While one may be up, answer from the
+  # latter only, and do not trust a cached driver PNG either.
+  let panelBefore = localAccessPanelMark()
+  let cached =
+    if panelBefore.shown: (hit: false, source: "", png: "")
+    else: cachedFrameImagePng(renderGeneration)
   if cached.hit:
     if logImageRequest:
       log(%*{
@@ -1150,8 +1266,15 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
   var driverPreview = "unknown"
   var driverPreviewError = ""
   try:
-    let image = drivers.toPng(360 - globalFrameConfig.rotate, globalFrameConfig.flip)
-    if image != "":
+    let image =
+      if panelBefore.shown: ""
+      else: frameDriverPng(360 - globalFrameConfig.rotate, globalFrameConfig.flip)
+    if panelBefore.shown or
+        (image != "" and localAccessCodeMayBeOnPanel(panelBefore, localAccessPanelMark())):
+      # Also when a code went out while the driver was encoding: what it
+      # read may be half of the new picture.
+      driverPreview = "localAccessCode"
+    elif image != "":
       rememberFrameImagePng(renderGeneration, "driver", image)
       if logImageRequest:
         log(%*{

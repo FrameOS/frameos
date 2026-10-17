@@ -46,18 +46,20 @@ Three things carry most of the weight today, and they are good:
   `CLOUD_SETTINGS_ALLOWLIST` (`frameos/cloud/hub_client.nim`) and refuses the
   *whole* verb on an unknown key. `allowedFrameCommandTypes` has no shell verb
   and never has.
-- **LAN access is default-deny with a presence ceremony.** A cloud-managed
-  frame's HTTP client refuses private-network destinations unless
-  `network.allowLocalNetworkAccess` is set, and that switch is deliberately not
-  in the bulk config save: it needs a challenge, a six-digit code *read off the
-  panel*, and a reply within three minutes (`frameos/local_access.nim`). The
-  deny follows the *scene origin*, not the link, so demoting a frame does not
-  lift it. Someone who cannot see the screen cannot turn it on.
+- **LAN access is a frame switch that only someone at the panel can turn
+  on.** With the frame's LAN access off, its HTTP client refuses
+  private-network destinations, and the switch is deliberately not in the bulk
+  config save or the cloud's settings verb: turning it on after setup needs a
+  challenge, a six-digit code *read off the panel*, and a reply within five
+  minutes (`frameos/local_access.nim`, `docs/lan-access.md`). Someone who cannot
+  see the screen cannot turn it on. It is chosen when the frame is created, so
+  a frame set up with it on can reach the LAN; frames older than the switch read
+  as on.
 
 So the headline of question 1 is largely already true. A stolen cloud account
 gets: push scenes, push eight settings, reboot, restart, render, set schedule,
 suggest an update. It does **not** get a shell, cannot reach 192.168.x.x from
-the frame, and cannot install anything — OTA images are minisign-verified
+a frame whose LAN access is off (nor turn it on), and cannot install anything — OTA images are minisign-verified
 against a pinned key on the device (`frameos/upgrade.nim`), so
 `notify_update_available` can only ever suggest a genuine FrameOS release.
 

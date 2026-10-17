@@ -1,6 +1,8 @@
-## The managed-frame private-network HTTP deny (docs/cloud-frames.md):
-## classifier ranges, enforcement at the request chokepoint, and the
-## provider-host exemption. Runs a local mummy server as the "private" target.
+## The private-network HTTP deny a frame with LAN access off runs under
+## (docs/lan-access.md): classifier ranges, enforcement at the request
+## chokepoint, the control-plane exemptions and the error a scene sees. Runs a
+## local mummy server as the "private" target. Which frames get the deny is
+## hub_client.refreshLocalNetworkPolicy's (cloud/tests/test_hub_verbs.nim).
 
 import std/[net, os, strutils, unittest]
 import mummy
@@ -92,10 +94,39 @@ suite "local network policy enforcement":
       check false
     except IOError as error:
       message = error.msg
-    check "local network access is blocked on cloud-managed frames" in message
-    check "127.0.0.1" in message
+    # The SPA's logs panel matches the start to link to the setting, and the
+    # ESP32 says the same words: both ends are a contract.
+    check message.startsWith("LAN access is off for this frame")
+    check message.endsWith("Turn on LAN access in the frame settings.")
+    check message == "LAN access is off for this frame, so 127.0.0.1 cannot be reached. " &
+      "Turn on LAN access in the frame settings."
 
-  test "policy active: the exempt provider host:port stays reachable":
+  test "the refusal names the host and the address it resolved to":
+    check lanAccessOffMessage("homeassistant.local", "192.168.1.5") ==
+      "LAN access is off for this frame, so homeassistant.local (192.168.1.5) cannot be reached. " &
+      "Turn on LAN access in the frame settings."
+    # A literal address is not repeated.
+    check lanAccessOffMessage("10.0.0.5", "10.0.0.5") ==
+      "LAN access is off for this frame, so 10.0.0.5 cannot be reached. " &
+      "Turn on LAN access in the frame settings."
+
+  test "policy active: a name is checked by what it resolves to":
+    setLocalNetworkPolicy(true)
+    var message = ""
+    try:
+      discard boundedGetContent("http://localhost:" & $TestPort & "/ok", timeoutMs = 3000)
+      check false
+    except IOError as error:
+      message = error.msg
+    check message.startsWith("LAN access is off for this frame, so localhost (")
+    # Exempting the name exempts exactly that name and port, as the backend's
+    # serverHost:serverPort is.
+    setLocalNetworkPolicy(true, @["LOCALHOST:" & $TestPort])
+    check boundedGetContent("http://localhost:" & $TestPort & "/ok", timeoutMs = 3000) == "hello from the LAN"
+    expect IOError:
+      discard boundedGetContent(localUrl, timeoutMs = 3000)
+
+  test "policy active: an exempt control plane host:port stays reachable":
     setLocalNetworkPolicy(true, @["127.0.0.1:" & $TestPort])
     check boundedGetContent(localUrl, timeoutMs = 3000) == "hello from the LAN"
     # The exemption is exact — same host on another port is still blocked.

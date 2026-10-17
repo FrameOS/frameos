@@ -133,7 +133,6 @@ async def render_scene_rgba_and_state(
     if node is None or assets is None or not RENDER_HARNESS.is_file():
         return None, None, None
 
-    network = frame.network if isinstance(frame.network, dict) else {}
     request = {
         "assetsDir": str(assets),
         "width": int(width),
@@ -142,11 +141,12 @@ async def render_scene_rgba_and_state(
         "timeZone": frame_timezone(frame.timezone),
         "settingsJson": json.dumps(settings or {}),
         "scenesJson": json.dumps(scenes, separators=(",", ":")),
-        # Scene HTTP on this frame may reach the LAN only if the owner said so —
-        # the same knob the device runtime reads (network.allowLocalNetworkAccess).
-        # The renderer runs on the backend's network, so this is what keeps a
-        # published scene away from the router, HA and the NAS.
-        "allowLocalNetwork": network.get("allowLocalNetworkAccess") is True,
+        # Scene HTTP on this frame may reach the LAN only with the frame's LAN
+        # access switch on — the same switch the device runtimes obey
+        # (frame.lan_access). The renderer runs on the backend's network, so
+        # this is what keeps a published scene away from the router, HA and
+        # the NAS.
+        "allowLocalNetwork": getattr(frame, "lan_access", None) is True,
     }
     if scene_id:
         request["sceneId"] = scene_id

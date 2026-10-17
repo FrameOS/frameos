@@ -22,7 +22,7 @@
 ## needs to see them. Nothing else in the runtime should parse a config type
 ## from JSON — go through parseFrameConfig / loadConfig.
 
-import json, jsony, pixie, os, strutils, parseutils, locks
+import json, jsony, pixie, os, strutils, parseutils, locks, options
 import zippy
 import frameos/hal/files
 import frameos/local_access
@@ -381,13 +381,42 @@ proc readConfig*(configPath = ""): FrameConfig =
   result = parseFrameConfig(if path.endsWith(".gz"): uncompress(encoded) else: encoded)
   if commandLineParams().contains("--debug"):
     result.debug = true
-  # The private-network elevation lives in state/, not here — a backend deploy
-  # rewrites frame.json wholesale and would drop it. Fold the stored value in
-  # on every load, including the reload after a deploy, so the in-memory config
-  # every reader consults (the hub's policy refresh, the admin API payload)
-  # agrees with what the frame is actually enforcing.
-  result.network.allowLocalNetworkAccess =
-    resolveLocalNetworkAccess(result.network.allowLocalNetworkAccess)
+  # LAN access lives in state/, not here — a backend deploy rewrites frame.json
+  # wholesale (frameos/local_access.nim). Fold the stored value in on every
+  # load, including the reload after a deploy, so the in-memory config agrees
+  # with what the frame is actually enforcing. Whatever frame.json says under
+  # this key is ignored: it is a leftover, never a setting.
+  result.network.allowLocalNetworkAccess = lanAccessEnabled()
+
+proc frameJsonLanAccessSeed*(configPath = ""): Option[bool] =
+  ## frame.json `network.lanAccess`, the LAN access chosen when the frame was
+  ## created (the backend's get_frame_json, and so an SD card's
+  ## frameos-setup.json). Read raw, because whether the key is there at all is
+  ## the point: absent means a frame from before the switch. Only
+  ## seedLocalNetworkAccess reads it, once per start.
+  try:
+    let path = getConfigFilename(configPath)
+    let encoded = readTextFile(path)
+    let data = parseJson(if path.endsWith(".gz"): uncompress(encoded) else: encoded)
+    let value = data{"network"}{"lanAccess"}
+    if value == nil:
+      return none(bool)
+    case value.kind
+    of JBool:
+      return some(value.getBool())
+    of JInt:
+      if value.getInt() in [0, 1]:
+        return some(value.getInt() == 1)
+    of JString:
+      case value.getStr().strip().toLowerAscii()
+      of "true", "1": return some(true)
+      of "false", "0": return some(false)
+      else: discard
+    else:
+      discard
+  except CatchableError:
+    discard
+  none(bool)
 
 proc loadConfig*(configPath = ""): FrameConfig =
   ## readConfig for the runtime itself (boot, the runner's reload).

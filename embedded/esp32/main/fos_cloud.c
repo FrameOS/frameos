@@ -39,6 +39,7 @@
 #include "fos_events.h"
 #include "fos_mem.h"
 #include "fos_http.h"
+#include "fos_lan_access.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_schedule.h"
@@ -284,21 +285,16 @@ const char *fos_cloud_ws_url(void) { return s_ws_url; }
 
 /* --------------------------------------------- private-network egress policy */
 
-/* docs/cloud-frames.md: an enrolled frame runs scenes the *provider* installed,
- * from inside the owner's LAN. So while the link is up, scene HTTP to
- * private/link-local addresses is denied — otherwise a compromised provider
- * account is an SSRF pivot onto the owner's router, NAS and IoT devices. The
+/* docs/lan-access.md: one switch per frame, LAN access, decides whether scene
+ * HTTP may reach private/link-local addresses — on every frame, standalone,
+ * backend-managed or cloud-managed alike (until 2026.10.17 the deny applied
+ * only while cloud-managed or rendering cloud-pushed scenes). The value is
+ * config->allow_local_network (NVS `lan_access`, absent = on: a frame from
+ * before the switch keeps working); turning it on from a control plane takes
+ * the code the frame shows on its panel (lan_access_set below). The
  * classifier and the enforcement live in fos_netguard.c (mirroring the native
- * runtime's utils/http_client.nim); this file owns the *trigger*, because this
- * is the only place that knows whether we are cloud-managed.
- *
- * Off whenever the frame is not enrolled AND not rendering provider scenes. A
- * standalone or backend-managed frame runs the owner's own scenes, where
- * reaching the LAN is the point. But enrollment alone is the wrong key: a
- * demotion (cloud_demote) keeps rendering the last provider-pushed scenes, and
- * those must not gain LAN access just because the link died — so the deny also
- * keys on fos_scenes_from_cloud(), the persisted record of who installed the
- * resident scenes (see fos_scenes.h). */
+ * runtime's utils/http_client.nim); this file owns the trigger and the
+ * exemptions. */
 
 /* Exempt one provider endpoint, as "host:port" with the scheme's default port
  * filled in — the same shape fos_netguard_url_allowed() derives from a request
@@ -331,59 +327,68 @@ static void netguard_exempt_provider_url(const char *url, bool ws)
     fos_netguard_set_exempt(host, port);
 }
 
-/* Recompute and apply. Cheap enough to call on every cloud-task tick (two URL
- * splits and a couple of string copies), which is what keeps a console toggle
- * of `allow_local_network` live without a restart. */
+/* FNV-1a over the URLs the exemptions come from, so the list is rebuilt only
+ * when one of them changes: a clear-and-refill on every tick left a window in
+ * which a scene's request to the frame's own backend read as blocked. */
+static uint32_t exempt_signature(const fos_config_t *config)
+{
+    const char *parts[] = {config->cloud_url, s_ws_url, config->backend_url};
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
+        for (const unsigned char *c = (const unsigned char *)parts[i]; *c; c++) {
+            hash = (hash ^ *c) * 16777619u;
+        }
+        hash = (hash ^ 0xFFu) * 16777619u; /* "ab"+"c" != "a"+"bc" */
+    }
+    return hash;
+}
+
+/* Recompute and apply. Cheap enough to call on every cloud-task tick, which is
+ * what keeps a console `set allow_local_network` live without a restart (the
+ * lan_access_set verb applies its own change at once). Runs on the cloud task,
+ * and once from fos_cloud_start before that task exists. */
 static void apply_network_policy(void)
 {
-    /* 0 = deny off, 1 = deny on (enrolled), 2 = deny on (demoted but still
-     * rendering cloud scenes), -1 = nothing logged yet. */
+    /* 0 = LAN access on, 1 = off, -1 = nothing logged yet. */
     static int logged_state = -1;
+    static bool exempt_built = false;
+    static uint32_t exempt_built_for = 0;
     const fos_config_t *config = fos_config();
-    const bool managed = (s_state == FOS_CLOUD_ENROLLED);
-    const bool cloud_scenes = fos_scenes_from_cloud();
-    /* Keyed on who installed the scenes (the cloud), not on where a scene came
-     * from: until 2026.10.16 a store-origin scene (origin.storeSceneId) armed
-     * the deny on any frame, but provenance is not something the frame can
-     * keep true across copies and imports. What a scene reaches for is shown
-     * when it is installed (frontend/src/utils/sceneAccess.ts). */
-    const bool active = (managed || cloud_scenes) && !config->allow_local_network;
+    const bool active = !config->allow_local_network;
 
-    fos_netguard_clear_exempt();
-    if (active && managed) {
-        /* The local admin linked this provider deliberately — possibly a dev
-         * provider on the LAN — so the provider's own endpoints must not be
-         * collateral damage. Both the API base URL and the optional ws_url
-         * override (a dev frame hub on its own port) count as "the provider". */
+    /* The frame's own control planes stay reachable by exact host:port: the
+     * owner linked them deliberately and either may sit on the LAN (a dev
+     * provider, the backend serving photo share links and receiving the image
+     * push). The provider's API base URL and its optional ws_url override (a
+     * dev frame hub on its own port) whenever one is stored, and the backend
+     * whenever one is configured. Built whatever the switch says, so turning
+     * it off needs only the policy bit. */
+    const uint32_t signature = exempt_signature(config);
+    if (!exempt_built || signature != exempt_built_for) {
+        fos_netguard_clear_exempt();
         netguard_exempt_provider_url(config->cloud_url, false);
         netguard_exempt_provider_url(s_ws_url, true);
+        netguard_exempt_provider_url(config->backend_url, false);
+        exempt_built = true;
+        exempt_built_for = signature;
     }
-    /* Not enrolled but still holding cloud scenes: the link (and its URLs)
-     * are gone, so there is no provider host to exempt — exempts stay clear
-     * and the deny covers everything private. */
     fos_netguard_set_policy(active);
 
-    const int state = active ? (managed ? 1 : 2) : 0;
+    const int state = active ? 1 : 0;
     if (state != logged_state) {
-        logged_state = state;
+        /* ESP_LOGW, not LOGI: LOGI is compiled out in every profile and a
+         * change of this must be visible on the serial stream. */
         if (state == 1) {
-            ESP_LOGW(TAG, "scene HTTP to private/link-local addresses is now blocked "
-                          "(cloud-managed frame); override locally with "
-                          "`set allow_local_network 1`");
-        } else if (state == 2) {
-            /* ESP_LOGW, not LOGI: LOGI is compiled out in every profile and
-             * this state must be visible on the serial stream. */
-            ESP_LOGW(TAG, "scene HTTP to private/link-local addresses stays blocked: "
-                          "frame is no longer cloud-managed but the resident scenes "
-                          "were pushed by the provider; upload scenes locally, sync "
-                          "from a backend, or `set allow_local_network 1` to lift");
-        } else if (managed) {
-            ESP_LOGW(TAG, "scene HTTP to private/link-local addresses is ALLOWED on this "
-                          "cloud-managed frame (allow_local_network=1)");
+            ESP_LOGW(TAG, "LAN access is off: scene HTTP to private/link-local addresses "
+                          "is blocked (the frame's backend and cloud provider stay "
+                          "reachable); turn it on in the frame settings, or "
+                          "`set allow_local_network 1` over USB");
+        } else if (logged_state == 1) {
+            ESP_LOGW(TAG, "LAN access is on: scenes may reach private addresses");
         } else {
-            ESP_LOGI(TAG, "scene HTTP to private addresses is allowed (frame is not "
-                          "cloud-managed)");
+            ESP_LOGI(TAG, "LAN access is on: scenes may reach private addresses");
         }
+        logged_state = state;
     }
 }
 
@@ -483,6 +488,10 @@ static void add_hardware_json(cJSON *parent)
      * panel shows as "on the frame". */
     cJSON_AddNumberToObject(hw, "buzzerPin", config->buzzer_pin);
     cJSON_AddNumberToObject(hw, "buzzerToneHz", config->buzzer_tone_hz);
+    /* The LAN access switch (docs/lan-access.md): the cloud has no column of
+     * its own and shows what the frame reports here, on every hello and
+     * every `state` (one follows each lan_access_set). */
+    cJSON_AddBoolToObject(hw, "lanAccess", config->allow_local_network);
 
     /* Board facts for the cloud deploy drawer, mirroring the USB console's
      * status JSON (fos_http_status_json). Sent on hello, so the control
@@ -1353,7 +1362,10 @@ static void ws_send_auth(const cJSON *root)
     cJSON_Delete(msg);
 }
 
-static void ws_ack(const cJSON *id, bool ok, const char *error)
+/* `with_lan_access`: the LAN access verbs' acks also say where the switch now
+ * stands (`lan_access`), so a control plane can update its mirror from the
+ * ack alone. */
+static void ws_ack_ex(const cJSON *id, bool ok, const char *error, bool with_lan_access)
 {
     cJSON *msg = cJSON_CreateObject();
     if (!msg) return;
@@ -1361,8 +1373,16 @@ static void ws_ack(const cJSON *id, bool ok, const char *error)
     cJSON_AddStringToObject(msg, "type", "ack");
     cJSON_AddBoolToObject(msg, "ok", ok);
     if (!ok && error) cJSON_AddStringToObject(msg, "error", error);
+    if (with_lan_access) {
+        cJSON_AddBoolToObject(msg, "lan_access", fos_config()->allow_local_network);
+    }
     ws_send_json(msg);
     cJSON_Delete(msg);
+}
+
+static void ws_ack(const cJSON *id, bool ok, const char *error)
+{
+    ws_ack_ex(id, ok, error, false);
 }
 
 /* get_state reply. The hub takes a `state` message without `states` as the
@@ -2707,12 +2727,96 @@ static bool backend_verb_allowed(const char *type)
 {
     static const char *const allowed[] = {
         "render", "reboot", "restart_runtime", "set_current_scene", "scene_event",
-        "notify_update_available",
+        "notify_update_available", "lan_access_challenge", "lan_access_set",
     };
     for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) {
         if (strcmp(type, allowed[i]) == 0) return true;
     }
     return false;
+}
+
+/* ------------------------------------------------------ LAN access verbs
+ *
+ * docs/lan-access.md. Turning the switch on from a control plane takes the
+ * code the frame draws on its panel (fos_lan_access.h, drawn by fos_client.c
+ * for the panel only), so a provider or a token that can reach the frame
+ * cannot open its owner's LAN without someone standing in front of it.
+ * Turning it off takes nothing. The code is never in an ack or a log line. */
+
+static uint32_t lan_access_rng(void)
+{
+    return esp_random();
+}
+
+/* `lan_access_challenge {}`: show a code. Acked at once; the render task
+ * repaints within a second (the wake below), and a pending code holds a
+ * battery frame's deep sleep until it is answered or expires. With the
+ * wrong-code budget spent, `rate_limited` and the pending code stays. */
+static void ws_handle_lan_access_challenge(const cJSON *id)
+{
+    if (!fos_display_present()) {
+        ws_ack_ex(id, false, "no_panel", true); /* headless: nowhere to show it */
+        return;
+    }
+    if (fos_lan_access_start(fos_lan_access_now(), lan_access_rng) == 0) {
+        frameos_nim_log_hook("{\"event\":\"lan_access:refused\",\"source\":\"esp32\","
+                             "\"reason\":\"rate_limited\"}");
+        ws_ack_ex(id, false, "rate_limited", true);
+        return;
+    }
+    frameos_nim_log_hook("{\"event\":\"lan_access:challenge\",\"source\":\"esp32\"}");
+    ws_ack_ex(id, true, NULL, true);
+    fos_client_wake_for_events();
+}
+
+/* `lan_access_set {enabled, code?}`. */
+static void ws_handle_lan_access_set(const cJSON *root, const cJSON *id, bool from_backend)
+{
+    const cJSON *enabled = cJSON_GetObjectItem(root, "enabled");
+    if (!cJSON_IsBool(enabled)) {
+        ws_ack_ex(id, false, "invalid_lan_access", true);
+        return;
+    }
+    const bool want = cJSON_IsTrue(enabled);
+    if (want) {
+        const cJSON *code = cJSON_GetObjectItem(root, "code");
+        fos_lan_access_result_t result = fos_lan_access_consume(
+            cJSON_IsString(code) ? code->valuestring : NULL, fos_lan_access_now());
+        if (result != FOS_LAN_ACCESS_OK) {
+            const char *token = fos_lan_access_result_token(result);
+            char line[112];
+            snprintf(line, sizeof(line),
+                     "{\"event\":\"lan_access:refused\",\"source\":\"esp32\",\"reason\":\"%s\"}",
+                     token);
+            frameos_nim_log_hook(line);
+            /* The fifth wrong code ended the challenge: off the panel. */
+            if (result == FOS_LAN_ACCESS_TOO_MANY_ATTEMPTS) fos_client_wake_for_events();
+            ws_ack_ex(id, false, token, true);
+            return;
+        }
+        fos_client_wake_for_events(); /* answered: off the panel */
+    } else if (fos_lan_access_panel_code(fos_lan_access_now(), NULL) != 0) {
+        /* Turned off: a code still showing has nothing left to unlock. */
+        fos_lan_access_clear();
+        fos_client_wake_for_events();
+    }
+    fos_config_t *config = fos_config();
+    const bool before = config->allow_local_network;
+    config->allow_local_network = want;
+    if (fos_config_save() != ESP_OK) {
+        config->allow_local_network = before;
+        ws_ack_ex(id, false, "persist_failed", true);
+        return;
+    }
+    /* Now, not on the next cloud-task tick: the exemptions do not depend on
+     * the switch, so the policy bit is all that changes. */
+    fos_netguard_set_policy(!want);
+    frameos_nim_log_hook(want ? "{\"event\":\"lan_access:set\",\"source\":\"esp32\",\"enabled\":true}"
+                              : "{\"event\":\"lan_access:set\",\"source\":\"esp32\",\"enabled\":false}");
+    ws_ack_ex(id, true, NULL, true);
+    /* hardware.lanAccess for the cloud's mirror. Over the backend's queue the
+     * ack's state fields carry `lan_access` instead. */
+    if (!from_backend) ws_send_state(NULL);
 }
 
 /* One verb, whoever sent it: the management socket (origin cloud) or the
@@ -2758,6 +2862,10 @@ static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
         ws_handle_asset_verb(ASSET_JOB_RENAME, root, id);
     } else if (strcmp(type, "image_get") == 0) {
         ws_handle_asset_verb(ASSET_JOB_IMAGE, root, id);
+    } else if (strcmp(type, "lan_access_challenge") == 0) {
+        ws_handle_lan_access_challenge(id);
+    } else if (strcmp(type, "lan_access_set") == 0) {
+        ws_handle_lan_access_set(root, id, from_backend);
     } else if (strcmp(type, "reboot") == 0 || strcmp(type, "restart_runtime") == 0) {
         /* On ESP32 the runtime IS the firmware: restart_runtime == reboot,
          * and fos_events.c carries both out the same way. */
@@ -2850,6 +2958,10 @@ void fos_cloud_add_state_fields(cJSON *msg)
     nim_snapshot_take(&snap);
     add_state_fields(msg, &snap, false);
     nim_snapshot_release(&snap);
+    /* The backend's commands pull and every ack carry no hardware block; the
+     * LAN access switch rides here instead, so the backend's frame.lan_access
+     * follows the device after each lan_access_set (docs/lan-access.md). */
+    cJSON_AddBoolToObject(msg, "lan_access", fos_config()->allow_local_network);
 }
 
 void fos_cloud_dispatch_backend_command(cJSON *root, void (*reply)(cJSON *msg, void *ctx), void *ctx)
@@ -3418,13 +3530,8 @@ static void ws_clear_demote_request(void) {}
  * re-enroll) and keep rendering the last pushed scenes. Local admin surfaces
  * are untouched, so this can never lock the owner out of the device.
  *
- * The RFC1918 LAN deny intentionally SURVIVES this: the scenes still rendering
- * were installed by the provider, and losing the link must not hand them the
- * owner's LAN. apply_network_policy() keys on fos_scenes_from_cloud() as well
- * as enrollment, and the scene source is persisted, so the deny holds across
- * reboots too. Pushing scenes locally (HTTP/USB upload) or a backend sync
- * replaces the cloud-sourced store and lifts the deny on the next policy
- * tick; `set allow_local_network 1` overrides it immediately. */
+ * The LAN access switch is the frame's, not the link's: a demotion leaves it
+ * as it was (apply_network_policy() reads only the switch). */
 static void cloud_demote(const char *reason)
 {
     ws_stop();
@@ -3474,9 +3581,10 @@ static void cloud_task(void *arg)
 
     while (true) {
         /* Re-derived every tick rather than pushed from each state change: it
-         * costs two string splits, it cannot be forgotten at a new call site,
-         * and it is what makes a demotion, a fresh enrollment or a console
-         * `set allow_local_network` take effect without a restart. */
+         * costs a hash of three URLs, it cannot be forgotten at a new call
+         * site, and it is what makes a console `set allow_local_network`, a
+         * new backend URL or a fresh enrollment take effect without a
+         * restart. */
         apply_network_policy();
 
         if (fos_wifi_state() != FOS_WIFI_CONNECTED) {
@@ -3579,9 +3687,10 @@ esp_err_t fos_cloud_start(void)
     if (s_task != NULL) return ESP_OK;
     /* Read the stored link state and arm the private-network policy here, not
      * in the task: main() brings the render loop up immediately after this
-     * call, and an enrolled frame must not get to run even one scene HTTP
-     * request in the window before the task is first scheduled. Both are pure
-     * NVS reads plus string work — nothing that needs a task context. */
+     * call, and a frame with LAN access off must not get to run even one
+     * scene HTTP request in the window before the task is first scheduled.
+     * Both are pure NVS reads plus string work — nothing that needs a task
+     * context. Runs on every frame, enrolled or not. */
     load_stored_state();
     apply_network_policy();
     if (xTaskCreate(cloud_task, "fos_cloud", FOS_CLOUD_TASK_STACK, NULL, 3, &s_task) != pdPASS) {

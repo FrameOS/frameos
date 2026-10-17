@@ -142,10 +142,12 @@ type
     # NetworkManager (armv6 buildroot) auto-detect the wpa_supplicant backend;
     # this pins it for debugging. FRAMEOS_NETWORK_BACKEND overrides it.
     networkBackend*: string
-    # Local-presence override for the cloud-managed default-deny on private
-    # network HTTP (docs/cloud-frames.md). Settable only through the local
-    # admin settings path — deliberately absent from the cloud set_settings
-    # allowlist.
+    # The frame's LAN access (docs/lan-access.md), as readConfig resolved it
+    # from state/local_access.json: never read from frame.json, never written
+    # by a settings save or set_settings. It moves through the panel-code
+    # ceremony (frameos/local_access.nim); this copy is for readers that hold
+    # a config anyway. frame.json `network.lanAccess`, the value chosen at
+    # creation, is only a seed and has no field here.
     allowLocalNetworkAccess*: bool
 
   # Part of FrameConfig
@@ -572,6 +574,12 @@ type
     controlCodeRender*: AppRoot
     controlCodeData*: AppRoot
     localAccessRender*: AppRoot
+    ## The LAN access code text (local_access.localAccessPanelText) the last
+    ## render was made for, "" for none; the sleep loop repaints when what
+    ## should be on the panel stops matching it. Runner thread only.
+    localAccessShownFor*: string
+    ## Whether that render actually carries the code (drawing it can fail).
+    localAccessDrawn*: bool
     linkCodeRender*: AppRoot
     linkCodeQrRender*: AppRoot
     linkCodeQrData*: AppRoot

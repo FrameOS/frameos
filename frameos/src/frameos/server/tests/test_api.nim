@@ -216,11 +216,11 @@ suite "the scenes a frame reports to a provider (scenes_get)":
       setUploadedScenePayload("")
       delEnv("FRAMEOS_SCENES_JSON")
 
-suite "private-network elevation is not a bulk-savable setting":
+suite "LAN access is not a bulk-savable setting":
   test "a config save cannot flip allowLocalNetworkAccess either way":
     # Both the cloud verb path and the admin page's frame save land in
-    # frontendFramePayloadToRuntimeConfig. Neither may carry this field: it
-    # only moves through the on-panel ceremony (frameos/local_access.nim).
+    # frontendFramePayloadToRuntimeConfig. Neither may carry this field: LAN
+    # access only moves through the ceremony (frameos/local_access.nim).
     let existingOff = %*{"network": {"networkCheck": true, "allowLocalNetworkAccess": false}}
     let turnOn = %*{"network": {"networkCheck": true, "allowLocalNetworkAccess": true}}
     let elevated = frontendFramePayloadToRuntimeConfig(turnOn, existingOff)
@@ -237,8 +237,24 @@ suite "private-network elevation is not a bulk-savable setting":
 
   test "a frame with no stored value does not gain one from a payload":
     let fresh = frontendFramePayloadToRuntimeConfig(
-      %*{"network": {"allowLocalNetworkAccess": true}}, %*{})
+      %*{"network": {"allowLocalNetworkAccess": true, "lanAccess": true}}, %*{})
     check not fresh{"network"}.hasKey("allowLocalNetworkAccess")
+    check not fresh{"network"}.hasKey("lanAccess")
+
+  test "the creation seed network.lanAccess is kept as it was, either way":
+    # frame.json's lanAccess is only read when the frame first starts, but a
+    # save that rewrote it would still be a way to choose it again later.
+    let existingOff = %*{"network": {"wifiHotspot": "disabled", "lanAccess": false}}
+    let saved = frontendFramePayloadToRuntimeConfig(
+      %*{"network": {"wifiHotspot": "bootOnly", "lanAccess": true}}, existingOff)
+    check saved{"network"}{"lanAccess"}.getBool(true) == false
+    check saved{"network"}{"wifiHotspot"}.getStr() == "bootOnly"
+    let existingOn = %*{"network": {"lanAccess": true}}
+    check frontendFramePayloadToRuntimeConfig(
+      %*{"network": {"lanAccess": false}}, existingOn){"network"}{"lanAccess"}.getBool(false) == true
+    # A network object without the key keeps the stored seed too.
+    check frontendFramePayloadToRuntimeConfig(
+      %*{"network": {"networkCheck": false}}, existingOn){"network"}{"lanAccess"}.getBool(false) == true
 
 suite "no-op settings pushes are detectable":
   # The cloud's set_settings verb delivers the full allowlisted object on

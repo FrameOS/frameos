@@ -28,6 +28,9 @@
     {"name": "network access is not a setting",
      "settings": {"network": {"allowLocalNetworkAccess": true}},
      "expect": {"linux": "setting_not_allowed", "esp32": "setting_not_allowed"}},
+    {"name": "LAN access is not a setting either: it has its own verbs, and turning it on takes the panel code",
+     "settings": {"lan_access": true},
+     "expect": {"linux": "setting_not_allowed", "esp32": "setting_not_allowed"}},
     {"name": "power keys exist only on the chip",
      "settings": {"deep_sleep": true, "deep_sleep_on_battery": false, "wake_check_seconds": 900,
                   "battery_pin": 1, "battery_divider": 2.0, "battery_enable_pin": 21},
@@ -347,6 +350,7 @@
     {"name": "get_logs needs telemetry:logs", "type": "get_logs", "scopes": [], "expect": "insufficient_scope"},
     {"name": "get_metrics needs telemetry:metrics", "type": "get_metrics", "scopes": ["telemetry:logs"], "expect": "insufficient_scope"},
     {"name": "refresh_service_settings needs settings:services", "type": "refresh_service_settings", "scopes": [], "expect": "insufficient_scope"},
-    {"name": "scene_event is a verb, and needs the event's name", "type": "scene_event", "expect": "invalid_event"}
+    {"name": "scene_event is a verb, and needs the event's name", "type": "scene_event", "expect": "invalid_event"},
+    {"name": "lan_access_set is a verb, and needs `enabled`", "type": "lan_access_set", "expect": "invalid_lan_access"}
   ]
 }

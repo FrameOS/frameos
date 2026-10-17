@@ -688,15 +688,16 @@ else:
       withLock dnsCacheLock:
         dnsCache.clear()
 
-  # ---- private-network policy (cloud-managed frames) ------------------------
-  # docs/cloud-frames.md: scenes installed by a cloud provider run *inside the
-  # owner's LAN*, so on a managed frame HTTP to private/link-local addresses is
-  # denied by default — otherwise a compromised account becomes an SSRF pivot
-  # onto routers and IoT devices. The check sits on the one address every
-  # request funnels through (literal or resolved, redirects included). The
-  # policy is flipped by frameos/cloud/hub_client.nim from the cloud link
-  # state; the only override is the local-admin-settable
-  # `network.allowLocalNetworkAccess` in frame.json.
+  # ---- private-network policy (LAN access off) -------------------------------
+  # docs/lan-access.md: scenes run *inside the owner's LAN*, and a scene from
+  # the store, a shared album or a compromised account must not become an
+  # SSRF pivot onto routers and IoT devices. With the frame's LAN access off,
+  # HTTP to private/link-local addresses is denied on every frame. The check
+  # sits on the one address every request funnels through (literal or
+  # resolved, redirects included). The policy is set by
+  # frameos/cloud/hub_client.nim (refreshLocalNetworkPolicy) from the LAN
+  # access switch (frameos/local_access.nim), with the frame's own control
+  # planes exempt by exact host:port.
 
   var
     localNetworkPolicyLock: Lock
@@ -706,7 +707,7 @@ else:
   initLock(localNetworkPolicyLock)
 
   proc isPrivateNetworkAddress*(address: string): bool {.gcsafe.} =
-    ## True for addresses a cloud-installed scene must not reach: loopback,
+    ## True for addresses a scene must not reach with LAN access off: loopback,
     ## RFC1918, link-local, CGNAT, 0.0.0.0/8, broadcast — and their IPv6
     ## equivalents (loopback/unspecified, ULA, link-local, mapped IPv4).
     ## Unparseable input classifies as private: the caller is about to hand
@@ -761,10 +762,20 @@ else:
       if b[0] == 0xff: return true                            # ff00::/8 multicast
       false
 
+  proc lanAccessOffMessage*(hostname: string, address: string): string {.gcsafe.} =
+    ## What a refused request fails with. The SPA's logs panel matches the
+    ## prefix to offer a link to the setting, and the ESP32 (fos_netguard)
+    ## says the same words: keep the start and the end exactly as they are.
+    let target =
+      if address.len == 0 or cmpIgnoreCase(hostname, address) == 0: hostname
+      else: hostname & " (" & address & ")"
+    "LAN access is off for this frame, so " & target &
+      " cannot be reached. Turn on LAN access in the frame settings."
+
   proc setLocalNetworkPolicy*(blockLocal: bool, exemptHostPorts: seq[string] = @[]) {.gcsafe.} =
     ## Activates/deactivates the private-network deny and replaces the exempt
-    ## "host:port" list (the cloud provider's own API endpoint, which the local
-    ## admin linked deliberately — possibly a dev provider on the LAN).
+    ## "host:port" list (the frame's own control planes: the cloud provider's
+    ## API endpoint and the self-hosted backend, either possibly on the LAN).
     {.gcsafe.}:
       withLock localNetworkPolicyLock:
         localNetworkPolicyBlock = blockLocal
@@ -786,9 +797,7 @@ else:
           if key notin localNetworkPolicyExempt and isPrivateNetworkAddress(address):
             blocked = true
       if blocked:
-        raise newException(IOError,
-          "local network access is blocked on cloud-managed frames (" &
-          hostname & " resolves to " & address & ")")
+        raise newException(IOError, lanAccessOffMessage(hostname, address))
 
   proc resolveHostBounded(host: string): string {.gcsafe.}
 

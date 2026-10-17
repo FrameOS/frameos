@@ -1053,6 +1053,10 @@ export const frameEnrollmentTokens = pgTable(
     // IANA zone of the browser that minted the token; enrollment seeds the
     // frame's `timezone` setting from it so a new frame shows local time.
     timezone: text("timezone"),
+    // The "LAN access" choice of an install-script enrollment; enrollment
+    // turns it off on the device when false (docs/lan-access.md). Null when
+    // the minting path carries the choice itself (SD card, USB console).
+    lanAccess: boolean("lan_access"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     usedAt: timestamp("used_at", { withTimezone: true }),
     maxUses: integer("max_uses").default(1).notNull(),

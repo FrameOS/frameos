@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 
 import { Esp32CloudFlasher } from './Esp32CloudFlasher'
+import { LanAccessToggle } from './LanAccessToggle'
 import { LinkRunningFrameForm, takeStashedLinkCode } from './LinkRunningFrameForm'
 import { SdImageBuilder } from './SdImageBuilder'
 
@@ -129,6 +130,12 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
   // the install command's and the SD image's are minted at different times.
   const [installSceneSource, setInstallSceneSource] = useState('')
   const [multiUseSceneSource, setMultiUseSceneSource] = useState('')
+  // The install script's "LAN access" choice. It has no SD card or USB
+  // console to carry it, so the claim code does, and enrollment turns LAN
+  // access off when it was left off (docs/lan-access.md). Same re-mint rule
+  // as the scene source: `installLanAccessMinted` is what the held code says.
+  const [installLanAccess, setInstallLanAccess] = useState(false)
+  const [installLanAccessMinted, setInstallLanAccessMinted] = useState(false)
   const abortRef = useRef<AbortController | undefined>(undefined)
   const cancelledRef = useRef(false)
   // One mint per opening, whatever React does with renders. A ref, not state:
@@ -214,13 +221,17 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
   // picked anything, so a later choice has to replace it — the code CARRIES
   // the choice. Cheap: the server recycles never-used single-use codes.
   useEffect(() => {
-    if (!mintStartedRef.current || minting || installSceneSource === sceneSourceFrameId) {
+    if (
+      !mintStartedRef.current ||
+      minting ||
+      (installSceneSource === sceneSourceFrameId && installLanAccessMinted === installLanAccess)
+    ) {
       return
     }
     setClaimToken(undefined)
     void mintInstallCode(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sceneSourceFrameId])
+  }, [sceneSourceFrameId, installLanAccess])
 
   // Minted when the panel opens, so the install command is copyable on sight
   // rather than one click away.
@@ -260,6 +271,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
         body: JSON.stringify({
           ...(sceneSourceFrameId ? { scene_source_frame_id: sceneSourceFrameId } : {}),
           ...claimTokenTimeZoneFields(),
+          lan_access: installLanAccess,
         }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
@@ -278,6 +290,7 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
       }
       setClaimToken(data.claim_token)
       setInstallSceneSource(sceneSourceFrameId)
+      setInstallLanAccessMinted(installLanAccess)
     } catch {
       if (!controller.signal.aborted && !cancelledRef.current) {
         setError('network_error')
@@ -431,6 +444,9 @@ export function AddFramePanel({ claimTokenTtlHours, cloudOrigin, onClose }: AddF
               Already running Raspberry Pi OS — or Debian/Ubuntu on any Pi or other Linux box? Run this on the device;
               it installs FrameOS, asks a few questions about your display, and links the frame here:
             </p>
+            <div className="mt-2">
+              <LanAccessToggle value={installLanAccess} onChange={setInstallLanAccess} />
+            </div>
             <pre className="frameos-inset mt-2 overflow-x-auto rounded-xl px-3 py-2 text-[11px] leading-relaxed [user-select:all]">
               {installCommand ?? maskedInstallCommand}
             </pre>

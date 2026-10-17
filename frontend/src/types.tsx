@@ -394,6 +394,10 @@ export interface FrameType {
   schedule?: FrameSchedule
   gpio_buttons?: GPIOButton[]
   input_settings?: InputSettings
+  /** Whether scenes may reach private/local addresses. Read-only here: it
+   * changes on the device (a code shown on the panel to turn it on) and the
+   * control plane mirrors it. null/absent: the frame does not report it yet. */
+  lan_access?: boolean | null
   network?: {
     wifiSSID?: string
     wifiPassword?: string
@@ -537,6 +541,8 @@ export interface NewFrameFormType {
     wifiSSID?: string
     wifiPassword?: string
   }
+  /** Chosen at creation, no code needed. Defaults to off. */
+  lan_access?: boolean
   rememberWifi?: boolean
 }
 
