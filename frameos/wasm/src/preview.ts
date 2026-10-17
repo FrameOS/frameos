@@ -150,7 +150,7 @@ export class FrameOSPreview {
   /** How the runtime's /srv/assets is backed (set once `ready` fires). */
   assetsInfo: PreviewAssetsInfo | null = null
   /** Which FrameOS version the runtime is (set once `ready` fires). */
-  runtimeInfo: PreviewRuntimeInfo = { version: null, pointerEvents: false, inputEvents: false, buttonEdges: false }
+  runtimeInfo: PreviewRuntimeInfo = { version: null, pointerEvents: false, inputEvents: false, gpioEvents: false }
   /** Latest public state of the current scene. */
   state: Record<string, unknown> = {}
   /** The scene currently selected in the runtime. */
@@ -207,7 +207,7 @@ export class FrameOSPreview {
           version: typeof msg.runtimeVersion === 'string' ? msg.runtimeVersion : null,
           pointerEvents: msg.pointerEvents === true,
           inputEvents: msg.inputEvents === true,
-          buttonEdges: msg.buttonEdges === true,
+          gpioEvents: msg.gpioEvents === true,
         }
         this.options.onReady?.(msg.sceneInfo, this.assetsInfo, this.runtimeInfo)
         break
@@ -341,14 +341,14 @@ export class FrameOSPreview {
   }
 
   /**
-   * A `button` held like a frame's key: call `buttonDown` when the pointer
-   * (or the keyboard) presses it and `buttonUp` when it lets go, and the
-   * scene gets the `down` and `up` edges as they happen (level 0 is down: the
-   * line is pulled up). The runtime adds the role and the `up`'s
-   * `durationMs`, and makes the `press`, `doublePress` or `longPress` the
-   * edges add up to. A preview button has no pin; the label tells keys apart.
-   * A bundle from before button edges (`runtimeInfo.buttonEdges`) gets one
-   * `button` for the whole press, on the release.
+   * A button held like a frame's key: call `buttonDown` when the pointer (or
+   * the keyboard) presses it and `buttonUp` when it lets go, and the scene
+   * gets the `gpio` edges as they happen, `down` and `up` (level 0 is down:
+   * the line is pulled up). The runtime adds the role and the `up`'s
+   * `durationMs`, and makes the `button` `press`, `doublePress` or
+   * `longPress` the edges add up to. A preview button has no pin; the label
+   * tells keys apart. A bundle from before `gpio` (`runtimeInfo.gpioEvents`)
+   * gets one `button` for the whole press, on the release.
    */
   buttonDown(label: string | null): void {
     const key = label ?? ''
@@ -356,8 +356,8 @@ export class FrameOSPreview {
       return
     }
     this.heldButtons.add(key)
-    if (this.runtimeInfo.buttonEdges) {
-      this.sendEvent('button', { ...buttonLabel(label), level: 0, action: 'down' })
+    if (this.runtimeInfo.gpioEvents) {
+      this.sendEvent('gpio', { ...buttonLabel(label), level: 0, action: 'down' })
     }
   }
 
@@ -367,7 +367,11 @@ export class FrameOSPreview {
       return
     }
     const payload = buttonLabel(label)
-    this.sendEvent('button', this.runtimeInfo.buttonEdges ? { ...payload, level: 1, action: 'up' } : payload)
+    if (this.runtimeInfo.gpioEvents) {
+      this.sendEvent('gpio', { ...payload, level: 1, action: 'up' })
+    } else {
+      this.sendEvent('button', payload)
+    }
   }
 
   /**

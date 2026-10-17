@@ -93,6 +93,7 @@ const
   evWheel* = "wheel"
   evTurnOn* = "turnOn"
   evTurnOff* = "turnOff"
+  evGpio* = "gpio"
   evButton* = "button"
   evSetSceneState* = "setSceneState"
   evSetCurrentScene* = "setCurrentScene"
@@ -102,7 +103,7 @@ const
   evReboot* = "reboot"
   evUploadScenes* = "uploadScenes"
 
-  ContractEventNames*: array[29, string] = [
+  ContractEventNames*: array[30, string] = [
     evInit,
     evRender,
     evOpen,
@@ -124,6 +125,7 @@ const
     evWheel,
     evTurnOn,
     evTurnOff,
+    evGpio,
     evButton,
     evSetSceneState,
     evSetCurrentScene,
@@ -134,7 +136,7 @@ const
     evUploadScenes,
   ]
 
-  ContractEventPolicies*: array[29, EventPolicy] = [
+  ContractEventPolicies*: array[30, EventPolicy] = [
     EventPolicy( # init
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
@@ -266,6 +268,12 @@ const
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
+    EventPolicy( # gpio
+      class: ecInput, device: edButton, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
+      linux: true, esp32: true, wasm: true),
     EventPolicy( # button
       class: ecInput, device: edButton, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
@@ -353,14 +361,15 @@ proc contractEventIndex*(name: string): int =
   of evWheel: 18
   of evTurnOn: 19
   of evTurnOff: 20
-  of evButton: 21
-  of evSetSceneState: 22
-  of evSetCurrentScene: 23
-  of evMetrics: 24
-  of evReload: 25
-  of evRestart: 26
-  of evReboot: 27
-  of evUploadScenes: 28
+  of evGpio: 21
+  of evButton: 22
+  of evSetSceneState: 23
+  of evSetCurrentScene: 24
+  of evMetrics: 25
+  of evReload: 26
+  of evRestart: 27
+  of evReboot: 28
+  of evUploadScenes: 29
   else: -1
 
 proc eventAliasCount*(name: string): int =
@@ -408,7 +417,8 @@ proc eventPayloadKeyCount*(name: string): int =
   of evLongPress: 5
   of evSwipe: 7
   of evWheel: 4
-  of evButton: 9
+  of evGpio: 8
+  of evButton: 7
   of evSetSceneState: 2
   of evSetCurrentScene: 2
   of evUploadScenes: 3
@@ -531,6 +541,17 @@ proc eventPayloadKey*(name: string, index: int): string =
     of 2: "x"
     of 3: "y"
     else: ""
+  of evGpio:
+    case index
+    of 0: "pin"
+    of 1: "label"
+    of 2: "role"
+    of 3: "action"
+    of 4: "durationMs"
+    of 5: "wake"
+    of 6: "atMs"
+    of 7: "level"
+    else: ""
   of evButton:
     case index
     of 0: "pin"
@@ -538,10 +559,8 @@ proc eventPayloadKey*(name: string, index: int): string =
     of 2: "role"
     of 3: "action"
     of 4: "durationMs"
-    of 5: "heldSeconds"
-    of 6: "wake"
-    of 7: "atMs"
-    of 8: "level"
+    of 5: "wake"
+    of 6: "atMs"
     else: ""
   of evSetSceneState:
     case index
@@ -560,14 +579,6 @@ proc eventPayloadKey*(name: string, index: int): string =
     of 2: "state"
     else: ""
   else: ""
-
-proc eventListenDefault*(name: string): (string, string) =
-  ## The one payload field of `name` with a `listenDefault`, and the value: a
-  ## listener with no filter on that field hears only events where it equals
-  ## this (`button` without an `action` filter hears presses). ("", ""): none.
-  case name
-  of evButton: ("action", "press")
-  else: ("", "")
 
 proc buttonRoleForLabel*(upperLabel: string): string =
   ## The default role of a GPIO button that has none configured, by its label

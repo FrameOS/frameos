@@ -1575,13 +1575,10 @@ proc eventFilterValue(value: JsonNode): string =
   else:
     return $value
 
-proc eventNodeMatchesPayload(node: DiagramNode, event: string, payload: JsonNode): bool =
-  # The contract's `listenDefault`: a `button` listener that does not filter on
-  # `action` hears presses only — every listener from before releases existed
-  # is exactly that, and must not run twice per press (docs/events.md). A
-  # payload without the field (a scene re-sending `{pin, label}`) is the default.
-  let (defaultKey, default) = eventListenDefault(event)
-  var hasDefaultFilter = false
+proc eventNodeMatchesPayload(node: DiagramNode, payload: JsonNode): bool =
+  # Every filter the listener sets must match; a field it leaves empty matches
+  # anything. A `button` listener with no `action` hears every press, double
+  # press and long press: the line's own edges are `gpio` (docs/events.md).
   var hasLabelFilter = false
   if not node.data.isNil and node.data.kind == JObject:
     if node.data.hasKey("config") and node.data["config"].kind == JObject:
@@ -1591,8 +1588,6 @@ proc eventNodeMatchesPayload(node: DiagramNode, event: string, payload: JsonNode
         if expected.len > 0:
           if key == "label":
             hasLabelFilter = true
-          if key == defaultKey:
-            hasDefaultFilter = true
           if not eventPayloadValueMatches(payload, key, expected):
             return false
 
@@ -1600,10 +1595,6 @@ proc eventNodeMatchesPayload(node: DiagramNode, event: string, payload: JsonNode
       let expected = eventFilterValue(node.data["label"])
       if expected.len > 0 and not eventPayloadValueMatches(payload, "label", expected):
         return false
-
-  if default.len > 0 and not hasDefaultFilter and not payload.isNil and payload.kind == JObject and
-      payload.hasKey(defaultKey) and not eventPayloadValueMatches(payload, defaultKey, default):
-    return false
 
   true
 
@@ -1654,7 +1645,7 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
     for nodeId in scene.eventListeners[context.event]:
       let nextNode = if scene.nextNodeIds.hasKey(nodeId): scene.nextNodeIds[nodeId] else: -1.NodeId
       if nextNode != 0.NodeId and nextNode != -1.NodeId:
-        if scene.nodes.hasKey(nodeId) and not eventNodeMatchesPayload(scene.nodes[nodeId], context.event, context.payload):
+        if scene.nodes.hasKey(nodeId) and not eventNodeMatchesPayload(scene.nodes[nodeId], context.payload):
           listenersFiltered += 1
           let d = scene.nodes[nodeId].data
           if not d.isNil and d.kind == JObject:

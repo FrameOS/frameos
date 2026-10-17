@@ -113,7 +113,7 @@ spellings never stop working: store scenes are versioned and immutable.
 | Class | Events | Meaning |
 |---|---|---|
 | `lifecycle` | `init`, `open`, `render`, `close` | The host tells a scene where it is in its life. |
-| `input` | `pointerMove`, `pointerDown`, `pointerUp`, `pointerCancel`, `wheel`, `tap`, `doubleTap`, `longPress`, `swipe`, `keyDown`, `keyUp`, `textInput`, `button` — and the old names `mouseMove`, `mouseDown`, `mouseUp` | Something a person did. `device` says with what: `keyboard`, `pointer`, `button`. See [Input](#input). |
+| `input` | `pointerMove`, `pointerDown`, `pointerUp`, `pointerCancel`, `wheel`, `tap`, `doubleTap`, `longPress`, `swipe`, `keyDown`, `keyUp`, `textInput`, `gpio`, `button` — and the old names `mouseMove`, `mouseDown`, `mouseUp` | Something a person did. `device` says with what: `keyboard`, `pointer`, `button`. See [Input](#input). |
 | `scene-command` | `setSceneState`, `setCurrentScene`, `turnOn`, `turnOff` | Asks the host to do something for the scene; a scene may dispatch it. |
 | `device-command` | `metrics`, `reload`, `restart`, `reboot`, `uploadScenes` | Asks the runtime to do something to the device. Never delivered to a scene, never offered by the editor. |
 
@@ -184,8 +184,9 @@ A refused event is dropped and logged (`event:refused`,
 
 The lists for input events are still wide: a schedule or a scene may say
 `button`, because scenes in the wild use that to reuse a handler. Narrowing
-one is a line in the contract and a fixture. The browser preview (`preview`)
-says what a frame's drivers say: pointers, the wheel, keys.
+one is a line in the contract and a fixture. `gpio` is as wide, less the
+cloud, which has no verb for it. The browser preview (`preview`) says what a
+frame's drivers say: pointers, the wheel, keys, button edges.
 
 ### Payloads, units and the wire
 
@@ -195,10 +196,9 @@ dispatch forms; `filter: "more"` keeps it in the catalog but folded in the
 event node ("More filters") until a filter is set, so a `button` node shows
 its role and action and not the pin, the label, the hold time and the wake
 flag. A unit whose values are a list the contract keeps (`button-role`,
-`button-action`, `swipe-direction`, `pointer-type`) reaches the editor as the
-field's `options`: a select, never a free text. `listenDefault` on a field is
-what a listener with no filter on it hears: only events where the field
-equals that value.
+`button-action`, `gpio-action`, `swipe-direction`, `pointer-type`) reaches the
+editor as the field's `options`: a select, never a free text. A listener with
+no filter on a field hears every value of it.
 
 - **Pointer position.** Every pointer event a scene hears carries `x`, `y` in
   **scene pixels**, rotation and flip applied. On the wire — driver → host,
@@ -285,33 +285,36 @@ key meant for a scene, Ctrl+Alt+Del included, and lets go when it stops;
 `inputSettings.grabKeyboard` (default on) turns that off. Keyboards and
 pointers plugged in after boot are found (inotify on `/dev/input`).
 
-**Buttons.** `button {pin, label, role, action, durationMs?, heldSeconds?, wake?, atMs?, level?}`.
-One event, `button`, in two layers; `action` says which.
+**Buttons.** Two events; `action` says which of each.
 
-- **Hardware layer: `down` and `up`.** What the line did, delivered the moment
-  the driver reports it: `down` on the press, `up` on the release with
-  `durationMs`. For a scene that wants the key itself: a counter that counts
-  every tap, hold-to-show.
-- **Button layer: `press`, `doublePress`, `longPress`.** What the person
-  meant, and each press is exactly one of them. `press` is a short press, once
+- **`gpio {pin, label, role, action, durationMs?, wake?, atMs?, level?}`:
+  `down` and `up`.** What the line did, delivered the moment the driver
+  reports it: `down` on the press, `up` on the release with `durationMs`. For
+  a scene that wants the key itself: a counter that counts every tap,
+  hold-to-show.
+- **`button {pin, label, role, action, durationMs?, wake?, atMs?}`:
+  `press`, `doublePress`, `longPress`.** What the person meant, and each press
+  is exactly one of them. `press` is a short press, once
   it is over and `buttons.doublePressMs` (350) has passed since its `up` with
   no second down, so it arrives 350 ms after the release. `doublePress` is the
   second down inside that window; the pair is that and nothing more (no
   `press`, no `longPress`), and a third down starts over. `longPress` is the
   `up` of a press held at least `buttons.longPressMs` (1000), once, right
-  after that `up`, with the same `durationMs` and `heldSeconds`; nothing is
+  after that `up`, with the same `durationMs`; nothing is
   delivered while a key is held, and a long press is not also a `press`.
 
-A tap is therefore `down`, `up`, then `press`; a double tap `down`, `up`,
-`down`, `doublePress`, `up`; a 2.2 s hold `down`, then `up` and `longPress`
-(`heldSeconds` 2) together. **A listener with no `action` filter hears `press`
-only** (`listenDefault`): every listener from before the layers existed is
-exactly that. A fast double tap reaches such a listener as nothing, since it
-is a `doublePress`; a scene that must count every tap listens for `down`.
-Drivers until 2026.10.16 sent their edges as `press` / `release`, and until
-then `press` was the down edge itself, `release` the up, `longPress` came
-while the key was held and `repeat` every second after; the dispatcher still
-takes those edges by their `level`.
+A tap is therefore `gpio` `down`, `gpio` `up`, then `button` `press`; a
+double tap `down`, `up`, `down` with a `doublePress`, `up`; a 2.2 s hold
+`down`, then `up` and a `longPress` (`durationMs` 2200) together. **A `button`
+listener with no `action` filter hears every press, double press and long
+press**, once each: a scene that reacts to a button listens for `button` and
+branches on `action` if it cares; one that must count every tap listens for
+`gpio` `down`. Producers until 2026.10.16 sent their edges as `button` (with
+`level`, as the action `down` / `up`, and before that named `press` /
+`release`, when `press` was the down edge itself, `release` the up,
+`longPress` came while the key was held and `repeat` every second after); the
+dispatcher still takes such a `button` as the `gpio` edge it is. Until
+2026.10.16 a `button` listener with no `action` filter heard `press` only.
 
 Each event has its sound on an ESP32 with a buzzer, at the instant it
 happens: a click on `down`, a lower one on every `up`, and a higher click
@@ -340,10 +343,10 @@ takes the first change as the edge and ignores changes for 30 ms after it, a
 Pi asks lgpio for 30 ms of steady level. Until 2026.10.16 they waited 80 ms and
 100 ms, which lost quick taps and the second tap of a quick double.
 
-Anything that is not an edge (no `level`, and an `action` other than `down` /
-`up`) is someone saying a button was pressed: HTTP, the cloud, a schedule, a
-scene. It moved no line and has nothing to time, so it is delivered as said,
-no `action` meaning `press`. `role` is what the button means:
+A `button` that is not an edge (no `level`, and an `action` other than `down`
+/ `up`) is someone saying a button was pressed: HTTP, the cloud, a schedule,
+a scene. It moved no line and has nothing to time, so it is delivered as said,
+no `action` meaning `press`. A `gpio` that names no edge is dropped. `role` is what the button means:
 `buttons.roles`: `primary`, `secondary`, `next`, `prev`, `up`, `down`, `back`,
 `menu`, `refresh`. A store scene filters on `role: "next"` instead of a
 silkscreen label: a frame configures one per button (`gpioButtons[].role`,

@@ -66,9 +66,9 @@ function contractOption(option: SelectFieldOption, labelsByRole: Record<string, 
 
 /**
  * The control for one filter field. A field the contract gives values to
- * (`options`) is a select; a boolean is a yes/no select; a `button` listener
- * on a frame whose buttons are known picks the label or the pin from a list,
- * and its role options say which of the frame's buttons map to them
+ * (`options`) is a select; a boolean is a yes/no select; a `button` or `gpio`
+ * listener on a frame whose buttons are known picks the label or the pin from
+ * a list, and its role options say which of the frame's buttons map to them
  * (`buttons.roleByLabel`); a number is a number box; the rest is free text.
  */
 export function eventFilterControl(
@@ -77,8 +77,9 @@ export function eventFilterControl(
   buttons?: FrameButton[] | null
 ): EventFilterControl {
   const known = Array.isArray(buttons) ? buttons.filter((button) => typeof button?.label === 'string') : []
+  const isButtonEvent = event === 'button' || event === 'gpio'
   if (field.options && field.options.length > 0) {
-    const labelsByRole = event === 'button' && field.name === 'role' ? roleLabelsByRole(known) : {}
+    const labelsByRole = isButtonEvent && field.name === 'role' ? roleLabelsByRole(known) : {}
     return {
       kind: 'select',
       options: [ANY_EVENT_FILTER_OPTION, ...field.options.map((option) => contractOption(option, labelsByRole))],
@@ -90,7 +91,7 @@ export function eventFilterControl(
       options: [ANY_EVENT_FILTER_OPTION, { value: 'true', label: 'yes' }, { value: 'false', label: 'no' }],
     }
   }
-  if (event === 'button' && known.length > 0 && (field.name === 'label' || field.name === 'pin')) {
+  if (isButtonEvent && known.length > 0 && (field.name === 'label' || field.name === 'pin')) {
     return {
       kind: 'select',
       options: [

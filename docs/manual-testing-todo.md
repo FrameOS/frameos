@@ -52,17 +52,17 @@ touch, both 2026-09-19):
   (`driver:evdev … listening`), is grabbed (`grabbed: true`; Ctrl+Alt+Del does
   nothing), and the Keyboard test shows `Shift+H` as `H` under the `us` layout
   and `z` for KEY_Y under `de` (`inputSettings.keyboardLayout`); a GPIO button
-  held 2.5 s logs `down`, then on the release an `up` and a `longPress`, both
-  with `durationMs` near 2500, and the Counter sample still counts one per tap (taps slower
-  than 350 ms apart; a quick double is a `doublePress`, which it does not
-  count). On an ESP32 (E1002 bench): a tap logs `down` and `up` at once and a
-  `press` 350 ms later, and a scene's `button` listener without an `action`
-  filter runs once per tap. Timing through a render (E1004, a ~30 s
+  held 2.5 s logs a `gpio` `down`, then on the release a `gpio` `up` and a
+  `button` `longPress`, both with `durationMs` near 2500, and the Counter
+  sample counts one per press (a quick double is one `doublePress`, a hold one
+  `longPress`). On an ESP32 (E1002 bench): a tap logs `gpio` `down` and `up`
+  at once and a `button` `press` 350 ms later, and a scene's `button` listener
+  without an `action` filter runs once per press, double press or long press. Timing through a render (E1004, a ~30 s
   refresh): a tap made mid-refresh logs an `up` with a `durationMs` of about
   100, not 30000, then a `press` and no `longPress`; two quick taps
   mid-refresh log one `doublePress` and no `press`; a key held 2 s
   mid-refresh logs the `up` then a `longPress`, both with `durationMs` near
-  2000 and `heldSeconds: 2`; a key held across the end of a refresh logs
+  2000; a key held across the end of a refresh logs
   nothing until it is let go.
 - [ ] **Button sounds and debounce on the E1004** (2026.10.16): the fastest
   tap you can make is `down`, `up`, `press` (no lost taps); the fastest

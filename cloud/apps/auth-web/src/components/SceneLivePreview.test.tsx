@@ -387,7 +387,7 @@ describe("SceneLivePreviewPanel pointer input", () => {
     };
     act(() =>
       preview.options.onReady({ currentSceneId: "scene-runtime-1" }, null, {
-        buttonEdges: true,
+        gpioEvents: true,
         inputEvents: true,
         pointerEvents: true,
         version: "2026.10.16",

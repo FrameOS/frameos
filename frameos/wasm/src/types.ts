@@ -103,11 +103,12 @@ export interface PreviewRuntimeInfo {
    * (see ./pointer). False sends the older bundle the old mouse events and
    * no keys. */
   inputEvents: boolean
-  /** Whether the bundle takes a button as its edges (2026.10.16): `down` when
-   * it is pressed, `up` when it is let go, from which the runtime makes the
-   * `press`, `doublePress` or `longPress` (see `FrameOSPreview.buttonDown`).
-   * False sends the older bundle one `button` per press, on the release. */
-  buttonEdges: boolean
+  /** Whether the bundle takes a button's edges as `gpio` (2026.10.16): `down`
+   * when it is pressed, `up` when it is let go, from which the runtime makes
+   * the `button` `press`, `doublePress` or `longPress` (see
+   * `FrameOSPreview.buttonDown`). False sends the older bundle one `button`
+   * per press, on the release. */
+  gpioEvents: boolean
 }
 
 /** How the runtime's /srv/assets is backed, sent with the worker's `ready` message. */
@@ -155,7 +156,9 @@ export function sceneEventButtons(scene: FrameOSScene | undefined | null): Scene
       continue
     }
     const data = (node.data ?? {}) as Record<string, unknown> & { config?: Record<string, unknown> }
-    const keyword = String(data.keyword ?? '')
+    // A `gpio` listener is pressed with the same button as a `button` one: the
+    // preview holds it and sends the edges (FrameOSPreview.buttonDown).
+    const keyword = data.keyword === 'gpio' ? 'button' : String(data.keyword ?? '')
     if (!keyword || LIFECYCLE_EVENTS.has(keyword) || POINTER_EVENTS.has(keyword) || KEYBOARD_EVENTS.has(keyword)) {
       continue
     }

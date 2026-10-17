@@ -161,12 +161,8 @@ def load():
                 fail(f"{where}.{fname}: needs a label and a required flag")
             if field.get("wire") not in (None, "pointer"):
                 fail(f"{where}.{fname}: the only wire form is \"pointer\"")
-            if "listenDefault" in field and (not isinstance(field["listenDefault"], str) or not event["listen"]):
-                fail(f"{where}.{fname}: listenDefault is the value a listener without a filter on this field hears")
             if "filter" in field and (field["filter"] != "more" or not event["listen"] or not field.get("catalog", True)):
                 fail(f"{where}.{fname}: filter: \"more\" folds a catalog field of a listenable event until a filter is set")
-        if sum(1 for f in event.get("payload", []) if "listenDefault" in f) > 1:
-            fail(f"{where}: one listenDefault field per event (the generated lookup returns one)")
         if "synthesized" in event and (not isinstance(event["synthesized"], bool) or "driver" not in event["origins"]):
             fail(f"{where}: `synthesized` marks an event the dispatcher makes out of others; it keeps the driver origin")
         alias_of = event.get("aliasOf")
@@ -205,8 +201,10 @@ def load():
     buttons = doc["buttons"]
     if not buttons.get("roles") or any(not NAME_RE.fullmatch(r) for r in buttons["roles"]):
         fail("buttons.roles: camelCase identifiers")
-    if buttons.get("actions") != ["down", "up", "press", "doublePress", "longPress"]:
-        fail("buttons.actions: down, up, press, doublePress, longPress")
+    if buttons.get("edges") != ["down", "up"]:
+        fail("buttons.edges: down, up (the `gpio` event)")
+    if buttons.get("actions") != ["press", "doublePress", "longPress"]:
+        fail("buttons.actions: press, doublePress, longPress (the `button` event)")
     for label, role in buttons["roleByLabel"].items():
         if label != label.upper() or role not in buttons["roles"]:
             fail(f"buttons.roleByLabel.{label}: an upper-case label and one of buttons.roles")
@@ -270,6 +268,7 @@ def unit_options(doc):
     return {
         "button-role": doc["buttons"]["roles"],
         "button-action": doc["buttons"]["actions"],
+        "gpio-action": doc["buttons"]["edges"],
         "swipe-direction": doc["gestures"]["directions"],
         "pointer-type": doc["pointer"]["types"],
     }
@@ -292,7 +291,6 @@ def catalog(doc):
         entry["fields"] = [
             {"name": f["name"], "label": f["label"], "type": f["type"], "required": f["required"],
              **({"options": options[f["unit"]]} if f.get("unit") in options else {}),
-             **({"listenDefault": f["listenDefault"]} if "listenDefault" in f else {}),
              **({"filter": f["filter"]} if "filter" in f else {})}
             for f in event.get("payload", [])
             if f.get("catalog", True)
@@ -478,17 +476,6 @@ def gen_nim(doc):
             out.append('    else: ""')
     out.append('  else: ""')
     out.append("")
-    out.append("proc eventListenDefault*(name: string): (string, string) =")
-    out.append("  ## The one payload field of `name` with a `listenDefault`, and the value: a")
-    out.append("  ## listener with no filter on that field hears only events where it equals")
-    out.append("  ## this (`button` without an `action` filter hears presses). (\"\", \"\"): none.")
-    out.append("  case name")
-    for event in events:
-        defaults = [f for f in event.get("payload", []) if "listenDefault" in f]
-        if defaults:
-            out.append(f"  of ev{camel(event['name'])}: ({nim_str(defaults[0]['name'])}, {nim_str(defaults[0]['listenDefault'])})")
-    out.append('  else: ("", "")')
-    out.append("")
     out.append("proc buttonRoleForLabel*(upperLabel: string): string =")
     out.append("  ## The default role of a GPIO button that has none configured, by its label")
     out.append("  ## (upper-cased by the caller); empty when the label says nothing.")
@@ -596,10 +583,12 @@ def gen_c(doc):
         f"#define FOS_POINTER_WIRE_MAX {int(doc['pointer']['wireMax'])}",
         f"#define FOS_CUSTOM_EVENT_MAX_NAME_LENGTH {int(doc['customEvents']['maxNameLength'])}",
         "",
-        "/* `button {action}`: the firmware reports the edges, each with `atMs` (when it saw",
-        " * it); doublePress, longPress and repeat are the Nim dispatcher's",
+        "/* `gpio {action}`: the firmware reports the edges, each with `atMs` (when it saw",
+        " * it); `button {action}` (press, doublePress, longPress) is the Nim dispatcher's",
         " * (frameos/input_state.nim), like on every host. */",
     ]
+    for action in doc["buttons"]["edges"]:
+        out.append(f"#define FOS_GPIO_ACTION_{upper_snake(action)} {c_str(action)}")
     for action in doc["buttons"]["actions"]:
         out.append(f"#define FOS_BUTTON_ACTION_{upper_snake(action)} {c_str(action)}")
     out += [
@@ -826,6 +815,7 @@ def gen_ts_frontend(doc):
     out.append(f"export const buttonRoles: readonly string[] = {ts_json(doc['buttons']['roles'], None)}")
     out.append(f"export const buttonRoleByLabel: Record<string, string> = {ts_json(doc['buttons']['roleByLabel'])}")
     out.append(f"export const buttonActions: readonly string[] = {ts_json(doc['buttons']['actions'], None)}")
+    out.append(f"export const gpioActions: readonly string[] = {ts_json(doc['buttons']['edges'], None)}")
     out.append("")
     out.append("/** Keyboard layouts a frame's `keyboardLayout` setting can name. */")
     out.append("export const keyboardLayouts: readonly { id: string; label: string }[] = "

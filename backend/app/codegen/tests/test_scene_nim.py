@@ -274,39 +274,33 @@ def _button_listener_scene(config: dict) -> dict:
     }
 
 
-PRESS_ONLY = '(not context.payload.hasKey("action") or eventPayloadValueMatches(context.payload, "action", "press"))'
-
-
-def test_button_listener_without_an_action_filter_fires_on_press_only():
-    """The catalog's `listenDefault` (docs/events-contract.json): a `button`
-    node that does not pick an action must not fire on every longPress,
-    repeat and release too — and a payload from before `action` still fires."""
+def test_button_listener_without_an_action_filter_hears_every_press():
+    """A `button` node that does not pick an action runs on every press,
+    double press and long press: the line's own down and up are `gpio`
+    (docs/events-contract.json), so there is nothing else to keep out."""
     frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
 
     source = write_scene_nim(frame, _button_listener_scene({"label": "A"}))
 
     assert 'of "button":' in source
-    assert 'eventPayloadValueMatches(context.payload, "label", "A")' in source
-    assert PRESS_ONLY in source
-    assert f'if eventPayloadValueMatches(context.payload, "label", "A") and {PRESS_ONLY}:' in source
+    assert '  if eventPayloadValueMatches(context.payload, "label", "A"):' in source
+    assert 'hasKey("action")' not in source
 
 
 def test_button_listener_with_an_action_filter_keeps_its_own():
     frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
 
-    source = write_scene_nim(frame, _button_listener_scene({"action": "release"}))
+    source = write_scene_nim(frame, _button_listener_scene({"action": "doublePress"}))
 
-    assert 'if eventPayloadValueMatches(context.payload, "action", "release"):' in source
-    assert PRESS_ONLY not in source
-    assert 'hasKey("action")' not in source
+    assert 'if eventPayloadValueMatches(context.payload, "action", "doublePress"):' in source
 
 
-def test_listen_default_is_the_only_condition_on_a_bare_button_listener():
+def test_bare_button_listener_has_no_condition():
     frame = SimpleNamespace(interval=3600, debug=False, scenes=[])
 
     source = write_scene_nim(frame, _button_listener_scene({}))
 
-    assert f'  if {PRESS_ONLY}:' in source
+    assert 'eventPayloadValueMatches' not in source.split('of "button":', 1)[1].split("of ", 1)[0]
 
 
 def test_static_scene_registry_imports_compiled_scenes():

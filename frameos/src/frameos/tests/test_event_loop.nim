@@ -191,7 +191,7 @@ block a_full_lane_drops_and_counts:
   let host = newRecordingHost("fixtures/dispatcher/lanes".SceneId, logs)
   host.loop.laneCapacity = 3
   for i in 0 ..< 5:
-    host.loop.enqueue(eoDriver, "button", %*{"pin": i, "label": "A", "level": 0})
+    host.loop.enqueue(eoDriver, "gpio", %*{"pin": i, "label": "A", "level": 0})
   doAssert host.loop.pending == 3
   doAssert host.loop.dropped == 2
   # A move still coalesces into a full lane: it takes the slot of the move before it.
