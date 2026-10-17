@@ -190,6 +190,7 @@ async function renderSceneToDataUrl(frame: FrameType, sceneId: string): Promise<
       settingsJson,
       proxyUrl,
       sceneId: scene.id,
+      lanAccess: frame.lan_access ?? undefined,
     })
   })
 }

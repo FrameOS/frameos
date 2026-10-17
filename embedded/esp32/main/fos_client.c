@@ -31,8 +31,10 @@
 #include "fos_events.h"
 #include "fos_framebuffer.h"
 #include "fos_http.h"
+#include "fos_lan_access.h"
 #include "fos_mem.h"
 #include "fos_ota.h"
+#include "fos_panel_draw.h"
 #include "fos_power.h"
 #include "fos_scenes.h"
 #include "fos_schedule.h"
@@ -493,9 +495,14 @@ static uint32_t keep_awake_remaining_seconds(void)
     portEXIT_CRITICAL(&s_keep_awake_lock);
 
     int64_t now_us = esp_timer_get_time();
-    if (until_us <= now_us) return 0;
-    int64_t remaining_us = until_us - now_us;
-    return (uint32_t)((remaining_us + 999999) / 1000000);
+    /* A local network access code on the panel holds the deep sleep until it is
+     * answered or expires: the person walking to the frame to read it must
+     * find the code there, and its end must repaint the panel. Not a
+     * keep_awake_ms() window, which an answered code could not shorten. */
+    uint32_t lan_s = fos_lan_access_seconds_left(fos_lan_access_now());
+    uint32_t hold_s = 0;
+    if (until_us > now_us) hold_s = (uint32_t)((until_us - now_us + 999999) / 1000000);
+    return lan_s > hold_s ? lan_s : hold_s;
 }
 
 static bool json_string_value(const char *json, const char *key, char *out, size_t out_len)
@@ -1078,6 +1085,93 @@ static void push_status_info(void)
     frameos_nim_set_status_info(info);
 }
 
+/* ------------------------------------------------- the local network access code */
+
+/* The generation of the local network access code (fos_lan_access.h) the render task
+ * last answered: drew, or saw end. Render task only. */
+static uint32_t s_lan_seen_gen = 0;
+
+/* A code appeared, was replaced or ended since the last render looked: one
+ * render, so the panel shows it or loses it. One per change — a render that
+ * then fails or is skipped (battery, OTA) does not make this fire again. */
+static bool lan_access_panel_changed(void)
+{
+    if (!fos_display_present()) return false;
+    uint32_t generation = fos_lan_access_panel_code(fos_lan_access_now(), NULL);
+    if (generation == s_lan_seen_gen) return false;
+    s_lan_seen_gen = generation;
+    return true;
+}
+
+typedef struct {
+    bool drawn;
+    fos_panel_surface_t surface;
+    fos_panel_code_box_t box;
+    uint8_t *saved; /* the render under the box; NULL = paint it white */
+} lan_overlay_t;
+
+/* Draw the pending code over a finished render, for the panel only
+ * (docs/lan-access.md). Between this and lan_overlay_end() the buffer holds
+ * the code, and nothing that reads it as an image may run: the snapshot
+ * behind /image, image_get and the backend push is stored after the end. */
+static void lan_overlay_begin(lan_overlay_t *ov, uint8_t *buf, int width, int height,
+                              fos_pixel_format_t format)
+{
+    memset(ov, 0, sizeof(*ov));
+    char code[FOS_LAN_ACCESS_CODE_LEN + 1];
+    uint32_t generation = fos_lan_access_panel_code(fos_lan_access_now(), code);
+    s_lan_seen_gen = generation;
+    if (generation == 0) return;
+    if (s_last_frame == buf) {
+        /* The lend hook could not drop the preview snapshot (a stream stalled
+         * past 30 s) so this buffer is still served as the frame's image. */
+        ESP_LOGW(TAG, "Local network access code skipped: buffer still lent");
+    } else {
+        ov->surface = (fos_panel_surface_t){
+            .buf = buf, .width = width, .height = height, .format = format,
+            .rotate = fos_config()->rotate,
+        };
+        if (fos_panel_code_box(&ov->surface, "Local network access code", FOS_LAN_ACCESS_CODE_LEN,
+                               &ov->box)) {
+            size_t bytes = fos_panel_box_copy(&ov->surface, &ov->box, NULL, false);
+            ov->saved = bytes ? fos_big_malloc(bytes) : NULL;
+            if (ov->saved) fos_panel_box_copy(&ov->surface, &ov->box, ov->saved, false);
+            fos_panel_draw_code(&ov->surface, &ov->box, "Local network access code", code);
+            ov->drawn = true;
+            frameos_nim_log_hook("{\"event\":\"lan_access:shown\",\"source\":\"esp32\"}");
+        }
+    }
+    volatile char *wipe = code;
+    for (size_t i = 0; i < sizeof(code); i++) wipe[i] = 0;
+}
+
+static void lan_overlay_end(lan_overlay_t *ov)
+{
+    if (!ov->drawn) return;
+    if (ov->saved) {
+        fos_panel_box_copy(&ov->surface, &ov->box, ov->saved, true);
+    } else {
+        /* No memory for a copy: a white box, still never the code. */
+        fos_panel_fill_rect(&ov->surface, ov->box.x, ov->box.y, ov->box.w, ov->box.h, false);
+    }
+    free(ov->saved);
+    ov->saved = NULL;
+    ov->drawn = false;
+}
+
+/* The panel shows something no stored hash describes (the render plus a
+ * code): the next render must refresh even when the scene did not change,
+ * here and after a reboot. */
+static void forget_display_state(void)
+{
+    s_display_state_loaded = true;
+    s_display_state_valid = false;
+    nvs_handle_t nvs;
+    if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
+    if (nvs_erase_key(nvs, "display_state") == ESP_OK) nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
 static esp_err_t render_once(void)
 {
     fos_config_t *config = fos_config();
@@ -1147,9 +1241,16 @@ static esp_err_t render_once(void)
         display_state_for_buffer(buf, buf_len, width, height, format, &rendered_state);
     bool skipped_refresh = false;
     const char *refresh = fos_display_present() ? "pending" : "none";
+    /* After the hash (which describes the render, not the code) and only for
+     * the panel: see lan_overlay_begin. */
+    lan_overlay_t lan_overlay = {0};
+    if (err == ESP_OK && fos_display_present()) {
+        lan_overlay_begin(&lan_overlay, buf, width, height, format);
+    }
     if (err == ESP_OK && fos_display_present()) {
         load_display_state();
-        if (rendered_state_valid && s_display_state_valid && display_state_matches(&rendered_state, &s_display_state)) {
+        if (!lan_overlay.drawn && rendered_state_valid && s_display_state_valid &&
+            display_state_matches(&rendered_state, &s_display_state)) {
             skipped_refresh = true;
             s_last_refresh_skipped = true;
             refresh = "skipped";
@@ -1170,7 +1271,11 @@ static esp_err_t render_once(void)
             frameos_nim_flush_logs();
             err = fos_display_blit(buf, buf_len);
             refresh = err == ESP_OK ? "updated" : "failed";
-            if (err == ESP_OK && rendered_state_valid) {
+            if (lan_overlay.drawn) {
+                lan_overlay_end(&lan_overlay);
+                s_last_refresh_skipped = false;
+                forget_display_state();
+            } else if (err == ESP_OK && rendered_state_valid) {
                 s_display_state = rendered_state;
                 s_display_state_valid = true;
                 s_last_refresh_skipped = false;
@@ -1181,6 +1286,7 @@ static esp_err_t render_once(void)
         ESP_LOGI(TAG, "headless: rendered %u bytes, no panel to blit", (unsigned)buf_len);
         refresh = "none";
     }
+    lan_overlay_end(&lan_overlay); /* already out on every path; never into the snapshot */
     if (err == ESP_OK) {
         if (skipped_refresh && rendered_state_valid) {
             s_display_state = rendered_state;
@@ -1616,6 +1722,10 @@ static void client_task(void *arg)
         if (fos_scenes_take_switched()) {
             force_render = true;
         }
+        /* A local network access code to show, or one to take off the panel. */
+        if (lan_access_panel_changed()) {
+            force_render = true;
+        }
         bool checkin_pass = deep_sleep_now && !force_render && clock_ok &&
                             s_next_render_due > wall_now + 2 &&
                             /* a due date past the longest allowed interval is
@@ -1917,6 +2027,12 @@ static void client_task(void *arg)
                 }
             }
             if (frameos_nim_render_requested()) {
+                force_render = true;
+                break;
+            }
+            /* A code started (the verb wakes this wait), answered, replaced
+             * or expired: within a second, whatever the interval. */
+            if (lan_access_panel_changed()) {
                 force_render = true;
                 break;
             }

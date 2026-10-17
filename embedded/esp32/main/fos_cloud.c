@@ -39,6 +39,7 @@
 #include "fos_events.h"
 #include "fos_mem.h"
 #include "fos_http.h"
+#include "fos_lan_access.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
 #include "fos_schedule.h"
@@ -483,6 +484,10 @@ static void add_hardware_json(cJSON *parent)
      * panel shows as "on the frame". */
     cJSON_AddNumberToObject(hw, "buzzerPin", config->buzzer_pin);
     cJSON_AddNumberToObject(hw, "buzzerToneHz", config->buzzer_tone_hz);
+    /* Local network access (docs/lan-access.md): the cloud has no column of
+     * its own and shows what the frame reports here, on every hello and
+     * every `state` (one follows each lan_access_set). */
+    cJSON_AddBoolToObject(hw, "lanAccess", config->allow_local_network);
 
     /* Board facts for the cloud deploy drawer, mirroring the USB console's
      * status JSON (fos_http_status_json). Sent on hello, so the control
@@ -2715,6 +2720,84 @@ static bool backend_verb_allowed(const char *type)
     return false;
 }
 
+/* ----------------------------------------------- local network access verbs
+ *
+ * docs/lan-access.md. Turning local network access on from the cloud takes
+ * the code the frame draws on its panel (fos_lan_access.h, drawn by
+ * fos_client.c for the panel only), so a provider account cannot open its
+ * owner's LAN without someone standing in front of the frame. Turning it off
+ * takes nothing. The code is never in an ack or a log line. Cloud verbs only:
+ * the backend's command queue does not carry them (backend_verb_allowed). */
+
+/* `{"event":"lan_access:<event>","source":"esp32"[,"reason":"<reason>"]}` */
+static void lan_access_log(const char *event, const char *reason)
+{
+    char line[96];
+    snprintf(line, sizeof(line), "{\"event\":\"lan_access:%s\",\"source\":\"esp32\"%s%s%s}", event,
+             reason ? ",\"reason\":\"" : "", reason ? reason : "", reason ? "\"" : "");
+    frameos_nim_log_hook(line);
+}
+
+/* `lan_access_challenge {}`: show a code. Acked at once; the render task
+ * repaints within a second (the wake below), and a pending code holds a
+ * battery frame's deep sleep until it is answered or expires. With the
+ * wrong-code budget spent, `rate_limited` and the pending code stays. */
+static void ws_handle_lan_access_challenge(const cJSON *id)
+{
+    const char *refused = NULL;
+    if (!fos_display_present()) {
+        refused = "no_panel"; /* headless: nowhere to show it */
+    } else if (fos_lan_access_start(fos_lan_access_now(), esp_random) == 0) {
+        refused = "rate_limited";
+    }
+    lan_access_log(refused ? "refused" : "challenge", refused);
+    ws_ack(id, refused == NULL, refused);
+    if (!refused) fos_client_wake_for_events();
+}
+
+/* `lan_access_set {enabled, code?}`. The new value reaches the cloud through
+ * the state that follows (hardware.lanAccess), not through the ack. */
+static void ws_handle_lan_access_set(const cJSON *root, const cJSON *id)
+{
+    const cJSON *enabled = cJSON_GetObjectItem(root, "enabled");
+    if (!cJSON_IsBool(enabled)) {
+        ws_ack(id, false, "invalid_lan_access");
+        return;
+    }
+    const bool want = cJSON_IsTrue(enabled);
+    if (want) {
+        const cJSON *code = cJSON_GetObjectItem(root, "code");
+        fos_lan_access_result_t result = fos_lan_access_consume(
+            cJSON_IsString(code) ? code->valuestring : NULL, fos_lan_access_now());
+        if (result != FOS_LAN_ACCESS_OK) {
+            const char *token = fos_lan_access_result_token(result);
+            lan_access_log("refused", token);
+            /* The fifth wrong code ended the challenge: off the panel. */
+            if (result == FOS_LAN_ACCESS_TOO_MANY_ATTEMPTS) fos_client_wake_for_events();
+            ws_ack(id, false, token);
+            return;
+        }
+        fos_client_wake_for_events(); /* answered: off the panel */
+    } else if (fos_lan_access_panel_code(fos_lan_access_now(), NULL) != 0) {
+        /* Turned off: a code still showing has nothing left to unlock. */
+        fos_lan_access_clear();
+        fos_client_wake_for_events();
+    }
+    fos_config_t *config = fos_config();
+    const bool before = config->allow_local_network;
+    config->allow_local_network = want;
+    if (fos_config_save() != ESP_OK) {
+        config->allow_local_network = before;
+        ws_ack(id, false, "persist_failed");
+        return;
+    }
+    /* Now, not on the next cloud-task tick. */
+    apply_network_policy();
+    lan_access_log(want ? "on" : "off", NULL);
+    ws_ack(id, true, NULL);
+    ws_send_state(NULL);
+}
+
 /* One verb, whoever sent it: the management socket (origin cloud) or the
  * backend's command queue (origin http:admin — the backend signs in with the
  * frame's server API key, the same credential as its /event route, so the
@@ -2758,6 +2841,10 @@ static void dispatch_verb(const char *type, cJSON *root, const cJSON *id,
         ws_handle_asset_verb(ASSET_JOB_RENAME, root, id);
     } else if (strcmp(type, "image_get") == 0) {
         ws_handle_asset_verb(ASSET_JOB_IMAGE, root, id);
+    } else if (strcmp(type, "lan_access_challenge") == 0) {
+        ws_handle_lan_access_challenge(id);
+    } else if (strcmp(type, "lan_access_set") == 0) {
+        ws_handle_lan_access_set(root, id);
     } else if (strcmp(type, "reboot") == 0 || strcmp(type, "restart_runtime") == 0) {
         /* On ESP32 the runtime IS the firmware: restart_runtime == reboot,
          * and fos_events.c carries both out the same way. */

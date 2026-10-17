@@ -51,6 +51,8 @@ const commandLabels: Record<string, string> = {
   asset_get: 'Fetch a file for a preview',
   get_metrics: 'Collect metrics',
   image_get: 'Fetch the current image',
+  lan_access_challenge: 'Show local network access code',
+  lan_access_set: 'Change local network access',
   notify_update_available: 'Check for a firmware update',
   reboot: 'Reboot',
   refresh_service_settings: 'Re-read service API keys',

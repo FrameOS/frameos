@@ -15,7 +15,10 @@ import {
   webSerialSupported as isWebSerialSupported,
   webSerialUnavailableReason,
 } from '../../../../utils/webSerial'
-import { workspaceLogic, type WorkspaceTheme } from '../../../workspace/workspaceLogic'
+import { scrollToFrameSettingsSection, workspaceLogic, type WorkspaceTheme } from '../../../workspace/workspaceLogic'
+import { urls } from '../../../../urls'
+import type { FrameId } from '../../../../types'
+import { LAN_ACCESS_BLOCKED_LOG_PREFIX, LAN_ACCESS_SETTINGS_ANCHOR } from '../FrameSettings/lanAccess'
 import { frameSupportsUsbSerialConsole, workspaceMode } from '../../../workspace/workspaceSurfaces'
 import {
   embeddedUsbLogsModel,
@@ -330,6 +333,27 @@ function logTypeClassName(type: string, theme: WorkspaceTheme): string {
     return theme === 'dark' ? 'text-emerald-400/80' : 'text-emerald-800/80'
   }
   return theme === 'dark' ? 'text-slate-100' : 'text-slate-900'
+}
+
+/** A scene ran into the local network access block: offer the switch right there. */
+function LanAccessLogLink({ frameId, theme }: { frameId: FrameId; theme: WorkspaceTheme }): JSX.Element {
+  const { openFrameTool } = useActions(workspaceLogic)
+  return (
+    <a
+      href={`${urls.frame(frameId, 'settings')}#${LAN_ACCESS_SETTINGS_ANCHOR}`}
+      onClick={(event) => {
+        event.preventDefault()
+        openFrameTool(frameId, 'settings')
+        scrollToFrameSettingsSection(LAN_ACCESS_SETTINGS_ANCHOR)
+      }}
+      className={clsx(
+        'ml-2 whitespace-nowrap font-sans text-xs font-semibold underline underline-offset-2 hover:no-underline',
+        theme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'
+      )}
+    >
+      Turn on local network access
+    </a>
+  )
 }
 
 export function Logs({ fullScreen = false, compact = false, className }: LogsProps = {}) {
@@ -906,6 +930,9 @@ export function Logs({ fullScreen = false, compact = false, className }: LogsPro
               <div className="shrink-0 whitespace-nowrap text-slate-500">{formatTimestamp(log.timestamp)}</div>
               <div className="min-w-0 flex-1 break-words" style={{ wordBreak: 'break-word' }}>
                 {logLine}
+                {String(log.line).includes(LAN_ACCESS_BLOCKED_LOG_PREFIX) ? (
+                  <LanAccessLogLink frameId={frameId} theme={renderTheme} />
+                ) : null}
               </div>
             </div>
           )

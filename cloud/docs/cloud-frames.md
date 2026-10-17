@@ -397,17 +397,23 @@ Native: `isPrivateNetworkAddress` / `enforceLocalNetworkPolicy` in
 classifiers in step.
 
 **Elevation requires a local-presence ceremony.** A scene that legitimately
-needs LAN access (Home Assistant, say) needs `network.allowLocalNetworkAccess`,
-and that switch is deliberately hard to reach. It is absent from
-`CLOUD_SETTINGS_ALLOWLIST`, so the provider cannot set it; it is stripped from
-the bulk config save, so neither the cloud verb nor the admin page's frame save
-can carry it. It moves only through the ceremony in `frameos/local_access.nim`:
-`POST /api/network/local-access/challenge` puts a six-digit code on the panel
-for three minutes, and `POST /api/network/local-access` applies the change only
-if that code comes back. The code is never in an API response, single-use, and
-capped at five attempts — someone who cannot see the screen cannot complete it.
-On ESP32 the equivalent is `set allow_local_network 1` on the USB console,
-which is physical presence by construction.
+needs LAN access (Home Assistant, say) needs the frame's local network access
+on (`docs/lan-access.md`), and that switch is deliberately hard to reach. It is
+absent from `CLOUD_SETTINGS_ALLOWLIST`, so `set_settings` cannot set it; it is
+stripped from the bulk config save, so neither that verb nor the admin page's
+frame save can carry it. It moves only through the ceremony in
+`frameos/local_access.nim` (`fos_lan_access.c` on ESP32): a challenge puts a
+six-digit code on the panel for five minutes, and the change applies only if
+that code comes back. The owner starts it from the frame settings on the cloud
+(`lan_access_challenge`, then `lan_access_set {enabled, code}`, through
+`POST /api/frames/{id}/lan_access[/challenge]`) or, on a Pi, from the frame's
+admin API (`POST /api/network/local-access/challenge`, then
+`POST /api/network/local-access`). The code is never in an API response, a
+command listing or an image the frame sends, is single-use, capped at five
+attempts per code and ten wrong ones an hour — someone who cannot see the
+screen cannot complete it. Turning it off takes no code. On ESP32
+`set allow_local_network 1` on the USB console also turns it on, which is
+physical presence by construction.
 
 The same ceremony carries a second, Pi-only fact: whether
 `data/chromiumScreenshot` may run its browser unsandboxed on a frame where

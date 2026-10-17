@@ -705,6 +705,13 @@ export interface framesModelActions {
     archived: boolean
     id: FrameId
   }
+  setFrameLanAccess: (
+    id: FrameId,
+    lanAccess: boolean
+  ) => {
+    id: FrameId
+    lanAccess: boolean
+  }
   stopFrame: (id: FrameId) => {
     id: FrameId
   }
@@ -803,6 +810,9 @@ export const framesModel = kea<framesModelType>([
     updateFrameFirmware: (id: FrameId) => ({ id }),
     setDeployWithAgent: (id: FrameId, deployWithAgent: boolean) => ({ id, deployWithAgent }),
     setFrameArchived: (id: FrameId, archived: boolean) => ({ id, archived }),
+    // The local network access switch is not a form field: it changes on the device
+    // first (lanAccessLogic), and the frame row only mirrors the result.
+    setFrameLanAccess: (id: FrameId, lanAccess: boolean) => ({ id, lanAccess }),
     toggleArchivedFramesExpanded: true,
     toggleInactiveFramesExpanded: true,
   }),
@@ -966,6 +976,11 @@ export const framesModel = kea<framesModelType>([
               archived,
             },
           }
+        },
+        setFrameLanAccess: (state, { id, lanAccess }) => {
+          const frame = state[id]
+          if (!frame) return state
+          return { ...state, [id]: { ...frame, lan_access: lanAccess } }
         },
         renameFrame: (state, { id, name }) => {
           const frame = state[id]

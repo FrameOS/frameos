@@ -50,7 +50,8 @@ Three things carry most of the weight today, and they are good:
   frame's HTTP client refuses private-network destinations unless
   `network.allowLocalNetworkAccess` is set, and that switch is deliberately not
   in the bulk config save: it needs a challenge, a six-digit code *read off the
-  panel*, and a reply within three minutes (`frameos/local_access.nim`). The
+  panel*, and a reply within five minutes (`frameos/local_access.nim`), whether
+  the owner starts it on the frame's admin page or from the cloud. The
   deny follows the *scene origin*, not the link, so demoting a frame does not
   lift it. Someone who cannot see the screen cannot turn it on.
 

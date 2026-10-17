@@ -119,10 +119,11 @@ typedef struct {
      * `network.allowLocalNetworkAccess` in the native build's frame.json: 1
      * lets scenes on an enrolled frame keep talking to the LAN.
      *
-     * Local-only on purpose. It is reachable from the USB console and nowhere
-     * else — not in the cloud `set_settings` allowlist, not in the backend
-     * settings poll, not in the local HTTP API — because a provider that could
-     * flip its own leash would not have one. */
+     * Local-only on purpose. It is reachable from the USB console, and from
+     * the cloud's `lan_access_set` only with the code the frame shows on its
+     * panel (fos_lan_access.h) — not in the cloud `set_settings` allowlist,
+     * not in the backend settings poll, not in the local HTTP API — because a
+     * provider that could flip its own leash would not have one. */
     bool allow_local_network;
     bool tls_enable;               /* serve the frame HTTP API over HTTPS too */
     uint16_t tls_port;             /* HTTPS port, default mirrors Pi Caddy proxy */

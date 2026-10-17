@@ -27,6 +27,7 @@ import {
   storeBlob,
 } from "./blobs";
 import { deviceDeliverableFields } from "./frame-service-settings";
+import { frameLanAccess } from "./frame-lan-access";
 import { commandTtlForFrame } from "./frame-sleep";
 import { deployProgressKindForCommand, startDeployProgress } from "./deploy-progress";
 import { requiredSettingsForScenes } from "./preview-settings";
@@ -751,6 +752,11 @@ export function frameSummary(
     hardware: frame.hardware,
     id: frame.id,
     deployed_scene_state: frame.deployedSceneState,
+    // The frame-level local network access switch as the device last reported it
+    // (`hardware.lanAccess` in hello / state; the cloud keeps no copy of its
+    // own). null: the firmware does not report it, so the cloud cannot
+    // manage it until the frame is updated (the lan_access routes say so).
+    lan_access: frameLanAccess(frame.hardware),
     last_seen_at: frame.lastSeenAt,
     // The device's deep-sleep forecast (hub handleSleep): when it redials
     // next, when the panel refreshes next, and why it sleeps. null while
@@ -955,8 +961,9 @@ export async function supersedePendingCommands(
 // ---------------------------------------------------------------------------
 
 // What a queued command looks like to its owner. Deliberately NOT the raw
-// row: `payload` can carry a scene bundle (set_scenes) or a settings object,
-// and the queue view is a list of intentions, not a data dump. Only the
+// row: `payload` can carry a scene bundle (set_scenes), a settings object or
+// the local network access code the owner typed (lan_access_set), and the queue view is
+// a list of intentions, not a data dump. Only the
 // scene-id payload of set_current_scene is small and meaningful enough to
 // echo, and it is a public store id the owner already sees in the workspace.
 export interface PendingFrameCommand {

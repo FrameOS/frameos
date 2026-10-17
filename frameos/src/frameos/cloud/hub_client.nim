@@ -61,6 +61,7 @@ import frameos/device_setup
 import frameos/events
 import frameos/interpreter
 import frameos/js_runtime/app_runtime
+import frameos/local_access
 import frameos/scenes
 import frameos/server/api
 import frameos/server/settings_apply
@@ -368,12 +369,13 @@ initLock(policyCacheLock)
 proc refreshLocalNetworkPolicy*(frameConfig: FrameConfig) {.gcsafe.} =
   ## Recomputes the managed-frame private-network HTTP deny
   ## (utils/http_client.nim): active iff the frame is cloud-managed — or
-  ## still running provider-pushed scenes after losing the link — and the
-  ## local admin has not set `network.allowLocalNetworkAccess` in frame.json.
-  ## Called at startup, whenever the hub thread observes link-state or config
-  ## changes, and (via uploadedScenesChangedHook) whenever the uploaded scene
-  ## set is replaced; standalone and backend-managed frames always end up
-  ## with the policy off.
+  ## still running provider-pushed scenes after losing the link — and its
+  ## local network access is off (frameos/local_access.nim: turned on with
+  ## the code from the panel). Called at startup, whenever the hub thread
+  ## observes link-state or config changes, by the routes and the verb that
+  ## change local network access, and (via uploadedScenesChangedHook)
+  ## whenever the uploaded scene set is replaced; standalone and
+  ## backend-managed frames always end up with the policy off.
   ##
   ## The scene-origin term closes the demotion hole: demoteManagedLink keeps
   ## rendering the provider's last-pushed scenes, and before origin was
@@ -398,8 +400,7 @@ proc refreshLocalNetworkPolicy*(frameConfig: FrameConfig) {.gcsafe.} =
         policyCacheGeneration = generation
       managed = policyCacheManaged
       exempt = policyCacheExempt
-    let localOverride = frameConfig != nil and frameConfig.network != nil and
-      frameConfig.network.allowLocalNetworkAccess
+    let localOverride = lanAccessEnabled(frameConfig)
     # Computed outside the generation cache: the uploaded scene set changes
     # independently of the link state.
     let providerScenes = cloudUploadedScenesResident()
@@ -1364,6 +1365,41 @@ proc handleGetMetrics(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
   ack["metrics"] = ctx.getMetricsFn()
   CloudVerbReply(ack: ack)
 
+proc handleLanAccessChallenge(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
+  ## `lan_access_challenge` (docs/lan-access.md): show a code on the panel for
+  ## turning local network access on. The same decision the frame's admin route makes
+  ## (server/api.nim, startLanAccessChallenge); only ever the `localNetwork`
+  ## scope, never `shellApps`, from a control plane. The ack does not carry
+  ## the code — nothing that leaves the frame does.
+  {.gcsafe.}:
+    let device = if ctx.frameConfig != nil: ctx.frameConfig.device else: ""
+    let outcome = startLanAccessChallenge(device, LocalAccessScopeLocalNetwork)
+    if outcome.error.len > 0:
+      ctx.audit("lan_access_challenge", false, outcome.error)
+      return CloudVerbReply(ack: ackError(id, outcome.error))
+    ctx.audit("lan_access_challenge", true)
+    CloudVerbReply(ack: ackOk(id))
+
+proc handleLanAccessSet(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudVerbReply =
+  ## `lan_access_set` `{enabled, code?}`: off at once, on with the code from
+  ## the panel. The next `state` message reports the value as
+  ## hardware.lanAccess (runHubSession). The audit line never has the code.
+  {.gcsafe.}:
+    # Only `enabled` and `code` cross over: whatever else the message holds
+    # (a `scope`, say) is not the provider's to choose.
+    var payload = %*{}
+    if msg.hasKey("enabled"):
+      payload["enabled"] = msg["enabled"]
+    if msg.hasKey("code"):
+      payload["code"] = msg["code"]
+    let outcome = applyLanAccessChange(payload)
+    if outcome.error.len > 0:
+      ctx.audit("lan_access_set", false, outcome.error)
+      return CloudVerbReply(ack: ackError(id, outcome.error))
+    refreshLocalNetworkPolicy(ctx.frameConfig)
+    ctx.audit("lan_access_set", true)
+    CloudVerbReply(ack: ackOk(id))
+
 proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gcsafe.} =
   ## Dispatches one provider→frame message. The verb table below is the
   ## complete cloud-profile capability surface of this frame; anything else —
@@ -1414,6 +1450,10 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     result = handleAssetRename(ctx, id, msg)
   of "image_get":
     result = handleImageGet(ctx, id)
+  of "lan_access_challenge":
+    result = handleLanAccessChallenge(ctx, id)
+  of "lan_access_set":
+    result = handleLanAccessSet(ctx, id, msg)
   of "scenes_get":
     result = handleScenesGet(ctx, id)
   of "render":
@@ -1857,6 +1897,10 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
   # a Pi 5 — and the workspace showed the image default (800x480) until the
   # next reconnect.
   var lastReportedDisplay = $frameConfig.width & "x" & $frameConfig.height
+  # Local network access as hello reports it (hardware.lanAccess). Whatever
+  # changes it — the `lan_access_set` verb, the frame's admin page — the
+  # provider learns it from the next `state` message.
+  var lastReportedLanAccess = lanAccessEnabled(frameConfig)
   # Starts at the current value, so a reconnect does not announce a render that
   # happened while the link was down: the provider's own staleness check covers
   # that, and a fleet reconnecting after a hub restart must not all ask to be
@@ -2033,8 +2077,11 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
         refreshLocalNetworkPolicy(frameConfig)
         let (sceneId, _) = getAllPublicStates()
         let display = $frameConfig.width & "x" & $frameConfig.height
-        if sceneId.string != lastActiveScene or display != lastReportedDisplay:
+        let lanAccess = lanAccessEnabled(frameConfig)
+        if sceneId.string != lastActiveScene or display != lastReportedDisplay or
+            lanAccess != lastReportedLanAccess:
           lastActiveScene = sceneId.string
+          lastReportedLanAccess = lanAccess
           if display != lastReportedDisplay:
             log(%*{"event": "cloud:hardware:changed", "display": display,
                    "previous": lastReportedDisplay})

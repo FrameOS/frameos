@@ -117,12 +117,49 @@ proc configureLocalAccessOverlay(self: RunnerThread) =
     offsetX: 0.0,
     offsetY: 0.0,
     padding: 16.0,
-    fontColor: parseHtmlColor("#ffffff"),
+    # Black on the white band drawLocalAccessCode puts behind it: what an
+    # e-ink panel shows most crisply, whatever the scene underneath.
+    fontColor: parseHtmlColor("#000000"),
     fontSize: 32.0 * panelScale(self.frameConfig),
-    borderColor: parseHtmlColor("#000000"),
-    borderWidth: 3,
+    borderColor: parseHtmlColor("#ffffff"),
+    borderWidth: 0,
     overflow: "fit-bounds",
   ))
+
+proc localAccessPanelWanted(self: RunnerThread): string =
+  ## The local network access code text that should be on the panel now, "" for none.
+  ## Never on a frame without a physical panel (local_access.nim,
+  ## localAccessPanelDevice): there the code would only ride an upload or a
+  ## browser, which is exactly where it must not go.
+  if localAccessPanelDevice(self.frameConfig.device): localAccessPanelText() else: ""
+
+proc drawLocalAccessCode(self: RunnerThread, image: Image, text: string): bool =
+  ## Draws `text` over `image`, the panel's copy only — the caller has stored
+  ## the render already (setLastImage copies). True when the code is on it.
+  if text.len == 0 or image.isNil:
+    return false
+  try:
+    if self.localAccessRender.isNil:
+      self.configureLocalAccessOverlay()
+    # A white band across the middle, ruled off above and below, so the code
+    # reads from across the room over any scene and survives the dither.
+    let fontSize = render_textApp.App(self.localAccessRender).appConfig.fontSize.float32
+    let bandHeight = min(image.height.float32, fontSize * 2.6'f32 + 32'f32)
+    let top = (image.height.float32 - bandHeight) / 2
+    let rule = max(2'f32, fontSize / 12)
+    let ctx = newContext(image)
+    ctx.fillStyle = rgba(0, 0, 0, 255)
+    ctx.fillRect(rect(0, top - rule, image.width.float32, bandHeight + rule * 2))
+    ctx.fillStyle = rgba(255, 255, 255, 255)
+    ctx.fillRect(rect(0, top, image.width.float32, bandHeight))
+    let context = ExecutionContext(image: image, hasImage: true, event: "render",
+      payload: %*{}, loopIndex: 0, loopKey: ".", nextSleep: -1)
+    render_textApp.App(self.localAccessRender).appConfig.text = text
+    render_textApp.App(self.localAccessRender).run(context)
+    true
+  except Exception as e:
+    self.logSignal(%*{"event": "render:localAccessCode:error", "error": e.msg})
+    false
 
 proc configureLinkCodeOverlay(self: RunnerThread) =
   ## Always built, like the presence-code overlay: a device-flow link can be
@@ -273,22 +310,14 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     # is stored and shown.
     applyGlobalColorCorrection(outImage)
     setLastImage(outImage)
-    # The local-presence code, if one is pending. Drawn AFTER the render is
-    # stored (setLastImage copies), so it reaches the panel only: the whole
-    # point is that it is readable from in front of the frame, by someone the
-    # admin API cannot see — and `GET /image` / the cloud's `image_get` are
-    # exactly what that someone-else could see. Drawn last so no scene can
-    # paint over it.
-    let presenceCode = activeLocalAccessCode()
-    if presenceCode.len > 0:
-      let sceneImage = context.image
-      context.image = outImage
-      try:
-        render_textApp.App(self.localAccessRender).appConfig.text =
-          "Local network access\n" & presenceCode
-        render_textApp.App(self.localAccessRender).run(context)
-      finally:
-        context.image = sceneImage
+    # The local network access code, if one is pending. Drawn AFTER the render is stored
+    # (setLastImage copies), so it reaches the panel only: the whole point is
+    # that it is readable from in front of the frame, by someone the admin API
+    # cannot see — and the stored image (`GET /image`, scene snapshots, the
+    # cloud's `image_get`) is exactly what that someone-else could see. Drawn
+    # last so no scene can paint over it.
+    self.localAccessShownFor = self.localAccessPanelWanted()
+    self.localAccessDrawn = self.drawLocalAccessCode(outImage, self.localAccessShownFor)
     case self.frameConfig.flip:
     of "horizontal":
       outImage.flipHorizontal()
@@ -303,6 +332,10 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   except Exception as e:
     let errorImage = renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}")
     setLastImage(errorImage)
+    # A failing scene must not hide the code, or a pending challenge could
+    # never be completed on it.
+    self.localAccessShownFor = self.localAccessPanelWanted()
+    self.localAccessDrawn = self.drawLocalAccessCode(errorImage, self.localAccessShownFor)
     result = (errorImage, context.nextSleep)
     self.logSignal(%*{"event": "render:error", "error": $e.msg, "stacktrace": e.getStackTrace()})
 
@@ -474,9 +507,16 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
           else:
             max(interval - durationToSeconds(getMonoTime() - timer), 0.0)
         setNextRenderSeconds(nextRenderSeconds)
+        # Raised before the panel gets a code, lowered only once a picture
+        # without one is on it: in between, `GET /image` must not hand out the
+        # driver's own copy of the panel (local_access.nim, the image sinks).
+        if self.localAccessDrawn:
+          markLocalAccessCodeOnPanel()
         # TODO: render the driver part in another thread
         drivers.render(lastRotatedImage)
         noteDriverRendered()
+        if not self.localAccessDrawn:
+          clearLocalAccessCodeOnPanel()
         # The framebuffer's late probe (Pi 5 KMS) reports the real panel
         # size through the driver context; persist it the first time it
         # differs from the file, so scenes, the cloud and the next boot agree.
@@ -587,6 +627,18 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         if watchCloudLink and currentCloudLinkGeneration() != cloudLinkGenerationAtSleep:
           self.logger.log(%*{"event": "render:cloudLinkChanged", "sceneId": currentScene.id.string})
           break
+        # A local network access code came up, or the one on the panel stopped being
+        # valid — matched, the fifth wrong try, expired, replaced by a new
+        # challenge. Repaint now: the code is useless until it is on the
+        # panel, and must not stay up for the next person walking past. This
+        # is the one place that does it, whoever ended the challenge (the
+        # admin page, a cloud verb, the clock). Never the digits
+        # in the log line.
+        let localAccessWanted = self.localAccessPanelWanted()
+        if localAccessWanted != self.localAccessShownFor:
+          self.logSignal(%*{"event": "render:localAccessCode",
+            "showing": localAccessWanted.len > 0})
+          break
         let now = getMonoTime()
         if nextDriverIdleTurnOffAt.isSome and now >= nextDriverIdleTurnOffAt.get():
           drivers.turnOff()
@@ -594,8 +646,13 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         if nextDriverRetryAt.isSome and now >= nextDriverRetryAt.get():
           try:
             setNextRenderSeconds(remainingSleepMs / 1000)
+            # The held canvas is the frame rendered above, code and all.
+            if self.localAccessDrawn:
+              markLocalAccessCodeOnPanel()
             drivers.render(driverRetryImage)
             noteDriverRendered()
+            if not self.localAccessDrawn:
+              clearLocalAccessCodeOnPanel()
             # This retry is exactly where a late framebuffer probe lands.
             if detectedDisplayChanged(self.frameConfig):
               discard persistDetectedDisplaySize(self.frameConfig, self.logger)
@@ -661,6 +718,10 @@ proc presentCursor(self: RunnerThread) =
   let state = addr self.sceneEvents.inputState
   if state[].cursorVisible:
     drawCursor(image, state[].cursorX, state[].cursorY)
+  # The stored frame has no local network access code (it is drawn after the store), so
+  # put it back while one is up, over the cursor like over the scene.
+  let codeDrawn = self.localAccessDrawn and
+    self.drawLocalAccessCode(image, self.localAccessShownFor)
   case self.frameConfig.flip:
   of "horizontal": image.flipHorizontal()
   of "vertical": image.flipVertical()
@@ -669,8 +730,12 @@ proc presentCursor(self: RunnerThread) =
     image.flipVertical()
   else: discard
   try:
+    if codeDrawn:
+      markLocalAccessCodeOnPanel()
     drivers.render(image.rotateDegrees(self.frameConfig.rotate))
     noteDriverRendered()
+    if not codeDrawn:
+      clearLocalAccessCodeOnPanel()
   except Exception as e:
     self.logger.log(%*{"event": "render:cursor:error", "error": $e.msg})
 

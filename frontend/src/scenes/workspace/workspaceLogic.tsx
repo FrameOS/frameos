@@ -433,6 +433,27 @@ export function isMobileWorkspaceViewport(): boolean {
   return typeof window !== 'undefined' && window.matchMedia?.(MOBILE_WORKSPACE_MEDIA_QUERY).matches
 }
 
+/** Scroll the Settings panel to a section heading, waiting a few frames for it to mount. */
+export function scrollToFrameSettingsSection(sectionId: string, attempt = 0): void {
+  if (typeof document === 'undefined' || typeof window === 'undefined') {
+    return
+  }
+
+  window.requestAnimationFrame(() => {
+    const section = document.getElementById(sectionId)
+    if (section) {
+      const offset = isMobileWorkspaceViewport() ? (window.matchMedia?.('(max-width: 639px)').matches ? 112 : 128) : 24
+      const top = section.getBoundingClientRect().top + window.scrollY - offset
+      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+      return
+    }
+
+    if (attempt < 8) {
+      window.setTimeout(() => scrollToFrameSettingsSection(sectionId, attempt + 1), 50)
+    }
+  })
+}
+
 function applyWorkspaceScrollGuard(locked: boolean): void {
   if (typeof document === 'undefined' || typeof window === 'undefined') {
     return

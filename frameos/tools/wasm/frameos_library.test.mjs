@@ -95,7 +95,7 @@ test('malformed IPv6 fails closed', () => {
 
 // Runs the request hook as the preview worker would, returning which URLs
 // were opened directly and whether the proxy was used.
-function request(url, { page, proxyUrl = '/api/proxy' } = {}) {
+function request(url, { page, proxyUrl = '/api/proxy', lanAccess } = {}) {
   const library = loadLibrary()
   const opened = []
   const logs = []
@@ -120,7 +120,11 @@ function request(url, { page, proxyUrl = '/api/proxy' } = {}) {
     HEAPU8: heap,
     _malloc: () => 512,
     makeSetValue: () => {},
-    Module: { frameosProxyUrl: proxyUrl, onFrameosLog: (message) => logs.push(message) },
+    Module: {
+      frameosProxyUrl: proxyUrl,
+      frameosLanAccess: lanAccess,
+      onFrameosLog: (message) => logs.push(message),
+    },
     XMLHttpRequest: FakeXHR,
     TextEncoder,
     URL,
@@ -174,4 +178,44 @@ test('same-origin targets still only go through the proxy', () => {
 test('headless renderers (no browser origin) are not guarded', () => {
   const result = request('http://192.168.1.1/', { page: undefined })
   assert.deepEqual(result.direct, ['http://192.168.1.1/'])
+})
+
+const LAN_OFF = /Local network access is off for this frame, so (\S+) cannot be reached\. Turn on local network access in the frame settings\./
+
+test('a frame with local network access off: private hosts refused, direct and proxied, in its words', () => {
+  for (const page of ['https://cloud.frameos.net/frames/1', 'http://192.168.1.5:8989/frames/1', undefined]) {
+    for (const url of ['http://192.168.1.1/admin', 'http://homeassistant.local:8123/api/states', 'http://[fd00::1]/']) {
+      const result = request(url, { page, lanAccess: false })
+      assert.deepEqual(result.opened, [], `${url} from ${page}`)
+      const line = result.logs.join('\n')
+      assert.match(line, LAN_OFF, `${url} from ${page}`)
+      assert.equal(line.match(LAN_OFF)[1], new URL(url).hostname)
+    }
+  }
+})
+
+test('a frame with local network access off still reaches the internet', () => {
+  const result = request('https://api.open-meteo.com/v1/forecast?x=1', {
+    page: 'https://cloud.frameos.net/frames/1',
+    lanAccess: false,
+  })
+  assert.deepEqual(result.direct, ['https://api.open-meteo.com/v1/forecast?x=1'])
+  assert.deepEqual(result.logs, [])
+})
+
+test('Local network access off leaves the same-origin path alone', () => {
+  const result = request('/api/frames', { page: 'http://192.168.1.5:8989/frames/1', lanAccess: false })
+  assert.deepEqual(result.direct, [])
+  assert.equal(result.viaProxy, true)
+})
+
+test('Local network access on, or not said, changes nothing', () => {
+  for (const lanAccess of [true, undefined]) {
+    const lan = request('http://192.168.1.20/api', { page: 'http://192.168.1.5:8989/frames/1', lanAccess })
+    assert.deepEqual(lan.direct, ['http://192.168.1.20/api'])
+    const publicPage = request('http://192.168.1.1/admin', { page: 'https://cloud.frameos.net/frames/1', lanAccess })
+    assert.deepEqual(publicPage.direct, [])
+    assert.equal(publicPage.viaProxy, true)
+    assert.doesNotMatch(publicPage.logs.join('\n'), /Local network access is off/)
+  }
 })

@@ -572,6 +572,12 @@ type
     controlCodeRender*: AppRoot
     controlCodeData*: AppRoot
     localAccessRender*: AppRoot
+    ## The local network access code text (local_access.localAccessPanelText) the last
+    ## render was made for, "" for none; the sleep loop repaints when what
+    ## should be on the panel stops matching it. Runner thread only.
+    localAccessShownFor*: string
+    ## Whether that render actually carries the code (drawing it can fail).
+    localAccessDrawn*: bool
     linkCodeRender*: AppRoot
     linkCodeQrRender*: AppRoot
     linkCodeQrData*: AppRoot

@@ -148,4 +148,16 @@ describe("what each surface may render", () => {
     expect(frameSettingsSectionRenders("ssh", "frameAdmin")).toBe(false);
     expect(frameSettingsSectionRenders("remote-agent", "frameAdmin")).toBe(false);
   });
+
+  it("renders and links local network access on cloud frames only", () => {
+    // Standalone and backend-managed frames have no block to lift.
+    for (const surface of surfaces) {
+      const cloud = surface === "cloudLinux" || surface === "cloudEsp32";
+      expect(frameSettingsSectionRenders("lan-access", surface), surface).toBe(cloud);
+    }
+    for (const mode of modes) {
+      const sections: readonly string[] = allowedFrameSettingsSections[mode];
+      expect(sections.includes("frame-settings-lan-access"), mode).toBe(mode === "cloud");
+    }
+  });
 });

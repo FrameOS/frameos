@@ -314,6 +314,8 @@
     {"type": "asset_delete", "scope": null, "profiles": ["linux", "esp32"]},
     {"type": "asset_rename", "scope": null, "profiles": ["linux", "esp32"]},
     {"type": "image_get", "scope": null, "profiles": ["linux", "esp32"]},
+    {"type": "lan_access_challenge", "scope": null, "profiles": ["linux", "esp32"]},
+    {"type": "lan_access_set", "scope": null, "profiles": ["linux", "esp32"]},
     {"type": "scenes_get", "scope": null, "profiles": ["linux"],
      "parity": {"only": "linux",
                 "why": "The verb exists for a frame that ran its own scenes before it joined a provider. The Linux runtime keeps scenes the owner built on the frame's own admin page (scenes.json.gz, state/uploaded.json), which exist nowhere else. An ESP32 has no on-device editor: every scene in its store was put there by a backend, a provider or the USB upload tool, which still holds the original. It sends no `scene_count` in its hello, so the provider never asks."}}
@@ -322,6 +324,8 @@
     "$comment": "The tokens every implementation answers with. Per-verb tokens beyond these are in docs/cloud-frames.md.",
     "common": ["unknown_verb", "unsupported_verb", "message_too_large", "invalid_json", "no_memory"],
     "set_settings": ["invalid_settings", "setting_not_allowed", "persist_failed"],
+    "lan_access_challenge": ["no_panel", "rate_limited", "challenge_failed"],
+    "lan_access_set": ["invalid_lan_access", "code_required", "invalid_code", "code_expired", "too_many_attempts", "rate_limited", "persist_failed"],
     "backend_managed": "a device whose content a self-hosted backend owns refuses every `content` verb with this"
   },
   "limits": {

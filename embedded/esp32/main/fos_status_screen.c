@@ -1,6 +1,7 @@
 #include "fos_status_screen.h"
 #include "fos_framebuffer.h"
 #include "fos_logo_bitmap.h"
+#include "fos_panel_draw.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,213 +14,14 @@
 
 static const char *TAG = "fos_status";
 
-static const uint8_t DIGITS[10][7] = {
-    {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E},
-    {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E},
-    {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F},
-    {0x1E, 0x01, 0x01, 0x0E, 0x01, 0x01, 0x1E},
-    {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02},
-    {0x1F, 0x10, 0x10, 0x1E, 0x01, 0x01, 0x1E},
-    {0x0E, 0x10, 0x10, 0x1E, 0x11, 0x11, 0x0E},
-    {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08},
-    {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E},
-    {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x01, 0x0E},
-};
-
-static const uint8_t LETTERS[26][7] = {
-    {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11},
-    {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E},
-    {0x0F, 0x10, 0x10, 0x10, 0x10, 0x10, 0x0F},
-    {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E},
-    {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F},
-    {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10},
-    {0x0F, 0x10, 0x10, 0x17, 0x11, 0x11, 0x0F},
-    {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11},
-    {0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E},
-    {0x07, 0x02, 0x02, 0x02, 0x12, 0x12, 0x0C},
-    {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11},
-    {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F},
-    {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11},
-    {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11},
-    {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E},
-    {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10},
-    {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D},
-    {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11},
-    {0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E},
-    {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04},
-    {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E},
-    {0x11, 0x11, 0x11, 0x11, 0x0A, 0x0A, 0x04},
-    {0x11, 0x11, 0x11, 0x15, 0x15, 0x1B, 0x11},
-    {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11},
-    {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04},
-    {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F},
-};
-
-static const uint8_t LOWER_LETTERS[26][7] = {
-    {0x00, 0x00, 0x0E, 0x01, 0x0F, 0x11, 0x0F},
-    {0x10, 0x10, 0x1E, 0x11, 0x11, 0x11, 0x1E},
-    {0x00, 0x00, 0x0F, 0x10, 0x10, 0x10, 0x0F},
-    {0x01, 0x01, 0x0F, 0x11, 0x11, 0x11, 0x0F},
-    {0x00, 0x00, 0x0E, 0x11, 0x1F, 0x10, 0x0F},
-    {0x06, 0x08, 0x1E, 0x08, 0x08, 0x08, 0x08},
-    {0x00, 0x00, 0x0F, 0x11, 0x0F, 0x01, 0x0E},
-    {0x10, 0x10, 0x1E, 0x11, 0x11, 0x11, 0x11},
-    {0x04, 0x00, 0x0C, 0x04, 0x04, 0x04, 0x0E},
-    {0x02, 0x00, 0x06, 0x02, 0x02, 0x12, 0x0C},
-    {0x10, 0x10, 0x12, 0x14, 0x18, 0x14, 0x12},
-    {0x0C, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E},
-    {0x00, 0x00, 0x1A, 0x15, 0x15, 0x15, 0x15},
-    {0x00, 0x00, 0x1E, 0x11, 0x11, 0x11, 0x11},
-    {0x00, 0x00, 0x0E, 0x11, 0x11, 0x11, 0x0E},
-    {0x00, 0x00, 0x1E, 0x11, 0x1E, 0x10, 0x10},
-    {0x00, 0x00, 0x0F, 0x11, 0x0F, 0x01, 0x01},
-    {0x00, 0x00, 0x17, 0x18, 0x10, 0x10, 0x10},
-    {0x00, 0x00, 0x0F, 0x10, 0x0E, 0x01, 0x1E},
-    {0x08, 0x08, 0x1E, 0x08, 0x08, 0x08, 0x06},
-    {0x00, 0x00, 0x11, 0x11, 0x11, 0x13, 0x0D},
-    {0x00, 0x00, 0x11, 0x11, 0x0A, 0x0A, 0x04},
-    {0x00, 0x00, 0x11, 0x15, 0x15, 0x15, 0x0A},
-    {0x00, 0x00, 0x11, 0x0A, 0x04, 0x0A, 0x11},
-    {0x00, 0x00, 0x11, 0x11, 0x0F, 0x01, 0x0E},
-    {0x00, 0x00, 0x1F, 0x02, 0x04, 0x08, 0x1F},
-};
-
-static const uint8_t GLYPH_DASH[7] = {0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00};
-static const uint8_t GLYPH_DOT[7] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C};
-static const uint8_t GLYPH_COLON[7] = {0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x0C, 0x00};
-static const uint8_t GLYPH_SLASH[7] = {0x01, 0x02, 0x02, 0x04, 0x08, 0x08, 0x10};
-static const uint8_t GLYPH_LPAREN[7] = {0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02};
-static const uint8_t GLYPH_RPAREN[7] = {0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08};
-static const uint8_t GLYPH_COMMA[7] = {0x00, 0x00, 0x00, 0x00, 0x0C, 0x04, 0x08};
-static const uint8_t GLYPH_QUOTE[7] = {0x0A, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00};
-
-static const uint8_t *glyph_for(char raw)
-{
-    unsigned char c = (unsigned char)raw;
-    if (c >= 'A' && c <= 'Z') return LETTERS[c - 'A'];
-    if (c >= 'a' && c <= 'z') return LOWER_LETTERS[c - 'a'];
-    if (c >= '0' && c <= '9') return DIGITS[c - '0'];
-    if (c == '-') return GLYPH_DASH;
-    if (c == '.') return GLYPH_DOT;
-    if (c == ':') return GLYPH_COLON;
-    if (c == '/') return GLYPH_SLASH;
-    if (c == '(') return GLYPH_LPAREN;
-    if (c == ')') return GLYPH_RPAREN;
-    if (c == ',') return GLYPH_COMMA;
-    if (c == '"') return GLYPH_QUOTE;
-    return NULL;
-}
-
-static uint8_t white_fill(fos_pixel_format_t format)
-{
-    switch (format) {
-        case FOS_PIXEL_2BPP_BWYR:
-            return 0x55; /* palette index 1 (white) */
-        case FOS_PIXEL_4BPP_7COLOR:
-        case FOS_PIXEL_4BPP_SPECTRA6:
-            return 0x11; /* palette index 1 (white) */
-        default:
-            return 0xFF;
-    }
-}
-
-static void set_black_pixel(uint8_t *buf, int width, int height, fos_pixel_format_t format, int x, int y)
-{
-    if (!buf || x < 0 || y < 0 || x >= width || y >= height) return;
-    switch (format) {
-        case FOS_PIXEL_1BPP: {
-            size_t row = ((size_t)width + 7u) / 8u;
-            buf[(size_t)y * row + (size_t)(x / 8)] &= (uint8_t)~(0x80u >> (x & 7));
-            break;
-        }
-        case FOS_PIXEL_DUAL_1BPP_RED:
-        case FOS_PIXEL_DUAL_1BPP_YELLOW: {
-            size_t row = ((size_t)width + 7u) / 8u;
-            buf[(size_t)y * row + (size_t)(x / 8)] &= (uint8_t)~(0x80u >> (x & 7));
-            break;
-        }
-        case FOS_PIXEL_2BPP_GRAY:
-        case FOS_PIXEL_2BPP_BWYR: {
-            size_t row = ((size_t)width + 3u) / 4u;
-            size_t index = (size_t)y * row + (size_t)(x / 4);
-            uint8_t shift = (uint8_t)(6 - (x & 3) * 2);
-            buf[index] &= (uint8_t)~(0x03u << shift);
-            break;
-        }
-        case FOS_PIXEL_4BPP_7COLOR:
-        case FOS_PIXEL_4BPP_SPECTRA6:
-        case FOS_PIXEL_4BPP_GRAY: {
-            size_t row = ((size_t)width + 1u) / 2u;
-            size_t index = (size_t)y * row + (size_t)(x / 2);
-            uint8_t mask = (x & 1) == 0 ? 0x0Fu : 0xF0u;
-            buf[index] &= mask;
-            break;
-        }
-        default:
-            break;
-    }
-}
-
-static int text_width(const char *text, int scale)
-{
-    if (!text || scale <= 0) return 0;
-    int chars = (int)strlen(text);
-    return chars > 0 ? ((chars * 6) - 1) * scale : 0;
-}
-
-static void draw_rect(uint8_t *buf, int width, int height, fos_pixel_format_t format,
-                      int x, int y, int w, int h)
-{
-    for (int yy = 0; yy < h; yy++) {
-        for (int xx = 0; xx < w; xx++) {
-            set_black_pixel(buf, width, height, format, x + xx, y + yy);
-        }
-    }
-}
-
-static void draw_char(uint8_t *buf, int width, int height, fos_pixel_format_t format,
-                      char c, int x, int y, int scale)
-{
-    const uint8_t *rows = glyph_for(c);
-    if (!rows) return;
-    for (int row = 0; row < 7; row++) {
-        for (int col = 0; col < 5; col++) {
-            if (rows[row] & (0x10u >> col)) {
-                draw_rect(buf, width, height, format,
-                          x + col * scale, y + row * scale, scale, scale);
-            }
-        }
-    }
-}
-
-static void draw_text(uint8_t *buf, int width, int height, fos_pixel_format_t format,
-                      const char *text, int x, int y, int scale)
-{
-    if (!text || scale <= 0) return;
-    for (size_t i = 0; text[i]; i++) {
-        draw_char(buf, width, height, format, text[i], x + (int)i * 6 * scale, y, scale);
-    }
-}
-
-/* The largest scale (at most `scale`) at which `text` fits in `avail` px. */
-static int fit_scale(const char *text, int scale, int avail)
-{
-    while (scale > 1 && text_width(text, scale) > avail) {
-        scale--;
-    }
-    return scale;
-}
-
 /* The FrameOS mark, `scale` panel pixels per bitmap pixel. */
-static void draw_mark(uint8_t *buf, int width, int height, fos_pixel_format_t format,
-                      int x, int y, int scale)
+static void draw_mark(const fos_panel_surface_t *s, int x, int y, int scale)
 {
     for (int row = 0; row < FOS_LOGO_H; row++) {
         uint32_t bits = FOS_LOGO_ROWS[row];
         for (int col = 0; col < FOS_LOGO_W; col++) {
             if (bits & (1u << (FOS_LOGO_W - 1 - col))) {
-                draw_rect(buf, width, height, format,
-                          x + col * scale, y + row * scale, scale, scale);
+                fos_panel_fill_rect(s, x + col * scale, y + row * scale, scale, scale, true);
             }
         }
     }
@@ -228,8 +30,7 @@ static void draw_mark(uint8_t *buf, int width, int height, fos_pixel_format_t fo
 /* The header every FrameOS status screen shares (frameos/utils/status_screen.nim
  * draws the same thing with pixie): the mark, "FrameOS" beside it, and one
  * status line under the wordmark. Returns the y just below the header. */
-static int draw_header(uint8_t *buf, int width, int height, fos_pixel_format_t format,
-                       int x, int y, int scale, const char *status)
+static int draw_header(const fos_panel_surface_t *s, int x, int y, int scale, const char *status)
 {
     int title_scale = scale + 1;
     int title_h = 7 * title_scale;
@@ -239,12 +40,12 @@ static int draw_header(uint8_t *buf, int width, int height, fos_pixel_format_t f
     int mark_h = FOS_LOGO_H * mark_scale;
     int header_h = mark_h > text_h ? mark_h : text_h;
 
-    draw_mark(buf, width, height, format, x, y + (header_h - mark_h) / 2, mark_scale);
+    draw_mark(s, x, y + (header_h - mark_h) / 2, mark_scale);
     int text_x = x + FOS_LOGO_W * mark_scale + scale * 4;
     int text_y = y + (header_h - text_h) / 2;
-    draw_text(buf, width, height, format, "FrameOS", text_x, text_y, title_scale);
-    draw_text(buf, width, height, format, status, text_x, text_y + title_h + scale * 2,
-              fit_scale(status, scale, width - text_x - x));
+    fos_panel_draw_text(s, "FrameOS", text_x, text_y, title_scale);
+    fos_panel_draw_text(s, status, text_x, text_y + title_h + scale * 2,
+                        fos_panel_fit_scale(status, scale, s->width - text_x - x));
     return y + header_h;
 }
 
@@ -261,7 +62,12 @@ esp_err_t fos_status_screen_show_portal(const char *ssid, const char *psk, const
         ESP_LOGE(TAG, "out of memory for %u byte status screen", (unsigned)len);
         return ESP_ERR_NO_MEM;
     }
-    memset(buf, white_fill(format), len);
+    memset(buf, fos_panel_white_fill(format), len);
+    /* Panel orientation: the portal screen predates the rotation setting
+     * and a frame on the portal has not been told one yet. */
+    const fos_panel_surface_t surface = {
+        .buf = buf, .width = width, .height = height, .format = format, .rotate = 0,
+    };
 
     int scale = width >= 700 && height >= 400 ? 4 : width >= 400 ? 3 : 2;
     int margin = width / 16 < 12 ? 12 : width / 16;
@@ -276,18 +82,18 @@ esp_err_t fos_status_screen_show_portal(const char *ssid, const char *psk, const
 
     int avail = width - 2 * margin;
     const char *hint = "Join this network from your phone or laptop";
-    int y = draw_header(buf, width, height, format, margin, margin, scale, "Setup: not on a network yet");
+    int y = draw_header(&surface, margin, margin, scale, "Setup: not on a network yet");
     y += gap * 2;
-    int hint_scale = fit_scale(hint, scale, avail);
-    draw_text(buf, width, height, format, hint, margin, y, hint_scale);
+    int hint_scale = fos_panel_fit_scale(hint, scale, avail);
+    fos_panel_draw_text(&surface, hint, margin, y, hint_scale);
     y += 7 * hint_scale + gap;
-    int ssid_scale = fit_scale(ssid_line, scale + 1, avail);
-    draw_text(buf, width, height, format, ssid_line, margin, y, ssid_scale);
+    int ssid_scale = fos_panel_fit_scale(ssid_line, scale + 1, avail);
+    fos_panel_draw_text(&surface, ssid_line, margin, y, ssid_scale);
     y += 7 * ssid_scale + gap;
-    int psk_scale = fit_scale(psk_line, scale + 1, avail);
-    draw_text(buf, width, height, format, psk_line, margin, y, psk_scale);
+    int psk_scale = fos_panel_fit_scale(psk_line, scale + 1, avail);
+    fos_panel_draw_text(&surface, psk_line, margin, y, psk_scale);
     y += 7 * psk_scale + gap;
-    draw_text(buf, width, height, format, ip_line, margin, y, fit_scale(ip_line, scale, avail));
+    fos_panel_draw_text(&surface, ip_line, margin, y, fos_panel_fit_scale(ip_line, scale, avail));
 
     esp_err_t err = fos_display_blit(buf, len);
     fos_framebuffer_release(buf);

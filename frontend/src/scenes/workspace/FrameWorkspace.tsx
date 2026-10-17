@@ -33,6 +33,7 @@ import {
   frameToolSegmentFromPathname,
   frameToolScrollKey,
   isMobileWorkspaceViewport,
+  scrollToFrameSettingsSection,
   workspaceLogic,
   WorkspaceUtilityPanel,
 } from './workspaceLogic'
@@ -296,6 +297,7 @@ const allFrameSettingsSections = [
   { id: 'frame-settings-admin', label: 'Admin' },
   { id: 'frame-http-proxy-section', label: 'HTTPS' },
   { id: 'frame-settings-network', label: 'Network' },
+  { id: 'frame-settings-lan-access', label: 'Local network access' },
   { id: 'frame-settings-mountpoints', label: 'Mountpoints' },
   { id: 'frame-settings-defaults', label: 'Defaults' },
   { id: 'frame-settings-error-behavior', label: 'Global errors' },
@@ -316,24 +318,11 @@ function frameSettingsSectionsForFrame(
   return allFrameSettingsSections.filter((section) => frameSettingsSectionIsAllowed(mode, section.id, frame))
 }
 
-function scrollToFrameSettingsSection(sectionId: string, attempt = 0): void {
-  if (typeof document === 'undefined' || typeof window === 'undefined') {
-    return
-  }
+const linkableFrameSettingsSections = new Set(['frame-settings-agent', 'frame-settings-lan-access'])
 
-  window.requestAnimationFrame(() => {
-    const section = document.getElementById(sectionId)
-    if (section) {
-      const offset = isMobileWorkspaceViewport() ? (window.matchMedia?.('(max-width: 639px)').matches ? 112 : 128) : 24
-      const top = section.getBoundingClientRect().top + window.scrollY - offset
-      window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
-      return
-    }
-
-    if (attempt < 8) {
-      window.setTimeout(() => scrollToFrameSettingsSection(sectionId, attempt + 1), 50)
-    }
-  })
+function frameSettingsSectionFromHash(hash: string): string | null {
+  const sectionId = hash.replace(/^#/, '')
+  return linkableFrameSettingsSections.has(sectionId) ? sectionId : null
 }
 
 function parseFrameId(frameId?: string): FrameId | null {
@@ -1477,8 +1466,11 @@ function FrameWorkspaceForFrame({ frameId }: { frameId: FrameId }): JSX.Element 
       return
     }
 
-    if (activeToolPanel === 'settings' && window.location.hash === '#frame-settings-agent') {
-      scrollToFrameSettingsSection('frame-settings-agent')
+    // Deep links into a settings section (`…/settings#frame-settings-agent`
+    // from the deploy drawer, `#frame-settings-lan-access` from the Logs panel).
+    const linkedSection = frameSettingsSectionFromHash(window.location.hash)
+    if (activeToolPanel === 'settings' && linkedSection) {
+      scrollToFrameSettingsSection(linkedSection)
       return
     }
 

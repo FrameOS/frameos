@@ -13,6 +13,7 @@ import ../identity
 import ../link_state
 import ../../types
 import ../../channels
+import ../../local_access
 import ../../utils/http_client
 
 const TestPort = 19468
@@ -239,6 +240,28 @@ suite "cloud hub session over a live socket":
     frameConfig.network = NetworkConfig(allowLocalNetworkAccess: false)
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       localNetworkPolicySnapshot().active)
+
+  test "local network access reaches the provider in hello and as a state":
+    withLock stubLock:
+      check recorded.hello{"hardware"}{"lanAccess"}.getBool(true) == false
+    proc lanAccessStates(value: bool): int {.gcsafe.} =
+      for state in repliesOfType("state"):
+        if state{"hardware"}{"lanAccess"} != nil and
+            state{"hardware"}{"lanAccess"}.getBool(not value) == value:
+          result += 1
+    let onBefore = lanAccessStates(true)
+    # As the ceremony does it (the lan_access_set verb, the admin page).
+    persistLocalNetworkAccess(true)
+    check waitUntil(10.0, proc(): bool {.gcsafe.} =
+      not localNetworkPolicySnapshot().active)
+    check waitUntil(10.0, proc(): bool {.gcsafe.} =
+      lanAccessStates(true) > onBefore)
+    let offBefore = lanAccessStates(false)
+    persistLocalNetworkAccess(false)
+    check waitUntil(10.0, proc(): bool {.gcsafe.} =
+      localNetworkPolicySnapshot().active)
+    check waitUntil(10.0, proc(): bool {.gcsafe.} =
+      lanAccessStates(false) > offBefore)
 
   test "an oversized inbound message drops the session instead of allocating":
     # ws 0.5.0 would happily assemble whatever length the provider claims; the

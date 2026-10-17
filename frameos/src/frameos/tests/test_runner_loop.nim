@@ -8,6 +8,7 @@ import ../runner
 import ../scenes
 import ../types
 import ../channels
+import ../local_access
 
 
 type LogStore = ref object
@@ -90,6 +91,16 @@ proc oneSecondInit(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, p
     logger: logger,
     state: %*{},
     refreshInterval: 1.0,
+    backgroundColor: parseHtmlColor("#ffffff")
+  )
+
+proc sixtySecondInit(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
+  FrameScene(
+    id: sceneId,
+    frameConfig: frameConfig,
+    logger: logger,
+    state: %*{},
+    refreshInterval: 60.0,
     backgroundColor: parseHtmlColor("#ffffff")
   )
 
@@ -815,3 +826,116 @@ suite "runner loop safety":
       check hasEvent(store, "render:error")
     finally:
       restoreBootGuardState(savedBootGuardState)
+
+
+proc lanAccessRunner(device: string, store: LogStore, sceneId: SceneId): RunnerThread =
+  var config = loadConfig()
+  config.device = device
+  config.rotate = 0
+  config.flip = ""
+  config.controlCode = ControlCode(
+    enabled: false,
+    position: "center",
+    size: 0,
+    padding: 0,
+    offsetX: 0,
+    offsetY: 0,
+    qrCodeColor: parseHtmlColor("#000000"),
+    backgroundColor: parseHtmlColor("#ffffff")
+  )
+  RunnerThread(
+    frameConfig: config,
+    scenes: initTable[SceneId, FrameScene](),
+    currentSceneId: sceneId,
+    lastRenderAt: 0.0,
+    sleepFuture: none(Future[void]),
+    isRendering: false,
+    triggerRenderNext: false,
+    logger: testLogger(config, store)
+  )
+
+suite "the local network access code on the panel":
+  setup:
+    clearEventChannel()
+    clearLocalAccessChallenge()
+    clearLocalAccessCodeOnPanel()
+
+  teardown:
+    clearLocalAccessChallenge()
+    clearLocalAccessCodeOnPanel()
+
+  test "the code is drawn on the panel's copy only, never the stored image":
+    let sceneId = "tests/runner/lan-access-overlay".SceneId
+    let store = LogStore(entries: @[])
+    var runnerThread = lanAccessRunner("framebuffer", store, sceneId)
+    let scene = sixtySecondInit(sceneId, runnerThread.frameConfig, runnerThread.logger, %*{})
+    let exported = ExportedScene(publicStateFields: @[], persistedStateKeys: @[],
+      render: fastRender, runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard)
+
+    let code = startLocalAccessChallenge().code
+    let (panel, _) = runnerThread.renderSceneImage(exported, scene)
+    let stored = getLastImageCopy()
+    check runnerThread.localAccessDrawn
+    check runnerThread.localAccessShownFor == "Local network access code\n" & code
+    check panel.width == stored.width and panel.height == stored.height
+    # The stored image (GET /image, snapshots, image_get) is the scene alone.
+    let storedPixels = stored.toContiguousSeq()
+    check storedPixels.allIt(it == storedPixels[0])
+    check panel.toContiguousSeq() != storedPixels
+
+    # The error screen of a failing scene carries it too, or the ceremony
+    # could not be finished on a broken scene.
+    let failing = ExportedScene(publicStateFields: @[], persistedStateKeys: @[],
+      render: failingRender, runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard)
+    let (errorPanel, _) = runnerThread.renderSceneImage(failing, scene)
+    check runnerThread.localAccessDrawn
+    check errorPanel.toContiguousSeq() != getLastImageCopy().toContiguousSeq()
+
+  test "a frame without a panel never draws it, so it cannot ride an upload":
+    let sceneId = "tests/runner/lan-access-no-panel".SceneId
+    for device in ["web_only", "http.upload"]:
+      let store = LogStore(entries: @[])
+      var runnerThread = lanAccessRunner(device, store, sceneId)
+      let scene = sixtySecondInit(sceneId, runnerThread.frameConfig, runnerThread.logger, %*{})
+      let exported = ExportedScene(publicStateFields: @[], persistedStateKeys: @[],
+        render: fastRender, runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard)
+      discard startLocalAccessChallenge()
+      let (output, _) = runnerThread.renderSceneImage(exported, scene)
+      check not runnerThread.localAccessDrawn
+      check runnerThread.localAccessShownFor == ""
+      check output.toContiguousSeq() == getLastImageCopy().toContiguousSeq()
+
+  test "the end of a challenge repaints at once, without the code":
+    let sceneId = "tests/runner/lan-access-repaint".SceneId
+    var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+    uploaded[sceneId] = ExportedInterpretedScene(
+      name: "Sixty second scene",
+      publicStateFields: @[],
+      persistedStateKeys: @[],
+      init: sixtySecondInit,
+      render: fastRender,
+      runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard
+    )
+    updateUploadedScenes(uploaded)
+    try:
+      let store = LogStore(entries: @[])
+      var runnerThread = lanAccessRunner("framebuffer", store, sceneId)
+      let code = startLocalAccessChallenge().code
+      # Two cycles: the first draws the code and sleeps its 60 s, the second
+      # is the repaint the end of the challenge must cause.
+      let loop = runnerThread.startRenderLoop(maxCycles = 2)
+      check waitUntil(proc(): bool = countEvent(store, "render:done") == 1, steps = 400)
+      check runnerThread.localAccessDrawn
+      # The image sinks know a code went to the panel.
+      check localAccessPanelMark().shown
+      # Matched, five wrong tries, expired: each clears the challenge.
+      clearLocalAccessChallenge()
+      check waitFor withTimeout(loop, 5000)
+      check countEvent(store, "render:done") == 2
+      check hasEvent(store, "render:localAccessCode")
+      check not runnerThread.localAccessDrawn
+      check not localAccessPanelMark().shown
+      for entry in store.entries:
+        check code notin $entry
+    finally:
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())

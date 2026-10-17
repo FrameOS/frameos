@@ -21,10 +21,13 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+struct addrinfo;
 
 /* How many "host:port" exemptions the policy holds. Two is the real need (the
  * provider's API endpoint plus a dev frame-hub on another port); four leaves
@@ -105,6 +108,54 @@ fos_netguard_verdict_t fos_netguard_check_url(const char *url, char *reason, siz
 
 /* fos_netguard_check_url() == FOS_NETGUARD_ALLOWED. */
 bool fos_netguard_url_allowed(const char *url, char *reason, size_t reason_len);
+
+/* What an ALLOWED verdict for a host NAME was decided on. The connect that
+ * follows must go to exactly this address and not resolve the name again: a
+ * second answer can be a router address the first one was not (DNS
+ * rebinding, a TTL-0 record answering public, then private), and ESP-IDF
+ * resolves the URL's host itself when it connects. frameos_nim_glue.c holds
+ * the pin for the calling task across esp_http_client_open() and answers
+ * lwIP's resolve hook from it. `active` is false when there is nothing to
+ * pin: the policy is off, or the host is an IP literal or exempt. */
+typedef struct {
+    bool active;
+    uint32_t host_hash; /* fos_netguard_host_hash() of the name */
+    uint8_t v4[4];
+} fos_netguard_pin_t;
+
+/* fos_netguard_check_url(), and with the policy on, the pin for a name it
+ * resolved. A name that answers with no IPv4 address is UNRESOLVED here:
+ * the frame connects over IPv4 only, so there is nothing safe to pin. */
+fos_netguard_verdict_t fos_netguard_check_url_pinned(const char *url, char *reason,
+                                                     size_t reason_len, fos_netguard_pin_t *pin);
+
+/* Hold `pin` for the calling task until fos_netguard_unpin_for_task(): while
+ * it is held, lwIP's resolve hook answers the pinned name on this task with
+ * the pinned address (CONFIG_LWIP_HOOK_NETCONN_EXT_RESOLVE_CUSTOM). True for
+ * an inactive pin (nothing to hold); false when every slot is taken, which
+ * the caller must treat as a refusal. Device builds only. */
+bool fos_netguard_pin_for_task(const fos_netguard_pin_t *pin);
+void fos_netguard_unpin_for_task(void);
+
+/* A host name's identity for the pin: FNV-1a over the name, ASCII lowercased.
+ * Two names that collide can only ever get an address that was checked as
+ * public, never a private one. */
+uint32_t fos_netguard_host_hash(const char *host);
+
+#ifndef ESP_PLATFORM
+/* Host tests: answer names without DNS. NULL restores getaddrinfo(). */
+void fos_netguard_set_test_getaddrinfo(int (*fn)(const char *node, const char *service,
+                                                 const struct addrinfo *hints,
+                                                 struct addrinfo **res));
+#endif
+
+/* The error a scene gets for a FOS_NETGUARD_BLOCKED request, the same
+ * sentence on both runtimes: the first %s is "" or "redirect: " (the hop that
+ * was refused), the second the reason. The prefix is what the SPA matches to
+ * offer a link to the setting, the last sentence is what the owner acts on:
+ * the glue's buffers are sized so neither is ever cut. */
+#define FOS_NETGUARD_BLOCK_FMT \
+    "Local network access is off for this frame (%s%s). Turn on local network access in the frame settings."
 
 #ifdef __cplusplus
 }
