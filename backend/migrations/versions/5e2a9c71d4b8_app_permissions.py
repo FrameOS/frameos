@@ -16,9 +16,8 @@ did: these are scenes the owner already runs, so what the code reaches for is
 granted.
 
 Only apps with no list get one, the way the cloud stamps the store scenes it
-reads (`onlyMissing`): a list already there, a hand-set one
-(`"permissionsAuto": false`) and a config.json that does not parse are left
-alone. A frame older than 2026.10.16 ignores the key, so nothing needs
+reads (`onlyMissing`): a list already there and a config.json that does not
+parse are left alone. A frame older than 2026.10.16 ignores the key, so nothing needs
 redeploying; a frame gets the lists with the deploy that installs the release
 that reads them.
 
@@ -124,7 +123,7 @@ def _config_with_permissions(text, permissions: list[str]):
         config = json.loads(text)
     except ValueError:
         return None
-    if not isinstance(config, dict) or config.get("permissionsAuto") is False or "permissions" in config:
+    if not isinstance(config, dict) or "permissions" in config:
         return None
     entries = list(config.items())
     settings_at = next((index for index, (key, _) in enumerate(entries) if key == "settings"), None)

@@ -354,9 +354,8 @@ is the mitigation for a self-hosted frame.
 A JS app names what it needs in its `config.json` `permissions` (`assets`
 reads the frame's assets folder, `assets-write` also changes it; `files` and
 `shell` belong to the built-in Local Image and the two process-spawning
-apps). The editor fills the list from the app's code on every save unless the
-app says `"permissionsAuto": false`. The frame enforces it per app
-(`JsAssetGrant`, `js_runtime/app_runtime.nim`), and asking for nothing gets
+apps). The editor sets the list from the app's code on every save. The frame
+enforces it per app (`JsAssetGrant`, `js_runtime/app_runtime.nim`), and asking for nothing gets
 nothing: an app with no list, or one that asks for none of them, keeps its
 files in the scene's own `<assets>/scenes/<sceneId>/`,
 one that asks to read cannot write, and every path is still checked against

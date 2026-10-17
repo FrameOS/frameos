@@ -135,21 +135,20 @@ describe("built-in apps", () => {
 });
 
 describe("scene access details", () => {
-  it("names a hand-set list that does not cover the code", () => {
+  it("names a stale list that does not cover the code", () => {
     const access = sceneAccess({
       nodes: [{ id: "a", type: "app", data: { keyword: "clever" } }],
       apps: {
         clever: {
           sources: {
             "app.ts": "frameos.loadAssetImage('a.png'); frameos.writeAsset('b.png', x)",
-            "config.json": JSON.stringify({ name: "Clever", permissions: ["files"], permissionsAuto: false }),
+            "config.json": JSON.stringify({ name: "Clever", permissions: ["files"] }),
           },
         },
       },
     });
     const app = access.apps[0];
     expect(app?.name).toBe("Clever");
-    expect(app?.auto).toBe(false);
     expect(app?.reasons).toEqual(["calls frameos.loadAssetImage", "calls frameos.writeAsset"]);
     // "files" covers reading the assets folder, not writing it.
     expect(app ? appPermissionShortfall(app) : null).toEqual(["assets-write"]);

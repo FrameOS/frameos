@@ -27,7 +27,7 @@ export interface ScenePermissionRow {
 /** One JavaScript app of the scene: where its list comes from, and what the frame refuses. */
 export interface ScenePermissionApp {
   name: string
-  /** "from its code", "set by hand" or "no list yet". */
+  /** "from its code", "updates on the next save" or "no list yet". */
   source: string
   /** The calls its list does not cover (the frame refuses them), or null. */
   warning: string | null
@@ -128,7 +128,12 @@ export const sceneSettingsLogic = kea<sceneSettingsLogicType>([
             const shortfall = appPermissionShortfall(app)
             return {
               name: app.name,
-              source: app.declared === null ? 'no list yet' : app.auto ? 'from its code' : 'set by hand',
+              source:
+                app.declared === null
+                  ? 'no list yet'
+                  : app.declared.join() === app.detected.join()
+                  ? 'from its code'
+                  : 'updates on the next save',
               warning:
                 shortfall.length > 0
                   ? `${app.reasons.join(' and ')} but does not ask for ${shortfall

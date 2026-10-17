@@ -193,10 +193,6 @@ class AppConfigSchema(BaseModel):
             "from its code when the scene is saved, and the frame gives the app exactly this list."
         )
     )
-    permissionsAuto: Optional[bool] = Field(
-        None,
-        description="false when `permissions` is set by hand: saving the scene leaves it as written."
-    )
 
     # The fields array can contain either an interactive form field or a block of markdown
     fields: Optional[List[FieldsUnion]] = Field(

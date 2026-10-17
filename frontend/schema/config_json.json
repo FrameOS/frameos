@@ -62,10 +62,6 @@
           },
           "type": "array"
         },
-        "permissionsAuto": {
-          "description": "false: `permissions` is set by hand and saving leaves it as written.",
-          "type": "boolean"
-        },
         "settings": {
           "description": "List of top level settings exported for this app",
           "items": {

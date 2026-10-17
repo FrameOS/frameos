@@ -294,13 +294,13 @@ Saving the scene fills a JavaScript app's list from its code, so you rarely
 write it. The frame gives the app exactly that list: with neither `"assets"`
 nor `"assets-write"`, its asset calls live in a folder of its own,
 `scenes/<sceneId>/`; with `"assets"` alone, its writes are refused. An app
-with no list asks for nothing. To keep a
-list you wrote by hand, add `"permissionsAuto": false` next to it. A scene
-asks for what its apps ask for, nothing more, and every surface shows it as
-tags ("reads assets folder", "writes assets folder", "reads all files",
-"runs shell commands", and "uses OpenAI key" for each settings namespace an
-app reads). Installing a scene is the approval of its tags, and an update
-says which ones it adds, so ask for what the app needs and no more.
+with no list asks for nothing, and a list written by hand is replaced on the
+next save. A scene asks for what its apps ask for, nothing more, and every
+surface shows it as tags ("reads assets folder", "writes assets folder",
+"reads all files", "runs shell commands", and "uses OpenAI key" for each
+settings namespace an app reads). Installing a scene is the approval of its
+tags, and an update says which ones it adds, so ask for what the app needs
+and no more.
 `fetchImage({ saveAsset })` is the frame caching a download, not the app
 using the folder: it needs no permission. (Frames before FrameOS 2026.10.16
 ignore the lists.)

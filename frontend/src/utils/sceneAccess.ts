@@ -8,10 +8,9 @@
  * files", "reads assets folder", "writes assets folder", "uses OpenAI key"),
  * and installing a scene that shows them is the approval.
  *
- * A JavaScript app's list is filled from its code whenever the scene is saved
- * (`withAppPermissions`) unless its config.json says `"permissionsAuto":
- * false`: then the list is the author's and is left as written. The frame
- * gives each JS app exactly what its list asks for (frameos/src/frameos/
+ * A JavaScript app's list is set from its code whenever the scene is saved
+ * (`withAppPermissions`), so it follows the code. The frame gives each JS app
+ * exactly what its list asks for (frameos/src/frameos/
  * js_runtime/app_runtime.nim), and an app with no list nothing. Scenes stored
  * before the lists existed got theirs from the control planes: the backend's
  * migration 5e2a9c71d4b8 (a frozen Python copy of this detection) and the
@@ -297,8 +296,6 @@ export interface AppAccess {
   kind: 'builtin' | 'scene'
   /** Its config.json `permissions`, known names in order; null when it has no list yet (the next save writes one). */
   declared: ScenePermission[] | null
-  /** False when config.json says `"permissionsAuto": false`: the list is the author's and saving leaves it alone. */
-  auto: boolean
   /** What its code reaches for (for a built-in app, what it declares). */
   detected: ScenePermission[]
   /** What it may do: the declared list, or what was detected when there is none. */
@@ -334,7 +331,6 @@ function sceneAppAccess(
     name: typeof name === 'string' && name.trim() ? name.trim() : keyword,
     kind: 'scene',
     declared,
-    auto: config?.['permissionsAuto'] !== false,
     detected,
     permissions: declared ?? detected,
     settings: stringList(config ? config['settings'] : fallback?.['settings']),
@@ -350,7 +346,6 @@ function builtinAccess(keyword: string, builtin: string): AppAccess {
     name: builtin.slice(builtin.lastIndexOf('/') + 1),
     kind: 'builtin',
     declared: permissions,
-    auto: false,
     detected: permissions,
     permissions,
     settings: [...(entry.settings ?? [])],
@@ -561,8 +556,7 @@ export function describeGainedAccess(changes: SceneAccessChanges): string {
 
 /**
  * config.json with `permissions` set to `permissions`, or null when it stays
- * as it is: already that list, a list the author set by hand
- * (`"permissionsAuto": false`), any list at all when `onlyMissing`, or a file
+ * as it is: already that list, any list at all when `onlyMissing`, or a file
  * that does not parse (left for its author to fix). Other keys keep their
  * order; a new `permissions` goes after `settings`, or last. The file keeps
  * its indent and trailing newline; an app with no config.json gets one.
@@ -576,7 +570,7 @@ function configWithPermissions(
     return `${JSON.stringify({ permissions }, null, 2)}\n`
   }
   const config = parseConfig(text)
-  if (!config || config['permissionsAuto'] === false) {
+  if (!config) {
     return null
   }
   const current = config['permissions']
@@ -614,8 +608,8 @@ function withSourcesPermissions(sources: unknown, onlyMissing: boolean): Record<
 
 /**
  * The scene with every JavaScript app's config.json `permissions` set from
- * its code, the way a save leaves it: apps whose list the author set by hand
- * (`"permissionsAuto": false`) and files that do not parse are left alone.
+ * its code, the way a save leaves it: a config.json that does not parse is
+ * left alone.
  * With `onlyMissing`, only apps with no list at all get one (the cloud's
  * read-time stamp of scenes that predate the lists). Returns the same object
  * when nothing changes.

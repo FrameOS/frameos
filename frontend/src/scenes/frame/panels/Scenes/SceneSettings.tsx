@@ -184,10 +184,7 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                       What this scene's apps may do on the frame. Each app asks in its config.json under "permissions",
                       and the frame gives it exactly that list.
                     </p>
-                    <p>
-                      A JavaScript app's list follows its code every time the scene is saved. To keep a list you wrote
-                      by hand, set "permissionsAuto": false in that config.json.
-                    </p>
+                    <p>A JavaScript app's list is set from its code every time the scene is saved.</p>
                     <p>Frames before FrameOS 2026.10.16 ignore the lists.</p>
                   </div>
                 }

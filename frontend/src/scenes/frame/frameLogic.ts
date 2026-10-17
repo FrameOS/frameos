@@ -2126,9 +2126,9 @@ export function sanitizeScene(scene: Partial<FrameScene>, frame: Partial<FrameTy
   )
   const shouldArrange = normalizedNodes.length > 0 && sanitizedNodes.every((node) => !hasValidPosition(node))
   const arranged = shouldArrange ? arrangeSceneGraph(normalizedNodes, edges) : { nodes: normalizedNodes, edges }
-  // Every JS app's config.json `permissions` follows its code, unless the
-  // author set them by hand (utils/sceneAccess.ts): what the frame enforces
-  // and the tags show. Every save goes through here.
+  // Every JS app's config.json `permissions` follows its code
+  // (utils/sceneAccess.ts): what the frame enforces and the tags show. Every
+  // save goes through here.
   return withAppPermissions({
     ...scene,
     id: scene.id ?? uuidv4(),

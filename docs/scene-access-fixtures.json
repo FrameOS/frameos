@@ -72,8 +72,8 @@
       "flags": []
     },
     {
-      "name": "a list set by hand stays what it says",
-      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "frameos.writeAsset('x', y)", "config.json": "{\n  \"name\": \"Clever\",\n  \"permissions\": [\n    \"assets\"\n  ],\n  \"permissionsAuto\": false\n}\n"}}}},
+      "name": "a stale list grants what it says until a save refills it",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "frameos.writeAsset('x', y)", "config.json": "{\n  \"name\": \"Stale\",\n  \"permissions\": [\n    \"assets\"\n  ]\n}\n"}}}},
       "flags": ["assets"]
     },
     {
@@ -214,7 +214,7 @@
       "expect": "{\n  \"name\": \"Writer\",\n  \"permissions\": [\n    \"assets\",\n    \"assets-write\"\n  ]\n}\n"
     },
     {
-      "name": "a stale automatic list follows the code",
+      "name": "a stale list follows the code",
       "code": "frameos.writeAsset('x', y)",
       "config": "{\n  \"name\": \"Stale\",\n  \"permissions\": [\n    \"assets\"\n  ],\n  \"category\": \"data\"\n}\n",
       "expect": "{\n  \"name\": \"Stale\",\n  \"permissions\": [\n    \"assets\",\n    \"assets-write\"\n  ],\n  \"category\": \"data\"\n}\n"
@@ -226,10 +226,10 @@
       "expect": null
     },
     {
-      "name": "a list set by hand is left alone",
+      "name": "an empty list is refilled from the code too",
       "code": "frameos.writeAsset('x', y)",
-      "config": "{\n  \"name\": \"Clever\",\n  \"permissions\": [],\n  \"permissionsAuto\": false\n}\n",
-      "expect": null
+      "config": "{\n  \"name\": \"Empty\",\n  \"permissions\": []\n}\n",
+      "expect": "{\n  \"name\": \"Empty\",\n  \"permissions\": [\n    \"assets\",\n    \"assets-write\"\n  ]\n}\n"
     },
     {
       "name": "an app that calls nothing asks for nothing",

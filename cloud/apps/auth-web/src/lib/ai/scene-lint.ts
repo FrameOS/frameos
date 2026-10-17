@@ -648,10 +648,10 @@ export function lintScene(
   }
   for (const app of sceneAccess(scene).apps) {
     const shortfall = appPermissionShortfall(app);
-    if (!app.auto && shortfall.length > 0) {
+    if (shortfall.length > 0) {
       push(
         "warning",
-        `Scene app "${app.keyword}" ${app.reasons.join(" and ")}, but the permissions set by hand in its config.json do not include ${shortfall.map((permission) => `"${permission}"`).join(" or ")}: the frame refuses those calls.`,
+        `Scene app "${app.keyword}" ${app.reasons.join(" and ")}, but the permissions in its config.json do not include ${shortfall.map((permission) => `"${permission}"`).join(" or ")}: the frame refuses those calls until the list asks for them.`,
       );
     }
   }

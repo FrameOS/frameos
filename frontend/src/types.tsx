@@ -918,8 +918,6 @@ export interface AppConfig {
    * on every save; the frame gives the app exactly this list (FrameOS 2026.10.16+).
    */
   permissions?: ('shell' | 'files' | 'assets' | 'assets-write')[]
-  /** false: `permissions` is set by hand and saving leaves it as written. */
-  permissionsAuto?: boolean
   /** List of apt packages to install (mode=rpios) */
   apt?: string[]
   /** Fields for app in diagram editor */
