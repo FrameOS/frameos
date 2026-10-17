@@ -287,12 +287,12 @@ pointers plugged in after boot are found (inotify on `/dev/input`).
 
 **Buttons.** Two events; `action` says which of each.
 
-- **`gpio {pin, label, role, action, durationMs?, heldSeconds?, wake?, atMs?, level?}`:
+- **`gpio {pin, label, role, action, durationMs?, wake?, atMs?, level?}`:
   `down` and `up`.** What the line did, delivered the moment the driver
   reports it: `down` on the press, `up` on the release with `durationMs`. For
   a scene that wants the key itself: a counter that counts every tap,
   hold-to-show.
-- **`button {pin, label, role, action, durationMs?, heldSeconds?, wake?, atMs?}`:
+- **`button {pin, label, role, action, durationMs?, wake?, atMs?}`:
   `press`, `doublePress`, `longPress`.** What the person meant, and each press
   is exactly one of them. `press` is a short press, once
   it is over and `buttons.doublePressMs` (350) has passed since its `up` with
@@ -300,12 +300,12 @@ pointers plugged in after boot are found (inotify on `/dev/input`).
   second down inside that window; the pair is that and nothing more (no
   `press`, no `longPress`), and a third down starts over. `longPress` is the
   `up` of a press held at least `buttons.longPressMs` (1000), once, right
-  after that `up`, with the same `durationMs` and `heldSeconds`; nothing is
+  after that `up`, with the same `durationMs`; nothing is
   delivered while a key is held, and a long press is not also a `press`.
 
 A tap is therefore `gpio` `down`, `gpio` `up`, then `button` `press`; a
 double tap `down`, `up`, `down` with a `doublePress`, `up`; a 2.2 s hold
-`down`, then `up` and a `longPress` (`heldSeconds` 2) together. **A `button`
+`down`, then `up` and a `longPress` (`durationMs` 2200) together. **A `button`
 listener with no `action` filter hears every press, double press and long
 press**, once each: a scene that reacts to a button listens for `button` and
 branches on `action` if it cares; one that must count every tap listens for

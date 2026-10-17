@@ -320,19 +320,19 @@ block test_a_button_has_a_role_and_two_events:
     at(2500), output)
   doAssert output.kinds == @["gpio:up", "button:longPress"]
   doAssert output[0].payload["durationMs"].getInt() == 2500 and output[0].payload["role"].getStr() == "menu"
-  doAssert output[1].payload["durationMs"].getInt() == 2500 and output[1].payload["heldSeconds"].getInt() == 2
+  doAssert output[1].payload["durationMs"].getInt() == 2500
   doAssert not output[1].payload.hasKey("level")
   output.setLen(0)
   state.tick(at(4000), output)
   doAssert output.len == 0
   doAssert state.buttonsHeld == 1 and state.buttonsBusy == 1 # pin 6, still down
   # An up with no down to measure from (a key held since before the driver
-  # started): the host's count if it gave one, with heldSeconds made from it.
+  # started): the host's count if it gave one.
   output.setLen(0)
   discard state.applyNamedInput(evGpio, %*{"pin": 9, "label": "BOOT", "level": 1, "action": "up",
     "durationMs": 3400}, eoDriver, at(4500), output)
   doAssert output.kinds == @["gpio:up"]
-  doAssert output[0].payload["durationMs"].getInt() == 3400 and output[0].payload["heldSeconds"].getInt() == 3
+  doAssert output[0].payload["durationMs"].getInt() == 3400
   # The down that woke the device is a press like any other: it waits for its
   # up, and the press it becomes says it woke the device.
   output.setLen(0)
@@ -379,7 +379,7 @@ block test_someone_elses_press_is_delivered_as_said:
   doAssert output.kinds == @["button:press"] and output[0].payload["role"].getStr() == "primary"
   output.setLen(0)
   discard state.applyNamedInput(evButton, %*{"label": "A", "action": "longPress", "durationMs": 1200}, eoCloud, at(0), output)
-  doAssert output.kinds == @["button:longPress"] and output[0].payload["heldSeconds"].getInt() == 1
+  doAssert output.kinds == @["button:longPress"] and output[0].payload["durationMs"].getInt() == 1200
   doAssert state.buttonsBusy == 0
   # A `gpio` that names no edge moved no line: nothing.
   output.setLen(0)

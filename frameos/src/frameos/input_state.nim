@@ -157,8 +157,7 @@ proc addButton(output: var seq[InputDelivery], name: string, origin: EventOrigin
                label, role, action: string, atMs = -1, durationMs = -1, level = -1, wake = false) =
   ## One `gpio` (an edge) or `button` (a press) event for the scene. Every one
   ## is built here, so the ESP32 carries this code once: the four fields each
-  ## has, then the optional ones when set. `heldSeconds` (the hold in whole
-  ## seconds) always comes with `durationMs`.
+  ## has, then the optional ones when set.
   let payload = %*{"pin": pin, "label": label, "role": role, "action": action}
   if level >= 0:
     payload["level"] = %level
@@ -168,7 +167,6 @@ proc addButton(output: var seq[InputDelivery], name: string, origin: EventOrigin
     payload["atMs"] = %atMs
   if durationMs >= 0:
     payload["durationMs"] = %durationMs
-    payload["heldSeconds"] = %(durationMs div 1000)
   output.add(InputDelivery(name: name, origin: origin, payload: payload))
 
 proc keyFor(state: InputState, pin: int, label: string): int =

@@ -2766,8 +2766,7 @@
          "action": "up",
          "level": 1,
          "atMs": 1080,
-         "durationMs": 80,
-         "heldSeconds": 0
+         "durationMs": 80
         }
        }
       ]
@@ -3299,8 +3298,7 @@
          "role": "next",
          "action": "up",
          "atMs": 1200,
-         "durationMs": 200,
-         "heldSeconds": 0
+         "durationMs": 200
         }
        }
       ]
@@ -3647,8 +3645,7 @@
          "label": "B",
          "role": "next",
          "action": "up",
-         "durationMs": 2200,
-         "heldSeconds": 2
+         "durationMs": 2200
         }
        },
        {
@@ -3659,8 +3656,7 @@
          "role": "next",
          "action": "longPress",
          "atMs": 1000,
-         "durationMs": 2200,
-         "heldSeconds": 2
+         "durationMs": 2200
         }
        }
       ]
@@ -3723,8 +3719,7 @@
          "label": "B",
          "role": "next",
          "action": "up",
-         "durationMs": 2500,
-         "heldSeconds": 2
+         "durationMs": 2500
         }
        },
        {
@@ -3735,8 +3730,7 @@
          "role": "next",
          "action": "longPress",
          "atMs": 1000,
-         "durationMs": 2500,
-         "heldSeconds": 2
+         "durationMs": 2500
         }
        }
       ]
@@ -3809,8 +3803,7 @@
          "label": "B",
          "role": "next",
          "action": "up",
-         "durationMs": 30000,
-         "heldSeconds": 30
+         "durationMs": 30000
         }
        },
        {
@@ -3821,8 +3814,7 @@
          "role": "next",
          "action": "longPress",
          "atMs": 1000,
-         "durationMs": 30000,
-         "heldSeconds": 30
+         "durationMs": 30000
         }
        }
       ]
@@ -3879,8 +3871,7 @@
          "label": "B",
          "role": "next",
          "action": "up",
-         "durationMs": 999,
-         "heldSeconds": 0
+         "durationMs": 999
         }
        }
       ]
@@ -3953,8 +3944,7 @@
          "label": "B",
          "role": "next",
          "action": "up",
-         "durationMs": 1000,
-         "heldSeconds": 1
+         "durationMs": 1000
         }
        },
        {
@@ -3965,8 +3955,7 @@
          "role": "next",
          "action": "longPress",
          "atMs": 3000,
-         "durationMs": 1000,
-         "heldSeconds": 1
+         "durationMs": 1000
         }
        }
       ]
@@ -4087,8 +4076,7 @@
          "label": "B",
          "role": "next",
          "action": "up",
-         "durationMs": 1160,
-         "heldSeconds": 1
+         "durationMs": 1160
         }
        }
       ]
@@ -4235,8 +4223,7 @@
          "label": "B",
          "role": "next",
          "action": "up",
-         "durationMs": 2500,
-         "heldSeconds": 2
+         "durationMs": 2500
         }
        },
        {
@@ -4691,8 +4678,7 @@
         "payload": {
          "label": "A",
          "role": "primary",
-         "action": "longPress",
-         "heldSeconds": 1
+         "action": "longPress"
         }
        }
       ]

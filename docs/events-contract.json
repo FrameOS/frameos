@@ -466,7 +466,7 @@
       "name": "gpio",
       "class": "input",
       "device": "button",
-      "description": "A GPIO button's line, the moment the driver reports it: `down` when the button is pressed, `up` when it is let go (with `durationMs` and `heldSeconds`). For a scene that wants the key itself: a counter that counts every tap, hold-to-show. What the person meant (a press, a double press, a long press) is `button`. `atMs` is when the driver saw the edge, on the frame's monotonic clock; `level` is the line (0 is down: the line is pulled up).",
+      "description": "A GPIO button going `down` or `up`, the moment it happens. `up` says how long it was held.",
       "listen": true,
       "dispatch": false,
       "payload": [
@@ -475,7 +475,6 @@
         {"name": "role", "label": "Role", "type": "string", "required": true, "unit": "button-role"},
         {"name": "action", "label": "Action", "type": "string", "required": true, "unit": "gpio-action"},
         {"name": "durationMs", "label": "Held for (ms)", "type": "integer", "required": false, "unit": "ms", "filter": "more"},
-        {"name": "heldSeconds", "label": "Held for (s)", "type": "integer", "required": false, "unit": "s", "filter": "more"},
         {"name": "wake", "label": "Woke the device", "type": "boolean", "required": false, "filter": "more"},
         {"name": "atMs", "label": "Seen at (ms)", "type": "integer", "required": false, "unit": "ms", "catalog": false},
         {"name": "level", "label": "Level", "type": "integer", "required": false, "unit": "gpio-level", "catalog": false}
@@ -491,7 +490,7 @@
       "name": "button",
       "class": "input",
       "device": "button",
-      "description": "A GPIO button pressed, once it is clear what the person meant. Each press is exactly one of: `press` (a short press with no second one within `doublePressMs` of its release, so it comes that long after the release), `doublePress` (on the second down) or `longPress` (on the release of a press held at least `longPressMs`, with `durationMs` and `heldSeconds`; nothing while the key is down). A listener with no `action` filter hears all three. The line itself, `down` and `up`, is `gpio`. `atMs` is when the press began, on the frame's monotonic clock: every rule is timed from the edges, so a press made while the panel was refreshing keeps its timing.",
+      "description": "A GPIO button pressed: a `press`, a `doublePress` or a `longPress`, one event per press.",
       "listen": true,
       "dispatch": false,
       "payload": [
@@ -500,7 +499,6 @@
         {"name": "role", "label": "Role", "type": "string", "required": true, "unit": "button-role"},
         {"name": "action", "label": "Action", "type": "string", "required": true, "unit": "button-action"},
         {"name": "durationMs", "label": "Held for (ms)", "type": "integer", "required": false, "unit": "ms", "filter": "more"},
-        {"name": "heldSeconds", "label": "Held for (s)", "type": "integer", "required": false, "unit": "s", "filter": "more"},
         {"name": "wake", "label": "Woke the device", "type": "boolean", "required": false, "filter": "more"},
         {"name": "atMs", "label": "Seen at (ms)", "type": "integer", "required": false, "unit": "ms", "catalog": false}
       ],
@@ -637,7 +635,7 @@
     "directions": ["left", "right", "up", "down"]
   },
   "buttons": {
-    "$comment": "GPIO buttons, as two events. `gpio` is the line: `edges`, `down` and `up`, delivered the moment the driver reports them (`up` with `durationMs`), for a scene that wants the key itself (a counter that counts every tap, hold-to-show). `button` is what the person meant (`actions`), and each press is exactly one of them: `press` once a short press is over and `doublePressMs` has passed since its release with no second down; `doublePress` on the second down within that window (the pair is that and nothing more: no `press`, no `longPress`, and the third down starts over); `longPress` on the `up` of a press held at least `longPressMs`, once, after the `up`, with the same `durationMs` and `heldSeconds` (nothing is delivered while a key is held). The rules are timed from the edges' `atMs`, never from when they were delivered. A `button` with a `level`, or with the action `down` or `up`, is an edge from a producer older than `gpio` (2026.10.16) and is taken as one. `roles` is what a button MEANS, so a store scene filters on `role: \"next\"` and not on a silkscreen label; a frame configures a role per button (`gpioButtons[].role`), and `roleByLabel` is the default for a button without one, by its label (case-insensitive). The ESP32 buzzer clicks on `down`, lower on every `up`, and higher on the second `down` of a `doublePress`; while a key is held it sounds a short falling pair at every whole `longPressMs`, counting the hold (the scene's `longPress` still comes once, with the `up`); a `press` adds no sound of its own.",
+    "$comment": "GPIO buttons, as two events. `gpio` is the line: `edges`, `down` and `up`, delivered the moment the driver reports them (`up` with `durationMs`), for a scene that wants the key itself (a counter that counts every tap, hold-to-show). `button` is what the person meant (`actions`), and each press is exactly one of them: `press` once a short press is over and `doublePressMs` has passed since its release with no second down; `doublePress` on the second down within that window (the pair is that and nothing more: no `press`, no `longPress`, and the third down starts over); `longPress` on the `up` of a press held at least `longPressMs`, once, after the `up`, with the same `durationMs` (nothing is delivered while a key is held). The rules are timed from the edges' `atMs` (when the driver saw the edge, on the frame's monotonic clock; a `button` carries its press's first `down`), never from when they were delivered, so a press made while the panel was refreshing keeps its timing. A `gpio` edge's `level` is the line (0 is down: the line is pulled up). A `button` with a `level`, or with the action `down` or `up`, is an edge from a producer older than `gpio` (2026.10.16) and is taken as one. `roles` is what a button MEANS, so a store scene filters on `role: \"next\"` and not on a silkscreen label; a frame configures a role per button (`gpioButtons[].role`), and `roleByLabel` is the default for a button without one, by its label (case-insensitive). The ESP32 buzzer clicks on `down`, lower on every `up`, and higher on the second `down` of a `doublePress`; while a key is held it sounds a short falling pair at every whole `longPressMs`, counting the hold (the scene's `longPress` still comes once, with the `up`); a `press` adds no sound of its own.",
     "roles": ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"],
     "roleByLabel": {
       "A": "primary", "B": "next", "C": "prev", "D": "back", "BOOT": "primary", "KEY1": "next", "KEY2": "prev",

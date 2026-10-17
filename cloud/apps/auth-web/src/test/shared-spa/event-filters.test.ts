@@ -20,10 +20,10 @@ describe("event node filters", () => {
   it("a button listener shows role and action; the rest is folded until set", () => {
     const fields = fieldsOf("button");
     expect(names(eventFilterFieldsToShow(fields, {}, false))).toEqual(["role", "action"]);
-    // pin, label, durationMs, heldSeconds, wake
-    expect(foldedEventFilterCount(fields, {})).toBe(5);
+    // pin, label, durationMs, wake
+    expect(foldedEventFilterCount(fields, {})).toBe(4);
     expect(names(eventFilterFieldsToShow(fields, { label: "A" }, false))).toEqual(["label", "role", "action"]);
-    expect(foldedEventFilterCount(fields, { label: "A" })).toBe(4);
+    expect(foldedEventFilterCount(fields, { label: "A" })).toBe(3);
     expect(names(eventFilterFieldsToShow(fields, {}, true))).toEqual(names(fields));
   });
 

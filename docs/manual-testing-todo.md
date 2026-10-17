@@ -62,7 +62,7 @@ touch, both 2026-09-19):
   100, not 30000, then a `press` and no `longPress`; two quick taps
   mid-refresh log one `doublePress` and no `press`; a key held 2 s
   mid-refresh logs the `up` then a `longPress`, both with `durationMs` near
-  2000 and `heldSeconds: 2`; a key held across the end of a refresh logs
+  2000; a key held across the end of a refresh logs
   nothing until it is let go.
 - [ ] **Button sounds and debounce on the E1004** (2026.10.16): the fastest
   tap you can make is `down`, `up`, `press` (no lost taps); the fastest
