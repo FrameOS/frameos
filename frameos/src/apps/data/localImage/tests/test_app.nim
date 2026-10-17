@@ -303,7 +303,7 @@ suite "data/localImage app":
       check image.width == 1
       check scene.state["meta"]["path"].getStr() == root / "shared.ppm"
 
-  test "auto, all-files and store-origin scenes read any path, as before":
+  test "auto and all-files scenes read any path, as before":
     let root = uniqueTempDir("frameos-local-image-open")
     let elsewhere = uniqueTempDir("frameos-local-image-open-elsewhere")
     defer:
@@ -318,7 +318,6 @@ suite "data/localImage app":
       FrameScene(state: %*{}, logger: newLogger(logs)),
       InterpretedFrameScene(id: "auto".SceneId, state: %*{}, logger: newLogger(logs)),
       InterpretedFrameScene(id: "files".SceneId, state: %*{}, logger: newLogger(logs), assetAccess: "all-files"),
-      InterpretedFrameScene(id: "store".SceneId, state: %*{}, logger: newLogger(logs), storeOrigin: true),
     ]
     for scene in scenes:
       let app = App(

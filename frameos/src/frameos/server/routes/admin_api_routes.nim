@@ -164,8 +164,7 @@ proc addAdminApiRoutes*(router: var Router) =
         return
       try:
         # `scope` picks which locally-established fact the matched code
-        # unlocks: the LAN deny (default) or the process-spawning apps for
-        # store-origin scenes.
+        # unlocks: the LAN deny (default) or Chromium unsandboxed as root.
         let scope = payload{"scope"}.getStr("localNetwork")
         let updated =
           case scope

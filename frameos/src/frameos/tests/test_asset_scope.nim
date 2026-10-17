@@ -11,8 +11,8 @@ proc config(assetsPath: string, sandbox = ""): FrameConfig =
   if sandbox.len > 0:
     result.js = JsRuntimeConfig(assetSandbox: sandbox)
 
-proc scene(access: string, id = "photos/one", storeOrigin = false): FrameScene =
-  InterpretedFrameScene(id: id.SceneId, assetAccess: access, storeOrigin: storeOrigin)
+proc scene(access: string, id = "photos/one"): FrameScene =
+  InterpretedFrameScene(id: id.SceneId, assetAccess: access)
 
 suite "asset scope":
   var root = ""
@@ -41,13 +41,6 @@ suite "asset scope":
       check not sceneAssetsConfined(plain, scene(access))
       check sceneAssetsRoot(plain, scene(access)) == root
     check sceneAssetsRoot(plain, scene("cache-home-only")) == root / "scenes" / "photos_one"
-
-  test "provenance confines nothing":
-    # A scene from the store with no setting runs as the owner's would.
-    let plain = config(root)
-    check sceneAssetAccess(plain, scene("", storeOrigin = true)) == "auto"
-    check not sceneAssetsConfined(plain, scene("", storeOrigin = true))
-    check sceneAssetsRoot(plain, scene("", storeOrigin = true)) == root
 
   test "compiled scenes and no scene run as auto":
     let plain = config(root)
@@ -162,8 +155,6 @@ suite "asset scope":
       check resolveSceneLocalPath(cfg, scene(access), "") == (root, "")
       check resolveSceneLocalPath(cfg, scene(access), "/media/usb/photos") == ("/media/usb/photos", "")
     check resolveSceneLocalPath(cfg, FrameScene(id: "legacy".SceneId), "/mnt/x") == ("/mnt/x", "")
-    # A store scene with no setting too.
-    check resolveSceneLocalPath(cfg, scene("", storeOrigin = true), "/media/usb") == ("/media/usb", "")
     # A "scene" frame holds even "all-files" to its subtree.
     let (resolved, refusal) = resolveSceneLocalPath(config(root, "scene"), scene("all-files"), "/media/usb")
     check resolved == ""

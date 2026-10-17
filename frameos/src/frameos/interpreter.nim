@@ -10,7 +10,6 @@ import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
 import frameos/retired_apps
 import frameos/channels
-import frameos/cloud/scene_guard
 import frameos/js_runtime/run_budget
 import frameos/node_config
 import frameos/event_log
@@ -1278,7 +1277,6 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     nodes: initTable[NodeId, DiagramNode](),
     edges: @[],
     apps: exportedScene.apps,
-    storeOrigin: exportedScene.storeOrigin,
     assetAccess: exportedScene.assetAccess,
     customEventOrigins: exportedScene.customEventOrigins,
     nextNodeIds: initTable[NodeId, NodeId](),
@@ -1888,7 +1886,6 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     edges: scene.edges,
     apps: if scene.apps.isNil: %*{} else: scene.apps,
     stateFields: refresh.fields,
-    storeOrigin: sceneOriginIsStore(scene.origin),
     assetAccess: if scene.settings != nil: string(scene.settings.assetAccess) else: "",
     customEventOrigins: declaredCustomEventOrigins(scene.customEvents),
     # Fields without an explicit access default to public for interpreted

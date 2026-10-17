@@ -389,10 +389,6 @@ type
     edges*: seq[DiagramEdge]
     apps*: JsonNode
     stateFields*: seq[StateField] # all state fields, including private ones
-    ## The scene came from the public scene store (`origin.storeSceneId` is
-    ## set): anyone's code, whichever control plane installed it. Trust
-    ## decisions key on this, not on who uploaded the payload.
-    storeOrigin*: bool
     ## The scene's `settings.assetAccess` as written ("" when absent); what it
     ## means is frameos/asset_scope.nim's.
     assetAccess*: string
@@ -444,7 +440,6 @@ type
     nodes*: Table[NodeId, DiagramNode]
     edges*: seq[DiagramEdge]
     apps*: JsonNode
-    storeOrigin*: bool ## see ExportedInterpretedScene.storeOrigin
     assetAccess*: string ## see ExportedInterpretedScene.assetAccess
     nextNodeIds*: Table[NodeId, NodeId] # mapping from current node id to next node id for quick lookup
     eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event

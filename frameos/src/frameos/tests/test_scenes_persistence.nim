@@ -236,10 +236,10 @@ suite "scene persistence helpers":
     check not cloudUploadedScenesResident()
     check hookFired == 2
 
-  test "store-origin scenes are tracked regardless of who uploaded them":
-    # The LAN deny keys on provenance too: a scene stamped with a store id by
-    # the cloud is anyone's code, whether the payload came over the provider
-    # link ("cloud") or from a backend deploy / local upload (no source).
+  test "a store stamp on a scene arms nothing; the source does":
+    # Until 2026.10.16 a scene stamped with a store id armed the LAN deny on
+    # any frame. The deny keys on who installed the payload now (the cloud),
+    # never on a stamp in the scene's own JSON.
     let storeScenes = %*[{
       "id": "store-test", "name": "Store scene",
       "origin": {"href": "https://scenes.frameos.net/s/x", "storeSceneId": "11111111-2222-3333-4444-555555555555"},
@@ -248,21 +248,7 @@ suite "scene persistence helpers":
     let (storeMain, _) = updateUploadedScenesFromPayload(
       %*{"scenes": storeScenes}, persistPayload = false)
     check storeMain.isSome
-    check storeOriginScenesResident()
     check not cloudUploadedScenesResident()
-
-    let ownScenes = %*[{
-      "id": "own-test", "name": "Own scene",
-      "origin": {"href": "https://scenes.frameos.net/s/x"},
-      "nodes": [], "edges": [],
-    }]
-    let (ownMain, _) = updateUploadedScenesFromPayload(
-      %*{"scenes": ownScenes}, persistPayload = false)
-    check ownMain.isSome
-    check not storeOriginScenesResident()
-    check scenePayloadHasStoreOrigin(storeScenes)
-    check not scenePayloadHasStoreOrigin(ownScenes)
-    check not scenePayloadHasStoreOrigin(%*{})
 
   test "cloud-origin payloads are re-checked for refused apps at load time":
     # The verb dispatcher refuses these at transport time; the load-time

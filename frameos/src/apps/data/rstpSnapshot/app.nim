@@ -110,10 +110,7 @@ proc runFfmpeg(command: string, args: seq[string], timeoutMs: int): tuple[data: 
   result.data = processResult.output
 
 proc get*(self: App, context: ExecutionContext): Image =
-  # Provenance and target checks before ffmpeg is spawned (spawn_guard.nim).
-  let refusal = spawningAppRefusal(self.scene, "rstpSnapshot")
-  if refusal.len > 0:
-    return renderError(self, context, refusal)
+  # The target check before ffmpeg is spawned (spawn_guard.nim).
   let target = spawnTarget(self.appConfig.url, ["rtsp", "rtsps", "http", "https"])
   if target.refusal.len > 0:
     return renderError(self, context, target.refusal)

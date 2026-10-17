@@ -361,7 +361,8 @@ for every consumer) or the frame's `js.assetSandbox` is `"scene"` (every
 scene confined); `"all-assets"` keeps `localImage` inside the assets folder.
 The setting is part of the scene's content, not of where it came from, so
 every copy carries it. What a scene reaches for is shown wherever it appears:
-the store computes `risk_flags` at publish (`shell`, `assets`, `files`) with
+the store computes `risk_flags` at publish (`shell`, `assets`,
+`assets-write`, `files`) with
 the SPA's own detector (`frontend/src/utils/sceneAccess.ts`, corpus
 `docs/scene-access-fixtures.json`), and installing a flagged scene is the
 approval. `"auto"`, the default, enforces nothing yet: a scene that hides its
@@ -401,13 +402,24 @@ capped at five attempts — someone who cannot see the screen cannot complete it
 On ESP32 the equivalent is `set allow_local_network 1` on the USB console,
 which is physical presence by construction.
 
-The same ceremony carries a second, Pi-only fact: whether scenes from the
-public scene store may run the two built-in apps that spawn a child process
-(`data/chromiumScreenshot`, `data/rstpSnapshot`) — `POST
-/api/network/local-access` with `{"scope": "shellApps", "enabled": true,
-"code": …}` (`frameos/spawn_guard.nim`). Off by default: a store scene is
-anyone's code, and those two apps reach the network without the HTTP client's
-private-network check.
+The same ceremony carries a second, Pi-only fact: whether
+`data/chromiumScreenshot` may run its browser unsandboxed on a frame where
+FrameOS runs as root — `POST /api/network/local-access` with
+`{"scope": "shellApps", "enabled": true, "code": …}`. Off by default.
+
+**Shell apps and the LAN deny follow the scene's content and the installer,
+not its provenance.** Until 2026.10.16 a scene stamped with a store id
+(`origin.storeSceneId`) needed that ceremony before it could run either
+process-spawning app (`data/chromiumScreenshot`, `data/rstpSnapshot`), and
+its presence armed the private-network deny on any frame, self-hosted ones
+included. A stamp is not something the frame can keep true across copies,
+forks and imports, so neither check reads it any more. A scene that uses
+either app says so in its own JSON, every surface shows it as "runs shell
+commands", and installing it is the approval; cloud-managed frames still
+refuse both apps outright. Whatever the scene, the URL such an app hands to
+its child process passes the same private-network policy as the HTTP client
+(`frameos/spawn_guard.nim`). The deny itself is armed by who installed the
+scenes: a cloud-managed frame, or scenes the cloud pushed.
 
 Both are persisted in `state/local_access.json`, deliberately not in `frame.json`.
 A backend deploy uploads a freshly generated `frame.json` over SSH and never

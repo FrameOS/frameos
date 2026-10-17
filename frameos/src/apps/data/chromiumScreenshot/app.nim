@@ -105,12 +105,13 @@ const LOW_RAM_ERROR = "Error: Can't take a browser snapshot.\n\nModern browsers 
 # image since the privileged door shipped (docs/buildroot-privileges.md), and
 # there the real sandbox runs; a root install (a self-hosted backend's SSH
 # deploy, an image from before 9.4) gets the flag only after the local admin
-# has said at the panel that this frame may run shell apps at all.
+# has accepted that at the panel (the `shellApps` scope of the local-access
+# ceremony, local_access.nim).
 const ROOT_SANDBOX_REFUSAL = "chromiumScreenshot: FrameOS runs as root on this frame, so Chromium " &
-  "would render the page unsandboxed as root. Allow shell apps at the panel " &
-  "(Settings → Network → shell apps for store scenes, confirmed with the code " &
-  "shown on the panel) to accept that, or run FrameOS as the unprivileged " &
-  "frameos user (every release image since 9.4 does)."
+  "would render the page unsandboxed as root. Accept that at the panel " &
+  "(POST /api/network/local-access with scope \"shellApps\", confirmed with the " &
+  "code shown on the panel), or run FrameOS as the unprivileged frameos user " &
+  "(every release image since 9.4 does)."
 const LIGHTWEIGHT_CHROMIUM_ARGS = @[
   "--headless",
   "--disable-gpu",
@@ -577,13 +578,8 @@ proc get*(self: App, context: ExecutionContext): Image =
   if not self.hasEnoughRam:
     return renderError(width, height, LOW_RAM_ERROR.replace("{memoryMb}", $(round(self.memoryKb / 1024).int)))
 
-  # Provenance and target checks before anything is spawned (spawn_guard.nim):
-  # a store scene needs the local admin's say-so to run a browser at all, and
-  # the URL it opens must be http(s) to a host the LAN policy allows.
-  let refusal = spawningAppRefusal(self.scene, "chromiumScreenshot")
-  if refusal.len > 0:
-    self.logError refusal
-    return renderError(width, height, refusal)
+  # The target check before anything is spawned (spawn_guard.nim): the URL
+  # it opens must be http(s) to a host the LAN policy allows.
   let target = spawnTarget(self.appConfig.url, ["http", "https"])
   if target.refusal.len > 0:
     self.logError "chromiumScreenshot refused to open the configured URL: " & target.refusal

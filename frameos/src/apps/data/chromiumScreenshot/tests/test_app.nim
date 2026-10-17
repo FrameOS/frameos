@@ -52,42 +52,6 @@ proc makeApp(scene: FrameScene, frameConfig: FrameConfig): App =
   )
 
 suite "data/chromiumScreenshot app":
-  test "a store-origin scene is refused before any browser is spawned":
-    let previousRamProbeHook = chromiumRamProbeHook
-    let previousEnsureSystemDependenciesHook = chromiumEnsureSystemDependenciesHook
-    let previousEnsureVenvExistsHook = chromiumEnsureVenvExistsHook
-    let previousEnsureBackgroundBrowserHook = chromiumEnsureBackgroundBrowserHook
-    defer:
-      chromiumRamProbeHook = previousRamProbeHook
-      chromiumEnsureSystemDependenciesHook = previousEnsureSystemDependenciesHook
-      chromiumEnsureVenvExistsHook = previousEnsureVenvExistsHook
-      chromiumEnsureBackgroundBrowserHook = previousEnsureBackgroundBrowserHook
-      forgetStoredLocalNetworkAccess()
-
-    ramProbeValue = 4_000_000
-    ensureSystemDependenciesCalls = 0
-    ensureVenvExistsCalls = 0
-    ensureBackgroundBrowserCalls = 0
-    ensureBackgroundBrowserResult = true
-    chromiumRamProbeHook = fakeRamProbe
-    chromiumEnsureSystemDependenciesHook = fakeEnsureSystemDependencies
-    chromiumEnsureVenvExistsHook = fakeEnsureVenvExists
-    chromiumEnsureBackgroundBrowserHook = fakeEnsureBackgroundBrowser
-
-    let logs = LogStore(items: @[])
-    # Provenance, not transport: the scene came from the store, whoever put
-    # it on this frame (spawn_guard.nim).
-    let scene = InterpretedFrameScene(id: "store".SceneId, logger: newLogger(logs), storeOrigin: true)
-    let app = makeApp(scene, FrameConfig(width: 10, height: 6))
-    app.init()
-    let browserCallsAfterInit = ensureBackgroundBrowserCalls
-    let outputImage = app.get(ExecutionContext(hasImage: false))
-
-    check outputImage.width == 10
-    check outputImage.height == 6
-    check ensureBackgroundBrowserCalls == browserCallsAfterInit
-    check logs.logContains("scene store")
-
   test "a bad target URL is refused before the browser opens it":
     let previousRamProbeHook = chromiumRamProbeHook
     let previousEnsureSystemDependenciesHook = chromiumEnsureSystemDependenciesHook

@@ -48,6 +48,12 @@ is left there is in the medium / low list.
   their choosing. Require a panel-shown code for the control-plane/admin
   fields (a headless frame then needs the local admin password instead), and
   strip current config from the unauthenticated setup page.
+- Scenes on a self-hosted frame reach the LAN freely: since 2026.10.16 the
+  private-network deny is armed by the installer (cloud-managed frames,
+  cloud-pushed scenes), no longer by a store stamp in the scene. Give it a
+  content-based signal the way assets have one: a "reaches local network"
+  flag (private-address URLs in config, an `haSensor`-style app) shown at
+  install, or a per-scene network declaration the frame enforces.
 - Scene asset access is flagged, not enforced, for `settings.assetAccess:
   "auto"` (the default): the frame confines only the explicit values. Make
   the frame enforce what the flags say: run the same detection

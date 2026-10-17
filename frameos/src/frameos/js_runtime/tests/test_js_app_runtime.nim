@@ -647,10 +647,9 @@ suite "js app runtime":
     check fileExists(assetsDir / "scenes" / "store_photos" / "cache.txt")
     check not fileExists(assetsDir / "cache.txt")
 
-    # Unset ("auto"), from the store or not: the frame-wide folder, as before.
-    # Provenance confines nothing.
+    # Unset ("auto"): the frame-wide folder, as before.
     let storeScene = InterpretedFrameScene(id: "store/other".SceneId, frameConfig: config, state: %*{},
-                                           logger: logger, storeOrigin: true)
+                                           logger: logger)
     let storePayload = run(storeScene, 28)
     check storePayload["wrote"].getBool()
     check storePayload["sharedVisible"].getBool()

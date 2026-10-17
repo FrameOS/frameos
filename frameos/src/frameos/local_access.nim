@@ -50,9 +50,10 @@ var
   # A hand-edited state file is picked up on restart, not live.
   persistedAccessCache: Option[bool]
   persistedAccessCacheLoaded = false
-  # Same file, same ceremony, second fact: may store-origin scenes on this
-  # frame run the two apps that spawn child processes (chromiumScreenshot,
-  # rstpSnapshot)? Off unless someone at the panel said yes.
+  # Same file, same ceremony, second fact: may chromiumScreenshot run its
+  # browser unsandboxed when FrameOS runs as root (the `shellApps` scope)?
+  # Off unless someone at the panel said yes. Until 2026.10.16 it also let
+  # store-origin scenes run the process-spawning apps at all (spawn_guard.nim).
   persistedShellAppsCache: Option[bool]
   persistedShellAppsCacheLoaded = false
 
@@ -102,9 +103,10 @@ proc persistLocalNetworkAccess*(enabled: bool) =
     persistedAccessCacheLoaded = true
 
 proc storedAllowShellApps*(): bool =
-  ## Whether store-origin scenes may run the process-spawning apps on this
-  ## frame. False until the on-panel ceremony has said otherwise; never read
-  ## from frame.json (a backend deploy must not be able to grant it).
+  ## Whether chromiumScreenshot may run Chromium unsandboxed on a frame where
+  ## FrameOS runs as root. False until the on-panel ceremony has said
+  ## otherwise; never read from frame.json (a backend deploy must not be able
+  ## to grant it).
   withLock localAccessLock:
     if not persistedShellAppsCacheLoaded:
       persistedShellAppsCache = none(bool)
