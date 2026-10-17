@@ -3,7 +3,7 @@
 // The ESP32 browser flasher inside the workspace's "Add frame" panel. It lives
 // in cloud-frontend/, which has no test runner, so it is tested from auth-web's
 // vitest across the package boundary (see the other shared-spa tests).
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bootWaitFailureMessage,
@@ -455,7 +455,8 @@ describe("Esp32CloudFlasher", () => {
       // The browser's zone rides along: a frame left on UTC shows the wrong
       // time until someone debugs it.
       ...timeZoneWrites(),
-      // LAN access, off unless chosen, before `wifi` reboots the board.
+      // Local network access, off for a new frame, before `wifi` reboots
+      // the board.
       "set allow_local_network 0",
       'wifi "My Home WiFi" "pa ss\\"word"',
     ]);
@@ -481,12 +482,8 @@ describe("Esp32CloudFlasher", () => {
     });
   });
 
-  it("leaves the time zone alone when re-enrolling an existing frame", async () => {
-    // A re-flashed board links back to a frame that already has a cloud
-    // `timezone` setting, and re-enrollment pushes nothing (rebindEnrollment
-    // keeps settings as they are). Writing this browser's zone over serial
-    // would put the board on a zone the workspace does not show — and the
-    // mint carries no zone either, only the frame binding.
+  // Re-enrollment: the mint binds the code to the frame being re-linked.
+  function mockReenrollApi() {
     mockCloudApi();
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
@@ -508,6 +505,15 @@ describe("Esp32CloudFlasher", () => {
       }
       return Promise.reject(new Error(`unexpected fetch: ${url}`));
     });
+  }
+
+  it("leaves the time zone alone when re-enrolling an existing frame", async () => {
+    // A re-flashed board links back to a frame that already has a cloud
+    // `timezone` setting, and re-enrollment pushes nothing (rebindEnrollment
+    // keeps settings as they are). Writing this browser's zone over serial
+    // would put the board on a zone the workspace does not show — and the
+    // mint carries no zone either, only the frame binding.
+    mockReenrollApi();
     const port = createHealthyPort();
     stubSerial(port);
     render(
@@ -612,24 +618,26 @@ describe("Esp32CloudFlasher", () => {
     ]);
   });
 
-  it("sends LAN access as chosen at setup", async () => {
-    mockCloudApi();
+  // A new frame's board always gets local network access off (the tests
+  // above); a re-linked board keeps what its frame has, before `restart`.
+  it("keeps a re-linked frame's local network access", async () => {
+    mockReenrollApi();
     const port = createHealthyPort();
     stubSerial(port);
-    render(<Esp32CloudFlasher cloudOrigin={window.location.origin} />);
-    await screen.findByRole("button", { name: /connect & flash/i });
-    await fillRequiredFields();
-    const toggle = screen.getByTestId("lan-access-toggle");
-    // Off by default: scenes on a new frame cannot reach local addresses.
-    expect(toggle.textContent).toContain("Off");
-    fireEvent.click(within(toggle).getByRole("switch"));
-    expect(toggle.textContent).toContain("On");
-    clickFlash();
+    render(
+      <Esp32CloudFlasher
+        cloudOrigin={window.location.origin}
+        reenrollFrame={{ id: "abc-123", name: "Kitchen", lanAccess: true }}
+      />,
+    );
+    expect(screen.queryByRole("switch", { name: /local network access/i })).toBeNull();
+    fireEvent.change(await screen.findByLabelText("Frame hardware"), {
+      target: { value: "panel:EPD_7in5_V2" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /connect & re-enroll/i }));
     await screen.findByTestId("esp32-flash-done", undefined, { timeout: 5000 });
 
-    const lanAccessWrite = port.writes.indexOf("set allow_local_network 1");
-    expect(lanAccessWrite).toBeGreaterThan(-1);
-    expect(port.writes.slice(lanAccessWrite + 1)).toEqual(["restart"]);
+    expect(port.writes.slice(-2)).toEqual(["set allow_local_network 1", "restart"]);
   });
 
   it("remembers WiFi credentials in localStorage only when asked to", async () => {

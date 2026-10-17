@@ -1160,10 +1160,10 @@ describe("command redelivery", () => {
   });
 });
 
-// The frame-level LAN access switch: the device reports it as
+// The frame-level local network access switch: the device reports it as
 // hardware.lanAccess (hello and state), and the code the owner types rides
 // lan_access_set to the device and is dropped from the row once answered.
-describe("LAN access", () => {
+describe("Local network access", () => {
   it("stores the reported switch from hello and from state", async () => {
     const { frame, privateKey, token } = await createFrameFixture();
     const device = await openDevice(token);

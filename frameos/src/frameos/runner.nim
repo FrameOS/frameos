@@ -127,7 +127,7 @@ proc configureLocalAccessOverlay(self: RunnerThread) =
   ))
 
 proc localAccessPanelWanted(self: RunnerThread): string =
-  ## The LAN access code text that should be on the panel now, "" for none.
+  ## The local network access code text that should be on the panel now, "" for none.
   ## Never on a frame without a physical panel (local_access.nim,
   ## localAccessPanelDevice): there the code would only ride an upload or a
   ## browser, which is exactly where it must not go.
@@ -310,7 +310,7 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     # is stored and shown.
     applyGlobalColorCorrection(outImage)
     setLastImage(outImage)
-    # The LAN access code, if one is pending. Drawn AFTER the render is stored
+    # The local network access code, if one is pending. Drawn AFTER the render is stored
     # (setLastImage copies), so it reaches the panel only: the whole point is
     # that it is readable from in front of the frame, by someone the admin API
     # cannot see — and the stored image (`GET /image`, scene snapshots, the
@@ -627,7 +627,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         if watchCloudLink and currentCloudLinkGeneration() != cloudLinkGenerationAtSleep:
           self.logger.log(%*{"event": "render:cloudLinkChanged", "sceneId": currentScene.id.string})
           break
-        # A LAN access code came up, or the one on the panel stopped being
+        # A local network access code came up, or the one on the panel stopped being
         # valid — matched, the fifth wrong try, expired, replaced by a new
         # challenge. Repaint now: the code is useless until it is on the
         # panel, and must not stay up for the next person walking past. This
@@ -718,7 +718,7 @@ proc presentCursor(self: RunnerThread) =
   let state = addr self.sceneEvents.inputState
   if state[].cursorVisible:
     drawCursor(image, state[].cursorX, state[].cursorY)
-  # The stored frame has no LAN access code (it is drawn after the store), so
+  # The stored frame has no local network access code (it is drawn after the store), so
   # put it back while one is up, over the cursor like over the scene.
   let codeDrawn = self.localAccessDrawn and
     self.drawLocalAccessCode(image, self.localAccessShownFor)

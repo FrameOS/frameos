@@ -61,9 +61,9 @@ export function framePayload(frame: NewFrameFormType): NewFrameFormType {
   // width/height are not part of FrameCreateRequest (the backend would drop
   // them silently); they are applied with a follow-up update after creation.
   const { rememberWifi: _rememberWifi, width: _width, height: _height, ...formValues } = frame
-  // Chosen here, so no code on the panel is needed. Always sent: off unless
-  // the switch was turned on.
-  const frameValues = { ...formValues, lan_access: frame.lan_access === true }
+  // New frames start with local network access off; the frame settings turn
+  // it on with the code from the panel (docs/lan-access.md).
+  const frameValues = { ...formValues, lan_access: false }
   const installMethod = installMethodOf(frame)
   const agent = agentPayload(frame)
 
@@ -277,7 +277,6 @@ export const newFrameForm = kea<newFrameFormType>([
           wifiSSID: '',
           wifiPassword: '',
         },
-        lan_access: false,
         // Opt-in: ticked by default it POSTed the passphrase into the
         // project-wide defaults on every SD-card / embedded frame.
         rememberWifi: false,

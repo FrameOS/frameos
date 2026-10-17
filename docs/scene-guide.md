@@ -307,9 +307,9 @@ ignore the lists.)
 
 **Local network.** A frame reaches addresses on its own network (a Home
 Assistant at `homeassistant.local`, a NAS, anything at `192.168.x.x`) only
-while its LAN access is on. That is a frame setting the owner chooses, not
+while its local network access is on. That is a frame setting the owner chooses, not
 something an app or a scene asks for. With it off, such a request fails with
-"LAN access is off for this frame". A scene that needs a local service says so
+"Local network access is off for this frame". A scene that needs a local service says so
 in its description, so the owner knows to turn it on.
 
 **Big responses.** A response body becomes a JS string. When the app needs

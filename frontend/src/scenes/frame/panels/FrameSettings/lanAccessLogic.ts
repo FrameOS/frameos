@@ -7,7 +7,7 @@ import { confirmDialog } from '../../../../utils/confirmDialogLogic'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 
 /**
- * The frame's LAN access switch (docs: "LAN access").
+ * The frame's local network access switch (docs: "Local network access").
  *
  * Not a frame form field. Turning it on needs a code the frame draws on its
  * own panel, so the change happens on the device first and the frame row only
@@ -48,7 +48,7 @@ const LAN_ACCESS_ERROR_COPY: Record<string, string> = {
   too_many_attempts: 'Too many wrong codes. Show a new one.',
   rate_limited: 'Too many wrong codes in the last hour. Try again later.',
   code_required: 'Enter the code showing on your frame.',
-  no_panel: 'This frame has no screen to show a code on. Choose LAN access when you set the frame up instead.',
+  no_panel: 'This frame has no screen to show a code on, so local network access cannot be turned on.',
   unsupported: "Update this frame's FrameOS first.",
   persist_failed: 'The frame could not save the change. Try again.',
   challenge_failed: 'The frame could not make a code. Try again.',
@@ -125,7 +125,7 @@ export async function requestLanAccessChallenge(frameId: FrameId): Promise<LanAc
   return { status: payload.status === 'queued' ? 'queued' : 'shown' }
 }
 
-/** Turn LAN access on (with the code from the panel) or off (no code). */
+/** Turn local network access on (with the code from the panel) or off (no code). */
 export async function setLanAccess(frameId: FrameId, enabled: boolean, code?: string): Promise<LanAccessSetResult> {
   const body: Record<string, unknown> = { enabled, ...(enabled && code ? { code } : {}) }
   if (isInFrameAdminMode()) {
@@ -454,7 +454,7 @@ export const lanAccessLogic = kea<lanAccessLogicType>([
           ? null
           : queuedValue
           ? 'The frame checks the code when it wakes up.'
-          : 'The frame turns LAN access off when it wakes up.',
+          : 'The frame turns local network access off when it wakes up.',
     ],
   }),
   listeners(({ actions, values, props }) => ({
@@ -464,7 +464,7 @@ export const lanAccessLogic = kea<lanAccessLogicType>([
       }
       // Off is one click away, on is a walk to the frame: say so first.
       const confirmed = await confirmDialog({
-        title: 'Turn off LAN access?',
+        title: 'Turn off local network access?',
         message:
           'Scenes on this frame will no longer reach devices on your home network.\n\n' +
           'To turn it back on, someone has to be at the frame: it shows a code on its screen that you type in here.',

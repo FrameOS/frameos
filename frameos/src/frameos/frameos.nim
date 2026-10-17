@@ -405,7 +405,7 @@ proc startFrameOS*() {.async.} =
   if interpretedScenesLoadError().len > 0:
     reloadInterpretedScenes()
   setupRenderMemory()
-  # LAN access gets its stored answer before anything reads it: readConfig
+  # Local network access gets its stored answer before anything reads it: readConfig
   # (in newFrameOS), the private-network policy (startCloudManagement), the
   # admin API. Single-threaded here, and idempotent across the retry loop:
   # once the state file has a value, frame.json is never consulted again

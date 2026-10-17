@@ -509,7 +509,7 @@ describe("SdImageBuilder", () => {
     expect(regionText).toContain("wifi_ssid=MyNet\n");
     expect(regionText).toContain("wifi_password=hunter2\n");
     expect(regionText).toContain("wifi_country=FR\n");
-    // LAN access is off unless the switch next to the WiFi fields says so.
+    // A new frame's card starts with local network access off.
     expect(regionText).toContain("lan_access=0\n");
   });
 

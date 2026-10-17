@@ -427,7 +427,7 @@ proc postJson(path: string, body: JsonNode, auth: (string, string)): TestRespons
   httpRequest(server.port, "POST", path,
     headers = [("Content-Type", "application/json"), auth], body = $body)
 
-suite "LAN access routes":
+suite "Local network access routes":
   ## The state file is a relative path, and the server thread shares this
   ## process's cwd: every case runs in its own temp directory.
   var previousDir = ""
@@ -500,7 +500,7 @@ suite "LAN access routes":
     let code = activeLocalAccessCode()
     check code.len == 6
     check code notin response.body
-    check localAccessPanelText() == "LAN access code\n" & code
+    check localAccessPanelText() == "Local network access code\n" & code
     let unknown = postJson("/api/network/local-access/challenge", %*{"scope": "everything"},
       ("Authorization", "Bearer api"))
     check unknown.status == 400
@@ -562,7 +562,7 @@ suite "LAN access routes":
     let invalidJson = httpRequest(server.port, "POST", "/api/network/local-access",
       headers = [("Content-Type", "application/json"), bearer], body = "{nope")
     check invalidJson.status == 400
-    # A LAN access code is not a shell apps code.
+    # A local network access code is not a shell apps code.
     let shell = postJson("/api/network/local-access",
       %*{"enabled": true, "code": code, "scope": "shellApps"}, bearer)
     check shell.status == 403

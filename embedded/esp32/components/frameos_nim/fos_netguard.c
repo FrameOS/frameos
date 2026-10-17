@@ -1,6 +1,6 @@
 /*
  * Private-network egress policy for scene HTTP — see fos_netguard.h for what
- * this is for: the enforcement behind the frame's LAN access switch.
+ * this is for: the enforcement behind the frame's local network access switch.
  *
  * Deliberately log-free and IDF-free apart from the FreeRTOS spinlock and the
  * getaddrinfo() in fos_netguard_url_allowed(): the callers own the ESP_LOGW,

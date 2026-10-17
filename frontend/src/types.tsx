@@ -541,7 +541,7 @@ export interface NewFrameFormType {
     wifiSSID?: string
     wifiPassword?: string
   }
-  /** Chosen at creation, no code needed. Defaults to off. */
+  /** Always off for a new frame. */
   lan_access?: boolean
   rememberWifi?: boolean
 }

@@ -50,8 +50,8 @@ main/                     boot orchestration + platform modules
   fos_framebuffer.c       canvas allocation (RGBX vs RGB565 by PSRAM) and dither/pack
   fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
   fos_panel_draw.c        5x7 font + rectangles straight into a packed panel buffer, rotation
-                          aware: the status screen and the LAN access code box (host-tested)
-  fos_lan_access.c        the LAN access code: mint, TTL, attempts, constant-time check (host-tested)
+                          aware: the status screen and the local network access code box (host-tested)
+  fos_lan_access.c        the local network access code: mint, TTL, attempts, constant-time check (host-tested)
   fos_board.c             board table: pins, panel defaults, battery divider per board
   fos_buttons.c           GPIO button map → `button` events (origin `driver`, via fos_events.c)
   fos_battery.c           battery ADC sampling; fos_battery_filter.c its outlier filter
@@ -73,7 +73,7 @@ partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (4032K each) + 8M st
 partitions_ota_32mb.csv   32MB: nvs + otadata + ota_0/ota_1 (4032K each) + 24M state
 build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/
 main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
-                          header carries its command line). The netguard, LAN access code
+                          header carries its command line). The netguard, local network access code
                           (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), SD probe, board,
                           power, wake, battery-filter, version and scene-event (contract table +
                           fos_events.c dispatch) tests run from the backend's
@@ -479,7 +479,7 @@ echoes them, but physical access to an unencrypted module means physical
 access to the link — see the "Secrets at rest on ESP32" note in
 `docs/cloud-frames.md`.
 
-## LAN access
+## Local network access
 
 One switch per frame decides whether scenes may reach private and local
 addresses (`docs/lan-access.md` is the cross-plane spec). Off, every scene
@@ -487,7 +487,7 @@ HTTP request and every redirect hop goes through `fos_netguard_check_url`
 (`frameos_nim_glue.c`) and a private answer fails the node with
 
 ```
-LAN access is off for this frame (homeassistant.local resolves to private address 192.168.1.5). Turn on LAN access in the frame settings.
+Local network access is off for this frame (homeassistant.local resolves to private address 192.168.1.5). Turn on local network access in the frame settings.
 ```
 
 (`FOS_NETGUARD_BLOCK_FMT`: the prefix is what the SPA's logs panel matches,
@@ -516,7 +516,7 @@ backend's command queue (`backend_verb_allowed`):
   clock is system time, so neither a `reboot` nor a deep-sleep wake refills
   it, only a power cycle does). The render task picks it up within a
   second and renders: after the packed buffer is hashed, `render_once` saves
-  the bytes under a centred box, draws "LAN access code" and the digits
+  the bytes under a centred box, draws "Local network access code" and the digits
   (`fos_panel_draw.c`, upright for the frame's `rotate`), blits, and puts the
   saved bytes back before `store_snapshot`, so `/image`, `image_get` and the
   BMP push to the backend never carry the code (with no memory for the copy
@@ -857,7 +857,7 @@ switch scenes without holding them. It also carries a top-level
 `"source": "local" | "backend" | "cloud"` key recording who installed the
 payload (missing = `local` on pre-upgrade stores); `fos_cloud.c` reports the
 applied payload's checksum to the cloud only for cloud-installed scenes. (It
-also keyed the private-network deny before the LAN access switch; the switch
+also keyed the private-network deny before the local network access switch; the switch
 alone decides that now.) The source is mirrored in NVS so it survives the
 store→apply window across a reboot.
 

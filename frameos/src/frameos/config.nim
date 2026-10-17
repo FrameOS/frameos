@@ -381,7 +381,7 @@ proc readConfig*(configPath = ""): FrameConfig =
     result.debug = true
 
 proc frameJsonLanAccessSeed*(configPath = ""): Option[bool] =
-  ## frame.json `network.lanAccess`, the LAN access chosen when the frame was
+  ## frame.json `network.lanAccess`, the local network access chosen when the frame was
   ## created (the backend's get_frame_json, and so an SD card's
   ## frameos-setup.json). Read raw, because whether the key is there at all is
   ## the point: absent means a frame from before the switch. Only

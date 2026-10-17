@@ -460,7 +460,7 @@ class Frame(Base):
     schedule = mapped_column(JSON, nullable=True)
     gpio_buttons = mapped_column(JSON, nullable=True)
     network = mapped_column(JSON, nullable=True)
-    # LAN access, the frame-level switch: may scene HTTP reach private/local
+    # Local network access, the frame-level switch: may scene HTTP reach private/local
     # addresses (app/utils/lan_access.py)? The DEVICE holds the
     # truth (state/local_access.json on Linux, NVS `lan_access` on an ESP32);
     # this column mirrors it, is the creation seed (frame.json
@@ -468,7 +468,7 @@ class Frame(Base):
     # renders itself (virtual, thin clients), is what its renderer obeys. Only
     # the create route and the /lan_access routes move it — never the settings
     # update, and it is not a deploy-tracked key. The database default is ON
-    # (a row that predates the column is a frame that worked with LAN access);
+    # (a row that predates the column is a frame that worked with local network access);
     # the ORM default is OFF (a frame created now starts with what was chosen).
     lan_access = mapped_column(Boolean, nullable=False, default=False, server_default=sql_true())
     agent = mapped_column(JSON, nullable=True)
@@ -734,8 +734,8 @@ async def new_frame(
             "wifiHotspotPassword": "frame1234",
             "wifiHotspotTimeoutSeconds": 300,
         },
-        # Chosen in the add-frame form; no code is asked at creation. A row
-        # created any other way says so (adoption: what the device reports).
+        # Off for a frame Add frame creates. A row created any other way says
+        # so (adoption: what the device reports).
         lan_access=bool(lan_access),
         agent={
             "agentEnabled": False,
@@ -1089,7 +1089,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "url": timezone_updater["url"],
         },
     }
-    # The creation seed of the device's LAN access switch: a runtime whose
+    # The creation seed of the device's local network access switch: a runtime whose
     # state file holds no value yet persists this once, and after that never
     # reads it again, so a deploy cannot flip what someone at the frame set.
     # The SD card's frameos-setup.json is this dict, so it carries the seed

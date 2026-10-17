@@ -990,7 +990,7 @@ def test_cloud_lan_access_never_overwrites_a_value_the_frame_already_has(tmp_pat
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(state.read_text(encoding="utf-8"))["allowLocalNetworkAccess"] is True
-    assert "Keeping the LAN access setting" in result.stdout
+    assert "Keeping the local network access setting" in result.stdout
     # A lan_access-only file is still consumed.
     assert not cloud_file.exists()
 

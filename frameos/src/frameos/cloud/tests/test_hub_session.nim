@@ -225,14 +225,14 @@ suite "cloud hub session over a live socket":
               return true
         false)
 
-  test "being managed arms nothing: LAN access is the frame's switch":
+  test "being managed arms nothing: Local network access is the frame's switch":
     # No state file in this sandbox: a frame from before the switch, on. The
     # hello says so, and the deny stays off although the frame is managed.
     withLock stubLock:
       check recorded.hello{"hardware"}{"lanAccess"}.getBool(false) == true
     check not localNetworkPolicySnapshot().active
 
-  test "LAN access off denies a managed frame too, with its provider exempt":
+  test "Local network access off denies a managed frame too, with its provider exempt":
     persistLocalNetworkAccess(false)
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       localNetworkPolicySnapshot().active)
@@ -241,7 +241,7 @@ suite "cloud hub session over a live socket":
     # exempt — the local admin linked it deliberately.
     check snapshot.exemptHostPorts == @["127.0.0.1:" & $TestPort]
 
-  test "a LAN access change made anywhere reaches the provider as a state":
+  test "a local network access change made anywhere reaches the provider as a state":
     proc lanAccessStates(value: bool): int {.gcsafe.} =
       for state in repliesOfType("state"):
         if state{"hardware"}{"lanAccess"} != nil and
@@ -293,7 +293,7 @@ suite "cloud hub session over a live socket":
       {.gcsafe.}:
         withLock stubLock:
           result = recorded.closed)
-    # Standalone again, and still denied: the deny is the LAN access
+    # Standalone again, and still denied: the deny is the local network access
     # switch's (off since the test above), not the link's. Recomputed here
     # rather than waited for: it is what the hub thread's next pass does.
     refreshLocalNetworkPolicy(frameConfig)

@@ -16,7 +16,6 @@ import { clearRememberedWifi, loadRememberedWifi, storeRememberedWifi } from '..
 import { esp32Panels } from '../lib/generated-devices'
 import { cloudFrameUrl } from '../routes'
 import { fetchFrameList, useEnrollmentWatch } from './enrollmentWatch'
-import { LanAccessToggle } from './LanAccessToggle'
 import { browserTimeZone, claimTokenTimeZoneFields } from '../lib/browser-time-zone'
 
 // Browser flasher for cloud-managed ESP32 frames (docs/cloud-frames.md,
@@ -623,7 +622,8 @@ export function Esp32CloudFlasher({
   // frame id, so redemption re-keys that row (docs/cloud-frames.md,
   // "Re-enrollment") — which also means there is no new frame to watch for
   // and no name to ask for: both already exist.
-  // `lanAccess` seeds the LAN access switch, so a re-linked board keeps it.
+  // `lanAccess` is the frame's current local network access, so a re-linked board keeps
+  // it. A new frame's board gets off (docs/lan-access.md).
   reenrollFrame?: { id: string; name: string; lanAccess?: boolean | undefined }
   // "Start it with the scenes from <frame>", chosen in the add-frame panel.
   // Rides on the claim code and is applied when the owner confirms the new
@@ -647,8 +647,9 @@ export function Esp32CloudFlasher({
   const [wifiSsid, setWifiSsid] = useState(remembered?.ssid ?? '')
   const [wifiPassword, setWifiPassword] = useState(remembered?.password ?? '')
   const [rememberWifi, setRememberWifi] = useState(remembered !== undefined)
-  // Off unless chosen: scenes on a new frame cannot reach local addresses.
-  const [lanAccess, setLanAccess] = useState(reenrollFrame?.lanAccess === true)
+  // Off for a new frame: its scenes cannot reach local addresses until the
+  // frame settings turn local network access on with the code from the panel.
+  const lanAccess = reenrollFrame?.lanAccess === true
   const [error, setError] = useState<string | undefined>()
   // Panel selection needs the all-panels firmware; the picker only shows when
   // the latest release actually publishes it (older releases hard-fail the
@@ -1020,7 +1021,7 @@ export function Esp32CloudFlasher({
         })
       }
       // Before `wifi`, which reboots. Always sent: a board that never stored
-      // a value treats LAN access as on.
+      // a value treats local network access as on.
       commands.push({
         display: `set allow_local_network ${lanAccess ? 1 : 0}`,
         expect: consolePrompt,
@@ -1191,7 +1192,6 @@ export function Esp32CloudFlasher({
           />
           Remember WiFi credentials in this browser (never sent to the cloud)
         </label>
-        <LanAccessToggle disabled={busy} value={lanAccess} onChange={setLanAccess} />
         <div className="flex flex-wrap items-center gap-2">
           <button
             className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"

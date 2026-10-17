@@ -394,7 +394,7 @@ proc frontendFramePayloadToRuntimeConfig*(payload: JsonNode, existing: JsonNode)
       continue
     putJsonIfPresent(result, payload, apiKey, configKey)
 
-  # LAN access never rides along with a bulk config save. The cloud is
+  # Local network access never rides along with a bulk config save. The cloud is
   # already blocked from it by CLOUD_SETTINGS_ALLOWLIST, but the admin page
   # came through here too, and an admin session is a password on a
   # LAN-reachable page — not proof that anyone is standing at the frame. It
@@ -757,7 +757,7 @@ proc setShellAppsAccess*(enabled: bool): JsonNode =
   localNetworkAccessPayload()
 
 proc setLocalNetworkAccess*(enabled: bool): JsonNode =
-  ## Applies LAN access. Turning it on is only ever called after the on-panel
+  ## Applies local network access. Turning it on is only ever called after the on-panel
   ## code has been matched (applyLanAccessChange) — see
   ## frameos/local_access.nim for why the bulk config save is not allowed to
   ## reach this field, and why it is persisted under state/ rather than in
@@ -768,7 +768,7 @@ proc setLocalNetworkAccess*(enabled: bool): JsonNode =
   localNetworkAccessPayload()
 
 type LanAccessOutcome* = object
-  ## One answer of the LAN access ceremony, shared by the frame's own admin
+  ## One answer of the local network access ceremony, shared by the frame's own admin
   ## API (server/routes/admin_api_routes.nim) and the cloud verbs
   ## (cloud/hub_client.nim) so the two cannot drift. `error` is "" on success
   ## and otherwise the contract's token (docs/cloud-frames-contract.json,
@@ -794,7 +794,7 @@ proc startLanAccessChallenge*(device: string,
     return lanAccessRefusal(400, "invalid_lan_access", "Unknown scope: " & scope)
   if not localAccessPanelDevice(device):
     return lanAccessRefusal(409, "no_panel",
-      "This frame has no screen to show a code on. Choose LAN access when setting the frame up.")
+      "This frame has no screen to show a code on, so local network access cannot be turned on.")
   # Before the pending challenge is replaced: a new one must not be a way
   # around the wrong-code budget.
   if localAccessRateLimited():
@@ -1071,7 +1071,7 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
         buildroot["platform"] = %board
     result["buildroot"] = buildroot
 
-  # The frame's LAN access, as the SPA reads it on every surface
+  # The frame's local network access, as the SPA reads it on every surface
   # (FrameType.lan_access). Not under `network`: no save can change it.
   result["lan_access"] = %lanAccessEnabled()
   result["id"] = %frameApiId()
@@ -1181,7 +1181,7 @@ proc rememberFrameImagePng(generation: int, source: string, png: string) {.gcsaf
 when defined(testing):
   var frameDriverPngHook*: proc(rotate: int, flip: string): string {.nimcall, gcsafe.} = nil
     ## Test seam for the drivers' own PNG: no driver is loaded in a test, and
-    ## the LAN access code's interplay with that PNG is what needs a test.
+    ## the local network access code's interplay with that PNG is what needs a test.
 
 proc frameDriverPng(rotate: int, flip: string): string =
   when defined(testing):
@@ -1234,7 +1234,7 @@ proc buildFrameImageResponse*(request: Request): tuple[status: httpcore.HttpCode
 
   var headers = frameImageHeaders(sceneId, lastUpdate)
   let renderGeneration = driverRenderGenerationValue()
-  # A LAN access code on the panel (frameos/local_access.nim) is in the
+  # A local network access code on the panel (frameos/local_access.nim) is in the
   # drivers' own PNG — e-ink drivers encode the pixels they last sent — but
   # never in the stored last image. While one may be up, answer from the
   # latter only, and do not trust a cached driver PNG either.

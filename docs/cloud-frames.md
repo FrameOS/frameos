@@ -452,7 +452,7 @@ drains either way.
 table above; the rest of `frame.json` is the device's, whatever else moves
 later: deployment mode, driver wiring (VCOM, pins, explicit dimensions — the
 driver key itself is a setting since 2026.9.22), flash and GPIO wiring,
-SD-card wiring, Wi-Fi/hotspot credentials, LAN access (two verbs of its own:
+SD-card wiring, Wi-Fi/hotspot credentials, local network access (two verbs of its own:
 turning it on takes the panel code), frame HTTP/admin/TLS access and keys,
 SSH/backend/agent configuration, mountpoints,
 HTTP-upload URLs and headers, arbitrary update URLs (the tz-updater URL
@@ -1374,15 +1374,15 @@ While managed:
 
 ### Local network access
 
-Whether a frame's scenes may reach its LAN is the frame's **LAN access**
+Whether a frame's scenes may reach its LAN is the frame's **Local network access**
 switch, on every frame and not only managed ones; `docs/lan-access.md` is the
 spec. With it off the HTTP stack denies requests whose target resolves to a
 private or local address — loopback (`127/8`, `::1`), RFC1918 (`10/8`,
 `172.16/12`, `192.168/16`), link-local (`169.254/16`, `fe80::/10`), CGNAT
 (`100.64/10`), `0.0.0.0/8`, broadcast, IPv6 ULA — whether the URL names the
 address literally or a DNS name (redirects included) resolves to one. Blocked
-requests fail with `LAN access is off for this frame, so <host> (<address>)
-cannot be reached. Turn on LAN access in the frame settings.` in the scene
+requests fail with `Local network access is off for this frame, so <host> (<address>)
+cannot be reached. Turn on local network access in the frame settings.` in the scene
 logs. A name that does not resolve is not a block: the request still fails
 (nothing to classify, and the connect would resolve the name again), but as
 `could not resolve <host>`, on both runtimes; the ESP32 asks its resolver
@@ -1392,7 +1392,7 @@ settling. The frame's own control planes stay reachable by exact `host:port`:
 the provider's API endpoint (from the stored `provider_url`, so development
 providers on the LAN work) and a self-hosted backend's `serverHost:serverPort`.
 
-The provider cannot turn LAN access on by itself. `lan_access` is not a
+The provider cannot turn local network access on by itself. `lan_access` is not a
 `set_settings` key (a fixture pins it). The verbs are `lan_access_challenge`,
 which makes the frame draw a six-digit code on its panel, and `lan_access_set
 {enabled, code?}`, which turns it off freely but turns it on only with that

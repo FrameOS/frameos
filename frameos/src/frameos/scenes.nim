@@ -372,8 +372,8 @@ proc cloudUploadedScenesResident*(): bool =
   ## True while the resident uploaded scene set was pushed by a cloud
   ## provider: such a set is re-checked for refused apps at load time, and
   ## shadows the frame's own scene of the same public id (runner.nim,
-  ## selectScene). Before the LAN access switch it also armed the private-network deny;
-  ## the frame's LAN access switch alone decides that now.
+  ## selectScene). Before the local network access switch it also armed the private-network deny;
+  ## the frame's local network access switch alone decides that now.
   {.gcsafe.}:
     var isCloud = false
     withLock uploadedScenePayloadLock:

@@ -752,7 +752,7 @@ export function frameSummary(
     hardware: frame.hardware,
     id: frame.id,
     deployed_scene_state: frame.deployedSceneState,
-    // The frame-level LAN access switch as the device last reported it
+    // The frame-level local network access switch as the device last reported it
     // (`hardware.lanAccess` in hello / state; the cloud keeps no copy of its
     // own). null: the firmware does not report it, so the cloud cannot
     // manage it until the frame is updated (the lan_access routes say so).
@@ -962,7 +962,7 @@ export async function supersedePendingCommands(
 
 // What a queued command looks like to its owner. Deliberately NOT the raw
 // row: `payload` can carry a scene bundle (set_scenes), a settings object or
-// the LAN access code the owner typed (lan_access_set), and the queue view is
+// the local network access code the owner typed (lan_access_set), and the queue view is
 // a list of intentions, not a data dump. Only the
 // scene-id payload of set_current_scene is small and meaningful enough to
 // echo, and it is a public store id the owner already sees in the workspace.

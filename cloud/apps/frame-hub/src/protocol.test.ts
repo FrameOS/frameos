@@ -472,7 +472,7 @@ describe("browser event shaping", () => {
       }).service_settings_enabled,
     ).toBe(false);
 
-    // The LAN access switch is the device's own report, hello or state:
+    // The local network access switch is the device's own report, hello or state:
     // a boolean when the firmware sends one, null for anything else.
     expect(frameUpdateEvent(frame).lan_access).toBeNull();
     for (const [hardware, expected] of [

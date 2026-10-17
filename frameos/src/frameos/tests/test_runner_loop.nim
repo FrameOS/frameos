@@ -854,7 +854,7 @@ proc lanAccessRunner(device: string, store: LogStore, sceneId: SceneId): RunnerT
     logger: testLogger(config, store)
   )
 
-suite "the LAN access code on the panel":
+suite "the local network access code on the panel":
   setup:
     clearEventChannel()
     clearLocalAccessChallenge()
@@ -876,7 +876,7 @@ suite "the LAN access code on the panel":
     let (panel, _) = runnerThread.renderSceneImage(exported, scene)
     let stored = getLastImageCopy()
     check runnerThread.localAccessDrawn
-    check runnerThread.localAccessShownFor == "LAN access code\n" & code
+    check runnerThread.localAccessShownFor == "Local network access code\n" & code
     check panel.width == stored.width and panel.height == stored.height
     # The stored image (GET /image, snapshots, image_get) is the scene alone.
     let storedPixels = stored.toContiguousSeq()

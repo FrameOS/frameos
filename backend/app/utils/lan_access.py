@@ -1,4 +1,4 @@
-"""LAN access, the frame-level switch: when it is off, scene HTTP on the frame
+"""Local network access, the frame-level switch: when it is off, scene HTTP on the frame
 may not reach private/local addresses.
 
 The device holds the truth (state/local_access.json on Linux, NVS
@@ -42,7 +42,7 @@ REFUSALS: dict[str, tuple[int, str]] = {
     # runtime that predates the switch.
     "unsupported": (409, "Update this frame's FrameOS first."),
     "no_panel": (409, "This frame has no screen to show a code on."),
-    "invalid_lan_access": (400, "Choose whether LAN access is on or off."),
+    "invalid_lan_access": (400, "Choose whether local network access is on or off."),
     "code_required": (403, "Enter the code showing on the frame."),
     "invalid_code": (403, "That code is not right. Check the frame and try again."),
     "code_expired": (403, "That code has expired. Show a new code on the frame."),

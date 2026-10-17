@@ -290,7 +290,7 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
   },
   {
     key: 'lan-access',
-    title: 'LAN access',
+    title: 'Local network access',
     anchor: 'frame-settings-lan-access',
     surfaces: ['backend', 'frameAdmin', 'cloudLinux', 'cloudEsp32'],
     conditions:

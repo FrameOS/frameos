@@ -140,7 +140,7 @@ class FrameBase(BaseModel):
     schedule: Optional[Dict[str, Any]]
     gpio_buttons: Optional[List[Dict[str, Any]]]
     network: Optional[Dict[str, Any]]
-    # The frame-level LAN access switch, as the device last reported it (the
+    # The frame-level local network access switch, as the device last reported it (the
     # backend mirrors it; POST /frames/{id}/lan_access changes it).
     lan_access: Optional[bool] = None
     agent: Optional[Dict[str, Any]]
@@ -193,8 +193,8 @@ class FrameCreateRequest(BaseModel):
     ssh_keys: Optional[List[str]] = None
     platform: Optional[str] = None
     network: Optional[Dict[str, Any]] = None
-    # LAN access for the new frame, chosen next to the Wi-Fi settings. No
-    # code is asked at creation; left out, the frame starts with it off.
+    # Local network access for the new frame. Add frame always sends false
+    # (docs/lan-access.md); left out, the frame starts with it off too.
     lan_access: Optional[bool] = None
     gpio_buttons: Optional[List[Dict[str, Any]]] = None
     agent: Optional[Dict[str, Any]] = None

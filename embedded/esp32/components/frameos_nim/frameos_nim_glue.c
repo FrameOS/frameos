@@ -1761,9 +1761,9 @@ static esp_http_client_handle_t http_open_request(
     *out_status = 0;
     *out_content_length = -1;
     if (err_buf != NULL && err_buf_len > 0) err_buf[0] = '\0';
-    /* Private-network policy (fos_netguard.h): the frame's LAN access switch.
+    /* Private-network policy (fos_netguard.h): the frame's local network access switch.
      * This is the one funnel every scene HTTP request goes through, and with
-     * LAN access off a scene does not get to reach the owner's router.
+     * Local network access off a scene does not get to reach the owner's router.
      * Checked before the client even exists; the redirect loop below
      * re-checks every hop, because a 302 to 192.168.1.1 is the same request. */
     char netguard_reason[96];
@@ -1779,7 +1779,7 @@ static esp_http_client_handle_t http_open_request(
         HTTP_OPEN_FAIL("%s", netguard_reason);
     case FOS_NETGUARD_BLOCKED:
     default:
-        ESP_LOGW(TAG, "%s %s: blocked, LAN access is off: %s",
+        ESP_LOGW(TAG, "%s %s: blocked, local network access is off: %s",
                  method ? method : "GET", url ? url : "(null)", netguard_reason);
         HTTP_OPEN_FAIL(FOS_NETGUARD_BLOCK_FMT, "", netguard_reason);
     }
@@ -1883,7 +1883,7 @@ static esp_http_client_handle_t http_open_request(
                 HTTP_OPEN_FAIL("redirect: %s", netguard_reason);
             }
             if (verdict != FOS_NETGUARD_ALLOWED) {
-                ESP_LOGW(TAG, "%s %s: redirect blocked, LAN access is off: %s",
+                ESP_LOGW(TAG, "%s %s: redirect blocked, local network access is off: %s",
                          method ? method : "GET", url, netguard_reason);
                 esp_http_client_close(client);
                 esp_http_client_cleanup(client);
@@ -1929,13 +1929,13 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
     const bool spill_allowed = out_spill_path != NULL && out_spill_len != NULL &&
                                s_http_spill_dir[0] != '\0';
 
-    char open_err[192];
-    /* The whole LAN access sentence fits whatever the reason (96 bytes with
-     * its NUL), so the start the SPA matches and the end the owner reads are
-     * never cut. The stream path's buffer is the same 192 bytes
+    char open_err[224];
+    /* The whole local network access sentence fits whatever the reason (96
+     * bytes with its NUL), so the start the SPA matches and the end the owner
+     * reads are never cut. The stream path's buffer is the same 224 bytes
      * (http_client.nim, openStreamHandle). */
     _Static_assert(sizeof(FOS_NETGUARD_BLOCK_FMT) - 4 + sizeof("redirect: ") - 1 + 95 < sizeof(open_err),
-                   "open_err must hold the whole LAN access message");
+                   "open_err must hold the whole local network access message");
     int64_t content_length = -1;
     esp_http_client_handle_t client = http_open_request(
         method, url, body, body_len, headers, headers_len, timeout_ms,

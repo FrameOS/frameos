@@ -4709,8 +4709,8 @@ async def api_frame_new(
             data.device,
             data.interval,
             project_id=project_id,
-            # What the form chose, for every install method; no code at
-            # creation. Left out: off.
+            # Off for every frame Add frame creates (it sends false); an API
+            # client that leaves it out gets off too.
             lan_access=data.lan_access is True,
         )
         if data.device_config is not None:
@@ -4894,7 +4894,7 @@ async def api_frame_import(
             data.get("interval"),
             project_id=current_project_id(),
             # An export is a frame that already exists: it keeps the switch it
-            # had, and one exported before the switch existed had LAN access.
+            # had, and one exported before the switch existed had local network access.
             lan_access=data.get("lan_access") is not False,
         )
 

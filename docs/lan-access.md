@@ -1,21 +1,21 @@
-# LAN access
+# Local network access
 
-Every frame has one switch, **LAN access**, that decides whether its scenes may
+Every frame has one switch, **Local network access**, that decides whether its scenes may
 reach addresses on the frame's own network: a Home Assistant at
 `homeassistant.local:8123`, a NAS, a camera, anything at `192.168.x.x`. It is a
-frame setting, chosen when the frame is created and changed later in the frame
-settings. It is not a permission an app or a scene asks for (that was weighed
+frame setting, off on every new frame and changed in the frame settings. It is
+not a permission an app or a scene asks for (that was weighed
 and dropped on 2026-10-17: scenes nest and copy apps, and no rule can tell from
 a hostname which local device a scene should reach).
 
 The switch is one extra layer, not the security boundary. Devices the frame
 should never reach belong on a different network or VLAN; the router decides
-what the frame can talk to, and a frame with LAN access on can reach whatever
+what the frame can talk to, and a frame with local network access on can reach whatever
 the router lets it.
 
 ## What "off" blocks
 
-With LAN access off, the frame's HTTP client refuses a scene's request when the
+With local network access off, the frame's HTTP client refuses a scene's request when the
 target resolves to a private or local address: loopback (`127/8`, `::1`),
 RFC1918 (`10/8`, `172.16/12`, `192.168/16`), link-local (`169.254/16`,
 `fe80::/10`), CGNAT (`100.64/10`), `0.0.0.0/8`, broadcast and multicast, IPv6
@@ -38,28 +38,34 @@ through the scene policy anyway.
 A refused request fails the node with
 
 ```
-LAN access is off for this frame, so homeassistant.local (192.168.1.5) cannot be reached. Turn on LAN access in the frame settings.
+Local network access is off for this frame, so homeassistant.local (192.168.1.5) cannot be reached. Turn on local network access in the frame settings.
 ```
 
-The prefix `LAN access is off for this frame` is what the SPA's logs panel
-matches to offer a "Turn on LAN access" link. A name that does not resolve is
+The prefix `Local network access is off for this frame` is what the SPA's logs panel
+matches to offer a "Turn on local network access" link. A name that does not resolve is
 not a block; it fails as `could not resolve <host>`.
 
 Until this change the deny applied only to cloud-managed frames (and frames
 still running scenes the cloud pushed). Now the switch alone decides, on every
 frame and on both control planes.
 
-## Choosing it at creation
+## New frames start with it off
 
-No code is needed when the value is chosen while the frame is set up. Every
-add-frame form shows the switch next to the Wi-Fi fields, off by default:
+Add frame offers no choice (the owner's decision, 2026-10-18): every new frame
+starts with local network access off, and the frame settings turn it on with
+the code from the panel. Each setup path still tells the device so, because a
+device with no stored value reads as on:
 
-| Where | How the value reaches the device |
+| Where | How "off" reaches the device |
 | --- | --- |
-| Backend, Add frame (SD card, ESP32, SSH, install script) | `frame.lan_access` column; `get_frame_json` writes it as frame.json `network.lanAccess` (the SD card's `frameos-setup.json` is that frame.json), the ESP32 provisioning plan as `set allow_local_network 0/1` |
-| Cloud, SD card image | `lan_access=0/1` in the card's `frameos-cloud.txt`; the first-boot shell (`setup_json_reset.py`) writes `state/local_access.json` before the runtime starts |
-| Cloud, ESP32 over USB | `set allow_local_network 0/1` on the console before the Wi-Fi command |
-| Cloud, install script | `lan_access` on the claim code (`frame_enrollment_tokens.lan_access`); enrollment queues `lan_access_set {enabled: false}` when it was left off, since off needs no code |
+| Backend, Add frame (SD card, ESP32, SSH, install script) | `frame.lan_access` column, `false` (the create route's default too); `get_frame_json` writes it as frame.json `network.lanAccess` (the SD card's `frameos-setup.json` is that frame.json), the ESP32 provisioning plan as `set allow_local_network 0` |
+| Cloud, SD card image | `lan_access=0` in the card's `frameos-cloud.txt`; the first-boot shell (`setup_json_reset.py`) writes `state/local_access.json` before the runtime starts |
+| Cloud, ESP32 over USB | `set allow_local_network 0` on the console before the Wi-Fi command |
+| Cloud, install script | `lan_access: false` on the claim code (`frame_enrollment_tokens.lan_access`); enrollment queues `lan_access_set {enabled: false}`, since off needs no code |
+
+A new SD card or a USB re-flash for a frame that already exists (the frame's
+deploy drawer) writes that frame's current value instead, so re-linking a board
+does not change it.
 
 frame.json `network.lanAccess` is a seed, read once: when the runtime starts
 and `state/local_access.json` has no value yet, it stores `network.lanAccess`
@@ -70,14 +76,14 @@ key `network.allowLocalNetworkAccess` is not a seed: settings saves wrote
 
 ## Turning it on later: the code on the panel
 
-Turning LAN access on for a frame that has it off needs someone in front of the
+Turning local network access on for a frame that has it off needs someone in front of the
 frame:
 
-1. The frame settings' "LAN access" switch (backend, FrameOS Cloud, or the
+1. The frame settings' "Local network access" switch (backend, FrameOS Cloud, or the
    frame's own admin page) asks the frame for a code.
-2. The frame draws a six-digit code on its panel, labeled "LAN access code".
+2. The frame draws a six-digit code on its panel, labeled "Local network access code".
 3. The person types it into the same page, which sends it to the frame.
-4. The frame checks it, turns LAN access on, and repaints without the code.
+4. The frame checks it, turns local network access on, and repaints without the code.
 
 The code is six uniform digits from the device's RNG, compared in constant
 time, single use, good for 300 seconds and five tries. Across codes the frame
@@ -99,13 +105,13 @@ never leaves the frame as an image:
   backend all read.
 
 Any end of a challenge (the right code, the fifth wrong one, expiry, a new
-challenge, LAN access turned off) repaints the panel, so the code does not
+challenge, local network access turned off) repaints the panel, so the code does not
 stay up for the next person walking past. On the Pi the runner's sleep loop
 compares the text it last drew with the one it should show and repaints when
 they differ; on the ESP32 a generation number does the same. A battery ESP32 stays awake while a code is up. A frame
 whose output is not a physical panel (`web_only`, `http.upload`, virtual
-frames) has nowhere to show a code and answers `no_panel`: choose LAN access
-when setting such a frame up.
+frames) has nowhere to show a code and answers `no_panel`, so local network
+access cannot be turned on there.
 
 Turning it **off** needs no code; any control plane, token or admin page that
 may manage the frame can do it, and it clears a code that is showing. On an ESP32 the USB console's
@@ -121,7 +127,7 @@ presence.
 | Backend | | `frame.lan_access`, updated when a toggle is applied and from ESP32 acks |
 | FrameOS Cloud | | `frames.hardware.lanAccess`, exposed as `lan_access` on the frame (`null` = firmware too old to report it) |
 
-A frame with no value stored anywhere predates this switch and has LAN access
+A frame with no value stored anywhere predates this switch and has local network access
 **on**: the backend migration sets `lan_access = true` on every existing frame,
 the Pi runtime seeds `true` when frame.json has no `network.lanAccess`, and an
 ESP32 without the `lan_access` NVS key reads as on. No frame that reached its
@@ -163,5 +169,5 @@ The Pi's own admin API (used by the frame's admin page and by the backend):
 admin session or the backend's serverApiKey bearer. `scope: "shellApps"` is
 the same ceremony for running Chromium unsandboxed as root.
 
-`set_settings` never carries LAN access (`docs/cloud-frames-fixtures.json`
+`set_settings` never carries local network access (`docs/cloud-frames-fixtures.json`
 pins it), and the bulk settings save on the frame ignores it.

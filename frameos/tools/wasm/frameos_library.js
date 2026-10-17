@@ -186,9 +186,9 @@ addToLibrary({
         }
       }
 
-      // The frame's own LAN access switch (docs/lan-access.md), when the host
+      // The frame's own local network access switch (docs/lan-access.md), when the host
       // page says what it is (`frameosLanAccess: false`): a preview of a frame
-      // with LAN access off refuses a private host the way the frame would,
+      // with local network access off refuses a private host the way the frame would,
       // neither direct nor through the proxy, and in the frame's words — the
       // SPA's logs panel matches the start of them to link to the setting.
       // A same-origin target keeps its own path (the proxy only, above).
@@ -199,8 +199,8 @@ addToLibrary({
         } catch (e) {}
         if (lanTarget && (lanTarget.protocol === 'http:' || lanTarget.protocol === 'https:') &&
             frameosIsPrivateHost(lanTarget.hostname)) {
-          throw new Error('LAN access is off for this frame, so ' + lanTarget.hostname +
-            ' cannot be reached. Turn on LAN access in the frame settings.')
+          throw new Error('Local network access is off for this frame, so ' + lanTarget.hostname +
+            ' cannot be reached. Turn on local network access in the frame settings.')
         }
       }
 

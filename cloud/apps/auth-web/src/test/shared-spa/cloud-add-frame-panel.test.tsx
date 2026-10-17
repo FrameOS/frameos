@@ -9,7 +9,7 @@
 // that — the panel is mounted only while it is open — so "opened" here means
 // "rendered" and "closed" means "unmounted".
 import { StrictMode } from "react";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AddFramePanel } from "../../../../../../cloud-frontend/src/components/AddFramePanel";
 import {
@@ -107,24 +107,18 @@ describe("AddFramePanel", () => {
     ).toBe(false);
   });
 
-  // The install script has no SD card or USB console to carry the "LAN
-  // access" choice, so the claim code does (docs/lan-access.md): off by
-  // default, and flipping the switch mints a code that says so.
-  it("carries the LAN access choice in the install command's code", async () => {
+  // New frames start with local network access off, and Add frame offers no
+  // choice. The install script has no SD card or USB console to say so, so
+  // the claim code does (docs/lan-access.md).
+  it("mints the install command's code with local network access off", async () => {
     renderPanel();
     openPath(/install script/i);
     await screen.findByText(/FRAMEOS_CLAIM_TOKEN=FRCT_from_server/);
     const bodyOf = (call: Parameters<typeof fetch>) =>
       JSON.parse(String(call[1]?.body)) as { lan_access?: boolean };
+    expect(mintCalls()).toHaveLength(1);
     expect(bodyOf(mintCalls()[0]!).lan_access).toBe(false);
-
-    fetchMock.mockResolvedValue(
-      Response.json({ claim_token: "FRCT_lan_on", expires_at: "2030-01-01T00:00:00Z" }),
-    );
-    fireEvent.click(within(screen.getByTestId("lan-access-toggle")).getByRole("switch"));
-    await screen.findByText(/FRAMEOS_CLAIM_TOKEN=FRCT_lan_on/);
-    expect(mintCalls()).toHaveLength(2);
-    expect(bodyOf(mintCalls()[1]!).lan_access).toBe(true);
+    expect(screen.queryByRole("switch", { name: /local network access/i })).toBeNull();
   });
 
   it("mints once per opening, not once per render", async () => {

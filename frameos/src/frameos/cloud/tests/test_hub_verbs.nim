@@ -1085,7 +1085,7 @@ proc panelContext(recorded: Recorded): CloudVerbContext =
   result.frameConfig = FrameConfig(mode: "rpios", device: "waveshare.EPD_7in5_V2",
     width: 800, height: 480, serverHost: "192.168.1.10", serverPort: 8989)
 
-suite "LAN access verbs":
+suite "Local network access verbs":
   ## The state file and the link state are relative paths, so every case runs
   ## in its own temp cwd.
   var previousDir = ""
@@ -1120,7 +1120,7 @@ suite "LAN access verbs":
       ctx.frameConfig.device = device
       check handleCloudVerb(ctx, %*{"type": "lan_access_challenge"}).ack{"error"}.getStr("") == "no_panel"
 
-  test "lan_access_challenge shows a LAN access code, and the code never leaves":
+  test "lan_access_challenge shows a local network access code, and the code never leaves":
     let recorded = Recorded()
     let reply = handleCloudVerb(panelContext(recorded), %*{"id": "c", "type": "lan_access_challenge",
       "scope": "shellApps"})
@@ -1128,8 +1128,8 @@ suite "LAN access verbs":
     check reply.ack{"id"}.getStr("") == "c"
     let code = activeLocalAccessCode()
     check code.len == LocalAccessCodeLength
-    # Only ever LAN access from a control plane, whatever the message says.
-    check localAccessPanelText().startsWith("LAN access code\n")
+    # Only ever local network access from a control plane, whatever the message says.
+    check localAccessPanelText().startsWith("Local network access code\n")
     check code notin $reply.ack
     for line in recorded.audits:
       check code notin $line
@@ -1199,7 +1199,7 @@ suite "LAN access verbs":
     for line in recorded.audits:
       check fresh notin $line
 
-  test "turning LAN access off takes any pending code off the panel":
+  test "turning local network access off takes any pending code off the panel":
     persistLocalNetworkAccess(true)
     let ctx = panelContext(Recorded())
     discard handleCloudVerb(ctx, %*{"type": "lan_access_challenge"})
@@ -1234,7 +1234,7 @@ suite "LAN access verbs":
     ageLocalAccessWrongCodesForTest(LocalAccessWrongCodeWindowSeconds)
     check handleCloudVerb(ctx, %*{"type": "lan_access_challenge"}).ack{"ok"}.getBool(false)
 
-  test "a shellApps code does not turn LAN access on over the verb":
+  test "a shellApps code does not turn local network access on over the verb":
     persistLocalNetworkAccess(false)
     let code = startLocalAccessChallenge(LocalAccessScopeShellApps).code
     let reply = handleCloudVerb(panelContext(Recorded()), %*{"type": "lan_access_set",
@@ -1251,13 +1251,13 @@ suite "LAN access verbs":
     let reply = handleCloudVerb(panelContext(Recorded()), %*{"type": "lan_access_set", "enabled": false})
     check reply.ack{"error"}.getStr("") == "persist_failed"
 
-  test "the hello's hardware reports LAN access":
+  test "the hello's hardware reports local network access":
     persistLocalNetworkAccess(false)
     check helloStatePayload(FrameConfig(device: "web_only"), "")["hardware"]["lanAccess"].getBool(true) == false
     persistLocalNetworkAccess(true)
     check helloStatePayload(FrameConfig(device: "web_only"), "")["hardware"]["lanAccess"].getBool(false) == true
 
-suite "the private-network policy follows the LAN access switch":
+suite "the private-network policy follows the local network access switch":
   var previousDir = ""
   var sandbox = ""
 
@@ -1274,8 +1274,8 @@ suite "the private-network policy follows the LAN access switch":
     forgetStoredLocalNetworkAccess()
     setLocalNetworkPolicy(false)
 
-  test "a standalone frame with LAN access off is denied too":
-    # No cloud link at all: before the LAN access switch this frame was never denied.
+  test "a standalone frame with local network access off is denied too":
+    # No cloud link at all: before the local network access switch this frame was never denied.
     persistLocalNetworkAccess(false)
     refreshLocalNetworkPolicy(FrameConfig(device: "framebuffer"))
     let policy = localNetworkPolicySnapshot()
@@ -1283,7 +1283,7 @@ suite "the private-network policy follows the LAN access switch":
     # Nothing linked, nothing exempt: not even the default provider.
     check policy.exemptHostPorts.len == 0
 
-  test "LAN access on lifts the deny, linked or not":
+  test "Local network access on lifts the deny, linked or not":
     persistLocalNetworkAccess(true)
     refreshLocalNetworkPolicy(FrameConfig(device: "framebuffer"))
     check not localNetworkPolicySnapshot().active

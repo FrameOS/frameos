@@ -936,7 +936,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         // app on each render and decodes photos into the canvas, a Pi keeps
         // them running.
         embedded: isEsp32Frame(values.frame),
-        // A frame with LAN access off refuses local hosts; so does its preview,
+        // A frame with local network access off refuses local hosts; so does its preview,
         // in the same words (docs/lan-access.md).
         lanAccess: values.frame?.lan_access ?? undefined,
       })

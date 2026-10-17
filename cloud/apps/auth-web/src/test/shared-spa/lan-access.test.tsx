@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 //
-// The frame's LAN access switch (docs/lan-access.md): turning it on asks the
+// The frame's local network access switch (docs/lan-access.md): turning it on asks the
 // frame to draw a code on its panel and sends the code back; turning it off
 // goes straight through. The backend and the cloud serve the same two routes;
 // the frame's own admin page talks to the device's local-access routes and is
@@ -129,7 +129,7 @@ function mountLogic(frame: FrameType = frameRow) {
   return logic;
 }
 
-describe("LAN access on the backend and the cloud", () => {
+describe("Local network access on the backend and the cloud", () => {
   // No config: the backend's SPA. The cloud calls the same paths, and the real
   // apiFetch project-scopes them on the backend the way restart and reboot are.
   it("calls the frame routes, which the backend project-scopes", () => {
@@ -175,7 +175,7 @@ describe("LAN access on the backend and the cloud", () => {
     });
   }
 
-  it("turns LAN access off with no code, after saying how it comes back", async () => {
+  it("turns local network access off with no code, after saying how it comes back", async () => {
     routes["POST /api/frames/1/lan_access"] = (body) => {
       frameRow = { ...frameRow, lan_access: body.enabled === true };
       return Response.json({ status: "applied", lan_access: false });
@@ -241,7 +241,7 @@ describe("LAN access on the backend and the cloud", () => {
     expect(lanAccessErrorMessage("too_many_attempts")).toBe("Too many wrong codes. Show a new one.");
     expect(lanAccessErrorMessage("unsupported")).toBe("Update this frame's FrameOS first.");
     expect(lanAccessErrorMessage("no_panel")).toBe(
-      "This frame has no screen to show a code on. Choose LAN access when you set the frame up instead.",
+      "This frame has no screen to show a code on, so local network access cannot be turned on.",
     );
     expect(lanAccessErrorMessage("timeout", null, 504)).toMatch(/Could not reach the frame/);
     expect(lanAccessErrorMessage("invalid_code", "Wrong code, 3 tries left.")).toBe("Wrong code, 3 tries left.");
@@ -267,7 +267,7 @@ describe("LAN access on the backend and the cloud", () => {
   });
 });
 
-describe("LAN access on the frame's own admin page", () => {
+describe("Local network access on the frame's own admin page", () => {
   beforeEach(() => {
     testWindow.FRAMEOS_APP_CONFIG = { frameMode: "frame", frameAdminMode: true };
   });
@@ -325,7 +325,7 @@ describe("LAN access on the frame's own admin page", () => {
   });
 });
 
-describe("the LAN access section in the settings panel", () => {
+describe("the local network access section in the settings panel", () => {
   function renderPanel(frame: FrameType) {
     testWindow.FRAMEOS_APP_CONFIG = { cloudMode: true };
     frameRow = frame;
@@ -337,7 +337,7 @@ describe("the LAN access section in the settings panel", () => {
       </BindLogic>,
     );
     const heading = document.getElementById("frame-settings-lan-access");
-    expect(heading?.textContent).toBe("LAN access");
+    expect(heading?.textContent).toBe("Local network access");
     // The section's body: the switch, its help and notes.
     return heading!.nextElementSibling as HTMLElement;
   }
@@ -358,7 +358,7 @@ describe("the LAN access section in the settings panel", () => {
     // the whole settings panel cost hundreds of milliseconds each in jsdom.
     expect(section.textContent).not.toContain("Lets scenes reach devices on your home network");
     const heading = section.previousElementSibling as HTMLElement;
-    fireEvent.click(within(heading).getByRole("button", { name: "LAN access help" }));
+    fireEvent.click(within(heading).getByRole("button", { name: "Local network access help" }));
     const popper = document.getElementById("popper") as HTMLElement;
     expect(await within(popper).findByText(/Lets scenes reach devices on your home network/)).toBeTruthy();
 
@@ -372,7 +372,7 @@ describe("the LAN access section in the settings panel", () => {
     fireEvent.change(input, { target: { value: "135790" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Turn on" }));
 
-    expect(await within(dialog).findByText("LAN access is on.")).toBeTruthy();
+    expect(await within(dialog).findByText("Local network access is on.")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
     await waitFor(() => expect(section.textContent).toContain("On"));
     expect(posts().map((post) => post.path)).toEqual([
@@ -381,7 +381,7 @@ describe("the LAN access section in the settings panel", () => {
     ]);
   });
 
-  it("says a cloud frame must update first when it does not report LAN access", () => {
+  it("says a cloud frame must update first when it does not report local network access", () => {
     const section = renderPanel(makeFrame({ ...cloudPi, lan_access: null } as Partial<FrameType>));
     expect(within(section).getByTestId("lan-access-unknown").textContent).toMatch(/Update its FrameOS first/);
     // Nothing to press: neither "Turn on" nor "Turn off" for a value nobody knows.
@@ -390,21 +390,21 @@ describe("the LAN access section in the settings panel", () => {
   });
 });
 
-describe("LAN access when a frame is added", () => {
+describe("Local network access when a frame is added", () => {
   const base: NewFrameFormType = { name: "Kitchen", frame_host: "pi@10.0.0.5", server_host: "10.0.0.2" };
 
-  it("is sent off for every install method unless the switch was turned on", () => {
+  it("is sent off for every install method: Add frame offers no choice", () => {
     for (const install_method of ["ssh", "script", "sd_card", "embedded"] as const) {
       expect(framePayload({ ...base, install_method }).lan_access, install_method).toBe(false);
-      expect(framePayload({ ...base, install_method, lan_access: true }).lan_access, install_method).toBe(true);
+      expect(framePayload({ ...base, install_method, lan_access: true }).lan_access, install_method).toBe(false);
     }
   });
 });
 
 describe("pending commands", () => {
-  it("names the two LAN access verbs", () => {
+  it("names the two local network access verbs", () => {
     const command = { id: "c1", status: "pending", created_at: null, expires_at: null, sent_at: null };
-    expect(pendingCommandLabel({ ...command, type: "lan_access_challenge" })).toBe("Show LAN access code");
-    expect(pendingCommandLabel({ ...command, type: "lan_access_set" })).toBe("Change LAN access");
+    expect(pendingCommandLabel({ ...command, type: "lan_access_challenge" })).toBe("Show local network access code");
+    expect(pendingCommandLabel({ ...command, type: "lan_access_set" })).toBe("Change local network access");
   });
 });

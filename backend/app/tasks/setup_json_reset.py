@@ -399,7 +399,7 @@ handle_cloud_config() {
       upload_url) cloud_upload_url="$cloud_value"; cloud_recognized=1 ;;
       root_password) cloud_root_password="$cloud_value"; cloud_recognized=1 ;;
       time_zone) cloud_time_zone="$cloud_value"; cloud_recognized=1 ;;
-      # The LAN access switch picked in the provider's SD-image builder:
+      # The local network access switch picked in the provider's SD-image builder:
       # 1/true or 0/false. Anything else is dropped with a warning.
       lan_access)
         case "$(printf '%s' "$cloud_value" | tr 'A-Z' 'a-z')" in
@@ -600,7 +600,7 @@ os.replace(tmp, path)'; then
     fi
   fi
 
-  # The LAN access switch lives in the runtime's state file
+  # The local network access switch lives in the runtime's state file
   # (frameos/local_access.nim), the device's truth. Only a card that holds
   # no value yet takes the builder's: what someone at the frame set stays.
   if [ -n "$cloud_lan_access" ]; then
@@ -614,7 +614,7 @@ os.replace(tmp, path)'; then
     fi
     lan_access_file="$lan_state_dir"/local_access.json
     if [ -e "$lan_access_file" ]; then
-      echo "Keeping the LAN access setting already in $lan_access_file"
+      echo "Keeping the local network access setting already in $lan_access_file"
       cloud_lan_access_applied=1
     elif [ ! -d "$lan_state_dir" ]; then
       echo "Warning: no state directory; cannot apply lan_access"
@@ -646,7 +646,7 @@ print(json.dumps({"allowLocalNetworkAccess": os.environ["FRAMEOS_LAN_ACCESS"] ==
         chmod 1770 "$lan_state_dir" 2>/dev/null || true
       fi
       cloud_lan_access_applied=1
-      echo "Wrote LAN access ($lan_access_json) to $lan_access_file"
+      echo "Wrote local network access ($lan_access_json) to $lan_access_file"
     fi
   fi
 

@@ -335,7 +335,7 @@ function logTypeClassName(type: string, theme: WorkspaceTheme): string {
   return theme === 'dark' ? 'text-slate-100' : 'text-slate-900'
 }
 
-/** A scene ran into the LAN access block: offer the switch right there. */
+/** A scene ran into the local network access block: offer the switch right there. */
 function LanAccessLogLink({ frameId, theme }: { frameId: FrameId; theme: WorkspaceTheme }): JSX.Element {
   const { openFrameTool } = useActions(workspaceLogic)
   return (
@@ -351,7 +351,7 @@ function LanAccessLogLink({ frameId, theme }: { frameId: FrameId; theme: Workspa
         theme === 'dark' ? 'text-blue-300' : 'frameos-primary-text'
       )}
     >
-      Turn on LAN access
+      Turn on local network access
     </a>
   )
 }

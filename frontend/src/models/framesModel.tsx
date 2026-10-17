@@ -810,7 +810,7 @@ export const framesModel = kea<framesModelType>([
     updateFrameFirmware: (id: FrameId) => ({ id }),
     setDeployWithAgent: (id: FrameId, deployWithAgent: boolean) => ({ id, deployWithAgent }),
     setFrameArchived: (id: FrameId, archived: boolean) => ({ id, archived }),
-    // The LAN access switch is not a form field: it changes on the device
+    // The local network access switch is not a form field: it changes on the device
     // first (lanAccessLogic), and the frame row only mirrors the result.
     setFrameLanAccess: (id: FrameId, lanAccess: boolean) => ({ id, lanAccess }),
     toggleArchivedFramesExpanded: true,

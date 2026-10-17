@@ -27,7 +27,7 @@ import { readSession } from "./session";
 
 // POST /api/frames/{id}/lan_access/challenge and POST /api/frames/{id}/lan_access:
 // the same paths and shapes the self-hosted backend serves, so the shared
-// SPA's LAN access dialog needs no cloud branch. Each enqueues its verb
+// SPA's local network access dialog needs no cloud branch. Each enqueues its verb
 // (lan_access_challenge / lan_access_set, never the generic /command route:
 // they are not in allowedFrameCommandTypes) and waits a bounded time for the
 // device's ack. The answers are in lanAccessOutcomeResponse.

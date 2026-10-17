@@ -1,7 +1,7 @@
-## The frame's LAN access switch, and the local-presence ceremony that turns
+## The frame's local network access switch, and the local-presence ceremony that turns
 ## it on (docs/lan-access.md).
 ##
-## LAN access decides whether scenes may reach private and local addresses
+## Local network access decides whether scenes may reach private and local addresses
 ## (utils/http_client.nim, the private-network deny): off, the deny applies on
 ## every frame, standalone, backend-managed and cloud-managed alike. The value
 ## is chosen when the frame is created (frame.json `network.lanAccess`, read
@@ -35,7 +35,7 @@ const
   LocalAccessWrongCodeLimit* = 10
   LocalAccessWrongCodeWindowSeconds* = 3600.0
 
-  ## The facts the ceremony can unlock. `localNetwork` is LAN access, the only
+  ## The facts the ceremony can unlock. `localNetwork` is local network access, the only
   ## one a control plane's verbs ever ask for; `shellApps` lets
   ## chromiumScreenshot run Chromium unsandboxed where FrameOS runs as root.
   LocalAccessScopeLocalNetwork* = "localNetwork"
@@ -210,7 +210,7 @@ proc seedLocalNetworkAccess*(frameJsonSeed: Option[bool]): bool =
       persistedAccessCacheLoaded = true
 
 proc lanAccessEnabled*(): bool =
-  ## The frame's LAN access, the one value every reader goes through: the
+  ## The frame's local network access, the one value every reader goes through: the
   ## policy (hub_client.refreshLocalNetworkPolicy), readConfig, the admin API
   ## and the hub's `hardware.lanAccess`. Unknown means on, for the same reason
   ## seedLocalNetworkAccess seeds `true`.
@@ -362,7 +362,7 @@ proc localAccessPanelText*(): string =
     if localAccessChallenge.code.len > 0 and localAccessChallenge.expiresAt > epochTime():
       let label =
         if localAccessChallenge.scope == LocalAccessScopeShellApps: "Shell apps code"
-        else: "LAN access code"
+        else: "Local network access code"
       result = label & "\n" & localAccessChallenge.code
     else:
       result = ""
@@ -378,7 +378,7 @@ proc consumeLocalAccessCode*(candidate: string,
   ## Single use: right or wrong, a completed attempt burns the challenge (on
   ## success) or a life (on failure), so the code cannot be brute-forced in the
   ## five minutes it lives for. A code is only good for the scope it was shown
-  ## for: a pending `shellApps` code does not turn LAN access on, and asking
+  ## for: a pending `shellApps` code does not turn local network access on, and asking
   ## for the wrong one costs no life (there is no code for it to guess).
   ##
   ## Every wrong code also counts against the budget across challenges

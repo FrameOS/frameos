@@ -1,5 +1,5 @@
 /*
- * The LAN access code: turning the frame's LAN access switch on from a
+ * The local network access code: turning the frame's local network access switch on from a
  * control plane takes a code the frame shows on its panel (docs/lan-access.md).
  *
  * `lan_access_challenge` mints six digits, the render task draws them over
@@ -69,7 +69,7 @@ uint32_t fos_lan_access_start(int64_t now_s, fos_lan_access_rng_t rng);
  * wrong code counts against the budget. */
 fos_lan_access_result_t fos_lan_access_consume(const char *code, int64_t now_s);
 
-/* Drop any pending challenge (LAN access turned off: the code has nothing
+/* Drop any pending challenge (local network access turned off: the code has nothing
  * left to do). The panel repaints because fos_lan_access_panel_code() now
  * answers 0. The budget is untouched. */
 void fos_lan_access_clear(void);

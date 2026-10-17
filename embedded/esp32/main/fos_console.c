@@ -771,7 +771,7 @@ static int cmd_set(int argc, char **argv)
     else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
     else if (strcmp(key, "debug") == 0) config->debug_logging = atoi(value) != 0;
     else if (strcmp(key, "fusion") == 0) config->image_fusion = atoi(value) != 0;
-    /* The LAN access switch (docs/lan-access.md): 1 lets scenes reach
+    /* The local network access switch (docs/lan-access.md): 1 lets scenes reach
      * private/link-local addresses, 0 blocks them. The USB cable is physical
      * presence, so no panel code here; the flashers send it at provisioning.
      * See fos_config.h. Takes effect within a few seconds, no restart. */

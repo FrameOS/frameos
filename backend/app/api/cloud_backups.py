@@ -330,8 +330,8 @@ async def restore_cloud_backup(
         for field in FRAME_RESTORE_FIELDS:
             if field in frame_dict:
                 setattr(frame, field, frame_dict[field])
-        # A backed-up frame already exists: it keeps its LAN access switch,
-        # and one backed up before the switch existed had LAN access.
+        # A backed-up frame already exists: it keeps its local network access switch,
+        # and one backed up before the switch existed had local network access.
         frame.lan_access = frame_dict.get("lan_access") is not False
         if isinstance(frame.scenes, list):
             # Backups may predate the removal of the legacy/* apps, or of a

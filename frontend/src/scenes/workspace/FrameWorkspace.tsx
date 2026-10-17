@@ -297,7 +297,7 @@ const allFrameSettingsSections = [
   { id: 'frame-settings-admin', label: 'Admin' },
   { id: 'frame-http-proxy-section', label: 'HTTPS' },
   { id: 'frame-settings-network', label: 'Network' },
-  { id: 'frame-settings-lan-access', label: 'LAN access' },
+  { id: 'frame-settings-lan-access', label: 'Local network access' },
   { id: 'frame-settings-mountpoints', label: 'Mountpoints' },
   { id: 'frame-settings-defaults', label: 'Defaults' },
   { id: 'frame-settings-error-behavior', label: 'Global errors' },

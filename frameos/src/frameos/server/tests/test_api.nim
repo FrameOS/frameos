@@ -216,7 +216,7 @@ suite "the scenes a frame reports to a provider (scenes_get)":
       setUploadedScenePayload("")
       delEnv("FRAMEOS_SCENES_JSON")
 
-suite "LAN access is not a bulk-savable setting":
+suite "Local network access is not a bulk-savable setting":
   test "a config save cannot flip allowLocalNetworkAccess either way":
     # Both the cloud verb path and the admin page's frame save land in
     # frontendFramePayloadToRuntimeConfig. Neither may carry this field: LAN

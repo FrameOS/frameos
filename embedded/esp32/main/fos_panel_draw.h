@@ -1,7 +1,7 @@
 /*
  * Drawing straight into a packed panel buffer, without Nim or pixie: the
  * 5x7 font and the rectangles behind the boot/portal status screen
- * (fos_status_screen.c) and the LAN access code the render task draws over a
+ * (fos_status_screen.c) and the local network access code the render task draws over a
  * render for the panel only (fos_client.c, docs/lan-access.md).
  *
  * A surface is a packed buffer in PANEL orientation (what the packers write
@@ -48,7 +48,7 @@ int fos_panel_fit_scale(const char *text, int scale, int avail);
  * spaces) advance without ink. */
 void fos_panel_draw_text(const fos_panel_surface_t *s, const char *text, int x, int y, int scale);
 
-/* The LAN access code's box: centred, white, a black border, a title line
+/* The local network access code's box: centred, white, a black border, a title line
  * (dropped when it cannot fit, on a tiny panel) and the digits as large as
  * the panel allows. */
 typedef struct {

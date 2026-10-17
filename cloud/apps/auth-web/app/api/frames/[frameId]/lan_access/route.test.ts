@@ -8,7 +8,7 @@ import { readSession } from "../../../../../src/lib/session";
 import { POST as postChallenge } from "./challenge/route";
 import { POST as postSet } from "./route";
 
-// The two LAN access routes with the database stubbed: the gates, what goes
+// The two local network access routes with the database stubbed: the gates, what goes
 // into the queue (and what never does: the code outside the payload), and
 // how each outcome is answered. The queue round trip against a real
 // Postgres is in src/test/integration/frame-lan-access.integration.test.ts.

@@ -114,7 +114,7 @@ typedef struct {
                                     * interpreter (value bytes, heap delta,
                                     * fusion tier) — see docs/value-pipeline.md */
     bool server_send_logs;         /* upload runtime/render logs to backend */
-    /* The LAN access switch (docs/lan-access.md): 1 lets scenes reach
+    /* The local network access switch (docs/lan-access.md): 1 lets scenes reach
      * private/link-local addresses, 0 has fos_netguard deny them on every
      * frame, managed or not. NVS `lan_access` (absent = 1, a frame from
      * before the switch), the Pi's state/local_access.json

@@ -454,9 +454,9 @@ describe("claim token time zone", () => {
   });
 });
 
-describe("claim token LAN access", () => {
+describe("claim token local network access", () => {
   // The install script has no SD card or USB console to carry the Add frame
-  // "LAN access" choice, so the claim token does (docs/lan-access.md). Off
+  // "Local network access" choice, so the claim token does (docs/lan-access.md). Off
   // goes down as a lan_access_set command at enrollment; on, or no choice,
   // queues nothing, because a frame with no stored value is already on.
   async function enrollWith(body: Record<string, unknown>) {

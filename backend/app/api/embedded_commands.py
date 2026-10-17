@@ -188,7 +188,7 @@ async def api_embedded_device_commands(
     now = utcnow()
 
     await _remember_device_state(redis, frame, body)
-    # The LAN access switch rides the hello's state fields: the row mirrors
+    # The local network access switch rides the hello's state fields: the row mirrors
     # the device (a `set allow_local_network` on the USB console included).
     await mirror_lan_access(db, redis, frame, reported_lan_access(body))
 

@@ -1,4 +1,4 @@
-## The frame's LAN access switch and the local-presence ceremony that turns it
+## The frame's local network access switch and the local-presence ceremony that turns it
 ## on (docs/lan-access.md).
 
 import std/[json, options, os, sequtils, strutils, times, unittest]
@@ -48,7 +48,7 @@ suite "local access challenge":
 
   test "the panel says what the code is for, on two lines":
     let lan = startLocalAccessChallenge()
-    check localAccessPanelText() == "LAN access code\n" & lan.code
+    check localAccessPanelText() == "Local network access code\n" & lan.code
     let shell = startLocalAccessChallenge(LocalAccessScopeShellApps)
     check localAccessPanelText() == "Shell apps code\n" & shell.code
 
@@ -231,7 +231,7 @@ suite "the code and the image sinks":
     check localAccessCodeMayBeOnPanel(clean, after)
     check not localAccessCodeMayBeOnPanel(after, localAccessPanelMark())
 
-suite "LAN access is persisted outside frame.json":
+suite "Local network access is persisted outside frame.json":
   ## LocalAccessStatePath is relative, so each case runs in its own temp cwd.
   var previousDir = ""
   var sandbox = ""
@@ -277,7 +277,7 @@ suite "LAN access is persisted outside frame.json":
     writeFile(LocalAccessStatePath, """{"updatedAt": "whenever", "allowShellApps": true}""")
     check storedLocalNetworkAccess().isNone
 
-  test "a first start stores the value chosen at creation":
+  test "a first start stores the value set at creation":
     check seedLocalNetworkAccess(some(false)) == false
     check storedLocalNetworkAccess() == some(false)
     check parseJson(readFile(LocalAccessStatePath))["allowLocalNetworkAccess"].getBool() == false
@@ -333,7 +333,7 @@ suite "LAN access is persisted outside frame.json":
     # ...and the old key does not break parsing the file.
     check readConfig("frame.json").network.networkCheck == false
 
-  test "frame.json's LAN access keys change nothing once a value is stored":
+  test "frame.json's local network access keys change nothing once a value is stored":
     # An old frame.json still carries `allowLocalNetworkAccess`: it parses
     # like any unknown key, and neither it nor the seed overrides the state.
     writeFile("frame.json", $(%*{"network": {"allowLocalNetworkAccess": true, "lanAccess": true}}))

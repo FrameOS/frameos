@@ -1,9 +1,9 @@
 /*
  * Private-network egress policy for scene HTTP: the enforcement half of the
- * frame's LAN access switch (docs/lan-access.md).
+ * frame's local network access switch (docs/lan-access.md).
  *
  * A frame sits inside the owner's LAN, and its scenes come from whoever can
- * install them: a cloud provider, a backend, a store scene. With LAN access
+ * install them: a cloud provider, a backend, a store scene. With local network access
  * off, scene HTTP to private/link-local addresses is denied, so a scene (or
  * a compromised account that pushed one) cannot use the frame as an SSRF
  * pivot onto routers, NAS boxes and IoT devices that trust anything on the
@@ -43,8 +43,8 @@ extern "C" {
  * wrong name). */
 #define FOS_NETGUARD_HOST_LEN 256
 
-/* Turn the deny on or off. Off (the default here) is LAN access on: scenes
- * may talk to the owner's LAN. fos_cloud.c sets it from the LAN access
+/* Turn the deny on or off. Off (the default here) is local network access on: scenes
+ * may talk to the owner's LAN. fos_cloud.c sets it from the local network access
  * switch at boot and on every cloud-task tick. */
 void fos_netguard_set_policy(bool block_local);
 
@@ -65,7 +65,7 @@ void fos_netguard_clear_exempt(void);
 bool fos_netguard_set_exempt(const char *host, int port);
 
 /* Is `ip` (a bare IPv4 or IPv6 literal, no brackets, no port) an address a
- * scene must not reach with LAN access off? Covers loopback, RFC1918, link-local,
+ * scene must not reach with local network access off? Covers loopback, RFC1918, link-local,
  * CGNAT, 0/8, multicast, reserved — and the IPv6 equivalents including the
  * wrappers that carry an IPv4 address (::ffff:a.b.c.d, ::a.b.c.d, 64:ff9b::/96).
  *
@@ -118,7 +118,7 @@ bool fos_netguard_url_allowed(const char *url, char *reason, size_t reason_len);
  * matches to offer a link to the setting, the last sentence is what the owner
  * acts on: the glue's buffers are sized so neither is ever cut. */
 #define FOS_NETGUARD_BLOCK_FMT \
-    "LAN access is off for this frame (%s%s). Turn on LAN access in the frame settings."
+    "Local network access is off for this frame (%s%s). Turn on local network access in the frame settings."
 
 #ifdef __cplusplus
 }

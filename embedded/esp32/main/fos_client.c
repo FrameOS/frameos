@@ -495,7 +495,7 @@ static uint32_t keep_awake_remaining_seconds(void)
     portEXIT_CRITICAL(&s_keep_awake_lock);
 
     int64_t now_us = esp_timer_get_time();
-    /* A LAN access code on the panel holds the deep sleep until it is
+    /* A local network access code on the panel holds the deep sleep until it is
      * answered or expires: the person walking to the frame to read it must
      * find the code there, and its end must repaint the panel. Not a
      * keep_awake_ms() window, which an answered code could not shorten. */
@@ -1085,9 +1085,9 @@ static void push_status_info(void)
     frameos_nim_set_status_info(info);
 }
 
-/* ------------------------------------------------- the LAN access code */
+/* ------------------------------------------------- the local network access code */
 
-/* The generation of the LAN access code (fos_lan_access.h) the render task
+/* The generation of the local network access code (fos_lan_access.h) the render task
  * last answered: drew, or saw end. Render task only. */
 static uint32_t s_lan_seen_gen = 0;
 
@@ -1125,18 +1125,18 @@ static void lan_overlay_begin(lan_overlay_t *ov, uint8_t *buf, int width, int he
     if (s_last_frame == buf) {
         /* The lend hook could not drop the preview snapshot (a stream stalled
          * past 30 s) so this buffer is still served as the frame's image. */
-        ESP_LOGW(TAG, "LAN access code skipped: buffer still lent");
+        ESP_LOGW(TAG, "Local network access code skipped: buffer still lent");
     } else {
         ov->surface = (fos_panel_surface_t){
             .buf = buf, .width = width, .height = height, .format = format,
             .rotate = fos_config()->rotate,
         };
-        if (fos_panel_code_box(&ov->surface, "LAN access code", FOS_LAN_ACCESS_CODE_LEN,
+        if (fos_panel_code_box(&ov->surface, "Local network access code", FOS_LAN_ACCESS_CODE_LEN,
                                &ov->box)) {
             size_t bytes = fos_panel_box_copy(&ov->surface, &ov->box, NULL, false);
             ov->saved = bytes ? fos_big_malloc(bytes) : NULL;
             if (ov->saved) fos_panel_box_copy(&ov->surface, &ov->box, ov->saved, false);
-            fos_panel_draw_code(&ov->surface, &ov->box, "LAN access code", code);
+            fos_panel_draw_code(&ov->surface, &ov->box, "Local network access code", code);
             ov->drawn = true;
             frameos_nim_log_hook("{\"event\":\"lan_access:shown\",\"source\":\"esp32\"}");
         }
@@ -1722,7 +1722,7 @@ static void client_task(void *arg)
         if (fos_scenes_take_switched()) {
             force_render = true;
         }
-        /* A LAN access code to show, or one to take off the panel. */
+        /* A local network access code to show, or one to take off the panel. */
         if (lan_access_panel_changed()) {
             force_render = true;
         }

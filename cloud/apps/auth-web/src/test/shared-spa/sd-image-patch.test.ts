@@ -231,7 +231,7 @@ describe("renderCloudConfig", () => {
     expect(text).not.toContain("lan_access=");
   });
 
-  it("writes LAN access as 1 or 0 when the builder chose it", () => {
+  it("writes local network access as 1 or 0 when the builder chose it", () => {
     // The first-boot script turns it into state/local_access.json.
     const render = (lanAccess: boolean) =>
       decoder.decode(renderCloudConfig({ claimToken: "FRCT_x", cloudUrl: "https://c.example", lanAccess }));

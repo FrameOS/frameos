@@ -269,19 +269,25 @@ bool fos_panel_code_box(const fos_panel_surface_t *s, const char *title, size_t 
 
     /* Digits up to 3/5 of the width and 2/5 of the height: readable from
      * across a room, with the scene still around them; at least scale 1 on a
-     * small panel, if the box fits at all. A title at a third of the digits'
-     * scale is narrower than the digits whenever it is no longer than they
-     * are wide at that scale ("LAN access code" is). */
+     * small panel, if the box fits at all. The title is at most a third of
+     * the digits' scale and no wider than them, down to scale 1; at scale 1
+     * a longer title ("Local network access code" on a 200 px panel) widens
+     * the box if the scene has room, and is dropped if not. */
     const int digit_scale = max_int(1, min_int((sw * 3 / 5) / digits_w1, (sh * 2 / 5) / 7));
-    int title_scale = digit_scale / 3; /* 0 on a tiny panel: the digits alone */
-    if (title == NULL || fos_panel_text_width(title, title_scale) > digits_w1 * digit_scale) {
+    const int digits_w = digits_w1 * digit_scale;
+    const int pad = 2 * digit_scale;
+    int title_scale = title == NULL ? 0 : digit_scale / 3; /* 0: the digits alone */
+    while (title_scale > 1 && fos_panel_text_width(title, title_scale) > digits_w) {
+        title_scale--;
+    }
+    if (title_scale == 1 && fos_panel_text_width(title, 1) + 2 * pad > sw) {
         title_scale = 0;
     }
-    box->pad = 2 * digit_scale;
+    box->pad = pad;
     box->gap = title_scale ? digit_scale : 0;
     box->title_scale = title_scale;
     box->digit_scale = digit_scale;
-    box->w = digits_w1 * digit_scale + 2 * box->pad;
+    box->w = max_int(digits_w, fos_panel_text_width(title, title_scale)) + 2 * pad;
     box->h = 7 * digit_scale + 2 * box->pad + (title_scale ? 7 * title_scale + box->gap : 0);
     if (box->w > sw || box->h > sh) return false;
     box->x = (sw - box->w) / 2;

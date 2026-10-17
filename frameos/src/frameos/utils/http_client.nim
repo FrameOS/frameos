@@ -269,7 +269,8 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     proc openStreamHandle(stream: HttpBodyStream) =
       var status: cint = 0
       var contentLength: int64 = -1
-      var errBuf = newString(192)
+      # 224: the whole "local network access is off" sentence (frameos_nim_glue.c).
+      var errBuf = newString(224)
       let headerPtr = if stream.headerBlock.len > 0: unsafeAddr stream.headerBlock[0] else: nil
       stream.handle = fos_nim_http_stream_open(stream.url.cstring, headerPtr,
         stream.headerBlock.len.csize_t, stream.timeoutMs.cint, addr status,
@@ -688,10 +689,10 @@ else:
       withLock dnsCacheLock:
         dnsCache.clear()
 
-  # ---- private-network policy (LAN access off) -------------------------------
+  # ---- private-network policy (local network access off) -------------------------------
   # docs/lan-access.md: scenes run *inside the owner's LAN*, and a scene from
   # the store, a shared album or a compromised account must not become an
-  # SSRF pivot onto routers and IoT devices. With the frame's LAN access off,
+  # SSRF pivot onto routers and IoT devices. With the frame's local network access off,
   # HTTP to private/link-local addresses is denied on every frame. The check
   # sits on the one address every request funnels through (literal or
   # resolved, redirects included). The policy is set by
@@ -707,7 +708,7 @@ else:
   initLock(localNetworkPolicyLock)
 
   proc isPrivateNetworkAddress*(address: string): bool {.gcsafe.} =
-    ## True for addresses a scene must not reach with LAN access off: loopback,
+    ## True for addresses a scene must not reach with local network access off: loopback,
     ## RFC1918, link-local, CGNAT, 0.0.0.0/8, broadcast — and their IPv6
     ## equivalents (loopback/unspecified, ULA, link-local, mapped IPv4).
     ## Unparseable input classifies as private: the caller is about to hand
@@ -769,8 +770,8 @@ else:
     let target =
       if address.len == 0 or cmpIgnoreCase(hostname, address) == 0: hostname
       else: hostname & " (" & address & ")"
-    "LAN access is off for this frame, so " & target &
-      " cannot be reached. Turn on LAN access in the frame settings."
+    "Local network access is off for this frame, so " & target &
+      " cannot be reached. Turn on local network access in the frame settings."
 
   proc setLocalNetworkPolicy*(blockLocal: bool, exemptHostPorts: seq[string] = @[]) {.gcsafe.} =
     ## Activates/deactivates the private-network deny and replaces the exempt

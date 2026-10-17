@@ -129,8 +129,9 @@ export interface CloudConfigInput {
   // with everything else they must fit the 4096-byte region: an ed25519 key
   // is ~100 bytes, an RSA-3072 one ~570.
   sshPublicKeys?: string[] | undefined;
-  // LAN access chosen at setup (`lan_access=1|0`): whether scenes may reach
-  // local addresses. First boot writes it to state/local_access.json.
+  // Local network access (`lan_access=1|0`): whether scenes may reach local
+  // addresses. 0 on a new frame's card, the frame's own value on a card for
+  // an existing one. First boot writes it to state/local_access.json.
   // Undefined writes nothing, which a frame reads as on.
   lanAccess?: boolean | undefined;
 }
@@ -184,7 +185,7 @@ export function renderCloudConfigLines(input: CloudConfigInput): string[] {
   push(
     "lan_access",
     input.lanAccess === undefined ? undefined : input.lanAccess ? "1" : "0",
-    "LAN access",
+    "Local network access",
   );
   for (const key of input.sshPublicKeys ?? []) {
     push("authorized_key", key.trim(), "SSH public key");

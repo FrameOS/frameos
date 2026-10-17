@@ -385,7 +385,7 @@ read — does not count against the budget, so a slow-but-honest scene is not
 mistaken for a spinning one. A blown budget is logged as a scene error and the
 node's value is defaulted, exactly like any other failing node.
 
-**LAN access is one switch per frame** (`docs/lan-access.md`). With it off,
+**Local network access is one switch per frame** (`docs/lan-access.md`). With it off,
 RFC1918 / link-local / loopback HTTP from scenes is refused, on both the native
 and the ESP32 builds. A malicious scene is *inside the owner's LAN*; without
 this, a compromised account becomes an SSRF pivot onto routers and IoT devices.
@@ -398,20 +398,19 @@ classifiers in step. It is one layer, not the boundary: what the frame can
 reach at all is the network's call (a separate network or VLAN for devices it
 must never touch).
 
-The owner picks the value when the frame is created (every add-frame form, next
-to Wi-Fi; off by default), and frames that existed before the switch read as
-on. The switch applies to every frame. Before it existed (October 2026), the
+Every new frame starts with it off (Add frame offers no choice), and frames
+that existed before the switch read as on. The switch applies to every frame. Before it existed (October 2026), the
 deny was armed only on cloud-managed frames and frames still running
 cloud-pushed scenes, and lifting it took the frame's own admin page.
 
 **Turning it on takes a code read off the panel.** The provider cannot set it:
 it is not in `CLOUD_SETTINGS_ALLOWLIST`, the bulk config save strips it, and a
-fixture pins `lan_access` as `setting_not_allowed`. The frame settings' "LAN
-access" switch sends `lan_access_challenge` (the routes are
+fixture pins `lan_access` as `setting_not_allowed`. The frame settings' "Local
+network access" switch sends `lan_access_challenge` (the routes are
 `POST /api/frames/{id}/lan_access/challenge` and `POST /api/frames/{id}/lan_access`,
 the same on the backend). The frame draws a six-digit code on its panel for
 five minutes. The owner types it into the page, and `lan_access_set {enabled:
-true, code}` turns LAN access on only if it matches. The code is never in an
+true, code}` turns local network access on only if it matches. The code is never in an
 API response or a command listing, never in an image the frame sends
 (`image_get`, `/image`, the ESP32's BMP push, the `http.upload` driver), single
 use and capped at five attempts. Someone who cannot see the screen cannot

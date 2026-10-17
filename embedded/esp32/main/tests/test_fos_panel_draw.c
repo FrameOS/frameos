@@ -1,5 +1,5 @@
 /*
- * Host tests for fos_panel_draw.c: the LAN access code box drawn over a
+ * Host tests for fos_panel_draw.c: the local network access code box drawn over a
  * packed render for the panel only (docs/lan-access.md), in every pixel
  * format and rotation the firmware drives.
  *
@@ -141,7 +141,7 @@ static void check_one(fos_pixel_format_t format, int width, int height, int rota
     fos_panel_surface_t s = {buf, width, height, format, rotate};
 
     fos_panel_code_box_t box;
-    const char *title = "LAN access code";
+    const char *title = "Local network access code";
     if (!fos_panel_code_box(&s, title, 6, &box)) {
         CHECK(false, "fmt %d %dx%d rot %d: no box", format, width, height, rotate);
         goto done;
@@ -262,17 +262,17 @@ static void test_small_and_odd(void)
     memset(buf, 0xFF, sizeof(buf));
     fos_panel_surface_t tiny = {buf, 16, 16, FOS_PIXEL_1BPP, 0};
     fos_panel_code_box_t box;
-    CHECK(!fos_panel_code_box(&tiny, "LAN access code", 6, &box), "16x16 has no room for six digits");
+    CHECK(!fos_panel_code_box(&tiny, "Local network access code", 6, &box), "16x16 has no room for six digits");
 
     uint8_t oled[(72 / 8) * 40];
     memset(oled, 0xFF, sizeof(oled));
     fos_panel_surface_t small = {oled, 72, 40, FOS_PIXEL_1BPP, 0};
-    CHECK(fos_panel_code_box(&small, "LAN access code", 6, &box), "72x40 fits the digits");
+    CHECK(fos_panel_code_box(&small, "Local network access code", 6, &box), "72x40 fits the digits");
     CHECK(box.title_scale == 0 && box.digit_scale == 1, "72x40: digits alone (title %d, digits %d)",
           box.title_scale, box.digit_scale);
 
     fos_panel_surface_t unknown = {oled, 72, 40, (fos_pixel_format_t)0, 0};
-    CHECK(!fos_panel_code_box(&unknown, "LAN access code", 6, &box), "unknown format: no box");
+    CHECK(!fos_panel_code_box(&unknown, "Local network access code", 6, &box), "unknown format: no box");
     CHECK(fos_panel_box_copy(&unknown, &box, NULL, false) == 0, "unknown format: nothing to save");
 }
 
@@ -281,9 +281,9 @@ static void test_text_metrics(void)
     CHECK(fos_panel_text_width("000000", 1) == 35, "six glyphs at scale 1");
     CHECK(fos_panel_text_width("000000", 3) == 105, "six glyphs at scale 3");
     CHECK(fos_panel_text_width("", 3) == 0 && fos_panel_text_width(NULL, 3) == 0, "empty");
-    CHECK(fos_panel_fit_scale("LAN access code", 6, 300) == 3, "fit %d",
-          fos_panel_fit_scale("LAN access code", 6, 300));
-    CHECK(fos_panel_fit_scale("LAN access code", 6, 10) == 1, "never below 1");
+    CHECK(fos_panel_fit_scale("Local network access code", 6, 300) == 2, "fit %d",
+          fos_panel_fit_scale("Local network access code", 6, 300));
+    CHECK(fos_panel_fit_scale("Local network access code", 6, 10) == 1, "never below 1");
     CHECK(fos_panel_white_fill(FOS_PIXEL_4BPP_SPECTRA6) == 0x11 &&
               fos_panel_white_fill(FOS_PIXEL_2BPP_BWYR) == 0x55 &&
               fos_panel_white_fill(FOS_PIXEL_1BPP) == 0xFF,

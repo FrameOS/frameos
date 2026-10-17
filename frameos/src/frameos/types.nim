@@ -142,7 +142,7 @@ type
     # NetworkManager (armv6 buildroot) auto-detect the wpa_supplicant backend;
     # this pins it for debugging. FRAMEOS_NETWORK_BACKEND overrides it.
     networkBackend*: string
-    # No LAN access field: the switch lives in state/local_access.json and is
+    # No local network access field: the switch lives in state/local_access.json and is
     # read with local_access.lanAccessEnabled() (docs/lan-access.md).
     # frame.json's `network.lanAccess` is only a creation seed
     # (config.frameJsonLanAccessSeed), and an old `allowLocalNetworkAccess`
@@ -572,7 +572,7 @@ type
     controlCodeRender*: AppRoot
     controlCodeData*: AppRoot
     localAccessRender*: AppRoot
-    ## The LAN access code text (local_access.localAccessPanelText) the last
+    ## The local network access code text (local_access.localAccessPanelText) the last
     ## render was made for, "" for none; the sleep loop repaints when what
     ## should be on the panel stops matching it. Runner thread only.
     localAccessShownFor*: string

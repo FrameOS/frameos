@@ -411,9 +411,9 @@ async function enrollWithClaimToken(
   }
 
   if (result.lanAccess === false) {
-    // "LAN access" left off in Add frame, on a path with no SD card or USB
-    // console to carry it (the install script). Turning it off needs no code
-    // on the frame, so the choice goes down as a command; a frame with no
+    // Local network access off for a new frame, on a path with no SD card or
+    // USB console to carry it (the install script). Turning it off needs no
+    // code on the frame, so it goes down as a command; a frame with no
     // stored value would otherwise come up with it on (docs/lan-access.md).
     // Firmware without the verb answers unknown_verb, and keeps the old rule.
     // No TTL: like set_scenes it carries state, so it waits for the frame's

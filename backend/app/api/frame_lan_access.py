@@ -1,4 +1,4 @@
-"""The frame's LAN access switch, from the workspace (app/utils/lan_access.py).
+"""The frame's local network access switch, from the workspace (app/utils/lan_access.py).
 
 `POST /frames/{id}/lan_access/challenge` asks the frame to draw a code on
 its panel:
@@ -93,7 +93,7 @@ def _lan_access_target(frame: Frame) -> str:
 def _no_code_on_this_frame(target: str) -> JSONResponse:
     if target == "virtual":
         return _refused("no_panel")
-    return _refused("unsupported", detail="This frame cannot show a LAN access code.")
+    return _refused("unsupported", detail="This frame cannot show a local network access code.")
 
 
 async def _relay_to_device(frame: Frame, redis: Redis, path: str, body: dict[str, Any]) -> tuple[int, Any]:
@@ -242,7 +242,7 @@ async def api_frame_lan_access_set(
 
 async def _record_applied(db: Session, redis: Redis, frame: Frame, value: bool, *, log: bool = True) -> None:
     """Mirror the new value and broadcast it. The ESP32 path's log lines come
-    from its queue ("Frame applied: LAN access (on)")."""
+    from its queue ("Frame applied: Local network access (on)")."""
     await mirror_lan_access(db, redis, frame, value)
     if log:
-        await new_log(db, redis, int(frame.id), "stdinfo", f"LAN access turned {'on' if value else 'off'}")
+        await new_log(db, redis, int(frame.id), "stdinfo", f"Local network access turned {'on' if value else 'off'}")

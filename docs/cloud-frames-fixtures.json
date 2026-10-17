@@ -28,7 +28,7 @@
     {"name": "network access is not a setting",
      "settings": {"network": {"allowLocalNetworkAccess": true}},
      "expect": {"linux": "setting_not_allowed", "esp32": "setting_not_allowed"}},
-    {"name": "LAN access is not a setting either: it has its own verbs, and turning it on takes the panel code",
+    {"name": "Local network access is not a setting either: it has its own verbs, and turning it on takes the panel code",
      "settings": {"lan_access": true},
      "expect": {"linux": "setting_not_allowed", "esp32": "setting_not_allowed"}},
     {"name": "power keys exist only on the chip",

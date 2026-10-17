@@ -1825,7 +1825,7 @@ async def adopt_standalone_frame(
         interval=remote_frame.get("interval"),
         project_id=project_id,
         # A running frame keeps its switch; a runtime too old to report it
-        # is from before the switch, when every frame had LAN access.
+        # is from before the switch, when every frame had local network access.
         lan_access=reported_lan_access(remote_frame) is not False,
     )
     frame.frame_port = frame_port

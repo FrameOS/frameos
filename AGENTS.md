@@ -229,12 +229,12 @@
   moderation: it scores `sexual/minors` on text only. Any new table holding photo objects goes into
   `cloud/scripts/object-store-sweep.sh`, or the sweep deletes the photos.
 
-## LAN access: one switch per frame, `docs/lan-access.md`
+## Local network access: one switch per frame, `docs/lan-access.md`
 
 - Whether a frame's scenes may reach its LAN (Home Assistant, a NAS,
-  `192.168.x.x`) is the frame's **LAN access** switch, on every frame type and
-  both control planes. It is chosen in every add-frame form (next to Wi-Fi) and
-  changed in the frame settings. It is never a permission apps or scenes declare
+  `192.168.x.x`) is the frame's **Local network access** switch, on every frame type and
+  both control planes. It is off on every new frame (Add frame offers no
+  choice) and changed in the frame settings. It is never a permission apps or scenes declare
   (the owner's decision, 2026-10-17). Off blocks private addresses in the scene
   HTTP policy, except the frame's own control planes by exact `host:port`.
 - Turning it **on** after setup takes the six-digit code the frame draws on its
@@ -249,7 +249,7 @@
   before `store_snapshot`). Keep it away from every sink: `GET /image` (incl.
   e-ink drivers' own `toPng`), `image_get`, scene snapshots, the ESP32 BMP push,
   the `http.upload` driver.
-- The blocked-request text starts with `LAN access is off for this frame`. The
+- The blocked-request text starts with `Local network access is off for this frame`. The
   SPA's logs panel matches that prefix, so keep it on both runtimes.
 
 ## Top-level layout

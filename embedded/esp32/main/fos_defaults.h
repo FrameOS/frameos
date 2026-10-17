@@ -91,7 +91,7 @@
 #ifndef FRAMEOS_DEFAULT_ADMIN_AUTH_PASS
 #define FRAMEOS_DEFAULT_ADMIN_AUTH_PASS ""
 #endif
-/* The LAN access switch when NVS holds no `lan_access` key: on, because a
+/* The local network access switch when NVS holds no `lan_access` key: on, because a
  * frame from before the switch existed must keep reaching its LAN. A new
  * frame gets what was chosen when it was set up (the flashers send
  * `set allow_local_network 0|1`). See docs/lan-access.md and fos_netguard.h. */

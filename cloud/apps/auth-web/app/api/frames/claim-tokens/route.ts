@@ -75,9 +75,10 @@ export async function POST(request: NextRequest) {
     timezoneCandidate && isValidTimeZoneName(timezoneCandidate)
       ? timezoneCandidate
       : null;
-  // The install-script path's "LAN access" choice (docs/lan-access.md). Only
-  // a boolean counts; anything else leaves it to the device, like the SD card
-  // and USB paths that carry the choice themselves.
+  // Local network access for an install-script frame: Add frame sends false,
+  // since new frames start with it off (docs/lan-access.md). Only a boolean
+  // counts; anything else leaves it to the device, like the SD card and USB
+  // paths that carry the value themselves.
   const lanAccess = typeof body.lan_access === "boolean" ? body.lan_access : null;
 
   // Re-enrollment: bind the token to one of the account's own frames.

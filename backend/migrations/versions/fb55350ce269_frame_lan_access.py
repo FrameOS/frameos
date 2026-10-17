@@ -1,4 +1,4 @@
-"""frame.lan_access: the frame-level LAN access switch
+"""frame.lan_access: the frame-level local network access switch
 
 Revision ID: fb55350ce269
 Revises: 5e2a9c71d4b8
@@ -10,10 +10,9 @@ truth (state/local_access.json, ESP32 NVS `lan_access`); this column mirrors
 it, seeds a new frame (frame.json `network.lanAccess`, ESP32 provisioning)
 and is what the backend's own renderer obeys for the frames it renders.
 
-Every frame that exists today keeps working: it gets LAN access ON, which is
+Every frame that exists today keeps working: it gets local network access ON, which is
 also what a device with no stored value reads. The database default stays ON
-for that reason; the ORM's default (a frame created from now on) is OFF
-unless the add-frame form turned it on.
+for that reason; the ORM's default (a frame created from now on) is OFF.
 
 The exception is a frame the backend renders itself and that has no device
 switch of its own: a virtual frame or a Pico thin client. Its scenes ran on

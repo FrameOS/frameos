@@ -30,7 +30,7 @@ def test_release_image_frame_uses_hotspot_without_wifi_credentials():
     assert frame_json["network"]["wifiHotspot"] == "bootOnly"
     assert frame_json["network"]["wifiHotspotSsid"] == "FrameOS-Setup"
     assert frame_json["device"] == "framebuffer"
-    # No LAN access seed on a generic card: the runtime's own default (or the
+    # No local network access seed on a generic card: the runtime's own default (or the
     # cloud personalization's lan_access=) decides.
     assert "lanAccess" not in frame_json["network"]
 

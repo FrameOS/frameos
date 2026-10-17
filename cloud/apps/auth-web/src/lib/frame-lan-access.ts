@@ -1,4 +1,4 @@
-// LAN access, the frame-level switch: when it is off, scene HTTP may not
+// Local network access, the frame-level switch: when it is off, scene HTTP may not
 // reach private/local addresses. The device holds the truth (its state file
 // on Linux, NVS on an ESP32) and reports it as `hardware.lanAccess` in hello
 // and in every `state`; the cloud keeps no column of its own. Turning it ON
@@ -48,13 +48,13 @@ export interface LanAccessRefusal {
 }
 
 // What each token means to the person at the screen. Short and plain: the
-// SPA shows `detail` inline in the LAN access dialog.
+// SPA shows `detail` inline in the local network access dialog.
 const refusals: Record<string, { status: number; detail: string }> = {
   // The device answered unknown_verb / unsupported_verb, or does not report
   // the switch at all.
   unsupported: { detail: "Update this frame's FrameOS first.", status: 409 },
   no_panel: { detail: "This frame has no screen to show a code on.", status: 409 },
-  invalid_lan_access: { detail: "Choose whether LAN access is on or off.", status: 400 },
+  invalid_lan_access: { detail: "Choose whether local network access is on or off.", status: 400 },
   code_required: { detail: "Enter the code showing on the frame.", status: 403 },
   invalid_code: { detail: "That code is not right. Check the frame and try again.", status: 403 },
   code_expired: { detail: "That code has expired. Show a new code on the frame.", status: 403 },
@@ -142,7 +142,7 @@ export type FrameCommandOutcome =
   | { state: "missing" };
 
 /**
- * The HTTP answer for a LAN access verb's outcome. Same shapes as the
+ * The HTTP answer for a local network access verb's outcome. Same shapes as the
  * self-hosted backend's routes (the shared SPA calls both):
  *
  *  - challenge acked: 200 {status: "shown", expires_in_seconds: 300}

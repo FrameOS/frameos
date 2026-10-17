@@ -1,4 +1,4 @@
-"""The frame-level LAN access switch on the self-hosted backend: the column
+"""The frame-level local network access switch on the self-hosted backend: the column
 and where it is set (creation, import, adoption mirror), what the device is
 handed (frame.json, ESP32 provisioning), and the two routes that change it
 (app/api/frame_lan_access.py) for each kind of frame."""
@@ -439,7 +439,7 @@ async def test_the_sync_status_read_mirrors_the_devices_switch(async_client, db,
         response = await async_client.get(f"/api/frames/{frame.id}/sync")
     assert response.status_code == 200, response.text
     assert response.json()["frame"]["lan_access"] is True
-    # Not a sync change: no "LAN access" row in the diff.
+    # Not a sync change: no "Local network access" row in the diff.
     changes = [change["path"] for section in response.json()["sync"]["sections"] for change in section["changes"]]
     assert not any("lan" in path.lower() for path in changes)
     db.refresh(frame)

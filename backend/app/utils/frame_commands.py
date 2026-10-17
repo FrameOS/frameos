@@ -39,7 +39,7 @@ from app.models.frame_command import FrameCommand
 COMMAND_TTL_SECONDS = 5 * 60
 # A firmware update notice keeps for a day (the cloud's updateNotifyTtlMs).
 UPDATE_NOTIFY_TTL_SECONDS = 24 * 60 * 60
-# A LAN access code request may wait for a sleeping frame a little longer
+# A local network access code request may wait for a sleeping frame a little longer
 # than the code it starts lives on the device (300 s); the cloud's
 # lanAccessChallengeTtlMs. lan_access_set keeps the base TTL.
 LAN_ACCESS_CHALLENGE_TTL_SECONDS = 10 * 60

@@ -1,4 +1,4 @@
-/* The LAN access code's state machine. See fos_lan_access.h. */
+/* The local network access code's state machine. See fos_lan_access.h. */
 #include "fos_lan_access.h"
 
 #include <string.h>

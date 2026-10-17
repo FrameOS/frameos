@@ -1,4 +1,4 @@
-## The private-network HTTP deny a frame with LAN access off runs under
+## The private-network HTTP deny a frame with local network access off runs under
 ## (docs/lan-access.md): classifier ranges, enforcement at the request
 ## chokepoint, the control-plane exemptions and the error a scene sees. Runs a
 ## local mummy server as the "private" target. Which frames get the deny is
@@ -96,19 +96,19 @@ suite "local network policy enforcement":
       message = error.msg
     # The SPA's logs panel matches the start to link to the setting, and the
     # ESP32 says the same words: both ends are a contract.
-    check message.startsWith("LAN access is off for this frame")
-    check message.endsWith("Turn on LAN access in the frame settings.")
-    check message == "LAN access is off for this frame, so 127.0.0.1 cannot be reached. " &
-      "Turn on LAN access in the frame settings."
+    check message.startsWith("Local network access is off for this frame")
+    check message.endsWith("Turn on local network access in the frame settings.")
+    check message == "Local network access is off for this frame, so 127.0.0.1 cannot be reached. " &
+      "Turn on local network access in the frame settings."
 
   test "the refusal names the host and the address it resolved to":
     check lanAccessOffMessage("homeassistant.local", "192.168.1.5") ==
-      "LAN access is off for this frame, so homeassistant.local (192.168.1.5) cannot be reached. " &
-      "Turn on LAN access in the frame settings."
+      "Local network access is off for this frame, so homeassistant.local (192.168.1.5) cannot be reached. " &
+      "Turn on local network access in the frame settings."
     # A literal address is not repeated.
     check lanAccessOffMessage("10.0.0.5", "10.0.0.5") ==
-      "LAN access is off for this frame, so 10.0.0.5 cannot be reached. " &
-      "Turn on LAN access in the frame settings."
+      "Local network access is off for this frame, so 10.0.0.5 cannot be reached. " &
+      "Turn on local network access in the frame settings."
 
   test "policy active: a name is checked by what it resolves to":
     setLocalNetworkPolicy(true)
@@ -118,7 +118,7 @@ suite "local network policy enforcement":
       check false
     except IOError as error:
       message = error.msg
-    check message.startsWith("LAN access is off for this frame, so localhost (")
+    check message.startsWith("Local network access is off for this frame, so localhost (")
     # Exempting the name exempts exactly that name and port, as the backend's
     # serverHost:serverPort is.
     setLocalNetworkPolicy(true, @["LOCALHOST:" & $TestPort])

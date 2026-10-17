@@ -22,7 +22,6 @@ import {
 } from '../lib/release-signing'
 import { useValues } from 'kea'
 import { SshKeysSection } from '../../../frontend/src/components/sshKeys/SshKeysSection'
-import { LanAccessToggle } from './LanAccessToggle'
 import { sshKeysLogic } from '../../../frontend/src/components/sshKeys/sshKeysLogic'
 
 // The zone the card's frame should keep its clock in: the browser's, since
@@ -264,7 +263,8 @@ export function SdImageBuilder({
         // enough to say so. Unknown board = no seed, and the select holds its
         // "Pick a board…" placeholder.
         buildrootPlatform?: string | undefined
-        // The frame's current LAN access, so a new card keeps it.
+        // The frame's current local network access, so a new card keeps it. A new
+        // frame's card writes off (docs/lan-access.md).
         lanAccess?: boolean | undefined
       }
     | undefined
@@ -284,8 +284,9 @@ export function SdImageBuilder({
   // access point on 2.4 GHz channel 12 or 13 (common in Europe).
   const [wifiCountry, setWifiCountry] = useState(() => browserWifiCountry())
   const [rememberWifi, setRememberWifi] = useState(remembered !== undefined)
-  // Off unless chosen: scenes on a new frame cannot reach local addresses.
-  const [lanAccess, setLanAccess] = useState(reenrollFrame?.lanAccess === true)
+  // Off for a new frame: its scenes cannot reach local addresses until the
+  // frame settings turn local network access on with the code from the panel.
+  const lanAccess = reenrollFrame?.lanAccess === true
   // Console login on the device: either a real root password (written into
   // the image in-browser, applied via chpasswd on first boot — which also
   // re-enables SSH password login), or an explicit opt-in to the image
@@ -971,7 +972,6 @@ export function SdImageBuilder({
               />
               Remember WiFi credentials in this browser (never sent to the cloud)
             </label>
-            <LanAccessToggle disabled={building} value={lanAccess} onChange={setLanAccess} />
           </FormGroup>
           <FormGroup
             title="Root access"

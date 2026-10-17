@@ -12,8 +12,8 @@
  * (backend/app/tasks/tests/test_esp32_netguard.py does exactly that in CI.)
  *
  * The bias under test is one-directional, like the SD probe next door but for
- * the opposite reason: a wrong "public" lets a scene on a frame with LAN
- * access off reach the owner's router, a wrong "private" costs a scene one
+ * the opposite reason: a wrong "public" lets a scene on a frame with local
+ * network access off reach the owner's router, a wrong "private" costs a scene one
  * unreachable host. So
  * every input this cannot parse must come back private, and most of the cases
  * below assert exactly that.
@@ -421,18 +421,18 @@ static void test_block_message(void)
 {
     /* docs/lan-access.md: the SPA matches the prefix to offer a link to the
      * setting, and the owner acts on the last sentence. The glue formats
-     * FOS_NETGUARD_BLOCK_FMT into 192 bytes with a reason of at most 95
+     * FOS_NETGUARD_BLOCK_FMT into 224 bytes with a reason of at most 95
      * characters: both ends always survive. */
-    const char *prefix = "LAN access is off for this frame";
-    const char *suffix = "Turn on LAN access in the frame settings.";
-    char msg[192];
+    const char *prefix = "Local network access is off for this frame";
+    const char *suffix = "Turn on local network access in the frame settings.";
+    char msg[224];
 
     snprintf(msg, sizeof(msg), FOS_NETGUARD_BLOCK_FMT, "", "192.168.1.5 is a private address");
-    CHECK(strcmp(msg, "LAN access is off for this frame (192.168.1.5 is a private address). "
-                      "Turn on LAN access in the frame settings.") == 0, "plain: %s", msg);
+    CHECK(strcmp(msg, "Local network access is off for this frame (192.168.1.5 is a private address). "
+                      "Turn on local network access in the frame settings.") == 0, "plain: %s", msg);
     snprintf(msg, sizeof(msg), FOS_NETGUARD_BLOCK_FMT, "redirect: ", "10.0.0.1 is a private address");
-    CHECK(strcmp(msg, "LAN access is off for this frame (redirect: 10.0.0.1 is a private "
-                      "address). Turn on LAN access in the frame settings.") == 0,
+    CHECK(strcmp(msg, "Local network access is off for this frame (redirect: 10.0.0.1 is a private "
+                      "address). Turn on local network access in the frame settings.") == 0,
           "redirect: %s", msg);
 
     char long_reason[96];
@@ -474,7 +474,7 @@ int main(void)
     test_unresolvable_is_not_a_block();
     test_block_message();
 
-    /* Leave the guard off: a test binary is a frame with LAN access on. */
+    /* Leave the guard off: a test binary is a frame with local network access on. */
     fos_netguard_set_policy(false);
     fos_netguard_clear_exempt();
 

@@ -105,8 +105,8 @@ proc addAdminApiRoutes*(router: var Router) =
         respondInternalError(request, "settings:update:error", error, "Failed to save the settings")
   )
 
-  # ---- LAN access (the panel-code ceremony) ---------------------------------
-  # docs/lan-access.md: turning the frame's LAN access on takes more than an
+  # ---- Local network access (the panel-code ceremony) ---------------------------------
+  # docs/lan-access.md: turning the frame's local network access on takes more than an
   # admin session, which is only a password on a LAN-reachable page, or the
   # backend's key, which is only a deploy: ask for a challenge, read the six
   # digits off the panel, send them back. Turning it off takes nothing more.

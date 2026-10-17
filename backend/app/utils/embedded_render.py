@@ -141,8 +141,8 @@ async def render_scene_rgba_and_state(
         "timeZone": frame_timezone(frame.timezone),
         "settingsJson": json.dumps(settings or {}),
         "scenesJson": json.dumps(scenes, separators=(",", ":")),
-        # Scene HTTP on this frame may reach the LAN only with the frame's LAN
-        # access switch on — the same switch the device runtimes obey
+        # Scene HTTP on this frame may reach the LAN only with the frame's local
+        # network access switch on — the same switch the device runtimes obey
         # (frame.lan_access). The renderer runs on the backend's network, so
         # this is what keeps a published scene away from the router, HA and
         # the NAS.

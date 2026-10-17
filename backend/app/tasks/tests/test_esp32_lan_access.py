@@ -9,7 +9,7 @@ from typing import TypedDict
 import pytest
 
 # Runs embedded/esp32/main/tests/test_fos_lan_access.c and
-# test_fos_panel_draw.c: the ESP32 half of the LAN access switch
+# test_fos_panel_draw.c: the ESP32 half of the local network access switch
 # (docs/lan-access.md).
 #
 # test_fos_lan_access.c drives the code's state machine with an injected clock

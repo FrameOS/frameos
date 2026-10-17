@@ -285,7 +285,7 @@ const char *fos_cloud_ws_url(void) { return s_ws_url; }
 
 /* --------------------------------------------- private-network egress policy */
 
-/* docs/lan-access.md: one switch per frame, LAN access, decides whether scene
+/* docs/lan-access.md: one switch per frame, local network access, decides whether scene
  * HTTP may reach private/link-local addresses — on every frame, standalone,
  * backend-managed or cloud-managed alike (before the switch the deny applied
  * only while cloud-managed or rendering cloud-pushed scenes). The value is
@@ -349,7 +349,7 @@ static uint32_t exempt_signature(const fos_config_t *config)
  * and once from fos_cloud_start before that task exists. */
 static void apply_network_policy(void)
 {
-    /* 0 = LAN access on, 1 = off, -1 = nothing logged yet. */
+    /* 0 = local network access on, 1 = off, -1 = nothing logged yet. */
     static int logged_state = -1;
     static bool exempt_built = false;
     static uint32_t exempt_built_for = 0;
@@ -378,7 +378,7 @@ static void apply_network_policy(void)
     if (state != logged_state) {
         /* ESP_LOGW, not LOGI: LOGI is compiled out in every profile and a
          * change of this must be visible on the serial stream. */
-        ESP_LOGW(TAG, "LAN access %s", state ? "off: scene HTTP to private addresses is blocked"
+        ESP_LOGW(TAG, "Local network access %s", state ? "off: scene HTTP to private addresses is blocked"
                                               : "on");
         logged_state = state;
     }
@@ -480,7 +480,7 @@ static void add_hardware_json(cJSON *parent)
      * panel shows as "on the frame". */
     cJSON_AddNumberToObject(hw, "buzzerPin", config->buzzer_pin);
     cJSON_AddNumberToObject(hw, "buzzerToneHz", config->buzzer_tone_hz);
-    /* The LAN access switch (docs/lan-access.md): the cloud has no column of
+    /* The local network access switch (docs/lan-access.md): the cloud has no column of
      * its own and shows what the frame reports here, on every hello and
      * every `state` (one follows each lan_access_set). */
     cJSON_AddBoolToObject(hw, "lanAccess", config->allow_local_network);
@@ -2716,7 +2716,7 @@ static bool backend_verb_allowed(const char *type)
     return false;
 }
 
-/* ------------------------------------------------------ LAN access verbs
+/* ------------------------------------------------------ Local network access verbs
  *
  * docs/lan-access.md. Turning the switch on from a control plane takes the
  * code the frame draws on its panel (fos_lan_access.h, drawn by fos_client.c
@@ -2935,7 +2935,7 @@ void fos_cloud_add_state_fields(cJSON *msg)
     add_state_fields(msg, &snap, false);
     nim_snapshot_release(&snap);
     /* The backend's commands pull and every ack carry no hardware block; the
-     * LAN access switch rides here instead, so the backend's frame.lan_access
+     * Local network access switch rides here instead, so the backend's frame.lan_access
      * follows the device after each lan_access_set (docs/lan-access.md). */
     cJSON_AddBoolToObject(msg, "lan_access", fos_config()->allow_local_network);
 }
@@ -3506,7 +3506,7 @@ static void ws_clear_demote_request(void) {}
  * re-enroll) and keep rendering the last pushed scenes. Local admin surfaces
  * are untouched, so this can never lock the owner out of the device.
  *
- * The LAN access switch is the frame's, not the link's: a demotion leaves it
+ * The local network access switch is the frame's, not the link's: a demotion leaves it
  * as it was (apply_network_policy() reads only the switch). */
 static void cloud_demote(const char *reason)
 {
@@ -3663,7 +3663,7 @@ esp_err_t fos_cloud_start(void)
     if (s_task != NULL) return ESP_OK;
     /* Read the stored link state and arm the private-network policy here, not
      * in the task: main() brings the render loop up immediately after this
-     * call, and a frame with LAN access off must not get to run even one
+     * call, and a frame with local network access off must not get to run even one
      * scene HTTP request in the window before the task is first scheduled.
      * Both are pure NVS reads plus string work — nothing that needs a task
      * context. Runs on every frame, enrolled or not. */

@@ -13,7 +13,7 @@ import { LAN_ACCESS_CODE_LENGTH, lanAccessLogic } from '../lanAccessLogic'
 import { SectionBody, SectionHeading } from './FrameSettingsSection'
 
 /**
- * The frame's LAN access switch. It sits in the frame form for its place next
+ * The frame's local network access switch. It sits in the frame form for its place next
  * to Network but binds no field: the device changes the value, a code on its
  * panel to turn it on (lanAccessLogic).
  */
@@ -28,8 +28,8 @@ export function LanAccessSection(): JSX.Element {
     <>
       <SectionHeading id={LAN_ACCESS_SETTINGS_ANCHOR}>
         <span className="inline-flex items-center gap-1.5">
-          LAN access
-          <Tooltip label="LAN access help" titleClassName="w-72" title={LAN_ACCESS_HELP} />
+          Local network access
+          <Tooltip label="Local network access help" titleClassName="w-72" title={LAN_ACCESS_HELP} />
         </span>
       </SectionHeading>
       <SectionBody>
@@ -59,7 +59,7 @@ export function LanAccessSection(): JSX.Element {
             </div>
             {unknown ? (
               <div className="frameos-muted text-xs" data-testid="lan-access-unknown">
-                This frame does not report LAN access yet. Update its FrameOS first.
+                This frame does not report local network access yet. Update its FrameOS first.
               </div>
             ) : null}
             {pendingNote ? <div className="frameos-muted text-xs">{pendingNote}</div> : null}
@@ -91,13 +91,13 @@ function LanAccessModal({ frameId }: { frameId: FrameId }): JSX.Element | null {
   const codeAsked = phase === 'shown' || phase === 'queued' || phase === 'confirming'
 
   return (
-    <Modal open onClose={closeModal} title="Turn on LAN access" panelClassName="max-w-[480px]">
+    <Modal open onClose={closeModal} title="Turn on local network access" panelClassName="max-w-[480px]">
       <form onSubmit={handleSubmit} className="space-y-4 p-5" data-testid="lan-access-modal">
         {finished ? (
           <p className="text-sm">
             {phase === 'done'
-              ? 'LAN access is on.'
-              : 'The frame checks the code when it wakes up. LAN access turns on if it matches.'}
+              ? 'Local network access is on.'
+              : 'The frame checks the code when it wakes up. Local network access turns on if it matches.'}
           </p>
         ) : codeAsked ? (
           <>
@@ -122,7 +122,7 @@ function LanAccessModal({ frameId }: { frameId: FrameId }): JSX.Element | null {
             </label>
           </>
         ) : (
-          <p className="text-sm">The frame shows a code on its screen. Type it here to turn LAN access on.</p>
+          <p className="text-sm">The frame shows a code on its screen. Type it here to turn local network access on.</p>
         )}
         {error ? (
           <div className="text-sm text-red-400" role="alert">

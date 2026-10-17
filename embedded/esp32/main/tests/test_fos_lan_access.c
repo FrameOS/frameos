@@ -1,5 +1,5 @@
 /*
- * Host tests for the LAN access code (fos_lan_access.c): the state machine
+ * Host tests for the local network access code (fos_lan_access.c): the state machine
  * behind `lan_access_challenge` / `lan_access_set` (docs/lan-access.md). The
  * clock and the RNG are injected, so expiry, attempts and the rejection
  * sampling are all driven from here.

@@ -1,4 +1,4 @@
-// The frame-level LAN access switch on a cloud-managed frame: the two routes
+// The frame-level local network access switch on a cloud-managed frame: the two routes
 // (POST /api/frames/{id}/lan_access/challenge, POST /api/frames/{id}/lan_access)
 // enqueue their verb on the real command queue and wait for the device's
 // ack, which a fake device writes the way the hub would. Shapes: the routes'
@@ -310,7 +310,7 @@ describe("POST /api/frames/{id}/lan_access", () => {
 });
 
 describe("the generic command route", () => {
-  it("does not send either LAN access verb", async () => {
+  it("does not send either local network access verb", async () => {
     const frame = await activeFrame();
     for (const type of ["lan_access_challenge", "lan_access_set"]) {
       const response = await sendCommand(
