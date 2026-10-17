@@ -330,9 +330,15 @@ describe('weather', () => {
 
 ### The export that runs
 
+Where the node sits decides the call, not the category: a node in a flow gets
+`run()`, a node that feeds a field gets `get()`, and the other export is never
+called. A `get()`-only app in a button flow does nothing at all; from FrameOS
+2026.10.16 the frame's log says that the app has no `run()` (or no `get()`).
+
 | category | export the runtime calls | how the node is wired |
 |---|---|---|
-| `data` / `logic` | `export function get(app, context)` → returns the `output` value (string, json, or `frameos.svg`/`frameos.image` for an image) | `codeNodeEdge` from `fieldOutput` into another node's `fieldInput/<field>` (e.g. `render/image`'s `image`) |
+| `data` | `export function get(app, context)` → returns the `output` value (string, json, or `frameos.svg`/`frameos.image` for an image) | `codeNodeEdge` from `fieldOutput` into another node's `fieldInput/<field>` (e.g. `render/image`'s `image`) |
+| `logic` | `export function run(app, context)` → returns nothing; acts with `frameos.setState`, `frameos.setNextSleep`, … | in a flow: `appNodeEdge` from an event node's `next` (or the node before it) into its `prev`, e.g. `button` → the app → a `render` dispatch |
 
 `export function init(app)` is optional and runs each time the app's
 interpreter starts: once per scene on a Pi, before every render on an ESP32

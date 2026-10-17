@@ -262,6 +262,22 @@ export const cases: EvalCase[] = [
     tags: ["modify", "fields"],
   },
   {
+    // A button flow is run(), not get(): the chess puzzle's toggle app
+    // exported get() and the press did nothing (2026-10-17).
+    checks: [
+      { type: "delivered", tool: "modify_scene" },
+      { type: "lint_clean" },
+      { type: "preserves_node_ids", minFraction: 0.8 },
+      { type: "preserves_fields" },
+      { type: "flow_sets_state", event: "button" },
+      { type: "render_ok" },
+    ],
+    id: "modify-weather-button-unit",
+    prompt: "When someone presses a button on the frame, switch between Celsius and Fahrenheit and redraw.",
+    seedSlug: "weather",
+    tags: ["modify", "events"],
+  },
+  {
     checks: [
       { type: "delivered", tool: "modify_scene" },
       { type: "lint_clean" },

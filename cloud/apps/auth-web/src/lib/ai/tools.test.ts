@@ -213,8 +213,9 @@ describe("create_scenes delivery", () => {
 // running it, the editor showed no change, and the reply described a toggle
 // node in the button flow. An app no node runs now bounces back to the model.
 describe("patch_scene and scene apps no node runs", () => {
+  // run(), not get(): the node sits in a button flow (scene-lint's flow rule).
   const toggleApp = {
-    sources: { "app.ts": "export function get(app) {\n  frameos.setState('revealed', true)\n  return null\n}\n" },
+    sources: { "app.ts": "export function run(app) {\n  frameos.setState('revealed', !app.state.revealed)\n}\n" },
   };
 
   function current(apps?: Record<string, unknown>): Record<string, unknown> {

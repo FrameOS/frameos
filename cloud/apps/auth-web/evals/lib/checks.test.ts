@@ -80,3 +80,51 @@ describe("code_nodes_min", () => {
     expect(result.passed).toBe(false);
   });
 });
+
+describe("flow_sets_state", () => {
+  const buttonScene = (nodes: unknown[], apps: Record<string, unknown> = {}) => ({
+    apps,
+    edges: [
+      { id: "b1", source: "button", sourceHandle: "next", target: "act", targetHandle: "prev", type: "appNodeEdge" },
+      { id: "b2", source: "act", sourceHandle: "next", target: "redraw", targetHandle: "prev", type: "appNodeEdge" },
+    ],
+    nodes: [
+      event,
+      { data: { keyword: "button" }, id: "button", type: "event" },
+      ...nodes,
+      { data: { config: {}, keyword: "render" }, id: "redraw", type: "dispatch" },
+    ],
+  });
+  const toggleApp = (source: string) => ({ toggle: { sources: { "app.ts": source, "config.json": "{}" } } });
+  const toggleNode = { data: { config: {}, keyword: "toggle" }, id: "act", type: "app" };
+
+  it("passes for a run() app that sets state and for logic/setAsState", () => {
+    const viaRun = run({ event: "button", type: "flow_sets_state" }, [
+      buttonScene([toggleNode], toggleApp("export function run(app) { frameos.setState('unit', 'f') }")),
+    ]);
+    expect(viaRun.passed).toBe(true);
+    expect(viaRun.detail).toContain("scene app toggle (act)");
+    const viaApp = run({ event: "button", type: "flow_sets_state" }, [
+      buttonScene([{ data: { config: { stateKey: "unit" }, keyword: "logic/setAsState" }, id: "act", type: "app" }]),
+    ]);
+    expect(viaApp.passed).toBe(true);
+  });
+
+  it("fails for the get()-only app the frame never calls in a flow", () => {
+    const result = run({ event: "button", type: "flow_sets_state" }, [
+      buttonScene([toggleNode], toggleApp("export function get(app) { frameos.setState('unit', 'f'); return null }")),
+    ]);
+    expect(result.passed).toBe(false);
+    expect(result.detail).toContain("toggle (act, no run())");
+  });
+
+  it("fails without a button event node or without a state change", () => {
+    expect(run({ event: "button", type: "flow_sets_state" }, [{ nodes: [event, renderImage] }]).detail).toBe(
+      'no "button" event node',
+    );
+    const redrawOnly = run({ event: "button", type: "flow_sets_state" }, [
+      buttonScene([{ data: { config: {}, keyword: "render" }, id: "act", type: "dispatch" }]),
+    ]);
+    expect(redrawOnly.passed).toBe(false);
+  });
+});

@@ -23,6 +23,12 @@ export type Check =
   | { type: "code_nodes_min"; min: number }
   /** The scene draws with SVG, by any route; `orApps` lists apps that satisfy the request just as well. */
   | { type: "draws_svg"; orApps?: string[] }
+  /**
+   * An `event` node with this keyword starts a flow that changes state (logic/setAsState, a
+   * setSceneState dispatch, or a scene-local JS app whose run() calls frameos.setState), and no
+   * JS app in that flow lacks the run() the frame calls there.
+   */
+  | { type: "flow_sets_state"; event: string }
   | { type: "scene_count"; min?: number; max?: number }
   | { type: "json_matches"; pattern: string; flags?: string }
   | { type: "json_not_matches"; pattern: string; flags?: string }

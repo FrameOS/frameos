@@ -57,18 +57,21 @@ schedule.
 Every edge is `{ id, source, target, sourceHandle, targetHandle, type }`, and
 both ends must be nodes of the scene. There are two kinds:
 
-- **The render flow** (`type: "appNodeEdge"`, `sourceHandle: "next"` →
-  `targetHandle: "prev"`): the `render` event node, then each render or logic
-  app in order. It is one straight chain: never point two `next` edges at one
-  `prev`. The apps in it draw on one shared canvas, in order, so never pass the
-  canvas between them through fields.
+- **Flows** (`type: "appNodeEdge"`, `sourceHandle: "next"` →
+  `targetHandle: "prev"`): every `event` node starts one, and the frame runs
+  its nodes in order. The render flow starts at the `render` event node and
+  holds the render and logic apps that draw; a flow from another event
+  (`button`, `tap`, a custom event) holds logic apps and `dispatch` nodes. A
+  flow is one straight chain: never point two `next` edges at one `prev`. The
+  apps in the render flow draw on one shared canvas, in order, so never pass
+  the canvas between them through fields.
 - **Values** (`type: "codeNodeEdge"`, `sourceHandle: "fieldOutput"`): a node's
   output into an app field (`targetHandle: "fieldInput/<field>"`) or into a
   code node argument (`targetHandle: "codeField/<arg>"`). Code, state and data
   nodes connect only this way, and their source handle is exactly
   `fieldOutput`, never `fieldOutput/<name>`.
 
-Data apps (category `data`) are never in the render flow; they feed values.
+Data apps (category `data`) are never in a flow; they feed values.
 Images are values too: to show one, put a `render/image` app in the render
 flow and wire the image into its `image` field. Never put a data app that
 makes an image straight into the render flow, and never keep an image in
@@ -218,15 +221,25 @@ the app's own files resolve: no npm packages, no `require()`, no dynamic
 apps small: a scene carries a copy of every app it uses, and an ESP32 keeps
 all its scenes in 512 KiB.
 
-**Exports.**
+**Exports.** Where the app's node sits decides which function the frame
+calls, and it calls no other:
 
-- A `data` app exports `get(app, context)`, which returns the value its
-  `output` names: a string, JSON, or for an image `frameos.svg(...)`,
-  `frameos.image(...)` or an image from `frameos.fetchImage`. It is not in the
-  render flow: wire its output into `render/image`'s `image` field or another
-  node's input.
-- A `logic` app in the render flow exports `run(app, context)`, for what it
-  does rather than returns (state, the next sleep).
+- A node that feeds a field (`fieldOutput` → `fieldInput/<field>`) calls
+  `get(app, context)`. That is a `data` app: `get` returns the value its
+  `output` names, a string, JSON, or for an image `frameos.svg(...)`,
+  `frameos.image(...)` or an image from `frameos.fetchImage`. To show an
+  image, wire it into `render/image`'s `image` field.
+- A node in a flow (after an event node, `next` → `prev`) calls
+  `run(app, context)`. That is a `logic` app: `run` returns nothing and acts,
+  with `frameos.setState`, `frameos.setNextSleep` and the like.
+- So a `get()` app in a flow does nothing, and a `run()` app feeding a field
+  gives an empty value. Write the one its node needs.
+- A button that changes the picture is a flow of its own: the `button` event
+  node, a logic app, then a `dispatch` node with `keyword: "render"`. The
+  app's `app.ts` is
+  `export function run(app) { frameos.setState("revealed", !app.state.revealed) }`,
+  and the render flow reads `revealed` from state. `logic/setAsState` does the
+  same for one value without a JS app.
 - Never make a JS app with category `render`: it draws nothing.
 - `init(app)` is optional and runs each time the app's interpreter starts:
   once per scene on a Pi, before every render on an ESP32 and in a preview
@@ -691,8 +704,8 @@ declare const console: {
 - Every code node argument is declared in `codeArgs` and fed by an edge.
 - Images go only into image fields; nothing keeps an image in state.
 - Time formats in code nodes use `{hour/2}`-style tokens.
-- JS apps are data apps exporting `get` (wired into `render/image`) or logic
-  apps exporting `run`.
+- A JS app whose node feeds a field is a `data` app exporting `get`; one whose
+  node sits in a flow, after any event node, is a `logic` app exporting `run`.
 - A JS app keeps what must outlast a render with `frameos.remember` (private)
   or `frameos.setState` (shared), never in a module variable.
 - SVG uses only the supported tags, gradients use `userSpaceOnUse`, and every

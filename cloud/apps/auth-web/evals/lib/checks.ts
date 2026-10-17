@@ -1,7 +1,7 @@
 // Deterministic checks over what the agent delivered. Each returns a
 // CheckResult with a one-line detail so a failing eval explains itself in
 // the report without opening the JSON.
-import type { LintResult } from "../../src/lib/ai/scene-lint";
+import { moduleExports, type LintResult } from "../../src/lib/ai/scene-lint";
 import type { Check, CheckResult, JudgeVerdict, RenderSummary } from "./types";
 
 type JsonObject = Record<string, unknown>;
@@ -109,6 +109,62 @@ function svgRoute(scenes: unknown[]): string | null {
   return codeNode ? `code node ${String(codeNode.id)}` : null;
 }
 
+// What the flows an event starts do to state, walking next -> prev (and
+// field/<slot> -> prev) edges from its event nodes. A scene-local JS app in a
+// flow counts only when its run() is there to call: the frame calls nothing
+// else in a flow, so a get()-only app there is listed as inert.
+function flowStateWriters(scenes: unknown[], event: string): { found: boolean; writers: string[]; inert: string[] } {
+  const writers: string[] = [];
+  const inert: string[] = [];
+  let found = false;
+  for (const scene of scenes) {
+    const entry = obj(scene);
+    const apps = obj(entry?.apps) ?? {};
+    const nodes = new Map(nodesOf([scene]).map((node) => [String(node.id), node]));
+    const edges = Array.isArray(entry?.edges) ? entry.edges.map(obj).filter((edge): edge is JsonObject => Boolean(edge)) : [];
+    const next = new Map<string, string[]>();
+    for (const edge of edges) {
+      if (edge.targetHandle === "prev") {
+        next.set(String(edge.source), [...(next.get(String(edge.source)) ?? []), String(edge.target)]);
+      }
+    }
+    const stack = [...nodes.values()]
+      .filter((node) => node.type === "event" && obj(node.data)?.keyword === event)
+      .map((node) => String(node.id));
+    found ||= stack.length > 0;
+    const seen = new Set<string>();
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      if (seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+      stack.push(...(next.get(id) ?? []));
+      const node = nodes.get(id);
+      const keyword = obj(node?.data)?.keyword;
+      if (!node || node.type === "event" || typeof keyword !== "string") {
+        continue;
+      }
+      if ((node.type === "app" && keyword === "logic/setAsState") || (node.type === "dispatch" && keyword === "setSceneState")) {
+        writers.push(`${keyword} (${id})`);
+        continue;
+      }
+      const sources = obj(obj(apps[keyword])?.sources);
+      const main = Object.entries(sources ?? {}).find(([file]) => /^app\.(ts|tsx|js|jsx)$/.test(file))?.[1];
+      if (node.type !== "app" || typeof main !== "string") {
+        continue;
+      }
+      const exported = moduleExports(main);
+      if (exported && !exported.has("run")) {
+        inert.push(`${keyword} (${id}, no run())`);
+      } else if (/frameos\.setState\s*\(/.test(main)) {
+        writers.push(`scene app ${keyword} (${id})`);
+      }
+    }
+  }
+  return { found, inert, writers };
+}
+
 function regex(pattern: string, flags?: string): RegExp {
   return new RegExp(pattern, flags ?? "i");
 }
@@ -212,6 +268,18 @@ export function runCheck(check: Check, input: CheckInput): CheckResult {
       return alternative
         ? pass(`uses ${alternative}`)
         : fail(`no SVG drawn: no render/svg or jsSvg app, no frameos.svg(...) or <svg in a JS app or code node (has: ${[...new Set(used)].join(", ") || "none"})`);
+    }
+    case "flow_sets_state": {
+      const { found, inert, writers } = flowStateWriters(scenes, check.event);
+      if (!found) {
+        return fail(`no "${check.event}" event node`);
+      }
+      if (inert.length > 0) {
+        return fail(`the ${check.event} flow runs apps that do nothing there: ${inert.join(", ")}`);
+      }
+      return writers.length > 0
+        ? pass(`the ${check.event} flow sets state via ${writers.join(", ")}`)
+        : fail(`the ${check.event} flow changes no state (no logic/setAsState, setSceneState dispatch or run() calling frameos.setState)`);
     }
     case "scene_count": {
       const count = scenes.length;
