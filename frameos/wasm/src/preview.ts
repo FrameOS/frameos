@@ -43,6 +43,12 @@ function panelColors(panel: NonNullable<ReturnType<typeof panelPaletteFor>>): re
   return panel.colors
 }
 
+/** A preview button's payload: its label, when it has one. Listener nodes
+ * filter on it (a "button" listener with label "A" only hears `{label: "A"}`). */
+function buttonLabel(label: string | null): Record<string, unknown> {
+  return label ? { label } : {}
+}
+
 export interface FrameOSPreviewOptions {
   /** URL of the module worker script: `<assets>/preview-worker.js`. The
    * frameos.js/frameos.wasm files must live next to it (same directory) —
@@ -136,13 +142,15 @@ export class FrameOSPreview {
   private nextAssetRequestId = 1
   private appTestsRequests = new Map<number, PendingAppTestsRequest>()
   private nextAppTestsRequestId = 1
+  /** Labels of the buttons `buttonDown` pressed and `buttonUp` has not let go of. */
+  private heldButtons = new Set<string>()
 
   /** Latest scene info from the runtime (set once `ready` fires). */
   sceneInfo: SceneInfo | null = null
   /** How the runtime's /srv/assets is backed (set once `ready` fires). */
   assetsInfo: PreviewAssetsInfo | null = null
   /** Which FrameOS version the runtime is (set once `ready` fires). */
-  runtimeInfo: PreviewRuntimeInfo = { version: null, pointerEvents: false, inputEvents: false }
+  runtimeInfo: PreviewRuntimeInfo = { version: null, pointerEvents: false, inputEvents: false, buttonEdges: false }
   /** Latest public state of the current scene. */
   state: Record<string, unknown> = {}
   /** The scene currently selected in the runtime. */
@@ -199,6 +207,7 @@ export class FrameOSPreview {
           version: typeof msg.runtimeVersion === 'string' ? msg.runtimeVersion : null,
           pointerEvents: msg.pointerEvents === true,
           inputEvents: msg.inputEvents === true,
+          buttonEdges: msg.buttonEdges === true,
         }
         this.options.onReady?.(msg.sceneInfo, this.assetsInfo, this.runtimeInfo)
         break
@@ -329,6 +338,36 @@ export class FrameOSPreview {
   /** Dispatch a scene event (a custom event node's keyword, "button", ...). */
   sendEvent(name: string, payload: Record<string, unknown> = {}): void {
     this.worker?.postMessage({ type: 'event', name, payload })
+  }
+
+  /**
+   * A `button` held like a frame's key: call `buttonDown` when the pointer
+   * (or the keyboard) presses it and `buttonUp` when it lets go, and the
+   * scene gets the `down` and `up` edges as they happen (level 0 is down: the
+   * line is pulled up). The runtime adds the role and the `up`'s
+   * `durationMs`, and makes the `press`, `doublePress` or `longPress` the
+   * edges add up to. A preview button has no pin; the label tells keys apart.
+   * A bundle from before button edges (`runtimeInfo.buttonEdges`) gets one
+   * `button` for the whole press, on the release.
+   */
+  buttonDown(label: string | null): void {
+    const key = label ?? ''
+    if (this.heldButtons.has(key)) {
+      return
+    }
+    this.heldButtons.add(key)
+    if (this.runtimeInfo.buttonEdges) {
+      this.sendEvent('button', { ...buttonLabel(label), level: 0, action: 'down' })
+    }
+  }
+
+  /** The release of a key `buttonDown` pressed; nothing for one it did not. */
+  buttonUp(label: string | null): void {
+    if (!this.heldButtons.delete(label ?? '')) {
+      return
+    }
+    const payload = buttonLabel(label)
+    this.sendEvent('button', this.runtimeInfo.buttonEdges ? { ...payload, level: 1, action: 'up' } : payload)
   }
 
   /**

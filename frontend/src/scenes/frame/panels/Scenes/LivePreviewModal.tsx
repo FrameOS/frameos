@@ -151,9 +151,9 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
     previewError,
     previewLogs,
     previewState,
-    previewSceneEvents,
+    previewClickEvents,
     previewDimensions,
-    gpioButtons,
+    previewHeldButtons,
     wasmUnsupportedApps,
     storedKeysNotice,
     lastRenderMs,
@@ -171,8 +171,8 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
     setFastMode,
     dismissFastRenderRequest,
     openPreviewAssets,
-    pressGpioButton,
-    releaseGpioButton,
+    pressPreviewButton,
+    releasePreviewButton,
   } = useActions(livePreviewLogic({ frameId }))
   const { scenes: frameScenes, previewingSceneId } = useValues(scenesLogic({ frameId }))
   const { previewScene } = useActions(scenesLogic({ frameId }))
@@ -198,19 +198,6 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
   if (!livePreviewSceneId || !isModalOwner) {
     return null
   }
-
-  // GPIO buttons get their own dedicated buttons below. Hide "button"
-  // scene-event entries: the configured GPIO buttons cover them, and an
-  // unlabeled "button" entry sends an event no handler can distinguish.
-  const sceneEventButtons = previewSceneEvents.filter((event) => {
-    if (event.keyword !== 'button') {
-      return true
-    }
-    if (gpioButtons.length > 0) {
-      return false
-    }
-    return Boolean(event.label)
-  })
 
   const publicFields = sceneStateFields(livePreviewScene).filter((field) => field.access === 'public')
   const publicFieldNames = new Set(publicFields.map((field) => field.name))
@@ -437,7 +424,7 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
                 title="Let the scene render as often as it asks instead of once per second"
               />
             ) : null}
-            {sceneEventButtons.map((event) => (
+            {previewClickEvents.map((event) => (
               <Button
                 key={`${event.keyword}:${event.label ?? ''}`}
                 size="small"
@@ -448,21 +435,21 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
                 {event.label ? `: ${event.label}` : ''}
               </Button>
             ))}
-            {gpioButtons.map((button) => (
+            {previewHeldButtons.map((button) => (
               <Button
-                key={`gpio:${button.pin}`}
+                key={`held:${button.pin}:${button.label}`}
                 size="small"
                 color="secondary"
                 className="flex items-center gap-1"
-                title={`GPIO pin ${button.pin} — hold for a long press`}
-                // The two edges the device's GPIO driver sends: a press (level
-                // 0, the line is pulled up) while the mouse button is down, the
-                // release when it comes up. The runtime makes the long press
-                // and the repeats out of the hold, as on a frame.
-                onPointerDown={() => pressGpioButton(button)}
-                onPointerUp={() => releaseGpioButton(button)}
-                onPointerLeave={() => releaseGpioButton(button)}
-                onPointerCancel={() => releaseGpioButton(button)}
+                title={button.pin >= 0 ? `GPIO pin ${button.pin}: hold for a long press` : 'Hold for a long press'}
+                // The two edges a frame's GPIO driver sends: `down` (level 0,
+                // the line is pulled up) while the mouse button is down, `up`
+                // when it comes up. The runtime makes the press, double press
+                // or long press out of them, as on a frame.
+                onPointerDown={() => pressPreviewButton(button)}
+                onPointerUp={() => releasePreviewButton(button)}
+                onPointerLeave={() => releasePreviewButton(button)}
+                onPointerCancel={() => releasePreviewButton(button)}
               >
                 <CursorArrowRaysIcon className="h-4 w-4" />
                 {button.label || `GPIO ${button.pin}`}

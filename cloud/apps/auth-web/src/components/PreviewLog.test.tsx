@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PreviewLog } from "./PreviewLog";
 
@@ -91,5 +91,39 @@ describe("PreviewLog", () => {
     expect(rows[1]!.querySelector(".preview-log__event")!.textContent).toBe("error");
     expect(rows[1]!.querySelector(".preview-log__value")!.textContent).toBe("Worker crashed");
     expect(rows[2]!.classList.contains("preview-log__row--warn")).toBe(true);
+  });
+
+  it("starts three lines tall and grows when its bottom row is dragged down", () => {
+    // jsdom has no PointerEvent: a MouseEvent under the pointer event's name
+    // carries the clientY and button the handle reads.
+    const drag = (target: Element, type: string, clientY: number) => {
+      const event = new MouseEvent(type, { bubbles: true, button: 0, cancelable: true, clientY });
+      Object.defineProperty(event, "pointerId", { value: 1 });
+      act(() => {
+        target.dispatchEvent(event);
+      });
+    };
+    render(<PreviewLog lines={[]} />);
+    const box = screen.getByTestId("preview-log");
+    // The three lines are the stylesheet's; nothing inline until a drag.
+    expect(box.style.height).toBe("");
+    box.getBoundingClientRect = () => ({ height: 80 }) as DOMRect;
+    const handle = screen.getByRole("separator", { name: "Resize the log" });
+    handle.setPointerCapture = vi.fn();
+
+    drag(handle, "pointerdown", 100);
+    drag(handle, "pointermove", 220);
+    expect(box.style.height).toBe("200px");
+    // Never shorter than the three lines it started at.
+    drag(handle, "pointermove", 0);
+    expect(box.style.height).toBe("80px");
+    drag(handle, "pointerup", 0);
+    drag(handle, "pointermove", 400);
+    expect(box.style.height).toBe("80px");
+
+    fireEvent.keyDown(handle, { key: "ArrowDown" });
+    expect(box.style.height).toBe("100px");
+    fireEvent.doubleClick(handle);
+    expect(box.style.height).toBe("");
   });
 });

@@ -87,13 +87,14 @@ describe("FrameOSPreview init", () => {
     // bundle is a release asset and the preview shows "runtime <version>");
     // a worker that names none reports null rather than an absent field.
     expect(onReady).toHaveBeenCalledWith({ currentSceneId: "scene-1" }, browserAssets, {
+      buttonEdges: false,
       inputEvents: false,
       pointerEvents: false,
       version: null,
     });
     expect(preview.assetsInfo).toEqual(browserAssets);
     expect(preview.currentSceneId).toBe("scene-1");
-    expect(preview.runtimeInfo).toEqual({ inputEvents: false, pointerEvents: false, version: null });
+    expect(preview.runtimeInfo).toEqual({ buttonEdges: false, inputEvents: false, pointerEvents: false, version: null });
   });
 
   it("names the runtime version the worker reports", () => {
@@ -101,11 +102,17 @@ describe("FrameOSPreview init", () => {
     const { preview, worker } = makePreview({ onReady });
     worker.reply({ runtimeVersion: "2026.9.2", type: "ready" });
     expect(onReady).toHaveBeenLastCalledWith(undefined, null, {
+      buttonEdges: false,
       inputEvents: false,
       pointerEvents: false,
       version: "2026.9.2",
     });
-    expect(preview.runtimeInfo).toEqual({ inputEvents: false, pointerEvents: false, version: "2026.9.2" });
+    expect(preview.runtimeInfo).toEqual({
+      buttonEdges: false,
+      inputEvents: false,
+      pointerEvents: false,
+      version: "2026.9.2",
+    });
   });
 });
 
@@ -237,6 +244,46 @@ describe("FrameOSPreview pointer input", () => {
       ["mouseUp", { button: 0 }],
       ["mouseUp", { button: 1 }],
     ]);
+  });
+});
+
+// A preview button is held like a frame's key: its edges as they happen, and
+// the runtime makes the press, double press or long press out of them. The
+// cloud serves the LAST RELEASE's bundle, so a page can be newer than its
+// worker: one from before button edges gets one `button` per press.
+describe("FrameOSPreview buttons", () => {
+  it("sends a bundle that takes button edges the down and the up", () => {
+    const { preview, worker } = makePreview();
+    worker.reply({ buttonEdges: true, runtimeVersion: "2026.10.16", type: "ready" });
+    expect(preview.runtimeInfo.buttonEdges).toBe(true);
+    const sent = worker.messages.length;
+
+    preview.buttonDown("A");
+    // A second down while held (a key repeat, a second pointer) is not a press.
+    preview.buttonDown("A");
+    preview.buttonDown(null);
+    preview.buttonUp("A");
+    preview.buttonUp("A");
+    preview.buttonUp(null);
+    expect(worker.messages.slice(sent)).toEqual([
+      { name: "button", payload: { action: "down", label: "A", level: 0 }, type: "event" },
+      { name: "button", payload: { action: "down", level: 0 }, type: "event" },
+      { name: "button", payload: { action: "up", label: "A", level: 1 }, type: "event" },
+      { name: "button", payload: { action: "up", level: 1 }, type: "event" },
+    ]);
+  });
+
+  it("sends an older bundle one button per press, on the release", () => {
+    const { preview, worker } = makePreview();
+    worker.reply({ inputEvents: true, pointerEvents: true, runtimeVersion: "2026.10.15", type: "ready" });
+    const sent = worker.messages.length;
+
+    preview.buttonDown("A");
+    expect(worker.messages).toHaveLength(sent);
+    preview.buttonUp("A");
+    // An up with no down before it (a pointer that came from elsewhere) is nothing.
+    preview.buttonUp("B");
+    expect(worker.messages.slice(sent)).toEqual([{ name: "button", payload: { label: "A" }, type: "event" }]);
   });
 });
 

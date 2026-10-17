@@ -171,9 +171,12 @@ proc addButton(output: var seq[InputDelivery], origin: EventOrigin, pin: int, la
     payload["heldSeconds"] = %(durationMs div 1000)
   output.add(InputDelivery(name: evButton, origin: origin, payload: payload))
 
-proc keyFor(state: InputState, pin: int): int =
+proc keyFor(state: InputState, pin: int, label: string): int =
+  ## A key is its pin and its label. On a frame a pin's label never changes;
+  ## the preview's buttons have no pin at all (-1), and a tap on A then on B
+  ## is two presses, not a double press.
   for index, key in state.buttons:
-    if key.pin == pin:
+    if key.pin == pin and key.label == label:
       return index
   -1
 
@@ -225,7 +228,7 @@ proc button(state: var InputState, payload: JsonNode, origin: EventOrigin, now: 
   let down = if payload.isInt("level"): payload["level"].getInt() == 0 else: action == "down"
   let at = payload.seenAt(now)
   state.tickButtons(at, output) # a tap whose window closed before this edge is a press first
-  let index = state.keyFor(pin)
+  let index = state.keyFor(pin, label)
   if down:
     output.addButton(origin, pin, label, role, "down", atMs, level = 0, wake = wake)
     # A key still waiting out its window makes this down the double press;

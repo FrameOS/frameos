@@ -51,9 +51,9 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
     previewError,
     previewLogs,
     previewState,
-    previewSceneEvents,
+    previewClickEvents,
     previewDimensions,
-    gpioButtons,
+    previewHeldButtons,
     wasmUnsupportedApps,
     storedKeysNotice,
     lastRenderMs,
@@ -69,8 +69,8 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
     forcePreviewRender,
     openPreviewImage,
     setPreviewSettings,
-    pressGpioButton,
-    releaseGpioButton,
+    pressPreviewButton,
+    releasePreviewButton,
   } = useActions(livePreviewLogic({ frameId }))
   const { apps } = useValues(appsModel)
 
@@ -198,18 +198,6 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
       el.scrollTop = el.scrollHeight
     }
   }, [previewLogs])
-
-  // GPIO buttons get dedicated buttons; hide indistinguishable "button"
-  // scene-event entries (same rule as LivePreviewModal).
-  const sceneEventButtons = previewSceneEvents.filter((event) => {
-    if (event.keyword !== 'button') {
-      return true
-    }
-    if (gpioButtons.length > 0) {
-      return false
-    }
-    return Boolean(event.label)
-  })
 
   const publicFields = sceneStateFields(livePreviewScene).filter((field) => field.access === 'public')
   const publicFieldNames = new Set(publicFields.map((field) => field.name))
@@ -369,7 +357,7 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
           <CameraIcon className="h-4 w-4" />
           Save screenshot
         </Button>
-        {sceneEventButtons.map((event) => (
+        {previewClickEvents.map((event) => (
           <Button
             key={`${event.keyword}:${event.label ?? ''}`}
             size="small"
@@ -380,17 +368,17 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
             {event.label ? `: ${event.label}` : ''}
           </Button>
         ))}
-        {gpioButtons.map((button) => (
+        {previewHeldButtons.map((button) => (
           <Button
-            key={`gpio:${button.pin}`}
+            key={`held:${button.pin}:${button.label}`}
             size="small"
             color="secondary"
             className="flex items-center gap-1"
-            title={`GPIO pin ${button.pin} — hold for a long press`}
-            onPointerDown={() => pressGpioButton(button)}
-            onPointerUp={() => releaseGpioButton(button)}
-            onPointerLeave={() => releaseGpioButton(button)}
-            onPointerCancel={() => releaseGpioButton(button)}
+            title={button.pin >= 0 ? `GPIO pin ${button.pin}: hold for a long press` : 'Hold for a long press'}
+            onPointerDown={() => pressPreviewButton(button)}
+            onPointerUp={() => releasePreviewButton(button)}
+            onPointerLeave={() => releasePreviewButton(button)}
+            onPointerCancel={() => releasePreviewButton(button)}
           >
             <CursorArrowRaysIcon className="h-4 w-4" />
             {button.label || `GPIO ${button.pin}`}

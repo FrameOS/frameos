@@ -62,6 +62,8 @@ vi.mock("frameos-wasm", async (importOriginal) => ({
     destroy = vi.fn();
     render = vi.fn();
     sendEvent = vi.fn();
+    buttonDown = vi.fn();
+    buttonUp = vi.fn();
     setSceneState = vi.fn();
     selectScene = vi.fn();
     attachCanvas = vi.fn();
@@ -365,6 +367,55 @@ describe("SceneLivePreviewPanel pointer input", () => {
       ["mouseMove", { x: 0, y: 32767 }],
       ["mouseDown", { button: 1 }],
     ]);
+  });
+
+  it("holds a scene's button like the frame's key, and clicks any other event", async () => {
+    const scene = {
+      ...clockScene,
+      nodes: [
+        { data: { config: { label: "A" }, keyword: "button" }, id: "listen-a", type: "event" },
+        { data: { keyword: "nextPage" }, id: "listen-next", type: "event" },
+      ],
+    };
+    render(<SceneLivePreviewPanel height={600} sceneId="scene-1" scenes={[scene]} width={800} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    const preview = previews[0]! as unknown as {
+      buttonDown: ReturnType<typeof vi.fn>;
+      buttonUp: ReturnType<typeof vi.fn>;
+      sendEvent: ReturnType<typeof vi.fn>;
+      options: { onReady: (info: unknown, assets: unknown, runtime: unknown) => void };
+    };
+    act(() =>
+      preview.options.onReady({ currentSceneId: "scene-runtime-1" }, null, {
+        buttonEdges: true,
+        inputEvents: true,
+        pointerEvents: true,
+        version: "2026.10.16",
+      }),
+    );
+    const held = await screen.findByRole("button", { name: "A" });
+    held.setPointerCapture = vi.fn();
+
+    // Down while the pointer is down, up when it lets go: the edges, so the
+    // runtime can tell a tap from a double press or a long press.
+    firePointer(held, "pointerdown", { button: 0, buttons: 1 });
+    expect(held.setPointerCapture).toHaveBeenCalledWith(1);
+    expect(preview.buttonDown.mock.calls).toEqual([["A"]]);
+    expect(preview.buttonUp).not.toHaveBeenCalled();
+    firePointer(held, "pointerup", { button: 0 });
+    expect(preview.buttonUp.mock.calls).toEqual([["A"]]);
+    // The right button is not a press.
+    firePointer(held, "pointerdown", { button: 2, buttons: 2 });
+    expect(preview.buttonDown).toHaveBeenCalledTimes(1);
+    // Space holds it too; a key repeat is not a second press.
+    fireEvent.keyDown(held, { key: " " });
+    fireEvent.keyDown(held, { key: " ", repeat: true });
+    fireEvent.keyUp(held, { key: " " });
+    expect(preview.buttonDown).toHaveBeenCalledTimes(2);
+    expect(preview.buttonUp).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "nextPage" }));
+    expect(preview.sendEvent.mock.calls).toEqual([["nextPage", {}]]);
   });
 });
 

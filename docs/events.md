@@ -359,7 +359,9 @@ began at the reset (`atMs` 0) and its hold counts from there; a key already up
 was a tap, its `down` and `up` stamped when first seen, which opens the
 double-press window then. A second tap made and let go entirely during the
 boot is not seen. `level` is the line on an edge (0 down: the line is pulled
-up).
+up). A key is its `pin` and its `label`: on a frame a pin's label never
+changes, and the preview's buttons, which have no pin (-1), are held, timed
+and double-pressed each on its own.
 
 **Privacy.** Key events are logged by name only (`log: name-only`), never with
 what was typed; pointer events not at all.

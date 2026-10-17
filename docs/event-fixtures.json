@@ -2690,7 +2690,7 @@
   ]
  },
  "inputState": {
-  "$comment": "The input state's button half (frameos/src/frameos/input_state.nim), alone, on one pin (GPIO 6, label B, role next by label). Per step: `at` = the runner's clock in ms when the step happens; `send` = one `button` payload applied at that time, or `tick` = time passing. `atMs` values in payloads are on the same clock as `at` (the runner shifts both onto its monotonic clock). `delivered` = exactly what came out, in order: event name, and a subset of the payload.",
+  "$comment": "The input state's button half (frameos/src/frameos/input_state.nim), alone, on one pin (GPIO 6, label B, role next by label) unless a case says otherwise. Per step: `at` = the runner's clock in ms when the step happens; `send` = one `button` payload applied at that time, or `tick` = time passing. `atMs` values in payloads are on the same clock as `at` (the runner shifts both onto its monotonic clock). `delivered` = exactly what came out, in order: event name, and a subset of the payload.",
   "cases": [
    {
     "name": "a tap is down and up at once, and a press when its window closes",
@@ -4431,6 +4431,142 @@
          "role": "next",
          "action": "press",
          "durationMs": 100
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "two buttons with no pin are two keys",
+    "why": "The preview's buttons have no GPIO line, so every one is pin -1; a key is its pin and its label. A tap on A and then one on B inside A's window is two presses, each when its own window closes, not a doublePress of B.",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "preview",
+       "event": "button",
+       "payload": {
+        "label": "A",
+        "level": 0,
+        "action": "down"
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": -1,
+         "label": "A",
+         "role": "primary",
+         "action": "down",
+         "level": 0
+        }
+       }
+      ]
+     },
+     {
+      "at": 1080,
+      "send": {
+       "origin": "preview",
+       "event": "button",
+       "payload": {
+        "label": "A",
+        "level": 1,
+        "action": "up"
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": -1,
+         "label": "A",
+         "role": "primary",
+         "action": "up",
+         "level": 1,
+         "durationMs": 80
+        }
+       }
+      ]
+     },
+     {
+      "at": 1200,
+      "send": {
+       "origin": "preview",
+       "event": "button",
+       "payload": {
+        "label": "B",
+        "level": 0,
+        "action": "down"
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": -1,
+         "label": "B",
+         "role": "next",
+         "action": "down",
+         "level": 0
+        }
+       }
+      ]
+     },
+     {
+      "at": 1280,
+      "send": {
+       "origin": "preview",
+       "event": "button",
+       "payload": {
+        "label": "B",
+        "level": 1,
+        "action": "up"
+       }
+      },
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": -1,
+         "label": "B",
+         "role": "next",
+         "action": "up",
+         "level": 1,
+         "durationMs": 80
+        }
+       }
+      ]
+     },
+     {
+      "at": 1431,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": -1,
+         "label": "A",
+         "role": "primary",
+         "action": "press",
+         "durationMs": 80
+        }
+       }
+      ]
+     },
+     {
+      "at": 1631,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": -1,
+         "label": "B",
+         "role": "next",
+         "action": "press",
+         "durationMs": 80
         }
        }
       ]

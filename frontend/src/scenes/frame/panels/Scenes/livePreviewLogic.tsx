@@ -210,11 +210,13 @@ export interface livePreviewLogicValues {
   previewAssetsInfo: PreviewAssetsInfo | null
   previewAssetsLoading: boolean
   previewAssetsOpen: boolean
+  previewClickEvents: LivePreviewSceneEvent[]
   previewDimensions: {
     height: number
     width: number
   }
   previewError: string | null
+  previewHeldButtons: GPIOButton[]
   previewLogs: LivePreviewLogLine[]
   previewSceneEvents: LivePreviewSceneEvent[]
   previewSettings: Record<string, Record<string, any>>
@@ -282,7 +284,7 @@ export interface livePreviewLogicActions {
   openPreviewImage: () => {
     value: true
   }
-  pressGpioButton: (button: GPIOButton) => {
+  pressPreviewButton: (button: GPIOButton) => {
     button: GPIOButton
   }
   previewAssetsChanged: () => {
@@ -320,7 +322,7 @@ export interface livePreviewLogicActions {
   registerCanvas: (canvas: HTMLCanvasElement | null) => {
     canvas: HTMLCanvasElement | null
   }
-  releaseGpioButton: (button: GPIOButton) => {
+  releasePreviewButton: (button: GPIOButton) => {
     button: GPIOButton
   }
   resetFastRender: () => {
@@ -370,6 +372,8 @@ export interface livePreviewLogicMeta {
       width: number
     }
     previewSceneEvents: (livePreviewScene: FrameScene | null) => LivePreviewSceneEvent[]
+    previewClickEvents: (previewSceneEvents: LivePreviewSceneEvent[]) => LivePreviewSceneEvent[]
+    previewHeldButtons: (gpioButtons: GPIOButton[], previewSceneEvents: LivePreviewSceneEvent[]) => GPIOButton[]
   }
 }
 
@@ -401,8 +405,8 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     }),
     closeLivePreview: true,
     registerCanvas: (canvas: HTMLCanvasElement | null) => ({ canvas }),
-    pressGpioButton: (button: GPIOButton) => ({ button }),
-    releaseGpioButton: (button: GPIOButton) => ({ button }),
+    pressPreviewButton: (button: GPIOButton) => ({ button }),
+    releasePreviewButton: (button: GPIOButton) => ({ button }),
     openPreviewImage: true,
     previewReady: true,
     // `count` frames arrived since the last report (the page coalesces);
@@ -683,6 +687,30 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         return events
       },
     ],
+    // The scene's events that are a click: everything but `button`, which is
+    // held (previewHeldButtons).
+    previewClickEvents: [
+      (s) => [s.previewSceneEvents],
+      (previewSceneEvents: livePreviewLogicValues['previewSceneEvents']): LivePreviewSceneEvent[] =>
+        previewSceneEvents.filter((event) => event.keyword !== 'button'),
+    ],
+    // The buttons the preview holds like a frame's keys: the frame's GPIO
+    // buttons, or with none configured, one per label the scene listens for
+    // (pin -1: the runtime tells keys apart by pin and label). An unlabeled
+    // `button` listener gets none: the event it would send has nothing a
+    // second listener could tell apart.
+    previewHeldButtons: [
+      (s) => [s.gpioButtons, s.previewSceneEvents],
+      (
+        gpioButtons: livePreviewLogicValues['gpioButtons'],
+        previewSceneEvents: livePreviewLogicValues['previewSceneEvents']
+      ): GPIOButton[] =>
+        gpioButtons.length > 0
+          ? gpioButtons
+          : previewSceneEvents.flatMap((event) =>
+              event.keyword === 'button' && event.label ? [{ pin: -1, label: event.label }] : []
+            ),
+    ],
   }),
   listeners(({ actions, values, cache, props }) => ({
     openLivePreview: async ({ sceneId, state, scenes }, breakpoint) => {
@@ -837,6 +865,8 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       cache.worker = worker
       cache.pointerEvents = false
       cache.inputEvents = false
+      cache.buttonEdges = false
+      cache.heldButtons = new Set<string>()
       const assetRequester = createAssetRequester(worker)
       cache.assetRequester = assetRequester
       cache.assetRequest = assetRequester.request
@@ -858,6 +888,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
             // Input v2 (2026.9.23): pointer events with a position, the
             // wheel, the keyboard. An older bundle gets the old mouse events.
             cache.inputEvents = msg.inputEvents === true
+            // Buttons in two layers (2026.10.16): a held button is sent as
+            // its `down` and `up`. An older bundle gets one `button` per press.
+            cache.buttonEdges = msg.buttonEdges === true
             actions.previewReady()
             break
           case 'frame': {
@@ -1058,31 +1091,38 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     dispatchPreviewEvent: ({ name, payload }) => {
       cache.worker?.postMessage({ type: 'event', name, payload })
     },
-    // A GPIO button in the preview is held like a real one: the `down` edge on
+    // A button in the preview is held like a real one: the `down` edge on
     // pointer down, the `up` edge on pointer up (level 0 is down: the line is
     // pulled up). The runtime adds the role, the `up`'s `durationMs`, and the
-    // press, double press or long presses the edges add up to.
-    pressGpioButton: ({ button }) => {
-      cache.heldGpioPins = cache.heldGpioPins ?? new Set<number>()
-      if (cache.heldGpioPins.has(button.pin)) {
+    // press, double press or long press the edges add up to. A key is its pin
+    // and its label (the scene's own buttons have no pin). A bundle from
+    // before button edges (`buttonEdges` on ready) gets one `button` for the
+    // whole press, on the release.
+    pressPreviewButton: ({ button }) => {
+      const key = `${button.pin}:${button.label}`
+      cache.heldButtons = cache.heldButtons ?? new Set<string>()
+      if (cache.heldButtons.has(key)) {
         return
       }
-      cache.heldGpioPins.add(button.pin)
-      cache.worker?.postMessage({
-        type: 'event',
-        name: 'button',
-        payload: { pin: button.pin, label: button.label, level: 0, action: 'down' },
-      })
+      cache.heldButtons.add(key)
+      if (cache.buttonEdges) {
+        cache.worker?.postMessage({
+          type: 'event',
+          name: 'button',
+          payload: { pin: button.pin, label: button.label, level: 0, action: 'down' },
+        })
+      }
     },
-    releaseGpioButton: ({ button }) => {
-      if (!cache.heldGpioPins?.has(button.pin)) {
+    releasePreviewButton: ({ button }) => {
+      if (!cache.heldButtons?.delete(`${button.pin}:${button.label}`)) {
         return
       }
-      cache.heldGpioPins.delete(button.pin)
       cache.worker?.postMessage({
         type: 'event',
         name: 'button',
-        payload: { pin: button.pin, label: button.label, level: 1, action: 'up' },
+        payload: cache.buttonEdges
+          ? { pin: button.pin, label: button.label, level: 1, action: 'up' }
+          : { pin: button.pin, label: button.label },
       })
     },
     forcePreviewRender: () => {

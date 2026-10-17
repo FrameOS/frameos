@@ -47,10 +47,22 @@ const preview = createFrameOSPreview({
   onState: (state) => console.log('scene state', state),
 })
 preview.setSceneState({ message: 'Hello' })
-preview.sendEvent('button', { label: 'a' })
+preview.sendEvent('nextPage')
+preview.buttonDown('A') // ...and preview.buttonUp('A') when it is let go
 preview.selectScene('sceneId')
 preview.destroy()
 ```
+
+### Buttons
+
+`preview.buttonDown(label)` and `preview.buttonUp(label)` hold a `button` the way a frame's
+GPIO key is held: the scene gets `down` the moment it is pressed and `up` (with `durationMs`)
+when it is let go, and the runtime makes the `press`, `doublePress` or `longPress` those edges
+add up to, timed as on a frame. A preview button has no pin; the label tells keys apart. Call
+them from `pointerdown` and `pointerup` (capture the pointer so a release off the button
+still counts). A runtime bundle from before button edges (`preview.runtimeInfo.buttonEdges
+=== false`) gets one `button` per press, on the release. `mountFrameOSManager` holds its
+`button` event buttons this way.
 
 ### Pointer input
 

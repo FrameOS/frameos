@@ -188,13 +188,18 @@ export function mountFrameOSManager(container: HTMLElement, options: FrameOSMana
     // Custom event nodes as buttons. Listener nodes filter on payload values
     // (a "button" listener with label "A" only fires for {label: "A"} — see
     // eventNodeMatchesPayload in frameos' interpreter.nim), so the label must
-    // ride along in the payload, not just caption the button.
+    // ride along in the payload, not just caption the button. A "button" is
+    // held like the frame's key; any other event is sent on the click.
     for (const event of sceneEventButtons(scene)) {
       const button = document.createElement('button')
       button.type = 'button'
       button.className = 'frameos-manager__button'
       button.textContent = event.label || event.keyword
-      button.onclick = () => preview.sendEvent(event.keyword, event.label ? { label: event.label } : {})
+      if (event.keyword === 'button') {
+        holdLikeAKey(button, preview, event.label)
+      } else {
+        button.onclick = () => preview.sendEvent(event.keyword, event.label ? { label: event.label } : {})
+      }
       buttonRow.appendChild(button)
     }
     const render = document.createElement('button')
@@ -324,6 +329,38 @@ function isValidJson(text: string): boolean {
   } catch {
     return false
   }
+}
+
+/** Down while the pointer (or Space / Enter) presses `button`, up when it lets
+ * go (FrameOSPreview.buttonDown). The release is listened for on the window:
+ * the controls are rebuilt when the scene's state changes, which a press can
+ * do while the key is still down. */
+function holdLikeAKey(button: HTMLButtonElement, preview: FrameOSPreview, label: string | null): void {
+  const press = (endEvents: string[]) => {
+    preview.buttonDown(label)
+    const release = () => {
+      for (const type of endEvents) {
+        window.removeEventListener(type, release)
+      }
+      preview.buttonUp(label)
+    }
+    for (const type of endEvents) {
+      window.addEventListener(type, release)
+    }
+  }
+  button.addEventListener('pointerdown', (event) => {
+    if (event.button === 0) {
+      press(['pointerup', 'pointercancel'])
+    }
+  })
+  button.addEventListener('keydown', (event) => {
+    if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault()
+      if (!event.repeat) {
+        press(['keyup', 'blur'])
+      }
+    }
+  })
 }
 
 function el(tag: string, className: string, text?: string): HTMLElement {

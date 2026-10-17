@@ -19,10 +19,12 @@
 //   {type: 'setFastMode', enabled}         lift (or restore) the 1 fps throttle
 //   {type: 'assets', requestId, op, ...}   browser asset folder ops, see handleAssetsRequest
 // Messages out:
-//   {type: 'ready', sceneInfo, browserAssets, runtimeVersion, pointerEvents}
+//   {type: 'ready', sceneInfo, browserAssets, runtimeVersion, pointerEvents, inputEvents, buttonEdges}
 //        runtimeVersion: FrameOS version of the bundle (null on older bundles)
 //        pointerEvents: true when this bundle takes pointer input as described above. A bundle without it would hand
 //        the scene raw 0..32767 coordinates and render on every move, so a page must not forward pointers to it.
+//        buttonEdges: true when a held button is sent as its `down` and `up` edges. A bundle without it gets one
+//        `button` for the whole press.
 //   {type: 'frame', width, height, buffer, renderMs}   buffer: transferred ArrayBuffer (RGBA)
 //   {type: 'state', state}
 //   {type: 'log', message}
@@ -792,6 +794,10 @@ async function init(msg) {
       // Input v2 (2026.9.23): pointer events with a position, the wheel, the
       // keyboard, and the runtime's own gestures and long presses.
       inputEvents: typeof Module._frameos_wasm_tick === 'function',
+      // Buttons in two layers (2026.10.16): a `button` with `level` and
+      // `action: 'down'` / `'up'` is an edge the runtime holds and times into
+      // `press`, `doublePress` or `longPress`, each key by its pin and label.
+      buttonEdges: true,
     })
     renderNow()
   } catch (e) {

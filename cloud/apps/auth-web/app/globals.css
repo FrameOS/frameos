@@ -2170,13 +2170,18 @@ canvas.lightbox__image {
   cursor: pointer;
 }
 
-/* The preview's runtime log: a virtualised list (PreviewLog.tsx) in the
-   same footprint the old <pre> had. The colours are theme variables, so
-   html.theme-dark is covered by the palette swap above. */
+/* The preview's runtime log: a virtualised list (PreviewLog.tsx) under the
+   picture. Three lines tall to start with (a row is 1.45em plus 2px of
+   padding, the list 8px, then the 10px handle and the border); the handle
+   row drags it taller and PreviewLog sets the height inline from then on.
+   The colours are theme variables, so html.theme-dark is covered by the
+   palette swap above. */
 .preview-log {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
   max-width: 100%;
-  height: 160px;
+  height: calc(3 * (1.45em + 2px) + 8px + 10px + 2px);
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg-soft);
@@ -2189,13 +2194,47 @@ canvas.lightbox__image {
 
 .preview-log__list {
   height: 100%;
+  min-height: 0;
   padding: 4px 0;
+}
+
+/* The whole bottom row is the handle; the pill in its middle says so. */
+.preview-log__resize {
+  position: relative;
+  height: 10px;
+  border-top: 1px solid var(--line);
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.preview-log__resize::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 36px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--line);
+  transform: translate(-50%, -50%);
+}
+
+.preview-log__resize:hover,
+.preview-log__resize:active,
+.preview-log__resize:focus-visible {
+  background: color-mix(in srgb, var(--primary), transparent 88%);
+  outline: none;
+}
+
+.preview-log__resize:hover::after,
+.preview-log__resize:active::after,
+.preview-log__resize:focus-visible::after {
+  background: color-mix(in srgb, var(--primary), var(--line) 40%);
 }
 
 .preview-log__empty {
   display: flex;
   height: 100%;
-  min-height: 150px;
   align-items: center;
   justify-content: center;
   color: var(--muted);

@@ -49,6 +49,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ButtonHTMLAttributes,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -204,6 +205,45 @@ function forwardPointer(
   return () => {
     detachPointer();
     detachKeyboard();
+  };
+}
+
+// A scene's "button" is held like the frame's key: down when the pointer (or
+// Space / Enter) presses it, up when it lets go, so a scene that listens for
+// `down`, `up`, `doublePress` or `longPress` can be driven from here. The
+// pointer is captured, so letting go off the button is still the release.
+function heldButtonHandlers(
+  previewRef: RefObject<FrameOSPreview | null>,
+  label: string | null,
+): ButtonHTMLAttributes<HTMLButtonElement> {
+  const release = () => previewRef.current?.buttonUp(label);
+  const isPressKey = (key: string) => key === " " || key === "Enter";
+  return {
+    onPointerDown: (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+      event.currentTarget.setPointerCapture(event.pointerId);
+      previewRef.current?.buttonDown(label);
+    },
+    onPointerUp: release,
+    onPointerCancel: release,
+    onLostPointerCapture: release,
+    onKeyDown: (event) => {
+      if (isPressKey(event.key)) {
+        event.preventDefault();
+        if (!event.repeat) {
+          previewRef.current?.buttonDown(label);
+        }
+      }
+    },
+    onKeyUp: (event) => {
+      if (isPressKey(event.key)) {
+        event.preventDefault();
+        release();
+      }
+    },
+    onBlur: release,
   };
 }
 
@@ -1199,18 +1239,22 @@ export function SceneLivePreviewPanel({
             {/* Custom event nodes as buttons. Listener nodes filter on
                 payload values (a "button" listener with label "A" only
                 fires for {label: "A"}), so the label rides along in the
-                payload, not just as the caption. */}
+                payload, not just as the caption. A "button" is held like
+                the frame's key; any other event is sent on the click. */}
             {eventButtons.map((event) => (
               <button
                 className="button button--subtle button--small"
                 disabled={!runtimeReady}
                 key={`${event.keyword}:${event.label ?? ""}`}
-                onClick={() =>
-                  previewRef.current?.sendEvent(
-                    event.keyword,
-                    event.label ? { label: event.label } : {},
-                  )
-                }
+                {...(event.keyword === "button"
+                  ? heldButtonHandlers(previewRef, event.label)
+                  : {
+                      onClick: () =>
+                        previewRef.current?.sendEvent(
+                          event.keyword,
+                          event.label ? { label: event.label } : {},
+                        ),
+                    })}
                 type="button"
               >
                 {event.label || event.keyword}
@@ -1323,6 +1367,8 @@ export function SceneLivePreviewPanel({
             width={viewport.width}
           />
         </div>
+        {/* Right under the picture: what the runtime says about it. */}
+        <PreviewLog lines={logs} />
         <div
           className={`live-preview__status${error ? " live-preview__status--error" : ""}`}
         >
@@ -1686,7 +1732,6 @@ export function SceneLivePreviewPanel({
           </div>
         </div>
       ) : null}
-      <PreviewLog lines={logs} />
       <p className="copy live-preview-panel__footnote">
         Runs in your browser via WebAssembly. Scenes that fetch external data or use device-only
         apps may render incompletely.

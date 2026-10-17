@@ -103,6 +103,11 @@ export interface PreviewRuntimeInfo {
    * (see ./pointer). False sends the older bundle the old mouse events and
    * no keys. */
   inputEvents: boolean
+  /** Whether the bundle takes a button as its edges (2026.10.16): `down` when
+   * it is pressed, `up` when it is let go, from which the runtime makes the
+   * `press`, `doublePress` or `longPress` (see `FrameOSPreview.buttonDown`).
+   * False sends the older bundle one `button` per press, on the release. */
+  buttonEdges: boolean
 }
 
 /** How the runtime's /srv/assets is backed, sent with the worker's `ready` message. */
