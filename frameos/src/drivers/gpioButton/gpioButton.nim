@@ -34,7 +34,7 @@ proc alertsHandler(num_alerts: cint, alerts: lgGpioAlert_p, userdata: pointer) {
     let gpio = alerts[i].report.gpio.int
     let level = alerts[i].report.level.int
     let label = pinLabels.getOrDefault(gpio)
-    sendEvent("button", %*{"pin": gpio, "label": label, "level": level,
+    sendEvent("gpio", %*{"pin": gpio, "label": label, "level": level,
       "action": (if level == 0: "down" else: "up"), "atMs": atMs}, eoDriver)
 
 proc determineGPIODevice(): int =

@@ -50,7 +50,7 @@ main/                     boot orchestration + platform modules
   fos_framebuffer.c       canvas allocation (RGBX vs RGB565 by PSRAM) and dither/pack
   fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
   fos_board.c             board table: pins, panel defaults, battery divider per board
-  fos_buttons.c           GPIO button map → `button` events (origin `driver`, via fos_events.c)
+  fos_buttons.c           GPIO button map → `gpio` edges (origin `driver`, via fos_events.c)
   fos_battery.c           battery ADC sampling; fos_battery_filter.c its outlier filter
   fos_power.c             deep sleep, wake-check render skip, VBUS truth
   fos_wake.c              wake scheduling (next render / schedule event)
@@ -523,8 +523,8 @@ tested by `main/tests/test_fos_wake.c`; a button's debounce and press kinds
 are `fos_button_timing.c`, host tested by `main/tests/test_button_timing.c`.
 
 **A press while awake.** The press cuts the render task's wait short
-(`fos_client_wake_for_events`) so the scene hears the `button` event within a
-poll, and a frame is drawn only when a scene listener took it or the scene
+(`fos_client_wake_for_events`) so the scene hears the `gpio` edges and the
+`button` they make within a poll, and a frame is drawn only when a scene listener took it or the scene
 dispatched `render` — not for every press, which on a Spectra panel was half a
 minute of refresh for a button nothing listens to. A scene's own
 `setCurrentScene` dispatch switches scenes through the same queue the HTTP,
@@ -707,15 +707,15 @@ same stamps and the contract's numbers) says so:
 
 | Event | Sound (pitch × `buzzer_tone_hz`, ms) |
 | --- | --- |
-| `down` | 1× 14 |
-| `up` | 0.7× 14, every up: a tap's, a double press's, a long press's |
+| `gpio` `down` | 1× 14 |
+| `gpio` `up` | 0.7× 14, every up: a tap's, a double press's, a long press's |
 | `doublePress` | its second down is 1.5× 14 instead of 1× |
 | a key held | 1× 8 then 0.5× 20 at every whole second it stays down |
 | `press` | none of its own: its clicks were the down and the up |
 | refused | down 100 Hz 14, up 70 Hz 14 |
 
-So a tap is "click, clack" and the scene hears `down`, `up`, and the `press`
-350 ms later; a double tap is 2000, 1400, 3000, 1400 Hz (the second down
+So a tap is "click, clack" and the scene hears `gpio` `down`, `up`, and the
+`button` `press` 350 ms later; a double tap is 2000, 1400, 3000, 1400 Hz (the second down
 higher); a 2.5 s hold is "click, dun, dun, clack", and the scene
 hears its one `longPress` with the `up`: the duns count the hold out loud, they
 are not events. Until 2026.10.16 a hold

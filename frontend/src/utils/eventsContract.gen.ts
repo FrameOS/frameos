@@ -34,6 +34,7 @@ export type ContractEventName =
   | 'wheel'
   | 'turnOn'
   | 'turnOff'
+  | 'gpio'
   | 'button'
   | 'setSceneState'
   | 'setCurrentScene'
@@ -571,6 +572,30 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       ]
     }
   },
+  "gpio": {
+    "class": "input",
+    "device": "button",
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "if-state-changed",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": true,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.10.16"
+  },
   "button": {
     "class": "input",
     "device": "button",
@@ -833,7 +858,8 @@ export const buttonRoleByLabel: Record<string, string> = {
   "DOWN": "down",
   "REFRESH": "refresh"
 }
-export const buttonActions: readonly string[] = ["down", "up", "press", "doublePress", "longPress"]
+export const buttonActions: readonly string[] = ["press", "doublePress", "longPress"]
+export const gpioActions: readonly string[] = ["down", "up"]
 
 /** Keyboard layouts a frame's `keyboardLayout` setting can name. */
 export const keyboardLayouts: readonly { id: string; label: string }[] = [
@@ -925,8 +951,10 @@ interface FrameOSEventPayloads {
   turnOn: Record<string, never>;
   /** Turn the screen off */
   turnOff: Record<string, never>;
-  /** A GPIO button, in two layers. The hardware layer says what the line did, the moment it did it: \`down\` and \`up\` (with \`durationMs\`). The button layer says what the person meant, once that is clear, and each press is exactly one of: \`press\` (a short press with no second one within \`doublePressMs\` of its release, so it waits that long), \`doublePress\` (on the second down) or \`longPress\` (on the up of a press held at least \`longPressMs\`, with \`durationMs\` and \`heldSeconds\`; nothing while the key is down). A listener with no \`action\` filter hears \`press\` only. \`atMs\` is when the driver saw the edge, on the frame's monotonic clock: every rule is timed from it, so a press made while the panel was refreshing keeps its timing. */
-  button: { pin: number; label: string; role: string; action: string; durationMs?: number; heldSeconds?: number; wake?: boolean; atMs?: number; level?: number };
+  /** A GPIO button's line, the moment the driver reports it: \`down\` when the button is pressed, \`up\` when it is let go (with \`durationMs\` and \`heldSeconds\`). For a scene that wants the key itself: a counter that counts every tap, hold-to-show. What the person meant (a press, a double press, a long press) is \`button\`. \`atMs\` is when the driver saw the edge, on the frame's monotonic clock; \`level\` is the line (0 is down: the line is pulled up). */
+  gpio: { pin: number; label: string; role: string; action: string; durationMs?: number; heldSeconds?: number; wake?: boolean; atMs?: number; level?: number };
+  /** A GPIO button pressed, once it is clear what the person meant. Each press is exactly one of: \`press\` (a short press with no second one within \`doublePressMs\` of its release, so it comes that long after the release), \`doublePress\` (on the second down) or \`longPress\` (on the release of a press held at least \`longPressMs\`, with \`durationMs\` and \`heldSeconds\`; nothing while the key is down). A listener with no \`action\` filter hears all three. The line itself, \`down\` and \`up\`, is \`gpio\`. \`atMs\` is when the press began, on the frame's monotonic clock: every rule is timed from the edges, so a press made while the panel was refreshing keeps its timing. */
+  button: { pin: number; label: string; role: string; action: string; durationMs?: number; heldSeconds?: number; wake?: boolean; atMs?: number };
   /** Set the scene's public state. This is not used for private state changes. */
   setSceneState: { state?: any; render?: boolean };
   /** Switch the frame to another scene. An optional \`state\` object is applied to that scene's public state. */

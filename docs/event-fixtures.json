@@ -260,6 +260,26 @@
     "allowed": true
    },
    {
+    "origin": "driver",
+    "event": "gpio",
+    "allowed": true
+   },
+   {
+    "origin": "preview",
+    "event": "gpio",
+    "allowed": true
+   },
+   {
+    "origin": "cloud",
+    "event": "gpio",
+    "allowed": false
+   },
+   {
+    "origin": "schedule",
+    "event": "gpio",
+    "allowed": true
+   },
+   {
     "origin": "cloud",
     "event": "setSceneState",
     "allowed": true
@@ -2690,7 +2710,7 @@
   ]
  },
  "inputState": {
-  "$comment": "The input state's button half (frameos/src/frameos/input_state.nim), alone, on one pin (GPIO 6, label B, role next by label) unless a case says otherwise. Per step: `at` = the runner's clock in ms when the step happens; `send` = one `button` payload applied at that time, or `tick` = time passing. `atMs` values in payloads are on the same clock as `at` (the runner shifts both onto its monotonic clock). `delivered` = exactly what came out, in order: event name, and a subset of the payload.",
+  "$comment": "The input state's button half (frameos/src/frameos/input_state.nim), alone, on one pin (GPIO 6, label B, role next by label) unless a case says otherwise. Per step: `at` = the runner's clock in ms when the step happens; `send` = one `gpio` (an edge) or `button` payload applied at that time, or `tick` = time passing. `atMs` values in payloads are on the same clock as `at` (the runner shifts both onto its monotonic clock). `delivered` = exactly what came out, in order: event name, and a subset of the payload.",
   "cases": [
    {
     "name": "a tap is down and up at once, and a press when its window closes",
@@ -2700,7 +2720,7 @@
       "at": 1000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -2711,7 +2731,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -2727,7 +2747,7 @@
       "at": 1080,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -2738,7 +2758,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -2784,7 +2804,7 @@
       "at": 1000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -2795,7 +2815,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -2810,7 +2830,7 @@
       "at": 1040,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -2821,7 +2841,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -2836,7 +2856,7 @@
       "at": 1140,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -2847,7 +2867,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -2872,7 +2892,7 @@
       "at": 1180,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -2883,7 +2903,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -2909,7 +2929,7 @@
       "at": 1000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -2920,7 +2940,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -2934,7 +2954,7 @@
       "at": 1050,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -2945,7 +2965,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -2960,7 +2980,7 @@
       "at": 1400,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -2971,7 +2991,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -2995,7 +3015,7 @@
       "at": 1450,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3006,7 +3026,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3021,7 +3041,7 @@
       "at": 1500,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3032,7 +3052,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3047,7 +3067,7 @@
       "at": 1550,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3058,7 +3078,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3096,7 +3116,7 @@
       "at": 1000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3107,7 +3127,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3121,7 +3141,7 @@
       "at": 1050,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3132,7 +3152,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3162,7 +3182,7 @@
       "at": 1500,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3173,7 +3193,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3188,7 +3208,7 @@
       "at": 1550,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3199,7 +3219,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3235,7 +3255,7 @@
       "at": 31000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3246,7 +3266,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3261,7 +3281,7 @@
       "at": 31000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3272,7 +3292,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3312,7 +3332,7 @@
       "at": 31000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3323,7 +3343,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3338,7 +3358,7 @@
       "at": 31000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3349,7 +3369,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3364,7 +3384,7 @@
       "at": 31000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3375,7 +3395,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3400,7 +3420,7 @@
       "at": 31000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3411,7 +3431,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3437,7 +3457,7 @@
       "at": 31000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3448,7 +3468,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3463,7 +3483,7 @@
       "at": 31000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3474,7 +3494,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3489,7 +3509,7 @@
       "at": 31000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3511,7 +3531,7 @@
         }
        },
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3526,7 +3546,7 @@
       "at": 31000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3537,7 +3557,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3575,7 +3595,7 @@
       "at": 1000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3586,7 +3606,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3610,7 +3630,7 @@
       "at": 3200,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3621,7 +3641,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3660,7 +3680,7 @@
       "at": 31000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3671,7 +3691,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3686,7 +3706,7 @@
       "at": 31000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3697,7 +3717,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3736,7 +3756,7 @@
       "at": 30000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3747,7 +3767,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3772,7 +3792,7 @@
       "at": 31000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3783,7 +3803,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3817,7 +3837,7 @@
       "at": 1000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3828,7 +3848,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3842,7 +3862,7 @@
       "at": 1999,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3853,7 +3873,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3891,7 +3911,7 @@
       "at": 3000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3902,7 +3922,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3916,7 +3936,7 @@
       "at": 4000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3927,7 +3947,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3961,7 +3981,7 @@
       "at": 1000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3972,7 +3992,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -3986,7 +4006,7 @@
       "at": 1040,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -3997,7 +4017,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4011,7 +4031,7 @@
       "at": 1140,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4022,7 +4042,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4050,7 +4070,7 @@
       "at": 2300,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4061,7 +4081,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4088,7 +4108,7 @@
       "at": 6000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4100,7 +4120,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4116,7 +4136,7 @@
       "at": 6000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4127,7 +4147,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4165,7 +4185,7 @@
       "at": 6000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4177,7 +4197,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4198,7 +4218,7 @@
       "at": 7000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4209,7 +4229,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4248,7 +4268,7 @@
       "at": 6000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4260,7 +4280,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4275,7 +4295,7 @@
       "at": 6000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4286,7 +4306,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4300,7 +4320,7 @@
       "at": 6000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4311,7 +4331,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4337,7 +4357,7 @@
       "at": 6000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4348,7 +4368,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4374,7 +4394,7 @@
       "at": 1000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4384,7 +4404,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4398,7 +4418,7 @@
       "at": 1100,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4408,7 +4428,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4445,7 +4465,7 @@
       "at": 1000,
       "send": {
        "origin": "preview",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "label": "A",
         "level": 0,
@@ -4454,7 +4474,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": -1,
          "label": "A",
@@ -4469,7 +4489,7 @@
       "at": 1080,
       "send": {
        "origin": "preview",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "label": "A",
         "level": 1,
@@ -4478,7 +4498,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": -1,
          "label": "A",
@@ -4494,7 +4514,7 @@
       "at": 1200,
       "send": {
        "origin": "preview",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "label": "B",
         "level": 0,
@@ -4503,7 +4523,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": -1,
          "label": "B",
@@ -4518,7 +4538,7 @@
       "at": 1280,
       "send": {
        "origin": "preview",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "label": "B",
         "level": 1,
@@ -4527,7 +4547,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": -1,
          "label": "B",
@@ -4581,7 +4601,7 @@
       "at": 1000,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4592,7 +4612,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4607,7 +4627,7 @@
       "at": 1100,
       "send": {
        "origin": "driver",
-       "event": "button",
+       "event": "gpio",
        "payload": {
         "pin": 6,
         "label": "B",
@@ -4617,7 +4637,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4685,8 +4705,8 @@
     ]
    },
    {
-    "name": "an older driver's press and release are edges",
-    "why": "Drivers until 2026.10.16 named their edges press / release. The level decides: a down, an up, and the press they add up to.",
+    "name": "an older producer's button edges are gpio edges",
+    "why": "Producers until 2026.10.16 sent their edges as `button`, with a `level` (and before that named them press / release). The level decides: a `gpio` down and up, and the `button` press they add up to.",
     "steps": [
      {
       "at": 1000,
@@ -4702,7 +4722,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4727,7 +4747,7 @@
       },
       "delivered": [
        {
-        "event": "button",
+        "event": "gpio",
         "payload": {
          "pin": 6,
          "label": "B",
@@ -4754,6 +4774,107 @@
         }
        }
       ]
+     }
+    ]
+   },
+   {
+    "name": "a button with the action down or up is an edge too",
+    "why": "A `button` naming the action `down` or `up` and no level (a page or a script from before `gpio`) is the edge it names.",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "http:write",
+       "event": "button",
+       "payload": {
+        "label": "A",
+        "action": "down"
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": -1,
+         "label": "A",
+         "role": "primary",
+         "action": "down"
+        }
+       }
+      ]
+     },
+     {
+      "at": 1100,
+      "send": {
+       "origin": "http:write",
+       "event": "button",
+       "payload": {
+        "label": "A",
+        "action": "up"
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": -1,
+         "label": "A",
+         "role": "primary",
+         "action": "up",
+         "durationMs": 100
+        }
+       }
+      ]
+     },
+     {
+      "at": 1451,
+      "tick": true,
+      "delivered": [
+       {
+        "event": "button",
+        "payload": {
+         "pin": -1,
+         "label": "A",
+         "role": "primary",
+         "action": "press",
+         "durationMs": 100
+        }
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "a gpio that names no edge is dropped",
+    "why": "`gpio` is a line moving: without a `level` or the action `down` / `up` it says nothing happened, and nothing is delivered.",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "http:write",
+       "event": "gpio",
+       "payload": {
+        "label": "A"
+       }
+      },
+      "delivered": []
+     },
+     {
+      "at": 1000,
+      "send": {
+       "origin": "http:write",
+       "event": "gpio",
+       "payload": {
+        "label": "A",
+        "action": "press"
+       }
+      },
+      "delivered": []
+     },
+     {
+      "at": 2000,
+      "tick": true,
+      "delivered": []
      }
     ]
    }

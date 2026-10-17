@@ -670,7 +670,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
             continue
           }
           const data = (node.data ?? {}) as Record<string, any>
-          const keyword = String(data.keyword ?? '')
+          // A `gpio` listener is pressed with the same held button as a
+          // `button` one: holding it sends the edges (pressPreviewButton).
+          const keyword = data.keyword === 'gpio' ? 'button' : String(data.keyword ?? '')
           // Not a button: what the host sends on its own (lifecycle events and
           // scene commands), and pointer and keyboard input — the canvas sends
           // those itself, with a position or a key (utils/previewPointer).
@@ -865,7 +867,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       cache.worker = worker
       cache.pointerEvents = false
       cache.inputEvents = false
-      cache.buttonEdges = false
+      cache.gpioEvents = false
       cache.heldButtons = new Set<string>()
       const assetRequester = createAssetRequester(worker)
       cache.assetRequester = assetRequester
@@ -888,9 +890,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
             // Input v2 (2026.9.23): pointer events with a position, the
             // wheel, the keyboard. An older bundle gets the old mouse events.
             cache.inputEvents = msg.inputEvents === true
-            // Buttons in two layers (2026.10.16): a held button is sent as
-            // its `down` and `up`. An older bundle gets one `button` per press.
-            cache.buttonEdges = msg.buttonEdges === true
+            // Buttons as two events (2026.10.16): a held button is sent as its
+            // `gpio` edges. An older bundle gets one `button` per press.
+            cache.gpioEvents = msg.gpioEvents === true
             actions.previewReady()
             break
           case 'frame': {
@@ -1091,13 +1093,13 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     dispatchPreviewEvent: ({ name, payload }) => {
       cache.worker?.postMessage({ type: 'event', name, payload })
     },
-    // A button in the preview is held like a real one: the `down` edge on
-    // pointer down, the `up` edge on pointer up (level 0 is down: the line is
-    // pulled up). The runtime adds the role, the `up`'s `durationMs`, and the
-    // press, double press or long press the edges add up to. A key is its pin
-    // and its label (the scene's own buttons have no pin). A bundle from
-    // before button edges (`buttonEdges` on ready) gets one `button` for the
-    // whole press, on the release.
+    // A button in the preview is held like a real one: the `gpio` `down` edge
+    // on pointer down, the `up` edge on pointer up (level 0 is down: the line
+    // is pulled up). The runtime adds the role, the `up`'s `durationMs`, and
+    // the `button` press, double press or long press the edges add up to. A
+    // key is its pin and its label (the scene's own buttons have no pin). A
+    // bundle from before `gpio` (`gpioEvents` on ready) gets one `button` for
+    // the whole press, on the release.
     pressPreviewButton: ({ button }) => {
       const key = `${button.pin}:${button.label}`
       cache.heldButtons = cache.heldButtons ?? new Set<string>()
@@ -1105,10 +1107,10 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         return
       }
       cache.heldButtons.add(key)
-      if (cache.buttonEdges) {
+      if (cache.gpioEvents) {
         cache.worker?.postMessage({
           type: 'event',
-          name: 'button',
+          name: 'gpio',
           payload: { pin: button.pin, label: button.label, level: 0, action: 'down' },
         })
       }
@@ -1117,13 +1119,11 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       if (!cache.heldButtons?.delete(`${button.pin}:${button.label}`)) {
         return
       }
-      cache.worker?.postMessage({
-        type: 'event',
-        name: 'button',
-        payload: cache.buttonEdges
-          ? { pin: button.pin, label: button.label, level: 1, action: 'up' }
-          : { pin: button.pin, label: button.label },
-      })
+      cache.worker?.postMessage(
+        cache.gpioEvents
+          ? { type: 'event', name: 'gpio', payload: { pin: button.pin, label: button.label, level: 1, action: 'up' } }
+          : { type: 'event', name: 'button', payload: { pin: button.pin, label: button.label } }
+      )
     },
     forcePreviewRender: () => {
       // The worker got a snapshot of the scenes when the preview opened; if

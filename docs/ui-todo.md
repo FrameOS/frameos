@@ -25,7 +25,8 @@ an LCD and merely current on Spectra 6.
   `type(props)`.
 - **Events flow end to end.** evdev emits `mouseMove`/`mouseDown`/`mouseUp`/
   `keyDown`/`keyUp` (`drivers/evdev/evdev.nim`), gpioButton and the ESP32's
-  `fos_buttons.c` emit `button` with a label, and
+  `fos_buttons.c` emit `gpio` edges with a label (the dispatcher makes the
+  `button` presses out of them), and
   `RunnerThread.dispatchSceneEvent` (`frameos/runner.nim`) routes any of them
   into the active scene.
 - **One rasterizer: pixie.** Text at any size from one TTF, the strict SVG

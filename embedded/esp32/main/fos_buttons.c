@@ -370,38 +370,41 @@ void fos_buttons_process_events(void)
         const fos_gpio_button_t *button = &config->gpio_buttons[event.index];
         char label[FOS_GPIO_BUTTON_LABEL_LEN * 2];
         json_escape(button->label, label, sizeof(label));
-        /* An edge and when it was seen, nothing more: `action` is `down` or
-         * `up`, `wake` whether it booted the chip, `atMs` the button task's
-         * clock (esp_timer, the CLOCK_MONOTONIC the Nim side reads too). The
-         * role, the `up`'s `durationMs` and the button layer (`press`,
-         * `doublePress`, `longPress`) are the Nim dispatcher's
-         * (input_state.nim), timed from `atMs`. */
+        /* A `gpio` edge and when it was seen, nothing more: `action` is
+         * `down` or `up`, `wake` whether it booted the chip, `atMs` the button
+         * task's clock (esp_timer, the CLOCK_MONOTONIC the Nim side reads
+         * too). The role, the `up`'s `durationMs` and the `button` the edges
+         * add up to (`press`, `doublePress`, `longPress`) are the Nim
+         * dispatcher's (input_state.nim), timed from `atMs`. */
         char payload[224];
         snprintf(payload, sizeof(payload),
                  "{\"pin\":%d,\"label\":\"%s\",\"level\":%d,\"action\":\"%s\"%s,\"atMs\":%lld}",
                  button->pin, label, event.level,
-                 event.level == 0 ? FOS_BUTTON_ACTION_DOWN : FOS_BUTTON_ACTION_UP,
+                 event.level == 0 ? FOS_GPIO_ACTION_DOWN : FOS_GPIO_ACTION_UP,
                  event.wake ? ",\"wake\":true" : "",
                  (long long)fos_wake_edge_at_ms(event.at_ms, now_ms()));
         /* `driver`: a press is hardware talking, and the contract lets it say
          * input and nothing else. fos_events.c hands it to the scene and asks
          * for the render when a listener took it; this is the render task, so
          * the runtime lock is free. */
-        bool dispatched = fos_events_dispatch(FOS_ORIGIN_DRIVER, FOS_EVENT_BUTTON, payload) == FOS_EVENT_DONE;
+        bool dispatched = fos_events_dispatch(FOS_ORIGIN_DRIVER, FOS_EVENT_GPIO, payload) == FOS_EVENT_DONE;
         /* Into the frame log, not just the serial console: a press used to
          * leave no trace anywhere a user can see. When a scene ignores it the
          * interpreter says so (runEvent:noListenerMatched), but that only
          * helps if you can first tell the press was registered at all. */
         char line[256];
         snprintf(line, sizeof(line),
-                 "{\"event\":\"button\",\"source\":\"esp32\",\"pin\":%d,"
+                 "{\"event\":\"gpio\",\"source\":\"esp32\",\"pin\":%d,"
                  "\"label\":\"%s\",\"level\":%d,\"action\":\"%s\",\"dispatched\":%s,\"wake\":%s}",
                  button->pin, label, event.level,
-                 event.level == 0 ? FOS_BUTTON_ACTION_DOWN : FOS_BUTTON_ACTION_UP,
+                 event.level == 0 ? FOS_GPIO_ACTION_DOWN : FOS_GPIO_ACTION_UP,
                  dispatched ? "true" : "false", event.wake ? "true" : "false");
         frameos_nim_log_hook(line);
+        /* `dispatched` is whether a listener heard the edge or the `button`
+         * it made: a scene that listens only for presses hears nothing on a
+         * first `down`. A runtime that is not up says so itself. */
         if (!dispatched) {
-            ESP_LOGW(TAG, "button event not delivered: no scene runtime, or no scene to hear it");
+            ESP_LOGD(TAG, "gpio edge: no listener heard it");
         }
     }
     /* Time passing: a key still held is a `longPress` each second, a short

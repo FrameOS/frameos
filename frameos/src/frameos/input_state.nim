@@ -4,8 +4,8 @@
 ## keyboard layout, and which GPIO buttons are held. Out of that it makes the
 ## events a scene hears — one `pointerMove` per motion report with the position
 ## every pointer event carries, `textInput` from a key, `tap` / `doubleTap` /
-## `longPress` / `swipe` from a down and an up, a button's `down` / `up` and
-## the `press` / `doublePress` / `longPress` they add up to — so the three hosts
+## `longPress` / `swipe` from a down and an up, a button's `gpio` edges and
+## the `button` press / doublePress / longPress they add up to — so the three hosts
 ## agree on all of it, and a driver or a preview has to say only what it saw.
 ##
 ## Pure: no clock (every entry point takes `now`), no channel, no scene. Fed by
@@ -153,12 +153,12 @@ proc buttonRole*(state: InputState, pin: int, label: string): string =
       return role
   buttonRoleForLabel(label.strip().toUpperAscii())
 
-proc addButton(output: var seq[InputDelivery], origin: EventOrigin, pin: int, label, role, action: string,
-               atMs = -1, durationMs = -1, level = -1, wake = false) =
-  ## One `button` event for the scene. Every one is built here, so the
-  ## ESP32 carries this code once: the four fields each has, then the
-  ## optional ones when set. `heldSeconds` (the hold in whole seconds) always
-  ## comes with `durationMs`.
+proc addButton(output: var seq[InputDelivery], name: string, origin: EventOrigin, pin: int,
+               label, role, action: string, atMs = -1, durationMs = -1, level = -1, wake = false) =
+  ## One `gpio` (an edge) or `button` (a press) event for the scene. Every one
+  ## is built here, so the ESP32 carries this code once: the four fields each
+  ## has, then the optional ones when set. `heldSeconds` (the hold in whole
+  ## seconds) always comes with `durationMs`.
   let payload = %*{"pin": pin, "label": label, "role": role, "action": action}
   if level >= 0:
     payload["level"] = %level
@@ -169,7 +169,7 @@ proc addButton(output: var seq[InputDelivery], origin: EventOrigin, pin: int, la
   if durationMs >= 0:
     payload["durationMs"] = %durationMs
     payload["heldSeconds"] = %(durationMs div 1000)
-  output.add(InputDelivery(name: evButton, origin: origin, payload: payload))
+  output.add(InputDelivery(name: name, origin: origin, payload: payload))
 
 proc keyFor(state: InputState, pin: int, label: string): int =
   ## A key is its pin and its label. On a frame a pin's label never changes;
@@ -188,25 +188,28 @@ proc tickButtons(state: var InputState, now: MonoTime, output: var seq[InputDeli
   while index < state.buttons.len:
     let key = state.buttons[index]
     if not key.down and msSince(now, key.releasedAt) > ButtonDoublePressMs:
-      output.addButton(key.origin, key.pin, key.label, key.role, "press", key.atMs, key.durationMs, wake = key.wake)
+      output.addButton(evButton, key.origin, key.pin, key.label, key.role, "press", key.atMs, key.durationMs,
+        wake = key.wake)
       state.buttons.delete(index)
     else:
       inc index
 
-proc button(state: var InputState, payload: JsonNode, origin: EventOrigin, now: MonoTime,
+proc button(state: var InputState, name: string, payload: JsonNode, origin: EventOrigin, now: MonoTime,
             output: var seq[InputDelivery]) =
-  ## `button` in two layers (docs/events.md, "Buttons").
+  ## GPIO buttons, as two events (docs/events.md, "Buttons").
   ##
-  ## An edge — a payload with `level` (0 is down: the line is pulled up), or
-  ## the action `down` / `up` — is the hardware layer: delivered at once, and
-  ## fed to the button layer, which makes `press` / `doublePress` /
-  ## `longPress` out of the edges, each press exactly one of them. Drivers
-  ## until 2026.10.16 named their edges `press` / `release`; the `level`
-  ## decides, so they still work.
+  ## An edge — `gpio` with `level` (0 is down: the line is pulled up) or the
+  ## action `down` / `up` — is delivered at once as `gpio`, and fed to the
+  ## button layer, which makes a `button` `press` / `doublePress` /
+  ## `longPress` out of the edges, each press exactly one of them. Producers
+  ## until 2026.10.16 sent their edges as `button` (with `level`, the action
+  ## `down` / `up`, or before that `press` / `release`); such a `button` is an
+  ## edge too, so they still work.
   ##
-  ## Anything else — HTTP, the cloud, a schedule or a scene saying a button
-  ## was pressed — moved no line and has nothing to time: it is delivered as
-  ## said, with no `action` meaning `press`.
+  ## A `button` that is not an edge — HTTP, the cloud, a schedule or a scene
+  ## saying a button was pressed — moved no line and has nothing to time: it
+  ## is delivered as said, with no `action` meaning `press`. A `gpio` that
+  ## names no edge moved no line either, and is dropped.
   ##
   ## Time is the edge's: a driver that says when it saw the edge (`atMs`) has
   ## every rule timed from there, and the button layer advances to that
@@ -223,14 +226,16 @@ proc button(state: var InputState, payload: JsonNode, origin: EventOrigin, now: 
   let given = if payload.isInt("durationMs"): payload["durationMs"].getInt() else: -1
   let wake = payload{"wake"}.getBool()
   if not (payload.isInt("level") or action in ["down", "up"]):
-    output.addButton(origin, pin, label, role, if action.len == 0: "press" else: action, atMs, given, wake = wake)
+    if name == evButton:
+      output.addButton(evButton, origin, pin, label, role, if action.len == 0: "press" else: action, atMs, given,
+        wake = wake)
     return
   let down = if payload.isInt("level"): payload["level"].getInt() == 0 else: action == "down"
   let at = payload.seenAt(now)
   state.tickButtons(at, output) # a tap whose window closed before this edge is a press first
   let index = state.keyFor(pin, label)
   if down:
-    output.addButton(origin, pin, label, role, "down", atMs, level = 0, wake = wake)
+    output.addButton(evGpio, origin, pin, label, role, "down", atMs, level = 0, wake = wake)
     # A key still waiting out its window makes this down the double press;
     # one still held missed its `up`, and this down starts over. The down
     # that woke the device is a press like any other: the ESP32 stamps it
@@ -243,15 +248,15 @@ proc button(state: var InputState, payload: JsonNode, origin: EventOrigin, now: 
     state.buttons.add(ButtonKey(pin: pin, label: label, role: role, origin: origin, down: true,
       downAt: at, atMs: atMs, twice: twice, wake: startedByWake))
     if twice:
-      output.addButton(origin, pin, label, role, "doublePress", atMs, wake = startedByWake)
+      output.addButton(evButton, origin, pin, label, role, "doublePress", atMs, wake = startedByWake)
   elif index < 0 or not state.buttons[index].down:
     # No down to measure from (a key held since before the driver started):
     # the host's own count if it gave one.
-    output.addButton(origin, pin, label, role, "up", atMs, max(given, 0), level = 1)
+    output.addButton(evGpio, origin, pin, label, role, "up", atMs, max(given, 0), level = 1)
   else:
     let key = state.buttons[index]
     let duration = msSince(at, key.downAt)
-    output.addButton(origin, pin, label, role, "up", atMs, duration, level = 1)
+    output.addButton(evGpio, origin, pin, label, role, "up", atMs, duration, level = 1)
     if not key.twice and duration < ButtonLongPressMs:
       # A short press: it waits out its window before it is a `press`.
       state.buttons[index].down = false
@@ -263,7 +268,7 @@ proc button(state: var InputState, payload: JsonNode, origin: EventOrigin, now: 
         # Held at least `ButtonLongPressMs`: a long press, decided now that
         # it is over, with how long it was. Once, never while held. (A
         # double press is that and nothing more.)
-        output.addButton(key.origin, pin, label, role, "longPress", key.atMs, duration, wake = key.wake)
+        output.addButton(evButton, key.origin, pin, label, role, "longPress", key.atMs, duration, wake = key.wake)
 
 proc buttonsHeld*(state: InputState): int =
   for key in state.buttons:
@@ -680,8 +685,8 @@ proc applyNamedInput*(state: var InputState, name: string, payload: JsonNode, or
   ## on the wire are 0..PointerWireMax across the panel (docs/events.md); a
   ## payload without one is at the pointer's last position. False when `name`
   ## is not an input event this module makes: the caller delivers it as it is.
-  if name == evButton:
-    state.button(payload, origin, now, output)
+  if name == evGpio or name == evButton:
+    state.button(name, payload, origin, now, output)
     return true
   when defined(frameosEmbedded):
     false

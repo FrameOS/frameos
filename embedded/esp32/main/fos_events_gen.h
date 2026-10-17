@@ -16,11 +16,11 @@
 #define FOS_POINTER_WIRE_MAX 32767
 #define FOS_CUSTOM_EVENT_MAX_NAME_LENGTH 63
 
-/* `button {action}`: the firmware reports the edges, each with `atMs` (when it saw
- * it); doublePress, longPress and repeat are the Nim dispatcher's
+/* `gpio {action}`: the firmware reports the edges, each with `atMs` (when it saw
+ * it); `button {action}` (press, doublePress, longPress) is the Nim dispatcher's
  * (frameos/input_state.nim), like on every host. */
-#define FOS_BUTTON_ACTION_DOWN "down"
-#define FOS_BUTTON_ACTION_UP "up"
+#define FOS_GPIO_ACTION_DOWN "down"
+#define FOS_GPIO_ACTION_UP "up"
 #define FOS_BUTTON_ACTION_PRESS "press"
 #define FOS_BUTTON_ACTION_DOUBLE_PRESS "doublePress"
 #define FOS_BUTTON_ACTION_LONG_PRESS "longPress"
@@ -50,6 +50,7 @@
 #define FOS_EVENT_WHEEL "wheel"
 #define FOS_EVENT_TURN_ON "turnOn"
 #define FOS_EVENT_TURN_OFF "turnOff"
+#define FOS_EVENT_GPIO "gpio"
 #define FOS_EVENT_BUTTON "button"
 #define FOS_EVENT_SET_SCENE_STATE "setSceneState"
 #define FOS_EVENT_SET_CURRENT_SCENE "setCurrentScene"
@@ -128,6 +129,8 @@ static const fos_event_spec_t FOS_EVENT_SPECS[] = {
      FOS_ORIGIN_SCENE | FOS_ORIGIN_SCHEDULE | FOS_ORIGIN_HTTP_WRITE | FOS_ORIGIN_HTTP_ADMIN | FOS_ORIGIN_CLOUD | FOS_ORIGIN_SYSTEM, 0},
     {FOS_EVENT_TURN_OFF, FOS_EVENT_CLASS_SCENE_COMMAND,
      FOS_ORIGIN_SCENE | FOS_ORIGIN_SCHEDULE | FOS_ORIGIN_HTTP_WRITE | FOS_ORIGIN_HTTP_ADMIN | FOS_ORIGIN_CLOUD | FOS_ORIGIN_SYSTEM, 0},
+    {FOS_EVENT_GPIO, FOS_EVENT_CLASS_INPUT,
+     FOS_ORIGIN_DRIVER | FOS_ORIGIN_PREVIEW | FOS_ORIGIN_SCENE | FOS_ORIGIN_SCHEDULE | FOS_ORIGIN_HTTP_WRITE | FOS_ORIGIN_HTTP_ADMIN | FOS_ORIGIN_SYSTEM, 0},
     {FOS_EVENT_BUTTON, FOS_EVENT_CLASS_INPUT,
      FOS_ORIGIN_DRIVER | FOS_ORIGIN_PREVIEW | FOS_ORIGIN_SCENE | FOS_ORIGIN_SCHEDULE | FOS_ORIGIN_HTTP_WRITE | FOS_ORIGIN_HTTP_ADMIN | FOS_ORIGIN_CLOUD | FOS_ORIGIN_SYSTEM, 0},
     {FOS_EVENT_SET_SCENE_STATE, FOS_EVENT_CLASS_SCENE_COMMAND,
@@ -145,7 +148,7 @@ static const fos_event_spec_t FOS_EVENT_SPECS[] = {
     {FOS_EVENT_UPLOAD_SCENES, FOS_EVENT_CLASS_DEVICE_COMMAND,
      FOS_ORIGIN_HTTP_ADMIN | FOS_ORIGIN_CLOUD | FOS_ORIGIN_SYSTEM, 0},
 };
-#define FOS_EVENT_SPEC_COUNT 29
+#define FOS_EVENT_SPEC_COUNT 30
 
 static const fos_event_spec_t FOS_CUSTOM_EVENT_SPEC = {
     NULL, FOS_EVENT_CLASS_CUSTOM,

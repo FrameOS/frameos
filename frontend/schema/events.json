@@ -608,8 +608,8 @@
     "fields": []
   },
   {
-    "name": "button",
-    "description": "A GPIO button, in two layers. The hardware layer says what the line did, the moment it did it: `down` and `up` (with `durationMs`). The button layer says what the person meant, once that is clear, and each press is exactly one of: `press` (a short press with no second one within `doublePressMs` of its release, so it waits that long), `doublePress` (on the second down) or `longPress` (on the up of a press held at least `longPressMs`, with `durationMs` and `heldSeconds`; nothing while the key is down). A listener with no `action` filter hears `press` only. `atMs` is when the driver saw the edge, on the frame's monotonic clock: every rule is timed from it, so a press made while the panel was refreshing keeps its timing.",
+    "name": "gpio",
+    "description": "A GPIO button's line, the moment the driver reports it: `down` when the button is pressed, `up` when it is let go (with `durationMs` and `heldSeconds`). For a scene that wants the key itself: a counter that counts every tap, hold-to-show. What the person meant (a press, a double press, a long press) is `button`. `atMs` is when the driver saw the edge, on the frame's monotonic clock; `level` is the line (0 is down: the line is pulled up).",
     "canListen": true,
     "fields": [
       {
@@ -650,12 +650,78 @@
         "required": true,
         "options": [
           "down",
+          "up"
+        ]
+      },
+      {
+        "name": "durationMs",
+        "label": "Held for (ms)",
+        "type": "integer",
+        "required": false,
+        "filter": "more"
+      },
+      {
+        "name": "heldSeconds",
+        "label": "Held for (s)",
+        "type": "integer",
+        "required": false,
+        "filter": "more"
+      },
+      {
+        "name": "wake",
+        "label": "Woke the device",
+        "type": "boolean",
+        "required": false,
+        "filter": "more"
+      }
+    ]
+  },
+  {
+    "name": "button",
+    "description": "A GPIO button pressed, once it is clear what the person meant. Each press is exactly one of: `press` (a short press with no second one within `doublePressMs` of its release, so it comes that long after the release), `doublePress` (on the second down) or `longPress` (on the release of a press held at least `longPressMs`, with `durationMs` and `heldSeconds`; nothing while the key is down). A listener with no `action` filter hears all three. The line itself, `down` and `up`, is `gpio`. `atMs` is when the press began, on the frame's monotonic clock: every rule is timed from the edges, so a press made while the panel was refreshing keeps its timing.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "pin",
+        "label": "Pin",
+        "type": "integer",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "label",
+        "label": "Label",
+        "type": "string",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "role",
+        "label": "Role",
+        "type": "string",
+        "required": true,
+        "options": [
+          "primary",
+          "secondary",
+          "next",
+          "prev",
           "up",
+          "down",
+          "back",
+          "menu",
+          "refresh"
+        ]
+      },
+      {
+        "name": "action",
+        "label": "Action",
+        "type": "string",
+        "required": true,
+        "options": [
           "press",
           "doublePress",
           "longPress"
-        ],
-        "listenDefault": "press"
+        ]
       },
       {
         "name": "durationMs",

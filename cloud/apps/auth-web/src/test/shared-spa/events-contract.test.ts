@@ -116,7 +116,7 @@ describe("preview buttons", () => {
 
   it("a button and a custom event get a button; host, pointer and keyboard events do not", () => {
     const node = (id: string, keyword: string) => ({ id, type: "event", data: { keyword } });
-    const names = ["init", "render", "open", "close", "setSceneState", "turnOn", "mouseMove", "pointerDown", "tap", "wheel", "button", "keyDown", "textInput", "nextPage"];
+    const names = ["init", "render", "open", "close", "setSceneState", "turnOn", "mouseMove", "pointerDown", "tap", "wheel", "button", "gpio", "keyDown", "textInput", "nextPage"];
     const buttons = sceneEventButtons({
       id: "s",
       name: "s",
@@ -124,6 +124,7 @@ describe("preview buttons", () => {
       edges: [],
     } as unknown as Parameters<typeof sceneEventButtons>[0]);
     // The canvas sends keys itself (a button could only send a key with no code).
+    // A `gpio` listener is the same held button as a `button` one: one entry.
     expect(buttons.map((button) => button.keyword)).toEqual(["button", "nextPage"]);
   });
 });

@@ -8,7 +8,7 @@ import {
   eventFilterFieldsToShow,
   foldedEventFilterCount,
 } from "../../../../../../frontend/src/utils/eventFilters";
-import { buttonActions, buttonRoles } from "../../../../../../frontend/src/utils/eventsContract.gen";
+import { buttonActions, buttonRoles, gpioActions } from "../../../../../../frontend/src/utils/eventsContract.gen";
 import catalog from "../../../../../../frontend/schema/events.json";
 import type { AppConfigField, FrameEvent } from "../../../../../../frontend/src/types";
 
@@ -44,6 +44,11 @@ describe("event node filters", () => {
     });
     const action = eventFilterControl("button", fields.find((f) => f.name === "action")!);
     expect(action.kind === "select" && action.options.map((o) => o.value)).toEqual(["", ...buttonActions]);
+    // What the person meant is `button`; the line's own down and up are `gpio`.
+    expect(buttonActions).toEqual(["press", "doublePress", "longPress"]);
+    const edge = eventFilterControl("gpio", fieldsOf("gpio").find((f) => f.name === "action")!);
+    expect(edge.kind === "select" && edge.options.map((o) => o.value)).toEqual(["", ...gpioActions]);
+    expect(gpioActions).toEqual(["down", "up"]);
     const direction = eventFilterControl("swipe", fieldsOf("swipe").find((f) => f.name === "direction")!);
     expect(direction.kind === "select" && direction.options.map((o) => o.value)).toEqual([
       "", "left", "right", "up", "down",

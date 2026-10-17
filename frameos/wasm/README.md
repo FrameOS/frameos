@@ -55,14 +55,14 @@ preview.destroy()
 
 ### Buttons
 
-`preview.buttonDown(label)` and `preview.buttonUp(label)` hold a `button` the way a frame's
-GPIO key is held: the scene gets `down` the moment it is pressed and `up` (with `durationMs`)
-when it is let go, and the runtime makes the `press`, `doublePress` or `longPress` those edges
-add up to, timed as on a frame. A preview button has no pin; the label tells keys apart. Call
-them from `pointerdown` and `pointerup` (capture the pointer so a release off the button
-still counts). A runtime bundle from before button edges (`preview.runtimeInfo.buttonEdges
-=== false`) gets one `button` per press, on the release. `mountFrameOSManager` holds its
-`button` event buttons this way.
+`preview.buttonDown(label)` and `preview.buttonUp(label)` hold a button the way a frame's
+GPIO key is held: the scene gets the `gpio` edges, `down` the moment it is pressed and `up`
+(with `durationMs`) when it is let go, and the runtime makes the `button` `press`,
+`doublePress` or `longPress` those edges add up to, timed as on a frame. A preview button has
+no pin; the label tells keys apart. Call them from `pointerdown` and `pointerup` (capture the
+pointer so a release off the button still counts). A runtime bundle from before `gpio`
+(`preview.runtimeInfo.gpioEvents === false`) gets one `button` per press, on the release.
+`mountFrameOSManager` holds its `button` event buttons this way.
 
 ### Pointer input
 

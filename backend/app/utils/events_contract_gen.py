@@ -11,7 +11,7 @@ REFUSED_BY_ORIGIN: dict[str, frozenset[str]] = {
     "schedule": frozenset({"init", "open", "close", "uploadScenes"}),
     "http:write": frozenset({"init", "open", "close", "reload", "restart", "reboot", "uploadScenes"}),
     "http:admin": frozenset({}),
-    "cloud": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "wheel", "reload"}),
+    "cloud": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "wheel", "gpio", "reload"}),
     "system": frozenset({}),
 }
 
@@ -21,7 +21,7 @@ CUSTOM_EVENT_DECLARABLE_ORIGINS: frozenset[str] = frozenset({"schedule", "cloud"
 DEVICE_COMMAND_EVENTS: frozenset[str] = frozenset({"metrics", "reload", "restart", "reboot", "uploadScenes"})
 
 # Every event the contract names; anything else a producer says is a custom event.
-CONTRACT_EVENTS: frozenset[str] = frozenset({"init", "render", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "wheel", "turnOn", "turnOff", "button", "setSceneState", "setCurrentScene", "metrics", "reload", "restart", "reboot", "uploadScenes"})
+CONTRACT_EVENTS: frozenset[str] = frozenset({"init", "render", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "wheel", "turnOn", "turnOff", "gpio", "button", "setSceneState", "setCurrentScene", "metrics", "reload", "restart", "reboot", "uploadScenes"})
 
 # Events the frame event route accepts and the command-queue verb each becomes
 # (the contract's `cloud` column; the cloud's cloudEventRouteVerbs). `profiles`:

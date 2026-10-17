@@ -43,15 +43,15 @@ localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode,
 host.makeCurrent("fixtures/dispatcher/switchFrom".SceneId)
 doAssert host.scene.isNil, "the scene is built by its first use, not by being made current"
 
-# The wake press, as an ESP32 queues it: a `down` with `wake: true` and its
-# `up`, stamped when the button task saw them a second before the scene was
-# up. Its window is long over by then, so the first tick makes it the
-# `press` the scene's listener hears.
+# The wake press, as an ESP32 queues it: a `gpio` `down` with `wake: true` and
+# its `up`, stamped when the button task saw them a second before the scene
+# was up. Its window is long over by then, so the first tick makes it the
+# `button` `press` the scene's listener hears. (The scene listens for presses
+# only: nothing hears the edges themselves.)
 let wokeAt = getMonoTime().ticks div 1_000_000 - 1000
-doAssert host.send(eoDriver, "button", %*{"pin": 5, "label": "RIGHT", "level": 0, "wake": true, "atMs": wokeAt}),
-  "a button sent before the first render is dispatched"
-doAssert not host.scene.isNil
-discard host.send(eoDriver, "button", %*{"pin": 5, "label": "RIGHT", "level": 1, "atMs": wokeAt + 80})
+discard host.send(eoDriver, "gpio", %*{"pin": 5, "label": "RIGHT", "level": 0, "wake": true, "atMs": wokeAt})
+doAssert not host.scene.isNil, "an edge sent before the first render builds the scene"
+discard host.send(eoDriver, "gpio", %*{"pin": 5, "label": "RIGHT", "level": 1, "atMs": wokeAt + 80})
 doAssert host.tick(), "the tick delivers the press"
 doAssert selected == @["fixtures/dispatcher/switchTo"], "selected " & $selected
 

@@ -1,11 +1,12 @@
 /*
  * ESP32 GPIO buttons. Buttons are active-low inputs with internal pull-ups and
- * emit the same "button" events as the Linux gpioButton driver.
+ * emit the same "gpio" edges as the Linux gpioButton driver; the dispatcher
+ * makes the "button" press, double press or long press out of them.
  *
  * Deep sleep: every registered button that sits on a wake-capable pad (an
  * RTC IO on the S3, GPIO0-5 on the C3) is armed as a wake source right
  * before esp_deep_sleep, so a press brings the frame back early — the scene
- * gets the press as a normal "button" event on the first pass and the panel
+ * gets the press as a normal "gpio" / "button" pair on the first pass and the panel
  * refreshes, instead of the frame waiting out its timer. The pure pin
  * arithmetic is in fos_wake.h; this module owns the esp_sleep calls.
  *

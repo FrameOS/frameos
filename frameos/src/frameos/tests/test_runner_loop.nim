@@ -649,7 +649,7 @@ suite "runner loop safety":
     sendEvent("keyDown", %*{"key": "KEY_P", "code": 25}, eoHttpAdmin)
     sendEvent("keyUp", %*{"key": "KEY_P", "code": 25}, eoHttpAdmin)
     sendEvent("wheel", %*{"deltaX": 0, "deltaY": 1}, eoHttpAdmin)
-    sendEvent("button", %*{"pin": 5, "label": "A", "level": 0}, eoHttpAdmin)
+    sendEvent("gpio", %*{"pin": 5, "label": "A", "level": 0}, eoHttpAdmin)
     waitFor messageLoop
 
     check hasEvent(store, "event:keyDown")
@@ -660,7 +660,7 @@ suite "runner loop safety":
         check not entry.hasKey("payload")
       check "KEY_P" notin $entry
     # Everything else keeps its payload: a dead button is debugged from it.
-    check store.entries.anyIt(it{"event"}.getStr() == "event:button" and it{"payload"}{"pin"}.getInt() == 5)
+    check store.entries.anyIt(it{"event"}.getStr() == "event:gpio" and it{"payload"}{"pin"}.getInt() == 5)
 
   test "scene changes are logged while render logging is paused":
     let sceneId = "tests/runner/paused-scene-change".SceneId
