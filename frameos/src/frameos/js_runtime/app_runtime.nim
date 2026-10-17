@@ -20,11 +20,13 @@ import frameos/js_runtime/burrito
 type
   JsAssetGrant* = enum
     ## What the app's config.json `permissions` let its asset calls do. An app
-    ## asks; the scene's tags are the union of its apps' (docs/scene-guide.md
-    ## "Assets"). "files" is Local Image's (a Nim app): for a JS app, which
-    ## has no absolute paths, it reads like "assets".
-    agUndeclared ## no `permissions` (apps from before 2026.10.16): the frame's folder, read and write
-    agOwnFolder  ## none of assets/files/assets-write: the scene's own <assets>/scenes/<sceneId>/
+    ## asks, and asking for nothing gets nothing; the scene's tags are the
+    ## union of its apps' (docs/scene-guide.md "Assets"). Scenes stored before
+    ## the lists existed got them written in by the control planes (backend
+    ## migration 5e2a9c71d4b8, the cloud's read-time stamp). "files" is Local
+    ## Image's (a Nim app): for a JS app, which has no absolute paths, it reads
+    ## like "assets".
+    agOwnFolder  ## none of assets/files/assets-write, or no list: the scene's own <assets>/scenes/<sceneId>/
     agRead       ## "assets" or "files": read the frame's folder, never change it
     agReadWrite  ## "assets-write": read and write the frame's folder
 
@@ -1081,7 +1083,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
 
 proc newJsAppRuntime*(category: string, outputType: string, source: string,
     settingsKeys: seq[string] = @[], sourceName: string = "",
-    sources: JsonNode = nil, assetGrant = agUndeclared): JsAppRuntime =
+    sources: JsonNode = nil, assetGrant = agOwnFolder): JsAppRuntime =
   ## `sources` is the app's file map (name → contents) that `source` may
   ## import from; `sourceName` names the main module among them.
   when defined(memProbe): memProbe("  NEW JsAppRuntime " & category & " src=" & $source.len & "B")
@@ -1413,20 +1415,16 @@ proc configFromSources(sources: JsonNode): JsonNode =
     return %*{}
 
 proc assetGrantFromConfig*(config: JsonNode): JsAssetGrant =
-  ## config.json `permissions`: absent or null is an app from before they
-  ## existed; anything else is exactly what the app asks for, and a value
-  ## that is not a list asks for nothing.
+  ## config.json `permissions`: exactly what the app asks for. No list, or a
+  ## value that is not one, asks for nothing.
+  result = agOwnFolder
   let declared = config{"permissions"}
-  if declared.isNil or declared.kind == JNull:
-    result = agUndeclared
-  else:
-    result = agOwnFolder
-    if declared.kind == JArray:
-      for item in declared.elems:
-        case item.getStr()
-        of "assets-write": result = agReadWrite
-        of "assets", "files": result = max(result, agRead)
-        else: discard
+  if not declared.isNil and declared.kind == JArray:
+    for item in declared.elems:
+      case item.getStr()
+      of "assets-write": result = agReadWrite
+      of "assets", "files": result = max(result, agRead)
+      else: discard
 
 proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, sources: JsonNode): AppRoot =
   let source = jsAppSourceFromSources(sources)

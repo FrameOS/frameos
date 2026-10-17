@@ -1,167 +1,147 @@
 {
-  "description": "Corpus for frontend/src/utils/sceneAccess.ts: what a scene declares (settings.assetAccess), what its content reaches for, the flags the control planes show, and what changes between two versions. docs/scene-guide.md \"Assets\" is the prose. Replayed by cloud/apps/auth-web/src/test/shared-spa/scene-access.test.ts.",
+  "description": "Corpus for frontend/src/utils/sceneAccess.ts: what a scene's apps ask for (config.json \"permissions\" and \"settings\"), the tags every surface shows, what an update changes, and how a save fills a JS app's list (withAppPermissions). docs/scene-guide.md \"Assets\" is the prose. Replayed by cloud/apps/auth-web/src/test/shared-spa/scene-access.test.ts.",
   "scenes": [
     {
-      "name": "an empty scene reaches for nothing",
+      "name": "an empty scene asks for nothing",
       "scene": {"id": "s", "nodes": [], "edges": []},
-      "expect": {"declared": "auto", "detected": "none", "effective": "none", "flags": [], "writes": false}
+      "flags": []
     },
     {
-      "name": "a JS code node reading an asset",
-      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "const raw = frameos.readAsset('notes.txt')"}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"], "writes": false}
+      "name": "the built-in Local Image app reads all files",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "data/localImage", "config": {}}}], "edges": []},
+      "flags": ["files"]
     },
     {
-      "name": "a scene-local app source listing assets",
-      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "jsImage", "sources": {"app.ts": "export function get() { return frameos.listAssets('photos') }"}}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"], "writes": false}
+      "name": "a bare built-in keyword from an older scene",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "localImage", "config": {}}}], "edges": []},
+      "flags": ["files"]
     },
     {
-      "name": "saving a fetched image is caching, not reading the folder",
-      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "unsplash", "sources": {"app.ts": "frameos.fetchImage(url, { saveAsset: { name: 'x', mode: 'auto' } })"}}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "none", "effective": "none", "flags": [], "writes": false}
-    },
-    {
-      "name": "Local Image with no path reads the assets folder",
-      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {}}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"], "writes": false}
-    },
-    {
-      "name": "Local Image inside /srv/assets",
-      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/srv/assets/photos"}}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"], "writes": false}
-    },
-    {
-      "name": "Local Image with the ESP32 spelling",
-      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "sd://photos"}}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"], "writes": false}
-    },
-    {
-      "name": "Local Image outside the assets folder",
-      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/home/pi/Pictures"}}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "files", "effective": "files", "flags": ["files"], "writes": false}
-    },
-    {
-      "name": "a folder that only starts like the assets folder",
-      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/srv/assets-old/x.jpg"}}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "files", "effective": "files", "flags": ["files"], "writes": false}
-    },
-    {
-      "name": "a traversal out of the assets folder",
-      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/srv/assets/../frameos"}}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "files", "effective": "files", "flags": ["files"], "writes": false}
-    },
-    {
-      "name": "a relative Local Image path is relative to the runtime, not the assets folder",
-      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "photos"}}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "files", "effective": "files", "flags": ["files"], "writes": false}
-    },
-    {
-      "name": "a Local Image path wired from a state field can name any folder",
-      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {}}}, {"id": "f", "type": "state", "data": {"keyword": "imageFolder"}}], "edges": [{"id": "e", "source": "f", "sourceHandle": "fieldOutput", "target": "l", "targetHandle": "fieldInput/path"}]},
-      "expect": {"declared": "auto", "detected": "files", "effective": "files", "flags": ["files"], "writes": false}
-    },
-    {
-      "name": "own folder only: asset calls stay in the scene's subtree, no flag",
-      "scene": {"id": "s", "settings": {"assetAccess": "cache-home-only"}, "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.writeAsset('state.json', b64)"}}], "edges": []},
-      "expect": {"declared": "cache-home-only", "detected": "assets", "effective": "home", "flags": [], "writes": true}
-    },
-    {
-      "name": "a declared reach is shown even when nothing in the content uses it",
-      "scene": {"id": "s", "settings": {"assetAccess": "all-files"}, "nodes": [], "edges": []},
-      "expect": {"declared": "all-files", "detected": "none", "effective": "files", "flags": ["files"], "writes": false}
-    },
-    {
-      "name": "all-assets caps a Local Image that points outside (the frame refuses it)",
-      "scene": {"id": "s", "settings": {"assetAccess": "all-assets"}, "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/etc"}}}], "edges": []},
-      "expect": {"declared": "all-assets", "detected": "files", "effective": "assets", "flags": ["assets"], "writes": false}
-    },
-    {
-      "name": "an unknown value is auto",
-      "scene": {"id": "s", "settings": {"assetAccess": "everything"}, "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.deleteAsset('x')"}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets", "assets-write"], "writes": true}
-    },
-    {
-      "name": "the screenshot app runs a shell command",
+      "name": "the built-in screenshot app runs shell commands",
       "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "data/chromiumScreenshot", "config": {}}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "none", "effective": "none", "flags": ["shell"], "writes": false}
+      "flags": ["shell"]
     },
     {
-      "name": "Nim process APIs in a code node",
+      "name": "the built-in camera app runs shell commands",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "data/rstpSnapshot", "config": {}}}], "edges": []},
+      "flags": ["shell"]
+    },
+    {
+      "name": "a code node cannot touch files, whatever it calls",
+      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "const raw = frameos.readAsset('notes.txt')"}}], "edges": []},
+      "flags": []
+    },
+    {
+      "name": "an app with no list shows what its code reads",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "export function get() { return frameos.listAssets('photos') }", "config.json": "{\n  \"name\": \"Lister\"\n}\n"}}}},
+      "flags": ["assets"]
+    },
+    {
+      "name": "an app with no list shows what its code writes",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "frameos.writeAsset('state.json', b64)", "config.json": "{\n  \"name\": \"Writer\"\n}\n"}}}},
+      "flags": ["assets", "assets-write"]
+    },
+    {
+      "name": "a stream opened to read reads",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "const s = frameos.openAssetStream('big.json', 'r')"}}}},
+      "flags": ["assets"]
+    },
+    {
+      "name": "a stream opened to write writes",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "const s = frameos.openAssetStream('log.txt', \"a\")"}}}},
+      "flags": ["assets", "assets-write"]
+    },
+    {
+      "name": "a stream with a mode the code computes writes",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "const s = frameos.openAssetStream(path, mode)"}}}},
+      "flags": ["assets", "assets-write"]
+    },
+    {
+      "name": "saving a fetched image is the frame caching, not the app using the folder",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "frameos.fetchImage(url, { saveAsset: { name: 'x', mode: 'auto' } })"}}}},
+      "flags": []
+    },
+    {
+      "name": "a declared list is what the app may do",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "export function get() { return null }", "config.json": "{\n  \"name\": \"Reader\",\n  \"permissions\": [\n    \"assets\"\n  ]\n}\n"}}}},
+      "flags": ["assets"]
+    },
+    {
+      "name": "a declared empty list asks for nothing, whatever the code calls (a save refills it)",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "frameos.writeAsset('x', y)", "config.json": "{\n  \"name\": \"Stale\",\n  \"permissions\": []\n}\n"}}}},
+      "flags": []
+    },
+    {
+      "name": "a list set by hand stays what it says",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "frameos.writeAsset('x', y)", "config.json": "{\n  \"name\": \"Clever\",\n  \"permissions\": [\n    \"assets\"\n  ],\n  \"permissionsAuto\": false\n}\n"}}}},
+      "flags": ["assets"]
+    },
+    {
+      "name": "unknown names in a list are ignored",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "export function get() { return null }", "config.json": "{\n  \"name\": \"Odd\",\n  \"permissions\": [\n    \"assets\",\n    \"root\"\n  ]\n}\n"}}}},
+      "flags": ["assets"]
+    },
+    {
+      "name": "an API key an app reads",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "frameos.getSetting('openAI', 'apiKey')", "config.json": "{\n  \"name\": \"Haiku\",\n  \"settings\": [\n    \"openAI\"\n  ]\n}\n"}}}},
+      "flags": ["key:openAI"]
+    },
+    {
+      "name": "keys come after permissions",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "frameos.readAsset('x')", "config.json": "{\n  \"name\": \"Both\",\n  \"settings\": [\n    \"openAI\"\n  ]\n}\n"}}}},
+      "flags": ["assets", "key:openAI"]
+    },
+    {
+      "name": "JavaScript cannot spawn processes, whatever its text says",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "// call execShellCmd like Nim would"}}}},
+      "flags": []
+    },
+    {
+      "name": "a legacy Nim code node that runs processes",
       "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"code": "discard execShellCmd(\"reboot\")"}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "none", "effective": "none", "flags": ["shell"], "writes": false}
+      "flags": ["shell"]
     },
     {
-      "name": "a writer reaches the assets folder and writes it",
-      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.writeAsset('notes.txt', b64)"}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "writes": true, "flags": ["assets", "assets-write"]}
+      "name": "legacy Nim code shells out whatever the node calls itself",
+      "scene": {"id": "s", "nodes": [{"id": "n", "data": {"code": "discard execShellCmd(\"reboot\")"}}], "edges": []},
+      "flags": ["shell"]
     },
     {
-      "name": "reads all files never covers writes assets folder",
-      "scene": {"id": "s", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/mnt/usb"}}}, {"id": "c", "type": "code", "data": {"codeJS": "frameos.appendAsset('log.txt', b64)"}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "files", "effective": "files", "writes": true, "flags": ["files", "assets-write"]}
+      "name": "JavaScript code cannot run processes, whatever it names",
+      "scene": {"id": "s", "nodes": [{"id": "n", "type": "code", "data": {"codeJS": "execShellCmd('reboot')"}}], "edges": []},
+      "flags": []
     },
     {
-      "name": "a stream opened to read",
-      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "const s = frameos.openAssetStream('big.json', \"r\")"}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "writes": false, "flags": ["assets"]}
+      "name": "a legacy Nim app the scene carries",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "nimApp"}}], "edges": [], "apps": {"nimApp": {"sources": {"app.nim": "import osproc\nlet x = execProcess(\"ls\")", "config.json": "{\"name\": \"Nim app\"}"}}}},
+      "flags": ["shell"]
     },
     {
-      "name": "a stream with no mode reads",
-      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "const s = frameos.openAssetStream(dir + '/big.json')"}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "writes": false, "flags": ["assets"]}
+      "name": "an app the node carries itself (older scenes)",
+      "scene": {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "inline", "sources": {"app.ts": "frameos.loadAssetImage('a.png')"}}}], "edges": []},
+      "flags": ["assets"]
     },
     {
-      "name": "a stream opened to write",
-      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "const s = frameos.openAssetStream(`cache/${name}`, 'w')"}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "writes": true, "flags": ["assets", "assets-write"]}
-    },
-    {
-      "name": "a stream opened to append, written over two arguments with calls in them",
-      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.openAssetStream(join(a, b), `a`)"}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "writes": true, "flags": ["assets", "assets-write"]}
-    },
-    {
-      "name": "a stream whose mode is not a literal counts as writing",
-      "scene": {"id": "s", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.openAssetStream(path, mode)"}}], "edges": []},
-      "expect": {"declared": "auto", "detected": "assets", "effective": "assets", "writes": true, "flags": ["assets", "assets-write"]}
-    },
-    {
-      "name": "all-assets without a write call shows no write flag",
-      "scene": {"id": "s", "settings": {"assetAccess": "all-assets"}, "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.listAssets('photos')"}}], "edges": []},
-      "expect": {"declared": "all-assets", "detected": "assets", "effective": "assets", "writes": false, "flags": ["assets"]}
-    },
-    {
-      "name": "all-files with a writer",
-      "scene": {"id": "s", "settings": {"assetAccess": "all-files"}, "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.deleteAsset('old.jpg')"}}], "edges": []},
-      "expect": {"declared": "all-files", "detected": "assets", "effective": "files", "writes": true, "flags": ["files", "assets-write"]}
+      "name": "an app no node runs asks for nothing",
+      "scene": {"id": "s", "nodes": [], "edges": [], "apps": {"unused": {"sources": {"app.ts": "frameos.deleteAsset('x')"}}}},
+      "flags": []
     }
   ],
   "sets": [
     {
       "name": "reads all files covers reads assets folder across a set",
-      "scenes": [
-        {"id": "a", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.readAsset('x')"}}], "edges": []},
-        {"id": "b", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/mnt/usb"}}}], "edges": []}
-      ],
+      "scenes": [{"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "data/localImage", "config": {}}}], "edges": []}, {"id": "b", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "frameos.readAsset('x')"}}}}],
       "flags": ["files"]
     },
     {
-      "name": "flags come in display order: shell, files, assets",
-      "scenes": [
-        {"id": "a", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.readAsset('x')"}}], "edges": []},
-        {"id": "b", "nodes": [{"id": "s", "type": "app", "data": {"keyword": "data/rstpSnapshot", "config": {}}}], "edges": []}
-      ],
-      "flags": ["shell", "assets"]
+      "name": "display order: permissions, then keys",
+      "scenes": [{"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "frameos.writeAsset('x', y)", "config.json": "{\n  \"name\": \"W\",\n  \"settings\": [\n    \"openAI\"\n  ]\n}\n"}}}}, {"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "data/chromiumScreenshot", "config": {}}}], "edges": []}],
+      "flags": ["shell", "assets", "assets-write", "key:openAI"]
     },
     {
-      "name": "a writer next to a reader of all files and a shell app",
-      "scenes": [
-        {"id": "a", "nodes": [{"id": "c", "type": "code", "data": {"codeJS": "frameos.writeAsset('x', b64)"}}], "edges": []},
-        {"id": "b", "nodes": [{"id": "l", "type": "app", "data": {"keyword": "data/localImage", "config": {"path": "/home/pi"}}}], "edges": []},
-        {"id": "c", "nodes": [{"id": "s", "type": "app", "data": {"keyword": "data/chromiumScreenshot", "config": {}}}], "edges": []}
-      ],
-      "flags": ["shell", "files", "assets-write"]
+      "name": "keys by name",
+      "scenes": [{"id": "s", "nodes": [{"id": "a", "type": "app", "data": {"keyword": "myApp"}}], "edges": [], "apps": {"myApp": {"sources": {"app.ts": "export function get() { return null }", "config.json": "{\n  \"name\": \"K\",\n  \"settings\": [\n    \"unsplash\",\n    \"homeAssistant\"\n  ]\n}\n"}}}}],
+      "flags": ["key:homeAssistant", "key:unsplash"]
     },
     {
       "name": "not a list",
@@ -192,32 +172,102 @@
       "lost": ["files"]
     },
     {
-      "name": "a new version starts writing",
+      "name": "gaining writes",
       "before": ["assets"],
       "after": ["assets", "assets-write"],
       "gained": ["assets-write"],
       "lost": []
     },
     {
-      "name": "from nothing to everything",
-      "before": [],
-      "after": ["shell", "files", "assets-write"],
-      "gained": ["shell", "files", "assets-write"],
+      "name": "gaining an API key",
+      "before": ["assets"],
+      "after": ["assets", "key:openAI"],
+      "gained": ["key:openAI"],
       "lost": []
     },
     {
-      "name": "reading all files covers a dropped assets read",
-      "before": ["assets", "assets-write"],
-      "after": ["files"],
-      "gained": ["files"],
-      "lost": ["assets-write"]
+      "name": "losing an API key",
+      "before": ["key:openAI", "key:unsplash"],
+      "after": ["key:unsplash"],
+      "gained": [],
+      "lost": ["key:openAI"]
     },
     {
-      "name": "unknown catalog flags are ignored",
+      "name": "unknown flags are ignored",
       "before": ["nsfw"],
-      "after": ["nsfw", "assets"],
-      "gained": ["assets"],
+      "after": ["nsfw", "shell"],
+      "gained": ["shell"],
       "lost": []
+    }
+  ],
+  "stamps": [
+    {
+      "name": "an app with no list gets what its code calls for, after settings",
+      "code": "frameos.readAsset('x')",
+      "config": "{\n  \"name\": \"Reader\",\n  \"settings\": [\n    \"openAI\"\n  ],\n  \"fields\": []\n}\n",
+      "expect": "{\n  \"name\": \"Reader\",\n  \"settings\": [\n    \"openAI\"\n  ],\n  \"permissions\": [\n    \"assets\"\n  ],\n  \"fields\": []\n}\n"
+    },
+    {
+      "name": "with no settings the list goes last",
+      "code": "frameos.writeAsset('x', y)",
+      "config": "{\n  \"name\": \"Writer\"\n}\n",
+      "expect": "{\n  \"name\": \"Writer\",\n  \"permissions\": [\n    \"assets\",\n    \"assets-write\"\n  ]\n}\n"
+    },
+    {
+      "name": "a stale automatic list follows the code",
+      "code": "frameos.writeAsset('x', y)",
+      "config": "{\n  \"name\": \"Stale\",\n  \"permissions\": [\n    \"assets\"\n  ],\n  \"category\": \"data\"\n}\n",
+      "expect": "{\n  \"name\": \"Stale\",\n  \"permissions\": [\n    \"assets\",\n    \"assets-write\"\n  ],\n  \"category\": \"data\"\n}\n"
+    },
+    {
+      "name": "a list that already matches is left alone",
+      "code": "frameos.readAsset('x')",
+      "config": "{\n  \"name\": \"Same\",\n  \"permissions\": [\n    \"assets\"\n  ]\n}\n",
+      "expect": null
+    },
+    {
+      "name": "a list set by hand is left alone",
+      "code": "frameos.writeAsset('x', y)",
+      "config": "{\n  \"name\": \"Clever\",\n  \"permissions\": [],\n  \"permissionsAuto\": false\n}\n",
+      "expect": null
+    },
+    {
+      "name": "an app that calls nothing asks for nothing",
+      "code": "export function get() { return 1 }",
+      "config": "{\n  \"name\": \"Plain\"\n}\n",
+      "expect": "{\n  \"name\": \"Plain\",\n  \"permissions\": []\n}\n"
+    },
+    {
+      "name": "an app with no config.json gets one",
+      "code": "frameos.readAsset('x')",
+      "config": null,
+      "expect": "{\n  \"permissions\": [\n    \"assets\"\n  ]\n}\n"
+    },
+    {
+      "name": "a config.json that does not parse is left for its author",
+      "code": "frameos.readAsset('x')",
+      "config": "{ not json",
+      "expect": null
+    },
+    {
+      "name": "the file's own indent and trailing newline are kept",
+      "code": "frameos.readAsset('x')",
+      "config": "{\n    \"name\": \"Four\"\n}",
+      "expect": "{\n    \"name\": \"Four\",\n    \"permissions\": [\n        \"assets\"\n    ]\n}"
+    },
+    {
+      "name": "the cloud's stamp only fills a missing list",
+      "onlyMissing": true,
+      "code": "frameos.writeAsset('x', y)",
+      "config": "{\n  \"name\": \"Declared\",\n  \"permissions\": [\n    \"assets\"\n  ]\n}\n",
+      "expect": null
+    },
+    {
+      "name": "the cloud's stamp fills a missing list",
+      "onlyMissing": true,
+      "code": "frameos.writeAsset('x', y)",
+      "config": "{\n  \"name\": \"Old\"\n}\n",
+      "expect": "{\n  \"name\": \"Old\",\n  \"permissions\": [\n    \"assets\",\n    \"assets-write\"\n  ]\n}\n"
     }
   ]
 }

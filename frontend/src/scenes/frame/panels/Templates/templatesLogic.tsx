@@ -16,7 +16,13 @@ import { longRunningTasksModel, reportTaskOutcome } from '../../../../models/lon
 import { framesModel } from '../../../../models/framesModel'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { templateCompatibilityForFrame } from '../../../../utils/embeddedCompatibility'
-import { sceneAccessFlagLabels, sceneAccessFlags, templateAccessFlags } from '../../../../utils/sceneAccess'
+import {
+  sceneAccessFlagIsRisky,
+  sceneAccessFlagLabel,
+  sceneAccessFlags,
+  templateAccessFlags,
+  withAppPermissions,
+} from '../../../../utils/sceneAccess'
 import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { templateWithSceneOrigins } from '../../../../utils/sceneOrigin'
@@ -655,7 +661,9 @@ export const templatesLogic = kea<templatesLogicType>([
           // Never ship a `secret: true` field value in a template or a store zip.
           const exportedScenes = (values.frameForm.scenes || [])
             .filter((scene) => exportScenes.includes(scene.id))
-            .map((scene) => stripSecretFieldValues(scene, values.apps))
+            // Saved the way a save leaves them: each JS app's permissions
+            // filled from its code (utils/sceneAccess.ts).
+            .map((scene) => withAppPermissions(stripSecretFieldValues(scene, values.apps)))
 
           if (target === 'cloud') {
             const response = await apiFetch('/api/cloud/store/publish', {
@@ -1134,19 +1142,23 @@ export const templatesLogic = kea<templatesLogicType>([
           return
         }
         // A URL carries no catalog flags and shows no tile, so this dialog is
-        // the only place the user sees what the scenes reach for: every flag
-        // asks (utils/sceneAccess.ts), shell as a danger.
+        // the only place the user sees what the scenes' apps ask for: every
+        // flag asks (utils/sceneAccess.ts), shell, files and writes as a danger.
         const accessFlags = sceneAccessFlags(scenes)
         if (
           accessFlags.length > 0 &&
           !(await confirmDialog({
-            title: accessFlags.includes('shell') ? 'These scenes run shell commands' : 'These scenes read files',
+            title: accessFlags.includes('shell')
+              ? 'These scenes run shell commands'
+              : accessFlags.some((flag) => !flag.startsWith('key:'))
+              ? 'These scenes use files on the frame'
+              : 'These scenes use your API keys',
             message:
               `What the scenes at this URL do on the frame: ${accessFlags
-                .map((flag) => sceneAccessFlagLabels[flag])
+                .map((flag) => sceneAccessFlagLabel(flag))
                 .join(', ')}. ` + 'Installing them allows that. Only install them if you trust the source.',
             confirmLabel: 'Install anyway',
-            danger: accessFlags.includes('shell') || accessFlags.includes('files'),
+            danger: accessFlags.some(sceneAccessFlagIsRisky),
           }))
         ) {
           return

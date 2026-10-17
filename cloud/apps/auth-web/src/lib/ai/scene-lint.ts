@@ -14,8 +14,9 @@
 import { appCatalog, sceneEvents, type AiAppConfig } from "./context";
 import type { JsonObject } from "./scene-utils";
 import {
-  ASSET_ACCESS_VALUES,
-  assetAccessRefusesContent,
+  SCENE_PERMISSIONS,
+  appPermissionShortfall,
+  isScenePermission,
   sceneAccess,
 } from "../../../../../../frontend/src/utils/sceneAccess";
 
@@ -620,23 +621,38 @@ export function lintScene(
       push("warning", `settings.backgroundColor: ${mismatch}.`);
     }
   }
-  if (settings.assetAccess !== undefined) {
+  // --- permissions ----------------------------------------------------------
+  // Each app asks for what it may do on the frame in its config.json; the
+  // frame gives it exactly that (frontend/src/utils/sceneAccess.ts).
+  for (const [keyword, app] of Object.entries(sceneApps ?? {})) {
+    const configText = obj(obj(app)?.sources)?.["config.json"];
+    if (typeof configText !== "string") {
+      continue;
+    }
+    let config: JsonObject | undefined;
+    try {
+      config = obj(JSON.parse(configText));
+    } catch {
+      continue;
+    }
+    const permissions = config?.permissions;
     if (
-      typeof settings.assetAccess !== "string" ||
-      !(ASSET_ACCESS_VALUES as readonly string[]).includes(settings.assetAccess)
+      permissions !== undefined &&
+      (!Array.isArray(permissions) || !permissions.every((permission) => isScenePermission(permission)))
     ) {
       push(
         "error",
-        `settings.assetAccess must be one of ${ASSET_ACCESS_VALUES.map((value) => `"${value}"`).join(", ")}.`,
+        `Scene app "${keyword}" (config.json): "permissions" must be a list of ${SCENE_PERMISSIONS.map((permission) => `"${permission}"`).join(", ")}.`,
       );
-    } else {
-      const access = sceneAccess(scene);
-      if (assetAccessRefusesContent(access)) {
-        push(
-          "warning",
-          `settings.assetAccess is "${access.declared}" but ${access.reasons.join("; ")}: the frame refuses that path. Use "all-files", or point it inside the assets folder.`,
-        );
-      }
+    }
+  }
+  for (const app of sceneAccess(scene).apps) {
+    const shortfall = appPermissionShortfall(app);
+    if (!app.auto && shortfall.length > 0) {
+      push(
+        "warning",
+        `Scene app "${app.keyword}" ${app.reasons.join(" and ")}, but the permissions set by hand in its config.json do not include ${shortfall.map((permission) => `"${permission}"`).join(" or ")}: the frame refuses those calls.`,
+      );
     }
   }
 

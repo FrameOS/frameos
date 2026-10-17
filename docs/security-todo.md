@@ -55,12 +55,6 @@ is left there is in the medium / low list.
   `lan`), filled on save where the app's code or config names a private
   address (an `haSensor`-style app), shown at install, and enforced by the
   HTTP client per app.
-- JS apps with no `permissions` in their config.json (written before
-  2026.10.16) still reach the whole assets folder, read and write, so old
-  scenes keep working. Every control plane writes `permissions` on save and
-  the cloud stamps store apps at read time; once that has had a release to
-  reach frames, treat a missing list as "asks for nothing" (`agUndeclared`
-  in `js_runtime/app_runtime.nim` becomes `agOwnFolder`).
 - Interpreter budgets (wall-clock deadline, JS heap ceiling, dispatch
   budget) are per run, not per scene per minute.
 - ESP32 OTA does not compare the image's own `esp_app_desc` version with the

@@ -5,7 +5,7 @@ import { PhotoIcon } from '@heroicons/react/24/outline'
 
 import type { TemplateType } from '../../types'
 import { imageElementIsBlank } from '../../utils/blankImage'
-import { sceneAccessFlagDescriptions, sceneAccessFlagLabels, templateAccessFlags } from '../../utils/sceneAccess'
+import { sceneAccessFlagDescription, sceneAccessFlagLabel, templateAccessFlags } from '../../utils/sceneAccess'
 import type { StoreShelfGroup } from './storeCatalog'
 
 // The store's tiles and shelves, as the cloud's store page drew them:
@@ -86,15 +86,15 @@ export function SceneTile({
     <>
       <TileImage imageUrl={typeof template.image === 'string' ? template.image : null} />
       <div className="flex flex-col gap-2 px-2.5 pt-2">
-        <h3 className="frameos-strong text-sm font-semibold leading-tight">
+        <h3 className="frameos-strong text-base font-semibold leading-snug">
           {template.name}
           {flags.map((flag) => (
             <span
               key={flag}
               className="ml-1 inline-block whitespace-nowrap rounded border border-amber-500/40 bg-amber-500/10 px-1 text-[10px] font-medium text-amber-700"
-              title={sceneAccessFlagDescriptions[flag]}
+              title={sceneAccessFlagDescription(flag)}
             >
-              {sceneAccessFlagLabels[flag]}
+              {sceneAccessFlagLabel(flag)}
             </span>
           ))}
         </h3>
@@ -176,7 +176,7 @@ export function StoreShelves({
       {shelves.map(({ shelf, templates }) => (
         <section key={shelf.slug} data-shelf={shelf.slug} className="scroll-mt-4 space-y-3">
           {!activeCategory ? (
-            <h2 className="frameos-heading flex items-baseline gap-2 text-lg font-bold">
+            <h2 className="frameos-heading flex items-baseline gap-2 text-2xl font-bold">
               {shelfHref ? (
                 <a href={shelfHref(shelf.slug)} className="hover:underline">
                   {shelf.title}
@@ -184,7 +184,7 @@ export function StoreShelves({
               ) : (
                 shelf.title
               )}
-              <span className="frameos-muted text-xs font-medium">{templates.length}</span>
+              <span className="frameos-muted text-sm font-medium">{templates.length}</span>
             </h2>
           ) : null}
           <TileGrid>

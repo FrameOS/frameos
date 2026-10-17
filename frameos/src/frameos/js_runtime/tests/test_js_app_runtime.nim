@@ -553,6 +553,8 @@ suite "js app runtime":
 
     let runtime = newJsAppRuntime(
       category = "data",
+      # The frame-wide folder, read and write (the app asks for "assets-write").
+      assetGrant = agReadWrite,
       outputType = "json",
       source = """export function get(app, context) {
           return {
@@ -653,11 +655,10 @@ suite "js app runtime":
       check not reader["stream"].getBool()
     check fileExists(assetsDir / "shared.txt")
     check not fileExists(assetsDir / "reader.txt")
-    # A value that is not a list asks for nothing; no `permissions` at all is
-    # an app from before them, which runs as before.
+    # No list, or a value that is not one, asks for nothing.
     check assetGrantFromConfig(%*{"permissions": "assets-write"}) == agOwnFolder
-    check assetGrantFromConfig(%*{}) == agUndeclared
-    check assetGrantFromConfig(%*{"permissions": nil}) == agUndeclared
+    check assetGrantFromConfig(%*{}) == agOwnFolder
+    check assetGrantFromConfig(%*{"permissions": nil}) == agOwnFolder
     # "assets-write": reads and changes the frame's folder.
     let writer = run(%*["assets", "assets-write"], "writer")
     check writer["wrote"].getBool() and writer["sharedVisible"].getBool() and writer["deleted"].getBool()
@@ -683,6 +684,8 @@ suite "js app runtime":
 
     let runtime = newJsAppRuntime(
       category = "data",
+      # The frame-wide folder, read and write (the app asks for "assets-write").
+      assetGrant = agReadWrite,
       outputType = "image",
       source = """export function get(app, context) {
           return frameos.loadAssetImage("plate.png")
@@ -710,6 +713,8 @@ suite "js app runtime":
 
     let runtime = newJsAppRuntime(
       category = "data",
+      # The frame-wide folder, read and write (the app asks for "assets-write").
+      assetGrant = agReadWrite,
       outputType = "json",
       source = """export function get(app, context) {
           // String stream: write, rewind, read back in small chunks.

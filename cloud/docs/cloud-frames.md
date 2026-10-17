@@ -355,13 +355,19 @@ A JS app names what it needs in its `config.json` `permissions` (`assets`
 reads the frame's assets folder, `assets-write` also changes it; `files` and
 `shell` belong to the built-in Local Image and the two process-spawning
 apps). The editor fills the list from the app's code on every save unless the
-app says `"permissionsAuto": false`, and the cloud stamps it into any store
-app that lacks it when the scene is read, so every app that reaches a frame
-through a control plane asks for something explicit. The frame enforces it
-per app (`JsAssetGrant`, `js_runtime/app_runtime.nim`): an app that asks for
-none of them keeps its files in the scene's own `<assets>/scenes/<sceneId>/`,
+app says `"permissionsAuto": false`. The frame enforces it per app
+(`JsAssetGrant`, `js_runtime/app_runtime.nim`), and asking for nothing gets
+nothing: an app with no list, or one that asks for none of them, keeps its
+files in the scene's own `<assets>/scenes/<sceneId>/`,
 one that asks to read cannot write, and every path is still checked against
-the real path so a symlink planted inside the folder is not a way out. A
+the real path so a symlink planted inside the folder is not a way out.
+Scenes stored before the lists existed get them from the control planes: the
+cloud stamps every store app that lacks a list when it builds the push for a
+firmware that reads them (`withStoreSceneOrigin`, `APP_PERMISSIONS_FROM`),
+so a frame's firmware update across 2026.10.16 changes its payload and the
+hub's firmware-change resync re-pushes the same assignments on the scene it
+is showing; the self-hosted backend's migration `5e2a9c71d4b8` writes them
+into every stored frame and template. A
 scene's tags (and the store's `risk_flags` at publish) are the union of its
 apps' permissions plus the API keys they use (`key:<namespace>`), from one
 detector shared by the SPA and the store (`frontend/src/utils/sceneAccess.ts`,

@@ -286,7 +286,7 @@ describe("cloud: several scenes with an update", () => {
   });
 
   it("says which scenes gain a permission, in red when it is the clicked one", async () => {
-    // Version 5 of the other scene starts writing assets; version 3 did not.
+    // Version 5 of the other scene adds an app that writes assets; version 3 had none.
     const store = apiFetchMock.getMockImplementation()!;
     apiFetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
@@ -297,7 +297,8 @@ describe("cloud: several scenes with an update", () => {
             ...scene,
             id: "rt-2",
             name: "Clock",
-            nodes: [{ id: "c", type: "code", position: { x: 0, y: 0 }, data: { codeJS: "frameos.writeAsset('x', y)" } }],
+            nodes: [{ id: "c", type: "app", position: { x: 0, y: 0 }, data: { keyword: "notes" } }],
+            apps: { notes: { sources: { "app.ts": "frameos.writeAsset('x', y)", "config.json": "{}" } } },
           },
         ]);
       }

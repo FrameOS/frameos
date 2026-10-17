@@ -1,30 +1,33 @@
-// What a scene reaches for on the frame (frontend/src/utils/sceneAccess.ts):
-// the access it declares in settings.assetAccess, what its content uses, the
-// flags the SPA and the store show, and what an update changes in them.
-// docs/scene-access-fixtures.json is the corpus; the store's publish-time
-// risk_flags call the same function.
-import { readFileSync } from "node:fs";
+// What a scene's apps ask for on the frame (frontend/src/utils/sceneAccess.ts):
+// each app's config.json "permissions" and "settings", the tags the SPA and
+// the store show for their union, what an update changes in them, and how a
+// save fills a JS app's list. docs/scene-access-fixtures.json is the corpus;
+// the store's publish-time risk_flags call the same function.
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  BUILTIN_APP_ACCESS,
   accessChangesAreRisky,
+  appPermissionShortfall,
   describeGainedAccess,
   knownSceneAccessFlags,
-  localImagePathReach,
   sceneAccess,
   sceneAccessChanges,
   sceneAccessFlagChanges,
+  sceneAccessFlagLabel,
   sceneAccessFlags,
+  withAppPermissions,
 } from "../../../../../../frontend/src/utils/sceneAccess";
 import { sceneUpdateAccessNotice } from "../../../../../../frontend/src/utils/sceneUpdateAccess";
 import { detectRiskFlags } from "../../lib/store";
 
-const repoFile = (path: string): string =>
-  readFileSync(new URL(`../../../../../../${path}`, import.meta.url), "utf8");
+const repoUrl = (path: string): URL => new URL(`../../../../../../${path}`, import.meta.url);
+const repoFile = (path: string): string => readFileSync(repoUrl(path), "utf8");
 
 interface SceneCase {
   name: string;
   scene: unknown;
-  expect: { declared: string; detected: string; effective: string; flags: string[]; writes: boolean };
+  flags: string[];
 }
 interface SetCase {
   name: string;
@@ -38,30 +41,31 @@ interface ChangeCase {
   gained: string[];
   lost: string[];
 }
+interface StampCase {
+  name: string;
+  code: string;
+  config: string | null;
+  onlyMissing?: boolean;
+  expect: string | null;
+}
 
 const corpus = JSON.parse(repoFile("docs/scene-access-fixtures.json")) as {
   scenes: SceneCase[];
   sets: SetCase[];
   changes: ChangeCase[];
+  stamps: StampCase[];
 };
 
-describe("sceneAccess corpus", () => {
+describe("scene access corpus", () => {
   for (const fixture of corpus.scenes) {
     it(fixture.name, () => {
-      const access = sceneAccess(fixture.scene);
-      expect({
-        declared: access.declared,
-        detected: access.detected,
-        effective: access.effective,
-        flags: sceneAccessFlags([fixture.scene]),
-        writes: access.writes,
-      }).toEqual(fixture.expect);
+      expect(sceneAccessFlags([fixture.scene])).toEqual(fixture.flags);
       // The store's risk flags are the same answer.
-      expect(detectRiskFlags([fixture.scene])).toEqual(fixture.expect.flags);
+      expect(detectRiskFlags([fixture.scene])).toEqual(fixture.flags);
     });
   }
   for (const fixture of corpus.sets) {
-    it(fixture.name, () => {
+    it(`set: ${fixture.name}`, () => {
       expect(sceneAccessFlags(fixture.scenes)).toEqual(fixture.flags);
       expect(detectRiskFlags(fixture.scenes)).toEqual(fixture.flags);
     });
@@ -75,53 +79,117 @@ describe("sceneAccess corpus", () => {
       });
     });
   }
+  for (const fixture of corpus.stamps) {
+    it(`save: ${fixture.name}`, () => {
+      const sources: Record<string, string> = { "app.ts": fixture.code };
+      if (fixture.config !== null) {
+        sources["config.json"] = fixture.config;
+      }
+      const scene = {
+        id: "s",
+        nodes: [{ id: "a", type: "app", data: { keyword: "myApp" } }],
+        apps: { myApp: { sources } },
+      };
+      const saved = withAppPermissions(scene, { onlyMissing: fixture.onlyMissing === true });
+      if (fixture.expect === null) {
+        // Nothing to change: the very same object comes back.
+        expect(saved).toBe(scene);
+      } else {
+        expect(saved.apps.myApp.sources["config.json"]).toBe(fixture.expect);
+        // Saving again changes nothing: the list now matches the code.
+        expect(withAppPermissions(saved)).toBe(saved);
+      }
+    });
+  }
 });
 
-describe("sceneAccess details", () => {
-  it("says why it flagged a scene", () => {
+describe("built-in apps", () => {
+  // BUILTIN_APP_ACCESS mirrors what the built-in apps' config.json declare
+  // (the cloud server cannot read frameos/src/apps): every key, both ways.
+  it("matches every config.json under frameos/src/apps", () => {
+    const declared: Record<string, { permissions?: string[]; settings?: string[] }> = {};
+    const appsRoot = repoUrl("frameos/src/apps/");
+    for (const category of readdirSync(appsRoot, { withFileTypes: true })) {
+      if (!category.isDirectory()) {
+        continue;
+      }
+      for (const app of readdirSync(new URL(`${category.name}/`, appsRoot), { withFileTypes: true })) {
+        const configUrl = new URL(`${category.name}/${app.name}/config.json`, appsRoot);
+        if (!app.isDirectory() || !existsSync(configUrl)) {
+          continue;
+        }
+        const config = JSON.parse(readFileSync(configUrl, "utf8")) as {
+          permissions?: string[];
+          settings?: string[];
+        };
+        if (config.permissions?.length || config.settings?.length) {
+          declared[`${category.name}/${app.name}`] = {
+            ...(config.permissions?.length ? { permissions: config.permissions } : {}),
+            ...(config.settings?.length ? { settings: config.settings } : {}),
+          };
+        }
+      }
+    }
+    expect(BUILTIN_APP_ACCESS).toEqual(declared);
+  });
+});
+
+describe("scene access details", () => {
+  it("names a hand-set list that does not cover the code", () => {
     const access = sceneAccess({
-      nodes: [
-        { id: "l", type: "app", data: { keyword: "data/localImage", config: { path: "/mnt/usb" } } },
-        { id: "c", type: "code", data: { codeJS: "frameos.loadAssetImage('a.png'); frameos.writeAsset('b.png', x)" } },
-      ],
+      nodes: [{ id: "a", type: "app", data: { keyword: "clever" } }],
+      apps: {
+        clever: {
+          sources: {
+            "app.ts": "frameos.loadAssetImage('a.png'); frameos.writeAsset('b.png', x)",
+            "config.json": JSON.stringify({ name: "Clever", permissions: ["files"], permissionsAuto: false }),
+          },
+        },
+      },
     });
-    expect(access.reasons).toEqual([
-      "a Local Image node reads /mnt/usb, outside the assets folder",
-      "its code calls frameos.loadAssetImage",
-      "its code calls frameos.writeAsset",
-    ]);
+    const app = access.apps[0];
+    expect(app?.name).toBe("Clever");
+    expect(app?.auto).toBe(false);
+    expect(app?.reasons).toEqual(["calls frameos.loadAssetImage", "calls frameos.writeAsset"]);
+    // "files" covers reading the assets folder, not writing it.
+    expect(app ? appPermissionShortfall(app) : null).toEqual(["assets-write"]);
   });
 
-  it("names a stream opened to write", () => {
-    expect(sceneAccess({ nodes: [{ id: "c", type: "code", data: { codeJS: 'frameos.openAssetStream(p, "w")' } }] }).reasons).toEqual([
-      "its code calls frameos.openAssetStream to write",
-    ]);
-  });
-
-  it("checks a Local Image path against a frame's own assets folder", () => {
-    expect(localImagePathReach("/data/assets/photos", "/data/assets/")).toBe("assets");
-    expect(localImagePathReach("/srv/assets/photos", "/data/assets")).toBe("files");
+  it("an app with no list is not short of anything: it runs as before", () => {
+    const access = sceneAccess({
+      nodes: [{ id: "a", type: "app", data: { keyword: "old" } }],
+      apps: { old: { sources: { "app.ts": "frameos.writeAsset('b', x)" } } },
+    });
+    expect(access.apps[0]?.declared).toBeNull();
+    expect(access.apps[0] ? appPermissionShortfall(access.apps[0]) : null).toEqual([]);
   });
 
   it("orders catalog flags and drops the ones it does not know", () => {
-    expect(knownSceneAccessFlags(["assets-write", "assets", "nsfw", "shell", "files"])).toEqual([
-      "shell",
-      "files",
-      "assets-write",
-    ]);
+    expect(
+      knownSceneAccessFlags(["key:openAI", "assets-write", "assets", "nsfw", "shell", "files", "key:bad name"]),
+    ).toEqual(["shell", "files", "assets-write", "key:openAI"]);
     expect(knownSceneAccessFlags(undefined)).toEqual([]);
+  });
+
+  it("labels key flags by the service", () => {
+    expect(sceneAccessFlagLabel("key:openAI")).toBe("uses OpenAI key");
+    expect(sceneAccessFlagLabel("key:homeAssistant")).toBe("uses Home Assistant key");
+    expect(sceneAccessFlagLabel("key:somethingNew")).toBe("uses somethingNew key");
   });
 });
 
 describe("what an update changes", () => {
-  const reader = { id: "a", nodes: [{ id: "c", type: "code", data: { codeJS: "frameos.readAsset('x')" } }] };
-  const allFiles = {
-    id: "a",
-    nodes: [{ id: "l", type: "app", data: { keyword: "data/localImage", config: { path: "/mnt/usb" } } }],
-  };
-  const writer = { id: "b", nodes: [{ id: "c", type: "code", data: { codeJS: "frameos.writeAsset('x', y)" } }] };
+  const app = (keyword: string, code: string, config: Record<string, unknown> = {}) => ({
+    id: keyword,
+    nodes: [{ id: "a", type: "app", data: { keyword } }],
+    apps: { [keyword]: { sources: { "app.ts": code, "config.json": JSON.stringify(config) } } },
+  });
+  const reader = app("reader", "frameos.readAsset('x')");
+  const allFiles = { id: "reader", nodes: [{ id: "l", type: "app", data: { keyword: "data/localImage" } }] };
+  const writer = app("writer", "frameos.writeAsset('x', y)");
+  const haiku = app("reader", "frameos.readAsset('x')", { settings: ["openAI"] });
 
-  it("reads a scene and its new version with the same detector", () => {
+  it("reads a scene and its new version the same way", () => {
     const changes = sceneAccessChanges(reader, allFiles);
     expect(changes.gained).toEqual(["files"]);
     expect(describeGainedAccess(changes)).toBe("reads all files (was reads assets folder)");
@@ -132,6 +200,12 @@ describe("what an update changes", () => {
     const changes = sceneAccessChanges([reader], [reader, writer]);
     expect(changes.gained).toEqual(["assets-write"]);
     expect(describeGainedAccess(changes)).toBe("writes assets folder");
+  });
+
+  it("gaining a key says so without a red button", () => {
+    const changes = sceneAccessChanges(reader, haiku);
+    expect(describeGainedAccess(changes)).toBe("uses OpenAI key");
+    expect(accessChangesAreRisky(changes)).toBe(false);
   });
 
   it("gaining only a read of the assets folder is not a red button", () => {
@@ -177,8 +251,8 @@ describe("what an update changes", () => {
 });
 
 describe("repo sample scenes", () => {
-  // The two SD-card samples point Local Image at a public state field, which
-  // whoever controls the frame can set to any folder.
+  // The two SD-card samples run the built-in Local Image app, which reads
+  // any folder on the frame.
   it.each([
     ["repo/scenes/samples/SD card image/scenes.json", ["files"]],
     ["repo/scenes/samples/Ken Burns slideshow/scenes.json", ["files"]],

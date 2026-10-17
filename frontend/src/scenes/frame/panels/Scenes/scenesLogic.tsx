@@ -2,7 +2,7 @@ import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path,
 import { FrameScene, SceneNodeData, FrameId } from '../../../../types'
 import { frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
 import { undeployedSceneIdsFor } from '../../../../utils/sceneDeployState'
-import { SceneAccessFlag, sceneAccessFlagsForScene } from '../../../../utils/sceneAccess'
+import { SceneAccessFlag, sceneAccessFlagsForScene, withAppPermissions } from '../../../../utils/sceneAccess'
 import { workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { appsModel } from '../../../../models/appsModel'
 import { sceneUpdatesLogic } from './sceneUpdatesLogic'
@@ -88,7 +88,9 @@ export function collectScenePreviewPayloadScenes(
       return
     }
     visited.add(scene.id)
-    result.push(isRoot ? applyStateToSceneFields(scene, resolvedState) : scene)
+    // The preview runs what the frame will: each JS app's permissions as a
+    // save leaves them, even before the edit is saved (utils/sceneAccess.ts).
+    result.push(withAppPermissions(isRoot ? applyStateToSceneFields(scene, resolvedState) : scene))
 
     for (const referencedSceneId of referencedSceneIds(scene)) {
       const referencedScene = sceneById.get(referencedSceneId)

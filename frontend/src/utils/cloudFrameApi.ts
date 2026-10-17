@@ -29,6 +29,7 @@ import {
 } from './cloudFrameSettings'
 import { isEsp32CloudFrame } from '../scenes/workspace/workspaceSurfaces'
 import type { FrameId } from './frameId'
+import { withScenesAppPermissions } from './sceneAccess'
 
 // FrameOS Cloud speaks a much narrower dialect than the FrameOS backend: an
 // enqueued command from a short verb list, or a declarative settings push.
@@ -572,7 +573,9 @@ export async function createCloudAccountScene(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name,
-      scenes,
+      // Saved the way every save leaves a scene: each JS app's permissions
+      // filled from its code (utils/sceneAccess.ts).
+      scenes: withScenesAppPermissions(scenes),
       ...(description ? { description } : {}),
       ...(previewFromFrame
         ? { preview_from_frame: { frame_id: String(previewFromFrame.frameId), scene_id: previewFromFrame.sceneId } }
@@ -599,7 +602,7 @@ export async function updateCloudAccountSceneContent(
   const response = await apiFetch(`/api/account/scenes/${storeSceneId}/content`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ scenes }),
+    body: JSON.stringify({ scenes: withScenesAppPermissions(scenes) }),
   })
   await assertOk(response, 'Failed to save the scene changes to your cloud scenes')
   const data = (await response.json()) as { scene?: { version?: number } }

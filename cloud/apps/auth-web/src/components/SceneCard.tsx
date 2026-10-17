@@ -4,8 +4,8 @@ import { getStoreCategory } from "../lib/categories";
 import { formatDate } from "../lib/format";
 import {
   knownSceneAccessFlags,
-  sceneAccessFlagDescriptions,
-  sceneAccessFlagLabels,
+  sceneAccessFlagDescription,
+  sceneAccessFlagLabel,
 } from "../../../../../frontend/src/utils/sceneAccess";
 
 export type SceneCardScene = {
@@ -66,9 +66,9 @@ export function SceneCard({
           <span
             className="risk-badge"
             key={flag}
-            title={sceneAccessFlagDescriptions[flag]}
+            title={sceneAccessFlagDescription(flag)}
           >
-            {sceneAccessFlagLabels[flag]}
+            {sceneAccessFlagLabel(flag)}
           </span>
         ))}
       </h3>

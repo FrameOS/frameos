@@ -872,6 +872,50 @@ describe("command redelivery", () => {
     device.ws.close();
   });
 
+  // From 2026.10.16 a frame gives a JavaScript app exactly its config.json
+  // `permissions` and an app with none nothing. A store version published
+  // before the lists has none, so the push gains them (scene-origin.ts) for
+  // that firmware and the update across it re-pushes, like a retired app.
+  it("re-pushes apps with their permissions when the firmware starts reading them", async () => {
+    const readerScenes = [
+      {
+        apps: {
+          reader: {
+            sources: {
+              "app.ts": "export function get() { return frameos.readAsset('notes.txt') }",
+              "config.json": '{\n  "name": "Reader"\n}\n',
+            },
+          },
+        },
+        edges: [],
+        id: "notes",
+        name: "Notes",
+        nodes: [{ data: { keyword: "reader" }, id: "n1", type: "app" }],
+      },
+    ];
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    await createAssignedStoreScene(account.id, frame.id, readerScenes);
+    await db
+      .update(frames)
+      .set({ frameosVersion: "2026.10.15" })
+      .where(eq(frames.id, frame.id));
+
+    const device = await openDevice(token);
+    const ready = await handshake(device, privateKey, {
+      frameos_version: "2026.10.16",
+      states: { active_scene: "notes" },
+    });
+    expect(ready.pending_commands).toBe(1);
+    const push = await device.next((msg) => msg.type === "set_scenes", "set_scenes push");
+    const [pushed] = push.scenes as Array<{ apps: Record<string, { sources: Record<string, string> }> }>;
+    expect(JSON.parse(pushed?.apps.reader?.sources["config.json"] ?? "{}")).toEqual({
+      name: "Reader",
+      permissions: ["assets"],
+    });
+    expect(push.scene_id).toBe("notes");
+    device.ws.close();
+  });
+
   it("leaves a firmware update that crosses no retired app to the owner", async () => {
     const { account, frame, privateKey, token } = await createFrameFixture();
     await createAssignedStoreScene(account.id, frame.id, immichScenes);

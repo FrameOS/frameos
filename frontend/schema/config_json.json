@@ -54,6 +54,18 @@
           },
           "type": "array"
         },
+        "permissions": {
+          "description": "What the app may do on the frame (utils/sceneAccess.ts): \"shell\", \"files\" (read any file), \"assets\" (read the assets folder), \"assets-write\" (write it). Filled from a JS app's code on every save; the frame gives the app exactly this list (FrameOS 2026.10.16+).",
+          "items": {
+            "enum": ["shell", "files", "assets", "assets-write"],
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "permissionsAuto": {
+          "description": "false: `permissions` is set by hand and saving leaves it as written.",
+          "type": "boolean"
+        },
         "settings": {
           "description": "List of top level settings exported for this app",
           "items": {

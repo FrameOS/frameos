@@ -109,13 +109,16 @@ export function sanitizeTagCandidates(value: unknown): string[] {
 }
 
 // Risk flags computed from the scenes JSON at publish and stored per version
-// (store_scene_versions.risk_flags): "shell" (apps or code that run shell
-// commands), "files" (reads any file on the frame), "assets" (reads the
-// frame's assets folder), "assets-write" (writes or deletes in it). The SPA computes the same flags for scenes that arrive
-// without a catalog entry, from the same function (frontend/src/utils/
-// sceneAccess.ts, corpus docs/scene-access-fixtures.json). A warning badge,
-// not a sandbox: the frame enforces only a scene's explicit
-// settings.assetAccess, and absence of a flag is no guarantee.
+// (store_scene_versions.risk_flags): what the scene's apps ask for in their
+// config.json, "shell" (runs shell commands), "files" (reads any file on the
+// frame), "assets" (reads the frame's assets folder), "assets-write" (writes
+// or deletes in it), and "key:<namespace>" for each API key they read. The
+// SPA computes the same flags for scenes that arrive without a catalog entry,
+// from the same function (frontend/src/utils/sceneAccess.ts, corpus
+// docs/scene-access-fixtures.json). The frame gives each JS app exactly the
+// list it asks for; an app without a list (published before 2026.10.16) is
+// shown what its code calls for and gets that list stamped when it leaves
+// the store (scene-origin.ts).
 export const riskFlagShell = "shell";
 
 // The scenes that would force a source build on a self-hosted frame and that

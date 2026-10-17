@@ -278,34 +278,32 @@ render tries again. `frameos.fetchImage` never throws; it answers
 decodes natively, and the bytes never enter the JS heap. Return its `image`.
 Use it for every photo, and `httpRequest` only for the JSON around it.
 
-**Assets.** Asset paths are relative to the frame's assets folder
-(`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos, fonts,
-what other scenes saved. A scene says how much of the frame's files it needs
-in `settings.assetAccess`:
+**Assets and permissions.** Asset paths are relative to the frame's assets
+folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,
+fonts, what other scenes saved. What an app may do there is its own
+config.json's `"permissions"` list:
 
-- `"auto"` (the default): nothing is declared, and the editor and the store
-  show what the scene's content uses: an asset call (`frameos.readAsset` and
-  the rest) or a Local Image node shows "reads assets folder", a Local Image
-  path outside the assets folder, or one wired from another node, shows
-  "reads all files".
-- `"cache-home-only"`: the scene gets a folder of its own,
-  `scenes/<sceneId>/` inside the assets folder, and sees nothing else. Its
-  asset calls, its `saveAsset` downloads and its Local Image nodes all resolve
-  there. Use it for a scene that keeps its own files under relative names;
-  it shows no flag.
-- `"all-assets"`: the whole assets folder; a Local Image path outside it is
-  refused.
-- `"all-files"`: a Local Image node may read any folder on the frame.
+- `"assets"`: read the assets folder (`listAssets`, `readAsset`,
+  `loadAssetImage`, a stream opened with `"r"`, ...).
+- `"assets-write"`: also write and delete in it (`writeAsset`,
+  `appendAsset`, `deleteAsset`, a stream opened with `"w"` or `"a"`).
+- `"files"` and `"shell"` belong to built-in apps: Local Image reads any
+  folder, the screenshot and camera apps run processes.
 
-Writing is its own flag: `writeAsset`, `appendAsset`, `deleteAsset` or a
-stream opened with `"w"` or `"a"` shows "writes assets folder" under every
-value but `"cache-home-only"`, whose writes stay in the scene's own folder.
-Writes only ever land inside the assets folder, so "reads all files" never
-means writing outside it. `fetchImage({ saveAsset })` is the frame caching a
-download, not the scene using the folder: it raises no flag. Installing a
-scene is the approval of what its flags say, and updating one says which
-flags the new version adds, so declare the narrowest access that works.
-(Frames before FrameOS 2026.10.16 ignore the setting.)
+Saving the scene fills a JavaScript app's list from its code, so you rarely
+write it. The frame gives the app exactly that list: with neither `"assets"`
+nor `"assets-write"`, its asset calls live in a folder of its own,
+`scenes/<sceneId>/`; with `"assets"` alone, its writes are refused. An app
+with no list asks for nothing. To keep a
+list you wrote by hand, add `"permissionsAuto": false` next to it. A scene
+asks for what its apps ask for, nothing more, and every surface shows it as
+tags ("reads assets folder", "writes assets folder", "reads all files",
+"runs shell commands", and "uses OpenAI key" for each settings namespace an
+app reads). Installing a scene is the approval of its tags, and an update
+says which ones it adds, so ask for what the app needs and no more.
+`fetchImage({ saveAsset })` is the frame caching a download, not the app
+using the folder: it needs no permission. (Frames before FrameOS 2026.10.16
+ignore the lists.)
 
 **Big responses.** A response body becomes a JS string. When the app needs
 only what follows some marker in a large page, pass
