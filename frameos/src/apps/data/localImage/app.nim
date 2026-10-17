@@ -13,7 +13,6 @@ import frameos/utils/dither
 import frameos/utils/exif
 import frameos/utils/paths
 import frameos/apps
-import frameos/asset_scope
 import frameos/types
 import frameos/hal/entropy
 
@@ -123,24 +122,13 @@ proc error*(self: App, context: ExecutionContext, message: string,
     message
   )
 
-proc resolvedFolder(self: App): tuple[path: string, refusal: string] =
-  ## The file or folder this node reads, as frameos/asset_scope.nim allows it
-  ## under the scene's `settings.assetAccess`: any path on disk for "auto" and
-  ## "all-files" (empty = the assets folder), the assets folder for
-  ## "all-assets", the scene's own subtree for "cache-home-only".
-  resolveSceneLocalPath(self.frameConfig, self.scene, self.appConfig.path)
-
 proc init*(self: App) =
-  let (folder, refusal) = self.resolvedFolder()
+  let folder = if self.appConfig.path == "": self.frameConfig.assetsPath else: self.appConfig.path
+  self.images = getImagesInFolder(folder, self.appConfig.search)
   self.lastPath = self.appConfig.path
   self.lastSearch = self.appConfig.search
   self.counter = 0
   self.lastImage = none(string)
-  if refusal.len > 0:
-    self.images = @[]
-    self.logError(refusal)
-    return
-  self.images = getImagesInFolder(folder, self.appConfig.search)
   if self.appConfig.search != "":
     self.log("Search query: " & self.appConfig.search)
   self.log("Found " & $self.images.len & " images in the folder: " & folder)
@@ -153,10 +141,7 @@ proc init*(self: App) =
     self.counter = self.scene.state{self.appConfig.counterStateKey}.getInt() mod self.images.len
 
 proc refreshImages(self: App) =
-  let (folder, refusal) = self.resolvedFolder()
-  if refusal.len > 0:
-    self.images = @[]
-    return
+  let folder = if self.appConfig.path == "": self.frameConfig.assetsPath else: self.appConfig.path
   let previousImage = self.lastImage
   let newImages = getImagesInFolder(folder, self.appConfig.search)
   var nextImages = newImages
@@ -209,15 +194,12 @@ proc get*(self: App, context: ExecutionContext): Image =
 
   self.refreshImages()
 
-  let (folder, refusal) = self.resolvedFolder()
-  if refusal.len > 0:
-    return self.error(context, refusal, decodeTarget)
-
   if self.images.len() == 0:
     if self.appConfig.search != "":
       return self.error(context, &"No images matching the search query \"{self.appConfig.search}\" found in the folder: {self.appConfig.path}", decodeTarget)
     return self.error(context, &"No images found in the folder: {self.appConfig.path}", decodeTarget)
 
+  let folder = if self.appConfig.path == "": self.frameConfig.assetsPath else: self.appConfig.path
   let currentIndex = self.counter
   let currentImage = self.images[currentIndex]
   var nextImage: Option[Image] = none(Image)

@@ -350,23 +350,25 @@ granted" above), so an undeclared-then-declared key never arrives. On the
 device the declaration gate stays as the second layer, and the audit trail
 is the mitigation for a self-hosted frame.
 
-**Filesystem access is what the scene declares, and what it shows.** Every
-scene-supplied path (the JS asset calls, `saveAsset`, the `data/localImage`
-app's `path`) resolves through `frameos/asset_scope.nim`, which rejects
-absolute paths and `..` segments and then re-checks containment against the
-*real* path, so a symlink planted inside the assets folder is not a way out.
-The root is the frame's shared assets folder unless the scene's own
-`settings.assetAccess` is `"cache-home-only"` (then `<assets>/scenes/<sceneId>/`,
-for every consumer) or the frame's `js.assetSandbox` is `"scene"` (every
-scene confined); `"all-assets"` keeps `localImage` inside the assets folder.
-The setting is part of the scene's content, not of where it came from, so
-every copy carries it. What a scene reaches for is shown wherever it appears:
-the store computes `risk_flags` at publish (`shell`, `assets`,
-`assets-write`, `files`) with
-the SPA's own detector (`frontend/src/utils/sceneAccess.ts`, corpus
-`docs/scene-access-fixtures.json`), and installing a flagged scene is the
-approval. `"auto"`, the default, enforces nothing yet: a scene that hides its
-asset calls from the detector is not stopped (`docs/security-todo.md`).
+**Filesystem access is what each app asks for, and the scene shows the sum.**
+A JS app names what it needs in its `config.json` `permissions` (`assets`
+reads the frame's assets folder, `assets-write` also changes it; `files` and
+`shell` belong to the built-in Local Image and the two process-spawning
+apps). The editor fills the list from the app's code on every save unless the
+app says `"permissionsAuto": false`, and the cloud stamps it into any store
+app that lacks it when the scene is read, so every app that reaches a frame
+through a control plane asks for something explicit. The frame enforces it
+per app (`JsAssetGrant`, `js_runtime/app_runtime.nim`): an app that asks for
+none of them keeps its files in the scene's own `<assets>/scenes/<sceneId>/`,
+one that asks to read cannot write, and every path is still checked against
+the real path so a symlink planted inside the folder is not a way out. A
+scene's tags (and the store's `risk_flags` at publish) are the union of its
+apps' permissions plus the API keys they use (`key:<namespace>`), from one
+detector shared by the SPA and the store (`frontend/src/utils/sceneAccess.ts`,
+corpus `docs/scene-access-fixtures.json`); installing a flagged scene is the
+approval. `saveAsset` (a `fetchImage` download kept as an asset) is the
+frame's own caching and stays in `saved/`. The frame's `js.assetSandbox:
+"scene"` still confines every JS app to the scene's folder.
 
 **Runaway scenes are bounded.** Scene JS runs on the render thread, so an
 infinite loop used to mean a frame that never drew again. Every entry into the

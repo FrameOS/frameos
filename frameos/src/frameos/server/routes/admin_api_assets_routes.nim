@@ -187,10 +187,9 @@ proc contentTypeForFilePath*(path: string): string =
 
 # Content types a browser would EXECUTE if it opened the URL directly: a
 # scripted SVG, a script, a stylesheet, a page. Assets are scene-writable (a
-# scene may save whatever it likes under its asset root — /srv/assets unless
-# the scene asked for its own subtree, frameos/asset_scope.nim),
-# so one of these opened from the admin origin would run same-origin with the
-# admin cookie. They go out as downloads.
+# store scene may save whatever it likes under /srv/assets — js.assetSandbox
+# defaults to frame-wide), so one of these opened from the admin origin would
+# run same-origin with the admin cookie. They go out as downloads.
 proc isActiveContentType*(contentType: string): bool =
   let lower = contentType.toLowerAscii()
   lower.startsWith("text/html") or lower.startsWith("application/xhtml") or

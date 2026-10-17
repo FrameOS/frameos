@@ -6,7 +6,6 @@ import frameos/apps as frameos_apps
 import frameos/js_runtime/runtime
 import frameos/js_runtime/run_budget
 import frameos/types
-import frameos/asset_scope
 import frameos/values
 import frameos/utils/http_client
 import frameos/utils/app_images
@@ -19,6 +18,16 @@ import frameos/utils/system
 import frameos/js_runtime/burrito
 
 type
+  JsAssetGrant* = enum
+    ## What the app's config.json `permissions` let its asset calls do. An app
+    ## asks; the scene's tags are the union of its apps' (docs/scene-guide.md
+    ## "Assets"). "files" is Local Image's (a Nim app): for a JS app, which
+    ## has no absolute paths, it reads like "assets".
+    agUndeclared ## no `permissions` (apps from before 2026.10.16): the frame's folder, read and write
+    agOwnFolder  ## none of assets/files/assets-write: the scene's own <assets>/scenes/<sceneId>/
+    agRead       ## "assets" or "files": read the frame's folder, never change it
+    agReadWrite  ## "assets-write": read and write the frame's folder
+
   JsAppRuntime* = ref object
     category*: string
     outputType*: string
@@ -32,6 +41,7 @@ type
     ## copy of every helper file is memory an ESP32 does not have.
     sources*: JsonNode
     settingsKeys*: seq[string]
+    assetGrant*: JsAssetGrant
     js*: QuickJS
     ready*: bool
     initialized*: bool
@@ -566,19 +576,77 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
   return nimStringToJS(ctx, $response)
 
 proc assetsRoot(e: JsAppEvalEnv): string =
-  ## The root for this app's asset calls: the frame-wide assets folder, or
-  ## the scene's own `<assets>/scenes/<sceneId>/` when its
-  ## `settings.assetAccess` is "cache-home-only" (or for every scene when
-  ## frame.json says so). The rule and the containment check live in
-  ## frameos/asset_scope.nim, shared with `saveAsset` and `data/localImage`.
-  sceneAssetsRoot(e.owner.frameConfig, e.owner.scene)
+  ## The sandbox root for this app's asset calls: the frame-wide assets
+  ## folder, or the scene's own subtree for an app that asks for no assets
+  ## permission (agOwnFolder) and for every app on a frame whose
+  ## `js.assetSandbox` is "scene".
+  let frameConfig = e.owner.frameConfig
+  result = if frameConfig == nil or frameConfig.assetsPath == "": "/srv/assets"
+           else: frameConfig.assetsPath
+  result.removeSuffix('/')
+  if e.runtime.assetGrant == agOwnFolder or
+      (frameConfig != nil and frameConfig.js != nil and frameConfig.js.assetSandbox == "scene"):
+    let sceneId = if e.owner.scene == nil: "" else: e.owner.scene.id.string
+    if sceneId.len > 0:
+      # Scene ids come from the diagram and can carry slashes ("tests/js").
+      # Flatten them so one scene cannot address another's subtree.
+      var safeId = ""
+      for ch in sceneId:
+        safeId.add(if ch in {'a'..'z', 'A'..'Z', '0'..'9', '-', '_'}: ch else: '_')
+      result = result / "scenes" / safeId
 
-proc resolveAssetPath(e: JsAppEvalEnv, relPath: string): string =
-  ## Absolute path inside this app's asset root, or "" when the path is
-  ## empty, absolute, or escapes the root (lexically or through a symlink).
-  resolveSceneAssetPath(e.owner.frameConfig, e.owner.scene, relPath)
+proc containsPathTraversal(relPath: string): bool =
+  ## True when any path *segment* is "..". A substring test would also reject
+  ## innocent names like "backup..old.json".
+  for segment in relPath.split({'/', '\\'}):
+    if segment == "..":
+      return true
+  return false
 
-const EmbeddedAssetReadMaxBytes = 2 * 1024 * 1024
+proc resolveAssetPath(e: JsAppEvalEnv, relPath: string, write = false): string =
+  ## Absolute path inside the assets folder, or "" when the path is empty,
+  ## absolute, or escapes the folder, or is a `write` from an app that asks
+  ## only to read the folder (agRead). One check here rather than one per
+  ## write call: every caller already handles "", and every extra exit in
+  ## jsAssets repeats the cleanup of all its live strings (ESP32 flash).
+  ##
+  ## The containment check runs against the *real* path, not the lexical one:
+  ## normalizedPath does not follow symlinks, so a link planted inside the
+  ## assets folder used to be a legal way out of it.
+  if relPath.len == 0 or relPath.startsWith("/") or relPath.isAbsolute() or
+      containsPathTraversal(relPath) or (write and e.runtime.assetGrant == agRead):
+    return ""
+  let root = assetsRoot(e)
+  let full = normalizedPath(root / relPath)
+  if not (full == root or full.startsWith(root & "/")):
+    return ""
+
+  when not defined(frameosEmbedded):
+    # Resolve the deepest ancestor that actually exists: the target itself may
+    # legitimately not exist yet (a write), but everything leading to it must
+    # still be inside the sandbox once symlinks are followed. Nothing exists
+    # to be a symlink until the root does, so an absent root skips the check.
+    if dirExists(root):
+      try:
+        let realRoot = expandFilename(root)
+        var probe = full
+        while not fileExists(probe) and not dirExists(probe):
+          let parent = probe.parentDir()
+          if parent == probe or parent.len < root.len:
+            break
+          probe = parent
+        if fileExists(probe) or dirExists(probe):
+          let realProbe = expandFilename(probe)
+          if not (realProbe == realRoot or realProbe.startsWith(realRoot & "/")):
+            return ""
+      except CatchableError:
+        return ""
+
+  return full
+
+const
+  EmbeddedAssetReadMaxBytes = 2 * 1024 * 1024
+  AssetPathRefused = ": invalid asset path, or a write the app's permissions do not include: "
 
 proc jsAssetReadMaxBytes(e: JsAppEvalEnv): int =
   ## Full-buffer asset reads triple in RAM (bytes + base64 + JS string), so
@@ -590,9 +658,9 @@ proc jsAssetReadMaxBytes(e: JsAppEvalEnv): int =
 
 proc writeAssetFile(e: JsAppEvalEnv, opName: string, pathStr: string,
     contents: string, append: bool): bool =
-  let full = resolveAssetPath(e, pathStr)
+  let full = resolveAssetPath(e, pathStr, write = true)
   if full.len == 0:
-    frameos_apps.logError(e.owner, "JS app " & opName & ": invalid asset path: " & pathStr)
+    frameos_apps.logError(e.owner, "JS app " & opName & AssetPathRefused & pathStr)
     return false
   createDir(full.parentDir())
   let freeDiskSpace = getAvailableDiskSpace(full.parentDir())
@@ -685,7 +753,7 @@ proc jsAssets(ctx: ptr JSContext, op: JSValue, path: JSValue, data: JSValue): JS
       let contents = decode(toNimString(ctx, data))
       return nimBoolToJS(ctx, writeAssetFile(e, opStr & "Asset", pathStr, contents, opStr == "append"))
     of "delete":
-      let full = resolveAssetPath(e, pathStr)
+      let full = resolveAssetPath(e, pathStr, write = true)
       if full.len == 0 or not fileExists(full):
         return nimBoolToJS(ctx, false)
       removeFile(full)
@@ -771,9 +839,9 @@ proc jsStreams(ctx: ptr JSContext, op: JSValue, optionsJson: JSValue): JSValue {
     of "openAsset":
       let pathStr = options{"path"}.getStr("")
       let mode = options{"mode"}.getStr("r")
-      let full = resolveAssetPath(e, pathStr)
+      let full = resolveAssetPath(e, pathStr, write = mode != "r")
       if full.len == 0:
-        frameos_apps.logError(e.owner, "JS app openAssetStream: invalid asset path: " & pathStr)
+        frameos_apps.logError(e.owner, "JS app openAssetStream" & AssetPathRefused & pathStr)
         return jsNull(ctx)
       if mode == "r":
         if not fileExists(full):
@@ -1013,7 +1081,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
 
 proc newJsAppRuntime*(category: string, outputType: string, source: string,
     settingsKeys: seq[string] = @[], sourceName: string = "",
-    sources: JsonNode = nil): JsAppRuntime =
+    sources: JsonNode = nil, assetGrant = agUndeclared): JsAppRuntime =
   ## `sources` is the app's file map (name → contents) that `source` may
   ## import from; `sourceName` names the main module among them.
   when defined(memProbe): memProbe("  NEW JsAppRuntime " & category & " src=" & $source.len & "B")
@@ -1025,6 +1093,7 @@ proc newJsAppRuntime*(category: string, outputType: string, source: string,
     sourceName: mainName,
     sources: sources,
     settingsKeys: settingsKeys,
+    assetGrant: assetGrant,
     nextImageId: 0,
     images: initTable[int, Image](),
     transientImageIds: @[]
@@ -1343,6 +1412,22 @@ proc configFromSources(sources: JsonNode): JsonNode =
   except CatchableError:
     return %*{}
 
+proc assetGrantFromConfig*(config: JsonNode): JsAssetGrant =
+  ## config.json `permissions`: absent or null is an app from before they
+  ## existed; anything else is exactly what the app asks for, and a value
+  ## that is not a list asks for nothing.
+  let declared = config{"permissions"}
+  if declared.isNil or declared.kind == JNull:
+    result = agUndeclared
+  else:
+    result = agOwnFolder
+    if declared.kind == JArray:
+      for item in declared.elems:
+        case item.getStr()
+        of "assets-write": result = agReadWrite
+        of "assets", "files": result = max(result, agRead)
+        else: discard
+
 proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, sources: JsonNode): AppRoot =
   let source = jsAppSourceFromSources(sources)
   if source.len == 0:
@@ -1357,7 +1442,8 @@ proc initDynamicJsApp*(keyword: string, node: DiagramNode, scene: FrameScene, so
       if key.kind == JString and key.getStr().len > 0:
         settingsKeys.add(key.getStr())
   let runtime = newJsAppRuntime(category, outputType, source, settingsKeys,
-                                jsAppSourceNameFromSources(sources), sources)
+                                jsAppSourceNameFromSources(sources), sources,
+                                assetGrantFromConfig(config))
   return DynamicJsApp(
     nodeId: node.id,
     nodeName: node.data{"name"}.getStr(keyword),

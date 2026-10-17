@@ -3,6 +3,7 @@
   "description": "Take a still image from a webcam feed with ffmpeg",
   "category": "data",
   "version": "1.0.0",
+  "permissions": ["shell"],
   "apt": ["ffmpeg"],
   "fields": [
     {

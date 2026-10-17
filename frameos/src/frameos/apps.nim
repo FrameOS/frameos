@@ -4,7 +4,6 @@ import strutils
 import math
 import os
 import checksums/md5
-import frameos/asset_scope
 import frameos/types
 import frameos/utils/memory
 import frameos/utils/system
@@ -263,10 +262,7 @@ proc saveAsset*(self: AppRoot, filename: string, extension: string, contents: st
     else:
       return ""
 
-  # A confined scene (asset_scope.nim: "cache-home-only", or every scene on a
-  # "scene" sandbox frame) saves under its own subtree, where its asset calls
-  # can read the file back.
-  let assetsPath = sceneAssetsRoot(self.frameConfig, self.scene)
+  let assetsPath = if self.frameConfig.assetsPath == "": "/srv/assets" else: self.frameConfig.assetsPath
   let basename = (if filename.len > 100: filename[0..100] else: filename).cleanFilename()
   let md5hash = getMD5(contents)
   let cleanPath = savedAssetDir(assetsPath, self.appKeyword, self.nodeName)

@@ -24,7 +24,6 @@
 
 import json, jsony, pixie, os, strutils, parseutils, locks
 import zippy
-import frameos/asset_scope
 import frameos/hal/files
 import frameos/local_access
 import frameos/types
@@ -198,12 +197,12 @@ proc newHook*(v: var NetworkConfig) =
 proc newHook*(v: var JsRuntimeConfig) =
   ## Defaults live in js_runtime/burrito.nim (DefaultJs*); -1 means "keep what
   ## this build target chose", so an unset frame.json changes nothing.
-  v = JsRuntimeConfig(executionTimeoutMs: -1, memoryLimitMb: -1, maxStackKb: -1,
-                      assetSandbox: DefaultAssetSandbox, renderDeadlineMs: -1, dispatchBudget: -1)
+  v = JsRuntimeConfig(executionTimeoutMs: -1, memoryLimitMb: -1, maxStackKb: -1, assetSandbox: "frame",
+                      renderDeadlineMs: -1, dispatchBudget: -1)
 
 proc postHook*(v: var JsRuntimeConfig) =
-  if v.assetSandbox notin AssetSandboxModes:
-    v.assetSandbox = DefaultAssetSandbox
+  if v.assetSandbox notin ["frame", "scene"]:
+    v.assetSandbox = "frame"
 
 proc newHook*(v: var AgentConfig) =
   v = AgentConfig(agentEnabled: false)

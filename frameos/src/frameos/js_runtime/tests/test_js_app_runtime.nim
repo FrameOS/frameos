@@ -612,64 +612,57 @@ suite "js app runtime":
     # reachable by name any more.
     check not payload["sharedVisible"].getBool()
 
-  test "settings.assetAccess confines a cache-home-only scene, nothing else":
-    let assetsDir = getTempDir() / "frameos-js-asset-access-test"
+  test "an app's config.json permissions decide what its asset calls reach":
+    let assetsDir = getTempDir() / "frameos-js-asset-permissions-test"
     removeDir(assetsDir)
     createDir(assetsDir)
     defer: removeDir(assetsDir)
-
     writeFile(assetsDir / "shared.txt", "frame wide")
 
     let config = testConfig()
     config.assetsPath = assetsDir
-    # No `js` block: the frame.json default ("frame") leaves it to each scene.
     let logger = testLogger(config)
-    let source = """export function get(app, context) {
-          return {
-            wrote: frameos.writeAsset("cache.txt", "aGVsbG8="),
-            sharedVisible: frameos.assetExists("shared.txt"),
-            list: frameos.listAssets(""),
-          }
-        }"""
-    let context = ExecutionContext(event: "render", payload: %*{}, hasImage: false,
+    let scene = FrameScene(id: "tests/perms".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 27.NodeId, nodeName: "jsPerms", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false,
                                    loopIndex: 0, loopKey: ".", nextSleep: -1)
-    proc run(scene: FrameScene, nodeId: int): JsonNode =
-      let owner = AppRoot(nodeId: nodeId.NodeId, nodeName: "jsAccess", scene: scene, frameConfig: config)
-      newJsAppRuntime(category = "data", outputType = "json", source = source)
-        .get(owner, %*{}, context).asJson()
+    proc run(permissions: JsonNode, name: string): JsonNode =
+      let runtime = newJsAppRuntime(
+        category = "data",
+        outputType = "json",
+        source = "export function get(app, context) { return {" &
+          "wrote: frameos.writeAsset('" & name & ".txt', 'aGVsbG8=')," &
+          "sharedVisible: frameos.assetExists('shared.txt')," &
+          "deleted: frameos.deleteAsset('shared.txt')," &
+          "stream: frameos.openAssetStream('" & name & "-stream.txt', 'w') !== null } }",
+        assetGrant = assetGrantFromConfig(%*{"permissions": permissions})
+      )
+      runtime.get(owner, %*{}, context).asJson()
 
-    let homeScene = InterpretedFrameScene(id: "store/photos".SceneId, frameConfig: config, state: %*{},
-                                          logger: logger, assetAccess: "cache-home-only")
-    let homePayload = run(homeScene, 27)
-    check homePayload["wrote"].getBool()
-    check not homePayload["sharedVisible"].getBool()
-    check homePayload["list"].mapIt(it.getStr()) == @["cache.txt"]
-    check fileExists(assetsDir / "scenes" / "store_photos" / "cache.txt")
-    check not fileExists(assetsDir / "cache.txt")
-
-    # Unset ("auto"): the frame-wide folder, as before.
-    let storeScene = InterpretedFrameScene(id: "store/other".SceneId, frameConfig: config, state: %*{},
-                                           logger: logger)
-    let storePayload = run(storeScene, 28)
-    check storePayload["wrote"].getBool()
-    check storePayload["sharedVisible"].getBool()
-    check fileExists(assetsDir / "cache.txt")
-    # It sees the other scene's subtree too: it is the frame's folder.
-    check "scenes/store_photos/cache.txt" in storePayload["list"].mapIt(it.getStr())
-
-    for access in ["all-assets", "all-files"]:
-      let scene = InterpretedFrameScene(id: "own".SceneId, frameConfig: config, state: %*{},
-                                        logger: logger, assetAccess: access)
-      check run(scene, 29)["sharedVisible"].getBool()
-
-    # A "scene" frame confines even an "all-files" scene.
-    config.js = JsRuntimeConfig(executionTimeoutMs: -1, memoryLimitMb: -1, maxStackKb: -1,
-                                assetSandbox: "scene")
-    let filesScene = InterpretedFrameScene(id: "files".SceneId, frameConfig: config, state: %*{},
-                                           logger: logger, assetAccess: "all-files")
-    let confinedPayload = run(filesScene, 30)
-    check not confinedPayload["sharedVisible"].getBool()
-    check fileExists(assetsDir / "scenes" / "files" / "cache.txt")
+    # None of the asset permissions: the scene's own folder, read and write.
+    let own = run(%*[], "own")
+    check own["wrote"].getBool() and own["stream"].getBool()
+    check not own["sharedVisible"].getBool()
+    check fileExists(assetsDir / "scenes" / "tests_perms" / "own.txt")
+    # "assets" (or "files"): reads the frame's folder, changes nothing.
+    for permissions in [%*["assets"], %*["files", "shell"]]:
+      let reader = run(permissions, "reader")
+      check reader["sharedVisible"].getBool()
+      check not reader["wrote"].getBool()
+      check not reader["deleted"].getBool()
+      check not reader["stream"].getBool()
+    check fileExists(assetsDir / "shared.txt")
+    check not fileExists(assetsDir / "reader.txt")
+    # A value that is not a list asks for nothing; no `permissions` at all is
+    # an app from before them, which runs as before.
+    check assetGrantFromConfig(%*{"permissions": "assets-write"}) == agOwnFolder
+    check assetGrantFromConfig(%*{}) == agUndeclared
+    check assetGrantFromConfig(%*{"permissions": nil}) == agUndeclared
+    # "assets-write": reads and changes the frame's folder.
+    let writer = run(%*["assets", "assets-write"], "writer")
+    check writer["wrote"].getBool() and writer["sharedVisible"].getBool() and writer["deleted"].getBool()
+    check fileExists(assetsDir / "writer.txt")
+    check not fileExists(assetsDir / "shared.txt")
 
   test "loads asset images within display bounds":
     let assetsDir = getTempDir() / "frameos-js-asset-image-test"

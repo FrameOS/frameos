@@ -117,38 +117,4 @@ block test_set_scene_state_parses_json_strings:
   doAssert scene.state{"search"}.getStr() == "{\"a\": 1}"
   setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
-block test_scene_settings_asset_access:
-  # settings.assetAccess (frameos/asset_scope.nim) reaches the running scene
-  # as written; absent is "" ("auto"). The original scene has none.
-  doAssert string(sceneInput.settings.assetAccess) == ""
-  let withAccess = parseInterpretedSceneInputs("""
-[{"id": "tests/asset-access", "name": "Asset access",
-  "settings": {"execution": "interpreted", "assetAccess": "cache-home-only"},
-  "nodes": [{"id": "e1", "type": "event", "data": {"keyword": "render"}}], "edges": []}]
-""")
-  doAssert string(withAccess[0].settings.assetAccess) == "cache-home-only"
-  let exported = buildInterpretedScenes(inputs & withAccess)
-  doAssert exported[withAccess[0].id].assetAccess == "cache-home-only"
-  doAssert exported[sceneInput.id].assetAccess == ""
-  setUploadedInterpretedScenes(exported)
-  resetInterpretedScenes()
-  let scene = InterpretedFrameScene(init(withAccess[0].id, testConfig(), testLogger(testConfig()), %*{}))
-  doAssert scene.assetAccess == "cache-home-only"
-  let plain = InterpretedFrameScene(init(sceneInput.id, testConfig(), testLogger(testConfig()), %*{}))
-  doAssert plain.assetAccess == ""
-  setUploadedInterpretedScenes(initTable[SceneId, ExportedInterpretedScene]())
-
-block test_scene_settings_asset_access_never_fails_the_parse:
-  # A hand-edited scenes.json with a non-string value must not take every
-  # scene on the frame down with it: it parses, and asset_scope reads an
-  # unknown value as "auto".
-  for value in ["5", "true", "null", "{\"a\": 1}", "[\"all-files\"]"]:
-    let parsed = parseInterpretedSceneInputs("""
-[{"id": "tests/odd-access", "name": "Odd access",
-  "settings": {"assetAccess": """ & value & """},
-  "nodes": [], "edges": []}]
-""")
-    doAssert parsed.len == 1, value
-    doAssert string(parsed[0].settings.assetAccess) == "", value
-
 echo "test_interpreter_state_fields: all assertions passed"

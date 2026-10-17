@@ -196,10 +196,6 @@ suite "config parsing (jsony)":
     check js.executionTimeoutMs == 500
     check js.memoryLimitMb == -1
     check js.assetSandbox == "frame"
-    check parseFrameConfig("""{"js": {"assetSandbox": "frame"}}""").js.assetSandbox == "frame"
-    # "store" was a pre-release mode keyed on scene provenance; gone.
-    check parseFrameConfig("""{"js": {"assetSandbox": "store"}}""").js.assetSandbox == "frame"
-    check parseFrameConfig("""{"js": {"assetSandbox": "scene"}}""").js.assetSandbox == "scene"
 
   test "assetsPath loses its trailing slash and defaults when empty":
     check parseFrameConfig("""{"assetsPath": "/data/assets/"}""").assetsPath == "/data/assets"
