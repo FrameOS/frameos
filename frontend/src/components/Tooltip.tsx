@@ -87,7 +87,9 @@ export function Tooltip({
                 </div>
               </Popover.Panel>
             </Transition>,
-            document.querySelector('#popper')!
+            // The SPA shells carry a #popper layer; a page without one (a test,
+            // a host embedding the editor) still gets a working tooltip.
+            document.querySelector('#popper') ?? document.body
           )}
         </>
       )}

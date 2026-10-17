@@ -109,7 +109,7 @@ function RemoteControlField({
         <div className="frameos-form-label text-sm font-semibold text-slate-700">FrameOS remote control</div>
         <Tooltip
           label="FrameOS remote control help"
-          className="inline-flex h-5 w-5 items-center justify-center rounded-full"
+          className="frameos-muted inline-flex h-5 w-5 items-center justify-center rounded-full"
           titleClassName="w-72"
           title={
             <div className="space-y-1">
@@ -153,10 +153,17 @@ function LanAccessField({
 }): JSX.Element {
   return (
     <div className="space-y-2">
-      <div className="frameos-form-label text-sm font-semibold text-slate-700">LAN access</div>
-      <div className="frame-tool-panel space-y-1">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <div className="frameos-form-label text-sm font-semibold text-slate-700">LAN access</div>
+        <Tooltip
+          label="LAN access help"
+          className="frameos-muted inline-flex h-5 w-5 items-center justify-center rounded-full"
+          titleClassName="w-72"
+          title={LAN_ACCESS_HELP}
+        />
+      </div>
+      <div className="frame-tool-panel">
         <Switch value={enabled} onChange={onChange} label={enabled ? 'On' : 'Off'} aria-label="LAN access" />
-        <div className="frameos-form-hint text-xs leading-relaxed text-slate-500">{LAN_ACCESS_HELP}</div>
       </div>
     </div>
   )

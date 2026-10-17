@@ -344,7 +344,10 @@ describe("the LAN access section in the settings panel", () => {
     };
     const section = renderPanel(makeFrame({ ...cloudPi, lan_access: false } as Partial<FrameType>));
     expect(section.textContent).toContain("Off");
-    expect(section.textContent).toContain("Lets scenes reach devices on your home network");
+    // The help is behind the "i" next to the heading, not under the switch.
+    expect(section.textContent).not.toContain("Lets scenes reach devices on your home network");
+    fireEvent.click(screen.getByRole("button", { name: "LAN access help" }));
+    expect(await screen.findByText(/Lets scenes reach devices on your home network/)).toBeTruthy();
 
     fireEvent.click(within(section).getByRole("switch"));
     fireEvent.click(await screen.findByRole("button", { name: "Show code on the frame" }));

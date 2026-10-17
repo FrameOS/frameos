@@ -6,6 +6,7 @@ import { Modal } from '../../../../../components/Modal'
 import { Spinner } from '../../../../../components/Spinner'
 import { Switch } from '../../../../../components/Switch'
 import { TextInput } from '../../../../../components/TextInput'
+import { Tooltip } from '../../../../../components/Tooltip'
 import type { FrameId } from '../../../../../types'
 import { frameLogic } from '../../../frameLogic'
 import { LAN_ACCESS_HELP, LAN_ACCESS_SETTINGS_ANCHOR } from '../lanAccess'
@@ -26,7 +27,12 @@ export function LanAccessSection(): JSX.Element {
   return (
     // A fragment like every section: the panel's CSS styles `form > h6 + div`.
     <>
-      <SectionHeading id={LAN_ACCESS_SETTINGS_ANCHOR}>LAN access</SectionHeading>
+      <SectionHeading id={LAN_ACCESS_SETTINGS_ANCHOR}>
+        <span className="inline-flex items-center gap-1.5">
+          LAN access
+          <Tooltip label="LAN access help" titleClassName="w-72" title={LAN_ACCESS_HELP} />
+        </span>
+      </SectionHeading>
       <SectionBody>
         <Field name="_noop" label="Let scenes reach the local network">
           <div className="w-full space-y-1">
@@ -39,7 +45,6 @@ export function LanAccessSection(): JSX.Element {
               />
               {disabling ? <Spinner /> : null}
             </div>
-            <div className="frameos-muted text-xs">{LAN_ACCESS_HELP}</div>
             {unknown ? (
               <div className="frameos-muted text-xs" data-testid="lan-access-unknown">
                 This frame does not report LAN access yet. Update its FrameOS first.
