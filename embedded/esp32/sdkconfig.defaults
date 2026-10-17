@@ -63,6 +63,12 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # 8MB octal PSRAM (XIAO ESP32-S3). Big allocations (framebuffers, Nim heap)
 # go to PSRAM via malloc; small/hot ones stay in internal SRAM.
 CONFIG_SPIRAM=y
+# No PSRAM memory test at boot: it read and wrote all 8 MB on every boot,
+# deep-sleep wakes included, 0.41 s of it on the E1002 (2026-10-16: the
+# button task now starts 0.75 s after the reset instead of 1.18 s). The keys
+# are blind until then, so it cost the second tap of a double press that woke
+# the frame. A bad PSRAM still fails loudly in use.
+# CONFIG_SPIRAM_MEMTEST is not set
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_USE_MALLOC=y

@@ -257,7 +257,11 @@ proc send*(host: SingleSceneHost, origin: EventOrigin, event: string, payload: J
   # transpiling for a scene nobody sees.
   if event != "setCurrentScene":
     discard host.ensureScene()
-  discard host.events.tick()
+  # No tick on the way in. A button edge the platform queued during a render
+  # carries when it was seen (`atMs`), and the input state advances the holds
+  # to that moment itself; ticking to now first turned a tap made during a
+  # 30 s refresh into a 30 s long press before its release was delivered.
+  # Time passes in `tick` and after `renderScene`, between events.
   host.events.dispatchNow(origin, event, payload)
 
 proc tick*(host: SingleSceneHost): bool =

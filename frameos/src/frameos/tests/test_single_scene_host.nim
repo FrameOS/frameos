@@ -1,4 +1,4 @@
-import std/[json, options, os, strutils]
+import std/[json, monotimes, options, os, strutils]
 import ../channels
 import ../interpreter
 import ../single_scene_host
@@ -43,9 +43,16 @@ localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode,
 host.makeCurrent("fixtures/dispatcher/switchFrom".SceneId)
 doAssert host.scene.isNil, "the scene is built by its first use, not by being made current"
 
-doAssert host.send(eoDriver, "button", %*{"pin": 5, "label": "RIGHT", "level": 0}),
+# The wake press, as an ESP32 queues it: a `down` with `wake: true` and its
+# `up`, stamped when the button task saw them a second before the scene was
+# up. Its window is long over by then, so the first tick makes it the
+# `press` the scene's listener hears.
+let wokeAt = getMonoTime().ticks div 1_000_000 - 1000
+doAssert host.send(eoDriver, "button", %*{"pin": 5, "label": "RIGHT", "level": 0, "wake": true, "atMs": wokeAt}),
   "a button sent before the first render is dispatched"
 doAssert not host.scene.isNil
+discard host.send(eoDriver, "button", %*{"pin": 5, "label": "RIGHT", "level": 1, "atMs": wokeAt + 80})
+doAssert host.tick(), "the tick delivers the press"
 doAssert selected == @["fixtures/dispatcher/switchTo"], "selected " & $selected
 
 # A switch sent before the first render (the backend's set_current_scene,
@@ -184,7 +191,9 @@ proc renderOnce() {.cdecl.} =
     doAssert false, "render raised: " & e.msg
 
 proc pressOnce() {.cdecl.} =
-  discard abortHost.send(eoDriver, "button", %*{"pin": 5, "label": "RIGHT", "level": 0})
+  # A press as said (no line, nothing to time): delivered at once, so the
+  # scene's handler runs inside this send.
+  discard abortHost.send(eoDriver, "button", %*{"pin": 5, "label": "RIGHT", "action": "press"})
 
 proc count(needle: string): int =
   for line in logLines:

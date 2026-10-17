@@ -124,12 +124,30 @@ static void test_wake_status_maps_back_to_a_button(void)
     CHECK(fos_wake_button_index(NULL, 0, BIT_(3)) == -1, "no buttons configured");
 }
 
+static void test_an_edge_stamp_widens_against_the_render_tasks_clock(void)
+{
+    /* A tap 30 s into a render: the stamp is from the button task, the
+     * reading from the render task when it drains the queue. */
+    CHECK(fos_wake_edge_at_ms(1000, 31000) == 1000, "an edge from 30 s ago reads as then");
+    CHECK(fos_wake_edge_at_ms(31000, 31000) == 31000, "an edge from this instant reads as now");
+    /* The clock passed 2^32 ms (49.7 days of uptime) between the edge and
+     * the drain: the 32-bit difference still says how long ago. */
+    int64_t wrap = (int64_t)1 << 32;
+    CHECK(fos_wake_edge_at_ms((uint32_t)(wrap - 500), wrap + 29500) == wrap - 500,
+          "a stamp from before the wrap is 30 s old, not 49 days young");
+    /* Deep into uptime, no wrap between the two readings. */
+    int64_t late = wrap * 3 + 123456;
+    CHECK(fos_wake_edge_at_ms((uint32_t)(late - 2000), late) == late - 2000,
+          "a 2 s old edge after three wraps");
+}
+
 int main(void)
 {
     test_arms_every_rtc_capable_button();
     test_skips_pins_the_chip_cannot_wake_from();
     test_held_button_sits_the_sleep_out();
     test_wake_status_maps_back_to_a_button();
+    test_an_edge_stamp_widens_against_the_render_tasks_clock();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok",
            g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

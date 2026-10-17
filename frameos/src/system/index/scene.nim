@@ -572,10 +572,15 @@ proc runEvent*(self: Scene, context: ExecutionContext) =
         if payload.hasKey(key) and payload[key] != self.state{key}:
           self.state[key] = copy(payload[key])
   of "button":
-    # A GPIO press (drivers/gpioButton, or the ESP32's fos_buttons): remember
-    # it for the bottom bar and redraw now rather than at the next interval.
-    # The release, the long press and the repeats are not news for the bar.
-    if context.payload{"action"}.getStr("press") == "press":
+    # A GPIO key went down (drivers/gpioButton, or the ESP32's fos_buttons):
+    # remember it for the bottom bar and redraw now rather than at the next
+    # interval. The hardware layer's `down`, not the button layer's `press`:
+    # this bar answers "I pressed it and nothing happened", so every touch of
+    # a key counts at once, a double or a long press too. The `up` and the
+    # button layer are not news for the bar. No action at all is a press from
+    # a driver before 2026.9.23, or one said over HTTP: news too.
+    let action = context.payload{"action"}.getStr("")
+    if action == "down" or action == "":
       self.state["lastButton"] = %*{
         "pin": context.payload{"pin"}.getInt(-1),
         "label": context.payload{"label"}.getStr(""),

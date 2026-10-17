@@ -520,9 +520,12 @@ need) and is written down once.
 - Preview: forward `keydown/keyup/beforeinput` from the focused canvas — the
   payload maps 1:1, which is the point of choosing the W3C names.
 
-**Buttons.** `button {pin, label, role, action: press|release|longPress|repeat,
-durationMs, wake}`. Both edges on both hosts (lgpio `LG_BOTH_EDGES`; the ESP32
-poll loop already sees the release). `role` (`primary|next|prev|back|…`) is a
+**Buttons.** `button {pin, label, role, action:
+press|doublePress|release|longPress|repeat, durationMs, wake, atMs}`. Both
+edges on both hosts (lgpio `LG_BOTH_EDGES`; the ESP32 poll loop already sees
+the release), each stamped with when the driver saw it, so a hold is measured
+between the edges and not from their delivery (the ESP32 drains its queue
+between renders). `role` (`primary|next|prev|back|…`) is a
 per-button frame setting with board-preset defaults, so a store scene filters
 on `role: "next"` instead of a silkscreen label. Legacy listeners keep working
 because the alias rule is "a listener without an `action` filter hears `press`

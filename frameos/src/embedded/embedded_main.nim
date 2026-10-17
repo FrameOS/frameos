@@ -647,8 +647,9 @@ proc fos_nim_render_requested_impl(): bool {.exportc, cdecl.} =
 
 proc fos_nim_tick_impl(): bool {.exportc, cdecl.} =
   ## Time passing for the dispatcher's input state (frameos/input_state.nim):
-  ## a held button becomes a `longPress`, then `repeat`s. True when an event
-  ## was made and delivered.
+  ## a held button is a `longPress` at every whole second, a short press whose
+  ## double-press window closed a `press`. True when an event was made and
+  ## delivered.
   try:
     tickInput()
   except Defect as e:

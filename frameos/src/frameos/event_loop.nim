@@ -33,7 +33,7 @@ import ./input_state
 
 export events
 export input_state.InputState, input_state.cursorVisible, input_state.takeCursorDirty,
-  input_state.pointersDown, input_state.buttonsHeld
+  input_state.pointersDown, input_state.buttonsHeld, input_state.buttonsBusy
 
 const
   DefaultLaneCapacity* = 256
@@ -392,8 +392,9 @@ proc drain*(loop: EventLoop, budget = DefaultDrainBudget): int =
     loop.host.requestRender()
 
 proc tick*(loop: EventLoop, now = getMonoTime()): int =
-  ## Time passing for the input state: a held pointer or button becomes a
-  ## `longPress`, a held button `repeat`s, an idle cursor hides. What it makes
+  ## Time passing for the input state: a held pointer becomes a `longPress`,
+  ## a held button one at every whole second, a short button press whose
+  ## double-press window closed a `press`, an idle cursor hides. What it makes
   ## is queued (input lane) for the drain that follows; returns how many.
   var made: seq[InputDelivery]
   loop.inputState.tick(now, made)
