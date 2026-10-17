@@ -342,6 +342,42 @@ suite "js app runtime":
     check logged[^1]["message"].getStr() ==
       """JS logic app ran {"event":"render","stateKey":"customState"}"""
 
+  test "an app without the export its node calls says so, once":
+    let config = testConfig()
+    var logged: seq[JsonNode] = @[]
+    var logger = testLogger(config)
+    logger.log = proc(payload: JsonNode) =
+      logged.add(payload)
+    let scene = FrameScene(id: "tests/js-app-missing-export".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 15.NodeId, nodeName: "toggleSolution", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "button", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    # A chess puzzle's toggle: get() only, in a button flow, which calls run().
+    let getOnly = newJsAppRuntime(
+      category = "logic",
+      outputType = "",
+      source = """export function get(app) {
+          frameos.setState("revealed", !app.state.revealed)
+          return null
+        }"""
+    )
+    getOnly.run(owner, %*{}, context)
+    getOnly.run(owner, %*{}, context)
+    check scene.state{"revealed"}.isNil
+    check logged.len == 1
+    check logged[0]["event"].getStr() == "error:15:toggleSolution"
+    check logged[0]["error"].getStr().startsWith("This app has no run(), so it does nothing in a flow")
+
+    logged.setLen(0)
+    let runOnly = newJsAppRuntime(
+      category = "data",
+      outputType = "text",
+      source = """export function run(app) { return "hi" }"""
+    )
+    discard runOnly.get(owner, %*{}, context)
+    check logged.len == 1
+    check logged[0]["error"].getStr().startsWith("This app has no get(), so its output is empty")
+
   test "log lines read like console.log, not like the JSON array of the arguments":
     let config = testConfig()
     var logged: seq[JsonNode] = @[]

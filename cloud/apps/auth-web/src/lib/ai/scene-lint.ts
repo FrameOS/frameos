@@ -51,6 +51,8 @@ type ResolvedApp = {
   fieldNames: Set<string>;
   nodeFieldNames: Set<string>;
   source: "catalog" | "scene" | "inline";
+  /** A JS app's main module, for the export its node needs (moduleExports). */
+  main?: { file: string; source: string } | undefined;
 };
 
 /** Mirrors frontend/src/utils/refreshInterval.ts. */
@@ -113,14 +115,20 @@ function resolveApp(
 ): ResolvedApp | undefined {
   let config: JsonObject | AiAppConfig | undefined;
   let source: ResolvedApp["source"] = "catalog";
+  let category: string | undefined;
+  let main: ResolvedApp["main"];
   const inlineSources = obj(data.sources);
   const inlineConfig = inlineSources ? parseJsonString(inlineSources["config.json"]) : undefined;
   if (inlineConfig) {
     config = inlineConfig;
     source = "inline";
+    category = str(inlineConfig.category);
+    main = mainAppSource(inlineSources);
   } else if (sceneApps && obj(sceneApps[keyword])) {
     config = obj(sceneApps[keyword]);
     source = "scene";
+    category = sceneAppCategory(config);
+    main = mainAppSource(obj(config?.sources));
   } else if (catalog[keyword]) {
     config = catalog[keyword];
   } else {
@@ -139,10 +147,11 @@ function resolveApp(
     }
   }
   return {
-    category: str((config as { category?: unknown }).category),
+    category: source === "catalog" ? str((config as { category?: unknown }).category) : category,
     fieldNames,
     fields,
     keyword,
+    main,
     nodeFieldNames,
     outputType: outputTypeOf(config),
     source,
@@ -376,10 +385,39 @@ export function lintAppImports(file: string, source: string, files: string[]): s
   return problems;
 }
 
+/**
+ * The names a JS app's main module exports. `null` when it has a default
+ * export (`export default { run }`): the frame calls that object's functions
+ * too, and a regex cannot read its keys, so nothing is claimed about it.
+ */
+export function moduleExports(source: string): Set<string> | null {
+  if (/\bexport\s+default\b/.test(source)) {
+    return null;
+  }
+  const names = new Set<string>();
+  const declarations =
+    /\bexport\s+(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)|\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)|\bexports\.([A-Za-z_$][\w$]*)\s*=/g;
+  for (const match of source.matchAll(declarations)) {
+    const name = match[1] ?? match[2] ?? match[3];
+    if (name) {
+      names.add(name);
+    }
+  }
+  // `export { run }`, `export { toggle as run }`.
+  for (const match of source.matchAll(/\bexport\s*\{([^}]*)\}/g)) {
+    for (const part of (match[1] ?? "").split(",")) {
+      const name = part.split(/\s+as\s+/).pop()?.trim();
+      if (name) {
+        names.add(name);
+      }
+    }
+  }
+  return names;
+}
+
 export function lintJsAppSource(source: string, category?: string): string[] {
   const problems: string[] = [];
-  const exportsFn = (name: string) =>
-    new RegExp(`export\\s+(?:async\\s+)?function\\s+${name}\\b|export\\s+(?:const|let)\\s+${name}\\b|exports\\.${name}\\s*=`).test(source);
+  const exported = moduleExports(source);
   // Verified 2026-08-24 against the wasm runtime: a scene-local app with
   // category "render" (run() returning frameos.svg) draws nothing and logs
   // nothing. The path that works is a DATA app whose get() returns the image,
@@ -388,17 +426,41 @@ export function lintJsAppSource(source: string, category?: string): string[] {
     problems.push(
       'scene-local apps with category "render" draw nothing in the runtime. Make it category "data" with `export function get(app, context)` returning frameos.svg(...) (output [{name:"image", type:"image"}]) and wire its fieldOutput into a render/image node\'s "image" field.',
     );
-  } else if (!exportsFn("get")) {
+  } else if (exported && category === "logic" && !exported.has("run")) {
     problems.push(
-      `a ${category ?? "data"}-category JS app must \`export function get(app, context)\` returning its output value; nothing else is called.`,
+      `a logic-category JS app must \`export function run(app, context)\`: its node sits in a flow (after an event node) and the frame calls run() there${exported.has("get") ? ", never get()" : ""}.`,
+    );
+  } else if (exported && category !== undefined && category !== "logic" && !exported.has("get")) {
+    problems.push(
+      `a ${category}-category JS app must \`export function get(app, context)\` returning its output value: the frame calls get() when the node's output feeds a field.${exported.has("run") ? ' An app that acts in a flow instead (after an event node: sets state, the next sleep) is category "logic" and exports run().' : ""}`,
+    );
+  } else if (exported && category === undefined && !exported.has("get") && !exported.has("run")) {
+    // No category anywhere: where its node sits says which one it needs.
+    problems.push(
+      "a JS app must export `get(app, context)` (a data app: its node's output feeds a field) or `run(app, context)` (a logic app: its node sits in a flow, after an event node); the frame calls nothing else.",
     );
   }
   if (/(^|[^.\w])(?:format|now|parseTs)\s*\(/.test(source)) {
     problems.push(
-      "JS apps have no format()/now()/parseTs() (those exist only in code nodes). Use Date (UTC only) or take the formatted value in through a field fed by a code node or data/clock.",
+      "JS apps have no format()/now()/parseTs() (those exist only in code nodes). Use Date, which reads the frame's local time, or take the formatted value in through a field fed by a code node or data/clock.",
     );
   }
   return problems;
+}
+
+/** The category the frame runs a scene app as: its config.json's (all the runtime reads), else the apps map entry's. */
+function sceneAppCategory(entry: JsonObject | undefined): string | undefined {
+  return str(parseJsonString(obj(entry?.sources)?.["config.json"])?.category) ?? str(entry?.category);
+}
+
+/** The app's main module (app.ts, app.tsx, …), with its file name. */
+function mainAppSource(sources: JsonObject | undefined): { file: string; source: string } | undefined {
+  for (const [file, content] of Object.entries(sources ?? {})) {
+    if (mainAppSourceFile.test(file) && typeof content === "string") {
+      return { file, source: content };
+    }
+  }
+  return undefined;
 }
 
 // pixie's SVG subset (pixie pin of 2026-08-25): any unsupported tag fails
@@ -597,9 +659,9 @@ export function lintScene(
         if (typeof content !== "string" || !/\.(ts|js|tsx|jsx)$/.test(file)) {
           continue;
         }
-        // Only the main module must export get(); helpers export whatever
-        // app.ts imports from them.
-        const contract = mainAppSourceFile.test(file) ? lintJsAppSource(content, str(obj(raw)?.category)) : [];
+        // Only the main module is held to the get()/run() contract; helpers
+        // export whatever app.ts imports from them.
+        const contract = mainAppSourceFile.test(file) ? lintJsAppSource(content, sceneAppCategory(obj(raw))) : [];
         for (const problem of [...contract, ...lintAppImports(file, content, fileNames), ...lintSvgMarkup(content)]) {
           push("error", `Scene app "${keyword}" (${file}): ${problem}`);
         }
@@ -867,11 +929,13 @@ export function lintScene(
   const connectedInputs = new Map<string, Set<string>>();
   const codeArgsFed = new Map<string, Set<string>>();
   const chainAdjacency = new Map<string, string[]>();
+  const chainTargets = new Set<string>();
   const valueSourcesUsed = new Set<string>();
   const addChain = (from: string, to: string) => {
     const list = chainAdjacency.get(from) ?? [];
     list.push(to);
     chainAdjacency.set(from, list);
+    chainTargets.add(to);
   };
 
   edges.forEach((edge, index) => {
@@ -1093,6 +1157,32 @@ export function lintScene(
           nodeId,
         );
       }
+    }
+  }
+
+  // Where a node sits decides which export the frame calls: run() for a node
+  // in a flow (after an event node, or in a node field such as a split
+  // cell), get() for one whose output feeds a field. Without that export the
+  // node does nothing, and the frame used to say nothing either: a chess
+  // puzzle's button flow ran a get()-only toggle app for three turns.
+  for (const [nodeId, app] of appByNode) {
+    const exported = app.main ? moduleExports(app.main.source) : null;
+    if (!app.main || !exported) {
+      continue;
+    }
+    if (chainTargets.has(nodeId) && !exported.has("run")) {
+      push(
+        "error",
+        `Node ${nodeId} runs scene app "${app.keyword}" in a flow, but its ${app.main.file} exports no run(), so the node does nothing: in a flow (after an event node) the frame calls run(app, context)${exported.has("get") ? ", and get() only when the node's output feeds a field" : ""}. Export run() and do the work there (frameos.setState(key, value) to change state), with category "logic"; or take the node out of the flow and wire its fieldOutput into the field that uses its value.`,
+        nodeId,
+      );
+    }
+    if (valueSourcesUsed.has(nodeId) && !exported.has("get")) {
+      push(
+        "error",
+        `Node ${nodeId}'s output feeds a field, but scene app "${app.keyword}" (${app.main.file}) exports no get(), so the value is always empty: the frame calls get(app, context) for a node whose output is wired into a field${exported.has("run") ? ", and run() only in a flow" : ""}. Export get() returning the value, with category "data".`,
+        nodeId,
+      );
     }
   }
 

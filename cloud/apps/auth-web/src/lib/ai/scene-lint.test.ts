@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { exampleScenes } from "./context";
+import { appCatalog, exampleScenes } from "./context";
 import { formatLintIssues, lintScenes } from "./scene-lint";
 import type { JsonObject } from "./scene-utils";
 
@@ -493,6 +493,85 @@ describe("lintScenes", () => {
     expect(messages([withApp("data", "export function run(app) { return 1 }")]).errors).toEqual([
       expect.stringContaining("must `export function get(app, context)`"),
     ]);
+  });
+
+  // The chess-puzzle turns that wired button → toggleSolution → dispatch
+  // render with an app.ts exporting only get(): the frame calls run() in a
+  // flow, so a press changed nothing. The lint used to ask for that get().
+  it("asks a scene app in a flow for run() and one feeding a field for get()", () => {
+    const toggleScene = (appTs: string, configJson: string) =>
+      scene({
+        apps: { toggleSolution: { origin: "toggleSolution", sources: { "app.ts": appTs, "config.json": configJson } } },
+        edges: [
+          { id: "e1", source: "ev", sourceHandle: "next", target: "text", targetHandle: "prev", type: "appNodeEdge" },
+          { id: "e2", source: "button", sourceHandle: "next", target: "toggle", targetHandle: "prev", type: "appNodeEdge" },
+          { id: "e3", source: "toggle", sourceHandle: "next", target: "redraw", targetHandle: "prev", type: "appNodeEdge" },
+        ],
+        nodes: [
+          { data: { keyword: "render" }, id: "ev", type: "event" },
+          { data: { config: { text: "hi" }, keyword: "render/text" }, id: "text", type: "app" },
+          { data: { keyword: "button" }, id: "button", type: "event" },
+          { data: { config: {}, keyword: "toggleSolution" }, id: "toggle", type: "app" },
+          { data: { config: {}, keyword: "render" }, id: "redraw", type: "dispatch" },
+        ],
+      });
+    const logicConfig = JSON.stringify({ category: "logic", fields: [], name: "Toggle", output: [] });
+    const toggle = "frameos.setState('revealed', !app.state.revealed)";
+
+    expect(messages([toggleScene(`export function get(app, context) { ${toggle}; return null }`, logicConfig)]).errors).toEqual([
+      expect.stringContaining('logic-category JS app must `export function run(app, context)`'),
+      expect.stringContaining('Node toggle runs scene app "toggleSolution" in a flow, but its app.ts exports no run()'),
+    ]);
+    // The category comes from config.json, as on the frame, so an apps entry
+    // without one is still a logic app.
+    expect(messages([toggleScene(`export function run(app, context) { ${toggle} }`, logicConfig)]).errors).toEqual([]);
+    expect(messages([toggleScene(`function toggle(app) { ${toggle} }\nexport { toggle as run }`, logicConfig)]).errors).toEqual([]);
+    expect(messages([toggleScene(`export default { run(app) { ${toggle} } }`, logicConfig)]).errors).toEqual([]);
+    // No category anywhere: the node's place decides, and either export will do.
+    expect(messages([toggleScene(`export function run(app, context) { ${toggle} }`, "{}")]).errors).toEqual([]);
+    expect(messages([toggleScene(`export function toggle(app) { ${toggle} }`, "{}")]).errors).toEqual([
+      expect.stringContaining("a JS app must export `get(app, context)` (a data app"),
+      expect.stringContaining('Node toggle runs scene app "toggleSolution" in a flow, but its app.ts exports no run()'),
+    ]);
+
+    const dataConfig = JSON.stringify({ category: "data", fields: [], name: "Label", output: [{ name: "text", type: "string" }] });
+    const valueScene = scene({
+      apps: { label: { sources: { "app.ts": "export function run(app) { return 'hi' }", "config.json": dataConfig } } },
+      edges: [
+        { id: "e1", source: "ev", sourceHandle: "next", target: "text", targetHandle: "prev", type: "appNodeEdge" },
+        { id: "e2", source: "label", sourceHandle: "fieldOutput", target: "text", targetHandle: "fieldInput/text", type: "codeNodeEdge" },
+      ],
+      nodes: [
+        { data: { keyword: "render" }, id: "ev", type: "event" },
+        { data: { config: {}, keyword: "render/text" }, id: "text", type: "app" },
+        { data: { config: {}, keyword: "label" }, id: "label", type: "app" },
+      ],
+    });
+    expect(messages([valueScene]).errors).toEqual([
+      expect.stringContaining('is category "logic" and exports run()'),
+      expect.stringContaining('Node label\'s output feeds a field, but scene app "label" (app.ts) exports no get()'),
+    ]);
+  });
+
+  it("accepts the repo's logic app template in a button flow", () => {
+    const template = appCatalog()["repo/apps/logic/jsLogic"];
+    expect(template?.sources?.["app.ts"]).toContain("export function run(");
+    const { errors } = messages([
+      scene({
+        apps: { jsLogic: { ...template, origin: "repo/apps/logic/jsLogic" } as unknown as JsonObject },
+        edges: [
+          { id: "e1", source: "ev", sourceHandle: "next", target: "text", targetHandle: "prev", type: "appNodeEdge" },
+          { id: "e2", source: "button", sourceHandle: "next", target: "logic", targetHandle: "prev", type: "appNodeEdge" },
+        ],
+        nodes: [
+          { data: { keyword: "render" }, id: "ev", type: "event" },
+          { data: { config: { text: "hi" }, keyword: "render/text" }, id: "text", type: "app" },
+          { data: { keyword: "button" }, id: "button", type: "event" },
+          { data: { config: {}, keyword: "jsLogic" }, id: "logic", type: "app" },
+        ],
+      }),
+    ]);
+    expect(errors).toEqual([]);
   });
 
   it("rejects SVG the frame renderer cannot draw and accepts the one gradient form it can", () => {

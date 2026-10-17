@@ -1633,12 +1633,22 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
     }
     return globalThis.__frameosModule || {};
   }
+  // A node in a flow calls run(), a node feeding a field calls get(). An app
+  // without the one its node needs does nothing, so say so, once.
+  const __frameosMissing = {};
   function __frameosInvoke(name) {
     const mod = __frameosExports();
     const fn = mod && mod[name];
-    return typeof fn === "function"
-      ? fn(globalThis.__frameosAppInstance, globalThis.__frameosContext)
-      : undefined;
+    if (typeof fn === "function") {
+      return fn(globalThis.__frameosAppInstance, globalThis.__frameosContext);
+    }
+    if (name !== "init" && !__frameosMissing[name]) {
+      __frameosMissing[name] = true;
+      jsAppLog("error", JSON.stringify([name === "run"
+        ? "This app has no run(), so it does nothing in a flow: a node after an event calls run(app, context), and get() only when its output feeds a field."
+        : "This app has no get(), so its output is empty: a node feeding a field calls get(app, context), and run() only in a flow."]));
+    }
+    return undefined;
   }
   """ & sceneJsPrelude)
   # The test harness, when this runtime runs an app's tests (app_tests.nim):
