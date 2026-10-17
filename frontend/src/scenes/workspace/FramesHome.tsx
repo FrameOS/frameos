@@ -1425,6 +1425,8 @@ function SceneControlPanelContent({
   const { saveAndDeployFrame, saveFrame } = useActions(frameLogic(frameLogicProps))
   const { undeployedSceneIds, unsavedSceneIds, sceneAccessFlagsById } = useValues(scenesLogic(frameLogicProps))
   const { openGenerator } = useActions(splitScreenLayoutLogic(frameLogicProps))
+  // The drawer's footer, where ExpandedScene puts the scene's actions.
+  const [actionsFooter, setActionsFooter] = useState<HTMLDivElement | null>(null)
 
   if (!frame) {
     return null
@@ -1606,8 +1608,15 @@ function SceneControlPanelContent({
                 showEditButton={false}
                 isUndeployed={sceneIsUndeployed}
                 isUnsaved={sceneIsUnsaved}
+                actionsContainer={actionsFooter}
               />
             </div>
+            {/* A fixed footer under the scrolling fields: Activate and Reset stay
+                in reach however many fields a scene has. */}
+            <div
+              ref={setActionsFooter}
+              className="frameos-divider border-t border-slate-200/80 px-5 py-3 empty:hidden"
+            />
           </div>
         </BindLogic>
       </BindLogic>

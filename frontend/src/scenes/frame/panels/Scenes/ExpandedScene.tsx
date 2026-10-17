@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useActions, useValues } from 'kea'
 import { router } from 'kea-router'
 import { expandedSceneLogic } from './expandedSceneLogic'
@@ -32,6 +33,10 @@ export interface ExpandedSceneProps {
   showEditButton?: boolean
   isUnsaved?: boolean
   isUndeployed?: boolean
+  /** Where to render the action buttons (Activate, Reset) instead of under the
+   * fields: the scene drawer's fixed footer. `null` is a footer not mounted
+   * yet (nothing renders until it is); leave it out to keep them inline. */
+  actionsContainer?: HTMLElement | null
 }
 
 export function ExpandedScene({
@@ -41,6 +46,7 @@ export function ExpandedScene({
   showEditButton = true,
   isUnsaved,
   isUndeployed,
+  actionsContainer,
 }: ExpandedSceneProps) {
   const { stateChanges, visibleFields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
   const { states, sceneId: currentSceneId, activatingSceneId } = useValues(controlLogic({ frameId }))
@@ -226,6 +232,15 @@ export function ExpandedScene({
   // Matches the old standalone buttons: with unsaved/undeployed changes the
   // primary action was the on-frame preview, otherwise activate.
   const defaultActionKey: SceneActionKey = canPreviewUnsavedChanges ? 'preview-frame' : 'activate'
+  // Under the fields, or in the drawer's footer: portaled there, but still
+  // inside this card's Form in the React tree.
+  const placeActions = (actions: JSX.Element, inline: JSX.Element): JSX.Element | null =>
+    actionsContainer === undefined ? inline : actionsContainer ? createPortal(actions, actionsContainer) : null
+  const resetButton = (
+    <Button onClick={() => resetStateChanges()} color="secondary">
+      Reset
+    </Button>
+  )
 
   return (
     <div className="space-y-3">
@@ -240,11 +255,14 @@ export function ExpandedScene({
         </div>
       ) : null}
       {fieldCount === 0 ? (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <SceneActionsButton options={actionOptions} defaultKey={defaultActionKey} />
+        placeActions(
+          <SceneActionsButton options={actionOptions} defaultKey={defaultActionKey} />,
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <SceneActionsButton options={actionOptions} defaultKey={defaultActionKey} />
+            </div>
           </div>
-        </div>
+        )
       ) : (
         <Form
           logic={expandedSceneLogic}
@@ -277,17 +295,19 @@ export function ExpandedScene({
               )}
             </Field>
           ))}
-          {fieldCount > 0 ? (
+          {placeActions(
+            <div className="flex w-full flex-wrap items-center gap-2">
+              <SceneActionsButton options={actionOptions} defaultKey={defaultActionKey} />
+              {resetButton}
+            </div>,
             <div className="flex w-full items-center gap-2">
               <div className="@md:w-1/3 hidden @md:block" />
               <div className="flex w-full flex-wrap items-center gap-2">
                 <SceneActionsButton options={actionOptions} defaultKey={defaultActionKey} />
-                <Button onClick={() => resetStateChanges()} color="secondary">
-                  Reset
-                </Button>
+                {resetButton}
               </div>
             </div>
-          ) : null}
+          )}
         </Form>
       )}
       {livePreviewSceneId === sceneId ? <LivePreviewModal frameId={frameId} /> : null}
