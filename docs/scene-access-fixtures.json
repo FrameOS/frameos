@@ -1,0 +1,206 @@
+{
+  "description": "Corpus for frontend/src/utils/sceneAccess.ts: what a scene declares (settings.assetAccess), what its content reaches for, and the flags the control planes show. docs/scene-guide.md \"Assets\" is the prose. Replayed by cloud/apps/auth-web/src/test/shared-spa/scene-access.test.ts.",
+  "scenes": [
+    {
+      "name": "an empty scene reaches for nothing",
+      "scene": { "id": "s", "nodes": [], "edges": [] },
+      "expect": { "declared": "auto", "detected": "none", "effective": "none", "flags": [] }
+    },
+    {
+      "name": "a JS code node reading an asset",
+      "scene": {
+        "id": "s",
+        "nodes": [{ "id": "c", "type": "code", "data": { "codeJS": "const raw = frameos.readAsset('notes.txt')" } }],
+        "edges": []
+      },
+      "expect": { "declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"] }
+    },
+    {
+      "name": "a scene-local app source listing assets",
+      "scene": {
+        "id": "s",
+        "nodes": [
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "jsImage",
+              "sources": { "app.ts": "export function get() { return frameos.listAssets('photos') }" }
+            }
+          }
+        ],
+        "edges": []
+      },
+      "expect": { "declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"] }
+    },
+    {
+      "name": "saving a fetched image is caching, not reading the folder",
+      "scene": {
+        "id": "s",
+        "nodes": [
+          {
+            "id": "a",
+            "type": "app",
+            "data": {
+              "keyword": "unsplash",
+              "sources": { "app.ts": "frameos.fetchImage(url, { saveAsset: { name: 'x', mode: 'auto' } })" }
+            }
+          }
+        ],
+        "edges": []
+      },
+      "expect": { "declared": "auto", "detected": "none", "effective": "none", "flags": [] }
+    },
+    {
+      "name": "Local Image with no path reads the assets folder",
+      "scene": {
+        "id": "s",
+        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": {} } }],
+        "edges": []
+      },
+      "expect": { "declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"] }
+    },
+    {
+      "name": "Local Image inside /srv/assets",
+      "scene": {
+        "id": "s",
+        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "/srv/assets/photos" } } }],
+        "edges": []
+      },
+      "expect": { "declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"] }
+    },
+    {
+      "name": "Local Image with the ESP32 spelling",
+      "scene": {
+        "id": "s",
+        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "sd://photos" } } }],
+        "edges": []
+      },
+      "expect": { "declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"] }
+    },
+    {
+      "name": "Local Image outside the assets folder",
+      "scene": {
+        "id": "s",
+        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "/home/pi/Pictures" } } }],
+        "edges": []
+      },
+      "expect": { "declared": "auto", "detected": "files", "effective": "files", "flags": ["files"] }
+    },
+    {
+      "name": "a folder that only starts like the assets folder",
+      "scene": {
+        "id": "s",
+        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "/srv/assets-old/x.jpg" } } }],
+        "edges": []
+      },
+      "expect": { "declared": "auto", "detected": "files", "effective": "files", "flags": ["files"] }
+    },
+    {
+      "name": "a traversal out of the assets folder",
+      "scene": {
+        "id": "s",
+        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "/srv/assets/../frameos" } } }],
+        "edges": []
+      },
+      "expect": { "declared": "auto", "detected": "files", "effective": "files", "flags": ["files"] }
+    },
+    {
+      "name": "a relative Local Image path is relative to the runtime, not the assets folder",
+      "scene": {
+        "id": "s",
+        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "photos" } } }],
+        "edges": []
+      },
+      "expect": { "declared": "auto", "detected": "files", "effective": "files", "flags": ["files"] }
+    },
+    {
+      "name": "a Local Image path wired from a state field can name any folder",
+      "scene": {
+        "id": "s",
+        "nodes": [
+          { "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": {} } },
+          { "id": "f", "type": "state", "data": { "keyword": "imageFolder" } }
+        ],
+        "edges": [{ "id": "e", "source": "f", "sourceHandle": "fieldOutput", "target": "l", "targetHandle": "fieldInput/path" }]
+      },
+      "expect": { "declared": "auto", "detected": "files", "effective": "files", "flags": ["files"] }
+    },
+    {
+      "name": "own folder only: asset calls stay in the scene's subtree, no flag",
+      "scene": {
+        "id": "s",
+        "settings": { "assetAccess": "cache-home-only" },
+        "nodes": [{ "id": "c", "type": "code", "data": { "codeJS": "frameos.writeAsset('state.json', b64)" } }],
+        "edges": []
+      },
+      "expect": { "declared": "cache-home-only", "detected": "assets", "effective": "home", "flags": [] }
+    },
+    {
+      "name": "a declared reach is shown even when nothing in the content uses it",
+      "scene": { "id": "s", "settings": { "assetAccess": "all-files" }, "nodes": [], "edges": [] },
+      "expect": { "declared": "all-files", "detected": "none", "effective": "files", "flags": ["files"] }
+    },
+    {
+      "name": "all-assets caps a Local Image that points outside (the frame refuses it)",
+      "scene": {
+        "id": "s",
+        "settings": { "assetAccess": "all-assets" },
+        "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "/etc" } } }],
+        "edges": []
+      },
+      "expect": { "declared": "all-assets", "detected": "files", "effective": "assets", "flags": ["assets"] }
+    },
+    {
+      "name": "an unknown value is auto",
+      "scene": {
+        "id": "s",
+        "settings": { "assetAccess": "everything" },
+        "nodes": [{ "id": "c", "type": "code", "data": { "codeJS": "frameos.deleteAsset('x')" } }],
+        "edges": []
+      },
+      "expect": { "declared": "auto", "detected": "assets", "effective": "assets", "flags": ["assets"] }
+    },
+    {
+      "name": "the screenshot app runs a shell command",
+      "scene": {
+        "id": "s",
+        "nodes": [{ "id": "a", "type": "app", "data": { "keyword": "data/chromiumScreenshot", "config": {} } }],
+        "edges": []
+      },
+      "expect": { "declared": "auto", "detected": "none", "effective": "none", "flags": ["shell"] }
+    },
+    {
+      "name": "Nim process APIs in a code node",
+      "scene": {
+        "id": "s",
+        "nodes": [{ "id": "c", "type": "code", "data": { "code": "discard execShellCmd(\"reboot\")" } }],
+        "edges": []
+      },
+      "expect": { "declared": "auto", "detected": "none", "effective": "none", "flags": ["shell"] }
+    }
+  ],
+  "sets": [
+    {
+      "name": "reads all files covers reads assets folder across a set",
+      "scenes": [
+        { "id": "a", "nodes": [{ "id": "c", "type": "code", "data": { "codeJS": "frameos.readAsset('x')" } }], "edges": [] },
+        { "id": "b", "nodes": [{ "id": "l", "type": "app", "data": { "keyword": "data/localImage", "config": { "path": "/mnt/usb" } } }], "edges": [] }
+      ],
+      "flags": ["files"]
+    },
+    {
+      "name": "flags come in display order: shell, files, assets",
+      "scenes": [
+        { "id": "a", "nodes": [{ "id": "c", "type": "code", "data": { "codeJS": "frameos.readAsset('x')" } }], "edges": [] },
+        { "id": "b", "nodes": [{ "id": "s", "type": "app", "data": { "keyword": "data/rstpSnapshot", "config": {} } }], "edges": [] }
+      ],
+      "flags": ["shell", "assets"]
+    },
+    {
+      "name": "not a list",
+      "scenes": { "id": "a" },
+      "flags": []
+    }
+  ]
+}

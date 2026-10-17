@@ -233,8 +233,8 @@ suite "data/localImage app":
     check emptyFolder.width == 7
     check emptyFolder.height == 5
 
-  test "a store-origin scene reads only its own subtree of the assets folder":
-    let root = uniqueTempDir("frameos-local-image-store")
+  test "a cache-home-only scene reads only its own subtree of the assets folder":
+    let root = uniqueTempDir("frameos-local-image-home")
     defer: removeDir(root)
 
     writePpm(root / "shared.ppm", 255, 0, 0)
@@ -244,7 +244,7 @@ suite "data/localImage app":
 
     let logs = LogStore(items: @[])
     let scene = InterpretedFrameScene(id: "store/photos".SceneId, state: %*{}, logger: newLogger(logs),
-                                      storeOrigin: true)
+                                      assetAccess: "cache-home-only")
     # Any path outside the scene's subtree is an error frame, not a listing.
     let outside = App(
       scene: scene,
@@ -255,7 +255,7 @@ suite "data/localImage app":
     check errorImage.width == 8
     check errorImage.height == 6
     check not scene.state.hasKey("meta")
-    check logs.items.anyIt(it{"error"}.getStr().contains("scene store"))
+    check logs.items.anyIt(it{"error"}.getStr().contains("\"cache-home-only\""))
 
     # An empty path is the scene's own folder; a relative one is inside it.
     for path in ["", "album", sceneRoot / "album"]:
@@ -270,12 +270,62 @@ suite "data/localImage app":
       check scene.state["meta"]["path"].getStr() == sceneRoot / "album" / "mine.ppm"
       check scene.state["meta"]["total"].getInt() == 1
 
-    # The owner's scene keeps reading anywhere, as before.
-    let own = App(
-      scene: FrameScene(state: %*{}, logger: newLogger(logs)),
+  test "an all-assets scene reads the assets folder and nothing outside it":
+    let root = uniqueTempDir("frameos-local-image-assets")
+    let elsewhere = uniqueTempDir("frameos-local-image-elsewhere")
+    defer:
+      removeDir(root)
+      removeDir(elsewhere)
+
+    writePpm(root / "shared.ppm", 255, 0, 0)
+    writePpm(elsewhere / "other.ppm", 0, 0, 255)
+
+    let logs = LogStore(items: @[])
+    let scene = InterpretedFrameScene(id: "assets".SceneId, state: %*{}, logger: newLogger(logs),
+                                      assetAccess: "all-assets")
+    let outside = App(
+      scene: scene,
       frameConfig: makeFrameConfig(root),
-      appConfig: AppConfig(path: root, order: "alphabetical", metadataStateKey: "meta")
+      appConfig: AppConfig(path: elsewhere, order: "alphabetical", metadataStateKey: "meta")
     )
-    let ownImage = own.get(ExecutionContext(hasImage: false))
-    check ownImage.width == 1
-    check own.scene.state["meta"]["total"].getInt() == 2
+    let errorImage = outside.get(ExecutionContext(hasImage: false))
+    check errorImage.width == 8
+    check not scene.state.hasKey("meta")
+    check logs.items.anyIt(it{"error"}.getStr().contains("\"all-assets\""))
+
+    for path in ["", root, root / "shared.ppm"]:
+      let inside = App(
+        scene: scene,
+        frameConfig: makeFrameConfig(root),
+        appConfig: AppConfig(path: path, order: "alphabetical", metadataStateKey: "meta")
+      )
+      let image = inside.get(ExecutionContext(hasImage: false))
+      check image.width == 1
+      check scene.state["meta"]["path"].getStr() == root / "shared.ppm"
+
+  test "auto, all-files and store-origin scenes read any path, as before":
+    let root = uniqueTempDir("frameos-local-image-open")
+    let elsewhere = uniqueTempDir("frameos-local-image-open-elsewhere")
+    defer:
+      removeDir(root)
+      removeDir(elsewhere)
+
+    writePpm(root / "shared.ppm", 255, 0, 0)
+    writePpm(elsewhere / "other.ppm", 0, 0, 255)
+
+    let logs = LogStore(items: @[])
+    let scenes = @[
+      FrameScene(state: %*{}, logger: newLogger(logs)),
+      InterpretedFrameScene(id: "auto".SceneId, state: %*{}, logger: newLogger(logs)),
+      InterpretedFrameScene(id: "files".SceneId, state: %*{}, logger: newLogger(logs), assetAccess: "all-files"),
+      InterpretedFrameScene(id: "store".SceneId, state: %*{}, logger: newLogger(logs), storeOrigin: true),
+    ]
+    for scene in scenes:
+      let app = App(
+        scene: scene,
+        frameConfig: makeFrameConfig(root),
+        appConfig: AppConfig(path: elsewhere, order: "alphabetical", metadataStateKey: "meta")
+      )
+      let image = app.get(ExecutionContext(hasImage: false))
+      check image.width == 1
+      check scene.state["meta"]["path"].getStr() == elsewhere / "other.ppm"

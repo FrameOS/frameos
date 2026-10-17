@@ -13,6 +13,11 @@
 
 import { appCatalog, sceneEvents, type AiAppConfig } from "./context";
 import type { JsonObject } from "./scene-utils";
+import {
+  ASSET_ACCESS_VALUES,
+  assetAccessRefusesContent,
+  sceneAccess,
+} from "../../../../../../frontend/src/utils/sceneAccess";
 
 export type LintLevel = "error" | "warning";
 
@@ -613,6 +618,25 @@ export function lintScene(
     const mismatch = valueLooksLike("color", settings.backgroundColor);
     if (mismatch) {
       push("warning", `settings.backgroundColor: ${mismatch}.`);
+    }
+  }
+  if (settings.assetAccess !== undefined) {
+    if (
+      typeof settings.assetAccess !== "string" ||
+      !(ASSET_ACCESS_VALUES as readonly string[]).includes(settings.assetAccess)
+    ) {
+      push(
+        "error",
+        `settings.assetAccess must be one of ${ASSET_ACCESS_VALUES.map((value) => `"${value}"`).join(", ")}.`,
+      );
+    } else {
+      const access = sceneAccess(scene);
+      if (assetAccessRefusesContent(access)) {
+        push(
+          "warning",
+          `settings.assetAccess is "${access.declared}" but ${access.reasons.join("; ")}: the frame refuses that path. Use "all-files", or point it inside the assets folder.`,
+        );
+      }
     }
   }
 

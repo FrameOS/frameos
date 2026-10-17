@@ -1115,6 +1115,13 @@ export interface FrameSceneSettings {
   refreshInterval?: number
   backgroundColor?: string
   execution?: 'compiled' | 'interpreted'
+  /**
+   * What the scene may read on the frame (utils/sceneAccess.ts, frameos asset_scope.nim):
+   * 'auto' (default) shows what its content uses and confines nothing, 'cache-home-only'
+   * keeps it in assets/scenes/<id>, 'all-assets' keeps Local Image inside the assets
+   * folder, 'all-files' lets it read anywhere. FrameOS 2026.10.16+.
+   */
+  assetAccess?: 'auto' | 'cache-home-only' | 'all-assets' | 'all-files'
   autoArrangeOnLoad?: boolean
   splitScreenLayout?: Record<string, any>
 }

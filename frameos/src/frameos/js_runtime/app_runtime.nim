@@ -566,11 +566,11 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
   return nimStringToJS(ctx, $response)
 
 proc assetsRoot(e: JsAppEvalEnv): string =
-  ## The root for this app's asset calls: the frame-wide assets folder for a
-  ## scene the owner wrote, the scene's own `<assets>/scenes/<sceneId>/` for
-  ## a store-origin scene (or for every scene when frame.json says so). The
-  ## rule and the containment check live in frameos/asset_scope.nim, shared
-  ## with `saveAsset` and the `data/localImage` app.
+  ## The root for this app's asset calls: the frame-wide assets folder, or
+  ## the scene's own `<assets>/scenes/<sceneId>/` when its
+  ## `settings.assetAccess` is "cache-home-only" (or for every scene when
+  ## frame.json says so). The rule and the containment check live in
+  ## frameos/asset_scope.nim, shared with `saveAsset` and `data/localImage`.
   sceneAssetsRoot(e.owner.frameConfig, e.owner.scene)
 
 proc resolveAssetPath(e: JsAppEvalEnv, relPath: string): string =

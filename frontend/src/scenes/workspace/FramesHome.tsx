@@ -61,6 +61,7 @@ import { frameLogic } from '../frame/frameLogic'
 import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import { fleetUpdateLogic } from './fleetUpdateLogic'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
+import { SceneAccessTags } from '../frame/panels/Scenes/SceneAccessTags'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
 import { settingsDetails } from '../frame/panels/secretSettings'
 import { missingSettingsGroups } from '../../utils/cloudFrameScenes'
@@ -1422,7 +1423,7 @@ function SceneControlPanelContent({
   const frameLogicProps = { frameId: sceneControlSelection.frameId }
   const { frameForm, isFrameFormSubmitting } = useValues(frameLogic(frameLogicProps))
   const { saveAndDeployFrame, saveFrame } = useActions(frameLogic(frameLogicProps))
-  const { undeployedSceneIds, unsavedSceneIds } = useValues(scenesLogic(frameLogicProps))
+  const { undeployedSceneIds, unsavedSceneIds, sceneAccessFlagsById } = useValues(scenesLogic(frameLogicProps))
   const { openGenerator } = useActions(splitScreenLayoutLogic(frameLogicProps))
 
   if (!frame) {
@@ -1586,6 +1587,7 @@ function SceneControlPanelContent({
                 </div>
               ) : null}
               {scene.origin ? <SceneOriginLine origin={scene.origin} /> : null}
+              <SceneAccessTags flags={sceneAccessFlagsById[scene.id] ?? []} className="mb-4" />
               {isCloudMode() ? (
                 <SceneKeysNotice frame={frame} scene={scene} sceneIsActive={selectedSceneIsActive} />
               ) : null}

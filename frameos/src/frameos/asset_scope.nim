@@ -1,43 +1,44 @@
 ## Where a scene may read and write files on the frame.
 ##
 ## The frame's assets folder (`assetsPath`, `/srv/assets` by default) is a
-## shared resource: uploaded photos, fonts, what other scenes saved. A scene
-## the owner wrote gets all of it, as it always did. A scene from the public
-## scene store is anyone's code, whichever control plane installed it
-## (`InterpretedFrameScene.storeOrigin`, the same provenance bit the
-## shell-apps gate in spawn_guard.nim keys on), and it gets a subtree of its
-## own, `<assets>/scenes/<sceneId>/`, and nothing else: not other scenes'
-## files, not the fonts, not `.frameos/scene_images`, not a path elsewhere on
-## disk through `localImage.path`.
+## shared resource: uploaded photos, fonts, what other scenes saved. How much
+## of the disk a scene may touch is part of the scene itself, the
+## `settings.assetAccess` key in scenes.json, so it travels with every copy
+## of the scene and anyone can read it in the JSON:
 ##
-## `js.assetSandbox` in frame.json picks the rule:
+##   "auto"             (default, also absent or unknown) nothing confined:
+##                      the frame-wide folder for the JS asset API and
+##                      `saveAsset`, `localImage.path` as written
+##   "cache-home-only"  the scene's own subtree, `<assets>/scenes/<sceneId>/`,
+##                      for all three and nothing else
+##   "all-assets"       the frame-wide folder; `localImage` may not leave it
+##   "all-files"        as "auto", said out loud: `localImage` reads any path
 ##
-##   "store"  (default) store-origin scenes are confined, the owner's are not
-##   "scene"  every scene is confined to its own subtree
-##   "frame"  nothing is confined (the pre-2026.10.16 behavior)
+## The control planes show a scene's access as tags (the declared value, or
+## what they detect in the scene's content under "auto"), and installing the
+## scene is the approval. This module enforces the explicit values only; an
+## "auto" scene runs as it always did. Holding "auto" to what the control
+## planes detected is the next step.
+##
+## `js.assetSandbox` in frame.json is the frame owner's ceiling: "frame"
+## (default) leaves each scene to its own setting, "scene" confines every
+## scene to its subtree whatever it asks for.
 ##
 ## Every consumer of a scene-supplied path — the JS asset API, `saveAsset`,
 ## the `data/localImage` app — resolves it through here, so there is one
 ## containment check (lexical, then against the real path so a planted
 ## symlink is not a way out) and one answer to "which folder is this scene's".
-##
-## The browser preview is the author's own machine with the author's own
-## files in it: nothing to protect from a scene there, so "store" confines
-## nothing in the wasm build. "scene" still does, for whoever asks for it.
 
 import std/[os, strutils]
 
 import frameos/types
 
 const
-  AssetSandboxModes* = ["store", "scene", "frame"]
-  DefaultAssetSandbox* = "store"
+  AssetSandboxModes* = ["frame", "scene"]
+  DefaultAssetSandbox* = "frame"
+  AssetAccessValues* = ["auto", "cache-home-only", "all-assets", "all-files"]
+  DefaultAssetAccess* = "auto"
   DefaultAssetsPath = "/srv/assets"
-
-proc sceneIsStoreOrigin*(scene: FrameScene): bool =
-  ## The scene came from the public scene store (`origin.storeSceneId` is
-  ## set). Compiled/legacy scenes are not InterpretedFrameScene: never store.
-  scene != nil and scene of InterpretedFrameScene and InterpretedFrameScene(scene).storeOrigin
 
 proc frameAssetsRoot*(frameConfig: FrameConfig): string =
   ## The frame-wide assets folder, without a trailing slash.
@@ -48,20 +49,30 @@ proc frameAssetsRoot*(frameConfig: FrameConfig): string =
     result = DefaultAssetsPath
 
 proc assetSandboxMode*(frameConfig: FrameConfig): string =
+  ## The frame's `js.assetSandbox`: "frame" or "scene".
   if frameConfig == nil or frameConfig.js == nil or frameConfig.js.assetSandbox notin AssetSandboxModes:
     return DefaultAssetSandbox
   frameConfig.js.assetSandbox
 
+proc normalizedAssetAccess*(value: string): string =
+  ## A scene's `settings.assetAccess` as one of AssetAccessValues; anything
+  ## else (absent, empty, a value from a newer editor) is "auto".
+  let trimmed = value.strip()
+  if trimmed in AssetAccessValues: trimmed else: DefaultAssetAccess
+
+proc sceneAssetAccess*(frameConfig: FrameConfig, scene: FrameScene): string =
+  ## The access this scene runs with: its declared `settings.assetAccess`,
+  ## or "cache-home-only" for every scene when the frame says "scene".
+  ## Compiled/legacy scenes carry no setting: "auto".
+  if assetSandboxMode(frameConfig) == "scene":
+    return "cache-home-only"
+  if scene == nil or not (scene of InterpretedFrameScene):
+    return DefaultAssetAccess
+  normalizedAssetAccess(InterpretedFrameScene(scene).assetAccess)
+
 proc sceneAssetsConfined*(frameConfig: FrameConfig, scene: FrameScene): bool =
   ## Whether this scene is held to its own subtree of the assets folder.
-  case assetSandboxMode(frameConfig)
-  of "frame": false
-  of "scene": true
-  else:
-    when defined(frameosWasm):
-      false
-    else:
-      sceneIsStoreOrigin(scene)
+  sceneAssetAccess(frameConfig, scene) == "cache-home-only"
 
 proc sceneSubtreeName*(sceneId: string): string =
   ## Scene ids come from the diagram and can carry slashes ("tests/js").
@@ -137,27 +148,34 @@ proc resolveSceneAssetPath*(frameConfig: FrameConfig, scene: FrameScene, relPath
 proc resolveSceneLocalPath*(frameConfig: FrameConfig, scene: FrameScene, path: string):
     tuple[path: string, refusal: string] =
   ## A path a scene names on the frame's disk (the `data/localImage` app's
-  ## `path` field: a file or a folder, absolute or relative). For a scene
-  ## that is not confined the path is taken as written, an empty path meaning
-  ## the frame-wide assets folder, as before. For a confined scene an empty
-  ## or relative path resolves inside the scene's subtree, an absolute path
-  ## is accepted only when it already points into that subtree, and anything
-  ## else comes back with a refusal naming the folder the scene may use.
+  ## `path` field: a file or a folder, absolute or relative).
+  ##
+  ## "auto" and "all-files" take the path as written, an empty path meaning
+  ## the frame-wide assets folder, as before. "cache-home-only" and
+  ## "all-assets" hold it to the scene's root (its subtree, or the whole
+  ## assets folder): an empty or relative path resolves inside that root, an
+  ## absolute path is accepted only when it already points into it, and
+  ## anything else comes back with a refusal naming the setting and the
+  ## folder the scene may read.
+  let access = sceneAssetAccess(frameConfig, scene)
   let root = sceneAssetsRoot(frameConfig, scene)
-  if not sceneAssetsConfined(frameConfig, scene):
+  if access notin ["cache-home-only", "all-assets"]:
     let open = if path.len == 0: root else: path
     return (open, "")
+  let refusal =
+    if access == "cache-home-only":
+      "this scene's asset access is \"cache-home-only\": it may only read " & root & ": " & path
+    else:
+      "this scene's asset access is \"all-assets\": it may only read the assets folder " & root & ": " & path
   var relative = path.strip()
   if relative.isAbsolute() or relative.startsWith("/"):
     let full = normalizedPath(relative)
     if not isInsideRoot(full, root):
-      return ("", "this scene comes from the scene store and may only read its own assets folder, " &
-        root & ": " & path)
+      return ("", refusal)
     relative = if full == root: "" else: full[(root.len + 1)..^1]
   if relative.len == 0:
     return (root, "")
   let full = resolveAssetPathUnder(root, relative)
   if full.len > 0:
     return (full, "")
-  ("", "this scene comes from the scene store and may only read its own assets folder, " &
-    root & ": " & path)
+  ("", refusal)

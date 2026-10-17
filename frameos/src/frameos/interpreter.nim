@@ -1279,6 +1279,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     edges: @[],
     apps: exportedScene.apps,
     storeOrigin: exportedScene.storeOrigin,
+    assetAccess: exportedScene.assetAccess,
     customEventOrigins: exportedScene.customEventOrigins,
     nextNodeIds: initTable[NodeId, NodeId](),
     appsByNodeId: initTable[NodeId, AppRoot](),
@@ -1773,6 +1774,20 @@ proc parseHook*(s: string, i: var int, v: var NodeId) =
   nodeMappingTable[str] = NodeId(globalNodeCounter)
   v = NodeId(globalNodeCounter)
 
+proc parseHook*(s: string, i: var int, v: var SceneAssetAccessSetting) =
+  ## A string, or nothing: any other value (a number, an object) is skipped
+  ## rather than failing the parse, since a scene that fails to parse takes
+  ## the whole frame down. asset_scope.nim reads "" (and anything unknown) as
+  ## "auto".
+  eatSpace(s, i)
+  if i < s.len and s[i] == '"':
+    var text: string
+    parseHook(s, i, text)
+    v = SceneAssetAccessSetting(text)
+  else:
+    skipValue(s, i)
+    v = SceneAssetAccessSetting("")
+
 type RawStateFieldOption = object
   value: string
   label: string
@@ -1874,6 +1889,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     apps: if scene.apps.isNil: %*{} else: scene.apps,
     stateFields: refresh.fields,
     storeOrigin: sceneOriginIsStore(scene.origin),
+    assetAccess: if scene.settings != nil: string(scene.settings.assetAccess) else: "",
     customEventOrigins: declaredCustomEventOrigins(scene.customEvents),
     # Fields without an explicit access default to public for interpreted
     # scenes to keep older scenes.json exports controllable.

@@ -350,21 +350,22 @@ granted" above), so an undeclared-then-declared key never arrives. On the
 device the declaration gate stays as the second layer, and the audit trail
 is the mitigation for a self-hosted frame.
 
-**Filesystem access follows the scene's provenance.** Every scene-supplied
-path — the JS asset calls, `saveAsset`, the `data/localImage` app's `path` —
-resolves through `frameos/asset_scope.nim`, which rejects absolute paths and
-`..` segments and then re-checks containment against the *real* path, so a
-symlink planted inside the assets folder is not a way out. The root depends
-on where the scene came from: a scene the owner wrote gets the frame's shared
-assets folder (uploaded images are a shared resource and the owner's scenes
-are expected to read each other's), while a store-origin scene (the same
-`storeOrigin` bit the shell-apps gate keys on, whichever control plane
-installed it) is confined to `<assets>/scenes/<sceneId>/` — not the fonts,
-not other scenes' files, not `.frameos/scene_images`, and `localImage` can no
-longer name a folder elsewhere on disk. That is `js.assetSandbox: "store"`,
-the default since 2026.10.16; `"scene"` confines every scene and `"frame"`
-none (the old behavior). The browser preview confines nothing under
-`"store"`: it is the author's own machine.
+**Filesystem access is what the scene declares, and what it shows.** Every
+scene-supplied path (the JS asset calls, `saveAsset`, the `data/localImage`
+app's `path`) resolves through `frameos/asset_scope.nim`, which rejects
+absolute paths and `..` segments and then re-checks containment against the
+*real* path, so a symlink planted inside the assets folder is not a way out.
+The root is the frame's shared assets folder unless the scene's own
+`settings.assetAccess` is `"cache-home-only"` (then `<assets>/scenes/<sceneId>/`,
+for every consumer) or the frame's `js.assetSandbox` is `"scene"` (every
+scene confined); `"all-assets"` keeps `localImage` inside the assets folder.
+The setting is part of the scene's content, not of where it came from, so
+every copy carries it. What a scene reaches for is shown wherever it appears:
+the store computes `risk_flags` at publish (`shell`, `assets`, `files`) with
+the SPA's own detector (`frontend/src/utils/sceneAccess.ts`, corpus
+`docs/scene-access-fixtures.json`), and installing a flagged scene is the
+approval. `"auto"`, the default, enforces nothing yet: a scene that hides its
+asset calls from the detector is not stopped (`docs/security-todo.md`).
 
 **Runaway scenes are bounded.** Scene JS runs on the render thread, so an
 infinite loop used to mean a frame that never drew again. Every entry into the

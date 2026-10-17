@@ -2,6 +2,16 @@ import { MakeLogicType, connect, kea, key, path, props, selectors } from 'kea'
 import { frameLogic } from '../../frameLogic'
 import { FrameScene, FrameId } from '../../../../types'
 import type { FrameType } from '../../../../types'
+import type { Option } from '../../../../components/Select'
+import {
+  ASSET_ACCESS_VALUES,
+  SceneAccess,
+  assetAccessLabels,
+  assetAccessRefusesContent,
+  sceneAccess,
+  sceneAccessFlagLabels,
+  sceneHomeFolder,
+} from '../../../../utils/sceneAccess'
 
 export interface SceneSettingsLogicProps {
   frameId: FrameId
@@ -12,7 +22,10 @@ export interface SceneSettingsLogicProps {
 export interface sceneSettingsLogicValues {
   frame: FrameType // frameLogic
   frameForm: Partial<FrameType> // frameLogic
+  assetAccessNote: string | null
+  assetAccessOptions: Option[]
   scene: FrameScene | null
+  sceneAccess: SceneAccess | null
   sceneIndex: number
   scenes: FrameScene[]
 }
@@ -24,6 +37,9 @@ export interface sceneSettingsLogicMeta {
     scenes: (frame: FrameType, frameForm: Partial<FrameType>) => FrameScene[]
     scene: (scenes: FrameScene[], sceneId: string | null) => FrameScene | null
     sceneIndex: (scenes: FrameScene[], sceneId: string | null) => number
+    sceneAccess: (scene: FrameScene | null) => SceneAccess | null
+    assetAccessOptions: (scene: FrameScene | null, sceneAccess: SceneAccess | null) => Option[]
+    assetAccessNote: (sceneAccess: SceneAccess | null) => string | null
   }
 }
 
@@ -52,6 +68,44 @@ export const sceneSettingsLogic = kea<sceneSettingsLogicType>([
       (s, p) => [s.scenes, p.sceneId],
       (scenes: sceneSettingsLogicValues['scenes'], sceneId: string | null): number =>
         scenes?.findIndex((scene) => scene.id === sceneId) ?? 0,
+    ],
+    // What the scene declares (settings.assetAccess) and what its content
+    // reaches for (utils/sceneAccess.ts), recomputed as the scene is edited.
+    sceneAccess: [
+      (s) => [s.scene],
+      (scene: sceneSettingsLogicValues['scene']): SceneAccess | null => (scene ? sceneAccess(scene) : null),
+    ],
+    assetAccessOptions: [
+      (s) => [s.scene, s.sceneAccess],
+      (scene: sceneSettingsLogicValues['scene'], access: sceneSettingsLogicValues['sceneAccess']): Option[] =>
+        ASSET_ACCESS_VALUES.map((value) => ({
+          value,
+          label:
+            value === 'auto'
+              ? // What "auto" comes to: the content's reach, whatever is declared.
+                `Auto (${
+                  access?.detected === 'files'
+                    ? sceneAccessFlagLabels.files
+                    : access?.detected === 'assets'
+                    ? sceneAccessFlagLabels.assets
+                    : 'no files'
+                })`
+              : value === 'cache-home-only'
+              ? `${assetAccessLabels[value]} (assets/${sceneHomeFolder(scene?.id ?? '')})`
+              : assetAccessLabels[value],
+        })),
+    ],
+    assetAccessNote: [
+      (s) => [s.sceneAccess],
+      (access: sceneSettingsLogicValues['sceneAccess']): string | null => {
+        if (!access || access.reasons.length === 0) {
+          return null
+        }
+        const found = access.reasons.join('; ')
+        return assetAccessRefusesContent(access)
+          ? `The frame will refuse part of this scene: ${found}.`
+          : `Found in this scene: ${found}.`
+      },
     ],
   }),
 ])

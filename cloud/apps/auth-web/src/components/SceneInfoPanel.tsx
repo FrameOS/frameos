@@ -248,6 +248,17 @@ export function SceneInfoPanel({
           deploying it.
         </p>
       ) : null}
+      {scene.riskFlags.includes("files") ? (
+        <p className="notice-error" role="alert">
+          This scene can read any file on the frame, outside the assets folder too. Installing it
+          allows that.
+        </p>
+      ) : scene.riskFlags.includes("assets") ? (
+        <p className="notice">
+          This scene reads and writes the frame&apos;s assets folder: uploaded photos, fonts and
+          what other scenes saved there. Installing it allows that.
+        </p>
+      ) : null}
 
     </div>
   );

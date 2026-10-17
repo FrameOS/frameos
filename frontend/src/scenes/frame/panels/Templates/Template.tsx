@@ -38,6 +38,8 @@ import { cloudDriveLogic } from './cloudDriveLogic'
 import { type FrameosTemplateDragData, setFrameosTemplateDragData } from '../../../workspace/sceneDrag'
 import type { CompatibilityResult } from '../../../../utils/embeddedCompatibility'
 import { livePreviewLogic } from '../Scenes/livePreviewLogic'
+import { SceneAccessTags } from '../Scenes/SceneAccessTags'
+import { templateAccessFlags } from '../../../../utils/sceneAccess'
 import { LivePreviewModal } from '../Scenes/LivePreviewModal'
 import { CURRENT_FRAMEOS_VERSION } from '../../frameDeployUtils'
 
@@ -224,9 +226,11 @@ export function TemplateRow({
     }
   }
 
-  // Risk flag computed by the cloud store; the install confirmation lives in
-  // the applyRemoteToFrame listener so drag-and-drop installs go through it too.
-  const runsShellCommands = Boolean(template.flags?.includes('shell'))
+  // What the scene reaches for on the frame (utils/sceneAccess.ts): from its
+  // scenes when the template carries them, else the catalog's flags. The
+  // shell confirmation lives in the applyRemoteToFrame listener so
+  // drag-and-drop installs go through it too.
+  const accessFlags = templateAccessFlags(template)
   const newerThanThisInstall = builtOnNewerFrameos(template.frameosVersion)
 
   return (
@@ -283,15 +287,7 @@ export function TemplateRow({
                     compiled
                   </Tag>
                 ) : null}
-                {runsShellCommands ? (
-                  <Tag
-                    color="red"
-                    className="ml-2 normal-case"
-                    title="This scene configures apps or custom code that run shell commands on the frame"
-                  >
-                    shell
-                  </Tag>
-                ) : null}
+                <SceneAccessTags flags={accessFlags} className="ml-2" />
                 {template.visibility === 'private' || template.visibility === 'public' ? (
                   <Tag
                     color={template.visibility === 'public' ? 'teal' : 'gray'}

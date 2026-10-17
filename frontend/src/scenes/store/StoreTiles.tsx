@@ -5,6 +5,7 @@ import { PhotoIcon } from '@heroicons/react/24/outline'
 
 import type { TemplateType } from '../../types'
 import { imageElementIsBlank } from '../../utils/blankImage'
+import { sceneAccessFlagDescriptions, sceneAccessFlagLabels, templateAccessFlags } from '../../utils/sceneAccess'
 import type { StoreShelfGroup } from './storeCatalog'
 
 // The store's tiles and shelves, as the cloud's store page drew them:
@@ -74,7 +75,7 @@ export function SceneTile({
   actions?: ReactNode
 }): JSX.Element {
   const href = typeof template.url === 'string' && template.url ? template.url : null
-  const flags = template.flags ?? []
+  const flags = templateAccessFlags(template)
   const installs = typeof template.downloads === 'number' && template.downloads > 0 ? template.downloads : null
   const meta = [
     showAuthor && template.author ? `by ${template.author}` : null,
@@ -87,14 +88,15 @@ export function SceneTile({
       <div className="flex flex-col gap-2 px-2.5 pt-2">
         <h3 className="frameos-strong text-sm font-semibold leading-tight">
           {template.name}
-          {flags.includes('shell') ? (
+          {flags.map((flag) => (
             <span
+              key={flag}
               className="ml-1 inline-block whitespace-nowrap rounded border border-amber-500/40 bg-amber-500/10 px-1 text-[10px] font-medium text-amber-700"
-              title="This scene configures apps or code that run shell commands on the frame"
+              title={sceneAccessFlagDescriptions[flag]}
             >
-              runs shell commands
+              {sceneAccessFlagLabels[flag]}
             </span>
-          ) : null}
+          ))}
         </h3>
         {template.description ? (
           <p className="frameos-muted line-clamp-2 text-xs leading-snug">{template.description}</p>

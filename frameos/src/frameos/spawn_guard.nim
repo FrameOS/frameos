@@ -30,12 +30,12 @@
 
 import std/[strutils, uri]
 
-import frameos/asset_scope
 import frameos/local_access
 import frameos/types
 import frameos/utils/http_client
 
-export sceneIsStoreOrigin
+proc sceneIsStoreOrigin*(scene: FrameScene): bool =
+  scene != nil and scene of InterpretedFrameScene and InterpretedFrameScene(scene).storeOrigin
 
 proc spawningAppRefusal*(scene: FrameScene, appName: string): string =
   ## "" when the app may run for this scene, otherwise the reason it may not.

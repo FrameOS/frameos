@@ -2,6 +2,11 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { getStoreCategory } from "../lib/categories";
 import { formatDate } from "../lib/format";
+import {
+  knownSceneAccessFlags,
+  sceneAccessFlagDescriptions,
+  sceneAccessFlagLabels,
+} from "../../../../../frontend/src/utils/sceneAccess";
 
 export type SceneCardScene = {
   // Store category slug (categories.ts); shown as a pill when set.
@@ -57,14 +62,15 @@ export function SceneCard({
       )}
       <h3>
         {scene.name}
-        {scene.riskFlags?.includes("shell") ? (
+        {knownSceneAccessFlags(scene.riskFlags).map((flag) => (
           <span
             className="risk-badge"
-            title="This scene configures apps or code that run shell commands on the frame"
+            key={flag}
+            title={sceneAccessFlagDescriptions[flag]}
           >
-            runs shell commands
+            {sceneAccessFlagLabels[flag]}
           </span>
-        ) : null}
+        ))}
       </h3>
       {scene.description ? <p className="copy">{scene.description}</p> : null}
       {scene.visibility || category ? (

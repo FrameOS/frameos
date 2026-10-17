@@ -612,8 +612,8 @@ suite "js app runtime":
     # reachable by name any more.
     check not payload["sharedVisible"].getBool()
 
-  test "a store-origin scene is confined by default, the owner's scene is not":
-    let assetsDir = getTempDir() / "frameos-js-store-sandbox-test"
+  test "settings.assetAccess confines a cache-home-only scene, nothing else":
+    let assetsDir = getTempDir() / "frameos-js-asset-access-test"
     removeDir(assetsDir)
     createDir(assetsDir)
     defer: removeDir(assetsDir)
@@ -622,7 +622,7 @@ suite "js app runtime":
 
     let config = testConfig()
     config.assetsPath = assetsDir
-    # No `js` block: the frame.json default ("store") applies.
+    # No `js` block: the frame.json default ("frame") leaves it to each scene.
     let logger = testLogger(config)
     let source = """export function get(app, context) {
           return {
@@ -633,35 +633,44 @@ suite "js app runtime":
         }"""
     let context = ExecutionContext(event: "render", payload: %*{}, hasImage: false,
                                    loopIndex: 0, loopKey: ".", nextSleep: -1)
+    proc run(scene: FrameScene, nodeId: int): JsonNode =
+      let owner = AppRoot(nodeId: nodeId.NodeId, nodeName: "jsAccess", scene: scene, frameConfig: config)
+      newJsAppRuntime(category = "data", outputType = "json", source = source)
+        .get(owner, %*{}, context).asJson()
 
-    let storeScene = InterpretedFrameScene(id: "store/photos".SceneId, frameConfig: config, state: %*{},
-                                           logger: logger, storeOrigin: true)
-    let storeOwner = AppRoot(nodeId: 27.NodeId, nodeName: "jsStore", scene: storeScene, frameConfig: config)
-    let storePayload = newJsAppRuntime(category = "data", outputType = "json", source = source)
-      .get(storeOwner, %*{}, context).asJson()
-    check storePayload["wrote"].getBool()
-    check not storePayload["sharedVisible"].getBool()
-    check storePayload["list"].mapIt(it.getStr()) == @["cache.txt"]
+    let homeScene = InterpretedFrameScene(id: "store/photos".SceneId, frameConfig: config, state: %*{},
+                                          logger: logger, assetAccess: "cache-home-only")
+    let homePayload = run(homeScene, 27)
+    check homePayload["wrote"].getBool()
+    check not homePayload["sharedVisible"].getBool()
+    check homePayload["list"].mapIt(it.getStr()) == @["cache.txt"]
     check fileExists(assetsDir / "scenes" / "store_photos" / "cache.txt")
     check not fileExists(assetsDir / "cache.txt")
 
-    let ownScene = InterpretedFrameScene(id: "own".SceneId, frameConfig: config, state: %*{},
-                                         logger: logger, storeOrigin: false)
-    let ownOwner = AppRoot(nodeId: 28.NodeId, nodeName: "jsOwn", scene: ownScene, frameConfig: config)
-    let ownPayload = newJsAppRuntime(category = "data", outputType = "json", source = source)
-      .get(ownOwner, %*{}, context).asJson()
-    check ownPayload["wrote"].getBool()
-    check ownPayload["sharedVisible"].getBool()
+    # Unset ("auto"), from the store or not: the frame-wide folder, as before.
+    # Provenance confines nothing.
+    let storeScene = InterpretedFrameScene(id: "store/other".SceneId, frameConfig: config, state: %*{},
+                                           logger: logger, storeOrigin: true)
+    let storePayload = run(storeScene, 28)
+    check storePayload["wrote"].getBool()
+    check storePayload["sharedVisible"].getBool()
     check fileExists(assetsDir / "cache.txt")
-    # The owner's scene sees the store scene's subtree too: it is the frame's folder.
-    check "scenes/store_photos/cache.txt" in ownPayload["list"].mapIt(it.getStr())
+    # It sees the other scene's subtree too: it is the frame's folder.
+    check "scenes/store_photos/cache.txt" in storePayload["list"].mapIt(it.getStr())
 
-    # `frame` switches the confinement off for everyone.
+    for access in ["all-assets", "all-files"]:
+      let scene = InterpretedFrameScene(id: "own".SceneId, frameConfig: config, state: %*{},
+                                        logger: logger, assetAccess: access)
+      check run(scene, 29)["sharedVisible"].getBool()
+
+    # A "scene" frame confines even an "all-files" scene.
     config.js = JsRuntimeConfig(executionTimeoutMs: -1, memoryLimitMb: -1, maxStackKb: -1,
-                                assetSandbox: "frame")
-    let openPayload = newJsAppRuntime(category = "data", outputType = "json", source = source)
-      .get(storeOwner, %*{}, context).asJson()
-    check openPayload["sharedVisible"].getBool()
+                                assetSandbox: "scene")
+    let filesScene = InterpretedFrameScene(id: "files".SceneId, frameConfig: config, state: %*{},
+                                           logger: logger, assetAccess: "all-files")
+    let confinedPayload = run(filesScene, 30)
+    check not confinedPayload["sharedVisible"].getBool()
+    check fileExists(assetsDir / "scenes" / "files" / "cache.txt")
 
   test "loads asset images within display bounds":
     let assetsDir = getTempDir() / "frameos-js-asset-image-test"

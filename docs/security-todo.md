@@ -48,6 +48,13 @@ is left there is in the medium / low list.
   their choosing. Require a panel-shown code for the control-plane/admin
   fields (a headless frame then needs the local admin password instead), and
   strip current config from the unauthenticated setup page.
+- Scene asset access is flagged, not enforced, for `settings.assetAccess:
+  "auto"` (the default): the frame confines only the explicit values. Make
+  the frame enforce what the flags say: run the same detection
+  (`frontend/src/utils/sceneAccess.ts`, corpus
+  `docs/scene-access-fixtures.json`) in `asset_scope.nim` and refuse asset
+  calls from an "auto" scene whose content shows none, so an obfuscated call
+  (`frameos["read" + "Asset"]`) fails instead of passing unflagged.
 - Interpreter budgets (wall-clock deadline, JS heap ceiling, dispatch
   budget) are per run, not per scene per minute.
 - ESP32 OTA does not compare the image's own `esp_app_desc` version with the

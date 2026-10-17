@@ -37,7 +37,7 @@ suite "config parsing (jsony)":
     check config.timeZone.len > 0
     check config.network != nil
     check config.errorBehavior != nil and config.errorBehavior.mode == "show_error_retry"
-    check config.js != nil and config.js.assetSandbox == "store"
+    check config.js != nil and config.js.assetSandbox == "frame"
     check config.deviceConfig != nil and config.deviceConfig.pins.rst == -1
     check config.saveAssets == %*false
     check config.assetsPath == "/srv/assets"
@@ -195,8 +195,10 @@ suite "config parsing (jsony)":
     let js = parseFrameConfig("""{"js": {"executionTimeoutMs": 500, "assetSandbox": "bogus"}}""").js
     check js.executionTimeoutMs == 500
     check js.memoryLimitMb == -1
-    check js.assetSandbox == "store"
+    check js.assetSandbox == "frame"
     check parseFrameConfig("""{"js": {"assetSandbox": "frame"}}""").js.assetSandbox == "frame"
+    # "store" was a pre-release mode keyed on scene provenance; gone.
+    check parseFrameConfig("""{"js": {"assetSandbox": "store"}}""").js.assetSandbox == "frame"
     check parseFrameConfig("""{"js": {"assetSandbox": "scene"}}""").js.assetSandbox == "scene"
 
   test "assetsPath loses its trailing slash and defaults when empty":

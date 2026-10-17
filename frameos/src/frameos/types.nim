@@ -83,9 +83,8 @@ type
     executionTimeoutMs*: int ## interpreter time per entry; 0 disables
     memoryLimitMb*: int      ## JS heap ceiling PER SCENE, shared by every runtime the scene creates; 0 leaves it unlimited
     maxStackKb*: int         ## JS stack ceiling; 0 keeps QuickJS's default
-    assetSandbox*: string    ## "store" (default: store-origin scenes get a per-scene subtree, the
-                             ## owner's share the frame's folder), "scene" (every scene its own
-                             ## subtree) or "frame" (nothing confined); frameos/asset_scope.nim
+    assetSandbox*: string    ## "frame" (default: each scene's settings.assetAccess decides) or
+                             ## "scene" (every scene its own subtree); frameos/asset_scope.nim
     renderDeadlineMs*: int   ## wall-clock ceiling per render/event, native calls included; 0 disables
     dispatchBudget*: int     ## dispatch nodes one render/event may fire; 0 leaves it unbounded
 
@@ -394,6 +393,9 @@ type
     ## set): anyone's code, whichever control plane installed it. Trust
     ## decisions key on this, not on who uploaded the payload.
     storeOrigin*: bool
+    ## The scene's `settings.assetAccess` as written ("" when absent); what it
+    ## means is frameos/asset_scope.nim's.
+    assetAccess*: string
     customEventOrigins*: Table[string, set[EventOrigin]] ## see FrameScene.customEventOrigins
 
   # Imported node from scenes.json
@@ -413,9 +415,15 @@ type
     edgeType*: string
 
   # Imported settings from scenes.json
+  ## `settings.assetAccess` as written: "auto" | "cache-home-only" | "all-assets" |
+  ## "all-files" (frameos/asset_scope.nim). Its own type for its lenient parseHook
+  ## (interpreter.nim): a value that is not a string must not fail scenes.json.
+  SceneAssetAccessSetting* = distinct string
+
   FrameSceneSettings* = ref object
     backgroundColor*: Color
     refreshInterval*: float
+    assetAccess*: SceneAssetAccessSetting
 
   # Imported scene from scenes.json
   FrameSceneInput* = ref object of RootObj
@@ -437,6 +445,7 @@ type
     edges*: seq[DiagramEdge]
     apps*: JsonNode
     storeOrigin*: bool ## see ExportedInterpretedScene.storeOrigin
+    assetAccess*: string ## see ExportedInterpretedScene.assetAccess
     nextNodeIds*: Table[NodeId, NodeId] # mapping from current node id to next node id for quick lookup
     eventListeners*: Table[string, seq[NodeId]] # mapping from event name to list of node ids that listen to that event
     appsByNodeId*: Table[NodeId, AppRoot] # mapping from node id to instantiated app for quick lookup

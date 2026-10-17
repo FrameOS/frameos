@@ -2,6 +2,7 @@ import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path,
 import { FrameScene, SceneNodeData, FrameId } from '../../../../types'
 import { frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
 import { undeployedSceneIdsFor } from '../../../../utils/sceneDeployState'
+import { SceneAccessFlag, sceneAccessFlagsForScene } from '../../../../utils/sceneAccess'
 import { workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { appsModel } from '../../../../models/appsModel'
 import { sceneUpdatesLogic } from './sceneUpdatesLogic'
@@ -184,6 +185,7 @@ export interface scenesLogicValues {
   previewingSceneId: string | null
   rawScenes: FrameScene[]
   renameSceneDialog: SceneRenameDialog | null
+  sceneAccessFlagsById: Record<string, SceneAccessFlag[]>
   sceneSecretSettings: Map<string, string[]>
   sceneTitles: {
     [k: string]: string
@@ -446,6 +448,7 @@ export interface scenesLogicMeta {
     frameId: (arg: FrameId) => FrameId
     editingFrame: (frameForm: Partial<FrameType>, frame: FrameType) => Partial<FrameType>
     rawScenes: (editingFrame: Partial<FrameType>) => FrameScene[]
+    sceneAccessFlagsById: (rawScenes: FrameScene[]) => Record<string, SceneAccessFlag[]>
     undeployedSceneIds: (rawScenes: FrameScene[], frame: FrameType, isFrameAdminMode: boolean) => Set<string>
     unsavedSceneIds: (frame: FrameType, frameForm: Partial<FrameType>) => Set<string>
     scenes: (rawScenes: FrameScene[], unsavedSceneIds: Set<string>, undeployedSceneIds: Set<string>) => FrameScene[]
@@ -826,6 +829,13 @@ export const scenesLogic = kea<scenesLogicType>([
     rawScenes: [
       (s) => [s.editingFrame],
       (frame: scenesLogicValues['editingFrame']): FrameScene[] => frame?.scenes ?? [],
+    ],
+    // What each scene reaches for on the frame (utils/sceneAccess.ts), from
+    // the scene as edited: the chips next to its name follow every save.
+    sceneAccessFlagsById: [
+      (s) => [s.rawScenes],
+      (rawScenes: scenesLogicValues['rawScenes']): Record<string, SceneAccessFlag[]> =>
+        Object.fromEntries(rawScenes.map((scene) => [scene.id, sceneAccessFlagsForScene(scene)])),
     ],
     undeployedSceneIds: [
       (s) => [s.rawScenes, s.frame, s.isFrameAdminMode],

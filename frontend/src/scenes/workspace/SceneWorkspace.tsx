@@ -55,6 +55,7 @@ import { EditAppModal } from '../frame/panels/EditApp/EditAppModal'
 import { ExpandedScene } from '../frame/panels/Scenes/ExpandedScene'
 import { SceneDropDown } from '../frame/panels/Scenes/SceneDropDown'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
+import { SceneAccessTags } from '../frame/panels/Scenes/SceneAccessTags'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from './sceneDrag'
 import { ScenesLibraryPage, ScenesSidePanel } from '../store/ScenesLibrary'
 import { scenesLibraryLogic } from '../store/scenesLibraryLogic'
@@ -188,9 +189,8 @@ function SceneSelector({
   sidebarActions?: JSX.Element
 }): JSX.Element {
   const { navigateToScene, navigateToSceneFrame, openTemplateDrawer } = useActions(workspaceLogic)
-  const { linkedActiveSceneId, undeployedSceneIds, unsavedSceneIds, sceneUpdateVersions } = useValues(
-    scenesLogic({ frameId: frame.id })
-  )
+  const { linkedActiveSceneId, undeployedSceneIds, unsavedSceneIds, sceneUpdateVersions, sceneAccessFlagsById } =
+    useValues(scenesLogic({ frameId: frame.id }))
   const frameGroups = groupFramesByStatus(frames)
   const inFrameAdminMode = isInFrameAdminMode()
 
@@ -375,6 +375,11 @@ function SceneSelector({
                             />
                           </span>
                         ) : null}
+                        <SceneAccessTags
+                          flags={sceneAccessFlagsById[scene.id] ?? []}
+                          className="shrink-0"
+                          tagClassName="!px-1.5 !py-0 !text-[10px] !font-semibold"
+                        />
                         {active ? (
                           <Tag
                             color="teal"

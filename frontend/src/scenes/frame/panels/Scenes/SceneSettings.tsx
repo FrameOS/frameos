@@ -34,7 +34,7 @@ function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
 export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSettingsProps): JSX.Element {
   const { frameId, frameForm, convertingSceneId } = useValues(frameLogic)
   const { convertSceneToInterpreted } = useActions(frameLogic)
-  const { sceneIndex, scene } = useValues(sceneSettingsLogic({ frameId, sceneId }))
+  const { sceneIndex, scene, assetAccessOptions, assetAccessNote } = useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
   }
@@ -108,6 +108,28 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
             >
               <ColorInput name="backgroundColor" className="!h-10 !min-w-0" placeholder="#ffffff" />
             </Field>
+            <Field
+              className={fieldClassName}
+              name="assetAccess"
+              label={<SceneSettingsLabel>Access to assets</SceneSettingsLabel>}
+              tooltip={
+                <div className="space-y-2">
+                  <p>
+                    What this scene may read on the frame. Its tags (reads assets folder, reads all files) follow this
+                    setting wherever the scene shows up, and installing the scene allows it.
+                  </p>
+                  <p>
+                    <strong>Auto</strong> shows what the scene's apps and code use. <strong>Own folder only</strong>{' '}
+                    keeps its asset calls and saved images in a folder of its own. <strong>All assets</strong> is the
+                    whole assets folder. <strong>All files</strong> lets a Local Image node read any folder.
+                  </p>
+                  <p>Frames before FrameOS 2026.10.16 ignore this setting.</p>
+                </div>
+              }
+            >
+              <Select name="assetAccess" className="h-10" options={assetAccessOptions} />
+            </Field>
+            {assetAccessNote ? <div className="frameos-muted px-1 text-xs">{assetAccessNote}</div> : null}
             {frameRunsInterpreted ? null : (
               <AdvancedSection className={fieldClassName}>
                 <Field

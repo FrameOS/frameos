@@ -124,9 +124,10 @@ proc error*(self: App, context: ExecutionContext, message: string,
   )
 
 proc resolvedFolder(self: App): tuple[path: string, refusal: string] =
-  ## The file or folder this node reads, as frameos/asset_scope.nim allows it:
-  ## any path on disk for a scene the owner wrote (empty = the assets folder),
-  ## the scene's own subtree of the assets folder for a store-origin scene.
+  ## The file or folder this node reads, as frameos/asset_scope.nim allows it
+  ## under the scene's `settings.assetAccess`: any path on disk for "auto" and
+  ## "all-files" (empty = the assets folder), the assets folder for
+  ## "all-assets", the scene's own subtree for "cache-home-only".
   resolveSceneLocalPath(self.frameConfig, self.scene, self.appConfig.path)
 
 proc init*(self: App) =

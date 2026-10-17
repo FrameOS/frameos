@@ -99,12 +99,14 @@ calls `listAssets`, `assetExists`, `assetSize`, `readAsset`, `writeAsset`,
 `appendAsset`, `deleteAsset`, `loadAssetImage`, and the stream calls
 `openAssetStream`, `createStream`, `streamRead`, `streamWrite`,
 `streamAtEnd`, `streamRewind`, `streamClose` (base64 in and out). Asset
-paths are relative to the scene's asset root: the frame's assets folder for
-a scene the owner wrote, the scene's own `scenes/<sceneId>/` subtree for a
-scene installed from the scene store (`frameos/src/frameos/asset_scope.nim`;
-the frame's `js.assetSandbox` setting picks `store` (default), `scene` or
-`frame`). Nothing outside the root resolves, and a symlink inside it is not
-a way out.
+paths are relative to the scene's asset root: the frame's assets folder, or
+the scene's own `scenes/<sceneId>/` subtree when the scene declares
+`settings.assetAccess: "cache-home-only"` or the frame's `js.assetSandbox`
+is `"scene"` (`frameos/src/frameos/asset_scope.nim`). Nothing outside the
+root resolves, and a symlink inside it is not a way out. Calling any of the
+asset functions flags the scene "reads assets folder" in the editor and the
+store unless it declares its own folder (`frontend/src/utils/sceneAccess.ts`,
+[scene-guide.md](scene-guide.md) "Assets").
 `app.state` **is** the scene's state — read any
 key from it, write with `frameos.setState(key, value)` and state nodes see the
 change. What an app does **not** have are the code-node time helpers

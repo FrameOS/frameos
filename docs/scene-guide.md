@@ -278,16 +278,29 @@ render tries again. `frameos.fetchImage` never throws; it answers
 decodes natively, and the bytes never enter the JS heap. Return its `image`.
 Use it for every photo, and `httpRequest` only for the JSON around it.
 
-**Assets.** Asset paths are relative, and the folder they resolve against
-depends on where the scene came from. A scene you wrote on your own frame
-reads and writes the frame's assets folder (`app.frame.assetsPath`,
-`/srv/assets` by default): uploaded photos, fonts, what other scenes saved.
-A scene installed from the scene store gets a folder of its own inside it,
-`scenes/<sceneId>/`, and sees nothing outside it; `saveAsset` lands there
-too, and the `data/localImage` app's `path` is held to the same folder. So
-a store scene keeps its own files under relative names and does not rely on
-a photo being at a fixed place on the frame. (The frame's `js.assetSandbox`
-setting can confine every scene, or none.)
+**Assets.** Asset paths are relative to the frame's assets folder
+(`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos, fonts,
+what other scenes saved. A scene says how much of the frame's files it needs
+in `settings.assetAccess`:
+
+- `"auto"` (the default): nothing is declared, and the editor and the store
+  show what the scene's content uses: an asset call (`frameos.readAsset` and
+  the rest) or a Local Image node shows "reads assets folder", a Local Image
+  path outside the assets folder, or one wired from another node, shows
+  "reads all files".
+- `"cache-home-only"`: the scene gets a folder of its own,
+  `scenes/<sceneId>/` inside the assets folder, and sees nothing else. Its
+  asset calls, its `saveAsset` downloads and its Local Image nodes all resolve
+  there. Use it for a scene that keeps its own files under relative names;
+  it shows no flag.
+- `"all-assets"`: the whole assets folder; a Local Image path outside it is
+  refused.
+- `"all-files"`: a Local Image node may read any folder on the frame.
+
+`fetchImage({ saveAsset })` is the frame caching a download, not the scene
+reading the folder: it raises no flag. Installing a scene is the approval of
+what its flags say, so declare the narrowest access that works. (Frames
+before FrameOS 2026.10.16 ignore the setting.)
 
 **Big responses.** A response body becomes a JS string. When the app needs
 only what follows some marker in a large page, pass
