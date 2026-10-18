@@ -26,7 +26,7 @@ local login, and ingress replaces that login.
 |---|---|
 | Table | `api_token` (migration `d4e5f6a7b8c9`): hash, hint, `access`, expiry, last use, revocation. Model and helpers in `backend/app/models/api_token.py`. |
 | Mint | `POST /api/user/api_tokens` `{name, access?: "full"\|"read_only", expires_in_days?, current_password?}` → `{token, api_token}` — the secret is returned once. Needs a session (never a token: `403 api_token_not_allowed`) and the current password when the account has one, because it turns a session into a durable credential — the same gate the email and password changes have. |
-| Expiry | Every token expires. `expires_in_days` is 1–365; omitted means 90. `GET` reports `default_ttl_days` and `max_ttl_days`. |
+| Expiry | Every token expires. `expires_in_days` is 1–365; omitted means 365. `GET` reports `default_ttl_days` and `max_ttl_days`. |
 | List / revoke | `GET /api/user/api_tokens` (live tokens plus the last week's revoked and expired ones, so a script that stopped working can be explained), `DELETE /api/user/api_tokens/{id}`. A token may revoke itself. |
 | Cap | 25 live tokens per user. |
 | Use | `Authorization: Bearer fb_api_…` on any route under `/api` that takes a login. |

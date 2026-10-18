@@ -61,10 +61,10 @@ API_TOKEN_ACCESS_VALUES = ("full", "read_only")
 MAX_API_TOKENS_PER_USER = 25
 MAX_API_TOKEN_NAME_LENGTH = 64
 MAX_API_TOKEN_TTL_DAYS = 365
-# Every token expires. Ninety days is long enough for a script in actual use
-# (its owner re-mints from the settings page) and short enough that a
-# forgotten one dies on its own.
-DEFAULT_API_TOKEN_TTL_DAYS = 90
+# Every token expires, by default after the most it may have: a script in
+# actual use needs a re-mint once a year (from the settings page), and a
+# forgotten one still dies on its own.
+DEFAULT_API_TOKEN_TTL_DAYS = MAX_API_TOKEN_TTL_DAYS
 
 # `last_used_at` is "is this token still in use", not an access log.
 LAST_USED_WRITE_INTERVAL = datetime.timedelta(minutes=1)

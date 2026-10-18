@@ -147,7 +147,7 @@ describe("POST /api/account/api-tokens", () => {
     expect(inserted).toHaveLength(0);
   });
 
-  it("defaults the expiry to ninety days when none is given", async () => {
+  it("defaults the expiry to a year when none is given", async () => {
     const before = Date.now();
     const response = await POST(post({ name: "laptop" }));
     const after = Date.now();
@@ -155,8 +155,8 @@ describe("POST /api/account/api-tokens", () => {
     const expiresAt = inserted[0]?.expiresAt as Date;
     expect(expiresAt).toBeInstanceOf(Date);
     const dayMs = 24 * 60 * 60 * 1000;
-    expect(expiresAt.getTime()).toBeGreaterThanOrEqual(before + 90 * dayMs);
-    expect(expiresAt.getTime()).toBeLessThanOrEqual(after + 90 * dayMs);
+    expect(expiresAt.getTime()).toBeGreaterThanOrEqual(before + 365 * dayMs);
+    expect(expiresAt.getTime()).toBeLessThanOrEqual(after + 365 * dayMs);
     const payload = (await response.json()) as { api_token: { expires_at: string | null } };
     expect(payload.api_token.expires_at).toBe(expiresAt.toISOString());
   });
@@ -199,7 +199,7 @@ describe("GET /api/account/api-tokens", () => {
       tokens: Record<string, unknown>[];
     };
     expect(payload.max_tokens).toBe(25);
-    expect(payload.default_ttl_days).toBe(90);
+    expect(payload.default_ttl_days).toBe(365);
     expect(payload.tokens[0]).toMatchObject({ id: "tok-1", token_hint: "fc_api_abcd" });
     // The shared SPA's Developer page reads the backend's listing shape too.
     expect(payload.api_tokens[0]).toMatchObject({ hint: "fc_api_abcd", id: "tok-1" });

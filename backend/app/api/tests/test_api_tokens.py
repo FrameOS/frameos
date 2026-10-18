@@ -45,7 +45,7 @@ async def test_mint_needs_the_password_and_returns_the_secret_once(async_client,
     assert listing["live_count"] == 1
     assert listing["can_create"] is True
     assert listing["mcp_url"].endswith("/api/mcp")
-    assert listing["default_ttl_days"] == 90
+    assert listing["default_ttl_days"] == 365
     # Only the hash is stored.
     row = db.query(ApiToken).one()
     assert payload["token"] not in (row.token_hash, row.hint)
