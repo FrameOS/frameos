@@ -1,6 +1,6 @@
 import unittest
 import json
-import std/[atomics, os]
+import std/[atomics, os, strutils]
 import mummy
 
 import ../../types
@@ -172,6 +172,24 @@ suite "Server auth helpers":
     check hasAdminSession(makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & first)]))
     check hasAdminSession(makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & second)]))
 
+  test "session signatures are HMAC-SHA256 (RFC 4231 vectors)":
+    check hmacSha256Hex("Jefe", "what do ya want for nothing?") ==
+      "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+    # Test case 6: a key longer than the block is hashed first.
+    var longKey = newString(131)
+    for i in 0 ..< longKey.len:
+      longKey[i] = char(0xaa)
+    check hmacSha256Hex(longKey, "Test Using Larger Than Block-Size Key - Hash Key First") ==
+      "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54"
+
+  test "admin session tokens from before the HMAC (v1) are refused":
+    configureAdmin(true, "admin", "secret")
+    setGlobalAdminSessionSalt("salt-one")
+    let token = createAdminSession()
+    check token.startsWith("v2.")
+    let legacy = "v1." & token["v2.".len .. ^1]
+    check not hasAdminSession(makeRequest(headers = @[("cookie", ADMIN_SESSION_COOKIE & "=" & legacy)]))
+
   test "admin sessions expire from signed expiry":
     configureAdmin(true, "admin", "secret")
     let expired = createAdminSession(ttlSeconds = -1)
@@ -220,6 +238,7 @@ suite "Server auth helpers":
     let generated = getOrCreateAdminSessionSalt(configPath)
     check generated.len > 0
     check fileExists(secretPath)
+    check getFilePermissions(secretPath) == {fpUserRead, fpUserWrite}
 
     let reused = getOrCreateAdminSessionSalt(configPath)
     check reused == generated

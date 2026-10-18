@@ -49,8 +49,38 @@ proc contentTypeForAsset*(path: string): string =
 proc configuredAssetsPath*(): string =
   normalizedPath(if globalFrameConfig.assetsPath.len > 0: globalFrameConfig.assetsPath else: "/srv/assets")
 
+when defined(posix) and not defined(frameosEmbedded) and not defined(frameosWasm):
+  import std/posix
+
 proc uploadChunkTempRoot(): string =
   normalizedPath(getTempDir() / "frameos-upload-chunks")
+
+# Part files are named by a keyed hash of the upload id, not by the id
+# itself: the id is the client's (the admin SPA's, the hub's), so on a shared
+# /tmp another local account could predict a name and plant a file or a
+# symlink there before the upload begins. The key is per process; an upload
+# a restart interrupts starts over (a local one is a single browser session,
+# a cloud one answers "chunk_gap" and the sender restarts at offset 0).
+let uploadPartNameKey = secureRandomToken()
+
+proc ensureUploadChunkTempRoot(): string =
+  ## The parts directory belongs to this runtime: a real directory (not a
+  ## symlink), owned by this user, mode 0700. A directory someone else made
+  ## first is refused rather than written into.
+  let root = uploadChunkTempRoot()
+  when defined(posix) and not defined(frameosEmbedded) and not defined(frameosWasm):
+    if posix.mkdir(root.cstring, Mode(0o700)) != 0 and errno != EEXIST:
+      raiseOSError(osLastError(), root)
+    var info: Stat
+    if lstat(root.cstring, info) != 0:
+      raiseOSError(osLastError(), root)
+    if not S_ISDIR(info.st_mode) or info.st_uid != getuid():
+      raise newException(IOError, "Upload directory is not this runtime's own: " & root)
+    if (info.st_mode.cint and 0o077) != 0 and chmod(root.cstring, Mode(0o700)) != 0:
+      raiseOSError(osLastError(), root)
+  else:
+    createDir(root)
+  root
 
 # Bounds on the unfinished-upload parts (local chunked uploads and the
 # cloud's offset-addressed ones alike) that sit under uploadChunkTempRoot.
@@ -96,8 +126,13 @@ proc sanitizeUploadId(uploadId: string): string =
     raise newException(ValueError, "Missing upload id")
   safeId
 
+proc uploadPartFileName(prefix, uploadId: string): string =
+  let safeId = sanitizeUploadId(uploadId)
+  {.gcsafe.}:
+    prefix & hmacSha256Hex(uploadPartNameKey, safeId)[0 ..< 32] & ".part"
+
 proc uploadChunkTempPath(uploadId: string): string =
-  normalizedPath(uploadChunkTempRoot() / (sanitizeUploadId(uploadId) & ".part"))
+  normalizedPath(uploadChunkTempRoot() / uploadPartFileName("", uploadId))
 
 proc realPathWithin(fullPath, root: string): bool =
   ## The lexical check above says nothing about symlinks: a link planted
@@ -304,7 +339,7 @@ proc reserveUploadPartBytes(partPath: string, partBytesAfterWrite: BiggestInt,
 proc appendUploadChunk*(uploadId: string, chunkIndex: int, data: string,
                         maxTotalBytes = MaxUploadPartsTotalBytes) =
   let tempPath = uploadChunkTempPath(uploadId)
-  createDir(parentDir(tempPath))
+  discard ensureUploadChunkTempRoot()
   let restart = chunkIndex <= 0
   let existing = if restart or not fileExists(tempPath): 0.BiggestInt else: getFileSize(tempPath)
   reserveUploadPartBytes(tempPath, existing + data.len.BiggestInt, maxTotalBytes)
@@ -332,14 +367,14 @@ proc discardUploadChunk*(uploadId: string) =
 # ---------------------------------------------------------------------------
 
 proc cloudUploadPartPath(uploadId: string): string =
-  normalizedPath(uploadChunkTempRoot() / ("cloud-" & sanitizeUploadId(uploadId) & ".part"))
+  normalizedPath(uploadChunkTempRoot() / uploadPartFileName("cloud-", uploadId))
 
 proc writeAssetUploadChunk*(uploadId: string, offset: BiggestInt, data: string): BiggestInt =
   ## Write `data` at `offset` into the upload's part file and return the
   ## part's size afterwards. Raises ValueError("chunk_gap") when `offset` lies
   ## past what has landed so far.
   let partPath = cloudUploadPartPath(uploadId)
-  createDir(parentDir(partPath))
+  discard ensureUploadChunkTempRoot()
   if offset <= 0:
     # First (or restarted) chunk: whatever was there is a previous attempt.
     reserveUploadPartBytes(partPath, data.len.BiggestInt)

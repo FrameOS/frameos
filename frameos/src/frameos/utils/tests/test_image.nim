@@ -420,3 +420,12 @@ suite "embeddedSizedRemoteImageUrl":
     availableRenderBytesOverride = 1024 * 1024
     check embeddedSizedRemoteImageUrl("https://example.com/a.jpg", panel) ==
       "https://example.com/a.jpg"
+
+suite "exiftool arguments":
+  test "a path is never read as an option":
+    let args = exifToolPathArgs("-j.txt")
+    check args[0 ..< 3] == @["-j", "-n", "--"]
+    check args.len == 4
+    check args[3].isAbsolute
+    check args[3].endsWith("-j.txt")
+    check exifToolPathArgs("/srv/assets/photo.jpg")[3] == "/srv/assets/photo.jpg"

@@ -7,8 +7,10 @@ Defines the arq worker settings and the task functions that run via arq.
 import asyncio
 from functools import wraps
 from httpx import AsyncClient
-from typing import Any, Awaitable, Callable, Dict
+from typing import Any, Awaitable, Callable, Dict, cast
 from arq.connections import RedisSettings
+from arq.cron import cron
+from arq.typing import WorkerCoroutine
 from arq.worker import func
 
 from app.tasks.deploy_frame import deploy_frame_task
@@ -19,6 +21,7 @@ from app.tasks.stop_frame import stop_frame_task
 from app.tasks.deploy_remote import deploy_remote_task
 from app.tasks.restart_remote import restart_remote_task
 from app.tasks.buildroot_image import buildroot_sd_image_task
+from app.tasks.prune_build_artifacts import prune_build_artifacts_task
 from app.config import config
 from app.redis import close_redis_connection, create_redis_connection
 from app.database import SessionLocal
@@ -93,6 +96,12 @@ class WorkerSettings:
         func(with_db_session(deploy_remote_task),     name="deploy_remote"),
         func(with_db_session(restart_remote_task),    name="restart_remote"),
         func(with_db_session(buildroot_sd_image_task), name="buildroot_sd_image"),
+    ]
+    # Housekeeping: SD images no frame points at any more, and cached release
+    # images for other releases (app/tasks/prune_build_artifacts.py).
+    cron_jobs = [
+        cron(cast(WorkerCoroutine, with_db_session(prune_build_artifacts_task)), name="prune_build_artifacts",
+             hour={4}, minute={23}, run_at_startup=True),
     ]
     on_startup = startup
     on_shutdown = shutdown

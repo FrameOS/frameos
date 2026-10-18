@@ -5,6 +5,7 @@ import times
 import mummy
 import frameos/types
 from frameos/config import getConfigFilename
+from frameos/utils/system import writePrivateFile
 import ./state
 
 const AUTH_HEADER* = "authorization"
@@ -12,6 +13,9 @@ const AUTH_TYPE* = "Bearer"
 const ACCESS_COOKIE* = "frame_access_key"
 const ADMIN_SESSION_COOKIE* = "frame_admin_session"
 const ADMIN_SESSION_TTL_SECONDS* = 60 * 60 * 24
+# v1 tokens were signed with sha256(salt ‖ …); v2 with HMAC-SHA256. A v1
+# cookie is refused, so the upgrade signs every admin out once.
+const ADMIN_SESSION_TOKEN_VERSION = "v2"
 
 type
   AccessType* = enum
@@ -54,10 +58,34 @@ proc secureRandomToken*(byteCount = 32): string =
     result.add(toHex(ord(value), 2))
   result = result.toLowerAscii()
 
-proc sha256Hex(data: string): string =
-  var hasher = initSha_256()
-  hasher.update(data)
-  result = ($hasher.digest()).toLowerAscii()
+proc hmacSha256Hex*(key, message: string): string =
+  ## RFC 2104 HMAC over checksums/sha2, which the runtime already links. The
+  ## session signature used to be `sha256(salt ‖ …)`: length extension only
+  ## reached the nonce under the same expiry, but a keyed hash is the right
+  ## primitive for a MAC.
+  const blockSize = 64
+  var keyBlock = key
+  if keyBlock.len > blockSize:
+    var keyHasher = initSha_256()
+    keyHasher.update(keyBlock)
+    let keyDigest = keyHasher.digest()
+    keyBlock = newString(keyDigest.len)
+    for i, value in keyDigest:
+      keyBlock[i] = value
+  keyBlock.setLen(blockSize)
+  var innerPad = newString(blockSize)
+  var outerPad = newString(blockSize)
+  for i in 0 ..< blockSize:
+    innerPad[i] = char(ord(keyBlock[i]) xor 0x36)
+    outerPad[i] = char(ord(keyBlock[i]) xor 0x5c)
+  var inner = initSha_256()
+  inner.update(innerPad)
+  inner.update(message)
+  let innerDigest = inner.digest()
+  var outer = initSha_256()
+  outer.update(outerPad)
+  outer.update(innerDigest)
+  result = ($outer.digest()).toLowerAscii()
 
 proc getHeaderValue(request: Request, name: string): string =
   for (headerName, value) in request.headers:
@@ -232,7 +260,7 @@ proc getOrCreateAdminSessionSalt*(configPath: string): string =
           if path != secretPath:
             try:
               createDir(parentDir(secretPath))
-              writeFile(secretPath, existing & "\n")
+              writePrivateFile(secretPath, existing & "\n")
             except CatchableError:
               discard
           return existing
@@ -240,21 +268,23 @@ proc getOrCreateAdminSessionSalt*(configPath: string): string =
       discard
 
   let generated = secureRandomToken()
+  # The salt keys every admin session's HMAC: owner-only, like frame.json.
   try:
     createDir(parentDir(secretPath))
-    writeFile(secretPath, generated & "\n")
+    writePrivateFile(secretPath, generated & "\n")
   except CatchableError:
     try:
-      writeFile(legacySecretPath, generated & "\n")
+      writePrivateFile(legacySecretPath, generated & "\n")
     except CatchableError:
       discard
   return generated
 
 proc adminSessionCredentialFingerprint(): string =
-  sha256Hex(adminSessionSalt() & ":" & adminAuthUser() & ":" & adminAuthPass())
+  hmacSha256Hex(adminSessionSalt(), "credentials:" & adminAuthUser() & ":" & adminAuthPass())
 
 proc adminSessionSignature(expiresAt: int64, nonce: string): string =
-  sha256Hex(adminSessionSalt() & ":" & adminSessionCredentialFingerprint() & ":" & $expiresAt & ":" & nonce)
+  hmacSha256Hex(adminSessionSalt(),
+    ADMIN_SESSION_TOKEN_VERSION & ":" & adminSessionCredentialFingerprint() & ":" & $expiresAt & ":" & nonce)
 
 proc constantTimeEquals*(first, second: string): bool =
   ## Every secret this server compares goes through here — the admin login,
@@ -271,7 +301,7 @@ proc constantTimeEquals*(first, second: string): bool =
 
 proc parseSignedAdminSession(token: string): SignedAdminSession =
   let parts = token.split(".")
-  if parts.len != 4 or parts[0] != "v1":
+  if parts.len != 4 or parts[0] != ADMIN_SESSION_TOKEN_VERSION:
     raise newException(ValueError, "Invalid admin session token")
   result.expiresAt = parseBiggestInt(parts[1]).int64
   result.nonce = parts[2]
@@ -288,7 +318,7 @@ proc clearAdminSessions*() =
 proc createAdminSession*(ttlSeconds = ADMIN_SESSION_TTL_SECONDS): string {.gcsafe.} =
   let expiresAt = int64(epochTime() + float(ttlSeconds))
   let nonce = secureRandomToken()
-  "v1." & $expiresAt & "." & nonce & "." & adminSessionSignature(expiresAt, nonce)
+  ADMIN_SESSION_TOKEN_VERSION & "." & $expiresAt & "." & nonce & "." & adminSessionSignature(expiresAt, nonce)
 
 proc invalidateAdminSessionToken(token: string) =
   # Logout clears the browser cookie. Signed sessions remain valid until their
