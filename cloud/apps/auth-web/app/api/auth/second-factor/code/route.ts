@@ -16,6 +16,7 @@ import {
   signedInResponse,
 } from "../../../../../src/lib/sign-in";
 import {
+  restoreRecoveryCode,
   secondFactorStatus,
   verifySecondFactorCode,
 } from "../../../../../src/lib/two-factor";
@@ -71,6 +72,10 @@ export async function POST(request: NextRequest) {
 
   const token = await completeSecondFactor(db, pending, matched);
   if (!token) {
+    if (matched === "recovery_code") {
+      // A concurrent submission finished this sign-in first.
+      await restoreRecoveryCode(db, accountId, code);
+    }
     return NextResponse.json({ error: "sign_in_expired" }, { status: 401 });
   }
   const extra: Record<string, unknown> = {};

@@ -1239,6 +1239,48 @@ describe("Local network access", () => {
   });
 });
 
+// An asset write carries the file inline as base64 (asset_put) or a piece of
+// it (asset_put_chunk). The device needs the bytes once; the row that stays
+// behind for the queue view keeps where they went, not the bytes.
+describe("finished asset writes", () => {
+  it("drop the body once the device answers, ok or not", async () => {
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey, { hardware: { platform: "esp32s3" } });
+
+    const put = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { data: Buffer.from("hello").toString("base64"), path: "a.txt" },
+      ttlMs: 60_000,
+      type: "asset_put",
+    });
+    const putMsg = await device.next((msg) => msg.id === put?.id, "asset_put");
+    expect(putMsg).toMatchObject({ data: "aGVsbG8=", path: "a.txt", type: "asset_put" });
+    device.send({ id: putMsg.id, ok: true, type: "ack" });
+    const acked = await waitFor(async () => {
+      const [r] = await db.select().from(frameCommands).where(eq(frameCommands.id, String(putMsg.id)));
+      return r?.status === "acked" ? r : undefined;
+    }, "asset_put acked");
+    expect(acked.payload).toEqual({ path: "a.txt" });
+
+    const chunk = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { data: Buffer.from("world").toString("base64"), offset: 4096, upload_id: "u1" },
+      ttlMs: 60_000,
+      type: "asset_put_chunk",
+    });
+    const chunkMsg = await device.next((msg) => msg.id === chunk?.id, "asset_put_chunk");
+    device.send({ error: "chunk_gap", id: chunkMsg.id, ok: false, type: "ack" });
+    const failed = await waitFor(async () => {
+      const [r] = await db.select().from(frameCommands).where(eq(frameCommands.id, String(chunkMsg.id)));
+      return r?.status === "failed" ? r : undefined;
+    }, "asset_put_chunk refused");
+    expect(failed.error).toBe("chunk_gap");
+    expect(failed.payload).toEqual({ offset: 4096, upload_id: "u1" });
+    device.ws.close();
+  });
+});
+
 // The hub writes the device side of the per-frame audit trail itself
 // (cloud/docs/cloud-frames.md "Account hardening"): account-scoped rows with
 // actor.kind = "device" and target.frameId, which auth-web's

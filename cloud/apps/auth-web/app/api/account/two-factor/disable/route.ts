@@ -5,6 +5,7 @@ import {
   accountPasskeys,
   accountRecoveryCodes,
   accountTotp,
+  revokeApiTokensForAccount,
 } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -12,6 +13,7 @@ import {
   notifySecurityChange,
   readJsonBody,
   requireWeakeningProof,
+  revokedTokensDetail,
 } from "../../../../../src/lib/account-security";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { requireDatabase } from "../../../../../src/lib/device-flow";
@@ -47,6 +49,9 @@ export async function POST(request: NextRequest) {
       .delete(accountRecoveryCodes)
       .where(eq(accountRecoveryCodes.accountId, context.accountId));
   });
+  // As for one factor (totp/route.ts DELETE): the tokens go with the setup
+  // they were minted under.
+  const apiTokensRevoked = await revokeApiTokensForAccount(db, context.accountId);
   await recordAuditEvent(db, {
     accountId: context.accountId,
     actor: {
@@ -54,8 +59,16 @@ export async function POST(request: NextRequest) {
       providerSubject: context.providerSubject,
     },
     eventType: "account.two_factor_disabled",
-    metadata: { method: "all" },
+    metadata: { apiTokensRevoked, method: "all" },
   });
-  await notifySecurityChange(context, "two_factor_disabled");
-  return NextResponse.json({ ok: true, two_factor_enabled: false });
+  await notifySecurityChange(
+    context,
+    "two_factor_disabled",
+    revokedTokensDetail(apiTokensRevoked, "removed"),
+  );
+  return NextResponse.json({
+    api_tokens_revoked: apiTokensRevoked,
+    ok: true,
+    two_factor_enabled: false,
+  });
 }

@@ -259,7 +259,9 @@ reinstall, a newly linked backend on the same account still lists and restores
 the old install's backups. One live copy per `(account, kind, item_key)`;
 saves replace in place. Caps: 8 MB per blob, 500 backups per account
 (`backup_too_large` / `backup_quota_exceeded`). The scope for a kind is
-enforced on every request, including reads.
+enforced on every request, including reads. Only sealed envelopes
+(`frameos-encrypted-backup-v1`, sealed by the backend before upload) are
+stored; anything else is `400 backup_not_sealed`.
 
 ## Frontend States
 

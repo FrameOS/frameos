@@ -8,7 +8,7 @@ is the only thing left, and it is paused on purpose (2026-09-03): no
 provider until there are users to invoice.** Nothing is *collected*: no
 invoice is cut and self-serve plan purchase stays gated off
 (`FRAMEOS_CLOUD_PLANS_SELF_SERVE`), because until 3b there is no way to
-settle a receivable. The open work is §7 and the lows in §10; §9 is the
+settle a receivable. The open work is §7; §9 is the
 2026-09-01 review and what its fixes did, kept because the code cites its
 item numbers.
 
@@ -1887,20 +1887,3 @@ the stamp is the measurement) and ages out of the 24-hour check on its
 own.
 
 Also in this round: `docs/todo.md`'s two stale lines now point here.
-
-## 10. Open findings — 2026-09-09 full-repo review
-
-The four §9.2 audit items (surface spoof, gap billing, cap off-by-overdraft,
-cascade FK) were re-verified as genuinely fixed. Nothing below is critical;
-all are low. **Delete an item when it ships.**
-
-- Admin billing routes 500 instead of 400 on a malformed uuid.
-- Anniversary drift: a subscription started on the 31st is clamped to the
-  28th and stays there forever.
-- `/api/account/usage` reports the wrong cap for shared-key accounts.
-- The unposted-usage sweep re-includes permanently failing rows and can
-  stall on them.
-- A pending downgrade to a plan that has since been deleted is silently
-  ignored.
-- The nightly script posts revenue figures in the healthchecks ping body.
-- The settings form takes micro-dollars with no dollar preview.

@@ -41,11 +41,6 @@ function routeSurface(request: NextRequest) {
     });
   }
 
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set(
-    "x-frameos-account-return-to",
-    `${request.nextUrl.pathname}${request.nextUrl.search}`,
-  );
   const destination = route.destination;
   // Nginx terminates TLS and forwards to Next over plain HTTP. Next can
   // normalize that proxied request as https://localhost:3000; without this
@@ -56,9 +51,7 @@ function routeSurface(request: NextRequest) {
   ) {
     destination.protocol = "http:";
   }
-  return NextResponse.rewrite(destination, {
-    request: { headers: requestHeaders },
-  });
+  return NextResponse.rewrite(destination);
 }
 
 // Paths that mint or clear the session cookie themselves. Refreshing here

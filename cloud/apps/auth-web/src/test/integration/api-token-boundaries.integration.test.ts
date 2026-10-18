@@ -24,7 +24,10 @@ import { PATCH as adminPatchUser } from "../../../app/api/admin/users/[accountId
 import { GET as listApiTokens } from "../../../app/api/account/api-tokens/route";
 import { GET as accountSettings } from "../../../app/api/settings/route";
 import { POST as passkeyOptions } from "../../../app/api/account/two-factor/passkeys/options/route";
-import { POST as beginTotp } from "../../../app/api/account/two-factor/totp/route";
+import {
+  POST as beginTotp,
+  DELETE as removeTotp,
+} from "../../../app/api/account/two-factor/totp/route";
 import { POST as confirmTotp } from "../../../app/api/account/two-factor/totp/confirm/route";
 import { GET as adminUsers } from "../../../app/api/admin/users/route";
 import { GET as frameAsset } from "../../../app/api/frames/[frameId]/asset/route";
@@ -385,6 +388,49 @@ describe("enrolling a second factor revokes every API token", () => {
       .from(accountApiTokens)
       .where(eq(accountApiTokens.accountId, accountId));
     expect(row?.revokedAt).not.toBeNull();
+    cookieJar.clear();
+    const asToken = await listApiTokens(
+      request("/api/account/api-tokens", undefined, "GET", {
+        authorization: `Bearer ${token}`,
+      }),
+    );
+    expect(asToken.status).toBe(401);
+  });
+});
+
+describe("removing a second factor revokes every API token", () => {
+  // Symmetric with enrolment: a token does not outlive the second-factor
+  // setup it was minted under.
+  it("kills the tokens minted while the authenticator was on", async () => {
+    const { accountId, email } = await signUpVerifiedUser();
+    await establishSession(accountId, email);
+    const start = await beginTotp(
+      request("/api/account/two-factor/totp", { password }),
+    );
+    const { secret } = (await start.json()) as { secret: string };
+    const confirm = await confirmTotp(
+      request("/api/account/two-factor/totp/confirm", {
+        code: totpCodeAtStep(secret, totpStepFor()),
+      }),
+    );
+    expect(confirm.status).toBe(200);
+
+    const minted = await createApiToken(
+      request("/api/account/api-tokens", { name: "script" }),
+    );
+    expect(minted.status).toBe(201);
+    const { token } = (await minted.json()) as { token: string };
+
+    const removed = await removeTotp(
+      request("/api/account/two-factor/totp", { password }, "DELETE"),
+    );
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toMatchObject({
+      api_tokens_revoked: 1,
+      ok: true,
+      two_factor_enabled: false,
+    });
+
     cookieJar.clear();
     const asToken = await listApiTokens(
       request("/api/account/api-tokens", undefined, "GET", {

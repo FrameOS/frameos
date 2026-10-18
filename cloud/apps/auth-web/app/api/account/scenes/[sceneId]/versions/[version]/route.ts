@@ -99,9 +99,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
   // The flip and the `latest_version` move are one transaction: "latest"
   // follows the newest non-yanked version, so yanking the version the store
-  // index advertised (and whose `?v=N` cover URL the edge caches immutable
-  // for a year) hands the pointer to the one the download route now serves
-  // by default, and unyanking a newer one hands it back.
+  // index advertised (and whose `?v=N` cover URL names it) hands the pointer
+  // to the one the download route now serves by default, and unyanking a
+  // newer one hands it back.
   const outcome = await db.transaction(async (tx) => {
     const [updated] = await tx
       .update(storeSceneVersions)

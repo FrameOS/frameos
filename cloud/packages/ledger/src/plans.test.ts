@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fallbackPaygPlan } from "./plans";
-import { addMonth } from "./subscriptions";
+import { addMonth, addMonths } from "./subscriptions";
 import { utcDayWindow, utcMonthWindow } from "./account-usage";
 
 describe("the free plan fallback", () => {
@@ -44,6 +44,21 @@ describe("addMonth", () => {
     expect(addMonth(new Date("2026-12-05T00:00:00Z")).toISOString()).toBe(
       "2027-01-05T00:00:00.000Z",
     );
+  });
+});
+
+// Anniversaries are counted from the anchor, so a clamp in a short month is
+// never carried into the months after it.
+describe("addMonths", () => {
+  it("counts from the anchor's day, clamping only the month that is short", () => {
+    const anchor = new Date("2026-01-31T09:00:00Z");
+    expect([1, 2, 3, 13].map((months) => addMonths(anchor, months).toISOString())).toEqual([
+      "2026-02-28T09:00:00.000Z",
+      "2026-03-31T09:00:00.000Z",
+      "2026-04-30T09:00:00.000Z",
+      "2027-02-28T09:00:00.000Z",
+    ]);
+    expect(addMonths(anchor, 0).toISOString()).toBe(anchor.toISOString());
   });
 });
 

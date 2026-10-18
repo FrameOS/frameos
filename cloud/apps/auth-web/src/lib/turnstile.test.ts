@@ -115,6 +115,19 @@ describe("verifyTurnstileToken", () => {
     expect(body.has("remoteip")).toBe(false);
   });
 
+  it("does not send the rate limiter's 'untrusted' placeholder as an IP", async () => {
+    process.env.TURNSTILE_SECRET_KEY = "secret";
+    process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY = "site";
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ success: true }), { status: 200 }),
+    );
+
+    await verifyTurnstileToken("tok", "untrusted");
+
+    const body = fetchMock.mock.calls[0]?.[1]?.body as URLSearchParams;
+    expect(body.has("remoteip")).toBe(false);
+  });
+
   it("fails CLOSED when Cloudflare is unreachable", async () => {
     // The tempting alternative — let signups through during a Cloudflare
     // outage — turns that outage into an open, unprotected signup endpoint,

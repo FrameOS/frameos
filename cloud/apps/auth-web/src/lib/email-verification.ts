@@ -14,11 +14,16 @@ const verificationTokenMaxAgeMs = 24 * 60 * 60 * 1000;
 
 // Failure to send must never fail the signup itself; the account works, the
 // email just stays unverified until a later verification or password reset.
+// Resolves to whether the mail went out, so the caller's copy can say so
+// honestly. `returnTo` (already validated by safeAuthReturnPath) rides the
+// link, so the page the visitor was headed to before signing up is where the
+// sign-in after verifying lands.
 export async function beginEmailVerification(
   db: ReturnType<typeof createDb>,
   accountId: string,
   email: string,
-) {
+  options: { returnTo?: string | undefined } = {},
+): Promise<boolean> {
   const token = createSecretToken("frev", 32);
   await db.insert(emailVerificationTokens).values({
     accountId,
@@ -26,13 +31,15 @@ export async function beginEmailVerification(
     tokenHash: hashSecret(token),
   });
 
-  const verifyUrl = new URL(
-    `/verify-email?token=${encodeURIComponent(token)}`,
-    getBaseUrl(),
-  ).toString();
+  const verifyUrl = new URL("/verify-email", getBaseUrl());
+  verifyUrl.searchParams.set("token", token);
+  if (options.returnTo) {
+    verifyUrl.searchParams.set("return_to", options.returnTo);
+  }
 
   try {
-    await sendEmailVerificationEmail(email, verifyUrl);
+    await sendEmailVerificationEmail(email, verifyUrl.toString());
+    return true;
   } catch (error) {
     // This is the single point of failure that gates every new signup: login
     // requires a verified email, so a bad Postmark token or a provider
@@ -41,6 +48,7 @@ export async function beginEmailVerification(
     // this has to reach the error tracker, because nobody is watching the
     // journal at 3am and the affected users cannot tell us.
     reportError("email.verification_send_failed", error, { accountId });
+    return false;
   }
 }
 

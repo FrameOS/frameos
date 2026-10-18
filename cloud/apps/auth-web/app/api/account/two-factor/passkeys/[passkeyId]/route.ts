@@ -1,12 +1,13 @@
 // Rename (PATCH) or remove (DELETE, with weakening proof) one passkey.
 import { and, eq } from "drizzle-orm";
-import { accountPasskeys } from "@frameos-cloud/db";
+import { accountPasskeys, revokeApiTokensForAccount } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import {
   accountSecurityContext,
   notifySecurityChange,
   readJsonBody,
   requireWeakeningProof,
+  revokedTokensDetail,
 } from "../../../../../../src/lib/account-security";
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { requireDatabase } from "../../../../../../src/lib/device-flow";
@@ -105,6 +106,11 @@ export async function DELETE(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
   const status = await clearRecoveryCodesIfNoFactors(db, context.accountId);
+  // Removing a factor ends the personal API tokens too, as enrolling one
+  // does: a token must not outlive the second-factor setup it was minted
+  // under, and removal is often the owner cleaning up after a lost device —
+  // exactly when a token minted on it should stop working.
+  const apiTokensRevoked = await revokeApiTokensForAccount(db, context.accountId);
   await recordAuditEvent(db, {
     accountId: context.accountId,
     actor: {
@@ -112,7 +118,7 @@ export async function DELETE(
       providerSubject: context.providerSubject,
     },
     eventType: "account.passkey_removed",
-    metadata: { name: deleted[0]?.name },
+    metadata: { apiTokensRevoked, name: deleted[0]?.name },
     target: { passkeyId },
   });
   if (!status.enabled) {
@@ -129,7 +135,13 @@ export async function DELETE(
   await notifySecurityChange(
     context,
     status.enabled ? "passkey_removed" : "two_factor_disabled",
-    deleted[0]?.name,
+    [deleted[0]?.name, revokedTokensDetail(apiTokensRevoked, "removed")]
+      .filter(Boolean)
+      .join(". "),
   );
-  return NextResponse.json({ ok: true, two_factor_enabled: status.enabled });
+  return NextResponse.json({
+    api_tokens_revoked: apiTokensRevoked,
+    ok: true,
+    two_factor_enabled: status.enabled,
+  });
 }

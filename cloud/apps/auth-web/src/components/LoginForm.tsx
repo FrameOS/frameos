@@ -103,11 +103,13 @@ export function LoginForm({
       }
 
       const payload = (await response.json().catch(() => undefined)) as
-        | { error?: string }
+        | { error?: string; verification_sent?: boolean }
         | undefined;
       if (payload?.error === "email_unverified") {
         setError(
-          "Your email address is not verified yet. We just sent a fresh verification link to your inbox — click it, then sign in again.",
+          payload.verification_sent
+            ? "Your email address is not verified yet. We just sent a fresh verification link to your inbox. Click it, then sign in again."
+            : "Your email address is not verified yet. No new link was sent this time, so use the newest verification email in your inbox, or sign in again later for a fresh one.",
         );
       } else if (response.status === 401) {
         setError("Wrong email or password.");
@@ -182,7 +184,13 @@ export function LoginForm({
         ) : null}
       </div>
       <div className="footer-links">
-        <a href="/signup">Create an account</a>
+        <a
+          href={`/signup${
+            returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ""
+          }`}
+        >
+          Create an account
+        </a>
         <a href="/reset">Forgot password?</a>
       </div>
     </form>

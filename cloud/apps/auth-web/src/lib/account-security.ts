@@ -227,14 +227,21 @@ export async function twoFactorStatusPayload(
 // adds a passkey is the scenario; the mail is the owner's chance to notice.
 // Never fails the change itself: the credential is already written, and a
 // mail outage is not a reason to report the enrollment as failed.
-// The "Details:" line of the enrolment mail when the enrolment revoked
+// The "Details:" line of the mail for a second-factor change that revoked
 // personal API tokens; empty otherwise. The count comes from
 // revokeApiTokensForAccount.
-export function revokedTokensDetail(revoked: number): string | undefined {
+export function revokedTokensDetail(
+  revoked: number,
+  change: "enrolled" | "removed" = "enrolled",
+): string | undefined {
   if (revoked <= 0) {
     return undefined;
   }
-  return `${revoked} personal API ${revoked === 1 ? "token was" : "tokens were"} revoked, because tokens minted before a second factor existed would keep bypassing it. Create new ones under Account → Developer.`;
+  const reason =
+    change === "enrolled"
+      ? "tokens minted before a second factor existed would keep bypassing it"
+      : "a token must not outlive the second-factor setup it was minted under";
+  return `${revoked} personal API ${revoked === 1 ? "token was" : "tokens were"} revoked, because ${reason}. Create new ones under Account → Developer.`;
 }
 
 export async function notifySecurityChange(

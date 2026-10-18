@@ -75,10 +75,10 @@ describe("clientIpFromRequest", () => {
     ).toBe("10.0.0.1");
   });
 
-  it("falls back to x-real-ip and then the socket address", () => {
+  it("falls back to the socket address, never x-real-ip", () => {
     delete process.env.RATE_LIMIT_TRUSTED_PROXY_COUNT;
     expect(clientIpFromRequest(request({ "x-real-ip": " 4.4.4.4 " }))).toBe(
-      "4.4.4.4",
+      "10.0.0.1",
     );
     expect(clientIpFromRequest(request({}))).toBe("10.0.0.1");
     expect(clientIpFromRequest(request({}, ""))).toBe("local");

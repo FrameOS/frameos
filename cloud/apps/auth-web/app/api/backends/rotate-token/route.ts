@@ -2,7 +2,10 @@ import { eq } from "drizzle-orm";
 import { linkedClients } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateLinkedClient } from "../../../../src/lib/backend-auth";
+import {
+  authenticateLinkedClient,
+  isLinkOfKind,
+} from "../../../../src/lib/backend-auth";
 import { jsonError, requireDatabase } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { createEncryptedSecretToken } from "../../../../src/lib/secrets";
@@ -39,6 +42,11 @@ export async function POST(request: NextRequest) {
   // power to replace the new one and lock the legitimate backend out.
   if (linkedClient.authenticatedWithPreviousToken) {
     return jsonError("invalid_link_token", 401);
+  }
+  // Backends only. Frames never call this: a frame's token is rotated by
+  // re-enrolment (frames/enroll).
+  if (!isLinkOfKind(linkedClient, "backend")) {
+    return jsonError("insufficient_scope", 403);
   }
 
   let credential: ReturnType<typeof createEncryptedSecretToken>;

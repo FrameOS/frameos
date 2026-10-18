@@ -337,6 +337,33 @@ describe("device-authed firmware manifest + download", () => {
     expect(response.headers.get("x-frameos-release")).toBe("v2026.8.1");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(firmwareBytes);
   });
+
+  it("budgets per frame, so frames behind one address do not starve each other", async () => {
+    // Every request in this suite comes from the same (unknown) address,
+    // which is exactly a fleet behind one NAT.
+    const chatty = await enrolledFrame();
+    const quiet = await enrolledFrame();
+    const download = (frame: { access_token: string; frame_id: string }) =>
+      getFirmwareDownload(
+        getRequest(downloadPath(frame.frame_id), {
+          authorization: `Bearer ${frame.access_token}`,
+        }),
+        routeParams(frame.frame_id),
+      );
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const response = await download(chatty);
+      expect(response.status).toBe(200);
+      await response.arrayBuffer();
+    }
+    const overBudget = await download(chatty);
+    expect(overBudget.status).toBe(429);
+    await expect(overBudget.json()).resolves.toMatchObject({ error: "rate_limited" });
+
+    const neighbour = await download(quiet);
+    expect(neighbour.status).toBe(200);
+    expect(new Uint8Array(await neighbour.arrayBuffer())).toEqual(firmwareBytes);
+  });
 });
 
 describe("the notify_update_available queue verb", () => {

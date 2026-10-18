@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createFrameosMcpServer } from "./server";
+import { createFrameosMcpServer, withoutToolPayloads } from "./server";
 import { serveStatelessHttp } from "./http";
 
 // The server against a fake cloud: every tool is one or two HTTP calls, so
@@ -822,5 +822,28 @@ describe("serveStatelessHttp", () => {
     expect(response.status).toBe(200);
     const payload = (await response.json()) as { result: { serverInfo: { name: string } } };
     expect(payload.result.serverInfo.name).toBe("frameos-cloud");
+  });
+});
+
+describe("MCP analytics", () => {
+  it("never sends a tool's arguments or its answer, only what ran", async () => {
+    const sent = await withoutToolPayloads({
+      distinct_id: "account-1",
+      event: "$mcp_tool_call",
+      properties: {
+        $mcp_duration_ms: 12,
+        $mcp_is_error: false,
+        $mcp_parameters: { settings: { openAI: { apiKey: "sk-secret" } } },
+        $mcp_response: { content: [{ text: "scene json", type: "text" }] },
+        $mcp_tool_name: "account_settings_update",
+      },
+      timestamp: "2026-10-18T00:00:00.000Z",
+      type: "capture",
+    });
+    expect(sent?.properties).toEqual({
+      $mcp_duration_ms: 12,
+      $mcp_is_error: false,
+      $mcp_tool_name: "account_settings_update",
+    });
   });
 });

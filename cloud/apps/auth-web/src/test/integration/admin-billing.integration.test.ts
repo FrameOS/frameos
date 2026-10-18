@@ -473,6 +473,41 @@ describe("admin billing routes", () => {
     expect(row?.code).toBe("platform_revenue");
   });
 
+  // Every one of these ids reaches a ::uuid column. A typo in the form used
+  // to come back as a 500 from Postgres; it is the admin's mistake, so 400.
+  it("answers a malformed id with 400, not 500", async () => {
+    await signIn({ superadmin: true });
+    for (const body of [
+      {
+        accountId: "not-a-uuid",
+        action: "manual_journal",
+        legs: journalLegs(systemAccountCodes.revenueAiUsage),
+      },
+      { action: "reverse", entryId: "not-a-uuid" },
+      {
+        action: "reclassify",
+        amountMicros: "1000000",
+        creditAccountCode: systemAccountCodes.psp,
+        debitAccountCode: systemAccountCodes.revenueAiUsage,
+        reclassifiesEntryId: "not-a-uuid",
+      },
+    ]) {
+      const response = await postJournal(
+        postJson("/api/admin/billing/journal", { ...body, reason: "Typo" }),
+      );
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe("invalid_request");
+    }
+    for (const body of [
+      { action: "assign", groupId: null, ledgerAccountId: "not-a-uuid" },
+      { action: "assign", groupId: "not-a-uuid", ledgerAccountId: crypto.randomUUID() },
+    ]) {
+      const response = await postGroups(postJson("/api/admin/billing/groups", body));
+      expect(response.status).toBe(400);
+    }
+    expect(await listJournalEntries(db)).toHaveLength(0);
+  });
+
   // The nightly route answers to a job token and nothing else. A
   // superadmin's cookie session or personal fc_api_ token used to open it;
   // that credential could also read every account and post journal entries
@@ -589,6 +624,11 @@ describe("admin billing routes", () => {
     expect(
       await accountBalanceMicros(db, customerReceivableCode(customer)),
     ).toBe(575_120n);
+    // The dead-man ping goes to a third party: counts, never an amount.
+    expect(payload.summary.revenue_micros).toBe("575120");
+    expect(payload.healthcheck).toBe(
+      "ok; sweep posted=1 failed=0; subscriptions opened=0 charged=0 failed=0; violations=0",
+    );
 
     // Drop the cap under what the day already spent and the same turn becomes
     // the violation the nightly job exists to shout about. This is invariant
@@ -604,6 +644,8 @@ describe("admin billing routes", () => {
       detail: expect.stringContaining(customer),
     });
     expect(strictPayload.ok).toBe(false);
+    expect(strictPayload.healthcheck).toContain("checks=daily_cap_respected");
+    expect(strictPayload.healthcheck).not.toMatch(/575|\$/);
     // And it reports rather than repairs: a book that disagrees with itself
     // needs a human, and a silent "correction" is how that goes unnoticed.
     expect(

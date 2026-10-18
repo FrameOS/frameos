@@ -6,6 +6,7 @@ import {
 import { NextRequest, NextResponse } from "next/server";
 import { getSuperadminContext, superadminRefusal } from "../../../../../src/lib/admin";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
+import { isAccountUuid } from "../../../../../src/lib/billing-admin";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import {
   jsonError,
@@ -74,12 +75,15 @@ export async function POST(request: NextRequest) {
     if (body.action === "assign") {
       const ledgerAccountId =
         typeof body.ledgerAccountId === "string" ? body.ledgerAccountId : "";
-      if (!ledgerAccountId) {
+      if (!isAccountUuid(ledgerAccountId)) {
         return jsonError("invalid_account", 400, {
           detail: "Which ledger account is moving group?",
         });
       }
       const groupId = typeof body.groupId === "string" && body.groupId ? body.groupId : null;
+      if (groupId !== null && !isAccountUuid(groupId)) {
+        return jsonError("invalid_request", 400, { detail: "groupId must be a uuid" });
+      }
       await setAccountGroup(db, ledgerAccountId, groupId);
       await recordAuditEvent(db, {
         actor,

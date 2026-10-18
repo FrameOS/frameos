@@ -42,7 +42,7 @@ export const newScenePresets = [
 ] as const;
 
 type NewSceneWithAiProps = {
-  /** From ?prompt=…: submitted to the AI as soon as the page opens. */
+  /** From ?prompt=…: put in the AI panel's box for the user to send. */
   initialPrompt?: string | undefined;
   settingsUrl?: string | undefined;
   /** The account switched AI features off; the panel says so up front. */
@@ -128,8 +128,8 @@ export function NewSceneWithAi({
 
   // The draft this page is keeping in the browser: its id rides in the URL
   // hash, so a reload lands back on the same one. Read at the first render,
-  // not in an effect — the AI panel decides on mount whether to run
-  // ?prompt=, and a restored draft must not run it a second time. (None of
+  // not in an effect — the AI panel decides on mount whether to put
+  // ?prompt= in its box, and a restored draft must not offer it again. (None of
   // it reaches the DOM, so the server render still matches.)
   const openedRef = useRef<{ draftId: string | null; draft: NewSceneDraft | null } | null>(null);
   if (openedRef.current === null) {
@@ -314,7 +314,7 @@ export function NewSceneWithAi({
 
   // What the AI panel opens with. A restored draft brings its conversation
   // back instead — and the ?prompt= that started that conversation must not
-  // run (and be paid for) a second time.
+  // be offered a second time.
   const aiEntry: { initialChat?: NewSceneDraftChat; initialPrompt?: string | undefined } = restored
     ? restored.chat
       ? { initialChat: restored.chat }

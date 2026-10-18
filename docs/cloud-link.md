@@ -372,6 +372,14 @@ reinstall, importing that code (`POST /api/cloud/backup-key/import`) makes
 old backups restorable again. Envelopes from before encryption shipped
 (plain inner payloads) still restore.
 
+A provider should refuse a save that is not shaped like this envelope:
+cloud.frameos.net answers `400 backup_not_sealed` unless `format` is
+`frameos-encrypted-backup-v1`, `key_fingerprint` is a string and
+`sealed_base64` decodes to `FRBE1` ‖ a 32-byte key ‖ at least a 16-byte tag.
+It cannot tell ciphertext from noise, but a client that skipped the seal
+(a plaintext frame dump carries Wi-Fi passwords and app keys) is refused
+before anything is stored.
+
 The sealed inner payloads:
 
 - `templates`: the scene/template interchange zip (`{name}/template.json`,

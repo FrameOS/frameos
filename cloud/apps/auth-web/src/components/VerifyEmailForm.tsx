@@ -6,7 +6,14 @@ import { useState } from "react";
 // The verification link lands here with its token; the token is only spent
 // when the person presses the button (see /api/auth/verify-email for why a
 // GET must not do it).
-export function VerifyEmailForm({ token }: { token: string }) {
+export function VerifyEmailForm({
+  loginHref,
+  token,
+}: {
+  /** /login, carrying the return_to the verification link came with. */
+  loginHref: string;
+  token: string;
+}) {
   const [state, setState] = useState<
     "idle" | "submitting" | "verified" | "invalid" | "error"
   >("idle");
@@ -38,7 +45,7 @@ export function VerifyEmailForm({ token }: { token: string }) {
           Cloud.
         </p>
         <div className="actions">
-          <a className="button button-primary" href="/login">
+          <a className="button button-primary" href={loginHref}>
             Continue to sign in
           </a>
         </div>
@@ -55,7 +62,7 @@ export function VerifyEmailForm({ token }: { token: string }) {
           your password sends a fresh link.
         </p>
         <div className="actions">
-          <a className="button button-primary" href="/login">
+          <a className="button button-primary" href={loginHref}>
             Go to sign in
           </a>
         </div>

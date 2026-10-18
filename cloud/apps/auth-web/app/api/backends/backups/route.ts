@@ -12,6 +12,7 @@ import {
   backupScopeForKind,
   backupSummary,
   decodeBackupContent,
+  isSealedBackupEnvelope,
   maxBackupBodyBytes,
   maxBackupBytes,
   maxBackupsPerAccount,
@@ -141,6 +142,11 @@ export async function POST(request: NextRequest) {
     return jsonError("backup_too_large", 413, {
       max_bytes: maxBackupBytes,
     });
+  }
+  // Backups are sealed client-side; the cloud only ever holds ciphertext
+  // (src/lib/backups.ts, isSealedBackupEnvelope).
+  if (!isSealedBackupEnvelope(content)) {
+    return jsonError("backup_not_sealed", 400);
   }
 
   const name = parseOptionalString(body.name)?.slice(0, 256);

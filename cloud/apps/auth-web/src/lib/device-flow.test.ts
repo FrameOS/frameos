@@ -4,9 +4,12 @@ import {
   allowedDeviceScopes,
   defaultDeviceScopes,
   deviceScopeDescriptions,
+  jsonNestingExceeds,
+  maxJsonBodyDepth,
   parseClientKind,
   parseScopes,
   readBoundedJsonObject,
+  readBoundedJsonValue,
   readJsonObject,
   safeLocalOrigin,
 } from "./device-flow";
@@ -107,6 +110,20 @@ describe("parseScopes", () => {
     expect(parseScopes(["foo:bar", 42])).toEqual(defaultDeviceScopes);
   });
 
+  it("drops the other kind's scopes once the kind is known", () => {
+    expect(
+      parseScopes(["backend:link", "frame:managed", "store:publish"], "backend"),
+    ).toEqual(["backend:link", "store:publish"]);
+    expect(
+      parseScopes(["frame:link", "backend:read", "auth:login"], "frame"),
+    ).toEqual(["frame:link", "auth:login"]);
+    expect(parseScopes(["frame:managed"], "backend")).toEqual(
+      defaultDeviceScopes,
+    );
+    expect(parseScopes(["backend:link"], "frame")).toEqual(["frame:link"]);
+    expect(parseScopes(undefined, "frame")).toEqual(["frame:link"]);
+  });
+
   it("has a user-facing description for every allowed scope", () => {
     for (const scope of allowedDeviceScopes) {
       expect(deviceScopeDescriptions[scope]).toBeTruthy();
@@ -164,5 +181,28 @@ describe("readBoundedJsonObject", () => {
     expect(await readJsonObject(jsonRequest('{"a":1}'), 1024)).toEqual({ a: 1 });
     const big = JSON.stringify({ filler: "x".repeat(2048) });
     expect(await readJsonObject(jsonRequest(big), 1024)).toEqual({});
+  });
+
+  // JSON.parse takes any depth; JSON.stringify of the same value throws a
+  // RangeError, which reached the routes as an unhandled 500.
+  it("refuses a body nested past the depth cap with a 400, before anything recursive runs", async () => {
+    const deep = 100_000;
+    const nested = `{"scenes":${"[".repeat(deep)}${"]".repeat(deep)}}`;
+    const object = await readBoundedJsonObject(jsonRequest(nested), 1024 * 1024);
+    expect(object.body).toBeUndefined();
+    expect(object.response?.status).toBe(400);
+    expect(await object.response?.json()).toMatchObject({ error: "json_too_deep", max_depth: maxJsonBodyDepth });
+    const value = await readBoundedJsonValue(jsonRequest(`${"[".repeat(deep)}${"]".repeat(deep)}`), 1024 * 1024);
+    expect(value.response?.status).toBe(400);
+    expect(await readJsonObject(jsonRequest(nested), 1024 * 1024)).toEqual({});
+  });
+
+  it("counts nesting per container, at the cap and one past it", () => {
+    const nest = (levels: number) => JSON.parse(`${"[".repeat(levels)}${"]".repeat(levels)}`) as unknown;
+    expect(jsonNestingExceeds(nest(maxJsonBodyDepth))).toBe(false);
+    expect(jsonNestingExceeds(nest(maxJsonBodyDepth + 1))).toBe(true);
+    expect(jsonNestingExceeds({ a: [{ b: [1, "x", null] }] }, 4)).toBe(false);
+    expect(jsonNestingExceeds({ a: [{ b: [{}] }] }, 4)).toBe(true);
+    expect(jsonNestingExceeds("scalar", 0)).toBe(false);
   });
 });

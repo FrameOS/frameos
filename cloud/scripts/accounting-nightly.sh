@@ -89,13 +89,20 @@ if [ -n "$days_left" ] && [ "$days_left" -le 14 ]; then
   echo "WARNING: the job token expires in ${days_left} day(s) — rotate it: scripts/accounting-service-account.sh --rotate, then update ACCOUNTING_API_TOKEN in /etc/frameos-cloud/accounting.env" >&2
 fi
 
+# The ping carries the route's `healthcheck` line — counts and the names of
+# broken checks, never an amount. The body above holds the night's revenue,
+# receivables and margin, and healthchecks.io is a third party: the figures
+# stay in the journal on this box. An older server without the field pings
+# with a fixed word instead of falling back to the body.
+ping_text="$(printf '%s' "$body" | sed -n 's/.*"healthcheck":"\([^"]*\)".*/\1/p')"
+
 # `ok` is false when the sweep left failures behind or any invariant broke.
-# No jq on the box, and this is the only field that needs reading.
+# No jq on the box, and these are the only fields that need reading.
 if printf '%s' "$body" | grep -q '"ok":true'; then
-  [ -n "$ping_url" ] && curl -fsS -m 10 -o /dev/null --data-raw "$body" "$ping_url" || true
+  [ -n "$ping_url" ] && curl -fsS -m 10 -o /dev/null --data-raw "${ping_text:-ok}" "$ping_url" || true
   exit 0
 fi
 
 echo "FAIL: the ledger reported violations or a failed sweep" >&2
-[ -n "$ping_url" ] && curl -fsS -m 10 -o /dev/null --data-raw "$body" "${ping_url}/fail" || true
+[ -n "$ping_url" ] && curl -fsS -m 10 -o /dev/null --data-raw "${ping_text:-attention: see the journal}" "${ping_url}/fail" || true
 exit 1

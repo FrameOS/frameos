@@ -148,13 +148,15 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     }
   }
 
-  // The digest is the URL, so the bytes behind it never change. An unbound
-  // draft image is an owner-only read whatever the scene's visibility, so it
-  // must never sit at the edge or hand out the public CDN capability.
+  // The digest is the URL, so the bytes behind it never change, but the
+  // scene can go private or be pulled and nothing purges the edge when it
+  // does: the answer here is edge-cached for minutes (the cover route says
+  // why), the content-addressed CDN object behind the redirect for long. An
+  // unbound draft image is an owner-only read whatever the scene's
+  // visibility, so it must never sit at the edge or hand out the public CDN
+  // capability.
   const cacheControl =
-    scene.visibility === "public" && !unbound
-      ? "public, max-age=86400, s-maxage=31536000, immutable"
-      : "private, max-age=3600";
+    scene.visibility === "public" && !unbound ? "public, max-age=300" : "private, max-age=3600";
   const cdnUrl =
     scene.visibility === "public" && !unbound
       ? publicBlobUrl(image.objectKey)

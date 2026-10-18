@@ -91,6 +91,8 @@
     "src/test/shared-spa/deploy-progress.test.tsx",
     // Same story: mounts FrameImage, whose sleep badge reads decorators/frame.tsx.
     "src/test/shared-spa/frame-image-sleep-badge.test.tsx",
+    // Same story: renders the workspace chat drawer from FrameosShell.
+    "src/test/shared-spa/frame-admin-ai-drawer.test.tsx",
     // Same story: mounts scenesLibraryLogic, whose graph reaches decorators/frame.tsx.
     "src/test/shared-spa/store-refresh.test.ts",
     // Same story: devices.ts imports the Option type from components/Select.tsx

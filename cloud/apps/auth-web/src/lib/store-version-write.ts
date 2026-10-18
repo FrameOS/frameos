@@ -178,7 +178,7 @@ export async function nextSceneVersion(
 /** Points `latest_version` at the newest non-yanked version and returns it.
  * Run after a yank or an unyank, inside the same transaction: "latest" is
  * what the store index advertises, what the cover SQL joins on and what the
- * `?v=N` cover URL — cached immutable at the edge for a year — names, so it
+ * `?v=N` cover URL names, so it
  * must not keep naming a version the download route no longer serves by
  * default. Every version yanked (the yank route refuses that) leaves the
  * column alone.

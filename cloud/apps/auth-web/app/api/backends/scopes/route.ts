@@ -7,6 +7,7 @@ import { recordAuditEvent } from "../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import {
   authenticateLinkedClient,
+  isLinkOfKind,
   linkedClientScopes,
 } from "../../../../src/lib/backend-auth";
 import {
@@ -59,6 +60,10 @@ export async function POST(request: NextRequest) {
   if (!linkedClient) {
     return jsonError("invalid_link_token", 401);
   }
+  const clientKind = linkedClient.clientKind === "frame" ? "frame" : "backend";
+  if (!isLinkOfKind(linkedClient, clientKind)) {
+    return jsonError("insufficient_scope", 403);
+  }
 
   const parsed = await readBoundedJsonObject(request, maxScopesBodyBytes);
   if (parsed.response) {
@@ -69,12 +74,10 @@ export async function POST(request: NextRequest) {
     return jsonError("invalid_scopes", 400);
   }
   const currentScopes = linkedClientScopes(linkedClient);
-  let requestedScopes = parseScopes(body.scopes);
+  let requestedScopes = parseScopes(body.scopes, clientKind);
   // The base link scope is not a feature; it can never be dropped this way.
   const baseScopes =
-    linkedClient.clientKind === "frame"
-      ? ["frame:link"]
-      : ["backend:link", "backend:read"];
+    clientKind === "frame" ? ["frame:link"] : ["backend:link", "backend:read"];
   for (const base of baseScopes) {
     if (currentScopes.includes(base) && !requestedScopes.includes(base)) {
       requestedScopes = [base, ...requestedScopes];

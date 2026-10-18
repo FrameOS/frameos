@@ -406,6 +406,44 @@ describe("sign-in with a second factor", () => {
     expect(unused).toHaveLength(9);
   });
 
+  it("spends one recovery code when two race on one sign-in", async () => {
+    const user = await signUpVerifiedUser();
+    await establishSession(user.accountId, user.email);
+    const { recoveryCodes } = await enrollTotp();
+    cookieJar.clear();
+
+    const first = await login(
+      request("/api/auth/login", { body: { email: user.email, password } }),
+    );
+    const pending = responseCookies(first).get(pendingSignInCookieName)!;
+
+    // Two tabs, two different codes, one pending sign-in: both may get past
+    // the early "spent?" check, only one can finish it, and the other's code
+    // must come back.
+    const responses = await Promise.all(
+      [recoveryCodes[0]!, recoveryCodes[1]!].map((code) =>
+        secondFactorCode(
+          request("/api/auth/second-factor/code", {
+            body: { code },
+            cookies: { [pendingSignInCookieName]: pending },
+          }),
+        ),
+      ),
+    );
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 401]);
+
+    const unused = await db
+      .select({ id: accountRecoveryCodes.id })
+      .from(accountRecoveryCodes)
+      .where(
+        and(
+          eq(accountRecoveryCodes.accountId, user.accountId),
+          isNull(accountRecoveryCodes.usedAt),
+        ),
+      );
+    expect(unused).toHaveLength(9);
+  });
+
   it("refuses the second step without a pending sign-in", async () => {
     const response = await secondFactorCode(
       request("/api/auth/second-factor/code", { body: { code: "123456" } }),

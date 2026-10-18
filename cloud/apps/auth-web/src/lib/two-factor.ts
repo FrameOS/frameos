@@ -9,7 +9,7 @@
 // grants access on its own; it only proves the first factor passed.
 
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { jwtVerify, SignJWT } from "jose";
 import {
   accountPasskeys,
@@ -214,6 +214,30 @@ export async function consumeRecoveryCode(
     )
     .returning({ id: accountRecoveryCodes.id });
   return updated.length > 0;
+}
+
+// Gives back a recovery code this request just spent through
+// verifySecondFactorCode, when what it was spent on fell through: two
+// submissions racing on one pending sign-in both pass the early "spent?"
+// check and both spend a code, but only one can finish the sign-in. The
+// loser's code bought nothing and must not be gone. Safe by hash alone: only
+// the request whose UPDATE flipped the row saw "recovery_code" come back, so
+// no other request can be holding this row as its own.
+export async function restoreRecoveryCode(
+  db: ReturnType<typeof createDb>,
+  accountId: string,
+  code: string,
+) {
+  await db
+    .update(accountRecoveryCodes)
+    .set({ usedAt: null })
+    .where(
+      and(
+        eq(accountRecoveryCodes.accountId, accountId),
+        eq(accountRecoveryCodes.codeHash, hashRecoveryCode(code)),
+        isNotNull(accountRecoveryCodes.usedAt),
+      ),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -494,7 +518,9 @@ export async function readPendingSignInToken(
     return undefined;
   }
   try {
-    const verified = await jwtVerify(token, pendingKey());
+    const verified = await jwtVerify(token, pendingKey(), {
+      algorithms: ["HS256"],
+    });
     const pending = verified.payload.pending as PendingSignIn | undefined;
     if (
       !pending ||

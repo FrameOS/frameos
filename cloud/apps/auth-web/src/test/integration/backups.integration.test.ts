@@ -14,6 +14,7 @@ import { POST as authorizeDevice } from "../../../app/api/device/authorize/route
 import { POST as pollDevice } from "../../../app/api/device/poll/route";
 import { POST as startDevice } from "../../../app/api/device/start/route";
 import { maxBackupBytes, maxBackupsPerAccount } from "../../lib/backups";
+import { sealedBackup, sealedBackupBase64 } from "./sealed-backup";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
 
@@ -127,7 +128,7 @@ function bearer(token: string) {
 }
 
 function contentBase64(text: string) {
-  return Buffer.from(text, "utf8").toString("base64");
+  return sealedBackupBase64(text);
 }
 
 const backupScopes = [
@@ -160,7 +161,7 @@ describe("config backups", () => {
     >;
     expect(saved.kind).toBe("frames");
     expect(saved.item_key).toBe("frame-1");
-    expect(saved.size_bytes).toBe('{"scenes": []}'.length);
+    expect(saved.size_bytes).toBe(sealedBackup('{"scenes": []}').length);
 
     const listResponse = await listBackups(
       getJson("/api/backends/backups", bearer(accessToken)),
@@ -374,6 +375,35 @@ describe("config backups", () => {
       ),
     );
     expect(badContent.status).toBe(400);
+
+    // Only sealed envelopes are stored: a plaintext frame dump, or an
+    // envelope whose sealed blob is not the backend's sealed-box format,
+    // is refused before anything is written.
+    const unsealedBodies = [
+      Buffer.from('{"frame": {"wifi_password": "hunter2"}}', "utf8"),
+      Buffer.from(
+        JSON.stringify({
+          format: "frameos-encrypted-backup-v1",
+          key_fingerprint: "fp",
+          sealed_base64: Buffer.from("plaintext, not sealed").toString("base64"),
+        }),
+        "utf8",
+      ),
+    ];
+    for (const body of unsealedBodies) {
+      const unsealed = await saveBackup(
+        postJson(
+          "/api/backends/backups",
+          { content_base64: body.toString("base64"), item_key: "x", kind: "frames" },
+          bearer(accessToken),
+        ),
+      );
+      expect(unsealed.status).toBe(400);
+      expect((await readJson(unsealed)).error).toBe("backup_not_sealed");
+    }
+    expect(
+      await db.select().from(clientBackups).where(eq(clientBackups.itemKey, "x")),
+    ).toHaveLength(0);
 
     const oversized = await saveBackup(
       postJson(

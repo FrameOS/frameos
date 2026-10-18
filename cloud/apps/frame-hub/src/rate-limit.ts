@@ -136,9 +136,9 @@ export function clientIpFromRequest(req: IncomingMessage) {
       }
     }
   }
-  const realIp = req.headers["x-real-ip"];
-  const single = Array.isArray(realIp) ? realIp[0] : realIp;
-  return single?.trim() || req.socket.remoteAddress || "local";
+  // Not `X-Real-IP`: no proxy of ours sets it, so it is the client's own word.
+  // The socket address is the one thing a client cannot choose.
+  return req.socket.remoteAddress || "local";
 }
 
 export function resetRateLimitsForTests() {

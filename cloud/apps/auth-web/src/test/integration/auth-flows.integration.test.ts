@@ -8,6 +8,7 @@ import {
   createDb,
   emailVerificationTokens,
   googleProviderKey,
+  linkIdentityToAccount,
   passwordProviderIssuer,
   passwordResetTokens,
   sessions,
@@ -60,6 +61,23 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
+// The verification links that "went out": the real sender only logs without
+// a Postmark token, and the tests need the URL (return_to rides it) and a
+// way to make a send fail.
+const sentVerificationUrls = vi.hoisted(() => [] as string[]);
+const verificationSendFails = vi.hoisted(() => ({ next: false }));
+
+vi.mock("../../lib/email", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/email")>()),
+  sendEmailVerificationEmail: async (_to: string, verifyUrl: string) => {
+    if (verificationSendFails.next) {
+      verificationSendFails.next = false;
+      throw new Error("Postmark send failed: 500");
+    }
+    sentVerificationUrls.push(verifyUrl);
+  },
+}));
+
 const baseUrl = "http://localhost:3000";
 const db = createDb();
 let userCounter = 0;
@@ -71,6 +89,8 @@ afterAll(async () => {
 beforeEach(async () => {
   resetRateLimitForTests();
   cookieJar.clear();
+  sentVerificationUrls.length = 0;
+  verificationSendFails.next = false;
   const tables = await db.execute<{ tablename: string }>(
     sql`select tablename from pg_tables where schemaname = 'public'`,
   );
@@ -479,6 +499,66 @@ describe("email verification", () => {
       postJson("/api/auth/login", { email, password: "a long enough password" }),
     );
     expect(allowed.status).toBe(200);
+  });
+
+  // The form's copy depends on it: past the resend limit no fresh link is
+  // waiting, and saying otherwise sends people hunting for a mail.
+  it("says whether the blocked login actually resent a link", async () => {
+    const { email } = await signUpUserUnverified();
+    const attempt = async () =>
+      readJson(
+        await login(
+          postJson("/api/auth/login", {
+            email,
+            password: "a long enough password",
+          }),
+        ),
+      );
+
+    for (let sent = 0; sent < 3; sent += 1) {
+      expect(await attempt()).toMatchObject({
+        error: "email_unverified",
+        verification_sent: true,
+      });
+    }
+    expect(await attempt()).toMatchObject({
+      error: "email_unverified",
+      verification_sent: false,
+    });
+    // Signup's link plus the three resends; the refused one sent nothing.
+    expect(sentVerificationUrls).toHaveLength(4);
+
+    verificationSendFails.next = true;
+    resetRateLimitForTests();
+    expect(await attempt()).toMatchObject({ verification_sent: false });
+  });
+
+  it("carries a safe return_to from signup into the verification link", async () => {
+    await signUpUserUnverified({ return_to: "/my-scenes?tab=private" });
+    const [kept] = sentVerificationUrls.splice(0);
+    expect(new URL(kept!).searchParams.get("return_to")).toBe(
+      "/my-scenes?tab=private",
+    );
+    expect(new URL(kept!).searchParams.get("token")).toMatch(/^frev_/);
+
+    await signUpUserUnverified({ return_to: "https://evil.example/steal" });
+    const [dropped] = sentVerificationUrls.splice(0);
+    expect(new URL(dropped!).searchParams.has("return_to")).toBe(false);
+  });
+
+  it("tells the signup form when the verification mail could not be sent", async () => {
+    verificationSendFails.next = true;
+    const response = await signup(
+      postJson("/api/auth/signup", {
+        email: "unlucky@example.com",
+        password: "a long enough password",
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await readJson(response)).toMatchObject({
+      ok: true,
+      verification_sent: false,
+    });
   });
 
   it("creates a verification token on signup and verifies the identity once", async () => {
@@ -950,6 +1030,79 @@ describe("google sign-in merging", () => {
     expect(again).toMatchObject({ created: false, status: "ok" });
   });
 
+  // A sign-in is not a request to rename the account or move its address:
+  // a password account that linked Google kept getting the Google address as
+  // its primary one (and the Google name) every time Google signed it in.
+  it("keeps a linked account's name and address when google signs it in", async () => {
+    const { accountId, email } = await signUpUser({ name: "Password Name" });
+    await linkIdentityToAccount(db, {
+      accountId,
+      email: "linked-elsewhere@gmail.example",
+      emailVerified: true,
+      providerIssuer: googleIssuer,
+      providerKey: googleProviderKey,
+      providerSubject: "google-sub-linked",
+    });
+
+    const signedIn = await resolveGoogleSignIn(db, googleIssuer, {
+      email: "renamed-at-google@gmail.example",
+      email_verified: true,
+      name: "Google Name",
+      sub: "google-sub-linked",
+    });
+    expect(signedIn).toEqual({ accountId, created: false, status: "ok" });
+
+    const [account] = await db
+      .select({
+        displayName: accounts.displayName,
+        primaryEmail: accounts.primaryEmail,
+      })
+      .from(accounts)
+      .where(eq(accounts.id, accountId));
+    expect(account).toEqual({ displayName: "Password Name", primaryEmail: email });
+    // The Google identity itself follows Google.
+    const [identity] = await db
+      .select({ emailSnapshot: accountIdentities.emailSnapshot })
+      .from(accountIdentities)
+      .where(eq(accountIdentities.providerSubject, "google-sub-linked"));
+    expect(identity?.emailSnapshot).toBe("renamed-at-google@gmail.example");
+  });
+
+  it("moves a google-first account's address along with google's, and fills a missing name", async () => {
+    const { accountId } = await upsertAccountFromIdentity(db, {
+      email: "before@gmail.example",
+      emailVerified: true,
+      providerIssuer: googleIssuer,
+      providerKey: googleProviderKey,
+      providerSubject: "google-sub-moving",
+    });
+
+    await resolveGoogleSignIn(db, googleIssuer, {
+      email: "after@gmail.example",
+      email_verified: true,
+      name: "Named Later",
+      sub: "google-sub-moving",
+    });
+    await resolveGoogleSignIn(db, googleIssuer, {
+      email: "after@gmail.example",
+      email_verified: true,
+      name: "Renamed At Google",
+      sub: "google-sub-moving",
+    });
+
+    const [account] = await db
+      .select({
+        displayName: accounts.displayName,
+        primaryEmail: accounts.primaryEmail,
+      })
+      .from(accounts)
+      .where(eq(accounts.id, accountId));
+    expect(account).toEqual({
+      displayName: "Named Later",
+      primaryEmail: "after@gmail.example",
+    });
+  });
+
   it("adds a password to a google-first account through the reset flow", async () => {
     const email = "google-first@example.com";
     const { accountId } = await upsertAccountFromIdentity(db, {
@@ -1377,6 +1530,20 @@ describe("the login page with a live session", () => {
     expect(
       await loginDestination({ error: "verify_before_google_link" }),
     ).toBeUndefined();
+  });
+
+  // The query is attacker-craftable: a made-up code is not a reason to show a
+  // signed-in visitor the sign-in form.
+  it("sends a signed-in visitor onward when the error is not one it knows", async () => {
+    const user = await signUpUser();
+    await establishSession(user.accountId, user.email);
+
+    expect(await loginDestination({ error: "session_expired_sign_in_again" })).toBe(
+      `${baseUrl}/frames`,
+    );
+    expect(await loginDestination({ error: "constructor" })).toBe(
+      `${baseUrl}/frames`,
+    );
   });
 
   it("does not follow a revoked session's cookie", async () => {

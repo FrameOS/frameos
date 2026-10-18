@@ -92,6 +92,17 @@ export async function POST(request: NextRequest) {
       periodId: failure.periodId,
     });
   }
+  // The cycle moved these accounts to the free plan because the plan they
+  // were downgrading to has been deleted. Not an error in the books, but a
+  // customer who asked for a plan and got none: somebody should offer them
+  // the plan that replaced it.
+  for (const missing of subscriptionCycle.missingDowngradePlans) {
+    reportError(
+      "billing.downgrade_plan_missing",
+      new Error(`Downgrade to deleted plan ${missing.planCode}; moved to the free plan`),
+      { ...missing },
+    );
+  }
 
   const violations = await checkLedgerIntegrity(db, {
     dailyCapMicros: settings.dailyCapMicros,
@@ -143,12 +154,29 @@ export async function POST(request: NextRequest) {
     violations: violations.length,
   });
 
+  const ok =
+    violations.length === 0 &&
+    sweep.failures.length === 0 &&
+    subscriptionCycle.failures.length === 0 &&
+    subscriptionCycle.missingDowngradePlans.length === 0;
+
   return NextResponse.json({
+    // What scripts/accounting-nightly.sh pings the dead-man check with: the
+    // counts and the names of the broken checks, and no amount. The ping
+    // goes to a third party (healthchecks.io), and the night's revenue is
+    // not theirs to read; the full body stays in the journal on the box.
+    healthcheck: healthcheckLine({
+      missingDowngradePlans: subscriptionCycle.missingDowngradePlans.length,
+      ok,
+      subscriptionsCharged: subscriptionCycle.charged,
+      subscriptionsFailed: subscriptionCycle.failures.length,
+      subscriptionsOpened: subscriptionCycle.opened,
+      sweepFailed: sweep.failures.length,
+      sweepPosted: sweep.posted,
+      violations: violations.map((violation) => violation.check),
+    }),
     metering_mode: settings.meteringMode,
-    ok:
-      violations.length === 0 &&
-      sweep.failures.length === 0 &&
-      subscriptionCycle.failures.length === 0,
+    ok,
     summary: {
       cogs_micros: summary.cogsMicros.toString(),
       contra_revenue_micros: summary.contraRevenueMicros.toString(),
@@ -165,6 +193,10 @@ export async function POST(request: NextRequest) {
       accrued_micros: subscriptionCycle.accruedMicros.toString(),
       charged: subscriptionCycle.charged,
       failed: subscriptionCycle.failures.length,
+      missing_downgrade_plans: subscriptionCycle.missingDowngradePlans.map((missing) => ({
+        account_id: missing.accountId,
+        plan_code: missing.planCode,
+      })),
       opened: subscriptionCycle.opened,
       recognized: subscriptionCycle.recognized,
     },
@@ -180,4 +212,31 @@ export async function POST(request: NextRequest) {
       detail: violation.detail,
     })),
   });
+}
+
+// One line, plain ASCII, no quotes: the script lifts it out of the JSON with
+// sed (there is no jq on the box). Check names are identifiers.
+function healthcheckLine(input: {
+  missingDowngradePlans: number;
+  ok: boolean;
+  subscriptionsCharged: number;
+  subscriptionsFailed: number;
+  subscriptionsOpened: number;
+  sweepFailed: number;
+  sweepPosted: number;
+  violations: string[];
+}): string {
+  const parts = [
+    input.ok ? "ok" : "attention",
+    `sweep posted=${input.sweepPosted} failed=${input.sweepFailed}`,
+    `subscriptions opened=${input.subscriptionsOpened} charged=${input.subscriptionsCharged} failed=${input.subscriptionsFailed}`,
+    `violations=${input.violations.length}`,
+  ];
+  if (input.violations.length > 0) {
+    parts.push(`checks=${[...new Set(input.violations)].join(",")}`);
+  }
+  if (input.missingDowngradePlans > 0) {
+    parts.push(`downgrades_to_deleted_plans=${input.missingDowngradePlans}`);
+  }
+  return parts.join("; ").replace(/[^ -~]|["\\]/g, "");
 }

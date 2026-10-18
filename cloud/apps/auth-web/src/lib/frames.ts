@@ -933,6 +933,19 @@ function deployProgressVersionForCommand(payload: unknown): string | null {
   return typeof version === "string" && version ? version : null;
 }
 
+// The payload a command keeps once it is finished (acked, failed or expired).
+// The row outlives the command by the retention window for the queue view,
+// but two things in it were only ever meant for the device: an asset write's
+// base64 body (up to the WS frame cap per row, every chunk of every upload)
+// and the code a lan_access_set carries off the panel, which is spent once the
+// device has answered. Every update that moves a command out of pending/sent
+// sets `payload: spentCommandPayload`.
+export const spentCommandPayload = sql`case
+  when jsonb_typeof(${frameCommands.payload}) is distinct from 'object' then ${frameCommands.payload}
+  when ${frameCommands.type} = 'lan_access_set' then ${frameCommands.payload} - 'code'
+  when ${frameCommands.type} in ('asset_put', 'asset_put_chunk') then ${frameCommands.payload} - 'data'
+  else ${frameCommands.payload} end`;
+
 // Supersede undelivered commands of the same type: a newer set_scenes or
 // set_settings makes the older one pointless (and applying both in order would
 // be wasted work on a slow device). "sent" counts as undelivered — the hub
@@ -946,7 +959,7 @@ export async function supersedePendingCommands(
 ) {
   await db
     .update(frameCommands)
-    .set({ error: "superseded", status: "expired" })
+    .set({ error: "superseded", payload: spentCommandPayload, status: "expired" })
     .where(
       and(
         eq(frameCommands.frameId, frameId),
@@ -1090,7 +1103,7 @@ export async function cancelFrameCommand(
 ): Promise<boolean> {
   const cancelled = await db
     .update(frameCommands)
-    .set({ error: "cancelled", status: "expired" })
+    .set({ error: "cancelled", payload: spentCommandPayload, status: "expired" })
     .where(
       and(
         eq(frameCommands.id, commandId),
@@ -2026,7 +2039,7 @@ export async function markFrameRevoked(
     .where(eq(frames.id, frameId));
   await db
     .update(frameCommands)
-    .set({ error: "frame_revoked", status: "expired" })
+    .set({ error: "frame_revoked", payload: spentCommandPayload, status: "expired" })
     .where(
       and(
         eq(frameCommands.frameId, frameId),

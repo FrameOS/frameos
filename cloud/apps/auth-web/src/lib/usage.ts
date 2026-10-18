@@ -34,7 +34,9 @@ import {
   storeSceneVersionImages,
   storeScenes,
   storeSceneVersions,
+  type createDb,
 } from "@frameos-cloud/db";
+import { dailyCapFor, resolveAiCredentials } from "./ai/api-key";
 import { logWarn } from "./log";
 import type { FramesDatabase } from "./frames";
 
@@ -445,7 +447,15 @@ export async function frameLogBytesForAccount(
  * later — paid tiers. snake_case: it crosses the AGPL boundary to
  * third-party reimplementations.
  */
-export async function accountUsage(db: FramesDatabase, accountId: string) {
+export async function accountUsage(
+  // Not a transaction: which key the account would use is read through
+  // resolveAiCredentials, which takes the database itself.
+  db: ReturnType<typeof createDb>,
+  accountId: string,
+  // The deployment's env, for which OpenAI key the account's turns would run
+  // on (the shared one has its own cap). Tests pass one; routes do not.
+  options: { env?: Record<string, string | undefined> | undefined } = {},
+) {
   const now = new Date();
   // One plan lookup for both the quota limits and the AI summary; `undefined`
   // when the accounting tables are not migrated, which both handle.
@@ -458,7 +468,7 @@ export async function accountUsage(db: FramesDatabase, accountId: string) {
       countFramesForAccount(db, accountId),
       countCloudRenderedFramesForAccount(db, accountId),
       accountLimits(db, accountId, plan),
-      accountAiSummary(db, accountId, now, plan),
+      accountAiSummary(db, accountId, now, plan, options.env),
       photoBytesForAccount(db, accountId),
       photoQuotaBytesForAccount(db, accountId),
     ]);
@@ -532,26 +542,33 @@ export type AccountUsage = Awaited<ReturnType<typeof accountUsage>>;
  * account page.
  */
 async function accountAiSummary(
-  db: FramesDatabase,
+  db: ReturnType<typeof createDb>,
   accountId: string,
   now: Date,
   known?: AccountPlan | undefined,
+  env?: Record<string, string | undefined> | undefined,
 ) {
   try {
-    const [thisMonth, lastMonth, today, settings] = await Promise.all([
+    const [thisMonth, lastMonth, today, settings, credentials] = await Promise.all([
       accountAiUsage(db, accountId, utcMonthWindow(now)),
       accountAiUsage(db, accountId, utcMonthWindow(now, -1)),
       accountAiUsage(db, accountId, utcDayWindow(now)),
-      readBillingSettings(db),
+      readBillingSettings(db, env),
+      resolveAiCredentials(db, accountId, env),
     ]);
     const [account] = await db.execute<{ ai_disabled_at: string | null }>(
       sql`select ai_disabled_at from accounts where id = ${accountId}`,
     );
+    // The cap the account's next turn would actually meet: on the shared key
+    // that is the operator's allowance, not the billable cap (the same
+    // dailyCapFor the gate and /api/account/ai use).
+    const cap = dailyCapFor(credentials, settings);
     return {
       // What they actually owe, which is narrower than what they used: only
       // the platform key bills anybody (see billing() in metering.ts).
       billable_micros: thisMonth.billableMicros.toString(),
-      daily_cap_micros: settings.dailyCapMicros.toString(),
+      daily_cap_allowance: cap.allowance as string,
+      daily_cap_micros: cap.capMicros.toString(),
       enabled: !account?.ai_disabled_at,
       // The same function metering prices with — one definition (plans.ts).
       // `known` is the caller's already-read plan; the margin lookup reads it
@@ -569,6 +586,7 @@ async function accountAiSummary(
   } catch {
     return {
       billable_micros: "0",
+      daily_cap_allowance: "billable" as string,
       daily_cap_micros: "0",
       enabled: true,
       margin_basis_points: 0,

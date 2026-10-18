@@ -17,6 +17,7 @@ afterEach(() => {
 describe("notifyNewCloudUser", () => {
   const input = {
     accountId: "acc-1",
+    analyticsConsent: "granted" as const,
     displayName: "Ada",
     email: "ada@example.com",
     provider: "password",
@@ -49,6 +50,24 @@ describe("notifyNewCloudUser", () => {
       },
     });
   });
+
+  // The privacy page's processor list does not have PostHog seeing a
+  // signup address for someone who declined analytics, or never answered.
+  it.each([["denied" as const], [undefined]])(
+    "leaves the email and name out when consent is %s",
+    async (analyticsConsent) => {
+      process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";
+      fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+
+      await notifyNewCloudUser({ ...input, analyticsConsent });
+
+      const [, init] = fetchMock.mock.calls[0]!;
+      expect(JSON.parse(String(init?.body)).properties).toEqual({
+        $lib: "frameos-cloud-auth-web",
+        provider: "password",
+      });
+    },
+  );
 
   it("never throws", async () => {
     process.env.NEXT_PUBLIC_POSTHOG_KEY = "phc_test";

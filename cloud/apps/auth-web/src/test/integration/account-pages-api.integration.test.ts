@@ -18,6 +18,7 @@ import { POST as revokeDevice } from "../../../app/api/device/revoke/route";
 import { POST as startDevice } from "../../../app/api/device/start/route";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
+import { sealedBackupBase64 } from "./sealed-backup";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
 
@@ -188,7 +189,7 @@ describe("GET /api/account/backups", () => {
       postJson(
         "/api/backends/backups",
         {
-          content_base64: Buffer.from('{"scenes": []}', "utf8").toString("base64"),
+          content_base64: sealedBackupBase64('{"scenes": []}'),
           content_type: "application/json",
           item_key: "frame-1",
           kind: "frames",

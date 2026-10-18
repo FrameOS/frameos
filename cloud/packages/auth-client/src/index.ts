@@ -326,7 +326,9 @@ export async function verifyOidcIdToken(
   },
 ) {
   const jwks = createRemoteJWKSet(new URL(options.jwksUri));
+  // Google signs its ID tokens with RS256; nothing else may verify.
   const verified = await jwtVerify(idToken, jwks, {
+    algorithms: ["RS256"],
     audience: options.audience,
     issuer: options.issuer,
   });

@@ -36,6 +36,7 @@ import { POST as authorizeDevice } from "../../../app/api/device/authorize/route
 import { POST as pollDevice } from "../../../app/api/device/poll/route";
 import { POST as startDevice } from "../../../app/api/device/start/route";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
+import { resetDownloadCountsForTests } from "../../lib/store-download-count";
 import { createSession, sessionCookieName } from "../../lib/session";
 
 // The preview proxy fetches through undici with a guarded dispatcher
@@ -76,6 +77,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   resetRateLimitForTests();
+  resetDownloadCountsForTests();
   cookieJar.clear();
   const tables = await db.execute<{ tablename: string }>(
     sql`select tablename from pg_tables where schemaname = 'public'`,
@@ -464,6 +466,24 @@ describe("store publish and distribution", () => {
         .where(eq(storeScenes.id, firstScene.id as string));
       expect(row?.downloadCount).toBe(1);
     });
+
+    // The same address fetching again, or asking with HEAD, is not another
+    // install: neither issues an increment at all.
+    const again = await downloadScene(
+      request(`/api/store/scenes/${firstScene.id}/download`, "GET"),
+      ctx(firstScene.id as string),
+    );
+    expect(again.status).toBe(200);
+    const head = await downloadScene(
+      request(`/api/store/scenes/${firstScene.id}/download`, "HEAD"),
+      ctx(firstScene.id as string),
+    );
+    expect(head.status).toBe(200);
+    const [after] = await db
+      .select({ downloadCount: storeScenes.downloadCount })
+      .from(storeScenes)
+      .where(eq(storeScenes.id, firstScene.id as string));
+    expect(after?.downloadCount).toBe(1);
   });
 
   it("links every image when a scene is forked, copying nothing", async () => {
@@ -754,7 +774,44 @@ describe("store publish and distribution", () => {
       imageCtx,
     );
     expect(published.status).toBe(200);
-    expect(published.headers.get("cache-control")).toContain("public");
+    // Minutes at the edge, never a year: the scene can go private or be
+    // pulled, and nothing purges the edge when it does. The cover of a
+    // pinned version is the same.
+    expect(published.headers.get("cache-control")).toBe("public, max-age=300");
+    const cover = await getSceneImage(
+      request(`/api/store/scenes/${sceneId}/image?version=2`, "GET"),
+      ctx(sceneId),
+    );
+    expect(cover.status).toBe(200);
+    expect(cover.headers.get("cache-control")).toBe("public, max-age=300");
+  });
+  it("binds only images the account holds, not any digest it knows", async () => {
+    // Account A's private scene, with a photo bound to it.
+    const owner = await linkClient(publishScopes);
+    const ownerSceneId = ((await readJson(await publish(owner.accessToken))).scene as Record<string, unknown>)
+      .id as string;
+    const photo = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 2, 7, 1, 8]);
+    const sha = await registerImage(ownerSceneId, photo);
+    expect((await saveVersion(ownerSceneId, { images: [sha] })).status).toBe(200);
+
+    // Account B learns the digest. Binding it into B's own scene would let
+    // B's owner view serve A's bytes, so it answers like an unknown digest.
+    const other = await linkClient(publishScopes);
+    const otherSceneId = ((await readJson(await publish(other.accessToken, { name: "Other scene" }))).scene as Record<
+      string,
+      unknown
+    >).id as string;
+    const before = await imageShas(otherSceneId);
+    const refused = await saveVersion(otherSceneId, { images: [sha] });
+    expect(refused.status).toBe(404);
+    expect((await readJson(refused)).error).toBe("image_not_found");
+    expect(await imageShas(otherSceneId)).toEqual(before);
+
+    // Holding the bytes is what counts: B uploading the same photo itself
+    // (the row keeps A as its first uploader) makes the digest B's to bind.
+    expect(await registerImage(otherSceneId, photo)).toBe(sha);
+    expect((await saveVersion(otherSceneId, { images: [sha] })).status).toBe(200);
+    expect(await imageShas(otherSceneId)).toEqual([sha]);
   });
   it("inherits the image set when a republished ZIP has no cover, and leads with the cover when it has one", async () => {
     const { accessToken } = await linkClient(publishScopes);

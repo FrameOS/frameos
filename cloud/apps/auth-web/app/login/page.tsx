@@ -27,8 +27,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   // never asks the server for the root again — and so does every "Sign in"
   // link followed in a second tab. An `error` means the caller has something
   // to say about this session (an unverified Google link, an expired flow), so
-  // that page is still rendered.
-  if (!error) {
+  // that page is still rendered. Only a code this page knows counts: the
+  // query is attacker-craftable, and `?error=anything` must not be a way to
+  // show a sign-in form to someone who is already signed in.
+  if (!error || !isKnownLoginError(error)) {
     const session = await readSession();
     if (session) {
       redirect(returnTo ?? getFramesUrl());
@@ -82,39 +84,35 @@ function readParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+const loginErrorMessages: Record<string, string> = {
+  access_denied: "Google sign-in was canceled. Try again when you are ready.",
+  google_email_unverified:
+    "Google has not verified that email address, so it cannot sign in here. Verify it with Google first, or sign up with a password.",
+  google_link_expired: "The Google sign-in took too long to confirm. Start again.",
+  google_unavailable: "Google sign-in is not configured for this environment yet.",
+  invalid_state:
+    "The sign-in attempt expired or did not match this browser session. Try again.",
+  provider_unavailable:
+    "Google sign-in is unavailable. Try again in a moment, or use your password.",
+  second_factor_expired:
+    "The two-factor step timed out. Sign in again to get a fresh one.",
+};
+
+function isKnownLoginError(error: string) {
+  // verify_before_google_link has its own card rather than a line of copy.
+  return (
+    error === "verify_before_google_link" ||
+    Object.hasOwn(loginErrorMessages, error)
+  );
+}
+
 function errorMessage(error: string) {
-  if (error === "google_unavailable") {
-    return "Google sign-in is not configured for this environment yet.";
-  }
-
-  if (error === "provider_unavailable") {
-    return "Google sign-in is unavailable. Try again in a moment, or use your password.";
-  }
-
-  if (error === "invalid_state") {
-    return "The sign-in attempt expired or did not match this browser session. Try again.";
-  }
-
-  if (error === "access_denied") {
-    return "Google sign-in was canceled. Try again when you are ready.";
-  }
-
-  if (error === "second_factor_expired") {
-    return "The two-factor step timed out. Sign in again to get a fresh one.";
-  }
-
-  if (error === "google_link_expired") {
-    return "The Google sign-in took too long to confirm. Start again.";
-  }
-
-  if (error === "google_email_unverified") {
-    return "Google has not verified that email address, so it cannot sign in here. Verify it with Google first, or sign up with a password.";
-  }
-
   // Never echo unrecognized error strings: the query parameter is
   // attacker-craftable, and arbitrary text rendered on the sign-in page is a
   // social-engineering vector even when safely escaped.
-  return "Sign-in failed. Try again, and contact support if it keeps happening.";
+  return Object.hasOwn(loginErrorMessages, error)
+    ? loginErrorMessages[error]
+    : "Sign-in failed. Try again, and contact support if it keeps happening.";
 }
 
 function statusMessage(status: string) {

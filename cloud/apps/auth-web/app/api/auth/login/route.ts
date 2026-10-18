@@ -90,24 +90,29 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_credentials" }, { status: 401 });
   }
 
+  const returnTo =
+    typeof body?.return_to === "string"
+      ? safeAuthReturnPath(body.return_to)
+      : undefined;
+
   // Correct password but unverified email: no session. Resend the
   // verification link (throttled) since the correct password proves this is
-  // the account owner, then tell them to check their inbox.
+  // the account owner, then tell them to check their inbox. Whether a link
+  // actually went out this time is part of the answer: past the resend limit
+  // (or when the send fails) the form must not claim a fresh one is waiting.
   if (!account.emailVerified) {
     const resend = await checkRateLimit(`auth:verify-email-resend:${account.id}`, {
       limit: 3,
       windowMs: 60 * 60 * 1000,
     });
-    if (resend.allowed) {
-      await beginEmailVerification(db, account.id, email);
-    }
-    return NextResponse.json({ error: "email_unverified" }, { status: 403 });
+    const verificationSent = resend.allowed
+      ? await beginEmailVerification(db, account.id, email, { returnTo })
+      : false;
+    return NextResponse.json(
+      { error: "email_unverified", verification_sent: verificationSent },
+      { status: 403 },
+    );
   }
-
-  const returnTo =
-    typeof body?.return_to === "string"
-      ? safeAuthReturnPath(body.return_to)
-      : undefined;
 
   const outcome = await completeFirstFactor(db, {
     method: "password",

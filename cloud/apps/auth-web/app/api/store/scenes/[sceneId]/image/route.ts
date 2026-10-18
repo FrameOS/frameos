@@ -87,23 +87,17 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     return jsonError("scene_not_found", 404);
   }
 
-  // A version's cover never changes, so a request that names the current
-  // version (?v=…, emitted by the store repository index) is immutable and
-  // can live on the CDN edge for good — a new publish changes the URL.
-  // Everything else still gets a day at the edge plus an ETag keyed on the
-  // version. Private scenes must never be publicly cached: their URL is
+  // A version's cover never changes, but the scene's visibility does: a
+  // public scene can go private or be pulled at any moment, and nothing
+  // purges the edge when it does. So whatever this URL answers (the CDN
+  // redirect or the bytes) sits at the edge for minutes, like scenes.json,
+  // never for good; the content-addressed object behind the redirect is
+  // what caches long. An ETag keyed on the version saves the bytes on a
+  // revalidation. Private scenes must never be publicly cached: their URL is
   // guessable and the edge would happily serve the copy to anyone.
   const isPublic = scene.visibility === "public";
-  const versionParam = request.nextUrl.searchParams.get("v");
-  const versionPinned =
-    version !== null ||
-    (versionParam !== null && versionParam === String(scene.latestVersion));
   const etag = `W/"${sceneId}-${version ?? scene.latestVersion}-${cover.sha256.slice(0, 12)}"`;
-  const cacheControl = !isPublic
-    ? "private, max-age=3600"
-    : versionPinned
-      ? "public, max-age=86400, s-maxage=31536000, immutable"
-      : "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400";
+  const cacheControl = isPublic ? "public, max-age=300" : "private, max-age=3600";
 
   if (request.headers.get("if-none-match") === etag) {
     return new NextResponse(null, {

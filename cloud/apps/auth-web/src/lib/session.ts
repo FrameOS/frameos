@@ -117,7 +117,9 @@ export async function readSession() {
       return readApiTokenSession();
     }
 
-    const verified = await jwtVerify(token, secretKey());
+    const verified = await jwtVerify(token, secretKey(), {
+      algorithms: ["HS256"],
+    });
     const profile = verified.payload.profile;
     if (!profile || typeof profile !== "object") {
       return undefined;

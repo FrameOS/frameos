@@ -106,8 +106,16 @@ export async function upsertAccountFromIdentity(
 ) {
   return db.transaction(async (tx) => {
     const [existing] = await tx
-      .select({ accountId: accountIdentities.accountId })
+      .select({
+        accountDisplayName: accounts.displayName,
+        accountId: accountIdentities.accountId,
+        accountPrimaryEmail: accounts.primaryEmail,
+        emailSnapshot: accountIdentities.emailSnapshot,
+        emailVerified: accountIdentities.emailVerified,
+        id: accountIdentities.id,
+      })
       .from(accountIdentities)
+      .innerJoin(accounts, eq(accounts.id, accountIdentities.accountId))
       .where(
         and(
           eq(accountIdentities.providerIssuer, identity.providerIssuer),
@@ -117,12 +125,37 @@ export async function upsertAccountFromIdentity(
       .limit(1);
 
     if (existing) {
+      // The identity row follows the provider: its address, and whether the
+      // provider vouches for it, is what lookups by email compare against.
+      const now = new Date();
+      await tx
+        .update(accountIdentities)
+        .set({
+          emailSnapshot: identity.email ?? existing.emailSnapshot,
+          emailVerified: identity.emailVerified ?? existing.emailVerified,
+          updatedAt: now,
+        })
+        .where(eq(accountIdentities.id, existing.id));
+
+      // The account's own name and address do not: a sign-in is not a
+      // request to change them, and overwriting them on every Google sign-in
+      // left a password account linked to Google with its password address,
+      // its Google address and a primary address that was whichever signed
+      // in last. Only an address that came from this identity follows a
+      // changed provider address; a missing name or address is filled in.
+      const addressFollowsIdentity =
+        !existing.accountPrimaryEmail ||
+        (existing.emailSnapshot !== null &&
+          existing.accountPrimaryEmail.toLowerCase() ===
+            existing.emailSnapshot.toLowerCase());
       await tx
         .update(accounts)
         .set({
-          displayName: identity.displayName,
-          primaryEmail: identity.email,
-          updatedAt: new Date(),
+          displayName: existing.accountDisplayName || identity.displayName,
+          primaryEmail: addressFollowsIdentity
+            ? (identity.email ?? existing.accountPrimaryEmail)
+            : existing.accountPrimaryEmail,
+          updatedAt: now,
         })
         .where(eq(accounts.id, existing.accountId));
       return { accountId: existing.accountId, created: false };

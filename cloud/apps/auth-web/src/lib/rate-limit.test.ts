@@ -87,11 +87,23 @@ describe("clientKey", () => {
     ).toBe("203.0.113.7");
   });
 
-  it("falls back to x-real-ip then a constant when no chain is present", () => {
+  it("never believes x-real-ip", () => {
+    // No proxy of ours sets it, so it is the client's own word: a request
+    // without a chain did not pass the proxy and shares the untrusted key.
     process.env.RATE_LIMIT_TRUSTED_PROXY_COUNT = "1";
     expect(clientKey(requestWithHeaders({ "x-real-ip": "198.51.100.9" }))).toBe(
-      "198.51.100.9",
+      "untrusted",
     );
-    expect(clientKey(requestWithHeaders({}))).toBe("local");
+    expect(clientKey(requestWithHeaders({}))).toBe("untrusted");
+    // With no proxy configured there is nothing in the headers to believe.
+    process.env.RATE_LIMIT_TRUSTED_PROXY_COUNT = "0";
+    expect(
+      clientKey(
+        requestWithHeaders({
+          "x-forwarded-for": "203.0.113.7",
+          "x-real-ip": "198.51.100.9",
+        }),
+      ),
+    ).toBe("local");
   });
 });

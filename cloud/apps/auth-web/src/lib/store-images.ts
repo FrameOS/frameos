@@ -1,9 +1,11 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
   type createDb,
+  storeImageUploads,
   storeImages,
   storeSceneVersionImages,
   storeSceneVersions,
+  storeScenes,
 } from "@frameos-cloud/db";
 import { blobNamespaces, readBlob, storeBlob } from "./blobs";
 import {
@@ -79,6 +81,14 @@ export async function registerStoreImage(
       target: storeImages.sha256,
     })
     .returning();
+  if (uploader) {
+    // The account now holds these bytes, whoever registered them first:
+    // what lets it bind the digest into a version (resolveImageSet).
+    await db
+      .insert(storeImageUploads)
+      .values({ accountId: uploader, sha256: stored.sha256 })
+      .onConflictDoNothing();
+  }
   return row ?? (await storeImageRows(db, [stored.sha256]))[0]!;
 }
 
@@ -158,11 +168,16 @@ export async function readStoreImage(image: { objectKey: string }): Promise<Buff
 }
 
 /** Validates a draft's image list: digests only, no repeats, within the
- * per-version limit, and every one registered. Returns the rows in order or
- * the API error code. */
+ * per-version limit, and every one registered AND held by the account —
+ * uploaded by it, or already in one of its own scenes' versions (a fork's
+ * images are). A digest is not a secret, so knowing one must not be enough
+ * to bind another account's image into a scene whose owner view serves the
+ * bytes. Unheld digests answer like unknown ones. Returns the rows in order
+ * or the API error code. */
 export async function resolveImageSet(
   db: Database,
   input: unknown,
+  accountId: string,
 ): Promise<{ images: StoreImage[] } | { error: string }> {
   if (
     !Array.isArray(input) ||
@@ -176,7 +191,43 @@ export async function resolveImageSet(
   if (images.length !== input.length) {
     return { error: "image_not_found" };
   }
+  if (input.length > 0) {
+    const held = await heldImageDigests(db, accountId, input);
+    if (held.size !== input.length) {
+      return { error: "image_not_found" };
+    }
+  }
   return { images };
+}
+
+async function heldImageDigests(
+  db: Database,
+  accountId: string,
+  shas: readonly string[],
+): Promise<Set<string>> {
+  const [uploaded, bound] = await Promise.all([
+    db
+      .select({ sha256: storeImageUploads.sha256 })
+      .from(storeImageUploads)
+      .where(
+        and(
+          eq(storeImageUploads.accountId, accountId),
+          inArray(storeImageUploads.sha256, [...shas]),
+        ),
+      ),
+    db
+      .selectDistinct({ sha256: storeSceneVersionImages.imageSha256 })
+      .from(storeSceneVersionImages)
+      .innerJoin(storeSceneVersions, eq(storeSceneVersions.id, storeSceneVersionImages.versionId))
+      .innerJoin(storeScenes, eq(storeScenes.id, storeSceneVersions.sceneId))
+      .where(
+        and(
+          eq(storeScenes.accountId, accountId),
+          inArray(storeSceneVersionImages.imageSha256, [...shas]),
+        ),
+      ),
+  ]);
+  return new Set([...uploaded, ...bound].map((row) => row.sha256));
 }
 
 export function sameImageSet(a: readonly { sha256: string }[], b: readonly { sha256: string }[]): boolean {

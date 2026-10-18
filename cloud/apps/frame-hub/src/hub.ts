@@ -46,6 +46,7 @@ import {
   maxAssetFileBytes,
   parseAssetEntries,
   redeployAssignedScenesToFrame,
+  spentCommandPayload,
   storeFrameAssetFile,
   supersedePendingCommands,
   storeFrameAssetListing,
@@ -546,7 +547,7 @@ export async function startFrameHub(
   async function expireStaleCommands(frameId?: string) {
     await db
       .update(frameCommands)
-      .set({ status: "expired" })
+      .set({ payload: spentCommandPayload, status: "expired" })
       .where(
         and(
           inArray(frameCommands.status, ["pending", "sent"]),
@@ -598,7 +599,7 @@ export async function startFrameHub(
     }
     await db
       .update(frameCommands)
-      .set({ error: "delivered_once", status: "expired" })
+      .set({ error: "delivered_once", payload: spentCommandPayload, status: "expired" })
       .where(
         and(
           inArray(frameCommands.frameId, frameIds),
@@ -619,7 +620,7 @@ export async function startFrameHub(
     // command that already has a newer command of the same type waiting.
     await db
       .update(frameCommands)
-      .set({ error: "superseded", status: "expired" })
+      .set({ error: "superseded", payload: spentCommandPayload, status: "expired" })
       .where(
         and(
           inArray(frameCommands.frameId, frameIds),
@@ -747,7 +748,7 @@ export async function startFrameHub(
             });
             await db
               .update(frameCommands)
-              .set({ error: "payload_too_large", status: "failed" })
+              .set({ error: "payload_too_large", payload: spentCommandPayload, status: "failed" })
               .where(
                 and(
                   eq(frameCommands.id, command.id),
@@ -1387,11 +1388,10 @@ export async function startFrameHub(
           : typeof msg.error === "string"
             ? msg.error.slice(0, 512)
             : "error",
-        // A lan_access_set carries the code the owner read off the panel.
-        // Once the device has answered it is spent (right, wrong or
-        // expired), and the row outlives it by the retention window: keep
-        // the switch position, drop the code.
-        payload: sql`case when ${frameCommands.type} = 'lan_access_set' and jsonb_typeof(${frameCommands.payload}) = 'object' then ${frameCommands.payload} - 'code' else ${frameCommands.payload} end`,
+        // Answered: drop what was only for the device (a lan_access_set's
+        // panel code, an asset write's body) and keep the rest for the
+        // queue view (spentCommandPayload in auth-web's frames.ts).
+        payload: spentCommandPayload,
         status: ok ? "acked" : "failed",
       })
       .where(

@@ -46,8 +46,8 @@ export async function POST(request: NextRequest) {
   const deviceCode = createSecretToken("fc_device", 40);
   const expiresAt = new Date(Date.now() + expiresInSeconds * 1000);
   const localOrigin = safeLocalOrigin(body.local_origin);
-  const requestedScopes = parseScopes(body.scopes);
-  const clientKind = parseClientKind(body.client_kind, requestedScopes);
+  const clientKind = parseClientKind(body.client_kind, parseScopes(body.scopes));
+  const requestedScopes = parseScopes(body.scopes, clientKind);
   const publicDisplayName = parseString(
     body.public_display_name ?? body.display_name,
     clientKind === "frame" ? "FrameOS frame" : "FrameOS backend",

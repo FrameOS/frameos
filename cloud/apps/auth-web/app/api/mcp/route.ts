@@ -35,7 +35,6 @@ const forwardedHeaders = [
   "x-forwarded-for",
   "x-forwarded-host",
   "x-forwarded-proto",
-  "x-real-ip",
 ];
 
 // Where this process answers HTTP, for the tool calls' self-fetch. NOT

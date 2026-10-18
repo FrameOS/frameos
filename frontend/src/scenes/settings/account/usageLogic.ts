@@ -19,6 +19,7 @@ export interface UsageBucket {
 export interface AccountUsage {
   ai: {
     billable_micros: string
+    daily_cap_allowance?: string
     daily_cap_micros: string
     enabled: boolean
     metering_mode: string

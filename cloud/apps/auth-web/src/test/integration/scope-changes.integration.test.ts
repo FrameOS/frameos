@@ -195,6 +195,24 @@ describe("scope changes (enabled features)", () => {
     expect(metadata.requestedScopes).toEqual(["backend:link", "backend:read"]);
   });
 
+  it("never gives a backend link a frame scope", async () => {
+    const { accessToken } = await linkClient(["backend:link", "backend:read"]);
+
+    const response = await setScopes(
+      postJson(
+        "/api/backends/scopes",
+        { scopes: ["backend:link", "backend:read", "frame:managed"] },
+        bearer(accessToken),
+      ),
+    );
+    // frame:managed is dropped before anything is compared, so nothing is
+    // added and nothing needs approval.
+    expect(response.status).toBe(200);
+    const payload = await readJson(response);
+    expect(payload.status).toBe("updated");
+    expect(payload.scope).toBe("backend:link backend:read");
+  });
+
   it("never drops the base link scope", async () => {
     const { accessToken } = await linkClient(["backend:link", "backend:read"]);
 

@@ -33,6 +33,7 @@ import {
   writeBillingSetting,
 } from "@frameos-cloud/ledger";
 import { resolveAiAccess } from "../../lib/ai/api-key";
+import { sealedBackupBase64 } from "./sealed-backup";
 import {
   accountUsage,
   maxBackupBytesPerAccount,
@@ -278,6 +279,16 @@ describe("the daily AI cap", () => {
       expect(over.refusal.detail).toContain("free AI allowance");
       expect(over.refusal.detail).not.toContain("daily AI limit");
     }
+    // The usage payload names the cap the gate just applied, not the
+    // billable one it used to show every account.
+    expect((await accountUsage(db, accountId, { env })).ai).toMatchObject({
+      daily_cap_allowance: "shared",
+      daily_cap_micros: "1500000",
+    });
+    expect((await accountUsage(db, accountId, { env: {} })).ai).toMatchObject({
+      daily_cap_allowance: "billable",
+      daily_cap_micros: "10000000",
+    });
     // The nightly check judges a shared-key day against the shared ceiling.
     const violations = await checkDailyCapRespected(db, {
       dailyCapMicros: 10_000_000n,
@@ -356,7 +367,7 @@ describe("account storage usage and quotas", () => {
       postJson(
         "/api/backends/backups",
         {
-          content_base64: Buffer.from("abcdef").toString("base64"),
+          content_base64: sealedBackupBase64("abcdef"),
           item_key: "new-item",
           kind: "frames",
         },
@@ -374,7 +385,7 @@ describe("account storage usage and quotas", () => {
       postJson(
         "/api/backends/backups",
         {
-          content_base64: Buffer.from("ok").toString("base64"),
+          content_base64: sealedBackupBase64("ok"),
           item_key: "existing",
           kind: "frames",
         },
