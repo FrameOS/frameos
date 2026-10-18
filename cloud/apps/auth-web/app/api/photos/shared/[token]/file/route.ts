@@ -7,11 +7,17 @@ import { parsePhotoPath } from "../../../../../../src/lib/photos/paths";
 
 export const runtime = "nodejs";
 
+// Long enough for a frame to follow the redirect and start the download
+// (only the start is checked), short enough that a copied address is useless.
+const sharedPhotoUrlSeconds = 10 * 60;
+
 // GET /api/photos/shared/{token}/file?path=<path>: one playable file below
-// the shared folder (`path` relative to it). With a public CDN alias this is
-// a 302 to the object's address there, so the bytes never pass through
-// Next; without one the bytes are streamed. The redirect itself is never
-// cached: revoking the link stops it at once.
+// the shared folder (`path` relative to it). On R2 this is a 302 to a
+// presigned address on the bucket's own endpoint, good for a few minutes, so
+// the bytes never pass through Next and an address that leaks (a frame's
+// log, a proxy) is dead soon after; never the public CDN alias, whose
+// addresses would outlive the link. Without R2 the bytes are streamed. The
+// redirect itself is never cached: revoking the link stops it at once.
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> },
@@ -32,9 +38,9 @@ export async function GET(
     return jsonError("not_found", 404);
   }
   const store = objectStore();
-  const publicUrl = store.publicUrl(row.objectKey);
-  if (publicUrl) {
-    return NextResponse.redirect(publicUrl, {
+  const signedUrl = await store.signedUrl(row.objectKey, sharedPhotoUrlSeconds);
+  if (signedUrl) {
+    return NextResponse.redirect(signedUrl, {
       headers: { "cache-control": "no-store" },
       status: 302,
     });
