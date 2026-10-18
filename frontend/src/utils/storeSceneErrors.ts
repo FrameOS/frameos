@@ -93,6 +93,8 @@ export function storeSceneErrorMessage(
       return 'The scene is too large (max 8 MB)'
     case 'scene_requires_compilation':
       return 'This is a legacy compiled scene (Nim code nodes or Nim apps). Convert it to an interpreted scene at /nim-converter first.'
+    case 'scene_contains_photo_link':
+      return 'This scene contains a Photos album link. Anyone who gets the scene could open the album, so remove the link before sharing it.'
 
     // Zip uploads
     case 'invalid_name':

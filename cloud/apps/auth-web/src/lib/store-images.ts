@@ -35,7 +35,8 @@ export const sha256Pattern = /^[0-9a-f]{64}$/;
 
 /** Put image bytes in the store and record them. Idempotent: the same bytes
  * come back with the same digest and no second row. The caller has already
- * vetted the bytes (a real raster, within size, not transparent, moderated).
+ * vetted the bytes (a real raster, within size, not transparent, and
+ * moderated when they are about to be public: store-image-moderation.ts).
  */
 export async function registerStoreImage(
   db: Database,

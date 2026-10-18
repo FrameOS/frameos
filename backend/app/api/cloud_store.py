@@ -119,7 +119,12 @@ async def publish_template_to_store(
             status_code=HTTPStatus.BAD_GATEWAY, detail=f"Could not reach {link.provider_url}: {exc}"
         ) from exc
     if status_code != 200:
-        detail = response.get("error") or f"unexpected status {status_code}"
+        # The cloud's own sentence when it has one (a scene holding a Photos
+        # share link cannot go public: scene_contains_photo_link), else its code.
+        cloud_detail = response.get("detail")
+        detail = (
+            cloud_detail if isinstance(cloud_detail, str) and cloud_detail else None
+        ) or response.get("error") or f"unexpected status {status_code}"
         raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"FrameOS Cloud error: {detail}")
     return {"status": "published", "scene": response.get("scene")}
 

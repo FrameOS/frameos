@@ -510,12 +510,17 @@ Semantics the provider must honor:
   `invalid_zip`, `missing_template_json`, `missing_scenes`,
   `413 scene_too_large`, or quota errors (`403 scene_quota_exceeded` /
   `storage_quota_exceeded`). Content moderation may reject
-  `422 content_rejected {categories}` (name/description/preview image
-  classified before anything is stored) or answer `503
+  `422 content_rejected {categories}` (name and description classified
+  before anything is stored, the preview image too when the scene is or
+  becomes public) or answer `503
   moderation_unavailable` when the provider's moderation backend is down —
   retry later, the publish was not accepted. Abuse controls may answer `403
   store_banned` (account-level publish ban) or `429
   daily_scene_limit_exceeded`.
+- **Photos share links stay private.** A scene holding a Photos album share
+  link (docs/photos.md, "Share links") cannot be public: such a publish
+  answers `400 scene_contains_photo_link` (with a `detail` sentence). A
+  private one is accepted, and the scene loses its sharing link.
 
 ## The FrameOS-side API
 

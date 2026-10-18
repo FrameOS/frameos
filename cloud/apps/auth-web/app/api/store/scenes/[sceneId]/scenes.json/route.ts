@@ -11,10 +11,12 @@ import {
   jsonError,
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
+import { hasPhotoShareLink } from "../../../../../../src/lib/photos/share-links-in-scenes";
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { withRetiredAppsReplaced } from "../../../../../../src/lib/retired-apps";
 import { withStoreSceneOrigin } from "../../../../../../src/lib/scene-origin";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
+import { photoLinkRefusal } from "../../../../../../src/lib/store-photo-links";
 import { unzipBounded } from "../../../../../../src/lib/zip-bounded";
 
 export const runtime = "nodejs";
@@ -69,19 +71,27 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     return jsonError("scene_pulled", 410);
   }
   const isPublic = scene.visibility === "public";
+  // Through the sharing link alone, a version holding a Photos share link is
+  // not served (store-photo-links.ts): album scenes saved before the sharing
+  // link was closed for them still have one.
+  let sharedOnly = false;
   if (
     !isPublic &&
-    !shareTokenGrantsAccess(
-      scene.shareToken,
-      request.nextUrl.searchParams.get("share"),
-    ) &&
     !(await canAccessPrivateScene(
       db,
       request.headers.get("authorization"),
       scene.accountId,
     ))
   ) {
-    return jsonError("scene_not_found", 404);
+    if (
+      !shareTokenGrantsAccess(
+        scene.shareToken,
+        request.nextUrl.searchParams.get("share"),
+      )
+    ) {
+      return jsonError("scene_not_found", 404);
+    }
+    sharedOnly = true;
   }
 
   const requestedVersion = versionParam(request);
@@ -121,6 +131,9 @@ async function handleGet(request: NextRequest, context: RouteContext) {
   const scenes = extractScenesJson(Buffer.from(versionContent));
   if (!scenes) {
     return jsonError("invalid_scene_zip", 500);
+  }
+  if (sharedOnly && hasPhotoShareLink(scenes)) {
+    return photoLinkRefusal(403);
   }
 
   // Each scene leaves with its `origin` (store page, uuid, THIS version) —

@@ -296,6 +296,19 @@ SPA puts the frame's `server_scheme://server_host:server_port` in front.
 
 Tokens are `pk_` plus at least 32 URL-safe random characters.
 
+A scene that plays an album carries its link as a plain string, so the
+scene is as good as the link: whoever reads it can open the album. Both
+planes treat a link anywhere in a scene's JSON (`/api/photos/shared/pk_...`,
+absolute with any host or root-relative; a bare `pk_...` is not one) as the
+owner's alone. The cloud store refuses to make such a scene public, to
+publish a version with one onto a public scene, or to give it a sharing
+link (`400 scene_contains_photo_link`); a private save is fine and turns
+the scene's sharing link off, and the sharing link of an older album scene
+no longer serves a version that holds one. The scene AI on both planes
+shows the model a placeholder (`pk_photo_link_1`, ...) and puts the real
+link back in what it returns. The MCP servers return scenes as they are:
+their client is the owner's own agent.
+
 ### `POST /api/photos/scene`
 
 ```json

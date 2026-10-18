@@ -13,6 +13,7 @@
 // rewritten app.ts into prose is the failure this shape prevents — the panel
 // only applies what arrives through write_app_files.
 
+import { PhotoLinkRedactor } from "../photos/share-links-in-scenes";
 import {
   OpenAiRequestError,
   streamResponse,
@@ -224,11 +225,15 @@ export async function runAppChat(input: {
     });
   };
 
+  // An app's sources can hold a Photos share link like a scene can; the
+  // model sees a placeholder and the files it writes get the link back (as
+  // in the scene chat, loop.ts).
+  const photoLinks = new PhotoLinkRedactor();
   let result;
   try {
     result = await streamResponse({
       apiKey: input.apiKey,
-      input: [
+      input: photoLinks.redact([
         ...input.history.map((message) => ({
           content: message.content,
           role: message.role,
@@ -239,7 +244,7 @@ export async function runAppChat(input: {
           role: "user",
           type: "message",
         },
-      ],
+      ]),
       instructions: buildAppChatInstructions(),
       model: input.model,
       onTextDelta: () => {
@@ -277,7 +282,7 @@ export async function runAppChat(input: {
   // the reply below says the edit did not happen.
   const parsedArgs = parseToolArguments(call.name, call.arguments);
   const parsed = "args" in parsedArgs ? parsedArgs.args : undefined;
-  const files = readAppSources(parsed?.files);
+  const files = readAppSources(photoLinks.restore(parsed?.files));
   if (!files) {
     // The model meant to edit and produced nothing applicable. Say so rather
     // than reporting a successful edit the editor never received.

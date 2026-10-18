@@ -11,6 +11,7 @@ import {
   type ResponseInputItem,
   type ResponseUsage,
 } from "./openai";
+import { PhotoLinkRedactor } from "../photos/share-links-in-scenes";
 import { buildSystemPrompt } from "./prompts";
 import {
   executeTool,
@@ -112,6 +113,12 @@ export type AgentLoopResult = {
   usage: ResponseUsage;
 };
 
+// Said once, next to the prompt, when the context held a Photos share link.
+export const photoLinkNote =
+  "Photos album share links in this conversation are shown with placeholder tokens " +
+  "(pk_photo_link_1, pk_photo_link_2, ...). Keep each one exactly as it is: the real link is put back " +
+  "in every scene you deliver or save.";
+
 function userMessage(text: string): ResponseInputItem {
   return { content: [{ text, type: "input_text" }], role: "user" };
 }
@@ -162,6 +169,20 @@ export async function runAgentLoop({
   onToolArgumentError?: (report: ToolArgumentErrorReport) => void;
 }): Promise<AgentLoopResult> {
   const instructions = buildSystemPrompt();
+  // A Photos share link is a credential for a whole album, and album scenes
+  // carry one (share-links-in-scenes.ts). The model sees a placeholder in its
+  // place, in the context, the history and every tool result; the tool calls
+  // it makes get the real link back before they run, so the scenes it
+  // delivers and saves still play the album.
+  const photoLinks = new PhotoLinkRedactor();
+  const redactedInput = photoLinks.redact(input);
+  if (redactedInput !== input) {
+    input.splice(0, input.length, ...redactedInput);
+  }
+  let photoLinksNoted = photoLinks.size > 0;
+  if (photoLinksNoted) {
+    input.splice(Math.max(0, input.length - 1), 0, userMessage(photoLinkNote));
+  }
   let reply = "";
   let usage: ResponseUsage = emptyUsage();
   let rounds = 0;
@@ -269,7 +290,7 @@ export async function runAgentLoop({
         });
       } else {
         try {
-          output = await executeTool(call.name, parsed.args, toolContext);
+          output = await executeTool(call.name, photoLinks.restore(parsed.args), toolContext);
           emit({ label, name: call.name, status: "done", type: "tool" });
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
@@ -279,9 +300,17 @@ export async function runAgentLoop({
       }
       input.push({
         call_id: call.call_id,
-        output,
+        // Frame logs, store scenes, lint findings: anything a tool returns
+        // may quote a link (older ESP32 firmware logs the failed URL).
+        output: photoLinks.redactText(output),
         type: "function_call_output",
       });
+    }
+    // The first link may arrive in a tool result (another album scene, a
+    // frame log): the note follows the round's results, never splits them.
+    if (!photoLinksNoted && photoLinks.size > 0) {
+      input.push(userMessage(photoLinkNote));
+      photoLinksNoted = true;
     }
   }
 

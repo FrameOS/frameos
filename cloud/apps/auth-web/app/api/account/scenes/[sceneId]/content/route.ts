@@ -12,6 +12,7 @@ import {
   readBoundedJsonObject,
 } from "../../../../../../src/lib/device-flow";
 import { moderateStoreContent } from "../../../../../../src/lib/moderation";
+import { hasPhotoShareLink } from "../../../../../../src/lib/photos/share-links-in-scenes";
 import { identityRateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import {
   extractManifestNameFromZip,
@@ -29,6 +30,7 @@ import {
   sceneSummary,
   validateSceneZip,
 } from "../../../../../../src/lib/store";
+import { moderateStoreImages } from "../../../../../../src/lib/store-image-moderation";
 import {
   imageSetForVersion,
   resolveImageSet,
@@ -40,6 +42,7 @@ import {
   type SceneListing,
 } from "../../../../../../src/lib/store-listing";
 import { loadOwnedScene } from "../../../../../../src/lib/store-owner";
+import { photoLinkRefusal } from "../../../../../../src/lib/store-photo-links";
 import {
   alignZipCover,
   nextSceneVersion,
@@ -162,6 +165,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
       });
     }
   }
+  // A Photos share link never goes public, and a scene that takes one loses
+  // its sharing link with this version (store-photo-links.ts). Checked on
+  // the version as a whole, inherited scenes included: an album scene made
+  // public before the rule cannot take another version until the link goes.
+  const photoLink = hasPhotoShareLink(scenes);
+  if (photoLink && scene.visibility === "public") {
+    return photoLinkRefusal();
+  }
+  const closingShareLink = photoLink && scene.shareToken !== null;
 
   // The listing title lives in the zip's template.json (that is what publishing
   // reads into storeScenes.name, and what the /s/[slug] <h1>, the social card
@@ -220,7 +232,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
   // Text that shows on public pages passes the same gate publishing does —
   // one call for all of it, and none at all for the usual save that carries
-  // nothing new. Images were moderated when they were uploaded.
+  // nothing new. Images go to moderation only on a public scene, below.
   const descriptionChanged = listing.description !== current.description;
   const tagsChanged = listing.tags.join(" ") !== current.tags.join(" ");
   if (renameTo || message || descriptionChanged || tagsChanged) {
@@ -250,6 +262,35 @@ export async function POST(request: NextRequest, context: RouteContext) {
         });
         return jsonError("content_rejected", 422, {
           categories: moderation.categories,
+        });
+      }
+      return jsonError("moderation_unavailable", 503);
+    }
+  }
+  // On a public scene an image this version links for the first time is
+  // about to be shown to everyone. Uploads to a private scene were never
+  // checked (store-image-moderation.ts), and the set may name any registered
+  // digest, so the check is here, at binding.
+  if (scene.visibility === "public") {
+    const previousShas = new Set(previousImages.map((image) => image.sha256));
+    const moderation = await moderateStoreImages(
+      images.filter((image) => !previousShas.has(image.sha256)),
+    );
+    if (!moderation.ok) {
+      if (moderation.error === "content_rejected") {
+        await recordAuditEvent(db, {
+          accountId: session.accountId,
+          actor: {
+            accountId: session.accountId,
+            providerSubject: session.providerSubject,
+          },
+          eventType: "store.image_rejected",
+          metadata: { categories: moderation.categories },
+          target: { sceneId: scene.id },
+        });
+        return jsonError("content_rejected", 422, {
+          categories: moderation.categories,
+          images: true,
         });
       }
       return jsonError("moderation_unavailable", 503);
@@ -321,7 +362,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
     message,
     // The slug is deliberately NOT re-derived: it is the URL people have
     // shared, pasted into a frame's Templates panel and bookmarked.
-    ...(renameTo ? { rowChanges: { name: renameTo } } : {}),
+    ...(renameTo || closingShareLink
+      ? {
+          rowChanges: {
+            ...(renameTo ? { name: renameTo } : {}),
+            ...(closingShareLink ? { shareToken: null } : {}),
+          },
+        }
+      : {}),
     sceneId: scene.id,
     validated,
     version: nextVersion,
@@ -331,6 +379,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
   }
   const { updated } = written;
 
+  if (closingShareLink) {
+    await recordAuditEvent(db, {
+      accountId: session.accountId,
+      actor: {
+        accountId: session.accountId,
+        providerSubject: session.providerSubject,
+      },
+      eventType: "store.share_link_changed",
+      metadata: { action: "disable", name: updated.name, reason: "photo_link" },
+      target: { sceneId: scene.id },
+    });
+  }
   await recordAuditEvent(db, {
     accountId: session.accountId,
     actor: {

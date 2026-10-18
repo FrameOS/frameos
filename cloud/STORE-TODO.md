@@ -56,10 +56,14 @@ Two sides of this monorepo:
    Public store objects redirect to the CDN; private ones and every frame
    snapshot stay proxied through the app, where the session check applies.
 7. **Pre-publish moderation via OpenAI omni-moderation.** Every
-   publish — also private ones, illegal content must never be hosted —
-   classifies name + description + preview image in one free API call before
-   anything is stored; the same gate runs when a scene is made public or its
-   description edited. Flagged categories (sexual, sexual/minors,
+   publish — also private ones — classifies name + description in one free
+   API call before anything is stored; the same gate runs when a scene is
+   made public or its description edited. Images go only when they are about
+   to be public (a public publish, the flip to public: every image any
+   version links, a new image on a public scene): a private scene's cover is
+   often a personal photo or the frame's own render, and omni-moderation is
+   no CSAM scanner anyway (it scores `sexual/minors` on text only; photos
+   have their own scanners, docs/photos.md "Scanning"). Flagged categories (sexual, sexual/minors,
    violence/graphic, self-harm, harassment/hate in text) reject with 422 and
    an audit event. Configured via `OPENAI_API_KEY`; when the key is set but
    the API is unreachable, publishing **fails closed** (503). Without a key
@@ -138,7 +142,8 @@ POST {provider}/api/store/publish                  (Bearer, store:publish)
      { name, description?, visibility?, content_base64, content_type? }
      → { status, scene: { id, slug, name, visibility, version, url, risk_flags } }
      422 content_rejected {categories} · 503 moderation_unavailable ·
-     403 store_banned · 429 daily_scene_limit_exceeded
+     403 store_banned · 429 daily_scene_limit_exceeded ·
+     400 scene_contains_photo_link (a Photos share link never goes public)
 GET  {provider}/api/store/repository.json          (public) frameos repository format
      entries carry extra fields old installs ignore: author, flags, frameosVersion
 GET  {provider}/api/store/account/repository.json  (Bearer, store:publish)

@@ -300,6 +300,26 @@ describe("validateSceneZip transparency rejection", () => {
   });
 });
 
+describe("validateSceneZip photo share links", () => {
+  const zipWith = (album: string) =>
+    Buffer.from(
+      zipSync({
+        "Album/scenes.json": strToU8(
+          JSON.stringify([{ id: "s", nodes: [{ data: { config: { album } }, id: "n", type: "app" }] }]),
+        ),
+        "Album/template.json": strToU8(JSON.stringify({ name: "Album" })),
+      }),
+    );
+
+  it("records whether the scenes hold a Photos share link", () => {
+    const link = `/api/photos/shared/pk_${"a".repeat(32)}`;
+    const withLink = validateSceneZip(zipWith(link));
+    expect(withLink.ok && withLink.value.photoShareLink).toBe(true);
+    const without = validateSceneZip(zipWith("https://example.com/photo.jpg"));
+    expect(without.ok && without.value.photoShareLink).toBe(false);
+  });
+});
+
 describe("normalizeVersionMessage", () => {
   it("keeps a trimmed single line", () => {
     expect(normalizeVersionMessage("  Bigger clock  ")).toBe("Bigger clock");

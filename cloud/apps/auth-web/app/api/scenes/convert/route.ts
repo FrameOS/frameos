@@ -21,6 +21,7 @@ import { csrfResponse } from "../../../../src/lib/csrf";
 import { jsonError, readBoundedJsonValue } from "../../../../src/lib/device-flow";
 import { hasDatabaseUrl } from "../../../../src/lib/env";
 import { logWarn } from "../../../../src/lib/log";
+import { PhotoLinkRedactor } from "../../../../src/lib/photos/share-links-in-scenes";
 import { checkRateLimit, clientKey, rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { retireAppsInScenes } from "../../../../src/lib/retired-apps";
 import {
@@ -175,9 +176,13 @@ export async function POST(request: NextRequest) {
   if (port && keySource === "shared") {
     port = meteredSharedPort(port, request);
   }
+  // The model pass reads the scenes: a Photos share link in one reaches it
+  // as a placeholder, and the converted scenes get the link back (as in the
+  // scene chat, src/lib/ai/loop.ts).
+  const photoLinks = new PhotoLinkRedactor();
   let results: Awaited<ReturnType<typeof convertScenes>>;
   try {
-    results = await convertScenes(scenes as Scene[], {
+    results = await convertScenes(photoLinks.redact(scenes as Scene[]), {
       // A ceiling per scene whichever key pays: a pathological scene must
       // not turn into hundreds of calls on anyone's account.
       maxModelCalls: maxModelCallsPerScene,
@@ -202,8 +207,8 @@ export async function POST(request: NextRequest) {
     }
     throw error;
   }
-  const converted = results.map((result) => result.scene);
-  const reports = results.map((result) => result.report);
+  const converted = results.map((result) => photoLinks.restore(result.scene));
+  const reports = results.map((result) => photoLinks.restore(result.report));
   // A compiled scene from before a Nim app was retired can name it
   // (data/immich): hand back the JavaScript app that replaced it.
   retireAppsInScenes(converted);

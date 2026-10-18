@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { strToU8, unzlibSync, zipSync } from "fflate";
 import { unzipBounded } from "./zip-bounded";
 import { normalizeCategory } from "./categories";
+import { hasPhotoShareLink } from "./photos/share-links-in-scenes";
 
 // FrameOS store constants and helpers (STORE-TODO). Payloads are the frameos
 // template interchange zip: {name}/template.json + scenes.json + image.jpg.
@@ -435,6 +436,9 @@ export type ValidatedSceneZip = {
   manifestDescription: string | undefined;
   manifestName: string | undefined;
   manifestTags: string[] | undefined;
+  /** The scenes hold a Photos share link (an album scene): never readable
+   *  by anyone but the owner (store-photo-links.ts). */
+  photoShareLink: boolean;
   previewImage: Buffer | undefined;
   riskFlags: string[];
   sceneCount: number;
@@ -525,6 +529,7 @@ export function validateSceneZip(content: Buffer): SceneZipValidation {
           ? record.name.trim().slice(0, 128)
           : undefined,
       manifestTags: record.tags === undefined ? undefined : normalizeTags(record.tags),
+      photoShareLink: hasPhotoShareLink(scenes),
       previewImage: imageRaw ? Buffer.from(imageRaw) : undefined,
       riskFlags: detectRiskFlags(scenes),
       sceneCount: scenes.length,

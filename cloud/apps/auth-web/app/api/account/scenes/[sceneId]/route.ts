@@ -17,14 +17,18 @@ import {
   readBoundedJsonObject,
   requireDatabase,
 } from "../../../../../src/lib/device-flow";
-import { readBlob } from "../../../../../src/lib/blobs";
 import {
   listingForVersion,
   moderateListingChanges,
 } from "../../../../../src/lib/store-listing";
+import { goingPublicRefusal } from "../../../../../src/lib/store-image-moderation";
 import { imageSetForVersion } from "../../../../../src/lib/store-images";
 import { sceneSummary, sceneVisibilities } from "../../../../../src/lib/store";
 import { loadOwnedScene } from "../../../../../src/lib/store-owner";
+import {
+  photoLinkRefusal,
+  sceneHasPhotoShareLink,
+} from "../../../../../src/lib/store-photo-links";
 import {
   accountLimits,
   privateSceneBytesForAccount,
@@ -208,6 +212,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     return jsonError("scene_pulled", 403);
   }
   if (visibility === undefined) {
+    // Anyone holding the sharing link reads every version: none of them may
+    // hold a Photos share link (store-photo-links.ts).
+    if (share === "rotate" && (await sceneHasPhotoShareLink(db, scene.id))) {
+      return photoLinkRefusal();
+    }
     const [updated] = await db
       .update(storeScenes)
       .set({
@@ -261,19 +270,29 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 
   // Flipping a scene public re-checks the whole listing (name +
-  // description + cover) through the same gate publishing uses.
+  // description) through the same gate publishing uses, every version for a
+  // Photos share link, and every image any version links: images were not
+  // moderated while the scene was private (store-image-moderation.ts).
   const makingPublic = visibility === "public" && scene.visibility !== "public";
   if (makingPublic) {
-    const [cover] = await imageSetForVersion(db, scene.id, null);
-    const coverBytes = cover ? await readBlob(cover) : undefined;
+    const refusal = await goingPublicRefusal(db, {
+      accountId: session.accountId!,
+      actor: {
+        accountId: session.accountId!,
+        providerSubject: session.providerSubject,
+      },
+      sceneId: scene.id,
+      sceneName: scene.name,
+    });
+    if (refusal) {
+      return refusal;
+    }
     const moderation = await moderateListingChanges({
       changes: {},
       makingPublic,
       scene: {
         description: scene.description,
         name: scene.name,
-        previewImage: coverBytes ?? null,
-        previewImageType: cover?.contentType ?? null,
       },
     });
     if (!moderation.ok) {

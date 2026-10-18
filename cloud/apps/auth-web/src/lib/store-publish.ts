@@ -23,12 +23,14 @@ import {
   validateSceneZip,
   compiledSceneHint,
 } from "./store";
+import { goingPublicRefusal } from "./store-image-moderation";
 import {
   imageSetForVersion,
   registerStoreImage,
   type StoreImage,
 } from "./store-images";
 import type { SceneListing } from "./store-listing";
+import { photoLinkRefusal } from "./store-photo-links";
 import {
   alignZipCover,
   nextSceneVersion,
@@ -71,6 +73,9 @@ export async function preflightStorePublish(
     content: Buffer;
     description?: string | undefined;
     name?: string | undefined;
+    /** The visibility the publish asks for; omitted keeps an existing
+     *  scene's and makes a new one private, as publishStoreScene does. */
+    visibility?: string | undefined;
   },
 ): Promise<PublishPreflight> {
   const validation = validateSceneZip(input.content);
@@ -87,6 +92,7 @@ export async function preflightStorePublish(
       category: storeScenes.category,
       description: storeScenes.description,
       tags: storeScenes.tags,
+      visibility: storeScenes.visibility,
     })
     .from(storeScenes)
     .where(
@@ -108,6 +114,7 @@ export async function preflightStorePublish(
     existing,
     name,
     validated,
+    visibility: input.visibility ?? existing?.visibility ?? "private",
   });
 }
 
@@ -122,10 +129,15 @@ async function slowPublishWork(
     existing: { category: string | null; tags: string[] | null } | undefined;
     name: string;
     validated: ReturnType<typeof validateSceneZip> extends { ok: true; value: infer V } | infer _ ? V : never;
+    /** The visibility the scene has once this publish lands. */
+    visibility: string;
   },
 ): Promise<PublishPreflight> {
   const { accountId, actor, description, existing, name, validated } = input;
-  const uploadedPreview = validated.previewImage;
+  // The cover goes to moderation only when it is about to be public
+  // (store-image-moderation.ts): a private scene's cover is often a personal
+  // photo or the frame's own render. The text always goes.
+  const uploadedPreview = input.visibility === "public" ? validated.previewImage : undefined;
   const moderation = await moderateStoreContent({
     texts: [name, description, validated.manifestTags?.join(" ")],
     ...(uploadedPreview
@@ -263,6 +275,14 @@ export async function publishStoreScene(
   if (existing?.status === "pulled") {
     return jsonError("scene_pulled", 403);
   }
+  // An omitted visibility keeps an existing scene's setting and defaults a
+  // new scene to private.
+  const resultingVisibility =
+    input.visibility ?? existing?.visibility ?? "private";
+  // A Photos share link never goes public (store-photo-links.ts).
+  if (validated.photoShareLink && resultingVisibility === "public") {
+    return photoLinkRefusal();
+  }
 
   const description =
     input.description?.trim().slice(0, 2000) ||
@@ -283,10 +303,7 @@ export async function publishStoreScene(
     });
   }
   // Only PRIVATE scenes are metered — publishing publicly is free. The check
-  // uses the visibility this publish RESULTS in: an omitted visibility keeps
-  // an existing scene's setting and defaults a new scene to private.
-  const resultingVisibility =
-    input.visibility ?? existing?.visibility ?? "private";
+  // uses the visibility this publish RESULTS in.
   if (resultingVisibility !== "public") {
     const privateBytes = await privateSceneBytesForAccount(db, accountId);
     // A version pushed onto an already-private scene adds `content.length`
@@ -328,9 +345,32 @@ export async function publishStoreScene(
     }
   }
 
+  // A publish that flips an existing private scene public exposes every
+  // version it already has, and every image they link: the same checks as
+  // the visibility toggle.
+  if (existing && resultingVisibility === "public" && existing.visibility !== "public") {
+    const refusal = await goingPublicRefusal(db, {
+      accountId,
+      actor,
+      sceneId: existing.id,
+      sceneName: existing.name,
+    });
+    if (refusal) {
+      return refusal;
+    }
+  }
+
   const preflight =
     input.preflight ??
-    (await slowPublishWork(db, { accountId, actor, description, existing, name, validated }));
+    (await slowPublishWork(db, {
+      accountId,
+      actor,
+      description,
+      existing,
+      name,
+      validated,
+      visibility: resultingVisibility,
+    }));
   if (preflight.response) {
     return preflight.response;
   }
@@ -376,6 +416,10 @@ export async function publishStoreScene(
     );
   }
 
+  // A version with a Photos share link takes the scene's sharing link with
+  // it (store-photo-links.ts): a new scene is born with one.
+  const closingShareLink = validated.photoShareLink && scene.shareToken !== null;
+
   const nextVersion = await nextSceneVersion(db, scene.id);
   const written = await writeSceneVersion(db, {
     content: aligned.content,
@@ -387,6 +431,7 @@ export async function publishStoreScene(
       // FrameOS client published this latest version.
       linkedClientId: linkedClientId ?? null,
       name,
+      ...(closingShareLink ? { shareToken: null } : {}),
       // An omitted visibility keeps an existing scene's setting and lets the
       // database default new scenes to private.
       ...(input.visibility ? { visibility: input.visibility } : {}),
@@ -400,6 +445,15 @@ export async function publishStoreScene(
   }
   const { updated } = written;
 
+  if (closingShareLink && existing) {
+    await recordAuditEvent(db, {
+      accountId,
+      actor,
+      eventType: "store.share_link_changed",
+      metadata: { action: "disable", name: updated.name, reason: "photo_link" },
+      target: { sceneId: updated.id },
+    });
+  }
   await recordAuditEvent(db, {
     accountId,
     actor,
