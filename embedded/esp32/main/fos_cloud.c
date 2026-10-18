@@ -1542,6 +1542,20 @@ static volatile bool s_asset_job_running = false;
 
 static QueueHandle_t s_asset_jobs = NULL;
 
+/* Eight jobs of two 256-byte paths each are ~5 KB, which internal RAM — the
+ * Wi-Fi/TLS stacks' pool — cannot spare. The items live in PSRAM where the
+ * board has it (fos_big_malloc); the queue's control block stays internal,
+ * and every send and receive runs on a task, never with the cache off. */
+static StaticQueue_t s_asset_jobs_queue;
+
+static QueueHandle_t asset_jobs_create(void)
+{
+    uint8_t *storage = fos_big_malloc(FOS_CLOUD_ASSET_JOB_QUEUE_DEPTH * sizeof(asset_job_t));
+    if (!storage) return NULL;
+    return xQueueCreateStatic(FOS_CLOUD_ASSET_JOB_QUEUE_DEPTH, sizeof(asset_job_t), storage,
+                              &s_asset_jobs_queue);
+}
+
 static void asset_job_run_list(const asset_job_t *job)
 {
     cJSON *msg = cJSON_CreateObject();
@@ -2063,7 +2077,7 @@ static void ws_handle_asset_verb(asset_job_kind_t kind, const cJSON *root, const
         job.data_len = raw_len;
     }
     if (!s_asset_jobs) {
-        s_asset_jobs = xQueueCreate(FOS_CLOUD_ASSET_JOB_QUEUE_DEPTH, sizeof(asset_job_t));
+        s_asset_jobs = asset_jobs_create();
     }
     if (!s_asset_jobs || xQueueSend(s_asset_jobs, &job, 0) != pdTRUE) {
         free(job.data);

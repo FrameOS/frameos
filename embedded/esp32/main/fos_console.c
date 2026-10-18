@@ -30,6 +30,7 @@
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
+#include "fos_console_line.h"
 #include "fos_events.h"
 #include "fos_framebuffer.h"
 #include "fos_http.h"
@@ -711,20 +712,11 @@ static int cmd_set(int argc, char **argv)
         /* Every supported panel is compiled in, so an unknown key can only be
          * a typo — and it would surface as a frame that renders to nothing
          * after the next restart. Refuse it now, while someone is looking. */
-        if (strcmp(value, "none") != 0) {
-            bool panel_known = false;
-            for (size_t i = 0; i < fos_display_panel_count(); i++) {
-                if (strcmp(fos_display_panel_name(i), value) == 0) {
-                    panel_known = true;
-                    break;
-                }
-            }
-            if (!panel_known) {
-                printf("unknown panel \"%s\" — this firmware compiles in %u panels; "
-                       "see the setup portal's list or `set panel none`\n",
-                       value, (unsigned)fos_display_panel_count());
-                return 1;
-            }
+        if (!fos_display_panel_known(value)) {
+            printf("unknown panel \"%s\" — this firmware compiles in %u panels; "
+                   "see the setup portal's list or `set panel none`\n",
+                   value, (unsigned)fos_display_panel_count());
+            return 1;
         }
         strlcpy(config->panel, value, sizeof(config->panel));
     }
@@ -779,7 +771,14 @@ static int cmd_set(int argc, char **argv)
      * no restart. */
     else if (strcmp(key, "allow_local_network") == 0)
         config->allow_local_network = atoi(value) != 0;
-    else if (strcmp(key, "assets_path") == 0) strlcpy(config->assets_path, value, sizeof(config->assets_path));
+    else if (strcmp(key, "assets_path") == 0) {
+        if (!fos_assets_mount_point_valid(value)) {
+            printf("bad assets_path, want an absolute mount point of at most %d bytes "
+                   "outside /state and /dev, e.g. /srv/assets\n", FOS_ASSETS_MOUNT_POINT_MAX);
+            return 1;
+        }
+        strlcpy(config->assets_path, value, sizeof(config->assets_path));
+    }
     else if (strcmp(key, "assets_sd") == 0) config->assets_sd.enabled = atoi(value) != 0;
     else if (strcmp(key, "assets_sd_freq") == 0) config->assets_sd.max_freq_khz = strtoul(value, NULL, 10);
     /* 1 (default): format a card at boot when the raw sectors prove it empty.
@@ -1243,28 +1242,6 @@ static void usb_api_payload_timeout_error(const char *name, size_t read, size_t 
     usb_api_error(name, ESP_ERR_TIMEOUT, message);
 }
 
-/* Console args split on whitespace, so asset paths travel percent-encoded. */
-static bool usb_api_decode_asset_path(const char *encoded, bool write_rule,
-                                      char *out, size_t out_len)
-{
-    if (!encoded) return false;
-    char raw[FOS_ASSETS_PATH_MAX];
-    size_t used = 0;
-    for (const char *p = encoded; *p && used + 1 < sizeof(raw); p++) {
-        if (*p == '%' && isxdigit((unsigned char)p[1]) && isxdigit((unsigned char)p[2])) {
-            char hex[3] = {p[1], p[2], 0};
-            raw[used++] = (char)strtol(hex, NULL, 16);
-            p += 2;
-        } else {
-            raw[used++] = *p;
-        }
-    }
-    if (used == 0 || used + 1 >= sizeof(raw)) return false;
-    raw[used] = '\0';
-    return write_rule ? fos_assets_sanitize_write_path(raw, out, out_len)
-                      : fos_assets_sanitize_path(raw, out, out_len);
-}
-
 static void usb_api_payload_text(const char *name, const char *text)
 {
     size_t len = text ? strlen(text) : 0;
@@ -1315,7 +1292,7 @@ static void usb_api_payload_base64(const char *name, const uint8_t *data, size_t
 static int cmd_usb_api(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene|scene-payload|ota|scene-state|logs|set|wifi|wifi-scan|restart|factory-reset|list-assets|get-asset|upload-asset|asset-op|remount-sd|format-sd> ...\n");
+        printf("usage: usb_api <status|image|render|reload|scenes-sync|upload-scenes|scene|scene-payload|ota|scene-state|logs|set|wifi|wifi-scan|restart|factory-reset|list-assets|remount-sd|format-sd> ...\n");
         return 1;
     }
 
@@ -1588,140 +1565,6 @@ static int cmd_usb_api(int argc, char **argv)
         return 0;
     }
 
-    if (strcmp(subcommand, "get-asset") == 0) {
-        if (argc < 3) {
-            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "missing path");
-            return 1;
-        }
-        char rel[FOS_ASSETS_PATH_MAX];
-        if (!usb_api_decode_asset_path(argv[2], false, rel, sizeof(rel))) {
-            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "invalid path");
-            return 1;
-        }
-        struct stat st;
-        if (fos_assets_stat(rel, &st) != ESP_OK || S_ISDIR(st.st_mode)) {
-            usb_api_error(subcommand, ESP_ERR_NOT_FOUND, "asset not found");
-            return 1;
-        }
-        char full[FOS_ASSETS_FULL_PATH_MAX];
-        fos_assets_full_path(full, sizeof(full), rel);
-        FILE *file = fopen(full, "rb");
-        if (!file) {
-            usb_api_error(subcommand, ESP_ERR_NOT_FOUND, "asset not found");
-            return 1;
-        }
-        char metadata[FOS_ASSETS_PATH_MAX + 64];
-        snprintf(metadata, sizeof(metadata), "content_type=%s",
-                 fos_assets_content_type(rel));
-        /* Same framing as `image`, streamed straight off the card. */
-        uint8_t raw[FOS_USB_API_RAW_CHUNK];
-        char encoded[((FOS_USB_API_RAW_CHUNK + 2) / 3) * 4 + 1];
-        printf("%s %s %u base64 %s\n", USB_API_BEGIN, subcommand,
-               (unsigned)st.st_size, metadata);
-        size_t remaining = (size_t)st.st_size;
-        bool failed = false;
-        while (remaining > 0) {
-            size_t want = remaining > sizeof(raw) ? sizeof(raw) : remaining;
-            size_t r = fread(raw, 1, want, file);
-            if (r == 0) {
-                failed = true;
-                break;
-            }
-            size_t encoded_len = usb_api_base64_encode(raw, r, encoded);
-            fwrite(encoded, 1, encoded_len, stdout);
-            fputc('\n', stdout);
-            remaining -= r;
-        }
-        fclose(file);
-        printf("%s %s\n", USB_API_END, subcommand);
-        fflush(stdout);
-        if (failed) {
-            usb_api_error(subcommand, ESP_FAIL, "asset read failed");
-            return 1;
-        }
-        return 0;
-    }
-
-    if (strcmp(subcommand, "upload-asset") == 0) {
-        if (argc < 4) {
-            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "usage: upload-asset <len> <urlencoded-path>");
-            return 1;
-        }
-        size_t len = (size_t)strtoul(argv[2], NULL, 10);
-        if (len == 0 || len > FOS_USB_API_MAX_UPLOAD) {
-            usb_api_error(subcommand, ESP_ERR_INVALID_SIZE, "bad upload length");
-            return 1;
-        }
-        char rel[FOS_ASSETS_PATH_MAX];
-        if (!usb_api_decode_asset_path(argv[3], true, rel, sizeof(rel))) {
-            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "invalid path");
-            return 1;
-        }
-        if (!fos_assets_available()) {
-            usb_api_error(subcommand, ESP_ERR_INVALID_STATE, "assets storage not mounted");
-            return 1;
-        }
-        uint8_t *body = fos_big_malloc(len);
-        if (!body) body = malloc(len);
-        if (!body) {
-            usb_api_error(subcommand, ESP_ERR_NO_MEM, "upload allocation failed");
-            return 1;
-        }
-        usb_api_ready(subcommand);
-        size_t bytes_read = 0;
-        if (!usb_api_read_exact(body, len, &bytes_read)) {
-            free(body);
-            usb_api_payload_timeout_error(subcommand, bytes_read, len);
-            return 1;
-        }
-        const char *asset_err = NULL;
-        esp_err_t err = fos_assets_write_file(rel, body, len, &asset_err);
-        free(body);
-        if (err != ESP_OK) {
-            usb_api_error(subcommand, err, asset_err ? asset_err : "asset write failed");
-            return 1;
-        }
-        usb_api_ok(subcommand);
-        return 0;
-    }
-
-    if (strcmp(subcommand, "asset-op") == 0) {
-        if (argc < 4) {
-            usb_api_error(subcommand, ESP_ERR_INVALID_ARG,
-                          "usage: asset-op <mkdir|delete|rename> <urlencoded-path> [urlencoded-dst]");
-            return 1;
-        }
-        const char *op = argv[2];
-        char rel[FOS_ASSETS_PATH_MAX];
-        if (!usb_api_decode_asset_path(argv[3], true, rel, sizeof(rel))) {
-            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "invalid path");
-            return 1;
-        }
-        const char *asset_err = NULL;
-        esp_err_t err;
-        if (strcmp(op, "mkdir") == 0) {
-            err = fos_assets_mkdir(rel, &asset_err);
-        } else if (strcmp(op, "delete") == 0) {
-            err = fos_assets_delete(rel, &asset_err);
-        } else if (strcmp(op, "rename") == 0) {
-            char dst[FOS_ASSETS_PATH_MAX];
-            if (argc < 5 || !usb_api_decode_asset_path(argv[4], true, dst, sizeof(dst))) {
-                usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "invalid destination");
-                return 1;
-            }
-            err = fos_assets_rename(rel, dst, &asset_err);
-        } else {
-            usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "unknown asset op");
-            return 1;
-        }
-        if (err != ESP_OK) {
-            usb_api_error(subcommand, err, asset_err ? asset_err : "asset op failed");
-            return 1;
-        }
-        usb_api_ok(subcommand);
-        return 0;
-    }
-
     if (strcmp(subcommand, "upload-scenes") == 0) {
         if (argc < 3) {
             usb_api_error(subcommand, ESP_ERR_INVALID_ARG, "missing byte length");
@@ -1871,34 +1714,32 @@ static void run_console_line(char *line)
 typedef struct {
     fos_console_channel_t channel;
     char line[FOS_CONSOLE_MAX_CMDLINE_LENGTH];
-    size_t len;
+    fos_console_line_t assembler;
 } console_line_state_t;
 
 static void console_feed_byte(console_line_state_t *state, uint8_t ch)
 {
-    if (ch == '\r' || ch == '\n') {
-        state->line[state->len] = '\0';
-        s_active_channel = state->channel;
-        run_console_line(state->line);
-        s_active_channel = FOS_CONSOLE_CHANNEL_NONE;
-        state->len = 0;
-        console_prompt();
-        return;
+    if (state->assembler.buf == NULL) {
+        state->assembler.buf = state->line;
+        state->assembler.cap = sizeof(state->line);
     }
-
-    if (ch == 0x08 || ch == 0x7f) {
-        if (state->len > 0) state->len--;
-        return;
+    switch (fos_console_line_feed(&state->assembler, ch)) {
+        case FOS_CONSOLE_LINE_READY:
+            s_active_channel = state->channel;
+            run_console_line(state->line);
+            s_active_channel = FOS_CONSOLE_CHANNEL_NONE;
+            console_prompt();
+            break;
+        case FOS_CONSOLE_LINE_TOO_LONG:
+            printf("command too long (max %u bytes); ignoring the rest of the line\n",
+                   (unsigned)(sizeof(state->line) - 1));
+            break;
+        case FOS_CONSOLE_LINE_DROPPED:
+            console_prompt();
+            break;
+        case FOS_CONSOLE_LINE_NONE:
+            break;
     }
-
-    if (state->len < sizeof(state->line) - 1) {
-        state->line[state->len++] = (char)ch;
-        return;
-    }
-    state->line[sizeof(state->line) - 1] = '\0';
-    printf("command too long\n");
-    state->len = 0;
-    console_prompt();
 }
 
 static void fos_console_task(void *arg)

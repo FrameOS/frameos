@@ -275,7 +275,10 @@ esp_err_t fos_wifi_connect(uint32_t timeout_ms)
     wifi_config_t wifi_config = {0};
     strlcpy((char *)wifi_config.sta.ssid, config->wifi_ssid, sizeof(wifi_config.sta.ssid));
     strlcpy((char *)wifi_config.sta.password, config->wifi_pass, sizeof(wifi_config.sta.password));
-    wifi_config.sta.threshold.authmode = config->wifi_pass[0] ? WIFI_AUTH_WPA_PSK : WIFI_AUTH_OPEN;
+    /* WPA2 at the least: a WPA/WPA2 mixed AP still offers WPA2 and WPA3 sits
+     * above the threshold, so both join; a WPA1-only (TKIP) network is
+     * refused and logs no_ap_found_in_authmode_threshold. */
+    wifi_config.sta.threshold.authmode = config->wifi_pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
     wifi_config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
     /* Mesh networks broadcast the SSID from several nodes; the default fast
      * scan joins the first one heard, which can be a distant node that then
@@ -419,6 +422,18 @@ const char *fos_wifi_ap_psk(void)
                  esp_err_to_name(err));
     }
     return config->ap_psk;
+}
+
+bool fos_wifi_addr_is_portal_ap(uint32_t local_addr)
+{
+    if (local_addr == 0 || !s_ap_netif || !esp_netif_is_netif_up(s_ap_netif)) return false;
+    esp_netif_ip_info_t ap = {0};
+    if (esp_netif_get_ip_info(s_ap_netif, &ap) != ESP_OK || ap.ip.addr != local_addr) return false;
+    if (s_sta_netif) {
+        esp_netif_ip_info_t sta = {0};
+        if (esp_netif_get_ip_info(s_sta_netif, &sta) == ESP_OK && sta.ip.addr == local_addr) return false;
+    }
+    return true;
 }
 
 esp_err_t fos_wifi_start_portal(void)

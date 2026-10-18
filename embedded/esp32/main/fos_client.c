@@ -40,6 +40,7 @@
 #include "fos_schedule.h"
 #include "fos_settings.h"
 #include "fos_tz.h"
+#include "fos_wake.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -1482,13 +1483,21 @@ static void log_render_skipped(const char *reason, int battery_pct)
     frameos_nim_flush_logs();
 }
 
+/* Local minus UTC at `utc`, as the schedule reads it: the configured zone
+ * (DST-aware) beats the flat offset a provider pushed. */
+static int local_offset_minutes_at(int64_t utc)
+{
+    return fos_tz_active() ? fos_tz_offset_minutes((time_t)utc) : fos_schedule_utc_offset_minutes();
+}
+
 /* How long to wait before the next render, in seconds.
  *
- * wake_schedule + a synced clock → align to wall-clock interval boundaries
- * (a 1h frame wakes at the top of the hour, a 5min frame on :00/:05/...),
- * which is what makes clock faces tick on time. Otherwise we subtract the
- * time already spent this cycle (boot + Wi-Fi + render) so the period stays
- * ~interval instead of drifting by however long a render took. */
+ * wake_schedule + a synced clock → align to the LOCAL clock's interval
+ * boundaries (a 1h frame wakes at the top of the hour, a 5min frame on
+ * :00/:05/..., a daily one at local midnight — fos_wake.h), which is what
+ * makes clock faces tick on time. Otherwise we subtract the time already
+ * spent this cycle (boot + Wi-Fi + render) so the period stays ~interval
+ * instead of drifting by however long a render took. */
 static uint32_t compute_sleep_seconds(uint32_t interval, int64_t cycle_start_us)
 {
     fos_config_t *config = fos_config();
@@ -1496,8 +1505,7 @@ static uint32_t compute_sleep_seconds(uint32_t interval, int64_t cycle_start_us)
     if (config->wake_schedule && fos_wifi_time_synced()) {
         time_t now = time(NULL);
         if (now > 1000000000) { /* clock actually set, not 1970 */
-            uint32_t until = interval - (uint32_t)((uint64_t)now % interval);
-            return until == 0 ? interval : until;
+            return fos_wake_aligned_sleep_seconds((int64_t)now, interval, local_offset_minutes_at);
         }
     }
     int64_t elapsed_s = (esp_timer_get_time() - cycle_start_us) / 1000000;

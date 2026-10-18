@@ -38,3 +38,44 @@ int64_t fos_wake_edge_at_ms(uint32_t at_ms_low, int64_t now_ms)
     uint32_t ago = (uint32_t)now_ms - at_ms_low;
     return now_ms - (int64_t)ago;
 }
+
+static int64_t next_local_boundary(int64_t local, int64_t interval)
+{
+    int64_t rem = local % interval;
+    if (rem < 0) rem += interval;
+    return local - rem + interval;
+}
+
+uint32_t fos_wake_aligned_sleep_seconds(int64_t utc_now, uint32_t interval_sec,
+                                        fos_wake_offset_fn offset_minutes_at)
+{
+    int64_t interval = interval_sec ? (int64_t)interval_sec : 1;
+    int now_offset = offset_minutes_at ? offset_minutes_at(utc_now) : 0;
+    int64_t boundary = next_local_boundary(utc_now + (int64_t)now_offset * 60, interval);
+    /* The next boundary under the offset in force now. */
+    int64_t at = boundary - (int64_t)now_offset * 60;
+    if (offset_minutes_at) {
+        int then_offset = offset_minutes_at(at);
+        if (then_offset != now_offset) {
+            /* The offset changes before that instant. The wake is the first
+             * local boundary under the new offset: the same local boundary
+             * (a daily frame: local midnight, a DST hour away from where the
+             * old offset put it) or an earlier one the change brings forward
+             * (an hourly frame when the clocks fall back onto 02:00). */
+            int64_t best = 0;
+            int64_t same = boundary - (int64_t)then_offset * 60;
+            if (same > utc_now && offset_minutes_at(same) == then_offset) best = same;
+            int64_t earlier = next_local_boundary(utc_now + (int64_t)then_offset * 60, interval) -
+                              (int64_t)then_offset * 60;
+            if (earlier > utc_now && offset_minutes_at(earlier) == then_offset &&
+                (best == 0 || earlier < best)) {
+                best = earlier;
+            }
+            if (best != 0) at = best;
+        }
+    }
+    int64_t until = at - utc_now;
+    if (until <= 0) until = interval;
+    if (until > (int64_t)UINT32_MAX) until = UINT32_MAX;
+    return (uint32_t)until;
+}

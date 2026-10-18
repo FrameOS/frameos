@@ -368,26 +368,29 @@ static void log_http_denied(httpd_req_t *req, int status)
     frameos_nim_log_hook(log_line);
 }
 
-/* True when the request came in over the provisioning hotspot (the soft-AP
- * hands out 192.168.4.x). */
+/* True when the request came in over the provisioning hotspot. Decided by
+ * the address the connection was accepted ON — the soft-AP's own — not by
+ * the peer's: a home LAN numbered 192.168.4.0/24 (a common router default)
+ * put every station-side client inside the hotspot's range. */
 static bool request_from_hotspot(httpd_req_t *req)
 {
     int fd = httpd_req_to_sockfd(req);
     if (fd < 0) return false;
-    struct sockaddr_storage peer;
-    socklen_t peer_len = sizeof(peer);
-    if (getpeername(fd, (struct sockaddr *)&peer, &peer_len) != 0) return false;
-    if (peer.ss_family == AF_INET) {
-        uint32_t ip = ntohl(((struct sockaddr_in *)&peer)->sin_addr.s_addr);
-        return (ip & 0xFFFFFF00u) == 0xC0A80400u; /* 192.168.4.0/24 */
+    struct sockaddr_storage local;
+    socklen_t local_len = sizeof(local);
+    if (getsockname(fd, (struct sockaddr *)&local, &local_len) != 0) return false;
+    if (local.ss_family == AF_INET) {
+        return fos_wifi_addr_is_portal_ap(((struct sockaddr_in *)&local)->sin_addr.s_addr);
     }
 #if LWIP_IPV6
-    if (peer.ss_family == AF_INET6) {
-        const struct sockaddr_in6 *p6 = (const struct sockaddr_in6 *)&peer;
-        const uint8_t *a = (const uint8_t *)&p6->sin6_addr;
+    if (local.ss_family == AF_INET6) {
+        const struct sockaddr_in6 *l6 = (const struct sockaddr_in6 *)&local;
+        const uint8_t *a = (const uint8_t *)&l6->sin6_addr;
         static const uint8_t v4mapped[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
         if (memcmp(a, v4mapped, sizeof(v4mapped)) == 0) {
-            return a[12] == 192 && a[13] == 168 && a[14] == 4;
+            uint32_t v4;
+            memcpy(&v4, a + 12, sizeof(v4));
+            return fos_wifi_addr_is_portal_ap(v4);
         }
     }
 #endif
@@ -849,9 +852,7 @@ char *fos_http_status_json(void)
         "\"assets\":{\"path\":\"%s\",\"sdEnabled\":%s,\"sdMounted\":%s,\"sdPins\":\"%s\","
         "\"sdMaxFrequencyKHz\":%lu,\"sdCapacityBytes\":%llu,\"sdAutoformat\":%s,"
         "\"sdErrorCode\":\"%s\",\"sdError\":\"%s\"},"
-        "\"ota\":{\"supported\":%s,\"slotBytes\":%u,\"retryAttempts\":64,\"requestMode\":\"early-reboot\","
-        "\"resumable\":true,\"bootRequestSupported\":true,"
-        "\"partialRequestBytes\":524288,\"wifiSettleMs\":3000},"
+        "\"ota\":{\"supported\":%s,\"slotBytes\":%u},"
         "\"wifi\":{\"state\":%d,\"ip\":\"%s\",\"rssi\":%d,\"timeSynced\":%s},"
         "\"battery\":{\"present\":%s,\"millivolts\":%d,\"percent\":%d,"
         "\"pin\":%d,\"divider\":%.3f,\"enablePin\":%d},"
@@ -1316,6 +1317,22 @@ static esp_err_t setup_post_handler(httpd_req_t *req)
     if (next_admin_auth_enabled && (!next_admin_user[0] || !next_admin_pass[0])) {
         free(body);
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "admin username and password required");
+    }
+    /* The console's rules for the same keys (fos_console.c cmd_set), checked
+     * before anything is written. The form posts every field back, so a
+     * value that is merely unchanged — a panel this firmware no longer
+     * compiles in, an old mount point — must not block saving the Wi-Fi. */
+    if (form_value(body, "panel", value, sizeof(value)) &&
+        strcmp(value, config->panel) != 0 && !fos_display_panel_known(value)) {
+        free(body);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown panel");
+    }
+    if (form_value(body, "assets_path", value, sizeof(value)) &&
+        strcmp(value, config->assets_path) != 0 && !fos_assets_mount_point_valid(value)) {
+        free(body);
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                                   "bad assets path: an absolute mount point of at most 15 bytes "
+                                   "outside /state and /dev, e.g. /srv/assets");
     }
 
     if (form_value(body, "ssid", value, sizeof(value))) strlcpy(config->wifi_ssid, value, sizeof(config->wifi_ssid));

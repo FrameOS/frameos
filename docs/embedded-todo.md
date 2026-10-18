@@ -6,27 +6,12 @@ and `docs/cloud-frames.md`; the cross-plane settings contract is
 `docs/cloud-frames-contract.json`. This file only carries the work.
 **When an item ships, delete it.** The firmware is careful, defensive C —
 path sanitisation, the netguard, the contract walker, the power and battery
-logic and the verify-before-switch OTA all hold up; what is left is parity
-gaps, authenticated-peer DoS, one privacy gap and doc drift.
+logic and the verify-before-switch OTA all hold up; what is left is the
+Pico's gaps and its missing test harness.
 
 Building note: ESP-IDF firmware cannot be built locally; it compiles with
 `-Werror`, so every firmware edit costs a CI round-trip on "Build and boot
 ESP32 firmware image".
-
-## ESP32 — low
-
-- `require_protected_access` decides "on the hotspot" by peer IP range
-  rather than by the interface the request arrived on.
-- `/api/setup` skips the panel and `assets_path` validation the console
-  applies to the same values.
-- Cloud OTA and backend OTA share no mutex; both can run at once.
-- A too-long provisioning line runs its tail as a second command.
-- The asset job queue sits in scarce internal RAM.
-- `wake_schedule` aligns to UTC, not local time.
-- The status JSON still reports retired OTA fields.
-- Wi-Fi accepts WPA1 and mixed mode.
-- `usb_api upload-asset` / `asset-op` / `get-asset` are implemented but
-  nothing calls them.
 
 ## Pico
 

@@ -47,3 +47,33 @@ bool fos_assets_sanitize_write_path(const char *raw, char *out, size_t out_len)
     }
     return true;
 }
+
+static bool mount_point_under(const char *path, const char *mount)
+{
+    size_t n = strlen(mount);
+    return strncmp(path, mount, n) == 0 && (path[n] == '\0' || path[n] == '/');
+}
+
+bool fos_assets_mount_point_valid(const char *path)
+{
+    if (!path || path[0] != '/') return false;
+    size_t len = strlen(path);
+    if (len < 2 || len > FOS_ASSETS_MOUNT_POINT_MAX || path[len - 1] == '/') return false;
+    const char *p = path + 1;
+    while (*p) {
+        const char *slash = strchr(p, '/');
+        size_t seg = slash ? (size_t)(slash - p) : strlen(p);
+        if (seg == 0) return false;                       /* "/a//b" */
+        if (seg == 1 && p[0] == '.') return false;
+        if (seg == 2 && p[0] == '.' && p[1] == '.') return false;
+        for (size_t i = 0; i < seg; i++) {
+            char c = p[i];
+            bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                      (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
+            if (!ok) return false;
+        }
+        p += seg;
+        if (*p == '/') p++;
+    }
+    return !mount_point_under(path, "/state") && !mount_point_under(path, "/dev");
+}

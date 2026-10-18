@@ -5,6 +5,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "esp_err.h"
 
 typedef enum {
@@ -30,6 +31,13 @@ void fos_wifi_set_portal_exit_cb(fos_wifi_portal_exit_cb cb);
 fos_wifi_state_t fos_wifi_state(void);
 /* IP as string when connected, AP IP in portal mode, else "". */
 const char *fos_wifi_ip(void);
+/* True when `local_addr` (an IPv4 address in network byte order, as
+ * getsockname() returns it for an accepted socket) is the provisioning
+ * soft-AP's own address — i.e. the connection arrived over the hotspot, not
+ * the station link. False when the AP is not up, or when the station holds
+ * the same address (a LAN numbered like the hotspot), so a LAN peer can
+ * never pass for a hotspot one. */
+bool fos_wifi_addr_is_portal_ap(uint32_t local_addr);
 const char *fos_wifi_ap_ssid(void);
 /* The portal AP passphrase. Minted from hardware entropy and stored in NVS
  * the first time it is needed (this call or the portal start), so it is the

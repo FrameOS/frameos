@@ -210,6 +210,10 @@ jobs:
                 embedded/esp32/main/tests/test_fos_schedule_catchup.c \
                 -o /tmp/test_fos_schedule_catchup
               /tmp/test_fos_schedule_catchup
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/tests/test_fos_console_line.c \
+                -o /tmp/test_fos_console_line
+              /tmp/test_fos_console_line
               ccache --show-stats || true
             '
           # The container writes as root; actions/cache runs as the runner user.
