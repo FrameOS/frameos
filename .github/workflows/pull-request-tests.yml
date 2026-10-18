@@ -31,10 +31,9 @@ jobs:
     # Playwright/snapshot baselines must keep rendering on the image that
     # produced them.
     # Pull requests from forks run on GitHub-hosted runners: the self-hosted
-    # VMs share a writable /mnt/cache (ccache, Buildroot dl/, nimcache) with
-    # the base-image and release jobs, and a fork must not be able to seed
-    # what ends up in every release SD image. Same-repo PRs and main keep
-    # the pool.
+    # VMs share one /mnt/cache (read-only there apart from the Nim shards'
+    # nimcache; tools/gha-runners/README.md), and code nobody has reviewed
+    # should not seed it. Same-repo PRs and main keep the pool.
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-4' }}
     # Four shards, not eight: a shard's fixed cost (VM boot, toolchain, the
     # nimcache copy) was three quarters of its four minutes, and 18 epyc-4
@@ -226,10 +225,9 @@ jobs:
     # browser, no system fonts — so the host image does not shape the pixels
     # and the job can use the self-hosted pool like the Nim shards.
     # Pull requests from forks run on GitHub-hosted runners: the self-hosted
-    # VMs share a writable /mnt/cache (ccache, Buildroot dl/, nimcache) with
-    # the base-image and release jobs, and a fork must not be able to seed
-    # what ends up in every release SD image. Same-repo PRs and main keep
-    # the pool.
+    # VMs share one /mnt/cache (read-only there apart from the Nim shards'
+    # nimcache; tools/gha-runners/README.md), and code nobody has reviewed
+    # should not seed it. Same-repo PRs and main keep the pool.
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-4' }}
     permissions:
       contents: read
@@ -441,10 +439,9 @@ jobs:
     # wherever it runs, so the job can move to the self-hosted pool. Browsers
     # ship in the image, hence no `playwright install` step.
     # Pull requests from forks run on GitHub-hosted runners: the self-hosted
-    # VMs share a writable /mnt/cache (ccache, Buildroot dl/, nimcache) with
-    # the base-image and release jobs, and a fork must not be able to seed
-    # what ends up in every release SD image. Same-repo PRs and main keep
-    # the pool.
+    # VMs share one /mnt/cache (read-only there apart from the Nim shards'
+    # nimcache; tools/gha-runners/README.md), and code nobody has reviewed
+    # should not seed it. Same-repo PRs and main keep the pool.
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-4' }}
     container:
       image: mcr.microsoft.com/playwright:v1.60.0-noble
@@ -859,10 +856,9 @@ jobs:
     # Self-hosted 8-core slot: docker + SSH loopback deploy, no rendering.
     # The redis service container runs via the VM's own docker daemon.
     # Pull requests from forks run on GitHub-hosted runners: the self-hosted
-    # VMs share a writable /mnt/cache (ccache, Buildroot dl/, nimcache) with
-    # the base-image and release jobs, and a fork must not be able to seed
-    # what ends up in every release SD image. Same-repo PRs and main keep
-    # the pool.
+    # VMs share one /mnt/cache (read-only there apart from the Nim shards'
+    # nimcache; tools/gha-runners/README.md), and code nobody has reviewed
+    # should not seed it. Same-repo PRs and main keep the pool.
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-latest' || 'epyc-8' }}
     # Redis for the runtime E2E test. A service container comes up during job
     # setup instead of costing an `apt-get update && apt-get install` step
