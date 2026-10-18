@@ -567,7 +567,7 @@ One button, three tiles, one shared enrollment endpoint.
   optionally WiFi credentials the user typed into the download form.
 - If WiFi is embedded, the download link is short-lived and the UI states
   the image contains network credentials. Default flow leaves WiFi out and
-  relies on the existing captive portal (`FrameOS-Setup` hotspot).
+  relies on the existing captive portal (the `FrameOS-XXXX` setup hotspot).
 - Boot sequence: flash → boot → portal if no network → dial cloud with
   claim token → keypair enrollment → every enrollment of the image's
   multi-use token lands **pending** until the owner confirms it (an image

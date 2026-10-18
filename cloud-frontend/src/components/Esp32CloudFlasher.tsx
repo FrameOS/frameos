@@ -1042,10 +1042,10 @@ export function Esp32CloudFlasher({
         reenrollFrame
           ? wifiSsid
             ? `Done. The board joins WiFi and links back to "${reenrollFrame.name}" — its scenes and settings are already there.`
-            : `Done. Connect the board to WiFi (serial: \`wifi <ssid> <pass>\` or the FrameOS-Setup portal); it then links back to "${reenrollFrame.name}".`
+            : `Done. Connect the board to WiFi (serial: \`wifi <ssid> <pass>\` or its FrameOS-XXXX setup hotspot); it then links back to "${reenrollFrame.name}".`
           : wifiSsid
           ? 'Done. The frame joins WiFi, enrolls, and appears in this workspace as pending — confirm it there.'
-          : 'Done. Connect the frame to WiFi (serial: `wifi <ssid> <pass>` or the FrameOS-Setup portal); it then enrolls and appears in this workspace as pending.'
+          : 'Done. Connect the frame to WiFi (serial: `wifi <ssid> <pass>` or its FrameOS-XXXX setup hotspot); it then enrolls and appears in this workspace as pending.'
       )
     } catch (flashError) {
       const message = flashError instanceof Error ? flashError.message : String(flashError)

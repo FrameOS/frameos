@@ -21,11 +21,22 @@ suite "hotspot credentials":
     for (ssid, password) in [("", ""), ("  ", "")]:
       freshState()
       let made = resolveHotspotCredentials("framebuffer", ssid, password)
-      check made.ssid.startsWith("FrameOS-Setup-")
-      check made.ssid.len == "FrameOS-Setup-".len + 4
+      # No Wi-Fi interface to read here: four random hex digits.
+      check made.ssid.startsWith("FrameOS-")
+      check made.ssid.len == "FrameOS-".len + 4
+      check made.ssid["FrameOS-".len .. ^1].allCharsInSet({'0'..'9', 'A'..'F'})
       check made.password.len == 10
       for c in made.password:
-        check c notin "01ilo"
+        check c in "abcdefghjkmnpqrstuvwxyz23456789"
+
+  test "the name is FrameOS- and the last two bytes of the Wi-Fi MAC, as on the ESP32":
+    let netClass = statePath.parentDir / "net"
+    createDir(netClass / "eth0")
+    writeFile(netClass / "eth0" / "address", "dc:a6:32:00:00:01\n")
+    createDir(netClass / "wlan0" / "wireless")
+    writeFile(netClass / "wlan0" / "address", "dc:a6:32:4f:ab:12\n")
+    useHotspotStatePathForTest(statePath, netClass)
+    check resolveHotspotCredentials("framebuffer", "", "").ssid == "FrameOS-AB12"
 
   test "the made-up pair is kept in state/ and read back, also after a restart":
     let first = resolveHotspotCredentials("pimoroni.inky_impression_13", "", "")
@@ -50,12 +61,12 @@ suite "hotspot credentials":
     check resolveHotspotCredentials("framebuffer", "Kitchen", "") == ("Kitchen", made.password)
     check resolveHotspotCredentials("framebuffer", "", "hunter2hunter2") == (made.ssid, "hunter2hunter2")
 
-  test "a frame without a screen uses FrameOS-Setup / frame1234 for what is blank, and writes nothing":
+  test "a frame without a screen gets the name, and frame1234 for a blank password":
+    let made = resolveHotspotCredentials("framebuffer", "", "")
     for device in ["", "web_only", "http.upload"]:
-      check resolveHotspotCredentials(device, "", "") == ("FrameOS-Setup", "frame1234")
+      check resolveHotspotCredentials(device, "", "") == (made.ssid, "frame1234")
       check resolveHotspotCredentials(device, "Kitchen", "") == ("Kitchen", "frame1234")
       check resolveHotspotCredentials(device, "Kitchen", "hunter2hunter2") == ("Kitchen", "hunter2hunter2")
-    check not fileExists(statePath)
 
   test "a broken state file is replaced":
     createDir(statePath.parentDir)

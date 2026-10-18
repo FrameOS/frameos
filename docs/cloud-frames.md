@@ -993,7 +993,7 @@ First boot: if the file exists, the device stores the config (Pi/buildroot:
 `0600`, containing `{"claim_token": …, "provider_url": …, "name"?: …}`, plus
 a NetworkManager keyfile when WiFi was embedded), shreds the file —
 zero-overwrite then delete, best effort on FAT — joins WiFi (from the file or
-via the existing `FrameOS-Setup` captive portal), and enrolls via flow A. If
+via the existing `FrameOS-XXXX` setup hotspot), and enrolls via flow A. If
 enrollment fails
 the claim token is kept in the `0600` state file and retried with backoff
 until its expiry, then the portal shows a "get a new code" hint. Downloads

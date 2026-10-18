@@ -360,7 +360,9 @@ class ReleaseImageFrame:
             "networkCheckTimeoutSeconds": 30,
             "networkCheckUrl": "https://networkcheck.frameos.net/",
             "wifiHotspot": "bootOnly",
-            "wifiHotspotSsid": "FrameOS-Setup",
+            # Blank: FrameOS-XXXX from the Wi-Fi MAC, like an ESP32. The
+            # password is fixed: a first boot may have no screen to show one.
+            "wifiHotspotSsid": "",
             "wifiHotspotPassword": "frame1234",
             "wifiHotspotTimeoutSeconds": 300,
         }

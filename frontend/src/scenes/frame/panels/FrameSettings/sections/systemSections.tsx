@@ -103,8 +103,8 @@ export function NetworkSection(): JSX.Element {
                         <p>
                           Connect to the network shown on the frame&apos;s screen, open http://10.42.0.1/ and enter your
                           wifi credentials. If you leave the hotspot&apos;s name or password blank, the frame makes one
-                          up and shows it on its screen. A frame without a screen uses FrameOS-Setup and frame1234. The
-                          hotspot is only active for 5 minutes by default.
+                          up (FrameOS-XXXX, like an ESP32 frame) and shows it on its screen. A frame without a screen
+                          uses the password frame1234. The hotspot is only active for 5 minutes by default.
                         </p>
                       </div>
                     }

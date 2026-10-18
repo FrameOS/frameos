@@ -48,11 +48,12 @@ is left there is in the medium / low list.
   peer or `embedded.followBootIp` is set (deliberate: ESP32 DHCP follow);
   `POST /setup` takes anyone on the Pi hotspot. New frames leave the
   hotspot's name and password blank and a frame with a screen makes up its
-  own (`frameos/hotspot_credentials.nim`), but `FrameOS-Setup` / `frame1234`
-  stays where something has to be known in advance: frames without a screen,
-  frames set up before blank was the default (left as they are, decided
-  2026-10-18), and the generic release image, whose `framebuffer` device may
-  have no screen attached yet.
+  own, `FrameOS-XXXX` and a password like the ESP32's
+  (`frameos/hotspot_credentials.nim`), but the password `frame1234` stays
+  where it has to be known in advance: frames without a screen, frames set up
+  before blank was the default (left as they are, decided 2026-10-18), and
+  the generic release image, whose `framebuffer` device may have no screen
+  attached yet.
 
 ### Frontends, wasm preview, CI
 

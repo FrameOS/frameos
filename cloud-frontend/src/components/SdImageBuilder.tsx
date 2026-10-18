@@ -827,7 +827,7 @@ export function SdImageBuilder({
                 onChange={(event) => pickDisplay(event.target.value)}
                 value={displayChoice}
               >
-                <option value="">Pick the display later (FrameOS-Setup portal)</option>
+                <option value="">Pick the display later (setup hotspot)</option>
                 {piDeviceGroups.map((group) => (
                   <optgroup key={group.label} label={group.label}>
                     {group.options.map((choice) => (
@@ -910,7 +910,7 @@ export function SdImageBuilder({
           </FormGroup>
           <FormGroup
             title="WiFi"
-            hint="Optional — without it the frame opens the FrameOS-Setup portal to be configured."
+            hint="Optional — without it the frame opens its setup hotspot to be configured."
           >
             <FormRow label="Network name">
               <input
@@ -919,7 +919,7 @@ export function SdImageBuilder({
                 disabled={building}
                 maxLength={64}
                 onChange={(event) => setWifiSsid(event.target.value)}
-                placeholder="WiFi network (optional — the FrameOS-Setup portal works too)"
+                placeholder="WiFi network (optional — the setup hotspot works too)"
                 value={wifiSsid}
               />
             </FormRow>
