@@ -455,7 +455,7 @@ function StoreActionCards(): JSX.Element {
 function StorePage(): JSX.Element {
   const { storeShelves, storeScenesCount, repositoriesLoading, search, category, repositories, storeSort } =
     useValues(scenesLibraryLogic)
-  const { loadRepositories, setVisibleShelf, setStoreSort } = useActions(scenesLibraryLogic)
+  const { refreshStore, setVisibleShelf, setStoreSort } = useActions(scenesLibraryLogic)
   const mode = workspaceMode()
   const shelvesRef = useRef<HTMLDivElement>(null)
 
@@ -478,7 +478,7 @@ function StorePage(): JSX.Element {
         actions={
           <div className="flex items-center gap-2">
             <StoreSortSelect value={storeSort} onChange={setStoreSort} />
-            <RefreshButton onClick={loadRepositories} loading={repositoriesLoading} />
+            <RefreshButton onClick={refreshStore} loading={repositoriesLoading} />
           </div>
         }
       />

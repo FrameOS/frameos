@@ -149,8 +149,11 @@ export const repositoriesModel = kea<repositoriesModelType>([
               // The cloud has no /api/repositories — the store catalog IS the
               // repository. The SPA fetches the repository JSON itself (no
               // backend to cache it) and the picker shows it like any other
-              // repo: searchable, installable, not removable.
-              const response = await apiFetch(cloudStoreRepositoryUrl)
+              // repo: searchable, installable, not removable. `no-cache`: the
+              // route lets caches keep the index for five minutes (installs
+              // poll it), but this page must show a scene the moment it is
+              // published, Refresh included.
+              const response = await apiFetch(cloudStoreRepositoryUrl, { cache: 'no-cache' })
               if (!response.ok) {
                 throw new Error('Failed to fetch the scene store catalog')
               }

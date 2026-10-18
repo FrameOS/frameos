@@ -57,6 +57,19 @@ export function storeTemplatesOf(repositories: RepositoryType[]): TemplateType[]
   return templates
 }
 
+/**
+ * The store rows a backend tracks (the seeded `{provider}/api/store/...` row).
+ * Its listing refreshes them only once a day, so the store page's Refresh
+ * asks for each one by id. The cloud and the frame read the store directly
+ * (their rows are `system-`) and just reload.
+ */
+export function trackedStoreRepositoryIds(repositories: RepositoryType[]): string[] {
+  return repositories
+    .filter(isCloudStoreRepository)
+    .map((repository) => repository.id)
+    .filter((id): id is string => !!id && !id.startsWith('system-'))
+}
+
 /** Where the store's own pages live (each template's `url` is a scene page
  * there): a self-hosted provider's host, or scenes.frameos.net. */
 export function storeOriginOf(storeTemplates: TemplateType[]): string {

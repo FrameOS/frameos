@@ -19,6 +19,7 @@ import {
   storeShelvesOf,
   storeTemplatesOf,
   templateMatchesSearch,
+  trackedStoreRepositoryIds,
   type StoreShelfCount,
   type StoreShelfGroup,
 } from './storeCatalog'
@@ -88,6 +89,9 @@ export interface scenesLibraryLogicActions {
   loadRepositoriesIfStale: (maxAgeMs: number) => {
     maxAgeMs: number
   } // repositoriesModel
+  refreshRepository: (id: string) => {
+    id: string
+  } // repositoriesModel
   exportTemplate: (
     id: string,
     format?: string | undefined
@@ -108,6 +112,9 @@ export interface scenesLibraryLogicActions {
   closeEditTemplate: () => {}
   openEditTemplate: (template: TemplateType) => {
     template: TemplateType
+  }
+  refreshStore: () => {
+    value: true
   }
   saveEditTemplate: () => {}
   saveEditTemplateFinished: (error: string | null) => {
@@ -193,13 +200,15 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
       cloudDriveLogic,
       ['loadDrive', 'loadDriveIfStale', 'deleteDriveScene'],
       repositoriesModel,
-      ['loadRepositoriesIfStale', 'loadRepositories'],
+      ['loadRepositoriesIfStale', 'loadRepositories', 'refreshRepository'],
       templatesModel,
       ['loadTemplatesIfStale', 'loadTemplates', 'removeTemplate', 'exportTemplate', 'updateTemplate'],
     ],
   })),
   actions({
     setStoreSort: (sort: StoreSort) => ({ sort }),
+    /** The store page's Refresh: the catalog as the store has it now. */
+    refreshStore: true,
     setRoute: (page: string | null, category: string | null, visibility: string | null, frame: string | null) => ({
       page,
       category,
@@ -330,6 +339,16 @@ export const scenesLibraryLogic = kea<scenesLibraryLogicType>([
     ],
   }),
   listeners(({ actions, values }) => ({
+    refreshStore: () => {
+      const trackedIds = trackedStoreRepositoryIds(values.repositories)
+      if (trackedIds.length === 0) {
+        actions.loadRepositories()
+        return
+      }
+      for (const id of trackedIds) {
+        actions.refreshRepository(id)
+      }
+    },
     saveEditTemplate: async () => {
       const form = values.editTemplateForm
       if (!form) {
