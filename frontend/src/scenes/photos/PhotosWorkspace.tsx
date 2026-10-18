@@ -1123,29 +1123,71 @@ function SelectionBar(): JSX.Element | null {
   )
 }
 
-function EmptyFolder({ isRoot }: { isRoot: boolean }): JSX.Element {
+const PHOTOS_FEATURES = [
+  {
+    icon: ComputerDesktopIcon,
+    title: 'One album, many frames',
+    text: 'Install an album on one frame or ten. Photos you add later show up on all of them.',
+  },
+  {
+    icon: PaintBrushIcon,
+    title: 'Colors per photo',
+    text: 'Set exposure, white balance and tints for each photo, previewed the way your panel will show it.',
+  },
+  {
+    icon: LinkIcon,
+    title: 'Private share links',
+    text: "Frames fetch one photo at a time through the album's own link, never with your login.",
+  },
+]
+
+function PhotosIntro(): JSX.Element {
   const { openNewFolder } = useActions(photosLogic)
+  const where = isCloudMode() ? 'in FrameOS Cloud' : 'on your FrameOS server'
+  return (
+    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-5 px-6 py-10 text-center">
+      <span className="frameos-icon-tile flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+        <PhotoIcon className="h-8 w-8" />
+      </span>
+      <div className="space-y-2">
+        <div className="frameos-strong text-lg font-semibold">Photo albums for your frames</div>
+        <p className="frameos-muted mx-auto max-w-md text-sm">
+          Albums keep your photos {where} and share them with one or many frames. Make an album, drop photos on it, then
+          install it on a frame.
+        </p>
+      </div>
+      <ul className="grid w-full max-w-2xl gap-3 text-left sm:grid-cols-3">
+        {PHOTOS_FEATURES.map(({ icon: Icon, title, text }) => (
+          <li key={title} className="frameos-card rounded-2xl border border-white/90 bg-white/80 p-4 shadow-sm">
+            <Icon className="frameos-muted h-5 w-5" />
+            <div className="frameos-strong mt-2 text-sm font-semibold">{title}</div>
+            <p className="frameos-muted mt-1 text-xs">{text}</p>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        onClick={() => openNewFolder('')}
+        className={clsx(toolbarButtonClassName, 'frameos-primary-action text-white')}
+      >
+        <FolderPlusIcon className="h-5 w-5" />
+        New album
+      </button>
+    </div>
+  )
+}
+
+function EmptyFolder({ isRoot }: { isRoot: boolean }): JSX.Element {
+  if (isRoot) {
+    return <PhotosIntro />
+  }
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 px-6 text-center">
       <span className="frameos-icon-tile flex h-16 w-16 items-center justify-center rounded-full bg-slate-100 text-slate-400">
         <PhotoIcon className="h-8 w-8" />
       </span>
-      <div className="frameos-strong text-lg font-semibold">{isRoot ? 'No photos yet' : 'This folder is empty'}</div>
-      <p className="frameos-muted max-w-sm text-sm">
-        {isRoot
-          ? 'Make an album, then drop photos on it. Albums play on any frame with Install on frame.'
-          : 'Drop photos or folders here, or use Upload.'}
-      </p>
-      {isRoot ? (
-        <button
-          type="button"
-          onClick={() => openNewFolder('')}
-          className={clsx(toolbarButtonClassName, 'frameos-primary-action text-white')}
-        >
-          <FolderPlusIcon className="h-5 w-5" />
-          New album
-        </button>
-      ) : null}
+      <div className="frameos-strong text-lg font-semibold">This folder is empty</div>
+      <p className="frameos-muted max-w-sm text-sm">Drop photos or folders here, or use Upload.</p>
     </div>
   )
 }
@@ -1577,7 +1619,8 @@ function Lightbox(): JSX.Element | null {
         </div>
         {isBrowserImageName(lightboxEntry.name) ? (
           <>
-            <PreviewTargetSelect overlay />
+            {/* Panel previews belong to the color editor; without it the photo is shown as it is. */}
+            {editing ? <PreviewTargetSelect overlay /> : null}
             <button
               type="button"
               title={lightboxEntry.colors ? 'Edit colors' : 'Set colors'}

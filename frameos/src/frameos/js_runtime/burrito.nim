@@ -730,9 +730,20 @@ proc describeJsError*(errorMsg: string): string =
     return errorMsg & SceneHeapBudgetNote
   errorMsg
 
+proc secondsText(ms: int): string =
+  if ms mod 1000 == 0: $(ms div 1000) & " s"
+  else: formatFloat(ms.float / 1000.0, ffDecimal, 1) & " s"
+
 proc deadlineTripMessage*(budgetMs: int, wallClock: bool): string =
   if wallClock:
-    "render exceeded its " & $budgetMs & "ms wall-clock deadline (native calls such as HTTP included) and was interrupted"
+    # Name the slow request when there was one: a stalled server or weak
+    # Wi-Fi is what usually eats this limit, not the script.
+    let wait = slowestNativeWait()
+    let limit = "render stopped at its " & secondsText(budgetMs) & " time limit"
+    if wait.label.len > 0 and wait.ms >= max(5_000, budgetMs div 4):
+      limit & " after waiting " & secondsText(wait.ms div 1000 * 1000) & " for " & wait.label
+    else:
+      limit & " (scene code and downloads count toward it)"
   else:
     "JavaScript execution exceeded its " & $budgetMs & "ms time budget and was interrupted"
 

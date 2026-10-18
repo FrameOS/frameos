@@ -205,8 +205,9 @@ void frameos_nim_flush_logs(void);
 /* Outbound HTTP(S) for the Nim side (apps, frameos.fetchText in JS apps):
  * esp_http_client + cert bundle. Returns a malloc'd body (caller frees with
  * fos_nim_http_free), sets *out_status and *out_len. Transport and size
- * errors are returned as HTTP-like status 599 with a short diagnostic body;
- * NULL is reserved for allocation failures before an error body can be made. */
+ * errors come back as status 0 with a short reason as the body ("Could not
+ * connect to example.com"); NULL is reserved for allocation failures before
+ * an error body can be made. */
 uint8_t *fos_nim_http_request(const char *method, const char *url,
                               const void *body, size_t body_len,
                               const char *headers, size_t headers_len,
@@ -218,7 +219,7 @@ void fos_nim_http_free(void *ptr);
  * PSRAM chunks, so no download ever needs one large contiguous allocation.
  * Image decoders consume the chunks as segments. Free the array and its
  * buffers with fos_nim_http_free_chunks. Error semantics match
- * fos_nim_http_request (single status-599 chunk with a diagnostic body). */
+ * fos_nim_http_request (single status-0 chunk holding the reason). */
 typedef struct {
     uint8_t *data;
     size_t len;
@@ -278,6 +279,9 @@ fos_nim_http_stream *fos_nim_http_stream_open(
 /* > 0 bytes read, 0 at end of body, < 0 on a transport error. */
 int fos_nim_http_stream_read(fos_nim_http_stream *stream, void *buf, size_t len);
 void fos_nim_http_stream_close(fos_nim_http_stream *stream);
+/* Scene requests whose first connect was refused at once and retried
+ * (the metrics line's httpConnectRetries, with the firmware's own). */
+uint32_t fos_nim_http_connect_retries(void);
 
 #ifdef __cplusplus
 }

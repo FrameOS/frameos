@@ -27,6 +27,7 @@ import {
   isValidEd25519PublicKey,
   redeemClaimToken,
 } from "../../../../src/lib/frames";
+import { notifyFrameAdded } from "../../../../src/lib/activity-notifications";
 import { accountLimits, countCloudRenderedFramesForAccount, hardwareIsCloudRendered } from "../../../../src/lib/usage";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { createEncryptedSecretToken, hashSecret } from "../../../../src/lib/secrets";
@@ -419,6 +420,17 @@ async function enrollWithClaimToken(
       linkedClientId: result.frame.linkedClientId,
     },
   });
+  // A pending frame is "added" when its owner confirms it (confirm route).
+  if (result.frame.status === "active") {
+    void notifyFrameAdded({
+      accountId: result.frame.accountId,
+      frameId: result.frame.id,
+      frameosVersion: result.frame.frameosVersion,
+      hardware: result.frame.hardware,
+      name: result.frame.name,
+      via: "claim_token",
+    });
+  }
 
   // A single-use enrollment is born active, so the provisioning scene copy
   // ("start with the scenes from <that frame>") runs here instead of at the
@@ -807,6 +819,14 @@ async function enrollLinkedFrame(
     eventType: "frame.enrolled",
     metadata: { via: "device_flow" },
     target: { frameId: frame.id, linkedClientId: linkedClient.id },
+  });
+  void notifyFrameAdded({
+    accountId: linkedClient.accountId,
+    frameId: frame.id,
+    frameosVersion: frame.frameosVersion,
+    hardware: frame.hardware,
+    name: frame.name,
+    via: "device_flow",
   });
 
   return NextResponse.json({

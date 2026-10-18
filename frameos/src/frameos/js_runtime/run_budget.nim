@@ -61,6 +61,8 @@ var
   dispatchBudgetRemaining {.threadvar.}: int
   dispatchBudgetTotal {.threadvar.}: int
   dispatchBudgetExhaustedLogged {.threadvar.}: bool
+  slowestWaitLabel {.threadvar.}: string ## e.g. "api.unsplash.com", for the trip message
+  slowestWaitMs {.threadvar.}: int
 
 proc armRenderDeadline*(budgetMs: int, hardCeilingMs = RenderDeadlineHardCeilingMs): bool =
   ## Start the wall clock for this run. Returns true when this call armed it
@@ -72,6 +74,8 @@ proc armRenderDeadline*(budgetMs: int, hardCeilingMs = RenderDeadlineHardCeiling
     return false
   renderDeadlineArmed = true
   renderDeadlineBudget = budgetMs
+  slowestWaitLabel = ""
+  slowestWaitMs = 0
   let now = getMonoTime()
   renderDeadlineAt = now + initDuration(milliseconds = budgetMs)
   renderDeadlineHardAt = now + initDuration(milliseconds = max(budgetMs, hardCeilingMs))
@@ -111,11 +115,29 @@ proc resetRunBudgets*() =
   ## these never ran, and an armed deadline is never re-armed: every later run
   ## rode on the aborted run's clock and tripped as soon as it had passed.
   disarmRenderDeadline()
+  slowestWaitLabel = ""
+  slowestWaitMs = 0
   dispatchBudgetTotal = 0
   dispatchBudgetRemaining = 0
   dispatchBudgetExhaustedLogged = false
 
 proc renderDeadlineArmedNow*(): bool = renderDeadlineArmed
+
+proc noteSlowerWait*(elapsedMs: int): bool =
+  ## Whether a blocking call that took `elapsedMs` is the longest of this run
+  ## so far, so the caller only builds a label when it will be kept.
+  renderDeadlineArmed and elapsedMs > slowestWaitMs
+
+proc noteNativeWait*(label: string, elapsedMs: int) =
+  ## A blocking call (an HTTP request, a download) took `elapsedMs`. When the
+  ## deadline trips, the longest one is named in the message: a stalled
+  ## server reads very differently from a slow script.
+  if noteSlowerWait(elapsedMs):
+    slowestWaitMs = elapsedMs
+    slowestWaitLabel = label
+
+proc slowestNativeWait*(): tuple[label: string, ms: int] =
+  (slowestWaitLabel, slowestWaitMs)
 
 proc renderDeadlineBudgetMs*(): int =
   if renderDeadlineArmed: renderDeadlineBudget else: 0

@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { frames } from "@frameos-cloud/db";
+import { notifyFrameAdded } from "../../../../../src/lib/activity-notifications";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "../../../../../src/lib/csrf";
@@ -69,6 +70,14 @@ export async function POST(
       },
       eventType: "frame.confirmed",
       target: { frameId: frame.id },
+    });
+    void notifyFrameAdded({
+      accountId: session.accountId,
+      frameId: frame.id,
+      frameosVersion: frame.frameosVersion,
+      hardware: frame.hardware,
+      name: frame.name,
+      via: "confirm",
     });
     await applyProvisioningScenes(db, {
       accountId: session.accountId,

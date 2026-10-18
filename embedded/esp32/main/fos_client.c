@@ -264,7 +264,8 @@ static void log_metrics_sample(void)
         (unsigned)uxTaskGetStackHighWaterMark(NULL),
         (unsigned)fos_cloud_task_stack_free(),
         fos_wifi_rssi(), (unsigned long)s_render_count, s_last_render_ms,
-        fos_scenes_loaded(), (unsigned long)fos_http_connect_retries());
+        fos_scenes_loaded(),
+        (unsigned long)(fos_http_connect_retries() + fos_nim_http_connect_retries()));
     if (battery_pct >= 0 && used < sizeof(json) - 128) {
         /* onBattery is the same "cell present" test the deep-sleep decision
          * uses, so a provider can tell whether deep_sleep_on_battery is in

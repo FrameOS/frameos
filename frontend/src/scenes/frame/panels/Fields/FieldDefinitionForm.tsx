@@ -7,22 +7,12 @@ import { TextInput } from '../../../../components/TextInput'
 import { appConfigFieldTypes, type AppConfigField, type StateField } from '../../../../types'
 import { Button } from '../../../../components/Button'
 import { ShowIfEditor, type ShowIfConditions } from './ShowIfEditor'
+import { codenameToLabel } from '../../../../utils/appConfigForm'
 import {
   REFRESH_INTERVAL_LABEL,
   REFRESH_INTERVAL_ROLE,
   refreshIntervalFieldIndex,
 } from '../../../../utils/refreshInterval'
-
-export function codenameToLabel(codename: string): string {
-  const label = codename
-    .replace(/[_-]+/g, ' ')
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .toLowerCase()
-  return label ? label.charAt(0).toUpperCase() + label.slice(1) : ''
-}
 
 /**
  * "Use as refresh interval": at most one state field carries the role. A

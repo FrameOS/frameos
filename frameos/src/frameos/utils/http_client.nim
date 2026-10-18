@@ -24,7 +24,7 @@ const
   DefaultFetchMaxSeconds* = 35.0
   DefaultFetchMaxRedirects* = 5
 
-import std/strutils
+import std/[monotimes, strutils, times]
 import frameos/js_runtime/run_budget
 import frameos/spool
 
@@ -89,6 +89,34 @@ proc validateHttpRequestUrl*(url: string) =
   let lowered = url.toLowerAscii()
   if not (lowered.startsWith("http://") or lowered.startsWith("https://")):
     raise newException(ValueError, "Invalid HTTP URL: " & url)
+
+proc httpHostOf*(url: string): string =
+  ## The host of `url`, for messages a person reads.
+  var rest = url
+  let scheme = rest.find("://")
+  if scheme >= 0:
+    rest = rest[scheme + 3 .. ^1]
+  for i, ch in rest:
+    if ch in {'/', '?', '#'}:
+      rest = rest[0 ..< i]
+      break
+  let at = rest.rfind('@')
+  if at >= 0:
+    rest = rest[at + 1 .. ^1]
+  if rest.startsWith("["):
+    let close = rest.find(']')
+    if close > 0:
+      return rest[0 .. close]
+  let colon = rest.find(':')
+  if colon >= 0:
+    rest = rest[0 ..< colon]
+  if rest.len > 0: rest else: url
+
+proc noteHttpWait(what, url: string, startedAt: MonoTime) =
+  ## Lets the render deadline name the request that ate its time.
+  let ms = int((getMonoTime() - startedAt).inMilliseconds)
+  if noteSlowerWait(ms):
+    noteNativeWait(what & " " & httpHostOf(url), ms)
 
 when defined(frameosEmbedded) or defined(frameosWasm):
   import std/strformat
@@ -256,10 +284,12 @@ when defined(frameosEmbedded) or defined(frameosWasm):
         prefixPos: int
         consumed: int64       ## bytes handed out past the retained prefix;
                               ## once > 0 a rewind must reopen the request
+        openedAt: MonoTime
 
     proc closeHttpBodyStream*(stream: HttpBodyStream) =
       if stream.isNil or stream.handle == nil:
         return
+      noteHttpWait("the download from", stream.url, stream.openedAt)
       let held = heldStreams.find(stream.handle)
       if held >= 0:
         heldStreams.del(held)
@@ -272,6 +302,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       # 224: the whole "local network access is off" sentence (frameos_nim_glue.c).
       var errBuf = newString(224)
       let headerPtr = if stream.headerBlock.len > 0: unsafeAddr stream.headerBlock[0] else: nil
+      stream.openedAt = getMonoTime()
       stream.handle = fos_nim_http_stream_open(stream.url.cstring, headerPtr,
         stream.headerBlock.len.csize_t, stream.timeoutMs.cint, addr status,
         addr contentLength, errBuf.cstring, errBuf.len.csize_t)
@@ -281,10 +312,10 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       stream.prefixPos = 0
       stream.consumed = 0
       if stream.handle == nil:
+        noteHttpWait("a reply from", stream.url, stream.openedAt)
         let detail = $errBuf.cstring
         raise newException(IOError,
-          "HTTP request failed: " & stream.url &
-          (if detail.len > 0: " (" & detail & ")" else: ""))
+          if detail.len > 0: detail else: "HTTP request failed: " & stream.url)
       stream.code = status.int
       stream.contentLength = contentLength
 
@@ -433,6 +464,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     let bodyPtr = if body.len > 0: unsafeAddr body[0] else: nil
     let headerBlock = encodeSimpleHeaders(headers)
     let headerPtr = if headerBlock.len > 0: unsafeAddr headerBlock[0] else: nil
+    let startedAt = getMonoTime()
     when defined(frameosEmbedded):
       var chunkCount: csize_t = 0
       var spillPath: cstring = nil
@@ -443,11 +475,21 @@ when defined(frameosEmbedded) or defined(frameosWasm):
                                      effectiveTimeoutMs.cint, maxBytes.csize_t,
                                      addr status, addr chunkCount,
                                      addr spillPath, addr spillLen)
-      if rawChunks == nil and status == 0:
+      noteHttpWait("a reply from", url, startedAt)
+      if status == 0:
+        # No HTTP response at all: the glue's one chunk is the reason
+        # ("Could not connect to example.com"), raised like the Pi's client
+        # raises, so a scene sees `error` instead of a made-up status.
+        var reason = ""
+        if rawChunks != nil:
+          if chunkCount > 0 and rawChunks[0].len > 0:
+            reason = newString(rawChunks[0].len.int)
+            copyMem(addr reason[0], rawChunks[0].data, rawChunks[0].len.int)
+          fos_nim_http_free_chunks(rawChunks, chunkCount)
         if spillPath != nil:
           discard c_remove(spillPath)
           fos_nim_http_free(spillPath)
-        raise newException(IOError, &"HTTP request failed: {url}")
+        raise newException(IOError, if reason.len > 0: reason else: &"HTTP request failed: {url}")
       if rawChunks != nil:
         heldBodyChunks.add((cast[pointer](rawChunks), chunkCount))
       result.code = status.int
@@ -479,8 +521,15 @@ when defined(frameosEmbedded) or defined(frameosWasm):
                                      headerPtr, headerBlock.len.csize_t,
                                      effectiveTimeoutMs.cint, maxBytes.csize_t,
                                      addr status, addr outLen)
-      if buf == nil and status == 0:
-        raise newException(IOError, &"HTTP request failed: {url}")
+      noteHttpWait("a reply from", url, startedAt)
+      if status == 0:
+        var reason = ""
+        if buf != nil:
+          if outLen > 0:
+            reason = newString(outLen.int)
+            copyMem(addr reason[0], buf, outLen.int)
+          fos_nim_http_free(buf)
+        raise newException(IOError, if reason.len > 0: reason else: &"HTTP request failed: {url}")
       result.code = status.int
       result.status = $status
       result.body = buf
@@ -1129,6 +1178,8 @@ else:
     validateHttpUrl(url)
     validateRequestHeaders(headers)
     let deadline = if maxSeconds > 0: epochTime() + maxSeconds else: 0.0
+    let startedAt = getMonoTime()
+    defer: noteHttpWait("a reply from", url, startedAt)
     var currentUrl = url
     var currentMethod = httpMethod
     var currentBody = body
