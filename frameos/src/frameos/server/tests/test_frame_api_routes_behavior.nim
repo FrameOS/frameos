@@ -385,6 +385,49 @@ suite "frame api route behavior":
       else:
         delEnv("FRAMEOS_SCENES_JSON")
 
+  test "frame update refuses an assets path outside the asset roots":
+    # Scenes and the asset routes write into the assets folder: pointed at the
+    # runtime's own, an upload could rewrite state/local_access.json.
+    drainEventChannel()
+    let tempRoot = getTempDir() / "frameos-frame-api-assets-path"
+    createDir(tempRoot)
+    let configPath = tempRoot / "frame.json"
+    writeFile(configPath, "{}")
+    let hadConfigEnv = existsEnv("FRAMEOS_CONFIG")
+    let oldConfigEnv = if hadConfigEnv: getEnv("FRAMEOS_CONFIG") else: ""
+    try:
+      putEnv("FRAMEOS_CONFIG", configPath)
+      var config = defaultFrameConfig()
+      config.frameAdminAuth = %*{"enabled": true, "user": "admin", "pass": "secret"}
+      configureServerState(config)
+      let login = httpRequest(server.port, "POST", "/api/admin/login",
+        headers = [("Content-Type", "application/json")],
+        body = $(%*{"username": "admin", "password": "secret"}))
+      let adminCookie = adminCookieFrom(login)
+      for path in ["/srv/frameos/state", "state", "/srv/assets/../frameos"]:
+        let response = httpRequest(server.port, "POST", "/api/frames/1",
+          headers = [("Content-Type", "application/json"), ("Cookie", adminCookie)],
+          body = $(%*{"assets_path": path}))
+        checkpoint(path)
+        check response.status == 400
+        check parseJson(response.body)["detail"].getStr() == AssetsPathRule
+      # Nothing was written.
+      check readFile(configPath) == "{}"
+      # A folder frame.json already names is left alone: the admin page
+      # re-sends it with every save.
+      writeFile(configPath, $(%*{"assetsPath": "/home/pi/assets"}))
+      let unchanged = httpRequest(server.port, "POST", "/api/frames/1",
+        headers = [("Content-Type", "application/json"), ("Cookie", adminCookie)],
+        body = $(%*{"assets_path": "/home/pi/assets/", "skip_runtime_reload": true}))
+      check unchanged.status == 200
+      let other = httpRequest(server.port, "POST", "/api/frames/1",
+        headers = [("Content-Type", "application/json"), ("Cookie", adminCookie)],
+        body = $(%*{"assets_path": "/home/pi/elsewhere"}))
+      check other.status == 400
+    finally:
+      if hadConfigEnv: putEnv("FRAMEOS_CONFIG", oldConfigEnv) else: delEnv("FRAMEOS_CONFIG")
+      removeDir(tempRoot)
+
   test "settings endpoint exposes and updates editable service settings only":
     let tempRoot = getTempDir() / "frameos-frame-api-settings"
     if dirExists(tempRoot):

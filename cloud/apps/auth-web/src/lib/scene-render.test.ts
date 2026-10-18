@@ -1,7 +1,11 @@
+import { spawnSync } from "node:child_process";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import {
   acquireRenderSlot,
   encodePng,
+  fetchChildScript,
   isRenderErrorLine,
   maxQueuedRendersPerOwner,
   rendererAvailable,
@@ -38,6 +42,35 @@ describe("isRenderErrorLine", () => {
     expect(isRenderErrorLine('{"event":"render:done"}')).toBe(false);
     expect(isRenderErrorLine("http error while fetching")).toBe(true);
     expect(isRenderErrorLine("scene initialized")).toBe(false);
+  });
+});
+
+describe("the HTTP child's host check", () => {
+  // The check is the socket's own lookup, so a name that answers public to a
+  // first lookup cannot answer private to the connect's (DNS rebinding).
+  // `localhost` is the one name a test resolves without the network.
+  function fetchInChild(url: string): { status: number; error?: string } {
+    const child = spawnSync(process.execPath, ["-e", fetchChildScript], {
+      encoding: "utf-8",
+      input: JSON.stringify({ method: "GET", url }),
+      timeout: 15_000,
+    });
+    return JSON.parse(child.stdout) as { status: number; error?: string };
+  }
+
+  it("refuses a name or a literal that is private, at connect time", async () => {
+    const server: Server = createServer((_request, response) => response.end("internal"));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+    try {
+      for (const url of [`http://localhost:${port}/`, `http://127.0.0.1:${port}/`, `http://[::1]:${port}/`]) {
+        const result = fetchInChild(url);
+        expect(result.status, url).toBe(0);
+        expect(result.error, url).toContain("host not allowed");
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
 

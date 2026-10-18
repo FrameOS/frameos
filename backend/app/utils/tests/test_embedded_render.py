@@ -1,4 +1,7 @@
 import asyncio
+import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -100,3 +103,44 @@ async def test_render_queue_refuses_past_the_waiter_cap(monkeypatch, tmp_path):
     assert all(result == b"\x00" * 16 for result in results)
     assert embedded_render.render_queue_depth() == 0
     assert await render() == b"\x00" * 16
+
+
+# The renderer's HTTP child checks the address its socket connects to (its
+# own lookup), not a lookup made before the request: a name checked once and
+# resolved again by fetch could answer the second query with a private
+# address (DNS rebinding). `localhost` is the one name a test resolves without
+# the network; nothing is listening on the port, so a request that got past
+# the check would fail with a connection error instead.
+_CHILD_RUNNER = r"""
+const { readFileSync } = require('node:fs');
+const { spawnSync } = require('node:child_process');
+const source = readFileSync(process.argv[1], 'utf-8');
+const literal = source.split('const FETCH_CHILD_SCRIPT = `')[1].split('\n`\n\n// Set once')[0];
+const script = new Function('return `' + literal + '\n`')();
+const results = JSON.parse(process.argv[2]).map((req) => {
+  const child = spawnSync(process.execPath, ['-e', script], { input: JSON.stringify(req), encoding: 'utf-8', timeout: 15000 });
+  return JSON.parse(child.stdout || '{}');
+});
+process.stdout.write(JSON.stringify(results));
+"""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="no node on PATH")
+def test_renderer_http_child_checks_what_the_socket_connects_to():
+    script = Path(__file__).resolve().parents[3] / "tools" / "embedded_wasm_render.mjs"
+    requests = [
+        {"method": "GET", "url": "http://localhost:9/"},
+        {"method": "GET", "url": "http://127.0.0.1:9/"},
+        {"method": "GET", "url": "http://metadata.google.internal/", "allowLocalNetwork": True},
+    ]
+    completed = subprocess.run(
+        ["node", "-e", _CHILD_RUNNER, str(script), json.dumps(requests)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    name, literal, metadata = json.loads(completed.stdout)
+    assert name["status"] == 0 and "local network access is off" in name["error"]
+    assert literal["status"] == 0 and "local network access is off" in literal["error"]
+    assert metadata["status"] == 0 and "cloud metadata address" in metadata["error"]

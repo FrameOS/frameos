@@ -484,6 +484,15 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
         # response says what happened under `apply`, which is how the admin
         # page knows to follow the frame to a new port or scheme.
         let preview = previewFrameApiUpdate(payload)
+        # A new assets folder must be inside the asset roots (config.nim,
+        # AssetsPathRoots). The folder frame.json already names is left
+        # alone: the admin page sends the whole form, unchanged fields too.
+        let assetsPath = payload{"assets_path"}.getStr("").strip()
+        if assetsPath.len > 0 and not assetsPathAllowed(assetsPath) and
+            assetsPath.strip(leading = false, chars = {'/'}) !=
+              preview.existing{"assetsPath"}.getStr("").strip().strip(leading = false, chars = {'/'}):
+          jsonResponse(request, Http400, %*{"detail": AssetsPathRule})
+          return
         var listenerResult = ListenerApplyResult(ok: true, listeners: activeListenerSpecs())
         if preview.change.listeners:
           listenerResult = applyListenerPlan(parseFrameConfig($preview.next))

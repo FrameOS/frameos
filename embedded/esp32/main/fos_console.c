@@ -837,7 +837,13 @@ static int cmd_set(int argc, char **argv)
         printf("unknown key \"%s\"\n", key);
         return 1;
     }
-    fos_config_save();
+    /* Said, not assumed: a value that did not reach NVS is gone at the next
+     * restart (allow_local_network 0 would come back as it was). */
+    esp_err_t err = fos_config_save();
+    if (err != ESP_OK) {
+        printf("error: %s is set until the next restart but was NOT saved: %s\n", key, esp_err_to_name(err));
+        return 1;
+    }
     printf("ok: %s set (some settings need `restart`)\n", key);
     return 0;
 }
@@ -851,7 +857,11 @@ static int cmd_wifi(int argc, char **argv)
     fos_config_t *config = fos_config();
     strlcpy(config->wifi_ssid, argv[1], sizeof(config->wifi_ssid));
     strlcpy(config->wifi_pass, argc > 2 ? argv[2] : "", sizeof(config->wifi_pass));
-    fos_config_save();
+    esp_err_t err = fos_config_save();
+    if (err != ESP_OK) {
+        printf("error: wifi credentials were NOT saved (%s); not restarting\n", esp_err_to_name(err));
+        return 1;
+    }
     printf("wifi credentials saved, restarting...\n");
     esp_restart();
     return 0;

@@ -46,8 +46,9 @@ Two rules that shape most entries:
 The 4 MB and 8 MB partition tables give NVS 16 KB (3 usable pages × 126
 entries); the 16/32 MB tables give 24 KB. The backend issues P-256 server
 keys (≈ 1 KB of PEM), the Wi-Fi driver keeps its config in RAM and `status`
-prints `nvs: used/total`, so a board should no longer fill up. Only if one
-does:
+prints `nvs: used/total`, and the service-settings cache skips itself
+rather than leave the config fewer than 192 free entries (`fos_settings.c`),
+so a board should no longer fill up. Only if one does:
 
 - [ ] **Store the TLS pair as DER, not PEM**, on the device (`nvs_set_pem`):
   another ~30 %.

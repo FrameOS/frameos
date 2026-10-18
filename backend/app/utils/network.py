@@ -4,8 +4,11 @@ import asyncio
 import ipaddress
 import re
 import socket
+import typing
 from urllib.parse import urlparse
 
+import httpcore
+import httpx
 from fastapi import HTTPException
 
 from app import config as app_config
@@ -56,9 +59,13 @@ def is_safe_host(host: str) -> bool:
 # legitimately live on the LAN — and the live-preview proxy passes
 # `allow_private=False` because it is a general-purpose HTTP relay.
 #
-# DNS is resolved once, here; a rebind between the check and the connect is
-# a residual risk accepted for project-authenticated features. Frame hosts
-# are IP literals in practice, which have no such window.
+# The checks below answer early, with a clear 403. The check that holds is
+# the connect's own (guarded_transport): a name checked here and resolved
+# again by the HTTP client can answer the second query with a private address
+# (DNS rebinding), so every fetch of a URL a user or a page supplied goes
+# through a client whose sockets only ever connect to an address that has just
+# been checked. Frame hosts are IP literals in practice, which have no such
+# window.
 # --------------------------------------------------------------------------
 
 
@@ -174,6 +181,99 @@ async def assert_url_target_allowed(url: str, *, allow_private: bool = True, wha
         raise HTTPException(status_code=400, detail=f"{what} must be an http(s) URL")
     await assert_target_allowed(parsed.hostname, allow_private=allow_private, what=f"{what} host")
     return parsed.hostname
+
+
+class _GuardedNetworkBackend(httpcore.AsyncNetworkBackend):
+    """httpcore's network backend with the outbound check in connect_tcp: the
+    host is resolved and every address checked, and the socket connects to
+    one of those addresses, never to a second answer. TLS still verifies and
+    sends SNI for the host name (httpcore starts TLS on this stream with the
+    request's host)."""
+
+    def __init__(self, *, allow_private: bool, allow_loopback: bool | None, private_hosts: frozenset[str]) -> None:
+        self._inner = httpcore.AnyIOBackend()
+        self._allow_private = allow_private
+        self._allow_loopback = allow_loopback
+        self._private_hosts = private_hosts
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: typing.Iterable[httpcore.SOCKET_OPTION] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        trusted = host.lower() in self._private_hosts
+        allow_private = True if trusted else self._allow_private
+        allow_loopback = None if trusted else self._allow_loopback
+        try:
+            if not host or not is_safe_host(host.strip("[]")):
+                raise TargetBlocked(host or "", "not a valid host name or address")
+            # Resolved once: these are the addresses checked, and the only
+            # ones connected to.
+            addresses = await resolve_target(host)
+            for address in addresses:
+                reason = address_block_reason(address, allow_private=allow_private, allow_loopback=allow_loopback)
+                if reason:
+                    raise TargetBlocked(host, f"resolves to a {reason} ({address})")
+        except TargetBlocked as exc:
+            raise httpcore.ConnectError(f"Target host is not allowed: {exc}") from exc
+        last_error: Exception | None = None
+        for address in addresses:
+            try:
+                return await self._inner.connect_tcp(
+                    str(address), port, timeout=timeout, local_address=local_address, socket_options=socket_options
+                )
+            except httpcore.ConnectError as exc:
+                last_error = exc
+        raise last_error or httpcore.ConnectError(f"{host}: no address to connect to")
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: typing.Iterable[httpcore.SOCKET_OPTION] | None = None,
+    ) -> httpcore.AsyncNetworkStream:
+        raise httpcore.ConnectError("unix sockets are not an outbound target")
+
+    async def sleep(self, seconds: float) -> None:
+        await self._inner.sleep(seconds)
+
+
+class _GuardedTransport(httpx.AsyncHTTPTransport):
+    def __init__(self, backend: _GuardedNetworkBackend) -> None:
+        super().__init__()
+        # httpx's own defaults (Limits()), on a pool that connects through
+        # the guarded backend.
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=httpx.create_ssl_context(),
+            max_connections=100,
+            max_keepalive_connections=20,
+            keepalive_expiry=5.0,
+            network_backend=backend,
+        )
+
+
+def guarded_transport(
+    *,
+    allow_private: bool = True,
+    allow_loopback: bool | None = None,
+    private_hosts: typing.Iterable[str] = (),
+) -> httpx.AsyncHTTPTransport:
+    """An httpx transport for fetching user- or page-supplied URLs: every
+    connection, redirects included, goes to an address that passed
+    `check_target_host` with these settings at connect time. A host in
+    `private_hosts` gets the defaults instead (private allowed, loopback per
+    config): a LAN repository's own redirects, say, while every other host
+    must be public."""
+    return _GuardedTransport(
+        _GuardedNetworkBackend(
+            allow_private=allow_private,
+            allow_loopback=allow_loopback,
+            private_hosts=frozenset(host.lower() for host in private_hosts),
+        )
+    )
 
 
 def device_server_host_error(host: str, *, allow_loopback: bool = True) -> str | None:

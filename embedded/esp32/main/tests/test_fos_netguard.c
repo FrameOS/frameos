@@ -474,6 +474,19 @@ static void test_pin(void)
     verdict = fos_netguard_check_url_pinned("https://gallery.example/", reason, sizeof(reason), &pin);
     CHECK(verdict == FOS_NETGUARD_ALLOWED && !pin.active, "policy off: nothing resolved or pinned");
 
+    /* The frame's own fetch of a URL someone else chose (an OTA downloadUrl
+     * off the control plane's origin): public only, whatever the scene
+     * policy says, and no exemption. */
+    CHECK(fos_netguard_set_exempt("rebind.example", 80), "exempt should be stored");
+    verdict = fos_netguard_check_public_url("http://rebind.example/fw.bin", reason, sizeof(reason), &pin);
+    CHECK(verdict == FOS_NETGUARD_BLOCKED && !pin.active, "public check, policy off: verdict %d", (int)verdict);
+    verdict = fos_netguard_check_public_url("http://10.0.0.5/fw.bin", reason, sizeof(reason), &pin);
+    CHECK(verdict == FOS_NETGUARD_BLOCKED, "public check, private literal: verdict %d", (int)verdict);
+    verdict = fos_netguard_check_public_url("https://gallery.example/fw.bin", reason, sizeof(reason), &pin);
+    CHECK(verdict == FOS_NETGUARD_ALLOWED && pin.active && pin.v4[0] == 93,
+          "public check, public name: verdict %d, pinned %d", (int)verdict, (int)pin.active);
+    fos_netguard_clear_exempt();
+
     fos_netguard_set_test_getaddrinfo(NULL);
 }
 

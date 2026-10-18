@@ -32,6 +32,7 @@
 #include "fos_config.h"
 #include "fos_http.h"
 #include "fos_minisig.h"
+#include "fos_netguard.h"
 #include "fos_ota_pubkey.h"
 #include "fos_url_guard.h"
 #include "fos_version.h"
@@ -456,7 +457,7 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
 
 static esp_err_t ota_download_verify(const ota_source_t *src, const char *download_url,
                                      const char *auth_header, const uint8_t sig[64],
-                                     size_t expected_size)
+                                     size_t expected_size, const fos_netguard_pin_t *pin)
 {
     const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
     if (target == NULL) {
@@ -488,7 +489,15 @@ static esp_err_t ota_download_verify(const ota_source_t *src, const char *downlo
         esp_http_client_set_header(client, "Authorization", auth_header);
     }
 
+    /* An off-origin download connects to the address its check resolved,
+     * not to a second answer (fos_netguard_pin_t). */
+    if (!fos_netguard_pin_for_task(pin)) {
+        esp_http_client_cleanup(client);
+        ota_log(src, "error", "download-connect-failed:busy");
+        return ESP_FAIL;
+    }
     esp_err_t err = esp_http_client_open(client, 0);
+    fos_netguard_unpin_for_task();
     if (err != ESP_OK) {
         esp_http_client_cleanup(client);
         char detail[80];
@@ -648,7 +657,22 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
         ota_note_failure(manifest.version);
         return ESP_FAIL;
     }
+    /* And off-origin, a public host only: the manifest is signed, but the
+     * URL in it is the control plane's word, and the frame must not be made
+     * to send requests into its own LAN. The control plane's own origin may
+     * be on the LAN (a self-hosted backend). */
+    fos_netguard_pin_t pin = {0};
     if (!first_party) {
+        char where[96];
+        fos_netguard_verdict_t verdict =
+            fos_netguard_check_public_url(manifest.download_url, where, sizeof(where), &pin);
+        if (verdict != FOS_NETGUARD_ALLOWED) {
+            ESP_LOGW(TAG, "ota (%s): refusing downloadUrl: %s", src->plane, where);
+            ota_log(src, "error",
+                    verdict == FOS_NETGUARD_UNRESOLVED ? "download-url-unresolved" : "download-url-private");
+            if (verdict == FOS_NETGUARD_BLOCKED) ota_note_failure(manifest.version);
+            return ESP_FAIL;
+        }
         ESP_LOGI(TAG, "ota (%s): downloadUrl is off-origin; fetching without credentials", src->plane);
     }
     ESP_LOGW(TAG, "ota (%s): %s -> %s from %s", src->plane,
@@ -666,7 +690,7 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
             }
         }
         err = ota_download_verify(src, manifest.download_url, first_party ? src->auth : NULL,
-                                  manifest.sig, manifest.size);
+                                  manifest.sig, manifest.size, &pin);
         if (err == ESP_OK || err == ESP_ERR_INVALID_CRC || err == ESP_ERR_INVALID_SIZE ||
             err == ESP_ERR_NO_MEM) {
             break; /* staged, or a failure no retry can fix */

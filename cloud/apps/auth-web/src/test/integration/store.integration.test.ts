@@ -38,6 +38,14 @@ import { POST as startDevice } from "../../../app/api/device/start/route";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
 
+// The preview proxy fetches through undici with a guarded dispatcher
+// (src/lib/ssrf.ts); routed to the global fetch here so a test can stub the
+// upstream. The connect-time check has its own tests (ssrf.test.ts).
+vi.mock("undici", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("undici")>()),
+  fetch: (input: unknown, init?: RequestInit) => globalThis.fetch(input as string, init),
+}));
+
 const cookieJar = vi.hoisted(() => new Map<string, string>());
 
 // The "My scenes" page renders client components (zip upload, row

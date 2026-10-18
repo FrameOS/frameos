@@ -322,6 +322,9 @@ importers:
       sharp:
         specifier: '>=0.35.0'
         version: 0.35.3(@types/node@25.9.5)
+      undici:
+        specifier: 7.29.0
+        version: 7.29.0
     devDependencies:
       '@frameos/cloud-frontend':
         specifier: workspace:*

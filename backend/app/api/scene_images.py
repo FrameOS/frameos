@@ -21,7 +21,7 @@ from app.models.scene_image import SceneImage            # created earlier
 from app.models.frame import Frame, frame_has_shell_access
 from app.models.template import Template
 from . import api_open, api_project
-from app.utils.network import TargetBlocked, assert_target_allowed, check_target_host, is_safe_host
+from app.utils.network import TargetBlocked, assert_target_allowed, check_target_host, guarded_transport, is_safe_host
 from app.utils.upload_limits import read_body_limited
 from app.api.auth import get_current_user_from_request
 from app.tenancy import current_project_id, get_user_project
@@ -459,7 +459,10 @@ async def _fetch_repository_image(db: Session, project_id: int, url: str) -> byt
         # to public addresses only (a LAN repository may serve its own covers;
         # nothing gets to point us at somebody else's LAN), and the link token
         # goes to the provider's own URLs only (cloud_headers_for_url).
-        async with httpx.AsyncClient(follow_redirects=False) as client:
+        # The same rule again at every connect (guarded_transport): the
+        # repository's own host may be private, any other must be public.
+        transport = guarded_transport(allow_private=False, allow_loopback=False, private_hosts=[parsed.hostname])
+        async with httpx.AsyncClient(follow_redirects=False, transport=transport) as client:
             current_url = url
             for _ in range(MAX_COPIED_IMAGE_REDIRECTS + 1):
                 response = await client.get(

@@ -74,7 +74,12 @@ async def test_repository_update_templates(db, default_project, monkeypatch):
     assert repo.description == "A sample repository"
     assert len(repo.templates) == 1
 
-    assert calls == [("init", {"timeout": 10}), ("GET", "http://example.com/repo")]
+    assert calls[1:] == [("GET", "http://example.com/repo")]
+    kind, init_kwargs = calls[0]
+    assert kind == "init" and init_kwargs["timeout"] == 10
+    # Connected through the outbound guard, which checks the address it
+    # connects to (app/utils/network.py, guarded_transport).
+    assert type(init_kwargs["transport"]).__name__ == "_GuardedTransport"
 
 
 @pytest.mark.asyncio

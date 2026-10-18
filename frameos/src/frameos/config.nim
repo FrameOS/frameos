@@ -36,6 +36,14 @@ export jsony.fromJson
 const
   DefaultTimeZoneUpdatesUrl* = "https://tz.frameos.net/tzdata.json.gz"
   DefaultAssetsPath* = "/srv/assets"
+  ## Where a NEW assets folder may be: scenes and the asset routes write
+  ## there, so it must never be, or contain, the runtime's own files
+  ## (state/local_access.json, the release, frame.json). Enforced where a
+  ## value is written (server/routes/frame_api_routes.nim, the backend, the
+  ## form), not when frame.json is read: a folder stored before the rule
+  ## keeps working.
+  AssetsPathRoots* = ["/srv/assets", "/mnt", "/media"]
+  AssetsPathRule* = "The assets path must be /srv/assets, /mnt or /media, or a folder inside one of them."
 
 # ---------------------------------------------------------------------------
 # Lenient scalars
@@ -179,6 +187,21 @@ proc postHook*(v: var ControlCode) =
   if v.qrCodeColor.a == 0: v.qrCodeColor = parseHtmlColor("#000000")
   if v.backgroundColor.a == 0: v.backgroundColor = parseHtmlColor("#ffffff")
   if v.position == "": v.position = "top-right"
+
+proc assetsPathAllowed*(path: string): bool =
+  ## AssetsPathRoots, or a folder inside one: absolute, no `.`, `..` or empty
+  ## segments (which could climb out of the root), a trailing slash allowed.
+  ## A relative path would land in the runtime's own folder.
+  let trimmed = path.strip(leading = false, trailing = true, chars = {'/'})
+  if not trimmed.startsWith("/"):
+    return false
+  for segment in trimmed[1 .. ^1].split('/'):
+    if segment.len == 0 or segment == "." or segment == "..":
+      return false
+  for root in AssetsPathRoots:
+    if trimmed == root or trimmed.startsWith(root & "/"):
+      return true
+  false
 
 proc newHook*(v: var NetworkConfig) =
   v = NetworkConfig(

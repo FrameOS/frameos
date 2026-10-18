@@ -46,7 +46,7 @@ class Repository(Base):
         # link-local / reserved targets, no redirects are followed (httpx
         # default) and the body is streamed under a cap. Any failure leaves
         # the cached templates as they were, like a non-200 always did.
-        from app.utils.network import TargetBlocked, check_target_host
+        from app.utils.network import TargetBlocked, check_target_host, guarded_transport
         from app.utils.upload_limits import MAX_REPOSITORY_JSON_BYTES, fetch_body_limited
         from fastapi import HTTPException
         from urllib.parse import urlparse
@@ -59,7 +59,7 @@ class Repository(Base):
         except TargetBlocked:
             return
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, transport=guarded_transport()) as client:
                 content = await fetch_body_limited(client, self.url, MAX_REPOSITORY_JSON_BYTES)
         except (httpx.HTTPError, HTTPException):
             return

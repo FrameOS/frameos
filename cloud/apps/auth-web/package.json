@@ -53,7 +53,8 @@
     "react-markdown": "^10.1.0",
     "react-virtuoso": "^4.6.1",
     "remark-gfm": "^4.0.1",
-    "sharp": "^0.35.3"
+    "sharp": "^0.35.3",
+    "undici": "7.29.0"
   },
   "devDependencies": {
     "@frameos/cloud-frontend": "workspace:*",

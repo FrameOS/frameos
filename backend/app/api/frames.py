@@ -2435,8 +2435,14 @@ async def api_frame_scene_preview_proxy(
     timeout = httpx.Timeout(timeout_seconds, connect=min(timeout_seconds, 15.0))
     try:
         # No redirects: the host check covered the URL the app asked for, not
-        # wherever it might bounce to. The body is streamed under a cap.
-        async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
+        # wherever it might bounce to. The connect is checked again where it
+        # happens (guarded_transport), so a name cannot answer the check with a
+        # public address and the connect with a private one. The body is
+        # streamed under a cap.
+        from app.utils.network import guarded_transport
+
+        transport = guarded_transport(allow_private=False, allow_loopback=False)
+        async with httpx.AsyncClient(follow_redirects=False, timeout=timeout, transport=transport) as client:
             async with client.stream(method, url, headers=forward_headers, content=body_bytes) as upstream:
                 upstream_status = upstream.status_code
                 media_type = upstream.headers.get("content-type", "application/octet-stream")
@@ -4523,6 +4529,19 @@ async def api_frame_update_endpoint(
         crontab_error = reboot_crontab_error(crontab) if isinstance(crontab, str) else "The reboot schedule is not text"
         if crontab_error:
             raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=crontab_error)
+    # A new assets folder for a Linux frame must be inside the asset roots
+    # (app/utils/assets_path.py); the folder the frame already has is left
+    # alone, since the form sends every field. An ESP32 mounts its SD card
+    # there instead.
+    from app.utils.assets_path import ASSETS_PATH_RULE, assets_path_change_allowed
+
+    assets_path_update = update_data.get("assets_path")
+    if (
+        isinstance(assets_path_update, str)
+        and (update_data.get("mode") or frame.mode or "rpios") != "embedded"
+        and not assets_path_change_allowed(assets_path_update, frame.assets_path)
+    ):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=ASSETS_PATH_RULE)
     previous_buildroot_sd_image_fingerprint = (
         buildroot_sd_image_config_fingerprint(frame)
         if (frame.mode or "rpios") == "buildroot"

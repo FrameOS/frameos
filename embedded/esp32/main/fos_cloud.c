@@ -565,7 +565,10 @@ static void erase_claim_token(void)
     fos_config_t *config = fos_config();
     if (!config->claim_token[0]) return;
     memset(config->claim_token, 0, sizeof(config->claim_token));
-    fos_config_save(); /* claim_token == "" erases the NVS key */
+    /* claim_token == "" erases the NVS key. */
+    if (fos_config_save() != ESP_OK) {
+        ESP_LOGW(TAG, "spent claim token not erased from NVS (it is refused server-side anyway)");
+    }
 }
 
 /* Copy a string-or-number JSON field.

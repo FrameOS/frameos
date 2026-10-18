@@ -197,8 +197,25 @@ suite "config parsing (jsony)":
     check js.memoryLimitMb == -1
     check js.assetSandbox == "frame"
 
+  test "assetsPath stays inside the asset roots":
+    # Scenes and the asset routes write there: pointed at the runtime's own
+    # folder, an asset upload could rewrite state/local_access.json.
+    for path in ["/srv/assets", "/srv/assets/", "/srv/assets/photos", "/mnt", "/mnt/usb/frame",
+                 "/media", "/media/pi/USB"]:
+      checkpoint(path)
+      check assetsPathAllowed(path)
+    for path in ["", "/", "/srv", "/srv/frameos", "/srv/frameos/state", "/srv/assets/../frameos",
+                 "/srv/assets/./x", "/srv//assets", "/srv/assetsx", "/mntx", "/media2", "/home/pi/assets",
+                 "/etc", "/boot", "state", "./tmp", "../frameos/assets", "srv/assets"]:
+      checkpoint(path)
+      check not assetsPathAllowed(path)
+
+  test "a stored assetsPath outside the roots is kept: only new values are refused":
+    check parseFrameConfig("""{"assetsPath": "/home/pi/assets/"}""").assetsPath == "/home/pi/assets"
+    check parseFrameConfig("""{"assetsPath": "./tmp"}""").assetsPath == "./tmp"
+
   test "assetsPath loses its trailing slash and defaults when empty":
-    check parseFrameConfig("""{"assetsPath": "/data/assets/"}""").assetsPath == "/data/assets"
+    check parseFrameConfig("""{"assetsPath": "/mnt/assets/"}""").assetsPath == "/mnt/assets"
     check parseFrameConfig("""{"assetsPath": ""}""").assetsPath == "/srv/assets"
     check parseFrameConfig("""{"assetsPath": null}""").assetsPath == "/srv/assets"
 
