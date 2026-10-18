@@ -102,9 +102,8 @@ export function NetworkSection(): JSX.Element {
                         </p>
                         <p>
                           Just connect to &apos;FrameOS-Setup&apos; with the password &apos;frame1234&apos;, open
-                          http://10.42.0.1/ (or wait for the sign-in page to appear) and enter your wifi credentials.
-                          Changing the display, admin or management settings there needs the setup code shown on the
-                          frame, or its admin password. The hotspot will only be active for 5 minutes by default.
+                          http://10.42.0.1/ and enter your wifi credentials. The hotspot will only be active for 10
+                          minutes by default.
                         </p>
                       </div>
                     }

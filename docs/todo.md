@@ -100,45 +100,46 @@ are not atomic; the rule and the helpers (`requestFrameConfig()`,
 not cross threads". `server/` was audited and fixed 2026-09-19 (#503). Left,
 deliberately:
 
+- `portal.nim` as the HTTP workers call it on the setup path
+  (`persistPortalSetup` copies and mutates the live `frameConfig`,
+  `setupHtml` / `setupStatusJson` read it). Only reachable while the setup
+  hotspot is up, when nothing else is running; not audited line by line.
 - The cloud link routes pass `globalFrameConfig` to `startCloudHubClient` /
   `enrollManagedFrame` / `pollDeviceFlow`, which keep it: one owning copy of
   the ROOT per link, never freed (the globals hold it), no closures in the
   type. The proper fix is for the hub client to work on values, as the
   logger and metrics threads already do.
 - Workers still read scalar and string fields straight off the live config
-  (`frameAccess`, `frameAccessKey`, `serverApiKey`, `assetsPath`, `rotate`…;
-  in `portal.nim` the setup-status and confirm pages' `frameHost`,
-  `framePort`, `httpsProxy.enable` and the hotspot SSID, and the connect
-  thread's `networkCheckUrl`). `updateFrameConfigFrom` never frees a
-  payload, so the read cannot land on freed memory, but the swap is a
-  `copyMem` and a string is two words: a reload can in principle tear one.
-  A values snapshot for `auth.nim` (what `AdminAuthValues` is for the admin
-  block) would close it.
+  (`frameAccess`, `frameAccessKey`, `serverApiKey`, `assetsPath`, `rotate`…).
+  `updateFrameConfigFrom` never frees a payload, so the read cannot land on
+  freed memory, but the swap is a `copyMem` and a string is two words: a
+  reload can in principle tear one. A values snapshot for `auth.nim` (what
+  `AdminAuthValues` is for the admin block) would close it.
 
 ---
 
-## Setup hotspot: bench the captive sheet
+## Setup hotspot: captive portal
 
-The captive portal (the dnsmasq drop-in on NetworkManager images, the
-redirect-only listener on `10.42.0.1:80`) and the setup code have not been
-seen on a bench:
+A phone that joins `FrameOS-Setup` should get the OS's "sign in to network"
+sheet with the setup form in it, instead of the owner scanning a second QR
+code. The frame already answers the well-known probe paths and every
+foreign-`Host` request with a 302 to the setup form (`captivePortalRedirect`),
+the armv6 supplicant backend's dnsmasq already resolves every name to
+`10.42.0.1`, and the unit already holds `CAP_NET_BIND_SERVICE`. Two halves
+are missing, and they only work together (DNS without port 80 reads as plain
+"no internet"):
 
-- A phone (iOS and Android) joining `FrameOS-Setup` gets the "sign in to
-  network" sheet with the setup form in it, on a `raspberry-pi-64` /
-  `raspberry-pi-5` image AND on the armv6 supplicant image (whose dnsmasq
-  already answered every name).
-- The "Saved!" page inside that sheet: it is a restricted browser that may
-  not run the page's timers, so the auto-move to the frame's LAN address
-  may not happen there. The page now reads right without script (a link,
-  a `<noscript>` line); if the sheet closes the moment the hotspot drops,
-  the link is what the owner uses. Decide whether the sheet needs a
-  "Done, open the app" step instead.
-- An existing frame flashed before the drop-in: root is read-only, so it
-  gets the DNS half only with a new image. Confirm the portal still works
-  there the old way (two QR codes), with the :80 listener bound but idle.
-- The setup code strip along the bottom of the hotspot screen on a slow
-  e-ink panel (it repaints when the code is spent) and on a small one
-  (4.2", 400x300), where the steps above it get the least room.
+- **DNS on NetworkManager images:** shared mode reads
+  `/etc/NetworkManager/dnsmasq-shared.d/`, so an `address=/#/10.42.0.1`
+  drop-in staged next to the resolved/dropbear ones in
+  `backend/app/tasks/buildroot_image.py` covers `raspberry-pi-64` /
+  `raspberry-pi-5`. Root is read-only, so this is image-time only.
+- **Port 80:** the probes go to port 80 and the hotspot's own listener
+  (`server/hotspot_listener.nim`) takes the first free port from 8000. Give
+  it a second, redirect-only bind on `10.42.0.1:80` for the hotspot's
+  lifetime.
+- Then re-test the "Saved!" auto-move: a captive sheet is a restricted
+  browser that may not run the page's timers.
 
 ---
 

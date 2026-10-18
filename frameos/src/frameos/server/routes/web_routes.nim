@@ -94,23 +94,15 @@ proc hotspotSetupUrl(): string {.gcsafe.} =
 
 proc captivePortalRedirect*(request: Request): bool {.gcsafe.} =
   ## While the setup hotspot is up, any request that is not for the hotspot's
-  ## own address AND port is a connectivity probe, a stray page load from a
-  ## device whose DNS now points everywhere at 10.42.0.1, or a hit on the
-  ## captive listener (10.42.0.1:80, redirect-only): send it to the setup
-  ## form. Returns false when there is nothing to redirect (no hotspot, or
-  ## the request already targets the setup URL by name and port).
+  ## own address is a connectivity probe or a stray page load from a device
+  ## whose DNS now points everywhere at 10.42.0.1: send it to the setup form.
+  ## Returns false when there is nothing to redirect (no hotspot, or the
+  ## request already targets 10.42.0.1 by name).
   {.gcsafe.}:
     if not netportal.isHotspotActive(globalFrameOS):
       return false
-    var host = ""
-    var hostPort = 80
-    if request.headers.contains("Host"):
-      let parts = request.headers["Host"].split(':')
-      host = parts[0].strip()
-      if parts.len > 1:
-        hostPort = try: parseInt(parts[1].strip()) except ValueError: 80
-    if host == "10.42.0.1" and hostPort == hotspotSetupPort(globalFrameOS.frameConfig) and
-        request.path notin captiveProbePaths:
+    let host = if request.headers.contains("Host"): request.headers["Host"].split(':')[0].strip() else: ""
+    if host == "10.42.0.1" and request.path notin captiveProbePaths:
       return false
     var headers: mummy.HttpHeaders
     headers["Location"] = hotspotSetupUrl()
@@ -157,10 +149,6 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
   router.get("/", proc(request: Request) {.gcsafe.} =
     {.gcsafe.}:
       if netportal.isHotspotActive(globalFrameOS):
-        # A hit on the captive listener (10.42.0.1:80) or under a foreign
-        # Host goes to the one setup URL; the form itself is served there.
-        if captivePortalRedirect(request):
-          return
         log(%*{"event": "portal:http", "get": request.path})
         request.respond(Http200, body = netportal.setupHtml(globalFrameOS))
       else:
@@ -249,19 +237,8 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       if not params.hasKey("ssid"):
         request.respond(Http400, body = "Missing ssid")
         return
-      # This worker's own parse of frame.json, never the runtime's live
-      # config (AGENTS.md, "Refs do not cross threads").
-      let frameConfig = netportal.portalRequestConfig(globalFrameOS)
-      # The gate first: the control-plane, admin and display fields need the
-      # code on the panel (or the admin password) before anything is parsed
-      # into a change (setup_gate.nim).
-      let gateProblem = netportal.setupGateProblem(params, frameConfig)
-      if gateProblem.len > 0:
-        log(%*{"event": "portal:setup:refused", "reason": gateProblem})
-        request.respond(Http403, body = gateProblem)
-        return
-      let options = netportal.parseSetupOptions(params, frameConfig)
-      let problem = netportal.setupOptionsProblem(options, frameConfig)
+      let options = netportal.parseSetupOptions(params, globalFrameOS.frameConfig)
+      let problem = netportal.setupOptionsProblem(options, globalFrameOS.frameConfig)
       if problem.len > 0:
         request.respond(Http400, body = problem)
         return

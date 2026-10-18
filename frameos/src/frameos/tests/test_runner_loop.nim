@@ -9,7 +9,6 @@ import ../scenes
 import ../types
 import ../channels
 import ../local_access
-import ../setup_gate
 
 
 type LogStore = ref object
@@ -905,39 +904,6 @@ suite "the local network access code on the panel":
       check not runnerThread.localAccessDrawn
       check runnerThread.localAccessShownFor == ""
       check output.toContiguousSeq() == getLastImageCopy().toContiguousSeq()
-
-  test "the setup code goes along the bottom of the panel's copy only; a local network access code comes first":
-    let sceneId = "tests/runner/setup-code-overlay".SceneId
-    let store = LogStore(entries: @[])
-    var runnerThread = lanAccessRunner("framebuffer", store, sceneId)
-    let scene = sixtySecondInit(sceneId, runnerThread.frameConfig, runnerThread.logger, %*{})
-    let exported = ExportedScene(publicStateFields: @[], persistedStateKeys: @[],
-      render: fastRender, runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard)
-    try:
-      let code = startSetupCode()
-      let (panel, _) = runnerThread.renderSceneImage(exported, scene)
-      let stored = getLastImageCopy()
-      check runnerThread.localAccessDrawn
-      check runnerThread.localAccessShownFor == "Setup code " & code
-      let storedPixels = stored.toContiguousSeq()
-      check storedPixels.allIt(it == storedPixels[0])
-      # The strip the hotspot scene leaves free, and only it (and its rule).
-      let stripTop = panel.height - int(panel.height.float * SetupCodeStripFraction)
-      var aboveSame = true
-      var stripDiffers = false
-      for y in 0 ..< panel.height:
-        for x in 0 ..< panel.width:
-          if panel[x, y] != stored[x, y]:
-            if y < stripTop - 16: aboveSame = false
-            elif y >= stripTop: stripDiffers = true
-      check aboveSame
-      check stripDiffers
-
-      let lanCode = startLocalAccessChallenge().code
-      discard runnerThread.renderSceneImage(exported, scene)
-      check runnerThread.localAccessShownFor == "Local network access code\n" & lanCode
-    finally:
-      clearSetupCode()
 
   test "the end of a challenge repaints at once, without the code":
     let sceneId = "tests/runner/lan-access-repaint".SceneId

@@ -16,7 +16,6 @@ import frameos/display_detect
 import frameos/driver_render_hint
 import frameos/render_stats
 import frameos/local_access
-import frameos/setup_gate
 import frameos/cloud/device_flow
 import frameos/cloud/link_state
 import frameos/logger
@@ -128,16 +127,11 @@ proc configureLocalAccessOverlay(self: RunnerThread) =
   ))
 
 proc localAccessPanelWanted(self: RunnerThread): string =
-  ## The code text that should be on the panel now, "" for none: a local
-  ## network access code, else the setup hotspot's code (setup_gate.nim).
+  ## The local network access code text that should be on the panel now, "" for none.
   ## Never on a frame without a physical panel (local_access.nim,
   ## localAccessPanelDevice): there the code would only ride an upload or a
   ## browser, which is exactly where it must not go.
-  if not localAccessPanelDevice(self.frameConfig.device):
-    return ""
-  result = localAccessPanelText()
-  if result.len == 0:
-    result = setupCodePanelText()
+  if localAccessPanelDevice(self.frameConfig.device): localAccessPanelText() else: ""
 
 proc drawLocalAccessCode(self: RunnerThread, image: Image, text: string): bool =
   ## Draws `text` over `image`, the panel's copy only — the caller has stored
@@ -147,30 +141,21 @@ proc drawLocalAccessCode(self: RunnerThread, image: Image, text: string): bool =
   try:
     if self.localAccessRender.isNil:
       self.configureLocalAccessOverlay()
-    # A white band, ruled off above and below, so the code reads from across
-    # the room over any scene and survives the dither: across the middle for
-    # a local network access code; for the setup code, the strip along the
-    # bottom that the hotspot scene leaves free, so its QR codes stay whole.
-    let textApp = render_textApp.App(self.localAccessRender)
-    let fontSize = textApp.appConfig.fontSize.float32
-    let setupCode = text.startsWith(SetupCodePanelLabel)
-    let bandHeight =
-      if setupCode: max(1, int(image.height.float * SetupCodeStripFraction)).float32
-      else: min(image.height.float32, fontSize * 2.6'f32 + 32'f32)
-    let top = if setupCode: image.height.float32 - bandHeight else: (image.height.float32 - bandHeight) / 2
+    # A white band across the middle, ruled off above and below, so the code
+    # reads from across the room over any scene and survives the dither.
+    let fontSize = render_textApp.App(self.localAccessRender).appConfig.fontSize.float32
+    let bandHeight = min(image.height.float32, fontSize * 2.6'f32 + 32'f32)
+    let top = (image.height.float32 - bandHeight) / 2
     let rule = max(2'f32, fontSize / 12)
     let ctx = newContext(image)
     ctx.fillStyle = rgba(0, 0, 0, 255)
     ctx.fillRect(rect(0, top - rule, image.width.float32, bandHeight + rule * 2))
     ctx.fillStyle = rgba(255, 255, 255, 255)
     ctx.fillRect(rect(0, top, image.width.float32, bandHeight))
-    # The strip is drawn into on its own, so the text fits its height.
-    let target = if setupCode: image.view(0, top.int, image.width, bandHeight.int) else: image
-    let context = ExecutionContext(image: target, hasImage: true, event: "render",
+    let context = ExecutionContext(image: image, hasImage: true, event: "render",
       payload: %*{}, loopIndex: 0, loopKey: ".", nextSleep: -1)
-    textApp.appConfig.padding = if setupCode: 0.0 else: 16.0
-    textApp.appConfig.text = text
-    textApp.run(context)
+    render_textApp.App(self.localAccessRender).appConfig.text = text
+    render_textApp.App(self.localAccessRender).run(context)
     true
   except Exception as e:
     self.logSignal(%*{"event": "render:localAccessCode:error", "error": e.msg})
