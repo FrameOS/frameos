@@ -6,8 +6,10 @@ import {
   auditEvents,
   createDb,
   createPasswordAccount,
+  frameAssetFiles,
   frames,
   linkedClients,
+  photoEntries,
   sessions,
   storeScenes,
   upsertAccountFromIdentity,
@@ -15,6 +17,7 @@ import {
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as deleteAccount } from "../../../app/api/account/delete/route";
 import { GET as exportAccount } from "../../../app/api/account/export/route";
+import { objectStore } from "../../lib/object-store";
 import { hashPassword } from "../../lib/passwords";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
@@ -118,18 +121,52 @@ async function seedContent(accountId: string) {
       tokenReference: `fc_link_ref_${accountId}`,
     })
     .returning({ id: linkedClients.id });
-  await db.insert(frames).values({
-    accountId,
-    linkedClientId: client!.id,
-    name: "Kitchen frame",
-    publicKey: "base64publickey",
-    status: "active",
-  });
+  const [frame] = await db
+    .insert(frames)
+    .values({
+      accountId,
+      linkedClientId: client!.id,
+      name: "Kitchen frame",
+      publicKey: "base64publickey",
+      status: "active",
+    })
+    .returning({ id: frames.id });
   await db.insert(storeScenes).values({
     accountId,
     name: "Sunrise clock",
     slug: `sunrise-clock-${accountId}`,
   });
+  return { frameId: frame!.id };
+}
+
+// A photo with its thumbnail and a frame snapshot, rows and bytes, as the
+// upload route and the hub would leave them.
+async function seedObjects(accountId: string, frameId: string) {
+  const keys = {
+    photo: `photos/${accountId}/${"a".repeat(32)}`,
+    snapshot: `frames/${frameId}/cache/${"c".repeat(64)}`,
+    thumb: `photos/${accountId}/thumbs/${"b".repeat(32)}`,
+  };
+  for (const key of Object.values(keys)) {
+    await objectStore().put(key, Buffer.from(key), "application/octet-stream");
+  }
+  await db.insert(photoEntries).values({
+    accountId,
+    contentType: "image/jpeg",
+    kind: "file",
+    objectKey: keys.photo,
+    path: "Family/beach.jpg",
+    sizeBytes: 3,
+    thumbObjectKey: keys.thumb,
+  });
+  await db.insert(frameAssetFiles).values({
+    contentType: "image/png",
+    frameId,
+    objectKey: keys.snapshot,
+    path: "snapshot.png",
+    sizeBytes: 3,
+  });
+  return keys;
 }
 
 describe("account data export", () => {
@@ -235,6 +272,35 @@ describe("self-serve account deletion", () => {
     expect(
       await db.select().from(sessions).where(eq(sessions.accountId, accountId)),
     ).toHaveLength(0);
+  });
+
+  it("takes the account's photos and frame snapshots off the bucket", async () => {
+    const { accountId } = await signInPasswordAccount("correct horse battery");
+    const { frameId } = await seedContent(accountId);
+    const keys = await seedObjects(accountId, frameId);
+    // Someone else's photo stays. Signing them in took the cookie, so the
+    // first account signs back in before it deletes itself.
+    const other = await signInPasswordAccount("another horse");
+    const otherKeys = await seedObjects(other.accountId, (await seedContent(other.accountId)).frameId);
+    cookieJar.set(
+      sessionCookieName,
+      await createSession(db, {
+        accountId,
+        providerIssuer: "frameos-cloud",
+        providerSubject: `erasure-${accountId}`,
+      }),
+    );
+
+    const response = await deleteAccount(
+      postJson("/api/account/delete", { password: "correct horse battery" }),
+    );
+    expect(response.status).toBe(200);
+    for (const key of Object.values(keys)) {
+      expect(await objectStore().head(key), key).toBeUndefined();
+    }
+    for (const key of Object.values(otherKeys)) {
+      expect(await objectStore().head(key), key).toBeDefined();
+    }
   });
 
   it("keeps the security trail, de-identified", async () => {

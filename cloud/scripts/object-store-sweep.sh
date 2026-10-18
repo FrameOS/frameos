@@ -12,30 +12,54 @@ cd "$(dirname "$0")/.."
 # running, and every object those rows pointed at is orphaned in the same
 # instant. This is the sweep for that.
 #
-# DRY RUN BY DEFAULT — pass --apply to delete. Run periodically (monthly is
-# plenty; the waste is bounded by how often accounts are deleted), the same way
-# db-cleanup.sh is run; see docs/operational-runbooks.md.
+# Account deletion removes the account's photos and frame snapshots itself
+# (apps/auth-web/src/lib/account-erasure.ts); what is left for this sweep is
+# the content-addressed store objects, and anything a failed delete left
+# behind.
 #
-#   DATABASE_URL=... ./scripts/object-store-sweep.sh [--apply]
+# DRY RUN BY DEFAULT — pass --apply to delete. Production runs it weekly with
+# --apply as frameos-cloud-object-sweep.timer (cloud/ops/cleanup/install.sh,
+# docs/operational-runbooks.md).
 #
-# Needs `rclone` with an `r2` remote (cloud/ops/backup/rclone.conf.example).
+#   DATABASE_URL=... ./scripts/object-store-sweep.sh [--apply] [--force]
+#
+# Needs `rclone` with an `r2` remote (cloud/ops/backup/rclone.conf.example),
+# or the app's own R2_CLOUD_* environment, which the timer's unit loads from
+# auth-web.env (no second copy of the key to rotate).
 # Deliberately not Node: this belongs with the other ops chores, and the
 # release bundle carries no third-party node_modules to import from anyway.
 
 apply=false
+force=false
 for arg in "$@"; do
   case "$arg" in
     --apply) apply=true ;;
+    # Delete even when most of the bucket looks orphaned (see below).
+    --force) force=true ;;
     *) echo "Unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
+
+# Without an `r2` remote in an rclone.conf, build it from the app's
+# environment: rclone reads a remote from RCLONE_CONFIG_<NAME>_* variables.
+if ! rclone listremotes 2>/dev/null | grep -qx 'r2:' &&
+  [ -n "${R2_CLOUD_ENDPOINT:-}" ] && [ -n "${R2_CLOUD_ACCESS_KEY_ID:-}" ] &&
+  [ -n "${R2_CLOUD_SECRET_ACCESS_KEY:-}" ]; then
+  export RCLONE_CONFIG_R2_TYPE=s3
+  export RCLONE_CONFIG_R2_PROVIDER=Cloudflare
+  export RCLONE_CONFIG_R2_REGION=auto
+  export RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
+  export RCLONE_CONFIG_R2_ENDPOINT="$R2_CLOUD_ENDPOINT"
+  export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_CLOUD_ACCESS_KEY_ID"
+  export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_CLOUD_SECRET_ACCESS_KEY"
+fi
 
 # The URL never goes on a command line (ps / /proc show argv to every local
 # account): it becomes libpq's PG* environment and psql runs bare.
 # shellcheck source=scripts/lib/pg-env.sh
 . scripts/lib/pg-env.sh
 pg_env_from_url "${DATABASE_URL:-postgres://frameos_cloud:frameos_cloud@localhost:5432/frameos_cloud}"
-remote="${OBJECT_STORE_REMOTE:-r2:frameos-cloud}"
+remote="${OBJECT_STORE_REMOTE:-r2:${R2_CLOUD_BUCKET:-frameos-cloud}}"
 # An object younger than this is never a candidate, however unreferenced it
 # looks. A publish writes the object BEFORE the row that points at it, so a
 # sweep racing a publish would otherwise delete the bytes of a scene that is
@@ -103,6 +127,16 @@ echo "stored: $stored_count  referenced: $referenced_count  orphaned: $orphan_co
 if [ "$orphan_count" = "0" ]; then
   echo "Nothing to sweep."
   exit 0
+fi
+
+# An unattended --apply against the wrong database (an empty restore, a
+# DATABASE_URL pointing elsewhere) would see every object as an orphan and
+# delete the bucket. Real orphans are a sliver of it: more than a quarter of
+# the stored objects is a reason to stop and look, not to delete.
+if [ "$apply" = true ] && [ "$force" = false ] &&
+  { [ "$referenced_count" = "0" ] || [ $((orphan_count * 4)) -gt "$stored_count" ]; }; then
+  echo "Refusing to delete $orphan_count of $stored_count objects (referenced: $referenced_count): is DATABASE_URL the right database? Re-run with --force if this is really what you want." >&2
+  exit 1
 fi
 
 # A referenced key that is somehow NOT in the store is the interesting failure

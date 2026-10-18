@@ -2,6 +2,10 @@ import { eq } from "drizzle-orm";
 import { accounts, createDb, normalizeEmail } from "@frameos-cloud/db";
 import { closeOutSubscriptionForDeletedAccount } from "@frameos-cloud/ledger";
 import { NextRequest, NextResponse } from "next/server";
+import {
+  accountPrivateObjectKeys,
+  deleteErasedObjects,
+} from "../../../../src/lib/account-erasure";
 import { recordAuditEvent } from "../../../../src/lib/audit";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import { assertDatabaseUrlConfigured } from "../../../../src/lib/env";
@@ -39,6 +43,8 @@ import {
 // the books keep a bare uuid, and a subscription in progress is closed out
 // BELOW before the row goes, so its unearned remainder returns to the
 // receivable rather than sitting as deferred revenue nothing will ever earn.
+// The bucket is not a table: the account's photos and its frames' snapshots
+// are deleted from it right after the row (src/lib/account-erasure.ts).
 
 export async function POST(request: NextRequest) {
   const csrf = csrfResponse(request);
@@ -147,7 +153,9 @@ export async function POST(request: NextRequest) {
   // write-off decision for a human, not something erasure may silently drop.
   await closeOutSubscriptionForDeletedAccount(db, accountId);
 
+  const objectKeys = await accountPrivateObjectKeys(db, accountId);
   await db.delete(accounts).where(eq(accounts.id, accountId));
+  await deleteErasedObjects(objectKeys);
 
   const response = NextResponse.json({ ok: true });
   response.cookies.set(sessionCookieName, "", {

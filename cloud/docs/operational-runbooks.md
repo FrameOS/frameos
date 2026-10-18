@@ -210,10 +210,13 @@ account.
 ### Sweeping the object store
 
 `scripts/object-store-sweep.sh` deletes blobs no row points at. The app
-already removes an object when the last row referencing it goes; what it
-cannot see is a row that vanishes underneath it — `delete from accounts`
-cascades through scenes, versions, images and frames with no application code
-running, orphaning every object those rows named. It also deletes
+already removes an object when the last row referencing it goes, and an
+account deletion removes the account's photos and frame snapshots itself
+(`src/lib/account-erasure.ts`); what it cannot see is a row that vanishes
+underneath it — `delete from accounts` cascades through scenes, versions and
+images with no application code running, orphaning the content-addressed
+store objects those rows named, and a delete that failed leaves its object
+behind. It also deletes
 `store_images` rows older than a week that no version ever bound (an owner
 upload whose draft was never saved) so their objects fall out with the same
 run; until then those bytes are metered against the uploader
@@ -226,15 +229,22 @@ cloud/scripts/object-store-sweep.sh              # dry run
 cloud/scripts/object-store-sweep.sh --apply
 ```
 
-Monthly is plenty — the waste is bounded by how often accounts are deleted.
-It needs the `r2` rclone remote (`cloud/ops/backup/rclone.conf.example`).
+Production runs it weekly with `--apply` as `frameos-cloud-object-sweep.timer`
+(Sundays 04:40 UTC, before the object backup), installed with
+`ops/cleanup/install.sh` and run as the app user out of the live release;
+`journalctl -u frameos-cloud-object-sweep` has each run. It uses the `r2`
+rclone remote when one is configured (`cloud/ops/backup/rclone.conf.example`)
+and otherwise builds it from the app's `R2_CLOUD_*` environment.
 
-Two safeties worth knowing before trusting it with `--apply`: objects younger
+Three safeties worth knowing before trusting it with `--apply`: objects younger
 than `OBJECT_STORE_SWEEP_MIN_AGE` (7 days) are never candidates, because a
 publish writes the object *before* the row that points at it and a sweep
 racing a publish would otherwise delete a live scene; and every candidate is
 re-checked against the database immediately before its delete, so a key
-claimed between the listing and the delete is skipped and said so.
+claimed between the listing and the delete is skipped and said so; and it
+refuses to delete when more than a quarter of the stored objects look
+orphaned, or no row references anything, which is what pointing it at the
+wrong database looks like (`--force` overrides, after looking).
 
 It also reports the opposite problem — a referenced key that is **not** in the
 store, i.e. a row pointing at bytes that are gone. That line should never

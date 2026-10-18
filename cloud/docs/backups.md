@@ -24,12 +24,15 @@ answer:
   and through the same crypt remote (`boxcrypt:objects`):
   `frameos-cloud-object-backup.timer` at 05:17 UTC, an hour after the database
   job so the object copy can only ever be newer than the rows referencing it.
-  It **copies, never syncs** — a sync would mirror a deletion in R2 onto the
-  backup, which is exactly the failure it exists for. Objects are immutable
-  and named after the sha256 of their own content, so copy-only is also
-  complete: the backup accumulates everything that ever existed, and rclone
-  runs with `--immutable` so a key whose content ever changed fails the run
-  instead of overwriting the good copy.
+  It **copies, never syncs** store objects — a sync would mirror a deletion
+  in R2 onto the backup, which is exactly the failure it exists for. Those
+  objects are immutable and named after the sha256 of their own content, so
+  copy-only is also complete: the backup accumulates everything that ever
+  existed, and rclone runs with `--immutable` so a key whose content ever
+  changed fails the run instead of overwriting the good copy. **Photos and
+  frame snapshots are synced instead**, with deletions held 30 days in
+  `boxcrypt:objects-deleted/` and then purged ("Restoring" below): a person's
+  deleted pictures must not live forever in a backup.
 - **A bucket lock protects `store/`** (see below): 30-day retention, so a
   leaked R2 key can neither destroy the only copy nor empty the live prefix.
   `frames/` stays deletable on purpose — it is a cache whose job is to evict.
@@ -343,6 +346,22 @@ rclone copy boxcrypt:objects r2:frameos-cloud
 Copying the whole backup back is safe and is usually the right move: the store
 only ever grows, keys are content digests, and objects nothing references are
 swept later (`scripts/object-store-sweep.sh`) rather than being a problem.
+
+Photos and frame snapshots (`photos/`, `frames/`) are the exception to "only
+ever grows": they are one person's pictures, so the nightly job **syncs**
+those two prefixes instead of copying them, and every object a run would
+delete is moved to `boxcrypt:objects-deleted/<date>/<prefix>/` instead. A
+dated folder older than `DELETED_OBJECT_RETENTION_DAYS` (30) is purged at the
+end of the run, so a photo its owner deleted, or an account's photos, leave
+the backup a month later. Within that month a wipe is recoverable:
+
+```sh
+rclone lsf boxcrypt:objects-deleted --dirs-only          # the days with deletions
+rclone copy boxcrypt:objects-deleted/2026-10-18/photos r2:frameos-cloud/photos
+```
+
+A photo row restored from a database backup whose object was deleted more
+than a month ago has no bytes anywhere; that is the deletion working.
 
 **Rehearsed 2026-08-17, passed.** The first copy shipped all 173 objects
 (97 MB) in 19 s. Six objects sampled across `store/scene-versions`,
