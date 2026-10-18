@@ -308,6 +308,32 @@ suite "Server admin api asset helpers":
     expect OSError:
       discard finishChunkedAssetUpload("bad-dest", "", "ok.txt")
 
+  test "upload parts live in a 0700 directory under names the upload id does not give away":
+    let tempRoot = getTempDir() / "frameos-api-chunked-private"
+    removeDir(tempRoot)
+    createDir(tempRoot)
+    globalFrameConfig = baseConfig(tempRoot)
+    let partsRoot = getTempDir() / "frameos-upload-chunks"
+    createDir(partsRoot)
+    # A directory left group/world-readable by an older runtime is tightened.
+    setFilePermissions(partsRoot, {fpUserRead, fpUserWrite, fpUserExec, fpGroupRead, fpGroupExec,
+      fpOthersRead, fpOthersExec})
+
+    appendUploadChunk("predictable-id", 0, "secret")
+    check writeAssetUploadChunk("predictable-id", 0, "secret") == 6
+    check getFilePermissions(partsRoot) == {fpUserRead, fpUserWrite, fpUserExec}
+    check not fileExists(partsRoot / "predictable-id.part")
+    check not fileExists(partsRoot / "cloud-predictable-id.part")
+    var names: seq[string] = @[]
+    for kind, path in walkDir(partsRoot):
+      let name = extractFilename(path)
+      if kind == pcFile and name.endsWith(".part"):
+        check "predictable" notin name
+        names.add(name)
+    check names.len >= 2
+    discardUploadChunk("predictable-id")
+    discardAssetUploadChunks("predictable-id")
+
   test "offset-addressed cloud upload chunks overwrite on retry and refuse holes":
     let tempRoot = getTempDir() / "frameos-api-cloud-chunked-assets"
     removeDir(tempRoot)

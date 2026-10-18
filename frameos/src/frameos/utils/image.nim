@@ -1318,6 +1318,14 @@ proc parseExifJson(output: string): Option[JsonNode] =
     discard
   return none(JsonNode)
 
+when not (defined(frameosEmbedded) or defined(frameosWasm)):
+  proc exifToolPathArgs*(path: string): seq[string] =
+    ## exiftool's arguments for reading one file. The path comes from a scene
+    ## or an asset name, so it must never read as an option: `--` ends them,
+    ## and the path is made absolute as well, so it cannot start with `-` even
+    ## for an exiftool that treats `--` differently.
+    @["-j", "-n", "--", absolutePath(path)]
+
 proc getExifMetadataFromPath*(path: string): Option[JsonNode] =
   when defined(frameosEmbedded) or defined(frameosWasm):
     none(JsonNode)
@@ -1328,7 +1336,7 @@ proc getExifMetadataFromPath*(path: string): Option[JsonNode] =
     try:
       let processResult = runProcessPiped(
         exiftool,
-        @["-j", "-n", path],
+        exifToolPathArgs(path),
         timeoutMs = ExifToolTimeoutMs,
         maxOutputBytes = MaxExifOutputBytes
       )

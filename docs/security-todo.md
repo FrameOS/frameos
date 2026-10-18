@@ -53,9 +53,10 @@ is left there is in the medium / low list.
 - Smaller: the frame's TLS material and admin login ride the
   `/embedded/settings` pull in clear on an http backend; Samba mount target
   unconfined; `http://` providers accepted device-side; the `exiftool`
-  fallback hands untrusted bytes to exiftool's parser and lacks a `--`
-  before the path (not on Buildroot); the cloud link-code overlay is still
-  drawn into the stored render; a device `bootup` event may still move
+  fallback hands untrusted bytes to exiftool's parser (not on Buildroot);
+  the cloud link-code overlay is still drawn into the stored render (the
+  status screen draws the code into its own render too, and on a
+  `web_only` frame the stored image is the only place it shows); a device `bootup` event may still move
   `frame_host` on embedded frames when the claimed IP matches the request
   peer or `embedded.followBootIp` is set (deliberate: ESP32 DHCP follow).
 
@@ -84,6 +85,8 @@ being deleted before December 2026 (`docs/convergence-todo.md` item 1). Its
 findings are recorded here so they are not rediscovered, not scheduled:
 a self-hosted operator who chooses source builds runs user-supplied Nim on
 their own host, and the fix is to use interpreted scenes.
+`scene_module_suffix` collisions (`codegen/scene_nim.py`) belong to this
+path too.
 
 - **User-supplied Nim is compiled on the backend host with no sandbox.**
   `nim compile --compileOnly` runs via `LocalBuildExecutor` on the host for
@@ -138,11 +141,7 @@ would capture tool arguments if a token were ever set.
 Device HTTP server: admin sessions are
 stateless signed cookies, so logout clears the browser's copy but a cookie
 someone kept stays good for its 24 h (changing the admin password is what
-revokes — the fingerprint is in the signature); the signature is
-`sha256(salt ‖ …)` rather than an HMAC — length extension only reaches the
-nonce, under the same expiry, so nothing is gained, but HMAC is the right
-primitive; unfinished uploads sit under `getTempDir()/frameos-upload-chunks`
-with predictable names (local users only, and a frame has one); login
+revokes — the fingerprint is in the signature); login
 throttling is per source address in a 512-entry table (the listeners are
 IPv4-only, so no /64 rotation); DNS rebinding is still open, as `origin.nim`
 says — it needs a Host allow-list the runtime has no source for; the
@@ -150,8 +149,7 @@ cover-copy route fetches an admin-supplied URL from the frame (through the
 LAN-egress deny on a managed frame, and only a decoded PNG or an error
 string comes back).
 
-Backend: `scene_module_suffix` collisions; no artifact cleanup for SD
-images and firmware; requests to a frame's own host (`app/utils/frame_http.py`)
+Backend: requests to a frame's own host (`app/utils/frame_http.py`)
 check it and then let httpx resolve it again, accepted because frame hosts
 are IP literals in practice (user-supplied URLs connect through
 `guarded_transport`); a frame whose SSH host key was already impersonated before the
