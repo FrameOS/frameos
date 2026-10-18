@@ -46,10 +46,13 @@ is left there is in the medium / low list.
   `web_only` frame the stored image is the only place it shows); a device `bootup` event may still move
   `frame_host` on embedded frames when the claimed IP matches the request
   peer or `embedded.followBootIp` is set (deliberate: ESP32 DHCP follow);
-  `POST /setup` takes anyone on the Pi hotspot, and a frame without a screen
-  keeps the hotspot's fixed `FrameOS-Setup` / `frame1234` (decided
-  2026-10-18: it has nowhere to show a made-up pair; frames with a screen
-  make up their own, `frameos/hotspot_credentials.nim`).
+  `POST /setup` takes anyone on the Pi hotspot. New frames leave the
+  hotspot's name and password blank and a frame with a screen makes up its
+  own (`frameos/hotspot_credentials.nim`), but `FrameOS-Setup` / `frame1234`
+  stays where something has to be known in advance: frames without a screen,
+  frames set up before blank was the default (left as they are, decided
+  2026-10-18), and the generic release image, whose `framebuffer` device may
+  have no screen attached yet.
 
 ### Frontends, wasm preview, CI
 

@@ -17,14 +17,13 @@ suite "hotspot credentials":
   teardown:
     removeDir(statePath.parentDir)
 
-  test "a frame with a screen makes up its own name and password when none is set":
-    for (ssid, password) in [("", ""), ("FrameOS-Setup", "frame1234"), (" FrameOS-Setup ", "")]:
+  test "a frame with a screen makes up a name and password when they are blank":
+    for (ssid, password) in [("", ""), ("  ", "")]:
       freshState()
       let made = resolveHotspotCredentials("framebuffer", ssid, password)
       check made.ssid.startsWith("FrameOS-Setup-")
       check made.ssid.len == "FrameOS-Setup-".len + 4
       check made.password.len == 10
-      check made.password != "frame1234"
       for c in made.password:
         check c notin "01ilo"
 
@@ -36,23 +35,25 @@ suite "hotspot credentials":
     check stored["password"].getStr() == first.password
     # A restart: nothing cached, the file is the source.
     useHotspotStatePathForTest(statePath)
-    check resolveHotspotCredentials("pimoroni.inky_impression_13", "FrameOS-Setup", "frame1234") == first
+    check resolveHotspotCredentials("pimoroni.inky_impression_13", "", "") == first
 
   test "frames do not share a made-up pair":
     let first = resolveHotspotCredentials("framebuffer", "", "")
     freshState()
     check resolveHotspotCredentials("framebuffer", "", "") != first
 
-  test "what frame.json sets explicitly wins, field by field":
+  test "whatever is set is used as it is, the old defaults included, field by field":
+    check resolveHotspotCredentials("framebuffer", "FrameOS-Setup", "frame1234") == ("FrameOS-Setup", "frame1234")
     check resolveHotspotCredentials("framebuffer", "Kitchen", "hunter2hunter2") == ("Kitchen", "hunter2hunter2")
+    check not fileExists(statePath)
     let made = resolveHotspotCredentials("framebuffer", "", "")
     check resolveHotspotCredentials("framebuffer", "Kitchen", "") == ("Kitchen", made.password)
     check resolveHotspotCredentials("framebuffer", "", "hunter2hunter2") == (made.ssid, "hunter2hunter2")
 
-  test "a frame without a screen keeps the fixed default, and writes nothing":
+  test "a frame without a screen uses FrameOS-Setup / frame1234 for what is blank, and writes nothing":
     for device in ["", "web_only", "http.upload"]:
       check resolveHotspotCredentials(device, "", "") == ("FrameOS-Setup", "frame1234")
-      check resolveHotspotCredentials(device, "FrameOS-Setup", "frame1234") == ("FrameOS-Setup", "frame1234")
+      check resolveHotspotCredentials(device, "Kitchen", "") == ("Kitchen", "frame1234")
       check resolveHotspotCredentials(device, "Kitchen", "hunter2hunter2") == ("Kitchen", "hunter2hunter2")
     check not fileExists(statePath)
 

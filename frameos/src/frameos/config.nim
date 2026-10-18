@@ -412,9 +412,9 @@ proc readConfig*(configPath = ""): FrameConfig =
   # agrees with what the frame is actually enforcing.
   result.network.allowLocalNetworkAccess =
     resolveLocalNetworkAccess(result.network.allowLocalNetworkAccess)
-  # The hotspot's name and password as the frame really uses them: a frame
-  # with a screen makes up its own unless frame.json sets them (kept in
-  # state/ for the same reason; hotspot_credentials.nim).
+  # The hotspot's name and password as the frame really uses them: left
+  # blank, a frame with a screen makes them up (kept in state/ for the same
+  # reason; hotspot_credentials.nim).
   (result.network.wifiHotspotSsid, result.network.wifiHotspotPassword) = resolveHotspotCredentials(
     result.device, result.network.wifiHotspotSsid, result.network.wifiHotspotPassword)
 

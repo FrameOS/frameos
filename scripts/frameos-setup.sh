@@ -881,8 +881,8 @@ network.update({
     "networkCheckTimeoutSeconds": env_int("FRAMEOS_NETWORK_CHECK_TIMEOUT_SECONDS", 30),
     "networkCheckUrl": env("FRAMEOS_NETWORK_CHECK_URL", "https://networkcheck.frameos.net/"),
     "wifiHotspot": env("FRAMEOS_WIFI_HOTSPOT", "disabled"),
-    "wifiHotspotSsid": env("FRAMEOS_WIFI_HOTSPOT_SSID", "FrameOS-Setup"),
-    "wifiHotspotPassword": env("FRAMEOS_WIFI_HOTSPOT_PASSWORD", "frame1234"),
+    "wifiHotspotSsid": env("FRAMEOS_WIFI_HOTSPOT_SSID"),
+    "wifiHotspotPassword": env("FRAMEOS_WIFI_HOTSPOT_PASSWORD"),
     "wifiHotspotTimeoutSeconds": env_int("FRAMEOS_WIFI_HOTSPOT_TIMEOUT_SECONDS", 300),
 })
 
@@ -1054,8 +1054,8 @@ default_remote_run_commands="$(json_get "$existing_config" agent.agentRunCommand
 default_server_send_logs="$(json_get "$existing_config" serverSendLogs "true")"
 default_network_check="$(json_get "$existing_config" network.networkCheck "true")"
 default_wifi_hotspot="$(json_get "$existing_config" network.wifiHotspot "disabled")"
-default_wifi_ssid="$(json_get "$existing_config" network.wifiHotspotSsid "FrameOS-Setup")"
-default_wifi_password="$(json_get "$existing_config" network.wifiHotspotPassword "frame1234")"
+default_wifi_ssid="$(json_get "$existing_config" network.wifiHotspotSsid "")"
+default_wifi_password="$(json_get "$existing_config" network.wifiHotspotPassword "")"
 default_log_to_file="$(json_get "$existing_config" logToFile "")"
 default_save_assets="$(json_get "$existing_config" saveAssets "true")"
 
@@ -1210,8 +1210,8 @@ case "$FRAMEOS_WIFI_HOTSPOT" in
   *) die "Unsupported WiFi setup hotspot mode: $FRAMEOS_WIFI_HOTSPOT" ;;
 esac
 if [ "$FRAMEOS_WIFI_HOTSPOT" = "bootOnly" ]; then
-  FRAMEOS_WIFI_HOTSPOT_SSID="${FRAMEOS_WIFI_HOTSPOT_SSID:-$(ask "WiFi setup hotspot SSID" "$default_wifi_ssid")}"
-  FRAMEOS_WIFI_HOTSPOT_PASSWORD="${FRAMEOS_WIFI_HOTSPOT_PASSWORD:-$(ask "WiFi setup hotspot password" "$default_wifi_password")}"
+  FRAMEOS_WIFI_HOTSPOT_SSID="${FRAMEOS_WIFI_HOTSPOT_SSID:-$(ask "WiFi setup hotspot SSID (blank: the frame makes one up)" "$default_wifi_ssid")}"
+  FRAMEOS_WIFI_HOTSPOT_PASSWORD="${FRAMEOS_WIFI_HOTSPOT_PASSWORD:-$(ask "WiFi setup hotspot password (blank: the frame makes one up)" "$default_wifi_password")}"
 else
   FRAMEOS_WIFI_HOTSPOT_SSID="${FRAMEOS_WIFI_HOTSPOT_SSID:-$default_wifi_ssid}"
   FRAMEOS_WIFI_HOTSPOT_PASSWORD="${FRAMEOS_WIFI_HOTSPOT_PASSWORD:-$default_wifi_password}"
