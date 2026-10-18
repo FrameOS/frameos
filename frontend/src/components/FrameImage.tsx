@@ -2,7 +2,8 @@ import { useActions, useValues } from 'kea'
 import { router } from 'kea-router'
 import clsx from 'clsx'
 import { useEffect, useRef, useState } from 'react'
-import { ArrowPathIcon, MagnifyingGlassPlusIcon } from '@heroicons/react/24/outline'
+import { ArrowPathIcon, MagnifyingGlassPlusIcon, MoonIcon } from '@heroicons/react/24/outline'
+import { frameCheckin, frameCheckinDescription } from '../decorators/frame'
 import { framesModel } from '../models/framesModel'
 import { entityImagesModel, useEntityImage } from '../models/entityImagesModel'
 import { wasmPreviewModel } from '../models/wasmPreviewModel'
@@ -168,6 +169,38 @@ export function FrameImageRefreshButton({
     >
       <ArrowPathIcon className="h-4 w-4" />
     </button>
+  )
+}
+
+/** The frame is asleep between renders, so a refresh cannot get a newer image until it wakes. */
+export function frameImageSleepTitle(frame: FrameType): string | null {
+  const checkin = frameCheckin(frame)
+  if (checkin?.kind !== 'sleeping') {
+    return null
+  }
+  const description = frameCheckinDescription(frame, checkin) ?? 'asleep'
+  return `${description.charAt(0).toUpperCase()}${description.slice(1)}. Refreshing shows this image until it wakes.`
+}
+
+export function FrameImageSleepBadge({ frameId, className }: { frameId: FrameId; className?: string }) {
+  const { frames } = useValues(framesModel)
+  const frame = frames[frameId]
+  const title = frame ? frameImageSleepTitle(frame) : null
+  if (!title) {
+    return null
+  }
+  return (
+    <div
+      title={title}
+      aria-label={title}
+      className={clsx(
+        'absolute bottom-2 left-2 z-10 inline-flex items-center gap-1 rounded-full bg-white/75 px-2 py-0.5 text-[11px] font-medium text-slate-600 shadow-sm ring-1 ring-slate-200/70 backdrop-blur dark:bg-slate-900/75 dark:text-slate-200 dark:ring-slate-600/70',
+        className
+      )}
+    >
+      <MoonIcon className="h-3.5 w-3.5 text-sky-600 dark:text-sky-300" />
+      Asleep
+    </div>
   )
 }
 

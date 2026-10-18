@@ -1,6 +1,11 @@
 import { useValues } from 'kea'
 import { frameLogic } from '../../frameLogic'
-import { FrameImage, FrameImageProps, FrameImageRefreshButton } from '../../../../components/FrameImage'
+import {
+  FrameImage,
+  FrameImageProps,
+  FrameImageRefreshButton,
+  FrameImageSleepBadge,
+} from '../../../../components/FrameImage'
 
 export type ImageProps = Omit<FrameImageProps, 'frameId'>
 
@@ -10,6 +15,7 @@ export function Image(props: ImageProps) {
     <div className="relative h-full w-full">
       <FrameImage frameId={frameId} refreshable={false} {...props} />
       <FrameImageRefreshButton frameId={frameId} />
+      <FrameImageSleepBadge frameId={frameId} />
     </div>
   )
 }

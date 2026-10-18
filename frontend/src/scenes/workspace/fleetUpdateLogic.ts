@@ -224,17 +224,21 @@ export const fleetUpdateLogic = kea<fleetUpdateLogicType>([
   })),
 ])
 
-/** Ask one frame to update, the way its own drawer would, and wait for the request to be sent. */
+/**
+ * Ask one frame to update, the way its own drawer would, and wait for the
+ * request to be sent. Quietly: the sidebar row draws each frame's progress,
+ * so only a failure gets a toast.
+ */
 async function startFrameUpdate(frame: FrameType): Promise<void> {
   switch (fleetUpdateVerbForFrame(frame)) {
     case 'cloudNotify':
-      await framesModel.asyncActions.updateFrameFirmware(frame.id)
+      await framesModel.asyncActions.updateFrameFirmware(frame.id, { quiet: true })
       // updateFrameFirmware does not refetch: the row's pending_command_types
       // is what keeps the frame out of the list once startedFrameIds is stale.
       framesModel.actions.loadFrame(frame.id)
       return
     case 'embeddedOta':
-      await framesModel.asyncActions.applyEmbeddedFirmwareOta(frame.id)
+      await framesModel.asyncActions.applyEmbeddedFirmwareOta(frame.id, { quiet: true })
       return
     case 'deviceUpgrade': {
       // The sidebar row keeps a frameLogic mounted for every listed frame; an
@@ -249,7 +253,7 @@ async function startFrameUpdate(frame: FrameType): Promise<void> {
       return
     }
     case 'fullDeploy':
-      await framesModel.asyncActions.deployFrame(frame.id, false)
+      await framesModel.asyncActions.deployFrame(frame.id, false, { quiet: true })
       return
     case null:
       return

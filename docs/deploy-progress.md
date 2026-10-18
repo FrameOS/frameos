@@ -27,6 +27,8 @@ While a record is running and not stale:
 - the deploy tile next to the frame's name spins and its tooltip names the
   stage;
 - a deploy toast started in this tab fills its bar from the same record.
+  The sidebar's "Update all" starts no toasts: its rows already draw the
+  bars, and only a failure gets one.
 
 A finished record shows "deployed" (or "restarted", "rebooted", "upgraded",
 "firmware updated") for `record.doneShownSeconds`, a failed one shows

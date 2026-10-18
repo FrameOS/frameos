@@ -21,6 +21,7 @@ vi.mock("../../../../../../frontend/src/utils/apiFetch", async (importOriginal) 
 });
 
 import { framesModel } from "../../../../../../frontend/src/models/framesModel";
+import { longRunningTasksModel } from "../../../../../../frontend/src/models/longRunningTasksModel";
 import { publishedReleaseModel } from "../../../../../../frontend/src/models/publishedReleaseModel";
 import { pendingFrameosUpgrade } from "../../../../../../frontend/src/scenes/frame/frameLogic";
 import {
@@ -229,6 +230,9 @@ describe("fleetUpdateLogic on the cloud", () => {
     expect(fleetUpdateLogic.values.framesNeedingUpdate).toEqual([]);
     const firstCommand = apiFetchMock.mock.calls.find(([url]) => url.endsWith("/command"));
     expect(firstCommand?.[1]?.body).toBe(JSON.stringify({ type: "notify_update_available" }));
+    // The sidebar rows show the progress: no toast per frame.
+    expect(longRunningTasksModel.values.tasks.map((task) => task.frameId)).toEqual(["behind-1", "behind-2", "behind-3"]);
+    expect(longRunningTasksModel.values.visibleTasks).toEqual([]);
 
     // Nothing left: a click is a no-op that settles at once.
     fleetUpdateLogic.actions.updateAllFrames();
@@ -253,5 +257,9 @@ describe("fleetUpdateLogic on the cloud", () => {
       "/api/frames/behind-3/command",
     ]);
     expect(fleetUpdateLogic.values.updatingAll).toBe(false);
+    // Only the refusal is a toast.
+    expect(longRunningTasksModel.values.visibleTasks.map((task) => [task.frameId, task.status])).toEqual([
+      ["behind-1", "error"],
+    ]);
   });
 });

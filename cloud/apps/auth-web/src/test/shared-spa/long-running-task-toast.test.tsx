@@ -4,7 +4,7 @@
 // the toast under the title row, drawn the way the Logs panel draws a line
 // (tone dot, timestamp, coloured text) on a log-coloured strip — not
 // truncated in the text column beside the Logs / expand / dismiss buttons.
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LongRunningTaskToasts } from "../../../../../../frontend/src/components/LongRunningTaskToasts";
 import { initKea } from "../../../../../../frontend/src/initKea";
@@ -63,5 +63,20 @@ describe("the long-running task toast", () => {
     const line = screen.getByText("Deployed");
     expect(line.closest(".font-mono")).toBeTruthy();
     expect(screen.queryByText("> upload progress: 23 MiB / 23 MiB")).toBeNull();
+  });
+
+  it("keeps a quiet task out of the toasts until it fails", () => {
+    // "Update all": the sidebar rows draw each frame's progress, so the task
+    // is only tracked (fleetUpdateInFlight reads it) unless it goes wrong.
+    longRunningTasksModel.actions.startTask({ frameId, kind: "deploy", title: "Deploying frame", quiet: true });
+    render(<LongRunningTaskToasts />);
+    expect(screen.queryByText("Deploying frame")).toBeNull();
+    expect(longRunningTasksModel.values.runningTasks.map((task) => task.title)).toEqual(["Deploying frame"]);
+
+    act(() => {
+      longRunningTasksModel.actions.taskFailed({ frameId, kind: "deploy", detail: "Deploy failed" });
+    });
+    expect(screen.getByText("Deploying frame")).toBeTruthy();
+    expect(screen.getByText("Deploy failed")).toBeTruthy();
   });
 });

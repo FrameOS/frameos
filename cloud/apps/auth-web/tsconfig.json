@@ -89,6 +89,8 @@
     // Same story: the deploy-progress bar reads decorators/frame.tsx (bare
     // JSX namespace). Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/deploy-progress.test.tsx",
+    // Same story: mounts FrameImage, whose sleep badge reads decorators/frame.tsx.
+    "src/test/shared-spa/frame-image-sleep-badge.test.tsx",
     // Same story: devices.ts imports the Option type from components/Select.tsx
     // (bare JSX namespace). Vitest still runs it; only tsc leaves it out.
     "src/test/shared-spa/device-catalog-mirror.test.ts",
