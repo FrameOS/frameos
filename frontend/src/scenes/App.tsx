@@ -67,11 +67,14 @@ function SceneRoute({
     return Component ? { scene: sceneKey, params, paramsKey, Component } : null
   })
   const cachedComponent = getCachedSceneComponent(sceneKey)
+  // Only another scene or other params switch components, never a new
+  // function for the same scene. In dev every edit re-runs scenes.tsx (an
+  // empty cache) and Fast Refresh re-runs the effect below, which re-imports
+  // the scene and gets a fresh function; taking it remounted the whole page,
+  // every image included. Fast Refresh already runs the new code through the
+  // function we hold, and in a build a scene's function never changes.
   const renderedScene =
-    cachedComponent &&
-    (displayedScene?.scene !== sceneKey ||
-      displayedScene.paramsKey !== paramsKey ||
-      displayedScene.Component !== cachedComponent)
+    cachedComponent && (displayedScene?.scene !== sceneKey || displayedScene.paramsKey !== paramsKey)
       ? { scene: sceneKey, params, paramsKey, Component: cachedComponent }
       : displayedScene
 
@@ -83,7 +86,7 @@ function SceneRoute({
         return
       }
       setDisplayedScene((current) => {
-        if (current?.scene === sceneKey && current.paramsKey === paramsKey && current.Component === Component) {
+        if (current?.scene === sceneKey && current.paramsKey === paramsKey) {
           return current
         }
         return { scene: sceneKey, params, paramsKey, Component }
