@@ -153,15 +153,9 @@ export function runSystemChecks(): SystemCheck[] {
       required: false,
     },
     {
-      configured: isSet("DISCORD_REPORTS_WEBHOOK_URL"),
-      detail: "Discord heads-up when a scene is reported.",
-      name: "DISCORD_REPORTS_WEBHOOK_URL",
-      required: false,
-    },
-    {
       configured: isSet("NEXT_PUBLIC_POSTHOG_KEY"),
       detail:
-        "PostHog analytics AND error tracking (browser exceptions, server-side reportError, signup and scene-report capture).",
+        "PostHog analytics AND error tracking (browser exceptions, server-side reportError, the signup, scene-report and photo-scan events its Discord workflows hang off).",
       name: "NEXT_PUBLIC_POSTHOG_KEY",
       required: false,
     },

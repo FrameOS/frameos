@@ -651,8 +651,8 @@ not scanned again. OpenAI moderation is not used for photos: it scores
 is a second layer for everything the CDN serves. A configured scanner that can not be reached refuses the upload. A match stores
 nothing, records a row in `photo_scan_hits`, suspends the account's photos
 (`accounts.photos_suspended_at`: uploads refused, share links answer 404)
-and notifies the admins (the `photo scan matched` PostHog event and
-`DISCORD_REPORTS_WEBHOOK_URL`). The matches are listed at `/admin/photos`;
+and notifies the admins (the `photo scan matched` PostHog event, which a
+PostHog webhook carries to Discord). The matches are listed at `/admin/photos`;
 the `/admin` checks warn while the hash list is the only scanner. Adding a
 blocked hash and lifting a suspension are SQL for now:
 
@@ -903,10 +903,9 @@ NEXT_PUBLIC_POSTHOG_HOST=…                   # optional; defaults to
 
 All go to the `/capture` endpoint using the same public project key as the
 browser SDK (no extra secret required). The Discord messages for these
-("new user", "scene reported") are PostHog webhook destinations on the
-events, configured in PostHog, not in auth-web. `DISCORD_REPORTS_WEBHOOK_URL`
-(`src/lib/discord.ts`) is the older direct post for scene reports and is on
-its way out (`docs/todo.md`).
+("new user", "scene reported", "photo scan match") are PostHog workflows on
+the events, configured in PostHog, not in auth-web: auth-web posts to Discord
+directly nowhere, so an event without a workflow notifies nobody.
 
 **The browser SDK does not read this from the server's env file.**
 `NEXT_PUBLIC_*` values are inlined into the client bundle when `next build`

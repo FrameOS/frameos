@@ -48,15 +48,23 @@ ping_healthcheck() {
 }
 
 # One row per run in the cloud's backup_runs table (see pg-backup.sh). The
-# URL stays off argv: libpq reads a connection URI from PGDATABASE as well.
+# URL stays off argv, and libpq does NOT read one from PGDATABASE (it takes
+# the whole URL as a database name and connects over the socket as root), so
+# the live release's pg-env.sh splits it into PG* variables, in a subshell.
+# pg-backup.sh carries its own copy; this one is best effort and borrows it.
+pg_env_lib="${FRAMEOS_CLOUD_RELEASE_DIR:-/opt/frameos-cloud}/cloud/scripts/lib/pg-env.sh"
 started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 record_run() {
   # $1: ok (true|false), $2: summary
   [ -n "${DATABASE_URL:-}" ] || return 0
-  PGDATABASE="$DATABASE_URL" psql -q -v ON_ERROR_STOP=1 -v kind=objects -v ok="$1" -v summary="$2" -v started="$started_at" <<'SQL' 2>/dev/null || echo "note: could not record the run in backup_runs (migration 0056 applied?)" >&2
+  (
+    # shellcheck source=/dev/null
+    . "$pg_env_lib" && pg_env_from_url "$DATABASE_URL" &&
+      psql -q -v ON_ERROR_STOP=1 -v kind=objects -v ok="$1" -v summary="$2" -v started="$started_at" <<'SQL'
 INSERT INTO backup_runs (kind, ok, summary, started_at)
 VALUES (:'kind', :'ok'::boolean, :'summary', :'started'::timestamptz);
 SQL
+  ) 2>/dev/null || echo "note: could not record the run in backup_runs ($pg_env_lib missing, or migration 0056 not applied?)" >&2
 }
 fail() {
   echo "object-store backup failed: $1" >&2

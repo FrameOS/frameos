@@ -9,7 +9,6 @@ import {
   readBoundedJsonObject,
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
-import { notifyDiscord } from "../../../../../../src/lib/discord";
 import { capturePostHogEvent } from "../../../../../../src/lib/posthog-capture";
 import {
   getAccountBaseUrl,
@@ -138,31 +137,19 @@ async function handlePost(request: NextRequest, context: RouteContext) {
   });
 
   // Heads-up to the moderation channel; the report itself already succeeded.
-  // The PostHog event is the sink of record (a Discord webhook hangs off it
-  // there); the direct Discord post stays until one real report has arrived
-  // through PostHog (docs/todo.md).
+  // The PostHog event is the only sink: the Discord message is a PostHog
+  // webhook on it (docs/deployment.md, "PostHog").
   const sceneUrl = new URL(`/s/${scene.slug}`, getScenesBaseUrl()).toString();
   const reportsUrl = new URL("/admin/reports", getAccountBaseUrl()).toString();
-  await Promise.all([
-    capturePostHogEvent(storeSceneReportedEvent, session.accountId, {
-      reason: reason.slice(0, 500),
-      report_id: created.id,
-      reporter_email: session.email,
-      reports_url: reportsUrl,
-      scene_id: scene.id,
-      scene_name: scene.name,
-      scene_url: sceneUrl,
-    }),
-    notifyDiscord(
-      [
-        `🚩 **Scene reported**: ${scene.name}`,
-        `Scene: <${sceneUrl}>`,
-        `Reporter: ${session.email ?? session.accountId}`,
-        `Reason: ${reason.slice(0, 500)}`,
-        `Review: <${reportsUrl}>`,
-      ].join("\n"),
-    ),
-  ]);
+  await capturePostHogEvent(storeSceneReportedEvent, session.accountId, {
+    reason: reason.slice(0, 500),
+    report_id: created.id,
+    reporter_email: session.email,
+    reports_url: reportsUrl,
+    scene_id: scene.id,
+    scene_name: scene.name,
+    scene_url: sceneUrl,
+  });
 
   return NextResponse.json({ status: "reported" });
 }

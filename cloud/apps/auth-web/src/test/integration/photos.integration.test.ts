@@ -105,7 +105,6 @@ beforeEach(async () => {
   cdn.base = undefined;
   vi.stubEnv("OPENAI_API_KEY", "");
   vi.stubEnv("PHOTODNA_SUBSCRIPTION_KEY", "");
-  vi.stubEnv("DISCORD_REPORTS_WEBHOOK_URL", "");
   vi.stubEnv(
     "FRAMEOS_PHOTO_UPLOAD_DIR",
     mkdtempSync(join(tmpdir(), "frameos-cloud-test-photo-uploads-")),
