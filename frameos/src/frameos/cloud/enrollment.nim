@@ -101,17 +101,18 @@ proc pendingEnrollmentPath*(): string =
   let override = getEnv("FRAMEOS_CLOUD_ENROLL_PENDING_PATH")
   if override.len > 0: override else: CLOUD_ENROLL_PENDING_PATH
 
-proc otherControlPlaneActive*(frameConfig: FrameConfig): bool =
+proc otherControlPlaneActive*(serverHost: string): bool =
   ## True when a self-hosted backend manages this frame (frame.json serverHost).
   ## Loopback hosts don't count: generic SD images have shipped frame.json with
   ## the placeholder serverHost "localhost", and a backend at the frame's own
   ## loopback cannot be a real control plane — treating it as one made every
   ## boot-time claim-token enrollment fail permanently (409 backend_managed)
   ## and shred the token before a single request left the device.
-  if frameConfig == nil:
-    return false
-  let host = frameConfig.serverHost.strip().toLowerAscii()
+  let host = serverHost.strip().toLowerAscii()
   host.len > 0 and host notin ["localhost", "127.0.0.1", "::1", "[::1]"]
+
+proc otherControlPlaneActive*(frameConfig: FrameConfig): bool =
+  frameConfig != nil and otherControlPlaneActive(frameConfig.serverHost)
 
 const DEVICE_TREE_COMPATIBLE_PATH* = "/proc/device-tree/compatible"
 

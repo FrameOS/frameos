@@ -1,7 +1,8 @@
-import std/[atomics, deques, json, locks, monotimes, os, times, unittest]
+import std/[atomics, deques, json, locks, monotimes, os, strutils, times, unittest]
 
 import ../state
 import ../../types
+from ../../config import currentFrameConfigGeneration, updateFrameConfigFrom
 
 suite "Server state helpers":
   test "frame api id is fixed":
@@ -71,3 +72,48 @@ suite "Server state helpers":
     check bad.load == 0
     check getUiLogs().len == MAX_RECENT_LOGS
     check getUiMetrics().len == MAX_RECENT_METRICS
+
+  test "workers copy the live config's strings while the runner reloads it":
+    # What auth.nim does on every request (frameAccess, frameAccessKey,
+    # serverApiKey) while a deploy reloads the config in place. Read straight
+    # off the object, a key could be the length of one config and the bytes
+    # of the next; copied under the reload's lock it is always one or the
+    # other.
+    let keyA = "a".repeat(40)
+    let keyB = "bb".repeat(13)
+    globalFrameConfig = FrameConfig(frameAccess: "private", frameAccessKey: keyA,
+      serverApiKey: keyB, assetsPath: "/srv/assets")
+    var done: Atomic[bool]
+    var bad: Atomic[int]
+    var reads: Atomic[int]
+    proc reader(args: tuple[done: ptr Atomic[bool], bad, reads: ptr Atomic[int],
+                            keyA, keyB: string]) {.thread.} =
+      {.cast(gcsafe).}:
+        while not args.done[].load:
+          let key = liveConfigValue(frameAccessKey)
+          let apiKey = liveConfigValue(serverApiKey)
+          if key notin [args.keyA, args.keyB] or apiKey notin [args.keyA, args.keyB] or
+              liveConfigValue(frameAccess) != "private" or
+              liveConfigValue(assetsPath) != "/srv/assets":
+            discard args.bad[].fetchAdd(1)
+          discard args.reads[].fetchAdd(1)
+          # Allocation churn: a freed string's chunk has to be reused for a
+          # premature free to show.
+          let junk = parseJson("""{"a":[1,2,3],"b":{"c":"dddddddddddddddd"}}""")
+          if junk{"a"}.len != 3:
+            discard args.bad[].fetchAdd(1000)
+    var readers: array[4, Thread[tuple[done: ptr Atomic[bool], bad, reads: ptr Atomic[int],
+                                       keyA, keyB: string]]]
+    for t in readers.mitems: createThread(t, reader, (addr done, addr bad, addr reads, keyA, keyB))
+    let generationBefore = currentFrameConfigGeneration()
+    for i in 0 ..< 2000:
+      let even = i mod 2 == 0
+      updateFrameConfigFrom(globalFrameConfig, FrameConfig(frameAccess: "private",
+        frameAccessKey: if even: keyB else: keyA, serverApiKey: if even: keyA else: keyB,
+        assetsPath: "/srv/assets"))
+    done.store(true)
+    joinThreads(readers)
+    check bad.load == 0
+    check reads.load > 0
+    check currentFrameConfigGeneration() - generationBefore == 2000
+    check liveConfigValue(frameAccessKey) == keyA

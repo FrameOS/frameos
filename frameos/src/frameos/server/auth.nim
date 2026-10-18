@@ -4,7 +4,7 @@ import std/[locks, os, strutils, sysrand, tables]
 import times
 import mummy
 import frameos/types
-from frameos/config import getConfigFilename
+from frameos/config import getConfigFilename, withLiveConfigLock
 from frameos/utils/system import writePrivateFile
 import ./state
 
@@ -183,12 +183,12 @@ proc frameAdminAuthValues(): AdminAuthValues {.gcsafe.} =
   let persisted = persistedFrameAdminAuth()
   if persisted.present:
     return persisted
+  # The runtime's own copy is a ref shared with the runner. Reading it under
+  # the live-config lock keeps the workers from touching its refcounts
+  # concurrently and a reload from swapping it mid-read; it is only reached
+  # while frame.json has no admin block at all.
   {.gcsafe.}:
-    # The runtime's own copy is a ref shared with the main thread (the portal
-    # assigns it once at setup). Reading it under the cache lock keeps the
-    # workers from touching its refcounts concurrently; it is only reached
-    # while frame.json has no admin block at all.
-    withLock adminAuthCacheLock:
+    withLiveConfigLock:
       if globalFrameConfig != nil and globalFrameConfig.frameAdminAuth != nil:
         return adminAuthValues(globalFrameConfig.frameAdminAuth)
   AdminAuthValues()
@@ -206,17 +206,17 @@ proc adminAuthUser(): string {.gcsafe.} =
 proc adminAuthPass(): string {.gcsafe.} =
   frameAdminAuthValues().pass
 
+# Copies, not reads off the live config: every request asks for these on a
+# mummy worker while a reload may be swapping the config (state.nim,
+# liveConfigValue).
 template frameAccessMode(): string =
-  {.gcsafe.}:
-    globalFrameConfig.frameAccess
+  liveConfigValue(frameAccess)
 
 template frameAccessKeyValue*(): string =
-  {.gcsafe.}:
-    globalFrameConfig.frameAccessKey
+  liveConfigValue(frameAccessKey)
 
 template frameServerApiKeyValue(): string =
-  {.gcsafe.}:
-    (if globalFrameConfig.isNil: "" else: globalFrameConfig.serverApiKey)
+  liveConfigValue(serverApiKey)
 
 proc adminPanelEnabled*(): bool {.gcsafe.} =
   let adminAuth = frameAdminAuthValues()

@@ -12,12 +12,13 @@ proc respond*(request: Request; statusCode: httpcore.HttpCode;
 
 template frameWebHtml*(frameAdminMode: bool = false): string =
   {.gcsafe.}:
-    let scalingMode = case globalFrameConfig.scalingMode:
-      of "cover", "center": globalFrameConfig.scalingMode
+    let configuredScalingMode = liveConfigValue(scalingMode)
+    let cssScalingMode = case configuredScalingMode:
+      of "cover", "center": configuredScalingMode
       of "stretch": "100% 100%"
       else: "contain"
     let adminMode = if frameAdminMode: "true" else: "false"
-    let html = frameWebIndexHtml.replace("/*$scalingMode*/contain", scalingMode).replace(
+    let html = frameWebIndexHtml.replace("/*$scalingMode*/contain", cssScalingMode).replace(
       "/*$frameAdminMode*/ false",
       adminMode,
     )

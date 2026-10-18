@@ -1031,18 +1031,21 @@ proc runDriverSetupFromSavedConfig*(frameOS: FrameOS, options: PortalSetupOption
   if binary.len == 0 or appDir.len == 0:
     rememberError("Display setup failed: runtime path not available.")
     return false
-  pLog("portal:setup:driverSetup:start", %*{"device": frameOS.frameConfig.device})
+  var device = ""
+  {.gcsafe.}:
+    device = portalRequestConfig(frameOS).device
+  pLog("portal:setup:driverSetup:start", %*{"device": device})
   let (output, rc) =
     if privilegedDoorAvailable():
       door(pvApplyDriverSetup, %*{"rebootIfRequired": true}, timeoutMs = 15 * 60 * 1000)
     else:
       run("cd " & shQuote(appDir) & " && sudo -n " & shQuote(binary) & " driver-setup --reboot-if-required")
   if rc == 0:
-    pLog("portal:setup:driverSetup:done", %*{"device": frameOS.frameConfig.device})
+    pLog("portal:setup:driverSetup:done", %*{"device": device})
     return true
   let message = output.strip()
   rememberError("Display setup failed" & (if message.len > 0: ": " & message else: "."))
-  pLog("portal:setup:driverSetup:error", %*{"device": frameOS.frameConfig.device, "rc": rc})
+  pLog("portal:setup:driverSetup:error", %*{"device": device, "rc": rc})
   false
 
 proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
@@ -1288,7 +1291,8 @@ proc availableNetworks*(frameOS: FrameOS): seq[string] =
   ## hotspot is what the phone is connected to while it looks at this list —
   ## a scan sees it too, and offering it back as a network to join is a trap
   ## (2026-09-06, Zero 2 W: "FrameOS-Setup" listed between the home SSIDs).
-  let ownSsid = frameOS.frameConfig.network.wifiHotspotSsid.strip()
+  let frameConfig = portalRequestConfig(frameOS)
+  let ownSsid = if frameConfig.network != nil: frameConfig.network.wifiHotspotSsid.strip() else: ""
   for ssid in scannedNetworks(frameOS):
     if ownSsid.len > 0 and ssid == ownSsid:
       continue
@@ -1674,7 +1678,10 @@ proc logNetworkDiagnostics*(reason: string) {.gcsafe.} =
   pLog("networkCheck:diagnostics", %*{"reason": reason, "output": output.strip()})
 
 proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
-  let frameConfig = frameOS.frameConfig
+  # This thread's own parse: the connect thread is not the runtime's.
+  var frameConfig: FrameConfig
+  {.gcsafe.}:
+    frameConfig = portalRequestConfig(frameOS)
 
   stopAp(frameOS) # close hotspot before connecting
   # The system zone follows the form (clocks on the panel were all UTC after
@@ -2326,8 +2333,7 @@ updateControlUi();
     .replace("__HOSTNAME_LINK_SUFFIX__", $(%hostnameLinkSuffix))
   layout(body & script)
 
-proc postSetupFrameUrl*(frameOS: FrameOS): string =
-  let frameConfig = frameOS.frameConfig
+proc postSetupFrameUrl*(frameConfig: FrameConfig): string =
   let scheme = if frameConfig.httpsProxy != nil and frameConfig.httpsProxy.enable: "https" else: "http"
   let host = if frameConfig.frameHost.strip().len > 0: frameConfig.frameHost.strip() else: "frame.local"
   var port =
@@ -2339,11 +2345,15 @@ proc postSetupFrameUrl*(frameOS: FrameOS): string =
     if (scheme == "http" and port == 80) or (scheme == "https" and port == 443): "" else: ":" & $port
   result = scheme & "://" & host & portSuffix & "/"
 
-proc plainHttpFrameUrl(frameOS: FrameOS): string =
+proc postSetupFrameUrl*(frameOS: FrameOS): string =
+  ## Read off this thread's own parse (portalRequestConfig): the status and
+  ## confirm pages run on a mummy worker.
+  postSetupFrameUrl(portalRequestConfig(frameOS))
+
+proc plainHttpFrameUrl(frameConfig: FrameConfig): string =
   ## The http:// twin of postSetupFrameUrl for a frame whose public URL is
   ## https: a browser will not fetch a self-signed https origin from the
   ## "Saved!" page, while the plain port still answers /setup/status.
-  let frameConfig = frameOS.frameConfig
   let host = if frameConfig.frameHost.strip().len > 0: frameConfig.frameHost.strip() else: "frame.local"
   let port = if frameConfig.framePort > 0: frameConfig.framePort else: 8787
   result = "http://" & host & (if port == 80: "" else: ":" & $port) & "/"
@@ -2374,12 +2384,13 @@ proc setupStatusJson*(frameOS: FrameOS, includeError = true): JsonNode =
     result["error"] = %(if lastError.len > 0: "setup reported an error; see the frame log" else: "")
 
 proc confirmHtml*(frameOS: FrameOS, ssid = ""): string =
-  let frameUrl = postSetupFrameUrl(frameOS)
+  let frameConfig = portalRequestConfig(frameOS)
+  let frameUrl = postSetupFrameUrl(frameConfig)
   let adminUrl = frameUrl & "admin"
-  let hotspotSsid = frameOS.frameConfig.network.wifiHotspotSsid
+  let hotspotSsid = if frameConfig.network != nil: frameConfig.network.wifiHotspotSsid else: ""
   var probeUrls = @[frameUrl & "setup/status"]
   if frameUrl.startsWith("https://"):
-    probeUrls.add plainHttpFrameUrl(frameOS) & "setup/status"
+    probeUrls.add plainHttpFrameUrl(frameConfig) & "setup/status"
   let cloudNote =
     if pendingCloudEnrollment() != nil:
       "<p>A cloud claim code is queued: once online, the frame enrolls itself " &

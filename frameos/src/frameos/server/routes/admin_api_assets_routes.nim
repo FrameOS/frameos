@@ -47,7 +47,8 @@ proc contentTypeForAsset*(path: string): string =
     "application/octet-stream"
 
 proc configuredAssetsPath*(): string =
-  normalizedPath(if globalFrameConfig.assetsPath.len > 0: globalFrameConfig.assetsPath else: "/srv/assets")
+  let assetsPath = liveConfigValue(assetsPath)
+  normalizedPath(if assetsPath.len > 0: assetsPath else: "/srv/assets")
 
 when defined(posix) and not defined(frameosEmbedded) and not defined(frameosWasm):
   import std/posix

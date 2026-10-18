@@ -57,6 +57,7 @@ import std/uri
 import ws
 
 import frameos/channels
+from frameos/config import currentFrameConfigGeneration, withLiveConfigLock
 import frameos/device_setup
 import frameos/events
 import frameos/interpreter
@@ -1512,6 +1513,81 @@ proc handleCloudVerb*(ctx: CloudVerbContext, msg: JsonNode): CloudVerbReply {.gc
     result = CloudVerbReply(ack: ackError(id, "unknown_verb"))
 
 # ---------------------------------------------------------------------------
+# The hub thread's frame config
+# ---------------------------------------------------------------------------
+#
+# The hub thread holds no reference to the runtime's FrameConfig: the runner
+# rewrites that object in place on every reload (config.nim
+# updateFrameConfigFrom) while four mummy workers read it, and ORC refcounts
+# are not atomic (AGENTS.md, "Refs do not cross threads"). It keeps a
+# FrameConfig of its own with the values the hub reads, copied off the live
+# object under the reload's lock whenever the config's generation moves — the
+# logger's LoggerSettings, as a FrameConfig so the enrollment and payload
+# helpers take it unchanged.
+
+var hubLiveConfig: pointer
+  ## The runtime's FrameConfig, uncounted (portal.nim's RuntimeHandle): the
+  ## runtime and globalFrameConfig keep it for the life of the process. Read
+  ## only by copyHubConfigValues, under withLiveConfigLock.
+
+var
+  hubConfig {.threadvar.}: FrameConfig
+  hubConfigGeneration {.threadvar.}: int
+
+proc copyHubConfigValues(target: FrameConfig) =
+  ## Every field the hub, its verbs and the enrollment helpers read. A field
+  ## missing here reads as its default on the hub, so add one with its reader.
+  let live {.cursor.} = cast[FrameConfig](hubLiveConfig)
+  if live == nil:
+    return
+  withLiveConfigLock:
+    target.name = live.name
+    target.mode = live.mode
+    target.device = live.device
+    target.width = live.width
+    target.height = live.height
+    target.serverHost = live.serverHost
+    target.frameHost = live.frameHost
+    target.framePort = live.framePort
+    target.metricsInterval = live.metricsInterval
+    target.network =
+      if live.network == nil: nil
+      else: NetworkConfig(allowLocalNetworkAccess: live.network.allowLocalNetworkAccess)
+    target.httpsProxy =
+      if live.httpsProxy == nil: nil
+      else: HttpsProxyConfig(enable: live.httpsProxy.enable, port: live.httpsProxy.port)
+    target.timeZoneUpdates =
+      if live.timeZoneUpdates == nil: nil
+      else: TimeZoneUpdatesConfig(enabled: live.timeZoneUpdates.enabled,
+        hour: live.timeZoneUpdates.hour, url: live.timeZoneUpdates.url)
+    target.gpioButtons.setLen(0)
+    for i in 0 ..< live.gpioButtons.len:
+      let button {.cursor.} = live.gpioButtons[i]
+      if button != nil:
+        target.gpioButtons.add(GPIOButton(pin: button.pin, label: button.label, role: button.role))
+
+proc hubFrameConfig(): FrameConfig =
+  ## This thread's copy, one object for the thread's life (the session's verb
+  ## context keeps it), refreshed in place. The display size is copied on
+  ## every call: a driver writes the panel's real mode into the live config
+  ## outside any reload, sometimes only after hello on a Pi 5.
+  # Sampled before the copy, so a reload racing it leaves the cache key
+  # behind the values, never ahead of them.
+  let generation = currentFrameConfigGeneration()
+  if hubConfig == nil:
+    hubConfig = FrameConfig()
+    hubConfigGeneration = generation - 1
+  if generation != hubConfigGeneration:
+    copyHubConfigValues(hubConfig)
+    hubConfigGeneration = generation
+  else:
+    let live {.cursor.} = cast[FrameConfig](hubLiveConfig)
+    if live != nil:
+      hubConfig.width = live.width
+      hubConfig.height = live.height
+  hubConfig
+
+# ---------------------------------------------------------------------------
 # WebSocket session
 # ---------------------------------------------------------------------------
 
@@ -1860,8 +1936,7 @@ proc pullServiceSettings(link: HubLinkSnapshot, ctx: CloudVerbContext): ServiceS
     raise newException(CloudHubAuthError,
       "Provider rejected the link token on the service-settings fetch")
 
-proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
-    Future[SessionEndReason] {.async.} =
+proc runHubSession(link: HubLinkSnapshot): Future[SessionEndReason] {.async.} =
   var socket: WebSocket
   let handle = DialHandle()
   try:
@@ -1885,6 +1960,7 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
     # re-raise keeps its type.
     handle.closeClient()
     raise
+  let frameConfig = hubFrameConfig()
   let ctx = defaultCloudVerbContext(frameConfig, link.scopes, link.scenesChecksum)
   var generation = link.generation
   var logBuffer: seq[SerializedLog] = @[]
@@ -1908,11 +1984,11 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
   var lastSceneImageGeneration = sceneImageGenerationValue()
   var logsGranted = "telemetry:logs" in link.scopes
   var metricsGranted = "telemetry:metrics" in link.scopes
-  # Read live each pass, not once here: a `set_settings` push may change (or
-  # zero, i.e. disable) metrics_interval while this session is up.
+  # Read each pass, not once here: a `set_settings` push may change (or zero,
+  # i.e. disable) metrics_interval while this session is up.
   proc metricsPushInterval(): float =
-    if frameConfig == nil or frameConfig.metricsInterval <= 0: 0.0
-    else: max(frameConfig.metricsInterval, 5.0)
+    let interval = hubFrameConfig().metricsInterval
+    if interval <= 0: 0.0 else: max(interval, 5.0)
   let idleTimeout = hubIdleTimeoutSeconds()
   let pingInterval = min(HubPingIntervalSeconds, idleTimeout / 3)
   result = sessionDisconnected
@@ -1984,7 +2060,7 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
       if currentCloudLinkGeneration() != generation:
         let fresh = snapshotLink()
         generation = fresh.generation
-        refreshLocalNetworkPolicy(frameConfig)
+        refreshLocalNetworkPolicy(hubFrameConfig())
         if not fresh.managed or fresh.accessToken != link.accessToken:
           result = sessionDemoted
           break
@@ -2074,7 +2150,7 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
         lastStateCheckAt = now
         # Pick up local settings changes (allowLocalNetworkAccess toggled on
         # the admin page) without waiting for a link-state generation bump.
-        refreshLocalNetworkPolicy(frameConfig)
+        refreshLocalNetworkPolicy(hubFrameConfig())
         let (sceneId, _) = getAllPublicStates()
         let display = $frameConfig.width & "x" & $frameConfig.height
         let lanAccess = lanAccessEnabled(frameConfig)
@@ -2122,7 +2198,7 @@ proc runHubSession(frameConfig: FrameConfig, link: HubLinkSnapshot):
 # ---------------------------------------------------------------------------
 
 var
-  hubThread: Thread[FrameConfig]
+  hubThread: Thread[void]
   hubThreadStarted = false
 
 proc sleepInterruptible(seconds: float) =
@@ -2132,7 +2208,7 @@ proc sleepInterruptible(seconds: float) =
     sleep(chunk)
     remainingMs -= chunk
 
-proc cloudHubThreadMain(frameConfig: FrameConfig) {.thread.} =
+proc cloudHubThreadMain() {.thread.} =
   {.cast(gcsafe).}:
     randomize()
     var backoff = HubBackoffMinSeconds
@@ -2142,6 +2218,7 @@ proc cloudHubThreadMain(frameConfig: FrameConfig) {.thread.} =
     while not hubStopRequested.load(moRelaxed):
       # Keep the private-network HTTP policy in sync with the link state and
       # the local override on every pass (idle pass = every ~2s).
+      let frameConfig = hubFrameConfig()
       refreshLocalNetworkPolicy(frameConfig)
       # ---- claim-token handoff -------------------------------------------
       # Checked every pass so a pending file written after boot (setup portal,
@@ -2205,7 +2282,7 @@ proc cloudHubThreadMain(frameConfig: FrameConfig) {.thread.} =
       var authRejected = false
       let sessionStartedAt = epochTime()
       try:
-        reason = waitFor runHubSession(frameConfig, link)
+        reason = waitFor runHubSession(link)
       except CloudHubAuthError as error:
         authRejected = true
         log(%*{"event": "cloud:hub:authFailed", "error": error.msg,
@@ -2237,28 +2314,35 @@ proc cloudHubThreadMain(frameConfig: FrameConfig) {.thread.} =
       backoff = min(backoff * 2, HubBackoffMaxSeconds)
 
 proc startCloudManagement*(frameConfig: FrameConfig) {.gcsafe.} =
-  ## Starts the cloud hub thread. Idempotent; the thread idles cheaply until
-  ## the frame is enrolled (mode=managed in cloud_link.json) or a pending
-  ## claim-token enrollment file appears at boot.
+  ## Starts the cloud hub thread on the runtime's config. Idempotent; the
+  ## thread idles cheaply until the frame is enrolled (mode=managed in
+  ## cloud_link.json) or a pending claim-token enrollment file appears at boot.
   {.gcsafe.}:
-    # A local upload replacing provider scenes must lift (or a rehydrate must
-    # raise) the deny without waiting for a hub tick — the hub thread idles
-    # on a standalone or demoted frame.
-    uploadedScenesChangedHook = proc() {.gcsafe.} =
-      refreshLocalNetworkPolicy(frameConfig)
     # Policy is correct from the first render onwards, not only once the
     # thread has spun up.
     refreshLocalNetworkPolicy(frameConfig)
     if hubThreadStarted:
       return
     hubThreadStarted = true
+    hubLiveConfig = cast[pointer](frameConfig)
+    # A local upload replacing provider scenes must lift (or a rehydrate must
+    # raise) the deny without waiting for a hub tick — the hub thread idles
+    # on a standalone or demoted frame. Whichever thread replaced them runs
+    # this, on its own copy of the config.
+    uploadedScenesChangedHook = proc() {.gcsafe.} =
+      refreshLocalNetworkPolicy(hubFrameConfig())
     hubStopRequested.store(false, moRelaxed)
-    createThread(hubThread, cloudHubThreadMain, frameConfig)
+    createThread(hubThread, cloudHubThreadMain)
 
-proc startCloudHubClient*(frameConfig: FrameConfig) {.gcsafe.} =
-  ## Alias used by the enrollment routes; the managed session starts as soon
-  ## as the thread observes the new link state.
-  startCloudManagement(frameConfig)
+proc startCloudHubClient*() {.gcsafe.} =
+  ## Used by the enrollment routes; the managed session starts as soon as the
+  ## thread observes the new link state. Boot already started the thread, so
+  ## a route only refreshes the policy, on its own thread's copy.
+  {.gcsafe.}:
+    if hubThreadStarted:
+      refreshLocalNetworkPolicy(hubFrameConfig())
+    else:
+      startCloudManagement(globalFrameConfig)
 
 proc stopCloudHubClient*() {.gcsafe.} =
   ## Asks the hub thread to wind down (used on shutdown; the disconnect route
