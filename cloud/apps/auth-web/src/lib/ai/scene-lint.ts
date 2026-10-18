@@ -294,10 +294,15 @@ export function lintCodeNodeJs(code: string, argNames: string[] = []): string[] 
   // Declared codeArgs are injected as `const <name> = …` ahead of the
   // snippet; redeclaring one in the same scope is a SyntaxError on the frame
   // ("invalid redefinition of lexical identifier") that names no line.
+  // One pass over the code for every declared name, then a lookup per arg: a
+  // regex per arg rescanned the whole snippet for each, and both counts are
+  // the caller's to choose.
+  const declared = new Set<string>();
+  for (const match of code.matchAll(/(^|[^.\w])(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g)) {
+    declared.add(match[2] ?? "");
+  }
   for (const name of argNames) {
-    // The name is scene-supplied: escape it, or "[" throws and "(a*)*c" backtracks forever.
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`(^|[^.\\w])(?:const|let|var|function|class)\\s+${escaped}\\b`).test(code)) {
+    if (declared.has(name)) {
       problems.push(
         `Code node redeclares its argument "${name}" (it is already defined as a const from codeArgs). Use it directly or copy it into a differently named variable.`,
       );
@@ -328,7 +333,10 @@ const mainAppSourceFile = /^app\.(ts|tsx|js|jsx)$/;
 const importableAppFile = /\.(ts|tsx|js|jsx|json)$/;
 const importExtensions = [".ts", ".tsx", ".js", ".jsx", ".json"];
 // `import x from '…'`, `import { a } from '…'`, `import '…'`, `export { a } from '…'`.
-const importSpecifierPattern = /^\s*(?:import|export)\b[^'"\n]*?\bfrom\s*['"]([^'"\n]+)['"]|^\s*import\s*['"]([^'"\n]+)['"]/gm;
+// The leading indent is `[ \t]*`, not `\s*`: under /m every line start is a
+// candidate, and a `\s*` there runs on through the blank lines below it, so
+// a body of newlines cost the square of its length (seconds per 100 KB).
+const importSpecifierPattern = /^[ \t]*(?:import|export)\b[^'"\n]*?\bfrom\s*['"]([^'"\n]+)['"]|^[ \t]*import\s*['"]([^'"\n]+)['"]/gm;
 
 export function importSpecifiers(source: string): string[] {
   const specifiers: string[] = [];
@@ -404,7 +412,9 @@ export function moduleExports(source: string): Set<string> | null {
     }
   }
   // `export { run }`, `export { toggle as run }`.
-  for (const match of source.matchAll(/\bexport\s*\{([^}]*)\}/g)) {
+  // Up to the `}` or the end, without requiring the `}`: requiring it made an
+  // unclosed `export {` rescan the rest of the source from every opening.
+  for (const match of source.matchAll(/\bexport\s*\{([^}]*)/g)) {
     for (const part of (match[1] ?? "").split(",")) {
       const name = part.split(/\s+as\s+/).pop()?.trim();
       if (name) {
@@ -479,10 +489,17 @@ export function lintSvgMarkup(markup: string): string[] {
       `SVG uses <${unsupported[1]}>, which the frame's renderer does not support — the WHOLE SVG fails to render. Supported: svg, g, path, rect, circle, ellipse, line, polyline, polygon, text/tspan, linearGradient, radialGradient, defs (gradients only).`,
     );
   }
-  if (/<\s*svg\b(?![^>]*viewBox)/i.test(markup)) {
-    problems.push("SVG root needs a viewBox attribute.");
+  // Tag scans read up to the next `>` and never require one: a pattern that
+  // demands the `>` (or looks ahead for an attribute past every unclosed
+  // `<svg`) rescans the rest of the markup from each opening, which made a
+  // run of unclosed tags quadratic. Non-overlapping matches keep it linear.
+  for (const match of markup.matchAll(/<\s*svg\b([^>]*)/gi)) {
+    if (!/viewBox/i.test(match[1] ?? "")) {
+      problems.push("SVG root needs a viewBox attribute.");
+      break;
+    }
   }
-  for (const match of markup.matchAll(/<\s*(linearGradient|radialGradient)\b([^>]*)>/gi)) {
+  for (const match of markup.matchAll(/<\s*(linearGradient|radialGradient)\b([^>]*)/gi)) {
     const tag = match[1] ?? "gradient";
     const attrs = match[2] ?? "";
     if (!/gradientUnits\s*=\s*["']userSpaceOnUse["']/.test(attrs)) {

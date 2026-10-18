@@ -28,6 +28,7 @@ import { framesModel } from '../../models/framesModel'
 import { DropdownMenu } from '../../components/DropdownMenu'
 import { DeployProgressBar } from '../../components/DeployProgressBar'
 import { FrameConnectionDot } from '../../components/FrameConnectionDot'
+import { AiElsewhereNote } from './AiElsewhereNote'
 import { FrameSidebarBattery, frameLastBatteryPercent } from './FrameBatteryIndicator'
 import { FrameImage } from '../../components/FrameImage'
 import { Modal } from '../../components/Modal'
@@ -855,9 +856,8 @@ function NewBlankSceneModal({
 }
 
 /**
- * What "Generate scene" does on the device. The frame has no AI to ask and no
- * account to bill one to, so the button says where the generator lives and how
- * a scene made there gets back here, rather than being missing entirely.
+ * What "Generate scene" does on the device: says where the generator lives
+ * (AiElsewhereNote) rather than being missing entirely.
  */
 function GenerateElsewhereModal({
   onClose,
@@ -869,24 +869,7 @@ function GenerateElsewhereModal({
   return (
     <Modal open onClose={onClose} title="Generate a scene with AI">
       <div className="space-y-4 p-5 text-sm">
-        <div className="frameos-muted">
-          Not from here. This panel is the frame itself, and the frame has no AI to ask.
-        </div>
-        <div className="frameos-muted">
-          Generate one at{' '}
-          <a
-            href="https://scenes.frameos.net"
-            target="_blank"
-            rel="noreferrer"
-            className="frameos-link font-medium hover:underline"
-          >
-            scenes.frameos.net
-          </a>
-          , download it, and bring it back with <span className="frameos-strong font-semibold">Upload scene</span>.
-        </div>
-        <div className="frameos-muted">
-          Or connect this frame to FrameOS Cloud and scenes move both ways without the download.
-        </div>
+        <AiElsewhereNote />
         <div className="flex justify-end gap-2">
           <button
             type="button"

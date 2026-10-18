@@ -21,7 +21,7 @@ import {
   readJsonObject,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
-import { resolveAiCredentials } from "../../../../src/lib/ai/api-key";
+import { dailyCapFor, resolveAiCredentials } from "../../../../src/lib/ai/api-key";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
 
@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
   // ONE definition of the margin (plans.ts): the same function metering
   // prices with, so the page cannot name a rate the meter does not use.
   const marginBasisPoints = await accountMarginBasisPoints(db, accountId, settings);
-  const allowance = credentials?.source === "shared" ? "shared" : "billable";
+  const { allowance, capMicros } = dailyCapFor(credentials, settings);
 
   return NextResponse.json(
     {
@@ -96,10 +96,7 @@ export async function GET(request: NextRequest) {
         // "shared": the operator's free allowance on the shared key, not a
         // limit on anything the account owes. "billable": their own.
         allowance,
-        daily_micros: (allowance === "shared"
-          ? settings.sharedKeyDailyCapMicros
-          : settings.dailyCapMicros
-        ).toString(),
+        daily_micros: capMicros.toString(),
         // When today's number goes back to zero. Named rather than implied:
         // "resets at midnight" is ambiguous in a way a timestamp is not
         // (§8.12 is the open question about whose midnight it should be).

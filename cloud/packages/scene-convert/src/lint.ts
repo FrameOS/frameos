@@ -5,7 +5,10 @@
 // per-file rules it applies to JavaScript, kept small and dependency-free
 // so the CLI has them too. Keep the two in step.
 
-const importSpecifierPattern = /^\s*(?:import|export)\b[^'"\n]*?\bfrom\s*['"]([^'"\n]+)['"]|^\s*import\s*['"]([^'"\n]+)['"]/gm;
+// The leading indent is `[ \t]*`, not `\s*`: under /m every line start is a
+// candidate, and a `\s*` there runs on through the blank lines below it, so
+// a body of newlines cost the square of its length (seconds per 100 KB).
+const importSpecifierPattern = /^[ \t]*(?:import|export)\b[^'"\n]*?\bfrom\s*['"]([^'"\n]+)['"]|^[ \t]*import\s*['"]([^'"\n]+)['"]/gm;
 
 function exportsFunction(source: string, name: string): boolean {
   return new RegExp(

@@ -7,7 +7,12 @@ import {
   passwordProviderIssuer,
 } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../src/lib/audit";
+import {
+  consentCookieName,
+  parseConsent,
+} from "../../../../src/lib/analytics-consent";
 import { NextRequest, NextResponse } from "next/server";
+import { safeAuthReturnPath } from "../../../../src/lib/auth-cookies";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import { beginEmailVerification } from "../../../../src/lib/email-verification";
 import { assertDatabaseUrlConfigured } from "../../../../src/lib/env";
@@ -42,6 +47,7 @@ export async function POST(request: NextRequest) {
         email?: unknown;
         name?: unknown;
         password?: unknown;
+        return_to?: unknown;
         turnstile_token?: unknown;
       }
     | undefined;
@@ -126,14 +132,31 @@ export async function POST(request: NextRequest) {
   // notifyNewCloudUser never throws and no-ops without its env vars.
   void notifyNewCloudUser({
     accountId: account.accountId,
+    analyticsConsent: parseConsent(request.cookies.get(consentCookieName)?.value),
     displayName: name,
     email,
     provider: "password",
   });
 
-  await beginEmailVerification(db, account.accountId, email);
+  // The page the visitor was headed to rides the verification link, so the
+  // sign-in after verifying lands there instead of on the default page.
+  const verificationSent = await beginEmailVerification(
+    db,
+    account.accountId,
+    email,
+    {
+      returnTo:
+        typeof body?.return_to === "string"
+          ? safeAuthReturnPath(body.return_to)
+          : undefined,
+    },
+  );
 
   // No session yet: the account only becomes usable after the emailed
   // verification link is clicked, then the user signs in normally.
-  return NextResponse.json({ ok: true, verify_email: true });
+  return NextResponse.json({
+    ok: true,
+    verification_sent: verificationSent,
+    verify_email: true,
+  });
 }

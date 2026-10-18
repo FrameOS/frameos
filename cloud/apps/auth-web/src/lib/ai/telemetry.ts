@@ -11,6 +11,7 @@
 
 import { posthogConfig } from "../error-tracking";
 import type { ResponseUsage } from "./openai";
+import type { MissingPrimitive } from "./missing-primitives";
 
 const captureTimeoutMs = 5000;
 const libName = "frameos-cloud-auth-web";
@@ -140,6 +141,9 @@ export type SceneConversionRecord = {
   apps: number;
   needsModel: number;
   needsManualPort: number;
+  /** Why the manual ports are needed, counted by missing primitive
+   *  (missing-primitives.ts): the category, never the reason's text. */
+  manualPortPrimitives: Partial<Record<MissingPrimitive, number>>;
   lintErrors: number;
   renderErrors: number | null;
   durationMs: number;
@@ -164,6 +168,7 @@ export function captureSceneConversion(record: SceneConversionRecord) {
     error: record.error ?? null,
     key_source: record.keySource,
     lint_errors: record.lintErrors,
+    manual_port_primitives: record.manualPortPrimitives,
     model_calls: record.modelCalls,
     needs_manual_port: record.needsManualPort,
     needs_model: record.needsModel,

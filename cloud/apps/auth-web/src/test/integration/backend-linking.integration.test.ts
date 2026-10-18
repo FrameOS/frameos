@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, like, sql } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import {
   accounts,
@@ -8,6 +8,7 @@ import {
   createDb,
   deviceAuthorizationRequests,
   linkedClients,
+  rateLimitBuckets,
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -463,6 +464,91 @@ describe("backend linking flow", () => {
     expect(linkedClient?.clientKind).toBe("frame");
   });
 
+  it("keeps a link's scopes to its own kind", async () => {
+    await startDeviceRequest({
+      client_kind: "backend",
+      public_display_name: "Greedy Backend",
+      scopes: ["backend:link", "backend:read", "frame:managed"],
+    });
+    await startDeviceRequest({
+      client_kind: "frame",
+      public_display_name: "Greedy Frame",
+      scopes: ["frame:link", "backend:link", "auth:login"],
+    });
+
+    const stored = await db.select().from(deviceAuthorizationRequests);
+    const byName = new Map(stored.map((row) => [row.publicDisplayName, row]));
+    expect(byName.get("Greedy Backend")?.requestedScopes).toEqual([
+      "backend:link",
+      "backend:read",
+    ]);
+    expect(byName.get("Greedy Frame")?.requestedScopes).toEqual([
+      "frame:link",
+      "auth:login",
+    ]);
+  });
+
+  it("lets a frame link read grants and report inventory, not rotate a backend token", async () => {
+    const { deviceCode, userCode } = await startDeviceRequest({
+      client_kind: "frame",
+      local_origin: "http://10.0.0.9:8787",
+      public_display_name: "Kitchen frame",
+      scopes: ["frame:link", "auth:login"],
+    });
+    await signIn();
+    const authorizeResponse = await authorizeDevice(
+      postJson("/api/device/authorize", { user_code: userCode }, { origin: baseUrl }),
+    );
+    expect(authorizeResponse.status).toBe(200);
+    const pollResponse = await pollDevice(
+      postJson("/api/device/poll", { device_code: deviceCode }),
+    );
+    const accessToken = (await readJson(pollResponse)).access_token as string;
+
+    // What the frame runtime's fetchConnectSync does after linking.
+    const grantsResponse = await backendGrants(
+      getJson("/api/backends/grants", bearer(accessToken)),
+    );
+    expect(grantsResponse.status).toBe(200);
+    const inventoryResponse = await backendInventory(
+      postJson(
+        "/api/backends/inventory",
+        { reported_frameos_version: "2026.10.16" },
+        bearer(accessToken),
+      ),
+    );
+    expect(inventoryResponse.status).toBe(200);
+
+    const rotateResponse = await rotateToken(
+      postJson("/api/backends/rotate-token", {}, bearer(accessToken)),
+    );
+    expect(rotateResponse.status).toBe(403);
+    expect((await readJson(rotateResponse)).error).toBe("insufficient_scope");
+  });
+
+  it("refuses a link that holds no link scope of its kind", async () => {
+    const { accessToken, linkedClientId } = await linkBackend();
+    // A link whose approval never carried backend:link (no current client
+    // asks for one without it) is not a backend link.
+    await db
+      .update(linkedClients)
+      .set({ providerClientMetadata: { requestedScopes: ["store:publish"] } })
+      .where(eq(linkedClients.id, linkedClientId));
+
+    const grantsResponse = await backendGrants(
+      getJson("/api/backends/grants", bearer(accessToken)),
+    );
+    expect(grantsResponse.status).toBe(403);
+    const inventoryResponse = await backendInventory(
+      postJson("/api/backends/inventory", {}, bearer(accessToken)),
+    );
+    expect(inventoryResponse.status).toBe(403);
+    const rotateResponse = await rotateToken(
+      postJson("/api/backends/rotate-token", {}, bearer(accessToken)),
+    );
+    expect(rotateResponse.status).toBe(403);
+  });
+
   it("includes the owning account's email in grants", async () => {
     const { accessToken, accountId } = await linkBackend();
 
@@ -625,6 +711,12 @@ describe("backend linking flow", () => {
     );
     expect(unknownPoll.status).toBe(400);
     expect((await readJson(unknownPoll)).error).toBe("invalid_device_code");
+    // A made-up code costs a lookup, never a rate-limit row.
+    const pollBuckets = await db
+      .select()
+      .from(rateLimitBuckets)
+      .where(like(rateLimitBuckets.key, "device:poll:%"));
+    expect(pollBuckets).toEqual([]);
 
     await signIn();
     const unknownAuthorize = await authorizeDevice(

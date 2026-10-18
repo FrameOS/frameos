@@ -10,6 +10,7 @@ import {
 import { NextRequest, NextResponse } from "next/server";
 import { getSuperadminContext, superadminRefusal } from "../../../../../src/lib/admin";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
+import { isAccountUuid } from "../../../../../src/lib/billing-admin";
 import { csrfResponse } from "../../../../../src/lib/csrf";
 import {
   jsonError,
@@ -69,6 +70,12 @@ export async function POST(request: NextRequest) {
     return jsonError("reason_required", 400, {
       detail: "Say why this is being posted; it goes into the books.",
     });
+  }
+  // Every id below reaches a ::uuid column; a malformed one is the admin's
+  // typo, and Postgres would answer it with a 500.
+  const malformed = malformedIdField(body);
+  if (malformed) {
+    return jsonError("invalid_request", 400, { detail: `${malformed} must be a uuid` });
   }
 
   try {
@@ -209,6 +216,16 @@ async function postReversal(
     ok: true,
     replayed: result.replayed,
   });
+}
+
+function malformedIdField(body: Record<string, unknown>): string | null {
+  for (const field of ["accountId", "entryId", "reclassifiesEntryId"]) {
+    const value = body[field];
+    if (value !== undefined && value !== null && !isAccountUuid(value as string)) {
+      return field;
+    }
+  }
+  return null;
 }
 
 // A client-supplied key makes a double-submitted form one fact; without one,

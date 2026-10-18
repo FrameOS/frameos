@@ -97,7 +97,9 @@ export async function createFrameosLoginRequestToken(
 
 export async function verifyFrameosLoginRequestToken(token: string) {
   try {
-    const verified = await jwtVerify(token, secretKey());
+    const verified = await jwtVerify(token, secretKey(), {
+      algorithms: ["HS256"],
+    });
     const payload = verified.payload;
     if (payload.frameos_type !== loginRequestType) {
       return undefined;

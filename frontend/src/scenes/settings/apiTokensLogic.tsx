@@ -63,7 +63,7 @@ const emptyListing: ApiTokensListing = {
   api_tokens: [],
   live_count: 0,
   max_tokens: 25,
-  default_ttl_days: 90,
+  default_ttl_days: 365,
   max_ttl_days: 365,
   can_create: true,
   mcp_url: '',
@@ -72,7 +72,7 @@ const emptyListing: ApiTokensListing = {
 const defaultTokenForm: ApiTokenForm = {
   name: '',
   access: 'full',
-  expires_in_days: 90,
+  expires_in_days: 365,
   current_password: '',
 }
 

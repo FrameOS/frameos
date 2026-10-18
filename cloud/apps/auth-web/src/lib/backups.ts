@@ -92,6 +92,40 @@ export function decodeBackupContent(value: unknown): Buffer | undefined {
   }
 }
 
+// Every config backup is sealed by the backend before upload (backend
+// app/utils/cloud_backup.py `encrypted_backup_content`, sealing in
+// app/utils/backup_crypto.py): a JSON envelope with a small plaintext manifest
+// and `sealed_base64`, which is `FRBE1` ‖ ephemeral X25519 key (32) ‖
+// ChaCha20-Poly1305 ciphertext (tag 16). The cloud cannot check that the
+// ciphertext is really ciphertext, but it can refuse anything that is not
+// shaped like one — a plaintext frame dump (Wi-Fi passwords, app keys) sent
+// by a client that skipped the seal must not be stored as if it were sealed.
+export const sealedBackupFormat = "frameos-encrypted-backup-v1";
+const sealedBackupMagic = Buffer.from("FRBE1", "ascii");
+const sealedBackupMinBytes = sealedBackupMagic.length + 32 + 16;
+
+export function isSealedBackupEnvelope(content: Buffer): boolean {
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(content.toString("utf8"));
+  } catch {
+    return false;
+  }
+  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
+    return false;
+  }
+  const fields = envelope as Record<string, unknown>;
+  if (fields.format !== sealedBackupFormat || typeof fields.key_fingerprint !== "string") {
+    return false;
+  }
+  const sealed = decodeBackupContent(fields.sealed_base64);
+  return (
+    sealed !== undefined &&
+    sealed.length >= sealedBackupMinBytes &&
+    sealed.subarray(0, sealedBackupMagic.length).equals(sealedBackupMagic)
+  );
+}
+
 export function sha256Hex(content: Buffer) {
   return createHash("sha256").update(content).digest("hex");
 }

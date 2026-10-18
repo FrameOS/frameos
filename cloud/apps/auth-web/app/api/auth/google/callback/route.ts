@@ -6,6 +6,10 @@ import {
 import { createDb } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
 import {
+  consentCookieName,
+  parseConsent,
+} from "../../../../../src/lib/analytics-consent";
+import {
   authCookieNames,
   cookieOptions,
   safeAuthReturnPath,
@@ -168,6 +172,9 @@ export async function GET(request: NextRequest) {
   if (resolution.created) {
     void notifyNewCloudUser({
       accountId,
+      analyticsConsent: parseConsent(
+        request.cookies.get(consentCookieName)?.value,
+      ),
       displayName: claims.name,
       email: claims.email,
       provider: "google",

@@ -5,7 +5,10 @@ import {
 } from "@frameos-cloud/db";
 import { recordAuditEvent } from "../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateLinkedClient } from "../../../../src/lib/backend-auth";
+import {
+  authenticateLinkedClient,
+  isLinkOfKind,
+} from "../../../../src/lib/backend-auth";
 import {
   jsonError,
   readBoundedJsonObject,
@@ -38,6 +41,15 @@ export async function POST(request: NextRequest) {
   );
   if (!linkedClient) {
     return jsonError("invalid_link_token", 401);
+  }
+  // A frame linked through the device flow reports its version here, like a
+  // backend: its approval made it a connected_backends row too, and the
+  // account's installs list reads the version from that row.
+  if (
+    !isLinkOfKind(linkedClient, "backend") &&
+    !isLinkOfKind(linkedClient, "frame")
+  ) {
+    return jsonError("insufficient_scope", 403);
   }
 
   const parsed = await readBoundedJsonObject(request, maxInventoryBodyBytes);

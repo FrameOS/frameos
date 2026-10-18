@@ -6,7 +6,10 @@ import {
   resetReleaseCacheForTests,
 } from "../../../../../src/lib/firmware-release";
 import { jsonError } from "../../../../../src/lib/device-flow";
-import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
+import {
+  identityRateLimitResponse,
+  rateLimitResponse,
+} from "../../../../../src/lib/rate-limit";
 import { GET as getManifest } from "./manifest/route";
 import { GET as getDownload } from "./download/route";
 
@@ -18,6 +21,7 @@ import { GET as getDownload } from "./download/route";
 // sibling browser-flasher suite (../../firmware/route.test.ts).
 
 vi.mock("../../../../../src/lib/rate-limit", () => ({
+  identityRateLimitResponse: vi.fn(() => Promise.resolve(undefined)),
   rateLimitResponse: vi.fn(() => Promise.resolve(undefined)),
 }));
 vi.mock("../../../../../src/lib/frame-device-auth", () => ({
@@ -41,6 +45,7 @@ vi.mock("../../../../../src/lib/firmware-release", async (importOriginal) => ({
 const authMock = vi.mocked(authenticateFrameDevice);
 const devFirmwareMock = vi.mocked(devFirmwareOverride);
 const rateLimitMock = vi.mocked(rateLimitResponse);
+const frameRateLimitMock = vi.mocked(identityRateLimitResponse);
 const fetchMock = vi.fn<typeof fetch>();
 
 const frameId = "11111111-2222-3333-4444-555555555555";
@@ -134,6 +139,7 @@ beforeEach(() => {
 afterEach(() => {
   fetchMock.mockReset();
   rateLimitMock.mockClear();
+  frameRateLimitMock.mockClear();
   authMock.mockReset();
   devFirmwareMock.mockReset();
   devFirmwareMock.mockResolvedValue(undefined);
@@ -161,6 +167,15 @@ describe("GET /api/frames/[frameId]/firmware/manifest", () => {
       downloadUrl: `/api/frames/${frameId}/firmware/download?platform=esp32-s3-generic`,
     });
     expect(rateLimitMock.mock.calls[0]?.[1]).toBe("frames:device-firmware-meta");
+    // The real budget is the frame's, so frames behind one NAT address do
+    // not share it; the per-address one in front is a fleet's worth.
+    expect(frameRateLimitMock.mock.calls[0]?.slice(0, 2)).toEqual([
+      frameId,
+      "frames:device-firmware-meta",
+    ]);
+    expect(rateLimitMock.mock.calls[0]?.[2]?.limit).toBeGreaterThan(
+      frameRateLimitMock.mock.calls[0]?.[2]?.limit ?? Infinity,
+    );
   });
 
   it("relays the device auth failure before touching GitHub", async () => {
@@ -357,6 +372,10 @@ describe("GET /api/frames/[frameId]/firmware/download", () => {
     expect(response.headers.get("x-frameos-release")).toBe("v1.2.3");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(firmwareBytes);
     expect(rateLimitMock.mock.calls[0]?.[1]).toBe("frames:device-firmware");
+    expect(frameRateLimitMock.mock.calls[0]?.slice(0, 2)).toEqual([
+      frameId,
+      "frames:device-firmware",
+    ]);
   });
 
   it("refuses an asset URL that does not live on github.com", async () => {

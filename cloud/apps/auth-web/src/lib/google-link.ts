@@ -49,7 +49,9 @@ export async function readPendingGoogleLinkToken(
     return undefined;
   }
   try {
-    const verified = await jwtVerify(token, pendingKey());
+    const verified = await jwtVerify(token, pendingKey(), {
+      algorithms: ["HS256"],
+    });
     if (verified.payload.purpose !== "google-link") {
       return undefined;
     }

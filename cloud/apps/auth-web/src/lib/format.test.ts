@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatBytes, formatMicrosUsd } from "./format";
+import { formatBytes, formatMicrosUsd, previewMicrosInput } from "./format";
 
 describe("formatMicrosUsd", () => {
   it("shows whole cents when that is all there is", () => {
@@ -22,6 +22,18 @@ describe("formatMicrosUsd", () => {
   it("reads the string form client props carry", () => {
     expect(formatMicrosUsd("")).toBe("$0.00");
     expect(formatMicrosUsd("10000000")).toBe("$10.00");
+  });
+});
+
+describe("previewMicrosInput", () => {
+  it("shows a typed amount in dollars, and nothing for what is not one", () => {
+    expect(previewMicrosInput("10000000")).toBe("$10.00");
+    expect(previewMicrosInput(" 1000000 ")).toBe("$1.00");
+    expect(previewMicrosInput("0")).toBe("$0.00");
+    expect(previewMicrosInput("")).toBeNull();
+    expect(previewMicrosInput("10.5")).toBeNull();
+    expect(previewMicrosInput("-5")).toBeNull();
+    expect(previewMicrosInput("1e7")).toBeNull();
   });
 });
 

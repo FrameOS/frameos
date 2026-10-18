@@ -16,6 +16,7 @@ import {
 import {
   isSealedSettingValue,
   maxAccountSettingValueLength,
+  resealLegacyAccountSettings,
 } from "../../lib/account-settings";
 import { mintApiToken } from "../../lib/api-tokens";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
@@ -385,6 +386,35 @@ describe("account settings API", () => {
     // …and it still opens to the same key.
     expect(await (await getSettings(getRequest("?reveal=1"))).json()).toEqual({
       openAI: { apiKey: "sk-legacy-plaintext", chatModel: "gpt-5.5" },
+    });
+  });
+
+  it("re-seals the plaintext rows nobody reads in one sweep, dry run first", async () => {
+    const accountId = await signIn();
+    await db.insert(accountSettings).values([
+      { accountId, key: "openAI", value: { apiKey: "sk-legacy-plaintext" } },
+      { accountId, key: "immich", value: { url: "https://photos.example" } },
+    ]);
+
+    const dryRun = await resealLegacyAccountSettings(db, { apply: false });
+    expect(dryRun).toEqual([{ accountId, key: "openAI" }]);
+    const [untouched] = await db
+      .select()
+      .from(accountSettings)
+      .where(eq(accountSettings.key, "openAI"));
+    expect(untouched?.value).toEqual({ apiKey: "sk-legacy-plaintext" });
+
+    expect(await resealLegacyAccountSettings(db, { apply: true })).toHaveLength(1);
+    const [sealed] = await db
+      .select()
+      .from(accountSettings)
+      .where(eq(accountSettings.key, "openAI"));
+    expect(isSealedSettingValue((sealed?.value as { apiKey: string }).apiKey)).toBe(true);
+    // Nothing is left for a second run, and the key still opens.
+    expect(await resealLegacyAccountSettings(db, { apply: true })).toEqual([]);
+    expect(await (await getSettings(getRequest("?reveal=1"))).json()).toEqual({
+      immich: { url: "https://photos.example" },
+      openAI: { apiKey: "sk-legacy-plaintext" },
     });
   });
 

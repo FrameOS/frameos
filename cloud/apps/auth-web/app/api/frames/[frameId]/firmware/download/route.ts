@@ -10,7 +10,10 @@ import {
   streamDevFirmwareResponse,
   streamReleaseAssetResponse,
 } from "../../../../../../src/lib/firmware-release";
-import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import {
+  identityRateLimitResponse,
+  rateLimitResponse,
+} from "../../../../../../src/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -22,15 +25,21 @@ export const runtime = "nodejs";
 // the minisign signature before switching boot slots, so these bytes are
 // untrusted until the device itself says otherwise.
 
+const deviceDownloadBudget = { limit: 10, windowMs: 60 * 60 * 1000 };
+// How many frames one address's budget is sized for (manifest route too).
+const fleetBehindOneAddress = 20;
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
 ) {
   // A device downloads at most one image per released version; the same
-  // tight per-client budget the browser flasher's binary pipe has.
+  // tight budget the browser flasher's binary pipe has, per FRAME. The
+  // per-address one in front of it is a fleet's worth, for the frames that
+  // share one NAT address (see the manifest route).
   const limited = await rateLimitResponse(request, "frames:device-firmware", {
-    limit: 10,
-    windowMs: 60 * 60 * 1000,
+    limit: deviceDownloadBudget.limit * fleetBehindOneAddress,
+    windowMs: deviceDownloadBudget.windowMs,
   });
   if (limited) {
     return limited;
@@ -49,6 +58,14 @@ export async function GET(
   const { frameId } = await params;
   if (auth.frame.id !== frameId) {
     return jsonError("frame_mismatch", 403);
+  }
+  const frameLimited = await identityRateLimitResponse(
+    auth.frame.id,
+    "frames:device-firmware",
+    deviceDownloadBudget,
+  );
+  if (frameLimited) {
+    return frameLimited;
   }
 
   const platform = request.nextUrl.searchParams.get("platform");

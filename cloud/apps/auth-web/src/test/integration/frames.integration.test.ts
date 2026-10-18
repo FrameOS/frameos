@@ -1109,6 +1109,58 @@ describe("cloud-managed frame enrollment", () => {
     );
   });
 
+  it("replays only a frame the same claim token enrolled", async () => {
+    const accountId = await signIn();
+    const kitchen = deviceKeypair();
+    const kitchenToken = await mintToken("Kitchen");
+    const kitchenEnrolled = await enroll(kitchenToken, kitchen.publicKeyBase64);
+    expect(kitchenEnrolled.status).toBe(200);
+    const kitchenFrameId = ((await kitchenEnrolled.json()) as { frame_id: string }).frame_id;
+    const [kitchenLinkBefore] = await db
+      .select()
+      .from(linkedClients)
+      .innerJoin(frames, eq(frames.linkedClientId, linkedClients.id))
+      .where(eq(frames.id, kitchenFrameId));
+
+    // A second token of the same account, spent by its own device.
+    const hallwayToken = await mintToken("Hallway");
+    expect((await enroll(hallwayToken, deviceKeypair().publicKeyBase64)).status).toBe(200);
+
+    // The hallway token plus the kitchen frame's public key is not a
+    // lost-response retry of anything: it must not rotate the kitchen
+    // frame's credentials.
+    const crossed = await enroll(hallwayToken, kitchen.publicKeyBase64);
+    expect(crossed.status).toBe(400);
+    expect(((await crossed.json()) as { error: string }).error).toBe("invalid_claim_token");
+    const [kitchenLinkAfter] = await db
+      .select()
+      .from(linkedClients)
+      .innerJoin(frames, eq(frames.linkedClientId, linkedClients.id))
+      .where(eq(frames.id, kitchenFrameId));
+    expect(kitchenLinkAfter?.linked_clients.tokenReference).toBe(
+      kitchenLinkBefore?.linked_clients.tokenReference,
+    );
+    expect(kitchenLinkAfter?.linked_clients.previousTokenReference).toBeNull();
+
+    // A multi-use token's EARLIER card still replays, although the token's
+    // own frame_id names only its last enrollment.
+    const minted = (await (
+      await mintClaimToken(
+        postJson("/api/frames/claim-tokens", { max_uses: 2, name: "SD batch" }, { origin: baseUrl }),
+      )
+    ).json()) as { claim_token: string };
+    const firstCard = deviceKeypair();
+    const firstEnrolled = await enroll(minted.claim_token, firstCard.publicKeyBase64);
+    const firstFrameId = ((await firstEnrolled.json()) as { frame_id: string }).frame_id;
+    expect((await enroll(minted.claim_token, deviceKeypair().publicKeyBase64)).status).toBe(200);
+    const firstRetry = await enroll(minted.claim_token, firstCard.publicKeyBase64);
+    expect(firstRetry.status).toBe(200);
+    expect(((await firstRetry.json()) as { frame_id: string }).frame_id).toBe(firstFrameId);
+    expect(
+      await db.select().from(frames).where(eq(frames.accountId, accountId)),
+    ).toHaveLength(4);
+  });
+
   it("flow B's first enrollment survives racing itself", async () => {
     // A device that retries before the first response lands (or two boots
     // of one card) used to hit frames_linked_client_unique from the second
@@ -2195,6 +2247,29 @@ describe("frame management API", () => {
       commandRouteParams(frame_id, "not-a-uuid"),
     );
     expect(malformed.status).toBe(404);
+  });
+
+  it("keeps a cancelled asset write's record, not its body", async () => {
+    const { frame_id } = await enrolledFrame();
+    const command = await enqueueFrameCommand(db, {
+      frameId: frame_id,
+      payload: { data: Buffer.from("bytes").toString("base64"), path: "photo.jpg" },
+      ttlMs: 60_000,
+      type: "asset_put",
+    });
+    const cancelled = await cancelPendingCommand(
+      deleteRequest(`/api/frames/${frame_id}/commands/${command!.id}`, {
+        origin: baseUrl,
+      }),
+      commandRouteParams(frame_id, command!.id),
+    );
+    expect(cancelled.status).toBe(200);
+    const [row] = await db
+      .select()
+      .from(frameCommands)
+      .where(eq(frameCommands.id, command!.id));
+    expect(row?.error).toBe("cancelled");
+    expect(row?.payload).toEqual({ path: "photo.jpg" });
   });
 
   it("accepts exactly the device's settings allowlist, in the device's spelling", async () => {

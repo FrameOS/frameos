@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { previewMicrosInput } from "../lib/format";
 
 export type BillingSettingsValues = {
   aiMarginPercent: string;
@@ -95,6 +96,7 @@ export function BillingSettingsForm({
           onChange={(event) => setDailyCap(event.target.value)}
           value={dailyCap}
         />
+        <MicrosPreview value={dailyCap} zeroMeansOff />
         <p className="copy">
           Postpay&apos;s credit limit: a turn is refused once an account&apos;s
           chargeable AI usage for the UTC day reaches this. 10,000,000 is ten
@@ -111,6 +113,7 @@ export function BillingSettingsForm({
           onChange={(event) => setSharedCap(event.target.value)}
           value={sharedCap}
         />
+        <MicrosPreview value={sharedCap} zeroMeansOff />
         <p className="copy">
           The cap for accounts running on the deployment&apos;s shared OpenAI
           key — the free tier. That usage is our money, not theirs, so it
@@ -129,6 +132,7 @@ export function BillingSettingsForm({
           onChange={(event) => setOverdraft(event.target.value)}
           value={overdraft}
         />
+        <MicrosPreview value={overdraft} />
         <p className="copy">
           How far past the daily cap a turn already in flight may run before
           it is stopped, and how much overshoot the nightly check tolerates.
@@ -163,5 +167,18 @@ export function BillingSettingsForm({
         {message ? <span className="pill">{message}</span> : null}
       </div>
     </form>
+  );
+}
+
+// The typed amount in dollars, under the input it belongs to.
+function MicrosPreview({ value, zeroMeansOff = false }: { value: string; zeroMeansOff?: boolean }) {
+  const dollars = previewMicrosInput(value);
+  if (dollars === null) {
+    return <p className="copy">Not a whole number of micro-dollars.</p>;
+  }
+  return (
+    <p className="copy">
+      <strong>{zeroMeansOff && dollars === "$0.00" ? "Off" : dollars}</strong>
+    </p>
   );
 }

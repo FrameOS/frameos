@@ -20,7 +20,7 @@ Both are managed on the frames workspace's Developer page (`/account/developer`)
 |---|---|
 | Table | `account_api_tokens` (migration 0040): hash, hint, `access`, expiry, last use, revocation |
 | Mint | `POST /api/account/api-tokens` `{name, access?: "full"\|"read_only", expires_in_days?}` → `{token, api_token}` — the secret is returned once. Needs a session (never a token) and a recent proof of credentials (`recentApprovalMaxAgeSeconds`, 2 h) because it turns a session into a durable credential — the same gate device approval has. |
-| Expiry | Every token expires. `expires_in_days` is 1–365; omitted means `defaultApiTokenTtlDays` (90), and an explicit `null` ("never") is `400 invalid_expiry`. `GET` reports `default_ttl_days` and `max_ttl_days`. |
+| Expiry | Every token expires. `expires_in_days` is 1–365; omitted means `defaultApiTokenTtlDays` (365), and an explicit `null` ("never") is `400 invalid_expiry`. `GET` reports `default_ttl_days` and `max_ttl_days`. |
 | List / revoke | `GET /api/account/api-tokens`, `DELETE /api/account/api-tokens/{id}`. A token may revoke itself. |
 | Revoked wholesale | On a password reset, an admin "sign out everywhere", and whenever a second factor is **enrolled** (`totp/confirm`, `passkeys` POST): a token minted before 2FA was on would keep walking past it, so the enrolment revokes every live token (`revokeApiTokensForAccount`, count returned as `api_tokens_revoked` and audited) and the owner re-mints behind the new factor. |
 | Cap | 25 live tokens per account (`maxApiTokensPerAccount`). |

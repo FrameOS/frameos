@@ -292,7 +292,9 @@ timer until both are real:
 - `ACCOUNTING_HEALTHCHECKS_URL`: a healthchecks.io ping, the same dead-man
   pattern the backup and uptime jobs use. **Required**, because the failure
   that matters is a night that never ran, and only something expecting a
-  ping can notice. `none` opts out deliberately.
+  ping can notice. `none` opts out deliberately. The ping body is the
+  response's `healthcheck` line (counts and the names of failed checks,
+  never an amount); the figures stay in the journal on the box.
 
 **As of 2026-09-02 the job had never been installed on production** — no
 env file, no timer — which is how the doc's "optional" ping stayed

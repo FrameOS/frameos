@@ -319,6 +319,9 @@ async function enrollWithClaimToken(
           accountId: token.accountId,
           clientKind: "frame",
           providerClientMetadata: {
+            // Which token this link came from: a lost-response retry may
+            // only get back a frame THIS token enrolled (replayEnrollment).
+            claimTokenId: token.id,
             enrolledVia: "claim_token",
             // Telemetry comes with the claim-token grant: the owner minted
             // this token to manage the frame from the workspace, and a Logs
@@ -469,6 +472,11 @@ const replayActiveWindowSeconds = 15 * 60;
 // lost-response retry would otherwise find nothing) — never beyond that
 // window, or a claim token captured after the fact could mint fresh
 // credentials for a frame that has long been in service.
+//
+// "With this exact claim token" is the frame's link recording the token's id
+// (or, for links enrolled before it did, the token's own frame_id, its last
+// enrollment). Matching on the account alone let any spent token of the
+// account, plus a frame's public key, rotate that other frame's credentials.
 async function replayEnrollment(
   db: NonNullable<ReturnType<typeof requireDatabase>["db"]>,
   wsUrl: string | undefined,
@@ -502,6 +510,10 @@ async function replayEnrollment(
       and(
         eq(frames.accountId, token.accountId),
         eq(frames.publicKey, input.publicKey),
+        or(
+          sql`${linkedClients.providerClientMetadata} ->> 'claimTokenId' = ${token.id}`,
+          ...(token.frameId ? [eq(frames.id, token.frameId)] : []),
+        ),
         replayableStatus,
         isNull(linkedClients.revokedAt),
       ),

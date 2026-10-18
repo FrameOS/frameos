@@ -1,5 +1,5 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { instrument } from "@posthog/mcp";
+import { instrument, type BeforeSendFn } from "@posthog/mcp";
 import { PostHog } from "posthog-node";
 import { z } from "zod";
 import { FrameosCloudClient, type FetchLike } from "./client";
@@ -21,6 +21,21 @@ export const posthog = new PostHog(process.env.POSTHOG_PROJECT_TOKEN ?? "", {
 });
 
 export const serverVersion = "0.1.0";
+
+// What a tool was called with and what it answered are the account's data:
+// scene JSON, frame logs, photo names, an API key pasted into a setting. The
+// SDK puts both on every tool-call event; analytics needs which tool ran,
+// how long it took and whether it failed, never the payload. Dropped before
+// anything leaves the process, whether or not a token is set today.
+const toolPayloadProperties = ["$mcp_parameters", "$mcp_response"];
+
+export const withoutToolPayloads: BeforeSendFn = (event) => {
+  const properties = { ...event.properties };
+  for (const key of toolPayloadProperties) {
+    delete properties[key];
+  }
+  return { ...event, properties };
+};
 
 export type FrameosMcpServerOptions = {
   /** Cloud API origin the tools call. */
@@ -79,6 +94,7 @@ export function createFrameosMcpServer(options: FrameosMcpServerOptions) {
     { capabilities: { logging: {} }, instructions },
   );
   instrument(server, posthog, {
+    beforeSend: withoutToolPayloads,
     logger: (msg) => process.stderr.write(msg + "\n"),
   });
 

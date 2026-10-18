@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { sharedKeyAccess, sharedKeyAllowedFor } from "./api-key";
+import { sharedKeyAccess, sharedKeyAllowedFor, sharedKeyChatModels } from "./api-key";
+import { DEFAULT_CHAT_MODEL } from "./openai";
 
 describe("shared OpenAI key access", () => {
   it("defaults to none and ignores unknown values", () => {
@@ -21,5 +22,14 @@ describe("shared OpenAI key access", () => {
     expect(sharedKeyAllowedFor(admin, "verified")).toBe(true);
     expect(sharedKeyAllowedFor(plain, "verified")).toBe(false);
     expect(sharedKeyAllowedFor(plain, "all")).toBe(true);
+  });
+
+  it("keeps the shared key on the default model unless the operator lists more", () => {
+    expect([...sharedKeyChatModels({})]).toEqual([DEFAULT_CHAT_MODEL]);
+    const widened = sharedKeyChatModels({ FRAMEOS_AI_SHARED_KEY_MODELS: " gpt-5.5, ,gpt-6-luna " });
+    expect(widened.has(DEFAULT_CHAT_MODEL)).toBe(true);
+    expect(widened.has("gpt-5.5")).toBe(true);
+    expect(widened.has("gpt-6-luna")).toBe(true);
+    expect(widened.has("o9-pro")).toBe(false);
   });
 });

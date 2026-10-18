@@ -46,13 +46,15 @@ export type AnyApiTokenAccess = ApiTokenAccess | JobTokenAccess;
 export const maxApiTokensPerAccount = 25;
 export const maxApiTokenNameLength = 64;
 export const maxApiTokenTtlDays = 365;
-// Every token expires. A token minted "forever" outlives the laptop it was
-// pasted into and the reason it was made; ninety days is long enough for a
-// script that is actually in use (its owner re-mints from the page, which
-// asks for fresh credentials) and short enough that a forgotten one dies on
-// its own. The route applies this when `expires_in_days` is omitted and
-// refuses an explicit `null`.
-export const defaultApiTokenTtlDays = 90;
+// Every new token expires, by default after the most it may have. A token
+// minted "forever" outlives the laptop it was pasted into and the reason it
+// was made; a year means one re-mint a year for a script in actual use (from
+// the page, which asks for fresh credentials), and a forgotten one still
+// dies on its own. The route applies this when `expires_in_days` is omitted
+// and refuses an explicit `null`. Tokens minted before every token expired
+// keep their NULL expiry on purpose (decided 2026-10-18): giving them a
+// deadline now would stop a working script or MCP client with no warning.
+export const defaultApiTokenTtlDays = maxApiTokenTtlDays;
 
 // Recent use is recorded at most this often; the column is for "is this
 // token still in use", not an access log.

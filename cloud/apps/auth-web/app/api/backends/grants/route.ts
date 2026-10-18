@@ -1,7 +1,10 @@
 import { eq } from "drizzle-orm";
 import { accounts } from "@frameos-cloud/db";
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateLinkedClient } from "../../../../src/lib/backend-auth";
+import {
+  authenticateLinkedClient,
+  isLinkOfKind,
+} from "../../../../src/lib/backend-auth";
 import { jsonError, requireDatabase } from "../../../../src/lib/device-flow";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { accountUsage } from "../../../../src/lib/usage";
@@ -28,6 +31,14 @@ export async function GET(request: NextRequest) {
   );
   if (!linkedClient) {
     return jsonError("invalid_link_token", 401);
+  }
+  // Frames linked for cloud login read their owner here too
+  // (frameos/src/frameos/cloud/device_flow.nim, fetchConnectSync).
+  if (
+    !isLinkOfKind(linkedClient, "backend") &&
+    !isLinkOfKind(linkedClient, "frame")
+  ) {
+    return jsonError("insufficient_scope", 403);
   }
 
   // Display/contact snapshot only, so the backend can show "Connected as

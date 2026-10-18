@@ -33,6 +33,7 @@ export {
 export {
   accruePeriod,
   addMonth,
+  addMonths,
   cancelAccountPlan,
   chargePeriod,
   closeOutSubscriptionForDeletedAccount,

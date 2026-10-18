@@ -9,7 +9,10 @@ import {
   otaPlatformMatchesHardware,
   streamablePlatforms,
 } from "../../../../../../src/lib/firmware-release";
-import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import {
+  identityRateLimitResponse,
+  rateLimitResponse,
+} from "../../../../../../src/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -36,15 +39,23 @@ export const runtime = "nodejs";
 // device must never be offered an image it could not verify, and a loud
 // error here beats a device quietly rejecting the download after the fact.
 
+const deviceManifestBudget = { limit: 60, windowMs: 15 * 60 * 1000 };
+// How many frames one address's budget is sized for (download route too).
+const fleetBehindOneAddress = 20;
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ frameId: string }> },
 ) {
   // Manifest checks are cheap JSON and happen at most a few times a day per
-  // device; the same budget the browser flasher's listing gets.
+  // device; the same budget the browser flasher's listing gets, per FRAME.
+  // The per-address budget in front of it only bounds what a caller can make
+  // this route do before the bearer is looked at, so it is a fleet's worth: a
+  // school or an office puts every frame behind one NAT address, and a
+  // per-address budget alone let one chatty frame starve the rest.
   const limited = await rateLimitResponse(request, "frames:device-firmware-meta", {
-    limit: 60,
-    windowMs: 15 * 60 * 1000,
+    limit: deviceManifestBudget.limit * fleetBehindOneAddress,
+    windowMs: deviceManifestBudget.windowMs,
   });
   if (limited) {
     return limited;
@@ -64,6 +75,14 @@ export async function GET(
   // The token IS the identity; the path segment must agree with it.
   if (auth.frame.id !== frameId) {
     return jsonError("frame_mismatch", 403);
+  }
+  const frameLimited = await identityRateLimitResponse(
+    auth.frame.id,
+    "frames:device-firmware-meta",
+    deviceManifestBudget,
+  );
+  if (frameLimited) {
+    return frameLimited;
   }
 
   const platform = request.nextUrl.searchParams.get("platform");

@@ -10,7 +10,9 @@ import {
   checkLedgerIntegrity,
   checkMeteringCompleteness,
   customerReceivableCode,
+  aiUsageEventType,
   markUsageRecordsCredited,
+  postingRules,
   postUsageRecord,
   recordAiUsage,
   reverseEntry,
@@ -19,6 +21,8 @@ import {
   utcDayWindow,
   writeBillingSetting,
   type CredentialSource,
+  type FinancialEventRecord,
+  type RuleContext,
 } from "../../index";
 import { createAccount, db, resetLedger } from "./helpers";
 
@@ -493,5 +497,50 @@ describe("AI metering", () => {
     expect(swept).toMatchObject({ posted: 5, scanned: 5 });
     expect(swept.failures).toEqual([]);
     expect(await checkMeteringCompleteness(db, { pendingEventGraceMs: 0 })).toEqual([]);
+  });
+
+  // Records that fail every time used to sit at the head of the queue: each
+  // batch re-read and re-reported them, and a head of `limit` of them ended
+  // the night before anything behind them was tried. Now each is tried and
+  // reported once, and the rest of the queue still posts.
+  it("gets past records that fail every time, and reports each once", async () => {
+    await goLive();
+    const accountId = await createAccount();
+    for (let index = 0; index < 5; index += 1) {
+      await recordAiUsage(db, turn(accountId, uuid(0xe00 + index)), { rules: {} });
+    }
+    // The three oldest are the poisonous ones.
+    await db.execute(sql`
+      update ai_usage_records
+         set created_at = now() - interval '2 hours'
+       where turn_id in (${uuid(0xe00)}, ${uuid(0xe01)}, ${uuid(0xe02)})
+    `);
+    await db.execute(sql`
+      update ai_usage_records set created_at = now() - interval '1 hour'
+       where created_at > now() - interval '1 hour'
+    `);
+    const poisoned = new Set([uuid(0xe00), uuid(0xe01), uuid(0xe02)]);
+    const rules = {
+      ...postingRules,
+      [aiUsageEventType]: {
+        ...postingRules[aiUsageEventType]!,
+        build: (event: FinancialEventRecord, context: RuleContext) => {
+          if (poisoned.has(event.sourceRef ?? "")) {
+            throw new Error("a record that never posts");
+          }
+          return postingRules[aiUsageEventType]!.build(event, context);
+        },
+      },
+    };
+
+    const swept = await sweepUnpostedUsage(db, { limit: 2, rules });
+    expect(swept).toMatchObject({ posted: 2, scanned: 5 });
+    expect(swept.failures.map((failure) => failure.turnId).sort()).toEqual([...poisoned].sort());
+
+    // Tomorrow they are tried, and reported, again: the sweep does not decide
+    // a record is beyond saving.
+    const tomorrow = await sweepUnpostedUsage(db, { limit: 2, rules });
+    expect(tomorrow).toMatchObject({ posted: 0, scanned: 3 });
+    expect(tomorrow.failures).toHaveLength(3);
   });
 });

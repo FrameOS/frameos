@@ -146,17 +146,16 @@ are missing, and they only work together (DNS without port 80 reads as plain
 ## On-device admin: no AI on the device
 
 The frame's own admin page (`http://<frame>:8787/admin`, the shared SPA in
-frame-control mode) hides **Generate scene** (`allowedAddSceneActions` in
-`workspaceSurfaces.ts`), because only the backend and the cloud can run the
-AI chat. Bring it back once the frame can reach an AI. Two routes, not
+frame-control mode) answers **Generate scene** and the AI chat buttons with
+where the generator lives (`AiElsewhereNote`: scenes.frameos.net, or link
+the frame to the cloud), because only the backend and the cloud can run the
+AI chat. Make them work once the frame can reach an AI. Two routes, not
 exclusive: the frame's FrameOS Cloud link (sign in from the panel, the
 cloud's AI and metering do the work — and the first scene could be on us, as
 the reason to link at all), and/or the owner's own OpenAI key under the
 frame's service keys (the prompt/lint pipeline in
 `cloud/apps/auth-web/src/lib/ai/` would have to be callable from the
-device). The other AI entry points (the sparkles in the header and the scene
-editor) still open a "coming soon" panel on the device; hide them the same
-way, or make them work, with this.
+device).
 
 ---
 

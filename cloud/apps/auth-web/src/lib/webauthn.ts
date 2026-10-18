@@ -96,7 +96,9 @@ export async function readChallengeToken(
     return undefined;
   }
   try {
-    const verified = await jwtVerify(token, challengeKey());
+    const verified = await jwtVerify(token, challengeKey(), {
+      algorithms: ["HS256"],
+    });
     const claims = verified.payload.webauthn as ChallengeClaims | undefined;
     if (
       !claims ||

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it } from "vitest";
 import { csrfResponse } from "./csrf";
+import { sessionCookieName } from "./session-cookie";
 
 const originalCloudUrl = process.env.FRAMEOS_CLOUD_APP_URL;
 const originalAccountUrl = process.env.FRAMEOS_ACCOUNT_APP_URL;
@@ -47,6 +48,33 @@ describe("csrfResponse", () => {
       method: "POST",
     });
     expect(csrfResponse(request)).toBeUndefined();
+  });
+
+  it("checks the origin when a session cookie rides along with the token", async () => {
+    // readSession() authenticates the cookie, not the bearer, so the bearer
+    // must not buy a cookie request out of the Origin check.
+    process.env.FRAMEOS_CLOUD_APP_URL = "https://cloud.frameos.net";
+    const request = new NextRequest("https://cloud.frameos.net/api/frames/x", {
+      headers: {
+        authorization: "Bearer fc_api_abcdef",
+        cookie: `${sessionCookieName}=session-token`,
+        origin: "https://evil.example",
+      },
+      method: "POST",
+    });
+    const response = csrfResponse(request);
+    expect(response?.status).toBe(403);
+    expect(await response?.json()).toEqual({ error: "invalid_origin" });
+
+    const sameOrigin = new NextRequest("https://cloud.frameos.net/api/frames/x", {
+      headers: {
+        authorization: "Bearer fc_apiro_abcdef",
+        cookie: `${sessionCookieName}=session-token`,
+        origin: "https://cloud.frameos.net",
+      },
+      method: "POST",
+    });
+    expect(csrfResponse(sameOrigin)).toBeUndefined();
   });
 
   it("stops read-only tokens before the route does any work", async () => {

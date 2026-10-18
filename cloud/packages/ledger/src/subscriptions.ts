@@ -49,25 +49,60 @@ import { LedgerError, type LedgerDb, type LedgerExecutor } from "./types";
 // that runs at 04:20 and again at 04:25 must not post a second entry for
 // five minutes of subscription.
 
-/** One calendar month on from `at`, clamped for short months — a
- *  subscription started on the 31st renews on the 30th, the 28th, and so on,
- *  rather than skipping February. */
-export function addMonth(at: Date): Date {
+/** `months` calendar months on from `at`, clamped for short months — the
+ *  31st plus one month is the 28th (or 29th) of February rather than a day
+ *  in March. */
+export function addMonths(at: Date, months: number): Date {
   const year = at.getUTCFullYear();
-  const month = at.getUTCMonth();
+  const month = at.getUTCMonth() + months;
   const day = at.getUTCDate();
-  const lastDayOfNextMonth = new Date(Date.UTC(year, month + 2, 0)).getUTCDate();
+  const lastDayOfTargetMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   return new Date(
     Date.UTC(
       year,
-      month + 1,
-      Math.min(day, lastDayOfNextMonth),
+      month,
+      Math.min(day, lastDayOfTargetMonth),
       at.getUTCHours(),
       at.getUTCMinutes(),
       at.getUTCSeconds(),
       at.getUTCMilliseconds(),
     ),
   );
+}
+
+/** One calendar month on from `at`, clamped for short months. */
+export function addMonth(at: Date): Date {
+  return addMonths(at, 1);
+}
+
+// Where a run of back-to-back periods started, and how many months into it
+// the last one ends. Periods are counted from the run's first start rather
+// than chained one end to the next: chained, a subscription taken on the 31st
+// renewed on February 28th and then on the 28th of every month for good (the
+// 2026-09-09 review). Counted from the anchor it is the 31st, the 28th, the
+// 31st, the 30th. A period that does not start where the run's schedule says
+// the next one would (the first one, a return after a cancellation, the new
+// period an upgrade opens mid-month) starts a run of its own.
+interface AnniversaryRun {
+  anchor: Date;
+  months: number;
+}
+
+function anniversaryRunOf(periods: PeriodRow[]): AnniversaryRun | null {
+  let run: AnniversaryRun | null = null;
+  for (const period of periods) {
+    run = continueRun(run, period.periodStart);
+  }
+  return run;
+}
+
+// The run a period starting at `start` belongs to, with the period counted.
+function continueRun(run: AnniversaryRun | null, start: Date): AnniversaryRun {
+  const next =
+    run && addMonths(run.anchor, run.months).getTime() === start.getTime()
+      ? run
+      : { anchor: start, months: 0 };
+  return { anchor: next.anchor, months: next.months + 1 };
 }
 
 export interface SubscriptionRecord {
@@ -332,6 +367,11 @@ export interface SubscriptionCycleResult {
   accruedMicros: bigint;
   charged: number;
   failures: { error: unknown; periodId: string }[];
+  // Downgrades that came due tonight to a plan that no longer exists. The
+  // account asked to pay less, so it is moved to the free plan rather than
+  // billed another month of the dearer one; the nightly reports each so an
+  // operator can put it on the plan that replaced the deleted one.
+  missingDowngradePlans: { accountId: string; planCode: string; subscriptionId: string }[];
   opened: number;
   // Periods closed out: earned to the end and stamped `recognized_at`.
   recognized: number;
@@ -352,6 +392,7 @@ export async function runSubscriptionCycle(
     accruedMicros: 0n,
     charged: 0,
     failures: [],
+    missingDowngradePlans: [],
     opened: 0,
     recognized: 0,
   };
@@ -361,7 +402,12 @@ export async function runSubscriptionCycle(
     .from(subscriptions)
     .where(eq(subscriptions.status, "active"));
   for (const subscription of active) {
-    result.opened += await openDuePeriodsFor(db, subscription, now);
+    result.opened += await openDuePeriodsFor(
+      db,
+      subscription,
+      now,
+      result.missingDowngradePlans,
+    );
   }
 
   const uncharged = await db
@@ -449,18 +495,19 @@ async function openDuePeriodsFor(
   db: LedgerExecutor,
   subscription: SubscriptionRow,
   now: Date,
+  missingDowngradePlans?: SubscriptionCycleResult["missingDowngradePlans"],
 ): Promise<number> {
   let planCode = subscription.planCode;
   let plan = await readPlan(db, planCode);
   if (!plan || plan.priceMicros === 0n) {
     return 0;
   }
-  const [latest] = await db
+  const periods = await db
     .select()
     .from(subscriptionPeriods)
     .where(eq(subscriptionPeriods.subscriptionId, subscription.id))
-    .orderBy(desc(subscriptionPeriods.periodEnd))
-    .limit(1);
+    .orderBy(asc(subscriptionPeriods.periodStart));
+  const latest = periods.at(-1);
   if (latest && latest.periodEnd > now) {
     return 0;
   }
@@ -468,6 +515,7 @@ async function openDuePeriodsFor(
     latest && latest.periodEnd > subscription.startedAt
       ? latest.periodEnd
       : subscription.startedAt;
+  let run = anniversaryRunOf(periods);
 
   let opened = 0;
   let guard = 0;
@@ -481,8 +529,19 @@ async function openDuePeriodsFor(
           .update(subscriptions)
           .set({ nextPlanCode: null, planCode: next.code, updatedAt: now })
           .where(eq(subscriptions.id, subscription.id));
-      } else if (next) {
-        // Downgrading to a free plan at the rollover is a cancellation.
+      } else {
+        // Downgrading to a free plan at the rollover is a cancellation. So is
+        // a downgrade to a plan deleted since: they asked to pay less, and
+        // the one thing that must not happen is another month at the price
+        // they asked to leave. It used to be skipped without a word, every
+        // night, at the old price.
+        if (!next) {
+          missingDowngradePlans?.push({
+            accountId: subscription.accountId,
+            planCode: subscription.nextPlanCode,
+            subscriptionId: subscription.id,
+          });
+        }
         await db
           .update(subscriptions)
           .set({ cancelAt: periodStart, canceledAt: now, nextPlanCode: null, status: "canceled", updatedAt: now })
@@ -490,7 +549,8 @@ async function openDuePeriodsFor(
         return opened;
       }
     }
-    const periodEnd = addMonth(periodStart);
+    run = continueRun(run, periodStart);
+    const periodEnd = addMonths(run.anchor, run.months);
     const inserted = await db
       .insert(subscriptionPeriods)
       .values({

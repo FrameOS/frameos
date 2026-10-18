@@ -286,10 +286,16 @@ export interface SweepResult {
 // The nightly catch-up: every live billable record whose entries never
 // landed. Oldest first, in batches, until the queue is empty — a backlog
 // bigger than one batch used to be left for tomorrow, and tomorrow's batch
-// was the same size, so it never drained (§9.2 item 18). `maxBatches` is the
-// only bound, and it exists so a record that fails every time cannot spin
-// the job forever: a failed row stays in the queue, so a batch that posted
-// nothing is the signal to stop.
+// was the same size, so it never drained (§9.2 item 18).
+//
+// Each batch starts after the last row the one before it read, so a record
+// is tried at most once a night. Restarting from the head of the queue
+// (which a failed row never leaves) re-tried and re-reported the same
+// failures every batch, and a head of `limit` rows that fail every time
+// stopped the sweep before it reached anything behind them (the 2026-09-09
+// review). A row that keeps failing is tried again tomorrow and reported
+// again: the nightly reports, it does not decide a record is beyond saving.
+// `maxBatches` bounds a night's work.
 export async function sweepUnpostedUsage(
   db: LedgerExecutor,
   options: PostEventOptions & {
@@ -303,8 +309,13 @@ export async function sweepUnpostedUsage(
   const olderThan = options.olderThan ?? new Date(Date.now() - 5 * 60 * 1000);
   const limit = options.limit ?? 500;
   const result: SweepResult = { failures: [], posted: 0, scanned: 0 };
+  // The cursor is the last row's id, compared through the row itself:
+  // created_at has microseconds and a JS Date does not, so a timestamp
+  // carried out of the database and back would land before the row it came
+  // from and read it again.
+  let after: string | null = null;
   for (let batch = 0; batch < (options.maxBatches ?? 50); batch += 1) {
-    const rows = await db
+    const rows: UsageRow[] = await db
       .select()
       .from(aiUsageRecords)
       .where(
@@ -313,26 +324,29 @@ export async function sweepUnpostedUsage(
           eq(aiUsageRecords.meteringMode, "live"),
           lt(aiUsageRecords.createdAt, olderThan),
           sql`(${aiUsageRecords.costMicros} > 0 or ${aiUsageRecords.priceMicros} > 0)`,
+          after === null
+            ? undefined
+            : sql`(${aiUsageRecords.createdAt}, ${aiUsageRecords.id}) > (select created_at, id from ai_usage_records where id = ${after})`,
         ),
       )
-      .orderBy(asc(aiUsageRecords.createdAt))
+      .orderBy(asc(aiUsageRecords.createdAt), asc(aiUsageRecords.id))
       .limit(limit);
     result.scanned += rows.length;
 
-    let postedThisBatch = 0;
     for (const row of rows) {
       try {
         await postUsageRecord(db, row, options);
         result.posted += 1;
-        postedThisBatch += 1;
       } catch (error) {
         // One poisonous record must not stop the rest of the night's work.
         result.failures.push({ error, turnId: row.turnId });
       }
     }
-    if (rows.length < limit || postedThisBatch === 0) {
+    const last = rows.at(-1);
+    if (rows.length < limit || !last) {
       break;
     }
+    after = last.id;
   }
   return result;
 }

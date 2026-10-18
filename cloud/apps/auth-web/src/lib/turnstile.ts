@@ -87,9 +87,10 @@ export async function verifyTurnstileToken(
   }
 
   const body = new URLSearchParams({ response: token, secret });
-  // "local" is rate-limit.ts's placeholder for "no proxy header"; sending it
-  // as an IP would make Cloudflare reject the whole verification.
-  if (remoteIp && remoteIp !== "local") {
+  // "local" and "untrusted" are rate-limit.ts's placeholders for "no address
+  // to believe"; sending one as an IP would make Cloudflare reject the whole
+  // verification.
+  if (remoteIp && remoteIp !== "local" && remoteIp !== "untrusted") {
     body.set("remoteip", remoteIp);
   }
 

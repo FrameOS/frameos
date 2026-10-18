@@ -7,7 +7,7 @@
 // form knows (SSH keys, build environment, deploy defaults, PostHog, ...) is
 // backend-only and never reaches the database here.
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { accountSettings, type createDb } from "@frameos-cloud/db";
 import { reportError } from "./log";
 import { previewSettingsGroups } from "./preview-settings";
@@ -118,6 +118,39 @@ export async function storedAccountSettings(
     }
   }
   return result;
+}
+
+// The one-off sweep behind scripts/reseal-account-settings.ts: every row that
+// still holds a legacy plaintext secret, re-sealed — what the read above does
+// lazily, for the rows nobody reads (an account that never opens its
+// settings again keeps its plaintext key until then). Returns the rows it
+// found; writes only with `apply`. A row someone saved since it was read is
+// left to that save, which seals on its own.
+export async function resealLegacyAccountSettings(
+  db: ReturnType<typeof createDb>,
+  options: { apply: boolean },
+): Promise<{ accountId: string; key: string }[]> {
+  const rows = await db.select().from(accountSettings);
+  const found: { accountId: string; key: string }[] = [];
+  for (const row of rows) {
+    const opened = openStoredGroup(row.key, row.value, row.accountId);
+    if (!opened.reseal) {
+      continue;
+    }
+    found.push({ accountId: row.accountId, key: row.key });
+    if (options.apply) {
+      await db
+        .update(accountSettings)
+        .set({ updatedAt: new Date(), value: opened.reseal })
+        .where(
+          and(
+            eq(accountSettings.id, row.id),
+            sql`${accountSettings.value} = ${JSON.stringify(row.value)}::jsonb`,
+          ),
+        );
+    }
+  }
+  return found;
 }
 
 // One stored group, opened: the revealed and the masked view of it, plus the

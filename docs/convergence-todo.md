@@ -146,11 +146,8 @@ gets a JS replacement is retired through `docs/retired-apps.json`
 (docs/retired-apps.md): stored scenes move to the JS app, older firmware is
 still sent the Nim keyword, and the Nim app goes in the same change.
 
-- [ ] Instrument: `scene_convert` telemetry carries only a
-  `needs_manual_port` *count* today. Every converter "no JS equivalent" and
-  every `needsManualPort` reason has to land there, aggregated by missing
-  primitive (drawing, text metrics, dither, shell, EXIF, …).
-- [ ] Each primitive that clears a real cluster gets a bridge call or a
+- [ ] Each primitive that clears a real cluster (the `scene_convert`
+  event's `manual_port_primitives` counts them) gets a bridge call or a
   JS port of the built-ins it unblocks — demand-ordered, one at a time,
   never a bulk port. Done so far: the network photo
   (`frameos.fetchImage`, 2026-10-12), which carried the Immich app across

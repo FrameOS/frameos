@@ -32,7 +32,7 @@ vi.mock("next/headers", () => ({
       return value === undefined ? undefined : { name, value };
     },
   }),
-  headers: async () => new Headers({ "x-real-ip": "203.0.113.9" }),
+  headers: async () => new Headers({ "x-forwarded-for": "203.0.113.9" }),
 }));
 
 const baseUrl = "http://localhost:3000";

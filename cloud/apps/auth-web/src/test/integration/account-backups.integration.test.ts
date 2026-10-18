@@ -17,6 +17,7 @@ import { POST as pollDevice } from "../../../app/api/device/poll/route";
 import { POST as startDevice } from "../../../app/api/device/start/route";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
+import { sealedBackup, sealedBackupBase64 } from "./sealed-backup";
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
 
@@ -128,9 +129,7 @@ async function linkAndSaveBackup() {
     postJson(
       "/api/backends/backups",
       {
-        content_base64: Buffer.from('{"scenes": []}', "utf8").toString(
-          "base64",
-        ),
+        content_base64: sealedBackupBase64('{"scenes": []}'),
         content_type: "application/json",
         item_key: "frame-1",
         kind: "frames",
@@ -166,7 +165,7 @@ describe("account backup routes", () => {
     expect(response.headers.get("content-disposition")).toContain(
       'attachment; filename="Kitchen_frame.json"',
     );
-    expect(await response.text()).toBe('{"scenes": []}');
+    expect(await response.text()).toBe(sealedBackup('{"scenes": []}').toString("utf8"));
   });
 
   it("lets the signed-in owner delete a backup and records an audit event", async () => {

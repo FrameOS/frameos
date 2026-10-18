@@ -43,6 +43,7 @@ import { workspaceChatDrawerLogic } from './workspaceChatDrawerLogic'
 import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { frameChangeDrawerKind, photosLibraryIsAvailable } from './workspaceSurfaces'
+import { AiElsewhereNote } from './AiElsewhereNote'
 import { FrameRenameModal } from './FrameActionsMenu'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { getFrameControlFrameId } from '../../utils/frameControlMode'
@@ -230,14 +231,16 @@ export function WorkspaceChatDrawer({
   sceneId: string | null
   source?: 'templates' | null
 }): JSX.Element | null {
+  // The device runs no AI: its AI buttons answer with where the AI is, as
+  // Generate scene does (workspaceSurfaces.ts, allowedAddSceneActions).
   if (isInFrameAdminMode()) {
-    return <WorkspaceChatComingSoonDrawer frameId={frameId} source={source} />
+    return <WorkspaceChatElsewhereDrawer frameId={frameId} source={source} />
   }
 
   return <WorkspaceChatDrawerContent frameId={frameId} nodeId={nodeId} sceneId={sceneId} source={source} />
 }
 
-function WorkspaceChatComingSoonDrawer({
+function WorkspaceChatElsewhereDrawer({
   frameId,
   source,
 }: {
@@ -245,7 +248,7 @@ function WorkspaceChatComingSoonDrawer({
   source?: 'templates' | null
 }): JSX.Element | null {
   const { frames } = useValues(framesModel)
-  const { closeChatDrawer, openTemplateDrawer } = useActions(workspaceLogic)
+  const { closeChatDrawer, openFrameTool, openTemplateDrawer } = useActions(workspaceLogic)
   const frame = frames[frameId]
 
   if (!frame) {
@@ -284,10 +287,20 @@ function WorkspaceChatComingSoonDrawer({
             <XMarkIcon className="h-6 w-6" />
           </button>
         </div>
-        <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center">
-          <div className="max-w-xs space-y-2">
-            <div className="frameos-strong text-base font-semibold">Coming soon in on-frame admin mode</div>
-            <p className="frameos-muted text-sm leading-6">AI chat only works from the FrameOS backend for now.</p>
+        <div className="flex min-h-0 flex-1 items-center justify-center p-6">
+          <div className="max-w-xs space-y-4 text-sm">
+            <AiElsewhereNote />
+            <button
+              type="button"
+              onClick={() => {
+                closeChatDrawer()
+                // The on-device settings page opens with the FrameOS Cloud box.
+                openFrameTool(frameId, 'settings')
+              }}
+              className="frameos-secondary-button rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              Connect to cloud
+            </button>
           </div>
         </div>
       </div>

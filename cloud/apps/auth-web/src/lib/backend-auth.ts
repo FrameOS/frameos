@@ -87,3 +87,26 @@ export function linkedClientHasScope(
 ) {
   return linkedClientScopes(linkedClient).includes(scope);
 }
+
+// The scopes that make a link a link of its kind. Every approval carries one
+// (device-scopes.ts baselineDeviceScopes, and POST /api/backends/scopes never
+// drops it); a frame enrolled with a claim token holds frame:managed instead
+// of frame:link (frames/enroll).
+const linkScopesByKind: Record<"backend" | "frame", readonly string[]> = {
+  backend: ["backend:link"],
+  frame: ["frame:link", "frame:managed"],
+};
+
+// Whether a linked client is a link of `kind` at all: its recorded kind, and
+// the scope its approval granted for that kind. A route written for one kind
+// checks this first, so a frame's token cannot drive a backend route.
+export function isLinkOfKind(
+  linkedClient: { clientKind: string; providerClientMetadata: unknown },
+  kind: "backend" | "frame",
+) {
+  if (linkedClient.clientKind !== kind) {
+    return false;
+  }
+  const scopes = linkedClientScopes(linkedClient);
+  return linkScopesByKind[kind].some((scope) => scopes.includes(scope));
+}

@@ -12,9 +12,10 @@ import {
   jsonError,
   requireDatabase,
 } from "../../../../../../src/lib/device-flow";
-import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
+import { clientKey, rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { rebuildZipWithSceneOrigins } from "../../../../../../src/lib/scene-origin";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
+import { shouldCountDownload } from "../../../../../../src/lib/store-download-count";
 import {
   photoLinkRefusal,
   zipHasPhotoShareLink,
@@ -118,16 +119,6 @@ async function handleGet(request: NextRequest, context: RouteContext) {
     return jsonError("version_not_found", 404);
   }
 
-  // Fire-and-forget download counting; a lost increment is fine.
-  void db
-    .update(storeScenes)
-    .set({ downloadCount: sql`${storeScenes.downloadCount} + 1` })
-    .where(eq(storeScenes.id, scene.id))
-    .then(
-      () => undefined,
-      () => undefined,
-    );
-
   const stored = await readBlob(version);
   if (!stored) {
     return jsonError("version_not_found", 404);
@@ -146,6 +137,20 @@ async function handleGet(request: NextRequest, context: RouteContext) {
   });
   if (!content) {
     return jsonError("invalid_scene_zip", 500);
+  }
+
+  // Fire-and-forget download counting, for a zip actually served: not a
+  // HEAD, and an address once a day per scene (store-download-count.ts). A
+  // lost increment is fine.
+  if (request.method !== "HEAD" && shouldCountDownload(scene.id, clientKey(request))) {
+    void db
+      .update(storeScenes)
+      .set({ downloadCount: sql`${storeScenes.downloadCount} + 1` })
+      .where(eq(storeScenes.id, scene.id))
+      .then(
+        () => undefined,
+        () => undefined,
+      );
   }
 
   return new NextResponse(new Uint8Array(content), {

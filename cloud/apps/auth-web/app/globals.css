@@ -264,6 +264,15 @@ html.theme-dark .button-primary {
   font-size: 14px;
 }
 
+/* A last line under an auth card's form: what to do when the form cannot
+   help (a lost second factor). */
+.auth-note {
+  margin: 20px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .shell {
   /* A column so the legal footer sits at the bottom of the viewport on a
      short page instead of floating up under the content. */

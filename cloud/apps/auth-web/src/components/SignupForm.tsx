@@ -20,15 +20,20 @@ export function SignupForm({
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
-  const [created, setCreated] = useState(false);
+  // Once the account exists: whether the verification mail went out.
+  const [created, setCreated] = useState<
+    { verificationSent: boolean } | undefined
+  >();
   const [turnstileToken, setTurnstileToken] = useState<string | undefined>();
   // The server spends the Turnstile token before answering, so every
   // rejected submit needs a fresh one for the corrected resubmit.
   const [turnstileReset, setTurnstileReset] = useState(0);
 
-  const googleHref = `/api/auth/google/start${
-    returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ""
-  }`;
+  const returnQuery = returnTo
+    ? `?return_to=${encodeURIComponent(returnTo)}`
+    : "";
+  const googleHref = `/api/auth/google/start${returnQuery}`;
+  const loginHref = `/login${returnQuery}`;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -49,8 +54,11 @@ export function SignupForm({
       });
 
       if (response.ok) {
+        const payload = (await response.json().catch(() => undefined)) as
+          | { verification_sent?: boolean }
+          | undefined;
         posthog.capture("user_signed_up", { method: "password" });
-        setCreated(true);
+        setCreated({ verificationSent: payload?.verification_sent !== false });
         return;
       }
 
@@ -82,12 +90,20 @@ export function SignupForm({
   if (created) {
     return (
       <div className="auth-form">
-        <p className="copy">
-          Your account is created. We sent a verification link to{" "}
-          <strong>{email}</strong> — click it, then sign in.
-        </p>
+        {created.verificationSent ? (
+          <p className="copy">
+            Your account is created. We sent a verification link to{" "}
+            <strong>{email}</strong>. Click it, then sign in.
+          </p>
+        ) : (
+          <p className="copy">
+            Your account is created, but the verification email to{" "}
+            <strong>{email}</strong> could not be sent right now. Sign in with
+            your password in a little while and we will send a fresh link.
+          </p>
+        )}
         <div className="actions">
-          <a className="button button-primary" href="/login">
+          <a className="button button-primary" href={loginHref}>
             Go to sign in
           </a>
         </div>
@@ -161,7 +177,7 @@ export function SignupForm({
         ) : null}
       </div>
       <div className="footer-links">
-        <a href="/login">Already have an account? Sign in</a>
+        <a href={loginHref}>Already have an account? Sign in</a>
       </div>
     </form>
   );

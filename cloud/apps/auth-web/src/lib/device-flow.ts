@@ -44,6 +44,41 @@ export function requireDatabase() {
 // pass their own, and routes with tiny bodies pass something much smaller.
 export const defaultJsonBodyBytes = 4 * 1024 * 1024;
 
+// How deep a request body may nest. JSON.parse takes any depth, but
+// JSON.stringify and every recursive walker after it (the scene linter, the
+// converter) do not: a few hundred KB of `[[[[…]]]]` parses fine and then
+// throws a RangeError out of the route as a 500. Real bodies nest a dozen
+// levels; this refuses the rest before anything recursive sees them.
+export const maxJsonBodyDepth = 256;
+
+// Iterative on purpose: a recursive depth check is the RangeError it exists
+// to prevent.
+export function jsonNestingExceeds(value: unknown, maxDepth = maxJsonBodyDepth): boolean {
+  const pending: Array<[unknown, number]> = [[value, 1]];
+  for (let next = pending.pop(); next; next = pending.pop()) {
+    const [current, depth] = next;
+    if (current === null || typeof current !== "object") {
+      continue;
+    }
+    if (depth > maxDepth) {
+      return true;
+    }
+    for (const child of Array.isArray(current) ? current : Object.values(current)) {
+      if (child !== null && typeof child === "object") {
+        pending.push([child, depth + 1]);
+      }
+    }
+  }
+  return false;
+}
+
+function jsonTooDeep() {
+  return jsonError("json_too_deep", 400, {
+    hint: `The body nests deeper than ${maxJsonBodyDepth} levels.`,
+    max_depth: maxJsonBodyDepth,
+  });
+}
+
 export type BoundedJsonObject =
   | { body: Record<string, unknown>; response?: undefined }
   | { body?: undefined; response: NextResponse };
@@ -72,15 +107,19 @@ export async function readBoundedJsonObject(
     return { response: payloadTooLarge(maxBytes) };
   }
   const text = read.bytes.toString("utf8");
+  let body: unknown;
   try {
-    const body = JSON.parse(text) as unknown;
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      return { body: {} };
-    }
-    return { body: body as Record<string, unknown> };
+    body = JSON.parse(text) as unknown;
   } catch {
     return { body: {} };
   }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { body: {} };
+  }
+  if (jsonNestingExceeds(body)) {
+    return { response: jsonTooDeep() };
+  }
+  return { body: body as Record<string, unknown> };
 }
 
 export type BoundedJsonValue =
@@ -106,11 +145,16 @@ export async function readBoundedJsonValue(
   if (read.overflow) {
     return { response: payloadTooLarge(maxBytes) };
   }
+  let value: unknown;
   try {
-    return { value: JSON.parse(read.bytes.toString("utf8")) as unknown };
+    value = JSON.parse(read.bytes.toString("utf8")) as unknown;
   } catch {
     return { value: undefined };
   }
+  if (jsonNestingExceeds(value)) {
+    return { response: jsonTooDeep() };
+  }
+  return { value };
 }
 
 // Same bound for a raw (non-JSON) body, for routes that take bytes: the
@@ -276,17 +320,25 @@ export function parseClientKind(
   return scopes.includes("frame:link") ? "frame" : "backend";
 }
 
-export function parseScopes(value: unknown) {
+// With a client kind, the other kind's scopes are dropped too: frame:managed
+// on a backend link would pass a frame route's scope check, backend:link on a
+// frame link a backend route's (backend-auth.ts isLinkOfKind). Without one,
+// the result is only good for guessing the kind (parseClientKind).
+export function parseScopes(value: unknown, clientKind?: "backend" | "frame") {
+  const fallback = clientKind === "frame" ? ["frame:link"] : defaultDeviceScopes;
   if (!Array.isArray(value)) {
-    return defaultDeviceScopes;
+    return fallback;
   }
 
+  const otherKindPrefix =
+    clientKind === "frame" ? "backend:" : clientKind === "backend" ? "frame:" : undefined;
   const scopes = value
     .filter((scope): scope is string => typeof scope === "string")
     .map((scope) => scope.trim())
-    .filter((scope) => allowedDeviceScopes.has(scope));
+    .filter((scope) => allowedDeviceScopes.has(scope))
+    .filter((scope) => !otherKindPrefix || !scope.startsWith(otherKindPrefix));
 
-  return scopes.length > 0 ? scopes : defaultDeviceScopes;
+  return scopes.length > 0 ? scopes : fallback;
 }
 
 export function metadataFromBody(body: Record<string, unknown>) {

@@ -14,10 +14,11 @@ import {
   readBillingSettings,
   surfaceIsAbsorbed,
   utcDayWindow,
+  type BillingSettings,
 } from "@frameos-cloud/ledger";
 import { accounts, type createDb } from "@frameos-cloud/db";
 import { storedAccountSettings } from "../account-settings";
-import { resolveChatModel, resolveReasoningEffort } from "./openai";
+import { DEFAULT_CHAT_MODEL, resolveChatModel, resolveReasoningEffort } from "./openai";
 
 export type AiCredentials = {
   apiKey: string;
@@ -71,6 +72,22 @@ type SharedAccess = "none" | "superadmin" | "verified" | "all";
 export function sharedKeyAccess(env: Record<string, string | undefined> = process.env): SharedAccess {
   const raw = (env.FRAMEOS_AI_SHARED_KEY_ACCESS ?? "none").trim().toLowerCase();
   return raw === "superadmin" || raw === "verified" || raw === "all" ? raw : "none";
+}
+
+// The models a turn on the shared key may run on. The account's chat model
+// setting is the account's to choose, but on the shared key it is our bill:
+// a model nobody priced meters at the conservative fallback while OpenAI
+// charges what it likes, so the cap stops guarding anything. An operator
+// widens the list with FRAMEOS_AI_SHARED_KEY_MODELS (comma-separated); the
+// default model is always on it.
+export function sharedKeyChatModels(
+  env: Record<string, string | undefined> = process.env,
+): ReadonlySet<string> {
+  const extra = (env.FRAMEOS_AI_SHARED_KEY_MODELS ?? "")
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean);
+  return new Set([DEFAULT_CHAT_MODEL, ...extra]);
 }
 
 export function sharedKeyAllowedFor(
@@ -151,9 +168,7 @@ export async function resolveAiAccess(
   }
 
   const settings = await readBillingSettings(db, env);
-  const allowance = credentials.source === "shared" ? "shared" : "billable";
-  const capMicros =
-    allowance === "shared" ? settings.sharedKeyDailyCapMicros : settings.dailyCapMicros;
+  const { allowance, capMicros } = dailyCapFor(credentials, settings);
   if (capMicros > 0n) {
     const window = utcDayWindow();
     const spent = await accountAiSpendMicros(db, accountId, window);
@@ -189,6 +204,20 @@ export async function resolveAiAccess(
     };
   }
   return { credentials, ok: true };
+}
+
+// Which daily cap the account's next turn answers to (§5.3): the shared
+// key's own allowance when that is the key it would run on, the account's
+// billable cap otherwise. One definition for the gate above and for every
+// page that shows the cap, which used to show the billable one to accounts
+// the shared allowance was actually capping.
+export function dailyCapFor(
+  credentials: Pick<AiCredentials, "source"> | null | undefined,
+  settings: Pick<BillingSettings, "dailyCapMicros" | "sharedKeyDailyCapMicros">,
+): { allowance: "billable" | "shared"; capMicros: bigint } {
+  return credentials?.source === "shared"
+    ? { allowance: "shared", capMicros: settings.sharedKeyDailyCapMicros }
+    : { allowance: "billable", capMicros: settings.dailyCapMicros };
 }
 
 // The sentence a refused turn carries. A shared-key user is not "over
@@ -238,5 +267,8 @@ export async function resolveAiCredentials(
   if (!account || !sharedKeyAllowedFor(account, access)) {
     return null;
   }
-  return { apiKey: sharedKey, model, reasoningEffort, source: "shared" };
+  // A model off the list falls back to the default rather than refusing:
+  // the setting is still right for the account's own key, once it has one.
+  const sharedModel = sharedKeyChatModels(env).has(model) ? model : DEFAULT_CHAT_MODEL;
+  return { apiKey: sharedKey, model: sharedModel, reasoningEffort, source: "shared" };
 }

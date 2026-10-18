@@ -363,6 +363,53 @@ describe("a subscriber's life through the books", () => {
     expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
   });
 
+  // A subscription taken on the 31st used to renew on February 28th and then
+  // on the 28th of every month for good: each period was one month on from
+  // the last one's end. Counted from the anchor, the clamp stays in February.
+  it("keeps a month-end anniversary through a short month", async () => {
+    const accountId = await createAccount();
+    await setAccountPlan(db, accountId, "maker", { now: new Date("2026-01-31T09:00:00Z") });
+    for (const night of ["2026-03-01", "2026-04-01", "2026-05-01", "2026-06-01"]) {
+      await runSubscriptionCycle(db, { now: new Date(`${night}T04:00:00Z`) });
+    }
+    expect(
+      (await periodsFor(accountId)).map((period) => period.periodStart.toISOString().slice(0, 10)),
+    ).toEqual(["2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31"]);
+    expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
+  });
+
+  // An operator can delete a plan row while a downgrade still points at it.
+  // The account asked to pay less, so at the rollover it goes to the free
+  // plan instead of quietly paying the dearer one for another month, and the
+  // cycle reports it so somebody can offer the plan that replaced it.
+  it("moves a downgrade to a deleted plan onto the free plan, and says so", async () => {
+    const accountId = await createAccount();
+    const receivable = customerReceivableCode(accountId);
+    await db.execute(sql`
+      insert into billing_plans (code, name, price_micros, margin_basis_points, entitlements, public, sort_order)
+      values ('retired', 'Retired', 990000, 5000, '{}'::jsonb, false, 5)
+    `);
+    await setAccountPlan(db, accountId, "studio", { now: t0 });
+    await setAccountPlan(db, accountId, "retired", { now: new Date(t0.getTime() + 5 * day) });
+    await db.execute(sql`delete from billing_plans where code = 'retired'`);
+
+    const cycle = await runSubscriptionCycle(db, { now: new Date(t0.getTime() + 35 * day) });
+    expect(cycle.missingDowngradePlans).toEqual([
+      { accountId, planCode: "retired", subscriptionId: expect.any(String) },
+    ]);
+    expect(cycle).toMatchObject({ opened: 0, recognized: 1 });
+    const after = await readAccountPlan(db, accountId);
+    expect(after).toMatchObject({ subscribed: false });
+    expect(after.plan.code).toBe("payg");
+    // One month of Studio, and not a second.
+    expect(await accountBalanceMicros(db, receivable)).toBe(6_990_000n);
+    expect(await checkLedgerIntegrity(db, { pendingEventGraceMs: 0 })).toEqual([]);
+
+    // Reported once: the downgrade is gone with the subscription.
+    const again = await runSubscriptionCycle(db, { now: new Date(t0.getTime() + 36 * day) });
+    expect(again.missingDowngradePlans).toEqual([]);
+  });
+
   // §9.2 item 4: deleting a subscriber used to cascade the charged period
   // away and strand its deferred revenue. Now erasure closes the books out
   // first, the subscription row survives (a bare uuid, like every ledger

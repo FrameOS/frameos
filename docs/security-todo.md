@@ -110,33 +110,13 @@ immediately (it only creates a private copy in the account; the prompt now
 says to call it only on the user's ask, and it is not a proposal); the
 device's `app_runtime.nim` still gates `getSetting` on the scene's own
 declaration — harmless now that the cloud ships only granted groups, but an
-embedded-source app could still be refused there outright; personal API
-tokens minted before the 90-day default keep their `NULL` expiry (sweep or
-re-mint), and tokens are revoked on second-factor *enrolment* but not on
-removal; spend reservations live in process memory (one auth-web instance
-today — a second instance would need them in Postgres/Redis); the
-legacy-plaintext re-seal of `account_settings` happens on first read, so a
-row nobody reads stays plaintext until then (a one-off sweep would finish it).
+embedded-source app could still be refused there outright; spend
+reservations and the store's once-a-day download dedupe live in process
+memory (one auth-web instance today — a second instance would need them in
+Postgres/Redis).
 
-Cloud: `backends/{grants,inventory,rotate-token,scopes}` check no base
-scope or `client_kind` (a frame-kind link can create `connected_backends`
-rows; `parseScopes` allows `frame:*` for backends); backups are only
-encrypted client-side (verify the envelope on POST or say so);
-`csrfResponse` skips the Origin check when the bearer merely *looks* like a
-token while the cookie is the credential actually used (harmless without
-CORS, but ignore the bearer when a cookie is present); identity-keyed login / reset
-limits are a cheap lockout; passwordless passkey profile picks an arbitrary
-identity row; scene image redirects are cached a year and nothing purges
-the CDN when a scene goes private or is pulled; convert/lint have quadratic
-paths on anonymous input (`uniqueName`, `importSpecifierPattern`, gradient
-scan) and no parser depth cap (a `RangeError` is an unhandled 500); `?ai=`
-/ `?prompt=` links auto-submit an AI turn; public scenes are unmetered
-storage; image-set binding accepts any known digest; markdown images load
-from any https host; `download_count` inflates on anonymous requests;
-`frame_commands` keeps base64 chunk bodies after ack; per-IP OTA budgets
-starve fleets behind one NAT; `replayEnrollment` binds by account not by
-frame; model choice is client-controlled on the shared key; `@posthog/mcp`
-would capture tool arguments if a token were ever set.
+Cloud: identity-keyed login / reset limits are a cheap lockout; public
+scenes are unmetered storage; markdown images load from any https host.
 
 Device HTTP server: admin sessions are
 stateless signed cookies, so logout clears the browser's copy but a cookie
@@ -157,24 +137,17 @@ TOFU pin stays pinned to the impostor until "Forget host key" — the
 fingerprint is shown so an owner can compare it with
 `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the device.
 
-Cloud identity: `clientIpFromHeaders`
-(`cloud/apps/auth-web/src/lib/rate-limit.ts`) falls back to the
-client-controlled `x-real-ip` when the chain is empty, contradicting the
-comment above it; `POST /api/device/poll` inserts a rate-limit row per
-arbitrary `device_code`, unauthenticated, before any existence check; every
-Google sign-in overwrites `displayName` and `primaryEmail`, so an account
-ends up with three different notions of "its address"; `email_unverified`
-copy claims a mail was sent even when the resend limit suppressed it; signup
-accepts `return_to` and then loses it; `/login?error=<anything>` shows the
-sign-in form to a signed-in user; the account layout re-implements
-return-path validation instead of reusing `safeAuthReturnPath`; CSP allows
-`form-action https:`; PostHog receives the signup email regardless of
-consent while the processor list says otherwise; recovery from a lost second
-factor is support-only and `/login/verify` does not say so; `jwtVerify`
-never pins `algorithms`; `verifySecondFactorCode` has a two-submission race
-that burns a spare recovery code.
+Cloud identity: CSP allows `form-action https:`. Next fixes the CSP at
+build time, but the cross-origin form targets (the scenes host's logout
+form, `CreateSceneWithAiBox`, the my-scenes filter) are only known at
+runtime, so tightening it means a request-time CSP from `proxy.ts`, checked
+against a real `next start`.
 
 Ops, not code: the session cookie is scoped to the registrable domain, so
 the browser also sends it to `cloud-cdn.frameos.net` (R2 behind
 Cloudflare). The fix is to serve the CDN from its own registrable domain;
 the `/admin` system check flags the shared domain until that is done.
+Re-seal the `account_settings` rows nobody has read since sealing shipped:
+`pnpm --filter @frameos-cloud/auth-web settings:reseal-legacy` against prod
+(`DATABASE_URL` + `FRAMEOS_CLOUD_ENCRYPTION_KEY` from `auth-web.env`), dry
+run first, then `--apply`.

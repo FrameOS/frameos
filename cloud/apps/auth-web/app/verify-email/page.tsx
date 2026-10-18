@@ -1,5 +1,6 @@
 import { AuthCard } from "../../src/components/AuthCard";
 import { VerifyEmailForm } from "../../src/components/VerifyEmailForm";
+import { safeAuthReturnPath } from "../../src/lib/auth-cookies";
 
 export const metadata = { title: "Verify email" };
 
@@ -16,6 +17,14 @@ export default async function VerifyEmailPage({
   const params = searchParams ? await searchParams : {};
   const rawToken = Array.isArray(params.token) ? params.token[0] : params.token;
   const token = rawToken?.trim();
+  // Set by the signup (or the sign-in that resent the link) the visitor came
+  // from; the sign-in after verifying continues there.
+  const returnTo = safeAuthReturnPath(
+    Array.isArray(params.return_to) ? params.return_to[0] : params.return_to,
+  );
+  const loginHref = returnTo
+    ? `/login?return_to=${encodeURIComponent(returnTo)}`
+    : "/login";
 
   if (token) {
     return (
@@ -24,7 +33,7 @@ export default async function VerifyEmailPage({
         eyebrow="Email verification"
         title="Confirm your email"
       >
-        <VerifyEmailForm token={token} />
+        <VerifyEmailForm loginHref={loginHref} token={token} />
       </AuthCard>
     );
   }
@@ -36,7 +45,7 @@ export default async function VerifyEmailPage({
       title="Link not valid"
     >
       <div className="actions">
-        <a className="button button-primary" href="/login">
+        <a className="button button-primary" href={loginHref}>
           Go to sign in
         </a>
       </div>

@@ -265,27 +265,25 @@ export function clientKey(request: NextRequest) {
 // the origin around the outer proxy, and whatever the chain holds was
 // written by the client. Such requests share one fixed key rather than a
 // key of the client's choosing — with no proxy-appended entry to believe,
-// a per-request key would be a free pass through every limit.
+// a per-request key would be a free pass through every limit. An empty
+// chain is the shortest such chain (Next itself fills in the socket address
+// when nothing upstream set one). `X-Real-IP` is never read: no proxy of
+// ours sets it, so it is whatever the client wrote.
 export const untrustedClientKey = "untrusted";
 
 export function clientIpFromHeaders(headers: Headers) {
   const count = trustedProxyCount();
-  if (count > 0) {
-    const chain = headers
+  if (count === 0) {
+    return "local";
+  }
+  const chain =
+    headers
       .get("x-forwarded-for")
       ?.split(",")
       .map((value) => value.trim())
-      .filter(Boolean);
-    if (chain && chain.length > 0) {
-      if (chain.length < count) {
-        return untrustedClientKey;
-      }
-      const clientIp = chain[chain.length - count];
-      if (clientIp) {
-        return clientIp;
-      }
-    }
+      .filter(Boolean) ?? [];
+  if (chain.length < count) {
+    return untrustedClientKey;
   }
-
-  return headers.get("x-real-ip")?.trim() || "local";
+  return chain[chain.length - count] || untrustedClientKey;
 }

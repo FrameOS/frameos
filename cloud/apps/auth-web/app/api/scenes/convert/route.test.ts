@@ -153,6 +153,18 @@ describe("POST /api/scenes/convert", () => {
     expect(payload.lint.errors).toEqual([]);
   });
 
+  // The converter's misses are the catalog's roadmap: what each manual port
+  // is missing reaches telemetry as a category, never the reason's words.
+  it("counts what a manual port is missing by primitive, without the reason's text", async () => {
+    process.env.OPENAI_API_KEY = "sk-platform";
+    portMock.mockReturnValue(fakePort({ notes: "", unsupported: "It shells out to exiftool to read the EXIF date of /home/me/photo.jpg." }));
+    const response = await POST(request({ scene: vannituba }));
+    expect(response.status).toBe(200);
+    const record = telemetryMock.mock.calls.at(-1)?.[0];
+    expect(record).toMatchObject({ manualPortPrimitives: { exif: 1, shell: 1 }, needsManualPort: 1 });
+    expect(JSON.stringify(record)).not.toContain("/home/me");
+  });
+
   it("answers 429 when the shared budget is spent, and says what to do", async () => {
     process.env.OPENAI_API_KEY = "sk-platform";
     rateLimitMock.mockResolvedValueOnce({ allowed: false, remaining: 0, resetAt: Date.now() + 90_000 });

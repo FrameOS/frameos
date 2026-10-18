@@ -39,17 +39,6 @@ export async function POST(request: NextRequest) {
     return jsonError("invalid_device_code", 400);
   }
 
-  // A generous multiple of the advertised 5s interval, so a client that polls
-  // as told never trips it, and one polling in a tight loop does.
-  const limited = await identityRateLimitResponse(
-    hashSecret(deviceCode),
-    "device:poll",
-    { limit: 240, windowMs: 10 * 60 * 1000 },
-  );
-  if (limited) {
-    return limited;
-  }
-
   const [deviceRequest] = await db
     .select()
     .from(deviceAuthorizationRequests)
@@ -60,6 +49,19 @@ export async function POST(request: NextRequest) {
 
   if (!deviceRequest) {
     return jsonError("invalid_device_code", 400);
+  }
+
+  // A generous multiple of the advertised 5s interval, so a client that polls
+  // as told never trips it, and one polling in a tight loop does. Counted only
+  // for codes that exist: a bucket per made-up code was a table row anyone
+  // could mint without a credential, and limited nothing.
+  const limited = await identityRateLimitResponse(
+    hashSecret(deviceCode),
+    "device:poll",
+    { limit: 240, windowMs: 10 * 60 * 1000 },
+  );
+  if (limited) {
+    return limited;
   }
 
   if (

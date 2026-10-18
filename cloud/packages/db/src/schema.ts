@@ -781,6 +781,29 @@ export const storeImages = pgTable(
   }),
 );
 
+// Which accounts have uploaded an image's bytes (migration 0066). A version
+// binds images by digest, and only an account that holds the bytes may bind
+// them (resolveImageSet): one that uploaded them (a row here — the image row
+// keeps only its first uploader) or already has them in its own versions.
+export const storeImageUploads = pgTable(
+  "store_image_uploads",
+  {
+    sha256: text("sha256")
+      .notNull()
+      .references(() => storeImages.sha256, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.sha256, table.accountId] }),
+    accountIdx: index("store_image_uploads_account_idx").on(table.accountId),
+  }),
+);
+
 // The ordered image set of one version: position 0 is the cover the store
 // shows for it. Immutable with the version — reordering publishes a new one.
 export const storeSceneVersionImages = pgTable(

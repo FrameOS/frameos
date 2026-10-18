@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { appCatalog, exampleScenes } from "./context";
-import { formatLintIssues, lintScenes } from "./scene-lint";
+import {
+  formatLintIssues,
+  importSpecifiers,
+  lintCodeNodeJs,
+  lintScenes,
+  lintSvgMarkup,
+  moduleExports,
+} from "./scene-lint";
 import type { JsonObject } from "./scene-utils";
 
 function scene(overrides: Partial<JsonObject> = {}): JsonObject {
@@ -713,5 +720,26 @@ describe("lintScenes", () => {
     }
     expect(unexpected).toEqual([]);
     expect(totalWarnings).toBeLessThanOrEqual(2);
+  });
+
+  // Scene JSON reaches the linter from anonymous callers (the converter
+  // runs it). Each of these inputs took the square of its length before:
+  // seconds at 100 KB, hours at the 3 MB the routes accept. 1 MB each now
+  // finishes well inside the test timeout.
+  it("stays linear on adversarial input", () => {
+    const megabyte = 1024 * 1024;
+    expect(importSpecifiers("\n".repeat(megabyte))).toEqual([]);
+    expect(importSpecifiers(`\n\n  import x from "./a"\n\n\timport "./b"\n`)).toEqual(["./a", "./b"]);
+    expect(lintSvgMarkup("<svg ".repeat(megabyte / 5) + "viewBox")).toEqual([]);
+    expect(lintSvgMarkup("<svg viewBox='0 0 1 1'>" + "<linearGradient ".repeat(megabyte / 16))).toEqual([
+      expect.stringContaining('linearGradient needs gradientUnits="userSpaceOnUse"'),
+    ]);
+    expect(moduleExports("export {".repeat(megabyte / 8))?.size).toBeGreaterThan(0);
+    expect(moduleExports("export { a, b as run }")).toEqual(new Set(["a", "run"]));
+    const argNames = Array.from({ length: 20_000 }, (_, index) => `arg${index}`);
+    expect(lintCodeNodeJs("x;".repeat(megabyte / 2) + "const arg7 = 1", argNames)).toEqual([
+      expect.stringContaining('redeclares its argument "arg7"'),
+    ]);
+    expect(lintCodeNodeJs("const arg70 = 1; foo.let arg7", ["arg7"])).toEqual([]);
   });
 });

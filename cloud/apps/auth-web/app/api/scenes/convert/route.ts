@@ -15,6 +15,7 @@ import { resolveAiCredentials } from "../../../../src/lib/ai/api-key";
 import { appCatalog, jsTypeDeclarations } from "../../../../src/lib/ai/context";
 import { lintScenes, type LintIssue } from "../../../../src/lib/ai/scene-lint";
 import { validateScenePayload } from "../../../../src/lib/ai/scene-utils";
+import { countMissingPrimitives } from "../../../../src/lib/ai/missing-primitives";
 import { captureSceneConversion } from "../../../../src/lib/ai/telemetry";
 import { meterAiUsage, type CredentialSource } from "../../../../src/lib/billing";
 import { csrfResponse } from "../../../../src/lib/csrf";
@@ -444,6 +445,9 @@ function telemetryRecord(input: {
     error: input.error,
     keySource: input.keySource,
     lintErrors: input.lintErrors ?? 0,
+    manualPortPrimitives: countMissingPrimitives(
+      items.flatMap((item) => (item.status === "needs_manual_port" ? [item.reason] : [])),
+    ),
     model: input.results.find((report) => report.model)?.model,
     modelCalls: input.results.reduce((n, report) => n + report.modelCalls, 0),
     needsManualPort: input.results.reduce((n, report) => n + report.needsManualPort.length, 0),

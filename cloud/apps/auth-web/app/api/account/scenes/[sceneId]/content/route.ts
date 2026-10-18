@@ -113,7 +113,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
   if (listingInput && "error" in listingInput) {
     return jsonError(listingInput.error, 400);
   }
-  const imagesInput = body.images !== undefined ? await resolveImageSet(db, body.images) : undefined;
+  const imagesInput = body.images !== undefined ? await resolveImageSet(db, body.images, session.accountId!) : undefined;
   if (imagesInput && "error" in imagesInput) {
     return jsonError(imagesInput.error, imagesInput.error === "image_not_found" ? 404 : 400);
   }

@@ -57,3 +57,12 @@ export function formatMicrosUsd(micros: bigint | string): string {
       : (absolute % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
   return `${negative ? "-" : ""}$${grouped}.${fraction}`;
 }
+
+// A micro-dollar amount someone is typing, in dollars, for the line under the
+// input: 10000000 is easy to mistype as 1000000. Null while the text is not
+// a whole number of micro-dollars, which is also what the settings route
+// refuses.
+export function previewMicrosInput(text: string): string | null {
+  const trimmed = text.trim();
+  return /^\d+$/.test(trimmed) ? formatMicrosUsd(BigInt(trimmed)) : null;
+}
