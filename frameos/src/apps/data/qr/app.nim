@@ -1,8 +1,7 @@
 import pixie
-import QRgen
-import QRgen/renderer
 import frameos/apps
 import frameos/types
+import frameos/utils/qr
 import frameos/utils/url
 import frameos/utils/image
 
@@ -30,22 +29,22 @@ proc get*(self: App, context: ExecutionContext): Image =
     else:
       self.appConfig.code
 
-  let myQR = newQR(code)
+  let qr = qrEncode(code)
 
   let width = case self.appConfig.sizeUnit
     of "percent": self.appConfig.size / 100.0 * min(if context.hasImage: context.image.width else: self.frameConfig.renderWidth(),
             if context.hasImage: context.image.height else: self.frameConfig.renderHeight()).float
-    of "pixels per dot": self.appConfig.size * (myQR.drawing.size.int + self.appConfig.padding * 2).float
+    of "pixels per dot": self.appConfig.size * (qr.size + self.appConfig.padding * 2).float
     else: self.appConfig.size
 
   # A scene-supplied size is bounded like any other requested raster.
   let boundedWidth = boundedRequestedDimensions(width.int, width.int).width
-  result = myQR.renderImg(
-    light = self.appConfig.backgroundColor.toHtmlHex,
-    dark = self.appConfig.qrCodeColor.toHtmlHex,
+  result = qr.qrImage(
+    boundedWidth,
+    self.appConfig.padding,
+    dark = self.appConfig.qrCodeColor,
+    light = self.appConfig.backgroundColor,
     alRad = self.appConfig.alRad,
     moRad = self.appConfig.moRad,
-    moSep = self.appConfig.moSep,
-    pixels = boundedWidth.uint32,
-    padding = self.appConfig.padding.uint8
+    moSep = self.appConfig.moSep
   )

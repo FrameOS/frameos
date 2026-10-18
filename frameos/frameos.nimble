@@ -22,7 +22,6 @@ requires "https://github.com/FrameOS/pixie#28a9cc32e013b4d7dd72c830f4a25008cb725
 # Linux frames terminates here; see docs/native-https.md.
 requires "https://github.com/FrameOS/mummy#020dfe59fd112bef4b711684c41fe9f678f56889"
 requires "linuxfb >= 0.1.0"
-requires "QRgen >= 3.1.0"
 requires "jsony >= 1.1.5"
 requires "ws >= 0.5.0"
 # zippy is imported directly (config.nim, scenes, logger); pin the floor here
