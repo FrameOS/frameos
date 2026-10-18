@@ -2,7 +2,7 @@ import { useActions, useValues } from 'kea'
 import { A } from 'kea-router'
 import clsx from 'clsx'
 
-import { FrameImage, FrameImageRefreshButton } from '../../components/FrameImage'
+import { FrameImage, FrameImageRefreshButton, FrameImageSleepBadge } from '../../components/FrameImage'
 import type { FrameType } from '../../types'
 import { urls } from '../../urls'
 import { publicSceneId } from '../../utils/systemScenes'
@@ -50,6 +50,7 @@ export function SceneLivePreview({ frame, sceneId }: { frame: FrameType; sceneId
             wasmFallback={liveScene ? { sceneId: liveScene.id } : undefined}
           />
           <FrameLiveBadge frame={frame} />
+          <FrameImageSleepBadge frameId={frame.id} />
         </div>
       </A>
       <FrameImageRefreshButton frameId={frame.id} />

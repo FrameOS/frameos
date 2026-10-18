@@ -1,4 +1,4 @@
-import { FrameImagePreviewButton, FrameImageRefreshButton } from '../../components/FrameImage'
+import { FrameImagePreviewButton, FrameImageRefreshButton, FrameImageSleepBadge } from '../../components/FrameImage'
 import type { FrameType } from '../../types'
 import { FrameLiveBadge } from './FrameLiveBadge'
 
@@ -19,6 +19,7 @@ export function FrameImageOverlayControls({
     <>
       {showLive ? <FrameLiveBadge frame={frame} className="right-3 top-3 z-10" /> : null}
       {showRefresh ? <FrameImageRefreshButton frameId={frame.id} sceneId={sceneId} /> : null}
+      <FrameImageSleepBadge frameId={frame.id} />
       {showPreview ? <FrameImagePreviewButton frameId={frame.id} /> : null}
     </>
   )

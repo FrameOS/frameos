@@ -59,6 +59,7 @@ export default tseslint.config(
       "**/src/test/shared-spa/frame-checkin.test.ts",
       "**/src/test/shared-spa/frame-firmware-update.test.ts",
       "**/src/test/shared-spa/deploy-progress.test.tsx",
+      "**/src/test/shared-spa/frame-image-sleep-badge.test.tsx",
       // Same exclusion, same reason: devices.ts reaches components/Select.tsx.
       "**/src/test/shared-spa/device-catalog-mirror.test.ts",
       // Same exclusion, same reason: importing frameLogic pulls in

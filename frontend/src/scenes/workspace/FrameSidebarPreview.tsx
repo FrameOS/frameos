@@ -1,7 +1,7 @@
 import { A } from 'kea-router'
 import clsx from 'clsx'
 
-import { FrameImage, FrameImageRefreshButton } from '../../components/FrameImage'
+import { FrameImage, FrameImageRefreshButton, FrameImageSleepBadge } from '../../components/FrameImage'
 import type { FrameType } from '../../types'
 import { urls } from '../../urls'
 import { sceneIsActive } from './FrameDashboardSurface'
@@ -42,6 +42,7 @@ export function FrameSidebarPreview({
             wasmFallback={activeScene ? { sceneId: activeScene.id } : undefined}
           />
           <FrameLiveBadge frame={frame} />
+          <FrameImageSleepBadge frameId={frame.id} />
         </div>
       </A>
       <FrameImageRefreshButton frameId={frame.id} />
