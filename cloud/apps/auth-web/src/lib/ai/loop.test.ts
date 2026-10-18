@@ -6,19 +6,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResponseInputItem, StreamedResponse } from "./openai";
 
 const streamResponse = vi.hoisted(() => vi.fn());
-const executeTool = vi.hoisted(() => vi.fn());
+const runTool = vi.hoisted(() => vi.fn());
 
 vi.mock("./openai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./openai")>()),
   streamResponse,
 }));
 vi.mock("./tools", () => ({
-  executeTool,
+  runTool,
   toolDefinitions: [],
   toolLabels: {},
 }));
 
-const { buildInitialInput, photoLinkNote, runAgentLoop } = await import("./loop");
+const { buildInitialInput, estimatedImageTokens, estimatedUsage, photoLinkNote, runAgentLoop } =
+  await import("./loop");
+
+function text(value: string) {
+  return { images: [], text: value };
+}
 
 const token = `pk_${"q7W3e9R1".repeat(4)}`;
 const link = `https://cloud.frameos.net/api/photos/shared/${token}`;
@@ -70,7 +75,7 @@ describe("runAgentLoop and Photos share links", () => {
       sent.push(structuredClone(input));
       return rounds.shift() ?? round([]);
     });
-    executeTool.mockReset();
+    runTool.mockReset();
   });
 
   it("sends placeholders and runs the tools with the real link", async () => {
@@ -88,8 +93,8 @@ describe("runAgentLoop and Photos share links", () => {
         },
       ]),
     );
-    executeTool.mockResolvedValueOnce(
-      JSON.stringify({ logs: [`HTTP request failed: ${link}/photo?index=2`], ok: true }),
+    runTool.mockResolvedValueOnce(
+      text(JSON.stringify({ logs: [`HTTP request failed: ${link}/photo?index=2`], ok: true })),
     );
 
     await run(
@@ -108,7 +113,7 @@ describe("runAgentLoop and Photos share links", () => {
     expect(JSON.stringify(first!.at(-1))).toContain("Make the photos fit");
 
     // The tool got the real link back.
-    const [, args] = executeTool.mock.calls[0]!;
+    const [, args] = runTool.mock.calls[0]!;
     expect(args.scene.nodes[0].data.config).toEqual({ album: link, fit: "contain" });
 
     // Its result reached the model redacted.
@@ -122,9 +127,9 @@ describe("runAgentLoop and Photos share links", () => {
       round([{ args: { scene_id: "s" }, name: "get_store_scene" }]),
       round([{ args: { album: "/api/photos/shared/pk_photo_link_1" }, name: "save_scene" }]),
     );
-    executeTool
-      .mockResolvedValueOnce(JSON.stringify({ album: `/api/photos/shared/${otherToken}` }))
-      .mockResolvedValueOnce(JSON.stringify({ ok: true }));
+    runTool
+      .mockResolvedValueOnce(text(JSON.stringify({ album: `/api/photos/shared/${otherToken}` })))
+      .mockResolvedValueOnce(text(JSON.stringify({ ok: true })));
 
     await run(buildInitialInput({ contextBlock: "", history: [], prompt: "Copy that album scene" }));
 
@@ -136,7 +141,7 @@ describe("runAgentLoop and Photos share links", () => {
     expect(JSON.stringify(second.at(-1))).toContain(photoLinkNote);
     // Noted once.
     expect(JSON.stringify(inputs[2]).split(photoLinkNote).length - 1).toBe(1);
-    expect(executeTool.mock.calls[1]![1]).toEqual({ album: `/api/photos/shared/${otherToken}` });
+    expect(runTool.mock.calls[1]![1]).toEqual({ album: `/api/photos/shared/${otherToken}` });
   });
 
   it("leaves a conversation without links as it is", async () => {
@@ -144,5 +149,59 @@ describe("runAgentLoop and Photos share links", () => {
     const before = structuredClone(input);
     await run(input);
     expect(seenInputs()[0]).toEqual(before);
+  });
+});
+
+describe("runAgentLoop and rendered images", () => {
+  const dataUrl = "data:image/png;base64,iVBORw0KGgo=";
+
+  beforeEach(() => {
+    sent = [];
+    rounds = [];
+    streamResponse.mockReset();
+    streamResponse.mockImplementation(async ({ input }: { input: ResponseInputItem[] }) => {
+      sent.push(structuredClone(input));
+      return rounds.shift() ?? round([]);
+    });
+    runTool.mockReset();
+  });
+
+  it("hands the model the image beside the tool's text, links still redacted", async () => {
+    respond(round([{ args: {}, name: "render_scene" }]));
+    runTool.mockResolvedValueOnce({
+      images: [{ dataUrl }],
+      text: JSON.stringify({ logs: [`fetching ${link}/photo`], ok: true }),
+    });
+
+    await run(buildInitialInput({ contextBlock: "", history: [], prompt: "It looks bad" }));
+
+    const output = seenInputs()[1]!.find((item) => item.type === "function_call_output");
+    expect(output?.output).toEqual([
+      { text: JSON.stringify({ logs: [`fetching ${redactedLink}/photo`], ok: true }), type: "input_text" },
+      { detail: "high", image_url: dataUrl, type: "input_image" },
+    ]);
+  });
+
+  it("keeps a text-only result a plain string", async () => {
+    respond(round([{ args: {}, name: "get_app" }]));
+    runTool.mockResolvedValueOnce(text('{"ok":true}'));
+
+    await run(buildInitialInput({ contextBlock: "", history: [], prompt: "Which fields?" }));
+
+    const output = seenInputs()[1]!.find((item) => item.type === "function_call_output");
+    expect(output?.output).toBe('{"ok":true}');
+  });
+
+  it("estimates an aborted round's image by count, not by the length of its base64", () => {
+    // 400 KB of base64 would be 100,000 tokens at four characters each.
+    const image = `data:image/png;base64,${"A".repeat(400_000)}`;
+    const usage = estimatedUsage(
+      "",
+      [{ output: [{ detail: "high", image_url: image, type: "input_image" }], type: "function_call_output" }],
+      0,
+      "",
+    );
+    expect(usage.inputTokens).toBeGreaterThanOrEqual(estimatedImageTokens);
+    expect(usage.inputTokens).toBeLessThan(estimatedImageTokens + 100);
   });
 });

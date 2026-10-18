@@ -13,6 +13,7 @@ import {
   rateLimitResponse,
 } from "../../../../src/lib/rate-limit";
 import {
+  accountRenderRateLimit,
   defaultRenderTimeoutMs,
   maxRenderDimension,
   maxRenderPixels,
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
   const accountLimited = await identityRateLimitResponse(
     session.accountId,
     "scenes:render",
-    { limit: 60, windowMs: 15 * 60 * 1000 },
+    accountRenderRateLimit,
   );
   if (accountLimited) {
     return accountLimited;

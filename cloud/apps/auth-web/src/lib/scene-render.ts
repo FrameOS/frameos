@@ -66,6 +66,9 @@ const maxQueuedRenders = 8;
 // for minutes while everyone else got renderer_busy.
 export const maxConcurrentRendersPerOwner = 1;
 export const maxQueuedRendersPerOwner = 2;
+// Renders one account may start per window, through any door: POST
+// /api/scenes/render and the AI chat's render_scene share the bucket.
+export const accountRenderRateLimit = { limit: 60, windowMs: 15 * 60 * 1000 };
 const maxCollectedLogs = 200;
 const settleMs = 1_500;
 
