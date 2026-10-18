@@ -11,6 +11,7 @@ function folder(path: string) {
     createdAt: at,
     height: null,
     kind: "folder",
+    location: null,
     path,
     sizeBytes: 0,
     status: "ready",
@@ -24,6 +25,7 @@ function file(
   contentType = "image/jpeg",
   status = "ready",
   colors: Record<string, unknown> | null = null,
+  location: unknown = null,
 ) {
   return {
     colors,
@@ -31,6 +33,7 @@ function file(
     createdAt: at,
     height: 30,
     kind: "file",
+    location,
     path,
     sizeBytes,
     status,
@@ -111,6 +114,7 @@ describe("describePhotoChildren", () => {
       content_type: "image/jpeg",
       height: 30,
       kind: "file",
+      location: null,
       mtime: Math.floor(at.getTime() / 1000),
       name: "root.jpg",
       path: "root.jpg",
@@ -128,6 +132,23 @@ describe("describePhotoChildren", () => {
     });
     for (const entry of entries.filter((item) => item.kind === "folder")) {
       expect(entry, entry.path).not.toHaveProperty("colors");
+    }
+  });
+
+  it("gives a file the stored location without its altitude, and a folder none", () => {
+    const located = file("located.jpg", 1, "image/jpeg", "ready", null, {
+      altitude: 31.5,
+      latitude: 59.43696,
+      longitude: 24.75353,
+    });
+    const entries = describePhotoChildren("", [...rows, located, file("odd.jpg", 1, "image/jpeg", "ready", null, "x")]);
+    expect(entries.find((entry) => entry.path === "located.jpg")?.location).toEqual({
+      latitude: 59.43696,
+      longitude: 24.75353,
+    });
+    expect(entries.find((entry) => entry.path === "odd.jpg")?.location).toBeNull();
+    for (const entry of entries.filter((item) => item.kind === "folder")) {
+      expect(entry.location, entry.path).toBeNull();
     }
   });
 

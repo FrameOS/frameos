@@ -16,12 +16,12 @@ from http import HTTPStatus
 from typing import Any
 
 from arq import ArqRedis as Redis
-from fastapi import Depends, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models.frame import Frame, server_scheme_for_frame
 from app.models.photo_share import PhotoShare
 from app.redis import get_redis
@@ -72,6 +72,12 @@ class PhotoRenameBody(BaseModel):
 
 class PhotoDeleteBody(BaseModel):
     paths: list[str] = Field(max_length=MAX_PATHS_PER_REQUEST)
+
+
+class PhotoMetadataBody(BaseModel):
+    paths: list[str] = Field(max_length=MAX_PATHS_PER_REQUEST)
+    # Checked by hand, for the contract's 400 rather than FastAPI's 422.
+    remove: Any = None
 
 
 _NO_COLORS = object()
@@ -165,11 +171,28 @@ async def photos_status(db: Session = Depends(get_db)):
     return await asyncio.to_thread(photos.status, db, current_project_id())
 
 
+def _read_unread_metadata(project_id: int, folder: str) -> None:
+    """After a listing has answered: the metadata of its files stored before
+    files had it (docs/photos.md "Reading old photos"), in a session of its
+    own (the request's is closed by then)."""
+    db = SessionLocal()
+    try:
+        photos.read_unread_metadata(db, project_id, photos.ready_store(), folder)
+    except Exception as error:  # the listing has answered; the next one tries again
+        photos.log.warning("Could not read photo metadata in %s: %s", folder or "/", error)
+    finally:
+        db.close()
+
+
 @api_project.get("/photos/files")
-async def photos_files(path: str = "", db: Session = Depends(get_db)):
+async def photos_files(background: BackgroundTasks, path: str = "", db: Session = Depends(get_db)):
     rel = photos.validate_path(path, allow_root=True)
     await _ready_store()
-    return await asyncio.to_thread(photos.list_folder, db, current_project_id(), rel)
+    project_id = current_project_id()
+    listing = await asyncio.to_thread(photos.list_folder, db, project_id, rel)
+    if any(entry["kind"] == "file" for entry in listing["entries"]):
+        background.add_task(_read_unread_metadata, project_id, rel)
+    return listing
 
 
 @api_project.post("/photos/upload")
@@ -271,6 +294,27 @@ async def photos_delete(data: PhotoDeleteBody, db: Session = Depends(get_db)):
     store = await _ready_store()
     deleted = await asyncio.to_thread(photos.delete_paths, db, current_project_id(), store, paths)
     return {"deleted": deleted}
+
+
+@api_project.get("/photos/metadata")
+async def photos_metadata(path: str = "", db: Session = Depends(get_db)):
+    """What a file carries (docs/photos.md "Metadata"), read from its bytes
+    when it has not been yet."""
+    rel = photos.validate_path(path)
+    store = await _ready_store()
+    metadata = await asyncio.to_thread(photos.metadata_for, db, current_project_id(), store, rel)
+    return {"path": rel, "metadata": metadata}
+
+
+@api_project.post("/photos/metadata")
+async def photos_remove_metadata(data: PhotoMetadataBody, db: Session = Depends(get_db)):
+    """Take the location, or all metadata, out of files: `{"paths": [...],
+    "remove": "location" | "all"}` -> `{"entries": [...], "changed": n}`."""
+    paths = _some_paths(data.paths)
+    if data.remove not in ("location", "all"):
+        raise _bad_request('remove must be "location" or "all"')
+    store = await _ready_store()
+    return await asyncio.to_thread(photos.remove_metadata, db, current_project_id(), store, paths, data.remove)
 
 
 @api_project.post("/photos/colors")

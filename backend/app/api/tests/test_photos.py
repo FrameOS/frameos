@@ -25,6 +25,7 @@ from app.models.photo_share import PhotoShare
 from app.utils import photos as photos_utils
 from app.utils.object_store import S3ObjectStore, is_valid_object_key, s3_settings_from_env
 from app.utils.photo_album_scene import build_photo_album_scene
+from app.utils.photo_metadata import read_photo_metadata_bytes, remove_photo_metadata
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -301,6 +302,7 @@ async def test_a_chunked_upload_lands_in_the_folder(async_client):
         "height": 48,
         "status": "ready",
         "colors": None,
+        "location": None,
     }
     assert await read_file(async_client, "Summer 2026/Beach/beach.jpg") == data
     # The bytes sit under their hash, with the thumbnail next to them.
@@ -360,30 +362,126 @@ async def test_two_uploads_of_one_photo_share_one_object(async_client, db):
     assert not object_file(data).exists() and not thumb_file(data).exists()
 
 
+def metadata_fixture(name: str) -> bytes:
+    """A photo from the metadata corpus (docs/photo-metadata-fixtures.json)."""
+    return (REPO_ROOT / "docs" / "photo-metadata-fixtures" / name).read_bytes()
+
+
+def stored_metadata(db, path: str):
+    db.expire_all()
+    return db.query(PhotoEntry).filter(PhotoEntry.path == path).one().photo_metadata
+
+
 @pytest.mark.asyncio
-async def test_an_upload_loses_its_location_and_camera_metadata(async_client, db):
-    """GPS, camera, XMP and what follows the image go before anything is
-    stored; the turn stays (docs/photos.md "POST /api/photos/upload"). The
-    object is named by the hash of what is left."""
-    original = (REPO_ROOT / "docs" / "photo-metadata-fixtures" / "exif-gps.jpg").read_bytes()
-    clean = photos_utils.without_private_metadata(original, "phone.jpg")
-    assert clean != original and b"FixtureCam" not in clean
-    response = await upload(async_client, "Trip", "phone.jpg", original)
+async def test_an_upload_is_stored_as_sent_and_its_metadata_read(async_client, no_auth_client, db):
+    """docs/photos.md "Metadata": the bytes as sent, what they carry in the
+    row, the pin in every listing and never in the share routes."""
+    phone = metadata_fixture("exif-gps.jpg")
+    metadata = read_photo_metadata_bytes(phone)
+    pin = {"latitude": metadata["location"]["latitude"], "longitude": metadata["location"]["longitude"]}
+    response = await upload(async_client, "Trip", "phone.jpg", phone)
     assert response.status_code == 200, response.text
     entry = response.json()["entry"]
-    assert (entry["size"], entry["width"], entry["height"]) == (len(clean), 16, 24)
-    assert await read_file(async_client, "Trip/phone.jpg") == clean
+    assert (entry["size"], entry["width"], entry["height"], entry["location"]) == (len(phone), 16, 24, pin)
+    assert await read_file(async_client, "Trip/phone.jpg") == phone
     row = db.query(PhotoEntry).filter(PhotoEntry.kind == "file").one()
-    digest = hashlib.sha256(clean).hexdigest()
-    assert (row.sha256, row.object_key, row.size_bytes) == (digest, f"photos/{digest}", len(clean))
-    assert object_file(clean).is_file() and not object_file(original).exists()
-    with Image.open(io.BytesIO(clean)) as image:
-        assert image.getexif().get(0x0112) == 6
-        assert not image.getexif().get_ifd(0x8825)
+    digest = hashlib.sha256(phone).hexdigest()
+    assert (row.sha256, row.object_key, row.photo_metadata) == (digest, f"photos/{digest}", metadata)
+    assert (await entry_of(async_client, "Trip/phone.jpg"))["location"] == pin
 
-    # A file that is not a JPEG, PNG or WebP is stored as it came.
+    read = await async_client.get("/api/photos/metadata", params={"path": "Trip/phone.jpg"})
+    assert read.status_code == 200, read.text
+    assert read.json() == {"path": "Trip/phone.jpg", "metadata": metadata}
+
+    # Any other file reads as carrying nothing.
     assert (await upload(async_client, "Trip", "notes.txt", b"lat 59.43", upload_id="upload-0002")).status_code == 200
-    assert await read_file(async_client, "Trip/notes.txt") == b"lat 59.43"
+    assert stored_metadata(db, "Trip/notes.txt") == {"location": None, "fields": [], "blocks": []}
+
+    token = (await share(async_client, "Trip"))["token"]
+    for file in (await no_auth_client.get(f"/api/photos/shared/{token}")).json()["files"]:
+        assert "location" not in file
+
+
+@pytest.mark.asyncio
+async def test_removing_a_photos_location_or_all_its_metadata(async_client, db):
+    phone = metadata_fixture("exif-gps.jpg")
+    await upload(async_client, "Trip", "a.jpg", phone)
+    await upload(async_client, "Trip", "b.png", metadata_fixture("exif-text.png"), upload_id="upload-0002")
+    assert (await set_colors(async_client, "Trip/a.jpg", {"whites": -10})).status_code == 200
+    before = db.query(PhotoEntry).filter(PhotoEntry.path == "Trip/a.jpg").one()
+    created, thumb = before.created_at, before.thumb_object_key
+
+    located = remove_photo_metadata(phone, "location").data
+    response = await async_client.post("/api/photos/metadata", json={"paths": ["Trip/a.jpg"], "remove": "location"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["changed"] == 1
+    [entry] = body["entries"]
+    assert (entry["path"], entry["location"], entry["size"], entry["colors"]) == ("Trip/a.jpg", None, len(phone), {"whites": -10})
+    assert await read_file(async_client, "Trip/a.jpg") == located
+    db.expire_all()
+    after = db.query(PhotoEntry).filter(PhotoEntry.path == "Trip/a.jpg").one()
+    digest = hashlib.sha256(located).hexdigest()
+    assert (after.object_key, after.sha256, after.photo_metadata) == (f"photos/{digest}", digest, read_photo_metadata_bytes(located))
+    assert (after.created_at, after.thumb_object_key) == (created, thumb)
+    # The old object went with its last row; the same request again changes nothing.
+    assert not object_file(phone).exists()
+    again = await async_client.post("/api/photos/metadata", json={"paths": ["Trip/a.jpg"], "remove": "location"})
+    assert again.json()["changed"] == 0
+
+    # Everything, from a selection, in request order.
+    response = await async_client.post("/api/photos/metadata", json={"paths": ["Trip/b.png", "Trip/a.jpg"], "remove": "all"})
+    assert response.json()["changed"] == 2
+    assert [entry["path"] for entry in response.json()["entries"]] == ["Trip/b.png", "Trip/a.jpg"]
+    assert await read_file(async_client, "Trip/b.png") == remove_photo_metadata(metadata_fixture("exif-text.png"), "all").data
+    read = (await async_client.get("/api/photos/metadata", params={"path": "Trip/a.jpg"})).json()["metadata"]
+    assert read == {"location": None, "fields": [{"group": "Image", "name": "Orientation", "value": 6}], "blocks": []}
+
+
+@pytest.mark.asyncio
+async def test_metadata_routes_check_every_path_first(async_client):
+    phone = metadata_fixture("exif-gps.jpg")
+    await upload(async_client, "Trip", "a.jpg", phone)
+
+    async def remove(body):
+        return await async_client.post("/api/photos/metadata", json=body)
+
+    assert (await remove({"paths": ["Trip/a.jpg", "Trip/none.jpg"], "remove": "location"})).status_code == 404
+    assert (await remove({"paths": ["Trip"], "remove": "all"})).status_code == 400
+    assert (await remove({"paths": [], "remove": "all"})).status_code == 400
+    assert (await remove({"paths": ["../a.jpg"], "remove": "all"})).status_code == 400
+    assert (await remove({"paths": ["Trip/a.jpg"], "remove": "gps"})).status_code == 400
+    assert await read_file(async_client, "Trip/a.jpg") == phone
+    assert (await async_client.get("/api/photos/metadata", params={"path": "Trip"})).status_code == 400
+    assert (await async_client.get("/api/photos/metadata", params={"path": "Trip/none.jpg"})).status_code == 404
+    assert (await async_client.get("/api/photos/metadata", params={"path": "../a.jpg"})).status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_old_photos_are_read_when_listed_or_asked_for(async_client, db):
+    """docs/photos.md "Reading old photos": a row without metadata gets it
+    after a listing of its folder answers, or on GET /api/photos/metadata."""
+    phone = metadata_fixture("exif-gps.jpg")
+    metadata = read_photo_metadata_bytes(phone)
+    await upload(async_client, "Old", "a.jpg", phone)
+    await upload(async_client, "Old", "b.jpg", phone, upload_id="upload-0002")
+
+    def forget():
+        db.query(PhotoEntry).filter(PhotoEntry.kind == "file").update({PhotoEntry.photo_metadata: None}, synchronize_session=False)
+        db.commit()
+
+    forget()
+    first = (await async_client.get("/api/photos/files", params={"path": "Old"})).json()["entries"]
+    assert [entry["location"] for entry in first] == [None, None]
+    # The background task has run by the time the test client returns.
+    assert stored_metadata(db, "Old/a.jpg") == metadata and stored_metadata(db, "Old/b.jpg") == metadata
+    second = (await async_client.get("/api/photos/files", params={"path": "Old"})).json()["entries"]
+    assert all(entry["location"] for entry in second)
+
+    forget()
+    read = await async_client.get("/api/photos/metadata", params={"path": "Old/a.jpg"})
+    assert read.json()["metadata"] == metadata
+    assert stored_metadata(db, "Old/a.jpg") == metadata
 
 
 @pytest.mark.asyncio
@@ -498,6 +596,7 @@ async def test_listing_shapes_and_order(async_client):
         "height": None,
         "content_type": None,
         "status": "ready",
+        "location": None,
     }
 
     img2 = by_name["img2.jpg"]
@@ -512,6 +611,7 @@ async def test_listing_shapes_and_order(async_client):
         "height": 40,
         "status": "ready",
         "colors": None,
+        "location": None,
     }
     text = by_name["B.txt"]
     assert text["content_type"] == "text/plain"

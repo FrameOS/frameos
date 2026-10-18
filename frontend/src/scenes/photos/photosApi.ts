@@ -25,7 +25,35 @@ export interface PhotoEntry {
   cover?: string | null
   /** Files: the photo's color profile, a frame asset sidecar's `colors` (docs/photos.md, "Colors"). */
   colors?: PhotoColors | null
+  /** Files: where the photo was taken, from its metadata; null when it says nothing or is not read yet. */
+  location?: PhotoLocation | null
 }
+
+export interface PhotoLocation {
+  latitude: number
+  longitude: number
+}
+
+export type PhotoMetadataValue = string | number | null | (string | number | null)[]
+
+export interface PhotoMetadataField {
+  /** "Image", "Photo", "Location", "Interoperability", "Thumbnail" (EXIF) or "Text" (PNG). */
+  group: string
+  name: string
+  value: PhotoMetadataValue
+}
+
+/** What else a file carries besides its EXIF fields, in this order. */
+export type PhotoMetadataBlock = 'exif' | 'xmp' | 'iptc' | 'comment' | 'text' | 'trailer' | 'other'
+
+/** `GET /api/photos/metadata` (docs/photos.md, "Metadata"). */
+export interface PhotoMetadata {
+  location: (PhotoLocation & { altitude: number | null }) | null
+  fields: PhotoMetadataField[]
+  blocks: PhotoMetadataBlock[]
+}
+
+export type PhotoMetadataRemoval = 'location' | 'all'
 
 /** The `colors` object of a `.frameos.json` sidecar (docs/asset-color-profiles.md). */
 export type PhotoColors = Record<string, unknown>
@@ -164,6 +192,22 @@ export async function resizePhoto(path: string, options: PhotoResizeOptions): Pr
   }
   const { entry } = await jsonPost<{ entry: PhotoEntry }>('/api/photos/resize', body)
   return entry
+}
+
+export async function fetchPhotoMetadata(path: string): Promise<PhotoMetadata> {
+  const result = await photosJson<{ path: string; metadata: PhotoMetadata }>(
+    `/api/photos/metadata?${new URLSearchParams({ path }).toString()}`
+  )
+  return result.metadata
+}
+
+/** Takes the location, or every bit of metadata, out of these files. The entries come back in request order. */
+export async function removePhotoMetadata(
+  paths: string[],
+  remove: PhotoMetadataRemoval
+): Promise<{ entries: PhotoEntry[]; changed: number }> {
+  const result = await jsonPost<{ entries: PhotoEntry[]; changed: number }>('/api/photos/metadata', { paths, remove })
+  return { entries: result.entries ?? [], changed: result.changed ?? 0 }
 }
 
 export async function deletePhotos(paths: string[]): Promise<number> {

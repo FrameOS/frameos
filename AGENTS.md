@@ -236,10 +236,16 @@
   `photos/` keys and a Cloudflare rule blocks the prefix on the CDN alias
   (the `/admin` check "Photos off the public CDN" fails without it). Never
   hand a photo out by a public URL again.
-- **Uploads lose location and camera metadata** on both planes, losslessly
-  (`app/utils/photo_metadata.py`, `src/lib/photos/metadata.ts`). The two
-  write the same bytes, pinned by `docs/photo-metadata-fixtures.json`: change
-  one, change both and run `tools/generate_photo_metadata_fixtures.py`.
+- **Photo metadata: inform, don't punish** (the owner's rule, 2026-10-18).
+  Uploads are stored exactly as sent; never strip or rewrite a photo the
+  owner did not ask to change. The library reads its metadata instead (a
+  location pin on the card, the viewer's Info panel, `GET
+  /api/photos/metadata`) and removes the location or everything only when
+  asked (`POST /api/photos/metadata`, one photo or a selection). The reader
+  and both removers are `app/utils/photo_metadata.py` and
+  `src/lib/photos/metadata.ts`, which must agree byte for byte, pinned by
+  `docs/photo-metadata-fixtures.json`: change one, change both and run
+  `tools/generate_photo_metadata_fixtures.py`.
 - **A share link inside a scene is the owner's alone.** The cloud store
   refuses to make a scene that holds one public or shared, and the scene
   AIs on both planes show the model a placeholder and restore the link in
