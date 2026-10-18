@@ -8,6 +8,13 @@ import ../portal
 import ../privileged
 import ../types
 
+# The setup path reads frame.json on the request's own thread
+# (portalRequestConfig). Point it at a file that does not exist so a stray
+# frameos/frame.json on a dev machine cannot stand in for the configs these
+# tests build by hand; the control-mode suite points it at its own temp file.
+let missingConfigPath = getTempDir() / ("frameos-test-portal-missing-frame-" & $getCurrentProcessId() & ".json")
+putEnv("FRAMEOS_CONFIG", missingConfigPath)
+
 type HookMode = enum
   hmWifiList
   hmStartApOk
@@ -746,7 +753,7 @@ suite "portal setup control mode":
     removeFile(setupDir / "frame.json")
     removeFile(setupDir / "pending.json")
     removeFile(setupDir / "link_code_pending.json")
-    delEnv("FRAMEOS_CONFIG")
+    putEnv("FRAMEOS_CONFIG", missingConfigPath)
     delEnv("FRAMEOS_CLOUD_ENROLL_PENDING_PATH")
     delEnv("FRAMEOS_CLOUD_LINK_CODE_PENDING_PATH")
 
@@ -847,6 +854,29 @@ suite "portal setup control mode":
     check explicit.controlModeExplicit
     check persistPortalSetup(frame, explicit)
     check parseFile(setupDir / "frame.json"){"serverHost"}.getStr("missing") == ""
+
+  test "the saved setup reaches the runtime's config through a reload, not through field writes":
+    writeFile(setupDir / "frame.json", $(%*{"serverHost": "backend.example.com", "serverPort": 8989,
+      "frameAdminAuth": {"enabled": false, "user": "admin", "pass": ""}}))
+    let frame = makeFrameOS()
+    frame.frameConfig.serverHost = "backend.example.com"
+    let liveAdmin = frame.frameConfig.frameAdminAuth
+    let options = parseSetupOptions({"ssid": "x", "hostname": "kitchen", "timeZone": "Europe/Tallinn",
+      "device": "pimoroni.inky_impression_13", "adminEnabled": "1", "adminUser": "admin", "adminPass": "pw"}.toTable,
+      portalRequestConfig(frame))
+    check persistPortalSetup(frame, options)
+    let saved = parseFile(setupDir / "frame.json")
+    check saved{"device"}.getStr("") == "pimoroni.inky_impression_13"
+    check saved{"gpioButtons"}.len == 4
+    check saved{"frameAdminAuth"}{"pass"}.getStr("") == "pw"
+    # The live config was swapped from the file: same object, new values,
+    # and the admin node is a fresh parse, not the worker's JsonNode.
+    check frame.frameConfig.device == "pimoroni.inky_impression_13"
+    check frame.frameConfig.timeZone == "Europe/Tallinn"
+    check frame.frameConfig.frameHost == "kitchen.local"
+    check frame.frameConfig.gpioButtons.len == 4
+    check frame.frameConfig.frameAdminAuth{"pass"}.getStr("") == "pw"
+    check frame.frameConfig.frameAdminAuth != liveAdmin
 
   test "cloud mode clears serverHost and queues the typed claim code":
     writeFile(setupDir / "frame.json", $(%*{"serverHost": "localhost", "serverPort": 8989}))
