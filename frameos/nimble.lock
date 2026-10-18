@@ -1,16 +1,6 @@
 {
   "version": 2,
   "packages": {
-    "QRgen": {
-      "version": "3.1.0",
-      "vcsRevision": "4445bb93a126ec33004901e9486963a40cbb97fc",
-      "url": "https://github.com/aruZeta/QRgen",
-      "downloadMethod": "git",
-      "dependencies": [],
-      "checksums": {
-        "sha1": "41a7a63b515a4cad66091a70509925e2dcc5a0e4"
-      }
-    },
     "vmath": {
       "version": "3.0.0",
       "vcsRevision": "7bd9f6e6b23ca3b751be42f20c8025d320881a00",

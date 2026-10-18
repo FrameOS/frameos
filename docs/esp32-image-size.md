@@ -387,3 +387,31 @@ inlines a little less once a helper is not file-local.
 The remaining same-named groups are genuinely different instances (a
 `rawGet` per table type, `parseObjectInner` per jsony type): see "The 52 hash
 tables".
+
+# QRgen out (2026-10-18)
+
+*`esp32-s3`, 8 MB layout, both images built in `frameos-esp32-ci-check`
+from the same tree, main at 49948ff vs the branch.*
+
+**3,102,656 → 3,081,712 bytes (−20,944).** The QR code app and the
+runtime's own screens (the control code, the link code, the hotspot, the
+index screen) drew with the QRgen package, which was 21,846 B and the only
+user of pixie's `Context` (2,986 B). `frameos/utils/qr.nim` replaces both
+with 6,073 B: level L only (no caller asked for another), two 40-entry
+tables where QRgen carried ten 160-entry ones, and one reserved-area test
+where QRgen's templates expanded one per mask.
+
+- **The codes follow the standard**: the smallest version that fits, the
+  mask with the lowest penalty. Each test vector decodes back to its text
+  with zxing-cpp. The layout and the styles (`alRad`, `moRad`, `moSep`) are
+  QRgen's. QRgen's numeric mode wrote a group with a leading zero in 7 or 4
+  bits, where the standard says 10. Digit-only text like `0123456789`
+  scanned as `0987173088`, and `007` did not scan at all.
+- **Unchecked on the ESP32: −3,289** of the module's 9,362. Every index is in
+  range by construction, and `qrImage` clamps the two numbers a scene can
+  pass. Hosts and the tests keep every check, so the tests run the same
+  code checked.
+- **Not ported to JavaScript.** The app's default code is the frame control
+  URL, which carries the access key, and JS apps (store scenes included)
+  must not be handed that key. The Linux runtime's screens need a Nim
+  encoder anyway, and every scene would have carried the encoder's source.

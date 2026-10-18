@@ -5,14 +5,13 @@ import std/times
 import std/uri
 import zippy
 from frameos/utils/system import systemHostname
-import QRgen
-import QRgen/renderer
 from frameos/cloud/device_flow import activeLinkCode
 
 import frameos/values
 import frameos/types
 import frameos/channels
 import frameos/cloud/link_state
+import frameos/utils/qr
 import frameos/utils/url
 import frameos/utils/time
 import frameos/utils/local_time
@@ -468,10 +467,10 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
       let key = payload & ":" & $target
       if self.linkQr == nil or self.linkQrKey != key:
         try:
-          let qr = newQR(payload)
-          let modules = qr.drawing.size.int + 4 # two modules of quiet zone each side
+          let qr = qrEncode(payload)
+          let modules = qr.size + 4 # two modules of quiet zone each side
           let pixels = max(2, target div modules) * modules
-          self.linkQr = qr.renderImg(light = "#ffffff", dark = "#000000", pixels = pixels.uint32, padding = 2'u8)
+          self.linkQr = qr.qrImage(pixels, padding = 2)
           self.linkQrKey = key
         except CatchableError:
           self.linkQr = nil
