@@ -5,6 +5,7 @@ import { RepositoryType, TemplateType } from '../../../../types'
 import { apiFetch } from '../../../../utils/apiFetch'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { cloudStoreRepository } from '../../../../utils/cloudStoreRepository'
+import type { CloudStoreTemplate } from '../../../../utils/cloudStoreRepository'
 import { getBasePath } from '../../../../utils/getBasePath'
 import { cloudLogic } from '../../../settings/cloudLogic'
 import type { CloudStatus } from '../../../../types'
@@ -21,6 +22,7 @@ export interface cloudDriveLogicValues {
   grantedScopes: string[] // cloudLogic
   cloudConnected: boolean
   cloudEnabled: boolean
+  deleteDriveSceneError: string | null
   driveLoadedAt: number | null
   driveRepository: RepositoryType
   driveTemplates: TemplateType[]
@@ -37,6 +39,21 @@ export interface cloudDriveLogicActions {
     cloudStatus: CloudStatus
     payload?: any
   } // cloudLogic
+  deleteDriveScene: (sceneId: string) => string
+  deleteDriveSceneFailure: (
+    error: string,
+    errorObject?: any
+  ) => {
+    error: string
+    errorObject?: any
+  }
+  deleteDriveSceneSuccess: (
+    driveTemplates: TemplateType[],
+    payload?: string
+  ) => {
+    driveTemplates: TemplateType[]
+    payload?: string
+  }
   loadDrive: () => any
   loadDriveFailure: (
     error: string,
@@ -95,7 +112,7 @@ export const cloudDriveLogic = kea<cloudDriveLogicType>([
       },
     ],
   }),
-  loaders(() => ({
+  loaders(({ values }) => ({
     driveTemplates: [
       [] as TemplateType[],
       {
@@ -121,9 +138,30 @@ export const cloudDriveLogic = kea<cloudDriveLogicType>([
                 : template.image,
           }))
         },
+        /** Delete one of the account's scenes, every version with it. The
+         * cloud's route takes the browser session only, so this is the cloud
+         * control plane's; a backend's link token cannot delete. */
+        deleteDriveScene: async (sceneId: string) => {
+          const response = await apiFetch(`/api/account/scenes/${encodeURIComponent(sceneId)}`, { method: 'DELETE' })
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}))
+            throw new Error(payload?.message || payload?.error || `Deleting failed (${response.status})`)
+          }
+          return values.driveTemplates.filter((template) => (template as CloudStoreTemplate).sceneId !== sceneId)
+        },
       },
     ],
   })),
+  reducers({
+    deleteDriveSceneError: [
+      null as string | null,
+      {
+        deleteDriveScene: () => null,
+        deleteDriveSceneFailure: (_, { error }) => error,
+        loadDrive: () => null,
+      },
+    ],
+  }),
   selectors({
     hasDriveScope: [
       (s) => [s.grantedScopes],

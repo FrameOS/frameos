@@ -22,8 +22,10 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_spiffs.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -1513,7 +1515,9 @@ static uint8_t *http_error_response_v(int *out_status, size_t *out_len,
         return NULL;
     }
     memcpy(buf, message, len + 1);
-    *out_status = 599;
+    /* Status 0: no response came back. The body is the reason, which the
+     * Nim side raises as the request's error. */
+    *out_status = 0;
     *out_len = len;
     return buf;
 }
@@ -1737,6 +1741,67 @@ static fos_nim_body_status_t http_spill_remaining(
     return FOS_NIM_BODY_OK;
 }
 
+/* A failed connect, in words a scene can show: esp_err_to_name() has no
+ * rows for the HTTP client's codes and printed "UNKNOWN ERROR". */
+static bool http_wifi_has_ip(void)
+{
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif == NULL) return true; /* no station interface: do not guess */
+    esp_netif_ip_info_t ip;
+    return esp_netif_is_netif_up(netif) && esp_netif_get_ip_info(netif, &ip) == ESP_OK &&
+           ip.ip.addr != 0;
+}
+
+static void http_url_host(const char *url, char *host, size_t host_len)
+{
+    int port = 0;
+    if (url == NULL || !fos_netguard_parse_url(url, host, host_len, &port)) {
+        strlcpy(host, "the server", host_len);
+    }
+}
+
+static void http_connect_reason(const char *url, esp_err_t err, char *buf, size_t len)
+{
+    char host[FOS_NETGUARD_HOST_LEN];
+    http_url_host(url, host, sizeof(host));
+    if (!http_wifi_has_ip()) {
+        snprintf(buf, len, "No Wi-Fi connection, could not reach %s", host);
+    } else if (err == ESP_ERR_HTTP_EAGAIN || err == ESP_ERR_TIMEOUT) {
+        snprintf(buf, len, "%s did not answer in time", host);
+    } else {
+        snprintf(buf, len, "Could not connect to %s", host);
+    }
+}
+
+/* The first connect after a deep-sleep wake is sometimes refused at once
+ * while the next one, a second later, goes through (fos_backend_http.c does
+ * the same for the firmware's own requests). Only an instant refusal is
+ * retried: a connect that timed out has already spent its time. */
+#define HTTP_FAST_CONNECT_FAIL_US (2 * 1000 * 1000)
+#define HTTP_CONNECT_RETRY_DELAY_MS 1000
+static uint32_t s_http_connect_retries = 0;
+
+uint32_t fos_nim_http_connect_retries(void)
+{
+    return s_http_connect_retries;
+}
+
+static esp_err_t http_open_with_retry(esp_http_client_handle_t client, size_t body_len,
+                                      const char *url)
+{
+    int64_t started_us = esp_timer_get_time();
+    esp_err_t err = esp_http_client_open(client, body_len);
+    if (err == ESP_ERR_HTTP_CONNECT &&
+        esp_timer_get_time() - started_us < HTTP_FAST_CONNECT_FAIL_US) {
+        s_http_connect_retries++;
+        ESP_LOGW(TAG, "%s: connect refused, retrying once", url ? url : "(null)");
+        esp_http_client_close(client);
+        vTaskDelay(pdMS_TO_TICKS(HTTP_CONNECT_RETRY_DELAY_MS));
+        err = esp_http_client_open(client, body_len);
+    }
+    return err;
+}
+
 /* Everything up to a readable response body, shared by the buffering fetch
  * (fos_nim_http_request_chunked_spill) and the streaming one
  * (fos_nim_http_stream_open): the private-network policy check, client
@@ -1826,13 +1891,15 @@ static esp_http_client_handle_t http_open_request(
         esp_http_client_cleanup(client);
         HTTP_OPEN_FAIL("too many requests in flight");
     }
-    esp_err_t err = esp_http_client_open(client, body_len);
+    /* A retry stays inside the pin: both attempts dial the checked address. */
+    esp_err_t err = http_open_with_retry(client, body_len, url);
     fos_netguard_unpin_for_task();
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "%s %s: connect failed: %s", method ? method : "GET", url,
-                 esp_err_to_name(err));
+        ESP_LOGW(TAG, "%s %s: connect failed: 0x%x", method ? method : "GET", url,
+                 (unsigned)err);
         esp_http_client_cleanup(client);
-        HTTP_OPEN_FAIL("connect failed: %s", esp_err_to_name(err));
+        if (err_buf != NULL && err_buf_len > 0) http_connect_reason(url, err, err_buf, err_buf_len);
+        return NULL;
     }
     if (body != NULL && body_len > 0) {
         if (esp_http_client_write(client, body, body_len) < 0) {
@@ -1905,14 +1972,16 @@ static esp_http_client_handle_t http_open_request(
             esp_http_client_cleanup(client);
             HTTP_OPEN_FAIL("too many requests in flight");
         }
-        err = esp_http_client_open(client, body_len);
+        err = http_open_with_retry(client, body_len, redirect_url_ok ? redirect_url : url);
         fos_netguard_unpin_for_task();
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "%s %s: redirect connect failed: %s", method ? method : "GET", url,
-                     esp_err_to_name(err));
+            ESP_LOGW(TAG, "%s %s: redirect connect failed: 0x%x", method ? method : "GET", url,
+                     (unsigned)err);
             esp_http_client_cleanup(client);
-            HTTP_OPEN_FAIL("redirect connect failed: %s",
-                                 esp_err_to_name(err));
+            if (err_buf != NULL && err_buf_len > 0) {
+                http_connect_reason(redirect_url_ok ? redirect_url : url, err, err_buf, err_buf_len);
+            }
+            return NULL;
         }
         if (body != NULL && body_len > 0) {
             if (esp_http_client_write(client, body, body_len) < 0) {
@@ -1924,6 +1993,19 @@ static esp_http_client_handle_t http_open_request(
         content_length = esp_http_client_fetch_headers(client);
         *out_status = esp_http_client_get_status_code(client);
         redirects++;
+    }
+    if (*out_status <= 0) {
+        /* Connected, but no status line came back before the timeout. */
+        ESP_LOGW(TAG, "%s %s: no response", method ? method : "GET", url);
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        *out_status = 0;
+        if (err_buf != NULL && err_buf_len > 0) {
+            char host[FOS_NETGUARD_HOST_LEN];
+            http_url_host(url, host, sizeof(host));
+            snprintf(err_buf, err_buf_len, "%s did not answer in time", host);
+        }
+        return NULL;
     }
     *out_content_length = content_length;
     return client;
@@ -2096,8 +2178,14 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
             ESP_LOGW(TAG, "%s: response exceeded %u bytes", url, (unsigned)limit);
             return chunked_error(out_status, out_count, "response exceeded %u bytes",
                                  (unsigned)limit);
-        case FOS_NIM_BODY_READ_FAILED:
-            return chunked_error(out_status, out_count, "response read failed");
+        case FOS_NIM_BODY_READ_FAILED: {
+            char host[FOS_NETGUARD_HOST_LEN];
+            http_url_host(url, host, sizeof(host));
+            return chunked_error(out_status, out_count,
+                                 http_wifi_has_ip() ? "The download from %s stopped partway"
+                                                    : "The download from %s stopped: Wi-Fi was lost",
+                                 host);
+        }
         case FOS_NIM_BODY_SPILL_FAILED:
             return chunked_error(out_status, out_count,
                                  "spilling HTTP response to storage failed after %u bytes",

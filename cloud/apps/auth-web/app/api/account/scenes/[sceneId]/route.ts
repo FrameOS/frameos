@@ -5,6 +5,7 @@ import {
   storeScenes,
   storeSceneVersions,
 } from "@frameos-cloud/db";
+import { notifyScenePublished } from "../../../../../src/lib/activity-notifications";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { getScenesBaseUrl } from "../../../../../src/lib/env";
@@ -316,6 +317,15 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       metadata: { name: scene.name, visibility },
       target: { sceneId: scene.id },
     });
+    if (visibility === "public") {
+      void notifyScenePublished({
+        accountId: updated.accountId,
+        name: updated.name,
+        sceneId: updated.id,
+        slug: updated.slug,
+        via: "visibility",
+      });
+    }
   }
 
   return NextResponse.json({ scene: sceneSummary(updated), status: "updated" });

@@ -5,6 +5,7 @@ import {
   storeScenes,
 } from "@frameos-cloud/db";
 import { NextResponse } from "next/server";
+import { notifyScenePublished } from "./activity-notifications";
 import { recordAuditEvent } from "./audit";
 import { jsonError } from "./device-flow";
 import { logWarn } from "./log";
@@ -413,6 +414,16 @@ export async function publishStoreScene(
     },
     target: { sceneId: updated.id },
   });
+  if (updated.visibility === "public" && existing?.visibility !== "public") {
+    void notifyScenePublished({
+      accountId,
+      name: updated.name,
+      sceneId: updated.id,
+      slug: updated.slug,
+      version: nextVersion,
+      via: "publish",
+    });
+  }
 
   return NextResponse.json({
     scene: {
