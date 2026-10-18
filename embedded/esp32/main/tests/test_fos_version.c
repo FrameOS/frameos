@@ -91,11 +91,31 @@ static void test_downgrade(void)
     CHECK(!fos_version_is_downgrade(NULL, "2026.9.9"));
 }
 
+/* The OTA path's identity check: the image's own app-descriptor version must
+ * name the release its signature was made for, or the board would install a
+ * release that reports another version and be offered it again every check. */
+static void test_same_release(void)
+{
+    CHECK(fos_version_same_release("2026.10.16", "2026.10.16"));
+    CHECK(fos_version_same_release("v2026.10.16", "2026.10.16"));
+    CHECK(fos_version_same_release("2026.10.16", "v2026.10.16"));
+    CHECK(!fos_version_same_release("2026.10.15", "2026.10.16"));
+    CHECK(!fos_version_same_release("2026.10.16-rc1", "2026.10.16"));
+    CHECK(!fos_version_same_release("2026.10.16+abc", "2026.10.16"));
+    CHECK(!fos_version_same_release("2026.10.1", "2026.10.16"));
+    CHECK(!fos_version_same_release("dev", "2026.10.16"));
+    CHECK(!fos_version_same_release("", ""));
+    CHECK(!fos_version_same_release("v", "v"));
+    CHECK(!fos_version_same_release(NULL, "2026.10.16"));
+    CHECK(!fos_version_same_release("2026.10.16", NULL));
+}
+
 int main(void)
 {
     test_parse();
     test_compare();
     test_downgrade();
+    test_same_release();
     printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;
 }
