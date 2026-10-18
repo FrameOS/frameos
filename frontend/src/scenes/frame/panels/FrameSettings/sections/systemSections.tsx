@@ -101,9 +101,10 @@ export function NetworkSection(): JSX.Element {
                           point that you can connect to. This is useful for setting up a frame in a new location.
                         </p>
                         <p>
-                          Just connect to &apos;FrameOS-Setup&apos; with the password &apos;frame1234&apos;, open
-                          http://10.42.0.1/ and enter your wifi credentials. The hotspot will only be active for 10
-                          minutes by default.
+                          Connect to the network and password shown on the frame&apos;s screen, open http://10.42.0.1/
+                          and enter your wifi credentials. Left at FrameOS-Setup and frame1234, a frame with a screen
+                          makes up its own network name and password. A frame without a screen uses FrameOS-Setup and
+                          frame1234. The hotspot is only active for 5 minutes by default.
                         </p>
                       </div>
                     }

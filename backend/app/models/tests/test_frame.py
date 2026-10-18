@@ -299,6 +299,24 @@ async def test_get_frame_json_input_settings_default_when_unset(_mock_publish, d
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_hotspot_credentials_default_when_blank(_mock_publish, db, redis):
+    # A blank hotspot name or password ships as the fixed default: the runtime
+    # reads both as "not set" (and makes up its own pair on a frame with a
+    # screen), and an older runtime still gets a hotspot it can bring up.
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    frame.network = {**(frame.network or {}), "wifiHotspotSsid": "", "wifiHotspotPassword": ""}
+    network = get_frame_json(db, frame)["network"]
+    assert network["wifiHotspotSsid"] == "FrameOS-Setup"
+    assert network["wifiHotspotPassword"] == "frame1234"
+
+    frame.network = {**frame.network, "wifiHotspotSsid": "Kitchen", "wifiHotspotPassword": "hunter2hunter2"}
+    network = get_frame_json(db, frame)["network"]
+    assert network["wifiHotspotSsid"] == "Kitchen"
+    assert network["wifiHotspotPassword"] == "hunter2hunter2"
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_gpio_buttons_carry_a_known_role_only(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
     frame.gpio_buttons = [

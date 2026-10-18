@@ -25,6 +25,7 @@
 import json, jsony, pixie, os, strutils, parseutils, locks
 import zippy
 import frameos/hal/files
+import frameos/hotspot_credentials
 import frameos/local_access
 import frameos/types
 import frameos/utils/font
@@ -411,6 +412,11 @@ proc readConfig*(configPath = ""): FrameConfig =
   # agrees with what the frame is actually enforcing.
   result.network.allowLocalNetworkAccess =
     resolveLocalNetworkAccess(result.network.allowLocalNetworkAccess)
+  # The hotspot's name and password as the frame really uses them: a frame
+  # with a screen makes up its own unless frame.json sets them (kept in
+  # state/ for the same reason; hotspot_credentials.nim).
+  (result.network.wifiHotspotSsid, result.network.wifiHotspotPassword) = resolveHotspotCredentials(
+    result.device, result.network.wifiHotspotSsid, result.network.wifiHotspotPassword)
 
 proc loadConfig*(configPath = ""): FrameConfig =
   ## readConfig for the runtime itself (boot, the runner's reload).
