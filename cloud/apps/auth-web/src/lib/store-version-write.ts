@@ -76,10 +76,13 @@ export type WriteVersionInput = {
   images: readonly StoreImage[];
   message?: string | null | undefined;
   publishedByLinkedClientId?: string | undefined;
-  /** Extra scene-row updates published alongside (name, visibility…). */
+  /** Extra scene-row updates published alongside (name, visibility…).
+   *  `shareToken: null` turns the sharing link off with the version that
+   *  needs it off (store-photo-links.ts). */
   rowChanges?: Partial<{
     linkedClientId: string | null;
     name: string;
+    shareToken: null;
     visibility: string;
   }>;
 };

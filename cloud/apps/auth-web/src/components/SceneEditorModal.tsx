@@ -1955,8 +1955,11 @@ export function SceneEditorModal({
         setError(
           // The name and the note show on the public page, so both are
           // moderated; the note is the usual suspect, and a Save is where
-          // the reader needs to know WHICH field to reword.
-          payload.error === "content_rejected"
+          // the reader needs to know WHICH field to reword. On a public
+          // scene the images newly in the set are checked too (`images`).
+          payload.error === "content_rejected" && payload.images
+            ? "An image was flagged by moderation. Remove it and save again."
+            : payload.error === "content_rejected"
             ? "The scene's name, description, tags or your note was flagged by moderation — please reword it."
             : // Everything else is the shared store wording: a name clash
               // names the other scene, the private-scene quota and a pulled

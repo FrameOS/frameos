@@ -15,6 +15,10 @@ import {
 import { rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { rebuildZipWithSceneOrigins } from "../../../../../../src/lib/scene-origin";
 import { storeRoute } from "../../../../../../src/lib/store-cache";
+import {
+  photoLinkRefusal,
+  zipHasPhotoShareLink,
+} from "../../../../../../src/lib/store-photo-links";
 
 export const runtime = "nodejs";
 
@@ -67,21 +71,26 @@ async function handleGet(request: NextRequest, context: RouteContext) {
   ) {
     return jsonError("scene_pulled", 410);
   }
-  if (scene.visibility !== "public") {
-    const shared = shareTokenGrantsAccess(
-      scene.shareToken,
-      request.nextUrl.searchParams.get("share"),
-    );
+  // Through the sharing link alone, a version holding a Photos share link is
+  // not served (store-photo-links.ts).
+  let sharedOnly = false;
+  if (
+    scene.visibility !== "public" &&
+    !(await canAccessPrivateScene(
+      db,
+      request.headers.get("authorization"),
+      scene.accountId,
+    ))
+  ) {
     if (
-      !shared &&
-      !(await canAccessPrivateScene(
-        db,
-        request.headers.get("authorization"),
-        scene.accountId,
-      ))
+      !shareTokenGrantsAccess(
+        scene.shareToken,
+        request.nextUrl.searchParams.get("share"),
+      )
     ) {
       return jsonError("scene_not_found", 404);
     }
+    sharedOnly = true;
   }
 
   const requestedVersion = versionParam(request);
@@ -122,6 +131,9 @@ async function handleGet(request: NextRequest, context: RouteContext) {
   const stored = await readBlob(version);
   if (!stored) {
     return jsonError("version_not_found", 404);
+  }
+  if (sharedOnly && zipHasPhotoShareLink(Buffer.from(stored))) {
+    return photoLinkRefusal(403);
   }
   // The stored zip is the publisher's bytes; what a frame installs from it
   // must say where it came from, so every scene in the served scenes.json

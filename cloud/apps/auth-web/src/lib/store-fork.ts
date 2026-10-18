@@ -248,7 +248,12 @@ async function forkStoreSceneLocked(db: Database, input: ForkInput) {
     content: aligned.content,
     images: sourceImages,
     listing,
-    rowChanges: { visibility: "private" },
+    rowChanges: {
+      // A copy holding a Photos share link is born without a sharing link
+      // (store-photo-links.ts).
+      ...(aligned.validated.photoShareLink ? { shareToken: null } : {}),
+      visibility: "private",
+    },
     sceneId: created.id,
     validated: aligned.validated,
     version: 1,

@@ -133,7 +133,8 @@ export function parseListingChanges(
 
 /** The moderation gate an edit that will show on a public page passes: a
  * changed description or tags, and — when the edit is what makes the scene
- * public — the whole listing, cover included. */
+ * public — the whole listing (with the cover when one is passed; the flip to
+ * public checks every image itself, store-image-moderation.ts). */
 export async function moderateListingChanges(options: {
   changes: ListingChanges;
   /** True when this edit is what flips the scene public. */
