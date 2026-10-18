@@ -43,6 +43,10 @@ int fos_display_height(void);
 fos_pixel_format_t fos_display_format(void);
 size_t fos_display_buffer_size(void);
 size_t fos_display_panel_count(void); /* all panels compiled into this firmware */
+/* True for "none" (headless) and for every panel compiled into this
+ * firmware: the check the console and the setup page apply before storing a
+ * panel key. */
+bool fos_display_panel_known(const char *name);
 const char *fos_display_panel_name(size_t index);
 int fos_display_panel_width(size_t index);
 int fos_display_panel_height(size_t index);

@@ -131,6 +131,16 @@ size_t fos_display_panel_count(void)
     return fos_panel_table_count;
 }
 
+bool fos_display_panel_known(const char *name)
+{
+    if (!name) return false;
+    if (strcmp(name, "none") == 0) return true;
+    for (size_t i = 0; i < fos_panel_table_count; i++) {
+        if (strcmp(fos_panel_table[i].name, name) == 0) return true;
+    }
+    return false;
+}
+
 const char *fos_display_panel_name(size_t index)
 {
     return index < fos_panel_table_count ? fos_panel_table[index].name : "";

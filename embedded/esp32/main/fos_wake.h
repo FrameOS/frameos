@@ -1,8 +1,9 @@
 /*
- * Deep-sleep wake sources: the pure decisions behind "a press on any
- * registered GPIO button wakes the frame". No IDF here — fos_buttons.c wraps
- * these with the chip's RTC-IO facts and the esp_sleep calls, and
- * main/tests/test_fos_wake.c argues with them on a laptop.
+ * Deep-sleep wakes: the pure decisions behind "a press on any registered
+ * GPIO button wakes the frame" and "a wake_schedule frame wakes on the local
+ * clock's interval boundary". No IDF here — fos_buttons.c and fos_client.c
+ * wrap these with the chip's RTC-IO facts, the clock and the esp_sleep
+ * calls, and main/tests/test_fos_wake.c argues with them on a laptop.
  *
  * Both routines speak in GPIO bit masks (bit N = GPIO N), the shape
  * esp_sleep_enable_ext1_wakeup / esp_deep_sleep_enable_gpio_wakeup and their
@@ -38,3 +39,15 @@ int fos_wake_button_index(const int *pins, size_t count, uint64_t status_mask);
  * A stamp that reads later than `now_ms` (the clocks are one; it cannot) is
  * treated as 2^32 ms old, which is what the arithmetic says. */
 int64_t fos_wake_edge_at_ms(uint32_t at_ms_low, int64_t now_ms);
+
+/* `wake_schedule`: seconds from `utc_now` to the next multiple of
+ * `interval_sec` on the frame's LOCAL clock — a daily frame wakes at local
+ * midnight, an hourly one on the local hour (which differs from UTC's in a
+ * :30 zone). `offset_minutes_at(t)` is local minus UTC at UTC second `t`
+ * (DST-aware, NULL = UTC). A sleep across a DST change still ends on a local
+ * boundary: the daily one an hour longer or shorter than a day, the hourly
+ * one on the first top of the hour the shifted clock shows. Never 0: on a
+ * boundary the answer is a whole interval. interval_sec 0 counts as 1. */
+typedef int (*fos_wake_offset_fn)(int64_t utc_seconds);
+uint32_t fos_wake_aligned_sleep_seconds(int64_t utc_now, uint32_t interval_sec,
+                                        fos_wake_offset_fn offset_minutes_at);

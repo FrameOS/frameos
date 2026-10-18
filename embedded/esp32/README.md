@@ -84,7 +84,7 @@ main/tests/               host tests for the IDF-free modules (plain `cc`, no ID
                           twin: the C3 thin client links the stub, and only a release builds
                           it); the contract
                           walker, JSON guard, upload limits, assets-path, URL guard, minisig,
-                          config-parse and schedule catch-up tests run in the ESP32 job of
+                          config-parse, schedule catch-up and console-line tests run in the ESP32 job of
                           .github/workflows/e2e-docker.yml. Nothing else runs them, so a new
                           host test is not a test until it is wired into one of the two.
 ```
@@ -442,7 +442,7 @@ and the deep sleep holds while the stream goes out), and the full asset verb
 set — `assets_list`,
 `asset_get`, `asset_put`, `asset_mkdir`, `asset_delete`, `asset_rename` —
 against the mounted SD card (shared implementation in `main/fos_assets.c`,
-also behind the local HTTP asset API and the `usb_api` asset commands).
+also behind the local HTTP asset API and `usb_api list-assets`).
 Write-verb acks are sent after the SD write finishes. Log shipping is
 implemented behind the `telemetry:logs` scope, with `get_logs` replaying the
 on-device ring (last 128 lines); `get_metrics` returns the newest metrics
@@ -539,9 +539,11 @@ token), `lan_access:on` and `lan_access:off`.
 render task calls `esp_deep_sleep` and the device cold-boots for the next pass.
 
 `wake_schedule` changes how the sleep duration is computed: with a synced clock
-it aligns the wake to wall-clock interval boundaries (a 1h frame wakes at the
-top of the hour, a 5-minute frame on :00/:05/...), so clock faces update on
-time. Without it (or before SNTP syncs) the time already spent awake this cycle
+it aligns the wake to the local clock's interval boundaries (a 1h frame wakes at
+the top of the hour, a 5-minute frame on :00/:05/..., a daily frame at local
+midnight — in the frame's `time_zone`, else the provider's flat UTC offset, the
+same clock the schedule reads; DST included, `fos_wake.c`), so clock faces
+update on time. Without it (or before SNTP syncs) the time already spent awake this cycle
 — boot, Wi-Fi, render — is subtracted from the interval so the cadence doesn't
 drift by however long a render took.
 

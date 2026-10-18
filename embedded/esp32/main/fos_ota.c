@@ -931,12 +931,34 @@ static esp_err_t cloud_ota_run(void)
     return ota_run_signed(&src);
 }
 
+/* The backend check (fos_ota_check_and_apply) and this task write the same
+ * inactive slot, so they share ota_lock. The backend side refuses when the
+ * lock is taken (its periodic/manual check comes round again); the cloud
+ * request was a verb the owner just sent, so it waits for the other run —
+ * which restarts the chip if it installs anything — and only gives up past
+ * a download's worth of time. */
+#define FOS_OTA_CLOUD_LOCK_WAIT_MS (15 * 60 * 1000)
+
 static void cloud_ota_task(void *arg)
 {
     (void)arg;
+    SemaphoreHandle_t lock = ota_lock();
+    if (lock == NULL || xSemaphoreTake(lock, 0) != pdTRUE) {
+        if (lock != NULL) {
+            ESP_LOGW(TAG, "cloud ota: another OTA is running; waiting for it");
+        }
+        if (lock == NULL || xSemaphoreTake(lock, pdMS_TO_TICKS(FOS_OTA_CLOUD_LOCK_WAIT_MS)) != pdTRUE) {
+            ota_source_t src = {.plane = "cloud"};
+            ota_log(&src, "skipped", "another-ota-running");
+            s_cloud_ota_running = false;
+            vTaskDelete(NULL);
+            return;
+        }
+    }
     s_ota_busy = true;
     esp_err_t err = cloud_ota_run();
     s_ota_busy = false;
+    xSemaphoreGive(lock);
     s_cloud_ota_running = false;
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "cloud ota: finished with %s", esp_err_to_name(err));
@@ -946,11 +968,14 @@ static void cloud_ota_task(void *arg)
 
 void fos_ota_request_cloud_update(void)
 {
-    if (s_cloud_ota_running) {
+    taskENTER_CRITICAL(&s_ota_request_mux);
+    bool already_running = s_cloud_ota_running;
+    s_cloud_ota_running = true;
+    taskEXIT_CRITICAL(&s_ota_request_mux);
+    if (already_running) {
         ESP_LOGW(TAG, "cloud ota: already running");
         return;
     }
-    s_cloud_ota_running = true;
     if (xTaskCreate(cloud_ota_task, "fos_cloud_ota", 8192, NULL, 5, NULL) != pdPASS) {
         s_cloud_ota_running = false;
         ESP_LOGW(TAG, "cloud ota: task create failed");

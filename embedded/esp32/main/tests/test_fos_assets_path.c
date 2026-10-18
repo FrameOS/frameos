@@ -1,7 +1,7 @@
 /*
  * Host tests for the assets-path rule (fos_assets_path.c) — the traversal
- * boundary behind every asset verb: cloud `asset_*`, the local HTTP asset
- * API and the USB console. No IDF, no mocks.
+ * boundary behind every asset verb: cloud `asset_*` and the local HTTP
+ * asset API. No IDF, no mocks.
  *
  * Build and run (from embedded/esp32/):
  *
@@ -214,6 +214,40 @@ static void test_read_rule_lets_dotfiles_be_named_directly(void)
     expect_read("photos/.cache/thumb.png", "photos/.cache/thumb.png");
 }
 
+static void test_mount_point_rule(void)
+{
+    /* The default, and the shapes people pick for a card. */
+    CHECK(fos_assets_mount_point_valid("/srv/assets"), "default refused");
+    CHECK(fos_assets_mount_point_valid("/sd"), "/sd refused");
+    CHECK(fos_assets_mount_point_valid("/sdcard"), "/sdcard refused");
+    CHECK(fos_assets_mount_point_valid("/media/card_1"), "/media/card_1 refused");
+    CHECK(fos_assets_mount_point_valid("/a"), "two bytes refused");
+    CHECK(fos_assets_mount_point_valid("/srv/assets-012"), "15 bytes refused");
+    CHECK(fos_assets_mount_point_valid("/statement"), "a name that only starts like /state refused");
+
+    /* What esp_vfs_register refuses. */
+    CHECK(!fos_assets_mount_point_valid(NULL), "NULL accepted");
+    CHECK(!fos_assets_mount_point_valid(""), "empty accepted");
+    CHECK(!fos_assets_mount_point_valid("/"), "/ accepted");
+    CHECK(!fos_assets_mount_point_valid("srv/assets"), "relative accepted");
+    CHECK(!fos_assets_mount_point_valid("/srv/assets/"), "trailing slash accepted");
+    CHECK(!fos_assets_mount_point_valid("/srv/assets-0123"), "16 bytes accepted");
+
+    /* Mounts the firmware owns. */
+    CHECK(!fos_assets_mount_point_valid("/state"), "/state accepted");
+    CHECK(!fos_assets_mount_point_valid("/state/sd"), "/state/sd accepted");
+    CHECK(!fos_assets_mount_point_valid("/dev"), "/dev accepted");
+    CHECK(!fos_assets_mount_point_valid("/dev/sd"), "/dev/sd accepted");
+
+    /* Shapes that are not a plain path. */
+    CHECK(!fos_assets_mount_point_valid("/srv//assets"), "empty segment accepted");
+    CHECK(!fos_assets_mount_point_valid("/srv/../dev"), "dot-dot accepted");
+    CHECK(!fos_assets_mount_point_valid("/./srv"), "dot accepted");
+    CHECK(!fos_assets_mount_point_valid("/my assets"), "space accepted");
+    CHECK(!fos_assets_mount_point_valid("/a\"b"), "quote accepted");
+    CHECK(!fos_assets_mount_point_valid("/a\\b"), "backslash accepted");
+}
+
 int main(void)
 {
     test_plain_relative_paths();
@@ -226,6 +260,7 @@ int main(void)
     test_write_rule_refuses_dot_components();
     test_write_rule_refuses_any_leading_dot();
     test_read_rule_lets_dotfiles_be_named_directly();
+    test_mount_point_rule();
 
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

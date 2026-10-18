@@ -141,6 +141,71 @@ static void test_an_edge_stamp_widens_against_the_render_tasks_clock(void)
           "a 2 s old edge after three wraps");
 }
 
+/* 2026, Europe/Brussels: CET (+60) until 29 March 01:00 UTC, CEST (+120)
+ * until 25 October 01:00 UTC, CET after. */
+#define EU_SPRING_2026 1774746000LL
+#define EU_AUTUMN_2026 1792890000LL
+static int offset_utc(int64_t t) { (void)t; return 0; }
+static int offset_india(int64_t t) { (void)t; return 330; }
+static int offset_brussels(int64_t t)
+{
+    return (t >= EU_SPRING_2026 && t < EU_AUTUMN_2026) ? 120 : 60;
+}
+
+static void test_wake_schedule_aligns_to_the_local_clock(void)
+{
+    const int64_t at_1015_utc = 1792318500LL; /* 2026-10-18 10:15:00 UTC */
+    /* UTC: the boundaries the firmware always used. */
+    CHECK(fos_wake_aligned_sleep_seconds(at_1015_utc, 3600, offset_utc) == 2700, "UTC hourly");
+    CHECK(fos_wake_aligned_sleep_seconds(at_1015_utc, 300, offset_utc) == 300,
+          "on a 5 min boundary the wake is a whole interval away, never 0");
+    CHECK(fos_wake_aligned_sleep_seconds(at_1015_utc, 86400, offset_utc) == 49500, "UTC daily");
+    CHECK(fos_wake_aligned_sleep_seconds(at_1015_utc, 3600, NULL) == 2700, "NULL offset = UTC");
+    CHECK(fos_wake_aligned_sleep_seconds(at_1015_utc, 0, offset_utc) == 1, "interval 0 counts as 1");
+
+    /* 15:45 in India (+5:30): the local hour is 15 min away, UTC's 45. */
+    CHECK(fos_wake_aligned_sleep_seconds(at_1015_utc, 3600, offset_india) == 900,
+          "IST hourly: got %u", fos_wake_aligned_sleep_seconds(at_1015_utc, 3600, offset_india));
+    CHECK(fos_wake_aligned_sleep_seconds(at_1015_utc, 86400, offset_india) == 29700,
+          "IST daily wakes at local midnight");
+
+    /* 12:15 CEST: a daily frame wakes at local midnight, not 02:00. */
+    CHECK(fos_wake_aligned_sleep_seconds(at_1015_utc, 86400, offset_brussels) == 42300,
+          "Brussels daily: got %u", fos_wake_aligned_sleep_seconds(at_1015_utc, 86400, offset_brussels));
+}
+
+static void test_wake_schedule_across_a_dst_change(void)
+{
+    /* 00:30 CEST on 25 October; the clocks fall back at 03:00 CEST. The next
+     * local midnight is 26 October 00:00 CET = 25 October 23:00 UTC. */
+    int64_t now = 1792881000LL; /* 2026-10-24 22:30 UTC */
+    uint32_t got = fos_wake_aligned_sleep_seconds(now, 86400, offset_brussels);
+    CHECK(got == 88200, "daily across fall-back sleeps 24.5 h: got %u", got);
+
+    /* 02:30 CEST, half an hour before the fall-back: the clock shows 02:00
+     * CET at 01:00 UTC, which is the next top of the hour. */
+    now = EU_AUTUMN_2026 - 1800;
+    got = fos_wake_aligned_sleep_seconds(now, 3600, offset_brussels);
+    CHECK(got == 1800, "hourly onto the repeated 02:00: got %u", got);
+
+    /* 00:30 CET on 29 March; the clocks spring forward at 02:00 CET. The
+     * next local midnight is 30 March 00:00 CEST = 29 March 22:00 UTC. */
+    now = 1774740600LL; /* 2026-03-28 23:30 UTC */
+    got = fos_wake_aligned_sleep_seconds(now, 86400, offset_brussels);
+    CHECK(got == 81000, "daily across spring-forward sleeps 22.5 h: got %u", got);
+
+    /* 01:30 CET: 02:00 never shows; 03:00 CEST does, at 01:00 UTC. */
+    now = EU_SPRING_2026 - 1800;
+    got = fos_wake_aligned_sleep_seconds(now, 3600, offset_brussels);
+    CHECK(got == 1800, "hourly over the skipped hour: got %u", got);
+
+    /* Short intervals right at the change stay short. */
+    got = fos_wake_aligned_sleep_seconds(EU_AUTUMN_2026 - 60, 300, offset_brussels);
+    CHECK(got == 60, "5 min interval at fall-back: got %u", got);
+    got = fos_wake_aligned_sleep_seconds(EU_SPRING_2026 - 60, 300, offset_brussels);
+    CHECK(got == 60, "5 min interval at spring-forward: got %u", got);
+}
+
 int main(void)
 {
     test_arms_every_rtc_capable_button();
@@ -148,6 +213,8 @@ int main(void)
     test_held_button_sits_the_sleep_out();
     test_wake_status_maps_back_to_a_button();
     test_an_edge_stamp_widens_against_the_render_tasks_clock();
+    test_wake_schedule_aligns_to_the_local_clock();
+    test_wake_schedule_across_a_dst_change();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok",
            g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
