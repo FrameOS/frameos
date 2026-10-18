@@ -54,5 +54,12 @@
     }
   ],
   "output": [{ "name": "image", "type": "image" }],
-  "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "900" }
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "900",
+    "staleEnabled": true,
+    "staleDuration": "86400"
+  }
 }

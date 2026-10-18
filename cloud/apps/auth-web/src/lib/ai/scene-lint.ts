@@ -914,7 +914,7 @@ export function lintScene(
       const cache = obj(data.cache);
       if (cache) {
         for (const key of Object.keys(cache)) {
-          if (!["enabled", "inputEnabled", "durationEnabled", "duration", "expression", "expressionType", "expressionEnabled", "expressionJS"].includes(key)) {
+          if (!["enabled", "inputEnabled", "durationEnabled", "duration", "expression", "expressionType", "expressionEnabled", "expressionJS", "staleEnabled", "staleDuration"].includes(key)) {
             push("warning", `Unknown cache option "${key}" on app ${keyword}.`, id);
           }
         }

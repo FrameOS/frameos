@@ -1,8 +1,8 @@
 ## The OpenAI Text code app (repo/apps/text/openaiText) run for real through
 ## the JS app runtime, its chat completion answered at `jsHttpRequestHook`:
 ## the request, the reply, the size-only request log, and the error behavior
-## (most errors log and return "", a failed request or a reply that is not JSON
-## also returns "OpenAI API error: <message>").
+## (a missing prompt or key logs and returns "", a failed request or a reply
+## that is not JSON fails the node, so a cache never keeps it).
 ##
 ## Each render gets the config a scene node arrives with: config.json's typed
 ## defaults under the node's own values, built by initDynamicJsApp as the
@@ -75,6 +75,14 @@ proc render(h: Harness, config: JsonNode): Value =
   let context = ExecutionContext(scene: h.scene, event: "render", payload: %*{}, hasImage: false,
     loopIndex: 0, loopKey: ".", nextSleep: -1)
   h.runtime.get(h.owner, configJson, context)
+
+proc failure(h: Harness, config: JsonNode): string =
+  ## The message the node fails with, "" when it did not.
+  try:
+    discard h.render(config)
+    ""
+  except JsAppError as e:
+    e.msg
 
 proc errors(h: Harness): seq[string] =
   for entry in h.logs[]:
@@ -175,7 +183,7 @@ suite "openaiText code app":
       check h.messages()[^1] == """{"replyChars":0}"""
       check h.errors().len == 0
 
-  test "API errors log the message from the error JSON and return an empty string":
+  test "API errors fail the node with the message from the error JSON":
     for (code, body, expected) in [
         (401, """{"error": {"message": "Incorrect API key provided", "type": "invalid_request_error"}}""",
           "Error making request 401: Incorrect API key provided"),
@@ -185,26 +193,18 @@ suite "openaiText code app":
       let h = newHarness()
       replyCode = code
       replyBody = body
-      let output = h.render(%*{"user": "hi"})
-      check output.kind == fkString
-      check output.asString() == ""
-      check h.errors() == @[expected]
+      check h.failure(%*{"user": "hi"}) == expected
       check h.scene.state.len == 0
 
-  test "a failed request or a reply that is not JSON also becomes the output":
+  test "a failed request or a reply that is not JSON fails the node":
     let transport = newHarness()
     transportError = "Connection refused"
-    let output = transport.render(%*{"user": "hi"})
-    check output.asString() == "OpenAI API error: Connection refused"
+    check transport.failure(%*{"user": "hi"}) == "OpenAI API error: Connection refused"
     check "JS app httpRequest failed: Connection refused" in transport.errors()
-    check "OpenAI API error: Connection refused" in transport.errors()
     check transport.scene.state.len == 0
 
     let notJson = newHarness()
     replyBody = "<html>oops</html>"
-    let reply = notJson.render(%*{"user": "hi"}).asString()
+    let reply = notJson.failure(%*{"user": "hi"})
     check reply.startsWith("OpenAI API error: ")
     check reply.len > "OpenAI API error: ".len
-    check notJson.errors() == @[reply]
-    for message in transport.errors() & notJson.errors():
-      check "JS app get failed" notin message
