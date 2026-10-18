@@ -403,9 +403,10 @@ Otherwise:
 ### `GET /api/photos/shared/{token}/file?path=<path>`
 
 The bytes of one playable file below the shared folder (`path` relative to
-it). The backend streams them. The cloud answers 302 to the file's address on
-the public CDN when one is configured, else streams them. Frame runtimes
-follow up to 5 redirects.
+it). The backend streams them. The cloud answers 302 to a presigned address
+on the bucket's own endpoint that expires after ten minutes (only the start
+of the download is checked), or streams them when it has no bucket; never
+to the public CDN alias. Frame runtimes follow up to 5 redirects.
 
 A `url` that starts with `/` is relative to the share link's origin
 (`scheme://host[:port]`).
@@ -461,8 +462,10 @@ uploaded twice with different metadata is still one object.
 
 Metadata is in Postgres (`photo_entries`, `photo_shares`), bytes in R2 under
 `photos/<account id>/<random id>`. The keys are random rather than content
-addressed: the CDN alias serves any key without authentication, and a content
-hash is a key anyone who has the same photo could compute. Moving or renaming
+addressed (a content hash is a key anyone who has the same photo could
+compute), and the bucket's public CDN alias refuses `photos/` (a Cloudflare
+rule, `cloud/docs/deployment.md`; the `/admin` check "Photos off the public
+CDN" proves it). Moving or renaming
 only rewrites rows. A photo's color profile is the `colors` column (jsonb) of
 its row.
 
@@ -478,8 +481,8 @@ written without its location and camera metadata to a second file beside it
 file, never held whole in memory. The row's `sha256` is of the bytes stored;
 the hash list and a `photo_scan_hits` row use the upload's own.
 
-Revoking a link stops new listings and redirects at once. A frame that already
-holds a CDN address keeps it working until the photo is deleted.
+Revoking a link stops new listings and redirects at once, and an address
+already handed out stops working within ten minutes.
 
 ## Colors
 
@@ -521,9 +524,9 @@ account's photos (`accounts.photos_suspended_at`: uploads refused, every share
 link 404) and notifies the admins. Reporting to NCMEC is a manual step from
 the admin page.
 
-Cloudflare's CSAM Scanning Tool can additionally be turned on for the CDN zone
-that serves the bucket. It scans what the CDN serves, which includes every
-photo a frame plays.
+Cloudflare's CSAM Scanning Tool, turned on for the CDN zone, scans only what
+the CDN serves: store images, not photos (frames get them from the bucket's
+own endpoint).
 
 ## Installing photo scenes
 

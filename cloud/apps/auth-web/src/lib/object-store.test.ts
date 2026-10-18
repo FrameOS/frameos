@@ -107,6 +107,10 @@ describe("filesystem driver", () => {
     expect(objectStore().publicUrl("store/scene-images/abc")).toBeUndefined();
   });
 
+  it("has no presigned URL either: private bytes are streamed", async () => {
+    expect(await objectStore().signedUrl("photos/a/b", 600)).toBeUndefined();
+  });
+
   it("leaves no temp files behind", async () => {
     await objectStore().put(
       "store/scene-images/tmp-check",
@@ -116,6 +120,40 @@ describe("filesystem driver", () => {
     const { readdir } = await import("node:fs/promises");
     const entries = await readdir(join(root, "store/scene-images"));
     expect(entries).toEqual(["tmp-check"]);
+  });
+});
+
+describe("s3 driver addresses", () => {
+  beforeEach(() => {
+    process.env.R2_CLOUD_ENDPOINT = "https://account.r2.cloudflarestorage.com";
+    process.env.R2_CLOUD_ACCESS_KEY_ID = "test-key-id";
+    process.env.R2_CLOUD_SECRET_ACCESS_KEY = "test-secret";
+    process.env.R2_CLOUD_PUBLIC_BASE_URL = "https://cdn.example";
+    resetObjectStoreForTests();
+  });
+
+  it("gives public objects an alias address and photos none", () => {
+    const store = objectStore();
+    expect(store.driver).toBe("s3");
+    expect(store.publicUrl("store/scene-images/abc")).toBe(
+      "https://cdn.example/store/scene-images/abc",
+    );
+    // A photo is one person's: the alias must never be handed out for one.
+    expect(store.publicUrl("photos/acct/0123abcd")).toBeUndefined();
+    expect(store.publicUrl("photos/acct/thumbs/0123abcd")).toBeUndefined();
+  });
+
+  it("presigns a GET on the bucket endpoint that expires", async () => {
+    const url = new URL((await objectStore().signedUrl("photos/acct/0123abcd", 600))!);
+    expect(`${url.origin}${url.pathname}`).toBe(
+      "https://account.r2.cloudflarestorage.com/frameos-cloud/photos/acct/0123abcd",
+    );
+    expect(url.searchParams.get("X-Amz-Expires")).toBe("600");
+    expect(url.searchParams.get("X-Amz-Algorithm")).toBe("AWS4-HMAC-SHA256");
+    expect(url.searchParams.get("X-Amz-Credential")).toMatch(/^test-key-id\//);
+    expect(url.searchParams.get("X-Amz-Signature")).toMatch(/^[0-9a-f]{64}$/);
+    // The secret never travels.
+    expect(url.toString()).not.toContain("test-secret");
   });
 });
 
@@ -334,6 +372,56 @@ describe("the /admin live check", () => {
     expect(objects!.detail).toContain("Filesystem driver");
     // And it leaves nothing behind.
     expect(await objectStore().head("health/object-store-probe")).toBeUndefined();
+  });
+
+  it("checks that the public alias refuses photos", async () => {
+    process.env.R2_CLOUD_ENDPOINT = "https://accountid.r2.cloudflarestorage.com";
+    process.env.R2_CLOUD_ACCESS_KEY_ID = "key";
+    process.env.R2_CLOUD_SECRET_ACCESS_KEY = "secret";
+    process.env.R2_CLOUD_PUBLIC_BASE_URL = "https://cdn.example";
+    resetObjectStoreForTests();
+
+    // A tiny bucket: PUT stores, a presigned GET reads, DELETE forgets; the
+    // alias answers with whatever `aliasStatus` says.
+    const objects = new Map<string, Buffer>();
+    let aliasStatus = 200;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      if (url.origin === "https://cdn.example") {
+        const bytes = objects.get(url.pathname.slice(1));
+        return aliasStatus === 200 && bytes
+          ? new Response(new Uint8Array(bytes))
+          : new Response("blocked", { status: aliasStatus });
+      }
+      const key = url.pathname.replace(/^\/frameos-cloud\//, "");
+      if (request.method === "PUT") {
+        objects.set(key, Buffer.from(await request.arrayBuffer()));
+        return new Response(null, { status: 200 });
+      }
+      if (request.method === "DELETE") {
+        objects.delete(key);
+        return new Response(null, { status: 204 });
+      }
+      const bytes = objects.get(key);
+      return bytes ? new Response(new Uint8Array(bytes)) : new Response("", { status: 404 });
+    }) as typeof fetch;
+    try {
+      const { runLiveChecks } = await import("./system-checks");
+      const open = (await runLiveChecks()).find((check) => check.name === "Photos off the public CDN");
+      expect(open!.state).toBe("failing");
+      expect(open!.detail).toContain("Cloudflare rule");
+
+      aliasStatus = 403;
+      const closed = (await runLiveChecks()).find((check) => check.name === "Photos off the public CDN");
+      expect(closed!.state).toBe("ok");
+      expect(closed!.detail).toContain("403");
+      // The probes are gone either way.
+      expect([...objects.keys()].filter((key) => key.startsWith("photos/"))).toEqual([]);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   it("fails loudly when the store cannot answer", async () => {

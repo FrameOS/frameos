@@ -11,6 +11,7 @@
 // have — a dead database and silently undelivered mail — both look perfectly
 // healthy to a presence check.
 
+import { randomBytes } from "node:crypto";
 import { and, gt, isNotNull, sql } from "drizzle-orm";
 import { createDb, frameAssetFiles } from "@frameos-cloud/db";
 import { checkEmailDelivery } from "./email";
@@ -312,6 +313,70 @@ async function checkObjectStoreLive(): Promise<LiveCheck> {
   }
 }
 
+// Photos are one person's (docs/photos.md "Storage"): frames get a presigned
+// address that expires, and the public alias serves any key it is asked for
+// unless a Cloudflare rule refuses `photos/` on it (cloud/docs/deployment.md
+// "Object storage"). Nothing in the app can see whether that rule exists, so
+// put a probe under `photos/`, ask the alias for it without credentials, and
+// fetch it through a presigned address as a frame would.
+async function checkPhotosOffPublicAlias(): Promise<LiveCheck> {
+  const name = "Photos off the public CDN";
+  const store = objectStore();
+  if (store.driver !== "s3") {
+    return { detail: "No bucket: photo bytes are streamed by this host.", name, state: "ok" };
+  }
+  const key = `photos/health/probe-${randomBytes(8).toString("hex")}`;
+  const payload = Buffer.from(`frameos-cloud photo probe ${Date.now()}`);
+  try {
+    await store.put(key, payload, "text/plain");
+    const signed = await store.signedUrl(key, 60);
+    const viaSigned = signed
+      ? await fetch(signed, { signal: AbortSignal.timeout(10_000) })
+      : undefined;
+    const signedBytes = viaSigned?.ok ? Buffer.from(await viaSigned.arrayBuffer()) : undefined;
+    if (!signedBytes?.equals(payload)) {
+      return {
+        detail: `A presigned address for a probe photo answered ${viaSigned?.status ?? "nothing"}: frames cannot download shared photos.`,
+        name,
+        state: "failing",
+      };
+    }
+    const base = process.env.R2_CLOUD_PUBLIC_BASE_URL?.trim().replace(/\/+$/, "");
+    if (!base) {
+      return {
+        detail: "No public alias is configured; frames get presigned addresses.",
+        name,
+        state: "ok",
+      };
+    }
+    const viaAlias = await fetch(`${base}/${key}`, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(10_000),
+    });
+    await viaAlias.body?.cancel();
+    if (viaAlias.ok) {
+      return {
+        detail: `${base} served a probe photo to anyone who asked. Add the Cloudflare rule that blocks /photos/ on that host (cloud/docs/deployment.md, "Object storage").`,
+        name,
+        state: "failing",
+      };
+    }
+    return {
+      detail: `${base} refuses photos (${viaAlias.status}); presigned addresses work.`,
+      name,
+      state: "ok",
+    };
+  } catch (error) {
+    return {
+      detail: error instanceof Error ? error.message : "unknown error",
+      name,
+      state: "failing",
+    };
+  } finally {
+    await store.delete(key).catch(() => undefined);
+  }
+}
+
 // The frame hub writes device snapshots through the same code auth-web reads
 // them with, from its OWN environment file — so it is entirely possible for
 // auth-web to be reading R2 while the hub keeps writing bytes into Postgres.
@@ -381,16 +446,18 @@ export function checkPhotoScanning(
 // Every remote probe in parallel; each already resolves to a result rather
 // than throwing, so one failing service cannot blank the whole panel.
 export async function runLiveChecks(): Promise<LiveCheck[]> {
-  const [database, email, objects, hubObjects] = await Promise.all([
+  const [database, email, objects, photoObjects, hubObjects] = await Promise.all([
     checkDatabaseLive(),
     checkEmailDelivery(),
     checkObjectStoreLive(),
+    checkPhotosOffPublicAlias(),
     checkHubObjectStoreLive(),
   ]);
   return [
     database,
     { ...email, name: "Postmark (email delivery)" },
     objects,
+    photoObjects,
     hubObjects,
     checkTurnstileLive(),
     checkPhotoScanning(),

@@ -57,10 +57,22 @@ export type ObjectStore = {
    * A URL a browser can fetch directly, for objects that are public by
    * construction. undefined when the deployment has no public alias — the
    * caller then proxies the bytes itself, which is also what every private
-   * object gets regardless.
+   * object gets regardless. Never for a photo (`photos/...`): those are
+   * private, and the alias must refuse them (cloud/docs/deployment.md).
    */
   publicUrl(key: string): string | undefined;
+  /**
+   * A presigned GET for one private object, good for `expiresInSeconds`, on
+   * the bucket's own S3 endpoint (not the public alias). undefined for the
+   * fs driver: the caller streams the bytes itself.
+   */
+  signedUrl(key: string, expiresInSeconds: number): Promise<string | undefined>;
 };
+
+/** Keys the public alias must never serve: one person's photos. */
+export function isPrivateObjectKey(key: string) {
+  return key.startsWith("photos/");
+}
 
 // Anchored, no dots, no leading slash: the fs driver joins these onto a root
 // directory, and a key is never derived from user input without passing
@@ -167,6 +179,9 @@ function createFsStore(root: string): ObjectStore {
       // production.
       return undefined;
     },
+    async signedUrl() {
+      return undefined;
+    },
   };
 }
 
@@ -252,7 +267,7 @@ function createS3Store(config: {
       }
     },
     publicUrl(key) {
-      if (!config.publicBaseUrl) {
+      if (!config.publicBaseUrl || isPrivateObjectKey(key)) {
         return undefined;
       }
       assertValidKey(key);
@@ -260,6 +275,15 @@ function createS3Store(config: {
         .split("/")
         .map(encodeURIComponent)
         .join("/")}`;
+    },
+    async signedUrl(key, expiresInSeconds) {
+      const url = new URL(urlFor(key));
+      url.searchParams.set("X-Amz-Expires", String(Math.max(1, Math.floor(expiresInSeconds))));
+      const signed = await client.sign(url.toString(), {
+        aws: { signQuery: true },
+        method: "GET",
+      });
+      return signed.url;
     },
   };
 }

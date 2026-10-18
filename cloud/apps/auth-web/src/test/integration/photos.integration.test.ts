@@ -67,8 +67,9 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers(),
 }));
 
-// The filesystem store has no public alias; this switch gives it one, so the
-// share file route's redirect can be exercised too.
+// The filesystem store has no bucket endpoint and no public alias; this
+// switch gives it both, so the share file route's redirect can be exercised
+// too (and shown to never use the alias).
 const cdn = vi.hoisted(() => ({ base: undefined as string | undefined }));
 vi.mock("../../lib/object-store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/object-store")>();
@@ -78,7 +79,11 @@ vi.mock("../../lib/object-store", async (importOriginal) => {
       const store = actual.objectStore();
       return {
         ...store,
-        publicUrl: (key: string) => (cdn.base ? `${cdn.base}/${key}` : store.publicUrl(key)),
+        publicUrl: (key: string) => (cdn.base ? `${cdn.base}/public/${key}` : store.publicUrl(key)),
+        signedUrl: async (key: string, expiresInSeconds: number) =>
+          cdn.base
+            ? `${cdn.base}/signed/${key}?X-Amz-Expires=${expiresInSeconds}&X-Amz-Signature=test`
+            : store.signedUrl(key, expiresInSeconds),
       };
     },
   };
@@ -421,11 +426,6 @@ describe("photo library: uploads", () => {
     expect(Buffer.from(await file.arrayBuffer()).equals(bytes)).toBe(true);
   });
 
-  it("refuses what it will not store: types, sizes, names, the quota", async () => {
-    const accountId = await signIn();
-    const text = await upload("", "notes.jpg", Buffer.from("just some text, not an image at all"));
-    expect(text.status).toBe(415);
-    expect(await text.json()).toMatchObject({ error: "unsupported_type" });
   it("takes location and camera metadata out before storing, whole or in chunks", async () => {
     const accountId = await signIn();
     // A phone's photo from the strip's corpus (docs/photo-metadata-fixtures.json).
@@ -476,6 +476,11 @@ describe("photo library: uploads", () => {
     expect(existsSync(parked) ? readdirSync(parked) : []).toEqual([]);
   });
 
+  it("refuses what it will not store: types, sizes, names, the quota", async () => {
+    const accountId = await signIn();
+    const text = await upload("", "notes.jpg", Buffer.from("just some text, not an image at all"));
+    expect(text.status).toBe(415);
+    expect(await text.json()).toMatchObject({ error: "unsupported_type" });
     // BMP is playable on a frame but the cloud only stores what it can scan.
     const bmp = Buffer.concat([Buffer.from("BM"), Buffer.alloc(60, 1)]);
     expect((await upload("", "old.bmp", bmp)).status).toBe(415);
@@ -952,14 +957,17 @@ describe("photo library: share links", () => {
     // The URL carries the token: a shared cache must not keep the bytes.
     expect(file.headers.get("cache-control")).toBe("private, max-age=300");
     expect(Buffer.from(await file.arrayBuffer()).equals(bytes.get("Sub/a.png")!)).toBe(true);
-    // ...redirected to the object's random key with one.
+    // ...redirected to a short-lived presigned address of the object's
+    // random key on a bucket, never to the public alias.
     cdn.base = "https://cdn.example";
     const redirected = await getSharedFile(
       get(`/api/photos/shared/${album.token}/file?path=Sub%2Fa.png`),
       tokenParams(album.token),
     );
     expect(redirected.status).toBe(302);
-    expect(redirected.headers.get("location")).toMatch(/^https:\/\/cdn\.example\/photos\/[0-9a-f-]{36}\/[0-9a-f]{32}$/);
+    expect(redirected.headers.get("location")).toMatch(
+      /^https:\/\/cdn\.example\/signed\/photos\/[0-9a-f-]{36}\/[0-9a-f]{32}\?X-Amz-Expires=600&/,
+    );
     expect(redirected.headers.get("cache-control")).toBe("no-store");
 
     // Nothing outside the shared folder, nothing made up.
