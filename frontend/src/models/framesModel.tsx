@@ -535,8 +535,14 @@ export interface framesModelActions {
   addFrame: (frame: FrameType) => {
     frame: FrameType
   }
-  applyEmbeddedFirmwareOta: (id: FrameId) => {
+  applyEmbeddedFirmwareOta: (
+    id: FrameId,
+    options?: {
+      quiet?: boolean
+    }
+  ) => {
     id: FrameId
+    quiet: boolean
   }
   cancelDeploy: (id: FrameId) => {
     id: FrameId
@@ -569,10 +575,14 @@ export interface framesModelActions {
   }
   deployFrame: (
     id: FrameId,
-    fastDeploy?: boolean
+    fastDeploy?: boolean,
+    options?: {
+      quiet?: boolean
+    }
   ) => {
     fastDeploy: boolean
     id: FrameId
+    quiet: boolean
   }
   deployRemote: (
     id: FrameId,
@@ -721,8 +731,14 @@ export interface framesModelActions {
   toggleInactiveFramesExpanded: () => {
     value: true
   }
-  updateFrameFirmware: (id: FrameId) => {
+  updateFrameFirmware: (
+    id: FrameId,
+    options?: {
+      quiet?: boolean
+    }
+  ) => {
     id: FrameId
+    quiet: boolean
   }
 }
 
@@ -759,7 +775,12 @@ export const framesModel = kea<framesModelType>([
   actions({
     addFrame: (frame: FrameType) => ({ frame }),
     loadFrame: (id: FrameId) => ({ id }),
-    deployFrame: (id: FrameId, fastDeploy?: boolean) => ({ id, fastDeploy: fastDeploy || false }),
+    // `quiet`: no toast unless it fails ("Update all", whose sidebar rows draw the progress).
+    deployFrame: (id: FrameId, fastDeploy?: boolean, options?: { quiet?: boolean }) => ({
+      id,
+      fastDeploy: fastDeploy || false,
+      quiet: options?.quiet || false,
+    }),
     cancelDeploy: (id: FrameId) => ({ id }),
     stopFrame: (id: FrameId) => ({ id }),
     restartFrame: (id: FrameId) => ({ id }),
@@ -803,11 +824,11 @@ export const framesModel = kea<framesModelType>([
     }),
     restartRemote: (id: FrameId, transport: RemoteTaskTransport = 'auto') => ({ id, transport }),
     downloadSdCardImage: (id: FrameId) => ({ id }),
-    applyEmbeddedFirmwareOta: (id: FrameId) => ({ id }),
+    applyEmbeddedFirmwareOta: (id: FrameId, options?: { quiet?: boolean }) => ({ id, quiet: options?.quiet || false }),
     // Cloud only: enqueue the advisory notify_update_available verb. The
     // device fetches the signed OTA manifest and installs on its own
     // schedule (docs/cloud-frames.md "Signed OTA") — nothing to track here.
-    updateFrameFirmware: (id: FrameId) => ({ id }),
+    updateFrameFirmware: (id: FrameId, options?: { quiet?: boolean }) => ({ id, quiet: options?.quiet || false }),
     setDeployWithAgent: (id: FrameId, deployWithAgent: boolean) => ({ id, deployWithAgent }),
     setFrameArchived: (id: FrameId, archived: boolean) => ({ id, archived }),
     // The local network access switch is not a form field: it changes on the device
@@ -1234,7 +1255,7 @@ export const framesModel = kea<framesModelType>([
         })
       }
     },
-    deployFrame: async ({ id, fastDeploy }) => {
+    deployFrame: async ({ id, fastDeploy, quiet }) => {
       // Cloud: there is no /deploy or /fast_deploy (both 404). The cloud's
       // deploy primitive is the uploadScenes event shim — one checksummed,
       // durable set_scenes push of the workspace's CURRENT scene list
@@ -1249,6 +1270,7 @@ export const framesModel = kea<framesModelType>([
           kind: 'deploy',
           title: 'Deploying scenes',
           detail: 'Sending scenes to the frame',
+          quiet,
         })
         try {
           const frame = values.frames[id]
@@ -1291,6 +1313,7 @@ export const framesModel = kea<framesModelType>([
         kind: 'deploy',
         title: fastDeploy ? 'Deploying scenes & settings' : 'Deploying frame',
         detail: 'Deploy request sent',
+        quiet,
       })
       try {
         const response = fastDeploy
@@ -1520,7 +1543,7 @@ export const framesModel = kea<framesModelType>([
         throw error
       }
     },
-    applyEmbeddedFirmwareOta: async ({ id }) => {
+    applyEmbeddedFirmwareOta: async ({ id, quiet }) => {
       // The board pulls this backend's relay of the release manifest and
       // installs the signed release image for its flash layout if it runs an
       // older version; the request itself only reboots it into its updater.
@@ -1533,6 +1556,7 @@ export const framesModel = kea<framesModelType>([
         kind: 'embeddedOta',
         title: 'Updating firmware over the air',
         detail: 'Asking the frame to check for a release',
+        quiet,
       })
 
       try {
@@ -1558,7 +1582,7 @@ export const framesModel = kea<framesModelType>([
         throw error
       }
     },
-    updateFrameFirmware: async ({ id }) => {
+    updateFrameFirmware: async ({ id, quiet }) => {
       // The "Update firmware" menu entry, offered only for esp32 cloud
       // frames (FrameActionsMenu). One durable notify_update_available in
       // the queue; the device does the manifest fetch, signature check and
@@ -1569,6 +1593,7 @@ export const framesModel = kea<framesModelType>([
         kind: 'embeddedOta',
         title: 'Requesting firmware update',
         detail: 'Queueing the update notification',
+        quiet,
       })
       try {
         await sendCloudFrameCommand(id, 'notify_update_available')

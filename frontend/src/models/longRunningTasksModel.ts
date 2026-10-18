@@ -45,6 +45,8 @@ export interface LongRunningTask {
   progressTotal?: number | null
   /** Shown under the bar instead of "X / Y bytes" (a deploy's stage caption). */
   progressLabel?: string | null
+  /** Tracked without a toast unless it fails: the sidebar row draws its progress ("Update all"). */
+  quiet?: boolean
   logs: LongRunningTaskLog[]
 }
 
@@ -57,6 +59,7 @@ export interface StartTaskPayload {
   sceneId?: string | null
   progressCurrent?: number | null
   progressTotal?: number | null
+  quiet?: boolean
 }
 
 export interface FinishTaskPayload {
@@ -354,6 +357,7 @@ export interface longRunningTasksModelActions {
       logs: LongRunningTaskLog[]
       progressCurrent: number | null
       progressTotal: number | null
+      quiet?: boolean | undefined
       sceneId?: string | null | undefined
       startedAt: string
       status: LongRunningTaskStatus
@@ -506,7 +510,11 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
     ],
   }),
   selectors({
-    visibleTasks: [(s) => [s.tasks], (tasks: longRunningTasksModelValues['tasks']): LongRunningTask[] => tasks],
+    visibleTasks: [
+      (s) => [s.tasks],
+      (tasks: longRunningTasksModelValues['tasks']): LongRunningTask[] =>
+        tasks.filter((task) => !task.quiet || task.status === 'error'),
+    ],
     runningTasks: [
       (s) => [s.tasks],
       (tasks: longRunningTasksModelValues['tasks']): LongRunningTask[] =>
