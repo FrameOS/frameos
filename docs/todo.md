@@ -113,18 +113,15 @@ deliberately:
   payload, so the read cannot land on freed memory, but the swap is a
   `copyMem` and a string is two words: a reload can in principle tear one.
   A values snapshot for `auth.nim` (what `AdminAuthValues` is for the admin
-  block) would close it. The setup path itself was audited 2026-10-16: the
-  form, the gate and the save work on the request's own `readConfig()`
-  (`portalRequestConfig`), and the save reaches the live config only
-  through the same swap the runner's reload uses.
+  block) would close it.
 
 ---
 
 ## Setup hotspot: bench the captive sheet
 
-Both halves of the captive portal shipped 2026-10-16 (the dnsmasq drop-in on
-NetworkManager images, the redirect-only listener on `10.42.0.1:80`), on
-paper. Not yet seen on a bench:
+The captive portal (the dnsmasq drop-in on NetworkManager images, the
+redirect-only listener on `10.42.0.1:80`) and the setup code have not been
+seen on a bench:
 
 - A phone (iOS and Android) joining `FrameOS-Setup` gets the "sign in to
   network" sheet with the setup form in it, on a `raspberry-pi-64` /
@@ -139,6 +136,9 @@ paper. Not yet seen on a bench:
 - An existing frame flashed before the drop-in: root is read-only, so it
   gets the DNS half only with a new image. Confirm the portal still works
   there the old way (two QR codes), with the :80 listener bound but idle.
+- The setup code strip along the bottom of the hotspot screen on a slow
+  e-ink panel (it repaints when the code is spent) and on a small one
+  (4.2", 400x300), where the steps above it get the least room.
 
 ---
 

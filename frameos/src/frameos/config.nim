@@ -412,6 +412,26 @@ proc readConfig*(configPath = ""): FrameConfig =
   result.network.allowLocalNetworkAccess =
     resolveLocalNetworkAccess(result.network.allowLocalNetworkAccess)
 
+proc requestConfig*(live: FrameConfig): FrameConfig =
+  ## The frame's config for ONE request on a thread that is not the
+  ## runtime's (a mummy worker, the portal's connect thread): readConfig.
+  ## Anything that needs more of the config than a scalar field works on
+  ## this, never on the live config: a shallow copy of that takes a
+  ## reference to every nested object (httpsProxy, network, settings, …)
+  ## while other workers and the runner do the same, and ORC refcounts are
+  ## not atomic (AGENTS.md, "Refs do not cross threads").
+  ##
+  ## `live` only stands in when there is no readable frame.json, which on a
+  ## frame means never (the runtime could not have started) and in the
+  ## tests means a config built by hand on the test's own thread.
+  try:
+    result = readConfig()
+  except CatchableError:
+    result = FrameConfig()
+    if live != nil:
+      result[] = live[]
+    setConfigDefaults(result)
+
 proc loadConfig*(configPath = ""): FrameConfig =
   ## readConfig for the runtime itself (boot, the runner's reload).
   result = readConfig(configPath)

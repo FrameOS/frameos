@@ -125,7 +125,6 @@ suite "web route behavior":
       body = "ssid=home&password=pw&hostname=kitchen&device=web_only&setupCode=000000")
     check wrong.status == 403
     check wrong.body.contains("does not match")
-    check setupGateAttemptsLeft() == SetupGateMaxAttempts - 1
     # (A Wi-Fi-only POST passes the gate — test_portal covers it; here it
     # would persist a frame.json into the harness's config path.)
     clearSetupCode()

@@ -254,14 +254,11 @@ proc addWebRoutes*(router: var Router, connectionsState: ConnectionsState, admin
       let frameConfig = netportal.portalRequestConfig(globalFrameOS)
       # The gate first: the control-plane, admin and display fields need the
       # code on the panel (or the admin password) before anything is parsed
-      # into a change. A wrong code costs an attempt; the fifth mints a new
-      # code, and the scene redraws it.
-      let gate = netportal.setupGateProblem(params, frameConfig)
-      if gate.remint:
-        sendEvent("render", %*{}, eoSystem)
-      if gate.problem.len > 0:
-        log(%*{"event": "portal:setup:refused", "reason": gate.problem})
-        request.respond(Http403, body = gate.problem)
+      # into a change (setup_gate.nim).
+      let gateProblem = netportal.setupGateProblem(params, frameConfig)
+      if gateProblem.len > 0:
+        log(%*{"event": "portal:setup:refused", "reason": gateProblem})
+        request.respond(Http403, body = gateProblem)
         return
       let options = netportal.parseSetupOptions(params, frameConfig)
       let problem = netportal.setupOptionsProblem(options, frameConfig)

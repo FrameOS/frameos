@@ -35,17 +35,6 @@ is left there is in the medium / low list.
   already signed and verified against the release key on both planes. A
   self-hosted backend reached over plain http still carries the bearer in
   clear on every request; an https backend is the fix for that.)
-- The Pi hotspot keeps its well-known default PSK (`frame1234`) — decided
-  2026-09-03: a Pi with no configured display could not show a minted one.
-  The PSK only buys the Wi-Fi form: the control-plane,
-  admin and display fields of `POST /setup` need the setup code drawn on
-  the panel (or the admin password; `frameos/src/frameos/setup_gate.nim`,
-  `cloud/docs/cloud-frames.md` "sandbox posture"), and the page shows a
-  stranger none of the current values. What is left open by design: a
-  fresh frame (no panel, no admin password, no control plane) is anyone's,
-  and so is a cloud-personalized image whose claim token has not been
-  redeemed yet — its owner has to be able to pick the display in the
-  portal, and until the enrollment completes the frame is nobody's.
 - Interpreter budgets (wall-clock deadline, JS heap ceiling, dispatch
   budget) are per run, not per scene per minute.
 - Smaller: the frame's TLS material and admin login ride the
@@ -56,7 +45,13 @@ is left there is in the medium / low list.
   status screen draws the code into its own render too, and on a
   `web_only` frame the stored image is the only place it shows); a device `bootup` event may still move
   `frame_host` on embedded frames when the claimed IP matches the request
-  peer or `embedded.followBootIp` is set (deliberate: ESP32 DHCP follow).
+  peer or `embedded.followBootIp` is set (deliberate: ESP32 DHCP follow);
+  the Pi setup hotspot keeps its default PSK (decided 2026-09-03), so a
+  fresh frame (no panel, no admin password, no control plane) and a
+  cloud-personalized image whose claim has not gone through yet are anyone
+  in radio range's to set up (by design, `frameos/setup_gate.nim`; every
+  other frame's `POST /setup` needs the panel's code or the admin password
+  for anything but Wi-Fi).
 
 ### Frontends, wasm preview, CI
 

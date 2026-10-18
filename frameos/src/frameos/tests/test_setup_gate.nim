@@ -22,25 +22,23 @@ suite "setup gate":
     check setupGateMode(config(device = "framebuffer"), controlPlaneConfigured = true) == sgPanelCode
     check setupGateMode(config(device = "web_only", adminPass = "pw"), controlPlaneConfigured = false) == sgAdminPassword
     check setupGateMode(config(device = "http.upload", adminPass = "pw"), controlPlaneConfigured = true) == sgAdminPassword
+    check setupGateMode(config(device = "wasm", adminPass = "pw"), controlPlaneConfigured = false) == sgAdminPassword
     check setupGateMode(config(device = "web_only"), controlPlaneConfigured = true) == sgLocked
     check setupGateMode(config(device = ""), controlPlaneConfigured = true) == sgLocked
     check setupGateMode(config(device = "web_only"), controlPlaneConfigured = false) == sgOpen
     check setupGateMode(nil, controlPlaneConfigured = false) == sgOpen
-    check deviceHasPanel("waveshare.EPD_7in3e")
-    check not deviceHasPanel("wasm")
 
   test "no code until the hotspot is up, digits while it is, none after":
     check activeSetupCode() == ""
-    check setupCodeLine() == ""
+    check setupCodePanelText() == ""
     let code = startSetupCode()
     check code.len == SetupCodeLength
     check code.allCharsInSet({'0'..'9'})
     check activeSetupCode() == code
-    check setupCodeLine().contains(code)
-    check setupGateAttemptsLeft() == SetupGateMaxAttempts
+    check setupCodePanelText() == SetupCodePanelLabel & " " & code
     clearSetupCode()
     check activeSetupCode() == ""
-    check setupCodeLine() == ""
+    check setupCodePanelText() == ""
 
   test "successive hotspot sessions do not repeat the code":
     var seen: seq[string] = @[]
@@ -48,68 +46,47 @@ suite "setup gate":
       seen.add(startSetupCode())
     check seen.deduplicate().len > 1
 
-  test "the right code passes once and is replaced; a wrong one costs an attempt":
+  test "the right code passes once and is replaced; a wrong one is refused":
     let code = startSetupCode()
-    let wrong = checkSetupSecret("000000", sgPanelCode, adminPassword = "")
-    check not wrong.ok
-    check wrong.detail.contains("does not match")
-    check not wrong.remint
-    check setupGateAttemptsLeft() == SetupGateMaxAttempts - 1
-    let right = checkSetupSecret(" " & code & " ", sgPanelCode, adminPassword = "")
-    check right.ok
-    check right.remint
+    check setupSecretProblem("000000", sgPanelCode, adminPassword = "").contains("does not match")
+    check setupSecretProblem(" " & code & " ", sgPanelCode, adminPassword = "") == ""
     check activeSetupCode() != code
     check activeSetupCode().len == SetupCodeLength
-    check setupGateAttemptsLeft() == SetupGateMaxAttempts
     # Single use: the code that was just accepted is gone.
-    check not checkSetupSecret(code, sgPanelCode, adminPassword = "").ok
-
-  test "five wrong codes mint a fresh one and say so":
-    let code = startSetupCode()
-    var last: tuple[ok: bool, detail: string, remint: bool]
-    for _ in 0 ..< SetupGateMaxAttempts:
-      last = checkSetupSecret("999999", sgPanelCode, adminPassword = "")
-    check not last.ok
-    check last.remint
-    check last.detail.contains("new code")
-    check activeSetupCode() != code
-    check setupGateAttemptsLeft() == SetupGateMaxAttempts
-    # The old code is worthless now, the new one works.
-    check not checkSetupSecret(code, sgPanelCode, adminPassword = "").ok
-    check checkSetupSecret(activeSetupCode(), sgPanelCode, adminPassword = "").ok
+    check setupSecretProblem(code, sgPanelCode, adminPassword = "") != ""
+    check setupSecretProblem(activeSetupCode(), sgPanelCode, adminPassword = "") == ""
 
   test "the admin password opens the gate on a headless frame and on a panel whose code cannot be read":
-    discard startSetupCode()
-    check checkSetupSecret("hunter2", sgAdminPassword, adminPassword = "hunter2").ok
-    check not checkSetupSecret("hunter2", sgAdminPassword, adminPassword = "hunter2").remint
-    let viaPassword = checkSetupSecret("hunter2", sgPanelCode, adminPassword = "hunter2")
-    check viaPassword.ok
-    check not viaPassword.remint # the code on the panel stays
-    let bad = checkSetupSecret("hunter3", sgAdminPassword, adminPassword = "hunter2")
-    check not bad.ok
-    check bad.detail.contains("admin password")
+    let code = startSetupCode()
+    check setupSecretProblem("hunter2", sgAdminPassword, adminPassword = "hunter2") == ""
+    check setupSecretProblem("hunter2", sgPanelCode, adminPassword = "hunter2") == ""
+    check activeSetupCode() == code # the code on the panel stays
+    check setupSecretProblem("hunter3", sgAdminPassword, adminPassword = "hunter2").contains("admin password")
+    # The code is the panel's proof; a headless frame does not take it.
+    check setupSecretProblem(code, sgAdminPassword, adminPassword = "hunter2") != ""
     # No password set means the password route is closed, not open.
-    check not checkSetupSecret("", sgAdminPassword, adminPassword = "").ok
-    check not checkSetupSecret("x", sgAdminPassword, adminPassword = "").ok
+    check setupSecretProblem("", sgAdminPassword, adminPassword = "") != ""
+    check setupSecretProblem("x", sgAdminPassword, adminPassword = "") != ""
 
-  test "five wrong passwords lock the gate until the hotspot is next brought up":
+  test "ten wrong answers shut the gate until the hotspot next comes up, the right ones included":
+    for mode in [sgPanelCode, sgAdminPassword]:
+      let code = startSetupCode()
+      for _ in 0 ..< SetupGateMaxWrong - 1:
+        check not setupSecretProblem("999999", mode, adminPassword = "hunter2").contains("Too many")
+      check not setupGateLocked()
+      check setupSecretProblem("999999", mode, adminPassword = "hunter2").contains("Too many")
+      check setupGateLocked()
+      check setupSecretProblem("hunter2", mode, adminPassword = "hunter2").contains("Too many")
+      check setupSecretProblem(code, mode, adminPassword = "hunter2").contains("Too many")
+      discard startSetupCode()
+      check not setupGateLocked()
+      check setupSecretProblem("hunter2", mode, adminPassword = "hunter2") == ""
+
+  test "an empty submission is told what to type and costs nothing; open and locked frames need nothing or get nothing":
     discard startSetupCode()
-    for _ in 0 ..< SetupGateMaxAttempts:
-      discard checkSetupSecret("nope", sgAdminPassword, adminPassword = "hunter2")
-    check setupGateLocked()
-    let locked = checkSetupSecret("hunter2", sgAdminPassword, adminPassword = "hunter2")
-    check not locked.ok
-    check locked.detail.contains("Too many")
-    discard startSetupCode()
+    for _ in 0 ..< SetupGateMaxWrong:
+      check setupSecretProblem("", sgPanelCode, adminPassword = "").contains("setup code")
+    check setupSecretProblem("", sgAdminPassword, adminPassword = "pw").contains("admin password")
     check not setupGateLocked()
-    check checkSetupSecret("hunter2", sgAdminPassword, adminPassword = "hunter2").ok
-
-  test "an empty submission is told what to type; open and locked frames need nothing or get nothing":
-    discard startSetupCode()
-    check checkSetupSecret("", sgPanelCode, adminPassword = "").detail.contains("setup code")
-    check checkSetupSecret("", sgAdminPassword, adminPassword = "pw").detail.contains("admin password")
-    check setupGateAttemptsLeft() == SetupGateMaxAttempts
-    check checkSetupSecret("", sgOpen, adminPassword = "").ok
-    let locked = checkSetupSecret(activeSetupCode(), sgLocked, adminPassword = "")
-    check not locked.ok
-    check locked.detail.contains("no display")
+    check setupSecretProblem("", sgOpen, adminPassword = "") == ""
+    check setupSecretProblem(activeSetupCode(), sgLocked, adminPassword = "").contains("no display")

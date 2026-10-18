@@ -852,14 +852,9 @@ proc applyDeviceConfigDefaults(device: string, deviceConfig: JsonNode) =
   if pins == nil or pins.kind != JObject:
     pins = newJObject()
 
-  proc pinValue(key: string, fallback: int): int =
+  for (key, fallback) in [("rst", 17), ("dc", 25), ("cs", 8), ("busy", 24), ("sclk", 11), ("mosi", 10), ("pwr", 27)]:
     if pins{key} == nil:
       pins[key] = %fallback
-      return fallback
-    pins{key}.getInt(fallback)
-
-  for (key, fallback) in [("rst", 17), ("dc", 25), ("cs", 8), ("busy", 24), ("sclk", 11), ("mosi", 10), ("pwr", 27)]:
-    discard pinValue(key, fallback)
   deviceConfig["pins"] = pins
 
 proc gpioButtonsForDeviceJson(device: string): JsonNode =
@@ -908,24 +903,11 @@ proc defaultControlMode*(frameConfig: FrameConfig): string {.gcsafe.} =
   "none"
 
 proc portalRequestConfig*(frameOS: FrameOS): FrameConfig =
-  ## The frame's config for one setup request, on a mummy worker or the
-  ## connect thread: this thread's own parse of frame.json, as readConfig
-  ## gives it to every other worker (AGENTS.md, "Refs do not cross threads").
+  ## The frame's config for one setup request (config.nim, requestConfig).
   ## The setup path used to read the runtime's live FrameConfig and even
   ## assign into it (`frameAdminAuth`, `deviceConfig`) from the worker that
-  ## took POST /setup; ORC refcounts are not atomic, so a nested ref shared
-  ## that way is freed under one of the two threads sooner or later.
-  ##
-  ## The live object only stands in when there is no readable frame.json,
-  ## which on a frame means never, and in the tests means a config built by
-  ## hand on the test's own thread.
-  try:
-    result = readConfig()
-  except CatchableError:
-    result = FrameConfig()
-    if frameOS != nil and frameOS.frameConfig != nil:
-      result[] = frameOS.frameConfig[]
-    setConfigDefaults(result)
+  ## took POST /setup.
+  requestConfig(if frameOS == nil: nil else: frameOS.frameConfig)
 
 proc reloadLiveConfig(frameOS: FrameOS) =
   ## After frame.json was written: the runtime's config follows the file,
@@ -969,19 +951,13 @@ proc setupRequestIsGated*(params: Table[string, string]): bool =
       return true
   false
 
-proc setupGateProblem*(params: Table[string, string], frameConfig: FrameConfig):
-    tuple[problem: string, remint: bool] {.gcsafe.} =
+proc setupGateProblem*(params: Table[string, string], frameConfig: FrameConfig): string {.gcsafe.} =
   ## "" when the submission may change the gated fields: it carries none of
   ## them, the frame is open, or the code / admin password it typed is right.
-  ## `remint` says the panel code changed (the hotspot scene has to redraw).
   if not setupRequestIsGated(params):
-    return ("", false)
-  let mode = setupGateModeFor(frameConfig)
-  let adminAuth = if frameConfig.frameAdminAuth == nil: %*{} else: frameConfig.frameAdminAuth
-  let verdict = checkSetupSecret(params.getOrDefault("setupCode", ""), mode, adminAuth{"pass"}.getStr(""))
-  if verdict.ok:
-    return ("", verdict.remint)
-  (verdict.detail, verdict.remint)
+    return ""
+  setupSecretProblem(params.getOrDefault("setupCode", ""), setupGateModeFor(frameConfig),
+    frameConfig.frameAdminAuth{"pass"}.getStr(""))
 
 proc adminUiPreselected*(frameConfig: FrameConfig): bool =
   ## Whether the setup form's "Enable admin UI" box starts ticked. Ticked
@@ -1454,8 +1430,8 @@ proc finishStartedHotspot(frameOS: FrameOS): bool {.gcsafe.} =
     pLog("portal:startAp:listener", %*{"port": listeners.port, "address": listeners.address,
                                         "captivePort": listeners.captivePort})
   # The code the setup form asks for before it touches anything but Wi-Fi
-  # (setup_gate.nim); the hotspot scene draws it. Minted before the scene
-  # is shown so its first render already carries it.
+  # (setup_gate.nim); the runner draws it along the bottom of the panel.
+  # Minted before the hotspot scene is shown so its first render has it.
   discard startSetupCode()
   let hotspotStarted = getMonoTime()
   frameOS.network.hotspotStartedAt = epochTime()
@@ -2034,8 +2010,8 @@ proc setupGateHtml(gate: SetupGateMode, hasAdminPass: bool): string =
     """
   <details open>
     <summary>Setup code</summary>
-    <p class="muted">The frame shows a 6-digit setup code on its display. It unlocks the display,
-      admin and management settings below.""" & alsoPassword & """</p>
+    <p class="muted">The frame shows a 6-digit setup code at the bottom of its display. It unlocks
+      the display, admin and management settings below.""" & alsoPassword & """</p>
     <label>Setup code
       <input id="setup-code" type="text" name="setupCode" inputmode="numeric" autocomplete="one-time-code" required>
     </label>
@@ -2063,13 +2039,13 @@ const setupLockedNote = """
   </details>
 """
 
-proc setupHtml*(frameOS: FrameOS, config: FrameConfig = nil): string =
+proc setupHtml*(frameOS: FrameOS): string =
   ## The setup form. Reads a private config (portalRequestConfig), never
   ## the runtime's. What it prefills depends on the gate: a frame anyone may
   ## set up (sgOpen) shows its current values; otherwise the gated fields
   ## start blank — the page is unauthenticated, and a blank means "keep" on
   ## the way back in (parseSetupOptions).
-  let frameConfig = if config != nil: config else: portalRequestConfig(frameOS)
+  let frameConfig = portalRequestConfig(frameOS)
   let gate = setupGateModeFor(frameConfig)
   let showCurrent = gate == sgOpen
   let deviceConfig = deviceConfigOf(frameConfig)

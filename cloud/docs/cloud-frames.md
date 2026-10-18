@@ -447,25 +447,24 @@ do not touch either.
 
 **The setup hotspot has the same gate.** While `FrameOS-Setup` is up its PSK
 is the well-known default (a frame with no display could not show a minted
-one), so `POST /setup` used to let anyone in radio range during a boot with
-the home AP down re-enroll the frame, repoint it at another backend, turn
-the admin UI on with their own password, or make every render POST to their
-URL. Since 2026-10-16 the Wi-Fi fields (SSID, password, hostname, time zone)
-are all the PSK buys. The control-plane, admin and display fields need the
-six-digit setup code the hotspot mints when it comes up and draws on the
-hotspot scene (`frameos/src/frameos/setup_gate.nim`; single use, five
-attempts, the fifth wrong code mints a fresh one and the scene redraws).
-A frame with no panel accepts its admin password instead; a headless frame
-that is already managed and has no admin password refuses those fields
-outright (manage it from its control plane); a fresh frame — no panel, no
-admin password, no backend or completed cloud link — is open, as it has to
-be to get set up at all, and so is a cloud-personalized image whose claim
-token is still waiting for the network. The unauthenticated form shows a
-stranger none of the current values (a blank gated field means "keep").
-The captive portal itself (NetworkManager's `dnsmasq-shared.d` drop-in
-staged by `buildroot_image.py`, the redirect-only listener on
-`10.42.0.1:80` in `hotspot_listener.nim`) only makes the form easier to
-reach; it adds no authority.
+one), so the Wi-Fi fields (SSID, password, hostname, time zone) are all the
+PSK buys. The control-plane, admin and display fields of `POST /setup` need
+the six-digit setup code the hotspot mints when it comes up, which the
+runner draws along the bottom of the panel like the local network access
+code: after the render is stored, so it never leaves the frame as an image
+(`frameos/src/frameos/setup_gate.nim`; single use, and ten wrong codes or
+passwords shut the gate until the hotspot next comes up). A frame with no
+panel accepts its admin password instead; a headless frame that is already
+managed and has no admin password refuses those fields outright (manage it
+from its control plane); a fresh frame (no panel, no admin password, no
+backend or completed cloud link) is open, as it has to be to get set up at
+all, and so is a cloud-personalized image whose claim token is still
+waiting for the network. The unauthenticated form shows a stranger none of
+the current values (a blank gated field means "keep"). The captive portal
+itself (NetworkManager's `dnsmasq-shared.d` drop-in staged by
+`buildroot_image.py`, the redirect-only listener on `10.42.0.1:80` in
+`hotspot_listener.nim`) only makes the form easier to reach; it adds no
+authority.
 
 Scene origin is now tracked at runtime, on both platforms, and the device
 stamps it itself — a payload key is never trusted. On Pi/Linux the hub

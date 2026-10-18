@@ -378,7 +378,7 @@ suite "portal network orchestration":
     check typed.serverHost == "other.example.com"
     check typed.adminUser == "root"
 
-  test "the gate: Wi-Fi only passes, a gated field needs the code, the fifth wrong code redraws":
+  test "the gate: Wi-Fi only passes, a gated field needs the code or the admin password":
     let open = makeFrameOS()
     open.frameConfig.serverHost = ""
     open.frameConfig.device = "web_only"
@@ -388,28 +388,22 @@ suite "portal network orchestration":
     clearSetupCode()
     # Nothing gated in the request: no code needed, whatever the frame.
     check setupGateProblem({"ssid": "x", "password": "y", "hostname": "h", "timeZone": "UTC"}.toTable,
-      panel.frameConfig) == ("", false)
+      panel.frameConfig) == ""
     check not setupRequestIsGated({"ssid": "x"}.toTable)
     check setupRequestIsGated({"ssid": "x", "device": "web_only"}.toTable)
     check setupRequestIsGated({"httpUploadUrl": "http://x"}.toTable)
     # An open frame needs nothing even for gated fields.
-    check setupGateProblem({"ssid": "x", "device": "framebuffer"}.toTable, open.frameConfig) == ("", false)
+    check setupGateProblem({"ssid": "x", "device": "framebuffer"}.toTable, open.frameConfig) == ""
     # A panel frame: the code, or its admin password.
     let code = startSetupCode()
-    check setupGateProblem({"ssid": "x", "device": "framebuffer"}.toTable, panel.frameConfig).problem.contains(
+    check setupGateProblem({"ssid": "x", "device": "framebuffer"}.toTable, panel.frameConfig).contains(
       "setup code")
     check setupGateProblem({"ssid": "x", "device": "framebuffer", "setupCode": "secret"}.toTable,
-      panel.frameConfig) == ("", false)
-    let accepted = setupGateProblem({"ssid": "x", "device": "framebuffer", "setupCode": code}.toTable,
-      panel.frameConfig)
-    check accepted.problem == ""
-    check accepted.remint
-    var last: tuple[problem: string, remint: bool]
-    for _ in 0 ..< SetupGateMaxAttempts:
-      last = setupGateProblem({"ssid": "x", "device": "framebuffer", "setupCode": "000000"}.toTable,
-        panel.frameConfig)
-    check last.problem.contains("new code")
-    check last.remint
+      panel.frameConfig) == ""
+    check setupGateProblem({"ssid": "x", "device": "framebuffer", "setupCode": code}.toTable,
+      panel.frameConfig) == ""
+    check setupGateProblem({"ssid": "x", "device": "framebuffer", "setupCode": "000000"}.toTable,
+      panel.frameConfig).contains("does not match")
     clearSetupCode()
 
   test "the hotspot mints the setup code when it comes up and drops it when it goes down":
