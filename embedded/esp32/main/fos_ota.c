@@ -393,7 +393,7 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
     /* Same image → nothing to do. Release versions have no v prefix. */
     const char *running = esp_app_get_description()->version;
     if (running[0] == 'v') running++;
-    if (strcmp(running, out->version) == 0) {
+    if (fos_version_same_release(running, out->version)) {
         ESP_LOGI(TAG, "ota (%s): already on %s", src->plane, out->version);
         ota_log(src, "up-to-date", out->version);
         cJSON_Delete(root);
@@ -457,7 +457,8 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
 
 static esp_err_t ota_download_verify(const ota_source_t *src, const char *download_url,
                                      const char *auth_header, const uint8_t sig[64],
-                                     size_t expected_size, const fos_netguard_pin_t *pin)
+                                     const char *version, size_t expected_size,
+                                     const fos_netguard_pin_t *pin)
 {
     const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
     if (target == NULL) {
@@ -592,6 +593,23 @@ static esp_err_t ota_download_verify(const ota_source_t *src, const char *downlo
         ota_log(src, "error", detail);
         return ESP_ERR_INVALID_CRC;
     }
+    /* The signature binds these bytes to a release NAME (the trusted comment,
+     * matched against the manifest's version before the download); the image
+     * names itself in its app descriptor. If the two disagree, the board would
+     * boot a release reporting another version, be offered the signed one
+     * again and re-flash on every check, so the image does not get to boot.
+     * Counted as a failure by the caller, which gives up after a few. */
+    esp_app_desc_t desc;
+    err = esp_ota_get_partition_description(target, &desc);
+    if (err != ESP_OK || !fos_version_same_release(desc.version, version)) {
+        ESP_LOGE(TAG, "ota: image says %s, signed as %s — refused",
+                 err == ESP_OK ? desc.version : esp_err_to_name(err), version);
+        char detail[80];
+        snprintf(detail, sizeof(detail), "image-version-mismatch:%s",
+                 err == ESP_OK ? desc.version : esp_err_to_name(err));
+        ota_log(src, "error", detail);
+        return ESP_ERR_INVALID_CRC;
+    }
     err = esp_ota_set_boot_partition(target);
     if (err != ESP_OK) {
         char detail[80];
@@ -690,7 +708,7 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
             }
         }
         err = ota_download_verify(src, manifest.download_url, first_party ? src->auth : NULL,
-                                  manifest.sig, manifest.size, &pin);
+                                  manifest.sig, manifest.version, manifest.size, &pin);
         if (err == ESP_OK || err == ESP_ERR_INVALID_CRC || err == ESP_ERR_INVALID_SIZE ||
             err == ESP_ERR_NO_MEM) {
             break; /* staged, or a failure no retry can fix */

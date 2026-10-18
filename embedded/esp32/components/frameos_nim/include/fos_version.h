@@ -34,6 +34,11 @@ int fos_version_compare(const char *a, const char *b);
 /* True only when both parse and `offered` is strictly older than `running`. */
 bool fos_version_is_downgrade(const char *offered, const char *running);
 
+/* True when a and b name the same release: equal strings once a leading "v"
+ * is dropped from either. Exact otherwise ("2026.9.9-rc1" is not "2026.9.9"):
+ * this is identity, not ordering. Empty or NULL is never the same. */
+bool fos_version_same_release(const char *a, const char *b);
+
 #ifdef __cplusplus
 }
 #endif

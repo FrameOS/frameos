@@ -54,3 +54,11 @@ bool fos_version_is_downgrade(const char *offered, const char *running)
     if (!fos_version_parse(offered, po, NULL) || !fos_version_parse(running, pr, NULL)) return false;
     return fos_version_compare(offered, running) < 0;
 }
+
+bool fos_version_same_release(const char *a, const char *b)
+{
+    if (a == NULL || b == NULL) return false;
+    if (*a == 'v' || *a == 'V') a++;
+    if (*b == 'v' || *b == 'V') b++;
+    return *a != '\0' && strcmp(a, b) == 0;
+}

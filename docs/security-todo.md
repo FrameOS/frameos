@@ -50,9 +50,6 @@ is left there is in the medium / low list.
   strip current config from the unauthenticated setup page.
 - Interpreter budgets (wall-clock deadline, JS heap ceiling, dispatch
   budget) are per run, not per scene per minute.
-- ESP32 OTA does not compare the image's own `esp_app_desc` version with the
-  name the signature binds (a release that mis-stamps its version would
-  re-flash daily; `ci_build_image.sh` already refuses to build one).
 - Smaller: the frame's TLS material and admin login ride the
   `/embedded/settings` pull in clear on an http backend; Samba mount target
   unconfined; `http://` providers accepted device-side; the `exiftool`

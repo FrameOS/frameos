@@ -1050,7 +1050,9 @@ image was signed AS: the `.minisig`'s trusted comment (covered by minisign's
 global signature) must be `frameos frameos-<manifest version>-<this image's
 platform>-app.bin`, so an older or other-layout image that was genuinely
 signed once cannot be served as a new version (`fos_minisig_verify_binding`;
-the log says `signature-for-another-release`). `fos_ota_platform()` names the
+the log says `signature-for-another-release`). After the download, the
+image's own app-descriptor version must be that same release, or the slot is
+not switched (`image-version-mismatch`). `fos_ota_platform()` names the
 layout this image was built for, so a 16 MB board asks for the 16 MB image. Progress is logged as
 `ota:backend` / `ota:cloud` lines; three failures on one version stop the
 retries until a newer release or a power cycle. The 4MB profile has no OTA
