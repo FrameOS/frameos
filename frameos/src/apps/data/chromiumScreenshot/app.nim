@@ -4,6 +4,7 @@ import frameos/types
 import frameos/local_access
 import frameos/spawn_guard
 import frameos/utils/image
+import frameos/utils/redacted_url
 
 import os, strformat, strutils, json, net, sequtils, sets, tables, algorithm
 import posix except Time
@@ -606,7 +607,9 @@ proc get*(self: App, context: ExecutionContext): Image =
       try: removeDir(workDir)
       except OSError: discard
 
-    self.log &"Capturing URL `{self.appConfig.url}` at {width}x{height} in {screenshotFile}"
+    # The page's URL is named by its origin only (utils/redacted_url.nim): a
+    # dashboard link often carries its access token.
+    self.log &"Capturing URL `{redactedUrl(self.appConfig.url)}` at {width}x{height} in {screenshotFile}"
 
     if fileExists(screenshotFile):
       try: removeFile(screenshotFile)
@@ -698,7 +701,10 @@ page.wait_for_timeout(1500)
           self.settleAfterBrowserStart()
 
         try:
-          let (output, response) = self.runCapture(venvPython, scriptFile, screenshotFile, blockedFile)
+          let (rawOutput, response) = self.runCapture(venvPython, scriptFile, screenshotFile, blockedFile)
+          # Playwright quotes the page's URL in its errors, and every use
+          # below ends up in the frame's log.
+          let output = redactedUrlsIn(rawOutput)
           if response == 0:
             completed = true
             break
@@ -709,7 +715,7 @@ page.wait_for_timeout(1500)
             break
 
           if output.contains("TimeoutError"):
-            self.logError &"Playwright navigation timed out after {PLAYWRIGHT_NAVIGATION_TIMEOUT_MS}ms while loading {self.appConfig.url}. Chromium may still be warming up."
+            self.logError &"Playwright navigation timed out after {PLAYWRIGHT_NAVIGATION_TIMEOUT_MS}ms while loading {redactedUrl(self.appConfig.url)}. Chromium may still be warming up."
             self.logError &"Playwright timeout details: {output}"
             return renderError(width, height, "Browser snapshot timed out while loading the page")
 

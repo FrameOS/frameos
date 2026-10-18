@@ -37,6 +37,15 @@ export function photoUrl(link: string, url: unknown): string {
   return value.startsWith('/') ? linkOrigin(link) + value : ''
 }
 
+// An error text safe to log and draw: every address cut to scheme://host and
+// any share token hidden. The link and a photo's address carry the token,
+// and an older runtime quoted the whole URL in its errors.
+export function reason(text: unknown): string {
+  return String(text ?? '')
+    .replace(/([a-z][\w+.-]*:\/\/)(?:[^\s/?#]*@)?([^\s/?#]*)\S*/gi, '$1$2')
+    .replace(/pk_[\w-]+/g, 'pk_...')
+}
+
 // The counter as a non-negative integer; anything else starts over at 0.
 export function position(value: unknown): number {
   const n = Math.floor(Number(value))
@@ -88,7 +97,7 @@ export function get(app: FrameOSApp, context: FrameOSContext): unknown {
   const r = frameos.httpRequest(`${link}/photo?${query}`, { timeoutMs: 20000 })
   if (r.status === 404) return fail(single ? 'This photo is no longer in the album.' : 'This album link no longer works.')
   if (r.status !== 200) {
-    return fail(r.status ? `Could not load the album (HTTP ${r.status}).` : `Could not reach the album: ${r.error ?? 'no response'}`)
+    return fail(r.status ? `Could not load the album (HTTP ${r.status}).` : `Could not reach the album: ${reason(r.error ?? 'no response')}`)
   }
   let data: any = null
   try {
@@ -111,6 +120,6 @@ export function get(app: FrameOSApp, context: FrameOSContext): unknown {
   frameos.log(single ? `Showing ${name}` : `Showing ${name} (${(index % count) + 1} of ${count})`)
   // null, not undefined: no profile clears the last photo's palette
   const result = frameos.fetchImage(url, { colors: photo.colors ?? null })
-  if (!result.image) return fail(`Could not load ${name}: ${result.error ?? 'no image'}`)
+  if (!result.image) return fail(`Could not load ${name}: ${reason(result.error ?? 'no image')}`)
   return result.image
 }

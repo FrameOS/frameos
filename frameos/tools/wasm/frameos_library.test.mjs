@@ -19,9 +19,30 @@ function loadLibrary() {
 }
 
 const isPrivateHost = loadLibrary().$frameosIsPrivateHost
+const logUrl = loadLibrary().$frameosLogUrl
 
-test('the request hook pulls in the private-host helper', () => {
+test('the request hook pulls in the private-host and log-URL helpers', () => {
   assert.ok(loadLibrary().fos_nim_http_request__deps.includes('$frameosIsPrivateHost'))
+  assert.ok(loadLibrary().fos_nim_http_request__deps.includes('$frameosLogUrl'))
+})
+
+test('a log line shows a URL as scheme://host[:port] only', () => {
+  const cases = [
+    ['https://cloud.frameos.net/api/photos/shared/pk_abc/file?path=beach%2Fa.jpg', 'https://cloud.frameos.net'],
+    ['HTTP://Example.COM:8080/x?key=secret#frag', 'http://example.com:8080'],
+    ['http://user:pa@ss@192.168.1.1:8123/api', 'http://192.168.1.1:8123'],
+    ['http://[fe80::1]:8080/x', 'http://[fe80::1]:8080'],
+    ['https://example.com?token=1', 'https://example.com'],
+    ['http://example.com:/x', 'http://example.com'],
+    ['', '(invalid URL)'],
+    ['example.com/path?key=1', '(invalid URL)'],
+    ['https:///pk_abc', '(invalid URL)'],
+    ['https://user:secret@/x', '(invalid URL)'],
+    ['https://host:80x/', '(invalid URL)'],
+    ['https://sec ret/', '(invalid URL)'],
+    ['/api/photos/shared/pk_abc/photo', '(invalid URL)'],
+  ]
+  for (const [url, want] of cases) assert.equal(logUrl(url), want, url)
 })
 
 test('private IPv4 literals, matching the device policy', () => {
@@ -95,7 +116,7 @@ test('malformed IPv6 fails closed', () => {
 
 // Runs the request hook as the preview worker would, returning which URLs
 // were opened directly and whether the proxy was used.
-function request(url, { page, proxyUrl = '/api/proxy' } = {}) {
+function request(url, { page, proxyUrl = '/api/proxy', sendError = null } = {}) {
   const library = loadLibrary()
   const opened = []
   const logs = []
@@ -106,6 +127,7 @@ function request(url, { page, proxyUrl = '/api/proxy' } = {}) {
     }
     setRequestHeader() {}
     send() {
+      if (sendError) throw new Error(sendError)
       this.status = 200
       this.response = new TextEncoder().encode('ok').buffer
     }
@@ -130,6 +152,7 @@ function request(url, { page, proxyUrl = '/api/proxy' } = {}) {
     btoa,
     self: page ? { location: new URL(page) } : undefined,
     frameosIsPrivateHost: library.$frameosIsPrivateHost,
+    frameosLogUrl: library.$frameosLogUrl,
   }
   // The hook's `{{{ makeSetValue(...) }}}` lines are Emscripten macros; as
   // plain JS they are nested blocks calling the stub above.
@@ -174,4 +197,12 @@ test('same-origin targets still only go through the proxy', () => {
 test('headless renderers (no browser origin) are not guarded', () => {
   const result = request('http://192.168.1.1/', { page: undefined })
   assert.deepEqual(result.direct, ['http://192.168.1.1/'])
+})
+
+test('a failed request is logged by its origin, the error text included', () => {
+  const url = 'https://cloud.frameos.net/api/photos/shared/pk_secret/photo?index=3'
+  const result = request(url, { proxyUrl: null, sendError: `Failed to load '${url}'` })
+  const logged = result.logs.join('\n')
+  assert.match(logged, /GET https:\/\/cloud\.frameos\.net failed: Error: Failed to load 'https:\/\/cloud\.frameos\.net'/)
+  assert.doesNotMatch(logged, /pk_secret|index=3/)
 })

@@ -308,7 +308,7 @@ proc jsFetchText(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
     return nimStringToJS(ctx, boundedGetContent(urlStr, maxBytes = jsFetchMaxBytes(e)))
   except CatchableError as err:
     if e != nil:
-      frameos_apps.logError(e.owner, "JS app fetchText failed: " & err.msg)
+      frameos_apps.logError(e.owner, "JS app fetchText failed: " & redactedUrlsIn(err.msg))
     return nimStringToJS(ctx, "")
 
 proc storeTransientImageJson(runtime: JsAppRuntime, image: Image): JsonNode
@@ -421,9 +421,14 @@ proc jsHttpRequest(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVa
     else:
       response["body"] = %*resBody
   except CatchableError as err:
-    response["error"] = %*err.msg
+    # The request's URL is the scene's and may carry a key or a share token;
+    # the client's own errors name its origin only (utils/redacted_url.nim),
+    # and anything else that quotes one is cut down here, before the text
+    # reaches the log or an app that draws it.
+    let message = redactedUrlsIn(err.msg)
+    response["error"] = %*message
     if e != nil:
-      frameos_apps.logError(e.owner, "JS app httpRequest failed: " & err.msg)
+      frameos_apps.logError(e.owner, "JS app httpRequest failed: " & message)
   return nimStringToJS(ctx, $response)
 
 const DecoderFits = ["cover", "contain", "stretch"]
@@ -573,8 +578,10 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
         if metadata.hasKey(key):
           response[key] = metadata[key]
   except CatchableError as err:
-    response["error"] = %*err.msg
-    frameos_apps.logError(e.owner, "JS app fetchImage failed: " & err.msg)
+    # As in httpRequest: no URL past its origin in the text an app may draw.
+    let message = redactedUrlsIn(err.msg)
+    response["error"] = %*message
+    frameos_apps.logError(e.owner, "JS app fetchImage failed: " & message)
   return nimStringToJS(ctx, $response)
 
 proc assetsRoot(e: JsAppEvalEnv): string =

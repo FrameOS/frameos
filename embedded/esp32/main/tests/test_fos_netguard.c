@@ -253,6 +253,52 @@ static void test_url_parser(void)
 }
 
 /* --------------------------------------------------------------------- */
+/* What a log line may show of a URL                                       */
+
+static void expect_origin(const char *url, const char *want)
+{
+    char out[FOS_NETGUARD_LOG_URL_LEN];
+    g_checks++;
+    fos_netguard_url_origin(url, out, sizeof(out));
+    if (strcmp(out, want) != 0) {
+        g_failures++;
+        printf("FAIL origin %-52s got \"%s\", want \"%s\"\n", url ? url : "(null)", out, want);
+    }
+}
+
+static void test_url_origin(void)
+{
+    /* A Photos share link: the token is in the path, the photo in the query. */
+    expect_origin("https://cloud.frameos.net/api/photos/shared/pk_abc/file?path=beach%2Fa.jpg",
+                  "https://cloud.frameos.net");
+    expect_origin("HTTP://Example.COM:8080/x?key=secret#frag", "http://example.com:8080");
+    expect_origin("http://user:pa@ss@192.168.1.1:8123/api", "http://192.168.1.1:8123");
+    expect_origin("rtsp://admin:hunter2@cam.local/stream", "rtsp://cam.local");
+    expect_origin("http://[fe80::1]:8080/x", "http://[fe80::1]:8080");
+    expect_origin("https://[2001:db8::1]/", "https://[2001:db8::1]");
+    expect_origin("https://example.com?token=1", "https://example.com");
+    expect_origin("http://example.com:/x", "http://example.com");
+
+    expect_origin(NULL, FOS_NETGUARD_INVALID_URL);
+    expect_origin("", FOS_NETGUARD_INVALID_URL);
+    expect_origin("example.com/path?key=1", FOS_NETGUARD_INVALID_URL); /* no scheme */
+    expect_origin("pk_abc", FOS_NETGUARD_INVALID_URL);
+    expect_origin("://host/x", FOS_NETGUARD_INVALID_URL);
+    expect_origin("https:///pk_abc", FOS_NETGUARD_INVALID_URL);  /* empty host */
+    expect_origin("https://user:secret@/x", FOS_NETGUARD_INVALID_URL);
+    expect_origin("https://host:80x/", FOS_NETGUARD_INVALID_URL);
+    expect_origin("https://[::1/", FOS_NETGUARD_INVALID_URL);
+    expect_origin("https://[::1]x/", FOS_NETGUARD_INVALID_URL);
+    expect_origin("https://sec ret/", FOS_NETGUARD_INVALID_URL);
+    expect_origin("data:image/png;base64,iVBOR?u=http://x/", FOS_NETGUARD_INVALID_URL);
+
+    /* A small buffer truncates the origin; nothing past the host appears. */
+    char small[12];
+    fos_netguard_url_origin("https://example.com/pk_abc", small, sizeof(small));
+    CHECK(strcmp(small, "https://exa") == 0, "truncated origin, got \"%s\"", small);
+}
+
+/* --------------------------------------------------------------------- */
 /* The policy as a whole                                                   */
 
 static void expect_allowed(const char *url)
@@ -413,6 +459,7 @@ int main(void)
     test_ipv6_public();
     test_ipv6_malformed_is_private();
     test_url_parser();
+    test_url_origin();
     test_policy_off_allows_everything();
     test_policy_on_blocks_literals();
     test_exemptions();

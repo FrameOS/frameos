@@ -87,7 +87,7 @@ proc serverLoop() {.thread.} =
       # Same server, different origin as far as the URL is concerned.
       respond(client, "HTTP/1.1 302 Found\r\nLocation: http://localhost:" &
         $int(serverPort) & "/echo-auth\r\nContent-Length: 0\r\n\r\n")
-    of "/redirect-loop":
+    of "/redirect-loop", "/redirect-loop?token=pk_secret":
       respond(client, "HTTP/1.1 302 Found\r\nLocation: /redirect-loop\r\nContent-Length: 0\r\n\r\n")
     of "/big":
       respond(client, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n" & "x".repeat(1000))
@@ -141,6 +141,34 @@ suite "bounded http client":
   test "gives up on redirect loops":
     expect HttpRequestError:
       discard boundedGetContent(baseUrl() & "/redirect-loop")
+
+  # Request errors reach scene JS, the log and (through an app's error
+  # panel) the screen; a URL's path and query can be a share token or a key.
+  test "a request error names the URL by its origin only":
+    try:
+      discard boundedGetContent(baseUrl() & "/redirect-loop?token=pk_secret")
+      check false
+    except HttpRequestError as e:
+      check e.msg == "Too many HTTP redirects fetching " & baseUrl()
+    for (url, shown) in [("ftp://user:pw@example.com/x?key=pk_secret", "ftp://example.com"),
+                         (baseUrl() & "/a b?key=pk_secret", baseUrl()),
+                         ("pk_secret", InvalidUrlText)]:
+      try:
+        discard boundedRequestWithHeaders(url)
+        check false
+      except ValueError as e:
+        check e.msg.endsWith(shown)
+        check "pk_secret" notin e.msg
+
+  test "the embedded and wasm request errors name the URL by its origin only":
+    # boundedRequestBuffer / openHttpBodyStream on those targets raise
+    # exactly these texts; the native build cannot reach those branches.
+    let url = "https://user:pw@cloud.frameos.net/api/photos/shared/pk_secret/photo?index=3"
+    check httpRequestFailedMessage(url) == "HTTP request failed: https://cloud.frameos.net"
+    check httpRequestFailedMessage(url, "connect failed: ESP_ERR_HTTP_CONNECT") ==
+      "HTTP request failed: https://cloud.frameos.net (connect failed: ESP_ERR_HTTP_CONNECT)"
+    check renderDeadlineRefusalMessage(url) ==
+      "HTTP request refused: the render's wall-clock deadline has passed (https://cloud.frameos.net)"
 
   test "raises HttpRequestError on 4xx":
     expect HttpRequestError:
