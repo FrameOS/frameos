@@ -71,7 +71,9 @@ partitions_4mb.csv        4MB: nvs + phy + factory app + 512K state; no OTA
 partitions.csv            8MB: nvs + otadata + phy + ota_0/ota_1 (3520K each) + 1M state
 partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (4032K each) + 8M state
 partitions_ota_32mb.csv   32MB: nvs + otadata + ota_0/ota_1 (4032K each) + 24M state
-build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/
+build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcache/, then
+                          tools/fold_nim_inlines.py: one copy of each Nim inline helper
+                          instead of one per C file (~30 KB; docs/esp32-image-size.md)
 main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
                           header carries its command line). The netguard, local network access code
                           (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), SD probe, board,
