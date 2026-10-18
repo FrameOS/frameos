@@ -361,6 +361,32 @@ async def test_two_uploads_of_one_photo_share_one_object(async_client, db):
 
 
 @pytest.mark.asyncio
+async def test_an_upload_loses_its_location_and_camera_metadata(async_client, db):
+    """GPS, camera, XMP and what follows the image go before anything is
+    stored; the turn stays (docs/photos.md "POST /api/photos/upload"). The
+    object is named by the hash of what is left."""
+    original = (REPO_ROOT / "docs" / "photo-metadata-fixtures" / "exif-gps.jpg").read_bytes()
+    clean = photos_utils.without_private_metadata(original, "phone.jpg")
+    assert clean != original and b"FixtureCam" not in clean
+    response = await upload(async_client, "Trip", "phone.jpg", original)
+    assert response.status_code == 200, response.text
+    entry = response.json()["entry"]
+    assert (entry["size"], entry["width"], entry["height"]) == (len(clean), 16, 24)
+    assert await read_file(async_client, "Trip/phone.jpg") == clean
+    row = db.query(PhotoEntry).filter(PhotoEntry.kind == "file").one()
+    digest = hashlib.sha256(clean).hexdigest()
+    assert (row.sha256, row.object_key, row.size_bytes) == (digest, f"photos/{digest}", len(clean))
+    assert object_file(clean).is_file() and not object_file(original).exists()
+    with Image.open(io.BytesIO(clean)) as image:
+        assert image.getexif().get(0x0112) == 6
+        assert not image.getexif().get_ifd(0x8825)
+
+    # A file that is not a JPEG, PNG or WebP is stored as it came.
+    assert (await upload(async_client, "Trip", "notes.txt", b"lat 59.43", upload_id="upload-0002")).status_code == 200
+    assert await read_file(async_client, "Trip/notes.txt") == b"lat 59.43"
+
+
+@pytest.mark.asyncio
 async def test_upload_limits(async_client, monkeypatch):
     monkeypatch.setattr(photos_utils, "MAX_UPLOAD_BYTES", 16)
     response = await upload(async_client, "", "a.jpg", b"x" * 10, complete=0)

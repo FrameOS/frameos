@@ -4,7 +4,7 @@
 // scan gate's consequences (422, the hit row, the suspension, every share
 // link 404).
 import { createHash, generateKeyPairSync } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq, sql } from "drizzle-orm";
@@ -42,6 +42,7 @@ import { GET as getStatus } from "../../../app/api/photos/status/route";
 import { GET as getThumb } from "../../../app/api/photos/thumb/route";
 import { POST as postUpload } from "../../../app/api/photos/upload/route";
 import { objectStore } from "../../lib/object-store";
+import { stripPhotoMetadataBytes } from "../../lib/photos/metadata";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
 import { hashSecret } from "../../lib/secrets";
@@ -425,6 +426,56 @@ describe("photo library: uploads", () => {
     const text = await upload("", "notes.jpg", Buffer.from("just some text, not an image at all"));
     expect(text.status).toBe(415);
     expect(await text.json()).toMatchObject({ error: "unsupported_type" });
+  it("takes location and camera metadata out before storing, whole or in chunks", async () => {
+    const accountId = await signIn();
+    // A phone's photo from the strip's corpus (docs/photo-metadata-fixtures.json).
+    const phone = readFileSync(join(__dirname, "..", "..", "..", "..", "..", "..", "docs", "photo-metadata-fixtures", "exif-gps.jpg"));
+    const clean = (await stripPhotoMetadataBytes(phone)).body as Buffer;
+    expect(clean.equals(phone)).toBe(false);
+
+    const whole = await upload("Trip", "whole.jpg", phone);
+    expect(whole.status).toBe(200);
+    // Still turned 6: the sides swap the way a browser shows it.
+    expect(((await whole.json()) as { entry: Record<string, unknown> }).entry).toMatchObject({
+      height: 24,
+      size: clean.length,
+      width: 16,
+    });
+    const half = Math.floor(phone.length / 2);
+    const chunk = (offset: number, part: Buffer, complete: boolean) =>
+      postUpload(
+        postBytes("/api/photos/upload", {
+          complete: complete ? "1" : "0",
+          filename: "chunked.jpg",
+          offset: String(offset),
+          path: "Trip",
+          upload_id: "metadata-chunks",
+        }, part),
+      );
+    expect((await chunk(0, phone.subarray(0, half), false)).status).toBe(200);
+    const done = await chunk(half, phone.subarray(half), true);
+    expect(done.status).toBe(200);
+    expect(((await done.json()) as { entry: Record<string, unknown> }).entry).toMatchObject({ size: clean.length });
+
+    for (const name of ["whole.jpg", "chunked.jpg"]) {
+      const file = await getFile(get(`/api/photos/file?path=Trip%2F${name}`));
+      expect(Buffer.from(await file.arrayBuffer()).equals(clean)).toBe(true);
+    }
+    // The row's hash is of the stored bytes.
+    const digest = createHash("sha256").update(clean).digest("hex");
+    const rows = await db
+      .select({ sha256: photoEntries.sha256, size: photoEntries.sizeBytes })
+      .from(photoEntries)
+      .where(and(eq(photoEntries.accountId, accountId), eq(photoEntries.kind, "file")));
+    expect(rows).toEqual([
+      { sha256: digest, size: clean.length },
+      { sha256: digest, size: clean.length },
+    ]);
+    // Neither the chunks nor the clean copy stay on the disk.
+    const parked = join(process.env.FRAMEOS_PHOTO_UPLOAD_DIR ?? "", accountId.toLowerCase());
+    expect(existsSync(parked) ? readdirSync(parked) : []).toEqual([]);
+  });
+
     // BMP is playable on a frame but the cloud only stores what it can scan.
     const bmp = Buffer.concat([Buffer.from("BM"), Buffer.alloc(60, 1)]);
     expect((await upload("", "old.bmp", bmp)).status).toBe(415);

@@ -3,6 +3,7 @@ import { jsonError, readBoundedJsonObject } from "../../../../src/lib/device-flo
 import { photoOwnerContext, withPhotoErrors } from "../../../../src/lib/photos/http";
 import { scanIncomingPhoto } from "../../../../src/lib/photos/intake";
 import { PhotoError, photoFileObjects, replacePhotoFile } from "../../../../src/lib/photos/library";
+import { stripPhotoMetadataBytes } from "../../../../src/lib/photos/metadata";
 import { parsePhotoPath } from "../../../../src/lib/photos/paths";
 import { parseResizeOptions, resizePhotoBytes } from "../../../../src/lib/photos/resize";
 import { makePhotoThumbnail } from "../../../../src/lib/photos/thumbnail";
@@ -49,14 +50,17 @@ export async function POST(request: NextRequest) {
     if (scanned.response) {
       return scanned.response;
     }
-    const thumbnail = await makePhotoThumbnail(resized.bytes);
+    // sharp writes no metadata here; the strip is the same rule as an upload's.
+    const clean = await stripPhotoMetadataBytes(resized.bytes);
+    const body = clean.body as Buffer;
+    const thumbnail = await makePhotoThumbnail(body);
     const entry = await replacePhotoFile(db, accountId, path, {
-      body: resized.bytes,
+      body,
       contentType: resized.contentType,
       extension: resized.extension,
       height: resized.height,
-      sha256: scanned.sha256,
-      size: resized.bytes.length,
+      sha256: clean.sha256 ?? scanned.sha256,
+      size: body.length,
       thumbnail,
       width: resized.width,
     });
