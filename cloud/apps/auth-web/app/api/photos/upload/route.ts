@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { detectImageContentType } from "../../../../src/lib/store";
 import { jsonError, readBoundedBytes } from "../../../../src/lib/device-flow";
+import { logWarn } from "../../../../src/lib/log";
 import { photoOwnerContext, withPhotoErrors } from "../../../../src/lib/photos/http";
 import { imageDimensions } from "../../../../src/lib/photos/image-info";
 import { scanIncomingPhoto } from "../../../../src/lib/photos/intake";
+import { stripPhotoMetadataBytes, stripPhotoMetadataFile } from "../../../../src/lib/photos/metadata";
 import {
   acceptedPhotoContentTypes,
   assertPhotoQuota,
@@ -22,6 +24,7 @@ import {
   type PhotoUploadFile,
   discardPhotoUpload,
   isValidPhotoUploadId,
+  photoUploadCleanPath,
   photoUploadFile,
   readPhotoUploadHead,
   writePhotoUploadChunk,
@@ -35,10 +38,12 @@ export const runtime = "nodejs";
 // Chunks wait on this host's disk (src/lib/photos/uploads.ts). Nothing
 // reaches the object store until the whole file is in, is one of the four
 // accepted image types (sniffed), fits the quota and has passed every
-// configured scanner. Its thumbnail is made here too (src/lib/photos/thumbnail.ts).
-// A chunked file is worked on where it lies: hashed, scanned, thumbnailed
-// and streamed to the store from disk, so a 250 MiB photo is never one
-// buffer in this process.
+// configured scanner. Then its location and camera metadata go
+// (src/lib/photos/metadata.ts): the scan sees the bytes as sent, the store,
+// the size, the dimensions and the thumbnail (src/lib/photos/thumbnail.ts)
+// see what is left. A chunked file is worked on where it lies: hashed,
+// scanned, stripped into a second file, thumbnailed and streamed to the store
+// from disk, so a 250 MiB photo is never one buffer in this process.
 export async function POST(request: NextRequest) {
   const context = await photoOwnerContext(request, { kind: "upload" });
   if (context.response) {
@@ -121,7 +126,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      return await storeFinished(file, folder);
+      return await storeFinished(file, folder, uploadId);
     } finally {
       if (!Buffer.isBuffer(file)) {
         await discardPhotoUpload(accountId, uploadId);
@@ -129,7 +134,7 @@ export async function POST(request: NextRequest) {
     }
   });
 
-  async function storeFinished(file: Buffer | PhotoUploadFile, folder: string) {
+  async function storeFinished(file: Buffer | PhotoUploadFile, folder: string, uploadId: string) {
     const size = Buffer.isBuffer(file) ? file.length : file.size;
     if (size === 0) {
       return jsonError("file_empty", 400);
@@ -143,21 +148,37 @@ export async function POST(request: NextRequest) {
     }
     await assertPhotoQuota(db, accountId, size);
 
+    // The hash list holds hashes of files as they are passed around: the
+    // scan sees the upload as it came.
     const source = Buffer.isBuffer(file) ? file : file.path;
     const scanned = await scanIncomingPhoto(db, request, { accountId, email }, source, contentType);
     if (scanned.response) {
       return scanned.response;
     }
-    const dimensions = imageDimensions(head, contentType);
-    const thumbnail = await makePhotoThumbnail(source);
+    const clean = Buffer.isBuffer(file)
+      ? await stripPhotoMetadataBytes(file)
+      : await stripPhotoMetadataFile(file, photoUploadCleanPath(accountId, uploadId));
+    if (clean.problem) {
+      // Stored as it came: never worse than before the strip existed.
+      logWarn("photos.metadata_kept", { contentType, problem: clean.problem });
+    }
+    const { body } = clean;
+    const cleanHead = !clean.changed
+      ? head
+      : Buffer.isBuffer(body)
+        ? body
+        : await readPhotoUploadHead(body, maxPhotoChunkBytes);
+    const dimensions = imageDimensions(cleanHead, contentType);
+    const thumbnail = await makePhotoThumbnail(Buffer.isBuffer(body) ? body : body.path);
     const entry = await storePhotoFile(db, accountId, {
-      body: file,
-      size,
+      body,
+      size: clean.size,
       contentType,
       folder,
       height: dimensions?.height ?? null,
       name: filename,
-      sha256: scanned.sha256,
+      // The stored bytes' digest, like the backend's object key.
+      sha256: clean.sha256 ?? scanned.sha256,
       thumbnail,
       width: dimensions?.width ?? null,
     });

@@ -23,6 +23,7 @@ import datetime
 import hashlib
 import io
 import json
+import logging
 import mimetypes
 import os
 import random
@@ -44,6 +45,7 @@ from sqlalchemy.orm import Session
 from app.config import DEFAULT_DATABASE_URL, get_bool_env
 from app.models.photo_entry import PhotoEntry
 from app.models.photo_share import PhotoShare
+from app.utils.photo_metadata import strip_photo_metadata
 from app.utils.object_store import (
     DiskObjectStore,
     ObjectStore,
@@ -51,6 +53,9 @@ from app.utils.object_store import (
     StoreError,
     s3_settings_from_env,
 )
+
+log = logging.getLogger(__name__)
+
 # A photographer's full-size file: 250 MiB, the same on the cloud
 # (cloud/apps/auth-web/src/lib/photos/library.ts maxPhotoUploadBytes).
 MAX_UPLOAD_BYTES = 250 * 1024 * 1024
@@ -866,6 +871,18 @@ def take_upload(project_id: int, upload_id: str) -> bytes:
         _unlink_quietly(claimed)
 
 
+def without_private_metadata(data: bytes, name: str) -> bytes:
+    """The JPEG, PNG or WebP (sniffed, whatever the name says) without EXIF,
+    XMP, text chunks or what follows the image, its orientation kept
+    (app/utils/photo_metadata.py, docs/photos.md "POST /api/photos/upload").
+    Anything else comes back as it is; so does a photo whose structure
+    cannot be followed, with a warning: never worse than storing it whole."""
+    stripped = strip_photo_metadata(data)
+    if stripped.problem:
+        log.warning("Photo %s kept its metadata, its %s structure could not be followed: %s", name, stripped.format, stripped.problem)
+    return stripped.data
+
+
 def store_file(
     db: Session,
     project_id: int,
@@ -878,7 +895,10 @@ def store_file(
 ) -> dict[str, Any]:
     """Store one file: the objects first (the file, its thumbnail; an object
     already there is left alone, two uploads of one photo share it), then
-    the row, with a " (2)" name when the name is taken."""
+    the row, with a " (2)" name when the name is taken. A photo loses its
+    location and camera metadata first (without_private_metadata), so the
+    object, its hash, size and thumbnail are of what is left."""
+    data = without_private_metadata(data, name)
     digest = hashlib.sha256(data).hexdigest()
     object_key = file_object_key(digest)
     content_type = content_type_for(name)
@@ -1188,6 +1208,8 @@ def resize_photo(db: Session, project_id: int, store: ObjectStore, path: str, op
     stored = fetch_object(store, row.object_key)
     data = stored.data if stored.data is not None else (stored.path.read_bytes() if stored.path else b"")
     resized, target_format, width, height = resize_image_bytes(data, base_name(path), options)
+    # Pillow writes no EXIF or text here; the strip is the same rule as an upload's.
+    resized = without_private_metadata(resized, base_name(path))
     digest = hashlib.sha256(resized).hexdigest()
     object_key = file_object_key(digest)
     new_name = base_name(path)

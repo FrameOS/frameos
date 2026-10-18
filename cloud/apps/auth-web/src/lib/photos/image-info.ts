@@ -150,7 +150,19 @@ export function exifOrientation(segment: Buffer): number | undefined {
   if (segment.length < 14 || segment.toString("latin1", 0, 6) !== "Exif\0\0") {
     return undefined;
   }
-  const tiff = segment.subarray(6);
+  return tiffOrientation(segment.subarray(6));
+}
+
+/**
+ * The orientation tag (1-8) in IFD0 of a bare EXIF TIFF block (what follows
+ * "Exif\0\0" in a JPEG, and a PNG eXIf or WebP EXIF chunk), if any. The
+ * backend's app/utils/photo_metadata.py tiff_orientation is this, line for
+ * line: the metadata strip keeps the orientation both read.
+ */
+export function tiffOrientation(tiff: Buffer): number | undefined {
+  if (tiff.length < 8) {
+    return undefined;
+  }
   const byteOrder = tiff.toString("latin1", 0, 2);
   const little = byteOrder === "II";
   if (!little && byteOrder !== "MM") {

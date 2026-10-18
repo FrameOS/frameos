@@ -49,11 +49,20 @@ function accountDirectory(accountId: string) {
   return join(photoUploadDirectory(), accountId.toLowerCase());
 }
 
-function uploadFile(accountId: string, uploadId: string) {
+function uploadFile(accountId: string, uploadId: string, suffix = ".part") {
   if (!isValidPhotoUploadId(uploadId)) {
     throw new Error(`Invalid upload id: ${JSON.stringify(uploadId)}`);
   }
-  return join(accountDirectory(accountId), `${uploadId}.part`);
+  return join(accountDirectory(accountId), `${uploadId}${suffix}`);
+}
+
+/**
+ * Where a finished upload's copy without its metadata is written
+ * (metadata.ts), next to the chunks: discardPhotoUpload removes both, and a
+ * copy a crash left behind goes with the hour like any parked file.
+ */
+export function photoUploadCleanPath(accountId: string, uploadId: string): string {
+  return uploadFile(accountId, uploadId, ".clean");
 }
 
 async function fileState(path: string): Promise<{ mtimeMs: number; size: number } | undefined> {
@@ -159,6 +168,7 @@ export async function readPhotoUpload(
 
 export async function discardPhotoUpload(accountId: string, uploadId: string): Promise<void> {
   await rm(uploadFile(accountId, uploadId), { force: true });
+  await rm(photoUploadCleanPath(accountId, uploadId), { force: true });
 }
 
 /** The account's unfinished uploads that are still within the hour. */
@@ -171,6 +181,10 @@ export async function pendingPhotoUploadCount(accountId: string, now = Date.now(
   }
   let count = 0;
   for (const name of names) {
+    // One upload is its .part; a .clean beside it is the same upload.
+    if (!name.endsWith(".part")) {
+      continue;
+    }
     const state = await fileState(join(accountDirectory(accountId), name)).catch(() => undefined);
     if (state && now - state.mtimeMs <= photoUploadTtlMs) {
       count += 1;

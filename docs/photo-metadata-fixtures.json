@@ -1,0 +1,186 @@
+{
+  "_comment": "The photo metadata strip's conformance corpus (docs/photos.md). Both app/utils/photo_metadata.py and cloud/apps/auth-web/src/lib/photos/metadata.ts must turn each input into the bytes with outputSha256. Written by tools/generate_photo_metadata_fixtures.py; orientation is what the output must still say (null: upright, no EXIF left).",
+  "cases": [
+    {
+      "name": "exif-gps.jpg",
+      "description": "A phone's JPEG: EXIF with GPS and serial, XMP, IPTC, Ducky and a comment go; JFIF and ICC stay; orientation 6 kept",
+      "inputSha256": "bccfb3c0de69e9edc74897c6fd10fb5096d49ccbfbed1be3e5f4bf377e428715",
+      "outputSha256": "8087d0d541cf0ac5fe4f9358b37e1b214764741e1d1d0b221c451d0d3b2cd1f4",
+      "changed": true,
+      "malformed": false,
+      "truncated": false,
+      "orientation": 6,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "xmpmeta",
+        "secret"
+      ]
+    },
+    {
+      "name": "progressive.jpg",
+      "description": "Progressive JPEG, big-endian EXIF and a comment between scans: every scan kept, orientation 8 kept",
+      "inputSha256": "28cb5ea406220bf20333d59f3dbc91d5dc77ab293067d0ab39ebc655d22e5dfc",
+      "outputSha256": "817f980e7270d8e46aacd93ee1bd34fa1036dc86f8fcbe776d2447b28873eefa",
+      "changed": true,
+      "malformed": false,
+      "truncated": false,
+      "orientation": 8,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "secret"
+      ]
+    },
+    {
+      "name": "mpf-trailer.jpg",
+      "description": "Upright EXIF, MPF and FlashPix APP2, a second image and a video after EOI: all gone, no EXIF left",
+      "inputSha256": "328960ca29ec200d3401c475e06d8809ef10d630b7b09119a785cff68ed5dd36",
+      "outputSha256": "6a60887e4d68e68d31df0c97ab37f8c8cd3c63da1bb1501c65d25b545d803fbd",
+      "changed": true,
+      "malformed": false,
+      "truncated": false,
+      "orientation": null,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "secret"
+      ]
+    },
+    {
+      "name": "cmyk-adobe.jpg",
+      "description": "CMYK JPEG without JFIF: Adobe APP14 stays, the minimal EXIF goes right after SOI, orientation 5",
+      "inputSha256": "da94c72f475ec1301f91a766ca16c0b63ede40a3650a41bd35868df568a3f13f",
+      "outputSha256": "2064d646fdb7a022dde28e8220065cfec7b1b20d3596e20dd0f60cd26ec62cd2",
+      "changed": true,
+      "malformed": false,
+      "truncated": false,
+      "orientation": 5,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567"
+      ]
+    },
+    {
+      "name": "plain.jpg",
+      "description": "Nothing to take out: the same bytes",
+      "inputSha256": "6a60887e4d68e68d31df0c97ab37f8c8cd3c63da1bb1501c65d25b545d803fbd",
+      "outputSha256": "6a60887e4d68e68d31df0c97ab37f8c8cd3c63da1bb1501c65d25b545d803fbd",
+      "changed": false,
+      "malformed": false,
+      "truncated": false,
+      "orientation": null,
+      "secrets": []
+    },
+    {
+      "name": "truncated.jpg",
+      "description": "Cut short in the scan: metadata gone, the scan kept up to where the file ends",
+      "inputSha256": "9eda5f5f54400264e2e672097972d8395832b95bd30a39b239a84b1cb3dd0e26",
+      "outputSha256": "d545616fc58fad805d6ab30a05b892d4c5e72222c69ce6d30a2bf66ae2d846db",
+      "changed": true,
+      "malformed": false,
+      "truncated": true,
+      "orientation": 6,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "xmpmeta",
+        "secret"
+      ]
+    },
+    {
+      "name": "malformed.jpg",
+      "description": "A stray byte between header segments: cannot be followed, kept as it came",
+      "inputSha256": "a71d4f2eeb92d145450769757f32c37d918d7db8e09a5f46234625b6bdee1269",
+      "outputSha256": "a71d4f2eeb92d145450769757f32c37d918d7db8e09a5f46234625b6bdee1269",
+      "changed": false,
+      "malformed": true,
+      "truncated": false,
+      "orientation": 6,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567"
+      ]
+    },
+    {
+      "name": "exif-text.png",
+      "description": "PNG: eXIf, tEXt, zTXt, iTXt, tIME and the trailer go; iCCP and pHYs stay; orientation 6 kept",
+      "inputSha256": "d2e2b17bed8ab67d631ecc59e3d8e24c2067285870e8c7e17775f614daf0afd9",
+      "outputSha256": "fd9825b76db3d491fd6c21714d020d3108f909869412be1ab8542c39a942d03b",
+      "changed": true,
+      "malformed": false,
+      "truncated": false,
+      "orientation": 6,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "xmpmeta",
+        "secret"
+      ]
+    },
+    {
+      "name": "plain.png",
+      "description": "Nothing to take out: the same bytes",
+      "inputSha256": "e74d924fb3f54fc9edd2b34a2fd4e73c741f1c8a6bbcc494dd1171e871a09251",
+      "outputSha256": "e74d924fb3f54fc9edd2b34a2fd4e73c741f1c8a6bbcc494dd1171e871a09251",
+      "changed": false,
+      "malformed": false,
+      "truncated": false,
+      "orientation": null,
+      "secrets": []
+    },
+    {
+      "name": "exif-xmp.webp",
+      "description": "WebP: XMP goes, EXIF becomes the minimal block, VP8X keeps ICC and EXIF flags",
+      "inputSha256": "405656db43a92a8c02424ab5559659390555f9d497ba992c37387a86eff0b100",
+      "outputSha256": "123380c21741c5b1e99a9e896afee03b75962d8851a01b047c4c3f25774aea77",
+      "changed": true,
+      "malformed": false,
+      "truncated": false,
+      "orientation": 6,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "xmpmeta"
+      ]
+    },
+    {
+      "name": "upright.webp",
+      "description": "Lossless WebP: upright EXIF and XMP go with their flags, the bytes after the RIFF too",
+      "inputSha256": "e9638496775a4b308e46cef6cf69c47e89c6ca5ef0c6b6dd14486c98aa15d562",
+      "outputSha256": "3a89b77c65819b1ba32b3f2a8c19a2127ff8cb515f31509f961accd297f48e36",
+      "changed": true,
+      "malformed": false,
+      "truncated": false,
+      "orientation": null,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "xmpmeta",
+        "secret"
+      ]
+    },
+    {
+      "name": "plain.webp",
+      "description": "Simple WebP: the same bytes",
+      "inputSha256": "475c61bae70d80dac0f074e9048c392db5695f2dd1aa472a62680ea07c1506c0",
+      "outputSha256": "475c61bae70d80dac0f074e9048c392db5695f2dd1aa472a62680ea07c1506c0",
+      "changed": false,
+      "malformed": false,
+      "truncated": false,
+      "orientation": null,
+      "secrets": []
+    },
+    {
+      "name": "plain.gif",
+      "description": "GIF is never touched",
+      "inputSha256": "1681b04ae6223ff8afd058a5e6ac6c9294243ff766a9bf64fdf61313db8f4726",
+      "outputSha256": "1681b04ae6223ff8afd058a5e6ac6c9294243ff766a9bf64fdf61313db8f4726",
+      "changed": false,
+      "malformed": false,
+      "truncated": false,
+      "orientation": null,
+      "secrets": []
+    }
+  ]
+}

@@ -141,6 +141,23 @@ Content-Type: application/octet-stream
   answers 429 `too_many_uploads` (16 unfinished uploads per account) and 507
   `entry_limit_reached`.
 
+**Metadata is taken out before a photo is stored**, on both planes, so a
+share link never hands out where a photo was taken. A JPEG, PNG or WebP
+(sniffed from the bytes) loses its EXIF (GPS, camera and lens, serial
+numbers, times), XMP, IPTC, comments and text chunks, and whatever follows
+the image (a phone's second image or motion-photo video). Kept: the pixels
+exactly as sent (nothing is re-encoded), the ICC color profile, JFIF, the
+Adobe segment a CMYK JPEG needs, and the EXIF orientation, as a minimal
+EXIF block with only that tag when it is not 1. GIFs and other files are
+stored as they are. A JPEG, PNG or WebP whose structure the server cannot
+follow is stored as it came, with a warning in the server log: an upload is
+never refused for it. The entry's `size`, the thumbnail and the stored bytes
+are those of the result; the cloud's scan sees the upload as it was sent.
+`app/utils/photo_metadata.py` and `src/lib/photos/metadata.ts` write the same
+bytes, pinned by `docs/photo-metadata-fixtures.json`
+(`tools/generate_photo_metadata_fixtures.py`). A resized photo is re-encoded
+without metadata anyway.
+
 ### `GET /api/photos/thumb?path=<file>`
 
 A JPEG thumbnail, at most 512 px on the long side, turned by the photo's
@@ -435,7 +452,10 @@ agree with. The store is one of:
 
 There is no quota; `free_bytes` is the free space on the disk, `null` for a
 bucket. Uploads are at most 250 MiB each. Any file type can be stored; the
-content type comes from the name.
+content type comes from the name. A JPEG, PNG or WebP is stored without its
+location and camera metadata (`POST /api/photos/upload`): the SHA-256, the
+object key, the size and the thumbnail are of the bytes stored, so one photo
+uploaded twice with different metadata is still one object.
 
 ### Cloud
 
@@ -452,8 +472,11 @@ storage (default 1024) once its email is verified (a social login counts),
 and the smaller `FRAMEOS_CLOUD_MAX_UNVERIFIED_PHOTO_MB` (default 250) until
 then; at most 100 000 entries and 16 unfinished uploads.
 Unfinished uploads wait on the app server's disk (`FRAMEOS_PHOTO_UPLOAD_DIR`),
-never in the bucket, and a finished one is hashed, scanned, thumbnailed and
-streamed to the bucket from that file, never held whole in memory.
+never in the bucket, and a finished one is hashed and scanned as it was sent,
+written without its location and camera metadata to a second file beside it
+(`POST /api/photos/upload`), thumbnailed and streamed to the bucket from that
+file, never held whole in memory. The row's `sha256` is of the bytes stored;
+the hash list and a `photo_scan_hits` row use the upload's own.
 
 Revoking a link stops new listings and redirects at once. A frame that already
 holds a CDN address keeps it working until the photo is deleted.
@@ -478,7 +501,8 @@ option and shows the photo ungraded, with the automatic fit as before.
 ## Scanning (cloud)
 
 Every upload is scanned before anything is stored, by every scanner that is
-configured (the thumbnail is made from the scanned bytes):
+configured, on the bytes as sent (the stored photo and its thumbnail are
+those bytes with their metadata taken out):
 
 1. **Hash list**: the SHA-256 against `photo_blocked_hashes`, always on.
    Admins add hashes.
