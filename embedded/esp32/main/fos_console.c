@@ -929,7 +929,7 @@ static int cmd_wifi_scan(int argc, char **argv)
 
 static int cmd_render(int argc, char **argv)
 {
-    fos_client_render_now();
+    fos_client_render_fresh();
     printf("render triggered\n");
     return 0;
 }
@@ -1337,7 +1337,7 @@ static int cmd_usb_api(int argc, char **argv)
     }
 
     if (strcmp(subcommand, "render") == 0) {
-        fos_client_render_now();
+        fos_client_render_fresh();
         usb_api_ok(subcommand);
         return 0;
     }

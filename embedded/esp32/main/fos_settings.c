@@ -196,8 +196,9 @@ void fos_settings_cloud_scope_granted(bool granted)
          * kept it until the next interval. Ask for a pass: it pulls first
          * (the request above), then renders; the panel skips its refresh
          * when the picture comes out the same. Every later boot applies
-         * the cache this pull writes and does not come through here. */
-        fos_client_render_now();
+         * the cache this pull writes and does not come through here. Fresh:
+         * every scene inside a split must run with the keys too. */
+        fos_client_render_fresh();
     }
 }
 

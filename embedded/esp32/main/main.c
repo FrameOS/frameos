@@ -93,7 +93,7 @@ static void action_ota_now(void)
 
 static void action_render_now(void)
 {
-    fos_client_render_now();
+    fos_client_render_fresh();
 }
 
 static void log_bootup_event(bool online);

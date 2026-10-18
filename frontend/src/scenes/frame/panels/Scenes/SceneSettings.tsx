@@ -37,7 +37,9 @@ function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
 export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSettingsProps): JSX.Element {
   const { frameId, frameForm, convertingSceneId } = useValues(frameLogic)
   const { convertSceneToInterpreted } = useActions(frameLogic)
-  const { sceneIndex, scene, permissionRows, permissionApps } = useValues(sceneSettingsLogic({ frameId, sceneId }))
+  const { sceneIndex, scene, permissionRows, permissionApps, splitRhythm } = useValues(
+    sceneSettingsLogic({ frameId, sceneId })
+  )
   if (!scene || !sceneId) {
     return <></>
   }
@@ -89,10 +91,19 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
                 className={fieldClassName}
                 name="refreshInterval"
                 label={<SceneSettingsLabel>Refresh interval</SceneSettingsLabel>}
+                hint={splitRhythm ?? undefined}
                 tooltip={
-                  <>
-                    {refreshIntervalTooltip} Scene code reads it as <code>state.{REFRESH_INTERVAL_FIELD_NAME}</code>.
-                  </>
+                  splitRhythm !== null ? (
+                    <>
+                      The fastest this split renders. Each panel renders when its own scene is due, and the others keep
+                      their picture until their time comes; the split waits longer when no panel is due. Set a panel's
+                      own interval in its options. Rendering the frame by hand redraws every panel.
+                    </>
+                  ) : (
+                    <>
+                      {refreshIntervalTooltip} Scene code reads it as <code>state.{REFRESH_INTERVAL_FIELD_NAME}</code>.
+                    </>
+                  )
                 }
               >
                 <RefreshIntervalInput

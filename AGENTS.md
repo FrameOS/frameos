@@ -159,6 +159,20 @@
   run the AI evals above. Keep it free of Nim: the cloud prompt is tested for
   that.
 
+## Scenes inside scenes: `docs/scene-rhythm.md`
+
+- A scene drawn through a scene node (a split's panel) renders on its own
+  `refreshInterval`; one that is not due puts back a copy of what it drew
+  last time (`frameos/src/frameos/scene_rhythm.nim`, one module for the Pi,
+  the ESP32 and the preview). Copies are capped at a quarter of free render
+  memory (1 MiB at most on an ESP32); without one the panel runs again with
+  `FrameScene.repainting` set, which is the hook for exact repaints (#555).
+- A generated split's own interval is the fastest it renders, and it waits
+  longer when no panel is due. A `render` from outside the scene (API, cloud,
+  schedule, button, console, preview) redraws every panel: `event_loop.nim`
+  on Linux and in the preview, `fos_events.c` on the ESP32. Keep the two
+  rules alike.
+
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 
 - A Nim app that gets a repo JavaScript replacement (`data/immich` →

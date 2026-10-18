@@ -17,6 +17,7 @@ import frameos/events
 import frameos/planner
 import frameos/refresh_interval
 import frameos/runtime_diagnostics
+import frameos/scene_rhythm
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times, math
 import apps/apps
 
@@ -385,6 +386,10 @@ var allScenesLoaded = false
 var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var uploadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var lastInterpretedScenesLoadError = ""
+var sceneLoader*: proc (sceneId: SceneId): bool {.nimcall.}
+  ## Set on the ESP32, which keeps one scene resident (embedded_runtime.nim):
+  ## a scene node naming one that is not resident yet (a split's panel) asks
+  ## the firmware to read it off flash before the node's scene starts.
 
 proc interpretedScenesLoadError*(): string =
   ## Why the last attempt to read scenes.json(.gz) off the disk failed, or ""
@@ -425,6 +430,32 @@ proc diagnosticKeyword(node: DiagramNode): string =
   if node.data.hasKey("name") and node.data["name"].kind == JString:
     return node.data["name"].getStr()
   ""
+
+# -------------------------
+# Scene nodes on their own schedule
+# -------------------------
+
+proc runSceneNodeRender(child: FrameScene, exportedChild: ExportedScene,
+    context: ExecutionContext) {.noinline.} =
+  ## A scene node handling `render` (frameos/scene_rhythm.nim): the scene it
+  ## draws runs only when it is due, and otherwise its last picture goes back.
+  ## Its `nextSleep` is its own: inside a split, `logic/nextSleepDuration`
+  ## means "this panel next renders in N seconds" and never reaches the frame.
+  ##
+  ## No `finally`: a scene's runEvent catches every node's exception itself
+  ## (runEventInner), so nothing raises past it.
+  let given = context.image
+  let decision = rhythmVisit(child, given)
+  if decision == rdRestore:
+    rhythmRestore(child, given)
+    return
+  let parentSleep = context.nextSleep
+  context.nextSleep = -1
+  child.repainting = decision == rdRepaint
+  exportedChild.runEvent(child, context)
+  child.repainting = false
+  rhythmAfterRun(child, decision, given, context.image, context.nextSleep)
+  context.nextSleep = parentSleep
 
 # -------------------------
 # Core node runner
@@ -886,6 +917,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         # on the Pi and recurses on the ESP32. Logged once per run, then dropped.
         case takeDispatchBudget()
         of dvAllowed:
+          if eventName == "render":
+            # A scene asking to be drawn again means this one, also when it
+            # sits in a split and is not due (scene_rhythm.nim).
+            rhythmMarkDue(self)
           sendEvent(eventName, finalPayload, eoScene)
         of dvRefusedFirst:
           self.logger.log(%*{
@@ -1140,7 +1175,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         markRuntimeCheckpoint("scene:delegate", currentSceneId = self.id.string, contextEvent = context.event,
           nodeId = currentNodeId.int, nodeType = nodeType, keyword = checkpointKeyword,
           childSceneId = childScene.id.string)
-      exportedChild.runEvent(childScene, context)
+      if context.event == "render" and context.hasImage and not context.image.isNil:
+        runSceneNodeRender(childScene, exportedChild, context)
+      else:
+        exportedChild.runEvent(childScene, context)
     else:
       raise newException(Exception, "Unknown node type: " & nodeType)
 
@@ -1278,6 +1316,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     edges: @[],
     apps: exportedScene.apps,
     customEventOrigins: exportedScene.customEventOrigins,
+    refreshFollowsChildren: exportedScene.refreshFollowsChildren,
+    followInterval: -1,
     nextNodeIds: initTable[NodeId, NodeId](),
     appsByNodeId: initTable[NodeId, AppRoot](),
     eventListeners: initTable[string, seq[NodeId]](),
@@ -1488,6 +1528,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       elif uploadedScenes.hasKey(childSceneId):
         let interpretedExport = uploadedScenes[childSceneId]
         exportedChild = ExportedScene(interpretedExport)
+        isInterpretedChild = true
+      elif not sceneLoader.isNil and sceneLoader(childSceneId) and loadedScenes.hasKey(childSceneId):
+        exportedChild = ExportedScene(loadedScenes[childSceneId])
         isInterpretedChild = true
       else:
         raise newException(Exception,
@@ -1703,11 +1746,18 @@ proc runEvent*(self: FrameScene, context: ExecutionContext) =
   let armedHere = armRenderDeadline(resolvedRenderDeadlineMs(self.frameConfig))
   if armedHere:
     setDispatchBudget(resolvedDispatchBudget(self.frameConfig))
+  # The outermost render is a pass: embedded scenes decide against its start
+  # whether they are due (scene_rhythm.nim).
+  let rendering = context.event == "render"
+  let passStarted = rendering and rhythmEnterRender(self)
   try:
     runEventInner(self, context)
   finally:
+    if rendering:
+      rhythmLeaveRender(self, passStarted)
     # The run may have moved the interval: a setSceneState from a control
-    # panel, or the scene's own code assigning `state.refreshInterval`.
+    # panel, the scene's own code assigning `state.refreshInterval`, or (a
+    # generated split) the time until its first panel is due.
     self.syncRefreshInterval()
     if armedHere:
       disarmRenderDeadline()
@@ -1806,6 +1856,17 @@ proc parseHook*(s: string, i: var int, v: var SceneId) =
   parseHook(s, i, tmp)
   v = SceneId(tmp)
 
+proc parseHook*(s: string, i: var int, v: var SplitLayoutMarker) =
+  ## The layout itself is the editor's; the runtime only needs to know it is
+  ## there. Skipping it keeps the parsed layout out of a firmware that would
+  ## never read it.
+  eatSpace(s, i)
+  v.present = i < s.len and s[i] == '{'
+  skipValue(s, i)
+
+proc dumpHook*(s: var string, v: SplitLayoutMarker) =
+  s.add(if v.present: "{}" else: "null")
+
 proc parseHook*(s: string, i: var int, v: var Color) =
   var tmp: string
   parseHook(s, i, tmp)
@@ -1863,6 +1924,10 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     apps: if scene.apps.isNil: %*{} else: scene.apps,
     stateFields: refresh.fields,
     customEventOrigins: declaredCustomEventOrigins(scene.customEvents),
+    # A scene the split drawer generated draws nothing of its own that
+    # changes: it waits for its panels, but never renders more often than
+    # its own interval (scene_rhythm.nim).
+    refreshFollowsChildren: scene.settings != nil and scene.settings.splitScreenLayout.present,
     # Fields without an explicit access default to public for interpreted
     # scenes to keep older scenes.json exports controllable.
     publicStateFields: refresh.fields.filterIt(it.access != "private"),
@@ -1953,6 +2018,12 @@ proc replaceInterpretedScenesCache*(scenes: Table[SceneId, ExportedInterpretedSc
   loadedScenes = scenes
   allScenesLoaded = true
   lastInterpretedScenesLoadError = ""
+
+proc addInterpretedSceneToCache*(scene: FrameSceneInput) =
+  ## Alongside what is already resident: how the ESP32's one-scene-at-a-time
+  ## loader brings in the scenes a resident scene embeds (a split's panels),
+  ## through `sceneLoader`.
+  loadedScenes[scene.id] = buildInterpretedSceneExport(scene)
 
 proc loadInterpretedScenesForStartup*(): Table[SceneId, ExportedInterpretedScene] =
   ## `loadInterpretedScenesFromDisk` for callers that cannot afford to raise.

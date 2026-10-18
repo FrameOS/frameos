@@ -35,6 +35,7 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
 void frameos_nim_apply_service_settings(const char *json) { (void)json; }
 int frameos_nim_set_scene_catalog(const char *index_json) { (void)index_json; return 0; }
 int frameos_nim_load_scene(const char *scene_json) { (void)scene_json; return 0; }
+void frameos_nim_request_fresh_pass(void) {}
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
 {
     (void)pixel_format;

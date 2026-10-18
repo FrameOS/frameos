@@ -339,6 +339,33 @@ type
     ## Custom event name -> the origins its declaration opts into, on top of
     ## what every custom event gets (docs/events.md, "Custom events").
     customEventOrigins*: Table[string, set[EventOrigin]]
+    ## When this scene renders next, if it is drawn through a scene node
+    ## (frameos/scene_rhythm.nim); nil until the first such render.
+    rhythm*: SceneRhythm
+    ## A generated split: it draws nothing that changes with time, so it waits
+    ## until the first of its embedded scenes is due (`followInterval`, set
+    ## after each render; < 0 before the first), and never less than its own
+    ## interval (refresh_interval.syncRefreshInterval).
+    refreshFollowsChildren*: bool
+    followInterval*: float
+    ## True while this scene runs although it is not due: the device kept no
+    ## copy of what it drew last time, so it draws again only to put that
+    ## picture back. Whatever can answer from what it fetched or computed last
+    ## time (a node cache) should, rather than fetch or advance anew.
+    repainting*: bool
+
+  # The schedule of one scene drawn through a scene node, and the picture it
+  # left there (frameos/scene_rhythm.nim).
+  SceneRhythm* = ref object
+    dueAt*: float         ## monotonic seconds; 0 = due on the next pass
+    interval*: float      ## the wait its last due run set (sizes the slack)
+    stateKey*: int        ## hash of its state after its last run
+    visitPass*: int       ## the pass that last decided for it
+    scheduledPass*: int   ## the pass whose run set `dueAt`
+    runsThisPass*: bool   ## that pass found it due: it runs in every cell it draws
+    copyRefused*: bool    ## the last copy did not fit the budget (logged once)
+    copies*: seq[Image]   ## each cell it drew, as it left it, in the canvas's format
+    copyAt*: seq[int]     ## per copy, three: its canvas origin, stride, and the pass that wrote it
 
   FontStyle* = ref object
     typeface*: Typeface
@@ -389,6 +416,7 @@ type
     apps*: JsonNode
     stateFields*: seq[StateField] # all state fields, including private ones
     customEventOrigins*: Table[string, set[EventOrigin]] ## see FrameScene.customEventOrigins
+    refreshFollowsChildren*: bool ## see FrameScene.refreshFollowsChildren
 
   # Imported node from scenes.json
   DiagramNode* = ref object of RootObj
@@ -410,6 +438,13 @@ type
   FrameSceneSettings* = ref object
     backgroundColor*: Color
     refreshInterval*: float
+    ## Present on the scenes the split-screen drawer generates. The runtime
+    ## only asks whether it is there, so the value is skipped, not parsed
+    ## (interpreter.nim's parseHook).
+    splitScreenLayout*: SplitLayoutMarker
+
+  SplitLayoutMarker* = object
+    present*: bool
 
   # Imported scene from scenes.json
   FrameSceneInput* = ref object of RootObj

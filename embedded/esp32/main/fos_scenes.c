@@ -829,6 +829,31 @@ static int load_scene_index(void)
  * be recognised as a no-op. Empty means "nothing resident". */
 static char s_resident_scene_id[SCENE_ID_LEN]; /* forward-declared above */
 
+/* A resident scene may embed others: a split screen's panels are scene nodes
+ * pointing at sibling scenes of the same payload. The runtime asks for each
+ * one by id while the split starts (interpreter.nim `sceneLoader`): its slot
+ * file, malloc'd for the caller to free, or NULL. Called from inside
+ * frameos_nim_load_scene/render on the render task, under the runtime lock:
+ * takes no lock itself. Only these scenes are read; the rest of the payload
+ * stays on flash as before. */
+char *fos_scenes_read_scene_json(const char *scene_id, size_t *out_len)
+{
+    int slot = slot_for_scene(scene_id);
+    if (slot < 0) {
+        ESP_LOGW(TAG, "embedded scene %s is not in the payload", scene_id ? scene_id : "?");
+        log_scene_event("scenes:load", "error", "embedded", scene_id ? scene_id : "",
+                        "embedded-scene-missing", 0, 0, 0, ESP_ERR_NOT_FOUND);
+        return NULL;
+    }
+    char path[SCENES_SLOT_PATH_LEN];
+    slot_path(slot, path, sizeof(path));
+    char *json = read_file(path, out_len);
+    log_scene_event("scenes:load", json ? "ok" : "error", "embedded", scene_id,
+                    json ? "embedded-scene-read" : "embedded-scene-unreadable",
+                    json ? *out_len : 0, json ? 1 : 0, 0, json ? ESP_OK : ESP_FAIL);
+    return json;
+}
+
 static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
 {
     char path[SCENES_SLOT_PATH_LEN];

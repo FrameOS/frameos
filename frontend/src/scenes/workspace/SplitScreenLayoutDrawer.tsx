@@ -15,6 +15,7 @@ import { ColorInput } from '../../components/ColorInput'
 import { FrameImage } from '../../components/FrameImage'
 import type { FrameId, FrameScene, FrameType, StateField } from '../../types'
 import { buildSplitScene, frameLogic } from '../frame/frameLogic'
+import { splitPanelRhythm } from '../../utils/sceneRhythm'
 import { StateFieldEdit } from '../frame/panels/Scenes/StateFieldEdit'
 import { assignSceneImages } from '../../utils/sceneImages'
 import { buildSplitScreenThumbnail } from '../../utils/splitScreenThumbnail'
@@ -62,7 +63,7 @@ import {
   sceneDependencyGroupingIsEnabled,
   workspaceLogic,
 } from './workspaceLogic'
-import { sceneStateFields } from '../../utils/refreshInterval'
+import { sceneRefreshSeconds, sceneStateFields } from '../../utils/refreshInterval'
 
 const DEFAULT_SPLIT_SCENE_NAME = 'Split screen'
 const INITIAL_SPLIT_PRESET_COUNT = 3
@@ -764,6 +765,7 @@ function SplitSceneOptionsPanel({
   frameId,
   leaf,
   scene,
+  rhythm,
   canRemove,
   onSetSceneStateValue,
   onSplitLeaf,
@@ -772,6 +774,7 @@ function SplitSceneOptionsPanel({
   frameId: FrameId
   leaf: SplitLayoutLeaf | null
   scene: FrameScene | null
+  rhythm: string | null
   canRemove: boolean
   onSetSceneStateValue: (leafId: string, field: StateField, value: any) => void
   onSplitLeaf: (leafId: string, direction: SplitLayoutDirection) => void
@@ -836,6 +839,14 @@ function SplitSceneOptionsPanel({
           <div className="frameos-strong truncate text-sm font-semibold">
             {scene?.name || (leaf.sceneId ? 'Untitled scene' : 'Empty panel')}
           </div>
+          {rhythm ? (
+            <div
+              className="frameos-muted truncate text-xs font-semibold"
+              title="Each panel renders on its own schedule. The others keep their picture until their own time comes."
+            >
+              Renders {rhythm}
+            </div>
+          ) : null}
         </div>
         {Object.keys(state).length > 0 ? (
           <span className="frameos-muted shrink-0 text-xs font-semibold">{Object.keys(state).length} changed</span>
@@ -927,6 +938,14 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
   const leaves = splitLayoutLeaves(layout.root)
   const selectedLeaf = selectedLeafId ? leaves.find((leaf) => leaf.id === selectedLeafId) ?? null : null
   const selectedLeafScene = selectedLeaf?.sceneId ? scenes.get(selectedLeaf.sceneId) ?? null : null
+  const editingScene = editingSceneId ? scenes.get(editingSceneId) ?? null : null
+  const selectedLeafRhythm = splitPanelRhythm(
+    selectedLeafScene,
+    selectedLeaf?.state,
+    frameScenes,
+    frame.interval || 300,
+    editingScene ? sceneRefreshSeconds(editingScene) : frame.interval || 300
+  )
   const rects = splitLayoutLeafRects(layout.root)
   const borderEdges = splitLayoutLeafBorderEdges(rects)
   const dividers = splitLayoutDividers(layout.root)
@@ -1139,6 +1158,7 @@ export function SplitScreenLayoutDrawer({ frame }: { frame: FrameType }): JSX.El
             frameId={frame.id}
             leaf={selectedLeaf}
             scene={selectedLeafScene}
+            rhythm={selectedLeafRhythm}
             canRemove={selectedLeaf ? canRemoveSplitLayoutLeaf(layout.root, selectedLeaf.id) : false}
             onSetSceneStateValue={setLeafSceneStateValue}
             onSplitLeaf={splitLeaf}

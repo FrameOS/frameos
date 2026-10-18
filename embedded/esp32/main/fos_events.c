@@ -389,9 +389,15 @@ fos_event_result_t fos_events_dispatch_wait(fos_event_origin_t origin, const cha
     }
 
     /* The firmware's own: no runtime lock, done when this returns. `render`
-     * is a request — the scene hears "render" from the render pass. */
+     * is a request — the scene hears "render" from the render pass. From
+     * outside the scene it is somebody asking, and every embedded scene runs
+     * (the same rule as event_loop.nim's). */
     if (strcmp(name, FOS_EVENT_RENDER) == 0) {
-        fos_client_render_now();
+        if (origin == FOS_ORIGIN_SCENE || origin == FOS_ORIGIN_SYSTEM) {
+            fos_client_render_now();
+        } else {
+            fos_client_render_fresh();
+        }
         return FOS_EVENT_DONE;
     }
     if (strcmp(name, FOS_EVENT_SET_CURRENT_SCENE) == 0) {

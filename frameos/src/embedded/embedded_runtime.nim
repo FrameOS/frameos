@@ -580,12 +580,17 @@ proc setSceneCatalog*(indexJson: string): int =
 proc catalogHas(sceneIdText: string): bool =
   sceneCatalog.anyIt(it.id == sceneIdText)
 
-proc loadScene*(payload: string): bool =
+proc loadScene*(payload: string, alongside = false): bool =
   when defined(memProbe): memProbe("  >>> loadScene payload=" & $payload.len & "B")
   ## Build ONE scene and make it the only resident one, tearing down whatever
   ## was live. `payload` is a single scene object (the element the combined
   ## scenes.json holds in its array); it is wrapped so the existing array
   ## parser can be reused rather than duplicated.
+  ##
+  ## `alongside`: a scene the resident one embeds (a split's panel), parsed
+  ## into the cache next to it, nothing torn down. Scene nodes resolve by id
+  ## when their scene starts, so a split cannot start until every panel it
+  ## names is resident too.
   ##
   ## Returns false and leaves the runtime scene-less on a bad payload — the
   ## caller (fos_scenes.c) logs and keeps the previous file on flash, so a
@@ -594,6 +599,11 @@ proc loadScene*(payload: string): bool =
   if inputs.len == 0:
     log("loadScene: payload contained no scene")
     return false
+  if alongside:
+    addInterpretedSceneToCache(inputs[0])
+    inc scenesLoadedCount
+    log("loadScene: \"" & inputs[0].id.string & "\" resident alongside")
+    return true
   let newScenes = buildInterpretedScenes(inputs)
   if newScenes.len == 0:
     log("loadScene: scene did not survive parsing")
@@ -612,6 +622,23 @@ proc loadScene*(payload: string): bool =
   host.renderRequested = true
   log(&"loadScene: \"{sceneId.string}\" resident (1 of {max(sceneCatalog.len, 1)})")
   true
+
+proc fos_scenes_read_scene_json(sceneId: cstring, outLen: ptr csize_t): cstring {.importc, cdecl.}
+
+proc loadEmbeddedScene(sceneId: SceneId): bool {.nimcall.} =
+  ## interpreter.sceneLoader: a scene the resident one embeds (a split's
+  ## panel), read off its slot (fos_scenes.c) and parsed alongside. Its own
+  ## panels come the same way when it starts.
+  var len: csize_t
+  let json = fos_scenes_read_scene_json(sceneId.string.cstring, len.addr)
+  if json.isNil:
+    return false
+  try:
+    result = loadScene($json, alongside = true)
+  finally:
+    cFree(json)
+
+sceneLoader = loadEmbeddedScene
 
 proc selectScene*(sceneIdText: string): bool =
   when defined(memProbe): memProbe("  >>> selectScene " & sceneIdText)

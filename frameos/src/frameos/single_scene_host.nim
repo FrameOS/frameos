@@ -18,6 +18,7 @@ import std/[json, options, tables]
 import pixie
 import ./event_loop
 import ./interpreter
+import ./scene_rhythm
 import ./types
 import ./utils/asset_colors
 import ./utils/dither
@@ -113,15 +114,17 @@ proc recoverAbortedRun*(host: SingleSceneHost): tuple[jsDropped, jsBytes: int] =
   ## the run's wall-clock deadline (each later JS call failed at once with
   ## "render exceeded its 90000ms wall-clock deadline"), the dispatcher's
   ## flags (no event delivered again), the recursion guards (false "depends
-  ## on itself"), sceneJsLock (the next code node waits forever), and the JS
-  ## interpreters that were mid-call, which can be neither run nor freed and
-  ## are dropped. Returns how many were dropped and the bytes they still hold.
-  ## What the aborted run allocated stays leaked; the glue decides whether
-  ## that warrants a restart.
+  ## on itself"), the render-pass depth (no embedded scene would ever be due
+  ## again, scene_rhythm.nim), sceneJsLock (the next code node waits
+  ## forever), and the JS interpreters that were mid-call, which can be
+  ## neither run nor freed and are dropped. Returns how many were dropped and
+  ## the bytes they still hold. What the aborted run allocated stays leaked;
+  ## the glue decides whether that warrants a restart.
   resetRunBudgets()
   if not host.events.isNil:
     host.events.resetAfterAbort()
   clearRunNodeStacks(host.scene)
+  rhythmResetAfterAbort()
   let apps = abandonMidCallJsAppRuntimes()
   let scenes = abandonMidCallSceneJs()
   (apps.count + scenes.count, apps.bytes + scenes.bytes)

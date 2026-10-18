@@ -46,8 +46,9 @@ line in the map).
    stays because code comments cite its decision numbers.
 9. **Open PRs with their own todo file**, joining this map when they merge:
    #555 (`docs/local-assets-todo.md`: serve-stale caches, bounded image
-   libraries, paid-source budgets) and draft #496
-   (`docs/scene-rhythm-todo.md`).
+   libraries, paid-source budgets). Draft #496 and its
+   `docs/scene-rhythm-todo.md` are superseded by #582, whose open work is the
+   "Scenes inside scenes" section below.
 
 ---
 
@@ -177,6 +178,29 @@ Both halves are held in place by the deprecated source-build path
   bench pass over an upgraded volume and an SD-image build before it ships.
 - While there: `docker-compose.yml` sets no `SECRET_KEY` (the key persists to
   a file, so compose works; still worth setting explicitly).
+
+---
+
+## Scenes inside scenes: exact repaints, and the bench
+
+A split's panels each render on their own schedule, and a panel that is not
+due puts back the picture it drew last time, from a copy capped by memory
+(`docs/scene-rhythm.md`). Where no copy fits (big ESP32 panels, every
+deep-sleep wake), the panel runs again: a *repaint*. Open:
+
+- **Exact repaints through the node store (#555).** While a repaint runs,
+  `FrameScene.repainting` is true. A node cache should then serve what it
+  stored last time whatever its age, so an album does not move on and a random
+  photo app does not fetch a new photo between its due runs. Until then a
+  repaint is an ordinary run.
+- **Bench it.** A Pi on HDMI with a 24 fps clock beside an Unsplash panel
+  (split on 0.04 s): one fetch per photo interval, the clock smooth. An E1002
+  split of a 60 s clock and a 15 min weather panel: the lazy loader reads
+  both panels in (`scenes:load` `embedded-scene-read`), the weather panel is
+  kept (its renders take the clock's time, not the weather fetch's). An E1004 1600x1200 split: the copy is refused once
+  (`render:rhythm:copyRefused`) and the big panel repaints.
+- **Realtime on an ESP32.** The C render loop ignores scene intervals under
+  1 s and sleeps in whole seconds; a fast ESP32 with an LCD would need both.
 
 ---
 
