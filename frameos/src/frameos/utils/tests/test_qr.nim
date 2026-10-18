@@ -3,6 +3,12 @@
 ## every version where the layout changes, in every mode, and the same pixels
 ## for every way the QR app styles a code. Every code here also decodes back
 ## to its text with zxing-cpp.
+##
+## Anti-aliased edges are pinned in black and white only: pixie blends a
+## colored partial coverage on SIMD paths that round differently per
+## architecture (a colored digest from an arm64 Mac failed on x86_64 CI,
+## QRgen's pixels included), while black over white and the colored square
+## modules (a fill and plain pixel writes) are the same bytes everywhere.
 
 import std/unittest
 import pixie
@@ -101,18 +107,20 @@ const
   RenderVectors = [
     ("frameos", 200, 1, 0.0, 0.0, 0.0, "#000000", "#ffffff", 200, 209071301'u32),
     ("frameos", 200, 1, 30.0, 0.0, 0.0, "#000000", "#ffffff", 200, 1066028512'u32),
-    ("frameos", 333, 2, 100.0, 0.0, 0.0, "#123456", "#fedcba", 333, 3026160817'u32),
+    ("frameos", 333, 2, 100.0, 0.0, 0.0, "#000000", "#ffffff", 333, 2124292993'u32),
     ("frameos", 257, 0, 0.0, 50.0, 0.0, "#000000", "#ffffff", 257, 166341560'u32),
     ("frameos", 512, 1, 0.0, 0.0, 25.0, "#000000", "#ffffff", 512, 699118229'u32),
-    ("frameos", 512, 5, 30.0, 40.0, 20.0, "#204080", "#f0f0e0", 512, 2572452945'u32),
+    ("frameos", 512, 5, 30.0, 40.0, 20.0, "#000000", "#ffffff", 512, 4147063363'u32),
+    ("frameos", 301, 3, 0.0, 0.0, 0.0, "#123456", "#fedcba", 301, 594382184'u32),
     ("frameos", 21, 0, 10.0, 100.0, 100.0, "#000000", "#ffffff", 21, 1135138613'u32),
     ("frameos", 5, 1, 30.0, 0.0, 0.0, "#000000", "#ffffff", 5, 783964881'u32),
     ("http://frame.local:8787/c?k=secret", 200, 1, 0.0, 0.0, 0.0, "#000000", "#ffffff", 200, 1813852645'u32),
     ("http://frame.local:8787/c?k=secret", 200, 1, 30.0, 0.0, 0.0, "#000000", "#ffffff", 200, 4235977138'u32),
-    ("http://frame.local:8787/c?k=secret", 333, 2, 100.0, 0.0, 0.0, "#123456", "#fedcba", 333, 314062035'u32),
+    ("http://frame.local:8787/c?k=secret", 333, 2, 100.0, 0.0, 0.0, "#000000", "#ffffff", 333, 2312567167'u32),
     ("http://frame.local:8787/c?k=secret", 257, 0, 0.0, 50.0, 0.0, "#000000", "#ffffff", 257, 2110244683'u32),
     ("http://frame.local:8787/c?k=secret", 512, 1, 0.0, 0.0, 25.0, "#000000", "#ffffff", 512, 1247313413'u32),
-    ("http://frame.local:8787/c?k=secret", 512, 5, 30.0, 40.0, 20.0, "#204080", "#f0f0e0", 512, 4024321275'u32),
+    ("http://frame.local:8787/c?k=secret", 512, 5, 30.0, 40.0, 20.0, "#000000", "#ffffff", 512, 1598612279'u32),
+    ("http://frame.local:8787/c?k=secret", 301, 3, 0.0, 0.0, 0.0, "#123456", "#fedcba", 301, 2206361160'u32),
     ("http://frame.local:8787/c?k=secret", 21, 0, 10.0, 100.0, 100.0, "#000000", "#ffffff", 21, 223692881'u32),
     ("http://frame.local:8787/c?k=secret", 5, 1, 30.0, 0.0, 0.0, "#000000", "#ffffff", 5, 783964881'u32),
   ]
@@ -205,6 +213,22 @@ suite "qrImage":
       check img.width == side
       check img.height == side
       check imageDigest(img) == digest
+
+  test "colors on rounded modules and finders":
+    let dark = parseHtmlColor("#204080")
+    let light = parseHtmlColor("#f0f0e0")
+    # 25 modules of 20 px, 2 of padding: the top-left finder starts at 40.
+    let img = qrEncode("frameos").qrImage(500, 2, dark = dark, light = light, alRad = 30, moRad = 40, moSep = 20)
+    check img.width == 500
+    check img[5, 5] == light.rgbx            # quiet zone
+    check img[40 + 70, 40 + 10] == dark.rgbx # outer ring, top edge
+    check img[40 + 30, 40 + 30] == light.rgbx # light ring
+    check img[40 + 70, 40 + 70] == dark.rgbx # center square
+    for y in 0 ..< img.height:
+      for x in 0 ..< img.width:
+        let c = img[x, y]
+        check c.a == 255
+        check c.r in dark.rgbx.r .. light.rgbx.r
 
   test "draws opaque, whatever the alpha":
     let img = qrEncode("frameos").qrImage(46, 1, dark = color(0, 0, 0, 0.5), light = color(1, 1, 1, 0))
