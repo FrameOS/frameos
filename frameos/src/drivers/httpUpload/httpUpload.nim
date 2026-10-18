@@ -88,12 +88,15 @@ proc defaultRequest(url: string, body: string, headers: HttpHeaders): tuple[stat
   )
   (response.code, response.body)
 
+# Both log lines name the upload URL by its origin only
+# (utils/redacted_url.nim): an upload endpoint often takes its key in the
+# query, and the log is shipped off the frame.
 proc logSuccess(self: Driver, status: int, hashValue: string) =
   self.logger.log(%*{
     "event": "driver:httpUpload",
     "status": status,
     "method": "POST",
-    "url": self.url,
+    "url": redactedUrl(self.url),
     "hash": hashValue,
   })
 
@@ -102,7 +105,7 @@ proc logError(self: Driver, message: string, status: int = 0) =
   var payload = %*{
     "event": "driver:httpUpload:error",
     "error": truncated,
-    "url": self.url,
+    "url": redactedUrl(self.url),
   }
   if status != 0:
     payload["status"] = %*status

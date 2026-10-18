@@ -5,10 +5,11 @@
 // the routes share.
 
 import type { createDb } from "@frameos-cloud/db";
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "../csrf";
 import { jsonError, requireDatabase } from "../device-flow";
 import { getPublicOrigin } from "../env";
+import { logWarn } from "../log";
 import { rateLimitResponse } from "../rate-limit";
 import { readSession } from "../session";
 import {
@@ -151,6 +152,24 @@ export function photoErrorResponse(error: unknown): NextResponse {
     return jsonError(error.code, error.status, error.extra);
   }
   throw error;
+}
+
+/**
+ * Run `task` once the response has gone out (Next's after()). A handler
+ * called outside a request (a test) has no after(): the task then runs
+ * before the handler returns. A task that fails is logged, never thrown.
+ */
+export async function afterPhotoResponse(name: string, task: () => Promise<unknown>): Promise<void> {
+  const logged = () =>
+    task().then(
+      () => undefined,
+      (error: unknown) => logWarn(`photos.${name}_failed`, { error: error instanceof Error ? error.message : String(error) }),
+    );
+  try {
+    after(logged);
+  } catch {
+    await logged();
+  }
 }
 
 /** Run a route body, answering PhotoErrors with their status. */

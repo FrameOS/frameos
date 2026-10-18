@@ -23,6 +23,7 @@ import datetime
 import hashlib
 import io
 import json
+import logging
 import mimetypes
 import os
 import random
@@ -44,6 +45,13 @@ from sqlalchemy.orm import Session
 from app.config import DEFAULT_DATABASE_URL, get_bool_env
 from app.models.photo_entry import PhotoEntry
 from app.models.photo_share import PhotoShare
+from app.utils.photo_metadata import (
+    REMOVALS,
+    file_reader,
+    read_photo_metadata,
+    read_photo_metadata_bytes,
+    remove_photo_metadata,
+)
 from app.utils.object_store import (
     DiskObjectStore,
     ObjectStore,
@@ -51,6 +59,9 @@ from app.utils.object_store import (
     StoreError,
     s3_settings_from_env,
 )
+
+log = logging.getLogger(__name__)
+
 # A photographer's full-size file: 250 MiB, the same on the cloud
 # (cloud/apps/auth-web/src/lib/photos/library.ts maxPhotoUploadBytes).
 MAX_UPLOAD_BYTES = 250 * 1024 * 1024
@@ -503,6 +514,29 @@ def _at_or_below(path: str):
     return (PhotoEntry.path == path) | _below(path)
 
 
+def _children_of(folder: str):
+    """A filter for the direct children of `folder` ("" is the root)."""
+    prefix = "" if folder == "" else folder + "/"
+    return _below(folder) & (func.instr(func.substr(PhotoEntry.path, len(prefix) + 1), "/") == 0)
+
+
+def _locations(db: Session, project_id: int, where: Any) -> dict[str, dict[str, float]]:
+    """The pins of the files `where` selects: the stored location without its
+    altitude, read with json_extract so a listing never loads the fields."""
+    latitude = func.json_extract(PhotoEntry.photo_metadata, "$.location.latitude")
+    longitude = func.json_extract(PhotoEntry.photo_metadata, "$.location.longitude")
+    found = (
+        db.query(PhotoEntry.path, latitude, longitude)
+        .filter(PhotoEntry.project_id == project_id, PhotoEntry.kind == "file", PhotoEntry.photo_metadata.isnot(None), where)
+        .all()
+    )
+    return {
+        path: {"latitude": float(lat), "longitude": float(lon)}
+        for path, lat, lon in found
+        if isinstance(lat, (int, float)) and isinstance(lon, (int, float))
+    }
+
+
 def _row_at(db: Session, project_id: int, path: str) -> Optional[PhotoEntry]:
     if path == "":
         return None
@@ -538,11 +572,14 @@ def _is_cover_image(row: PhotoEntry) -> bool:
     return row.kind == "file" and row.status == "ready" and bool((row.content_type or "").startswith("image/"))
 
 
-def describe_children(parent: str, rows: list[PhotoEntry]) -> list[dict[str, Any]]:
+def describe_children(
+    parent: str, rows: list[PhotoEntry], locations: Optional[dict[str, dict[str, float]]] = None
+) -> list[dict[str, Any]]:
     """Entries for the direct children of `parent` found in `rows`, which
     must hold every row below each child that should be counted (folder
     `items`, `files`, `size` and `cover` come from them). Folders first, then
-    by name. The cloud's describePhotoChildren."""
+    by name. `locations` are the files' pins (_locations). The cloud's
+    describePhotoChildren."""
     prefix = "" if parent == "" else parent + "/"
     children: list[PhotoEntry] = []
     stats: dict[str, dict[str, int]] = {}
@@ -611,6 +648,7 @@ def describe_children(parent: str, rows: list[PhotoEntry]) -> list[dict[str, Any
                 "height": None,
                 "content_type": None,
                 "status": row.status,
+                "location": None,
             })
         else:
             entries.append({
@@ -622,6 +660,7 @@ def describe_children(parent: str, rows: list[PhotoEntry]) -> list[dict[str, Any
                 "content_type": row.content_type,
                 "status": row.status,
                 "colors": row.colors if row.colors else None,
+                "location": (locations or {}).get(row.path),
             })
     return entries
 
@@ -631,7 +670,7 @@ def entry_for(db: Session, project_id: int, path: str) -> Optional[dict[str, Any
     if path == "":
         return None
     rows = _rows_at_or_below(db, project_id, path)
-    for entry in describe_children(parent_path(path), rows):
+    for entry in describe_children(parent_path(path), rows, _locations(db, project_id, PhotoEntry.path == path)):
         if entry["path"] == path:
             return entry
     return None
@@ -643,7 +682,8 @@ def list_folder(db: Session, project_id: int, folder: str) -> dict[str, Any]:
         row = _row_at(db, project_id, folder)
         if row is None or row.kind != "folder":
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Folder not found")
-    return {"path": folder, "entries": describe_children(folder, _rows_below(db, project_id, folder))}
+    entries = describe_children(folder, _rows_below(db, project_id, folder), _locations(db, project_id, _children_of(folder)))
+    return {"path": folder, "entries": entries}
 
 
 def file_row(db: Session, project_id: int, path: str) -> PhotoEntry:
@@ -878,7 +918,8 @@ def store_file(
 ) -> dict[str, Any]:
     """Store one file: the objects first (the file, its thumbnail; an object
     already there is left alone, two uploads of one photo share it), then
-    the row, with a " (2)" name when the name is taken."""
+    the row, with a " (2)" name when the name is taken. The bytes are stored
+    as sent; their metadata is read into the row (docs/photos.md "Metadata")."""
     digest = hashlib.sha256(data).hexdigest()
     object_key = file_object_key(digest)
     content_type = content_type_for(name)
@@ -913,6 +954,7 @@ def store_file(
             width=width,
             height=height,
             status="ready",
+            photo_metadata=metadata_of_bytes(data, name),
             created_at=created_at or now,
             updated_at=now,
         ))
@@ -1225,6 +1267,8 @@ def resize_photo(db: Session, project_id: int, store: ObjectStore, path: str, op
         row.thumb_object_key = thumb_key
         row.width = width
         row.height = height
+        # What the re-encoded bytes carry (Pillow writes no EXIF here).
+        row.photo_metadata = metadata_of_bytes(resized, new_name)
         row.updated_at = _utcnow()
         _touch_folder(db, project_id, folder)
         db.commit()
@@ -1248,6 +1292,169 @@ def _delete_unreferenced_objects(db: Session, store: ObjectStore, keys: list[Opt
             store.delete(key)
         except StoreError:
             continue
+
+
+# ---------------------------------------------------------------------------
+# Metadata (docs/photos.md "Metadata", app/utils/photo_metadata.py)
+# ---------------------------------------------------------------------------
+
+# What one folder listing reads in the background. A photo over the size cap
+# waits for GET /api/photos/metadata, which reads any.
+METADATA_READS_PER_LISTING = 200
+METADATA_BACKGROUND_MAX_BYTES = 64 * 1024 * 1024
+
+
+def metadata_of_bytes(data: bytes, name: str) -> Optional[dict[str, Any]]:
+    """What a file carries (any type: what is not a JPEG, PNG or WebP reads
+    as nothing). None, read again later, when the read fails: a photo is
+    never refused for its metadata."""
+    try:
+        return read_photo_metadata_bytes(data)
+    except Exception as error:  # pragma: no cover - every read is bounded
+        log.warning("Could not read the metadata of %s: %s", name, error)
+        return None
+
+
+def _stored_metadata(store: ObjectStore, key: Optional[str]) -> dict[str, Any]:
+    """The metadata of a stored object: read at offsets from the disk
+    store's file, from the bytes of a bucket's."""
+    stored = fetch_object(store, key)
+    if stored.path is not None:
+        with open(stored.path, "rb") as handle:
+            return read_photo_metadata(file_reader(handle), os.fstat(handle.fileno()).st_size)
+    return read_photo_metadata_bytes(stored.data or b"")
+
+
+def _save_metadata(db: Session, project_id: int, path: str, object_key: Optional[str], metadata: dict[str, Any]) -> None:
+    """Store what was read, unless the file's bytes changed in between. Not
+    updated_at: reading changes nothing a share link shows."""
+    with project_lock(project_id):
+        db.query(PhotoEntry).filter(
+            PhotoEntry.project_id == project_id, PhotoEntry.path == path, PhotoEntry.object_key == object_key
+        ).update({PhotoEntry.photo_metadata: metadata}, synchronize_session=False)
+        db.commit()
+
+
+def metadata_for(db: Session, project_id: int, store: ObjectStore, path: str) -> dict[str, Any]:
+    """GET /api/photos/metadata: the stored metadata, or the object read (and
+    the result stored) when the file has none yet. 404 for nothing there,
+    400 for a folder."""
+    row = _row_at(db, project_id, path)
+    if row is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="File not found")
+    if row.kind != "file":
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Metadata is a file's, not a folder's")
+    if row.photo_metadata is not None:
+        return row.photo_metadata
+    metadata = _stored_metadata(store, row.object_key)
+    _save_metadata(db, project_id, path, row.object_key, metadata)
+    return metadata
+
+
+def read_unread_metadata(db: Session, project_id: int, store: ObjectStore, folder: str) -> int:
+    """Read the metadata of the files directly in `folder` that have none yet
+    (stored before files had it), at most METADATA_READS_PER_LISTING, so the
+    next listing shows their pins: what GET /api/photos/files runs after it
+    has answered. A file that cannot be read is logged and left for the next
+    listing. Returns how many were read."""
+    rows = (
+        db.query(PhotoEntry.path, PhotoEntry.object_key)
+        .filter(
+            PhotoEntry.project_id == project_id,
+            _children_of(folder),
+            PhotoEntry.kind == "file",
+            PhotoEntry.status == "ready",
+            PhotoEntry.photo_metadata.is_(None),
+            PhotoEntry.size_bytes <= METADATA_BACKGROUND_MAX_BYTES,
+        )
+        .limit(METADATA_READS_PER_LISTING)
+        .all()
+    )
+    read = 0
+    for path, object_key in rows:
+        try:
+            _save_metadata(db, project_id, path, object_key, _stored_metadata(store, object_key))
+            read += 1
+        except Exception as error:
+            log.warning("Could not read the metadata of %s: %s", path, error)
+    return read
+
+
+def remove_metadata(db: Session, project_id: int, store: ObjectStore, paths: list[str], removal: str) -> dict[str, Any]:
+    """POST /api/photos/metadata: take the location, or all metadata, out of
+    files (app/utils/photo_metadata.py). Every path is checked first: one
+    missing is a 404, a folder a 400, and nothing changes. A file that is not
+    a JPEG, PNG or WebP, or one with nothing to remove, is left alone. A
+    changed file's bytes go to their new content address with its size,
+    SHA-256 and metadata; its path, date, colors, thumbnail and share links
+    stay, and the old object goes when no row points at it any more."""
+    if removal not in REMOVALS:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail='remove must be "location" or "all"')
+    unique = list(dict.fromkeys(paths))
+    found = {
+        path: (kind, object_key, content_type)
+        for path, kind, object_key, content_type in db.query(
+            PhotoEntry.path, PhotoEntry.kind, PhotoEntry.object_key, PhotoEntry.content_type
+        )
+        .filter(PhotoEntry.project_id == project_id, PhotoEntry.path.in_(unique))
+        .all()
+    }
+    for path in unique:
+        if path not in found:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=f"Not found: {path}")
+        if found[path][0] != "file":
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=f"Not a file: {path}")
+
+    changed = 0
+    for path in unique:
+        _kind, object_key, content_type = found[path]
+        if not object_key:
+            continue
+        stored = fetch_object(store, object_key)
+        data = stored.data if stored.data is not None else (stored.path.read_bytes() if stored.path else b"")
+        result = remove_photo_metadata(data, removal)
+        if not result.changed:
+            unread = db.query(PhotoEntry.id).filter(
+                PhotoEntry.project_id == project_id, PhotoEntry.path == path, PhotoEntry.photo_metadata.is_(None)
+            ).first()
+            if unread is not None:
+                _save_metadata(db, project_id, path, object_key, read_photo_metadata_bytes(data))
+            continue
+        digest = hashlib.sha256(result.data).hexdigest()
+        new_key = file_object_key(digest)
+        try:
+            if not store.exists(new_key):
+                store.put(new_key, result.data, content_type or content_type_for(base_name(path)))
+        except StoreError as error:
+            raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail=f"The photo could not be stored: {error}")
+        metadata = read_photo_metadata_bytes(result.data)
+        with project_lock(project_id):
+            # Only the bytes this read: a file replaced, moved or deleted in
+            # between is left to what happened to it.
+            updated = db.query(PhotoEntry).filter(
+                PhotoEntry.project_id == project_id, PhotoEntry.path == path, PhotoEntry.object_key == object_key
+            ).update(
+                {
+                    PhotoEntry.object_key: new_key,
+                    PhotoEntry.sha256: digest,
+                    PhotoEntry.size_bytes: len(result.data),
+                    PhotoEntry.photo_metadata: metadata,
+                    PhotoEntry.updated_at: _utcnow(),
+                },
+                synchronize_session=False,
+            )
+            if updated:
+                _touch_folder(db, project_id, parent_path(path))
+            db.commit()
+            _delete_unreferenced_objects(db, store, [object_key] if updated else [new_key])
+        if updated:
+            changed += 1
+
+    db.expire_all()
+    rows = db.query(PhotoEntry).filter(PhotoEntry.project_id == project_id, PhotoEntry.path.in_(unique)).all()
+    locations = _locations(db, project_id, PhotoEntry.path.in_(unique))
+    entries = {row.path: describe_children(parent_path(row.path), [row], locations)[0] for row in rows}
+    return {"entries": [entries[path] for path in paths if path in entries], "changed": changed}
 
 
 def delete_paths(db: Session, project_id: int, store: ObjectStore, paths: list[str]) -> int:

@@ -1,0 +1,1617 @@
+{
+  "_comment": "The photo metadata conformance corpus (docs/photos.md \"Metadata\"). Both app/utils/photo_metadata.py and cloud/apps/auth-web/src/lib/photos/metadata.ts must read each input as `metadata` and turn it into the bytes with removeLocation.sha256 and removeAll.sha256. Written by tools/generate_photo_metadata_fixtures.py; `orientation` is what the removeAll output must still say (null: upright, no EXIF left).",
+  "cases": [
+    {
+      "name": "exif-gps.jpg",
+      "description": "A phone's JPEG: little-endian EXIF with GPS and serial, XMP with a GPS latitude, IPTC, Ducky, a comment, ICC",
+      "inputSha256": "bccfb3c0de69e9edc74897c6fd10fb5096d49ccbfbed1be3e5f4bf377e428715",
+      "metadata": {
+        "location": {
+          "latitude": 59.43680555555555,
+          "longitude": 24.75034722222222,
+          "altitude": null
+        },
+        "fields": [
+          {
+            "group": "Image",
+            "name": "Make",
+            "value": "FixtureCam"
+          },
+          {
+            "group": "Image",
+            "name": "Model",
+            "value": "Model 7"
+          },
+          {
+            "group": "Image",
+            "name": "Orientation",
+            "value": 6
+          },
+          {
+            "group": "Image",
+            "name": "DateTime",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "DateTimeOriginal",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "BodySerialNumber",
+            "value": "SN-1234567"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitudeRef",
+            "value": "N"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitude",
+            "value": [
+              59.0,
+              26.0,
+              12.5
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitudeRef",
+            "value": "E"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitude",
+            "value": [
+              24.0,
+              45.0,
+              1.25
+            ]
+          }
+        ],
+        "blocks": [
+          "exif",
+          "xmp",
+          "iptc",
+          "comment",
+          "other"
+        ]
+      },
+      "removeLocation": {
+        "sha256": "691dc2205f353c4888a224852ea7f126b21e95c22f204b2bd2196b587d795f53",
+        "changed": true
+      },
+      "removeAll": {
+        "sha256": "8087d0d541cf0ac5fe4f9358b37e1b214764741e1d1d0b221c451d0d3b2cd1f4",
+        "changed": true,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": 6,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "xmpmeta",
+        "secret"
+      ]
+    },
+    {
+      "name": "progressive.jpg",
+      "description": "Progressive JPEG, big-endian EXIF with GPS and a comment between scans: every scan kept",
+      "inputSha256": "28cb5ea406220bf20333d59f3dbc91d5dc77ab293067d0ab39ebc655d22e5dfc",
+      "metadata": {
+        "location": {
+          "latitude": 59.43680555555555,
+          "longitude": 24.75034722222222,
+          "altitude": null
+        },
+        "fields": [
+          {
+            "group": "Image",
+            "name": "Make",
+            "value": "FixtureCam"
+          },
+          {
+            "group": "Image",
+            "name": "Model",
+            "value": "Model 7"
+          },
+          {
+            "group": "Image",
+            "name": "Orientation",
+            "value": 8
+          },
+          {
+            "group": "Image",
+            "name": "DateTime",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "DateTimeOriginal",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "BodySerialNumber",
+            "value": "SN-1234567"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitudeRef",
+            "value": "N"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitude",
+            "value": [
+              59.0,
+              26.0,
+              12.5
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitudeRef",
+            "value": "E"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitude",
+            "value": [
+              24.0,
+              45.0,
+              1.25
+            ]
+          }
+        ],
+        "blocks": [
+          "exif",
+          "comment"
+        ]
+      },
+      "removeLocation": {
+        "sha256": "099f1337cc71f7b95a74c2f7a9cf8cd668b16556e44e383909576e4a76d0f2da",
+        "changed": true
+      },
+      "removeAll": {
+        "sha256": "817f980e7270d8e46aacd93ee1bd34fa1036dc86f8fcbe776d2447b28873eefa",
+        "changed": true,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": 8,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "secret"
+      ]
+    },
+    {
+      "name": "mpf-trailer.jpg",
+      "description": "Upright EXIF with GPS, MPF and FlashPix APP2, a second image and a video after EOI",
+      "inputSha256": "328960ca29ec200d3401c475e06d8809ef10d630b7b09119a785cff68ed5dd36",
+      "metadata": {
+        "location": {
+          "latitude": 59.43680555555555,
+          "longitude": 24.75034722222222,
+          "altitude": null
+        },
+        "fields": [
+          {
+            "group": "Image",
+            "name": "Make",
+            "value": "FixtureCam"
+          },
+          {
+            "group": "Image",
+            "name": "Model",
+            "value": "Model 7"
+          },
+          {
+            "group": "Image",
+            "name": "Orientation",
+            "value": 1
+          },
+          {
+            "group": "Image",
+            "name": "DateTime",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "DateTimeOriginal",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "BodySerialNumber",
+            "value": "SN-1234567"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitudeRef",
+            "value": "N"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitude",
+            "value": [
+              59.0,
+              26.0,
+              12.5
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitudeRef",
+            "value": "E"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitude",
+            "value": [
+              24.0,
+              45.0,
+              1.25
+            ]
+          }
+        ],
+        "blocks": [
+          "exif",
+          "trailer",
+          "other"
+        ]
+      },
+      "removeLocation": {
+        "sha256": "88a744ef79a477041c2fff9462a9fda427bc7b88c8a81a5c6450662f297c2c60",
+        "changed": true
+      },
+      "removeAll": {
+        "sha256": "6a60887e4d68e68d31df0c97ab37f8c8cd3c63da1bb1501c65d25b545d803fbd",
+        "changed": true,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": null,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "secret"
+      ]
+    },
+    {
+      "name": "cmyk-adobe.jpg",
+      "description": "CMYK JPEG without JFIF: Adobe APP14 stays, the minimal EXIF goes right after SOI",
+      "inputSha256": "da94c72f475ec1301f91a766ca16c0b63ede40a3650a41bd35868df568a3f13f",
+      "metadata": {
+        "location": {
+          "latitude": 59.43680555555555,
+          "longitude": 24.75034722222222,
+          "altitude": null
+        },
+        "fields": [
+          {
+            "group": "Image",
+            "name": "Make",
+            "value": "FixtureCam"
+          },
+          {
+            "group": "Image",
+            "name": "Model",
+            "value": "Model 7"
+          },
+          {
+            "group": "Image",
+            "name": "Orientation",
+            "value": 5
+          },
+          {
+            "group": "Image",
+            "name": "DateTime",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "DateTimeOriginal",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "BodySerialNumber",
+            "value": "SN-1234567"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitudeRef",
+            "value": "N"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitude",
+            "value": [
+              59.0,
+              26.0,
+              12.5
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitudeRef",
+            "value": "E"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitude",
+            "value": [
+              24.0,
+              45.0,
+              1.25
+            ]
+          }
+        ],
+        "blocks": [
+          "exif"
+        ]
+      },
+      "removeLocation": {
+        "sha256": "ca4580117470e3ac254b7d00882ae52e731b086cd2b557e4c710924b5cc6e574",
+        "changed": true
+      },
+      "removeAll": {
+        "sha256": "2064d646fdb7a022dde28e8220065cfec7b1b20d3596e20dd0f60cd26ec62cd2",
+        "changed": true,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": 5,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567"
+      ]
+    },
+    {
+      "name": "every-type-ii.jpg",
+      "description": "Every EXIF type and group, little-endian, located south and west below sea level",
+      "inputSha256": "e34e64d57843efa1ce7b9ab96e73b89aac941ea2c915d452c49f95a09ba0633c",
+      "metadata": {
+        "location": {
+          "latitude": -12.046433333333333,
+          "longitude": -77.04283333333333,
+          "altitude": -15.5
+        },
+        "fields": [
+          {
+            "group": "Image",
+            "name": "Make",
+            "value": "FixtureCam"
+          },
+          {
+            "group": "Image",
+            "name": "Model",
+            "value": "Model 7"
+          },
+          {
+            "group": "Image",
+            "name": "Orientation",
+            "value": 6
+          },
+          {
+            "group": "Image",
+            "name": "XResolution",
+            "value": 72.0
+          },
+          {
+            "group": "Image",
+            "name": "ResolutionUnit",
+            "value": 2
+          },
+          {
+            "group": "Image",
+            "name": "Software",
+            "value": "Fixture Paint xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\u2026"
+          },
+          {
+            "group": "Image",
+            "name": "DateTime",
+            "value": "2026:07:14 18:22:05"
+          },
+          {
+            "group": "Image",
+            "name": "Artist",
+            "value": "J\u00fcri \u00d5un"
+          },
+          {
+            "group": "Image",
+            "name": "Copyright",
+            "value": "Fixture"
+          },
+          {
+            "group": "Image",
+            "name": "Tag 0x9999",
+            "value": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "group": "Photo",
+            "name": "ExposureTime",
+            "value": 0.004
+          },
+          {
+            "group": "Photo",
+            "name": "FNumber",
+            "value": 2.8
+          },
+          {
+            "group": "Photo",
+            "name": "ISOSpeedRatings",
+            "value": 200
+          },
+          {
+            "group": "Photo",
+            "name": "ExifVersion",
+            "value": "0232"
+          },
+          {
+            "group": "Photo",
+            "name": "DateTimeOriginal",
+            "value": "2026:07:14 18:22:05"
+          },
+          {
+            "group": "Photo",
+            "name": "OffsetTimeOriginal",
+            "value": "+03:00"
+          },
+          {
+            "group": "Photo",
+            "name": "ComponentsConfiguration",
+            "value": "(4 bytes)"
+          },
+          {
+            "group": "Photo",
+            "name": "ExposureBiasValue",
+            "value": -0.3333333333333333
+          },
+          {
+            "group": "Photo",
+            "name": "FocalLength",
+            "value": null
+          },
+          {
+            "group": "Photo",
+            "name": "SubjectArea",
+            "value": "(20 values)"
+          },
+          {
+            "group": "Photo",
+            "name": "MakerNote",
+            "value": "(40 bytes)"
+          },
+          {
+            "group": "Photo",
+            "name": "UserComment",
+            "value": "secret user comment"
+          },
+          {
+            "group": "Photo",
+            "name": "Temperature",
+            "value": -5.5
+          },
+          {
+            "group": "Photo",
+            "name": "Tag 0x9990",
+            "value": -5
+          },
+          {
+            "group": "Photo",
+            "name": "Tag 0x9991",
+            "value": [
+              -300,
+              7
+            ]
+          },
+          {
+            "group": "Photo",
+            "name": "Tag 0x9992",
+            "value": -70000
+          },
+          {
+            "group": "Photo",
+            "name": "Tag 0x9997",
+            "value": [
+              2.25,
+              null
+            ]
+          },
+          {
+            "group": "Photo",
+            "name": "Tag 0x9998",
+            "value": 1.5
+          },
+          {
+            "group": "Photo",
+            "name": "CameraOwnerName",
+            "value": "secret owner"
+          },
+          {
+            "group": "Photo",
+            "name": "BodySerialNumber",
+            "value": "SN-1234567"
+          },
+          {
+            "group": "Photo",
+            "name": "LensModel",
+            "value": "Fixture 50mm"
+          },
+          {
+            "group": "Location",
+            "name": "GPSVersionID",
+            "value": [
+              2,
+              3,
+              0,
+              0
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitudeRef",
+            "value": "S"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitude",
+            "value": [
+              12.0,
+              2.0,
+              47.16
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitudeRef",
+            "value": "W"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitude",
+            "value": [
+              77.0,
+              2.0,
+              34.2
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSAltitudeRef",
+            "value": 1
+          },
+          {
+            "group": "Location",
+            "name": "GPSAltitude",
+            "value": 15.5
+          },
+          {
+            "group": "Location",
+            "name": "GPSTimeStamp",
+            "value": [
+              18.0,
+              22.0,
+              5.0
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSProcessingMethod",
+            "value": "(11 bytes)"
+          },
+          {
+            "group": "Location",
+            "name": "GPSDateStamp",
+            "value": "2026:07:14"
+          },
+          {
+            "group": "Interoperability",
+            "name": "InteroperabilityIndex",
+            "value": "R98"
+          },
+          {
+            "group": "Interoperability",
+            "name": "InteroperabilityVersion",
+            "value": "0100"
+          },
+          {
+            "group": "Thumbnail",
+            "name": "Compression",
+            "value": 6
+          },
+          {
+            "group": "Thumbnail",
+            "name": "JPEGInterchangeFormat",
+            "value": 0
+          },
+          {
+            "group": "Thumbnail",
+            "name": "JPEGInterchangeFormatLength",
+            "value": 0
+          }
+        ],
+        "blocks": [
+          "exif"
+        ]
+      },
+      "removeLocation": {
+        "sha256": "d05dcc894404c3a6b89605c7de89d0b3ec7aee865398d839db623e1fe7ce28dd",
+        "changed": true
+      },
+      "removeAll": {
+        "sha256": "6284704846962acf9b8714b1009e86fef530a56a3eb88c93438d58508f637ee0",
+        "changed": true,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": 6,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "secret"
+      ]
+    },
+    {
+      "name": "every-type-mm.jpg",
+      "description": "The same EXIF big-endian: the same metadata",
+      "inputSha256": "65d3b77bb32496084265fac3dca69da14ad4c3182cc8dffc009cfbe75484671e",
+      "metadata": {
+        "location": {
+          "latitude": -12.046433333333333,
+          "longitude": -77.04283333333333,
+          "altitude": -15.5
+        },
+        "fields": [
+          {
+            "group": "Image",
+            "name": "Make",
+            "value": "FixtureCam"
+          },
+          {
+            "group": "Image",
+            "name": "Model",
+            "value": "Model 7"
+          },
+          {
+            "group": "Image",
+            "name": "Orientation",
+            "value": 6
+          },
+          {
+            "group": "Image",
+            "name": "XResolution",
+            "value": 72.0
+          },
+          {
+            "group": "Image",
+            "name": "ResolutionUnit",
+            "value": 2
+          },
+          {
+            "group": "Image",
+            "name": "Software",
+            "value": "Fixture Paint xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\u2026"
+          },
+          {
+            "group": "Image",
+            "name": "DateTime",
+            "value": "2026:07:14 18:22:05"
+          },
+          {
+            "group": "Image",
+            "name": "Artist",
+            "value": "J\u00fcri \u00d5un"
+          },
+          {
+            "group": "Image",
+            "name": "Copyright",
+            "value": "Fixture"
+          },
+          {
+            "group": "Image",
+            "name": "Tag 0x9999",
+            "value": [
+              1,
+              2,
+              3
+            ]
+          },
+          {
+            "group": "Photo",
+            "name": "ExposureTime",
+            "value": 0.004
+          },
+          {
+            "group": "Photo",
+            "name": "FNumber",
+            "value": 2.8
+          },
+          {
+            "group": "Photo",
+            "name": "ISOSpeedRatings",
+            "value": 200
+          },
+          {
+            "group": "Photo",
+            "name": "ExifVersion",
+            "value": "0232"
+          },
+          {
+            "group": "Photo",
+            "name": "DateTimeOriginal",
+            "value": "2026:07:14 18:22:05"
+          },
+          {
+            "group": "Photo",
+            "name": "OffsetTimeOriginal",
+            "value": "+03:00"
+          },
+          {
+            "group": "Photo",
+            "name": "ComponentsConfiguration",
+            "value": "(4 bytes)"
+          },
+          {
+            "group": "Photo",
+            "name": "ExposureBiasValue",
+            "value": -0.3333333333333333
+          },
+          {
+            "group": "Photo",
+            "name": "FocalLength",
+            "value": null
+          },
+          {
+            "group": "Photo",
+            "name": "SubjectArea",
+            "value": "(20 values)"
+          },
+          {
+            "group": "Photo",
+            "name": "MakerNote",
+            "value": "(40 bytes)"
+          },
+          {
+            "group": "Photo",
+            "name": "UserComment",
+            "value": "secret user comment"
+          },
+          {
+            "group": "Photo",
+            "name": "Temperature",
+            "value": -5.5
+          },
+          {
+            "group": "Photo",
+            "name": "Tag 0x9990",
+            "value": -5
+          },
+          {
+            "group": "Photo",
+            "name": "Tag 0x9991",
+            "value": [
+              -300,
+              7
+            ]
+          },
+          {
+            "group": "Photo",
+            "name": "Tag 0x9992",
+            "value": -70000
+          },
+          {
+            "group": "Photo",
+            "name": "Tag 0x9997",
+            "value": [
+              2.25,
+              null
+            ]
+          },
+          {
+            "group": "Photo",
+            "name": "Tag 0x9998",
+            "value": 1.5
+          },
+          {
+            "group": "Photo",
+            "name": "CameraOwnerName",
+            "value": "secret owner"
+          },
+          {
+            "group": "Photo",
+            "name": "BodySerialNumber",
+            "value": "SN-1234567"
+          },
+          {
+            "group": "Photo",
+            "name": "LensModel",
+            "value": "Fixture 50mm"
+          },
+          {
+            "group": "Location",
+            "name": "GPSVersionID",
+            "value": [
+              2,
+              3,
+              0,
+              0
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitudeRef",
+            "value": "S"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitude",
+            "value": [
+              12.0,
+              2.0,
+              47.16
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitudeRef",
+            "value": "W"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitude",
+            "value": [
+              77.0,
+              2.0,
+              34.2
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSAltitudeRef",
+            "value": 1
+          },
+          {
+            "group": "Location",
+            "name": "GPSAltitude",
+            "value": 15.5
+          },
+          {
+            "group": "Location",
+            "name": "GPSTimeStamp",
+            "value": [
+              18.0,
+              22.0,
+              5.0
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSProcessingMethod",
+            "value": "(11 bytes)"
+          },
+          {
+            "group": "Location",
+            "name": "GPSDateStamp",
+            "value": "2026:07:14"
+          },
+          {
+            "group": "Interoperability",
+            "name": "InteroperabilityIndex",
+            "value": "R98"
+          },
+          {
+            "group": "Interoperability",
+            "name": "InteroperabilityVersion",
+            "value": "0100"
+          },
+          {
+            "group": "Thumbnail",
+            "name": "Compression",
+            "value": 6
+          },
+          {
+            "group": "Thumbnail",
+            "name": "JPEGInterchangeFormat",
+            "value": 0
+          },
+          {
+            "group": "Thumbnail",
+            "name": "JPEGInterchangeFormatLength",
+            "value": 0
+          }
+        ],
+        "blocks": [
+          "exif"
+        ]
+      },
+      "removeLocation": {
+        "sha256": "ac7510233bd9ef27e6c5e420162752388c04c740c098ea450b412b43558958c3",
+        "changed": true
+      },
+      "removeAll": {
+        "sha256": "6284704846962acf9b8714b1009e86fef530a56a3eb88c93438d58508f637ee0",
+        "changed": true,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": 6,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "secret"
+      ]
+    },
+    {
+      "name": "xmp-gps.jpg",
+      "description": "GPS only in XMP attributes (DDD,MM.mmk and DDD,MM,SSk): the location comes from XMP",
+      "inputSha256": "33b952d91a5237e672495e3577ca2ed55af8c376f746540b07a8729e1ec27490",
+      "metadata": {
+        "location": {
+          "latitude": 59.43666666666667,
+          "longitude": 24.75340277777778,
+          "altitude": null
+        },
+        "fields": [
+          {
+            "group": "Image",
+            "name": "Make",
+            "value": "FixtureCam"
+          },
+          {
+            "group": "Image",
+            "name": "Orientation",
+            "value": 3
+          }
+        ],
+        "blocks": [
+          "exif",
+          "xmp"
+        ]
+      },
+      "removeLocation": {
+        "sha256": "59478eb76585536c08612493b9b1aadc7f697262d191927e5c61dba702a0e7f9",
+        "changed": true
+      },
+      "removeAll": {
+        "sha256": "0b79b8a29edc31ac9cc7c059bf81f31a25f443e967d95cf0973199820c809b1e",
+        "changed": true,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": 3,
+      "secrets": [
+        "FixtureCam",
+        "xmpmeta"
+      ]
+    },
+    {
+      "name": "plain.jpg",
+      "description": "Nothing to read, nothing to remove: the same bytes",
+      "inputSha256": "6a60887e4d68e68d31df0c97ab37f8c8cd3c63da1bb1501c65d25b545d803fbd",
+      "metadata": {
+        "location": null,
+        "fields": [],
+        "blocks": []
+      },
+      "removeLocation": {
+        "sha256": "6a60887e4d68e68d31df0c97ab37f8c8cd3c63da1bb1501c65d25b545d803fbd",
+        "changed": false
+      },
+      "removeAll": {
+        "sha256": "6a60887e4d68e68d31df0c97ab37f8c8cd3c63da1bb1501c65d25b545d803fbd",
+        "changed": false,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": null,
+      "secrets": []
+    },
+    {
+      "name": "truncated.jpg",
+      "description": "Cut short in the scan: read and stripped up to where the file ends",
+      "inputSha256": "9eda5f5f54400264e2e672097972d8395832b95bd30a39b239a84b1cb3dd0e26",
+      "metadata": {
+        "location": {
+          "latitude": 59.43680555555555,
+          "longitude": 24.75034722222222,
+          "altitude": null
+        },
+        "fields": [
+          {
+            "group": "Image",
+            "name": "Make",
+            "value": "FixtureCam"
+          },
+          {
+            "group": "Image",
+            "name": "Model",
+            "value": "Model 7"
+          },
+          {
+            "group": "Image",
+            "name": "Orientation",
+            "value": 6
+          },
+          {
+            "group": "Image",
+            "name": "DateTime",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "DateTimeOriginal",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "BodySerialNumber",
+            "value": "SN-1234567"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitudeRef",
+            "value": "N"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitude",
+            "value": [
+              59.0,
+              26.0,
+              12.5
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitudeRef",
+            "value": "E"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitude",
+            "value": [
+              24.0,
+              45.0,
+              1.25
+            ]
+          }
+        ],
+        "blocks": [
+          "exif",
+          "xmp",
+          "iptc",
+          "comment",
+          "other"
+        ]
+      },
+      "removeLocation": {
+        "sha256": "ac7cfc53fed45b80622cf962f68d72ff68d683d28ff1809680781cbedd9064a8",
+        "changed": true
+      },
+      "removeAll": {
+        "sha256": "d545616fc58fad805d6ab30a05b892d4c5e72222c69ce6d30a2bf66ae2d846db",
+        "changed": true,
+        "malformed": false
+      },
+      "truncated": true,
+      "orientation": 6,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "xmpmeta",
+        "secret"
+      ]
+    },
+    {
+      "name": "malformed.jpg",
+      "description": "A stray byte between header segments: read up to it; all is kept, the location still goes",
+      "inputSha256": "a71d4f2eeb92d145450769757f32c37d918d7db8e09a5f46234625b6bdee1269",
+      "metadata": {
+        "location": {
+          "latitude": 59.43680555555555,
+          "longitude": 24.75034722222222,
+          "altitude": null
+        },
+        "fields": [
+          {
+            "group": "Image",
+            "name": "Make",
+            "value": "FixtureCam"
+          },
+          {
+            "group": "Image",
+            "name": "Model",
+            "value": "Model 7"
+          },
+          {
+            "group": "Image",
+            "name": "Orientation",
+            "value": 6
+          },
+          {
+            "group": "Image",
+            "name": "DateTime",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "DateTimeOriginal",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "BodySerialNumber",
+            "value": "SN-1234567"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitudeRef",
+            "value": "N"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitude",
+            "value": [
+              59.0,
+              26.0,
+              12.5
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitudeRef",
+            "value": "E"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitude",
+            "value": [
+              24.0,
+              45.0,
+              1.25
+            ]
+          }
+        ],
+        "blocks": [
+          "exif"
+        ]
+      },
+      "removeLocation": {
+        "sha256": "f5d7979f8d1af0f8d5b17b2a0a30a50b2babec4cc3ec95c8b21a0fc5afc32958",
+        "changed": true
+      },
+      "removeAll": {
+        "sha256": "a71d4f2eeb92d145450769757f32c37d918d7db8e09a5f46234625b6bdee1269",
+        "changed": false,
+        "malformed": true
+      },
+      "truncated": false,
+      "orientation": 6,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567"
+      ]
+    },
+    {
+      "name": "exif-text.png",
+      "description": "PNG: eXIf with GPS (its CRC redone), tEXt, zTXt, iTXt XMP, tIME, iCCP, pHYs and a trailer",
+      "inputSha256": "d2e2b17bed8ab67d631ecc59e3d8e24c2067285870e8c7e17775f614daf0afd9",
+      "metadata": {
+        "location": {
+          "latitude": 59.43680555555555,
+          "longitude": 24.75034722222222,
+          "altitude": null
+        },
+        "fields": [
+          {
+            "group": "Image",
+            "name": "Make",
+            "value": "FixtureCam"
+          },
+          {
+            "group": "Image",
+            "name": "Model",
+            "value": "Model 7"
+          },
+          {
+            "group": "Image",
+            "name": "Orientation",
+            "value": 6
+          },
+          {
+            "group": "Image",
+            "name": "DateTime",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "DateTimeOriginal",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "BodySerialNumber",
+            "value": "SN-1234567"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitudeRef",
+            "value": "N"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitude",
+            "value": [
+              59.0,
+              26.0,
+              12.5
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitudeRef",
+            "value": "E"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitude",
+            "value": [
+              24.0,
+              45.0,
+              1.25
+            ]
+          },
+          {
+            "group": "Text",
+            "name": "Comment",
+            "value": "secret comment"
+          },
+          {
+            "group": "Text",
+            "name": "Author",
+            "value": "(compressed)"
+          }
+        ],
+        "blocks": [
+          "exif",
+          "xmp",
+          "text",
+          "trailer",
+          "other"
+        ]
+      },
+      "removeLocation": {
+        "sha256": "ee5027079df48d66a359a0658f132f43705b6f65c67c9ffd407558f1a2ebc9ae",
+        "changed": true
+      },
+      "removeAll": {
+        "sha256": "fd9825b76db3d491fd6c21714d020d3108f909869412be1ab8542c39a942d03b",
+        "changed": true,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": 6,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "xmpmeta",
+        "secret"
+      ]
+    },
+    {
+      "name": "xmp-gps.png",
+      "description": "PNG: GPS only in iTXt XMP elements, next to tEXt, zTXt and compressed and plain iTXt",
+      "inputSha256": "3f58ee16f7e69a688fa661f595d17787c582437dd884bdf81833184ca8850dfa",
+      "metadata": {
+        "location": {
+          "latitude": 40.44611666666667,
+          "longitude": -79.98221666666667,
+          "altitude": null
+        },
+        "fields": [
+          {
+            "group": "Text",
+            "name": "Software",
+            "value": "Fixture Paint"
+          },
+          {
+            "group": "Text",
+            "name": "Title",
+            "value": "Tallinn \u2713"
+          },
+          {
+            "group": "Text",
+            "name": "Description",
+            "value": "(compressed)"
+          },
+          {
+            "group": "Text",
+            "name": "Author",
+            "value": "(compressed)"
+          }
+        ],
+        "blocks": [
+          "xmp",
+          "text"
+        ]
+      },
+      "removeLocation": {
+        "sha256": "89845b57933082fffd6050fec8b52b7449b4d99939e317a21ec465bb5542300a",
+        "changed": true
+      },
+      "removeAll": {
+        "sha256": "e74d924fb3f54fc9edd2b34a2fd4e73c741f1c8a6bbcc494dd1171e871a09251",
+        "changed": true,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": null,
+      "secrets": [
+        "xmpmeta"
+      ]
+    },
+    {
+      "name": "plain.png",
+      "description": "Nothing to read, nothing to remove: the same bytes",
+      "inputSha256": "e74d924fb3f54fc9edd2b34a2fd4e73c741f1c8a6bbcc494dd1171e871a09251",
+      "metadata": {
+        "location": null,
+        "fields": [],
+        "blocks": []
+      },
+      "removeLocation": {
+        "sha256": "e74d924fb3f54fc9edd2b34a2fd4e73c741f1c8a6bbcc494dd1171e871a09251",
+        "changed": false
+      },
+      "removeAll": {
+        "sha256": "e74d924fb3f54fc9edd2b34a2fd4e73c741f1c8a6bbcc494dd1171e871a09251",
+        "changed": false,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": null,
+      "secrets": []
+    },
+    {
+      "name": "exif-xmp.webp",
+      "description": "WebP: EXIF with GPS, XMP with a GPS latitude, ICC",
+      "inputSha256": "405656db43a92a8c02424ab5559659390555f9d497ba992c37387a86eff0b100",
+      "metadata": {
+        "location": {
+          "latitude": 59.43680555555555,
+          "longitude": 24.75034722222222,
+          "altitude": null
+        },
+        "fields": [
+          {
+            "group": "Image",
+            "name": "Make",
+            "value": "FixtureCam"
+          },
+          {
+            "group": "Image",
+            "name": "Model",
+            "value": "Model 7"
+          },
+          {
+            "group": "Image",
+            "name": "Orientation",
+            "value": 6
+          },
+          {
+            "group": "Image",
+            "name": "DateTime",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "DateTimeOriginal",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "BodySerialNumber",
+            "value": "SN-1234567"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitudeRef",
+            "value": "N"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitude",
+            "value": [
+              59.0,
+              26.0,
+              12.5
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitudeRef",
+            "value": "E"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitude",
+            "value": [
+              24.0,
+              45.0,
+              1.25
+            ]
+          }
+        ],
+        "blocks": [
+          "exif",
+          "xmp"
+        ]
+      },
+      "removeLocation": {
+        "sha256": "03d83c0bd22394502e09864bde9ce60b1ff7671a2151d1aaa36e9f7578563d0f",
+        "changed": true
+      },
+      "removeAll": {
+        "sha256": "123380c21741c5b1e99a9e896afee03b75962d8851a01b047c4c3f25774aea77",
+        "changed": true,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": 6,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "xmpmeta"
+      ]
+    },
+    {
+      "name": "upright.webp",
+      "description": "Lossless WebP: upright EXIF with GPS and XMP, and bytes after the RIFF",
+      "inputSha256": "e9638496775a4b308e46cef6cf69c47e89c6ca5ef0c6b6dd14486c98aa15d562",
+      "metadata": {
+        "location": {
+          "latitude": 59.43680555555555,
+          "longitude": 24.75034722222222,
+          "altitude": null
+        },
+        "fields": [
+          {
+            "group": "Image",
+            "name": "Make",
+            "value": "FixtureCam"
+          },
+          {
+            "group": "Image",
+            "name": "Model",
+            "value": "Model 7"
+          },
+          {
+            "group": "Image",
+            "name": "Orientation",
+            "value": 1
+          },
+          {
+            "group": "Image",
+            "name": "DateTime",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "DateTimeOriginal",
+            "value": "2026:10:18 12:00:00"
+          },
+          {
+            "group": "Photo",
+            "name": "BodySerialNumber",
+            "value": "SN-1234567"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitudeRef",
+            "value": "N"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLatitude",
+            "value": [
+              59.0,
+              26.0,
+              12.5
+            ]
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitudeRef",
+            "value": "E"
+          },
+          {
+            "group": "Location",
+            "name": "GPSLongitude",
+            "value": [
+              24.0,
+              45.0,
+              1.25
+            ]
+          }
+        ],
+        "blocks": [
+          "exif",
+          "xmp",
+          "trailer"
+        ]
+      },
+      "removeLocation": {
+        "sha256": "5fadd95b4455d8028bd89f542112d3d74868089cdd26eaf3ecb431badb970ff0",
+        "changed": true
+      },
+      "removeAll": {
+        "sha256": "3a89b77c65819b1ba32b3f2a8c19a2127ff8cb515f31509f961accd297f48e36",
+        "changed": true,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": null,
+      "secrets": [
+        "FixtureCam",
+        "SN-1234567",
+        "xmpmeta",
+        "secret"
+      ]
+    },
+    {
+      "name": "plain.webp",
+      "description": "Simple WebP: the same bytes",
+      "inputSha256": "475c61bae70d80dac0f074e9048c392db5695f2dd1aa472a62680ea07c1506c0",
+      "metadata": {
+        "location": null,
+        "fields": [],
+        "blocks": []
+      },
+      "removeLocation": {
+        "sha256": "475c61bae70d80dac0f074e9048c392db5695f2dd1aa472a62680ea07c1506c0",
+        "changed": false
+      },
+      "removeAll": {
+        "sha256": "475c61bae70d80dac0f074e9048c392db5695f2dd1aa472a62680ea07c1506c0",
+        "changed": false,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": null,
+      "secrets": []
+    },
+    {
+      "name": "plain.gif",
+      "description": "GIF is never read or touched",
+      "inputSha256": "1681b04ae6223ff8afd058a5e6ac6c9294243ff766a9bf64fdf61313db8f4726",
+      "metadata": {
+        "location": null,
+        "fields": [],
+        "blocks": []
+      },
+      "removeLocation": {
+        "sha256": "1681b04ae6223ff8afd058a5e6ac6c9294243ff766a9bf64fdf61313db8f4726",
+        "changed": false
+      },
+      "removeAll": {
+        "sha256": "1681b04ae6223ff8afd058a5e6ac6c9294243ff766a9bf64fdf61313db8f4726",
+        "changed": false,
+        "malformed": false
+      },
+      "truncated": false,
+      "orientation": null,
+      "secrets": []
+    }
+  ]
+}

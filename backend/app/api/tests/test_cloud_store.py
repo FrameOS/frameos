@@ -111,6 +111,25 @@ async def test_publish_passes_explicit_visibility(async_client, db, store_calls)
 
 
 @pytest.mark.asyncio
+async def test_publish_relays_the_clouds_reason(async_client, db, monkeypatch):
+    """A scene holding a Photos share link cannot go public; the person reads
+    the cloud's sentence, not its code."""
+    make_connected_link(db)
+    template = make_template(db, async_client.project_id)
+    sentence = "This scene contains a Photos album link. Anyone who gets the scene could open the album, so remove the link before sharing it."
+
+    async def store_publish(*args):
+        return 400, {"error": "scene_contains_photo_link", "detail": sentence}
+
+    monkeypatch.setattr(cloud_link, "store_publish", store_publish)
+    response = await async_client.post(
+        "/api/cloud/store/publish", json={"template_id": str(template.id), "visibility": "public"}
+    )
+    assert response.status_code == 502
+    assert response.json()["detail"] == f"FrameOS Cloud error: {sentence}"
+
+
+@pytest.mark.asyncio
 async def test_publish_requires_scope(async_client, db, store_calls):
     make_connected_link(db, scope="backend:link backend:read")
     template = make_template(db, async_client.project_id)

@@ -12,6 +12,7 @@ from app.models.frame import Frame
 from app.schemas.ai_apps import AiAppChatRequest, AiAppChatResponse
 from app.utils.ai_app import answer_app_question, edit_app_sources, route_app_chat
 from app.utils.ai_scene import CHAT_MODEL, SCENE_MODEL, openai_model
+from app.utils.photo_share_links import PhotoLinkRedactor
 from app.tenancy import current_project_id
 from . import api_project
 
@@ -82,7 +83,14 @@ async def chat_app(
     if not api_key:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI backend API key not set")
 
-    history = [item.model_dump() for item in (data.history or [])]
+    # An app's sources can hold a Photos share link like a scene can: the
+    # model sees a placeholder, and the files it writes get the link back
+    # (app/utils/photo_share_links.py). The user's message was stored as
+    # written, above.
+    photo_links = PhotoLinkRedactor()
+    prompt = photo_links.redact_text(prompt)
+    sources = photo_links.redact(data.sources)
+    history = photo_links.redact([item.model_dump() for item in (data.history or [])])
     model = openai_model(openai_settings, "appChatModel", openai_model(openai_settings, "chatModel", CHAT_MODEL))
 
     tool_payload = {}
@@ -113,7 +121,7 @@ async def chat_app(
     if tool == "edit_app":
         edit_payload = await edit_app_sources(
             prompt=tool_prompt,
-            sources=data.sources,
+            sources=sources,
             app_name=data.app_name,
             app_keyword=data.app_keyword,
             scene_id=data.scene_id,
@@ -128,13 +136,13 @@ async def chat_app(
             reply = edit_payload.get("reply") or "Updated app files."
             files_payload = edit_payload.get("files")
             if isinstance(files_payload, dict):
-                files = {str(key): str(value) for key, value in files_payload.items()}
+                files = photo_links.restore({str(key): str(value) for key, value in files_payload.items()})
         if not reply:
             reply = "Updated app files."
     else:
         answer_payload = await answer_app_question(
             prompt=tool_prompt,
-            sources=data.sources,
+            sources=sources,
             app_name=data.app_name,
             app_keyword=data.app_keyword,
             scene_id=data.scene_id,

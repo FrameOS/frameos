@@ -1,0 +1,19 @@
+[Unit]
+Description=FrameOS Cloud object-store sweep (objects no database row points at)
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+# auth-web.env provides DATABASE_URL and the R2_CLOUD_* keys the script builds
+# its rclone remote from (scripts/object-store-sweep.sh), so there is no
+# second copy of either to rotate.
+EnvironmentFile=-/etc/frameos-cloud/auth-web.env
+# The script ships with every release (docs/deployment.md), so the box always
+# runs the version that matches its schema; a sweep that missed a new object
+# column would delete what that column points at.
+WorkingDirectory=/opt/frameos-cloud/cloud
+ExecStart=/opt/frameos-cloud/cloud/scripts/object-store-sweep.sh --apply
+User=frameos-cloud
+Nice=10
+IOSchedulingClass=idle

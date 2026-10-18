@@ -7,6 +7,7 @@ import {
   auditEvents,
   createDb,
   storeSceneReports,
+  storeScenes,
   upsertAccountFromIdentity,
 } from "@frameos-cloud/db";
 import {
@@ -26,6 +27,7 @@ import { GET as getDriveRepositoryJson } from "../../../app/api/store/account/re
 import { POST as publishScene } from "../../../app/api/store/publish/route";
 import { GET as getRepositoryJson } from "../../../app/api/store/repository.json/route";
 import { GET as downloadScene } from "../../../app/api/store/scenes/[sceneId]/download/route";
+import { GET as getScenesJson } from "../../../app/api/store/scenes/[sceneId]/scenes.json/route";
 import { POST as reportScene } from "../../../app/api/store/scenes/[sceneId]/report/route";
 import { POST as authorizeDevice } from "../../../app/api/device/authorize/route";
 import { POST as pollDevice } from "../../../app/api/device/poll/route";
@@ -230,7 +232,7 @@ describe("store moderation gate", () => {
     process.env.OPENAI_API_KEY = "test-key";
 
     const { calls } = moderationFetch(["sexual"]);
-    const rejected = await publish(accessToken);
+    const rejected = await publish(accessToken, { visibility: "public" });
     expect(rejected.status).toBe(422);
     expect(await readJson(rejected)).toMatchObject({
       categories: ["sexual"],
@@ -260,6 +262,38 @@ describe("store moderation gate", () => {
     moderationFetch([]);
     const accepted = await publish(accessToken);
     expect(accepted.status).toBe(200);
+  });
+
+  it("keeps a private scene's cover away from moderation until it goes public", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+    process.env.OPENAI_API_KEY = "test-key";
+
+    const { calls } = moderationFetch([]);
+    const published = await publish(accessToken);
+    expect(published.status).toBe(200);
+    const scene = (await readJson(published)).scene as { id: string };
+    // The text went; the cover did not.
+    expect(calls).toHaveLength(1);
+    expect((calls[0] as { input: { type: string }[] }).input.map((part) => part.type)).toEqual([
+      "text",
+      "text",
+    ]);
+
+    // Going public sends every image some version links, then the text.
+    calls.length = 0;
+    const flip = await patchScene(
+      request(`/api/account/scenes/${scene.id}`, "PATCH", {
+        body: { visibility: "public" },
+        headers: { origin: baseUrl },
+      }),
+      ctx({ sceneId: scene.id }),
+    );
+    expect(flip.status).toBe(200);
+    const parts = calls.flatMap((call) =>
+      (call as { input: { type: string }[] }).input.map((part) => part.type),
+    );
+    expect(parts.filter((type) => type === "image_url")).toHaveLength(1);
+    expect(parts.filter((type) => type === "text")).toHaveLength(2);
   });
 
   it("fails closed when moderation is configured but unreachable", async () => {
@@ -314,6 +348,145 @@ describe("store moderation gate", () => {
       ctx({ sceneId: scene.id }),
     );
     expect(edit.status).toBe(422);
+  });
+});
+
+// docs/photos.md "Share links": a scene holding a Photos share link is its
+// owner's alone (src/lib/store-photo-links.ts).
+describe("Photos share links in scenes", () => {
+  const albumLink = `https://cloud.frameos.net/api/photos/shared/pk_${"r4T6y8U0".repeat(4)}`;
+  const albumScenes = [
+    {
+      id: "scene-1",
+      nodes: [
+        {
+          data: { config: { album: albumLink }, keyword: "photoAlbum" },
+          id: "n1",
+          type: "app",
+        },
+      ],
+    },
+  ];
+  const albumZip = (name = "Sunrise Clock") =>
+    templateZip({ name, scenes: albumScenes }).toString("base64");
+
+  async function shareToken(sceneId: string) {
+    const [row] = await db
+      .select({ shareToken: storeScenes.shareToken })
+      .from(storeScenes)
+      .where(eq(storeScenes.id, sceneId));
+    return row?.shareToken ?? null;
+  }
+
+  function flip(sceneId: string, body: Record<string, unknown>) {
+    return patchScene(
+      request(`/api/account/scenes/${sceneId}`, "PATCH", {
+        body,
+        headers: { origin: baseUrl },
+      }),
+      ctx({ sceneId }),
+    );
+  }
+
+  it("never publishes one, and a private album scene has no sharing link", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+
+    const refused = await publish(accessToken, {
+      content_base64: albumZip(),
+      visibility: "public",
+    });
+    expect(refused.status).toBe(400);
+    expect(await readJson(refused)).toMatchObject({ error: "scene_contains_photo_link" });
+
+    const saved = await publish(accessToken, { content_base64: albumZip() });
+    expect(saved.status).toBe(200);
+    const scene = (await readJson(saved)).scene as { id: string };
+    expect(await shareToken(scene.id)).toBeNull();
+
+    // No sharing link and no going public while any version holds the link.
+    for (const body of [{ share: "rotate" }, { visibility: "public" }]) {
+      const response = await flip(scene.id, body);
+      expect(response.status).toBe(400);
+      expect((await readJson(response)).error).toBe("scene_contains_photo_link");
+    }
+    // A later version without the link does not help: the old one stays
+    // downloadable by number.
+    const cleaned = await editSceneContent(
+      request(`/api/account/scenes/${scene.id}/content`, "POST", {
+        body: { scenes: [{ id: "scene-1", nodes: [] }] },
+        headers: { origin: baseUrl },
+      }),
+      ctx({ sceneId: scene.id }),
+    );
+    expect(cleaned.status).toBe(200);
+    expect((await flip(scene.id, { visibility: "public" })).status).toBe(400);
+  });
+
+  it("turns the sharing link off when a version brings a link in, and refuses one on a public scene", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+    const saved = await publish(accessToken);
+    const scene = (await readJson(saved)).scene as { id: string };
+    const before = await shareToken(scene.id);
+    expect(before).toBeTruthy();
+
+    const withLink = await editSceneContent(
+      request(`/api/account/scenes/${scene.id}/content`, "POST", {
+        body: { scenes: albumScenes },
+        headers: { origin: baseUrl },
+      }),
+      ctx({ sceneId: scene.id }),
+    );
+    expect(withLink.status).toBe(200);
+    expect(await shareToken(scene.id)).toBeNull();
+    const [event] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.eventType, "store.share_link_changed"));
+    expect(event?.metadata).toMatchObject({ action: "disable", reason: "photo_link" });
+
+    const other = await publish(accessToken, { name: "Public Clock", visibility: "public" });
+    const publicScene = (await readJson(other)).scene as { id: string };
+    const refused = await editSceneContent(
+      request(`/api/account/scenes/${publicScene.id}/content`, "POST", {
+        body: { scenes: albumScenes },
+        headers: { origin: baseUrl },
+      }),
+      ctx({ sceneId: publicScene.id }),
+    );
+    expect(refused.status).toBe(400);
+    expect((await readJson(refused)).error).toBe("scene_contains_photo_link");
+  });
+
+  it("does not serve a version with a link through a sharing link saved before the rule", async () => {
+    const { accessToken } = await linkClient(publishScopes);
+    const saved = await publish(accessToken, { content_base64: albumZip() });
+    const scene = (await readJson(saved)).scene as { id: string };
+    // An album scene saved before this rule kept the token every scene is
+    // born with.
+    const token = "11111111-2222-4333-8444-555555555555";
+    await db.update(storeScenes).set({ shareToken: token }).where(eq(storeScenes.id, scene.id));
+
+    // The owner still reads it.
+    const own = await getScenesJson(
+      request(`/api/store/scenes/${scene.id}/scenes.json?share=${token}`, "GET"),
+      ctx({ sceneId: scene.id }),
+    );
+    expect(own.status).toBe(200);
+
+    cookieJar.clear();
+    for (const response of [
+      await downloadScene(
+        request(`/api/store/scenes/${scene.id}/download?share=${token}`, "GET"),
+        ctx({ sceneId: scene.id }),
+      ),
+      await getScenesJson(
+        request(`/api/store/scenes/${scene.id}/scenes.json?share=${token}`, "GET"),
+        ctx({ sceneId: scene.id }),
+      ),
+    ]) {
+      expect(response.status).toBe(403);
+      expect((await readJson(response)).error).toBe("scene_contains_photo_link");
+    }
   });
 });
 

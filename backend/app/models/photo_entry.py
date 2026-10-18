@@ -51,6 +51,11 @@ class PhotoEntry(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ready")
     # Files only: the color profile (docs/photos.md "Colors"), or null.
     colors: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Files only: what the photo carries besides its pixels (docs/photos.md
+    # "Metadata", app/utils/photo_metadata.py), or SQL NULL when not read yet.
+    # Deferred: a listing reads only its location (json_extract). The column
+    # is "metadata", a name declarative classes keep for themselves.
+    photo_metadata: Mapped[dict | None] = mapped_column("metadata", JSON(none_as_null=True), nullable=True, deferred=True)
     # Naive UTC, like the other tables. updated_at is bumped whenever the
     # entry or (for folders) something directly inside it changes, so a
     # share link's listing can say when its album last changed.

@@ -2,7 +2,10 @@ import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import { decodeBackupContent } from "../../../../../../src/lib/backups";
 import { jsonError, readBoundedJsonObject } from "../../../../../../src/lib/device-flow";
-import { moderateStoreContent } from "../../../../../../src/lib/moderation";
+import {
+  moderateStoreContent,
+  type ModerationResult,
+} from "../../../../../../src/lib/moderation";
 import {
   detectImageContentType,
   isProvablyFullyTransparentImage,
@@ -24,7 +27,9 @@ type RouteContext = { params: Promise<{ sceneId: string }> };
 
 // Owner upload of an image for a scene. This registers the bytes — sniffed
 // for a real image signature, refused when provably transparent, moderated
-// like the publish-time cover — and answers with their digest. It binds
+// like the publish-time cover when the scene is public (a private scene's
+// images go to moderation when it goes public, store-image-moderation.ts) —
+// and answers with their digest. It binds
 // nothing: which images a scene shows, and in what order, is part of a
 // version, so the digest goes into the editor's draft and the next Save
 // publishes it (POST …/content with `images`). An upload that never gets
@@ -84,10 +89,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
   }
 
-  const moderation = await moderateStoreContent({
-    image: { content, contentType },
-    texts: [],
-  });
+  // Checked here as well as at Save on a public scene, so the editor hears
+  // about a refused image while the person is still choosing it.
+  const moderation: ModerationResult =
+    scene.visibility === "public"
+      ? await moderateStoreContent({
+          image: { content, contentType },
+          texts: [],
+        })
+      : { checked: false, ok: true };
   if (!moderation.ok) {
     if (moderation.error === "content_rejected") {
       await recordAuditEvent(db, {

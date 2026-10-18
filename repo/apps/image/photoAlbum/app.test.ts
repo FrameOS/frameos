@@ -1,4 +1,4 @@
-import { albumLink, get, linkOrigin, photoUrl, position, shapesQuery } from './app'
+import { albumLink, get, linkOrigin, photoUrl, position, reason, shapesQuery } from './app'
 
 const link = 'https://frames.example/api/photos/shared/pk_test'
 const photo = { path: 'beach/a.jpg', name: 'a.jpg', url: '/api/photos/shared/pk_test/file?path=beach%2Fa.jpg', colors: null }
@@ -23,6 +23,15 @@ describe('photoAlbum helpers', () => {
     expect(position('7')).toBe(7)
     expect(position(-1)).toBe(0)
     expect(position('soon')).toBe(0)
+  })
+  it('cuts addresses and share tokens out of an error text', () => {
+    expect(reason(`HTTP request failed: ${link}/photo?index=3`)).toBe('HTTP request failed: https://frames.example')
+    expect(reason('Too many HTTP redirects fetching https://u:p@w@cdn.example:8443/x.jpg?sig=1')).toBe(
+      'Too many HTTP redirects fetching https://cdn.example:8443'
+    )
+    expect(reason('HTTP 404: Cannot GET /api/photos/shared/pk_test/file')).toBe('HTTP 404: Cannot GET /api/photos/shared/pk_.../file')
+    expect(reason('connect failed: ESP_ERR_HTTP_CONNECT')).toBe('connect failed: ESP_ERR_HTTP_CONNECT')
+    expect(reason(null)).toBe('')
   })
   it('asks for the shapes only when one is off', () => {
     expect(shapesQuery({ landscape: true, portrait: 'true', square: true })).toBe('')
@@ -90,5 +99,23 @@ describe('photoAlbum', () => {
     expect(get(app, makeContext()).svg).toContain('Could not load a.jpg: gone')
     expect(app.state.photoIndex).toBe(1)
     expect(error).toHaveBeenCalledTimes(5)
+  })
+
+  it('never shows the album link or a photo address when a fetch fails', () => {
+    const error = mock.error()
+    mock.httpRequest((url: string) => ({ status: 0, error: `HTTP request failed: ${url}` }))
+    const unreachable = get(makeApp({ config: { album: link } }), makeContext())
+    expect(error).toHaveBeenLastCalledWith('Could not reach the album: HTTP request failed: https://frames.example')
+    album(1)
+    mock.fetchImage((url: string) => ({ image: null, error: `HTTP request refused: deadline passed (${url})` }))
+    const failed = get(makeApp({ config: { album: link } }), makeContext())
+    expect(error).toHaveBeenLastCalledWith('Could not load a.jpg: HTTP request refused: deadline passed (https://frames.example')
+    expect(failed.svg).toContain('https://frames.example')
+    for (const text of [unreachable.svg, failed.svg, JSON.stringify(error.calls)]) {
+      expect(text).not.toContain('pk_test')
+      expect(text).not.toContain('/photo?')
+      expect(text).not.toContain('file?path')
+    }
+    expect(error).toHaveBeenCalledTimes(2)
   })
 })

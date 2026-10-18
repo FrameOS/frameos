@@ -18,11 +18,14 @@ import {
   UserIcon,
   DocumentIcon,
   ExclamationTriangleIcon,
+  EyeSlashIcon,
   FolderIcon,
   FolderPlusIcon,
+  InformationCircleIcon,
   LinkIcon,
   ListBulletIcon,
   MagnifyingGlassIcon,
+  MapPinIcon,
   PencilSquareIcon,
   PhotoIcon,
   PlayIcon,
@@ -33,6 +36,7 @@ import {
   XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { FrameosShell } from '../workspace/FrameosShell'
+import { Button } from '../../components/Button'
 import { DropdownMenu, type DropdownMenuItem } from '../../components/DropdownMenu'
 import { Modal } from '../../components/Modal'
 import { Spinner } from '../../components/Spinner'
@@ -56,6 +60,8 @@ import {
 import { type PhotoThumbnailFit } from './photoEntries'
 import { AspectMark, ShapeToggles } from './ShapeToggles'
 import { photoColorsLogic } from './photoColorsLogic'
+import { photoInfoLogic } from './photoInfoLogic'
+import { formatAltitude, formatCoordinates, openStreetMapUrl } from './photoMetadata'
 import {
   PREVIEW_SIZE_PRESETS,
   PREVIEW_SIZE_TARGET_KEY,
@@ -705,6 +711,7 @@ function entryMenuItems(
     openShare: (path: string) => void
     openInstallPicker: (albums: string[]) => void
     openColors: (path: string) => void
+    openInfo: (path: string) => void
     openShowPicker: (target: PhotoShowTarget) => void
     showOnFrame: (frameId: FrameId, target: PhotoShowTarget) => void
     openResize: (paths: string[]) => void
@@ -741,6 +748,13 @@ function entryMenuItems(
           label: entry.colors ? 'Edit colors' : 'Set colors',
           icon: <PaintBrushIcon className="h-5 w-5" />,
           onClick: () => actions.openColors(entry.path),
+        }
+      : null,
+    playable
+      ? {
+          label: 'Info',
+          icon: <InformationCircleIcon className="h-5 w-5" />,
+          onClick: () => actions.openInfo(entry.path),
         }
       : null,
     playable
@@ -831,6 +845,7 @@ function EntryMenu({ entry }: { entry: PhotoEntry }): JSX.Element {
     openResize,
   } = useActions(photosLogic)
   const { openEditor } = useActions(photoColorsLogic)
+  const { openInfo } = useActions(photoInfoLogic)
   return (
     <div onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}>
       <DropdownMenu
@@ -847,6 +862,7 @@ function EntryMenu({ entry }: { entry: PhotoEntry }): JSX.Element {
           openShare,
           openInstallPicker,
           openColors: openEditor,
+          openInfo,
         })}
       />
     </div>
@@ -908,6 +924,14 @@ function FileTile({ entry, selected }: { entry: PhotoEntry; selected: boolean })
       <SelectToggle entry={entry} selected={selected} />
       <div className="frameos-inset relative aspect-[4/3] w-full overflow-hidden bg-slate-100">
         <PhotoThumb entry={entry} className="h-full w-full" fit={thumbnailFit} />
+        {entry.location ? (
+          <span
+            title="Has location"
+            className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/45 text-white shadow"
+          >
+            <MapPinIcon className="h-3.5 w-3.5" aria-label="Has location" />
+          </span>
+        ) : null}
         {entry.status === 'blocked' ? (
           <span className="absolute inset-x-2 bottom-2 rounded-lg bg-red-600/90 px-2 py-1 text-center text-xs font-semibold text-white">
             Blocked
@@ -976,6 +1000,7 @@ function ListRow({ entry, selected, shared }: { entry: PhotoEntry; selected: boo
           </span>
           {shared ? <LinkIcon className="h-3.5 w-3.5 shrink-0 opacity-60" aria-label="Shared" /> : null}
           {entry.colors ? <ColorsMark /> : null}
+          {entry.location ? <LocationMark /> : null}
           {entry.status === 'blocked' ? <span className="text-xs font-semibold text-red-600">Blocked</span> : null}
         </div>
         <div className="frameos-muted truncate text-xs @3xl:hidden">
@@ -1013,6 +1038,8 @@ function SelectionBar(): JSX.Element | null {
     openShowPicker,
     openResize,
   } = useActions(photosLogic)
+  const { selectedLocationPaths, selectedMetadataPaths, removing } = useValues(photoInfoLogic)
+  const { removeSelectedMetadata } = useActions(photoInfoLogic)
   if (!selectedEntries.length) {
     return null
   }
@@ -1089,6 +1116,28 @@ function SelectionBar(): JSX.Element | null {
         >
           <ArrowsPointingInIcon className="h-4 w-4" />
           {resizable.length > 1 ? `Resize all (${resizable.length})` : 'Resize'}
+        </button>
+      ) : null}
+      {selectedLocationPaths.length ? (
+        <button
+          type="button"
+          disabled={!!removing}
+          onClick={() => removeSelectedMetadata('location')}
+          className={clsx(toolbarButtonClassName, 'frameos-secondary-button h-9')}
+        >
+          <MapPinIcon className="h-4 w-4" />
+          {`Remove location (${selectedLocationPaths.length})`}
+        </button>
+      ) : null}
+      {selectedMetadataPaths.length ? (
+        <button
+          type="button"
+          disabled={!!removing}
+          onClick={() => removeSelectedMetadata('all')}
+          className={clsx(toolbarButtonClassName, 'frameos-secondary-button h-9')}
+        >
+          <EyeSlashIcon className="h-4 w-4" />
+          {`Remove metadata (${selectedMetadataPaths.length})`}
         </button>
       ) : null}
       {single && single.kind === 'file' && single.status !== 'blocked' ? (
@@ -1260,6 +1309,14 @@ function ColorsMark(): JSX.Element {
   return (
     <span title="Has colors" className="shrink-0">
       <PaintBrushIcon className="h-3.5 w-3.5 opacity-60" aria-label="Has colors" />
+    </span>
+  )
+}
+
+function LocationMark(): JSX.Element {
+  return (
+    <span title="Has location" className="shrink-0">
+      <MapPinIcon className="h-3.5 w-3.5 opacity-60" aria-label="Has location" />
     </span>
   )
 }
@@ -1506,6 +1563,116 @@ function PhotoColorsPanel(): JSX.Element {
   )
 }
 
+/** The Info panel, in the colors editor's place beside the photo: what the file says about itself. */
+function PhotoInfoPanel(): JSX.Element {
+  const {
+    infoPath,
+    infoMetadata,
+    metadataError,
+    infoGroups,
+    infoBlocksSentence,
+    infoEmpty,
+    canRemoveLocation,
+    canRemoveAll,
+    removing,
+    removeError,
+  } = useValues(photoInfoLogic)
+  const { closeInfo, removeShownMetadata } = useActions(photoInfoLogic)
+  const location = infoMetadata?.location ?? null
+  const headingClassName = 'frame-tool-muted text-xs font-semibold uppercase tracking-wide'
+  return (
+    // Always the dark theme, like the colors editor: it sits in the black lightbox.
+    <aside
+      className="frameos-theme-dark frameos-dark-surface photos-info-panel flex w-[24rem] max-w-[90vw] shrink-0"
+      aria-label="Info"
+    >
+      <div className="frameos-panel frame-tool-panel flex min-h-0 w-full flex-col border-l backdrop-blur-xl">
+        <div className="frameos-divider flex items-start gap-2 border-b px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <div className="frameos-strong truncate text-lg font-semibold">Info</div>
+            <div className="frame-tool-muted truncate text-xs">{infoPath ? photoBaseName(infoPath) : ''}</div>
+          </div>
+          <button
+            type="button"
+            title="Close"
+            onClick={closeInfo}
+            className="frameos-icon-button flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+          >
+            <XMarkIcon className="h-5 w-5" />
+          </button>
+        </div>
+        {metadataError ? (
+          <div className="p-4 text-sm text-red-300">{metadataError}</div>
+        ) : !infoMetadata ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <Spinner className="h-8 w-8" />
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+            {location ? (
+              <section className="space-y-1">
+                <h3 className={headingClassName}>Location</h3>
+                <div className="frameos-strong flex items-center gap-1.5 text-sm font-semibold tabular-nums">
+                  <MapPinIcon className="h-4 w-4 shrink-0" />
+                  {formatCoordinates(location)}
+                </div>
+                {location.altitude !== null ? (
+                  <div className="frame-tool-muted text-xs">Altitude {formatAltitude(location.altitude)}</div>
+                ) : null}
+                <a
+                  href={openStreetMapUrl(location)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block text-xs font-semibold text-sky-300 underline-offset-2 hover:underline"
+                >
+                  Open in OpenStreetMap
+                </a>
+              </section>
+            ) : null}
+            {infoGroups.map((group) => (
+              <section key={group.group} className="space-y-1">
+                <h3 className={headingClassName}>{group.label}</h3>
+                <dl className="space-y-0.5 text-xs">
+                  {group.fields.map((field, index) => (
+                    <div key={index} className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-3">
+                      <dt className="frame-tool-muted truncate" title={field.name}>
+                        {field.name}
+                      </dt>
+                      <dd className="frameos-strong break-words">{field.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            ))}
+            {infoBlocksSentence ? <p className="frame-tool-muted text-xs">{infoBlocksSentence}</p> : null}
+            {infoEmpty ? <p className="frame-tool-muted text-sm">No metadata in this file.</p> : null}
+          </div>
+        )}
+        {infoMetadata && (canRemoveLocation || canRemoveAll || removeError) ? (
+          <div className="frameos-divider flex flex-wrap items-center gap-2 border-t p-3">
+            {removeError ? <p className="w-full text-xs text-red-300">{removeError}</p> : null}
+            {canRemoveLocation ? (
+              <Button
+                color="secondary"
+                size="small"
+                disabled={!!removing}
+                onClick={() => removeShownMetadata('location')}
+              >
+                {removing === 'location' ? 'Removing…' : 'Remove location'}
+              </Button>
+            ) : null}
+            {canRemoveAll ? (
+              <Button color="secondary" size="small" disabled={!!removing} onClick={() => removeShownMetadata('all')}>
+                {removing === 'all' ? 'Removing…' : 'Remove all metadata'}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </aside>
+  )
+}
+
 /** The lightbox's photo as the chosen panel shows it, or graded at full fidelity. */
 function LightboxPainted({ entry }: { entry: PhotoEntry }): JSX.Element {
   const values = useValues(photoColorsLogic)
@@ -1583,16 +1750,20 @@ function LightboxPainted({ entry }: { entry: PhotoEntry }): JSX.Element {
   )
 }
 
-function Lightbox(): JSX.Element | null {
+// Exported, like PhotosBrowser, for the shared-spa tests, which mount it without the shell.
+export function Lightbox(): JSX.Element | null {
   const { lightboxEntry, lightboxEntries } = useValues(photosLogic)
   const { closeLightbox, stepLightbox, deleteEntries } = useActions(photosLogic)
   const { lightboxPainted, imagePath } = useValues(photoColorsLogic)
   const { openEditor, closeEditor } = useActions(photoColorsLogic)
+  const { infoPath } = useValues(photoInfoLogic)
+  const { toggleInfo } = useActions(photoInfoLogic)
   if (!lightboxEntry) {
     return null
   }
   const index = lightboxEntries.findIndex((entry) => entry.path === lightboxEntry.path)
   const editing = imagePath === lightboxEntry.path
+  const showingInfo = infoPath === lightboxEntry.path
   // Portalled to <body>: on the cloud the workspace sits in a wrapper with a
   // transform (cloud-frontend index.css), which makes it the containing block
   // for every fixed descendant, so an in-tree overlay would stop under the
@@ -1632,6 +1803,18 @@ function Lightbox(): JSX.Element | null {
               )}
             >
               <PaintBrushIcon className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              title="Info"
+              aria-pressed={showingInfo}
+              onClick={() => toggleInfo(lightboxEntry.path)}
+              className={clsx(
+                'flex h-10 w-10 items-center justify-center rounded-xl hover:bg-white/10',
+                showingInfo && 'bg-white/15'
+              )}
+            >
+              <InformationCircleIcon className="h-5 w-5" />
             </button>
           </>
         ) : null}
@@ -1693,7 +1876,7 @@ function Lightbox(): JSX.Element | null {
             </>
           ) : null}
         </div>
-        {editing ? <PhotoColorsPanel /> : null}
+        {editing ? <PhotoColorsPanel /> : showingInfo ? <PhotoInfoPanel /> : null}
       </div>
     </div>,
     document.body
@@ -2367,7 +2550,7 @@ function Notice(): JSX.Element | null {
   )
 }
 
-function PhotosBrowser(): JSX.Element {
+export function PhotosBrowser(): JSX.Element {
   const {
     folder,
     visibleEntries,

@@ -24,6 +24,7 @@ from app.schemas.ai_scenes import (
 )
 from app.config import config
 from app.utils.ai_catalog import AiCatalogItem, build_catalog_context, collect_catalog_items
+from app.utils.photo_share_links import PhotoLinkRedactor
 from app.utils.repo_apps import bundle_repo_apps, repo_app_configs
 from app.utils.ai_scene import (
     CHAT_MODEL,
@@ -327,6 +328,11 @@ async def generate_scene(
         )
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI backend API key not set")
 
+    # A Photos share link is a credential for a whole album: the model sees a
+    # placeholder, and the scenes it returns get the link back below
+    # (app/utils/photo_share_links.py).
+    photo_links = PhotoLinkRedactor()
+    prompt = photo_links.redact_text(prompt)
     try:
         catalog_context, context_items = await _load_catalog_context(
             settings=settings,
@@ -502,6 +508,7 @@ async def generate_scene(
         input_state=[{"role": "user", "content": prompt}],
         output_state={"title": title, "scenes": scenes},
     )
+    scenes = photo_links.restore(scenes)
     _capture_ai_span(
         trace_id=posthog_trace_id,
         session_id=posthog_session_id,
@@ -616,9 +623,15 @@ async def chat_scene(
         )
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="OpenAI backend API key not set")
 
+    # The prompt, the history, the scene and the selection reach the model
+    # with placeholders for Photos share links, and the scenes it returns get
+    # the links back (app/utils/photo_share_links.py). The user's message was
+    # stored as written, above.
+    photo_links = PhotoLinkRedactor()
+    prompt = photo_links.redact_text(prompt)
     try:
-        history = [item.model_dump() for item in (data.history or [])]
-        scene_payload = data.scene if isinstance(data.scene, dict) else None
+        history = photo_links.redact([item.model_dump() for item in (data.history or [])])
+        scene_payload = photo_links.redact(data.scene) if isinstance(data.scene, dict) else None
         scene_prefix = "Build a new scene:"
         tool_payload = None
         tool = None
@@ -674,8 +687,8 @@ async def chat_scene(
             request_id=request_id,
         )
 
-        selected_nodes = data.selected_nodes if isinstance(data.selected_nodes, list) else None
-        selected_edges = data.selected_edges if isinstance(data.selected_edges, list) else None
+        selected_nodes = photo_links.redact(data.selected_nodes) if isinstance(data.selected_nodes, list) else None
+        selected_edges = photo_links.redact(data.selected_edges) if isinstance(data.selected_edges, list) else None
 
         if tool in {"answer_scene_question", "reply"} and scene_payload:
             await _publish_ai_scene_log(redis, "Answering scene question.", request_id, stage="answer")
@@ -851,12 +864,18 @@ async def chat_scene(
             )
             reply = f"Generated a new scene: {title}."
             _record_assistant_message(reply, tool)
-            return AiSceneChatResponse(reply=reply, tool=tool, title=title, scenes=scenes, chatId=chat.id if chat else None)
+            return AiSceneChatResponse(
+                reply=reply,
+                tool=tool,
+                title=photo_links.restore(title),
+                scenes=photo_links.restore(scenes),
+                chatId=chat.id if chat else None,
+            )
 
         if tool == "modify_scene":
             scene_model = openai_model(openai_settings, "sceneModel", SCENE_MODEL)
-            response_payload: dict[str, Any] | None = None
-            validation_issues: list[str] = []
+            response_payload = None
+            validation_issues = []
             available_apps = sorted({*get_app_configs(), *repo_app_configs()})
             max_attempts = 2
             for attempt in range(1, max_attempts + 1):
@@ -919,7 +938,7 @@ async def chat_scene(
             for scene in scenes:
                 if not isinstance(scene, dict):
                     continue
-                settings_payload: dict[str, Any] | None = scene.get("settings") or {}
+                settings_payload = scene.get("settings") or {}
                 if not isinstance(settings_payload, dict):
                     settings_payload = {}
                     scene["settings"] = settings_payload
@@ -936,7 +955,9 @@ async def chat_scene(
             if validation_issues:
                 reply += " Note: the update may need review for validation issues."
             _record_assistant_message(reply, tool)
-            return AiSceneChatResponse(reply=reply, tool=tool, scenes=scenes, chatId=chat.id if chat else None)
+            return AiSceneChatResponse(
+                reply=reply, tool=tool, scenes=photo_links.restore(scenes), chatId=chat.id if chat else None
+            )
 
         await _publish_ai_scene_log(redis, "Answering frame question.", request_id, stage="answer")
         answer = await answer_frame_question(

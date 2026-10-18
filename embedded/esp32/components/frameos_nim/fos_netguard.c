@@ -406,6 +406,113 @@ bool fos_netguard_parse_url(const char *url, char *host, size_t host_len, int *p
     return true;
 }
 
+/* ------------------------------------------------------------ log redaction */
+
+static bool origin_scheme_char(char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+           c == '+' || c == '-' || c == '.';
+}
+
+/* A registered name: letters, digits, "-._~", percent-encoding and raw UTF-8
+ * (IDN). Anything else means the "host" is not one, and it is not shown. */
+static bool origin_host_char(unsigned char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+           c == '-' || c == '.' || c == '_' || c == '~' || c == '%' || c >= 0x80;
+}
+
+static bool origin_ipv6_char(char c)
+{
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') ||
+           c == ':' || c == '.';
+}
+
+static void origin_append(char *out, size_t out_len, size_t *pos, const char *s, size_t n, bool lower)
+{
+    for (size_t i = 0; i < n && *pos + 1 < out_len; i++) {
+        char c = s[i];
+        if (lower && c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        out[(*pos)++] = c;
+    }
+    out[*pos] = '\0';
+}
+
+static bool url_origin(const char *url, char *out, size_t out_len)
+{
+    if (url == NULL) return false;
+    const char *mark = strstr(url, "://");
+    if (mark == NULL || mark == url ||
+        !((url[0] >= 'a' && url[0] <= 'z') || (url[0] >= 'A' && url[0] <= 'Z'))) return false;
+    for (const char *p = url; p < mark; p++) {
+        if (!origin_scheme_char(*p)) return false;
+    }
+
+    const char *authority = mark + 3;
+    size_t authority_len = strcspn(authority, "/?#\\");
+    /* Userinfo ends at the LAST '@', as in fos_netguard_parse_url. */
+    for (size_t i = authority_len; i > 0; i--) {
+        if (authority[i - 1] == '@') {
+            authority += i;
+            authority_len -= i;
+            break;
+        }
+    }
+
+    size_t host_chars;
+    const char *port_str = NULL;
+    size_t port_chars = 0;
+    if (authority_len > 0 && authority[0] == '[') {
+        const char *close = memchr(authority, ']', authority_len);
+        if (close == NULL || close - authority < 2) return false;
+        for (const char *p = authority + 1; p < close; p++) {
+            if (!origin_ipv6_char(*p)) return false;
+        }
+        host_chars = (size_t)(close + 1 - authority);
+        if (host_chars < authority_len) {
+            if (authority[host_chars] != ':') return false;
+            port_str = authority + host_chars + 1;
+            port_chars = authority_len - host_chars - 1;
+        }
+    } else {
+        const char *colon = memchr(authority, ':', authority_len);
+        host_chars = colon != NULL ? (size_t)(colon - authority) : authority_len;
+        if (colon != NULL) {
+            port_str = colon + 1;
+            port_chars = authority_len - host_chars - 1;
+        }
+        if (host_chars == 0) return false;
+        for (size_t i = 0; i < host_chars; i++) {
+            if (!origin_host_char((unsigned char)authority[i])) return false;
+        }
+    }
+    if (port_chars > 5) return false;
+    for (size_t i = 0; i < port_chars; i++) {
+        if (port_str[i] < '0' || port_str[i] > '9') return false;
+    }
+
+    size_t pos = 0;
+    origin_append(out, out_len, &pos, url, (size_t)(mark - url), true);
+    origin_append(out, out_len, &pos, "://", 3, false);
+    origin_append(out, out_len, &pos, authority, host_chars, true);
+    if (port_chars > 0) {
+        origin_append(out, out_len, &pos, ":", 1, false);
+        origin_append(out, out_len, &pos, port_str, port_chars, false);
+    }
+    return true;
+}
+
+void fos_netguard_url_origin(const char *url, char *out, size_t out_len)
+{
+    if (out == NULL || out_len == 0) return;
+    out[0] = '\0';
+    if (!url_origin(url, out, out_len)) {
+        size_t pos = 0;
+        origin_append(out, out_len, &pos, FOS_NETGUARD_INVALID_URL,
+                      sizeof(FOS_NETGUARD_INVALID_URL) - 1, false);
+    }
+}
+
 /* ------------------------------------------------------------- the decision */
 
 /* Does this host consist only of digits and dots? Such a string is never a

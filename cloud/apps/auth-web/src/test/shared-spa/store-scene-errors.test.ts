@@ -30,7 +30,15 @@ describe("storeSceneErrorMessage", () => {
     expect(storeSceneErrorMessage({ error: "cannot_yank_last_version" }, 400)).toMatch(
       /at least one published version/,
     );
-    for (const code of ["storage_quota_exceeded", "scene_pulled", "rate_limited"]) {
+    expect(storeSceneErrorMessage({ error: "scene_contains_photo_link" }, 400)).toBe(
+      "This scene contains a Photos album link. Anyone who gets the scene could open the album, so remove the link before sharing it.",
+    );
+    for (const code of [
+      "storage_quota_exceeded",
+      "scene_pulled",
+      "rate_limited",
+      "scene_contains_photo_link",
+    ]) {
       expect(storeSceneErrorMessage({ error: code }, 400)).not.toContain(code);
       expect(storeSceneErrorMessage({ error: code }, 400)).not.toMatch(/^Failed/);
     }

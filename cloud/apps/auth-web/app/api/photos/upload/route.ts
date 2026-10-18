@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { detectImageContentType } from "../../../../src/lib/store";
 import { jsonError, readBoundedBytes } from "../../../../src/lib/device-flow";
+import { logWarn } from "../../../../src/lib/log";
 import { photoOwnerContext, withPhotoErrors } from "../../../../src/lib/photos/http";
 import { imageDimensions } from "../../../../src/lib/photos/image-info";
 import { scanIncomingPhoto } from "../../../../src/lib/photos/intake";
+import {
+  type PhotoMetadata,
+  readPhotoMetadataBytes,
+  readPhotoMetadataFile,
+} from "../../../../src/lib/photos/metadata";
 import {
   acceptedPhotoContentTypes,
   assertPhotoQuota,
@@ -35,10 +41,12 @@ export const runtime = "nodejs";
 // Chunks wait on this host's disk (src/lib/photos/uploads.ts). Nothing
 // reaches the object store until the whole file is in, is one of the four
 // accepted image types (sniffed), fits the quota and has passed every
-// configured scanner. Its thumbnail is made here too (src/lib/photos/thumbnail.ts).
-// A chunked file is worked on where it lies: hashed, scanned, thumbnailed
-// and streamed to the store from disk, so a 250 MiB photo is never one
-// buffer in this process.
+// configured scanner. It is stored exactly as sent; its thumbnail is made
+// here (src/lib/photos/thumbnail.ts) and its metadata read into the row
+// (src/lib/photos/metadata.ts, docs/photos.md "Metadata"). A chunked file is
+// worked on where it lies: hashed, scanned, read, thumbnailed and streamed
+// to the store from disk, so a 250 MiB photo is never one buffer in this
+// process.
 export async function POST(request: NextRequest) {
   const context = await photoOwnerContext(request, { kind: "upload" });
   if (context.response) {
@@ -150,18 +158,34 @@ export async function POST(request: NextRequest) {
     }
     const dimensions = imageDimensions(head, contentType);
     const thumbnail = await makePhotoThumbnail(source);
+    const metadata = await readMetadata(file);
     const entry = await storePhotoFile(db, accountId, {
       body: file,
       size,
       contentType,
       folder,
       height: dimensions?.height ?? null,
+      metadata,
       name: filename,
       sha256: scanned.sha256,
       thumbnail,
       width: dimensions?.width ?? null,
     });
     return NextResponse.json({ entry });
+  }
+}
+
+/**
+ * What the photo carries, read at offsets from the file on disk. A read that
+ * fails stores nothing (null: the folder listing reads it later); an upload
+ * is never refused for its metadata.
+ */
+async function readMetadata(file: Buffer | PhotoUploadFile): Promise<PhotoMetadata | null> {
+  try {
+    return Buffer.isBuffer(file) ? await readPhotoMetadataBytes(file) : await readPhotoMetadataFile(file);
+  } catch (error) {
+    logWarn("photos.metadata_read_failed", { error: error instanceof Error ? error.message : String(error) });
+    return null;
   }
 }
 

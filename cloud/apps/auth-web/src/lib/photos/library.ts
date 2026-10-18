@@ -27,6 +27,13 @@ import { capturePostHogEvent } from "../posthog-capture";
 import { photoQuotaBytesForAccount } from "../usage";
 import type { PhotoColors } from "./colors";
 import {
+  emptyPhotoMetadata,
+  type PhotoMetadata,
+  type PhotoMetadataRemoval,
+  readPhotoMetadataBytes,
+  removePhotoMetadataBytes,
+} from "./metadata";
+import {
   comparePhotoNames,
   comparePhotoPaths,
   isPlayablePhotoName,
@@ -86,6 +93,9 @@ export type PhotoEntry = {
   height: number | null;
   items?: number;
   kind: "file" | "folder";
+  // Where the photo was taken (docs/photos.md "Metadata"), or null: none,
+  // not read yet, or a folder. Never in the share routes' JSON.
+  location: PhotoEntryLocation | null;
   mtime: number;
   name: string;
   path: string;
@@ -94,12 +104,16 @@ export type PhotoEntry = {
   width: number | null;
 };
 
+export type PhotoEntryLocation = { latitude: number; longitude: number };
+
 type EntryRow = {
   colors: PhotoColors | null;
   contentType: string | null;
   createdAt: Date;
   height: number | null;
   kind: string;
+  // metadata -> 'location': the stored Metadata's location, or null.
+  location: unknown;
   path: string;
   sizeBytes: number;
   status: string;
@@ -112,11 +126,22 @@ const entryColumns = {
   createdAt: photoEntries.createdAt,
   height: photoEntries.height,
   kind: photoEntries.kind,
+  // Only the location: a listing must not carry every photo's fields.
+  location: sql<unknown>`${photoEntries.metadata} -> 'location'`,
   path: photoEntries.path,
   sizeBytes: photoEntries.sizeBytes,
   status: photoEntries.status,
   width: photoEntries.width,
 };
+
+/** The listing's pin: the stored location without its altitude. */
+function entryLocation(value: unknown): PhotoEntryLocation | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const { latitude, longitude } = value as Record<string, unknown>;
+  return typeof latitude === "number" && typeof longitude === "number" ? { latitude, longitude } : null;
+}
 
 function seconds(date: Date) {
   return Math.floor(date.getTime() / 1000);
@@ -240,6 +265,7 @@ export function describePhotoChildren(parent: string, rows: EntryRow[]): PhotoEn
           height: null,
           items: folderStats.items,
           kind: "folder" as const,
+          location: null,
           size: folderStats.size,
           status: row.status,
           width: null,
@@ -251,6 +277,7 @@ export function describePhotoChildren(parent: string, rows: EntryRow[]): PhotoEn
         content_type: row.contentType,
         height: row.height,
         kind: "file" as const,
+        location: entryLocation(row.location),
         size: Number(row.sizeBytes),
         status: row.status,
         width: row.width,
@@ -552,6 +579,8 @@ export type StorePhotoInput = {
   contentType: string;
   folder: string;
   height: number | null;
+  /** What the photo carries (metadata.ts), read at upload. */
+  metadata: PhotoMetadata | null;
   name: string;
   sha256: string;
   /** The JPEG from makePhotoThumbnail, or null when there is none. */
@@ -598,6 +627,7 @@ export async function storePhotoFile(
         contentType: input.contentType,
         height: input.height,
         kind: "file",
+        metadata: input.metadata,
         objectKey,
         path: target,
         sha256: input.sha256,
@@ -621,6 +651,8 @@ export type ReplacePhotoInput = {
   /** The extension the new bytes call for (".jpg"); the name follows it when it differs. */
   extension: string;
   height: number | null;
+  /** What the new bytes carry (metadata.ts). */
+  metadata: PhotoMetadata | null;
   sha256: string;
   size: number;
   thumbnail: Buffer | null;
@@ -693,6 +725,7 @@ export async function replacePhotoFile(
         .set({
           contentType: input.contentType,
           height: input.height,
+          metadata: input.metadata,
           objectKey,
           path: next,
           sha256: input.sha256,
@@ -894,6 +927,257 @@ export async function setPhotoColors(
     await touchPhotoFolder(tx, accountId, photoParent(path));
   });
   return (await loadPhotoEntry(db, accountId, path)) as PhotoEntry;
+}
+
+// ---------------------------------------------------------------------------
+// Metadata (docs/photos.md "Metadata", src/lib/photos/metadata.ts)
+
+// The types the reader reads; any other file's metadata is empty, unread.
+const metadataContentTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+// What one folder listing reads in the background, two at a time. A photo
+// over the size cap waits for GET /api/photos/metadata, which reads any.
+export const photoMetadataReadsPerListing = 200;
+const backgroundMetadataMaxBytes = 64 * 1024 * 1024;
+const metadataWorkers = 2;
+const rewriteWorkers = 4;
+
+/** What a stored object carries: read from the bucket, or empty for a GIF. */
+async function readObjectMetadata(objectKey: string | null, contentType: string | null): Promise<PhotoMetadata> {
+  if (!contentType || !metadataContentTypes.has(contentType)) {
+    return emptyPhotoMetadata();
+  }
+  const bytes = objectKey ? await objectStore().get(objectKey) : undefined;
+  if (!bytes) {
+    throw new PhotoError("not_found", 404);
+  }
+  return readPhotoMetadataBytes(bytes);
+}
+
+/** Store what was read, unless the photo's bytes changed in between. */
+async function savePhotoMetadata(
+  db: FramesDatabase,
+  accountId: string,
+  path: string,
+  objectKey: string,
+  metadata: PhotoMetadata,
+) {
+  // Not updated_at: reading changes nothing a share link shows.
+  await db
+    .update(photoEntries)
+    .set({ metadata })
+    .where(
+      and(
+        eq(photoEntries.accountId, accountId),
+        eq(photoEntries.path, path),
+        eq(photoEntries.objectKey, objectKey),
+      ),
+    );
+}
+
+/**
+ * GET /api/photos/metadata: a file's stored metadata, or the object read
+ * (and the result stored) when the photo has none yet. 404 for nothing
+ * there (or a blocked file), 400 for a folder.
+ */
+export async function photoMetadata(db: FramesDatabase, accountId: string, path: string): Promise<PhotoMetadata> {
+  const [row] = await db
+    .select({
+      contentType: photoEntries.contentType,
+      kind: photoEntries.kind,
+      metadata: photoEntries.metadata,
+      objectKey: photoEntries.objectKey,
+      status: photoEntries.status,
+    })
+    .from(photoEntries)
+    .where(and(eq(photoEntries.accountId, accountId), eq(photoEntries.path, path)))
+    .limit(1);
+  if (!row || (row.kind === "file" && row.status !== "ready")) {
+    throw new PhotoError("not_found", 404);
+  }
+  if (row.kind !== "file") {
+    throw new PhotoError("not_a_file", 400);
+  }
+  if (row.metadata) {
+    return row.metadata as PhotoMetadata;
+  }
+  const metadata = await readObjectMetadata(row.objectKey, row.contentType);
+  if (row.objectKey) {
+    await savePhotoMetadata(db, accountId, path, row.objectKey, metadata);
+  }
+  return metadata;
+}
+
+/**
+ * Read the metadata of the photos directly in `folder` that have none yet
+ * (stored before photos had it), at most photoMetadataReadsPerListing of
+ * them, so the next listing shows their pins. What GET /api/photos/files
+ * runs after answering. A photo that cannot be read is logged and left for
+ * the next listing. Returns how many were read.
+ */
+export async function readUnreadPhotoMetadata(db: FramesDatabase, accountId: string, folder: string): Promise<number> {
+  const prefix = folder === "" ? "" : `${folder}/`;
+  const rows = await db
+    .select({
+      contentType: photoEntries.contentType,
+      objectKey: photoEntries.objectKey,
+      path: photoEntries.path,
+      sizeBytes: photoEntries.sizeBytes,
+    })
+    .from(photoEntries)
+    .where(
+      and(
+        eq(photoEntries.accountId, accountId),
+        strictlyBelow(photoEntries.path, folder),
+        // Direct children only: nothing after the folder's prefix holds a "/".
+        sql`strpos(substr(${photoEntries.path}, char_length(${prefix}) + 1), '/') = 0`,
+        eq(photoEntries.kind, "file"),
+        eq(photoEntries.status, "ready"),
+        isNull(photoEntries.metadata),
+        sql`${photoEntries.sizeBytes} <= ${backgroundMetadataMaxBytes}`,
+      ),
+    )
+    .limit(photoMetadataReadsPerListing);
+  let read = 0;
+  const pending = [...rows];
+  const worker = async () => {
+    for (let row = pending.shift(); row !== undefined; row = pending.shift()) {
+      if (!row.objectKey) {
+        continue;
+      }
+      try {
+        const metadata = await readObjectMetadata(row.objectKey, row.contentType);
+        await savePhotoMetadata(db, accountId, row.path, row.objectKey, metadata);
+        read += 1;
+      } catch (error) {
+        logWarn("photos.metadata_read_failed", {
+          error: error instanceof Error ? error.message : String(error),
+          objectKey: row.objectKey,
+        });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(metadataWorkers, pending.length) }, worker));
+  return read;
+}
+
+/**
+ * POST /api/photos/metadata: take the location, or all metadata, out of
+ * files (metadata.ts). Every path is checked first: one missing is a 404,
+ * one folder a 400, and nothing changes. A file that is not a JPEG, PNG or
+ * WebP, a blocked one, or one with nothing to remove is left alone. A
+ * changed file gets new bytes under a new key, its size, SHA-256 and
+ * metadata again; its path, date, colors, thumbnail and share links stay.
+ * The old object goes once the row has moved on.
+ */
+export async function removePhotoMetadata(
+  db: FramesDatabase,
+  accountId: string,
+  paths: string[],
+  removal: PhotoMetadataRemoval,
+): Promise<{ changed: number; entries: PhotoEntry[] }> {
+  const unique = [...new Set(paths)];
+  const rows = await db
+    .select({
+      contentType: photoEntries.contentType,
+      kind: photoEntries.kind,
+      metadata: photoEntries.metadata,
+      objectKey: photoEntries.objectKey,
+      path: photoEntries.path,
+      sizeBytes: photoEntries.sizeBytes,
+      status: photoEntries.status,
+    })
+    .from(photoEntries)
+    .where(and(eq(photoEntries.accountId, accountId), inArray(photoEntries.path, unique)));
+  const byPath = new Map(rows.map((row) => [row.path, row]));
+  for (const path of unique) {
+    const row = byPath.get(path);
+    if (!row) {
+      throw new PhotoError("not_found", 404, { path });
+    }
+    if (row.kind !== "file") {
+      throw new PhotoError("not_a_file", 400, { path });
+    }
+  }
+
+  let changed = 0;
+  const pending = unique.map((path) => byPath.get(path)!);
+  const rewrite = async (row: (typeof rows)[number]) => {
+    if (row.status !== "ready" || !row.objectKey || !row.contentType || !metadataContentTypes.has(row.contentType)) {
+      return;
+    }
+    const bytes = await objectStore().get(row.objectKey);
+    if (!bytes) {
+      return;
+    }
+    const result = await removePhotoMetadataBytes(bytes, removal);
+    if (!result.changed || !Buffer.isBuffer(result.body)) {
+      if (!row.metadata) {
+        await savePhotoMetadata(db, accountId, row.path, row.objectKey, await readPhotoMetadataBytes(bytes));
+      }
+      return;
+    }
+    const body = result.body;
+    const metadata = await readPhotoMetadataBytes(body);
+    const objectKey = randomPhotoObjectKey(accountId, "file");
+    await objectStore().put(objectKey, body, row.contentType);
+    let moved = false;
+    try {
+      moved = await db.transaction(async (tx) => {
+        await lockPhotoLibrary(tx, accountId);
+        await assertPhotosAvailable(tx, accountId);
+        const growth = body.length - Number(row.sizeBytes);
+        if (growth > 0) {
+          await assertPhotoQuota(tx, accountId, growth, 0);
+        }
+        // Only the bytes this read: a photo replaced, moved or deleted in
+        // between is left to what happened to it.
+        const updated = await tx
+          .update(photoEntries)
+          .set({ metadata, objectKey, sha256: result.sha256, sizeBytes: body.length, updatedAt: new Date() })
+          .where(
+            and(
+              eq(photoEntries.accountId, accountId),
+              eq(photoEntries.path, row.path),
+              eq(photoEntries.objectKey, row.objectKey as string),
+              eq(photoEntries.status, "ready"),
+            ),
+          )
+          .returning({ id: photoEntries.id });
+        if (updated.length > 0) {
+          await touchPhotoFolder(tx, accountId, photoParent(row.path));
+        }
+        return updated.length > 0;
+      });
+    } catch (error) {
+      await deletePhotoObjects([objectKey]);
+      throw error;
+    }
+    if (!moved) {
+      await deletePhotoObjects([objectKey]);
+      return;
+    }
+    await deletePhotoObjects([row.objectKey]);
+    changed += 1;
+  };
+  const worker = async () => {
+    for (let row = pending.shift(); row !== undefined; row = pending.shift()) {
+      await rewrite(row);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(rewriteWorkers, pending.length) }, worker));
+
+  // The entries, in request order: one query, each file its own entry.
+  const after = await db
+    .select(entryColumns)
+    .from(photoEntries)
+    .where(and(eq(photoEntries.accountId, accountId), inArray(photoEntries.path, unique)));
+  const entries = new Map(
+    after.map((row) => [row.path, describePhotoChildren(photoParent(row.path), [row])[0]] as const),
+  );
+  return {
+    changed,
+    entries: paths.map((path) => entries.get(path)).filter((entry): entry is PhotoEntry => entry !== undefined),
+  };
 }
 
 /**

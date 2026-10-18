@@ -4,7 +4,7 @@
 // scan gate's consequences (422, the hit row, the suspension, every share
 // link 404).
 import { createHash, generateKeyPairSync } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, eq, sql } from "drizzle-orm";
@@ -41,7 +41,9 @@ import { GET as getShares, POST as postShares } from "../../../app/api/photos/sh
 import { GET as getStatus } from "../../../app/api/photos/status/route";
 import { GET as getThumb } from "../../../app/api/photos/thumb/route";
 import { POST as postUpload } from "../../../app/api/photos/upload/route";
+import { GET as getMetadata, POST as postMetadata } from "../../../app/api/photos/metadata/route";
 import { objectStore } from "../../lib/object-store";
+import { readPhotoMetadataBytes, removePhotoMetadataBytes } from "../../lib/photos/metadata";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
 import { hashSecret } from "../../lib/secrets";
@@ -66,8 +68,9 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers(),
 }));
 
-// The filesystem store has no public alias; this switch gives it one, so the
-// share file route's redirect can be exercised too.
+// The filesystem store has no bucket endpoint and no public alias; this
+// switch gives it both, so the share file route's redirect can be exercised
+// too (and shown to never use the alias).
 const cdn = vi.hoisted(() => ({ base: undefined as string | undefined }));
 vi.mock("../../lib/object-store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/object-store")>();
@@ -77,7 +80,11 @@ vi.mock("../../lib/object-store", async (importOriginal) => {
       const store = actual.objectStore();
       return {
         ...store,
-        publicUrl: (key: string) => (cdn.base ? `${cdn.base}/${key}` : store.publicUrl(key)),
+        publicUrl: (key: string) => (cdn.base ? `${cdn.base}/public/${key}` : store.publicUrl(key)),
+        signedUrl: async (key: string, expiresInSeconds: number) =>
+          cdn.base
+            ? `${cdn.base}/signed/${key}?X-Amz-Expires=${expiresInSeconds}&X-Amz-Signature=test`
+            : store.signedUrl(key, expiresInSeconds),
       };
     },
   };
@@ -187,6 +194,11 @@ function png(width: number, height: number, salt = "") {
     Buffer.from([8, 6, 0, 0, 0]),
     Buffer.from(`png-body-${salt}`),
   ]);
+}
+
+/** A photo from the metadata corpus (docs/photo-metadata-fixtures.json). */
+function metadataFixture(name: string) {
+  return readFileSync(join(__dirname, "..", "..", "..", "..", "..", "..", "docs", "photo-metadata-fixtures", name));
 }
 
 /** An image sharp can read (the two above are headers only). */
@@ -418,6 +430,201 @@ describe("photo library: uploads", () => {
     });
     const file = await getFile(get("/api/photos/file?path=Chunks%2Fbig.jpg"));
     expect(Buffer.from(await file.arrayBuffer()).equals(bytes)).toBe(true);
+  });
+
+  it("stores a photo as sent, whole or in chunks, and reads what it carries", async () => {
+    const accountId = await signIn();
+    const phone = metadataFixture("exif-gps.jpg");
+    const metadata = await readPhotoMetadataBytes(phone);
+    expect(metadata.location).not.toBeNull();
+    const pin = { latitude: metadata.location!.latitude, longitude: metadata.location!.longitude };
+
+    const whole = await upload("Trip", "whole.jpg", phone);
+    expect(whole.status).toBe(200);
+    // Turned 6: the sides swap the way a browser shows it.
+    expect(((await whole.json()) as { entry: Record<string, unknown> }).entry).toMatchObject({
+      height: 24,
+      location: pin,
+      size: phone.length,
+      width: 16,
+    });
+    const half = Math.floor(phone.length / 2);
+    const chunk = (offset: number, part: Buffer, complete: boolean) =>
+      postUpload(
+        postBytes("/api/photos/upload", {
+          complete: complete ? "1" : "0",
+          filename: "chunked.jpg",
+          offset: String(offset),
+          path: "Trip",
+          upload_id: "metadata-chunks",
+        }, part),
+      );
+    expect((await chunk(0, phone.subarray(0, half), false)).status).toBe(200);
+    const done = await chunk(half, phone.subarray(half), true);
+    expect(done.status).toBe(200);
+    expect(((await done.json()) as { entry: Record<string, unknown> }).entry).toMatchObject({
+      location: pin,
+      size: phone.length,
+    });
+
+    // The bytes exactly as sent, and the metadata in the row.
+    for (const name of ["whole.jpg", "chunked.jpg"]) {
+      const file = await getFile(get(`/api/photos/file?path=Trip%2F${name}`));
+      expect(Buffer.from(await file.arrayBuffer()).equals(phone)).toBe(true);
+    }
+    const digest = createHash("sha256").update(phone).digest("hex");
+    const rows = await db
+      .select({ metadata: photoEntries.metadata, sha256: photoEntries.sha256, size: photoEntries.sizeBytes })
+      .from(photoEntries)
+      .where(and(eq(photoEntries.accountId, accountId), eq(photoEntries.kind, "file")));
+    expect(rows).toEqual([
+      { metadata, sha256: digest, size: phone.length },
+      { metadata, sha256: digest, size: phone.length },
+    ]);
+    // The chunks do not stay on the disk.
+    const parked = join(process.env.FRAMEOS_PHOTO_UPLOAD_DIR ?? "", accountId.toLowerCase());
+    expect(existsSync(parked) ? readdirSync(parked) : []).toEqual([]);
+
+    // The listing pins both; the metadata route has the rest.
+    expect((await listFolder("Trip")).map((entry) => entry.location)).toEqual([pin, pin]);
+    const read = await getMetadata(get("/api/photos/metadata?path=Trip%2Fwhole.jpg"));
+    expect(read.status).toBe(200);
+    expect(await read.json()).toEqual({ metadata, path: "Trip/whole.jpg" });
+    // Frames never get the location.
+    const trip = await share("Trip");
+    const shared = await getShared(get(`/api/photos/shared/${trip.token}`), tokenParams(trip.token));
+    const listing = (await shared.json()) as { files: Record<string, unknown>[] };
+    expect(listing.files).toHaveLength(2);
+    for (const file of listing.files) {
+      expect(file).not.toHaveProperty("location");
+    }
+  });
+
+  it("removes a photo's location in place, or all its metadata, and keeps the rest of it", async () => {
+    const accountId = await signIn();
+    const phone = metadataFixture("exif-gps.jpg");
+    await upload("Trip", "a.jpg", phone);
+    await upload("Trip", "b.jpg", phone);
+    expect((await postColors(postJson("/api/photos/colors", { colors: { whites: -10 }, path: "Trip/a.jpg" }))).status).toBe(200);
+    const rowOf = async (path: string) => {
+      const [row] = await db
+        .select()
+        .from(photoEntries)
+        .where(and(eq(photoEntries.accountId, accountId), eq(photoEntries.path, path)));
+      return row!;
+    };
+    const before = await rowOf("Trip/a.jpg");
+    const remove = (paths: string[], removal: string) =>
+      postMetadata(postJson("/api/photos/metadata", { paths, remove: removal }));
+
+    const located = (await removePhotoMetadataBytes(phone, "location")).body as Buffer;
+    const response = await remove(["Trip/a.jpg"], "location");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      changed: 1,
+      entries: [
+        expect.objectContaining({
+          colors: { whites: -10 },
+          location: null,
+          path: "Trip/a.jpg",
+          size: phone.length,
+        }),
+      ],
+    });
+    const file = await getFile(get("/api/photos/file?path=Trip%2Fa.jpg"));
+    expect(Buffer.from(await file.arrayBuffer()).equals(located)).toBe(true);
+    const after = await rowOf("Trip/a.jpg");
+    expect(after.objectKey).not.toBe(before.objectKey);
+    expect(after.sha256).toBe(createHash("sha256").update(located).digest("hex"));
+    expect(after.metadata).toEqual(await readPhotoMetadataBytes(located));
+    expect([after.thumbObjectKey, after.createdAt, after.colors]).toEqual([
+      before.thumbObjectKey,
+      before.createdAt,
+      before.colors,
+    ]);
+    // The old object is gone; the same request again changes nothing.
+    expect(await objectStore().get(before.objectKey!)).toBeUndefined();
+    expect(await (await remove(["Trip/a.jpg"], "location")).json()).toMatchObject({ changed: 0 });
+
+    // Everything, from a selection, in request order.
+    const everything = await remove(["Trip/b.jpg", "Trip/a.jpg"], "all");
+    const body = (await everything.json()) as { changed: number; entries: { path: string }[] };
+    expect(body.changed).toBe(2);
+    expect(body.entries.map((entry) => entry.path)).toEqual(["Trip/b.jpg", "Trip/a.jpg"]);
+    const stripped = (await removePhotoMetadataBytes(phone, "all")).body as Buffer;
+    const bFile = await getFile(get("/api/photos/file?path=Trip%2Fb.jpg"));
+    expect(Buffer.from(await bFile.arrayBuffer()).equals(stripped)).toBe(true);
+    const read = (await (await getMetadata(get("/api/photos/metadata?path=Trip%2Fb.jpg"))).json()) as {
+      metadata: { blocks: string[]; fields: unknown[]; location: unknown };
+    };
+    expect(read.metadata).toEqual({
+      blocks: [],
+      fields: [{ group: "Image", name: "Orientation", value: 6 }],
+      location: null,
+    });
+  });
+
+  it("checks every path before it changes any", async () => {
+    await signIn();
+    const phone = metadataFixture("exif-gps.jpg");
+    await upload("Trip", "a.jpg", phone);
+    await upload("Trip", "flat.png", await realPng(4, 3));
+    const remove = (body: unknown, origin?: string | null) =>
+      postMetadata(postJson("/api/photos/metadata", body, origin));
+
+    const missing = await remove({ paths: ["Trip/a.jpg", "Trip/none.jpg"], remove: "location" });
+    expect(missing.status).toBe(404);
+    expect(((await missing.json()) as { error: string }).error).toBe("not_found");
+    expect((await remove({ paths: ["Trip"], remove: "all" })).status).toBe(400);
+    expect((await remove({ paths: [], remove: "all" })).status).toBe(400);
+    expect((await remove({ paths: ["../a.jpg"], remove: "all" })).status).toBe(400);
+    expect((await remove({ paths: ["Trip/a.jpg"], remove: "gps" })).status).toBe(400);
+    expect((await remove({ paths: ["Trip/a.jpg"], remove: "all" }, null)).status).toBe(403);
+    // Nothing changed.
+    const file = await getFile(get("/api/photos/file?path=Trip%2Fa.jpg"));
+    expect(Buffer.from(await file.arrayBuffer()).equals(phone)).toBe(true);
+    // A photo with nothing to remove is left as it is.
+    expect(await (await remove({ paths: ["Trip/flat.png"], remove: "all" })).json()).toMatchObject({ changed: 0 });
+
+    expect((await getMetadata(get("/api/photos/metadata?path=Trip"))).status).toBe(400);
+    expect((await getMetadata(get("/api/photos/metadata?path=Trip%2Fnone.jpg"))).status).toBe(404);
+    expect((await getMetadata(get("/api/photos/metadata?path=..%2Fa.jpg"))).status).toBe(400);
+  });
+
+  it("reads the metadata of a photo stored before it existed: listed, or asked for", async () => {
+    const accountId = await signIn();
+    const phone = metadataFixture("exif-gps.jpg");
+    await upload("Old", "a.jpg", phone);
+    await upload("Old", "b.jpg", phone);
+    const metadata = await readPhotoMetadataBytes(phone);
+    const forget = () =>
+      db
+        .update(photoEntries)
+        .set({ metadata: null })
+        .where(and(eq(photoEntries.accountId, accountId), eq(photoEntries.kind, "file")));
+    const stored = async () =>
+      (
+        await db
+          .select({ metadata: photoEntries.metadata, path: photoEntries.path })
+          .from(photoEntries)
+          .where(and(eq(photoEntries.accountId, accountId), eq(photoEntries.kind, "file")))
+      ).sort((x, y) => x.path.localeCompare(y.path));
+
+    await forget();
+    // Not read yet: no pin. The listing reads them once it has answered
+    // (after(); called outside a request, before the handler returns).
+    expect((await listFolder("Old")).map((entry) => entry.location)).toEqual([null, null]);
+    expect(await stored()).toEqual([
+      { metadata, path: "Old/a.jpg" },
+      { metadata, path: "Old/b.jpg" },
+    ]);
+    expect((await listFolder("Old")).every((entry) => entry.location !== null)).toBe(true);
+
+    // On demand, one photo.
+    await forget();
+    const read = await getMetadata(get("/api/photos/metadata?path=Old%2Fa.jpg"));
+    expect(((await read.json()) as { metadata: unknown }).metadata).toEqual(metadata);
+    expect((await stored())[0]).toEqual({ metadata, path: "Old/a.jpg" });
   });
 
   it("refuses what it will not store: types, sizes, names, the quota", async () => {
@@ -901,14 +1108,17 @@ describe("photo library: share links", () => {
     // The URL carries the token: a shared cache must not keep the bytes.
     expect(file.headers.get("cache-control")).toBe("private, max-age=300");
     expect(Buffer.from(await file.arrayBuffer()).equals(bytes.get("Sub/a.png")!)).toBe(true);
-    // ...redirected to the object's random key with one.
+    // ...redirected to a short-lived presigned address of the object's
+    // random key on a bucket, never to the public alias.
     cdn.base = "https://cdn.example";
     const redirected = await getSharedFile(
       get(`/api/photos/shared/${album.token}/file?path=Sub%2Fa.png`),
       tokenParams(album.token),
     );
     expect(redirected.status).toBe(302);
-    expect(redirected.headers.get("location")).toMatch(/^https:\/\/cdn\.example\/photos\/[0-9a-f-]{36}\/[0-9a-f]{32}$/);
+    expect(redirected.headers.get("location")).toMatch(
+      /^https:\/\/cdn\.example\/signed\/photos\/[0-9a-f-]{36}\/[0-9a-f]{32}\?X-Amz-Expires=600&/,
+    );
     expect(redirected.headers.get("cache-control")).toBe("no-store");
 
     // Nothing outside the shared folder, nothing made up.

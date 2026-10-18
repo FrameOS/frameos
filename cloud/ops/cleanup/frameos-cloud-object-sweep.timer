@@ -1,0 +1,12 @@
+[Unit]
+Description=FrameOS Cloud object-store sweep, weekly
+
+[Timer]
+# Before the nightly object backup (05:17 UTC), so the backup's deleted-objects
+# folder dates the sweep's deletions to the same day.
+OnCalendar=Sun *-*-* 04:40:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

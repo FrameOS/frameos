@@ -827,19 +827,32 @@ frames/<frame-id>/cache/<sha256>
 ```
 
 Photos are the exception: `photos/<account-id>/<random>` and
-`photos/<account-id>/thumbs/<random>`. The alias serves any key without
-authentication, so a content hash would be a key anyone holding the same
-photo could compute; a random key is only known to the owner and to frames
-given a share link. `scripts/object-store-sweep.sh` lists the photo columns
-with the others.
+`photos/<account-id>/thumbs/<random>`, random rather than content addressed
+so no one holding the same photo can compute the key. They are private, and
+**the alias must refuse them.** Left alone, the alias serves any key without
+authentication, so an address a frame was once redirected to would keep
+working after its share link was revoked. Add one Cloudflare WAF custom rule
+on the alias's zone (Security → WAF → Custom rules):
+
+```text
+Name:       Photos are private
+Expression: (http.host eq "cloud-cdn.frameos.net" and starts_with(http.request.uri.path, "/photos/"))
+Action:     Block
+```
+
+The `/admin` live check **Photos off the public CDN** writes a probe under
+`photos/`, asks the alias for it without credentials and fails while the
+alias serves it; it also proves that a presigned address works.
+`scripts/object-store-sweep.sh` lists the photo columns with the others.
 
 `R2_CLOUD_PUBLIC_BASE_URL` only affects **public** store objects: a public
 scene's preview and gallery images redirect (307) to the CDN. Private scenes
 and every frame snapshot are proxied through the app, where the session check
 still applies — the alias has no authentication in front of it. Photos read
-through a share link (`/api/photos/shared/<token>/file`) also redirect (302)
-to their random key on the CDN; the owner's own views of the library are
-proxied.
+through a share link (`/api/photos/shared/<token>/file`) redirect (302) to a
+presigned GET on `R2_CLOUD_ENDPOINT` that expires after ten minutes, never to
+the alias (`publicUrl` refuses `photos/` keys); the owner's own views of the
+library are proxied.
 
 Image content types are sniffed from the bytes when serving, not read from the
 stored column — a `content_type` is only as good as whatever wrote it, and the

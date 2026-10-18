@@ -3,6 +3,7 @@ import { jsonError, readBoundedJsonObject } from "../../../../src/lib/device-flo
 import { photoOwnerContext, withPhotoErrors } from "../../../../src/lib/photos/http";
 import { scanIncomingPhoto } from "../../../../src/lib/photos/intake";
 import { PhotoError, photoFileObjects, replacePhotoFile } from "../../../../src/lib/photos/library";
+import { readPhotoMetadataBytes } from "../../../../src/lib/photos/metadata";
 import { parsePhotoPath } from "../../../../src/lib/photos/paths";
 import { parseResizeOptions, resizePhotoBytes } from "../../../../src/lib/photos/resize";
 import { makePhotoThumbnail } from "../../../../src/lib/photos/thumbnail";
@@ -55,6 +56,8 @@ export async function POST(request: NextRequest) {
       contentType: resized.contentType,
       extension: resized.extension,
       height: resized.height,
+      // What the re-encoded bytes carry (sharp writes no EXIF here).
+      metadata: await readPhotoMetadataBytes(resized.bytes),
       sha256: scanned.sha256,
       size: resized.bytes.length,
       thumbnail,

@@ -102,6 +102,17 @@ addToLibrary({
     return last === 'localhost' || last === 'local' || last === 'internal' || last === 'lan' || lastTwo === 'home.arpa'
   },
 
+  // What of a scene's request URL a log line may show: scheme://host[:port],
+  // the way redactedUrl (src/frameos/utils/redacted_url.nim) and the ESP32's
+  // fos_netguard_url_origin cut it. A share link carries its token in the
+  // path, API keys ride in query strings, and these lines reach the preview's
+  // log panel and the headless renderers' output.
+  $frameosLogUrl: function (url) {
+    var m = /^([a-z][a-z0-9+.-]*:\/\/)(?:[^\/?#\\]*@)?(\[[0-9a-f:.]+\]|[\w.~%\u0080-\uffff-]+)(:\d{0,5})?(?=[\/?#\\]|$)/i.exec(String(url || '').trim())
+    if (!m) return '(invalid URL)'
+    return (m[1] + m[2]).toLowerCase() + (m[3] && m[3].length > 1 ? m[3] : '')
+  },
+
   frameos_wasm_js_log: function (msgPtr) {
     var msg = UTF8ToString(msgPtr)
     if (Module['onFrameosLog']) {
@@ -117,7 +128,7 @@ addToLibrary({
     }
   },
 
-  fos_nim_http_request__deps: ['malloc', '$frameosIsPrivateHost'],
+  fos_nim_http_request__deps: ['malloc', '$frameosIsPrivateHost', '$frameosLogUrl'],
   fos_nim_http_request: function (
     methodPtr,
     urlPtr,
@@ -272,7 +283,7 @@ addToLibrary({
       }
       if (maxBytes > 0 && bytes.length > maxBytes) {
         if (Module['onFrameosLog']) {
-          Module['onFrameosLog']('http: response for ' + url + ' exceeded ' + maxBytes + ' bytes')
+          Module['onFrameosLog']('http: response for ' + frameosLogUrl(url) + ' exceeded ' + maxBytes + ' bytes')
         }
         return 0
       }
@@ -284,7 +295,10 @@ addToLibrary({
       return ptr
     } catch (e) {
       if (Module['onFrameosLog']) {
-        Module['onFrameosLog']('http: ' + method + ' ' + url + ' failed: ' + e)
+        // A browser's network error can quote the URL it failed on, too.
+        var origin = frameosLogUrl(url)
+        var reason = url ? String(e).split(url).join(origin) : String(e)
+        Module['onFrameosLog']('http: ' + method + ' ' + origin + ' failed: ' + reason)
       }
       return 0
     }

@@ -26,6 +26,7 @@ let appConfigJson = readFile(AppDir / "config.json")
 ##             two-color palette), b.jpg `colors: null`, c.jpg no key at all
 ##   pk_empty  no photos
 ##   pk_broken one photo whose file is gone
+##   pk_loop   three photos whose /file redirects to itself forever
 ## any other token is a 404, like a deleted link. Photo i is a PNG of
 ## (5 + i) x (3 + i) pixels, so the image size says which one was shown.
 var mockPort: Port
@@ -114,7 +115,7 @@ proc mockPhotosLoop() {.thread.} =
       continue
     let token = segments[4]
     let route = segments[5]
-    if token notin ["pk_rel", "pk_abs", "pk_cdn", "pk_colors", "pk_empty", "pk_broken"]:
+    if token notin ["pk_rel", "pk_abs", "pk_cdn", "pk_colors", "pk_empty", "pk_broken", "pk_loop"]:
       client.reply("404 Not Found", "application/json", """{"detail":"Share link not found"}""")
       continue
 
@@ -148,6 +149,8 @@ proc mockPhotosLoop() {.thread.} =
         client.reply("404 Not Found", "application/json", """{"detail":"Not Found"}""")
       elif token == "pk_cdn":
         client.reply("302 Found", "text/plain", "", "Location: " & base & "/cdn/" & name & "\r\n")
+      elif token == "pk_loop":
+        client.reply("302 Found", "text/plain", "", "Location: " & target & "\r\n")
       else:
         client.reply("200 OK", "image/png", pngBytes(5 + i, 3 + i))
     else:
@@ -333,6 +336,17 @@ suite "photo album code app":
     check h.render(%*{"album": shareLink("pk_broken"), "counterStateKey": "photoIndex"}).size() == (200, 120)
     check h.scene.state["photoIndex"].getInt() == 1
     check h.errorLogged("Could not load broken.jpg")
+
+  test "a failed download never shows the share link or the photo's address":
+    # The client gives up on the redirect loop with an error that names the
+    # URL; the app draws that error and logs it. Neither may carry the token.
+    let h = newHarness()
+    check h.render(%*{"album": shareLink("pk_loop"), "order": "sequential", "counterStateKey": "photoIndex"}).size() == (200, 120)
+    check h.errorLogged("Could not load a.jpg: Too many HTTP redirects fetching " & mockBase())
+    check h.logs[].len > 0
+    for entry in h.logs[]:
+      check "pk_loop" notin $entry
+      check "file?path" notin $entry
 
   test "an unreachable server names the problem":
     let h = newHarness()

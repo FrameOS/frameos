@@ -1869,6 +1869,10 @@ export const photoEntries = pgTable(
     // Files only: the photo's color profile (migration 0060, docs/photos.md
     // "Colors"), a JSON object stored as the owner sent it, or null.
     colors: jsonb("colors").$type<Record<string, unknown>>(),
+    // Files only: what the photo carries besides its pixels (migration 0065,
+    // docs/photos.md "Metadata"): EXIF fields, its location, which other
+    // blocks it holds. Read at upload; null means not read yet.
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
     ...timestamps,
   },
   (table) => ({

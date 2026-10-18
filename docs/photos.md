@@ -54,7 +54,8 @@ The shape every listing returns:
   "width": 4032,
   "height": 3024,
   "status": "ready",
-  "colors": { "whites": -30, "saturation": 20 }
+  "colors": { "whites": -30, "saturation": 20 },
+  "location": { "latitude": 59.43696, "longitude": 24.75353 }
 }
 ```
 
@@ -65,6 +66,9 @@ The shape every listing returns:
 - `status`: `"ready"`, or `"blocked"` on the cloud when a scan matched (the
   bytes are gone; see Scanning).
 - `colors`: files only. The photo's color profile, or `null` (see Colors).
+- `location`: where the photo was taken, the Metadata's `location` without
+  its altitude, or `null`: none, not read yet (see Metadata), or a folder.
+  The share routes never send it.
 - Folders also carry `items` (direct children), `files` (files anywhere below)
   and `cover` (the path of an image to show for the folder, or `null`: the
   first image among the direct children by name, else the first one found in
@@ -140,6 +144,11 @@ Content-Type: application/octet-stream
   when a scan matched, 503 when a scanner could not answer. The cloud also
   answers 429 `too_many_uploads` (16 unfinished uploads per account) and 507
   `entry_limit_reached`.
+
+**A photo is stored exactly as sent.** What it carries (its EXIF, its
+location, XMP and the rest) is read into its row at upload, the entry shows
+the `location`, and nothing is taken out unless the owner asks
+(`POST /api/photos/metadata`, see Metadata).
 
 ### `GET /api/photos/thumb?path=<file>`
 
@@ -234,6 +243,49 @@ stored upright (the EXIF turn applied, then dropped).
   transparency is flattened on for JPEG and BMP.
 - 413 for a photo over the thumbnailer's pixel cap, 503 when the server has
   no image library. The cloud scans the new bytes like an upload (422, 503).
+- The new bytes' metadata is read into the row (a re-encoded photo carries
+  none, so its `location` is `null`).
+
+### `GET /api/photos/metadata?path=<file>`
+
+`{"path": "<file>", "metadata": Metadata}` (see Metadata): the stored copy,
+or the photo read (and the result stored) when it has none yet. 400 for a
+bad path or a folder, 404 when nothing is there.
+
+### `POST /api/photos/metadata`
+
+```json
+{"paths": ["a.jpg", "Summer/b.png"], "remove": "location"}
+```
+
+→ `{"entries": [Entry, ...], "changed": 2}`: the entries of the given paths
+after the change, in request order; `changed` counts the files whose bytes
+changed.
+
+- `paths`: 1 to 10 000 file paths. Every path is checked before anything
+  changes: an empty list, a bad path or a folder is a 400, one missing path a
+  404, and nothing changes.
+- `remove: "location"`: the EXIF GPS directory is cut out and its bytes
+  zeroed, and XMP GPS properties (`exif:GPS*`) are blanked with spaces, in
+  place: the file keeps its length and every other byte (maker notes
+  included); a changed PNG chunk gets its CRC again. A location in a
+  trailer (a motion photo's video) stays: `"all"` removes it.
+- `remove: "all"`: everything but the picture. A JPEG keeps JFIF, the ICC
+  profile and the Adobe segment a CMYK JPEG needs; a PNG its critical
+  chunks, color chunks (`iCCP`, `sRGB`, `gAMA`, `cHRM`) and `pHYs`; a WebP
+  its image and ICC. EXIF (but a minimal block with the orientation, when it
+  is not 1), XMP, IPTC, comments, text chunks and whatever follows the image
+  go. The pixels are not re-encoded.
+- A file that is not a JPEG, PNG or WebP (sniffed), a blocked photo, or one
+  with nothing to remove is left as it is. A JPEG, PNG or WebP whose
+  structure cannot be followed to its end is read as far as it goes;
+  `"all"` leaves it as it is, `"location"` still edits what was found.
+- A changed photo keeps its path, `mtime`, `colors`, thumbnail and share
+  links; its bytes, `size` and SHA-256 change (cloud: a new random object
+  key, the old object deleted after the row moved; backend: the new content
+  address, the old object deleted when no row points at it), and its
+  metadata is read again. A frame playing it gets the new bytes on its next
+  fetch.
 
 ### Share links
 
@@ -278,6 +330,19 @@ frames use to reach it, so it returns `/api/photos/shared/<token>` and the
 SPA puts the frame's `server_scheme://server_host:server_port` in front.
 
 Tokens are `pk_` plus at least 32 URL-safe random characters.
+
+A scene that plays an album carries its link as a plain string, so the
+scene is as good as the link: whoever reads it can open the album. Both
+planes treat a link anywhere in a scene's JSON (`/api/photos/shared/pk_...`,
+absolute with any host or root-relative; a bare `pk_...` is not one) as the
+owner's alone. The cloud store refuses to make such a scene public, to
+publish a version with one onto a public scene, or to give it a sharing
+link (`400 scene_contains_photo_link`); a private save is fine and turns
+the scene's sharing link off, and the sharing link of an older album scene
+no longer serves a version that holds one. The scene AI on both planes
+shows the model a placeholder (`pk_photo_link_1`, ...) and puts the real
+link back in what it returns. The MCP servers return scenes as they are:
+their client is the owner's own agent.
 
 ### `POST /api/photos/scene`
 
@@ -386,9 +451,10 @@ Otherwise:
 ### `GET /api/photos/shared/{token}/file?path=<path>`
 
 The bytes of one playable file below the shared folder (`path` relative to
-it). The backend streams them. The cloud answers 302 to the file's address on
-the public CDN when one is configured, else streams them. Frame runtimes
-follow up to 5 redirects.
+it). The backend streams them. The cloud answers 302 to a presigned address
+on the bucket's own endpoint that expires after ten minutes (only the start
+of the download is checked), or streams them when it has no bucket; never
+to the public CDN alias. Frame runtimes follow up to 5 redirects.
 
 A `url` that starts with `/` is relative to the share link's origin
 (`scheme://host[:port]`).
@@ -435,16 +501,19 @@ agree with. The store is one of:
 
 There is no quota; `free_bytes` is the free space on the disk, `null` for a
 bucket. Uploads are at most 250 MiB each. Any file type can be stored; the
-content type comes from the name.
+content type comes from the name. A photo's metadata is the row's
+`metadata` column (JSON; see Metadata).
 
 ### Cloud
 
 Metadata is in Postgres (`photo_entries`, `photo_shares`), bytes in R2 under
 `photos/<account id>/<random id>`. The keys are random rather than content
-addressed: the CDN alias serves any key without authentication, and a content
-hash is a key anyone who has the same photo could compute. Moving or renaming
+addressed (a content hash is a key anyone who has the same photo could
+compute), and the bucket's public CDN alias refuses `photos/` (a Cloudflare
+rule, `cloud/docs/deployment.md`; the `/admin` check "Photos off the public
+CDN" proves it). Moving or renaming
 only rewrites rows. A photo's color profile is the `colors` column (jsonb) of
-its row.
+its row, its metadata the `metadata` column (jsonb; see Metadata).
 
 Uploads accept JPEG, PNG, GIF and WebP only (every byte stored must pass the
 scan), at most 250 MiB each. Each account has `FRAMEOS_CLOUD_MAX_PHOTO_MB` of
@@ -452,11 +521,12 @@ storage (default 1024) once its email is verified (a social login counts),
 and the smaller `FRAMEOS_CLOUD_MAX_UNVERIFIED_PHOTO_MB` (default 250) until
 then; at most 100 000 entries and 16 unfinished uploads.
 Unfinished uploads wait on the app server's disk (`FRAMEOS_PHOTO_UPLOAD_DIR`),
-never in the bucket, and a finished one is hashed, scanned, thumbnailed and
-streamed to the bucket from that file, never held whole in memory.
+never in the bucket, and a finished one is hashed, scanned, read for its
+metadata, thumbnailed and streamed to the bucket from that file, never held
+whole in memory.
 
-Revoking a link stops new listings and redirects at once. A frame that already
-holds a CDN address keeps it working until the photo is deleted.
+Revoking a link stops new listings and redirects at once, and an address
+already handed out stops working within ten minutes.
 
 ## Colors
 
@@ -475,10 +545,66 @@ asset's sidecar is applied, palette override included, so the frame's
 automatic fit leaves it alone. A runtime older than 2026.10.13 ignores the
 option and shows the photo ungraded, with the automatic fit as before.
 
+## Metadata
+
+What a photo carries besides its pixels, read from its bytes without
+decoding a pixel (`app/utils/photo_metadata.py`, `src/lib/photos/metadata.ts`;
+both planes give the same object for the same bytes, pinned by
+`docs/photo-metadata-fixtures.json`, written by
+`tools/generate_photo_metadata_fixtures.py`):
+
+```json
+{
+  "location": { "latitude": 59.43696, "longitude": 24.75353, "altitude": 31.5 },
+  "fields": [
+    { "group": "Image", "name": "Make", "value": "Apple" },
+    { "group": "Photo", "name": "DateTimeOriginal", "value": "2026:07:14 18:22:05" },
+    { "group": "Location", "name": "GPSLatitude", "value": [59, 26, 13.06] }
+  ],
+  "blocks": ["exif", "xmp"]
+}
+```
+
+- `location`: decimal degrees (south and west negative) from the EXIF GPS
+  directory, `altitude` in meters (below sea level negative) or `null`.
+  Without a usable EXIF position, XMP's `exif:GPSLatitude` and
+  `exif:GPSLongitude` (`DDD,MM,SSk` or `DDD,MM.mmk`), altitude `null`.
+  `null` when neither has both, or the position is 0, 0 (what a camera
+  without a fix writes).
+- `fields`: every EXIF entry by group, in the order Image (IFD0), Photo
+  (the Exif directory), Location (GPS), Interoperability, Thumbnail (IFD1),
+  each group in file order; for a PNG, its text chunks after them as group
+  `Text` (a compressed one's value is `"(compressed)"`). `name` is the tag's
+  name, or `Tag 0xA4FF` for one the table does not know. A value is a
+  string, a number (a fraction as its quotient, `null` for a zero
+  denominator or a value that is not finite), or a list of up to 16 of them;
+  longer lists are `"(N values)"`, binary data `"(N bytes)"`, and strings
+  are cut at 256 characters. At most 500 fields.
+- `blocks`: what else the file holds, in this order: `exif`, `xmp`, `iptc`,
+  `comment`, `text` (PNG text chunks), `trailer` (bytes after the image: a
+  second image, a motion photo's video, which may hold its own location),
+  `other` (any other segment or chunk `"remove": "all"` takes out). An EXIF
+  block that holds nothing but the orientation is not listed: it is what
+  `"all"` keeps.
+- A GIF or any other file reads as `{"location": null, "fields": [], "blocks": []}`.
+
+The cloud stores it in `photo_entries.metadata`, the backend in
+`photo_entry.metadata`: read at upload (an upload is never refused for
+it), after a resize, and after `POST /api/photos/metadata`.
+
+### Reading old photos
+
+A photo stored before metadata existed has none (`null`, so its entry's
+`location` is `null`). Listing its folder reads up to 200 such photos once
+the listing has answered, so the next listing shows their pins (a photo over
+64 MiB is read only when asked for); `GET /api/photos/metadata` reads any
+photo on demand.
+
 ## Scanning (cloud)
 
 Every upload is scanned before anything is stored, by every scanner that is
-configured (the thumbnail is made from the scanned bytes):
+configured (the thumbnail is made from the scanned bytes, and the bytes are
+stored as sent):
 
 1. **Hash list**: the SHA-256 against `photo_blocked_hashes`, always on.
    Admins add hashes.
@@ -497,9 +623,9 @@ account's photos (`accounts.photos_suspended_at`: uploads refused, every share
 link 404) and notifies the admins. Reporting to NCMEC is a manual step from
 the admin page.
 
-Cloudflare's CSAM Scanning Tool can additionally be turned on for the CDN zone
-that serves the bucket. It scans what the CDN serves, which includes every
-photo a frame plays.
+Cloudflare's CSAM Scanning Tool, turned on for the CDN zone, scans only what
+the CDN serves: store images, not photos (frames get them from the bucket's
+own endpoint).
 
 ## Installing photo scenes
 

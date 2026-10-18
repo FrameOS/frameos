@@ -227,7 +227,31 @@
 - Cloud uploads are scanned before anything is stored (hash list,
   PhotoDNA), and a configured scanner that fails stores nothing. Not OpenAI
   moderation: it scores `sexual/minors` on text only. Any new table holding photo objects goes into
-  `cloud/scripts/object-store-sweep.sh`, or the sweep deletes the photos.
+  `cloud/scripts/object-store-sweep.sh`, or the sweep deletes the photos
+  (it runs weekly with `--apply` now). Account deletion removes the
+  account's photo and snapshot objects itself (`src/lib/account-erasure.ts`),
+  and the object backup keeps deleted `photos/` and `frames/` 30 days only.
+- **Photo bytes are private on the cloud.** The share `/file` route
+  redirects to a ten-minute presigned R2 GET, `publicUrl` refuses
+  `photos/` keys and a Cloudflare rule blocks the prefix on the CDN alias
+  (the `/admin` check "Photos off the public CDN" fails without it). Never
+  hand a photo out by a public URL again.
+- **Photo metadata: inform, don't punish** (the owner's rule, 2026-10-18).
+  Uploads are stored exactly as sent; never strip or rewrite a photo the
+  owner did not ask to change. The library reads its metadata instead (a
+  location pin on the card, the viewer's Info panel, `GET
+  /api/photos/metadata`) and removes the location or everything only when
+  asked (`POST /api/photos/metadata`, one photo or a selection). The reader
+  and both removers are `app/utils/photo_metadata.py` and
+  `src/lib/photos/metadata.ts`, which must agree byte for byte, pinned by
+  `docs/photo-metadata-fixtures.json`: change one, change both and run
+  `tools/generate_photo_metadata_fixtures.py`.
+- **A share link inside a scene is the owner's alone.** The cloud store
+  refuses to make a scene that holds one public or shared, and the scene
+  AIs on both planes show the model a placeholder and restore the link in
+  what comes back (`share-links-in-scenes.ts`, `photo_share_links.py`). On
+  frames, errors and logs name a request URL only as `scheme://host[:port]`
+  (`frameos/src/frameos/utils/redacted_url.nim`, `fos_netguard_url_origin`).
 
 ## Local network access: cloud frames only, `docs/lan-access.md`
 

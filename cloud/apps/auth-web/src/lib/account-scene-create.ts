@@ -106,6 +106,9 @@ export async function createAccountScene(
     content: requested.content,
     ...(input.description ? { description: input.description } : {}),
     name: input.name,
+    // Always a new private scene (the lock below picks a free name), so its
+    // cover stays out of image moderation.
+    visibility: "private",
   });
   if (preflight.response) {
     return preflight.response;
