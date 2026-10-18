@@ -396,10 +396,11 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
     ],
   })),
   reducers({
+    // Full fidelity unless the color editor is open: closing it brings the
+    // photo back as it is. The editor reopens on `lastPanelTargetKey`.
     previewTargetKey: [
       FULL_FIDELITY_TARGET.key as string,
-      { persist: true, storageKey: 'photoColorsLogic.previewTarget' },
-      { setPreviewTarget: (_, { key }) => key },
+      { setPreviewTarget: (_, { key }) => key, closeEditor: () => FULL_FIDELITY_TARGET.key },
     ],
     // The last panel or frame chosen: what the editor opens on when the
     // lightbox is at full fidelity, which has nothing to grade for.
@@ -737,6 +738,8 @@ export const photoColorsLogic = kea<photoColorsLogicType>([
       closeEditor: () => {
         values.source?.bitmap.close()
         actions.loadSourceSuccess(null)
+        // Back at full fidelity: a photo with saved colors is still painted.
+        actions.loadLightboxPreview()
       },
       saveProfile: async () => {
         // Auto on a target that fits by itself is what every frame with

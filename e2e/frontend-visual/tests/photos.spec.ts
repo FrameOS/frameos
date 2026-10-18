@@ -146,7 +146,7 @@ test.describe.serial('@e2e photos library', () => {
     await openPhotos(page)
 
     await expect(page.getByText('No albums yet. Make one to start.')).toBeVisible()
-    await expect(page.getByText('No photos yet')).toBeVisible()
+    await expect(page.getByText('Photo albums for your frames')).toBeVisible()
 
     // The empty state's own button; the sidebar has a second one (aria-label "New album").
     await page.getByRole('button', { name: 'New album', exact: true }).first().click()
@@ -336,7 +336,7 @@ test.describe.serial('@e2e photos library', () => {
 
     await expect(tile).toHaveCount(0)
     await expect(page.getByText('No albums yet. Make one to start.')).toBeVisible()
-    await expect(page.getByText('No photos yet')).toBeVisible()
+    await expect(page.getByText('Photo albums for your frames')).toBeVisible()
 
     const listing = await page.request.get(await photosApiPath(page, '/files?path='))
     expect(listing.ok()).toBeTruthy()

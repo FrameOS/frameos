@@ -39,6 +39,12 @@ proc sleepingBinding(ctx: ptr JSContext): JSValue {.nimcall.} =
   sleep(300)
   return nimIntToJS(ctx, 1'i32)
 
+proc stalledRequestBinding(ctx: ptr JSContext): JSValue {.nimcall.} =
+  ## An HTTP request that waited on its server (http_client notes the wait).
+  sleep(300)
+  noteNativeWait("a reply from api.example.com", 61_400)
+  return nimIntToJS(ctx, 1'i32)
+
 suite "js execution deadline":
   test "an infinite loop is interrupted instead of hanging the thread":
     var config = defaultConfig()
@@ -152,9 +158,21 @@ suite "wall-clock render deadline":
       discard js.eval("slowNativeCall(); slowNativeCall(); slowNativeCall(); 1")
     except JSException as err:
       message = err.msg
-    check message.contains("wall-clock")
-    check message.contains("500ms")
+    check message.contains("render stopped at its 0.5 s time limit")
     check renderDeadlinePassed()
+
+  test "the message names the request that used up the time":
+    var js = newQuickJS()
+    defer: js.close()
+    js.registerFunction("stalledRequest", stalledRequestBinding)
+    check armRenderDeadline(500)
+    defer: disarmRenderDeadline()
+    var message = ""
+    try:
+      discard js.eval("stalledRequest(); stalledRequest(); 1")
+    except JSException as err:
+      message = err.msg
+    check message == "render stopped at its 0.5 s time limit after waiting 61 s for a reply from api.example.com"
 
   test "a run that finishes inside the deadline is untouched":
     var js = newQuickJS()
@@ -177,7 +195,7 @@ suite "wall-clock render deadline":
       discard js.eval("for (;;) {}")
     except JSException as err:
       message = err.msg
-    check message.contains("wall-clock")
+    check message.contains("time limit (scene code and downloads count toward it)")
 
   test "arming is re-entrant and a nested run does not reset the clock":
     check armRenderDeadline(1_000)

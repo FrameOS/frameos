@@ -18,6 +18,8 @@ import { DropdownMenu } from '../../../../components/DropdownMenu'
 import { javascriptAppSourceFiles } from '../../../../utils/sceneApps'
 import { workspaceLogic } from '../../../workspace/workspaceLogic'
 import { inmemoryModelPath } from '../../../../utils/monacoPaths'
+import { AppConfigForm } from './AppConfigForm'
+import { appConfigFormLogic } from './appConfigFormLogic'
 
 interface EditAppProps {
   // When set, keeps editAppLogic mounted until the editor is closed via
@@ -301,6 +303,13 @@ export function EditApp({
     activeTestRun,
   } = useValues(logic)
   const { forkAndSaveChanges, updateFile, saveChanges, discardChanges, runTests } = useActions(logic)
+  const { showConfigSource } = useValues(appConfigFormLogic(logicProps))
+  const { setShowConfigSource } = useActions(appConfigFormLogic(logicProps))
+  // config.json opens as a form; its source is one click away.
+  const configForm = activeFile === 'config.json' && !showConfigSource
+  // The file Monaco is showing, if any: the form leaves config.json's model
+  // to the effect below, which keeps it in step with the form's edits.
+  const editorFile = configForm ? null : activeFile
   const [[monaco, editor], setMonacoAndEditor] = useState<[Monaco | null, importedEditor.IStandaloneCodeEditor | null]>(
     [null, null]
   )
@@ -338,19 +347,19 @@ export function EditApp({
       const existing = monaco.editor.getModel(uri)
       if (!existing) {
         siblingModelsRef.current.set(file, monaco.editor.createModel(content ?? '', appSourceEditorLanguage(file), uri))
-      } else if (file !== activeFile && existing.getValue() !== content) {
+      } else if (file !== editorFile && existing.getValue() !== content) {
         existing.setValue(content ?? '')
       }
     }
     for (const [file, model] of siblingModelsRef.current) {
-      if (!present.has(file) && file !== activeFile) {
+      if (!present.has(file) && file !== editorFile) {
         if (!model.isDisposed()) {
           model.dispose()
         }
         siblingModelsRef.current.delete(file)
       }
     }
-  }, [monaco, sources, nodeId, activeFile])
+  }, [monaco, sources, nodeId, editorFile])
 
   useEffect(() => {
     return () => {
@@ -483,23 +492,55 @@ export function EditApp({
             </Button>
           </div>
         ) : null}
-        <div className="frameos-inset overflow-hidden rounded-md border font-mono text-sm w-full flex-1">
-          <Editor
-            height="100%"
-            path={inmemoryModelPath('app-editor', [nodeId], activeFile)}
-            language={editorLanguage}
-            value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
-            theme={theme === 'dark' ? 'darkframe' : 'lightframe'}
-            beforeMount={configureAppSourceEditor}
-            onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
-            onChange={(value) => updateFile(activeFile, value ?? '')}
-            options={{
-              minimap: { enabled: false },
-              readOnly: requiresCompiledOnSave,
-              domReadOnly: requiresCompiledOnSave,
-            }}
-          />
-        </div>
+        {activeFile === 'config.json' ? (
+          <div className="flex shrink-0 items-center gap-2 text-xs">
+            <div className="frameos-muted min-w-0 flex-1 truncate">
+              {configForm ? "The app's name, fields, output and defaults." : 'config.json'}
+            </div>
+            <div className="frameos-inset flex rounded-lg border p-0.5" role="group" aria-label="Edit config.json as">
+              {[
+                { label: 'Form', source: false },
+                { label: 'Source', source: true },
+              ].map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  aria-pressed={showConfigSource === option.source}
+                  onClick={() => setShowConfigSource(option.source)}
+                  className={clsx(
+                    'rounded-md px-2.5 py-1 font-semibold transition',
+                    showConfigSource === option.source ? 'frameos-primary-action text-white' : 'frameos-muted'
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {configForm ? (
+          <div className="min-h-0 w-full flex-1 overflow-y-auto">
+            <AppConfigForm logicProps={logicProps} />
+          </div>
+        ) : (
+          <div className="frameos-inset overflow-hidden rounded-md border font-mono text-sm w-full flex-1">
+            <Editor
+              height="100%"
+              path={inmemoryModelPath('app-editor', [nodeId], activeFile)}
+              language={editorLanguage}
+              value={sources[activeFile] ?? sources[Object.keys(sources)[0]] ?? ''}
+              theme={theme === 'dark' ? 'darkframe' : 'lightframe'}
+              beforeMount={configureAppSourceEditor}
+              onMount={(editor, monaco) => setMonacoAndEditor([monaco, editor])}
+              onChange={(value) => updateFile(activeFile, value ?? '')}
+              options={{
+                minimap: { enabled: false },
+                readOnly: requiresCompiledOnSave,
+                domReadOnly: requiresCompiledOnSave,
+              }}
+            />
+          </div>
+        )}
         {activeFileIsTest && activeTestRun ? (
           <div className="frameos-inset app-test-report max-h-[45%] shrink-0 overflow-auto rounded-md border">
             <AppTestReportView run={activeTestRun} />

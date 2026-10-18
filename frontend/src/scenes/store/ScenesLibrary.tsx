@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowDownOnSquareIcon,
+  ArrowTopRightOnSquareIcon,
   ComputerDesktopIcon,
   ArrowDownTrayIcon,
   ArrowPathIcon,
@@ -27,6 +28,7 @@ import { TextInput } from '../../components/TextInput'
 import type { RepositoryType, TemplateType } from '../../types'
 import { urls } from '../../urls'
 import { isCloudMode } from '../../utils/cloudMode'
+import type { CloudStoreTemplate } from '../../utils/cloudStoreRepository'
 import { storeShelfForCategory } from '../../utils/storeCategories'
 import {
   Note,
@@ -519,8 +521,9 @@ function CloudScenesPage(): JSX.Element {
     search,
     visibility,
     driveRepository,
+    deleteDriveSceneError,
   } = useValues(scenesLibraryLogic)
-  const { loadDrive, setVisibleShelf } = useActions(scenesLibraryLogic)
+  const { loadDrive, setVisibleShelf, deleteDriveScene } = useActions(scenesLibraryLogic)
   const mode = workspaceMode()
   const title = scenesLibraryPageLabel('cloud', mode)
   const shelvesRef = useRef<HTMLDivElement>(null)
@@ -567,6 +570,7 @@ function CloudScenesPage(): JSX.Element {
       />
       <div className="space-y-8" ref={shelvesRef}>
         {mode === 'cloud' ? <StoreActionCards /> : null}
+        {deleteDriveSceneError ? <Note>Could not delete the scene: {deleteDriveSceneError}</Note> : null}
         {driveTemplatesLoading && driveTemplates.length === 0 ? (
           <div className="frameos-muted flex items-center gap-2 text-sm">
             <Spinner className="h-4 w-4" />
@@ -601,7 +605,15 @@ function CloudScenesPage(): JSX.Element {
                       key={template.sceneId ?? template.id ?? template.name}
                       template={template}
                       showAuthor={false}
-                      actions={<InstallButton template={template} repository={driveRepository} />}
+                      actions={
+                        <>
+                          <InstallButton template={template} repository={driveRepository} />
+                          {/* The cloud's scene routes take the browser session: a backend's link cannot delete. */}
+                          {mode === 'cloud' && template.sceneId ? (
+                            <DriveSceneMenu template={template} onDelete={deleteDriveScene} />
+                          ) : null}
+                        </>
+                      }
                     />
                   ))}
                 </TileGrid>
@@ -611,6 +623,57 @@ function CloudScenesPage(): JSX.Element {
         )}
       </div>
     </>
+  )
+}
+
+const moreMenuClassName =
+  'frameos-form-control h-7 w-7 items-center rounded-md border !px-0 !py-0 !shadow-none transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-400'
+
+// One of the account's own scenes on the cloud: open its page, download it, or delete it.
+function DriveSceneMenu({
+  template,
+  onDelete,
+}: {
+  template: TemplateType
+  onDelete: (sceneId: string) => void
+}): JSX.Element {
+  const published = template.visibility === 'public'
+  const { url, zip } = template as CloudStoreTemplate
+  return (
+    <DropdownMenu
+      buttonTitle="More"
+      buttonContent={<EllipsisHorizontalIcon className="h-4 w-4" />}
+      buttonColor="none"
+      className={moreMenuClassName}
+      items={[
+        ...(url
+          ? [
+              {
+                label: 'Open',
+                icon: <ArrowTopRightOnSquareIcon className="h-4 w-4" />,
+                onClick: () => window.location.assign(url),
+              },
+            ]
+          : []),
+        ...(zip
+          ? [
+              {
+                label: 'Download .zip',
+                icon: <ArrowDownTrayIcon className="h-4 w-4" />,
+                onClick: () => window.location.assign(zip),
+              },
+            ]
+          : []),
+        {
+          label: 'Delete',
+          icon: <TrashIcon className="h-4 w-4" />,
+          confirm: published
+            ? `Delete "${template.name}"? It is published, so it leaves the store too. Frames keep what they have installed.`
+            : `Delete "${template.name}" and all its versions? Frames keep what they have installed.`,
+          onClick: () => onDelete(template.sceneId!),
+        },
+      ]}
+    />
   )
 }
 
@@ -710,7 +773,7 @@ function LocalScenesPage(): JSX.Element {
                         buttonTitle="More"
                         buttonContent={<EllipsisHorizontalIcon className="h-4 w-4" />}
                         buttonColor="none"
-                        className="frameos-form-control h-7 w-7 items-center rounded-md border !px-0 !py-0 !shadow-none transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-400"
+                        className={moreMenuClassName}
                         items={[
                           {
                             label: 'Edit',
