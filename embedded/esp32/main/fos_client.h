@@ -26,6 +26,10 @@ void fos_client_render_recovery_boot(void);
 bool fos_client_render_paused(void);
 void fos_client_clear_render_pause(void);
 void fos_client_render_now(void);
+/* Render now because somebody asked (a render verb, the console, a button,
+ * the schedule): unlike fos_client_render_now, the scenes inside a split all
+ * run, also those whose own interval has not come round. */
+void fos_client_render_fresh(void);
 /* Pull the backend's command queue on the render task as soon as it is idle
  * (the backend's nudge, fos_http.c `/api/action/commands`); the next pass
  * pulls it anyway. See fos_commands.h. */

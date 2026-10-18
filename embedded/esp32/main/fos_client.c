@@ -464,6 +464,15 @@ void fos_client_render_now(void)
     }
 }
 
+/* Set by any task, taken by the render task right before it renders. */
+static bool s_render_fresh = false;
+
+void fos_client_render_fresh(void)
+{
+    __atomic_store_n(&s_render_fresh, true, __ATOMIC_SEQ_CST);
+    fos_client_render_now();
+}
+
 void fos_client_wake_for_events(void)
 {
     if (s_events) {
@@ -1200,6 +1209,11 @@ static esp_err_t render_once(void)
     if (local_render) {
         if (fos_scenes_loaded() == 0) {
             push_status_info();
+        }
+        /* Somebody asked for this render: every scene inside the current
+         * one runs, also those not yet due (frameos/scene_rhythm.nim). */
+        if (__atomic_exchange_n(&s_render_fresh, false, __ATOMIC_SEQ_CST)) {
+            frameos_nim_request_fresh_pass();
         }
         err = frameos_nim_render_alloc(&buf, &buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
         if (err != ESP_OK) ESP_LOGE(TAG, "nim render failed");

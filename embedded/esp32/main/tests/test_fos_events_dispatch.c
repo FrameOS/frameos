@@ -28,6 +28,7 @@
 
 static struct {
     int renders;
+    int fresh_renders;
     int wakes;
     int syncs;
     int selects;
@@ -70,6 +71,7 @@ static void reset(void)
 }
 
 void fos_client_render_now(void) { n.renders++; }
+void fos_client_render_fresh(void) { n.renders++; n.fresh_renders++; }
 void fos_client_wake_for_events(void) { n.wakes++; }
 void fos_scenes_request_sync(void) { n.syncs++; }
 
@@ -219,6 +221,13 @@ static void test_render(void)
     n.nim_available = false;
     CHECK(fos_events_dispatch(FOS_ORIGIN_SCHEDULE, "render", "{}") == FOS_EVENT_DONE);
     CHECK(n.renders == 1);
+    /* Somebody outside the scene asking renders every embedded scene anew;
+     * the scene's own request and the runtime's do not (event_loop.nim). */
+    CHECK(n.fresh_renders == 1);
+    reset();
+    CHECK(fos_events_dispatch(FOS_ORIGIN_SCENE, "render", "{}") == FOS_EVENT_DONE);
+    CHECK(fos_events_dispatch(FOS_ORIGIN_SYSTEM, "render", "{}") == FOS_EVENT_DONE);
+    CHECK(n.renders == 2 && n.fresh_renders == 0);
 }
 
 static void test_set_current_scene(void)

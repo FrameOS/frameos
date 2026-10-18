@@ -114,10 +114,29 @@ proc resolveRefreshInterval*(fields: seq[StateField], settingsSeconds: float): R
     result.key = RefreshIntervalFieldName
     result.implicit = true
 
+proc ownRefreshInterval*(scene: FrameScene): float =
+  ## The interval the scene's own state holds, before a generated split
+  ## stretches it to its first panel's due time.
+  if scene.isNil:
+    return 0.0
+  if scene.refreshIntervalKey.len == 0:
+    return (if scene.refreshFollowsChildren: scene.refreshIntervalDefault else: scene.refreshInterval)
+  refreshIntervalFromState(scene.state, scene.refreshIntervalKey, scene.refreshIntervalDefault)
+
 proc syncRefreshInterval*(scene: FrameScene) =
   ## `FrameScene.refreshInterval` is what every host's render loop reads; the
   ## scene's state is where it is set. Copy one into the other.
-  if scene.isNil or scene.refreshIntervalKey.len == 0:
+  ##
+  ## A generated split draws nothing that changes with time, so it waits
+  ## longer when none of its panels is due by then: its interval is the time
+  ## until its first panel is due, as its last render left it, but never less
+  ## than its own (scene_rhythm.nim).
+  if scene.isNil:
+    return
+  if scene.refreshFollowsChildren and scene.followInterval >= 0:
+    scene.refreshInterval = max(ownRefreshInterval(scene), scene.followInterval)
+    return
+  if scene.refreshIntervalKey.len == 0:
     return
   scene.refreshInterval = refreshIntervalFromState(
     scene.state, scene.refreshIntervalKey, scene.refreshIntervalDefault)

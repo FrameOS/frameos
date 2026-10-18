@@ -11,11 +11,12 @@
 #      AOT app library, hot-updatable from the backend without reflashing)
 #   2. the baked demo scene in embedded_scene.nim
 
-import std/[math, monotimes, options, strformat, times]
+import std/[json, math, monotimes, options, strformat, times]
 import pixie
 
 import embedded_scene
 import embedded_runtime
+import frameos/scene_rhythm
 from frameos/apps import applyServiceSettings
 import frameos/utils/asset_colors
 import frameos/utils/dither
@@ -341,6 +342,13 @@ proc renderBufferFree(p: pointer) {.importc: "frameos_nim_free_render_buffer".}
 
 # ------------------------------------------------------------------ C API
 
+# Every `_impl` below is a C boundary, and nothing may escape one: with
+# `--exceptions:goto` an exception that leaves an exported proc does not
+# unwind the C side, the runtime stays in error mode, and every later Nim call
+# returns at once with a poisoned result (the firmware then renders "0 bytes"
+# once a second, with no line saying why). Seen on the E1004 when a split's
+# panel was not resident: interpreter.init raised a root `Exception`, which
+# `except CatchableError` lets through. So these handlers catch `Exception`.
 proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes: cint,
     rotate: cint): bool {.exportc, cdecl.} =
   frameWidth = width.int
@@ -363,7 +371,7 @@ proc fos_nim_init_impl(width, height: cint; name: cstring; maxHttpResponseBytes:
   except Defect as e:
     log("nim init failed (defect): " & e.msg)
     false
-  except CatchableError as e:
+  except Exception as e:
     log("nim init failed: " & e.msg)
     false
 
@@ -379,7 +387,7 @@ proc fos_nim_apply_service_settings_impl(payload: cstring) {.exportc, cdecl.} =
       log("service settings updated")
   except Defect as e:
     log("service settings apply failed (defect): " & e.msg)
-  except CatchableError as e:
+  except Exception as e:
     log("service settings apply failed: " & e.msg)
 
 proc fos_nim_load_scenes_impl(payload: cstring): cint {.exportc, cdecl.} =
@@ -393,7 +401,7 @@ proc fos_nim_load_scenes_impl(payload: cstring): cint {.exportc, cdecl.} =
     GC_fullCollect()
     recoverEmergencyReserve("scene load failure")
     result = 0
-  except CatchableError as e:
+  except Exception as e:
     log("loadScenes failed: " & e.msg)
     recoverEmergencyReserve("scene load failure")
     result = 0
@@ -411,9 +419,43 @@ proc fos_nim_set_scene_catalog_impl(indexJson: cstring): cint {.exportc, cdecl.}
     GC_fullCollect()
     recoverEmergencyReserve("scene catalog failure")
     result = 0
-  except CatchableError as e:
+  except Exception as e:
     log("setSceneCatalog failed: " & e.msg)
     result = 0
+
+var missingScenesBuffer: string
+
+proc fos_nim_add_scene_impl(payload: cstring): cint {.exportc, cdecl.} =
+  ## Lazy path, second step: a scene the resident one embeds, added alongside.
+  try:
+    if payload == nil:
+      return 0
+    result = (if addScene($payload): 1 else: 0).cint
+    recoverEmergencyReserve("scene load")
+  except Defect as e:
+    log("addScene failed (defect): " & e.msg)
+    GC_fullCollect()
+    recoverEmergencyReserve("scene load failure")
+    result = 0
+  except Exception as e:
+    log("addScene failed: " & e.msg)
+    recoverEmergencyReserve("scene load failure")
+    result = 0
+
+proc fos_nim_missing_scenes_json_impl(): cstring {.exportc, cdecl.} =
+  ## JSON array of the scene ids the resident scenes embed but that are not
+  ## resident yet; "[]" when the set is complete.
+  try:
+    missingScenesBuffer = $(%missingSceneDependencies())
+  except Exception as e:
+    log("missing scenes failed: " & e.msg)
+    missingScenesBuffer = "[]"
+  missingScenesBuffer.cstring
+
+proc fos_nim_request_fresh_pass_impl() {.exportc, cdecl.} =
+  ## Somebody asked for this render (a cloud or HTTP render verb, the console,
+  ## a button, the schedule): every embedded scene runs, due or not.
+  rhythmRequestFreshPass()
 
 proc fos_nim_load_scene_impl(payload: cstring): cint {.exportc, cdecl.} =
   ## Lazy path: make ONE scene resident, replacing whatever was live. The
@@ -429,7 +471,7 @@ proc fos_nim_load_scene_impl(payload: cstring): cint {.exportc, cdecl.} =
     GC_fullCollect()
     recoverEmergencyReserve("scene load failure")
     result = 0
-  except CatchableError as e:
+  except Exception as e:
     log("loadScene failed: " & e.msg)
     recoverEmergencyReserve("scene load failure")
     result = 0
@@ -456,7 +498,7 @@ proc renderErrorFallback(
   except Defect:
     GC_fullCollect()
     1
-  except CatchableError:
+  except Exception:
     GC_fullCollect()
     1
 
@@ -499,7 +541,7 @@ proc fos_nim_render_impl(
     log("render failed (defect): " & e.msg)
     result = renderErrorFallback(buf, bufLen.int, pixelFormat.int, "Render failed: " & e.msg)
     recoverEmergencyReserve("render failure")
-  except CatchableError as e:
+  except Exception as e:
     log("render failed: " & e.msg)
     result = renderErrorFallback(buf, bufLen.int, pixelFormat.int, "Render failed: " & e.msg)
     recoverEmergencyReserve("render failure")
@@ -531,7 +573,7 @@ proc renderErrorFallbackAlloc(
   except Defect:
     GC_fullCollect()
     1
-  except CatchableError:
+  except Exception:
     GC_fullCollect()
     1
 
@@ -589,7 +631,7 @@ proc fos_nim_render_alloc_impl(
     outLen = 0
     result = renderErrorFallbackAlloc(outBuf, outLen, pixelFormat.int, "Render failed: " & e.msg)
     recoverEmergencyReserve("render failure")
-  except CatchableError as e:
+  except Exception as e:
     log("render failed: " & e.msg)
     if outBuf != nil:
       renderBufferFree(outBuf)
@@ -624,7 +666,7 @@ proc fos_nim_scene_interval_impl(): cdouble {.exportc, cdecl.} =
   except Defect as e:
     log("scene interval failed (defect): " & e.msg)
     0.cdouble
-  except CatchableError as e:
+  except Exception as e:
     log("scene interval failed: " & e.msg)
     0.cdouble
 
@@ -636,7 +678,7 @@ proc fos_nim_next_sleep_impl(): cdouble {.exportc, cdecl.} =
   except Defect as e:
     log("next sleep failed (defect): " & e.msg)
     -1.cdouble
-  except CatchableError as e:
+  except Exception as e:
     log("next sleep failed: " & e.msg)
     -1.cdouble
 
@@ -655,7 +697,7 @@ proc fos_nim_tick_impl(): bool {.exportc, cdecl.} =
   except Defect as e:
     log("input tick failed (defect): " & e.msg)
     false
-  except CatchableError as e:
+  except Exception as e:
     log("input tick failed: " & e.msg)
     false
 
@@ -665,7 +707,7 @@ proc fos_nim_scene_info_json_impl(): cstring {.exportc, cdecl.} =
   except Defect as e:
     log("scene info failed (defect): " & e.msg)
     sceneInfoBuffer = "{}"
-  except CatchableError as e:
+  except Exception as e:
     log("scene info failed: " & e.msg)
     sceneInfoBuffer = "{}"
   sceneInfoBuffer.cstring
@@ -676,7 +718,7 @@ proc fos_nim_scene_state_json_impl(): cstring {.exportc, cdecl.} =
   except Defect as e:
     log("scene state failed (defect): " & e.msg)
     sceneStateBuffer = "{}"
-  except CatchableError as e:
+  except Exception as e:
     log("scene state failed: " & e.msg)
     sceneStateBuffer = "{}"
   sceneStateBuffer.cstring
@@ -692,7 +734,7 @@ proc fos_nim_set_scene_impl(sceneId: cstring): bool {.exportc, cdecl.} =
     GC_fullCollect()
     recoverEmergencyReserve("scene switch failure")
     result = false
-  except CatchableError as e:
+  except Exception as e:
     log("set scene failed: " & e.msg)
     recoverEmergencyReserve("scene switch failure")
     result = false

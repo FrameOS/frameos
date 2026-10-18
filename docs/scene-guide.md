@@ -151,6 +151,12 @@ part people can see and change:
   sleep after one render only. When the interval deserves its own label
   ("Seconds per image"), declare one `float` field with
   `"role": "refreshInterval"`; its value is then the interval.
+- A scene drawn inside another (a `scene` node, such as a split's panel)
+  renders on its own `refreshInterval`, and in between the frame shows the
+  picture it drew last time. A split made in the editor renders at most as
+  often as its own interval, and waits longer when none of its panels is due
+  by then. `logic/nextSleepDuration` (or `frameos.setNextSleep`) inside such a
+  scene sets when that scene renders next, not the frame.
 
 ## Code nodes
 

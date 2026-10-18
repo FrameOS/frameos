@@ -30,6 +30,7 @@ import ./event_log
 import ./types
 import ./driver_abi
 import ./input_state
+import ./scene_rhythm
 
 export events
 export input_state.InputState, input_state.cursorVisible, input_state.takeCursorDirty,
@@ -338,6 +339,12 @@ proc process(loop: EventLoop, envelope: EventEnvelope): bool =
   case envelope.name
   of evRender:
     # A request, not a delivery: the scene hears "render" from the render pass.
+    # Somebody outside the scene asking (the API, the cloud, a schedule, a
+    # button, the preview) gets every embedded scene drawn anew, due or not;
+    # the scene's own requests and the runtime's (a code drawn over the
+    # picture) do not (scene_rhythm.nim).
+    if envelope.origin notin {eoScene, eoSystem}:
+      rhythmRequestFreshPass()
     loop.renderWanted = true
     result = true
   of evSetCurrentScene:

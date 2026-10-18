@@ -199,7 +199,27 @@ Both halves are held in place by the deprecated source-build path
 
 ---
 
-## Canonical API gaps
+## Scenes inside scenes: exact repaints, and the bench
+
+A split's panels each render on their own schedule, and a panel that is not
+due puts back the picture it drew last time, from a copy capped by memory
+(`docs/scene-rhythm.md`). Where no copy fits (big ESP32 panels, every
+deep-sleep wake), the panel runs again: a *repaint*. Open:
+
+- **Exact repaints through the node store (#555).** While a repaint runs,
+  `FrameScene.repainting` is true. A node cache should then serve what it
+  stored last time whatever its age, so an album does not move on and a random
+  photo app does not fetch a new photo between its due runs. Until then a
+  repaint is an ordinary run.
+- **Bench it.** A Pi on HDMI with a 24 fps clock beside an Unsplash panel
+  (split on 0.04 s): one fetch per photo interval, the clock smooth. An E1002
+  split of a 60 s clock and a 15 min weather panel: the lazy loader brings
+  both panels in (`scenes:load` `embedded-scene-loaded`), the weather panel is
+  kept, not repainted. An E1004 1600x1200 split: the copy is refused once
+  (`render:rhythm:copyRefused`) and the big panel repaints.
+- **Realtime on an ESP32.** The C render loop ignores scene intervals under
+  1 s and sleeps in whole seconds; a fast ESP32 with an LCD would need both.
+
 
 Matrix in `docs/api-triality.md`; nothing scheduled — the remaining deltas
 (ESP32 field coverage, canonical Pi asset-mutation aliases) live in that
