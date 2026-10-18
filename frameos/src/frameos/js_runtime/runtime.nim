@@ -78,7 +78,7 @@ when defined(frameosEmbedded):
   const SceneJsEvictHeadroomBytes = 2 * 1024 * 1024
 initLock(sceneJsLock)
 
-const sceneJsPrelude* = """
+const sceneJsPrelude* = compactJs("""
 const __frameosFragment = Symbol.for("frameos.fragment");
 const __frameosNormalizeChildren = (children) => {
   if (children.length === 0) return undefined;
@@ -109,7 +109,7 @@ const __frameosJsx = (type, props, ...children) => {
 };
 globalThis.__frameosFragment = __frameosFragment;
 globalThis.__frameosJsx = __frameosJsx;
-"""
+""")
 
 # -------------------------
 # Small string/JS helpers
@@ -814,7 +814,7 @@ proc ensureSceneJs*(scene: InterpretedFrameScene) =
     scene.js.registerFunction("parseTs", jsChronoParseTs)
     scene.js.registerFunction("format", jsChronoFormat)
     scene.js.registerFunction("now", jsChronoNow)
-    discard scene.js.eval("""
+    discard scene.js.eval(static(compactJs("""
     "use strict";
     const __jsReplacer = (k, v) =>
       (typeof v === 'bigint') ? { __bigint: v.toString() }
@@ -829,7 +829,7 @@ proc ensureSceneJs*(scene: InterpretedFrameScene) =
     const __state   = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getState(k))   : undefined; } });
     const __args    = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getArg(k))     : undefined; } });
     const __context = new Proxy({}, { get(_, k) { return (typeof k === 'string') ? __frameosUnwrap(getContext(k)) : undefined; } });
-    """ & sceneJsPrelude)
+    """ & sceneJsPrelude)))
     # Initialize registries
     scene.jsFuncNameByNode = initTable[NodeId, string]()
     scene.codeInlineFuncNameByNodeArg = initTable[NodeId, Table[string, string]]()

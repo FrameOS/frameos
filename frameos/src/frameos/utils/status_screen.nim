@@ -58,7 +58,10 @@ proc hasAside*(screen: StatusScreen): bool =
   screen.aside.code.len > 0 or screen.aside.qr != nil
 
 const
-  frameosMarkSvg = staticRead("status_screen/frameos_mark.svg")
+  frameosMarkFile = staticRead("status_screen/frameos_mark.svg")
+  # From `<svg` on: the comment the file opens with is for whoever reads it,
+  # and in the binary it was 330 bytes of ESP32 flash.
+  frameosMarkSvg = frameosMarkFile.substr(frameosMarkFile.find("<svg"))
   markAspect = 464.0 / 544.0 # width / height of the mark's viewBox
   wordmark = "FrameOS"
   # The three squares' fills in frameos_mark.svg (same as logo-white-colors.svg).

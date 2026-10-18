@@ -137,9 +137,10 @@ proc seenAt(payload: JsonNode, now: MonoTime): MonoTime =
   ## time it is delivered; measuring the hold from `now` made a tap during a
   ## panel refresh a 30 s long press. A time in the future is a clock the
   ## producer does not share: it reads as now.
-  if payload.isInt("atMs"):
+  let atMs = payload{"atMs"}
+  if not atMs.isNil and atMs.kind == JInt:
     let nowMs = now.ticks div 1_000_000
-    let ago = nowMs - payload["atMs"].getInt()
+    let ago = nowMs - atMs.getInt()
     if ago > 0:
       return now - initDuration(milliseconds = ago)
   now
@@ -220,15 +221,16 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
   if role.len == 0:
     role = state.buttonRole(pin, label)
   let action = payload{"action"}.getStr()
-  let atMs = if payload.isInt("atMs"): payload["atMs"].getInt() else: -1
-  let given = if payload.isInt("durationMs"): payload["durationMs"].getInt() else: -1
+  let atMs = payload{"atMs"}.getInt(-1)
+  let given = payload{"durationMs"}.getInt(-1)
   let wake = payload{"wake"}.getBool()
-  if not (payload.isInt("level") or action in ["down", "up"]):
+  let hasLevel = payload.isInt("level")
+  if not (hasLevel or action in ["down", "up"]):
     if name == evButton:
       output.addButton(evButton, origin, pin, label, role, if action.len == 0: "press" else: action, atMs, given,
         wake = wake)
     return
-  let down = if payload.isInt("level"): payload["level"].getInt() == 0 else: action == "down"
+  let down = if hasLevel: payload{"level"}.getInt() == 0 else: action == "down"
   let at = payload.seenAt(now)
   state.tickButtons(at, output) # a tap whose window closed before this edge is a press first
   let index = state.keyFor(pin, label)

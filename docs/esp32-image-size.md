@@ -297,3 +297,93 @@ merging those is worth ~1.4 KB each and needs the two declarations found first.
   routes `$float` back through newlib, but changes how floats stringify
   (`0.1` → `0.10000000000000001`), and those strings reach scene state and the
   cloud. Not measured; not recommended without a formatting audit.
+
+---
+
+# The October audit and the inline-helper fold (2026-10-18)
+
+*`esp32-s3`, 8 MB layout, `EPD_7in5_V2`. Full `ci_build_image.sh` builds in
+the `esp32-ci` image; the v2026.10.15 tree rebuilt locally came out byte for
+byte at the release's 3,138,272.*
+
+**v2026.10.15 3,138,272 → main 3,154,224 (+15,952) → 3,119,504 (−34,720
+against main, −18,768 against the release). OTA slot 87.5% → 86.5% full,
+474 KB free.**
+
+## What the two weeks after 2026.10.15 added
+
+| object | Δ | PRs |
+|---|---:|---|
+| `frameos/utils/redacted_url.nim` (new) | +3,154 | #564 |
+| `fos_panel_draw.c` (new) / `fos_status_screen.c` | +2,229 / −1,156 | #560 |
+| `frameos/js_runtime/app_runtime.nim` (of it the prelude literal +1,274) | +2,216 | #553 #556 #563 #564 |
+| `frameos/utils/http_client.nim` | +1,815 | #564 #565 |
+| `fos_netguard.c` (DNS pinning, `fos_netguard_url_origin`) | +1,353 | #560 #564 #566 |
+| `frameos/input_state.nim` | +1,313 | #554 #557 #562 |
+| `fos_lan_access.c` (new) | +841 | #560 |
+| `frameos_nim_glue.c` (connect reasons, retry, pins) | +820 | #564 #565 |
+| `fos_client.c` (the code overlay, the button settle) | +691 | #557 #560 #565 |
+| `frameos/js_runtime/burrito.nim` (the deadline message) | +603 | #565 |
+| the C string pool | +595 | |
+| `fos_button_timing.c` (new), `fos_buzzer.c`, `fos_buttons.c` | +434, +261, +244 | #554 #557 #562 |
+| `fos_cloud.c`, `fos_ota.c`, `fos_settings.c` | +393, +172, +104 | #556 #560 #566 |
+| `interpreter.nim`, `cloud/scene_guard.nim` | −284, −255 | #556 |
+
+The C side is feature code with little to take out. Five things on the Nim
+side were redundant, each changed without changing behaviour (−4,960):
+
+- **`redactedUrl` existed twice** — in Nim (1,570 B) and as
+  `fos_netguard_url_origin` in C (634 B), which the firmware needs anyway. On
+  `frameosEmbedded` the Nim proc now calls the C one; the Nim test cases pass
+  against it. −1,962 with the next item.
+- **A string slice `s[a .. b]` is a generic, instantiated anew (~350 B) in
+  every module that uses one.** `redactedUrlsIn` and `httpHostOf` use
+  `substr`, system's single copy; `httpHostOf` is `redactedUrl` minus the
+  scheme, so it no longer falls back to the whole URL. −788 in http_client.
+- **The JS preludes shipped their indentation and comments.**
+  `compactJs` (burrito.nim, compile time) trims every line and drops blank
+  and `//` lines; it refuses a template literal or a trailing backslash, the
+  two ways a string could run across a line. The asset and stream calls of
+  `frameos` share three helpers, `console` points at `frameos.log`. −1,516.
+- The status screen's SVG opened with a 330-byte comment for its readers. Cut
+  at compile time.
+- `input_state.button` looked up `atMs`, `durationMs` and `level` twice each
+  (`isInt`, then `[]`). −347.
+
+## The inline-helper fold: −29,760
+
+Nim emits every `{.inline.}` proc a module needs as `static N_INLINE(...)`
+into that module's C file. Wherever GCC does not inline a call, the file
+keeps a private copy, so the image held 70 `appendString`s, 44
+`nimDecRefIsLastCyclicDyn`s, 31 `eqStrings`, 55 `nimZeroMem`s and a dozen
+copies of each string-slice `[]` — about 21.6 KB of identical code (103
+same-named local-function groups, 43 KB counting genuinely different
+instances).
+
+`embedded/esp32/tools/fold_nim_inlines.py`, run by `build_nim.sh`, uses C99
+inline semantics: a helper whose definition is identical in every file
+becomes a plain `inline` definition (still inlined where GCC wants, no
+private copy) in all files but one, which has `extern inline`, the single
+external definition. 199 helpers fold; 23 whose bodies name module data stay
+private. Measured −29,760, more than the copies themselves, since GCC also
+inlines a little less once a helper is not file-local.
+
+- **`__attribute__((weak))` is the wrong tool** — it folds the copies too
+  (−21,610) but GCC never inlines a weak function, and losing that cost more:
+  +1,392 net.
+- Bodies are compared as text after renaming the temporaries a body declares
+  (`TM__<module hash>_<n>`); a `TM__` the body only *reads* is module data and
+  keeps the bodies apart. No folded body has a static local (an inline
+  definition may not).
+- Checked on the host by building seven Nim suites (interpreter, dispatcher
+  fixtures, the single-scene host, the JS app runtime and all 19 repo apps'
+  tests) through the same fold at `-O0`, where every call goes to the one
+  copy: all pass. `test_esp32_fold_nim_inlines.py` pins the rewrite and links
+  and runs a folded sample at `-O0` and `-O2`. The QEMU smoke boots it as far
+  as it boots main.
+- The other two ways to fold reach less or nothing: LTO on the component
+  measured −4,720 in all (above), and `ld.bfd` has no identical-code folding.
+
+The remaining same-named groups are genuinely different instances (a
+`rawGet` per table type, `parseObjectInner` per jsony type): see "The 52 hash
+tables".

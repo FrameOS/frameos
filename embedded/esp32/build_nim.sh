@@ -89,4 +89,8 @@ cp "$NIM_LIB/nimbase.h" "$NIMCACHE/"
 # Only *.c is compiled; drop the json metadata to keep the component clean
 rm -f "$NIMCACHE"/*.json
 
+# One out-of-line copy of each inline helper instead of one per C file
+# (~30 KB of flash; see the script).
+python3 "$SCRIPT_DIR/tools/fold_nim_inlines.py" "$NIMCACHE"
+
 echo "nimcache ready: $(ls "$NIMCACHE" | wc -l | tr -d ' ') files in $NIMCACHE"

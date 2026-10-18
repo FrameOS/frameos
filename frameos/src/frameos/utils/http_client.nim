@@ -107,26 +107,13 @@ proc renderDeadlineRefusalMessage*(url: string): string =
     redactedUrl(url) & ")"
 
 proc httpHostOf*(url: string): string =
-  ## The host of `url`, for messages a person reads.
-  var rest = url
-  let scheme = rest.find("://")
-  if scheme >= 0:
-    rest = rest[scheme + 3 .. ^1]
-  for i, ch in rest:
-    if ch in {'/', '?', '#'}:
-      rest = rest[0 ..< i]
-      break
-  let at = rest.rfind('@')
-  if at >= 0:
-    rest = rest[at + 1 .. ^1]
-  if rest.startsWith("["):
-    let close = rest.find(']')
-    if close > 0:
-      return rest[0 .. close]
-  let colon = rest.find(':')
-  if colon >= 0:
-    rest = rest[0 ..< colon]
-  if rest.len > 0: rest else: url
+  ## The host of `url` (and its port, when the URL names one), for messages a
+  ## person reads: its redactedUrl without the scheme, so never more of the
+  ## URL than an error message may carry.
+  result = redactedUrl(url)
+  let mark = result.find("://")
+  if mark >= 0:
+    result = result.substr(mark + 3)
 
 proc noteHttpWait(what, url: string, startedAt: MonoTime) =
   ## Lets the render deadline name the request that ate its time.
