@@ -72,11 +72,6 @@ is left there is in the medium / low list.
   `/api/frames/…/preview_proxy`) with the app's session cookie, and an
   opaque-origin worker cannot send it — the proxy has to move to a
   short-lived per-preview token first, on both control planes.
-- **`ACTIONS_WRITE_TOKEN` scope is unverified.** The release workflow's
-  `update-addon-repo` job checks out `frameos/frameos-home-assistant-addon`
-  with it. If it is a classic PAT its blast radius is the whole account;
-  confirm on the GitHub secrets page and swap it for a fine-grained token
-  limited to that one repository.
 - Smaller: the runner pool's `/mnt/cache` is writable from every VM (fork
   PRs do not land there — mount it read-only or a scratch subtree for any
   job that is not building a release, and keep "require approval for all

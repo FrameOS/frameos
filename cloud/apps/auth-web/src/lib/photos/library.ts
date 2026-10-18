@@ -18,7 +18,6 @@ import {
   photoScanHits,
   photoShares,
 } from "@frameos-cloud/db";
-import { notifyDiscord } from "../discord";
 import { getAccountBaseUrl } from "../env";
 import type { FramesDatabase } from "../frames";
 import { logWarn } from "../log";
@@ -1614,20 +1613,9 @@ export async function recordPhotoScanMatch(
   });
 
   const adminUrl = new URL("/admin/photos", getAccountBaseUrl()).toString();
-  await Promise.all([
-    capturePostHogEvent("photo scan matched", input.accountId, {
-      admin_url: adminUrl,
-      scanner: input.scanner,
-      sha256: input.sha256,
-    }),
-    notifyDiscord(
-      [
-        `**Photo scan match** (${input.scanner})`,
-        `Account: ${email ?? input.accountId}`,
-        `SHA-256: ${input.sha256}`,
-        "The upload was refused and the account's photos are suspended.",
-        `Review: <${adminUrl}>`,
-      ].join("\n"),
-    ),
-  ]);
+  await capturePostHogEvent("photo scan matched", input.accountId, {
+    admin_url: adminUrl,
+    scanner: input.scanner,
+    sha256: input.sha256,
+  });
 }
