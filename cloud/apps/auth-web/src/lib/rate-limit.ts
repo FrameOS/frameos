@@ -171,6 +171,19 @@ export async function rateLimitResponse(
 // Rate limit keyed on a non-spoofable identity (e.g. the authenticated account)
 // rather than the client IP. Used to cap brute-force guessing of device user
 // codes by a logged-in attacker, which the IP-based limit cannot reliably stop.
+// checkIdentityRateLimit is the same bucket for callers that are not a route
+// (the AI chat's render_scene spends the account's scenes:render budget).
+export async function checkIdentityRateLimit(
+  identity: string,
+  action: string,
+  options: {
+    limit: number;
+    windowMs: number;
+  },
+) {
+  return checkRateLimit(`${action}:identity:${identity}`, options);
+}
+
 export async function identityRateLimitResponse(
   identity: string,
   action: string,
@@ -179,7 +192,7 @@ export async function identityRateLimitResponse(
     windowMs: number;
   },
 ) {
-  const result = await checkRateLimit(`${action}:identity:${identity}`, options);
+  const result = await checkIdentityRateLimit(identity, action, options);
   if (result.allowed) {
     return undefined;
   }

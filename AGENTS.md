@@ -135,6 +135,12 @@
   ai:eval --compare evals/results/<prev>/report.json` (needs the dev server on
   :3000, the local DB filled by `scripts/import-store-scenes.mjs`, and
   `OPENAI_API_KEY`). See `cloud/apps/auth-web/evals/README.md`.
+- The chat can see: `render_scene` renders the scene it holds with the
+  server's wasm runtime (`scene-render.ts`, as `POST /api/scenes/render`) at
+  the client's preview size (`renderSize` in the request) and returns the PNG
+  inside the tool result. Renders never carry the account's service keys and
+  spend the account's `scenes:render` budget. The backend's scene AI has no
+  tool loop and no equivalent.
 
 ## Writing scenes: `docs/scene-guide.md` is what every author reads
 

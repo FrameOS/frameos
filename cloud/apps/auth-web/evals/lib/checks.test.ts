@@ -128,3 +128,29 @@ describe("flow_sets_state", () => {
     expect(redrawOnly.passed).toBe(false);
   });
 });
+
+describe("tool_called", () => {
+  const input = (toolCalls?: string[]): CheckInput => ({
+    deliveredTool: "modify_scene",
+    judge: null,
+    lint: null,
+    render: null,
+    reply: "",
+    scenes: [],
+    seedScene: null,
+    ...(toolCalls ? { toolCalls } : {}),
+  });
+
+  it("passes when the agent called the tool in any turn", () => {
+    expect(runCheck({ name: "render_scene", type: "tool_called" }, input(["get_app", "render_scene"])).passed).toBe(true);
+  });
+
+  it("names the tools it did call when it fails", () => {
+    const result = runCheck({ name: "render_scene", type: "tool_called" }, input(["patch_scene"]));
+    expect(result.passed).toBe(false);
+    expect(result.detail).toBe("render_scene never called (tools: patch_scene)");
+    expect(runCheck({ name: "render_scene", type: "tool_called" }, input()).detail).toBe(
+      "render_scene never called (tools: none)",
+    );
+  });
+});

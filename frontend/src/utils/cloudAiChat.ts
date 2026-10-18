@@ -74,6 +74,10 @@ export interface CloudAiChatRequest {
   selectedNodes?: Record<string, any>[]
   selectedEdges?: Record<string, any>[]
   history: { role: string; content: string }[]
+  /** The size and clock the frame's preview renders at; the assistant's
+   * render_scene looks at the scene the same way. */
+  renderSize?: { width: number; height: number }
+  timeZone?: string
 }
 
 export function formatElapsed(ms: number): string {

@@ -68,6 +68,10 @@ export type AiChatRequest = {
    * so the assistant edits what the user sees, not what was published. */
   listing?: AiListingChanges | undefined;
   history?: AiChatHistoryItem[] | undefined;
+  /** The size and clock the panel's preview renders at; the assistant's
+   * render_scene looks at the scene the same way. */
+  renderSize?: { width: number; height: number } | undefined;
+  timeZone?: string | undefined;
 };
 
 // A non-2xx answer before the stream started: `code` is the server's

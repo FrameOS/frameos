@@ -14,13 +14,14 @@ import {
 import { PhotoLinkRedactor } from "../photos/share-links-in-scenes";
 import { buildSystemPrompt } from "./prompts";
 import {
-  executeTool,
+  runTool,
   toolDefinitions,
   toolLabels,
   type InstallProposalEvent,
   type ListingEvent,
   type ScenesEvent,
   type ToolContext,
+  type ToolImage,
 } from "./tools";
 import { parseToolArguments } from "./tool-args";
 
@@ -66,20 +67,33 @@ export type RoundReport = {
   toolCalls: string[];
 };
 
+// What one rendered frame costs as input. OpenAI scales an image down before
+// counting it (an 800x480 render measured ~450 tokens at high detail), so
+// its base64, hundreds of kilobytes, says nothing about its price.
+export const estimatedImageTokens = 1_000;
+
 // Rough token count for a round that never reported one (see RoundReport
 // usageEstimated): ~4 UTF-16 characters per token, which errs high on
 // English prose and low on JSON — good enough for a meter that otherwise
-// records zero.
-function estimatedUsage(
+// records zero. Images count as estimatedImageTokens each.
+export function estimatedUsage(
   instructions: string,
   input: unknown[],
   replyBefore: number,
   replyNow: string,
 ): ResponseUsage {
-  const inputChars = instructions.length + JSON.stringify(input).length;
+  let images = 0;
+  const inputJson = JSON.stringify(input, (_key, value: unknown) => {
+    if (value && typeof value === "object" && (value as { type?: unknown }).type === "input_image") {
+      images += 1;
+      return { ...value, image_url: "" };
+    }
+    return value;
+  });
+  const inputChars = instructions.length + inputJson.length;
   return {
     cachedInputTokens: 0,
-    inputTokens: Math.ceil(inputChars / 4),
+    inputTokens: Math.ceil(inputChars / 4) + images * estimatedImageTokens,
     outputTokens: Math.ceil(Math.max(0, replyNow.length - replyBefore) / 4),
     reasoningTokens: 0,
   };
@@ -125,6 +139,19 @@ function userMessage(text: string): ResponseInputItem {
 
 function assistantMessage(text: string): ResponseInputItem {
   return { content: [{ text, type: "output_text" }], role: "assistant" };
+}
+
+// A tool result for the model: plain text, or text and the images the tool
+// produced (render_scene's frame). High detail: the point of looking is
+// clipped text and cramped layouts, which a 512 px thumbnail hides.
+export function functionCallOutput(text: string, images: ToolImage[]): string | ResponseInputItem[] {
+  if (images.length === 0) {
+    return text;
+  }
+  return [
+    { text, type: "input_text" },
+    ...images.map((image) => ({ detail: "high", image_url: image.dataUrl, type: "input_image" })),
+  ];
 }
 
 export function buildInitialInput({
@@ -269,6 +296,7 @@ export async function runAgentLoop({
       toolCalls.push(call.name);
       emit({ label, name: call.name, status: "start", type: "tool" });
       let output: string;
+      let images: ToolImage[] = [];
       const parsed = parseToolArguments(call.name, call.arguments);
       if ("error" in parsed) {
         // The call never ran. Hand the model a result that says exactly that,
@@ -290,7 +318,9 @@ export async function runAgentLoop({
         });
       } else {
         try {
-          output = await executeTool(call.name, photoLinks.restore(parsed.args), toolContext);
+          const result = await runTool(call.name, photoLinks.restore(parsed.args), toolContext);
+          output = result.text;
+          images = result.images;
           emit({ label, name: call.name, status: "done", type: "tool" });
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error);
@@ -302,7 +332,7 @@ export async function runAgentLoop({
         call_id: call.call_id,
         // Frame logs, store scenes, lint findings: anything a tool returns
         // may quote a link (older ESP32 firmware logs the failed URL).
-        output: photoLinks.redactText(output),
+        output: functionCallOutput(photoLinks.redactText(output), images),
         type: "function_call_output",
       });
     }

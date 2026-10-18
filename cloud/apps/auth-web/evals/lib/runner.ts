@@ -107,6 +107,8 @@ export async function runCase(evalCase: EvalCase, ctx: RunnerContext): Promise<E
         },
         prompt,
         providerSubject: "evals",
+        // render_scene looks at the case's frame, as the editor's preview would.
+        renderSize: frame,
         storeSceneId,
       };
       const contextParts: string[] = [
@@ -252,6 +254,7 @@ export async function runCase(evalCase: EvalCase, ctx: RunnerContext): Promise<E
     reply,
     scenes: deliveredScenes,
     seedScene,
+    toolCalls: turns.flatMap((turn) => turn.toolCalls ?? []),
   });
   return {
     checks,

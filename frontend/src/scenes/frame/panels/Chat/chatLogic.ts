@@ -30,6 +30,7 @@ import {
 } from '../../../../utils/cloudAiChat'
 import { installCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
 import { renderSceneCheck } from '../../../../utils/wasmSceneRenderCheck'
+import { wasmPreviewDimensions } from '../../../../utils/wasmScenePreview'
 import { projectApiPathForProject } from '../../../../utils/projectApi'
 
 const MAX_HISTORY = 8
@@ -1412,6 +1413,9 @@ export const chatLogic = kea<chatLogicType>([
             }
             return newlyAddedScene?.id ?? null
           }
+          // The assistant's render_scene looks at the scene the way this
+          // frame's preview (and the render check below) draws it.
+          const previewFrame = frameLogic({ frameId: props.frameId }).values
           await streamCloudAiChat(
             {
               prompt,
@@ -1422,6 +1426,12 @@ export const chatLogic = kea<chatLogicType>([
               selectedNodes: selectedNodesPayload.length ? selectedNodesPayload : undefined,
               selectedEdges: selectedEdgesPayload.length ? selectedEdgesPayload : undefined,
               history: values.historyForRequest,
+              renderSize: wasmPreviewDimensions({
+                width: previewFrame.frameForm?.width ?? previewFrame.frame?.width,
+                height: previewFrame.frameForm?.height ?? previewFrame.frame?.height,
+                rotate: previewFrame.frameForm?.rotate ?? previewFrame.frame?.rotate,
+              }),
+              timeZone: previewFrame.frameForm?.timezone ?? previewFrame.frame?.timezone ?? undefined,
             },
             async (event: CloudAiChatEvent) => {
               switch (event.type) {

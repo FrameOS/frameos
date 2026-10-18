@@ -51,6 +51,11 @@ import {
   requireDatabase,
 } from "../../../../src/lib/device-flow";
 import { frameForAccount } from "../../../../src/lib/frames";
+import {
+  maxRenderDimension,
+  maxRenderPixels,
+  minRenderDimension,
+} from "../../../../src/lib/scene-render";
 import { logInfo, logWarn, reportError } from "../../../../src/lib/log";
 import {
   identityRateLimitResponse,
@@ -88,11 +93,43 @@ function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
+// The size the client's preview draws the scene at, which render_scene
+// renders at: only whole pixels the renderer accepts.
+function renderSizeFrom(value: unknown): { width: number; height: number } | null {
+  const record = objectOrNull(value);
+  const width = record?.width;
+  const height = record?.height;
+  const valid = (side: unknown): side is number =>
+    typeof side === "number" &&
+    Number.isInteger(side) &&
+    side >= minRenderDimension &&
+    side <= maxRenderDimension;
+  return valid(width) && valid(height) && width * height <= maxRenderPixels
+    ? { height, width }
+    : null;
+}
+
+function timeZoneFrom(value: unknown): string | null {
+  if (typeof value !== "string" || !value || value.length > 64) {
+    return null;
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 async function frameContextBlock(
   db: ReturnType<typeof createDb>,
   accountId: string,
   frameId: string | null,
-): Promise<{ block: string; frameId: string | null }> {
+): Promise<{
+  block: string;
+  frameId: string | null;
+  resolution?: { width: number; height: number } | null;
+}> {
   if (!frameId) {
     return { block: "", frameId: null };
   }
@@ -137,7 +174,11 @@ async function frameContextBlock(
   } else {
     lines.push("- No scenes assigned yet.");
   }
-  return { block: lines.join("\n"), frameId: frame.id };
+  return {
+    block: lines.join("\n"),
+    frameId: frame.id,
+    resolution: renderSizeFrom({ height, width }),
+  };
 }
 
 // The store scene the chat was opened on (scenes.frameos.net). Same access
@@ -351,7 +392,7 @@ export async function POST(request: NextRequest) {
     });
   }
   const sceneId = stringOrNull(body.sceneId);
-  const { block: frameBlock, frameId } = await frameContextBlock(
+  const { block: frameBlock, frameId, resolution: frameResolution } = await frameContextBlock(
     db,
     accountId,
     stringOrNull(body.frameId),
@@ -510,6 +551,10 @@ export async function POST(request: NextRequest) {
     prompt,
     // Audit actor for save_scene's store write.
     providerSubject: session.providerSubject,
+    // What render_scene draws at: the client's preview, else the frame's
+    // resolution (older clients send no size), else the default.
+    renderSize: renderSizeFrom(body.renderSize) ?? frameResolution ?? null,
+    renderTimeZone: timeZoneFrom(body.timeZone),
     storeSceneId,
   };
 

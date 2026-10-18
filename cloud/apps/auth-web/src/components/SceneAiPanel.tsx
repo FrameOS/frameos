@@ -659,6 +659,10 @@ export function SceneAiPanel({
             ...(targetScene ? { scene: targetScene, sceneId: targetScene.id } : {}),
             ...(editorScenes.length > 0 ? { scenes: editorScenes } : {}),
             ...(draftListing ? { listing: draftListing } : {}),
+            // The render check's size and clock, so the frame the assistant
+            // looks at is the one this panel shows.
+            renderSize: { height: propsRef.current.height, width: propsRef.current.width },
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
           },
           {
             onEvent: (event) => {

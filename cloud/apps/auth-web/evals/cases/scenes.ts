@@ -249,6 +249,25 @@ export const cases: EvalCase[] = [
     tags: ["modify", "text"],
   },
   {
+    // A complaint about looks names nothing to change: the agent has to look
+    // at the scene first (it used to answer "I can't see the image").
+    checks: [
+      { type: "tool_called", name: "render_scene" },
+      { type: "delivered", tool: "modify_scene" },
+      { type: "lint_clean" },
+      { type: "preserves_node_ids", minFraction: 0.8 },
+      { type: "render_ok" },
+      { type: "render_not_blank" },
+      { type: "judge", min: 3 },
+    ],
+    id: "modify-counter-looks-bad",
+    judgeRubric:
+      "The counter's number is still the focus, now with a deliberate design: a considered background, a large well-placed number, nothing clipped or cramped.",
+    prompt: "This looks bad. Can you make it look nicer?",
+    seedSlug: "counter",
+    tags: ["modify", "layout", "render"],
+  },
+  {
     checks: [
       { type: "delivered", tool: "modify_scene" },
       { type: "lint_clean" },

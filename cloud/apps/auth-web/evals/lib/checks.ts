@@ -14,6 +14,8 @@ export type CheckInput = {
   lint: LintResult | null;
   render: RenderSummary | null;
   judge: JudgeVerdict | null;
+  /** Every tool the agent called, across the case's turns, in order. */
+  toolCalls?: string[];
 };
 
 function obj(value: unknown): JsonObject | undefined {
@@ -307,6 +309,12 @@ export function runCheck(check: Check, input: CheckInput): CheckResult {
       return regex(check.pattern, check.flags).test(input.reply)
         ? pass(`reply matches /${check.pattern}/`)
         : fail(`reply does not match /${check.pattern}/: ${input.reply.slice(0, 160).replace(/\s+/g, " ")}`);
+    case "tool_called": {
+      const calls = input.toolCalls ?? [];
+      return calls.includes(check.name)
+        ? pass(`${check.name} called`)
+        : fail(`${check.name} never called (tools: ${calls.join(", ") || "none"})`);
+    }
     case "preserves_node_ids": {
       if (!input.seedScene) {
         return fail("no seed scene to compare against");

@@ -33,6 +33,8 @@ export type Check =
   | { type: "json_matches"; pattern: string; flags?: string }
   | { type: "json_not_matches"; pattern: string; flags?: string }
   | { type: "reply_matches"; pattern: string; flags?: string }
+  /** The agent called this tool in some turn of the case (e.g. render_scene before restyling). */
+  | { type: "tool_called"; name: string }
   | { type: "preserves_node_ids"; minFraction: number }
   | { type: "preserves_fields" }
   | { type: "lint_clean" }
