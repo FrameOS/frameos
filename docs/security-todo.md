@@ -102,11 +102,8 @@ their own host, and the fix is to use interpreted scenes.
 
 ## Medium / low — worth a pass
 
-**Dated:** the pre-encryption pgBackRest repo `storagebox:pgbackrest` is frozen
-plaintext — **delete it on 2026-10-03** (`rclone purge storagebox:pgbackrest`
-on the box), once the encrypted repo has its own four-week window; the
-object store's own copy is rehearsed only by count and hash, not by a
-restore into R2.
+Backups: the object store's own copy is rehearsed only by count and hash,
+not by a restore into R2.
 
 Cloud: the AI's `save_scene` still acts
 immediately (it only creates a private copy in the account; the prompt now

@@ -66,9 +66,8 @@ Two independent layers ship to the Hetzner Storage Box
    window: ~4 weeks (`repo1-retention-full=4`). Repo config:
    `/etc/pgbackrest/pgbackrest.conf`, stanza `frameos`, repo path
    `/home/pgbackrest-enc` on the box, encrypted with the repo cipher (the
-   pre-encryption repo at `/home/pgbackrest` is frozen — nothing writes to
-   it — and is deleted on 2026-10-03, once the encrypted repo has held a
-   full four-week window of its own). Timers:
+   pre-encryption repo at `/home/pgbackrest` was purged on 2026-10-18).
+   Timers:
    `frameos-cloud-pgbackrest-full.timer` (Sun 02:47 UTC) and
    `frameos-cloud-pgbackrest-diff.timer` (Mon–Sat 02:47 UTC), both running
    as `postgres`.
@@ -430,9 +429,8 @@ consistent-but-stale database, which reads exactly like a partial restore.
   its SSH access), and the R2 bucket (Cloudflare-side encryption at rest
   only; the objects are the store's published content plus per-account
   previews).
-- Left over from before encryption, deliberately: the frozen plaintext
-  pgBackRest repo at `/home/pgbackrest` on the Storage Box — delete it
-  on **2026-10-03** (`rclone purge storagebox:pgbackrest`), by which time
-  the encrypted repo has a four-week window of its own. The old plaintext
-  nightly folders (`frameos-cloud-backups`, `frameos-cloud-objects`) were
-  removed the day the encrypted copies were verified.
+- Nothing from before encryption is left on the Storage Box: the old
+  plaintext nightly folders (`frameos-cloud-backups`,
+  `frameos-cloud-objects`) were removed the day the encrypted copies were
+  verified, and the plaintext pgBackRest repo (`/home/pgbackrest`) on
+  2026-10-18.
