@@ -127,8 +127,14 @@ for prefix in $private_prefixes; do
     fail "$source_remote/$prefix holds ${in_store:-0} objects but the backup has $in_backup: refusing to mirror a mass deletion (set OBJECT_BACKUP_ALLOW_MASS_DELETE=1 for one run if it is real)"
   fi
   echo "Syncing $source_remote/$prefix -> $rclone_remote/$prefix (deletions kept in $deleted_remote/$today/$prefix)"
+  # --size-only: a key never names two contents (frames/<id>/cache/<sha256>
+  # is its own hash, photo keys are random and written once), but the hub
+  # re-PUTs a cache object it already sent, R2 moves its LastModified, and
+  # the crypt remote has no hash to compare, so by modtime --immutable would
+  # call the same bytes "modified" and fail the run.
   rclone sync "$source_remote/$prefix" "$rclone_remote/$prefix" \
     --backup-dir "$deleted_remote/$today/$prefix" \
+    --size-only \
     --immutable \
     --transfers 4 \
     --checkers 8 \
