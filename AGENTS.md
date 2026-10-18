@@ -227,7 +227,25 @@
 - Cloud uploads are scanned before anything is stored (hash list,
   PhotoDNA), and a configured scanner that fails stores nothing. Not OpenAI
   moderation: it scores `sexual/minors` on text only. Any new table holding photo objects goes into
-  `cloud/scripts/object-store-sweep.sh`, or the sweep deletes the photos.
+  `cloud/scripts/object-store-sweep.sh`, or the sweep deletes the photos
+  (it runs weekly with `--apply` now). Account deletion removes the
+  account's photo and snapshot objects itself (`src/lib/account-erasure.ts`),
+  and the object backup keeps deleted `photos/` and `frames/` 30 days only.
+- **Photo bytes are private on the cloud.** The share `/file` route
+  redirects to a ten-minute presigned R2 GET, `publicUrl` refuses
+  `photos/` keys and a Cloudflare rule blocks the prefix on the CDN alias
+  (the `/admin` check "Photos off the public CDN" fails without it). Never
+  hand a photo out by a public URL again.
+- **Uploads lose location and camera metadata** on both planes, losslessly
+  (`app/utils/photo_metadata.py`, `src/lib/photos/metadata.ts`). The two
+  write the same bytes, pinned by `docs/photo-metadata-fixtures.json`: change
+  one, change both and run `tools/generate_photo_metadata_fixtures.py`.
+- **A share link inside a scene is the owner's alone.** The cloud store
+  refuses to make a scene that holds one public or shared, and the scene
+  AIs on both planes show the model a placeholder and restore the link in
+  what comes back (`share-links-in-scenes.ts`, `photo_share_links.py`). On
+  frames, errors and logs name a request URL only as `scheme://host[:port]`
+  (`frameos/src/frameos/utils/redacted_url.nim`, `fos_netguard_url_origin`).
 
 ## Top-level layout
 - `backend/` – Python FastAPI application that exposes REST/WS APIs, schedules background jobs, and manages persistence via SQLAlchemy. Includes Alembic migrations, ARQ worker tasks, and pytest suites. 【F:backend/app/fastapi.py†L1-L101】【F:backend/app/tasks/worker.py†L1-L64】【F:backend/app/models/user.py†L1-L16】
