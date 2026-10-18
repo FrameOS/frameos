@@ -423,35 +423,6 @@ proc fos_nim_set_scene_catalog_impl(indexJson: cstring): cint {.exportc, cdecl.}
     log("setSceneCatalog failed: " & e.msg)
     result = 0
 
-var missingScenesBuffer: string
-
-proc fos_nim_add_scene_impl(payload: cstring): cint {.exportc, cdecl.} =
-  ## Lazy path, second step: a scene the resident one embeds, added alongside.
-  try:
-    if payload == nil:
-      return 0
-    result = (if addScene($payload): 1 else: 0).cint
-    recoverEmergencyReserve("scene load")
-  except Defect as e:
-    log("addScene failed (defect): " & e.msg)
-    GC_fullCollect()
-    recoverEmergencyReserve("scene load failure")
-    result = 0
-  except Exception as e:
-    log("addScene failed: " & e.msg)
-    recoverEmergencyReserve("scene load failure")
-    result = 0
-
-proc fos_nim_missing_scenes_json_impl(): cstring {.exportc, cdecl.} =
-  ## JSON array of the scene ids the resident scenes embed but that are not
-  ## resident yet; "[]" when the set is complete.
-  try:
-    missingScenesBuffer = $(%missingSceneDependencies())
-  except Exception as e:
-    log("missing scenes failed: " & e.msg)
-    missingScenesBuffer = "[]"
-  missingScenesBuffer.cstring
-
 proc fos_nim_request_fresh_pass_impl() {.exportc, cdecl.} =
   ## Somebody asked for this render (a cloud or HTTP render verb, the console,
   ## a button, the schedule): every embedded scene runs, due or not.

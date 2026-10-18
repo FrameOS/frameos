@@ -56,6 +56,12 @@ const char *fos_scenes_last_error(void);
 /* Copy the persisted scenes JSON array. Caller owns the returned buffer. */
 char *fos_scenes_json_copy(size_t *out_len);
 
+/* One scene of the payload by id, read off its slot on the lazy path, for
+ * the Nim runtime when a resident split names a panel that is not resident
+ * (frameos/src/embedded/embedded_runtime.nim). Caller frees; NULL when the
+ * payload has no such scene. */
+char *fos_scenes_read_scene_json(const char *scene_id, size_t *out_len);
+
 /* Ask the render task to force a backend sync on its next pass. */
 void fos_scenes_request_sync(void);
 

@@ -195,9 +195,9 @@ deep-sleep wake), the panel runs again: a *repaint*. Open:
   repaint is an ordinary run.
 - **Bench it.** A Pi on HDMI with a 24 fps clock beside an Unsplash panel
   (split on 0.04 s): one fetch per photo interval, the clock smooth. An E1002
-  split of a 60 s clock and a 15 min weather panel: the lazy loader brings
-  both panels in (`scenes:load` `embedded-scene-loaded`), the weather panel is
-  kept, not repainted. An E1004 1600x1200 split: the copy is refused once
+  split of a 60 s clock and a 15 min weather panel: the lazy loader reads
+  both panels in (`scenes:load` `embedded-scene-read`), the weather panel is
+  kept (its renders take the clock's time, not the weather fetch's). An E1004 1600x1200 split: the copy is refused once
   (`render:rhythm:copyRefused`) and the big panel repaints.
 - **Realtime on an ESP32.** The C render loop ignores scene intervals under
   1 s and sleeps in whole seconds; a fast ESP32 with an LCD would need both.

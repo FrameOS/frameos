@@ -128,6 +128,13 @@ uploaded[sharedId] = ExportedInterpretedScene(name: "Shared", backgroundColor: p
 # A generated split as a panel of another: [split(clock, photo), paced]
 uploaded[nestedId] = splitOf("Nested", splitId.string, pacedId.string, followsChildren = true,
   interval = 0.04)
+# Its panel is not resident: only `sceneLoader` can bring it in (the ESP32).
+let lazyPanelId = "tests/rhythm/lazy-panel".SceneId
+let lazySplitId = "tests/rhythm/lazy-split".SceneId
+uploaded[lazySplitId] = splitOf("Lazy split", clockId.string, lazyPanelId.string, followsChildren = true,
+  interval = 0.04)
+let refusedSplitId = "tests/rhythm/refused-split".SceneId
+uploaded[refusedSplitId] = splitOf("Refused split", clockId.string, "tests/rhythm/nowhere", followsChildren = true)
 setUploadedInterpretedScenes(uploaded)
 resetInterpretedScenes()
 
@@ -193,8 +200,8 @@ suite "scene rhythm":
     check second.pixel(30, 5).b == 255     # ...yet its picture is there
     check countEvent("render:rhythm") == 1
     # Only the panel that is not due next pass keeps a copy.
-    check clock.rhythm.copies.len == 0
-    check photo.rhythm.copies.len == 1
+    check clock.rhythm.copy.isNil
+    check not photo.rhythm.copy.isNil
     rhythmClockOverride = 1600.0
     discard scene.pass()
     check photo.runs == 2
@@ -206,8 +213,8 @@ suite "scene rhythm":
     discard scene.pass()
     check abs(scene.refreshInterval - 300.0) < 0.001
     # The clock will be due by then, so it is not kept; the photo is.
-    check scene.child(3).rhythm.copies.len == 0
-    check scene.child(4).rhythm.copies.len == 1
+    check scene.child(3).rhythm.copy.isNil
+    check not scene.child(4).rhythm.copy.isNil
     # With every panel slower than the split, the split waits for the first.
     scene.child(3).state["refreshInterval"] = %900
     rhythmClockOverride = 1300.0
@@ -299,14 +306,14 @@ suite "scene rhythm":
     availableRenderBytesOverride = 1024    # nothing to spare
     discard scene.pass()
     let photo = scene.child(4)
-    check photo.rhythm.copies.len == 0
+    check photo.rhythm.copy.isNil
     check countEvent("render:rhythm:copyRefused") == 1
     rhythmClockOverride = 1001.0
     let second = scene.pass()
     check photo.runs == 2                  # it ran again...
     check abs(photo.rhythm.dueAt - 1600.0) < 0.001   # ...without being rescheduled
     check second.pixel(30, 5).b == 255
-    check lastEvent("render:rhythm"){"repainted"}.len == 1
+    check lastEvent("render:rhythm"){"repainted"}.getInt() == 1
     # Refused once, logged once.
     check countEvent("render:rhythm:copyRefused") == 1
 
@@ -332,21 +339,23 @@ suite "scene rhythm":
     # of 8000 is 2000, so it fits, and with 4000 it does not.
     availableRenderBytesOverride = 8000
     discard scene.pass()
-    check scene.child(4).rhythm.copies.len == 1
+    check not scene.child(4).rhythm.copy.isNil
     let other = newScene(splitId)
     availableRenderBytesOverride = 4000
     discard other.pass()
-    check other.child(4).rhythm.copies.len == 0
+    check other.child(4).rhythm.copy.isNil
 
-  test "one scene drawn into several cells runs in all of them or in none":
+  test "one scene drawn into several cells runs in all of them or in none, and keeps no copy":
     let scene = newScene(sharedId)
     let first = scene.pass()
     let photo = scene.child(3)
     check photo.runs == 2                  # once per cell
-    check photo.rhythm.copies.len == 2
+    check photo.rhythm.shared
+    check photo.rhythm.copy.isNil
     rhythmClockOverride = 1001.0
     let second = scene.pass()
-    check photo.runs == 2
+    check photo.runs == 4                  # repainted in both cells...
+    check abs(photo.rhythm.dueAt - 1600.0) < 0.001   # ...and still due when it was
     check second.pixel(20, 5).b == 255 and second.pixel(33, 5).b == 255
     check first.pixel(20, 5) == second.pixel(20, 5)
     check second.pixel(5, 5).r == 255      # the clock ran
@@ -367,10 +376,10 @@ suite "scene rhythm":
   test "switching the top scene draws everything and drops the old copies":
     let scene = newScene(splitId)
     discard scene.pass()
-    check scene.child(4).rhythm.copies.len == 1
+    check not scene.child(4).rhythm.copy.isNil
     let other = newScene(plainSplitId)
     discard other.pass()
-    check scene.child(4).rhythm.copies.len == 0
+    check scene.child(4).rhythm.copy.isNil
     rhythmClockOverride = 1001.0
     discard scene.pass()
     check scene.child(4).runs == 2
@@ -378,8 +387,28 @@ suite "scene rhythm":
   test "copies keep the canvas's own pixel format":
     let scene = newScene(splitId)
     discard scene.pass(newImage565(W, H))
-    check scene.child(4).rhythm.copies["./1"].pixels.format == pfRgb565
+    check scene.child(4).rhythm.copy.format == pfRgb565
     rhythmClockOverride = 1001.0
     let second = scene.pass(newImage565(W, H))
     check scene.child(4).runs == 1
     check second.pixel(30, 5).b > 200
+
+  test "a panel that is not resident is asked for by id (the ESP32's one-scene loader)":
+    sceneLoader = proc (sceneId: SceneId): bool {.nimcall.} =
+      if sceneId == "tests/rhythm/lazy-panel".SceneId:
+        addInterpretedSceneToCache(parseInterpretedSceneInputs("""[
+          {"id": "tests/rhythm/lazy-panel", "name": "Lazy panel", "fields": [],
+           "settings": {"refreshInterval": 600, "backgroundColor": "#00ffff"},
+           "nodes": [{"id": "1", "type": "event", "data": {"keyword": "render"}}], "edges": []}
+        ]""")[0])
+        return true
+      false
+    try:
+      let scene = newScene(lazySplitId)
+      check scene.child(4).id == lazyPanelId
+      check scene.pass().pixel(30, 5).g == 255
+      # A panel the firmware does not have fails the split as it always did.
+      expect Exception:
+        discard newScene(refusedSplitId)
+    finally:
+      sceneLoader = nil

@@ -73,8 +73,10 @@ would be free without them** (`availableRenderHeadroomBytes`), and on an
 ESP32-class device never more than **1 MiB**. A new copy also needs one
 contiguous block. A copy that does not fit is not taken (logged once as
 `render:rhythm:copyRefused`), and the scene is then *repainted* (below) on the
-passes where it is not due. Passes that reused or repainted something log one
-`render:rhythm` line naming them.
+passes where it is not due. So is a scene drawn into several cells in one pass
+(a split's "render all other cells"): one copy cannot stand for several
+rectangles. Passes that reused or repainted something log one `render:rhythm`
+line with how many of each (not on the ESP32).
 
 In practice: a Pi keeps every slow panel. An ESP32 with an 800x480 panel keeps
 small panels. A 13.3" 1600x1200 board keeps none of its big panels (a half of
@@ -98,13 +100,16 @@ runtime needs to change for that; `repainting` is the whole interface.
 
 The firmware keeps one scene resident (`fos_scenes.c`, the lazy path). A split
 needs its panels resident too, or `interpreter.init` fails with "Scene node
-references unknown scene id". After loading a scene, `load_embedded_scenes`
-asks the runtime which embedded scenes are missing
-(`frameos_nim_missing_scenes_json`), reads each off its slot and adds it
-alongside (`frameos_nim_add_scene`), up to four rounds for nested splits. Every
-Nim entry point the firmware calls now catches `Exception`, not only
+references unknown scene id". So when a scene node names a scene that is not
+resident, the interpreter asks `sceneLoader` (set by `embedded_runtime.nim`),
+which reads that one scene off its slot (`fos_scenes_read_scene_json`) and
+parses it alongside; a panel's own panels come the same way, at any depth.
+Every Nim entry point the firmware calls now catches `Exception`, not only
 `CatchableError`: with `--exceptions:goto` a root `Exception` escaping one
 poisoned the runtime (found on the E1004 with exactly that error).
+
+On the ESP32 the per-pass `render:rhythm` line is left out to save image
+bytes; a panel whose picture cannot be kept still says so once.
 
 ## Tests
 
@@ -112,7 +117,8 @@ poisoned the runtime (found on the E1004 with exactly that error).
   interval as a floor, a panel's own `nextSleep`, panel options, state
   changes, fresh passes from the
   dispatcher, repaints without memory and the `repainting` flag, the budget,
-  one scene in several cells, nested splits, switching scenes, RGB565 copies.
+  one scene in several cells, nested splits, switching scenes, RGB565 copies,
+  the loader hook that brings an ESP32 split's panels in.
 - `embedded/esp32/main/tests/test_fos_events_dispatch.c`: which render
   origins are fresh on the ESP32.
 - `cloud/apps/auth-web/src/test/shared-spa/scene-rhythm.test.ts` and

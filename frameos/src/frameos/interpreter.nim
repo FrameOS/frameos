@@ -386,6 +386,10 @@ var allScenesLoaded = false
 var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var uploadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var lastInterpretedScenesLoadError = ""
+var sceneLoader*: proc (sceneId: SceneId): bool {.nimcall.}
+  ## Set on the ESP32, which keeps one scene resident (embedded_runtime.nim):
+  ## a scene node naming one that is not resident yet (a split's panel) asks
+  ## the firmware to read it off flash before the node's scene starts.
 
 proc interpretedScenesLoadError*(): string =
   ## Why the last attempt to read scenes.json(.gz) off the disk failed, or ""
@@ -437,21 +441,21 @@ proc runSceneNodeRender(child: FrameScene, exportedChild: ExportedScene,
   ## draws runs only when it is due, and otherwise its last picture goes back.
   ## Its `nextSleep` is its own: inside a split, `logic/nextSleepDuration`
   ## means "this panel next renders in N seconds" and never reaches the frame.
+  ##
+  ## No `finally`: a scene's runEvent catches every node's exception itself
+  ## (runEventInner), so nothing raises past it.
   let given = context.image
-  let decision = rhythmVisit(child, given, context.loopKey)
+  let decision = rhythmVisit(child, given)
   if decision == rdRestore:
-    rhythmRestore(child, given, context.loopKey)
+    rhythmRestore(child, given)
     return
   let parentSleep = context.nextSleep
   context.nextSleep = -1
   child.repainting = decision == rdRepaint
-  try:
-    exportedChild.runEvent(child, context)
-  finally:
-    child.repainting = false
-    let childSleep = context.nextSleep
-    context.nextSleep = parentSleep
-    rhythmAfterRun(child, decision, given, context.image, context.loopKey, childSleep)
+  exportedChild.runEvent(child, context)
+  child.repainting = false
+  rhythmAfterRun(child, decision, given, context.image, context.nextSleep)
+  context.nextSleep = parentSleep
 
 # -------------------------
 # Core node runner
@@ -1525,6 +1529,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
         let interpretedExport = uploadedScenes[childSceneId]
         exportedChild = ExportedScene(interpretedExport)
         isInterpretedChild = true
+      elif not sceneLoader.isNil and sceneLoader(childSceneId) and loadedScenes.hasKey(childSceneId):
+        exportedChild = ExportedScene(loadedScenes[childSceneId])
+        isInterpretedChild = true
       else:
         raise newException(Exception,
           "Scene node references unknown scene id: " & childSceneId.string)
@@ -2012,19 +2019,11 @@ proc replaceInterpretedScenesCache*(scenes: Table[SceneId, ExportedInterpretedSc
   allScenesLoaded = true
   lastInterpretedScenesLoadError = ""
 
-proc addInterpretedScenesToCache*(scenes: Table[SceneId, ExportedInterpretedScene]) =
+proc addInterpretedSceneToCache*(scene: FrameSceneInput) =
   ## Alongside what is already resident: how the ESP32's one-scene-at-a-time
-  ## loader brings in the scenes a resident scene embeds (a split's panels).
-  for sceneId, exported in scenes:
-    loadedScenes[sceneId] = exported
-
-proc embeddedSceneIds*(exported: ExportedInterpretedScene): seq[SceneId] =
-  ## The scenes this one's scene nodes point at.
-  for node in exported.nodes:
-    if node.nodeType == "scene" and not node.data.isNil and node.data.kind == JObject:
-      let id = node.data{"keyword"}.getStr()
-      if id.len > 0 and id.SceneId notin result:
-        result.add(id.SceneId)
+  ## loader brings in the scenes a resident scene embeds (a split's panels),
+  ## through `sceneLoader`.
+  loadedScenes[scene.id] = buildInterpretedSceneExport(scene)
 
 proc loadInterpretedScenesForStartup*(): Table[SceneId, ExportedInterpretedScene] =
   ## `loadInterpretedScenesFromDisk` for callers that cannot afford to raise.

@@ -830,43 +830,28 @@ static int load_scene_index(void)
 static char s_resident_scene_id[SCENE_ID_LEN]; /* forward-declared above */
 
 /* A resident scene may embed others: a split screen's panels are scene nodes
- * pointing at sibling scenes of the same payload, and the runtime resolves
- * them by id when the split starts, so they have to be resident too. Ask the
- * runtime what is missing, read each off its slot, add it alongside, and ask
- * again: a panel can embed panels of its own. Bounded, so a cycle or an id
- * the payload never carried cannot spin. Only these scenes are parsed; the
- * rest of the payload stays on flash as before. */
-static void load_embedded_scenes(const char *origin)
+ * pointing at sibling scenes of the same payload. The runtime asks for each
+ * one by id while the split starts (interpreter.nim `sceneLoader`): its slot
+ * file, malloc'd for the caller to free, or NULL. Called from inside
+ * frameos_nim_load_scene/render on the render task, under the runtime lock:
+ * takes no lock itself. Only these scenes are read; the rest of the payload
+ * stays on flash as before. */
+char *fos_scenes_read_scene_json(const char *scene_id, size_t *out_len)
 {
-    for (int round = 0; round < 4; round++) {
-        const char *missing = frameos_nim_missing_scenes_json();
-        cJSON *ids = cJSON_Parse(missing ? missing : "[]");
-        int count = cJSON_IsArray(ids) ? cJSON_GetArraySize(ids) : 0;
-        int added = 0;
-        for (int i = 0; i < count; i++) {
-            const cJSON *id = cJSON_GetArrayItem(ids, i);
-            if (!cJSON_IsString(id) || id->valuestring == NULL) continue;
-            int slot = slot_for_scene(id->valuestring);
-            if (slot < 0) {
-                ESP_LOGW(TAG, "embedded scene %s is not in the payload", id->valuestring);
-                log_scene_event("scenes:load", "error", origin, id->valuestring,
-                                "embedded-scene-missing", 0, 0, 0, ESP_ERR_NOT_FOUND);
-                continue;
-            }
-            char path[SCENES_SLOT_PATH_LEN];
-            slot_path(slot, path, sizeof(path));
-            size_t len = 0;
-            char *json = read_file(path, &len);
-            int ok = (json != NULL && len > 0) ? frameos_nim_add_scene(json) : 0;
-            free(json);
-            log_scene_event("scenes:load", ok ? "ok" : "error", origin, id->valuestring,
-                            ok ? "embedded-scene-loaded" : "embedded-scene-rejected",
-                            len, ok ? 1 : 0, 0, ok ? ESP_OK : ESP_FAIL);
-            if (ok) added++;
-        }
-        cJSON_Delete(ids);
-        if (added == 0) break;
+    int slot = slot_for_scene(scene_id);
+    if (slot < 0) {
+        ESP_LOGW(TAG, "embedded scene %s is not in the payload", scene_id ? scene_id : "?");
+        log_scene_event("scenes:load", "error", "embedded", scene_id ? scene_id : "",
+                        "embedded-scene-missing", 0, 0, 0, ESP_ERR_NOT_FOUND);
+        return NULL;
     }
+    char path[SCENES_SLOT_PATH_LEN];
+    slot_path(slot, path, sizeof(path));
+    char *json = read_file(path, out_len);
+    log_scene_event("scenes:load", json ? "ok" : "error", "embedded", scene_id,
+                    json ? "embedded-scene-read" : "embedded-scene-unreadable",
+                    json ? *out_len : 0, json ? 1 : 0, 0, json ? ESP_OK : ESP_FAIL);
+    return json;
 }
 
 static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
@@ -893,7 +878,6 @@ static bool load_scene_slot(int slot, const char *scene_id, const char *origin)
     s_loaded = 1;
     snprintf(s_resident_scene_id, sizeof(s_resident_scene_id), "%s",
              scene_id ? scene_id : "");
-    load_embedded_scenes(origin);
     size_t internal_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     ESP_LOGI(TAG, "scene slot %d live (%s); %d available, internal RAM %u -> %u",
              slot, scene_id ? scene_id : "?", s_slot_count,

@@ -361,14 +361,12 @@ type
     interval*: float      ## the wait its last due run set (sizes the slack)
     stateKey*: int        ## hash of its state after its last run
     visitPass*: int       ## the pass that last decided for it
-    runsThisPass*: bool   ## that pass found it due: it runs in every cell it draws
     scheduledPass*: int   ## the pass whose run set `dueAt`
-    copies*: Table[string, RhythmCopy] ## loopKey -> its rectangle after its last run
+    runsThisPass*: bool   ## that pass found it due: it runs in every cell it draws
+    shared*: bool         ## drawn into several cells in one pass: keeps no copy
     copyRefused*: bool    ## the last copy did not fit the budget (logged once)
-
-  RhythmCopy* = object
-    pixels*: Image        ## owned, in the canvas's own pixel format
-    origin*, stride*: int ## where on the canvas it came from
+    copy*: Image          ## its rectangle after its last run, in the canvas's format
+    copyOrigin*, copyStride*: int ## where on the canvas that came from
 
   FontStyle* = ref object
     typeface*: Typeface

@@ -14,6 +14,9 @@
 ## interval. A generated split has nothing of its own that changes with time,
 ## so it also waits until its first embedded scene is due, if that is later
 ## (`refreshFollowsChildren`). docs/scene-rhythm.md is the long version.
+##
+## Every proc here is on every ESP32 render, in an image with little room:
+## no tables, no per-pass lists, one walk over the scene tree.
 
 import std/[hashes, json, monotimes, tables]
 import pixie
@@ -50,21 +53,16 @@ var
   passDepth {.threadvar.}: int
   passId {.threadvar.}: int
   passStart {.threadvar.}: float
+  passNext {.threadvar.}: float
+    ## When the next pass is expected: this one's start plus the top scene's
+    ## interval as it starts. A panel's `nextSleep` can bring it forward; the
+    ## end of the pass then drops what that made unnecessary.
   passFresh {.threadvar.}: bool
   freshRequested {.threadvar.}: bool
   passRoot {.threadvar.}: FrameScene
-  passRootInterval {.threadvar.}: float
-    ## The top scene's interval as the pass starts.
-  passRootOwn {.threadvar.}: float
-    ## A generated split's own interval: it never renders more often.
-  passDue1 {.threadvar.}: float
-  passDue1Scene {.threadvar.}: FrameScene
-  passDue2 {.threadvar.}: float
-    ## The two earliest due times of the embedded scenes this pass has met so
-    ## far, so a scene can ask when the next pass is without counting itself.
   heldBytes {.threadvar.}: int
-  passRestored {.threadvar.}: seq[string]
-  passRepainted {.threadvar.}: seq[string]
+  passReused {.threadvar.}: int
+  passRepainted {.threadvar.}: int
 
 when defined(testing):
   var rhythmClockOverride* {.threadvar.}: float
@@ -79,6 +77,9 @@ proc rhythmNow*(): float =
 proc dueSlack(interval: float): float =
   clamp(interval * DueSlackShare, DueSlackMinSeconds, DueSlackMaxSeconds) + WholeSecondSleepSlack
 
+proc dueBy(r: SceneRhythm, at: float): bool =
+  r.dueAt <= at + dueSlack(r.interval)
+
 proc logLine(scene: FrameScene, payload: JsonNode) =
   if not scene.logger.isNil and not scene.logger.log.isNil:
     scene.logger.log(payload)
@@ -86,26 +87,7 @@ proc logLine(scene: FrameScene, payload: JsonNode) =
 proc stateKey(scene: FrameScene): int =
   if scene.state.isNil: 0 else: hash(scene.state).int
 
-proc noteDue(scene: FrameScene, dueAt: float) =
-  if dueAt < passDue1:
-    if passDue1Scene != scene:
-      passDue2 = passDue1
-    passDue1 = dueAt
-    passDue1Scene = scene
-  elif dueAt < passDue2 and passDue1Scene != scene:
-    passDue2 = dueAt
-
-proc nextPassAt(scene: FrameScene): float =
-  ## When the next pass is expected, as far as `scene` can tell. A generated
-  ## split's also depends on the first due time among its embedded scenes,
-  ## which the pass learns as it goes (a panel's `nextSleep` can bring it
-  ## forward), but never comes before its own interval is up.
-  result = passStart + passRootInterval
-  if passRoot.refreshFollowsChildren:
-    let soonest = if passDue1Scene == scene: passDue2 else: passDue1
-    result = max(passStart + passRootOwn, min(result, soonest))
-
-proc followedInterval(scene: FrameScene, depth = 0): float =
+proc followedInterval(scene: FrameScene): float =
   ## A scene's interval. A generated split's is the time until its first
   ## panel is due, as its last render left it, or before its first render the
   ## shortest of its panels' intervals (they are instantiated with it); and
@@ -115,60 +97,44 @@ proc followedInterval(scene: FrameScene, depth = 0): float =
   let own = ownRefreshInterval(scene)
   if scene.followInterval >= 0:
     return max(own, scene.followInterval)
-  if depth > 8:
-    return own
   var soonest = Inf
-  for _, child in InterpretedFrameScene(scene).sceneNodes:
-    soonest = min(soonest, followedInterval(child, depth + 1))
+  for child in InterpretedFrameScene(scene).sceneNodes.values:
+    soonest = min(soonest, child.refreshInterval)
   if soonest == Inf: own else: max(own, soonest)
-
-proc dueByNextPass(r: SceneRhythm, nextPass: float): bool =
-  r.dueAt <= nextPass + dueSlack(r.interval)
 
 # ------------------------------------------------------------------- copies
 
 proc copyPixels(dst, src: Image) =
-  ## Row by row: either side may be a view onto a bigger canvas.
-  let rowBytes = src.width * src.bytesPerPixel
+  ## Row by row, in either pixel format: either side may be a view onto a
+  ## bigger canvas.
+  let bpp = src.bytesPerPixel
+  let d = cast[ptr UncheckedArray[byte]](dst.bufferPointer)
+  let s = cast[ptr UncheckedArray[byte]](src.bufferPointer)
   for y in 0 ..< src.height:
-    if src.format == pfRgb565:
-      copyMem(dst.data16[dst.dataIndex(0, y)].addr, src.data16[src.dataIndex(0, y)].addr, rowBytes)
+    copyMem(d[dst.dataIndex(0, y) * bpp].addr, s[src.dataIndex(0, y) * bpp].addr, src.width * bpp)
+
+proc copyFits(r: SceneRhythm, image: Image): bool =
+  not r.copy.isNil and r.copy.width == image.width and r.copy.height == image.height and
+    r.copy.format == image.format and r.copyOrigin == image.origin and r.copyStride == image.stride
+
+proc dropCopy(r: SceneRhythm) =
+  if not r.copy.isNil:
+    heldBytes -= r.copy.byteSize
+    r.copy = nil
+
+proc walkCopies(scene: FrameScene, dropDueBy: float): int =
+  ## The bytes still kept for `scene` and the scenes it embeds, after letting
+  ## go of the pictures of those due by `dropDueBy` (-Inf keeps everything,
+  ## Inf drops everything).
+  let r = scene.rhythm
+  if not r.isNil and not r.copy.isNil:
+    if r.dueBy(dropDueBy):
+      r.copy = nil
     else:
-      copyMem(dst.data[dst.dataIndex(0, y)].addr, src.data[src.dataIndex(0, y)].addr, rowBytes)
-
-proc fits(copy: RhythmCopy, image: Image): bool =
-  not copy.pixels.isNil and not image.isNil and
-    copy.pixels.width == image.width and copy.pixels.height == image.height and
-    copy.pixels.format == image.format and copy.origin == image.origin and copy.stride == image.stride
-
-proc heldBy(scene: FrameScene): int =
-  if not scene.rhythm.isNil:
-    for _, copy in scene.rhythm.copies:
-      if not copy.pixels.isNil:
-        result += copy.pixels.byteSize
+      result += r.copy.byteSize
   if scene of InterpretedFrameScene:
-    for _, child in InterpretedFrameScene(scene).sceneNodes:
-      result += heldBy(child)
-
-proc releaseCopies*(scene: FrameScene) =
-  ## Drop every picture kept for `scene` and the scenes it embeds.
-  if scene.isNil:
-    return
-  if not scene.rhythm.isNil:
-    scene.rhythm.copies.clear()
-  if scene of InterpretedFrameScene:
-    for _, child in InterpretedFrameScene(scene).sceneNodes:
-      releaseCopies(child)
-
-proc pruneCopies(scene: FrameScene, nextPass: float) =
-  ## Drop the pictures of embedded scenes that will run on the next pass
-  ## anyway: keeping them would only cost a copy per pass.
-  if not scene.rhythm.isNil and scene.rhythm.copies.len > 0 and
-      scene.rhythm.dueByNextPass(nextPass):
-    scene.rhythm.copies.clear()
-  if scene of InterpretedFrameScene:
-    for _, child in InterpretedFrameScene(scene).sceneNodes:
-      pruneCopies(child, nextPass)
+    for child in InterpretedFrameScene(scene).sceneNodes.values:
+      result += walkCopies(child, dropDueBy)
 
 proc copyBudgetBytes(): int =
   let headroom = availableRenderHeadroomBytes()
@@ -178,39 +144,29 @@ proc copyBudgetBytes(): int =
   if runsAsEmbedded():
     result = min(result, EmbeddedCopyCapBytes)
 
-proc dropCopy(r: SceneRhythm, loopKey: string) =
-  if r.copies.hasKey(loopKey):
-    let old = r.copies[loopKey]
-    if not old.pixels.isNil:
-      heldBytes -= old.pixels.byteSize
-    r.copies.del(loopKey)
-
-proc keepCopy(scene: FrameScene, image: Image, loopKey: string) =
+proc keepCopy(scene: FrameScene, image: Image) =
   let r = scene.rhythm
   let bytes = image.byteSize
-  let existing = r.copies.getOrDefault(loopKey)
-  let reuse = existing.fits(image)
-  let existingBytes = if existing.pixels.isNil: 0 else: existing.pixels.byteSize
+  let reuse = r.copyFits(image)
+  let others = heldBytes - (if r.copy.isNil: 0 else: r.copy.byteSize)
   let budget = copyBudgetBytes()
   # A new copy needs one contiguous block, which fragmented PSRAM may not
   # have even with the budget to spare.
   let largest = availableRenderBytes()
-  let contiguous = reuse or bytes <= largest or (largest <= 0 and not runsAsEmbedded())
-  if heldBytes - existingBytes + bytes > budget or not contiguous:
-    r.dropCopy(loopKey)
+  if others + bytes > budget or not (reuse or bytes <= largest or (largest <= 0 and not runsAsEmbedded())):
+    r.dropCopy()
     if not r.copyRefused:
       r.copyRefused = true
-      scene.logLine(%*{"event": "render:rhythm:copyRefused", "sceneId": scene.id.string,
-        "bytes": bytes, "budget": budget, "held": heldBytes,
-        "message": "Not enough memory to keep this scene's picture between its renders; " &
-          "it is drawn again on every pass until it is due."})
+      scene.logLine(%*{"event": "render:rhythm:copyRefused", "sceneId": scene.id.string, "bytes": bytes})
     return
   r.copyRefused = false
   if reuse:
-    copyPixels(existing.pixels, image)
+    copyPixels(r.copy, image)
   else:
-    r.dropCopy(loopKey)
-    r.copies[loopKey] = RhythmCopy(pixels: image.copy(), origin: image.origin, stride: image.stride)
+    r.dropCopy()
+    r.copy = image.copy()
+    r.copyOrigin = image.origin
+    r.copyStride = image.stride
     heldBytes += bytes
 
 # ------------------------------------------------------------------- passes
@@ -238,18 +194,14 @@ proc rhythmEnterRender*(scene: FrameScene): bool =
   # from scratch, and whatever the old one kept goes.
   let switched = not passRoot.isNil and passRoot != scene
   if switched:
-    releaseCopies(passRoot)
+    discard walkCopies(passRoot, Inf)
   passFresh = freshRequested or switched
   freshRequested = false
   passRoot = scene
-  passRootInterval = followedInterval(scene)
-  passRootOwn = ownRefreshInterval(scene)
-  passDue1 = Inf
-  passDue2 = Inf
-  passDue1Scene = nil
-  heldBytes = heldBy(scene)
-  passRestored.setLen(0)
-  passRepainted.setLen(0)
+  passNext = passStart + followedInterval(scene)
+  heldBytes = walkCopies(scene, -Inf)
+  passReused = 0
+  passRepainted = 0
   true
 
 proc rhythmLeaveRender*(scene: FrameScene, passStarted: bool) =
@@ -259,17 +211,22 @@ proc rhythmLeaveRender*(scene: FrameScene, passStarted: bool) =
     dec passDepth
   if scene.refreshFollowsChildren and scene of InterpretedFrameScene:
     var soonest = Inf
-    for _, child in InterpretedFrameScene(scene).sceneNodes:
+    for child in InterpretedFrameScene(scene).sceneNodes.values:
       if not child.rhythm.isNil and child.rhythm.visitPass == passId:
         soonest = min(soonest, child.rhythm.dueAt)
     if soonest != Inf:
       scene.followInterval = max(0.0, soonest - passStart)
   if not passStarted:
     return
-  pruneCopies(scene, passStart + followedInterval(scene))
-  if passRestored.len > 0 or passRepainted.len > 0:
-    scene.logLine(%*{"event": "render:rhythm", "sceneId": scene.id.string,
-      "reused": passRestored, "repainted": passRepainted})
+  # Pictures of scenes that will run on the next pass anyway would only cost
+  # a copy per pass.
+  discard walkCopies(scene, passStart + followedInterval(scene))
+  # Not on the ESP32, where every byte of the image counts: there a panel
+  # that cannot be kept says so once (`render:rhythm:copyRefused`).
+  when not defined(frameosEmbedded):
+    if passReused + passRepainted > 0:
+      scene.logLine(%*{"event": "render:rhythm", "sceneId": scene.id.string,
+        "reused": passReused, "repainted": passRepainted})
 
 proc rhythmResetAfterAbort*() =
   ## The ESP32's out-of-memory abort skips every `finally`: the next render
@@ -278,35 +235,37 @@ proc rhythmResetAfterAbort*() =
 
 # ------------------------------------------------------------- scene nodes
 
-proc rhythmVisit*(scene: FrameScene, image: Image, loopKey: string): RhythmDecision =
+proc rhythmVisit*(scene: FrameScene, image: Image): RhythmDecision =
   ## A scene node is about to draw `scene` into `image`. The first visit in a
-  ## pass decides whether it is due; a scene drawn into several cells (a
-  ## split's "render all other cells") runs in all of them or in none.
+  ## pass decides whether it is due. A scene drawn into several cells (a
+  ## split's "render all other cells") runs in all of them or in none, and
+  ## keeps no picture: one copy cannot stand for several rectangles.
   if passDepth == 0:
     return rdRun
   if scene.rhythm.isNil:
-    scene.rhythm = SceneRhythm(copies: initTable[string, RhythmCopy]())
+    scene.rhythm = SceneRhythm()
   let r = scene.rhythm
-  if r.visitPass != passId:
+  if r.visitPass == passId:
+    r.shared = true
+    r.dropCopy()
+  else:
     r.visitPass = passId
     r.runsThisPass = passFresh or r.dueAt <= 0 or stateKey(scene) != r.stateKey or
-      passStart + dueSlack(r.interval) >= r.dueAt
-    if not r.runsThisPass:
-      noteDue(scene, r.dueAt)
+      r.dueBy(passStart)
   if r.runsThisPass:
-    return rdRun
-  if r.copies.getOrDefault(loopKey).fits(image):
-    passRestored.add(scene.id.string)
+    rdRun
+  elif not r.shared and r.copyFits(image):
+    inc passReused
     rdRestore
   else:
-    passRepainted.add(scene.id.string)
+    inc passRepainted
     rdRepaint
 
-proc rhythmRestore*(scene: FrameScene, image: Image, loopKey: string) =
-  copyPixels(image, scene.rhythm.copies[loopKey].pixels)
+proc rhythmRestore*(scene: FrameScene, image: Image) =
+  copyPixels(image, scene.rhythm.copy)
 
 proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: Image,
-    loopKey: string, nextSleep: float) =
+    nextSleep: float) =
   ## After `scene` ran for a scene node: schedule it (a due run only), and
   ## keep what it drew if it will not be due again by the next pass and the
   ## memory allows. `nextSleep` is what its run set (-1: nothing), which
@@ -321,12 +280,10 @@ proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: 
     let wait = max(if nextSleep >= 0: nextSleep else: scene.refreshInterval, 0.0)
     r.interval = wait
     r.dueAt = passStart + wait
-    noteDue(scene, r.dueAt)
   # A scene that swapped its canvas for an image of its own did not draw into
   # the rectangle, and one due again by the next pass would be copied for
-  # nothing. (When a panel's `nextSleep` brings the next pass forward after
-  # others were kept, the end of the pass drops what it no longer needs.)
-  if given.isNil or drawn != given or r.dueByNextPass(nextPassAt(scene)):
-    r.dropCopy(loopKey)
+  # nothing.
+  if r.shared or given.isNil or drawn != given or r.dueBy(passNext):
+    r.dropCopy()
     return
-  keepCopy(scene, given, loopKey)
+  keepCopy(scene, given)
