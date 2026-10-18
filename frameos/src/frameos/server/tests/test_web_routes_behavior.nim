@@ -19,8 +19,14 @@ suite "web route behavior":
   test "root route handles hotspot and access-key redirects":
     var config = defaultFrameConfig()
     configureServerState(config, hotspotActive = true)
-    let hotspotResponse = httpRequest(server.port, "GET", "/")
+    let hotspotResponse = httpRequest(server.port, "GET", "/", headers = [("Host", "10.42.0.1:" & $config.framePort)])
     check hotspotResponse.status == 200
+    check hotspotResponse.body.contains("Set up your Frame")
+    # The same page asked for on the captive listener's port (a bare Host is
+    # port 80) is sent to the setup URL instead of being served twice.
+    let captive = httpRequest(server.port, "GET", "/", headers = [("Host", "10.42.0.1")])
+    check captive.status == 302
+    check captive.header("location") == "http://10.42.0.1:" & $config.framePort & "/"
 
     configureServerState(config, hotspotActive = false)
     let unauthorized = httpRequest(server.port, "GET", "/")

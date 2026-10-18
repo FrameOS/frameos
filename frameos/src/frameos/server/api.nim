@@ -936,29 +936,11 @@ proc frameConfigJson(config: FrameConfig): JsonNode =
   parseJson(complete.toJson())
 
 proc requestFrameConfig*(): FrameConfig =
-  ## The frame's config for ONE request on a mummy worker: this thread's own
-  ## parse of frame.json (readConfig: defaults, `--debug`, the stored
-  ## private-network elevation — what the runtime holds after its next
-  ## reload). Anything that needs more of the config than a scalar field
-  ## (the admin API's frame payload, the status screen drawn on request)
-  ## works on this, never on globalFrameConfig.
-  ##
-  ## The payload used to be frameConfigJson(globalFrameConfig), and that
-  ## shallow copy took a reference to every nested object of the live config
-  ## — httpsProxy, network, agent, schedule, settings, … — on a worker, on
-  ## every `GET /api/frames/1`, while three other workers and the runner did
-  ## the same. ORC refcounts are not atomic: that is the auth-cache crash
-  ## again (docs/todo.md, "refs shared across HTTP worker threads"). The live
-  ## object only stands in when there is no readable frame.json, which on a
-  ## frame means never (the runtime could not have started) and in the tests
-  ## means a config built by hand on the test's own thread.
-  try:
-    result = readConfig()
-  except CatchableError:
-    result = FrameConfig()
-    if globalFrameConfig != nil:
-      result[] = globalFrameConfig[]
-    setConfigDefaults(result)
+  ## This worker's own parse of frame.json (config.nim, requestConfig). The
+  ## admin API's frame payload used to be frameConfigJson(globalFrameConfig),
+  ## a reference to every nested object of the live config on every
+  ## `GET /api/frames/1`: the auth-cache crash again.
+  requestConfig(globalFrameConfig)
 
 proc typedFrameConfigJson(): JsonNode =
   frameConfigJson(requestFrameConfig())

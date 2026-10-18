@@ -731,9 +731,9 @@ proc makeDisplayOption(device, driverName: string): SetupDisplayOption =
     httpUploadUrlRequired: device == "http.upload",
   )
 
-proc setupDisplayOptions*(frameOS: FrameOS): seq[SetupDisplayOption] =
+proc setupDisplayOptions*(frameConfig: FrameConfig): seq[SetupDisplayOption] =
   var drivers = availableDriverNames()
-  let currentDriver = driverNameForDevice(frameOS.frameConfig.device)
+  let currentDriver = driverNameForDevice(frameConfig.device)
   if drivers.len == 0 and currentDriver.len > 0:
     drivers.add(currentDriver)
 
@@ -800,8 +800,8 @@ proc setupDisplayOptions*(frameOS: FrameOS): seq[SetupDisplayOption] =
       if variant == "EPD_7in3e":
         result.addDisplayOption(makeDisplayOption("waveshare.rpi_zero_photopainter_7in3e", driver))
 
-  if result.len == 0 and frameOS.frameConfig.device.len > 0:
-    result.addDisplayOption(makeDisplayOption(frameOS.frameConfig.device, currentDriver))
+  if result.len == 0 and frameConfig.device.len > 0:
+    result.addDisplayOption(makeDisplayOption(frameConfig.device, currentDriver))
 
 proc displayOptionsJson(options: seq[SetupDisplayOption]): JsonNode =
   result = newJObject()
@@ -833,14 +833,17 @@ proc defaultDeviceConfig(): DeviceConfig =
     pins: PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1),
   )
 
-proc ensureDeviceConfig(frameConfig: FrameConfig): DeviceConfig =
-  if frameConfig.deviceConfig.isNil:
-    frameConfig.deviceConfig = defaultDeviceConfig()
-  result = frameConfig.deviceConfig
-  if result.pins.isNil:
-    result.pins = PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1)
+proc deviceConfigOf(frameConfig: FrameConfig): DeviceConfig =
+  ## The config's device section, or the defaults when it has none. Read
+  ## only: the callers work on a private config (portalRequestConfig), never
+  ## on the runtime's, so nothing is assigned back into it.
+  if frameConfig == nil or frameConfig.deviceConfig.isNil:
+    return defaultDeviceConfig()
+  frameConfig.deviceConfig
 
-proc applyDeviceConfigDefaults(device: string, deviceConfig: JsonNode, runtimeDeviceConfig: DeviceConfig = nil) =
+proc applyDeviceConfigDefaults(device: string, deviceConfig: JsonNode) =
+  ## Fills the pin defaults of the one board that needs them into the
+  ## frame.json payload. The runtime picks them up from the reload.
   if device != "waveshare.rpi_zero_photopainter_7in3e" or deviceConfig == nil or deviceConfig.kind != JObject:
     return
 
@@ -848,31 +851,10 @@ proc applyDeviceConfigDefaults(device: string, deviceConfig: JsonNode, runtimeDe
   if pins == nil or pins.kind != JObject:
     pins = newJObject()
 
-  proc pinValue(key: string, fallback: int): int =
+  for (key, fallback) in [("rst", 17), ("dc", 25), ("cs", 8), ("busy", 24), ("sclk", 11), ("mosi", 10), ("pwr", 27)]:
     if pins{key} == nil:
       pins[key] = %fallback
-      return fallback
-    pins{key}.getInt(fallback)
-
-  let rst = pinValue("rst", 17)
-  let dc = pinValue("dc", 25)
-  let cs = pinValue("cs", 8)
-  let busy = pinValue("busy", 24)
-  let sclk = pinValue("sclk", 11)
-  let mosi = pinValue("mosi", 10)
-  let pwr = pinValue("pwr", 27)
   deviceConfig["pins"] = pins
-
-  if not runtimeDeviceConfig.isNil:
-    if runtimeDeviceConfig.pins.isNil:
-      runtimeDeviceConfig.pins = PinOverrides(rst: -1, dc: -1, cs: -1, busy: -1, sclk: -1, mosi: -1, pwr: -1)
-    runtimeDeviceConfig.pins.rst = rst
-    runtimeDeviceConfig.pins.dc = dc
-    runtimeDeviceConfig.pins.cs = cs
-    runtimeDeviceConfig.pins.busy = busy
-    runtimeDeviceConfig.pins.sclk = sclk
-    runtimeDeviceConfig.pins.mosi = mosi
-    runtimeDeviceConfig.pins.pwr = pwr
 
 proc gpioButtonsForDeviceJson(device: string): JsonNode =
   result = newJArray()
@@ -883,14 +865,11 @@ proc gpioButtonsForDeviceJson(device: string): JsonNode =
   for pair in pairs:
     result.add(%*{"pin": pair[0], "label": pair[1]})
 
-proc applyGpioButtonsForDevice(frameConfig: FrameConfig, data: JsonNode, device: string) =
+proc applyGpioButtonsForDevice(data: JsonNode, device: string) =
   let buttons = gpioButtonsForDeviceJson(device)
   if buttons.len == 0:
     return
   data["gpioButtons"] = buttons
-  frameConfig.gpioButtons = @[]
-  for item in buttons.items:
-    frameConfig.gpioButtons.add(GPIOButton(pin: item{"pin"}.getInt(), label: item{"label"}.getStr()))
 
 proc loggableSetupParams*(params: Table[string, string]): JsonNode =
   result = newJObject()
@@ -922,6 +901,23 @@ proc defaultControlMode*(frameConfig: FrameConfig): string {.gcsafe.} =
     return "backend"
   "none"
 
+proc portalRequestConfig*(frameOS: FrameOS): FrameConfig =
+  ## The frame's config for one setup request (config.nim, requestConfig).
+  ## The setup path used to read the runtime's live FrameConfig and even
+  ## assign into it (`frameAdminAuth`, `deviceConfig`) from the worker that
+  ## took POST /setup.
+  requestConfig(if frameOS == nil: nil else: frameOS.frameConfig)
+
+proc reloadLiveConfig(frameOS: FrameOS) =
+  ## After frame.json was written: the runtime's config follows the file,
+  ## through the same raw swap the runner's reload uses (nothing of the
+  ## outgoing config is freed, so a reader mid-field never sees freed
+  ## memory). Replaces the field-by-field writes persistPortalSetup used to
+  ## make into the live config from the worker thread.
+  if frameOS == nil or frameOS.frameConfig == nil:
+    return
+  updateFrameConfigFrom(frameOS.frameConfig, readConfig())
+
 proc adminUiPreselected*(frameConfig: FrameConfig): bool =
   ## Whether the setup form's "Enable admin UI" box starts ticked. Ticked
   ## when the admin UI is already on, and on a frame that has never had an
@@ -951,7 +947,7 @@ proc setupOptionsProblem*(options: PortalSetupOptions, frameConfig: FrameConfig)
 
 proc parseSetupOptions*(params: Table[string, string], frameConfig: FrameConfig): PortalSetupOptions =
   let device = params.getOrDefault("device", frameConfig.device)
-  let deviceConfig = ensureDeviceConfig(frameConfig)
+  let deviceConfig = deviceConfigOf(frameConfig)
   let adminAuth = if frameConfig.frameAdminAuth == nil: %*{} else: frameConfig.frameAdminAuth
   var controlMode = params.getOrDefault("controlMode", "").strip().toLowerAscii()
   let controlModeExplicit = controlMode in ["cloud", "backend", "none"]
@@ -1050,7 +1046,12 @@ proc runDriverSetupFromSavedConfig*(frameOS: FrameOS, options: PortalSetupOption
   false
 
 proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
-  let frameConfig = frameOS.frameConfig
+  ## Writes the form into frame.json and reloads the runtime's config from
+  ## it. Runs on the mummy worker that took POST /setup: every read here is
+  ## of this thread's own parse of the file (portalRequestConfig), and the
+  ## live config changes only through reloadLiveConfig's swap at the end —
+  ## never field by field from this thread.
+  let frameConfig = portalRequestConfig(frameOS)
   let filename = getConfigFilename()
   let device = options.device.strip()
   let oldFrameHost = frameConfig.frameHost
@@ -1069,39 +1070,35 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
     if data == nil or data.kind != JObject:
       data = newJObject()
 
+    var serverHost = frameConfig.serverHost
     if not options.controlModeExplicit:
       # Nothing about the control plane changes: serverHost, the queued
       # claim and the panel link code all stay as they are.
       discard
     elif options.controlMode == "backend":
       if options.serverHost.strip().len > 0:
-        data["serverHost"] = %options.serverHost.strip()
-        frameConfig.serverHost = options.serverHost.strip()
+        serverHost = options.serverHost.strip()
+        data["serverHost"] = %serverHost
     else:
       # Cloud-enrolled and standalone frames must not carry a serverHost: a
       # non-loopback value means "a self-hosted backend owns this frame" and
       # blocks cloud enrollment (enrollment.nim, otherControlPlaneActive).
+      serverHost = ""
       data["serverHost"] = %""
-      frameConfig.serverHost = ""
     data["serverPort"] = %serverPort
-    frameConfig.serverPort = serverPort
 
     data["frameHost"] = %frameHost
-    frameConfig.frameHost = frameHost
     if options.timeZone.strip().len > 0 and isIanaZone(options.timeZone.strip()):
       data["timeZone"] = %options.timeZone.strip()
-      frameConfig.timeZone = options.timeZone.strip()
     # The image ships as "FrameOS Setup"; a card that has just been given a
     # hostname is named after it (the same rule cloud enrollment applies —
     # a backend that adopted such a card showed "FrameOS Setup", 2026-09-08).
     let currentName = data{"name"}.getStr("").strip()
     if currentName.len == 0 or currentName == oldFrameHost or currentName in ImagePlaceholderNames:
       data["name"] = %hostnameBase
-      frameConfig.name = hostnameBase
 
     if device.len > 0:
       data["device"] = %device
-      frameConfig.device = device
 
     let dims = nativeDeviceDimensions(device)
     var width = options.width
@@ -1112,10 +1109,8 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
       height = dims.height
     if width > 0:
       data["width"] = %width
-      frameConfig.width = width
     if height > 0:
       data["height"] = %height
-      frameConfig.height = height
 
     var deviceConfig = data{"deviceConfig"}
     if deviceConfig == nil or deviceConfig.kind != JObject:
@@ -1125,17 +1120,10 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
     deviceConfig["partialMaxAreaPercent"] = %options.partialMaxAreaPercent
     deviceConfig["partialMaxRefreshesBeforeFull"] = %options.partialMaxRefreshesBeforeFull
     deviceConfig["uploadUrl"] = %options.httpUploadUrl.strip()
-
-    let runtimeDeviceConfig = ensureDeviceConfig(frameConfig)
-    applyDeviceConfigDefaults(device, deviceConfig, runtimeDeviceConfig)
+    applyDeviceConfigDefaults(device, deviceConfig)
     data["deviceConfig"] = deviceConfig
-    runtimeDeviceConfig.vcom = options.vcom
-    runtimeDeviceConfig.partial = options.partial
-    runtimeDeviceConfig.partialMaxAreaPercent = options.partialMaxAreaPercent
-    runtimeDeviceConfig.partialMaxRefreshesBeforeFull = options.partialMaxRefreshesBeforeFull
-    runtimeDeviceConfig.httpUploadUrl = options.httpUploadUrl.strip()
 
-    applyGpioButtonsForDevice(frameConfig, data, device)
+    applyGpioButtonsForDevice(data, device)
 
     let existingAdmin = if frameConfig.frameAdminAuth == nil: %*{} else: frameConfig.frameAdminAuth
     let adminUser = options.adminUser.strip()
@@ -1148,13 +1136,13 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
       data["frameAdminAuth"] = %*{"enabled": true, "user": adminUser, "pass": adminPass}
     else:
       data["frameAdminAuth"] = %*{"enabled": false, "user": adminUser, "pass": ""}
-    frameConfig.frameAdminAuth = data["frameAdminAuth"]
 
-    # Atomic and private: this runs from the unauthenticated first-boot
-    # POST /setup with frameAdminAuth.pass in clear, so a power cut mid-write
-    # must leave the old frame.json, not a truncated one the frame cannot
-    # boot from — and the file must never sit at 0644.
+    # Atomic and private: this runs from the first-boot POST /setup with
+    # frameAdminAuth.pass in clear, so a power cut mid-write must leave the
+    # old frame.json, not a truncated one the frame cannot boot from — and
+    # the file must never sit at 0644.
     writePrivateFile(filename, pretty(data, indent = 4) & "\n")
+    reloadLiveConfig(frameOS)
     if not writeHostname(hostnameBase):
       return false
 
@@ -1184,13 +1172,13 @@ proc persistPortalSetup*(frameOS: FrameOS, options: PortalSetupOptions): bool =
 
     pLog("portal:setup:persisted", %*{
       "controlMode": options.controlMode,
-      "serverHost": frameConfig.serverHost,
-      "serverPort": frameConfig.serverPort,
-      "frameHost": frameConfig.frameHost,
-      "device": frameConfig.device,
-      "width": frameConfig.width,
-      "height": frameConfig.height,
-      "adminEnabled": frameConfig.frameAdminAuth{"enabled"}.getBool(false),
+      "serverHost": serverHost,
+      "serverPort": serverPort,
+      "frameHost": frameHost,
+      "device": data{"device"}.getStr(""),
+      "width": data{"width"}.getInt(0),
+      "height": data{"height"}.getInt(0),
+      "adminEnabled": data["frameAdminAuth"]{"enabled"}.getBool(false),
     })
     rememberError("")
     true
@@ -1390,8 +1378,9 @@ proc finishStartedHotspot(frameOS: FrameOS): bool {.gcsafe.} =
   ## (hotspot listener, hotspot scene, auto-timeout) behaves identically.
   frameOS.network.hotspotStatus = HotspotStatus.enabled
   if frameOS.server != nil:
-    let (port, address) = startHotspotListener(frameOS.server.mummy, frameOS.frameConfig)
-    pLog("portal:startAp:listener", %*{"port": port, "address": address})
+    let listeners = startHotspotListener(frameOS.server.mummy, frameOS.frameConfig)
+    pLog("portal:startAp:listener", %*{"port": listeners.port, "address": listeners.address,
+                                        "captivePort": listeners.captivePort})
   let hotspotStarted = getMonoTime()
   frameOS.network.hotspotStartedAt = epochTime()
   pLog("portal:startAp:done")
@@ -1958,8 +1947,10 @@ proc layout*(inner: string): string =
 <body><div class="card">{inner}</div></body></html>"""
 
 proc setupHtml*(frameOS: FrameOS): string =
-  let frameConfig = frameOS.frameConfig
-  let deviceConfig = if frameConfig.deviceConfig.isNil: defaultDeviceConfig() else: frameConfig.deviceConfig
+  ## The setup form. Reads a private config (portalRequestConfig), never
+  ## the runtime's.
+  let frameConfig = portalRequestConfig(frameOS)
+  let deviceConfig = deviceConfigOf(frameConfig)
   let adminAuth = if frameConfig.frameAdminAuth == nil: %*{} else: frameConfig.frameAdminAuth
   let adminUser = adminAuth{"user"}.getStr("admin")
   let hasAdminPass = adminAuth{"pass"}.getStr("").len > 0
@@ -1970,7 +1961,7 @@ proc setupHtml*(frameOS: FrameOS): string =
       "Leave blank to keep current password"
     else:
       "Required when admin UI is enabled"
-  let options = setupDisplayOptions(frameOS)
+  let options = setupDisplayOptions(frameConfig)
 
   var currentDevice = frameConfig.device
   var currentOption = SetupDisplayOption()
@@ -2403,6 +2394,11 @@ proc confirmHtml*(frameOS: FrameOS, ssid = ""): string =
     "<p id=\"progress\">The frame is " & joining & ". Reconnect this device to the same network — " &
       "this page follows the frame over as soon as it can reach it at <a href=\"" &
       htmlEscape(frameUrl) & "\">" & htmlEscape(frameUrl) & "</a>.</p>\n" &
+    # A captive-portal sheet is a restricted browser that may not run this
+    # page's timers, and it closes once the hotspot is gone: the link above
+    # is the way over, and it has to read right without the script.
+    "<noscript><p>Once this device is back on your network, open <a href=\"" & htmlEscape(frameUrl) & "\">" &
+      htmlEscape(frameUrl) & "</a>.</p></noscript>\n" &
     "<p id=\"setup-error\" class=\"hidden\" style=\"color:#f87171\"></p>\n" &
     cloudNote &
     "<p>If you enabled the admin UI, open <a href=\"" & htmlEscape(adminUrl) & "\">" & htmlEscape(adminUrl) & "</a>.</p>\n" &
