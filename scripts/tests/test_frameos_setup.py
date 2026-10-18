@@ -652,6 +652,8 @@ class FrameOSSetupScriptTest(unittest.TestCase):
             "FRAMEOS_DIR": "/tmp/out/srv/frameos",
             "FRAMEOS_AGENT_DIR": "/tmp/out/srv/frameos/remote",
             "FRAMEOS_ASSETS_DIR": "/tmp/out/srv/assets",
+            # A sandbox path, not one of the device's asset roots.
+            "FRAMEOS_ALLOW_ANY_ASSETS_PATH": "1",
             "FRAMEOS_NETWORK_CHECK_TIMEOUT_SECONDS": "30",
             "FRAMEOS_NETWORK_CHECK_URL": "https://networkcheck.frameos.net/",
             "FRAMEOS_WIFI_HOTSPOT_TIMEOUT_SECONDS": "300",

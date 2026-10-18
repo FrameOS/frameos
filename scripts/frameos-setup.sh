@@ -1219,6 +1219,20 @@ fi
 FRAMEOS_WIFI_HOTSPOT_TIMEOUT_SECONDS="${FRAMEOS_WIFI_HOTSPOT_TIMEOUT_SECONDS:-300}"
 FRAMEOS_LOG_TO_FILE="${FRAMEOS_LOG_TO_FILE:-$default_log_to_file}"
 FRAMEOS_ASSETS_PATH="${FRAMEOS_ASSETS_PATH:-$FRAMEOS_ASSETS_DIR}"
+# A new install's assets folder must be inside these roots: scenes write
+# there, so never into the runtime's own state (frameos/src/frameos/config.nim,
+# AssetsPathRoots). FRAMEOS_ALLOW_ANY_ASSETS_PATH=1 is for the setup tests'
+# sandbox.
+assets_path_rule="the assets path must be /srv/assets, /mnt or /media, or a folder inside one of them"
+if [ "${FRAMEOS_ALLOW_ANY_ASSETS_PATH:-}" != "1" ]; then
+  case "${FRAMEOS_ASSETS_PATH%/}/" in
+    */../*|*/./*|*//*) die "FRAMEOS_ASSETS_PATH=$FRAMEOS_ASSETS_PATH: $assets_path_rule" ;;
+  esac
+  case "${FRAMEOS_ASSETS_PATH%/}" in
+    /srv/assets|/srv/assets/*|/mnt|/mnt/*|/media|/media/*) ;;
+    *) die "FRAMEOS_ASSETS_PATH=$FRAMEOS_ASSETS_PATH: $assets_path_rule" ;;
+  esac
+fi
 FRAMEOS_SAVE_ASSETS="${FRAMEOS_SAVE_ASSETS:-$default_save_assets}"
 FRAMEOS_MAX_HTTP_RESPONSE_BYTES="${FRAMEOS_MAX_HTTP_RESPONSE_BYTES:-67108864}"
 FRAMEOS_DEBUG="${FRAMEOS_DEBUG:-false}"

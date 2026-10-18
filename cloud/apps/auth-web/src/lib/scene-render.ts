@@ -595,81 +595,101 @@ main().catch((error) => {
   return workerSourceCache;
 }
 
-// Runs in a child Node per HTTP request: resolves the host first and refuses
-// anything private before a byte leaves the box; caps the body at 10 MB. The
-// address classifier is ssrf.ts's own source, spliced in — one guard.
-const fetchChildScript = String.raw`
-const dns = require("node:dns/promises");
+// Runs in a child Node per HTTP request and refuses anything private before a
+// byte leaves the box; caps the body at 10 MB. The address classifier is
+// ssrf.ts's own source, spliced in — one guard. The check sits in the
+// socket's own lookup (node:http, not fetch): checking a name and letting the
+// client resolve it again would let a rebinding name answer the second query
+// with a private address.
+export const fetchChildScript = String.raw`
+const dns = require("node:dns");
+const http = require("node:http");
+const https = require("node:https");
+const zlib = require("node:zlib");
 const { isIP } = require("node:net");
 const chunks = [];
 ${addressIsPrivateSource}
-async function hostIsBlocked(hostname) {
-  let addresses;
-  if (isIP(hostname)) {
-    addresses = [hostname];
-  } else {
-    try {
-      addresses = (await dns.lookup(hostname, { all: true, verbatim: true })).map((r) => r.address);
-    } catch {
-      return true;
+function guardedLookup(hostname, options, callback) {
+  dns.lookup(hostname, { ...options, all: true, verbatim: true }, (error, records) => {
+    if (error) return callback(error);
+    if (records.length === 0 || records.some((record) => addressIsPrivate(record.address))) {
+      return callback(new Error("host not allowed"));
     }
+    if (options && options.all) return callback(null, records);
+    callback(null, records[0].address, records[0].family);
+  });
+}
+// A literal host is connected to as is, without a lookup.
+function refused(url) {
+  if (url.protocol !== "http:" && url.protocol !== "https:") return true;
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  return isIP(host) !== 0 && addressIsPrivate(host);
+}
+const skippedHeaders = new Set(["host", "connection", "content-length", "transfer-encoding"]);
+function requestOnce(target, req, signal) {
+  const headers = {};
+  for (const [name, value] of Object.entries(req.headers || {})) {
+    if (!skippedHeaders.has(name.toLowerCase())) headers[name] = value;
   }
-  return addresses.length === 0 || addresses.some(addressIsPrivate);
+  return new Promise((resolve, reject) => {
+    const client = target.protocol === "https:" ? https : http;
+    const outgoing = client.request(target, { method: req.method, headers, lookup: guardedLookup, signal }, resolve);
+    outgoing.on("error", reject);
+    outgoing.end(req.bodyBase64 ? Buffer.from(req.bodyBase64, "base64") : undefined);
+  });
+}
+// What fetch did on its own: an encoded body arrives decoded.
+function decodedBody(response) {
+  const encoding = String(response.headers["content-encoding"] || "").trim().toLowerCase();
+  if (encoding === "gzip" || encoding === "x-gzip") return response.pipe(zlib.createGunzip());
+  if (encoding === "deflate") return response.pipe(zlib.createInflate());
+  if (encoding === "br") return response.pipe(zlib.createBrotliDecompress());
+  return response;
 }
 process.stdin.on("data", (c) => chunks.push(c));
 process.stdin.on("end", async () => {
   const req = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), req.timeoutMs || 15000);
   try {
-    const url = new URL(req.url);
-    if ((url.protocol !== "http:" && url.protocol !== "https:") || (await hostIsBlocked(url.hostname))) {
-      throw new Error("host not allowed");
-    }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), req.timeoutMs || 15000);
+    let target = new URL(req.url);
     // Redirects are followed by hand so every hop passes the host check: a
     // public URL must not bounce scene code to loopback or link-local.
-    let target = url;
     let response;
     for (let hop = 0; ; hop += 1) {
-      response = await fetch(target, {
-        method: req.method,
-        headers: req.headers,
-        body: req.bodyBase64 ? Buffer.from(req.bodyBase64, "base64") : undefined,
-        redirect: "manual",
-        signal: controller.signal,
-      });
-      const location = response.headers.get("location");
-      if (response.status >= 300 && response.status < 400 && location) {
+      if (refused(target)) {
+        throw new Error("host not allowed");
+      }
+      response = await requestOnce(target, req, controller.signal);
+      const location = response.headers.location;
+      if (response.statusCode >= 300 && response.statusCode < 400 && location) {
+        response.resume();
         if (hop >= 5) {
           throw new Error("too many redirects");
         }
         target = new URL(location, target);
-        if ((target.protocol !== "http:" && target.protocol !== "https:") || (await hostIsBlocked(target.hostname))) {
-          throw new Error("host not allowed");
-        }
         continue;
       }
       break;
     }
-    clearTimeout(timer);
     const cap = 10 * 1024 * 1024;
-    const reader = response.body ? response.body.getReader() : null;
     const parts = [];
     let total = 0;
-    while (reader) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    for await (const value of decodedBody(response)) {
       total += value.length;
       if (total > cap) {
-        await reader.cancel();
+        response.destroy();
         throw new Error("response too large");
       }
       parts.push(Buffer.from(value));
     }
     const body = Buffer.concat(parts);
-    process.stdout.write(JSON.stringify({ status: response.status, bodyBase64: body.toString("base64") }));
+    process.stdout.write(JSON.stringify({ status: response.statusCode, bodyBase64: body.toString("base64") }));
   } catch (error) {
     process.stdout.write(JSON.stringify({ status: 0, error: String(error) }));
+  } finally {
+    // A pending timer would hold the child open after it has answered.
+    clearTimeout(timer);
   }
 });
 `;

@@ -21,7 +21,7 @@ import httpx
 from fastapi import HTTPException
 
 from app.utils import photos
-from app.utils.network import assert_url_target_allowed
+from app.utils.network import assert_url_target_allowed, guarded_transport
 
 from ..client import ToolContext
 from ..protocol import McpServer
@@ -48,7 +48,7 @@ def _filename_from_url(url: str) -> str:
 
 
 def _outbound_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(timeout=60)
+    return httpx.AsyncClient(timeout=60, transport=guarded_transport())
 
 
 async def _fetch_photo(url: str) -> bytes:

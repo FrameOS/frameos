@@ -1,6 +1,8 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { isIP } from "node:net";
-import { addressIsPrivate, addressIsPrivateSource, guardedFetch } from "./ssrf";
+import { addressIsPrivate, addressIsPrivateSource, guardedFetch, guardedLookup, pinnedFetch } from "./ssrf";
 
 describe("addressIsPrivate", () => {
   it("blocks the RFC 1918, loopback, link-local and CGNAT v4 ranges", () => {
@@ -103,28 +105,54 @@ describe("guardedFetch", () => {
       }
       return new Response("done", { status: 200 });
     });
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const response = await guardedFetch("https://example.com/start", {
+    const response = await guardedFetch(
+      "https://example.com/start",
+      {
         headers: {
           authorization: "Bearer app-key",
           cookie: "session",
           "x-api-key": "k",
         },
-      });
-      expect(await response.text()).toBe("done");
-      expect(calls.map((call) => call.url)).toEqual([
-        "https://example.com/start",
-        "https://example.com/same-origin",
-        "https://example.org/elsewhere",
-      ]);
-      expect(calls[1]?.headers.get("authorization")).toBe("Bearer app-key");
-      expect(calls[2]?.headers.get("authorization")).toBeNull();
-      expect(calls[2]?.headers.get("cookie")).toBeNull();
-      // Non-credential headers still travel.
-      expect(calls[2]?.headers.get("x-api-key")).toBe("k");
+      },
+      5,
+      fetchMock,
+    );
+    expect(await response.text()).toBe("done");
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://example.com/start",
+      "https://example.com/same-origin",
+      "https://example.org/elsewhere",
+    ]);
+    expect(calls[1]?.headers.get("authorization")).toBe("Bearer app-key");
+    expect(calls[2]?.headers.get("authorization")).toBeNull();
+    expect(calls[2]?.headers.get("cookie")).toBeNull();
+    // Non-credential headers still travel.
+    expect(calls[2]?.headers.get("x-api-key")).toBe("k");
+  });
+});
+
+describe("the connect-time check (DNS rebinding)", () => {
+  // hostIsBlocked looks a name up once; fetch would look it up again, and a
+  // rebinding name answers that second query with a private address. The
+  // connect's own lookup is the check that holds: whatever it hands the
+  // socket, it has classified.
+  it("refuses a name whose answer is private, at the lookup the socket uses", async () => {
+    const error = await new Promise<Error | null>((resolve) =>
+      guardedLookup("localhost", {}, (lookupError) => resolve(lookupError)),
+    );
+    expect(error?.message).toBe("host_not_allowed");
+  });
+
+  it("refuses the connect itself, even with no check before it", async () => {
+    const server: Server = createServer((_request, response) => response.end("internal"));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+    try {
+      // `localhost` is the one name a test can resolve without the network,
+      // and it resolves to loopback: a rebinding name's second answer.
+      await expect(pinnedFetch(`http://localhost:${port}/`)).rejects.toThrow("host_not_allowed");
     } finally {
-      vi.unstubAllGlobals();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 });

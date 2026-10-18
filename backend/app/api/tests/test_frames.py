@@ -18,6 +18,7 @@ def _stamped(scenes):
 from urllib.parse import urlparse
 
 from app.api import frame_sync, frames as frames_api
+from app.utils.assets_path import ASSETS_PATH_RULE, assets_path_allowed
 from app.utils.embedded_assets import AssetListing
 from app.models import new_frame
 from app.models.frame import Frame, frame_has_shell_access, get_frame_json
@@ -1550,6 +1551,50 @@ async def test_api_frame_update_max_http_response_bytes(async_client, db, redis)
     db.expire_all()
     updated_frame = db.get(Frame, frame.id)
     assert updated_frame.max_http_response_bytes == 32 * 1024 * 1024
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_assets_path_stays_inside_the_asset_roots(async_client, db, redis):
+    # Scenes and the frame's asset routes write into the assets folder: pointed
+    # at the runtime's own, an upload could rewrite state/local_access.json.
+    frame = await new_frame(db, redis, 'AssetsFrame', 'localhost', 'localhost')
+    for path in ("/srv/frameos/state", "state", "/srv/assets/../frameos", "/home/pi"):
+        resp = await async_client.post(f'/api/frames/{frame.id}', json={"assets_path": path})
+        assert resp.status_code == 400, path
+        assert resp.json()["detail"] == ASSETS_PATH_RULE
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"assets_path": "/mnt/photos/"})
+    assert resp.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).assets_path == "/mnt/photos/"
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_keeps_an_assets_path_stored_before_the_rule(async_client, db, redis):
+    frame = await new_frame(db, redis, 'LegacyAssetsFrame', 'localhost', 'localhost')
+    frame.assets_path = "/home/pi/assets"
+    db.commit()
+    # The form sends every field: an unchanged folder is not a new one.
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"assets_path": "/home/pi/assets/", "name": "Kept"})
+    assert resp.status_code == 200
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"assets_path": "/home/pi/elsewhere"})
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_api_frame_update_assets_path_is_an_esp32s_sd_mount(async_client, db, redis):
+    frame = await new_frame(db, redis, 'SdFrame', 'localhost', 'localhost')
+    frame.mode = "embedded"
+    db.commit()
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"assets_path": "/sdcard"})
+    assert resp.status_code == 200
+
+
+def test_assets_path_rule():
+    for path in ("/srv/assets", "/srv/assets/", "/srv/assets/x", "/mnt", "/mnt/usb", "/media/pi/USB"):
+        assert assets_path_allowed(path), path
+    for path in ("", "/", "/srv", "/srv/frameos/state", "/srv/assets/../x", "/srv/assets/./x",
+                 "/srv//assets", "/srv/assetsx", "/mntx", "state", "./tmp"):
+        assert not assets_path_allowed(path), path
 
 
 @pytest.mark.asyncio

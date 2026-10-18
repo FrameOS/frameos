@@ -48,8 +48,11 @@ import { dirname, join, relative, sep } from 'node:path'
 // send() runs fetch() in a short-lived child Node so the blocking wait is
 // outside this process' event loop.
 const FETCH_CHILD_SCRIPT = `
-const dns = require('node:dns').promises;
+const dns = require('node:dns');
+const http = require('node:http');
+const https = require('node:https');
 const net = require('node:net');
+const zlib = require('node:zlib');
 const chunks = [];
 process.stdin.on('data', (c) => chunks.push(c));
 
@@ -96,10 +99,37 @@ function isLocalAddress(address) {
 const METADATA_HOSTS = new Set(['169.254.169.254', 'fd00:ec2::254', 'metadata.google.internal', 'metadata']);
 const CROSS_ORIGIN_HEADERS = ['authorization', 'proxy-authorization', 'cookie', 'x-api-key'];
 
-// Resolve and classify every address the host name maps to; a name that
-// resolves to any local address is refused as a whole (DNS rebinding would
-// otherwise pass a public A record and connect to the private one).
-async function checkTarget(url, allowLocal) {
+function refusal(address, allowLocal) {
+  if (METADATA_HOSTS.has(address)) return 'blocked: cloud metadata address';
+  if (!allowLocal && isLocalAddress(address)) {
+    return 'blocked: local network access is off for this frame (network.allowLocalNetworkAccess)';
+  }
+  return null;
+}
+
+// The check sits in the socket's own lookup (node:http, not fetch): the
+// addresses the connect gets are the ones classified here, so a name cannot
+// answer a first lookup with a public address and the connect's with a
+// private one (DNS rebinding). A name with any refused address is refused as
+// a whole.
+function guardedLookup(allowLocal) {
+  return (hostname, options, callback) => {
+    dns.lookup(hostname, { ...options, all: true, verbatim: true }, (error, records) => {
+      if (error) return callback(error);
+      if (records.length === 0) return callback(new Error('host did not resolve'));
+      for (const record of records) {
+        const reason = refusal(record.address, allowLocal);
+        if (reason) return callback(new Error(reason));
+      }
+      if (options && options.all) return callback(null, records);
+      callback(null, records[0].address, records[0].family);
+    });
+  };
+}
+
+// What the lookup never sees: the scheme, a metadata host name, and a literal
+// address, which the connect uses as is.
+function checkTarget(url, allowLocal) {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error('blocked: only http(s) URLs');
   }
@@ -107,23 +137,9 @@ async function checkTarget(url, allowLocal) {
   if (METADATA_HOSTS.has(host)) {
     throw new Error('blocked: cloud metadata address');
   }
-  let addresses;
   if (net.isIP(host)) {
-    addresses = [host];
-  } else {
-    const records = await dns.lookup(host, { all: true, verbatim: true });
-    addresses = records.map((r) => r.address);
-  }
-  if (addresses.length === 0) {
-    throw new Error('host did not resolve');
-  }
-  for (const address of addresses) {
-    if (METADATA_HOSTS.has(address)) {
-      throw new Error('blocked: cloud metadata address');
-    }
-    if (!allowLocal && isLocalAddress(address)) {
-      throw new Error('blocked: local network access is off for this frame (network.allowLocalNetworkAccess)');
-    }
+    const reason = refusal(host, allowLocal);
+    if (reason) throw new Error(reason);
   }
 }
 
@@ -132,22 +148,49 @@ function sameOrigin(a, b) {
     (a.port || (a.protocol === 'https:' ? '443' : '80')) === (b.port || (b.protocol === 'https:' ? '443' : '80'));
 }
 
+const SKIPPED_HEADERS = new Set(['host', 'connection', 'content-length', 'transfer-encoding']);
+
+function requestOnce(url, method, headers, body, lookup, signal) {
+  const outgoing = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (!SKIPPED_HEADERS.has(name.toLowerCase())) outgoing[name] = value;
+  }
+  return new Promise((resolve, reject) => {
+    const client = url.protocol === 'https:' ? https : http;
+    const request = client.request(url, { method, headers: outgoing, lookup, signal }, resolve);
+    request.on('error', reject);
+    request.end(body);
+  });
+}
+
+// What fetch did on its own: an encoded body arrives decoded.
+function decodedBody(response) {
+  const encoding = String(response.headers['content-encoding'] || '').trim().toLowerCase();
+  if (encoding === 'gzip' || encoding === 'x-gzip') return response.pipe(zlib.createGunzip());
+  if (encoding === 'deflate') return response.pipe(zlib.createInflate());
+  if (encoding === 'br') return response.pipe(zlib.createBrotliDecompress());
+  return response;
+}
+
 process.stdin.on('end', async () => {
   const req = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), req.timeoutMs || 30000);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), req.timeoutMs || 30000);
+    const allowLocal = req.allowLocalNetwork === true;
+    const lookup = guardedLookup(allowLocal);
     let url = new URL(req.url);
     let method = req.method;
     let headers = { ...(req.headers || {}) };
     let body = req.bodyBase64 ? Buffer.from(req.bodyBase64, 'base64') : undefined;
     let response;
     for (let hop = 0; ; hop++) {
-      await checkTarget(url, req.allowLocalNetwork === true);
-      response = await fetch(url, { method, headers, body, redirect: 'manual', signal: controller.signal });
-      if (![301, 302, 303, 307, 308].includes(response.status)) break;
-      const location = response.headers.get('location');
+      checkTarget(url, allowLocal);
+      response = await requestOnce(url, method, headers, body, lookup, controller.signal);
+      if (![301, 302, 303, 307, 308].includes(response.statusCode)) break;
+      const location = response.headers.location;
       if (!location) break;
+      response.resume();
       if (hop >= 5) throw new Error('too many redirects');
       const next = new URL(location, url);
       if (!sameOrigin(url, next)) {
@@ -155,17 +198,21 @@ process.stdin.on('end', async () => {
           if (CROSS_ORIGIN_HEADERS.includes(name.toLowerCase())) delete headers[name];
         }
       }
-      if ([301, 302, 303].includes(response.status) && method !== 'GET' && method !== 'HEAD') {
+      if ([301, 302, 303].includes(response.statusCode) && method !== 'GET' && method !== 'HEAD') {
         method = 'GET';
         body = undefined;
       }
       url = next;
     }
-    clearTimeout(timer);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    process.stdout.write(JSON.stringify({ status: response.status, bodyBase64: bytes.toString('base64') }));
+    const parts = [];
+    for await (const chunk of decodedBody(response)) parts.push(chunk);
+    const bytes = Buffer.concat(parts);
+    process.stdout.write(JSON.stringify({ status: response.statusCode, bodyBase64: bytes.toString('base64') }));
   } catch (error) {
     process.stdout.write(JSON.stringify({ status: 0, error: String(error) }));
+  } finally {
+    // A pending timer would hold the child open after it has answered.
+    clearTimeout(timer);
   }
 });
 `

@@ -132,8 +132,7 @@ rows; `parseScopes` allows `frame:*` for backends); backups are only
 encrypted client-side (verify the envelope on POST or say so);
 `csrfResponse` skips the Origin check when the bearer merely *looks* like a
 token while the cookie is the credential actually used (harmless without
-CORS, but ignore the bearer when a cookie is present); `ssrf.ts` does not
-pin the resolved address (DNS rebinding); identity-keyed login / reset
+CORS, but ignore the bearer when a cookie is present); identity-keyed login / reset
 limits are a cheap lockout; passwordless passkey profile picks an arbitrary
 identity row; scene image redirects are cached a year and nothing purges
 the CDN when a scene goes private or is pulled; convert/lint have quadratic
@@ -163,10 +162,10 @@ LAN-egress deny on a managed frame, and only a decoded PNG or an error
 string comes back).
 
 Backend: `scene_module_suffix` collisions; no artifact cleanup for SD
-images and firmware; the resolver-based target guard (`app/utils/network.py`)
-resolves once per request, so a DNS rebind between check and connect is
-accepted for project-authenticated features (frame hosts are IP literals in
-practice); a frame whose SSH host key was already impersonated before the
+images and firmware; requests to a frame's own host (`app/utils/frame_http.py`)
+check it and then let httpx resolve it again, accepted because frame hosts
+are IP literals in practice (user-supplied URLs connect through
+`guarded_transport`); a frame whose SSH host key was already impersonated before the
 TOFU pin stays pinned to the impostor until "Forget host key" — the
 fingerprint is shown so an owner can compare it with
 `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the device.

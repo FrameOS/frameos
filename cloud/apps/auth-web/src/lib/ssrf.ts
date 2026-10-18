@@ -1,11 +1,15 @@
+import dns from "node:dns";
 import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { isIP, type LookupFunction } from "node:net";
+import { Agent, fetch as undiciFetch, type RequestInit as UndiciRequestInit } from "undici";
 
 // SSRF guard shared by every server-side fetch of a user-supplied URL (the
 // preview proxy, the MCP server's scene imports): reject hosts resolving to
 // loopback / private / link-local / reserved addresses so the server cannot
-// be used to probe its own network. DNS resolves once here; a rebind between
-// check and fetch is a residual risk accepted for these features.
+// be used to probe its own network. hostIsBlocked answers early with a clear
+// refusal; the check that holds is the connect's own (guardedLookup below),
+// because a name checked here and resolved again by fetch can answer the
+// second query with a private address (DNS rebinding).
 export async function hostIsBlocked(hostname: string): Promise<boolean> {
   const literal = isIP(hostname) ? [hostname] : null;
   let addresses: string[];
@@ -91,13 +95,75 @@ function withoutCredentialHeaders(headers: HeadersInit | undefined): Headers {
   return stripped;
 }
 
+class HostNotAllowedError extends Error {
+  constructor() {
+    super("host_not_allowed");
+  }
+}
+
+// The lookup every guarded connect makes (net/tls `lookup`): the addresses it
+// hands the socket are the ones it classified, so there is no second answer
+// to rebind. A literal host never reaches it (net connects to a literal as
+// is), which is what hostIsBlocked's own check is for.
+export const guardedLookup: LookupFunction = (hostname, options, callback) => {
+  dns.lookup(hostname, { ...options, all: true, verbatim: true }, (error, addresses) => {
+    if (error) {
+      callback(error, "");
+      return;
+    }
+    const list = addresses as dns.LookupAddress[];
+    const first = list[0];
+    if (!first || list.some((entry) => addressIsPrivate(entry.address))) {
+      callback(new HostNotAllowedError(), "");
+      return;
+    }
+    if (options.all) {
+      callback(null, list);
+    } else {
+      callback(null, first.address, first.family);
+    }
+  });
+};
+
+const guardedDispatcher = new Agent({ connect: { lookup: guardedLookup } });
+
+function refusedByGuard(error: unknown): boolean {
+  for (let current = error, depth = 0; current && depth < 5; depth += 1) {
+    if (current instanceof HostNotAllowedError) {
+      return true;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+// undici's own fetch with the guarded dispatcher (not the global fetch: its
+// bundled undici and this one are not guaranteed to share a dispatcher
+// interface).
+export async function pinnedFetch(input: URL | string, init?: RequestInit): Promise<Response> {
+  try {
+    const response = await undiciFetch(input, {
+      ...(init as UndiciRequestInit),
+      dispatcher: guardedDispatcher,
+    });
+    return response as unknown as Response;
+  } catch (error) {
+    if (refusedByGuard(error)) {
+      throw new Error("host_not_allowed");
+    }
+    throw error;
+  }
+}
+
 // A fetch that applies the guard before every request (redirects included:
 // each hop is checked, so a public URL cannot bounce to an internal one, and
-// credential headers stay behind when a hop changes origin).
+// credential headers stay behind when a hop changes origin), and again where
+// it counts, at connect time (pinnedFetch). `fetchImpl` is for tests.
 export async function guardedFetch(
   input: string,
   init?: RequestInit,
   maxRedirects = 5,
+  fetchImpl: (input: URL | string, init?: RequestInit) => Promise<Response> = pinnedFetch,
 ): Promise<Response> {
   let url = new URL(input);
   let headers: HeadersInit | undefined = init?.headers;
@@ -108,7 +174,7 @@ export async function guardedFetch(
     if (await hostIsBlocked(url.hostname)) {
       throw new Error("host_not_allowed");
     }
-    const response = await fetch(url, {
+    const response = await fetchImpl(url, {
       ...init,
       ...(headers === undefined ? {} : { headers }),
       redirect: "manual",

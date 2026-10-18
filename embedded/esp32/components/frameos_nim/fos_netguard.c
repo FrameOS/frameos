@@ -501,16 +501,21 @@ fos_netguard_verdict_t fos_netguard_check_url(const char *url, char *reason, siz
     return fos_netguard_check_url_pinned(url, reason, reason_len, NULL);
 }
 
-fos_netguard_verdict_t fos_netguard_check_url_pinned(const char *url, char *reason,
-                                                     size_t reason_len, fos_netguard_pin_t *pin)
+/* The check behind both entry points. `scene_policy`: the scene policy's
+ * check (off when the policy is off, exemptions honoured); otherwise every
+ * URL is held to "public only", with no exemptions. */
+static fos_netguard_verdict_t check_url(const char *url, char *reason, size_t reason_len,
+                                        fos_netguard_pin_t *pin, bool scene_policy)
 {
     if (reason != NULL && reason_len > 0) reason[0] = '\0';
     if (pin != NULL) memset(pin, 0, sizeof(*pin));
 
-    NETGUARD_LOCK();
-    const bool blocking = s_block_local;
-    NETGUARD_UNLOCK();
-    if (!blocking) return FOS_NETGUARD_ALLOWED;
+    if (scene_policy) {
+        NETGUARD_LOCK();
+        const bool blocking = s_block_local;
+        NETGUARD_UNLOCK();
+        if (!blocking) return FOS_NETGUARD_ALLOWED;
+    }
 
     char host[FOS_NETGUARD_HOST_LEN];
     int port = 0;
@@ -520,7 +525,7 @@ fos_netguard_verdict_t fos_netguard_check_url_pinned(const char *url, char *reas
         }
         return FOS_NETGUARD_BLOCKED;
     }
-    if (exempt_match(host, port)) return FOS_NETGUARD_ALLOWED;
+    if (scene_policy && exempt_match(host, port)) return FOS_NETGUARD_ALLOWED;
 
     uint8_t v4[4];
     uint8_t v6[16];
@@ -622,6 +627,18 @@ fos_netguard_verdict_t fos_netguard_check_url_pinned(const char *url, char *reas
         memcpy(pin->v4, first_v4, sizeof(pin->v4));
     }
     return FOS_NETGUARD_ALLOWED;
+}
+
+fos_netguard_verdict_t fos_netguard_check_url_pinned(const char *url, char *reason,
+                                                     size_t reason_len, fos_netguard_pin_t *pin)
+{
+    return check_url(url, reason, reason_len, pin, true);
+}
+
+fos_netguard_verdict_t fos_netguard_check_public_url(const char *url, char *reason,
+                                                     size_t reason_len, fos_netguard_pin_t *pin)
+{
+    return check_url(url, reason, reason_len, pin, false);
 }
 
 /* ------------------------------------------------------------- DNS pinning */

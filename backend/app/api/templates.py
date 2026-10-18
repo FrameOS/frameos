@@ -29,7 +29,7 @@ from app.api import api_project, api_open
 from app.redis import get_redis
 from app.tenancy import current_project_id, get_user_project
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
-from app.utils.network import assert_url_target_allowed
+from app.utils.network import assert_url_target_allowed, guarded_transport
 from app.utils.retired_apps import retire_apps_in_scenes
 from app.utils.upload_limits import (
     MAX_TEMPLATE_MEMBER_BYTES,
@@ -240,7 +240,7 @@ async def create_template(
         from app.utils.cloud_backup import cloud_headers_for_url
 
         await assert_url_target_allowed(url, what="Template URL")
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=30, transport=guarded_transport()) as client:
             content = await fetch_body_limited(
                 client, url, MAX_TEMPLATE_ZIP_BYTES, headers=cloud_headers_for_url(db, url)
             )
@@ -301,7 +301,7 @@ async def create_template(
                 from app.utils.cloud_backup import cloud_headers_for_url
 
                 await assert_url_target_allowed(img_val, what="Template image URL")
-                async with httpx.AsyncClient(timeout=30) as client:
+                async with httpx.AsyncClient(timeout=30, transport=guarded_transport()) as client:
                     img_val = await fetch_body_limited(
                         client, img_val, MAX_TEMPLATE_MEMBER_BYTES, headers=cloud_headers_for_url(db, img_val)
                     )

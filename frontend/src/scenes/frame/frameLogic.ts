@@ -97,6 +97,7 @@ import { frameHasActivityLog } from '../../decorators/frame'
 import { frameRunsScenesInterpreted, normalizeSceneExecution, sceneExecutionForFrame } from '../../utils/sceneExecution'
 import { normalizeCustomEvent } from '../../utils/frameEvents'
 import { normalizeFieldOptions } from '../../utils/selectOptions'
+import { assetsPathError } from '../../utils/assetsPath'
 import { frameFormSceneErrors } from './frameFormSceneErrors'
 import {
   cloneSplitScreenSceneLayout,
@@ -2650,6 +2651,12 @@ export const frameLogic = kea<frameLogicType>([
       defaults: {} as FrameType,
       errors: (state: Partial<FrameType>) => ({
         error_behavior: {},
+        // Buildroot frames always use /srv/assets; an ESP32 mounts its SD card
+        // here. A folder the frame already has is not a new one.
+        assets_path:
+          state.mode === 'buildroot' || state.mode === 'embedded'
+            ? undefined
+            : assetsPathError(state.assets_path, values.frame?.assets_path),
         frame_admin_auth: state.frame_admin_auth?.enabled
           ? {
               user: state.frame_admin_auth?.user ? undefined : 'Username is required',

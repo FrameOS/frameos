@@ -31,6 +31,12 @@ static const char *TAG = "fos_settings";
  * PEMs (the frame's own HTTPS certificate and key, ~2-4 KB each) next to the
  * tzdata slice, hence the headroom. */
 #define SETTINGS_MAX_BYTES (32 * 1024)
+/* The cache shares the "frameos" NVS namespace with the frame's own config,
+ * on a 16-24 KB partition. A payload that would leave fewer free entries
+ * than this (32 bytes each) is applied but not cached, so fos_config_save
+ * always has room: otherwise a large settings payload could make a later
+ * console `set` or lan_access_set fail to persist. */
+#define SETTINGS_CACHE_NVS_RESERVE_ENTRIES 192
 #define SETTINGS_ETAG_LEN 96
 /* Provider error bodies are a bare {"error": "…"}. */
 #define SETTINGS_AUTH_LEN (FOS_CLOUD_TOKEN_LEN + 16)
@@ -262,6 +268,19 @@ static void apply_service_settings(const cJSON *root, const char *origin, const 
 
 static void cache_store(const char *printed, const char *etag, const char *origin)
 {
+    /* Room check first. A blob takes one entry per 32 bytes plus its index,
+     * and the new one is written before the old one is freed. */
+    const size_t blob_entries = (strlen(printed) + 1 + 31) / 32 + 2;
+    nvs_stats_t stats;
+    if (nvs_get_stats(NULL, &stats) == ESP_OK &&
+        stats.free_entries < blob_entries + SETTINGS_CACHE_NVS_RESERVE_ENTRIES) {
+        ESP_LOGW(TAG, "service settings not cached: %u NVS entries needed, %u free (keeping %u for the config)",
+                 (unsigned)blob_entries, (unsigned)stats.free_entries,
+                 (unsigned)SETTINGS_CACHE_NVS_RESERVE_ENTRIES);
+        /* An older cache would be applied at the next boot as if current. */
+        fos_settings_forget_cache();
+        return;
+    }
     nvs_handle_t nvs;
     if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
     esp_err_t err = nvs_set_blob(nvs, SETTINGS_CACHE_KEY, printed, strlen(printed) + 1);

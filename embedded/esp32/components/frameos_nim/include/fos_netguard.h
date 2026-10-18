@@ -137,6 +137,13 @@ fos_netguard_verdict_t fos_netguard_check_url_pinned(const char *url, char *reas
 bool fos_netguard_pin_for_task(const fos_netguard_pin_t *pin);
 void fos_netguard_unpin_for_task(void);
 
+/* The same check for the frame's own fetch of a URL someone else chose (the
+ * OTA manifest's off-origin downloadUrl): every address must be public,
+ * whatever the scene policy says, and no exemption applies. On ALLOWED for a
+ * name, `pin` holds the checked address. */
+fos_netguard_verdict_t fos_netguard_check_public_url(const char *url, char *reason,
+                                                     size_t reason_len, fos_netguard_pin_t *pin);
+
 /* A host name's identity for the pin: FNV-1a over the name, ASCII lowercased.
  * Two names that collide can only ever get an address that was checked as
  * public, never a private one. */
