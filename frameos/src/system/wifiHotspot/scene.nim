@@ -137,9 +137,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   scene.getDataNode = (proc(nodeId: NodeId, context: ExecutionContext): Value = scene.getDataNode(nodeId, context))
   scene.node1 = render_splitApp.App(nodeName: "render/split", nodeId: 1.NodeId, scene: scene.FrameScene,
     frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
-    rows: 2,
+    rows: 3,
     gap: "10",
-    height_ratios: "45 55",
+    height_ratios: "45 43 12",
     inputImage: none(Image),
     columns: 1,
     hideEmpty: false,
@@ -149,6 +149,9 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     @[
       3.NodeId,
+    ],
+    @[
+      0.NodeId,
     ],
   ],
     render_function: 0.NodeId,

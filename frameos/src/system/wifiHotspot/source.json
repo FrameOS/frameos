@@ -35,9 +35,9 @@
       "data": {
         "keyword": "render/split",
         "config": {
-          "rows": "2",
+          "rows": "3",
           "gap": "10",
-          "height_ratios": "45 55"
+          "height_ratios": "45 43 12"
         }
       },
       "type": "app",

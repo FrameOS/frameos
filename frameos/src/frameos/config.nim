@@ -412,6 +412,26 @@ proc readConfig*(configPath = ""): FrameConfig =
   result.network.allowLocalNetworkAccess =
     resolveLocalNetworkAccess(result.network.allowLocalNetworkAccess)
 
+proc requestConfig*(live: FrameConfig): FrameConfig =
+  ## The frame's config for ONE request on a thread that is not the
+  ## runtime's (a mummy worker, the portal's connect thread): readConfig.
+  ## Anything that needs more of the config than a scalar field works on
+  ## this, never on the live config: a shallow copy of that takes a
+  ## reference to every nested object (httpsProxy, network, settings, …)
+  ## while other workers and the runner do the same, and ORC refcounts are
+  ## not atomic (AGENTS.md, "Refs do not cross threads").
+  ##
+  ## `live` only stands in when there is no readable frame.json, which on a
+  ## frame means never (the runtime could not have started) and in the
+  ## tests means a config built by hand on the test's own thread.
+  try:
+    result = readConfig()
+  except CatchableError:
+    result = FrameConfig()
+    if live != nil:
+      result[] = live[]
+    setConfigDefaults(result)
+
 proc loadConfig*(configPath = ""): FrameConfig =
   ## readConfig for the runtime itself (boot, the runner's reload).
   result = readConfig(configPath)
@@ -439,11 +459,17 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   ## fields — freeing the JsonNodes, strings and seqs a worker may be in the
   ## middle of reading (the writer-side twin of the auth-cache
   ## use-after-free). So the swap is done with raw copies that run no
-  ## destructor at all, and both the outgoing payload and `source` (whose
-  ## buffers `target` now shares) are parked in a list that is never
-  ## released. A reload happens on a deploy, so this leaks one config's
+  ## destructor at all, and the outgoing payload is parked in a list that is
+  ## never released. A reload happens on a deploy, so this leaks one config's
   ## worth of small objects per deploy — a price worth paying for readers
   ## that never see freed memory.
+  ##
+  ## `source` is emptied rather than parked: `target` now holds its buffers
+  ## with their refcounts (one owner, as before the swap), so a `source` that
+  ## kept pointing at them would be a second, uncounted owner — harmless
+  ## while nothing reads it, but its destruction at process exit freed what
+  ## a dead `target` had already freed (a test binary that swapped a config
+  ## built on the stack died with SIGSEGV on the way out, 2026-10-16).
   if target == nil or source == nil:
     return
   {.gcsafe.}:
@@ -451,8 +477,8 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
     withLock retiredConfigLock:
       copyMem(addr retired[], addr target[], sizeof(target[]))
       copyMem(addr target[], addr source[], sizeof(target[]))
+      zeroMem(addr source[], sizeof(source[]))
       retiredFrameConfigs.add(retired)
-      retiredFrameConfigs.add(source)
 
 proc replaceFrameConfigSettings*(target: FrameConfig, settings: sink JsonNode) =
   ## `target.settings = settings` for a config other threads are reading.

@@ -93,6 +93,12 @@ battery ESP32 stays awake while a code is up. A frame whose output is not a
 physical panel (`web_only`, `http.upload`) has nowhere to show a code and
 answers `no_panel`, so local network access cannot be turned on there.
 
+The Pi's setup hotspot uses the same overlay for its own code (the one
+`POST /setup` asks for before it changes anything but Wi-Fi,
+`frameos/src/frameos/setup_gate.nim`): one line along the bottom of the panel,
+in the strip the hotspot scene leaves free, and only while no local network
+access code is up.
+
 Turning it **off** needs no code, and clears a code that is showing. On an
 ESP32 the USB console's `set allow_local_network 1` turns it on directly: the
 cable is physical presence.

@@ -1066,6 +1066,30 @@ def stage_buildroot_dropbear_dropin(root: Path) -> None:
     os.chmod(path, 0o644)
 
 
+BUILDROOT_CAPTIVE_DNS_DROPIN_PATH = "/etc/NetworkManager/dnsmasq-shared.d/10-frameos-captive.conf"
+BUILDROOT_CAPTIVE_DNS_DROPIN = """# FrameOS: the setup hotspot is a captive portal.
+#
+# NetworkManager's shared-IPv4 hotspot runs dnsmasq with this directory as
+# its conf-dir. Answering every name with the hotspot's own address makes a
+# phone's connectivity probe (captive.apple.com, connectivitycheck.gstatic.com,
+# ...) land on the frame, where the runtime's redirect-only listener on
+# 10.42.0.1:80 sends it to the setup form and the OS opens its "sign in to
+# network" sheet (frameos/src/frameos/server/hotspot_listener.nim). Without
+# this the hotspot reads as plain "no internet" and the owner has to scan the
+# second QR code. The root filesystem is read-only, so this ships in the
+# image; the armv6 wpa_supplicant backend configures its own dnsmasq the same
+# way at run time.
+address=/#/10.42.0.1
+"""
+
+
+def stage_buildroot_captive_dns_dropin(root: Path) -> None:
+    path = root / BUILDROOT_CAPTIVE_DNS_DROPIN_PATH.lstrip("/")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(BUILDROOT_CAPTIVE_DNS_DROPIN, encoding="utf-8")
+    os.chmod(path, 0o644)
+
+
 def stage_buildroot_network_service_dropin(root: Path) -> None:
     path = root / BUILDROOT_NETWORK_SERVICE_DROPIN_PATH.lstrip("/")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -2057,6 +2081,7 @@ class BuildrootImageBuilder:
         stage_buildroot_resolved_dropin(overlay_dir)
         stage_buildroot_network_service_dropin(overlay_dir)
         stage_buildroot_dropbear_dropin(overlay_dir)
+        stage_buildroot_captive_dns_dropin(overlay_dir)
         stage_postboot_log(overlay_dir)
 
         if not frameos_build.binary_path:
@@ -3011,6 +3036,7 @@ fi
         stage_buildroot_resolved_dropin(service_root)
         stage_buildroot_network_service_dropin(service_root)
         stage_buildroot_dropbear_dropin(service_root)
+        stage_buildroot_captive_dns_dropin(service_root)
         (service_root / "etc" / "hostname").write_text(_hostname_for_frame(self.frame) + "\n", encoding="utf-8")
         # Refresh the first-boot setup script/unit and fstab on the root
         # partition so images composed from older cached base images pick up
