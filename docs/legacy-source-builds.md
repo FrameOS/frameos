@@ -90,7 +90,7 @@ Everything still works:
 The source-build path — `codegen/`, `cross_compile.py`, the build host and
 Modal executors, the `compilationMode` select, the Nim textarea in the
 editor — is removed by item 1 of `docs/convergence-todo.md` ("Delete the
-compiler"), whose gate is **not before October 2026, and possibly much later
+compiler"), whose gate is **not before December 2026, and possibly much later
 or never**: one full release cycle in which `build_kind` shows no source
 builds outside frames that chose `static`. Until then it stays, hidden,
 warned about, and working. (Stage 5 of that file is a different thing — the

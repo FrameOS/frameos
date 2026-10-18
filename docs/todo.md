@@ -18,7 +18,7 @@ converter (scenes.frameos.net/nim-converter, the editor button, MCP
 `scene_convert`, the CLI), deploys install release binaries, and
 `last_successful_deploy.build_kind` records which frames still build from
 source (`docs/legacy-source-builds.md`). Deleting the source-build path is
-item 1 of `docs/convergence-todo.md` — not before October 2026, maybe much
+item 1 of `docs/convergence-todo.md` — not before December 2026, maybe much
 later or never; until then the legacy path keeps working when asked for,
 and hardening it (the unsandboxed Nim stage in `docs/security-todo.md`) is
 not a priority. The "Both control planes" rule below stands.
