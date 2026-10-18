@@ -159,7 +159,7 @@ export function CloudBaseSettingsSection(): JSX.Element {
         )}
         <p className="frameos-muted text-sm">
           {esp32
-            ? 'This ESP32 frame accepts its name, refresh interval, rotation, scaling mode, time zone and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or the FrameOS-Setup portal.'
+            ? 'This ESP32 frame accepts its name, refresh interval, rotation, scaling mode, time zone and the power settings below from the cloud. The panel driver, WiFi, GPIO and other hardware settings are provisioned on the device itself — over its USB console or its FrameOS-XXXX setup hotspot.'
             : 'These are the settings a cloud-managed frame accepts; the display driver, palette and GPIO buttons are under Panel below. Everything else this frame runs on — network and WiFi, mount points, driver wiring and log settings — is owned by the device and configured on the frame itself, through its own admin panel or the card it was flashed from.'}
         </p>
       </SectionBody>

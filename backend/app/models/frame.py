@@ -716,8 +716,8 @@ async def new_frame(
             "networkCheckTimeoutSeconds": 30,
             "networkCheckUrl": "https://networkcheck.frameos.net/",
             "wifiHotspot": "disabled",
-            "wifiHotspotSsid": "FrameOS-Setup",
-            "wifiHotspotPassword": "frame1234",
+            "wifiHotspotSsid": "",
+            "wifiHotspotPassword": "",
             "wifiHotspotTimeoutSeconds": 300,
         },
         agent={
@@ -1036,6 +1036,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "networkCheckTimeoutSeconds": int(network.get('networkCheckTimeoutSeconds', 30)),
             "networkCheckUrl": network.get('networkCheckUrl', "https://networkcheck.frameos.net/"),
             "wifiHotspot": network.get('wifiHotspot', "disabled"),
+            # Blank: the frame makes up its own (hotspot_credentials.nim).
+            # A row from before blank was the default keeps the old pair.
             "wifiHotspotSsid": network.get('wifiHotspotSsid', "FrameOS-Setup"),
             "wifiHotspotPassword": network.get('wifiHotspotPassword', "frame1234"),
             "wifiHotspotTimeoutSeconds": int(network.get('wifiHotspotTimeoutSeconds', 300)),

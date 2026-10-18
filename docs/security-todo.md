@@ -35,19 +35,6 @@ is left there is in the medium / low list.
   already signed and verified against the release key on both planes. A
   self-hosted backend reached over plain http still carries the bearer in
   clear on every request; an https backend is the fix for that.)
-- **`POST /setup` on the Pi hotspot is unauthenticated while it is up**, and
-  the hotspot keeps its well-known default PSK (`frame1234`) — decided
-  2026-09-03: a Pi with no configured display could not show a minted one.
-  Release images bake the default with `wifiHotspot: "bootOnly"` for 300 s;
-  the setup form accepts `controlMode`, `cloudUrl`, `claimToken`,
-  `serverHost`, `adminUser/Pass`, `runDriverSetup`, `device` and
-  `httpUploadUrl` and persists them to `frame.json` (`portal.nim`
-  `parseSetupOptions` / `persistPortalSetup`), so anyone in radio range
-  during a boot where the home AP is down can re-enrol the frame, repoint
-  `serverHost`, or make the frame POST every rendered image to a URL of
-  their choosing. Require a panel-shown code for the control-plane/admin
-  fields (a headless frame then needs the local admin password instead), and
-  strip current config from the unauthenticated setup page.
 - Interpreter budgets (wall-clock deadline, JS heap ceiling, dispatch
   budget) are per run, not per scene per minute.
 - Smaller: the frame's TLS material and admin login ride the
@@ -58,7 +45,15 @@ is left there is in the medium / low list.
   status screen draws the code into its own render too, and on a
   `web_only` frame the stored image is the only place it shows); a device `bootup` event may still move
   `frame_host` on embedded frames when the claimed IP matches the request
-  peer or `embedded.followBootIp` is set (deliberate: ESP32 DHCP follow).
+  peer or `embedded.followBootIp` is set (deliberate: ESP32 DHCP follow);
+  `POST /setup` takes anyone on the Pi hotspot. New frames leave the
+  hotspot's name and password blank and a frame with a screen makes up its
+  own, `FrameOS-XXXX` and a password like the ESP32's
+  (`frameos/hotspot_credentials.nim`), but the password `frame1234` stays
+  where it has to be known in advance: frames without a screen, frames set up
+  before blank was the default (left as they are, decided 2026-10-18), and
+  the generic release image, whose `framebuffer` device may have no screen
+  attached yet.
 
 ### Frontends, wasm preview, CI
 

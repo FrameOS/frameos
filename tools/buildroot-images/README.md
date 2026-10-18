@@ -253,8 +253,9 @@ Release images are composed after all precompiled release binaries have been
 built. They use the cached base image plus the platform's precompiled
 FrameOS binary (the Remote binary in the artifact is ignored — see
 "Privilege separation" above), ship without WiFi credentials, and keep
-`wifiHotspot=bootOnly` so the board starts the `FrameOS-Setup` hotspot when it
-cannot reach the network. The first-boot setup service is present but dormant:
+`wifiHotspot=bootOnly` so the board starts its `FrameOS-XXXX` setup hotspot
+(password `frame1234`) when it cannot reach the network. The first-boot setup
+service is present but dormant:
 `frameos-setup.json` (self-hosted personalization) is absent, and
 `frameos-cloud.txt` ships as the 4096-byte all-comments placeholder described
 above, ignored on boot until it is personalized — edited manually after

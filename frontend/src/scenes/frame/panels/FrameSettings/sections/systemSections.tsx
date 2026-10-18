@@ -101,9 +101,10 @@ export function NetworkSection(): JSX.Element {
                           point that you can connect to. This is useful for setting up a frame in a new location.
                         </p>
                         <p>
-                          Just connect to &apos;FrameOS-Setup&apos; with the password &apos;frame1234&apos;, open
-                          http://10.42.0.1/ and enter your wifi credentials. The hotspot will only be active for 10
-                          minutes by default.
+                          Connect to the network shown on the frame&apos;s screen, open http://10.42.0.1/ and enter your
+                          wifi credentials. If you leave the hotspot&apos;s name or password blank, the frame makes one
+                          up and shows it on its screen. A frame without a screen uses the password frame1234. The
+                          hotspot is only active for 5 minutes by default.
                         </p>
                       </div>
                     }
@@ -121,7 +122,7 @@ export function NetworkSection(): JSX.Element {
                         {({ onChange, value }) => (
                           <TextInput
                             name="wifiHotspotSsid"
-                            placeholder="FrameOS-Setup"
+                            placeholder="Blank: the frame makes one up"
                             onChange={onChange}
                             value={value ?? 'FrameOS-Setup'}
                           />
@@ -138,7 +139,7 @@ export function NetworkSection(): JSX.Element {
                           <TextInput
                             name="wifiHotspotPassword"
                             type={frameFormTouches['network.wifiHotspotPassword'] ? 'text' : 'password'}
-                            placeholder="frame1234"
+                            placeholder="Blank: the frame makes one up"
                             autoComplete="new-password"
                             onChange={onChange}
                             value={value ?? 'frame1234'}

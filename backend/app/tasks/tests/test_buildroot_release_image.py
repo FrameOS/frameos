@@ -28,7 +28,9 @@ def test_release_image_frame_uses_hotspot_without_wifi_credentials():
     assert frame.network.get("wifiPassword") is None
     assert frame_json["network"]["networkCheck"] is True
     assert frame_json["network"]["wifiHotspot"] == "bootOnly"
-    assert frame_json["network"]["wifiHotspotSsid"] == "FrameOS-Setup"
+    # Blank: the frame names it FrameOS-XXXX; the password is the known one.
+    assert frame_json["network"]["wifiHotspotSsid"] == ""
+    assert frame_json["network"]["wifiHotspotPassword"] == "frame1234"
     assert frame_json["device"] == "framebuffer"
 
 

@@ -1252,8 +1252,8 @@ def ensure_buildroot_frame_defaults(frame: Frame, platform: str | None = None) -
     network.setdefault("networkCheckTimeoutSeconds", 90)
     network.setdefault("networkCheckUrl", "https://networkcheck.frameos.net/")
     network["wifiHotspot"] = "bootOnly"
-    network.setdefault("wifiHotspotSsid", "FrameOS-Setup")
-    network.setdefault("wifiHotspotPassword", "frame1234")
+    network.setdefault("wifiHotspotSsid", "")
+    network.setdefault("wifiHotspotPassword", "")
     network.setdefault("wifiHotspotTimeoutSeconds", 300)
     frame.network = network
 
