@@ -409,6 +409,39 @@ suite "js app runtime":
     check logged[2]["error"].getStr() == "Please provide an album ID."
     check logged[3]["error"].getStr() == "failed: 404"
 
+  test "console logs like frameos.log, warn says so, error is an error":
+    let config = testConfig()
+    var logged: seq[JsonNode] = @[]
+    var logger = testLogger(config)
+    logger.log = proc(payload: JsonNode) =
+      logged.add(payload)
+    let scene = FrameScene(id: "tests/js-app-console".SceneId, frameConfig: config, state: %*{}, logger: logger)
+    let owner = AppRoot(nodeId: 17.NodeId, nodeName: "jsConsole", scene: scene, frameConfig: config)
+    let context = ExecutionContext(scene: scene, event: "render", payload: %*{}, hasImage: false, loopIndex: 0, loopKey: ".", nextSleep: -1)
+
+    let runtime = newJsAppRuntime(
+      category = "data",
+      outputType = "text",
+      source = """export function get(app) {
+          console.log("count", 3, { k: "v" })
+          console.info("info")
+          console.debug("debug")
+          console.warn("careful")
+          console.error("broke", 500)
+          return "ok"
+        }"""
+    )
+
+    check runtime.get(owner, %*{}, context).asString() == "ok"
+    check logged.len == 5
+    check logged[0]["event"].getStr() == "log:17:jsConsole"
+    check logged[0]["message"].getStr() == """count 3 {"k":"v"}"""
+    check logged[1]["message"].getStr() == "info"
+    check logged[2]["message"].getStr() == "debug"
+    check logged[3]["message"].getStr() == "warning: careful"
+    check logged[4]["event"].getStr() == "error:17:jsConsole"
+    check logged[4]["error"].getStr() == "broke 500"
+
   test "runs modern ES syntax supported by QuickJS":
     let config = testConfig()
     let logger = testLogger(config)

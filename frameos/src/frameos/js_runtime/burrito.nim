@@ -1542,6 +1542,21 @@ proc abandon*(js: var QuickJS): int {.discardable.} =
     dealloc(js.guard)
   js = QuickJS()
 
+proc compactJs*(source: string): string {.compileTime.} =
+  ## A prelude as it is stored in the binary: every line trimmed, blank lines
+  ## and whole-line `//` comments dropped (on the ESP32 the indentation alone
+  ## was a KB of flash). Lines are never joined, so semicolon insertion reads
+  ## the code as written. That holds only where no string runs across lines,
+  ## which is checked: no template literal, no backslash at a line's end.
+  doAssert '`' notin source, "compactJs: a template literal can run across lines"
+  for line in source.splitLines():
+    let code = line.strip()
+    if code.len == 0 or code.startsWith("//"):
+      continue
+    doAssert not code.endsWith("\\"), "compactJs: a string continues past " & code
+    result.add(code)
+    result.add('\n')
+
 proc eval*(js: QuickJS, code: string, filename: string = "<eval>", flags: cint = 0): string =
   ## Evaluate JavaScript code and return result as string. `flags` adds
   ## JS_EVAL_FLAG_* bits (quicktsFlagsFor for TypeScript / JSX sources).

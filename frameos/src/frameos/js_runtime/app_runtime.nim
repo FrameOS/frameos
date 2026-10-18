@@ -1531,7 +1531,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsGetAppFrame", jsGetAppFrame)
   runtime.js.registerFunction("jsGetAppContext", jsGetAppContext)
   runtime.js.registerFunction("jsGetAppKeys", jsGetAppKeys)
-  discard runtime.js.eval("""
+  discard runtime.js.eval(static(compactJs("""
   "use strict";
   const __jsReplacer = (k, v) =>
     (typeof v === 'bigint') ? { __bigint: v.toString() } : v;
@@ -1551,6 +1551,10 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   const __frameosAppState = __frameosProxy("state", jsGetAppState);
   const __frameosAppFrame = __frameosProxy("frame", jsGetAppFrame);
   globalThis.__frameosContext = __frameosProxy("context", jsGetAppContext);
+  // What every asset and stream call below shares.
+  const __frameosAsset = (op, path, data = "") => __frameosUnwrap(jsAssets(op, String(path || ""), data));
+  const __frameosStream = (op, options) => __frameosUnwrap(jsStreams(op, JSON.stringify(options)));
+  const __frameosStreamId = (ref) => (ref && ref.id) || ref;
   const frameos = {
     image: (spec = {}) => ({ __frameosType: "image", ...spec }),
     svg: (svg, spec = {}) => ({ __frameosType: "image", svg, ...spec }),
@@ -1568,30 +1572,21 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
     fetchImage: (url, options) => JSON.parse(
       jsFetchImage(String(url || ""), JSON.stringify(options || {}, __jsReplacer)) || '{"image":null}'
     ),
-    listAssets: (dir) => __frameosUnwrap(jsAssets("list", String(dir || ""), "")) || [],
-    assetExists: (path) => __frameosUnwrap(jsAssets("exists", String(path || ""), "")) === true,
-    assetSize: (path) => __frameosUnwrap(jsAssets("size", String(path || ""), "")) ?? -1,
-    readAsset: (path, options) => __frameosUnwrap(jsAssets(
-      "read", String(path || ""), options ? JSON.stringify(options) : ""
-    )) ?? null,
-    writeAsset: (path, base64) => __frameosUnwrap(jsAssets("write", String(path || ""), String(base64 || ""))) === true,
-    appendAsset: (path, base64) => __frameosUnwrap(jsAssets("append", String(path || ""), String(base64 || ""))) === true,
-    deleteAsset: (path) => __frameosUnwrap(jsAssets("delete", String(path || ""), "")) === true,
-    loadAssetImage: (path) => __frameosUnwrap(jsAssets("image", String(path || ""), "")) ?? null,
-    openAssetStream: (path, mode) => __frameosUnwrap(jsStreams("openAsset",
-      JSON.stringify({ path: String(path || ""), mode: String(mode || "r") }))) ?? null,
-    createStream: (base64) => __frameosUnwrap(jsStreams("create",
-      JSON.stringify({ base64: String(base64 || "") }))) ?? null,
-    streamRead: (ref, length) => __frameosUnwrap(jsStreams("read",
-      JSON.stringify({ id: (ref && ref.id) || ref, length }))) ?? null,
-    streamWrite: (ref, base64) => __frameosUnwrap(jsStreams("write",
-      JSON.stringify({ id: (ref && ref.id) || ref, base64: String(base64 || "") }))) === true,
-    streamAtEnd: (ref) => __frameosUnwrap(jsStreams("atEnd",
-      JSON.stringify({ id: (ref && ref.id) || ref }))) === true,
-    streamRewind: (ref) => __frameosUnwrap(jsStreams("rewind",
-      JSON.stringify({ id: (ref && ref.id) || ref }))) === true,
-    streamClose: (ref) => __frameosUnwrap(jsStreams("close",
-      JSON.stringify({ id: (ref && ref.id) || ref }))) === true,
+    listAssets: (dir) => __frameosAsset("list", dir) || [],
+    assetExists: (path) => __frameosAsset("exists", path) === true,
+    assetSize: (path) => __frameosAsset("size", path) ?? -1,
+    readAsset: (path, options) => __frameosAsset("read", path, options ? JSON.stringify(options) : "") ?? null,
+    writeAsset: (path, base64) => __frameosAsset("write", path, String(base64 || "")) === true,
+    appendAsset: (path, base64) => __frameosAsset("append", path, String(base64 || "")) === true,
+    deleteAsset: (path) => __frameosAsset("delete", path) === true,
+    loadAssetImage: (path) => __frameosAsset("image", path) ?? null,
+    openAssetStream: (path, mode) => __frameosStream("openAsset", { path: String(path || ""), mode: String(mode || "r") }) ?? null,
+    createStream: (base64) => __frameosStream("create", { base64: String(base64 || "") }) ?? null,
+    streamRead: (ref, length) => __frameosStream("read", { id: __frameosStreamId(ref), length }) ?? null,
+    streamWrite: (ref, base64) => __frameosStream("write", { id: __frameosStreamId(ref), base64: String(base64 || "") }) === true,
+    streamAtEnd: (ref) => __frameosStream("atEnd", { id: __frameosStreamId(ref) }) === true,
+    streamRewind: (ref) => __frameosStream("rewind", { id: __frameosStreamId(ref) }) === true,
+    streamClose: (ref) => __frameosStream("close", { id: __frameosStreamId(ref) }) === true,
     getSetting: (...path) => __frameosUnwrap(jsGetSetting(
       JSON.stringify(path.flat().map((p) => String(p)))
     )),
@@ -1612,19 +1607,13 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   // logs like frameos.log: strings as they are, the rest as JSON, one line
   // per call. warn is a log line that says so; error goes to the error log.
   const console = {
-    log: (...args) => jsAppLog("log", JSON.stringify(args, __jsReplacer)),
-    info: (...args) => jsAppLog("log", JSON.stringify(args, __jsReplacer)),
-    debug: (...args) => jsAppLog("log", JSON.stringify(args, __jsReplacer)),
+    log: frameos.log, info: frameos.log, debug: frameos.log, error: frameos.error,
     warn: (...args) => jsAppLog("warn", JSON.stringify(args, __jsReplacer)),
-    error: (...args) => jsAppLog("error", JSON.stringify(args, __jsReplacer)),
   };
   globalThis.__frameosModule = {};
   const exports = globalThis.__frameosModule;
   function __frameosWrapApp(app) {
-    return Object.assign(app || {}, {
-      log: (...args) => jsAppLog("log", JSON.stringify(args, __jsReplacer)),
-      logError: (...args) => jsAppLog("error", JSON.stringify(args, __jsReplacer)),
-    });
+    return Object.assign(app || {}, { log: frameos.log, logError: frameos.error });
   }
   globalThis.__frameosAppInstance = __frameosWrapApp({
     get nodeId() { return __frameosUnwrap(jsGetAppMeta("nodeId")); },
@@ -1657,7 +1646,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
     }
     return undefined;
   }
-  """ & sceneJsPrelude)
+  """ & sceneJsPrelude)))
   # The test harness, when this runtime runs an app's tests (app_tests.nim):
   # after the prelude so it can wrap `frameos`, before the module so the
   # module's describe() calls land in it.

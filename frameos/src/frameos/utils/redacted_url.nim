@@ -13,6 +13,10 @@
 ##
 ## Import-light on purpose: http_client, the spawn guard and the JS bridge
 ## all use it, and its test compiles in a second.
+##
+## On the ESP32 `redactedUrl` IS fos_netguard_url_origin, which the C side
+## links anyway: one copy of the rule in the firmware instead of two (the
+## Nim one was 1.5 KB of flash). Both are held to the same cases.
 
 import std/strutils
 
@@ -26,58 +30,71 @@ const
     ## A registered name, percent-encoded or raw UTF-8 (IDN) included.
   Ipv6Chars = {'0'..'9', 'a'..'f', 'A'..'F', ':', '.'}
 
-proc redactedUrl*(url: string): string =
-  ## `scheme://host[:port]` of `url`, scheme and host lowercased; userinfo,
-  ## path, query and fragment dropped. An IPv6 host keeps its brackets.
-  ## Anything without a scheme, with an empty or malformed host or a
-  ## non-numeric port is `InvalidUrlText`.
-  let trimmed = url.strip()
-  let mark = trimmed.find("://")
-  if mark <= 0 or trimmed[0] notin Letters:
-    return InvalidUrlText
-  for i in 0 ..< mark:
-    if trimmed[i] notin SchemeChars:
+when defined(frameosEmbedded):
+  proc fos_netguard_url_origin(url: cstring, output: cstring, outputLen: csize_t)
+                              {.importc: "fos_netguard_url_origin", cdecl.}
+
+  proc redactedUrl*(url: string): string =
+    ## The origin is never longer than the URL it came from, nor the
+    ## placeholder longer than itself, so nothing is cut.
+    let trimmed = url.strip()
+    result = newString(max(trimmed.len, InvalidUrlText.len) + 1)
+    fos_netguard_url_origin(trimmed.cstring, result.cstring, result.len.csize_t)
+    result.setLen(result.cstring.len)
+
+else:
+  proc redactedUrl*(url: string): string =
+    ## `scheme://host[:port]` of `url`, scheme and host lowercased; userinfo,
+    ## path, query and fragment dropped. An IPv6 host keeps its brackets.
+    ## Anything without a scheme, with an empty or malformed host or a
+    ## non-numeric port is `InvalidUrlText`.
+    let trimmed = url.strip()
+    let mark = trimmed.find("://")
+    if mark <= 0 or trimmed[0] notin Letters:
       return InvalidUrlText
-  var authorityEnd = mark + 3
-  while authorityEnd < trimmed.len and trimmed[authorityEnd] notin {'/', '?', '#', '\\'}:
-    inc authorityEnd
-  var authority = trimmed[mark + 3 ..< authorityEnd]
-  # Userinfo ends at the LAST '@', the way browsers read it: everything
-  # before it is credentials, whatever it contains.
-  let at = authority.rfind('@')
-  if at >= 0:
-    authority = authority[at + 1 .. ^1]
-  var host, port: string
-  if authority.startsWith("["):
-    let close = authority.find(']')
-    if close < 2:
-      return InvalidUrlText
-    for c in authority[1 ..< close]:
-      if c notin Ipv6Chars:
+    for i in 0 ..< mark:
+      if trimmed[i] notin SchemeChars:
         return InvalidUrlText
-    host = authority[0 .. close]
-    let rest = authority[close + 1 .. ^1]
-    if rest.len > 0:
-      if rest[0] != ':':
+    var authorityEnd = mark + 3
+    while authorityEnd < trimmed.len and trimmed[authorityEnd] notin {'/', '?', '#', '\\'}:
+      inc authorityEnd
+    var authority = trimmed[mark + 3 ..< authorityEnd]
+    # Userinfo ends at the LAST '@', the way browsers read it: everything
+    # before it is credentials, whatever it contains.
+    let at = authority.rfind('@')
+    if at >= 0:
+      authority = authority[at + 1 .. ^1]
+    var host, port: string
+    if authority.startsWith("["):
+      let close = authority.find(']')
+      if close < 2:
         return InvalidUrlText
-      port = rest[1 .. ^1]
-  else:
-    let colon = authority.find(':')
-    host = if colon >= 0: authority[0 ..< colon] else: authority
-    port = if colon >= 0: authority[colon + 1 .. ^1] else: ""
-    if host.len == 0:
-      return InvalidUrlText
-    for c in host:
-      if c notin HostChars:
+      for c in authority[1 ..< close]:
+        if c notin Ipv6Chars:
+          return InvalidUrlText
+      host = authority[0 .. close]
+      let rest = authority[close + 1 .. ^1]
+      if rest.len > 0:
+        if rest[0] != ':':
+          return InvalidUrlText
+        port = rest[1 .. ^1]
+    else:
+      let colon = authority.find(':')
+      host = if colon >= 0: authority[0 ..< colon] else: authority
+      port = if colon >= 0: authority[colon + 1 .. ^1] else: ""
+      if host.len == 0:
         return InvalidUrlText
-  if port.len > 5:
-    return InvalidUrlText
-  for c in port:
-    if c notin Digits:
+      for c in host:
+        if c notin HostChars:
+          return InvalidUrlText
+    if port.len > 5:
       return InvalidUrlText
-  result = trimmed[0 ..< mark].toLowerAscii() & "://" & host.toLowerAscii()
-  if port.len > 0:
-    result.add(":" & port)
+    for c in port:
+      if c notin Digits:
+        return InvalidUrlText
+    result = trimmed[0 ..< mark].toLowerAscii() & "://" & host.toLowerAscii()
+    if port.len > 0:
+      result.add(":" & port)
 
 const
   UrlStop = Whitespace + {'"', '\'', '<', '>', '`'}
@@ -92,7 +109,7 @@ proc redactedUrlsIn*(text: string): string =
   while i < text.len:
     let mark = text.find("://", i)
     if mark < 0:
-      result.add(text[i .. ^1])
+      result.add(text.substr(i))
       break
     var start = mark
     while start > i and text[start - 1] in SchemeChars:
@@ -100,7 +117,7 @@ proc redactedUrlsIn*(text: string): string =
     while start < mark and text[start] notin Letters:
       inc start
     if start == mark:
-      result.add(text[i ..< mark + 3])
+      result.add(text.substr(i, mark + 2))
       i = mark + 3
       continue
     var stop = mark + 3
@@ -109,7 +126,7 @@ proc redactedUrlsIn*(text: string): string =
     var urlEnd = stop
     while urlEnd > mark + 3 and text[urlEnd - 1] in TrailingPunctuation:
       dec urlEnd
-    result.add(text[i ..< start])
-    result.add(redactedUrl(text[start ..< urlEnd]))
-    result.add(text[urlEnd ..< stop])
+    result.add(text.substr(i, start - 1))
+    result.add(redactedUrl(text.substr(start, urlEnd - 1)))
+    result.add(text.substr(urlEnd, stop - 1))
     i = stop
