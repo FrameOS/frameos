@@ -11,6 +11,7 @@ import frameos/types
 import frameos/spawn_guard
 import frameos/utils/image
 import frameos/utils/process
+import frameos/utils/redacted_url
 
 const
   DefaultFfmpegTimeoutSeconds = 15
@@ -124,7 +125,10 @@ proc get*(self: App, context: ExecutionContext): Image =
       if target.address.len > 0 and target.scheme in ["http", "https"]: target.hostname
       else: ""
     let args = ffmpegArgs(target.pinnedUrl, "pipe:1", scheme = target.scheme, hostHeader = hostHeader)
-    let command = ffmpegCommandForLog(args)
+    # A camera URL usually carries its password: the logged command names it
+    # by its origin only (utils/redacted_url.nim).
+    let command = ffmpegCommandForLog(ffmpegArgs(redactedUrl(target.pinnedUrl), "pipe:1",
+      scheme = target.scheme, hostHeader = hostHeader))
     let timeoutMs = self.ffmpegTimeoutMs()
 
     if self.frameConfig.debug:

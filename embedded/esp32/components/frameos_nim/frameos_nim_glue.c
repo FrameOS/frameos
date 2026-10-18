@@ -1437,7 +1437,7 @@ struct fos_nim_http_stream {
 };
 
 static esp_http_client_handle_t http_open_request(
-    const char *method, const char *url,
+    const char *method, const char *url, const char *log_url,
     const void *body, size_t body_len,
     const char *headers, size_t headers_len,
     int timeout_ms, int *out_status, int64_t *out_content_length,
@@ -1449,8 +1449,10 @@ fos_nim_http_stream *fos_nim_http_stream_open(
     char *err_buf, size_t err_buf_len)
 {
     int64_t content_length = -1;
+    char log_url[FOS_NETGUARD_LOG_URL_LEN];
+    fos_netguard_url_origin(url, log_url, sizeof(log_url));
     esp_http_client_handle_t client = http_open_request(
-        "GET", url, NULL, 0, headers, headers_len, timeout_ms,
+        "GET", url, log_url, NULL, 0, headers, headers_len, timeout_ms,
         out_status, &content_length, err_buf, err_buf_len);
     *out_content_length = content_length;
     if (client == NULL) return NULL;
@@ -1641,7 +1643,7 @@ static bool set_extra_headers(esp_http_client_handle_t client, const char *heade
  * fos_nim_http_free) holding the ENTIRE body and *out_total its size. On
  * failure the partial file is unlinked. */
 static fos_nim_body_status_t http_spill_remaining(
-    esp_http_client_handle_t client, const char *url,
+    esp_http_client_handle_t client, const char *log_url,
     fos_nim_http_chunk *chunks, size_t chunk_count,
     size_t buffered, size_t limit,
     char **out_path, size_t *out_total, size_t *out_limit)
@@ -1669,7 +1671,7 @@ static fos_nim_body_status_t http_spill_remaining(
 
     FILE *f = fopen(path, "wb");
     if (f == NULL) {
-        ESP_LOGW(TAG, "%s: cannot open spill file %s (errno=%d)", url, path, errno);
+        ESP_LOGW(TAG, "%s: cannot open spill file %s (errno=%d)", log_url, path, errno);
         fos_nim_http_free_chunks(chunks, chunk_count);
         return FOS_NIM_BODY_SPILL_FAILED;
     }
@@ -1677,7 +1679,7 @@ static fos_nim_body_status_t http_spill_remaining(
      * knob) and the only runtime evidence the spill path ran — the 32MB
      * profile compiles ESP_LOGI out (CONFIG_LOG_DEFAULT_LEVEL=WARN). */
     ESP_LOGW(TAG, "%s: PSRAM exhausted after %u buffered bytes; spilling body to %s",
-             url, (unsigned)buffered, path);
+             log_url, (unsigned)buffered, path);
 
     bool ok = true;
     for (size_t i = 0; i < chunk_count; i++) {
@@ -1717,7 +1719,7 @@ static fos_nim_body_status_t http_spill_remaining(
         }
         if (fwrite(io, 1, (size_t)r, f) != (size_t)r) {
             ESP_LOGW(TAG, "%s: spill write failed at %u bytes (errno=%d)",
-                     url, (unsigned)total, errno);
+                     log_url, (unsigned)total, errno);
             status = FOS_NIM_BODY_SPILL_FAILED;
             break;
         }
@@ -1737,7 +1739,7 @@ static fos_nim_body_status_t http_spill_remaining(
     }
     *out_path = dup;
     *out_total = total;
-    ESP_LOGW(TAG, "%s: spilled %u-byte body to %s", url, (unsigned)total, path);
+    ESP_LOGW(TAG, "%s: spilled %u-byte body to %s", log_url, (unsigned)total, path);
     return FOS_NIM_BODY_OK;
 }
 
@@ -1787,14 +1789,14 @@ uint32_t fos_nim_http_connect_retries(void)
 }
 
 static esp_err_t http_open_with_retry(esp_http_client_handle_t client, size_t body_len,
-                                      const char *url)
+                                      const char *log_url)
 {
     int64_t started_us = esp_timer_get_time();
     esp_err_t err = esp_http_client_open(client, body_len);
     if (err == ESP_ERR_HTTP_CONNECT &&
         esp_timer_get_time() - started_us < HTTP_FAST_CONNECT_FAIL_US) {
         s_http_connect_retries++;
-        ESP_LOGW(TAG, "%s: connect refused, retrying once", url ? url : "(null)");
+        ESP_LOGW(TAG, "%s: connect refused, retrying once", log_url);
         esp_http_client_close(client);
         vTaskDelay(pdMS_TO_TICKS(HTTP_CONNECT_RETRY_DELAY_MS));
         err = esp_http_client_open(client, body_len);
@@ -1809,7 +1811,10 @@ static esp_err_t http_open_with_retry(esp_http_client_handle_t client, size_t bo
  * the policy on every hop. Returns the open client with the final status in
  * *out_status and the body length in *out_content_length (-1 when unknown).
  * On failure returns NULL with a short diagnostic in err_buf; the client is
- * already cleaned up. */
+ * already cleaned up. The log lines name the request by `log_url`, the
+ * caller's fos_netguard_url_origin() of it: a scene URL can carry a share
+ * token or an API key past the host, and neither the diagnostic nor the
+ * console gets more than scheme://host[:port]. */
 #define HTTP_OPEN_FAIL(...) \
     do { \
         if (err_buf != NULL && err_buf_len > 0) snprintf(err_buf, err_buf_len, __VA_ARGS__); \
@@ -1817,7 +1822,7 @@ static esp_err_t http_open_with_retry(esp_http_client_handle_t client, size_t bo
     } while (0)
 
 static esp_http_client_handle_t http_open_request(
-    const char *method, const char *url,
+    const char *method, const char *url, const char *log_url,
     const void *body, size_t body_len,
     const char *headers, size_t headers_len,
     int timeout_ms, int *out_status, int64_t *out_content_length,
@@ -1844,12 +1849,12 @@ static esp_http_client_handle_t http_open_request(
          * client ("Could not resolve host"): it is not the policy speaking,
          * and a scene that shows the text must not tell the owner their
          * gallery was blocked. */
-        ESP_LOGW(TAG, "%s %s: %s", method ? method : "GET", url ? url : "(null)", netguard_reason);
+        ESP_LOGW(TAG, "%s %s: %s", method ? method : "GET", log_url, netguard_reason);
         HTTP_OPEN_FAIL("%s", netguard_reason);
     case FOS_NETGUARD_BLOCKED:
     default:
         ESP_LOGW(TAG, "%s %s: blocked by the local-network policy: %s",
-                 method ? method : "GET", url ? url : "(null)", netguard_reason);
+                 method ? method : "GET", log_url, netguard_reason);
         HTTP_OPEN_FAIL(FOS_NETGUARD_BLOCK_FMT, "", netguard_reason);
     }
 
@@ -1892,10 +1897,10 @@ static esp_http_client_handle_t http_open_request(
         HTTP_OPEN_FAIL("too many requests in flight");
     }
     /* A retry stays inside the pin: both attempts dial the checked address. */
-    esp_err_t err = http_open_with_retry(client, body_len, url);
+    esp_err_t err = http_open_with_retry(client, body_len, log_url);
     fos_netguard_unpin_for_task();
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "%s %s: connect failed: 0x%x", method ? method : "GET", url,
+        ESP_LOGW(TAG, "%s %s: connect failed: 0x%x", method ? method : "GET", log_url,
                  (unsigned)err);
         esp_http_client_cleanup(client);
         if (err_buf != NULL && err_buf_len > 0) http_connect_reason(url, err, err_buf, err_buf_len);
@@ -1903,7 +1908,7 @@ static esp_http_client_handle_t http_open_request(
     }
     if (body != NULL && body_len > 0) {
         if (esp_http_client_write(client, body, body_len) < 0) {
-            ESP_LOGW(TAG, "%s %s: body write failed", method, url);
+            ESP_LOGW(TAG, "%s %s: body write failed", method, log_url);
             esp_http_client_cleanup(client);
             HTTP_OPEN_FAIL("request body write failed");
         }
@@ -1954,14 +1959,14 @@ static esp_http_client_handle_t http_open_request(
                                                         sizeof(netguard_reason), &pin);
             }
             if (verdict == FOS_NETGUARD_UNRESOLVED) {
-                ESP_LOGW(TAG, "%s %s: redirect: %s", method ? method : "GET", url, netguard_reason);
+                ESP_LOGW(TAG, "%s %s: redirect: %s", method ? method : "GET", log_url, netguard_reason);
                 esp_http_client_close(client);
                 esp_http_client_cleanup(client);
                 HTTP_OPEN_FAIL("redirect: %s", netguard_reason);
             }
             if (verdict != FOS_NETGUARD_ALLOWED) {
                 ESP_LOGW(TAG, "%s %s: redirect blocked by the local-network policy: %s",
-                         method ? method : "GET", url, netguard_reason);
+                         method ? method : "GET", log_url, netguard_reason);
                 esp_http_client_close(client);
                 esp_http_client_cleanup(client);
                 HTTP_OPEN_FAIL(FOS_NETGUARD_BLOCK_FMT, "redirect: ", netguard_reason);
@@ -1972,10 +1977,10 @@ static esp_http_client_handle_t http_open_request(
             esp_http_client_cleanup(client);
             HTTP_OPEN_FAIL("too many requests in flight");
         }
-        err = http_open_with_retry(client, body_len, redirect_url_ok ? redirect_url : url);
+        err = http_open_with_retry(client, body_len, log_url);
         fos_netguard_unpin_for_task();
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "%s %s: redirect connect failed: 0x%x", method ? method : "GET", url,
+            ESP_LOGW(TAG, "%s %s: redirect connect failed: 0x%x", method ? method : "GET", log_url,
                      (unsigned)err);
             esp_http_client_cleanup(client);
             if (err_buf != NULL && err_buf_len > 0) {
@@ -1985,7 +1990,7 @@ static esp_http_client_handle_t http_open_request(
         }
         if (body != NULL && body_len > 0) {
             if (esp_http_client_write(client, body, body_len) < 0) {
-                ESP_LOGW(TAG, "%s %s: redirect body write failed", method ? method : "GET", url);
+                ESP_LOGW(TAG, "%s %s: redirect body write failed", method ? method : "GET", log_url);
                 esp_http_client_cleanup(client);
                 HTTP_OPEN_FAIL("request body write failed");
             }
@@ -1996,7 +2001,7 @@ static esp_http_client_handle_t http_open_request(
     }
     if (*out_status <= 0) {
         /* Connected, but no status line came back before the timeout. */
-        ESP_LOGW(TAG, "%s %s: no response", method ? method : "GET", url);
+        ESP_LOGW(TAG, "%s %s: no response", method ? method : "GET", log_url);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
         *out_status = 0;
@@ -2034,9 +2039,11 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
      * (http_client.nim, openStreamHandle). */
     _Static_assert(sizeof(FOS_NETGUARD_BLOCK_FMT) - 4 + sizeof("redirect: ") - 1 + 95 < sizeof(open_err),
                    "open_err must hold the whole local network access message");
+    char log_url[FOS_NETGUARD_LOG_URL_LEN];
+    fos_netguard_url_origin(url, log_url, sizeof(log_url));
     int64_t content_length = -1;
     esp_http_client_handle_t client = http_open_request(
-        method, url, body, body_len, headers, headers_len, timeout_ms,
+        method, url, log_url, body, body_len, headers, headers_len, timeout_ms,
         out_status, &content_length, open_err, sizeof(open_err));
     if (client == NULL) {
         return chunked_error(out_status, out_count, "%s", open_err);
@@ -2044,7 +2051,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
 
     size_t limit = max_bytes ? max_bytes : 10u * 1024u * 1024u;
     if (content_length > 0 && (size_t)content_length > limit) {
-        ESP_LOGW(TAG, "%s: response too large (%lld > %u)", url,
+        ESP_LOGW(TAG, "%s: response too large (%lld > %u)", log_url,
                  content_length, (unsigned)limit);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
@@ -2116,7 +2123,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
                      * here on, success or not. */
                     char *spill_path = NULL;
                     size_t spill_total = 0;
-                    body_status = http_spill_remaining(client, url, chunks,
+                    body_status = http_spill_remaining(client, log_url, chunks,
                                                        chunk_count, total, limit,
                                                        &spill_path, &spill_total,
                                                        &effective_limit);
@@ -2143,7 +2150,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
         int r = esp_http_client_read(client, (char *)cur + cur_len, cur_cap - cur_len);
         if (r < 0) {
             ESP_LOGW(TAG, "%s %s: response read failed, internal=%u psram=%u",
-                     method ? method : "GET", url,
+                     method ? method : "GET", log_url,
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
             body_status = FOS_NIM_BODY_READ_FAILED;
@@ -2168,14 +2175,14 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
             if (effective_limit < limit) {
                 ESP_LOGW(TAG, "%s: response exceeded the %u byte storage spill cap "
                          "(%s, max_http_response_bytes %u; PSRAM was too full to buffer it)",
-                         url, (unsigned)effective_limit, s_http_spill_dir, (unsigned)limit);
+                         log_url, (unsigned)effective_limit, s_http_spill_dir, (unsigned)limit);
                 return chunked_error(out_status, out_count,
                                      "response exceeded %u bytes: the image did not fit in "
                                      "free PSRAM and %s has only %u bytes to spare for it",
                                      (unsigned)effective_limit, s_http_spill_dir,
                                      (unsigned)effective_limit);
             }
-            ESP_LOGW(TAG, "%s: response exceeded %u bytes", url, (unsigned)limit);
+            ESP_LOGW(TAG, "%s: response exceeded %u bytes", log_url, (unsigned)limit);
             return chunked_error(out_status, out_count, "response exceeded %u bytes",
                                  (unsigned)limit);
         case FOS_NIM_BODY_READ_FAILED: {
@@ -2192,7 +2199,7 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
                                  (unsigned)total);
         default:
             ESP_LOGW(TAG, "%s: out of memory buffering HTTP response: total=%u internal=%u psram=%u largest_psram=%u",
-                     url, (unsigned)total,
+                     log_url, (unsigned)total,
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));

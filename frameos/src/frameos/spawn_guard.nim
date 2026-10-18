@@ -17,7 +17,9 @@
 ## process must be http(s) (or rtsp(s) for the camera app) with a host, and
 ## that host must pass the same private-network policy the HTTP client
 ## enforces — so `file:///etc/shadow` or a router address does not get
-## through a scene's browser when the deny is on.
+## through a scene's browser when the deny is on. A refusal names the URL by
+## its origin only (utils/redacted_url.nim): the apps draw it on the panel,
+## and a camera URL usually carries its password.
 ##
 ## The policy check resolves the host once. While the deny is active the
 ## child must connect to THAT answer and nothing else (`SpawnTarget.address`
@@ -62,15 +64,15 @@ proc spawnTarget*(url: string, allowedSchemes: openArray[string]): SpawnTarget =
   try:
     parsed = parseUri(trimmed)
   except CatchableError:
-    result.refusal = "URL could not be parsed: " & trimmed
+    result.refusal = "URL could not be parsed: " & redactedUrl(trimmed)
     return
   let scheme = parsed.scheme.toLowerAscii()
   result.scheme = scheme
   if scheme notin allowedSchemes:
-    result.refusal = "URL scheme \"" & scheme & "\" is not allowed here (" & allowedSchemes.join(", ") & " only): " & trimmed
+    result.refusal = "URL scheme \"" & scheme & "\" is not allowed here (" & allowedSchemes.join(", ") & " only): " & redactedUrl(trimmed)
     return
   if parsed.hostname.len == 0:
-    result.refusal = "URL has no host: " & trimmed
+    result.refusal = "URL has no host: " & redactedUrl(trimmed)
     return
   result.hostname = parsed.hostname
   var port = 0
@@ -78,7 +80,7 @@ proc spawnTarget*(url: string, allowedSchemes: openArray[string]): SpawnTarget =
     try:
       port = parseInt(parsed.port)
     except ValueError:
-      result.refusal = "URL has an invalid port: " & trimmed
+      result.refusal = "URL has an invalid port: " & redactedUrl(trimmed)
       return
   else:
     port = case scheme

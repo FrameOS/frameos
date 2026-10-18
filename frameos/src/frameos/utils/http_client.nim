@@ -27,6 +27,9 @@ const
 import std/[monotimes, strutils, times]
 import frameos/js_runtime/run_budget
 import frameos/spool
+import frameos/utils/redacted_url
+
+export redacted_url
 
 type
   SimpleHttpHeader* = tuple[name: string, value: string]
@@ -79,16 +82,29 @@ proc validateHttpHeaders*(headers: seq[SimpleHttpHeader]) =
 proc validateHttpRequestUrl*(url: string) =
   ## The URL is copied onto the request line as-is, so anything that ends the
   ## line, splits the target from the version, or is a control byte is refused
-  ## along with any scheme other than http(s).
+  ## along with any scheme other than http(s). The messages name the URL by
+  ## its origin only (redacted_url.nim), like every request error.
   if url.strip().len == 0:
     raise newException(ValueError, "Invalid HTTP URL: empty")
   for c in url:
     if ord(c) <= 0x20 or ord(c) == 0x7f:
-      raise newException(ValueError, "Invalid HTTP URL: control character or space in " &
-        url.escape())
+      raise newException(ValueError, "Invalid HTTP URL: control character or space in a URL for " &
+        redactedUrl(url))
   let lowered = url.toLowerAscii()
   if not (lowered.startsWith("http://") or lowered.startsWith("https://")):
-    raise newException(ValueError, "Invalid HTTP URL: " & url)
+    raise newException(ValueError, "Invalid HTTP URL: " & redactedUrl(url))
+
+proc httpRequestFailedMessage*(url: string, detail = ""): string =
+  ## What a request that got no response at all raises on the embedded and
+  ## wasm targets, where the transport is C or JavaScript and only says
+  ## "failed" (and sometimes why). Scene JS hands the text to the app, which
+  ## may draw it.
+  "HTTP request failed: " & redactedUrl(url) &
+    (if detail.len > 0: " (" & detail & ")" else: "")
+
+proc renderDeadlineRefusalMessage*(url: string): string =
+  "HTTP request refused: the render's wall-clock deadline has passed (" &
+    redactedUrl(url) & ")"
 
 proc httpHostOf*(url: string): string =
   ## The host of `url`, for messages a person reads.
@@ -315,7 +331,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
         noteHttpWait("a reply from", stream.url, stream.openedAt)
         let detail = $errBuf.cstring
         raise newException(IOError,
-          if detail.len > 0: detail else: "HTTP request failed: " & stream.url)
+          if detail.len > 0: detail else: httpRequestFailedMessage(stream.url))
       stream.code = status.int
       stream.contentLength = contentLength
 
@@ -406,11 +422,11 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       if stream.httpBodyStreamFailed:
         raise newException(HttpStreamReopenError,
           "reopen for rewind answered HTTP " & $stream.code &
-          " (first response was HTTP " & $expectedCode & "): " & stream.url)
+          " (first response was HTTP " & $expectedCode & "): " & redactedUrl(stream.url))
       if stream.contentLength != expectedLength:
         raise newException(HttpStreamReopenError,
           "reopen for rewind changed Content-Length from " & $expectedLength &
-          " to " & $stream.contentLength & ": " & stream.url)
+          " to " & $stream.contentLength & ": " & redactedUrl(stream.url))
 
     proc httpBodyStreamSource*(stream: HttpBodyStream):
         proc(dst: pointer, maxBytes: int): int {.gcsafe, raises: [].} =
@@ -458,7 +474,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     # so a slow upstream costs the render its remaining time, not the whole
     # watchdog window. Refused outright once the deadline has passed.
     if renderDeadlineRemainingMs() == 0:
-      raise newException(IOError, &"HTTP request refused: the render's wall-clock deadline has passed ({url})")
+      raise newException(IOError, renderDeadlineRefusalMessage(url))
     let effectiveTimeoutMs = capToRenderDeadline(timeoutMs)
     var status: cint = 0
     let bodyPtr = if body.len > 0: unsafeAddr body[0] else: nil
@@ -489,7 +505,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
         if spillPath != nil:
           discard c_remove(spillPath)
           fos_nim_http_free(spillPath)
-        raise newException(IOError, if reason.len > 0: reason else: &"HTTP request failed: {url}")
+        raise newException(IOError, if reason.len > 0: reason else: httpRequestFailedMessage(url))
       if rawChunks != nil:
         heldBodyChunks.add((cast[pointer](rawChunks), chunkCount))
       result.code = status.int
@@ -529,7 +545,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
             reason = newString(outLen.int)
             copyMem(addr reason[0], buf, outLen.int)
           fos_nim_http_free(buf)
-        raise newException(IOError, if reason.len > 0: reason else: &"HTTP request failed: {url}")
+        raise newException(IOError, if reason.len > 0: reason else: httpRequestFailedMessage(url))
       result.code = status.int
       result.status = $status
       result.body = buf
@@ -964,7 +980,7 @@ else:
     let parsed = parseUri(url)
     let scheme = parsed.scheme.toLowerAscii()
     if scheme notin ["http", "https"] or parsed.hostname.len == 0:
-      raise newException(ValueError, &"Invalid HTTP URL: {url}")
+      raise newException(ValueError, "Invalid HTTP URL: " & redactedUrl(url))
 
   proc validateRequestHeaders(headers: HttpHeaders) =
     if headers == nil:
@@ -1203,7 +1219,7 @@ else:
       # A redirect chain is also a chain of resolutions and connects; make sure
       # what is left of the budget can still cover one.
       discard ioTimeoutMs(timeoutMs, deadline)
-    raise newException(HttpRequestError, &"Too many HTTP redirects fetching {url}")
+    raise newException(HttpRequestError, "Too many HTTP redirects fetching " & redactedUrl(url))
 
   proc boundedHeadMetadata*(
       url: string,

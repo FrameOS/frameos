@@ -81,6 +81,22 @@ bool fos_netguard_is_private_ip(const char *ip);
  * address, not to example.com. */
 bool fos_netguard_parse_url(const char *url, char *host, size_t host_len, int *port);
 
+/* What of a scene's request URL a log line may show: "scheme://host[:port]",
+ * scheme and host lowercased, userinfo, path, query and fragment dropped (an
+ * IPv6 host keeps its brackets). Anything that does not parse that way is
+ * FOS_NETGUARD_INVALID_URL, never the input echoed back. Always writes a
+ * NUL-terminated string when out_len > 0; a long origin is truncated, which
+ * still shows nothing past the host.
+ *
+ * A scene URL can carry a secret anywhere past the host (a Photos share link
+ * is /api/photos/shared/pk_<token>/..., API keys ride in query strings), and
+ * the console these lines go to is read over USB. Same rule as the runtime's
+ * redactedUrl (frameos/src/frameos/utils/redacted_url.nim). */
+#define FOS_NETGUARD_INVALID_URL "(invalid URL)"
+/* Enough for "https://" + a typical host + ":65535"; longer is truncated. */
+#define FOS_NETGUARD_LOG_URL_LEN 96
+void fos_netguard_url_origin(const char *url, char *out, size_t out_len);
+
 /* The three answers a URL can get while the deny is active. UNRESOLVED is a
  * DNS failure, not a policy decision: the request cannot proceed (connect()
  * would resolve the name again, which is the rebinding hole the check
