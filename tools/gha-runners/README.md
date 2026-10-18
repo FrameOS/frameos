@@ -25,6 +25,12 @@ it never enters a VM), then build the image:
 Rebuild the image whenever you want a newer actions-runner / toolchain.
 `/srv/gha-runners/cache` is mounted into every VM at `/mnt/cache` — point
 BR2_DL_DIR / ccache / buildx `type=local` caches there from the workflows.
+Concurrent jobs share it, so a cache whose files must agree with each other
+(the Nim tests' nimcache, whose `.o` is trusted when its `.c` matches) goes
+through immutable snapshots, not one directory everyone copies into:
+`frameos/tools/ci_nimcache.sh`, under `nimcache/frameos-tests-snapshots`.
+The old `nimcache/frameos-tests/shard-{1..8}` dirs (~31 G) serve only
+branches older than that change (5–8 nothing at all) and can be deleted.
 Runners carry labels `self-hosted,monster,epyc-32|epyc-8|epyc-4,linux,x64`.
 
 ## Pool (since 2026-09-11)
