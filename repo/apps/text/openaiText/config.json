@@ -25,5 +25,12 @@
     { "name": "model", "type": "string", "value": "gpt-5.5", "required": true, "label": "Model" }
   ],
   "output": [{ "name": "reply", "type": "string" }],
-  "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "600", "staleEnabled": true, "staleDuration": "86400" }
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "600",
+    "staleEnabled": true,
+    "staleDuration": "86400"
+  }
 }

@@ -119,5 +119,12 @@
     }
   ],
   "output": [{ "name": "image", "type": "image" }],
-  "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "3600", "staleEnabled": true, "staleDuration": "86400" }
+  "cache": {
+    "enabled": true,
+    "inputEnabled": true,
+    "durationEnabled": true,
+    "duration": "3600",
+    "staleEnabled": true,
+    "staleDuration": "86400"
+  }
 }
