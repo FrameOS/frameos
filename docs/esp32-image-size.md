@@ -401,20 +401,16 @@ with 6,073 B: level L only (no caller asked for another), two 40-entry
 tables where QRgen carried ten 160-entry ones, and one reserved-area test
 where QRgen's templates expanded one per mask.
 
-- **The output is QRgen's**, module for module and pixel for pixel, so no
-  scene's code moved: `tests/test_qr.nim` pins vectors made with QRgen at
-  every version where the layout changes, in all three modes, and every
-  style the app offers. That includes QRgen's version rule (the smallest
-  version that holds one character more than the text) and its `float32`
-  arithmetic for rounded modules: computed in `float64` instead, the
-  edges of tiny modules came out a level or two different.
-- **One fix:** QRgen wrote a numeric group with a leading zero in 7 or 4
+- **The codes follow the standard**: the smallest version that fits, the
+  mask with the lowest penalty. Each test vector decodes back to its text
+  with zxing-cpp. The layout and the styles (`alRad`, `moRad`, `moSep`) are
+  QRgen's. QRgen's numeric mode wrote a group with a leading zero in 7 or 4
   bits, where the standard says 10. Digit-only text like `0123456789`
   scanned as `0987173088`, and `007` did not scan at all.
 - **Unchecked on the ESP32: −3,289** of the module's 9,362. Every index is in
   range by construction, and `qrImage` clamps the two numbers a scene can
-  pass. Hosts and the tests keep every check, so the same code runs checked
-  at all 40 versions.
+  pass. Hosts and the tests keep every check, so the tests run the same
+  code checked.
 - **Not ported to JavaScript.** The app's default code is the frame control
   URL, which carries the access key, and JS apps (store scenes included)
   must not be handed that key. The Linux runtime's screens need a Nim

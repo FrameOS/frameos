@@ -4,14 +4,9 @@
 ## This replaced the QRgen package (2026-10-18), which was 21.9 KB of the
 ## ESP32 firmware: its templates expanded the reserved-area test once per
 ## mask, its tables carried all four levels and every caller asked for L.
-## The codes are QRgen's module for module (the same mode, the same version:
-## the smallest that holds one character MORE than the text, which was
-## QRgen's rule; the same mask, scored by QRgen's penalty before the format
-## bits are drawn), and `qrImage` lays them out in QRgen's pixels, so a
-## scene's QR code did not move. One difference on purpose: QRgen wrote a
-## numeric group with a leading zero in 7 or 4 bits (a tutorial's mistake)
-## where the standard has 10, so digit-only text with such a group scanned
-## as something else. tests/test_qr.nim pins all of it.
+## The layout and the styles (`alRad`, `moRad`, `moSep`) are QRgen's. QRgen
+## wrote a numeric group with a leading zero in 7 or 4 bits where the
+## standard has 10, so digit-only text like "007" did not scan; this does.
 
 import pixie
 
@@ -143,7 +138,7 @@ proc qrEncode*(text: string): QrCode =
   var countBits = 0
   while true:
     countBits = (if version <= 9: [10, 9, 8] elif version <= 26: [12, 11, 16] else: [14, 13, 16])[modeIndex]
-    if 4 + countBits + payloadBits(mode, text.len + 1) <= dataCodewords(version) * 8: break
+    if 4 + countBits + payloadBits(mode, text.len) <= dataCodewords(version) * 8: break
     if version == 40: raise newException(ValueError, "Too much text for a QR code: " & $text.len & " characters")
     inc version
 
@@ -274,10 +269,11 @@ proc qrImage*(qr: QrCode, pixels: int, padding = 1, dark = color(0, 0, 0), light
   ## `qr` at most `pixels` square: whole pixels per module, `padding`
   ## modules of quiet zone, the rest split around it. `alRad` rounds the
   ## finder patterns, `moRad` the modules and `moSep` spaces them, each a
-  ## percentage. Colors are drawn opaque.
+  ## percentage. Colors are drawn opaque: square modules are written, not
+  ## blended.
   let
     n = qr.size
-    # Bounds for the unchecked arithmetic below; QRgen took a uint8 padding.
+    # Bounds for the unchecked arithmetic below.
     pixels = clamp(pixels, 1, 1 shl 15)
     padding = clamp(padding, 0, 255)
     unit = pixels div (n + padding * 2)
@@ -289,10 +285,9 @@ proc qrImage*(qr: QrCode, pixels: int, padding = 1, dark = color(0, 0, 0), light
     dark = color(dark.r, dark.g, dark.b)
     light = color(light.r, light.g, light.b)
     shaped = moRad > 0 or moSep > 0
-    # float32 with QRgen's own expressions: the same bits, the same edges.
-    sep: float32 = unit.float32 * 0.4 * moSep / 100
-    side: float32 = unit.float32 - sep * 2
-    radius: float32 = (unit.float32 / 2 - sep) * moRad / 100
+    sep = unit.float32 * 0.4'f32 * moSep / 100
+    side = unit.float32 - sep * 2
+    radius = (unit.float32 / 2 - sep) * moRad / 100
     darkRgbx = dark.rgbx
   result = newImage(extent, extent)
   result.fill(light)
@@ -308,7 +303,7 @@ proc qrImage*(qr: QrCode, pixels: int, padding = 1, dark = color(0, 0, 0), light
           for px in 0 ..< unit:
             result.unsafe[margin + x * unit + px, margin + y * unit + py] = darkRgbx
   if shaped or alRad > 0:
-    let finder: float32 = 3.5 * alRad / 100
+    let finder = 3.5'f32 * alRad / 100
     for level in 0 .. 2:
       let r = unit.float32 * (
         if level == 0: finder
