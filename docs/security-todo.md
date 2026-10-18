@@ -65,13 +65,12 @@ is left there is in the medium / low list.
   `/api/frames/…/preview_proxy`) with the app's session cookie, and an
   opaque-origin worker cannot send it — the proxy has to move to a
   short-lived per-preview token first, on both control planes.
-- Smaller: the runner pool's `/mnt/cache` is writable from every VM (fork
-  PRs do not land there — mount it read-only or a scratch subtree for any
-  job that is not building a release, and keep "require approval for all
-  outside collaborators" on); the backend Docker image runs as root
-  (`docs/todo.md`, "Backend Docker image"); the OpenAI service-account key
-  and R2 keys sit in plaintext `.env*` files on the dev laptop (rotate /
-  scope).
+- Smaller: the backend Docker image runs as root (`docs/todo.md`, "Backend
+  Docker image"); the OpenAI service-account key and R2 keys sit in
+  plaintext `.env*` files on the dev laptop (rotate / scope). Keep "require
+  approval for all outside collaborators" on in the repo's Actions settings:
+  the runner pool's shared `/mnt/cache` is read-only to pull-request jobs
+  apart from the Nim shards' nimcache (`tools/gha-runners/README.md`).
 
 ## Accepted — the deprecated source-build path (not a priority)
 
@@ -142,7 +141,3 @@ Ops, not code: the session cookie is scoped to the registrable domain, so
 the browser also sends it to `cloud-cdn.frameos.net` (R2 behind
 Cloudflare). The fix is to serve the CDN from its own registrable domain;
 the `/admin` system check flags the shared domain until that is done.
-Re-seal the `account_settings` rows nobody has read since sealing shipped:
-`pnpm --filter @frameos-cloud/auth-web settings:reseal-legacy` against prod
-(`DATABASE_URL` + `FRAMEOS_CLOUD_ENCRYPTION_KEY` from `auth-web.env`), dry
-run first, then `--apply`.

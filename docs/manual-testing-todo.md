@@ -42,45 +42,6 @@ touch, both 2026-09-19):
   Pi Zero W and a Pi 5).
 - [ ] **Touch on a rotated frame:** at `rotate` 90 / 270 the touch-test dot
   is still under the finger (rotate 0 passed on the Pi 5).
-- [ ] **Input v2 on a Pi (2026.9.23, `docs/events.md` "Input"; run in the
-  preview and under tests, never on hardware):** with a USB mouse on a
-  framebuffer / HyperPixel frame the drawn cursor moves along the picture's
-  axes at `rotate` 0 and 90, hides 5 s after the last motion, and a click of
-  it is a `pointerDown` at the cursor; on the Touch test the gestures come
-  out right (`tap`, `doubleTap`, `longPress` while still held, `swipe left`);
-  two fingers are two `pointerId`s; a keyboard plugged in AFTER boot is found
-  (`driver:evdev … listening`), is grabbed (`grabbed: true`; Ctrl+Alt+Del does
-  nothing), and the Keyboard test shows `Shift+H` as `H` under the `us` layout
-  and `z` for KEY_Y under `de` (`inputSettings.keyboardLayout`); a GPIO button
-  held 2.5 s logs a `gpio` `down`, then on the release a `gpio` `up` and a
-  `button` `longPress`, both with `durationMs` near 2500, and the Counter
-  sample counts one per press (a quick double is one `doublePress`, a hold one
-  `longPress`). On an ESP32 (E1002 bench): a tap logs `gpio` `down` and `up`
-  at once and a `button` `press` 350 ms later, and a scene's `button` listener
-  without an `action` filter runs once per press, double press or long press. Timing through a render (E1004, a ~30 s
-  refresh): a tap made mid-refresh logs an `up` with a `durationMs` of about
-  100, not 30000, then a `press` and no `longPress`; two quick taps
-  mid-refresh log one `doublePress` and no `press`; a key held 2 s
-  mid-refresh logs the `up` then a `longPress`, both with `durationMs` near
-  2000; a key held across the end of a refresh logs
-  nothing until it is let go.
-- [ ] **Button sounds and debounce on the E1004** (2026.10.16): the fastest
-  tap you can make is `down`, `up`, `press` (no lost taps); the fastest
-  double tap you can make is `down`, `up`, `down`, `doublePress`, `up` with
-  no `press`, and sounds 2000, 1400, 3000, 1400 Hz: the second down higher
-  (1.5x), every up the same lower click; a 2.5 s hold
-  sounds "click, dun, dun, clack", a dun at 1 s and 2 s, and logs one
-  `longPress` with the `up`; no key double-registers from contact bounce
-  (press slowly, rock the key). On a battery frame, tap once right before it
-  would sleep: the `press` still lands (the log shows it before the sleep
-  line). From deep sleep: hold a key to wake the frame for 2.5 s: duns from
-  the moment the task starts, then a `longPress` (`wake: true`); tap to wake,
-  then tap again just after the first click: a `doublePress`; a plain tap to
-  wake: a `press`. Listen for whether the double's high second down (1.5x the press
-  pitch) and the hold's low note (0.5x) carry on the piezo; retune in
-  `fos_buzzer.c` if not. Pi with buttons (Inky Impression): the same fastest
-  tap and double tap register with the 30 ms lgpio debounce, and a slow press
-  does not bounce into two.
 - [ ] **"Turn display off / on" end to end on the Pi 5** (menu → event →
   driver). The write the driver makes (`echo 1 > /sys/class/graphics/fb0/blank`)
   was run by hand as uid 990 and took `bl_power` 0 → 4 and DPMS On → Off.
@@ -99,6 +60,28 @@ touch, both 2026-09-19):
   4.0 → Square → 2.1" Round and back; after each deploy + reboot config.txt
   holds exactly one `dpi_timings=` line and at most one HyperPixel
   `dtoverlay=` line.
+
+### Input on a Pi
+
+- [ ] **Input v2 on a Pi (2026.9.23, `docs/events.md` "Input"; run in the
+  preview and under tests, never on hardware):** with a USB mouse on a
+  framebuffer / HyperPixel frame the drawn cursor moves along the picture's
+  axes at `rotate` 0 and 90, hides 5 s after the last motion, and a click of
+  it is a `pointerDown` at the cursor; on the Touch test the gestures come
+  out right (`tap`, `doubleTap`, `longPress` while still held, `swipe left`);
+  two fingers are two `pointerId`s; a keyboard plugged in AFTER boot is found
+  (`driver:evdev … listening`), is grabbed (`grabbed: true`; Ctrl+Alt+Del does
+  nothing), and the Keyboard test shows `Shift+H` as `H` under the `us` layout
+  and `z` for KEY_Y under `de` (`inputSettings.keyboardLayout`); a GPIO button
+  held 2.5 s logs a `gpio` `down`, then on the release a `gpio` `up` and a
+  `button` `longPress`, both with `durationMs` near 2500, and the Counter
+  sample counts one per press (a quick double is one `doublePress`, a hold one
+  `longPress`).
+- [ ] **GPIO buttons on a Pi (Inky Impression):** the fastest tap and double
+  tap you can make register with the 30 ms lgpio debounce (`down`, `up`,
+  `press`; `down`, `up`, `down`, `doublePress`, `up`), and a slow press does
+  not bounce into two. The same checks passed on the E1004, sounds included
+  (2026-10-18).
 
 ### ESP32 bench
 
@@ -143,3 +126,30 @@ to end.
   undeclared` otherwise. `POST /event/setCurrentScene` with `state` over
   HTTP, and a physical button press (origin `driver`), take the same C
   function the console does.
+
+### Setup hotspot bench
+
+The captive portal (#580: the dnsmasq drop-in on NetworkManager images, the
+redirect-only listener on `10.42.0.1:80`) and the made-up hotspot credentials
+(#579) have not met a phone.
+
+- [ ] **The captive sheet:** a phone (iOS and Android) joining the setup
+  hotspot gets the "sign in to network" sheet with the setup form in it, on a
+  `raspberry-pi-64` / `raspberry-pi-5` image AND on the armv6 supplicant image
+  (whose dnsmasq already answered every name). A frame with a screen shows
+  its made-up `FrameOS-XXXX` name and password with the QR code, and the QR
+  code joins.
+- [ ] **"Saved!" inside the sheet:** it is a restricted browser that may not
+  run the page's timers, so the move to the frame's LAN address may not
+  happen there. The page reads right without script (a link, a `<noscript>`
+  line); if the sheet closes the moment the hotspot drops, the link is what
+  the owner uses. Decide whether the sheet needs a "Done, open the app" step.
+- [ ] **A frame flashed before the drop-in:** root is read-only, so it gets
+  the DNS half only with a new image. The portal still works there the old
+  way (two QR codes), with the :80 listener bound but idle.
+
+### Scene import bench
+
+- [ ] **Import from a frame that ran standalone first** (`scenes_get` + the
+  importer, `docs/cloud-frames.md` "Scenes the frame already had"): so far
+  covered by Nim, hub and auth-web tests against a fake device only.

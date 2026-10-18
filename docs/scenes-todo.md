@@ -1,9 +1,10 @@
-# Scene store TODO — 50 missing scenes
+# Scene store TODO — 49 missing scenes
 
 Ideas for practical scenes the store at [scenes.frameos.net](https://scenes.frameos.net) doesn't have yet.
+Priority: lower than the platform work for now (2026-10-18), not parked.
 Focus: glanceable, high-contrast, low-refresh content that plays to e-ink strengths (always-on, no glow, readable in sunlight). Cadence notes assume typical e-ink refresh budgets (Spectra 6 ≈ minutes, faster B/W panels ≈ seconds).
 
-Already covered (don't duplicate): photo slideshows (Google Photos, Immich, SD card, Unsplash, Wikimedia, URL), curated art galleries, monthly calendar, iCal agenda, weather, chart, GitHub stars, XKCD, counter, message board, Chromium screenshot, Ken Burns, RTSP webcam, MiniGPT, OpenAI image, haiku of the hour, bird field journal, visited world map, DVD logo bounce, word clock, big typographic clock, analog clock face, year progress / memento mori.
+Already covered (don't duplicate): photo slideshows (Google Photos, Immich, SD card, Unsplash, Wikimedia, URL), curated art galleries, monthly calendar, iCal agenda, weather, chart, GitHub stars, XKCD, counter, message board, Chromium screenshot, Ken Burns, RTSP webcam, MiniGPT, OpenAI image, haiku of the hour, bird field journal, visited world map, DVD logo bounce, word clock, big typographic clock, analog clock face, year progress / memento mori, chess puzzle of the day, touch test. Photo albums are not a store scene: the Photos library builds one per album (`docs/photo-album-scene.json`).
 
 Legend: **S** = simple (one HTTP source + layout), **M** = medium (auth / multiple sources / state), **L** = larger (protocol work, new app, or heavy layout).
 
@@ -70,7 +71,6 @@ Legend: **S** = simple (one HTTP source + layout), **M** = medium (auth / multip
 
 ## Learning & play
 
-- [ ] **Chess puzzle of the day** — daily puzzle from the Lichess API, board rendered as crisp SVG; solution revealed on next refresh or button press. **M**
 - [ ] **Sudoku of the day** — generated locally, printed like a newspaper puzzle; solution on button press. Pairs with a frame in the kitchen and a pencil. **M**
 - [ ] **Language flashcard** — word or phrase of the hour in the target language with translation and example; spaced-repetition-ish rotation from a bundled deck or CSV URL. **M**
 - [ ] **Trivia / fact of the day** — Numbers API / Open Trivia DB; question at breakfast, answer at dinner (two-phase daily refresh). **S**

@@ -1,16 +1,55 @@
 # FrameOS — what is still open
 
-Everything left to do across the repo, in one file. It is written to be read
-cold: each section says what that part of FrameOS *is* before it says what is
+Everything left to do across the repo starts here. "The map" lists every
+todo file with its state and how much it matters right now; the rest of this
+file is the work that has no file of its own. It is written to be read cold:
+each section says what that part of FrameOS *is* before it says what is
 missing from it. Reference material — principles, permission scopes, threat
-models, wire protocols, measurements — lives in the linked docs; this file only
-carries the work. **When an item ships, delete it.** Larger tracks keep their
-own files: security findings in `docs/security-todo.md`, architecture
-convergence in `docs/convergence-todo.md`, store
-content in `docs/scenes-todo.md`, the JSX widget UI in `docs/ui-todo.md`,
-cloud billing in `cloud/docs/accounting-todo.md`, ESP32/Pico firmware in
-`docs/embedded-todo.md`, and the boxes that need a bench in
-`docs/manual-testing-todo.md`.
+models, wire protocols, measurements — lives in the linked docs; the todo
+files only carry the work. **When an item ships, delete it** (and update its
+line in the map).
+
+## The map (2026-10-19)
+
+1. **`docs/convergence-todo.md`** — the architecture getting smaller: one
+   provider protocol on two hosts. **Next up: item 7 stage 1**, the backend
+   hosts the frames' management WebSocket. Item 3 (the hub renders for thin
+   clients) waits on a reason to ship, since its plans cannot be bought until
+   billing resumes; item 2 (a hardware bench that runs on every release) has
+   not started; item 1 (delete the compiler) not before December 2026.
+2. **`docs/security-todo.md`** — nothing critical open on any plane. The
+   highs left are device and isolation work: ESP32 Secure Boot and flash/NVS
+   encryption, the preview worker on its own origin (blocked on a per-preview
+   proxy token on both planes), interpreter budgets per scene. Owner tasks:
+   rotate the laptop's plaintext OpenAI and R2 keys, and move the CDN to its
+   own registrable domain.
+3. **`docs/manual-testing-todo.md`** — what needs a bench: the HyperPixels on
+   Pi 0–4 and the Round on a Pi 5, input and GPIO buttons on a Pi, four ESP32
+   flash/OTA checks and the dispatcher's cloud/schedule paths, the setup
+   hotspot's captive sheet on a phone, scene import from a standalone frame.
+   The E1004's buttons and sounds passed (2026-10-18). It only shrinks for
+   good with convergence item 2.
+4. **`cloud/docs/accounting-todo.md`** — billing. AI metering is live and
+   nothing is invoiced: Phase 3b (entity, provider, invoices, dunning) is
+   paused until there are users to invoice. Owed before the first invoice: an
+   OpenAI organisation admin key and a week of `ai-metering-compare.mjs`
+   (§7). Mostly a design record; §8/§9 stay because the code cites them.
+5. **`docs/embedded-todo.md`** — the Pico's four small bugs and its missing
+   host tests, all fixed on draft PR #499, which rewrites the file when it
+   merges. The ESP32's open work lives in the other files.
+6. **`docs/ui-todo.md`** — JSX widgets that render and react on the frame.
+   Designed, not started. Lower priority for now, not parked.
+7. **`docs/scenes-todo.md`** — 49 store scene ideas, which
+   `build-todo-scenes.ts` builds from. Lower priority for now, not parked.
+8. **`cloud/STORE-TODO.md`** — the store's design record (decisions, threat
+   model, protocol), no open work; its open questions are below. The name
+   stays because code comments cite its decision numbers.
+9. **Open PRs with their own todo file**, joining this map when they merge:
+   #555 (`docs/local-assets-todo.md`: serve-stale caches, bounded image
+   libraries, paid-source budgets) and draft #496
+   (`docs/scene-rhythm-todo.md`).
+
+---
 
 **Compiled scenes are deprecated (2026-08-30).** No editor action produces
 new Nim, every surface that shows a compiled scene warns and points at the
@@ -41,32 +80,6 @@ Two rules that shape most entries:
 
 ---
 
-## ESP32 NVS on the 16 KB layouts
-
-The 4 MB and 8 MB partition tables give NVS 16 KB (3 usable pages × 126
-entries); the 16/32 MB tables give 24 KB. The backend issues P-256 server
-keys (≈ 1 KB of PEM), the Wi-Fi driver keeps its config in RAM and `status`
-prints `nvs: used/total`, and the service-settings cache skips itself
-rather than leave the config fewer than 192 free entries (`fos_settings.c`),
-so a board should no longer fill up. Only if one does:
-
-- [ ] **Store the TLS pair as DER, not PEM**, on the device (`nvs_set_pem`):
-  another ~30 %.
-- Do NOT grow the NVS partition on the 4 MB / 8 MB tables: the NVS-sparing
-  USB update (`embeddedFlashImage.ts`) writes around the NVS range read from
-  the image and refuses a board whose table differs, so a bigger NVS strands
-  every board already on the old table.
-
-## Pre-release manual test sweep
-
-`docs/manual-testing-todo.md` holds the boxes that need hardware: the
-HyperPixel bench (Pi 0–4 firmware-DPI path, the Square, the Round on a Pi 5)
-and the ESP32 flashing / OTA boxes that need a 16 MB C3, a 16 MB XIAO, a
-32 MB S3 and an OTA-capable board on a self-hosted backend. Delete it when
-empty.
-
----
-
 ## Frame privileges and FrameOS Remote
 
 `docs/buildroot-privileges.md` §4 is the reference: generic Buildroot images
@@ -86,55 +99,25 @@ the images ship no FrameOS Remote. Verified on hardware 2026-09-04/05. Left:
 - **Backend-personalized Buildroot images stay root**, and their Remote keeps
   `shell`, because the self-hosted deploy path is built out of it
   (`_frame_deployer.py`, `deploy_remote.py`, `restart_frame.py`, the asset
-  manager). The way out is `docs/convergence-todo.md` item 7: once the
-  backend speaks the provider protocol, those images use the same
-  unprivileged unit and door as generic ones and the Remote retires.
+  manager), until `docs/convergence-todo.md` item 7 stage 3.
 
 ---
 
-## Runtime: refs shared across HTTP worker threads
+## Runtime: the last live-config reads off the runtime's thread
 
 The frame's web server runs up to four mummy worker threads and ORC refcounts
-are not atomic; the rule and the helpers (`requestFrameConfig()`,
-`getLastPublicSceneState()`, `sendEvent` copies) are in `AGENTS.md`, "Refs do
-not cross threads". `server/` was audited and fixed 2026-09-19 (#503). Left,
-deliberately:
+are not atomic; the rule and the helpers are in `AGENTS.md`, "Refs do not
+cross threads". Workers copy what they read (`liveConfigValue`,
+`requestFrameConfig()`), and the hub thread keeps a copy of its own that it
+refreshes when the config's generation moves. Left:
 
-- The cloud link routes pass `globalFrameConfig` to `startCloudHubClient` /
-  `enrollManagedFrame` / `pollDeviceFlow`, which keep it: one owning copy of
-  the ROOT per link, never freed (the globals hold it), no closures in the
-  type. The proper fix is for the hub client to work on values, as the
-  logger and metrics threads already do.
-- Workers still read scalar and string fields straight off the live config
-  (`frameAccess`, `frameAccessKey`, `serverApiKey`, `assetsPath`, `rotate`…;
-  in `portal.nim` the setup-status and confirm pages' `frameHost`,
-  `framePort`, `httpsProxy.enable` and the hotspot SSID, and the connect
-  thread's `networkCheckUrl`). `updateFrameConfigFrom` never frees a
-  payload, so the read cannot land on freed memory, but the swap is a
-  `copyMem` and a string is two words: a reload can in principle tear one.
-  A values snapshot for `auth.nim` (what `AdminAuthValues` is for the admin
-  block) would close it.
-
----
-
-## Setup hotspot: bench the captive sheet
-
-The captive portal (the dnsmasq drop-in on NetworkManager images, the
-redirect-only listener on `10.42.0.1:80`) has not been seen on a bench:
-
-- A phone (iOS and Android) joining the setup hotspot gets the "sign in to
-  network" sheet with the setup form in it, on a `raspberry-pi-64` /
-  `raspberry-pi-5` image AND on the armv6 supplicant image (whose dnsmasq
-  already answered every name).
-- The "Saved!" page inside that sheet: it is a restricted browser that may
-  not run the page's timers, so the auto-move to the frame's LAN address
-  may not happen there. The page now reads right without script (a link,
-  a `<noscript>` line); if the sheet closes the moment the hotspot drops,
-  the link is what the owner uses. Decide whether the sheet needs a
-  "Done, open the app" step instead.
-- An existing frame flashed before the drop-in: root is read-only, so it
-  gets the DNS half only with a new image. Confirm the portal still works
-  there the old way (two QR codes), with the :80 listener bound but idle.
+- The portal's start-AP path (`startAp`, `startApSupplicant`,
+  `checkNetwork`, `hotspotAutoTimeoutLoop`, `effectiveWifiCountry`) still
+  reads the hotspot name and password, `networkCheckUrl` and `wifiCountry`
+  off the live config. It runs on the main thread at boot, but `startAp`
+  also runs on the connect thread after a failed join, where a reload could
+  tear a string. Threading a private config through the start-AP path
+  closes it.
 
 ---
 
@@ -167,8 +150,6 @@ the frame already had"):
   screen, but the provider's copy runs as `uploaded/<id>`, so state persisted
   under the old id is not carried over. `set_scenes` takes a `state` seed; the
   import sends none.
-- Bench pass on a frame that ran standalone first — so far it is covered by
-  Nim, hub and auth-web tests against a fake device only.
 
 ---
 
@@ -199,38 +180,16 @@ Both halves are held in place by the deprecated source-build path
 
 ---
 
-## Canonical API gaps
-
-Matrix in `docs/api-triality.md`; nothing scheduled — the remaining deltas
-(ESP32 field coverage, canonical Pi asset-mutation aliases) live in that
-file's "Current gaps".
-
----
-
 ## Open questions (decisions, not code)
 
-- Billing — decided 2026-09-01: postpay AI metering plus a three-plan
-  ladder, double-entry ledger, one invoice a month
-  (`cloud/docs/accounting-todo.md` §0). Metering is live; nothing is
-  invoiced. The payment provider (§8.7 — Stripe or a merchant-of-record),
-  the invoicing entity (§8.15) and the plan numbers (§8.13) are parked
-  until there are users to invoice (decided 2026-09-03); the integration
-  is small once needed.
 - `store:publish` human review: always, only for the public store, or
   pre-review for risky (shell-app) scenes? Today it is automated moderation +
   badges + post-moderation only.
 - Unpublish policy: owners delete outright today. Switch to yank-only plus
   support-mediated deletion once anything can depend on a scene.
-- Usernames / publisher handles — the store works without them; the first real
-  need is publisher pages.
-- Asset-backup key recovery UX. The answer has to remain "we cannot read your
-  photos".
-- One backend link per installation, or per organization/project?
-- Thin-client frames on the cloud (ESP32-C3, Pico) — decided: cloud
-  rendering is a paid-plan entitlement, N frames *and* a minimum refresh
-  interval, none on the free tier, and enrollment enforces it. What keeps C3
-  boards out of the cloud flasher is that the hub does not render for thin
-  clients yet — item 3 of `docs/convergence-todo.md`.
+- Publisher handles: publisher pages exist under opaque account ids
+  (`cloud/STORE-TODO.md` decision 8); pretty handles only once someone wants
+  them, and the URLs can then 301.
 
 ---
 
@@ -246,7 +205,8 @@ case, so it is skipped until abuse is actually observed.
 - **Photo gallery service** (`gallery:read`) — curated feeds usable as image
   sources in scenes, quota-limited free tier.
 - **Asset backup** (`backup:assets`) — client-side encryption (the key never
-  leaves the user), content-addressed chunks, resumable.
+  leaves the user), content-addressed chunks, resumable. Its key-recovery UX
+  is open, and the answer has to remain "we cannot read your photos".
 - **Remote access** (`remote:access`) — a persistent outbound WebSocket tunnel
   from backend or frame to a cloud relay (pattern in `app/ws/remote_bridge.py`),
   with an explicit local toggle and a visible "tunnel open" status — and direct
@@ -287,7 +247,8 @@ Everything else parked:
 - Fleet features: one cloud account administering many backends (installer /
   digital signage); a cloud-side "all my frames" dashboard.
 - Shared household access: invite a second account to a backend with a role
-  (the `cloud_membership` table anticipates this).
+  (the `cloud_membership` table anticipates this). With it: one backend link
+  per installation, or per organization/project?
 - Notifications: deploy finished / frame offline → push or email.
 - Community scene of the day, or a featured gallery as an opt-in feed.
 - Hosted backends: run the whole backend in the cloud. Out of scope for the
@@ -303,3 +264,10 @@ Everything else parked:
   allocations to PSRAM (`JS_NewRuntime2` with PSRAM-backed
   `js_malloc_functions`; `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384`) and cJSON
   likewise (`cJSON_InitHooks`). Measure first.
+- ESP32 NVS on the 4 MB / 8 MB layouts (16 KB, 3 usable pages): the
+  service-settings cache already skips itself below 192 free entries
+  (`fos_settings.c`) and `status` prints `nvs: used/total`. Only if a board
+  fills up anyway: store the TLS pair as DER, not PEM (`nvs_set_pem`,
+  ~30 %). Never grow the NVS partition on those tables: the NVS-sparing USB
+  update (`embeddedFlashImage.ts`) refuses a board whose table differs, so a
+  bigger NVS strands every board already on the old one.

@@ -2,7 +2,9 @@
 
 *Written 2026-08-31. Read cold: each section says what exists before what is
 missing. When an item ships, delete it. Repo-wide odds and ends live in
-`docs/todo.md`; this file carries only the widget-UI work.*
+`docs/todo.md`; this file carries only the widget-UI work. Priority: lower
+than the platform work for now (2026-10-18), not parked; nothing below has
+been started.*
 
 The goal: a JS app returns a JSX tree — boxes, text, images, buttons — and the
 frame turns it into pixels *and into behavior*: elements hit-testable by touch,
@@ -23,10 +25,11 @@ an LCD and merely current on Spectra 6.
   `{type, props}` objects. Lowercase tags arrive as strings, capitalized tags
   as identifiers — **user function components come free** once a walker calls
   `type(props)`.
-- **Events flow end to end.** evdev emits `mouseMove`/`mouseDown`/`mouseUp`/
-  `keyDown`/`keyUp` (`drivers/evdev/evdev.nim`), gpioButton and the ESP32's
-  `fos_buttons.c` emit `gpio` edges with a label (the dispatcher makes the
-  `button` presses out of them), and
+- **Events flow end to end.** `frameos/input_state.nim` turns evdev and the
+  preview's pointer into `pointer*` / `key*` events with gestures (`tap`,
+  `longPress`, `swipe`; `docs/events.md` "Input", old `mouse*` names as
+  aliases), gpioButton and the ESP32's `fos_buttons.c` emit `gpio` edges with
+  a label (the dispatcher makes the `button` presses out of them), and
   `RunnerThread.dispatchSceneEvent` (`frameos/runner.nim`) routes any of them
   into the active scene.
 - **One rasterizer: pixie.** Text at any size from one TTF, the strict SVG
@@ -35,9 +38,8 @@ an LCD and merely current on Spectra 6.
   hints host↔driver; waveshare has `renderImagePartial` and per-panel
   `supportsPartialRefresh` (mostly `false` today).
 - **The wasm preview** runs interpreted scenes in the browser, and the pointer
-  over its canvas reaches the scene as the evdev events (`mouseMove` 0..32767,
-  `mouseDown`/`mouseUp`; `frameos/wasm/src/pointer.ts`, scaled by the same
-  `pointerToScenePoint` the runner uses) — the natural place for instant UI
+  and the keyboard over its canvas reach the scene as the same events
+  (`frameos/wasm/src/pointer.ts`) — the natural place for instant UI
   iteration.
 
 ## Standing decisions
@@ -136,11 +138,10 @@ events itself.
    flip `supportsPartialRefresh` per verified panel; keep the
    partials-before-full bookkeeping honest. Spectra 6 stays full-refresh —
    the model still works, it just refreshes at panel speed.
-7. **Preview + editor.** Pass keys from the wasm preview into the scene
-   (`keyDown`/`keyUp` with evdev key names; the pointer already passes);
-   focus simulation for GPIO frames in the device picker; scene-store lint
-   rules for the new
-   vocabulary (`ai-scene.ts` and the field-type checklists apply).
+7. **Preview + editor.** Focus simulation for GPIO frames in the device
+   picker (keys and the pointer already reach the scene); scene-store lint
+   rules for the new vocabulary (`scene-lint.ts`, `docs/scene-guide.md` and
+   the field-type checklists apply).
 8. **ESP32.** Same Nim layout/painter compiles in; measure flash cost before
    merging (firmware-size CI catches it), keep the handler table inside the
    existing per-scene QuickJS budget, and accept full-frame renders only —
