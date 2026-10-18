@@ -69,7 +69,7 @@ an interpreted scene at
 (or in the editor, or with the CLI in `cloud/packages/scene-convert`; see
 `docs/nim-to-js-conversion.md`). Until then such a scene still forces the
 old whole-frame source build on every deploy — `docs/legacy-source-builds.md`
-— which stays until it is deleted: not before October 2026, and possibly
+— which stays until it is deleted: not before December 2026, and possibly
 much later or never (the gate is in `docs/convergence-todo.md`, item 1).
 
 ### Quick install

@@ -80,7 +80,7 @@ is left there is in the medium / low list.
 ## Accepted — the deprecated source-build path (not a priority)
 
 Compiled scenes are deprecated and not recommended, and the path is not
-being deleted before October 2026 (`docs/convergence-todo.md` item 1). Its
+being deleted before December 2026 (`docs/convergence-todo.md` item 1). Its
 findings are recorded here so they are not rediscovered, not scheduled:
 a self-hosted operator who chooses source builds runs user-supplied Nim on
 their own host, and the fix is to use interpreted scenes.

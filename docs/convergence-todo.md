@@ -37,7 +37,7 @@ the work that makes the architecture smaller or decided.*
 
 ## 1. Delete the compiler (the dated debt)
 
-**Gate (restated 2026-09-03): not before October 2026, and possibly
+**Gate (restated 2026-10-18): not before December 2026, and possibly
 much later or never.** The source-build path is the deprecated,
 not-recommended way to run scenes, and it keeps working as long as it is
 there; nothing else on this list waits for its deletion, and its security
@@ -140,7 +140,7 @@ direction only — preview = last release, frame = whatever it runs:
 
 ## 5. Grow the loadable catalog toward the built-in one
 
-30 apps exist only as Nim in the firmware; 17 as loadable JS. The
+29 apps exist only as Nim in the firmware; 19 as loadable JS. The
 converter's misses are the roadmap, not a porting program. A built-in that
 gets a JS replacement is retired through `docs/retired-apps.json`
 (docs/retired-apps.md): stored scenes move to the JS app, older firmware is
