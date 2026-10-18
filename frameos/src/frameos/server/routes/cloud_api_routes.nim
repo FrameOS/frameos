@@ -35,7 +35,7 @@ proc cloudStatusPayload(state: JsonNode): JsonNode =
   # frame owned by a self-hosted backend refuses managed enrollment.
   var backendManaged = false
   {.gcsafe.}:
-    backendManaged = otherControlPlaneActive(globalFrameConfig)
+    backendManaged = otherControlPlaneActive(liveConfigValue(serverHost))
   result = %*{
     "enabled": true,
     "provider_url": providerUrlFromState(state),
@@ -279,7 +279,7 @@ proc addCloudApiRoutes*(router: var Router) =
           return
         let fromBody = normalizeProviderUrl(payload{"provider_url"}.getStr(""))
         providerUrl = if fromBody.len > 0: fromBody else: providerUrlFromState(state)
-      let ownName = frameDisplayName(globalFrameConfig)
+      let ownName = frameDisplayName(requestFrameConfig())
       if ownName.len > 0:
         displayName = "FrameOS frame (" & ownName & ")"
 
@@ -303,9 +303,9 @@ proc addCloudApiRoutes*(router: var Router) =
       # Shared with the hub thread's background tick; both sides are safe to
       # run concurrently (the poll is a no-op unless the link is connecting,
       # and the provider treats a duplicate poll as authorization_pending).
-      let poll = pollDeviceFlow(globalFrameConfig)
+      let poll = pollDeviceFlow(requestFrameConfig())
       if poll.startHub:
-        startCloudHubClient(globalFrameConfig)
+        startCloudHubClient()
       withLock cloudLinkLock:
         let state = loadCloudLinkState()
         jsonResponse(request, Http200, cloudStatusPayload(state))
@@ -331,7 +331,8 @@ proc addCloudApiRoutes*(router: var Router) =
         return
       # One control plane at a time: refuse while a self-hosted backend is
       # configured, and while already enrolled with a provider.
-      if otherControlPlaneActive(globalFrameConfig):
+      let frameConfig = requestFrameConfig()
+      if otherControlPlaneActive(frameConfig):
         jsonResponse(request, Http409,
           %*{"detail": "This frame is managed by a self-hosted backend. " &
                        "Remove serverHost from frame.json before enrolling with FrameOS Cloud."})
@@ -352,9 +353,9 @@ proc addCloudApiRoutes*(router: var Router) =
       # flow records too), with the device's own hostname as the fallback.
       var origin = localOrigin(request)
       if origin.len == 0:
-        origin = deviceLocalOrigin(globalFrameConfig)
+        origin = deviceLocalOrigin(frameConfig)
       let outcome = enrollManagedFrame(
-        providerUrl, claimToken, "", payload{"name"}.getStr(""), globalFrameConfig,
+        providerUrl, claimToken, "", payload{"name"}.getStr(""), frameConfig,
         localOrigin = origin)
       if not outcome.ok:
         let status =
@@ -368,9 +369,9 @@ proc addCloudApiRoutes*(router: var Router) =
           "error": outcome.error,
         })
         return
-      startCloudHubClient(globalFrameConfig)
+      startCloudHubClient()
       # Managed mode activates the private-network HTTP deny immediately.
-      refreshLocalNetworkPolicy(globalFrameConfig)
+      refreshLocalNetworkPolicy(frameConfig)
       withLock cloudLinkLock:
         jsonResponse(request, Http200, cloudStatusPayload(loadCloudLinkState()))
   )
@@ -619,7 +620,7 @@ proc addCloudApiRoutes*(router: var Router) =
             saveCloudLinkState(state)
           jsonResponse(request, Http200, cloudStatusPayload(state))
         # The private-network deny only applies to a managed frame.
-        refreshLocalNetworkPolicy(globalFrameConfig)
+        refreshLocalNetworkPolicy(requestFrameConfig())
         return
 
       var providerUrl = ""
@@ -640,7 +641,8 @@ proc addCloudApiRoutes*(router: var Router) =
           return
         providerUrl = providerUrlFromState(state)
         accessToken = state{"access_token"}.getStr("")
-      if otherControlPlaneActive(globalFrameConfig):
+      let frameConfig = requestFrameConfig()
+      if otherControlPlaneActive(frameConfig):
         jsonResponse(request, Http409,
           %*{"detail": "This frame is managed by a self-hosted backend. " &
                        "Remove serverHost from frame.json before letting FrameOS Cloud manage it."})
@@ -650,7 +652,7 @@ proc addCloudApiRoutes*(router: var Router) =
         return
 
       # Another provider round trip, so no lock is held across it.
-      let outcome = enrollManagedFrame(providerUrl, "", accessToken, "", globalFrameConfig)
+      let outcome = enrollManagedFrame(providerUrl, "", accessToken, "", frameConfig)
       if not outcome.ok:
         withLock cloudLinkLock:
           let state = loadCloudLinkState()
@@ -662,8 +664,8 @@ proc addCloudApiRoutes*(router: var Router) =
           %*{"detail": "Could not hand this frame to FrameOS Cloud: " & outcome.error,
              "error": outcome.error})
         return
-      startCloudHubClient(globalFrameConfig)
-      refreshLocalNetworkPolicy(globalFrameConfig)
+      startCloudHubClient()
+      refreshLocalNetworkPolicy(frameConfig)
       withLock cloudLinkLock:
         jsonResponse(request, Http200, cloudStatusPayload(loadCloudLinkState()))
   )
@@ -842,5 +844,5 @@ proc addCloudApiRoutes*(router: var Router) =
       clearPendingLinkCode()
       sendEvent("render", %*{}, eoSystem)
       # Leaving managed mode lifts the private-network HTTP deny immediately.
-      refreshLocalNetworkPolicy(globalFrameConfig)
+      refreshLocalNetworkPolicy(requestFrameConfig())
   )

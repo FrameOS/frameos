@@ -1350,7 +1350,7 @@ proc renderControlPage*(request: Request) =
         let options = if fieldType == "boolean":
           @[StateFieldOption(value: "true", label: "true"), StateFieldOption(value: "false", label: "false")]
         elif fieldType == "font":
-          getAvailableFonts(globalFrameConfig.assetsPath).mapIt(StateFieldOption(value: it, label: it))
+          getAvailableFonts(liveConfigValue(assetsPath)).mapIt(StateFieldOption(value: it, label: it))
         else:
           field.options
       for option in options:
@@ -1400,13 +1400,14 @@ proc renderControlPage*(request: Request) =
   # case field text carries a template placeholder that relocates it
   let fieldsMetaJson = ($fieldsMeta).replace("<", "\\u003c")
   {.gcsafe.}:
+    let frameName = liveConfigValue(name)
     # Single pass: substituted content (which may contain user-supplied
     # text) is never rescanned for the other placeholders
     let controlHtml = getWebAsset("assets/compiled/web/control.html").multiReplace(
       ("/*$$fieldsHtml$$*/", fieldsHtml),
       ("[/*$$fieldsMetaJson$$*/]", fieldsMetaJson),
       ("/*$$sceneOptionsHtml$$*/", sceneOptionsHtml),
-      ("Frame Control", if globalFrameConfig.name != "": h(globalFrameConfig.name) else: "Frame Control"))
+      ("Frame Control", if frameName != "": h(frameName) else: "Frame Control"))
     request.respond(int(Http200), body = controlHtml)
 
 proc appsPayload*(): string =

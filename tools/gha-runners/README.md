@@ -25,6 +25,15 @@ it never enters a VM), then build the image:
 Rebuild the image whenever you want a newer actions-runner / toolchain.
 `/srv/gha-runners/cache` is mounted into every VM at `/mnt/cache` — point
 BR2_DL_DIR / ccache / buildx `type=local` caches there from the workflows.
+It is **read-only unless a slot's `GHA_CACHE_WRITABLE` says otherwise**
+(`bin/gha-slot.sh`): `all` on the epyc-32 slots, which only
+`workflow_dispatch` release builds reach (the Buildroot ccache and downloads
+under `buildroot/`); `nimcache` on the epyc-4 slots, writable over the
+read-only rest, for the Nim test shards; nothing on epyc-8. Incus's
+`readonly=true` makes the host-side mount read-only, so root inside the
+guest (the runner has passwordless sudo) cannot remount it writable. A new
+workflow that wants a writable cache gets its own subdirectory on the slots
+it runs on, never a slot-wide `all` on a label pull requests reach.
 Concurrent jobs share it, so a cache whose files must agree with each other
 (the Nim tests' nimcache, whose `.o` is trusted when its `.c` matches) goes
 through immutable snapshots, not one directory everyone copies into:
@@ -127,4 +136,5 @@ Watch it with `free -g` (the `shared` column is the VMs) and
 Security notes: the host never runs job code; VMs are ephemeral; "Require
 approval for all outside collaborators" is on in the repo's Actions
 settings, and fork PRs are routed to GitHub-hosted runners by the
-workflows because every VM shares the writable `/mnt/cache`.
+workflows, so code nobody has reviewed neither runs here nor seeds the
+nimcache the epyc-4 slots share.

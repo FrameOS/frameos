@@ -13,6 +13,7 @@ import ../identity
 import ../link_state
 import ../../types
 import ../../channels
+from ../../config import noteFrameConfigChanged, withLiveConfigLock
 import ../../local_access
 import ../../utils/http_client
 
@@ -234,10 +235,16 @@ suite "cloud hub session over a live socket":
     check snapshot.exemptHostPorts == @["127.0.0.1:" & $TestPort]
 
   test "the local admin override lifts the deny while managed":
-    frameConfig.network = NetworkConfig(allowLocalNetworkAccess: true)
+    # As a reload does it: the hub copies its values off the live config when
+    # the config's generation moves, not by holding the object.
+    withLiveConfigLock:
+      frameConfig.network = NetworkConfig(allowLocalNetworkAccess: true)
+    noteFrameConfigChanged()
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       not localNetworkPolicySnapshot().active)
-    frameConfig.network = NetworkConfig(allowLocalNetworkAccess: false)
+    withLiveConfigLock:
+      frameConfig.network = NetworkConfig(allowLocalNetworkAccess: false)
+    noteFrameConfigChanged()
     check waitUntil(10.0, proc(): bool {.gcsafe.} =
       localNetworkPolicySnapshot().active)
 

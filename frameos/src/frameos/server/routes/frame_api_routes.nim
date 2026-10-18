@@ -224,7 +224,7 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
       return
     {.gcsafe.}:
       var fonts: seq[JsonNode] = @[]
-      for font in getAvailableFonts(globalFrameConfig.assetsPath):
+      for font in getAvailableFonts(liveConfigValue(assetsPath)):
         if font.len > 0:
           fonts.add(%*{
             "file": font,
@@ -244,7 +244,7 @@ proc addFrameApiRoutes*(router: var Router, connectionsState: ConnectionsState) 
       if font.len == 0 or "/" in font or "\\" in font or ".." in font:
         request.respond(Http400, body = "Invalid font filename")
         return
-      let path = globalFrameConfig.assetsPath / "fonts" / font
+      let path = liveConfigValue(assetsPath) / "fonts" / font
       if not fileExists(path):
         request.respond(Http404, body = "Font not found")
         return

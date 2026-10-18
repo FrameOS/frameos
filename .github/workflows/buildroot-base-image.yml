@@ -197,12 +197,14 @@ jobs:
       # runner VM at /mnt/cache — it survives every job with no
       # save/restore step and no quota, which is what actions/cache never
       # managed here (GitHub's 10GB repo store evicted it within hours, and
-      # Depot's store went away with Depot). A runner_label override onto a
-      # GitHub-hosted runner simply builds cold in the workspace.
+      # Depot's store went away with Depot). Only the epyc-32 slots may write
+      # it; a runner_label override onto a GitHub-hosted runner, or onto a
+      # slot that sees the cache read-only, simply builds cold in the
+      # workspace.
       - name: Pick the persistent cache dir
         run: |
           set -euo pipefail
-          if [ -d /mnt/cache ]; then
+          if [ -d /mnt/cache ] && [ -w /mnt/cache ]; then
             cache_dir="/mnt/cache/buildroot/${PLATFORM}"
           else
             cache_dir="${GITHUB_WORKSPACE}/build/buildroot-images/cache"

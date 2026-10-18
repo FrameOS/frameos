@@ -6,6 +6,7 @@ import deques
 import mummy
 import assets/frame_web as frameWebAssets
 import frameos/types
+from frameos/config import withLiveConfigLock
 
 var globalFrameOS*: FrameOS
 var globalFrameConfig*: FrameConfig
@@ -29,6 +30,25 @@ const MAX_RECENT_LOGS* = 5000
 # small (500 entries covers ~8 hours).
 const MAX_RECENT_METRICS* = 500
 const FRAME_API_ID* = 1
+
+proc liveConfigHandle*(): pointer =
+  ## `globalFrameConfig` uncounted: reading it through this takes no
+  ## reference, so no refcount of the runtime's config moves on this thread.
+  {.gcsafe.}:
+    cast[pointer](globalFrameConfig)
+
+template liveConfigValue*(field: untyped): untyped =
+  ## One value field (a string, a number) of the runtime's config, copied for
+  ## this thread under the lock a reload swaps the config with. Read straight
+  ## off `globalFrameConfig` on a worker, a string can tear across a reload.
+  ## Never a ref field: a copy of one shares the runner's refcounts.
+  block:
+    var value: typeof(FrameConfig().field)
+    withLiveConfigLock:
+      let live {.cursor.} = cast[FrameConfig](liveConfigHandle())
+      if live != nil:
+        value = live.field
+    value
 
 proc initConnectionsState*(): ConnectionsState =
   new(result)

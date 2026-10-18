@@ -23,6 +23,7 @@
 ## from JSON — go through parseFrameConfig / loadConfig.
 
 import json, jsony, pixie, os, strutils, parseutils, locks
+import std/atomics
 import zippy
 import frameos/hal/files
 import frameos/hotspot_credentials
@@ -454,6 +455,26 @@ var retiredFrameConfigs: seq[FrameConfig] = @[]
 var retiredSettingsNodes: seq[JsonNode] = @[]
 var retiredConfigLock: Lock
 initLock(retiredConfigLock)
+# Moves on every swap below, so a thread that keeps values copied off the live
+# config (the hub client) knows when to copy them again.
+var liveConfigGeneration: Atomic[int]
+
+proc currentFrameConfigGeneration*(): int =
+  liveConfigGeneration.load(moAcquire)
+
+proc noteFrameConfigChanged*() =
+  ## For a writer that changed the live config in place rather than through
+  ## the swaps below (the tests do).
+  discard liveConfigGeneration.fetchAdd(1, moRelease)
+
+template withLiveConfigLock*(body: untyped) =
+  ## Runs `body` while no reload can swap the live config: the swaps below
+  ## hold this lock. A thread that is not the runtime's copies values out
+  ## (strings, numbers) here, never a ref — a string read straight off the
+  ## live object is two words, and a reload landing between them would tear
+  ## it (AGENTS.md, "Refs do not cross threads").
+  withLock retiredConfigLock:
+    body
 
 proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
   ## Reload in place: every holder of the FrameConfig ref (the runner, the
@@ -485,6 +506,7 @@ proc updateFrameConfigFrom*(target: FrameConfig, source: FrameConfig) =
       copyMem(addr target[], addr source[], sizeof(target[]))
       zeroMem(addr source[], sizeof(source[]))
       retiredFrameConfigs.add(retired)
+      noteFrameConfigChanged()
 
 proc replaceFrameConfigSettings*(target: FrameConfig, settings: sink JsonNode) =
   ## `target.settings = settings` for a config other threads are reading.
@@ -517,3 +539,4 @@ proc replaceFrameConfigSettings*(target: FrameConfig, settings: sink JsonNode) =
       wasMoved(incoming)
       if outgoing != nil:
         retiredSettingsNodes.add(move(outgoing))
+      noteFrameConfigChanged()

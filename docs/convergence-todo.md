@@ -140,8 +140,9 @@ direction only — preview = last release, frame = whatever it runs:
 
 ## 5. Grow the loadable catalog toward the built-in one
 
-29 apps exist only as Nim in the firmware; 19 as loadable JS. The
-converter's misses are the roadmap, not a porting program. A built-in that
+The firmware's built-in catalog (`frameos/src/apps`) is still bigger than
+the loadable one (19 JS apps under `repo/apps`). The converter's misses are
+the roadmap, not a porting program. A built-in that
 gets a JS replacement is retired through `docs/retired-apps.json`
 (docs/retired-apps.md): stored scenes move to the JS app, older firmware is
 still sent the Nim keyword, and the Nim app goes in the same change.
@@ -149,13 +150,8 @@ still sent the Nim keyword, and the Nim app goes in the same change.
 - [ ] Each primitive that clears a real cluster (the `scene_convert`
   event's `manual_port_primitives` counts them) gets a bridge call or a
   JS port of the built-ins it unblocks — demand-ordered, one at a time,
-  never a bulk port. Done so far: the network photo
-  (`frameos.fetchImage`, 2026-10-12), which carried the Immich app across
-  as `repo/apps/image/immich` and retired `data/immich`. On 2026-10-13 the
-  FrameOS Gallery, Unsplash, Wikimedia Commons, Google Photos, OpenAI image
-  and text, Home Assistant sensor, Weather and Recycle Belgium followed, with
-  `frameos.remember` (state that outlives an ESP32 render), `fetchImage`
-  `exif` and `app.frame.embedded`. What stays Nim on purpose:
+  never a bulk port. Eleven built-ins have gone that way so far
+  (`docs/retired-apps.json`). What stays Nim on purpose:
   `downloadImage` (the planner tests' decoder producer, no flash to save),
   `downloadUrl` (spooled bodies for `icalJson`), `localImage` (folders and
   color sidecars), `xmlToJson` (pixie's SVG parser keeps `std/xmlparser`
@@ -172,14 +168,8 @@ scene-execution rule is pinned the same way
 so is the settings-key split: every single-plane key in
 `docs/cloud-frames-contract.json` carries `parity: {only, why}`, and the
 tests cap the count at 10 linux-only / 9 esp32-only — the cap can only go
-down (it went up three times: 8 → 9 for the Linux display-driver key `device`,
-2026.9.22, so cloud Pi frames could switch drivers at all; 9 → 10 for
-`input_settings`, 2026.9.23, keyboard layout + grab, which is not a gap to
-close — the chip has no keyboard or pointer, every `key*`/`pointer*` event
-in `docs/events-contract.json` is `hosts.esp32: false`; esp32 7 → 9 for
-`buzzer_pin` and `buzzer_tone_hz`, 2026.10.12, the button-press tone of the
-reTerminal E-series, which no Pi preset has a buzzer for). Standing rule rather than a
-task:
+down (each raise carries its reason in that key's `parity.why`).
+Standing rule rather than a task:
 
 - [ ] ESP32 `device`: the firmware already switches panels at runtime
   (`set panel <key>`, fos_console.c), but a panel key pushed without the

@@ -125,7 +125,7 @@ nothing new can be added, and the overage is billed at the PAYG rate).
 
 ### 0.2 Cloud-rendered frames — the entitlement that answers an old question
 
-`docs/todo.md` has carried this for a while: *"Thin-client frames on the
+`docs/todo.md` used to carry this: *"Thin-client frames on the
 cloud (ESP32-C3, embedded Pi/Pico): serving them means the cloud renders
 every frame for them — free cloud rendering forever, for everyone. Decide
 before building; until then C3 boards stay out of the cloud flasher."*

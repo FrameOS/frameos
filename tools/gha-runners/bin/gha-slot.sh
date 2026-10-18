@@ -11,7 +11,10 @@
 #                 passed into the VM; the VM only ever sees the JIT config.
 #   CPUS, MEMORY, DISK, LABELS  sizing + runner labels for this slot
 #   GHA_IMAGE_ALIAS (gha-runner-noble), GHA_POOL (parallaize-lvm)
-#   GHA_CACHE_DIR   host dir shared read-write into every VM at /mnt/cache
+#   GHA_CACHE_DIR   host dir shared into every VM at /mnt/cache
+#   GHA_CACHE_WRITABLE  what of it the VM may write: "all", or subdirectories
+#                   (space-separated) mounted writable over a read-only cache.
+#                   Empty, the default, leaves the whole cache read-only.
 set -uo pipefail
 
 SLOT=${1:?slot name}
@@ -69,7 +72,22 @@ while true; do
         -c user.gha-slot="$SLOT" >/dev/null; then
     log "init failed; retry in 30s"; sleep 30; continue
   fi
-  [ -d "$CACHE_DIR" ] && incus config device add "$VM" cache disk source="$CACHE_DIR" path=/mnt/cache >/dev/null
+  # A job is anyone's code that can push a branch (and whatever its
+  # dependencies run), and what lands in the cache feeds the next job: the
+  # Buildroot ccache ends up in every release SD image. So a slot writes only
+  # what its jobs own. readonly=true makes the host-side mount read-only, so
+  # root in the guest cannot remount it writable (checked 2026-10-18).
+  if [ -d "$CACHE_DIR" ]; then
+    if [ "${GHA_CACHE_WRITABLE:-}" = all ]; then
+      incus config device add "$VM" cache disk source="$CACHE_DIR" path=/mnt/cache >/dev/null
+    else
+      incus config device add "$VM" cache disk source="$CACHE_DIR" path=/mnt/cache readonly=true >/dev/null
+      for sub in ${GHA_CACHE_WRITABLE:-}; do
+        [ -d "$CACHE_DIR/$sub" ] || { log "no $CACHE_DIR/$sub, left read-only"; continue; }
+        incus config device add "$VM" "cache-${sub//\//-}" disk source="$CACHE_DIR/$sub" path="/mnt/cache/$sub" >/dev/null
+      done
+    fi
+  fi
   if ! incus start "$VM"; then
     log "start failed; destroying $VM"; incus delete -f "$VM" >/dev/null 2>&1; sleep 30; continue
   fi

@@ -360,14 +360,16 @@
   in a second). A global that crosses threads holds VALUES (strings, plain
   objects) or is only read under the lock that writes it; hand out copies;
   never write `let x = globalFrameConfig` (or `.settings`, `.network`, …) on
-  a worker — use `requestFrameConfig()` / `readConfig()` for a private
-  config, `getLastPublicSceneState()` / `publicStateFieldsCopy()` for scene
-  state. A `Channel` MOVES its message under ORC, so `sendEvent` copies the
+  a worker — use `liveConfigValue(field)` (`server/state.nim`) for one string
+  or number, `requestFrameConfig()` / `readConfig()` for a private config,
+  `getLastPublicSceneState()` / `publicStateFieldsCopy()` for scene state. A
+  thread that lives long keeps its own copy and refreshes it when
+  `currentFrameConfigGeneration()` moves (the hub client does). A `Channel` MOVES its message under ORC, so `sendEvent` copies the
   payload; `sendEventOwned(name, move(payload))` is for a fresh parse too big
   to copy. New shared state gets a four-thread test built with
   `-d:useMalloc` (`test_public_state_threads.nim` is the template).
-  `docs/todo.md`, "refs shared across HTTP worker threads", lists what is
-  still open.
+  `docs/todo.md`, "Runtime: the last live-config reads off the runtime's
+  thread", lists what is still open.
 - `frameos/src` houses the on-device runtime written in Nim with asyncdispatch (`frameos/frameos` and `frameos/build` are untracked build outputs, not sources).
 - Entry point `src/frameos.nim` is the runtime's CLI, not a bare `waitFor startFrameOS()`: `start` (the default, also for any unrecognised `--flag`) runs `startFrameOS()` in a retry loop with the boot guard; `version` / `--version` / `-v` prints the compiled version and exits — it used to fall through to `start` and boot a second runtime next to the service, which is how release 9.2 shipped a 9.1 runtime, so keep that branch first; `check` verifies the binary starts; `setup` (`--with-setup=/boot/frameos-setup.json[.gz]`, `--reboot-if-required`) runs first-boot device setup; `driver-setup` and `set-display` (`--device`, `--width`, `--height`, `--rotate`, `--vcom`, `--upload-url`) patch and apply the display; `upgrade` (`--dry-run`, `--no-reboot`) pulls the latest GitHub release; `privileged-worker` is the root side of the privileged door on Buildroot frames; `help` lists them. Drivers, system integrations, and Nim app implementations live in nested directories (`src/apps`, `src/drivers`, `src/system`, `src/frameos`); JavaScript example app sources/configs live under `repo/apps/<folder>/<app>`.
 - JavaScript repo apps under `repo/apps/<image|text|json|logic>/<app>` are catalog templates for custom code apps; a scene copies one into its own `apps` map, with `origin` naming the template (until 2026.10.13 they all sat under `repo/apps/code`, and readers match an old origin by the app's name). Do not generate or commit Nim wrappers inside `repo/apps`; compiled scenes that use them copy their sources into generated `src/apps/sceneapp_*` folders during build/deploy.
