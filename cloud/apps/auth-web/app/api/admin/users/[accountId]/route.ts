@@ -4,6 +4,10 @@ import {
   createDb,
 } from "@frameos-cloud/db";
 import { closeOutSubscriptionForDeletedAccount } from "@frameos-cloud/ledger";
+import {
+  accountPrivateObjectKeys,
+  deleteErasedObjects,
+} from "../../../../../src/lib/account-erasure";
 import { recordAuditEvent } from "../../../../../src/lib/audit";
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -114,6 +118,9 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   // in progress returns its unearned remainder to the receivable and ends,
   // so deleting the account cannot strand deferred revenue.
   await closeOutSubscriptionForDeletedAccount(db, accountId);
+  // The account's photos and frame snapshots leave the bucket with it
+  // (src/lib/account-erasure.ts).
+  const objectKeys = await accountPrivateObjectKeys(db, accountId);
   const [deleted] = await db
     .delete(accounts)
     .where(eq(accounts.id, accountId))
@@ -122,6 +129,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
   if (!deleted) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
+  await deleteErasedObjects(objectKeys);
 
   // The audit row survives account deletion because account_id is
   // set-null-on-delete; record the email in the payload for traceability.
