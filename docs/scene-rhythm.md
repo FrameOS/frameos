@@ -73,10 +73,11 @@ would be free without them** (`availableRenderHeadroomBytes`), and on an
 ESP32-class device never more than **1 MiB**. A new copy also needs one
 contiguous block. A copy that does not fit is not taken (logged once as
 `render:rhythm:copyRefused`), and the scene is then *repainted* (below) on the
-passes where it is not due. So is a scene drawn into several cells in one pass
-(a split's "render all other cells"): one copy cannot stand for several
-rectangles. Passes that reused or repainted something log one `render:rhythm`
-line with how many of each (not on the ESP32).
+passes where it is not due. A scene drawn into several cells in one pass (a
+split's "render all other cells") keeps one copy per cell, each found by its
+place on the canvas; a cell its last due run did not draw (the layout changed)
+loses its copy. Passes that reused or repainted something log one
+`render:rhythm` line with how many of each (not on the ESP32).
 
 In practice: a Pi keeps every slow panel. An ESP32 with an 800x480 panel keeps
 small panels. A 13.3" 1600x1200 board keeps none of its big panels (a half of

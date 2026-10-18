@@ -16,7 +16,8 @@
 ## (`refreshFollowsChildren`). docs/scene-rhythm.md is the long version.
 ##
 ## Every proc here is on every ESP32 render, in an image with little room:
-## no tables, no per-pass lists, one walk over the scene tree.
+## no tables, no per-pass lists, one walk over the scene tree. A scene's
+## copies are a seq found by their place on the canvas.
 
 import std/[hashes, json, monotimes, tables]
 import pixie
@@ -113,25 +114,47 @@ proc copyPixels(dst, src: Image) =
   for y in 0 ..< src.height:
     copyMem(d[dst.dataIndex(0, y) * bpp].addr, s[src.dataIndex(0, y) * bpp].addr, src.width * bpp)
 
-proc copyFits(r: SceneRhythm, image: Image): bool =
-  not r.copy.isNil and r.copy.width == image.width and r.copy.height == image.height and
-    r.copy.format == image.format and r.copyOrigin == image.origin and r.copyStride == image.stride
+proc copyIndex(r: SceneRhythm, image: Image): int =
+  ## The copy of `image`'s rectangle, or -1. A rectangle is its place on the
+  ## canvas (origin and stride) and its size: one scene drawn into several
+  ## cells keeps one copy per cell, nested splits included.
+  for i in 0 ..< r.copies.len:
+    let copy = r.copies[i]
+    if copy.width == image.width and copy.height == image.height and copy.format == image.format and
+        r.copyAt[3 * i] == image.origin and r.copyAt[3 * i + 1] == image.stride:
+      return i
+  -1
 
-proc dropCopy(r: SceneRhythm) =
-  if not r.copy.isNil:
-    heldBytes -= r.copy.byteSize
-    r.copy = nil
+proc dropCopy(r: SceneRhythm, i: int) =
+  ## The last copy takes its slot: copies are found by their place, not their
+  ## order, and a shifting `delete` cost 600 bytes of ESP32 image.
+  heldBytes -= r.copies[i].byteSize
+  let last = r.copies.high
+  r.copies[i] = r.copies[last]
+  r.copies.setLen(last)
+  for k in 0 .. 2:
+    r.copyAt[3 * i + k] = r.copyAt[3 * last + k]
+  r.copyAt.setLen(3 * last)
+
+proc dropCopy(r: SceneRhythm, image: Image) =
+  let i = r.copyIndex(image)
+  if i >= 0:
+    r.dropCopy(i)
 
 proc walkCopies(scene: FrameScene, dropDueBy: float): int =
   ## The bytes still kept for `scene` and the scenes it embeds, after letting
   ## go of the pictures of those due by `dropDueBy` (-Inf keeps everything,
-  ## Inf drops everything).
+  ## Inf drops everything), and of cells its last due run no longer drew (a
+  ## layout that changed).
   let r = scene.rhythm
-  if not r.isNil and not r.copy.isNil:
-    if r.dueBy(dropDueBy):
-      r.copy = nil
-    else:
-      result += r.copy.byteSize
+  if not r.isNil:
+    var i = r.copies.len
+    while i > 0:
+      dec i
+      if r.dueBy(dropDueBy) or r.copyAt[3 * i + 2] < r.scheduledPass:
+        r.dropCopy(i)
+      else:
+        result += r.copies[i].byteSize
   if scene of InterpretedFrameScene:
     for child in InterpretedFrameScene(scene).sceneNodes.values:
       result += walkCopies(child, dropDueBy)
@@ -146,27 +169,29 @@ proc copyBudgetBytes(): int =
 
 proc keepCopy(scene: FrameScene, image: Image) =
   let r = scene.rhythm
+  let i = r.copyIndex(image)
   let bytes = image.byteSize
-  let reuse = r.copyFits(image)
-  let others = heldBytes - (if r.copy.isNil: 0 else: r.copy.byteSize)
+  let others = heldBytes - (if i >= 0: bytes else: 0)
   let budget = copyBudgetBytes()
   # A new copy needs one contiguous block, which fragmented PSRAM may not
   # have even with the budget to spare.
   let largest = availableRenderBytes()
-  if others + bytes > budget or not (reuse or bytes <= largest or (largest <= 0 and not runsAsEmbedded())):
-    r.dropCopy()
+  if others + bytes > budget or not (i >= 0 or bytes <= largest or (largest <= 0 and not runsAsEmbedded())):
+    if i >= 0:
+      r.dropCopy(i)
     if not r.copyRefused:
       r.copyRefused = true
       scene.logLine(%*{"event": "render:rhythm:copyRefused", "sceneId": scene.id.string, "bytes": bytes})
     return
   r.copyRefused = false
-  if reuse:
-    copyPixels(r.copy, image)
+  if i >= 0:
+    copyPixels(r.copies[i], image)
+    r.copyAt[3 * i + 2] = passId
   else:
-    r.dropCopy()
-    r.copy = image.copy()
-    r.copyOrigin = image.origin
-    r.copyStride = image.stride
+    r.copies.add(image.copy())
+    r.copyAt.add(image.origin)
+    r.copyAt.add(image.stride)
+    r.copyAt.add(passId)
     heldBytes += bytes
 
 # ------------------------------------------------------------------- passes
@@ -237,24 +262,20 @@ proc rhythmResetAfterAbort*() =
 
 proc rhythmVisit*(scene: FrameScene, image: Image): RhythmDecision =
   ## A scene node is about to draw `scene` into `image`. The first visit in a
-  ## pass decides whether it is due. A scene drawn into several cells (a
-  ## split's "render all other cells") runs in all of them or in none, and
-  ## keeps no picture: one copy cannot stand for several rectangles.
+  ## pass decides whether it is due: a scene drawn into several cells (a
+  ## split's "render all other cells") runs in all of them or in none.
   if passDepth == 0:
     return rdRun
   if scene.rhythm.isNil:
     scene.rhythm = SceneRhythm()
   let r = scene.rhythm
-  if r.visitPass == passId:
-    r.shared = true
-    r.dropCopy()
-  else:
+  if r.visitPass != passId:
     r.visitPass = passId
     r.runsThisPass = passFresh or r.dueAt <= 0 or stateKey(scene) != r.stateKey or
       r.dueBy(passStart)
   if r.runsThisPass:
     rdRun
-  elif not r.shared and r.copyFits(image):
+  elif r.copyIndex(image) >= 0:
     inc passReused
     rdRestore
   else:
@@ -262,7 +283,8 @@ proc rhythmVisit*(scene: FrameScene, image: Image): RhythmDecision =
     rdRepaint
 
 proc rhythmRestore*(scene: FrameScene, image: Image) =
-  copyPixels(image, scene.rhythm.copy)
+  let r = scene.rhythm
+  copyPixels(image, r.copies[r.copyIndex(image)])
 
 proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: Image,
     nextSleep: float) =
@@ -283,7 +305,9 @@ proc rhythmAfterRun*(scene: FrameScene, decision: RhythmDecision, given, drawn: 
   # A scene that swapped its canvas for an image of its own did not draw into
   # the rectangle, and one due again by the next pass would be copied for
   # nothing.
-  if r.shared or given.isNil or drawn != given or r.dueBy(passNext):
-    r.dropCopy()
+  if given.isNil:
+    return
+  if drawn != given or r.dueBy(passNext):
+    r.dropCopy(given)
     return
   keepCopy(scene, given)

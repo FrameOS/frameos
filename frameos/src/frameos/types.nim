@@ -363,10 +363,9 @@ type
     visitPass*: int       ## the pass that last decided for it
     scheduledPass*: int   ## the pass whose run set `dueAt`
     runsThisPass*: bool   ## that pass found it due: it runs in every cell it draws
-    shared*: bool         ## drawn into several cells in one pass: keeps no copy
     copyRefused*: bool    ## the last copy did not fit the budget (logged once)
-    copy*: Image          ## its rectangle after its last run, in the canvas's format
-    copyOrigin*, copyStride*: int ## where on the canvas that came from
+    copies*: seq[Image]   ## each cell it drew, as it left it, in the canvas's format
+    copyAt*: seq[int]     ## per copy, three: its canvas origin, stride, and the pass that wrote it
 
   FontStyle* = ref object
     typeface*: Typeface

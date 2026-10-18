@@ -200,8 +200,8 @@ suite "scene rhythm":
     check second.pixel(30, 5).b == 255     # ...yet its picture is there
     check countEvent("render:rhythm") == 1
     # Only the panel that is not due next pass keeps a copy.
-    check clock.rhythm.copy.isNil
-    check not photo.rhythm.copy.isNil
+    check clock.rhythm.copies.len == 0
+    check photo.rhythm.copies.len == 1
     rhythmClockOverride = 1600.0
     discard scene.pass()
     check photo.runs == 2
@@ -213,8 +213,8 @@ suite "scene rhythm":
     discard scene.pass()
     check abs(scene.refreshInterval - 300.0) < 0.001
     # The clock will be due by then, so it is not kept; the photo is.
-    check scene.child(3).rhythm.copy.isNil
-    check not scene.child(4).rhythm.copy.isNil
+    check scene.child(3).rhythm.copies.len == 0
+    check scene.child(4).rhythm.copies.len == 1
     # With every panel slower than the split, the split waits for the first.
     scene.child(3).state["refreshInterval"] = %900
     rhythmClockOverride = 1300.0
@@ -306,7 +306,7 @@ suite "scene rhythm":
     availableRenderBytesOverride = 1024    # nothing to spare
     discard scene.pass()
     let photo = scene.child(4)
-    check photo.rhythm.copy.isNil
+    check photo.rhythm.copies.len == 0
     check countEvent("render:rhythm:copyRefused") == 1
     rhythmClockOverride = 1001.0
     let second = scene.pass()
@@ -339,26 +339,41 @@ suite "scene rhythm":
     # of 8000 is 2000, so it fits, and with 4000 it does not.
     availableRenderBytesOverride = 8000
     discard scene.pass()
-    check not scene.child(4).rhythm.copy.isNil
+    check scene.child(4).rhythm.copies.len == 1
     let other = newScene(splitId)
     availableRenderBytesOverride = 4000
     discard other.pass()
-    check other.child(4).rhythm.copy.isNil
+    check other.child(4).rhythm.copies.len == 0
 
-  test "one scene drawn into several cells runs in all of them or in none, and keeps no copy":
+  test "one scene drawn into several cells runs in all of them or in none, and keeps each cell":
     let scene = newScene(sharedId)
     let first = scene.pass()
     let photo = scene.child(3)
     check photo.runs == 2                  # once per cell
-    check photo.rhythm.shared
-    check photo.rhythm.copy.isNil
+    check photo.rhythm.copies.len == 2     # one copy per cell, found by its place
     rhythmClockOverride = 1001.0
     let second = scene.pass()
-    check photo.runs == 4                  # repainted in both cells...
-    check abs(photo.rhythm.dueAt - 1600.0) < 0.001   # ...and still due when it was
+    check photo.runs == 2                  # neither cell ran
     check second.pixel(20, 5).b == 255 and second.pixel(33, 5).b == 255
     check first.pixel(20, 5) == second.pixel(20, 5)
     check second.pixel(5, 5).r == 255      # the clock ran
+    # Its next due run rewrites both copies in place, and nothing else is held.
+    rhythmClockOverride = 1600.0
+    discard scene.pass()
+    check photo.runs == 4
+    check photo.rhythm.copies.len == 2
+
+  test "copies of cells a due run no longer drew are dropped":
+    let scene = newScene(splitId)
+    discard scene.pass()
+    let photo = scene.child(4)
+    # A copy from a rectangle that is not on the canvas any more (an older
+    # layout), written before the photo's last due run.
+    photo.rhythm.copies.add(newImage(3, 3))
+    photo.rhythm.copyAt.add(@[0, 3, photo.rhythm.scheduledPass - 1])
+    rhythmClockOverride = 1001.0
+    discard scene.pass()
+    check photo.rhythm.copies.len == 1
 
   test "a split inside a split follows its own panels":
     let scene = newScene(nestedId)
@@ -376,10 +391,10 @@ suite "scene rhythm":
   test "switching the top scene draws everything and drops the old copies":
     let scene = newScene(splitId)
     discard scene.pass()
-    check not scene.child(4).rhythm.copy.isNil
+    check scene.child(4).rhythm.copies.len == 1
     let other = newScene(plainSplitId)
     discard other.pass()
-    check scene.child(4).rhythm.copy.isNil
+    check scene.child(4).rhythm.copies.len == 0
     rhythmClockOverride = 1001.0
     discard scene.pass()
     check scene.child(4).runs == 2
@@ -387,7 +402,7 @@ suite "scene rhythm":
   test "copies keep the canvas's own pixel format":
     let scene = newScene(splitId)
     discard scene.pass(newImage565(W, H))
-    check scene.child(4).rhythm.copy.format == pfRgb565
+    check scene.child(4).rhythm.copies[0].format == pfRgb565
     rhythmClockOverride = 1001.0
     let second = scene.pass(newImage565(W, H))
     check scene.child(4).runs == 1
