@@ -29,6 +29,13 @@ export { ditherFrame, panelPalettes, panelPaletteFor, type PanelPaletteKey } fro
 export { mountFrameOSManager, type FrameOSManagerHandle, type FrameOSManagerOptions } from './manager'
 export { selectFieldOptions } from './options'
 export {
+  PREVIEW_PROXY_TOKEN_HEADER,
+  keepPreviewProxyTokenFresh,
+  mintPreviewProxyToken,
+  previewProxyTokenUrl,
+  type PreviewProxyToken,
+} from './proxyToken'
+export {
   POINTER_AXIS_MAX,
   attachKeyboardInput,
   attachPointerInput,

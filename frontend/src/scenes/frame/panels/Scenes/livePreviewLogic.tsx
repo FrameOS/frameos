@@ -22,6 +22,7 @@ import { assetUrl } from '../../../../utils/assetUrl'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { isFrameControlMode } from '../../../../utils/frameControlMode'
 import { getBasePath } from '../../../../utils/getBasePath'
+import { keepPreviewProxyTokenFresh, mintPreviewProxyToken } from '../../../../utils/previewProxyToken'
 import { projectApiPath } from '../../../../utils/projectApi'
 import { frameLogic } from '../../frameLogic'
 import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
@@ -718,6 +719,8 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
     openLivePreview: async ({ sceneId, state, scenes }, breakpoint) => {
       cache.worker?.terminate()
       cache.worker = null
+      cache.stopProxyTokens?.()
+      cache.stopProxyTokens = null
       cache.pendingFrame = null
       cache.assetRequester?.rejectAll()
       cache.assetRequester = null
@@ -829,10 +832,12 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
       const settingsJson = JSON.stringify(settings)
 
       // Same-origin proxy so the runtime's HTTP requests (image apps,
-      // weather, ...) work despite CORS — the worker's sync XHR carries auth
-      // cookies to it. Resolve the project-prefixed absolute path up front.
-      // An embedding page (the standalone editor bundle) can supply its own
-      // proxy endpoint via FRAMEOS_APP_CONFIG.preview_proxy_url instead.
+      // weather, ...) work despite CORS. The worker authenticates with a
+      // short-lived token minted at `<proxy>/token` (utils/previewProxyToken)
+      // and falls back to the page's cookie where there is no token route.
+      // Resolve the project-prefixed absolute path up front. An embedding
+      // page (the standalone editor bundle) can supply its own proxy
+      // endpoint via FRAMEOS_APP_CONFIG.preview_proxy_url instead.
       let proxyUrl = ''
       const configuredProxyUrl = (window as any).FRAMEOS_APP_CONFIG?.preview_proxy_url
       if (typeof configuredProxyUrl === 'string' && configuredProxyUrl) {
@@ -852,6 +857,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
           // preview still runs; external fetches will fail with CORS as before
         }
       }
+      const proxyToken = await mintPreviewProxyToken(proxyUrl)
       breakpoint()
 
       let worker: Worker
@@ -962,6 +968,7 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         scenesJson: JSON.stringify(payloadScenes),
         settingsJson,
         proxyUrl,
+        proxyToken: proxyToken?.token ?? '',
         sceneId,
         fastMode: values.fastMode,
         // Apps may save into the browser folder; it is the user's own
@@ -975,10 +982,22 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         // in the same words (docs/lan-access.md).
         lanAccess: values.frame?.lan_access ?? undefined,
       })
+      // A preview stays open for as long as the user likes; the token does
+      // not. Without one to start from (no token route, or none to be had)
+      // the worker uses the page's cookie, as it did before tokens.
+      if (proxyToken) {
+        cache.stopProxyTokens = keepPreviewProxyTokenFresh(
+          proxyUrl,
+          (token) => worker.postMessage({ type: 'proxyToken', token }),
+          proxyToken
+        )
+      }
     },
     closeLivePreview: () => {
       cache.worker?.terminate()
       cache.worker = null
+      cache.stopProxyTokens?.()
+      cache.stopProxyTokens = null
       cache.pendingFrame = null
       cache.canvas = null
       clearUiFlushes(cache)
@@ -1157,6 +1176,8 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
   beforeUnmount(({ cache }) => {
     cache.worker?.terminate()
     cache.worker = null
+    cache.stopProxyTokens?.()
+    cache.stopProxyTokens = null
     clearUiFlushes(cache)
     cache.assetRequester?.rejectAll()
     cache.assetRequester = null

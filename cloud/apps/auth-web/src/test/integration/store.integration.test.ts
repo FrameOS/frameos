@@ -31,6 +31,7 @@ import { GET as getSceneImage } from "../../../app/api/store/scenes/[sceneId]/im
 import { GET as getGalleryImage } from "../../../app/api/store/scenes/[sceneId]/images/[imageId]/route";
 import { GET as getScenesJson } from "../../../app/api/store/scenes/[sceneId]/scenes.json/route";
 import { POST as previewProxy } from "../../../app/api/store/preview-proxy/route";
+import { POST as mintPreviewProxyToken } from "../../../app/api/store/preview-proxy/token/route";
 import { POST as editSceneContent } from "../../../app/api/account/scenes/[sceneId]/content/route";
 import { POST as authorizeDevice } from "../../../app/api/device/authorize/route";
 import { POST as pollDevice } from "../../../app/api/device/poll/route";
@@ -1914,6 +1915,45 @@ describe("store publish and distribution", () => {
     );
     const templates = repo.templates as Array<Record<string, unknown>>;
     expect(templates[0]?.tags).toEqual(["clock", "e-ink"]);
+  });
+  it("lets a preview worker with a minted token in from an opaque origin", async () => {
+    // What a worker moved out of the app's origin (a sandboxed iframe) has:
+    // no cookie and `Origin: null`, only the token its page minted.
+    const minted = await mintPreviewProxyToken(
+      request("/api/store/preview-proxy/token", "POST", { headers: { origin: baseUrl } }),
+    );
+    expect(minted.status).toBe(200);
+    const { token } = (await readJson(minted)) as { token: string };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("upstream-bytes", { status: 200 })),
+    );
+    try {
+      const response = await previewProxy(
+        request("/api/store/preview-proxy", "POST", {
+          body: { url: "https://example.com/data" },
+          headers: { origin: "null", "x-frameos-preview-token": token },
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("upstream-bytes");
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    const refused = await previewProxy(
+      request("/api/store/preview-proxy", "POST", {
+        body: { url: "https://example.com/data" },
+        headers: { origin: "null", "x-frameos-preview-token": `${token}x` },
+      }),
+    );
+    expect(refused.status).toBe(401);
+    expect((await readJson(refused)).error).toBe("invalid_preview_token");
+    // Minting stays a same-origin call.
+    const crossSite = await mintPreviewProxyToken(
+      request("/api/store/preview-proxy/token", "POST", { headers: { origin: "null" } }),
+    );
+    expect(crossSite.status).toBe(403);
   });
   it("guards the live-preview proxy against SSRF and junk", async () => {
     // The preview worker's XHR: same-origin, JSON. Anything else — a

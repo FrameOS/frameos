@@ -8,6 +8,8 @@
 // account (GET /api/settings) and CORS-blocked fetches go through the
 // store's preview proxy.
 
+import { mintPreviewProxyToken } from "frameos-wasm";
+
 export const RENDER_CHECK_SETTLE_MS = 2000;
 export const RENDER_CHECK_TIMEOUT_MS = 30_000;
 const MAX_COLLECTED_LOGS = 100;
@@ -251,6 +253,9 @@ export async function renderSceneCheck({
 
   const payloadScenes = collectRenderCheckScenes(scene, scenes);
   const settingsJson = JSON.stringify(settings ?? (await fetchPreviewSettings()));
+  // One token outlives this worker (it is gone in 30 s), so no refresh.
+  const proxyToken =
+    (await mintPreviewProxyToken(RENDER_CHECK_PROXY_URL))?.token ?? "";
 
   let worker: Worker;
   try {
@@ -332,6 +337,7 @@ export async function renderSceneCheck({
       scenesJson: JSON.stringify(payloadScenes),
       settingsJson,
       proxyUrl: RENDER_CHECK_PROXY_URL,
+      proxyToken,
       sceneId: scene.id,
     });
   });

@@ -19,8 +19,9 @@ line in the map).
    not started; item 1 (delete the compiler) not before December 2026.
 2. **`docs/security-todo.md`** — nothing critical open on any plane. The
    highs left are device and isolation work: ESP32 Secure Boot and flash/NVS
-   encryption, the preview worker on its own origin (blocked on a per-preview
-   proxy token on both planes), interpreter budgets per scene. Owner tasks:
+   encryption, the preview worker on its own origin (the per-preview proxy
+   token it waited on is in; the move is left), interpreter budgets per
+   scene. Owner tasks:
    rotate the laptop's plaintext OpenAI and R2 keys, and move the CDN to its
    own registrable domain.
 3. **`docs/manual-testing-todo.md`** — what needs a bench: the HyperPixels on

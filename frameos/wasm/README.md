@@ -121,7 +121,13 @@ Helpers for building your own UI are exported too: `evaluateShowIf`, `visiblePub
 
 - Scenes that fetch external URLs are subject to browser CORS unless you pass `proxyUrl` (a
   same-origin endpoint that forwards `{method, url, headers, bodyBase64, timeoutMs}` — see
-  FrameOS's `/api/frames/{id}/scene_preview_proxy`).
+  FrameOS's `/api/frames/{id}/scene_preview_proxy`). The worker authenticates to it with a
+  short-lived token in the `X-FrameOS-Preview-Token` header instead of the page's cookie: pass
+  `proxyTokens: true` to mint one from `POST <proxyUrl>/token` (`{token, expiresIn}`; FrameOS's
+  backend and cloud both serve it) and keep it fresh, or `proxyToken` plus
+  `preview.setProxyToken(token)` to mint your own. Without a token the proxy is called as before,
+  with the page's cookie. `mintPreviewProxyToken` and `keepPreviewProxyTokenFresh` are exported for
+  hosts that drive the worker themselves.
 - Apps that need host processes are not in the wasm build: `data/chromiumScreenshot`,
   `data/rstpSnapshot`. `data/localImage` reads the browser asset folder (see above).
 - `index.html` in the package root is a standalone demo page:

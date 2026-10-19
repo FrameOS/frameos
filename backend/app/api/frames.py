@@ -69,6 +69,7 @@ from app.models.frame import (
 )
 from app.models.log import FRAME_ACTIVITY_LOG_TYPES, LOG_LIMIT_PER_FRAME, Log, new_log as log
 from app.models.metrics import METRICS_RETAINED_PER_FRAME, Metrics
+from app.models.user import User
 from app.codegen.scene_nim import write_scene_nim
 from app.utils.ssh_utils import (
     get_ssh_connection,
@@ -203,6 +204,12 @@ from app.drivers.devices import apply_device_config_defaults, apply_device_gpio_
 from app.api.project_scope import project_get_or_404
 from app.api.firmware_release import latest_published_provisioning_assets
 from app.tenancy import current_project_id, get_user_project
+from app.utils.preview_proxy_token import (
+    PREVIEW_PROXY_TOKEN_HEADER,
+    PREVIEW_PROXY_TOKEN_TTL_SECONDS,
+    mint_preview_proxy_token,
+    read_preview_proxy_token,
+)
 from . import api_project, api_open, api_public
 
 REMOTE_TASK_TRANSPORTS = {"auto", "remote", "agent", "ssh"}
@@ -2377,8 +2384,69 @@ async def _preview_proxy_host_is_blocked(host: str) -> bool:
     return False
 
 
-@api_project.post("/frames/{id:int}/scene_preview_proxy")
+# A request that authenticates with a preview token may come from a worker
+# in an opaque origin (a sandboxed iframe), which sees the answer only with
+# these. No credentials are allowed, so a page cannot read anything through
+# here with someone's cookie: the token is the credential, and it is not
+# ambient.
+PREVIEW_PROXY_CORS_HEADERS = {"Access-Control-Allow-Origin": "*"}
+PREVIEW_PROXY_CORS_PREFLIGHT_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST",
+    "Access-Control-Allow-Headers": f"Content-Type, {PREVIEW_PROXY_TOKEN_HEADER}",
+    "Access-Control-Max-Age": "600",
+}
+
+
+@api_project.post("/frames/{id:int}/scene_preview_proxy/token")
+async def api_frame_scene_preview_proxy_token(
+    id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """A short-lived token for `scene_preview_proxy`, minted with the
+    session the page has, for a preview worker that cannot send it
+    (app/utils/preview_proxy_token.py). The page asks again before
+    `expiresIn` runs out."""
+    frame = _project_frame(db, id)
+    context = getattr(request.state, "project", None)
+    user = context.user if context is not None else None
+    token, expires_at = mint_preview_proxy_token(
+        project_id=current_project_id(),
+        frame_id=frame.id,
+        user_id=user.id if user is not None else None,
+    )
+    return {
+        "token": token,
+        "expiresAt": datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat(),
+        "expiresIn": PREVIEW_PROXY_TOKEN_TTL_SECONDS,
+    }
+
+
+def _preview_proxy_grant_frame(db: Session, project_id: int, frame_id: int, token: str) -> Frame | None:
+    """The frame a preview token opens, or None when the token does not
+    (expired, tampered with, another frame, or its user lost the project)."""
+    grant = read_preview_proxy_token(token)
+    if grant is None or grant.project_id != project_id or grant.frame_id != frame_id:
+        return None
+    if config.HASSIO_RUN_MODE != "ingress":
+        user = db.get(User, grant.user_id) if grant.user_id else None
+        if user is None or get_user_project(db, user, project_id) is None:
+            return None
+    frame = db.query(Frame).filter_by(project_id=project_id, id=frame_id).first()
+    if frame is None:
+        _not_found()
+    return frame
+
+
+@api_open.options("/projects/{project_id}/frames/{id:int}/scene_preview_proxy")
+async def api_frame_scene_preview_proxy_preflight(project_id: int, id: int):
+    return Response(status_code=HTTPStatus.NO_CONTENT, headers=PREVIEW_PROXY_CORS_PREFLIGHT_HEADERS)
+
+
+@api_open.post("/projects/{project_id}/frames/{id:int}/scene_preview_proxy")
 async def api_frame_scene_preview_proxy(
+    project_id: int,
     id: int,
     request: Request,
     db: Session = Depends(get_db),
@@ -2386,9 +2454,41 @@ async def api_frame_scene_preview_proxy(
     """Server-side HTTP fetch for the in-browser wasm live preview. Data apps
     (image galleries, weather, ...) fetch external URLs that the browser can't
     reach directly because of CORS; the preview routes those requests here so
-    they behave like the device, which fetches server-side. Project-authed and
-    SSRF-guarded. Request body: {method, url, headers, bodyBase64, timeoutMs}.
-    The response mirrors the upstream status code and body bytes."""
+    they behave like the device, which fetches server-side. SSRF-guarded.
+    Request body: {method, url, headers, bodyBase64, timeoutMs}. The response
+    mirrors the upstream status code and body bytes.
+
+    Authenticated by a preview token (`X-FrameOS-Preview-Token`, minted by
+    the route above) or, for bundles that predate it, the session. A token
+    that no longer works falls back to the session, so a same-origin page
+    keeps working across an expiry; without either the answer is 401."""
+    token = request.headers.get(PREVIEW_PROXY_TOKEN_HEADER, "").strip()
+    try:
+        frame = _preview_proxy_grant_frame(db, project_id, id, token) if token else None
+        if frame is None:
+            try:
+                frame = await _public_project_frame(project_id=project_id, frame_id=id, request=request, db=db)
+            except HTTPException as exc:
+                if token and exc.status_code == HTTPStatus.UNAUTHORIZED:
+                    raise HTTPException(
+                        status_code=HTTPStatus.UNAUTHORIZED, detail="Preview token expired or invalid"
+                    )
+                raise
+        response = await _scene_preview_proxy_fetch(request)
+    except HTTPException as exc:
+        if token:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=exc.detail,
+                headers={**(exc.headers or {}), **PREVIEW_PROXY_CORS_HEADERS},
+            )
+        raise
+    if token:
+        response.headers.update(PREVIEW_PROXY_CORS_HEADERS)
+    return response
+
+
+async def _scene_preview_proxy_fetch(request: Request) -> Response:
     try:
         envelope = json.loads(
             await read_body_limited(request, PREVIEW_PROXY_MAX_REQUEST_BYTES, "Proxy request body too large")
@@ -2399,10 +2499,6 @@ async def api_frame_scene_preview_proxy(
         raise
     except Exception:
         _bad_request("Invalid proxy request body")
-
-    frame = _project_frame(db, id)
-    if frame is None:
-        _not_found()
 
     url = (envelope.get("url") or "").strip()
     method = (envelope.get("method") or "GET").upper()

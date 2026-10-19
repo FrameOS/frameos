@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { csrfResponse } from "../../../../src/lib/csrf";
 import { jsonError, readJsonObject } from "../../../../src/lib/device-flow";
+import {
+  previewProxyTokenHeader,
+  previewProxyTokenValid,
+} from "../../../../src/lib/preview-proxy-token";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { guardedFetch } from "../../../../src/lib/ssrf";
 import { storeRoute } from "../../../../src/lib/store-cache";
@@ -18,6 +22,12 @@ const maxTimeoutMs = 30_000;
 // are public), so it is tightly capped and SSRF-guarded.
 // Body: {method, url, headers, bodyBase64, timeoutMs}; the response mirrors
 // the upstream status and bytes.
+//
+// Who may call it: a preview worker holding a token from ./token (sent as
+// `x-frameos-preview-token`, from any origin, `null` included), or a
+// same-origin request, which is how bundles from before the token call it.
+// A request that carries a token gets CORS headers on every answer, so a
+// worker in an opaque origin can read the bytes and the refusals alike.
 async function handlePost(request: NextRequest) {
   const limited = await rateLimitResponse(request, "store:preview-proxy", {
     limit: 240,
@@ -26,16 +36,20 @@ async function handlePost(request: NextRequest) {
   if (limited) {
     return limited;
   }
-  // Only the preview worker (a same-origin XHR sending JSON) may call this.
-  // Without these two checks a cross-site form POST could reach it, and the
+  // Only the preview worker (an XHR sending JSON) may call this. Without
+  // these two checks a cross-site form POST could reach it, and the
   // response — bytes we did not author — would render on our origin.
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().startsWith("application/json")) {
     return jsonError("invalid_content_type", 415);
   }
-  const csrf = csrfResponse(request);
-  if (csrf) {
-    return csrf;
+  const token = request.headers.get(previewProxyTokenHeader);
+  if (!(await previewProxyTokenValid(token))) {
+    // A stale token from a same-origin page still passes the Origin check.
+    const csrf = csrfResponse(request);
+    if (csrf) {
+      return token ? jsonError("invalid_preview_token", 401) : csrf;
+    }
   }
 
   const body = await readJsonObject(request);
@@ -165,6 +179,38 @@ async function readCapped(
   return Buffer.concat(chunks);
 }
 
+// No credentials are ever allowed cross-origin: the token is the credential,
+// and it is not ambient, so `*` opens nothing a cookie could reach.
+const corsHeaders = {
+  "access-control-allow-origin": "*",
+  "access-control-expose-headers": "x-upstream-content-type",
+};
+
+async function handlePostWithCors(request: NextRequest) {
+  const response = await handlePost(request);
+  if (request.headers.has(previewProxyTokenHeader)) {
+    for (const [name, value] of Object.entries(corsHeaders)) {
+      response.headers.set(name, value);
+    }
+  }
+  return response;
+}
+
+// The preflight a worker in an opaque origin sends before its first POST
+// (JSON and the token header are not simple-request material).
+async function handleOptions(_request: NextRequest) {
+  return new NextResponse(null, {
+    headers: {
+      "access-control-allow-headers": `content-type, ${previewProxyTokenHeader}`,
+      "access-control-allow-methods": "POST",
+      "access-control-allow-origin": "*",
+      "access-control-max-age": "600",
+    },
+    status: 204,
+  });
+}
+
 // Cache policy is per-response here (see storeRoute): anything this
 // handler did not decide is no-store.
-export const POST = storeRoute(handlePost);
+export const POST = storeRoute(handlePostWithCors);
+export const OPTIONS = storeRoute(handleOptions);

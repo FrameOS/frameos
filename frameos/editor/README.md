@@ -48,7 +48,9 @@ Parent → editor:
 
 - `{type: 'frameos-editor:init', scenes, sceneId?, mode?, width?, height?, interval?, theme?, previewProxyUrl?, description?}` —
   `theme` is `'light' | 'dark'`; `previewProxyUrl` is an optional same-origin endpoint the in-editor wasm live
-  preview routes CORS-blocked HTTP requests through; `description` is the embedding page's description of the
+  preview routes CORS-blocked HTTP requests through (when the host also answers `POST <previewProxyUrl>/token`
+  with `{token, expiresIn}`, the preview sends that token as `X-FrameOS-Preview-Token` instead of relying on
+  cookies, as FrameOS's backend and cloud do); `description` is the embedding page's description of the
   scene, shown in the Scene settings panel
 - `{type: 'frameos-editor:get-scenes'}` — replies with a `:scenes` message
 - `{type: 'frameos-editor:select-scene', sceneId}`

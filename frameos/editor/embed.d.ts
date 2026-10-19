@@ -18,7 +18,9 @@ export interface FrameOSEditorOptions {
    * Same-origin endpoint the in-editor wasm live preview routes CORS-blocked
    * HTTP requests through (appended as `?url=`-style proxy by the runtime).
    * Without it the preview still runs, but scenes fetching external data may
-   * render incompletely.
+   * render incompletely. When the host also answers `POST <previewProxyUrl>/token`
+   * with `{token, expiresIn}`, the preview sends that token as
+   * `X-FrameOS-Preview-Token` instead of relying on cookies.
    */
   previewProxyUrl?: string
   /**
