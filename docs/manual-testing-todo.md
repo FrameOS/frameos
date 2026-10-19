@@ -151,5 +151,10 @@ redirect-only listener on `10.42.0.1:80`) and the made-up hotspot credentials
 ### Scene import bench
 
 - [ ] **Import from a frame that ran standalone first** (`scenes_get` + the
-  importer, `docs/cloud-frames.md` "Scenes the frame already had"): so far
-  covered by Nim, hub and auth-web tests against a fake device only.
+  importer, `docs/cloud-frames.md` "Scenes the frame already had"): the
+  interpreted scenes land and the one on screen stays there; an album scene
+  keeps its place after the push (`uploadScenes:stateCarried` in the log); a
+  compiled scene listed in the frame's scenes.json comes over with "Convert
+  and import"; and a source-built frame names its compiled-in scenes in the
+  banner. So far covered by Nim, hub and auth-web tests against a fake
+  device only.

@@ -24,7 +24,7 @@ import frameos/version
 from frameos/metrics import defaultProcessMemoryUsage
 from frameos/logger import LoggerSettings, postLogLinesOnce
 from frameos/scenes import getLastImagePng, getLastPublicState, getLastPublicSceneState, getAllPublicStates,
-    getUploadedScenePayload, getDynamicSceneOptions
+    getUploadedScenePayload, getDynamicSceneOptions, compiledSceneOptions
 from scenes/scenes import sceneOptions
 import ./embedded_assets
 import ./state
@@ -1426,39 +1426,68 @@ proc uploadedScenesPayload*(): JsonNode =
 proc sceneJsonIsCompiled(scene: JsonNode): bool =
   scene{"settings"}{"execution"}.getStr("") == "compiled"
 
-proc deviceScenesPayload*(): JsonNode =
-  ## Every interpreted scene this frame holds, as the JSON its owner would
-  ## export: the answer to the cloud's `scenes_get` (docs/cloud-frames.md).
-  ## `{"scenes": [...], "skipped_compiled": N}`, scene ids PUBLIC (no
+const DeviceScenesCompiledBudgetBytes* = 3 * 1024 * 1024
+  ## How much of a `scenes_get` reply compiled scenes may fill: the cloud's
+  ## converter takes at most 3 MiB of scenes per request, and the whole reply
+  ## must stay under the hub's 8 MiB stream cap with the interpreted scenes
+  ## (which are what the frame is actually running) in it.
+
+proc deviceScenesPayload*(compiledBudgetBytes = DeviceScenesCompiledBudgetBytes): JsonNode =
+  ## Every scene this frame holds, as the JSON its owner would export: the
+  ## answer to the cloud's `scenes_get` (docs/cloud-frames.md).
+  ## `{"scenes": [...], "compiled_scenes": [...], "compiled_unsent":
+  ## [{"id", "name"}], "skipped_compiled": N}`, scene ids PUBLIC (no
   ## "uploaded/" prefix — the uploaded payload is persisted before it is
   ## renamed).
   ##
   ## The uploaded set comes first and wins an id both stores hold: it is what
   ## the frame was last handed (a local upload, or a provider's push), and on a
   ## frame a provider already manages the copy on disk is the older one.
-  ## Compiled scenes are counted, never sent: their behaviour is in the binary,
-  ## and a provider only takes interpreted node graphs. Only the ones a scene
-  ## store lists are seen: a deploy writes scenes.json as the interpreted
-  ## subset, and the all_scenes.json that listed the rest is gone (#505).
+  ##
+  ## Compiled scenes never go in `scenes`: a provider only runs interpreted
+  ## node graphs. Their JSON goes in `compiled_scenes` when a scene store
+  ## lists it (a backend's frame sync or the admin page saved it), so the
+  ## owner can have the cloud convert them while importing. The ones this
+  ## frame cannot send are named in `compiled_unsent`: scenes a source build
+  ## compiled into the binary, whose JSON no deploy leaves on the frame (the
+  ## all_scenes.json that listed them is gone, #505), and any past
+  ## `compiledBudgetBytes`. `skipped_compiled` counts both, for providers that
+  ## predate the two lists.
   var scenes = newJArray()
+  var compiledScenes = newJArray()
+  var compiledUnsent = newJArray()
   var seen: seq[string] = @[]
-  var compiledIds: seq[string] = @[]
+  var compiledBytes = 0
 
   proc consider(scene: JsonNode) =
     if scene == nil or scene.kind != JObject:
       return
     let sceneId = scene{"id"}.getStr("")
-    if sceneId.len == 0 or sceneId in seen or sceneId in compiledIds:
-      return
-    if sceneJsonIsCompiled(scene):
-      compiledIds.add(sceneId)
+    if sceneId.len == 0 or sceneId in seen:
       return
     seen.add(sceneId)
-    scenes.add(scene)
+    if not sceneJsonIsCompiled(scene):
+      scenes.add(scene)
+      return
+    let size = ($scene).len
+    if compiledBytes + size <= compiledBudgetBytes:
+      compiledBytes += size
+      compiledScenes.add(scene)
+    else:
+      compiledUnsent.add(%*{"id": sceneId, "name": scene{"name"}.getStr("")})
 
   {.gcsafe.}:
     for scene in getUploadedScenePayload():
       consider(scene)
   for scene in loadScenePayload():
     consider(scene)
-  result = %*{"scenes": scenes, "skipped_compiled": compiledIds.len}
+  for (sceneId, sceneName) in compiledSceneOptions():
+    if sceneId.string notin seen:
+      seen.add(sceneId.string)
+      compiledUnsent.add(%*{"id": sceneId.string, "name": sceneName})
+  result = %*{
+    "scenes": scenes,
+    "compiled_scenes": compiledScenes,
+    "compiled_unsent": compiledUnsent,
+    "skipped_compiled": compiledScenes.len + compiledUnsent.len,
+  }

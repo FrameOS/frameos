@@ -314,14 +314,18 @@ export async function getCloudFrameSceneListing(
  * Import the frame's own scenes into the account, or drop the frame's report
  * (POST /api/frames/{id}/device-scenes). Importing mints private drafts —
  * reusing the ones the account already has — adds them to the frame and
- * pushes the set with the scene on screen kept. Neither touches the scenes
- * on the device.
+ * pushes the set with the scene on screen kept. `convertCompiled` also
+ * converts the frame's compiled scenes to interpreted ones and imports them
+ * (a few per call). Neither touches the scenes on the device.
  */
-export async function importCloudFrameDeviceScenes(frameId: FrameId): Promise<CloudDeviceScenesImportResult> {
+export async function importCloudFrameDeviceScenes(
+  frameId: FrameId,
+  convertCompiled = false
+): Promise<CloudDeviceScenesImportResult> {
   const response = await apiFetch(`/api/frames/${frameId}/device-scenes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'import' }),
+    body: JSON.stringify(convertCompiled ? { action: 'import', convert_compiled: true } : { action: 'import' }),
   })
   await assertOk(response, 'Failed to import the scenes from this frame')
   return (await response.json()) as CloudDeviceScenesImportResult

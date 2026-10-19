@@ -269,3 +269,66 @@ suite "scene persistence helpers":
     let (localMain, _) = updateUploadedScenesFromPayload(
       %*{"scenes": scenes}, persistPayload = false)
     check localMain.isSome
+
+  test "a provider's first push of a scene the frame already ran carries its state":
+    # The frame ran "album" on its own; the owner imported it into the cloud,
+    # which pushes it back as uploaded/album (`scenes_get`, cloud-frames.md).
+    # The provider's copy starts where the frame's copy was, not at defaults.
+    let diskId = "carry-album".SceneId
+    let uploadedId = "uploaded/carry-album".SceneId
+    for sceneId in [diskId, uploadedId]:
+      if fileExists(persistedPath(sceneId)):
+        removeFile(persistedPath(sceneId))
+    writeFile(persistedPath(diskId), $(%*{"index": 7, "albumId": "abc"}))
+    defer:
+      removePersistedState(uploadedId)
+      if fileExists(persistedPath(diskId)):
+        removeFile(persistedPath(diskId))
+    let scenes = %*[{
+      "id": "carry-album", "name": "Album",
+      "fields": [{"name": "index", "type": "integer", "persist": "disk"}],
+      "nodes": [], "edges": [],
+    }]
+    # Forget any earlier uploaded set, so carry-album is new to this one.
+    discard updateUploadedScenesFromPayload(%*{"scenes": [{
+      "id": "carry-other", "name": "Other", "nodes": [], "edges": []}]}, persistPayload = false)
+
+    discard updateUploadedScenesFromPayload(
+      %*{"scenes": scenes, "source": "cloud"}, persistPayload = true)
+    let carried = loadPersistedState(uploadedId)
+    check carried{"index"}.getInt() == 7
+    check carried{"albumId"}.getStr() == "abc"
+    # The frame's own copy keeps its file.
+    check parseJson(readFile(persistedPath(diskId))){"index"}.getInt() == 7
+
+    # A later push of the same set never copies again: the provider's copy
+    # has its own state now, defaults included.
+    removePersistedState(uploadedId)
+    discard updateUploadedScenesFromPayload(
+      %*{"scenes": scenes, "source": "cloud"}, persistPayload = true)
+    check not fileExists(persistedPath(uploadedId))
+
+  test "local uploads and boot replays do not carry a disk scene's state":
+    let diskId = "carry-local".SceneId
+    let uploadedId = "uploaded/carry-local".SceneId
+    for sceneId in [diskId, uploadedId]:
+      if fileExists(persistedPath(sceneId)):
+        removeFile(persistedPath(sceneId))
+    writeFile(persistedPath(diskId), $(%*{"index": 3}))
+    defer:
+      removePersistedState(uploadedId)
+      if fileExists(persistedPath(diskId)):
+        removeFile(persistedPath(diskId))
+    let scenes = %*[{"id": "carry-local", "name": "Local", "nodes": [], "edges": []}]
+    discard updateUploadedScenesFromPayload(%*{"scenes": [{
+      "id": "carry-other", "name": "Other", "nodes": [], "edges": []}]}, persistPayload = false)
+
+    # A local admin upload (no source) and a reboot's replay of a cloud set
+    # (persistPayload = false) are not a provider installing the scene.
+    discard updateUploadedScenesFromPayload(%*{"scenes": scenes}, persistPayload = true)
+    check not fileExists(persistedPath(uploadedId))
+    discard updateUploadedScenesFromPayload(%*{"scenes": [{
+      "id": "carry-other", "name": "Other", "nodes": [], "edges": []}]}, persistPayload = false)
+    discard updateUploadedScenesFromPayload(
+      %*{"scenes": scenes, "source": "cloud"}, persistPayload = false)
+    check not fileExists(persistedPath(uploadedId))

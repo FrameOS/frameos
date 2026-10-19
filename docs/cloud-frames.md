@@ -419,7 +419,7 @@ but not in this device's profile), `message_too_large`, `invalid_json`,
 | `notify_update_available` | `{"version"?: "…"}` | nudge the device to update itself — the provider supplies no URLs and no binaries (today's provider sends a bare `{"id","type"}` frame; a `version`, if present, is logged and otherwise ignored). The full profile answers by running its own signed release upgrade (`frameos/upgrade.nim`: fetch the latest published release for its target, verify the minisign signature on-device, stage, restart — a nudge while an upgrade is in flight, or on an up-to-date install, is a logged no-op, so at-least-once redelivery is safe); the ESP32 fetches its control plane's signed OTA manifest (see the profile table; the self-hosted backend serves the same shape at `/embedded/ota/manifest`) |
 | `assets_list` | `{}` | bare ack, then a separate `{"id", "type": "assets", "assets": [{"path", "size", "mtime", "is_dir"?}…], "truncated"?: true}` message with the same `id`. Paths are **relative to the device's assets directory** (`assets_path`, default `/srv/assets`) — never absolute. A device may bound the listing (the reference cap is 5000 entries) and must then say so with `"truncated": true` rather than silently stopping |
 | `image_get` | `{}` | the frame's current rendered image. Bare ack, then the same `asset_chunk` stream `asset_get` uses (same `id` correlation, same caps); the first chunk's `content_type` says what the device produces (the Linux runtime sends `image/png` of its last render, the ESP32 packs `image/bmp` from its framebuffer). `ok: false` ack with `no_image` when nothing has rendered yet, `busy` on a small device already streaming |
-| `scenes_get` | `{}` | every interpreted scene the frame holds, as the JSON its owner would export. Bare ack, then the same `asset_chunk` stream `asset_get` uses (same `id` correlation, same 8 MiB cap — `too_large` past it), `content_type: application/json`, carrying ONE document: `{"scenes": […scene JSON…], "active_scene": "…", "skipped_compiled": N}`. Scene ids and `active_scene` are **public** ids (never the runtime's `uploaded/` registration). The uploaded set comes first and wins an id both of the device's stores hold; compiled scenes are counted in `skipped_compiled` and never sent, because a provider only takes interpreted node graphs. Read-only, and nothing the local admin page's scene export would not hand over. **Linux only** — the ESP32 profile answers `unsupported_verb` and sends no `scene_count`, so it is never asked. Errors: `read_failed`, `too_large` |
+| `scenes_get` | `{}` | every scene the frame holds, as the JSON its owner would export. Bare ack, then the same `asset_chunk` stream `asset_get` uses (same `id` correlation, same 8 MiB cap — `too_large` past it), `content_type: application/json`, carrying ONE document: `{"scenes": […interpreted scene JSON…], "compiled_scenes": […compiled scene JSON…], "compiled_unsent": [{"id", "name"}…], "active_scene": "…", "skipped_compiled": N}`. Scene ids and `active_scene` are **public** ids (never the runtime's `uploaded/` registration). The uploaded set comes first and wins an id both of the device's stores hold. Compiled scenes never go in `scenes`: the ones a scene store lists as JSON go in `compiled_scenes` (at most 3 MiB of them), and the rest are only named in `compiled_unsent` — scenes a source build compiled into the binary, whose JSON no deploy leaves on the frame, and any past the 3 MiB. `skipped_compiled` counts both lists, for providers from before them (runtimes before 2026.10.18 only count, and only what a scene store lists). Read-only, and nothing the local admin page's scene export would not hand over. **Linux only** — the ESP32 profile answers `unsupported_verb` and sends no `scene_count`, so it is never asked. Errors: `read_failed`, `too_large` |
 | `asset_get` | `{"path": "…", "thumb"?: true}` | read one file from the assets directory. Failure is an ordinary `ok: false` ack: `invalid_path` (traversal, absolute, or outside the assets directory), `not_found`, `is_directory`, `too_large` (the reference cap is **8 MiB** raw), `busy` (a small device already streaming another file). Success is a bare ack followed by one or more `{"id", "type": "asset_chunk", "seq": 0…N, "data": "<base64>", "done": bool}` messages with the same `id`, in order; the first chunk also carries `"size"` (total raw bytes), `"mtime"` and `"content_type"`. A read that fails after the ack ends the stream with `{"type": "asset_chunk", "id", "error": "…", "done": true}` and the provider discards the partial file. With `thumb`, a device that can generate thumbnails (Linux) returns a small preview — the reference implementation fits it inside 320×320 and encodes PNG, and says so in `content_type`, which is what a provider should trust; a device that cannot (ESP32) returns the original bytes |
 | `asset_put` | `{"path": "…", "data": "<base64>"}` | store one file in the assets directory. The whole payload rides a single message, so the raw size is bounded well under the inbound frame cap (the reference device cap is **2.5 MiB** raw — `too_large` past it; bigger files ride `asset_put_chunk` below); the filename component is sanitized by the device exactly like a local admin upload, parent folders are created as needed, and an existing file at the path is replaced. Errors: `invalid_path` (traversal, absolute, outside the assets directory, or a dot-directory — see below), `invalid_data` (empty or undecodable base64), `too_large`, `write_failed`. The ack carries `"asset": {"path" (relative, as stored), "size", "mtime", "is_dir"}` |
 | `asset_put_chunk` | `{"upload_id": "…", "offset": N, "data": "<base64>", "complete"?: true, "path"?: "…"}` | store one file that does not fit a single `asset_put`, as offset-addressed chunks under one `upload_id` (`[A-Za-z0-9_-]{1,64}` — it becomes a filename component on the device). The provider sends one chunk, waits for its ack, sends the next; the last one carries `complete: true` and the destination `path` (sanitized like `asset_put`, dot-directories refused). Offsets make redelivery idempotent — hub delivery is at-least-once, and a chunk that arrives twice overwrites itself instead of appending. `offset: 0` starts (or restarts) the part; an offset past what has landed means an earlier chunk was lost and is refused with **`chunk_gap`** — the provider restarts the file from 0 under a fresh id. The part lives outside the assets directory (Linux: the admin upload temp root; ESP32: `.uploads/` on the card) until the final chunk moves it into place, so a half-uploaded file is never listable or renderable; parts nobody finishes are swept on the next session start (Linux, after 6 h) or at card mount (ESP32). Per-chunk raw cap: what one inbound frame carries (the reference Linux runtime takes up to `HubMaxAssetUploadBytes` = 2.5 MiB, an ESP32 ≈ 256 KiB); assembled-file cap **64 MiB** (`too_large`). Non-final acks carry `"received": <part bytes so far>`; the final ack carries `"asset"` exactly like `asset_put`. Errors: `invalid_upload_id`, `invalid_offset`, `invalid_data`, `invalid_path`, `chunk_gap`, `too_large`, `write_failed`. Firmware from before 2026.8.30 answers `unknown_verb`; a provider then knows only single-frame files fit and says so |
@@ -542,7 +542,8 @@ while the provider, which has assigned it nothing, would list an empty frame.
 `scenes_get` is the device → provider path that closes the gap.
 
 - **When the provider asks.** On session start, for a CONFIRMED frame whose
-  hello carries a positive `scene_count`, that has no scene assignments, and
+  hello carries a positive `scene_count` (interpreted scenes plus those a
+  source build compiled in), that has no scene assignments, and
   whose owner has not already imported or dismissed what it holds. The ask is
   queued ahead of the drain with a short TTL and supersedes an unanswered
   earlier one; while the owner is undecided it is repeated on every connect,
@@ -551,10 +552,12 @@ while the provider, which has assigned it nothing, would list an empty frame.
   asked.
 - **What the provider keeps.** The reply, as sent, one per frame
   (cloud.frameos.net: `frame_device_scenes`), parsed defensively — entries
-  without a usable id, duplicates of an id and anything flagged compiled are
-  dropped — plus a names-only summary for its UI. The bytes are dropped the
-  moment the owner imports or dismisses; an undecided report ages out with
-  the frame's logs.
+  without a usable id and duplicates of an id are dropped, and a scene flagged
+  compiled is a compiled scene wherever the device put it — plus a names-only
+  summary for its UI. The bytes are dropped the moment the owner imports or
+  dismisses; an undecided report ages out with the frame's logs. A report of
+  compiled scenes only is kept too: the owner can have them converted, or
+  learn why they stay on the frame.
 - **Import is the owner's act, never automatic.** It mints scenes in their
   library, spends their quotas and re-renders their panel, so
   cloud.frameos.net offers it ("This frame is running 3 scenes of its own…")
@@ -564,6 +567,21 @@ while the provider, which has assigned it nothing, would list an empty frame.
   pushed as an ordinary
   `set_scenes` with `scene_id` = the reported `active_scene`, so the scene on
   screen stays on screen.
+- **Compiled scenes are converted only when the owner asks.**
+  cloud.frameos.net's banner and MCP's `frame_device_scenes_import` offer
+  "Convert and import" (`convert_compiled`): each compiled scene the frame
+  sent is run through the Nim → JavaScript converter (`/nim-converter`'s, on
+  the same key policy: the account's own OpenAI key, else the platform's
+  within a shared budget, else the deterministic pass alone — an absorbed
+  surface, metered but billed to nobody), at most three per call, and a scene
+  that converted fully is minted like any other, keeping its id. One the
+  converter could not finish stays compiled, which the store refuses, so it
+  is reported (`conversion_incomplete`; `conversion_needs_model` when only
+  the model pass is missing and a later call can finish it). A plain import
+  leaves the report open while compiled scenes with JSON are waiting. They
+  dedupe on the digest of what the frame holds, so a converted scene is
+  found again without a second conversion. `compiled_unsent` scenes cannot
+  be imported at all: their source is with the backend that built them.
 - **An import grants no service keys.** What a scene declares is the
   DEVICE's say, and claim-token enrolments hold `settings:services` by
   default: granting "what the imported scenes declare" would let a frame that
@@ -603,7 +621,13 @@ while the provider, which has assigned it nothing, would list an empty frame.
   `setCurrentScene` (the verb, a schedule entry, a button) resolves to the
   provider's copy, because that is the one being edited and deployed. Replace
   the uploaded set locally, or leave the provider, and the bare id is the disk
-  scene again.
+  scene again. **State travels on the device:** when a provider's push first
+  installs `uploaded/<id>` for an id the frame already ran, and that copy has
+  no persisted state of its own yet, the runtime starts it from the disk
+  scene's persisted state (`state/scene-<id>.json`), so an album keeps its
+  place. Nothing is sent to the provider for this; `set_scenes`' own `state`
+  seed still applies on top, to the scene it activates. The ESP32 stores
+  scenes by public id and needs no copy (it has no `scenes_get` anyway).
 
 ### Previews
 

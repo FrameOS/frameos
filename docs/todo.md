@@ -26,7 +26,8 @@ line in the map).
 3. **`docs/manual-testing-todo.md`** — what needs a bench: the HyperPixels on
    Pi 0–4 and the Round on a Pi 5, input and GPIO buttons on a Pi, four ESP32
    flash/OTA checks and the dispatcher's cloud/schedule paths, the setup
-   hotspot's captive sheet on a phone, scene import from a standalone frame.
+   hotspot's captive sheet on a phone, scene import from a standalone frame
+   (compiled scenes and carried state included), a panel pushed to an ESP32.
    The E1004's buttons and sounds passed (2026-10-18). It only shrinks for
    good with convergence item 2.
 4. **`cloud/docs/accounting-todo.md`** — billing. AI metering is live and
@@ -135,22 +136,6 @@ the reason to link at all), and/or the owner's own OpenAI key under the
 frame's service keys (the prompt/lint pipeline in
 `cloud/apps/auth-web/src/lib/ai/` would have to be callable from the
 device).
-
----
-
-## Frame scene import (`scenes_get`)
-
-Open on the import of a frame's own scenes (`docs/cloud-frames.md`, "Scenes
-the frame already had"):
-
-- Compiled scenes stay behind: the device counts them and the import's
-  summary says so, but the owner has to find `/nim-converter` themselves.
-  Sending their JSON along and offering the conversion inside the import
-  would finish the job for frames that came from an old backend deploy.
-- Persisted scene state does not travel: the push keeps the active scene on
-  screen, but the provider's copy runs as `uploaded/<id>`, so state persisted
-  under the old id is not carried over. `set_scenes` takes a `state` seed; the
-  import sends none.
 
 ---
 

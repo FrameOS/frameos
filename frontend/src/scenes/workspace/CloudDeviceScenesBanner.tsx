@@ -1,11 +1,17 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
-import { ArrowDownTrayIcon, XMarkIcon } from '@heroicons/react/24/solid'
+import { ArrowDownTrayIcon, ArrowPathRoundedSquareIcon, XMarkIcon } from '@heroicons/react/24/solid'
 
 import { Spinner } from '../../components/Spinner'
 import { framesModel } from '../../models/framesModel'
 import type { FrameType } from '../../types'
-import { deviceScenesImportable, deviceScenesOffer } from '../../utils/cloudDeviceScenes'
+import {
+  deviceScenesCompiledNotes,
+  deviceScenesConvertible,
+  deviceScenesOffer,
+  deviceScenesPlainImportable,
+  deviceScenesWorthShowing,
+} from '../../utils/cloudDeviceScenes'
 import { workspaceMode } from './workspaceSurfaces'
 
 /**
@@ -15,7 +21,10 @@ import { workspaceMode } from './workspaceSurfaces'
  * docs/cloud-frames.md); this is the offer to bring the answer into the
  * account: private drafts, added to the frame, sent back to it with the
  * scene on screen kept. Also the place the outcome is read afterwards — a
- * scene the store refused must not just be missing.
+ * scene the store refused must not just be missing. Compiled (Nim) scenes
+ * the frame sent are imported only through "Convert and import", which
+ * converts them to interpreted scenes first; ones the frame could only name
+ * are explained, not offered.
  *
  * Renders nothing outside the cloud, for a frame that reported nothing, and
  * until the owner has confirmed the frame (nothing can be sent before that,
@@ -31,12 +40,15 @@ export function CloudDeviceScenesBanner({ frame }: { frame: FrameType }): JSX.El
   const deviceScenes = cloudDeviceScenes[frame.id]
   const notice = cloudDeviceScenesNotices[frame.id]
   const busy = cloudDeviceScenesBusy[frame.id]
-  const importable = deviceScenesImportable(deviceScenes)
-  if (!importable && !notice && !busy) {
+  const showing = deviceScenesWorthShowing(deviceScenes)
+  if (!showing && !notice && !busy) {
     return null
   }
+  const plain = deviceScenesPlainImportable(deviceScenes)
+  const convertible = deviceScenesConvertible(deviceScenes)
   // A `partial` import leaves the report waiting: the same button finishes it.
-  const retrying = importable && deviceScenes?.result?.status === 'partial'
+  const retrying = plain && deviceScenes?.result?.status === 'partial'
+  const compiledNotes = showing && deviceScenes ? deviceScenesCompiledNotes(deviceScenes) : []
 
   return (
     <div
@@ -49,16 +61,23 @@ export function CloudDeviceScenesBanner({ frame }: { frame: FrameType }): JSX.El
       )}
     >
       <div className="min-w-0 flex-1 space-y-1">
-        {importable && deviceScenes ? (
+        {showing && deviceScenes ? (
           <p>
             {deviceScenesOffer(deviceScenes)}{' '}
-            <span className="font-normal">
-              Import them to see, edit and schedule them here. They become private scenes in your account and are sent
-              back to the frame; the copies on the frame itself are left alone, and none of your service keys are shared
-              with it.
-            </span>
+            {plain || convertible ? (
+              <span className="font-normal">
+                Import them to see, edit and schedule them here. They become private scenes in your account and are sent
+                back to the frame; the copies on the frame itself are left alone, and none of your service keys are
+                shared with it.
+              </span>
+            ) : null}
           </p>
         ) : null}
+        {compiledNotes.map((line, index) => (
+          <p key={`compiled-${index}`} className="font-normal">
+            {line}
+          </p>
+        ))}
         {notice?.lines.map((line, index) => (
           <p key={index} className={clsx(index > 0 && 'font-normal')}>
             {line}
@@ -66,22 +85,46 @@ export function CloudDeviceScenesBanner({ frame }: { frame: FrameType }): JSX.El
         ))}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        {importable ? (
+        {showing ? (
           <>
-            <button
-              type="button"
-              disabled={Boolean(busy)}
-              aria-busy={busy === 'importing'}
-              onClick={() => importCloudDeviceScenes(frame.id)}
-              className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {busy === 'importing' ? (
-                <Spinner className="h-4 w-4 [&>svg]:h-full [&>svg]:w-full" />
-              ) : (
-                <ArrowDownTrayIcon aria-hidden className="h-4 w-4" />
-              )}
-              {busy === 'importing' ? 'Importing…' : retrying ? 'Import the rest' : 'Import scenes'}
-            </button>
+            {plain ? (
+              <button
+                type="button"
+                disabled={Boolean(busy)}
+                aria-busy={busy === 'importing'}
+                onClick={() => importCloudDeviceScenes(frame.id)}
+                className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy === 'importing' ? (
+                  <Spinner className="h-4 w-4 [&>svg]:h-full [&>svg]:w-full" />
+                ) : (
+                  <ArrowDownTrayIcon aria-hidden className="h-4 w-4" />
+                )}
+                {busy === 'importing' ? 'Importing…' : retrying ? 'Import the rest' : 'Import scenes'}
+              </button>
+            ) : null}
+            {convertible ? (
+              <button
+                type="button"
+                disabled={Boolean(busy)}
+                aria-busy={busy === 'converting'}
+                onClick={() => importCloudDeviceScenes(frame.id, true)}
+                title="Convert the compiled scenes to interpreted scenes, then import everything"
+                className={clsx(
+                  'inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50',
+                  plain
+                    ? 'border border-sky-300 text-sky-900 hover:bg-sky-100 dark:border-sky-800 dark:text-sky-100 dark:hover:bg-sky-900/50'
+                    : 'frameos-primary-action text-white'
+                )}
+              >
+                {busy === 'converting' ? (
+                  <Spinner className="h-4 w-4 [&>svg]:h-full [&>svg]:w-full" />
+                ) : (
+                  <ArrowPathRoundedSquareIcon aria-hidden className="h-4 w-4" />
+                )}
+                {busy === 'converting' ? 'Converting…' : 'Convert and import'}
+              </button>
+            ) : null}
             <button
               type="button"
               disabled={Boolean(busy)}

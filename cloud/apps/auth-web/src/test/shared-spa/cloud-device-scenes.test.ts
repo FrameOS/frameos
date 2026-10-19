@@ -13,9 +13,13 @@ import { waitFor } from "@testing-library/react";
 import { initKea } from "../../../../../../frontend/src/initKea";
 import {
   deviceSceneSkipReason,
+  deviceScenesCompiledNotes,
+  deviceScenesConvertible,
   deviceScenesImportable,
   deviceScenesImportSummary,
   deviceScenesOffer,
+  deviceScenesPlainImportable,
+  deviceScenesWorthShowing,
   type CloudDeviceScenes,
   type CloudDeviceScenesImportResult,
 } from "../../../../../../frontend/src/utils/cloudDeviceScenes";
@@ -90,6 +94,51 @@ describe("what the import banner says", () => {
     );
   });
 
+  it("offers the frame's compiled scenes only as a conversion, and explains the ones it cannot send", () => {
+    const compiled = [
+      { id: "weather", name: "Weather" },
+      { id: "legacy", name: "Legacy" },
+    ];
+    // Interpreted and compiled: import either way, the compiled ones named apart.
+    const both = report({ compiled_scenes: compiled, skipped_compiled: 2 });
+    expect(deviceScenesPlainImportable(both)).toBe(true);
+    expect(deviceScenesConvertible(both)).toBe(true);
+    expect(deviceScenesOffer(both)).toBe("This frame is running 2 scenes of its own: “Clock” and “Photos”.");
+    expect(deviceScenesCompiledNotes(both)).toEqual([
+      "It also runs 2 compiled scenes (“Weather” and “Legacy”), written in Nim, which the cloud does not run. Convert and import turns them into interpreted scenes on the way in.",
+    ]);
+
+    // Compiled only.
+    const compiledOnly = report({ compiled_scenes: compiled.slice(0, 1), scene_count: 0, scenes: [], skipped_compiled: 1 });
+    expect(deviceScenesImportable(compiledOnly)).toBe(true);
+    expect(deviceScenesPlainImportable(compiledOnly)).toBe(false);
+    expect(deviceScenesOffer(compiledOnly)).toBe("This frame is running a compiled scene of its own: “Weather”.");
+
+    // After a plain import the report stays open for the conversion alone.
+    const afterPlain = report({ compiled_scenes: compiled, result: outcome(), skipped_compiled: 2 });
+    expect(deviceScenesPlainImportable(afterPlain)).toBe(false);
+    expect(deviceScenesConvertible(afterPlain)).toBe(true);
+    expect(deviceScenesOffer(afterPlain)).toBe(
+      "The compiled scenes from this frame are not imported yet: “Weather” and “Legacy”.",
+    );
+
+    // A scene compiled into the frame's program: nothing to import, but the
+    // owner learns why the cloud lists less than the frame shows.
+    const unsentOnly = report({
+      compiled_unsent: [{ id: "binary", name: "Binary" }],
+      scene_count: 0,
+      scenes: [],
+      skipped_compiled: 1,
+    });
+    expect(deviceScenesImportable(unsentOnly)).toBe(false);
+    expect(deviceScenesWorthShowing(unsentOnly)).toBe(true);
+    expect(deviceScenesWorthShowing(report({ ...unsentOnly, status: "dismissed" }))).toBe(false);
+    expect(deviceScenesOffer(unsentOnly)).toBe("This frame is running a compiled scene of its own: “Binary”.");
+    expect(deviceScenesCompiledNotes(unsentOnly)).toEqual([
+      "“Binary” is compiled into the frame's program, and its source is not on the frame. Export it from the FrameOS backend that deployed the frame and convert it with the Nim converter (scenes.frameos.net/nim-converter).",
+    ]);
+  });
+
   it("sums an import up, and never lets a refused scene just go missing", () => {
     expect(deviceScenesImportSummary(outcome())).toEqual([
       "2 imported as private drafts. The frame is taking them over now.",
@@ -155,6 +204,22 @@ describe("what the import banner says", () => {
     ]);
     // A code the SPA has no words for is shown, not swallowed.
     expect(deviceSceneSkipReason("some_new_refusal")).toBe("some new refusal");
+    // Converted scenes are counted as such, and a conversion that could not
+    // finish says why.
+    expect(
+      deviceScenesImportSummary(
+        outcome({
+          imported: [
+            { assigned: true, device_scene_id: "clock", name: "Clock", scene_id: "s1", version: 1 },
+            { assigned: true, converted: true, device_scene_id: "legacy", name: "Legacy", scene_id: "s2", version: 1 },
+          ],
+          skipped: [{ device_scene_id: "stuck", name: "Stuck", reason: "conversion_incomplete" }],
+        }),
+      ),
+    ).toEqual([
+      "2 imported as private drafts, 1 of them converted from a compiled scene. The frame is taking them over now.",
+      "“Stuck” was left out: the converter could not port all of its Nim, so it stays on the frame.",
+    ]);
   });
 });
 
@@ -217,6 +282,17 @@ describe("the import flow in framesModel", () => {
 
     framesModel.actions.clearCloudDeviceScenesNotice("9101");
     expect(framesModel.values.cloudDeviceScenesNotices["9101"]).toBeUndefined();
+  });
+
+  it("converts the compiled scenes only through the convert action", async () => {
+    await loaded("9101");
+    framesModel.actions.importCloudDeviceScenes("9101", true);
+    expect(framesModel.values.cloudDeviceScenesBusy["9101"]).toBe("converting");
+    await waitFor(() =>
+      expect(framesModel.values.cloudDeviceScenesBusy["9101"]).toBeUndefined(),
+    );
+    const post = apiFetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ action: "import", convert_compiled: true });
   });
 
   it("says why an import failed and still re-reads the listing", async () => {
