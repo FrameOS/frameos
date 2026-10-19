@@ -26,8 +26,7 @@ line in the map).
 3. **`docs/manual-testing-todo.md`** — what needs a bench: the HyperPixels on
    Pi 0–4 and the Round on a Pi 5, input and GPIO buttons on a Pi, four ESP32
    flash/OTA checks and the dispatcher's cloud/schedule paths, the setup
-   hotspot's captive sheet on a phone, scene import from a standalone frame
-   (compiled scenes and carried state included), a panel pushed to an ESP32.
+   hotspot's captive sheet on a phone, scene import from a standalone frame.
    The E1004's buttons and sounds passed (2026-10-18). It only shrinks for
    good with convergence item 2.
 4. **`cloud/docs/accounting-todo.md`** — billing. AI metering is live and

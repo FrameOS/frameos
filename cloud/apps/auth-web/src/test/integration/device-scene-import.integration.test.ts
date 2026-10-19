@@ -87,43 +87,13 @@ const actorFor = (accountId: string) => ({
   providerSubject: "device-import-test",
 });
 
-async function importFor(accountId: string, frameId: string, convertCompiled?: boolean) {
+async function importFor(accountId: string, frameId: string) {
   const [frame] = await db.select().from(frames).where(eq(frames.id, frameId));
   return importDeviceScenes(db, {
     accountId,
     actor: actorFor(accountId),
-    ...(convertCompiled ? { convertCompiled } : {}),
     frame: frame!,
   });
-}
-
-// A compiled scene whose one code node pass 1 converts (no model needed), and
-// one with a source node nothing can port.
-const legacy = {
-  edges: [],
-  id: "legacy",
-  name: "Legacy",
-  nodes: [{ data: { code: "1 + 2", codeArgs: [] }, id: "c1", type: "code" }],
-  settings: { execution: "compiled" },
-};
-const stuck = {
-  edges: [],
-  id: "stuck",
-  name: "Stuck",
-  nodes: [{ data: { sources: { "app.nim": "discard" } }, id: "s1", type: "source" }],
-  settings: { execution: "compiled" },
-};
-
-function compiledReport(scenes: unknown[], compiled: unknown[], unsent: unknown[] = []) {
-  return Buffer.from(
-    JSON.stringify({
-      active_scene: "legacy",
-      compiled_scenes: compiled,
-      compiled_unsent: unsent,
-      scenes,
-      skipped_compiled: compiled.length + unsent.length,
-    }),
-  );
 }
 
 beforeEach(() => {
@@ -383,108 +353,6 @@ describe("importing a frame's own scenes", () => {
       .set({ statusAt: new Date(Date.now() - 11 * 60 * 1000) })
       .where(eq(frameDeviceScenes.frameId, busy.id));
     expect((await importFor(accountId, busy.id)).ok).toBe(true);
-  });
-
-  it("converts the frame's compiled scenes only when asked, and keeps the report until then", async () => {
-    // No model in this test: pass 1 converts `legacy` on its own.
-    vi.stubEnv("OPENAI_API_KEY", "");
-    const accountId = await account();
-    const frame = await frameRow(accountId);
-    await storeFrameDeviceScenes(
-      db,
-      frame.id,
-      compiledReport([clock], [legacy, stuck], [{ id: "binary", name: "Binary" }]),
-    );
-    const [stored] = await db
-      .select()
-      .from(frameDeviceScenes)
-      .where(eq(frameDeviceScenes.frameId, frame.id));
-    expect(stored?.compiledScenes).toEqual([
-      { id: "legacy", name: "Legacy", sent: true },
-      { id: "stuck", name: "Stuck", sent: true },
-      { id: "binary", name: "Binary", sent: false },
-    ]);
-
-    // A plain import takes the interpreted scene and leaves the report open
-    // for the compiled ones: nothing converts unless the owner says so.
-    const plain = await importFor(accountId, frame.id);
-    if (!plain.ok) {
-      throw new Error(plain.failure.code);
-    }
-    expect(plain.result.imported.map((scene) => scene.name)).toEqual(["Clock"]);
-    expect(plain.result.skipped_compiled).toBe(3);
-    const [open] = await db
-      .select()
-      .from(frameDeviceScenes)
-      .where(eq(frameDeviceScenes.frameId, frame.id));
-    expect(open?.status).toBe("ready");
-    expect(open?.payload).not.toBeNull();
-
-    const converted = await importFor(accountId, frame.id, true);
-    if (!converted.ok) {
-      throw new Error(converted.failure.code);
-    }
-    expect(converted.result.reused.map((scene) => scene.name)).toEqual(["Clock"]);
-    expect(converted.result.imported).toMatchObject([{ converted: true, name: "Legacy" }]);
-    expect(converted.result.skipped).toEqual([
-      { device_scene_id: "stuck", name: "Stuck", reason: "conversion_incomplete" },
-    ]);
-    // Only the scene the frame could not send is left untried.
-    expect(converted.result.skipped_compiled).toBe(1);
-    expect(converted.result.status).toBe("imported");
-
-    // The push carries the converted scene under its own id, so the scene on
-    // screen stays on screen (and the frame carries its state over).
-    const pushes = await db
-      .select()
-      .from(frameCommands)
-      .where(and(eq(frameCommands.frameId, frame.id), eq(frameCommands.type, "set_scenes")));
-    const last = pushes.find((push) => push.id === converted.result.command_id);
-    const payload = last?.payload as {
-      scene_id?: string;
-      scenes?: { id: string; nodes?: { data?: Record<string, unknown> }[]; settings?: Record<string, unknown> }[];
-    };
-    expect(payload.scene_id).toBe("legacy");
-    const pushed = payload.scenes?.find((scene) => scene.id === "legacy");
-    expect(pushed?.settings?.execution).toBe("interpreted");
-    expect(pushed?.nodes?.[0]?.data?.codeJS).toBeTruthy();
-    expect(pushed?.nodes?.[0]?.data?.code).toBeUndefined();
-
-    // The same compiled scene from a re-enrolled frame is the draft already
-    // made, found by what the frame holds: no second conversion, no copy.
-    const second = await frameRow(accountId);
-    await storeFrameDeviceScenes(db, second.id, compiledReport([], [legacy]));
-    const again = await importFor(accountId, second.id, true);
-    if (!again.ok) {
-      throw new Error(again.failure.code);
-    }
-    expect(again.result.imported).toEqual([]);
-    expect(again.result.reused).toMatchObject([
-      { converted: true, scene_id: converted.result.imported[0]!.scene_id },
-    ]);
-  });
-
-  it("keeps a report of compiled scenes only, which a plain import does not touch", async () => {
-    const accountId = await account();
-    const frame = await frameRow(accountId);
-    await storeFrameDeviceScenes(
-      db,
-      frame.id,
-      compiledReport([], [], [{ id: "binary", name: "Binary" }]),
-    );
-    expect(await importFor(accountId, frame.id)).toMatchObject({
-      failure: { code: "nothing_to_import", status: 404 },
-      ok: false,
-    });
-    // Still there for the banner to explain, and for "Not now" to close.
-    const [snapshot] = await db
-      .select()
-      .from(frameDeviceScenes)
-      .where(eq(frameDeviceScenes.frameId, frame.id));
-    expect(snapshot?.status).toBe("ready");
-    expect(
-      await dismissDeviceScenes(db, { accountId, actor: actorFor(accountId), frame }),
-    ).toBe(true);
   });
 
   it("dismiss drops the bytes, keeps the verdict and is not reopened by a late reply", async () => {

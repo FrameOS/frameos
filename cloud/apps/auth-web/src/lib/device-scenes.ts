@@ -40,20 +40,9 @@ const maxSceneNameChars = 128;
 
 export type DeviceScene = Record<string, unknown> & { id: string };
 
-/** A compiled scene the frame could only name: compiled into its program by
- *  a backend's source build (no JSON of it is left on the frame), or past the
- *  part of the reply the frame allows compiled scenes. */
-export type UnsentCompiledScene = { id: string; name: string };
-
 export type DeviceScenesDocument = {
   activeScene: string | undefined;
-  /** Interpreted scenes: what an import mints as they are. */
   scenes: DeviceScene[];
-  /** Compiled scenes with their JSON: what an import can convert first. */
-  compiledScenes: DeviceScene[];
-  compiledUnsent: UnsentCompiledScene[];
-  /** Every compiled scene the frame holds, the counted-only ones of older
-   *  firmware included. */
   skippedCompiled: number;
 };
 
@@ -89,16 +78,11 @@ export function deviceSceneName(scene: DeviceScene): string {
   return (name || scene.id).slice(0, maxSceneNameChars);
 }
 
-function isCompiledScene(entry: Record<string, unknown>): boolean {
-  return isRecord(entry.settings) && entry.settings.execution === "compiled";
-}
-
 /**
  * Parse a `scenes_get` reply. Everything in it is device-supplied: scenes
- * without a usable id and duplicates of an id are dropped here, and a scene
- * that says it is compiled is only ever a compiled scene (to be converted on
- * the owner's say), wherever the device put it — so nothing downstream has
- * to ask again. Undefined when the bytes are not the documented shape at all.
+ * without a usable id, compiled scenes and duplicates of an id are dropped
+ * here, so nothing downstream has to ask again. Undefined when the bytes are
+ * not the documented shape at all.
  */
 export function parseDeviceScenesDocument(
   content: Buffer,
@@ -116,83 +100,44 @@ export function parseDeviceScenesDocument(
     return undefined;
   }
   const scenes: DeviceScene[] = [];
-  const compiledScenes: DeviceScene[] = [];
-  const compiledUnsent: UnsentCompiledScene[] = [];
   const seen = new Set<string>();
-  // Compiled scenes found in `scenes`: a device that put one there did not
-  // count it in its own `skipped_compiled` (which covers the two lists).
-  let compiledAmongScenes = 0;
-  const reportedCompiled =
+  let skippedCompiled =
     typeof parsed.skipped_compiled === "number" &&
     Number.isInteger(parsed.skipped_compiled) &&
     parsed.skipped_compiled > 0
-      ? parsed.skipped_compiled
+      ? Math.min(parsed.skipped_compiled, maxDeviceScenes)
       : 0;
-  const take = (entry: unknown, compiledList: boolean) => {
-    if (scenes.length + compiledScenes.length >= maxDeviceScenes) {
-      return;
+  for (const entry of parsed.scenes) {
+    if (scenes.length >= maxDeviceScenes) {
+      break;
     }
     if (!isRecord(entry) || typeof entry.id !== "string") {
-      return;
+      continue;
     }
     const id = entry.id;
     if (id.length === 0 || id.length > maxSceneIdChars || seen.has(id)) {
-      return;
+      continue;
+    }
+    // The device filters these itself; a provider believes nobody.
+    if (isRecord(entry.settings) && entry.settings.execution === "compiled") {
+      skippedCompiled += 1;
+      continue;
     }
     // No real scene nests like this; one that does is an attack on whatever
     // walks it next.
     if (nestedDeeperThan(entry, maxDeviceSceneDepth)) {
-      return;
+      continue;
     }
     seen.add(id);
-    // The device sorts these itself; a provider believes nobody, and a scene
-    // in `compiled_scenes` never becomes an interpreted one by saying so.
-    if (compiledList || isCompiledScene(entry)) {
-      compiledAmongScenes += compiledList ? 0 : 1;
-      compiledScenes.push(entry as DeviceScene);
-    } else {
-      scenes.push(entry as DeviceScene);
-    }
-  };
-  for (const entry of parsed.scenes) {
-    take(entry, false);
+    scenes.push(entry as DeviceScene);
   }
-  if (Array.isArray(parsed.compiled_scenes)) {
-    for (const entry of parsed.compiled_scenes) {
-      take(entry, true);
-    }
-  }
-  if (Array.isArray(parsed.compiled_unsent)) {
-    for (const entry of parsed.compiled_unsent) {
-      if (compiledUnsent.length >= maxDeviceScenes) {
-        break;
-      }
-      if (!isRecord(entry) || typeof entry.id !== "string") {
-        continue;
-      }
-      const id = entry.id;
-      if (id.length === 0 || id.length > maxSceneIdChars || seen.has(id)) {
-        continue;
-      }
-      seen.add(id);
-      const name = typeof entry.name === "string" ? entry.name.trim() : "";
-      compiledUnsent.push({ id, name: (name || id).slice(0, maxSceneNameChars) });
-    }
-  }
-  const skippedCompiled = Math.min(
-    Math.max(
-      reportedCompiled,
-      compiledScenes.length - compiledAmongScenes + compiledUnsent.length,
-    ) + compiledAmongScenes,
-    maxDeviceScenes,
-  );
   const activeScene =
     typeof parsed.active_scene === "string" &&
     parsed.active_scene.length > 0 &&
     parsed.active_scene.length <= maxSceneIdChars
       ? parsed.active_scene
       : undefined;
-  return { activeScene, compiledScenes, compiledUnsent, scenes, skippedCompiled };
+  return { activeScene, scenes, skippedCompiled };
 }
 
 // Keys sorted at every depth, so two serializations of one scene digest the
@@ -278,10 +223,8 @@ export async function shouldRequestDeviceScenes(
 /**
  * Store a `scenes_get` reply as the frame's snapshot. Returns the parsed
  * document, or undefined when the reply was unusable (nothing is stored). A
- * reply that names no scene at all clears a waiting snapshot instead of
- * leaving a banner that says nothing. One with compiled scenes only is kept:
- * the owner can have the ones with JSON converted, and should learn why the
- * others stay on the frame.
+ * reply with no importable scene clears a waiting snapshot instead of leaving
+ * a banner that offers nothing.
  */
 export async function storeFrameDeviceScenes(
   db: Database,
@@ -292,11 +235,7 @@ export async function storeFrameDeviceScenes(
   if (!document) {
     return undefined;
   }
-  if (
-    document.scenes.length === 0 &&
-    document.compiledScenes.length === 0 &&
-    document.compiledUnsent.length === 0
-  ) {
+  if (document.scenes.length === 0) {
     await db
       .delete(frameDeviceScenes)
       .where(
@@ -315,14 +254,6 @@ export async function storeFrameDeviceScenes(
     })),
     sizeBytes: content.length,
     skippedCompiled: document.skippedCompiled,
-    compiledScenes: [
-      ...document.compiledScenes.map((scene) => ({
-        id: scene.id,
-        name: deviceSceneName(scene),
-        sent: true,
-      })),
-      ...document.compiledUnsent.map((scene) => ({ ...scene, sent: false })),
-    ].slice(0, maxSummaryScenes),
   };
   await db
     .insert(frameDeviceScenes)
@@ -339,15 +270,10 @@ export async function storeFrameDeviceScenes(
 }
 
 export type DeviceScenesSummary = {
-  /** Compiled scenes an import can convert (the frame sent their JSON). */
-  compiled_scenes: { id: string; name: string }[];
-  /** Compiled scenes the frame could only name; they stay on the frame. */
-  compiled_unsent: { id: string; name: string }[];
   received_at: string;
   result: unknown;
   scene_count: number;
   scenes: { id: string; name: string }[];
-  /** Every compiled scene the frame holds, named or only counted. */
   skipped_compiled: number;
   status: string;
 };
@@ -365,15 +291,7 @@ export function deviceScenesSummary(
       ? [{ id: entry.id, name: entry.name }]
       : [],
   );
-  const compiled = (Array.isArray(row.compiledScenes) ? row.compiledScenes : []).flatMap(
-    (entry) =>
-      isRecord(entry) && typeof entry.id === "string" && typeof entry.name === "string"
-        ? [{ entry: { id: entry.id, name: entry.name }, sent: entry.sent === true }]
-        : [],
-  );
   return {
-    compiled_scenes: compiled.filter((item) => item.sent).map((item) => item.entry),
-    compiled_unsent: compiled.filter((item) => !item.sent).map((item) => item.entry),
     received_at: row.receivedAt.toISOString(),
     result: row.result ?? null,
     scene_count: row.sceneCount,

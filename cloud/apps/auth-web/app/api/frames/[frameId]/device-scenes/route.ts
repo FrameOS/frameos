@@ -17,10 +17,6 @@ import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
 import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
-// An import that converts compiled scenes makes model calls of up to a few
-// minutes (three scenes per call, device-scene-convert.ts); nginx's
-// proxy_read_timeout has to agree, as for /api/scenes/convert.
-export const maxDuration = 300;
 
 // The scenes a frame was ALREADY running when it joined the cloud
 // (docs/cloud-frames.md, `scenes_get`). The hub asks a frame that reports
@@ -66,11 +62,8 @@ export async function GET(
 // per reported scene — reusing the ones this account already has, see
 // device-scene-import.ts — assigns them to the frame after whatever it
 // already has, and pushes the set with the frame's active scene kept on
-// screen. With `"convert_compiled": true` the compiled scenes the frame sent
-// as JSON are converted to interpreted scenes and imported too (a few per
-// call). Answers the per-scene outcome; `status: "partial"` means a quota,
-// an outage or the conversion batch left some and the same call can be
-// repeated later.
+// screen. Answers the per-scene outcome; `status: "partial"` means a quota
+// or an outage refused some and the same call can be repeated later.
 // POST {"action": "dismiss"} drops the snapshot and stops the asking. The
 // scenes on the device are never touched by either.
 export async function POST(
@@ -127,7 +120,6 @@ export async function POST(
   const outcome = await importDeviceScenes(db, {
     accountId: session.accountId,
     actor,
-    convertCompiled: body.convert_compiled === true,
     frame,
   });
   if (!outcome.ok) {

@@ -1,10 +1,12 @@
 import {
   convertScenes,
   DEFAULT_CONVERT_MODEL,
+  ModelBudgetExceededError,
   ModelRequestError,
   openAiModelPort,
   rewrapScenes,
   unwrapScenes,
+  type ConversionReport,
   type ModelPort,
   type Scene,
 } from "@frameos-cloud/scene-convert";
@@ -13,6 +15,7 @@ import { resolveAiCredentials } from "../../../../src/lib/ai/api-key";
 import { appCatalog, jsTypeDeclarations } from "../../../../src/lib/ai/context";
 import { lintScenes, type LintIssue } from "../../../../src/lib/ai/scene-lint";
 import { validateScenePayload } from "../../../../src/lib/ai/scene-utils";
+import { countMissingPrimitives } from "../../../../src/lib/ai/missing-primitives";
 import { captureSceneConversion } from "../../../../src/lib/ai/telemetry";
 import { meterAiUsage, type CredentialSource } from "../../../../src/lib/billing";
 import { csrfResponse } from "../../../../src/lib/csrf";
@@ -20,15 +23,8 @@ import { jsonError, readBoundedJsonValue } from "../../../../src/lib/device-flow
 import { hasDatabaseUrl } from "../../../../src/lib/env";
 import { logWarn } from "../../../../src/lib/log";
 import { PhotoLinkRedactor } from "../../../../src/lib/photos/share-links-in-scenes";
-import { clientKey, rateLimitResponse } from "../../../../src/lib/rate-limit";
+import { checkRateLimit, clientKey, rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { retireAppsInScenes } from "../../../../src/lib/retired-apps";
-import {
-  maxModelCallsPerScene,
-  meteredSharedPort,
-  sceneConversionTelemetry,
-  sharedConverterKey,
-  spendSharedModelBudget,
-} from "../../../../src/lib/scene-convert-policy";
 import {
   renderScenes,
   rendererAvailable,
@@ -156,7 +152,7 @@ export async function POST(request: NextRequest) {
         // per-request unit bought an unbounded number of shared-key calls.
         // The first call is paid for here (so an exhausted budget is a 429
         // before any work starts); every further call pays as it is made.
-        const spent = await spendSharedModelBudget(clientKey(request));
+        const spent = await spendSharedModelBudget(request);
         if (!spent.allowed) {
           const retryAfter = Math.max(1, Math.ceil((spent.resetAt - Date.now()) / 1000));
           return NextResponse.json(
@@ -179,7 +175,7 @@ export async function POST(request: NextRequest) {
     ? openAiModelPort({ apiKey, model, reasoningEffort })
     : undefined;
   if (port && keySource === "shared") {
-    port = meteredSharedPort(port, clientKey(request));
+    port = meteredSharedPort(port, request);
   }
   // The model pass reads the scenes: a Photos share link in one reaches it
   // as a placeholder, and the converted scenes get the link back (as in the
@@ -199,7 +195,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     if (error instanceof ModelRequestError) {
-      captureSceneConversion(sceneConversionTelemetry({ distinctId, error: `openai_${error.status}`, keySource, requestId, results: [], scenes: scenes.length, startedAt }));
+      captureSceneConversion(telemetryRecord({ distinctId, error: `openai_${error.status}`, keySource, requestId, results: [], scenes: scenes.length, startedAt }));
       // Only a signed-in caller learns that OpenAI refused the key it
       // passed. Anonymous callers get the generic failure with no status
       // in it: the route needs no login, so a per-key verdict would make
@@ -240,7 +236,7 @@ export async function POST(request: NextRequest) {
 
   const ok = reports.every((report) => report.executionAfter === "interpreted");
   captureSceneConversion(
-    sceneConversionTelemetry({
+    telemetryRecord({
       distinctId,
       keySource,
       lintErrors: lint.errors.length,
@@ -361,6 +357,111 @@ function issue(entry: LintIssue) {
   return { message: entry.message, ...(entry.node ? { node: entry.node } : {}), scene: entry.scene };
 }
 
-// The key and budget policy lives in src/lib/scene-convert-policy.ts, shared
-// with the device-scene import; the route keeps exporting the key lookup.
-export { sharedConverterKey };
+// The platform key pays for anonymous conversions unless the operator says
+// otherwise — the whole point of the page is that a self-hoster with no
+// account can use it. FRAMEOS_SCENE_CONVERT_SHARED_KEY_ACCESS=none turns it
+// off; the budgets below are per address per hour and global per day.
+export function sharedConverterKey(env: Record<string, string | undefined> = process.env): string | undefined {
+  const access = (env.FRAMEOS_SCENE_CONVERT_SHARED_KEY_ACCESS ?? "all").trim().toLowerCase();
+  if (access === "none" || access === "off" || access === "0") {
+    return undefined;
+  }
+  return env.OPENAI_API_KEY?.trim() || undefined;
+}
+
+function positiveInt(raw: string | undefined, fallback: number): number {
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+// Per scene, on top of the shared-key budget: enough for a large scene's
+// apps and code nodes at three attempts each, far below "unbounded".
+const maxModelCallsPerScene = 60;
+
+// One unit of the shared-key budget: the per-address window first, the
+// global daily one only when that passed (so a spent address does not eat
+// into everyone's day). Both bucket keys are what the tests pin.
+async function spendSharedModelBudget(
+  request: NextRequest,
+): Promise<{ allowed: boolean; resetAt: number }> {
+  const perAddress = await checkRateLimit(`scenes:convert-model:${clientKey(request)}`, {
+    limit: sharedKeyPerAddressPerHour(),
+    windowMs: 60 * 60 * 1000,
+  });
+  if (!perAddress.allowed) {
+    return { allowed: false, resetAt: perAddress.resetAt };
+  }
+  const global = await checkRateLimit("scenes:convert-model:global", {
+    limit: sharedKeyPerDay(),
+    windowMs: 24 * 60 * 60 * 1000,
+  });
+  return { allowed: global.allowed, resetAt: global.resetAt };
+}
+
+// The shared-key port pays one budget unit per call. The first call was paid
+// up front by the route; when the budget runs out mid-conversion the
+// converter reports the rest of the scene as needs_model instead of calling.
+function meteredSharedPort(port: ModelPort, request: NextRequest): ModelPort {
+  let prepaid = 1;
+  return async (modelRequest, signal) => {
+    if (prepaid > 0) {
+      prepaid -= 1;
+    } else {
+      const spent = await spendSharedModelBudget(request);
+      if (!spent.allowed) {
+        throw new ModelBudgetExceededError(sharedKeyPerAddressPerHour());
+      }
+    }
+    return port(modelRequest, signal);
+  };
+}
+
+function sharedKeyPerAddressPerHour() {
+  return positiveInt(process.env.FRAMEOS_SCENE_CONVERT_PER_ADDRESS_PER_HOUR, 6);
+}
+
+function sharedKeyPerDay() {
+  return positiveInt(process.env.FRAMEOS_SCENE_CONVERT_PER_DAY, 200);
+}
+
+function telemetryRecord(input: {
+  distinctId: string;
+  keySource: "request" | "account" | "shared" | "none";
+  requestId: string;
+  results: ConversionReport[];
+  scenes: number;
+  startedAt: number;
+  lintErrors?: number;
+  renderErrors?: number | null;
+  error?: string;
+}) {
+  const items = input.results.flatMap((report) => report.items);
+  return {
+    apps: items.filter((item) => item.kind === "app" && item.status === "converted").length,
+    codeNodesDeterministic: items.filter((item) => item.kind === "code" && item.status === "converted" && item.via === "deterministic").length,
+    codeNodesModel: items.filter((item) => item.kind === "code" && item.status === "converted" && item.via === "model").length,
+    distinctId: input.distinctId,
+    durationMs: Date.now() - input.startedAt,
+    error: input.error,
+    keySource: input.keySource,
+    lintErrors: input.lintErrors ?? 0,
+    manualPortPrimitives: countMissingPrimitives(
+      items.flatMap((item) => (item.status === "needs_manual_port" ? [item.reason] : [])),
+    ),
+    model: input.results.find((report) => report.model)?.model,
+    modelCalls: input.results.reduce((n, report) => n + report.modelCalls, 0),
+    needsManualPort: input.results.reduce((n, report) => n + report.needsManualPort.length, 0),
+    needsModel: input.results.reduce((n, report) => n + report.needsModel.length, 0),
+    renderErrors: input.renderErrors ?? null,
+    requestId: input.requestId,
+    scenes: input.scenes,
+    usage: input.results.reduce(
+      (total, report) => ({
+        inputTokens: total.inputTokens + report.usage.inputTokens,
+        outputTokens: total.outputTokens + report.usage.outputTokens,
+        reasoningTokens: total.reasoningTokens + report.usage.reasoningTokens,
+      }),
+      { inputTokens: 0, outputTokens: 0, reasoningTokens: 0 },
+    ),
+  };
+}

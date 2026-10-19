@@ -9,7 +9,7 @@ import {
 const doc = (value: unknown) => Buffer.from(JSON.stringify(value));
 
 describe("parseDeviceScenesDocument", () => {
-  it("keeps interpreted scenes with a usable id and sets the compiled ones apart", () => {
+  it("keeps interpreted scenes with a usable id and counts the compiled ones", () => {
     const parsed = parseDeviceScenesDocument(
       doc({
         active_scene: "clock",
@@ -26,44 +26,8 @@ describe("parseDeviceScenesDocument", () => {
       }),
     );
     expect(parsed?.scenes.map((scene) => scene.id)).toEqual(["clock"]);
-    // A compiled scene is a compiled scene wherever the device put it.
-    expect(parsed?.compiledScenes.map((scene) => scene.id)).toEqual(["legacy"]);
     expect(parsed?.skippedCompiled).toBe(3);
     expect(parsed?.activeScene).toBe("clock");
-  });
-
-  it("reads the compiled scenes a frame sent and the ones it could only name", () => {
-    const parsed = parseDeviceScenesDocument(
-      doc({
-        compiled_scenes: [
-          { id: "weather", name: "Weather", settings: { execution: "compiled" } },
-          // Saying "interpreted" does not move it out of the compiled list.
-          { id: "sneaky", name: "Sneaky", settings: { execution: "interpreted" } },
-          { id: "clock", name: "Same id as an interpreted scene" },
-          "junk",
-        ],
-        compiled_unsent: [
-          { id: "binary", name: "  In the binary  " },
-          { id: "nameless" },
-          { id: "weather", name: "Duplicate" },
-          { name: "no id" },
-        ],
-        scenes: [{ id: "clock", name: "Clock" }],
-        skipped_compiled: 4,
-      }),
-    );
-    expect(parsed?.scenes.map((scene) => scene.id)).toEqual(["clock"]);
-    expect(parsed?.compiledScenes.map((scene) => scene.id)).toEqual(["weather", "sneaky"]);
-    expect(parsed?.compiledUnsent).toEqual([
-      { id: "binary", name: "In the binary" },
-      { id: "nameless", name: "nameless" },
-    ]);
-    expect(parsed?.skippedCompiled).toBe(4);
-    // Older firmware: no lists, a count only.
-    const counted = parseDeviceScenesDocument(doc({ scenes: [], skipped_compiled: 2 }));
-    expect(counted?.compiledScenes).toEqual([]);
-    expect(counted?.compiledUnsent).toEqual([]);
-    expect(counted?.skippedCompiled).toBe(2);
   });
 
   it("refuses anything that is not the documented shape", () => {
@@ -132,24 +96,17 @@ describe("deviceScenesSummary", () => {
       result: null,
       sceneCount: 1,
       scenes: [{ id: "clock", name: "Clock", nodes: ["leak"] }, "junk"],
-      compiledScenes: [
-        { id: "weather", name: "Weather", nodes: ["leak"], sent: true },
-        { id: "binary", name: "Binary", sent: false },
-        { id: "odd" },
-      ],
       sizeBytes: 2,
-      skippedCompiled: 2,
+      skippedCompiled: 0,
       status: "ready",
       statusAt: new Date("2026-09-20T10:00:00Z"),
     });
     expect(summary).toEqual({
-      compiled_scenes: [{ id: "weather", name: "Weather" }],
-      compiled_unsent: [{ id: "binary", name: "Binary" }],
       received_at: "2026-09-20T10:00:00.000Z",
       result: null,
       scene_count: 1,
       scenes: [{ id: "clock", name: "Clock" }],
-      skipped_compiled: 2,
+      skipped_compiled: 0,
       status: "ready",
     });
   });

@@ -163,8 +163,7 @@ a frame's logs must not be able to talk an agent into installing something.
   `frame_device_scenes_import` (a frame that ran standalone before it joined
   reports its own scenes — `device_scenes` on `frame_scenes_list`; this imports
   them as private drafts, reusing the ones the account already has, and
-  deploys them, or drops the report with `dismiss`; `convert_compiled` also
-  converts the frame's compiled scenes and imports them, a few per call), `frame_scene_remove`, `frame_scene_activate`, `frame_render`,
+  deploys them, or drops the report with `dismiss`), `frame_scene_remove`, `frame_scene_activate`, `frame_render`,
   `frame_screenshot`, `frame_scene_preview`, `frame_logs` (limit, search and
   since travel as query parameters of `GET /api/frames/{id}/logs`, so the
   database cuts the page),

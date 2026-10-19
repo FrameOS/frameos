@@ -606,11 +606,7 @@ export interface framesModelActions {
     force: boolean
     id: FrameId
   }
-  importCloudDeviceScenes: (
-    id: FrameId,
-    convertCompiled?: boolean
-  ) => {
-    convertCompiled: boolean
+  importCloudDeviceScenes: (id: FrameId) => {
     id: FrameId
   }
   importCloudDeviceScenesSuccess: (
@@ -811,12 +807,7 @@ export const framesModel = kea<framesModelType>([
     // (utils/cloudDeviceScenes.ts). Arrives with the scene hydration; the
     // dashboard's banner imports it into the account or dismisses it.
     setCloudDeviceScenes: (id: FrameId, deviceScenes: CloudDeviceScenes | null) => ({ id, deviceScenes }),
-    // `convertCompiled`: also convert the frame's compiled scenes and import
-    // them (the banner's "Convert and import"). Never a default.
-    importCloudDeviceScenes: (id: FrameId, convertCompiled?: boolean) => ({
-      id,
-      convertCompiled: convertCompiled || false,
-    }),
+    importCloudDeviceScenes: (id: FrameId) => ({ id }),
     importCloudDeviceScenesSuccess: (id: FrameId, result: CloudDeviceScenesImportResult) => ({ id, result }),
     dismissCloudDeviceScenes: (id: FrameId) => ({ id }),
     cloudDeviceScenesFailure: (id: FrameId, error: string) => ({ id, error }),
@@ -927,15 +918,11 @@ export const framesModel = kea<framesModelType>([
         setCloudDeviceScenes: (state, { id, deviceScenes }) => ({ ...state, [id]: deviceScenes }),
       },
     ],
-    // 'importing' | 'converting' | 'dismissing' while the banner's request is
-    // in flight.
+    // 'importing' | 'dismissing' while the banner's request is in flight.
     cloudDeviceScenesBusy: [
       {} as Record<FrameId, string>,
       {
-        importCloudDeviceScenes: (state, { id, convertCompiled }) => ({
-          ...state,
-          [id]: convertCompiled ? 'converting' : 'importing',
-        }),
+        importCloudDeviceScenes: (state, { id }) => ({ ...state, [id]: 'importing' }),
         dismissCloudDeviceScenes: (state, { id }) => ({ ...state, [id]: 'dismissing' }),
         importCloudDeviceScenesSuccess: (state, { id }) => withoutFrameKey(state, id),
         cloudDeviceScenesFailure: (state, { id }) => withoutFrameKey(state, id),
@@ -1742,9 +1729,9 @@ export const framesModel = kea<framesModelType>([
         actions.confirmCloudFrameFailure(id, error instanceof Error ? error.message : 'Failed to confirm the frame')
       }
     },
-    importCloudDeviceScenes: async ({ id, convertCompiled }) => {
+    importCloudDeviceScenes: async ({ id }) => {
       try {
-        const result = await importCloudFrameDeviceScenes(id, convertCompiled)
+        const result = await importCloudFrameDeviceScenes(id)
         actions.importCloudDeviceScenesSuccess(id, result)
       } catch (error) {
         console.error(error)

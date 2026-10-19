@@ -303,18 +303,6 @@ proc dynamicSceneCount*(): int =
   withLock sceneRegistryLock:
     result = interpretedScenes.len + uploadedScenes.len
 
-proc compiledSceneOptions*(): seq[tuple[id: SceneId, name: string]] =
-  ## The scenes a backend's source build compiled into this binary (the
-  ## deprecated path, docs/legacy-source-builds.md), for `scenes_get` and the
-  ## hello's `scene_count`. `sceneOptions` is a const of the generated
-  ## registry, so any thread may read it. A release binary registers one
-  ## placeholder, the built-in "Default Scene", which is no scene of the
-  ## owner's.
-  for (sceneId, name) in scenes.sceneOptions:
-    if sceneId.string == "default" and name == "Default Scene":
-      continue
-    result.add((sceneId, name))
-
 proc getDynamicSceneOptions*(): seq[tuple[id: SceneId, name: string]] =
   withLock sceneRegistryLock:
     for sceneId, scene in interpretedScenes:

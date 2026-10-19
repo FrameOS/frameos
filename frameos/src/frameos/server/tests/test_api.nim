@@ -192,7 +192,7 @@ suite "Server API helpers":
     check invalidScenesPayload{"scenes"}.len == 0
 
 suite "the scenes a frame reports to a provider (scenes_get)":
-  test "uploaded scenes first, disk scenes after, compiled ones apart":
+  test "uploaded scenes first, disk scenes after, compiled ones counted not sent":
     let tempRoot = getTempDir() / "frameos-api-device-scenes"
     createDir(tempRoot)
     let scenesPath = tempRoot / "scenes.json"
@@ -210,35 +210,10 @@ suite "the scenes a frame reports to a provider (scenes_get)":
       # The uploaded copy wins an id both stores hold.
       check payload{"scenes"}[0]{"name"}.getStr() == "Clock (uploaded)"
       check payload{"scenes"}[1]{"id"}.getStr() == "photos"
-      # `legacy` says so itself, and travels in its own list so the owner can
-      # have it converted while importing.
-      check payload{"compiled_scenes"}.len == 1
-      check payload{"compiled_scenes"}[0]{"name"}.getStr() == "Legacy"
-      # The release binary's built-in placeholder is no scene of the owner's.
-      check payload{"compiled_unsent"}.len == 0
+      # `legacy` says so itself.
       check payload{"skipped_compiled"}.getInt() == 1
     finally:
       setUploadedScenePayload("")
-      delEnv("FRAMEOS_SCENES_JSON")
-
-  test "compiled scenes past the budget are named, not sent":
-    let tempRoot = getTempDir() / "frameos-api-device-scenes-budget"
-    createDir(tempRoot)
-    let scenesPath = tempRoot / "scenes.json"
-    writeFile(scenesPath, $(%*[
-      {"id": "small", "name": "Small", "settings": {"execution": "compiled"}},
-      {"id": "big", "name": "Big", "settings": {"execution": "compiled"},
-       "nodes": [{"id": "1", "data": {"code": "x".repeat(400)}}]},
-    ]))
-    putEnv("FRAMEOS_SCENES_JSON", scenesPath)
-    try:
-      let payload = deviceScenesPayload(compiledBudgetBytes = 200)
-      check payload{"scenes"}.len == 0
-      check payload{"compiled_scenes"}.len == 1
-      check payload{"compiled_scenes"}[0]{"id"}.getStr() == "small"
-      check payload{"compiled_unsent"} == %*[{"id": "big", "name": "Big"}]
-      check payload{"skipped_compiled"}.getInt() == 2
-    finally:
       delEnv("FRAMEOS_SCENES_JSON")
 
 suite "private-network elevation is not a bulk-savable setting":

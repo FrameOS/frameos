@@ -22,12 +22,6 @@
 // the `origin` stamp. A scene the owner edited on the frame since is different
 // content and becomes a new draft — silently overwriting either copy would
 // lose work.
-//
-// Compiled scenes the frame sent as JSON are imported only when the owner
-// asks for them to be converted (`convertCompiled`, device-scene-convert.ts).
-// They dedupe on the digest of what the FRAME holds, before conversion, so a
-// retry or a re-enrolled frame finds the draft without converting again
-// (tier 2; a compiled scene was never a store scene, so tier 1 cannot match).
 
 import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import {
@@ -41,7 +35,6 @@ import {
 import { createAccountScene } from "./account-scene-create";
 import { recordAuditEvent } from "./audit";
 import { readBlob } from "./blobs";
-import { convertDeviceScenes, maxConversionsPerImport } from "./device-scene-convert";
 import {
   deviceSceneContentSha256,
   deviceSceneName,
@@ -79,9 +72,6 @@ const draftConcurrency = 4;
 // the banner can offer "Import the rest"; the ledger makes the retry skip
 // what already landed.
 const retryableReasons = new Set([
-  "conversion_failed",
-  "conversion_needs_model",
-  "conversion_next_batch",
   "daily_scene_limit_exceeded",
   "moderation_unavailable",
   "scene_quota_exceeded",
@@ -92,9 +82,6 @@ export type ImportedDeviceScene = {
   // False when the draft exists but could not go onto the frame (the frame
   // is full, or the scene runs shell apps a cloud push may never carry).
   assigned: boolean;
-  // A compiled scene on the frame, converted to an interpreted one (now or
-  // by an earlier import of the same content).
-  converted?: true;
   device_scene_id: string;
   name: string;
   // Service-key groups the scene declares and was NOT granted (an import
@@ -117,8 +104,6 @@ export type DeviceSceneImportResult = {
   imported: ImportedDeviceScene[];
   reused: ImportedDeviceScene[];
   skipped: SkippedDeviceScene[];
-  // Compiled scenes this import did not try: all of them when it was not
-  // asked to convert, else the ones the frame could only name or count.
   skipped_compiled: number;
   // `partial`: something was refused for a reason a retry can get past.
   status: "imported" | "partial";
@@ -351,17 +336,9 @@ async function releaseSnapshot(
  */
 export async function importDeviceScenes(
   db: Database,
-  input: {
-    accountId: string;
-    actor: PublishActor;
-    // Convert the compiled scenes the frame sent as JSON and import them
-    // too. The owner's explicit choice, never a default.
-    convertCompiled?: boolean;
-    frame: FrameRow;
-  },
+  input: { accountId: string; actor: PublishActor; frame: FrameRow },
 ): Promise<DeviceSceneImportOutcome> {
   const { accountId, actor, frame } = input;
-  const convertCompiled = input.convertCompiled === true;
   if (frame.status !== "active") {
     return { failure: { code: "frame_not_active", status: 409 }, ok: false };
   }
@@ -385,26 +362,16 @@ export async function importDeviceScenes(
     const document = claimed.payload
       ? parseDeviceScenesDocument(claimed.payload)
       : undefined;
-    const compiledToConvert = convertCompiled ? (document?.compiledScenes ?? []) : [];
-    if (!document || document.scenes.length + compiledToConvert.length === 0) {
-      if (document && document.compiledScenes.length + document.compiledUnsent.length > 0) {
-        // Compiled scenes only, and no conversion asked for: the report
-        // stays for the owner to convert or dismiss.
-        await releaseSnapshot(db, frame.id, "ready", null);
-      } else {
-        await db
-          .delete(frameDeviceScenes)
-          .where(eq(frameDeviceScenes.frameId, frame.id));
-      }
+    if (!document || document.scenes.length === 0) {
+      await db
+        .delete(frameDeviceScenes)
+        .where(eq(frameDeviceScenes.frameId, frame.id));
       return { failure: { code: "nothing_to_import", status: 404 }, ok: false };
     }
 
     // Tiers 1 and 2 are database reads: settle them in order, so two device
     // scenes with identical content resolve to one store scene.
     type Entry = {
-      // A compiled scene to convert before it is minted; `scene` becomes the
-      // converted one, `digest` stays the frame's original.
-      compiled?: true;
       digest: string;
       resolved?: Resolved | undefined;
       reused: boolean;
@@ -424,22 +391,6 @@ export async function importDeviceScenes(
         (await resolveFromOrigin(db, accountId, scene, digest)) ??
         (await resolveFromLedger(db, accountId, digest));
       entries.push({ digest, resolved, reused: resolved !== undefined, scene });
-    }
-    let conversions = 0;
-    for (const scene of compiledToConvert) {
-      const digest = deviceSceneContentSha256(scene);
-      if (digestsSeen.has(digest)) {
-        entries.push({ compiled: true, digest, reused: false, scene, skipped: "duplicate" });
-        continue;
-      }
-      digestsSeen.add(digest);
-      const resolved = await resolveFromLedger(db, accountId, digest);
-      // A few conversions per call: the rest wait for "Import the rest".
-      const skipped =
-        !resolved && conversions++ >= maxConversionsPerImport
-          ? "conversion_next_batch"
-          : undefined;
-      entries.push({ compiled: true, digest, resolved, reused: resolved !== undefined, scene, skipped });
     }
 
     // The store checks its quotas AFTER moderation and classification (both
@@ -470,26 +421,6 @@ export async function importDeviceScenes(
         entry.skipped = overBudget;
       }
     }
-
-    // Conversion, only for compiled scenes that will be minted: within the
-    // scene budget and not already in the account. A scene the converter
-    // could not finish stays compiled, which the store refuses, so it is
-    // reported instead.
-    const toConvert = entries.filter(
-      (entry) => entry.compiled && !entry.resolved && !entry.skipped,
-    );
-    const converted = await convertDeviceScenes(db, {
-      accountId,
-      scenes: toConvert.map((entry) => entry.scene),
-    });
-    toConvert.forEach((entry, index) => {
-      const outcome = converted[index];
-      if (outcome?.ok) {
-        entry.scene = outcome.scene;
-      } else {
-        entry.skipped = outcome?.reason ?? "conversion_failed";
-      }
-    });
 
     // Tier 3, a few at a time. Once one draft is refused for a reason that
     // will refuse the rest too (the daily budget, a full account), stop
@@ -586,7 +517,6 @@ export async function importDeviceScenes(
       const needs = reason === undefined ? declaredServiceSettingGroups([entry.scene]) : [];
       return {
         assigned: reason === undefined,
-        ...(entry.compiled ? { converted: true as const } : {}),
         device_scene_id: entry.scene.id,
         name: deviceSceneName(entry.scene),
         ...(needs.length > 0 ? { needs_settings_groups: needs } : {}),
@@ -609,13 +539,10 @@ export async function importDeviceScenes(
       imported: entries.filter((entry) => entry.resolved && !entry.reused).map(describe),
       reused: entries.filter((entry) => entry.resolved && entry.reused).map(describe),
       skipped,
-      skipped_compiled: Math.max(0, document.skippedCompiled - compiledToConvert.length),
+      skipped_compiled: document.skippedCompiled,
       status: partial ? "partial" : "imported",
     };
-    // A report with compiled scenes nobody asked to convert stays open, so
-    // the owner can still convert them; "Not now" closes it.
-    const keepOpen = partial || (!convertCompiled && document.compiledScenes.length > 0);
-    await releaseSnapshot(db, frame.id, keepOpen ? "ready" : "imported", result);
+    await releaseSnapshot(db, frame.id, partial ? "ready" : "imported", result);
 
     await recordAuditEvent(db, {
       accountId,
@@ -627,9 +554,6 @@ export async function importDeviceScenes(
         reused: result.reused.map((scene) => scene.name),
         skipped: result.skipped.map((scene) => `${scene.name}: ${scene.reason}`),
         skippedCompiled: result.skipped_compiled,
-        converted: [...result.imported, ...result.reused]
-          .filter((scene) => scene.converted)
-          .map((scene) => scene.name),
       },
       target: { commandId, frameId: frame.id },
     });
