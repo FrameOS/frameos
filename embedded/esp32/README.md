@@ -53,8 +53,6 @@ main/                     boot orchestration + platform modules
                           aware: the status screen and the local network access code box (host-tested)
   fos_lan_access.c        the local network access code: mint, TTL, attempts, constant-time check (host-tested)
   fos_board.c             board table: pins, panel defaults, battery divider per board
-  fos_board_panels.c      which panels a pushed `device` may name on this board (host-tested,
-                          docs/esp32-board-panels.json + fos_board_panels_gen.h)
   fos_buttons.c           GPIO button map → `gpio` edges (origin `driver`, via fos_events.c)
   fos_battery.c           battery ADC sampling; fos_battery_filter.c its outlier filter
   fos_power.c             deep sleep, wake-check render skip, VBUS truth
@@ -212,18 +210,6 @@ for the two Spectra boards most of the bench work runs on:
 | `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash; battery GPIO1 ÷2, switch GPIO21 |
 | `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas |
 | `elecrow_crowpanel_5in79` | S3 | EPD_5in79 5.79" 4-gray | CrowPanel, dual SSD1683 |
-
-A control plane can switch the panel too (`set_settings` `device`, firmware
-2026.10.18+), but only to one this board can drive:
-`docs/esp32-board-panels.json` lists every preset above as `builtin` (the
-panel is part of the board, so that panel and no other) or `connector` (the
-two XIAO ePaper Driver Board kits: any compiled panel the pins can drive),
-and a board without a preset is judged by its pins alone, the SPI set or
-the I2C pair, plus `cs2` for EPD_13in3e. `none` is never pushed. A preset
-added to the console's table has to be added there too: the generator
-(`frameos/tools/generate_esp32_board_panels.py`) refuses a console preset it
-does not list. The console and the setup portal still take any compiled
-panel: someone is at the board there.
 
 The TRMNL X (10.3" 1872×1404 parallel e-ink over EPDIY/FastEPD) is not yet
 supported — it needs a parallel display driver class this component does not

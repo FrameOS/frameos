@@ -8,7 +8,6 @@
  * hardware): the editor then previews the adjustments alone.
  */
 import type { FrameType } from '../../types'
-import { esp32Panels } from '../esp32BoardPanels.gen'
 import { hexToTriplet, type RgbTriplet } from './profile'
 
 // The Spectra 6 panels, by device name — the same set `withCustomPalette`
@@ -158,20 +157,16 @@ export function customPaletteOf(frame: Pick<FrameType, 'palette'>): RgbTriplet[]
  * The driver name the palette tables are keyed by. A cloud frame's panel is
  * the one in its enrollment hardware report, never a form value: the cloud
  * fills no `device` for an ESP32, and a Pi reports the driver it runs. An
- * ESP32 reports its panel by the firmware's name (`EPD_7in3e`,
- * `OLED_SSD1306_72x40`) where the tables say `waveshare.EPD_7in3e` /
- * `oled.ssd1306_72x40` (esp32BoardPanels.gen.ts has both). Backend-managed
- * frames carry no hardware report and keep their own `device`.
+ * ESP32 reports its panel as the bare waveshare key (`EPD_7in3e`) where the
+ * tables say `waveshare.EPD_7in3e`. Backend-managed frames carry no
+ * hardware report and keep their own `device`.
  */
 export function paletteDeviceOf(frame: Pick<FrameType, 'device' | 'hardware'>): string {
   const reported = frame.hardware?.device ?? ''
   if (reported) {
     const platform = frame.hardware?.platform
     const esp32 = typeof platform === 'string' && platform.toLowerCase().startsWith('esp32')
-    if (!esp32 || reported.includes('.')) {
-      return reported
-    }
-    return esp32Panels.find((panel) => panel.name === reported)?.device ?? `waveshare.${reported}`
+    return esp32 && !reported.includes('.') ? `waveshare.${reported}` : reported
   }
   return frame.device || ''
 }

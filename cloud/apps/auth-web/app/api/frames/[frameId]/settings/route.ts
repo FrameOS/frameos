@@ -67,10 +67,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const isEsp32 = frameHardwareIsEsp32(frame)
   const refusal = frameSettingsRefusal(frame, settings)
   if (refusal) {
-    return jsonError(refusal.error, 400, {
-      ...(refusal.minFrameosVersion ? { min_frameos_version: refusal.minFrameosVersion } : {}),
-      ...(refusal.reason ? { reason: refusal.reason } : {}),
-    })
+    return jsonError(
+      refusal.error,
+      400,
+      refusal.minFrameosVersion ? { min_frameos_version: refusal.minFrameosVersion } : undefined,
+    )
   }
 
   // Mirror what was pushed so the Settings panel hydrates on the next load

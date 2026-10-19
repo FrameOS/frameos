@@ -95,10 +95,9 @@ def test_single_plane_settings_carry_a_parity_reason():
     by_plane = {}
     for spec in single.values():
         by_plane[spec["parity"]["only"]] = by_plane.get(spec["parity"]["only"], 0) + 1
-    # 9 since `device` went both-planes (2026.10.18: the ESP32 takes a panel
-    # its board can drive, docs/esp32-board-panels.json); `input_settings`
-    # (keyboards and pointers are the Linux runtime's) is still counted.
-    assert by_plane.get("linux", 0) <= 9, by_plane
+    # 10 since `input_settings` (2026.9.23: keyboards and pointers are the
+    # Linux runtime's, docs/convergence-todo.md §6).
+    assert by_plane.get("linux", 0) <= 10, by_plane
     # 9 since `buzzer_pin` + `buzzer_tone_hz` (2026.10.12: the button tone is
     # the ESP32 button task's; no Pi preset has a buzzer).
     assert by_plane.get("esp32", 0) <= 9, by_plane

@@ -149,8 +149,7 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     surfaces: ['cloudEsp32'],
     nav: [],
     navNote: 'The esp32 profile links Power, Palette and Colors only; see esp32CloudFrameSettingsSections.',
-    conditions:
-      'Disabled below esp32ExtendedCloudFrameSettingsMinVersion; the display panel field in it below esp32DisplayPanelCloudFrameSettingsMinVersion (2026.10.18), and it lists only the panels the reported board can drive.',
+    conditions: 'Disabled below esp32ExtendedCloudFrameSettingsMinVersion.',
   },
   {
     key: 'cloud-esp32-palette',

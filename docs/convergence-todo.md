@@ -167,7 +167,7 @@ scene-execution rule is pinned the same way
 (`docs/scene-execution-fixtures.json`; new cases go in the JSON first), and
 so is the settings-key split: every single-plane key in
 `docs/cloud-frames-contract.json` carries `parity: {only, why}`, and the
-tests cap the count at 9 linux-only / 9 esp32-only — the cap can only go
+tests cap the count at 10 linux-only / 9 esp32-only — the cap can only go
 down (each raise carries its reason in that key's `parity.why`).
 Standing rule rather than a task:
 

@@ -806,9 +806,6 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     if (before->rotate != after->rotate) {
         change_append_int(out, out_len, "rotate", (long)after->rotate);
     }
-    if (strcmp(before->panel, after->panel) != 0) {
-        change_append(out, out_len, "device", after->panel);
-    }
     if (strcmp(before->scaling_mode, after->scaling_mode) != 0) {
         change_append(out, out_len, "scaling_mode", after->scaling_mode);
     }

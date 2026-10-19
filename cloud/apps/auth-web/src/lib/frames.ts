@@ -30,7 +30,6 @@ import { deviceDeliverableFields } from "./frame-service-settings";
 import { frameLanAccess } from "./frame-lan-access";
 import { commandTtlForFrame } from "./frame-sleep";
 import { deployProgressKindForCommand, startDeployProgress } from "./deploy-progress";
-import { esp32PanelRefusal, type Esp32PanelBoard, type Esp32PanelRefusal } from "./esp32-board-panels";
 import { requiredSettingsForScenes } from "./preview-settings";
 import { scenesForEmbeddedRuntime, scenesForRuntime } from "./retired-apps";
 import { withStoreSceneOrigin } from "./scene-origin";
@@ -279,16 +278,13 @@ export function frameSupportsSettingsFrom(
  * (settings_not_supported_by_device), a key its firmware is too old for
  * (settings_need_newer_firmware, with the lowest floor that would do), or a
  * value outside the profile's rules (invalid_settings — e.g. nine GPIO
- * buttons for a chip whose table holds eight), or, on an ESP32, a panel its
- * board cannot drive (panel_not_drivable, with the reason from
- * docs/esp32-board-panels.json). null when the push would be accepted. Every
- * answer is the contract's or the board table's, so this and the device
- * agree.
+ * buttons for a chip whose table holds eight). null when the push would be
+ * accepted. Every answer is the contract's, so this and the device agree.
  */
 export function frameSettingsRefusal(
   frame: { frameosVersion: string | null | undefined; hardware: unknown },
   settings: Record<string, unknown>,
-): { error: string; minFrameosVersion?: string; reason?: Esp32PanelRefusal } | null {
+): { error: string; minFrameosVersion?: string } | null {
   const profile = frameContractProfile(frame);
   const keys = Object.keys(settings);
   if (keys.some((key) => contractSettingSince(key, profile) === undefined)) {
@@ -304,15 +300,6 @@ export function frameSettingsRefusal(
   }
   if (checkContractSettings(settings, profile) !== null) {
     return { error: "invalid_settings" };
-  }
-  // The contract judged the key's shape; whether this board can drive the
-  // panel is the board's (the chip refuses the whole push otherwise).
-  if (profile === "esp32" && typeof settings.device === "string") {
-    const hardware = (frame.hardware && typeof frame.hardware === "object" ? frame.hardware : {}) as Esp32PanelBoard;
-    const reason = esp32PanelRefusal(hardware, settings.device);
-    if (reason) {
-      return { error: "panel_not_drivable", reason };
-    }
   }
   // A button `role` is a sub-key of a key older than it: Linux firmware
   // between 2026.8.31 and the input batch refuses the whole push on it.
@@ -431,14 +418,6 @@ export const esp32BatteryEnablePinFrameSettingKeys = new Set(
 // silent), and `buzzer_tone_hz`, its pitch. Live, no reboot.
 export const esp32BuzzerFrameSettingsMinVersion = "2026.10.12";
 export const esp32BuzzerFrameSettingKeys = new Set(contractSettingKeysSince("esp32", esp32BuzzerFrameSettingsMinVersion));
-
-// 2026.10.18: `device`, the panel, from those the board can drive
-// (esp32-board-panels.ts; frameSettingsRefusal answers panel_not_drivable
-// for any other). The chip reboots into it.
-export const esp32DisplayPanelFrameSettingsMinVersion = "2026.10.18";
-export const esp32DisplayPanelFrameSettingKeys = new Set(
-  contractSettingKeysSince("esp32", esp32DisplayPanelFrameSettingsMinVersion),
-);
 
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata

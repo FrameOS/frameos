@@ -50,14 +50,11 @@ UNSUPPORTED_PANELS = {
 # Panels that are not Waveshare e-paper: hand-written drivers in this
 # component with the same init/clear/display/sleep shape. `bus` 1 = I2C — the
 # display layer skips the shared SPI module init for those (their pins are the
-# EPD sck/mosi lines reused as SCL/SDA). `device` is the control planes' key
-# for the panel (the `waveshare.<name>` convention does not fit). Mirrored by
-# EMBEDDED_EXTRA_PANELS / EMBEDDED_DEVICE_PANELS in
+# EPD sck/mosi lines reused as SCL/SDA). Mirrored by EMBEDDED_EXTRA_PANELS in
 # backend/app/tasks/embedded_firmware.py.
 EXTRA_PANELS = [
     {
         "name": "OLED_SSD1306_72x40",
-        "device": "oled.ssd1306_72x40",
         "width": 72,
         "height": 40,
         "format": 1,  # FOS_PIXEL_1BPP
@@ -72,10 +69,6 @@ EXTRA_PANELS = [
 
 FOS_PANEL_BUS_SPI = 0
 FOS_PANEL_BUS_I2C = 1
-
-# Panels driven through two chip-selects (pins.cs2): a board without that pin
-# wired cannot drive them.
-DUAL_CS_PANELS = {"EPD_13in3e"}
 
 
 def c_string(value: str) -> str:
@@ -187,10 +180,14 @@ extern const size_t fos_panel_table_count;
 """
 
 
-def waveshare_panel_keys(repo_root: Path) -> list[str]:
-    """The Waveshare variant keys this firmware compiles in, in table order."""
+def generate(repo_root: Path, out_dir: Path) -> None:
     sys.path.insert(0, str(repo_root / "backend"))
-    from app.drivers.waveshare import get_variant_folder, get_variant_keys, key_to_float
+    from app.drivers.waveshare import (
+        convert_waveshare_source,
+        get_variant_folder,
+        get_variant_keys,
+        key_to_float,
+    )
 
     keys = [
         key
@@ -200,51 +197,6 @@ def waveshare_panel_keys(repo_root: Path) -> list[str]:
     ]
     # Sorted by physical size then name, so the portal <select> reads naturally.
     keys.sort(key=lambda key: (key_to_float(key)[0] or 0.0, key))
-    return keys
-
-
-def panel_catalog(repo_root: Path) -> list[dict]:
-    """Every panel in the firmware's table, as the control planes see it: the
-    firmware name, the planes' device key, size, pixel format, the bus it is
-    driven on and whether it needs pins.cs2. frameos/tools/
-    generate_esp32_board_panels.py builds the planes' copy from this, so the
-    list a Settings panel offers is the table this script writes."""
-    sys.path.insert(0, str(repo_root / "backend"))
-    from app.drivers.waveshare import convert_waveshare_source
-
-    catalog = []
-    for key in waveshare_panel_keys(repo_root):
-        variant = convert_waveshare_source(key)
-        catalog.append({
-            "name": key,
-            "device": f"waveshare.{key}",
-            "width": int(variant.width),
-            "height": int(variant.height),
-            "format": PIXEL_FORMAT_BY_COLOR[variant.color_option],
-            "bus": FOS_PANEL_BUS_SPI,
-            "requiresCs2": key in DUAL_CS_PANELS,
-        })
-    for panel in EXTRA_PANELS:
-        catalog.append({
-            "name": panel["name"],
-            "device": panel["device"],
-            "width": int(panel["width"]),
-            "height": int(panel["height"]),
-            "format": int(panel["format"]),
-            "bus": int(panel["bus"]),
-            "requiresCs2": panel["name"] in DUAL_CS_PANELS,
-        })
-    return catalog
-
-
-def generate(repo_root: Path, out_dir: Path) -> None:
-    sys.path.insert(0, str(repo_root / "backend"))
-    from app.drivers.waveshare import (
-        convert_waveshare_source,
-        get_variant_folder,
-    )
-
-    keys = waveshare_panel_keys(repo_root)
 
     variants = {}
     # Shared driver diagnostics (DEV_Debug.c) are built with the panels, on
@@ -299,20 +251,19 @@ def generate(repo_root: Path, out_dir: Path) -> None:
                 int(variant.width),
                 int(variant.height),
                 PIXEL_FORMAT_BY_COLOR[variant.color_option],
-                1 if key in DUAL_CS_PANELS else 0,
+                1 if key == "EPD_13in3e" else 0,
                 FOS_PANEL_BUS_SPI,
                 key, key, key, key,
             )
         )
     for panel in EXTRA_PANELS:
         parts.append(
-            "    { %s, %d, %d, %d, %d, %d, %s, %s, %s, %s },"
+            "    { %s, %d, %d, %d, 0, %d, %s, %s, %s, %s },"
             % (
                 c_string(panel["name"]),
                 int(panel["width"]),
                 int(panel["height"]),
                 int(panel["format"]),
-                1 if panel["name"] in DUAL_CS_PANELS else 0,
                 int(panel["bus"]),
                 panel["init"], panel["clear"], panel["display"], panel["sleep"],
             )

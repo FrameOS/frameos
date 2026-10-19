@@ -34,7 +34,6 @@
 
 #include "fos_assets.h"
 #include "fos_assets_sd.h"
-#include "fos_board_panels.h"
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_events.h"
@@ -469,20 +468,6 @@ static void add_hardware_json(cJSON *parent)
      * it causes, and a console `set gpio_buttons` after the next reboot. */
     if (config->hardware_preset[0]) {
         cJSON_AddStringToObject(hw, "hardwarePreset", config->hardware_preset);
-    }
-    /* The display wiring, so a provider offers (and refuses) a pushed
-     * `device` by the same rule this firmware judges it with
-     * (fos_board_panels.c): which bus the pins make, whether cs2 is wired. */
-    cJSON *pins = cJSON_AddObjectToObject(hw, "pins");
-    if (pins) {
-        cJSON_AddNumberToObject(pins, "rst", config->pins.rst);
-        cJSON_AddNumberToObject(pins, "dc", config->pins.dc);
-        cJSON_AddNumberToObject(pins, "cs", config->pins.cs);
-        cJSON_AddNumberToObject(pins, "cs2", config->pins.cs2);
-        cJSON_AddNumberToObject(pins, "busy", config->pins.busy);
-        cJSON_AddNumberToObject(pins, "sck", config->pins.sck);
-        cJSON_AddNumberToObject(pins, "mosi", config->pins.mosi);
-        cJSON_AddNumberToObject(pins, "pwr", config->pins.pwr);
     }
     cJSON *buttons = cJSON_AddArrayToObject(hw, "gpioButtons");
     if (buttons) {
@@ -2281,10 +2266,7 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * by the render loop's next pass) and `battery_pin` / `battery_divider` /
  * `battery_enable_pin` (deferred reboot: the ADC is set up once at boot) —
  * and `buzzer_pin` / `buzzer_tone_hz` (live, the next button tone uses them)
- * round out the profile. `device` switches the panel (deferred reboot: the
- * display is set up once at boot), and only to a panel this board can drive
- * (fos_board_panels.c): a panel pushed without the pins to match would
- * drive a display that is not there.
+ * round out the profile.
  * Any other key refuses the WHOLE verb with setting_not_allowed, mirroring
  * the Nim runtime, so the provider never half-applies a settings push. */
 /* The contract's pin ranges (-1..48) are chip-agnostic; whether a pin is an
@@ -2349,40 +2331,6 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
                      "{\"event\":\"settings:cloud\",\"source\":\"esp32\","
                      "\"status\":\"rejected\",\"key\":\"%s\",\"pin\":%d,\"reason\":\"%s\"}",
                      pin_key, bad_pin, pin_why);
-            frameos_nim_log_hook(line);
-            ws_ack(id, false, "invalid_settings");
-            return;
-        }
-    }
-    /* `device`: the contract checked the key's shape; whether THIS board can
-     * drive the panel is the board's say, judged before anything is applied
-     * (docs/esp32-board-panels.json has the rule and its reasons). */
-    char next_panel[FOS_STR_LEN] = "";
-    const cJSON *device = cJSON_GetObjectItem(settings, "device");
-    if (device != NULL) {
-        const fos_config_t *current = fos_config();
-        const fos_panel_wiring_t wiring = {
-            .rst = current->pins.rst,
-            .dc = current->pins.dc,
-            .cs = current->pins.cs,
-            .cs2 = current->pins.cs2,
-            .busy = current->pins.busy,
-            .sck = current->pins.sck,
-            .mosi = current->pins.mosi,
-        };
-        const char *why = fos_board_panel_refusal(current->hardware_preset, &wiring,
-                                                  device->valuestring, fos_display_panel_facts);
-        if (why == NULL && !fos_board_panel_name(device->valuestring, next_panel, sizeof(next_panel))) {
-            why = "not_compiled";
-        }
-        if (why != NULL) {
-            ESP_LOGW(TAG, "ws: set_settings refused: device %s (%s)", device->valuestring, why);
-            /* The contract's driver_key format leaves nothing to escape. */
-            char line[200];
-            snprintf(line, sizeof(line),
-                     "{\"event\":\"settings:cloud\",\"source\":\"esp32\","
-                     "\"status\":\"rejected\",\"key\":\"device\",\"device\":\"%s\",\"reason\":\"%s\"}",
-                     device->valuestring, why);
             frameos_nim_log_hook(line);
             ws_ack(id, false, "invalid_settings");
             return;
@@ -2585,15 +2533,6 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         fos_config_format_gpio_buttons(config, after, sizeof(after));
         restart_for_init = restart_for_init || strcmp(before, after) != 0;
     }
-    /* The panel, last: nothing below refuses the verb any more. It is set up
-     * once at boot (fos_display_init), so a new one takes the same deferred
-     * reboot as rotate; the same panel again changes nothing (the Settings
-     * panel sends the key on every save). */
-    bool panel_changed = false;
-    if (next_panel[0]) {
-        panel_changed = strcmp(config->panel, next_panel) != 0;
-        strlcpy(config->panel, next_panel, sizeof(config->panel));
-    }
     if (fos_config_save() != ESP_OK) {
         ws_ack(id, false, "persist_failed");
         return;
@@ -2609,9 +2548,6 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         frameos_nim_log_hook(line);
     }
     ws_ack(id, true, NULL);
-    /* One reboot covers every boot-time change; rotate and the panel take
-     * the last branch. */
-    rotate_changed = rotate_changed || panel_changed;
     if (restart_for_init && !battery_changed && !rotate_changed) {
         ESP_LOGW(TAG, "ws: boot-time setting changed (http ceiling %lu, %u buttons); restarting",
                  (unsigned long)config->max_http_response_bytes, (unsigned)config->gpio_button_count);
@@ -2630,8 +2566,8 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
          * the config directly — a restart is what makes a new rotation take
          * effect, exactly as on the backend settings poll. Ack first: the
          * reboot task's delay is what lets it flush over the socket. */
-        ESP_LOGW(TAG, "ws: panel %s, rotation %u; restarting to re-init the display and renderer",
-                 config->panel, (unsigned)config->rotate);
+        ESP_LOGW(TAG, "ws: rotation changed to %u; restarting to re-init the renderer",
+                 (unsigned)config->rotate);
         ws_schedule_reboot();
     }
 }

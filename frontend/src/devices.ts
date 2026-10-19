@@ -1,6 +1,5 @@
 import { Option, OptionGroup } from './components/Select'
 import { Palette } from './types'
-import { esp32DrivablePanels, type Esp32PanelBoard } from './utils/esp32BoardPanels'
 
 // To generate a new version:
 // cd backend && python3 list_devices.py
@@ -175,25 +174,6 @@ export function cloudDisplayDriverOptions(current?: string | null): OptionGroup<
     return [{ label: 'Current', options: [{ value: current, label: current }] }, ...groups]
   }
   return groups
-}
-
-/**
- * The display panel choices for an ESP32 cloud frame: the panels its board can
- * drive (utils/esp32BoardPanels.ts, judged from the frame's hardware report),
- * labelled as the catalog above labels them. `current` (the panel the frame
- * reports, in the planes' spelling) is always offered, so the field never
- * shows a value missing from its own list.
- */
-export function cloudEsp32PanelOptions(board: Esp32PanelBoard, current?: string | null): Option[] {
-  const labels = new Map(devices.flatMap((group) => group.options.map((option) => [option.value, option.label])))
-  const options: Option[] = esp32DrivablePanels(board).map((panel) => ({
-    value: panel.device,
-    label: labels.get(panel.device) ?? `${panel.name} ${panel.width}x${panel.height}`,
-  }))
-  if (current && !options.some((option) => option.value === current)) {
-    options.unshift({ value: current, label: labels.get(current) ?? current })
-  }
-  return options
 }
 
 export const partialRefreshDevices = new Set(['waveshare.EPD_7in5_V2', 'waveshare.EPD_13in3b'])

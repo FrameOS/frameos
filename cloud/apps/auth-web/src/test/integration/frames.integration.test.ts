@@ -2333,7 +2333,6 @@ describe("frame management API", () => {
         "timezone",
         "colors",
         "palette",
-        "device",
       ].sort(),
     );
     for (const key of esp32SettableKeys) {
@@ -2721,64 +2720,6 @@ describe("frame management API", () => {
       routeParams(frame_id),
     );
     expect(paletteOk.status).toBe(200);
-  });
-
-  it("pushes an esp32 only a panel its board can drive", async () => {
-    // docs/esp32-board-panels.json: a reTerminal E1002's display is built
-    // in, so its own panel is the only one a push may name. The device
-    // refuses anything else too; the route says so first, with the reason,
-    // and queues nothing.
-    const keys = deviceKeypair();
-    await signIn();
-    const claimToken = await mintToken("E1002");
-    const enrolled = await enroll(claimToken, keys.publicKeyBase64, {
-      hardware: {
-        platform: "esp32-s3",
-        device: "EPD_7in3e",
-        hardwarePreset: "seeed_reterminal_e1002",
-        pins: { rst: 12, dc: 11, cs: 10, cs2: -1, busy: 13, sck: 7, mosi: 9, pwr: -1 },
-        width: 800,
-        height: 480,
-      },
-    });
-    const { frame_id } = (await enrolled.json()) as { frame_id: string };
-    await confirmFrame(
-      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
-      routeParams(frame_id),
-    );
-    const push = (settings: Record<string, unknown>) =>
-      pushFrameSettings(
-        postJson(`/api/frames/${frame_id}/settings`, { settings }, { origin: baseUrl }),
-        routeParams(frame_id),
-      );
-    const setSettingsCommands = async () =>
-      (await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame_id))).filter(
-        (command) => command.type === "set_settings",
-      );
-
-    await db.update(frames).set({ frameosVersion: "2026.10.17" }).where(eq(frames.id, frame_id));
-    const tooEarly = await push({ device: "waveshare.EPD_7in3e" });
-    expect(tooEarly.status).toBe(400);
-    expect((await tooEarly.json()) as { error: string; min_frameos_version?: string }).toMatchObject({
-      error: "settings_need_newer_firmware",
-      min_frameos_version: "2026.10.18",
-    });
-
-    await db.update(frames).set({ frameosVersion: "2026.10.18" }).where(eq(frames.id, frame_id));
-    const otherPanel = await push({ device: "waveshare.EPD_7in5_V2" });
-    expect(otherPanel.status).toBe(400);
-    expect(await otherPanel.json()).toEqual({ error: "panel_not_drivable", reason: "builtin_display" });
-    const linuxDriver = await push({ device: "pimoroni.hyperpixel4sq_touch" });
-    expect(await linuxDriver.json()).toEqual({ error: "panel_not_drivable", reason: "not_compiled" });
-    const off = await push({ device: "none" });
-    expect(await off.json()).toEqual({ error: "panel_not_drivable", reason: "panel_off" });
-    expect(await setSettingsCommands()).toHaveLength(0);
-
-    const own = await push({ device: "waveshare.EPD_7in3e" });
-    expect(own.status).toBe(200);
-    const queued = await setSettingsCommands();
-    expect(queued).toHaveLength(1);
-    expect(queued[0]?.payload).toEqual({ settings: { device: "waveshare.EPD_7in3e" } });
   });
 
   it("refuses a mixed esp32 settings payload without applying the name", async () => {
