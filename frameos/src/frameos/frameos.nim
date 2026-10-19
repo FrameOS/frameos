@@ -348,7 +348,7 @@ proc start*(self: FrameOS) {.async.} =
       if connected:
         netportal.stopAp(self)
       else:
-        netportal.startAp(self)
+        netportal.startAp(self, self.frameConfig)
         if self.network.hotspotStatus == HotspotStatus.enabled:
           firstSceneId = some("system/wifiHotspot".SceneId)
         else:
