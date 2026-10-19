@@ -14,13 +14,13 @@ import { hiddenWritePath, sanitizedUploadFilename } from "./frame-asset-write";
 
 describe("sceneSnapshotAssetPath", () => {
   it("builds the runner's snapshot path for a plain runtime id", () => {
-    // md5("abc") — the device hashes the PUBLIC id (uploaded/ prefix stripped).
+    // md5("abc"): the device hashes the scene's own id.
     expect(sceneSnapshotAssetPath("abc")).toBe(
       ".frameos/scene_images/abc-900150983cd24fb0d6963f7d28e17f72.png",
     );
   });
 
-  it("strips the uploaded/ prefix like sceneImagePublicId does", () => {
+  it("strips an older runtime's legacy uploaded/ prefix", () => {
     expect(sceneSnapshotAssetPath("uploaded/abc")).toBe(
       sceneSnapshotAssetPath("abc"),
     );

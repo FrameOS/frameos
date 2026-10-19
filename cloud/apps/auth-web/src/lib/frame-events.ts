@@ -142,10 +142,16 @@ export function cloudDeclaredCustomEvents(customEvents: unknown): Set<string> {
   return declared;
 }
 
-// The runtime registers every pushed scene as "uploaded/<id>" and reports the
-// active one that way; scenes.json carries the bare id.
-function bareSceneId(sceneId: string): string {
-  return sceneId.startsWith("uploaded/") ? sceneId.slice("uploaded/".length) : sceneId;
+// Runtimes before 2026.10.18 registered every pushed scene as "uploaded/<id>"
+// and reported the active one that way; later ones use the scene's own id, as
+// scenes.json does. The one place the cloud knows the old prefix: delete it,
+// and the strip, once those runtimes are gone.
+const legacyUploadedScenePrefix = "uploaded/";
+
+export function publicSceneId(sceneId: string): string {
+  return sceneId.startsWith(legacyUploadedScenePrefix)
+    ? sceneId.slice(legacyUploadedScenePrefix.length)
+    : sceneId;
 }
 
 /**
@@ -178,7 +184,7 @@ export function customEventRouting(input: {
     (scene): scene is { id?: unknown; customEvents?: unknown } =>
       Boolean(scene) && typeof scene === "object" && !Array.isArray(scene),
   );
-  const activeId = input.activeSceneId === undefined ? undefined : bareSceneId(input.activeSceneId);
+  const activeId = input.activeSceneId === undefined ? undefined : publicSceneId(input.activeSceneId);
   const showing = activeId === undefined ? undefined : scenes.find((scene) => scene.id === activeId);
   const declared = (showing ? [showing] : scenes).some((scene) =>
     cloudDeclaredCustomEvents(scene.customEvents).has(input.eventName),

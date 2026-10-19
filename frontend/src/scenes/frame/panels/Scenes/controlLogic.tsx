@@ -15,7 +15,7 @@ import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
 import { framesModel, rehydrateCloudFrameScenes } from '../../../../models/framesModel'
 import { grantCloudFrameSceneSettingsGroups } from '../../../../utils/cloudFrameApi'
 import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
-import { sceneIdsRefer } from '../../../../utils/systemScenes'
+import { isSystemSceneId, sceneIdsRefer } from '../../../../utils/systemScenes'
 import { SCENE_ACTIVATION_TIMEOUT_MS } from '../../../../utils/sceneActivation'
 import type { TemplateType } from '../../../../types'
 import type { StateField } from '../../../../types'
@@ -25,7 +25,6 @@ export interface ControlLogicProps {
   frameId: FrameId
 }
 
-const UPLOADED_SCENE_PREFIX = 'uploaded/'
 const emptyFrameStateRecord: FrameStateRecord = { sceneId: '', states: {} }
 
 function normaliseFrameStateRecord(payload: any): FrameStateRecord {
@@ -478,7 +477,15 @@ export const controlLogic = kea<controlLogicType>([
           actions.sceneActivationSettled(stateRecord.sceneId)
         }
       }
-      if (stateRecord?.sceneId?.startsWith(UPLOADED_SCENE_PREFIX)) {
+      // A scene the frame shows but the frame's scene list does not have was
+      // handed to it (Preview on frame, an upload): fetch it so the drawer can
+      // name it and offer to install it.
+      const liveSceneId = stateRecord?.sceneId
+      if (
+        liveSceneId &&
+        !isSystemSceneId(liveSceneId) &&
+        !(values.scenes ?? []).some((scene) => sceneIdsRefer(scene.id, liveSceneId))
+      ) {
         actions.loadUploadedScenes()
       }
       if (stateRecord?.cache?.refreshing && !stateRecord.cache.cached) {
@@ -499,8 +506,8 @@ export const controlLogic = kea<controlLogicType>([
       try {
         const { event, sceneId } = JSON.parse(log.line)
         if (values.activatingSceneId !== null) {
-          // The device reports an interpreted scene as `uploaded/<id>`;
-          // sceneActivationSettled compares the public ids.
+          // sceneActivationSettled compares public ids (an older runtime
+          // reports the scene as `uploaded/<id>`).
           if (event === 'render:done' && typeof sceneId === 'string') {
             actions.sceneActivationSettled(sceneId)
           } else if (event === 'render:error' || event === 'event:error') {

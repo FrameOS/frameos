@@ -70,7 +70,7 @@ import {
 import { closeSplitGenerator } from './splitScreenLayoutLogic'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
-import { STATUS_SCREEN_SCENE_ID, STATUS_SCREEN_SCENE_NAME } from '../../utils/systemScenes'
+import { STATUS_SCREEN_SCENE_ID, STATUS_SCREEN_SCENE_NAME, sceneIdsRefer } from '../../utils/systemScenes'
 import {
   frameChangeDrawerKind,
   frameMenuActionIsAllowed,
@@ -86,7 +86,6 @@ import {
 import { sortScenesAlphabetically } from '../../utils/sortScenes'
 import { confirmDialog } from '../../utils/confirmDialogLogic'
 
-const uploadedScenePrefix = 'uploaded/'
 /** Scene drawer selection for "whatever the frame is showing", used while the active scene is unknown. */
 export const livePreviewSceneId = '__live_preview__'
 const activeSurfaceClassName = 'frameos-active-surface'
@@ -120,7 +119,7 @@ export function sceneIsActive(scene: FrameScene, currentSceneId: string | null |
 }
 
 function sceneIdIsActive(sceneId: string, currentSceneId: string | null | undefined): boolean {
-  return currentSceneId === sceneId || currentSceneId === `${uploadedScenePrefix}${sceneId}`
+  return sceneIdsRefer(sceneId, currentSceneId)
 }
 
 function frameDisplayDimensions(frame: FrameType): { width: number; height: number } | null {

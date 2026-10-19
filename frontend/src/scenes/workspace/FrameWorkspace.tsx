@@ -69,6 +69,7 @@ import { groupFramesByStatus } from './frameStatusGroups'
 import { sceneTileSummaryLabel } from './sceneTileLabels'
 import { frameMetricsPreviewLogic } from './frameMetricsPreviewLogic'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
+import { sceneIdsRefer } from '../../utils/systemScenes'
 import {
   frameChangeDrawerKind,
   frameSettingsSectionIsAllowed,
@@ -81,7 +82,6 @@ interface FrameWorkspaceProps {
   id?: string
 }
 
-const uploadedScenePrefix = 'uploaded/'
 const activeSurfaceClassName = 'frameos-active-surface'
 const scrollRestoreMaxDurationMs = 1500
 const scrollRestoreRetryMs = 50
@@ -632,7 +632,7 @@ function FrameToolLoadingSkeleton({ activeTool }: { activeTool: WorkspaceUtility
 }
 
 function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefined): boolean {
-  return currentSceneId === scene.id || currentSceneId === `${uploadedScenePrefix}${scene.id}`
+  return sceneIdsRefer(scene.id, currentSceneId)
 }
 
 function SceneTile({ frame, scene, active }: { frame: FrameType; scene: FrameScene; active: boolean }): JSX.Element {

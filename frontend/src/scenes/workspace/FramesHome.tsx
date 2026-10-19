@@ -88,10 +88,9 @@ import { closeSplitGenerator, splitScreenLayoutLogic } from './splitScreenLayout
 import { WorkspaceSceneDropDown } from './WorkspaceSceneDropDown'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
 import { normalizeSplitScreenSceneLayout } from '../../utils/splitScreenLayouts'
-import { STATUS_SCREEN_SCENE_ID, STATUS_SCREEN_SCENE_NAME } from '../../utils/systemScenes'
+import { STATUS_SCREEN_SCENE_ID, STATUS_SCREEN_SCENE_NAME, sceneIdsRefer } from '../../utils/systemScenes'
 import { sceneIsActivating } from '../../utils/sceneActivation'
 
-const uploadedScenePrefix = 'uploaded/'
 const activeSurfaceClassName = 'frameos-active-surface'
 
 const frameSectionToolLinks = [
@@ -102,7 +101,7 @@ const frameSectionToolLinks = [
 ] as const satisfies readonly { label: string; panel: WorkspaceUtilityPanel }[]
 
 function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefined): boolean {
-  return currentSceneId === scene.id || currentSceneId === `${uploadedScenePrefix}${scene.id}`
+  return sceneIdsRefer(scene.id, currentSceneId)
 }
 
 // The line under the frame's name: the deploy's progress bar while one is
@@ -1275,11 +1274,8 @@ function resolveSceneControlSelection(
   sceneId: string,
   uploadedScenes: FrameScene[]
 ): { scene: FrameScene | null; sceneId: string; saved: boolean } {
-  const uploadedSceneId = sceneId.startsWith(uploadedScenePrefix) ? sceneId.slice(uploadedScenePrefix.length) : null
   const findScene = (scenes: FrameScene[] | undefined): FrameScene | null =>
-    scenes?.find((candidate) => candidate.id === sceneId) ??
-    (uploadedSceneId ? scenes?.find((candidate) => candidate.id === uploadedSceneId) ?? null : null) ??
-    null
+    scenes?.find((candidate) => sceneIdsRefer(candidate.id, sceneId)) ?? null
 
   const savedScene = findScene(savedFrame.scenes)
   // The editing frame wins: it is the saved frame with the form's unsaved
@@ -1292,9 +1288,7 @@ function resolveSceneControlSelection(
     return { scene, sceneId: scene.id, saved: !!savedScene }
   }
 
-  const uploadedScene = uploadedSceneId
-    ? uploadedScenes.find((candidate) => candidate.id === uploadedSceneId) ?? null
-    : uploadedScenes.find((candidate) => candidate.id === sceneId) ?? null
+  const uploadedScene = findScene(uploadedScenes)
 
   return { scene: uploadedScene, sceneId, saved: false }
 }

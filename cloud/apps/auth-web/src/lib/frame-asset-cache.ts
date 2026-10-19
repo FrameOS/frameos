@@ -8,6 +8,7 @@
 import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { frameAssetFiles, frameCommands } from "@frameos-cloud/db";
+import { publicSceneId } from "./frame-events";
 import {
   enqueueFrameCommand,
   maxAssetPathChars,
@@ -218,16 +219,13 @@ export async function queueImageGetIfIdle(
  * {assets}/.frameos/scene_images/{sanitized}-{md5(publicId)}.png on the first
  * render of each scene and on every scene switch, and asset_get can read it
  * (the dot-directory is hidden from assets_list, not from asset_get).
- * Runtime scene ids arrive both bare and as "uploaded/<id>"; the device
- * strips the prefix, so we do too.
+ * An older runtime reports a scene as "uploaded/<id>" (publicSceneId); the
+ * snapshot is named by the scene's own id either way.
  */
 export const sceneSnapshotAssetPrefix = ".frameos/scene_images/";
 
 export function sceneSnapshotAssetPath(sceneId: string): string {
-  const uploadedPrefix = "uploaded/";
-  const publicId = sceneId.startsWith(uploadedPrefix)
-    ? sceneId.slice(uploadedPrefix.length)
-    : sceneId;
+  const publicId = publicSceneId(sceneId);
   let safe = "";
   for (const ch of publicId) {
     safe += /[A-Za-z0-9._-]/.test(ch) ? ch : "_";

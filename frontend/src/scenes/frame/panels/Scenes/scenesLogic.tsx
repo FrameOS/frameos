@@ -2,6 +2,7 @@ import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path,
 import { FrameScene, SceneNodeData, FrameId } from '../../../../types'
 import { frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
 import { undeployedSceneIdsFor } from '../../../../utils/sceneDeployState'
+import { publicSceneId, sceneIdsRefer, sceneRecordEntry } from '../../../../utils/systemScenes'
 import { SceneAccessFlag, sceneAccessFlagsForScene, withAppPermissions } from '../../../../utils/sceneAccess'
 import { workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { appsModel } from '../../../../models/appsModel'
@@ -37,8 +38,6 @@ export interface SceneRenameDialog {
   sceneId: string
   name: string
 }
-
-const UPLOADED_SCENE_PREFIX = 'uploaded/'
 
 const applyStateToSceneFields = (scene: FrameScene, state: Record<string, any> | null): FrameScene => {
   if (!state || !scene.fields?.length) {
@@ -952,10 +951,7 @@ export const scenesLogic = kea<scenesLogicType>([
         if (!activeSceneId) {
           return null
         }
-        if (!activeSceneId.startsWith(UPLOADED_SCENE_PREFIX)) {
-          return activeSceneId
-        }
-        const candidateId = activeSceneId.slice(UPLOADED_SCENE_PREFIX.length)
+        const candidateId = publicSceneId(activeSceneId)
         return scenes.some((scene) => scene.id === candidateId) ? candidateId : activeSceneId
       },
     ],
@@ -976,7 +972,7 @@ export const scenesLogic = kea<scenesLogicType>([
         uploadedScenes: scenesLogicValues['uploadedScenes']
       ) =>
         missingActiveSceneId
-          ? uploadedScenes.find((scene) => `uploaded/${scene.id}` === missingActiveSceneId) ?? null
+          ? uploadedScenes.find((scene) => sceneIdsRefer(scene.id, missingActiveSceneId)) ?? null
           : null,
     ],
     missingActiveMatchesSearch: [
@@ -1166,7 +1162,7 @@ export const scenesLogic = kea<scenesLogicType>([
         controlLogic({ frameId: props.frameId }).actions.sceneActivationStarted(scene.id)
       }
       try {
-        const resolvedState = state ?? values.states?.[scene.id] ?? values.states?.[`uploaded/${scene.id}`] ?? null
+        const resolvedState = state ?? sceneRecordEntry(values.states, scene.id) ?? null
         const payloadScenes = collectScenePreviewPayloadScenes(scene, sceneList, resolvedState)
         const payload = {
           scenes: payloadScenes,

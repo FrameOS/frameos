@@ -796,6 +796,34 @@ async def test_api_frames_include_cached_sync_hint(async_client, db, redis):
 
 
 @pytest.mark.asyncio
+async def test_api_frame_get_image_caches_a_plain_scene_id_as_it_is(async_client, db, redis):
+    # 2026.10.18+ runtimes report a scene they were handed under its own id;
+    # the two tests below are older runtimes' "uploaded/<id>".
+    frame = await new_frame(db, redis, 'PlainSceneIdImageFrame', 'localhost', 'localhost')
+    frame.scenes = [{'id': 'scene-1', 'name': 'Scene 1', 'nodes': [], 'edges': []}]
+    db.add(frame)
+    db.commit()
+
+    png = io.BytesIO()
+    Image.new('RGB', (2, 1), 'white').save(png, format='PNG')
+    png_body = png.getvalue()
+
+    async def mock_fetch(frame_obj, redis_obj, *, path, method="GET"):
+        return 200, png_body, {'content-type': 'image/png', 'x-scene-id': 'scene-1'}
+
+    with patch('app.api.frames._fetch_frame_http_bytes', side_effect=mock_fetch):
+        response = await async_client.get(f'/api/frames/{frame.id}/image?t=123')
+
+    assert response.status_code == 200
+    assert (
+        db.query(SceneImage)
+        .filter_by(project_id=frame.project_id, frame_id=frame.id, scene_id='scene-1')
+        .first()
+        is not None
+    )
+
+
+@pytest.mark.asyncio
 async def test_api_frame_get_image_caches_uploaded_preview_under_original_scene_id(async_client, db, redis):
     frame = await new_frame(db, redis, 'UploadedPreviewImageFrame', 'localhost', 'localhost')
     frame.scenes = [{'id': 'scene-1', 'name': 'Scene 1', 'nodes': [], 'edges': []}]

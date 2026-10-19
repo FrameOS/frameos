@@ -8,8 +8,7 @@ import { isInFrameAdminMode } from '../utils/frameAdmin'
 import { isCloudMode } from '../utils/cloudMode'
 import { frameUpdateFromImageHeaders, planFrameImageRefresh } from '../utils/frameImageRefresh'
 import type { FrameType } from '../types'
-
-const uploadedScenePrefix = 'uploaded/'
+import { publicSceneId } from '../utils/systemScenes'
 
 export function useEntityImage(
   entity: string | null,
@@ -230,9 +229,7 @@ export const entityImagesModel = kea<entityImagesModelType>([
             }
             const payload = await response.json()
             const activeSceneId = typeof payload?.sceneId === 'string' ? payload.sceneId : ''
-            const sceneImageId = activeSceneId.startsWith(uploadedScenePrefix)
-              ? activeSceneId.slice(uploadedScenePrefix.length)
-              : activeSceneId
+            const sceneImageId = publicSceneId(activeSceneId)
             if (sceneImageId) {
               actions.updateEntityImage(`frames/${frameId}`, `scene_images/${sceneImageId}`)
             }

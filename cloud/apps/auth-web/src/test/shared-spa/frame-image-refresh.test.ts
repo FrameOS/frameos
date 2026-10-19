@@ -9,6 +9,7 @@ import {
   isSystemSceneId,
   publicSceneId,
   sceneIdsRefer,
+  sceneRecordEntry,
 } from "../../../../../../frontend/src/utils/systemScenes";
 import {
   SCENE_ACTIVATION_TIMEOUT_MS,
@@ -43,7 +44,7 @@ describe("planFrameImageRefresh", () => {
 });
 
 describe("system scene ids", () => {
-  it("knows the status screen and strips the device's uploaded/ prefix", () => {
+  it("knows the status screen and strips an older runtime's uploaded/ prefix", () => {
     expect(isSystemSceneId(STATUS_SCREEN_SCENE_ID)).toBe(true);
     expect(isSystemSceneId("uploaded/abc")).toBe(false);
     expect(publicSceneId("uploaded/abc")).toBe("abc");
@@ -58,10 +59,19 @@ describe("system scene ids", () => {
     expect(sceneIdsRefer("", "")).toBe(false);
     expect(sceneIdsRefer(null, undefined)).toBe(false);
   });
+
+  it("reads a record keyed by the scene's own id or by an older runtime's legacy id", () => {
+    expect(sceneRecordEntry({ abc: 1 }, "abc")).toBe(1);
+    expect(sceneRecordEntry({ "uploaded/abc": 2 }, "abc")).toBe(2);
+    // The scene's own id wins when an older runtime left both behind.
+    expect(sceneRecordEntry({ "uploaded/abc": 2, abc: 1 }, "abc")).toBe(1);
+    expect(sceneRecordEntry({ def: 3 }, "abc")).toBeUndefined();
+    expect(sceneRecordEntry(null, "abc")).toBeUndefined();
+  });
 });
 
 // The Activate button spins from the click until the frame logs that scene's
-// render:done — which names an interpreted scene `uploaded/<id>`.
+// render:done, under the scene's own id (an older runtime: `uploaded/<id>`).
 describe("sceneIsActivating", () => {
   it("spins for the scene that was asked for, prefix or not", () => {
     expect(sceneIsActivating("abc", "abc")).toBe(true);
