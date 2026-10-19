@@ -31,10 +31,12 @@ proc testInterpreted(name: string): ExportedInterpretedScene =
 suite "scene registry and cleanup helpers":
   let uploadedStatePath = "state/uploaded.json"
   let uploadedBackup = backupFile(uploadedStatePath)
-  let uploadedKeepPath = "state/scene-uploaded_keep.json"
-  let uploadedOrphanPath = "state/scene-uploaded_orphan.json"
-  let uploadedKeepBackup = backupFile(uploadedKeepPath)
-  let uploadedOrphanBackup = backupFile(uploadedOrphanPath)
+  let legacyKeepPath = "state/scene-uploaded_keep.json"
+  let legacyOrphanPath = "state/scene-uploaded_orphan.json"
+  let keepPath = "state/scene-keep.json"
+  let legacyKeepBackup = backupFile(legacyKeepPath)
+  let legacyOrphanBackup = backupFile(legacyOrphanPath)
+  let keepBackup = backupFile(keepPath)
 
   let interpretedBackup = interpretedScenes
   let uploadedBackupTable = uploadedScenes
@@ -47,12 +49,11 @@ suite "scene registry and cleanup helpers":
     uploadedScenes = uploadedBackupTable
     refreshExportedScenes()
     resetRetiredExportedScenesForTest()
-    setUploadedStateCleanupRanForTest(false)
+    setUploadedScenesLoadedForTest(false)
 
-    if fileExists(uploadedKeepPath):
-      removeFile(uploadedKeepPath)
-    if fileExists(uploadedOrphanPath):
-      removeFile(uploadedOrphanPath)
+    for path in [legacyKeepPath, legacyOrphanPath, keepPath]:
+      if fileExists(path):
+        removeFile(path)
 
   teardown:
     interpretedScenes = interpretedBackup
@@ -61,23 +62,31 @@ suite "scene registry and cleanup helpers":
     resetRetiredExportedScenesForTest()
 
     restoreFile(uploadedStatePath, uploadedBackup)
-    restoreFile(uploadedKeepPath, uploadedKeepBackup)
-    restoreFile(uploadedOrphanPath, uploadedOrphanBackup)
+    restoreFile(legacyKeepPath, legacyKeepBackup)
+    restoreFile(legacyOrphanPath, legacyOrphanBackup)
+    restoreFile(keepPath, keepBackup)
 
   test "getSceneDisplayName resolves compiled, system, interpreted and uploaded names":
     let interpretedId = "test/interpreted-name".SceneId
     interpretedScenes[interpretedId] = testInterpreted("Interpreted Name")
     refreshExportedScenes()
 
+    let sharedId = "test/shared-name".SceneId
+    interpretedScenes[sharedId] = testInterpreted("Deployed Name")
+    refreshExportedScenes()
+
     var uploadedOnly = initTable[SceneId, ExportedInterpretedScene]()
-    let uploadedId = "uploaded/test-name".SceneId
+    let uploadedId = "test-name".SceneId
     uploadedOnly[uploadedId] = testInterpreted("Uploaded Name")
+    uploadedOnly[sharedId] = testInterpreted("Uploaded Copy")
     updateUploadedScenes(uploadedOnly)
 
     check getSceneDisplayName("default".SceneId).get() == "Default Scene"
     check getSceneDisplayName("system/index".SceneId).get() == "Index"
     check getSceneDisplayName(interpretedId).get() == "Interpreted Name"
     check getSceneDisplayName(uploadedId).get() == "Uploaded Name"
+    # An uploaded scene stands in for the deployed one with its id.
+    check getSceneDisplayName(sharedId).get() == "Uploaded Copy"
     check getSceneDisplayName("missing/scene".SceneId).isNone()
 
   test "dynamic options include interpreted and uploaded scenes with fallback names":
@@ -87,44 +96,48 @@ suite "scene registry and cleanup helpers":
     refreshExportedScenes()
 
     var uploadedOnly = initTable[SceneId, ExportedInterpretedScene]()
-    uploadedOnly["uploaded/with-name".SceneId] = testInterpreted("Uploaded Friendly")
-    uploadedOnly["uploaded/no-name".SceneId] = testInterpreted("")
+    uploadedOnly["up/with-name".SceneId] = testInterpreted("Uploaded Friendly")
+    uploadedOnly["up/no-name".SceneId] = testInterpreted("")
+    uploadedOnly["test/with-name".SceneId] = testInterpreted("Uploaded Copy")
     updateUploadedScenes(uploadedOnly)
 
     let options = getDynamicSceneOptions()
     var namesById = initTable[string, string]()
     for entry in options:
+      check not namesById.hasKey(entry.id.string)
       namesById[entry.id.string] = entry.name
 
-    check namesById["test/with-name"] == "Friendly Name"
+    check namesById.len == 4
+    check namesById["test/with-name"] == "Uploaded Copy"
     check namesById["test/no-name"] == "test/no-name"
-    check namesById["uploaded/with-name"] == "Uploaded Friendly"
-    check namesById["uploaded/no-name"] == "uploaded/no-name"
+    check namesById["up/with-name"] == "Uploaded Friendly"
+    check namesById["up/no-name"] == "up/no-name"
+    check dynamicSceneCount() == 4
 
-  test "pruneUploadedPublicStates drops orphan uploaded states and falls back current scene":
-    interpretedScenes = initTable[SceneId, ExportedInterpretedScene]()
-    refreshExportedScenes()
+  test "prunePublicStates drops the scenes the frame no longer holds and hands over the current one":
     var uploadedOnly = initTable[SceneId, ExportedInterpretedScene]()
-    uploadedOnly["uploaded/keep".SceneId] = testInterpreted("Keep")
-    uploadedOnly["uploaded/remove".SceneId] = testInterpreted("Remove")
+    uploadedOnly["keep".SceneId] = testInterpreted("Keep")
+    uploadedOnly["remove".SceneId] = testInterpreted("Remove")
     updateUploadedScenes(uploadedOnly)
 
-    let keepScene = FrameScene(id: "uploaded/keep".SceneId, state: %*{"value": 1})
-    let removeScene = FrameScene(id: "uploaded/remove".SceneId, state: %*{"value": 2})
+    let keepScene = FrameScene(id: "keep".SceneId, state: %*{"value": 1})
+    let removeScene = FrameScene(id: "remove".SceneId, state: %*{"value": 2})
     keepScene.updateLastPublicState()
     removeScene.updateLastPublicState()
-    setLastPublicSceneId("uploaded/remove".SceneId)
+    setLastPublicSceneId("remove".SceneId)
 
-    pruneUploadedPublicStates(@["uploaded/keep".SceneId], some("uploaded/keep".SceneId))
+    prunePublicStates(@["remove".SceneId], "keep".SceneId)
 
     let (currentScene, allStates) = getAllPublicStates()
-    check currentScene == "uploaded/keep".SceneId
-    check allStates.hasKey("uploaded/keep")
-    check not allStates.hasKey("uploaded/remove")
+    check currentScene == "keep".SceneId
+    check allStates.hasKey("keep")
+    check not allStates.hasKey("remove")
 
-  test "cleanupOrphanedUploadedStateFiles removes orphan uploaded state files":
-    writeFile(uploadedKeepPath, "{\"state\":1}")
-    writeFile(uploadedOrphanPath, "{\"state\":2}")
+  test "an older runtime's uploaded state moves to the scene's own file at boot":
+    # Before 2026.10.18 an uploaded scene ran as "uploaded/<id>" and kept its
+    # state in scene-uploaded_<id>.json.
+    writeFile(legacyKeepPath, "{\"state\":1}")
+    writeFile(legacyOrphanPath, "{\"state\":2}")
     writeFile(uploadedStatePath, $(%*{
       "sceneId": "keep",
       "scenes": [
@@ -139,18 +152,20 @@ suite "scene registry and cleanup helpers":
       ]
     }))
 
-    cleanupOrphanedUploadedStateFiles()
+    loadUploadedScenes()
 
-    check fileExists(uploadedKeepPath)
-    check not fileExists(uploadedOrphanPath)
+    check readFile(keepPath) == "{\"state\":1}"
+    check not fileExists(legacyKeepPath)
+    check not fileExists(legacyOrphanPath)
+    check hasExportedScene("keep".SceneId)
 
   test "reclaimRetiredExportedScenes keeps one previous generation":
     var uploadedOne = initTable[SceneId, ExportedInterpretedScene]()
-    uploadedOne["uploaded/one".SceneId] = testInterpreted("One")
+    uploadedOne["one".SceneId] = testInterpreted("One")
     updateUploadedScenes(uploadedOne)
 
     var uploadedTwo = initTable[SceneId, ExportedInterpretedScene]()
-    uploadedTwo["uploaded/two".SceneId] = testInterpreted("Two")
+    uploadedTwo["two".SceneId] = testInterpreted("Two")
     updateUploadedScenes(uploadedTwo)
 
     check retiredExportedScenesCountForTest() == 2

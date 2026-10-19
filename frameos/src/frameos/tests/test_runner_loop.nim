@@ -426,18 +426,15 @@ suite "runner loop safety":
     check hasEvent(store, "event:setCurrentScene")
     check not logger.enabled
 
-  test "setCurrentScene resolves public scene ids to their uploaded registration":
+  test "setCurrentScene names an uploaded scene by its own id, or as an older client did":
     clearEventChannel()
 
-    # Cloud pushes register scenes as "uploaded/<id>", but the provider's
-    # set_current_scene verb (and workspace-authored schedules) name the
-    # public id. The runner must resolve it instead of failing "Scene not
-    # found".
-    let publicSceneId = "tests/runner/public-activation"
-    let uploadedSceneId = ("uploaded/" & publicSceneId).SceneId
+    # Until 2026.10.18 the runtime registered every uploaded scene as
+    # "uploaded/<id>"; a client written for one may still say so.
+    let sceneId = "tests/runner/public-activation".SceneId
     try:
       var uploaded = initTable[SceneId, ExportedInterpretedScene]()
-      uploaded[uploadedSceneId] = ExportedInterpretedScene(
+      uploaded[sceneId] = ExportedInterpretedScene(
         name: "Uploaded activation scene",
         publicStateFields: @[],
         persistedStateKeys: @[],
@@ -452,7 +449,8 @@ suite "runner loop safety":
       var runnerThread = RunnerThread(
         frameConfig: config,
         scenes: initTable[SceneId, FrameScene](),
-        currentSceneId: getFirstSceneId(),
+        # Somewhere else, so the selection below is a switch.
+        currentSceneId: "default".SceneId,
         lastRenderAt: 0.0,
         sleepFuture: none(Future[void]),
         isRendering: false,
@@ -461,32 +459,30 @@ suite "runner loop safety":
       )
 
       let messageLoop = runnerThread.startMessageLoop(maxIterations = 2)
-      sendEvent("setCurrentScene", %*{"sceneId": publicSceneId}, eoHttpAdmin)
+      sendEvent("setCurrentScene", %*{"sceneId": "uploaded/" & sceneId.string}, eoHttpAdmin)
 
       let finished = waitUntil(proc(): bool = messageLoop.finished, steps = 200, stepMs = 5)
       check finished
       if finished:
         waitFor messageLoop
-      check runnerThread.currentSceneId == uploadedSceneId
-      check runnerThread.scenes.hasKey(uploadedSceneId)
+      check runnerThread.currentSceneId == sceneId
+      check runnerThread.scenes.hasKey(sceneId)
       check not store.entries.anyIt(it.kind == JObject and
         it{"error"}.getStr("") == "Scene not found")
     finally:
       updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
-  test "a provider's copy shadows the frame's own scene of the same id":
+  test "an uploaded scene stands in for the deployed scene with its id":
     clearEventChannel()
 
-    # A frame that joined a provider with its own scenes gets them imported
-    # and pushed back, so one public id names the copy on disk AND the
-    # provider's "uploaded/<id>". While the provider's set is resident a bare
-    # id means the provider's copy — that is the one being edited.
-    let publicSceneId = "tests/runner/shadowed"
-    let uploadedSceneId = ("uploaded/" & publicSceneId).SceneId
-    let sceneJson = %*{"id": publicSceneId, "name": "Shadowed", "nodes": [], "edges": [],
+    # A preview of a deployed scene, or a provider's copy of a scene the frame
+    # already had (`scenes_get`): one id, and the uploaded copy runs until the
+    # uploaded set is replaced.
+    let sceneId = "tests/runner/shadowed".SceneId
+    let sceneJson = %*{"id": sceneId.string, "name": "Uploaded copy", "nodes": [], "edges": [],
                        "settings": {"execution": "interpreted"}}
     try:
-      interpretedScenes[publicSceneId.SceneId] = ExportedInterpretedScene(
+      interpretedScenes[sceneId] = ExportedInterpretedScene(
         name: "Disk copy",
         publicStateFields: @[],
         persistedStateKeys: @[],
@@ -494,17 +490,17 @@ suite "runner loop safety":
         render: fastRender,
         runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard
       )
-      discard updateUploadedScenesFromPayload(
-        %*{"scenes": [sceneJson], "source": "cloud"}, persistPayload = false)
-      check hasExportedScene(publicSceneId.SceneId)
-      check hasExportedScene(uploadedSceneId)
+      refreshExportedScenes()
+      discard updateUploadedScenesFromPayload(%*{"scenes": [sceneJson]}, persistPayload = false)
+      check getSceneDisplayName(sceneId).get() == "Uploaded copy"
 
       var config = loadConfig()
       let store = LogStore(entries: @[])
       var runnerThread = RunnerThread(
         frameConfig: config,
         scenes: initTable[SceneId, FrameScene](),
-        currentSceneId: getFirstSceneId(),
+        # Somewhere else, so the selection below is a switch.
+        currentSceneId: "default".SceneId,
         lastRenderAt: 0.0,
         sleepFuture: none(Future[void]),
         isRendering: false,
@@ -512,27 +508,21 @@ suite "runner loop safety":
         logger: testLogger(config, store)
       )
       let messageLoop = runnerThread.startMessageLoop(maxIterations = 2)
-      sendEvent("setCurrentScene", %*{"sceneId": publicSceneId}, eoHttpAdmin)
+      sendEvent("setCurrentScene", %*{"sceneId": sceneId.string}, eoHttpAdmin)
       let finished = waitUntil(proc(): bool = messageLoop.finished, steps = 200, stepMs = 5)
       check finished
       if finished:
         waitFor messageLoop
-      check runnerThread.currentSceneId == uploadedSceneId
+      check runnerThread.currentSceneId == sceneId
+      check runnerThread.scenes.hasKey(sceneId)
 
-      # The same set uploaded locally is the owner's own: no shadowing, the
-      # bare id is the disk scene again.
-      discard updateUploadedScenesFromPayload(%*{"scenes": [sceneJson]}, persistPayload = false)
-      let localLoop = runnerThread.startMessageLoop(maxIterations = 2)
-      sendEvent("setCurrentScene", %*{"sceneId": publicSceneId}, eoHttpAdmin)
-      let localFinished = waitUntil(proc(): bool = localLoop.finished, steps = 200, stepMs = 5)
-      check localFinished
-      if localFinished:
-        waitFor localLoop
-      check runnerThread.currentSceneId == publicSceneId.SceneId
+      # Replaced by another set, the id is the deployed scene again.
+      discard updateUploadedScenesFromPayload(%*{"scenes": [
+        {"id": "tests/runner/other", "name": "Other", "nodes": [], "edges": []}]}, persistPayload = false)
+      check getSceneDisplayName(sceneId).get() == "Disk copy"
     finally:
-      interpretedScenes.del(publicSceneId.SceneId)
+      interpretedScenes.del(sceneId)
       updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
-      discard updateUploadedScenesFromPayload(%*{"scenes": []}, persistPayload = false)
 
   test "a reboot event runs the detached system reboot and is not handed to the scene":
     clearEventChannel()

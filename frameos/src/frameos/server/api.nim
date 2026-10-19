@@ -1429,13 +1429,11 @@ proc sceneJsonIsCompiled(scene: JsonNode): bool =
 proc deviceScenesPayload*(): JsonNode =
   ## Every interpreted scene this frame holds, as the JSON its owner would
   ## export: the answer to the cloud's `scenes_get` (docs/cloud-frames.md).
-  ## `{"scenes": [...], "skipped_compiled": N}`, scene ids PUBLIC (no
-  ## "uploaded/" prefix — the uploaded payload is persisted before it is
-  ## renamed).
+  ## `{"scenes": [...], "skipped_compiled": N}`.
   ##
-  ## The uploaded set comes first and wins an id both stores hold: it is what
-  ## the frame was last handed (a local upload, or a provider's push), and on a
-  ## frame a provider already manages the copy on disk is the older one.
+  ## The uploaded set comes first and wins an id both stores hold, as in the
+  ## frame's scene registry: it is what the frame was last handed (a local
+  ## upload, or a provider's push).
   ## Compiled scenes are counted, never sent: their behaviour is in the binary,
   ## and a provider only takes interpreted node graphs. Only the ones a scene
   ## store lists are seen: a deploy writes scenes.json as the interpreted

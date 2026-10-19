@@ -16,7 +16,22 @@ import frameos/js_runtime/app_runtime
 # Where to store the persisted states
 const SCENE_STATE_JSON_FOLDER = "./state"
 const UPLOADED_SCENES_JSON_PATH = &"{SCENE_STATE_JSON_FOLDER}/uploaded.json"
-const UPLOADED_SCENE_PREFIX = "uploaded/"
+# Runtimes before 2026.10.18 registered every uploaded scene as
+# "uploaded/<id>". An uploaded scene is registered under its own id now (one
+# that a deployed scene also has is the uploaded one until it is replaced);
+# the prefix is only read back, from what an older runtime left on disk or a
+# client written for one sends (withoutLegacyUploadedPrefix).
+const LEGACY_UPLOADED_PREFIX = "uploaded/"
+
+# Stamped into state/uploaded.json: the deployed scene set the upload was made
+# over (dropUploadsTheDeployReplaced).
+const DEPLOYED_SCENES_KEY = "deployedScenes"
+
+proc withoutLegacyUploadedPrefix*(sceneId: SceneId): SceneId =
+  if sceneId.string.startsWith(LEGACY_UPLOADED_PREFIX):
+    SceneId(sceneId.string[LEGACY_UPLOADED_PREFIX.len .. ^1])
+  else:
+    sceneId
 
 type SceneImageSaveResult* = object
   sceneId*: string
@@ -285,60 +300,35 @@ proc getSceneDisplayName*(sceneId: SceneId): Option[string] =
     for (candidateId, sceneName) in systemScenesRegistry.sceneOptions:
       if candidateId == sceneId and sceneName.len > 0:
         return some(sceneName)
-    if interpretedScenes.hasKey(sceneId):
-      let interpreted = interpretedScenes[sceneId]
-      if interpreted.name.len > 0:
-        return some(interpreted.name)
     if uploadedScenes.hasKey(sceneId):
       let uploaded = uploadedScenes[sceneId]
       if uploaded.name.len > 0:
         return some(uploaded.name)
+    if interpretedScenes.hasKey(sceneId):
+      let interpreted = interpretedScenes[sceneId]
+      if interpreted.name.len > 0:
+        return some(interpreted.name)
     return none(string)
 
 proc dynamicSceneCount*(): int =
-  ## How many interpreted scenes this frame holds (deployed + uploaded), for
-  ## the cloud hello's `scene_count`. Table lengths only: the hub thread calls
-  ## this, and iterating would copy the runner's scene refs on a foreign
-  ## thread (see publicStateFieldValues).
+  ## How many interpreted scenes this frame holds (deployed and uploaded; an
+  ## uploaded scene with a deployed scene's id is one scene), for the cloud
+  ## hello's `scene_count`. Keys only: the hub thread calls this, and touching
+  ## the values would copy the runner's scene refs on a foreign thread (see
+  ## publicStateFieldValues).
   withLock sceneRegistryLock:
-    result = interpretedScenes.len + uploadedScenes.len
+    result = uploadedScenes.len
+    for sceneId in interpretedScenes.keys:
+      if not uploadedScenes.hasKey(sceneId):
+        inc result
 
 proc getDynamicSceneOptions*(): seq[tuple[id: SceneId, name: string]] =
   withLock sceneRegistryLock:
     for sceneId, scene in interpretedScenes:
-      result.add((sceneId, if scene.name.len > 0: scene.name else: sceneId.string))
+      if not uploadedScenes.hasKey(sceneId):
+        result.add((sceneId, if scene.name.len > 0: scene.name else: sceneId.string))
     for sceneId, scene in uploadedScenes:
       result.add((sceneId, if scene.name.len > 0: scene.name else: sceneId.string))
-
-proc normalizeUploadedScenePayload*(sceneInputs: seq[FrameSceneInput]): seq[FrameSceneInput] =
-  # Add "uploaded/" in front of every scene ID to make sure we don't conflict with existing scenes
-  var uploadedIdMap = initTable[SceneId, SceneId]()
-  for scene in sceneInputs:
-    uploadedIdMap[scene.id] = SceneId("uploaded/" & scene.id.string)
-
-  for scene in sceneInputs:
-    let originalId = scene.id
-    if uploadedIdMap.hasKey(originalId):
-      scene.id = uploadedIdMap[originalId]
-    for node in scene.nodes:
-      if node.data.isNil or node.data.kind != JObject:
-        continue
-      if node.nodeType == "scene":
-        if node.data.hasKey("keyword") and node.data["keyword"].kind == JString:
-          let keywordId = SceneId(node.data["keyword"].getStr())
-          if uploadedIdMap.hasKey(keywordId):
-            node.data["keyword"] = %*(uploadedIdMap[keywordId].string)
-      elif node.nodeType == "dispatch":
-        if node.data.hasKey("keyword") and node.data["keyword"].kind == JString:
-          let eventName = node.data["keyword"].getStr()
-          if eventName == "setCurrentScene":
-            if node.data.hasKey("config") and node.data["config"].kind == JObject:
-              let config = node.data["config"]
-              if config.hasKey("sceneId") and config["sceneId"].kind == JString:
-                let sceneId = SceneId(config["sceneId"].getStr())
-                if uploadedIdMap.hasKey(sceneId):
-                  config["sceneId"] = %*(uploadedIdMap[sceneId].string)
-  sceneInputs
 
 var
   lastImageLock: Lock
@@ -358,7 +348,7 @@ var
   # uploads. Trust-boundary metadata, not the template-provenance
   # `scene.origin` the editor writes.
   uploadedScenesSource {.guard: uploadedScenePayloadLock.} = ""
-  uploadedStateCleanupRan = false
+  uploadedScenesLoaded = false
 
 # Lets the cloud module recompute the LAN-deny policy when the uploaded scene
 # set (and with it the recorded source) changes — scenes.nim cannot import
@@ -390,22 +380,16 @@ proc getUploadedScenePayload*(): JsonNode =
       return %*[]
     return parseJson(uploadedScenePayload)
 
-proc pruneUploadedPublicStates*(keepSceneIds: seq[SceneId], mainSceneId: Option[SceneId]) =
-  var keepLookup = initTable[string, bool]()
-  for sceneId in keepSceneIds:
-    keepLookup[sceneId.string] = true
+proc prunePublicStates*(droppedSceneIds: seq[SceneId], mainSceneId: SceneId) =
+  ## Forget the public state of scenes the frame no longer holds; the scene
+  ## they showed hands over to `mainSceneId`.
   withLock lastPublicStatesLock:
-    for sceneKey in lastPublicStates.keys.toSeq():
-      if sceneKey.startsWith("uploaded/") and not keepLookup.hasKey(sceneKey):
-        lastPublicStates.delete(sceneKey)
-    for sceneId in lastPublicStateUpdates.keys.toSeq():
-      if sceneId.string.startsWith("uploaded/") and not keepLookup.hasKey(sceneId.string):
-        lastPublicStateUpdates.del(sceneId)
-    if lastPublicSceneId.string.startsWith("uploaded/") and not keepLookup.hasKey(lastPublicSceneId.string):
-      if mainSceneId.isSome:
-        lastPublicSceneId = mainSceneId.get()
-      else:
-        lastPublicSceneId = "".SceneId
+    for sceneId in droppedSceneIds:
+      if lastPublicStates.hasKey(sceneId.string):
+        lastPublicStates.delete(sceneId.string)
+      lastPublicStateUpdates.del(sceneId)
+      if lastPublicSceneId == sceneId:
+        lastPublicSceneId = mainSceneId
 
 proc sanitizePathString*(s: string): string =
   var sanitized = newStringOfCap(s.len)
@@ -433,16 +417,9 @@ proc sanitizePathString*(s: string): string =
     trimmed = trimmed[0 ..< 120]
   return trimmed
 
-proc sceneImagePublicId*(sceneId: string): string =
-  if sceneId.startsWith(UPLOADED_SCENE_PREFIX):
-    sceneId[UPLOADED_SCENE_PREFIX.len .. ^1]
-  else:
-    sceneId
-
 proc sceneImageFilename*(sceneId: string): string =
-  let publicSceneId = sceneImagePublicId(sceneId)
   var safe = ""
-  for ch in publicSceneId:
+  for ch in sceneId:
     if ch.isAlphaNumeric() or ch in {'-', '_', '.'}:
       safe.add(ch)
     else:
@@ -452,7 +429,7 @@ proc sceneImageFilename*(sceneId: string): string =
     safe = "scene"
   if safe.len > 64:
     safe = safe[0 .. 63]
-  safe & "-" & getMD5(publicSceneId) & ".png"
+  safe & "-" & getMD5(sceneId) & ".png"
 
 proc sceneImagesAssetsRoot(assetsPath: string): string =
   normalizedPath(if assetsPath.len > 0: assetsPath else: "/srv/assets")
@@ -487,38 +464,17 @@ proc sceneImageIsStale*(assetsPath: string, sceneId: SceneId): bool =
   let age = storedFileAgeSeconds(sceneImagePath(assetsPath, sceneId.string))
   age < 0 or age >= SCENE_IMAGE_MAX_AGE_SECONDS
 
+proc sceneStatePath(sceneId: SceneId): string =
+  &"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json"
+
 proc removePersistedState*(sceneId: SceneId) =
   if lastPersistedStates.hasKey(sceneId.string):
     lastPersistedStates.delete(sceneId.string)
-  let statePath = &"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json"
+  let statePath = sceneStatePath(sceneId)
   try:
     if storedFileExists(statePath):
       removeStoredFile(statePath)
   except OSError:
-    discard
-
-proc seedUploadedStateFromDiskScene(publicId, uploadedId: SceneId) =
-  ## A provider's push registers every scene as "uploaded/<id>", whose
-  ## persisted state is a file of its own. When the frame already ran a scene
-  ## under the bare id — the frame joined the cloud with scenes of its own and
-  ## the owner imported them (`scenes_get`, docs/cloud-frames.md) — the
-  ## provider's copy starts from that scene's persisted state instead of its
-  ## defaults: the album keeps its place, the counter its count. Only when
-  ## the uploaded copy has no state of its own yet; the values never leave
-  ## the device, and the disk scene's file is left as it was.
-  let uploadedPath = &"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(uploadedId.string)}.json"
-  let diskPath = &"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(publicId.string)}.json"
-  try:
-    if storedFileExists(uploadedPath) or not storedFileExists(diskPath):
-      return
-    let persisted = parseJson(readTextFile(diskPath))
-    if persisted.kind != JObject or persisted.len == 0:
-      return
-    writeTextFile(uploadedPath, $persisted)
-    lastPersistedStates[uploadedId.string] = persisted
-    log(%*{"event": "uploadScenes:stateCarried", "sceneId": uploadedId.string,
-           "keys": persisted.len})
-  except JsonParsingError, IOError, OSError:
     discard
 
 proc updateUploadedScenesFromPayload*(
@@ -549,12 +505,7 @@ proc updateUploadedScenesFromPayload*(
   # nim json -> jsony -> FrameSceneInput
   # clunky but works...
   let payloadString = $scenePayload
-  let rawSceneInputs = parseInterpretedSceneInputs(payloadString)
-  var uploadedIdMap = initTable[SceneId, SceneId]()
-  for scene in rawSceneInputs:
-    uploadedIdMap[scene.id] = SceneId("uploaded/" & scene.id.string)
-
-  let sceneInputs = normalizeUploadedScenePayload(rawSceneInputs)
+  let sceneInputs = parseInterpretedSceneInputs(payloadString)
   if sceneInputs.len == 0:
     return (none(SceneId), @[])
 
@@ -569,29 +520,26 @@ proc updateUploadedScenesFromPayload*(
   # than on the next hub tick (the hub thread idles on a demoted frame).
   if not uploadedScenesChangedHook.isNil:
     uploadedScenesChangedHook()
+  # The uploaded set replaces the last one. A scene that left it and that the
+  # frame no longer holds at all loses its persisted state; one a deployed
+  # scene shares the id (and with it the state file) of keeps it.
+  var droppedSceneIds: seq[SceneId] = @[]
   for sceneId in oldUploaded.keys:
-    if sceneId.string.startsWith("uploaded/") and not newScenes.hasKey(sceneId):
+    if not newScenes.hasKey(sceneId) and not hasExportedScene(sceneId):
+      droppedSceneIds.add(sceneId)
       removePersistedState(sceneId)
-  if persistPayload and payloadSource == "cloud":
-    for publicId, uploadedId in uploadedIdMap:
-      if not oldUploaded.hasKey(uploadedId):
-        seedUploadedStateFromDiskScene(publicId, uploadedId)
   if persistPayload:
+    payload[DEPLOYED_SCENES_KEY] = %deployedScenesFingerprint()
     writeTextFile(UPLOADED_SCENES_JSON_PATH, $payload)
 
   let sceneIds = sceneInputs.mapIt(it.id)
   let oldSceneIds = oldUploaded.keys.toSeq()
   var mainSceneId = sceneInputs[0].id
-  if payload.kind == JObject and payload.hasKey("sceneId") and payload["sceneId"].kind == JString:
-    let requestedId = SceneId(payload["sceneId"].getStr())
-    if uploadedIdMap.hasKey(requestedId):
-      mainSceneId = uploadedIdMap[requestedId]
-    else:
-      for scene in sceneInputs:
-        if scene.id == requestedId:
-          mainSceneId = requestedId
-          break
-  pruneUploadedPublicStates(sceneIds, some(mainSceneId))
+  if payload{"sceneId"}.getStr("").len > 0:
+    let requestedId = withoutLegacyUploadedPrefix(SceneId(payload["sceneId"].getStr()))
+    if newScenes.hasKey(requestedId):
+      mainSceneId = requestedId
+  prunePublicStates(droppedSceneIds, mainSceneId)
   return (some(mainSceneId), sceneIds & oldSceneIds)
 
 proc setLastImage*(image: Image) =
@@ -624,7 +572,7 @@ proc saveSceneImagePng*(assetsPath: string, sceneId: string, png: string): Scene
   ensureParentDir(path)
   writeTextFile(path, png)
   SceneImageSaveResult(
-    sceneId: sceneImagePublicId(sceneId),
+    sceneId: sceneId,
     path: path,
     size: png.len,
   )
@@ -691,30 +639,121 @@ proc setPersistedStateFromPayload*(sceneId: SceneId, payload: JsonNode) =
     persistedState[key] = copy(payload[key])
   writeTextFile(&"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(sceneId.string)}.json", $persistedState)
 
-proc cleanupOrphanedUploadedStateFiles*() =
-  if uploadedStateCleanupRan:
-    return
-  uploadedStateCleanupRan = true
-  var keepFiles = initTable[string, bool]()
-  try:
-    if storedFileExists(UPLOADED_SCENES_JSON_PATH):
-      let uploadedPayload = parseJson(readTextFile(UPLOADED_SCENES_JSON_PATH))
-      let (_, sceneIds) = updateUploadedScenesFromPayload(uploadedPayload, false)
-      for sceneId in sceneIds:
-        let filename = &"scene-{sanitizePathString(sceneId.string)}.json"
-        keepFiles[filename] = true
-  except JsonParsingError, IOError:
-    discard
+proc migrateLegacyUploadedStateFiles(uploadedSceneIds: seq[SceneId]) =
+  ## Runtimes before 2026.10.18 kept an uploaded scene's state in
+  ## scene-uploaded_<id>.json. The scene is registered under its own id now,
+  ## so that state moves to the scene's own file; the uploaded copy was the
+  ## one running, so its state wins over a deployed copy's. Files of scenes
+  ## the frame no longer holds go, as that runtime's own sweep did.
+  for sceneId in uploadedSceneIds:
+    let legacyPath = sceneStatePath(SceneId(LEGACY_UPLOADED_PREFIX & sceneId.string))
+    try:
+      if storedFileExists(legacyPath):
+        writeTextFile(sceneStatePath(sceneId), readTextFile(legacyPath))
+        removeStoredFile(legacyPath)
+    except IOError, OSError:
+      discard
+  var ownStateFiles = initTable[string, bool]()
+  withLock sceneRegistryLock:
+    for sceneId in exportedScenes.keys:
+      ownStateFiles[extractFilename(sceneStatePath(sceneId))] = true
   for filePath in walkFiles(&"{SCENE_STATE_JSON_FOLDER}/scene-uploaded_*.json"):
     try:
-      if not keepFiles.hasKey(splitFile(filePath).name & ".json"):
+      if not ownStateFiles.hasKey(extractFilename(filePath)):
         removeStoredFile(filePath)
     except OSError:
       discard
 
+proc dropUploadsTheDeployReplaced(payload: JsonNode): bool =
+  ## An uploaded scene stands in for the deployed scene with its id until the
+  ## deployed set changes: a deploy after an upload wins. `payload` is the
+  ## persisted upload, which records the deployed set it was made over; when
+  ## that set has changed since, its scenes that a deployed scene shares an id
+  ## with are taken out of it. True when the payload is out of date (scenes
+  ## taken out, or no record yet: an older runtime wrote it) and should be
+  ## written again.
+  let madeOver = payload{DEPLOYED_SCENES_KEY}.getStr("")
+  if madeOver == deployedScenesFingerprint() or interpretedScenesLoadError().len > 0:
+    # Unchanged, or unreadable right now (a deploy that lost its writes):
+    # nothing to compare with.
+    return false
+  if madeOver.len > 0:
+    var kept = newJArray()
+    var replaced: seq[string] = @[]
+    withLock sceneRegistryLock:
+      for scene in payload["scenes"]:
+        let sceneId = scene{"id"}.getStr("")
+        if sceneId.len > 0 and interpretedScenes.hasKey(SceneId(sceneId)):
+          replaced.add(sceneId)
+        else:
+          kept.add(scene)
+    if replaced.len > 0:
+      payload["scenes"] = kept
+      log(%*{"event": "uploadScenes:replacedByDeploy", "sceneIds": replaced})
+  true
+
+proc clearUploadedScenes() =
+  var oldUploaded = initTable[SceneId, ExportedInterpretedScene]()
+  withLock sceneRegistryLock:
+    oldUploaded = uploadedScenes
+  updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+  setUploadedScenePayload("")
+  setUploadedScenesSource("")
+  if not uploadedScenesChangedHook.isNil:
+    uploadedScenesChangedHook()
+  var droppedSceneIds: seq[SceneId] = @[]
+  for sceneId in oldUploaded.keys:
+    if not hasExportedScene(sceneId):
+      droppedSceneIds.add(sceneId)
+      removePersistedState(sceneId)
+  prunePublicStates(droppedSceneIds, "".SceneId)
+  try:
+    if storedFileExists(UPLOADED_SCENES_JSON_PATH):
+      removeStoredFile(UPLOADED_SCENES_JSON_PATH)
+  except OSError:
+    discard
+
+proc readUploadedPayload(): JsonNode =
+  ## state/uploaded.json, or nil when there is none worth reading.
+  try:
+    if storedFileExists(UPLOADED_SCENES_JSON_PATH):
+      result = parseJson(readTextFile(UPLOADED_SCENES_JSON_PATH))
+  except JsonParsingError, IOError:
+    return nil
+  if result.isNil or result.kind != JObject or result{"scenes"}.isNil or result["scenes"].kind != JArray:
+    return nil
+
+proc loadUploadedScenes*() =
+  ## The uploaded scene set the frame held before it started
+  ## (state/uploaded.json), registered once, before the first scene is
+  ## chosen, minus what a deploy has replaced since.
+  if uploadedScenesLoaded:
+    return
+  uploadedScenesLoaded = true
+  var sceneIds: seq[SceneId] = @[]
+  let payload = readUploadedPayload()
+  if not payload.isNil:
+    let outOfDate = dropUploadsTheDeployReplaced(payload)
+    if payload["scenes"].len > 0:
+      sceneIds = updateUploadedScenesFromPayload(payload, persistPayload = outOfDate).sceneIds
+    else:
+      clearUploadedScenes()
+  migrateLegacyUploadedStateFiles(sceneIds)
+
+proc applyDeployToUploads*() =
+  ## After the deployed scenes were read again (a reload, which is how a
+  ## deploy lands without a restart): the same rule as at boot.
+  let payload = readUploadedPayload()
+  if payload.isNil or not dropUploadsTheDeployReplaced(payload):
+    return
+  if payload["scenes"].len > 0:
+    discard updateUploadedScenesFromPayload(payload)
+  else:
+    clearUploadedScenes()
+
 when defined(testing):
-  proc setUploadedStateCleanupRanForTest*(value: bool) =
-    uploadedStateCleanupRan = value
+  proc setUploadedScenesLoadedForTest*(value: bool) =
+    uploadedScenesLoaded = value
 
   proc retiredExportedScenesCountForTest*(): int =
     withLock sceneRegistryLock:
@@ -808,38 +847,34 @@ proc loadLastScene*(): Option[SceneId] =
   try:
     let json = parseJson(readTextFile(&"{SCENE_STATE_JSON_FOLDER}/scene.json"))
     if json.hasKey("sceneId"):
-      result = some(SceneId(json["sceneId"].getStr()))
+      result = some(withoutLegacyUploadedPrefix(SceneId(json["sceneId"].getStr())))
       lastPersistedSceneId = result
   except JsonParsingError, IOError:
     return none(SceneId)
 
 proc getFirstSceneId*(): SceneId =
+  ## The scene to start with: the one the frame showed last, while it still
+  ## has it; else one of its own scenes; else the scene registry's default (a
+  ## source build's chosen scene, or a release binary's placeholder); else the
+  ## status screen. Until 2026.10.18 the registry's default came first, so a
+  ## release binary booted into its placeholder whatever the frame showed.
   {.gcsafe.}:
-    cleanupOrphanedUploadedStateFiles()
-    if defaultSceneId.isSome():
-      return defaultSceneId.get()
+    loadUploadedScenes()
     let lastSceneId = loadLastScene()
-    if lastSceneId.isSome():
-      let persistedSceneId = lastSceneId.get()
-      if persistedSceneId.string.startsWith("uploaded/") and not hasExportedScene(persistedSceneId):
-        try:
-          let uploadedPayload = parseJson(readTextFile(UPLOADED_SCENES_JSON_PATH))
-          discard updateUploadedScenesFromPayload(uploadedPayload, false)
-        except JsonParsingError, IOError:
-          discard
-      if hasExportedScene(persistedSceneId):
-        return persistedSceneId
+    if lastSceneId.isSome() and hasExportedScene(lastSceneId.get()):
+      return lastSceneId.get()
     withLock sceneRegistryLock:
-      if len(compiledScenes) > 0:
-        for key in keys(compiledScenes):
-          return key
-      if len(interpretedScenes) > 0:
-        for key in keys(interpretedScenes):
-          return key
-      if len(compiledScenes) == 0 and len(interpretedScenes) == 0 and len(uploadedScenes) == 0:
-        let indexSceneId = "system/index".SceneId
-        if systemScenes.hasKey(indexSceneId):
-          return indexSceneId
+      for key in keys(uploadedScenes):
+        return key
+      for key in keys(interpretedScenes):
+        return key
+      if defaultSceneId.isSome() and exportedScenes.hasKey(defaultSceneId.get()):
+        return defaultSceneId.get()
+      for key in keys(compiledScenes):
+        return key
+      let indexSceneId = "system/index".SceneId
+      if systemScenes.hasKey(indexSceneId):
+        return indexSceneId
       if len(systemScenes) > 0:
         for key in keys(systemScenes):
           return key
