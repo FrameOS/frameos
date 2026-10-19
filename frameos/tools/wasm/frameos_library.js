@@ -150,6 +150,10 @@ addToLibrary({
     // load), and only CORS/network failures are retried through the proxy,
     // which fetches server-side like the device would.
     var proxyUrl = Module['frameosProxyUrl']
+    // A short-lived token the page minted for that proxy (preview-worker.js
+    // keeps it fresh). With it the proxy needs neither the page's cookie nor
+    // its origin, which is what lets this worker leave the app's origin.
+    var proxyToken = Module['frameosProxyToken']
     try {
       var body = null
       if (bodyLen > 0) {
@@ -243,7 +247,9 @@ addToLibrary({
       var proxyRequest = function () {
         var xhr = new XMLHttpRequest()
         xhr.open('POST', proxyUrl, false)
-        xhr.withCredentials = true
+        // Cookies only when there is no token: same-origin they go anyway,
+        // and a cross-origin proxy answers token requests without credentials.
+        xhr.withCredentials = !proxyToken
         try {
           xhr.responseType = 'arraybuffer'
           if (timeoutMs > 0) xhr.timeout = timeoutMs
@@ -255,6 +261,9 @@ addToLibrary({
           bodyBase64 = btoa(bin)
         }
         xhr.setRequestHeader('Content-Type', 'application/json')
+        if (proxyToken) {
+          xhr.setRequestHeader('X-FrameOS-Preview-Token', proxyToken)
+        }
         xhr.send(
           JSON.stringify({ method: method, url: url, headers: headers, bodyBase64: bodyBase64, timeoutMs: timeoutMs })
         )

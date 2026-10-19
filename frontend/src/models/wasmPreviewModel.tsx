@@ -8,6 +8,7 @@ import { isCloudMode } from '../utils/cloudMode'
 import { isFrameControlMode } from '../utils/frameControlMode'
 import { getBasePath } from '../utils/getBasePath'
 import { projectApiPath } from '../utils/projectApi'
+import { mintPreviewProxyToken } from '../utils/previewProxyToken'
 import { onSettingsChanged } from '../utils/settingsInvalidation'
 import {
   createWasmPreviewQueue,
@@ -130,6 +131,8 @@ async function renderSceneToDataUrl(frame: FrameType, sceneId: string): Promise<
   }
   const settingsJson = JSON.stringify(gated.settings)
   const proxyUrl = await previewProxyUrl(frame.id)
+  // One token outlives this worker (it is gone in 30 s), so no refresh.
+  const proxyToken = (await mintPreviewProxyToken(proxyUrl))?.token ?? ''
 
   const worker = new Worker(assetUrl('/frameos-wasm/preview-worker.js'), { type: 'module' })
   return await new Promise<string>((resolve, reject) => {
@@ -189,6 +192,7 @@ async function renderSceneToDataUrl(frame: FrameType, sceneId: string): Promise<
       scenesJson: JSON.stringify(payloadScenes),
       settingsJson,
       proxyUrl,
+      proxyToken,
       sceneId: scene.id,
       lanAccess: frame.lan_access ?? undefined,
     })

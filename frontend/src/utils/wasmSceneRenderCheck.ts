@@ -1,6 +1,7 @@
 import { collectScenePreviewPayloadScenes } from '../scenes/frame/panels/Scenes/scenesLogic'
 import { fetchSettingsJson, previewProxyUrl } from '../models/wasmPreviewModel'
 import { assetUrl } from './assetUrl'
+import { mintPreviewProxyToken } from './previewProxyToken'
 import { wasmPreviewDimensions } from './wasmScenePreview'
 import type { FrameId, FrameScene } from '../types'
 
@@ -78,6 +79,8 @@ export async function renderSceneCheck(
   })
   const settingsJson = await fetchSettingsJson(frame.id)
   const proxyUrl = await previewProxyUrl(frame.id)
+  // One token outlives this worker (it is gone in 30 s), so no refresh.
+  const proxyToken = (await mintPreviewProxyToken(proxyUrl))?.token ?? ''
 
   const errors: string[] = []
   const logs: string[] = []
@@ -140,6 +143,7 @@ export async function renderSceneCheck(
       scenesJson: JSON.stringify(payloadScenes),
       settingsJson,
       proxyUrl,
+      proxyToken,
       sceneId: scene.id,
     })
   })

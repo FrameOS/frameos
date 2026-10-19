@@ -690,8 +690,10 @@ export function SceneLivePreviewPanel({
         scenes,
         settings: previewSettings,
         // Fallback only: the runtime fetches URLs client-side first and
-        // routes just CORS-blocked hosts through this endpoint.
+        // routes just CORS-blocked hosts through this endpoint, with a
+        // short-lived token from /api/store/preview-proxy/token.
         proxyUrl: "/api/store/preview-proxy",
+        proxyTokens: true,
         fastMode,
         panelPalette: panelRef.current,
         beforeDither: beforeDitherRef.current,

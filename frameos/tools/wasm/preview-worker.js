@@ -7,7 +7,10 @@
 //
 // Messages in:
 //   {type: 'init', width, height, timeZone, scenesJson, sceneId, settingsJson, proxyUrl,
-//    fastMode?, saveAssets?, browserAssets?, lanAccess?}
+//    proxyToken?, fastMode?, saveAssets?, browserAssets?, lanAccess?}
+//        proxyToken: a short-lived token for proxyUrl, sent as `X-FrameOS-Preview-Token` with every proxied
+//        request in place of the page's cookie (the page mints it at `<proxyUrl>/token`; frameos-wasm's
+//        proxyToken.ts). Requests go out untokened, as they used to, until one arrives.
 //        lanAccess: the previewed cloud frame's local network access (docs/lan-access.md); `false` makes the
 //        runtime refuse private hosts the way that frame would. Absent = nothing to copy, nothing refused.
 //   {type: 'render'}                       force a render now
@@ -19,6 +22,8 @@
 //                                          asks for it.
 //   {type: 'selectScene', sceneId}
 //   {type: 'setFastMode', enabled}         lift (or restore) the 1 fps throttle
+//   {type: 'proxyToken', token}            the next proxy token (the page refreshes it before it expires);
+//                                          taken at any time, also while init is still loading the runtime
 //   {type: 'assets', requestId, op, ...}   browser asset folder ops, see handleAssetsRequest
 // Messages out:
 //   {type: 'ready', sceneInfo, browserAssets, runtimeVersion, pointerEvents, inputEvents, gpioEvents}
@@ -47,6 +52,9 @@
 let Module = null
 let renderTimer = null
 let rendering = false
+// The proxy token the page sent last ('' = none). Kept here as well as on
+// Module, because a refresh may arrive before init has created Module.
+let proxyToken = ''
 
 // Render pacing. Every scene is throttled to at most one render per second:
 // a scene asking for less (a 24 fps slideshow) gets a `fastRenderRequest`
@@ -729,6 +737,11 @@ async function init(msg) {
   try {
     fastMode = Boolean(msg.fastMode)
     fastRequestSent = false
+    // Before the awaits below: a refresh that arrives while the runtime
+    // loads is newer than this one and must win.
+    if (msg.proxyToken) {
+      proxyToken = String(msg.proxyToken)
+    }
     const createFrameOS = (await import('./frameos.js')).default
     Module = await createFrameOS({
       locateFile: (path) => new URL(path, import.meta.url).href,
@@ -746,6 +759,7 @@ async function init(msg) {
     if (msg.proxyUrl) {
       Module['frameosProxyUrl'] = msg.proxyUrl
     }
+    Module['frameosProxyToken'] = proxyToken
     if (msg.lanAccess === false) {
       Module['frameosLanAccess'] = false
     }
@@ -914,6 +928,12 @@ self.onmessage = (ev) => {
       }
       if (Module && !rendering) {
         scheduleNextRender()
+      }
+      break
+    case 'proxyToken':
+      proxyToken = String(msg.token || '')
+      if (Module) {
+        Module['frameosProxyToken'] = proxyToken
       }
       break
     case 'assets':

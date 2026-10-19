@@ -60,11 +60,14 @@ is left there is in the medium / low list.
 - **Preview worker isolation.** Same-origin direct requests from scene code
   are refused in `frameos_library.js`, but the worker still shares the app
   origin. Host `preview-worker.js` + wasm in a sandboxed iframe or a
-  dedicated origin and talk over postMessage. Blocked on one thing: the
-  worker reaches the preview proxy (`/api/store/preview-proxy`,
-  `/api/frames/…/preview_proxy`) with the app's session cookie, and an
-  opaque-origin worker cannot send it — the proxy has to move to a
-  short-lived per-preview token first, on both control planes.
+  dedicated origin and talk over postMessage. The proxy no longer needs the
+  app's session: both planes take a short-lived per-preview token
+  (`X-FrameOS-Preview-Token`, minted at `<proxy>/token`, 15 min, CORS on
+  token requests and never credentials), which every preview sends. Left:
+  the move itself, then dropping the cookie / same-origin fallback the
+  proxies keep for bundles from before the token. The cloud serves the
+  release-pinned worker, so its previews send the token from the next
+  release on.
 - Smaller: the backend Docker image runs as root (`docs/todo.md`, "Backend
   Docker image"); the OpenAI service-account key and R2 keys sit in
   plaintext `.env*` files on the dev laptop (rotate / scope). Keep "require

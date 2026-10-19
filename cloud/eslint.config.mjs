@@ -97,6 +97,7 @@ export default tseslint.config(
       "**/src/test/shared-spa/diagram-history.test.ts",
       "**/src/test/shared-spa/editor-export-secrets.test.ts",
       "**/src/test/shared-spa/preview-key-consent.test.ts",
+      "**/src/test/shared-spa/preview-proxy-token-render-check.test.ts",
       // The scene-editor logic tests (2026-09 review §11), same reason.
       "**/src/test/shared-spa/diagram-clipboard.test.ts",
       "**/src/test/shared-spa/new-node-picker.test.ts",

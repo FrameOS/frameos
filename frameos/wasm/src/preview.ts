@@ -5,6 +5,7 @@
 import type { DeviceLimits } from './devices'
 import { ditherFrame, panelPaletteFor, type PanelPaletteKey } from './dither'
 import { attachKeyboardInput, attachPointerInput } from './pointer'
+import { keepPreviewProxyTokenFresh } from './proxyToken'
 import type {
   FrameOSScene,
   PreviewAssetEntry,
@@ -70,6 +71,14 @@ export interface FrameOSPreviewOptions {
   /** Same-origin proxy endpoint for the runtime's HTTP requests. Without it,
    * scenes fetching external data hit browser CORS limits. */
   proxyUrl?: string
+  /** A short-lived token for `proxyUrl`, sent with every proxied request in
+   * the `X-FrameOS-Preview-Token` header (see ./proxyToken); for a host that
+   * mints its own. `setProxyToken` replaces it. */
+  proxyToken?: string
+  /** Mint tokens for `proxyUrl` from `<proxyUrl>/token` and keep them fresh
+   * while the preview runs. FrameOS's backend and cloud both serve that
+   * route; a proxy without one is used as before, untokened. */
+  proxyTokens?: boolean
   /** Canvas to paint frames onto; can also be attached later. */
   canvas?: HTMLCanvasElement | null
   /** Renders are throttled to one per second unless this is true (see
@@ -144,6 +153,7 @@ export class FrameOSPreview {
   private nextAppTestsRequestId = 1
   /** Labels of the buttons `buttonDown` pressed and `buttonUp` has not let go of. */
   private heldButtons = new Set<string>()
+  private stopProxyTokens: (() => void) | null = null
 
   /** Latest scene info from the runtime (set once `ready` fires). */
   sceneInfo: SceneInfo | null = null
@@ -184,12 +194,19 @@ export class FrameOSPreview {
       scenesJson: JSON.stringify(options.scenes),
       settingsJson: JSON.stringify(options.settings ?? {}),
       proxyUrl: options.proxyUrl || '',
+      proxyToken: options.proxyToken || '',
       sceneId: options.sceneId || '',
       fastMode: this.fastMode,
       saveAssets: options.saveAssets === undefined ? true : options.saveAssets,
       browserAssets: options.browserAssets === undefined ? true : options.browserAssets,
       deviceLimits: options.deviceLimits ?? null,
     })
+    if (options.proxyTokens && options.proxyUrl) {
+      // The worker takes a token at any time, also while it is still
+      // loading the runtime; requests made before the first one arrives go
+      // out untokened, as they always did.
+      this.stopProxyTokens = keepPreviewProxyTokenFresh(options.proxyUrl, (token) => this.setProxyToken(token))
+    }
   }
 
   private handleMessage(msg: Record<string, any>): void {
@@ -414,6 +431,11 @@ export class FrameOSPreview {
     this.worker?.postMessage({ type: 'selectScene', sceneId })
   }
 
+  /** Replace the token proxied requests carry (null sends none). */
+  setProxyToken(token: string | null): void {
+    this.worker?.postMessage({ type: 'proxyToken', token: token ?? '' })
+  }
+
   /** Let the scene render as often as it asks (true), or throttle it back
    * to one render per second (false). */
   setFastMode(enabled: boolean): void {
@@ -506,6 +528,8 @@ export class FrameOSPreview {
   /** Terminate the worker; the instance cannot be reused afterwards. */
   destroy(): void {
     this.destroyed = true
+    this.stopProxyTokens?.()
+    this.stopProxyTokens = null
     this.worker?.terminate()
     this.worker = null
     this.pendingFrame = null

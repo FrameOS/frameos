@@ -116,19 +116,25 @@ test('malformed IPv6 fails closed', () => {
 
 // Runs the request hook as the preview worker would, returning which URLs
 // were opened directly and whether the proxy was used.
-function request(url, { page, proxyUrl = '/api/proxy', lanAccess, sendError = null } = {}) {
+function request(url, { page, proxyUrl = '/api/proxy', proxyToken, lanAccess, sendError = null, directStatus = 200 } = {}) {
   const library = loadLibrary()
   const opened = []
   const logs = []
+  const sent = []
   class FakeXHR {
     open(method, target) {
       this.target = target
+      this.headers = {}
       opened.push(target)
     }
-    setRequestHeader() {}
+    setRequestHeader(name, value) {
+      this.headers[name] = value
+    }
     send() {
+      sent.push({ target: this.target, headers: this.headers, withCredentials: this.withCredentials })
       if (sendError) throw new Error(sendError)
-      this.status = 200
+      // A CORS-blocked direct request ends with status 0.
+      this.status = this.target === proxyUrl ? 200 : directStatus
       this.response = new TextEncoder().encode('ok').buffer
     }
   }
@@ -144,6 +150,7 @@ function request(url, { page, proxyUrl = '/api/proxy', lanAccess, sendError = nu
     makeSetValue: () => {},
     Module: {
       frameosProxyUrl: proxyUrl,
+      frameosProxyToken: proxyToken,
       frameosLanAccess: lanAccess,
       onFrameosLog: (message) => logs.push(message),
     },
@@ -162,8 +169,34 @@ function request(url, { page, proxyUrl = '/api/proxy', lanAccess, sendError = nu
   // plain JS they are nested blocks calling the stub above.
   const hook = vm.runInNewContext(`(${library.fos_nim_http_request.toString()})`, context)
   hook(1, 2, 0, 0, 0, 0, 1000, 0, 0, 0)
-  return { opened, logs, direct: opened.filter((u) => u !== proxyUrl), viaProxy: opened.includes(proxyUrl) }
+  return {
+    opened,
+    logs,
+    direct: opened.filter((u) => u !== proxyUrl),
+    viaProxy: opened.includes(proxyUrl),
+    proxied: sent.find((request) => request.target === proxyUrl),
+    sent,
+  }
 }
+
+test('a proxied request carries the preview token instead of the cookie', () => {
+  const result = request('https://api.example.com/x', {
+    page: 'https://cloud.frameos.net/frames/1',
+    proxyToken: 'pp1.token',
+    directStatus: 0,
+  })
+  assert.equal(result.proxied.headers['X-FrameOS-Preview-Token'], 'pp1.token')
+  assert.equal(result.proxied.withCredentials, false)
+  // The token is for our proxy only: the direct attempt never sees it.
+  const direct = result.sent.find((sent) => sent.target === 'https://api.example.com/x')
+  assert.equal(direct.headers['X-FrameOS-Preview-Token'], undefined)
+})
+
+test('without a token the proxied request rides the cookie as before', () => {
+  const result = request('https://api.example.com/x', { page: 'https://cloud.frameos.net/frames/1', directStatus: 0 })
+  assert.equal(result.proxied.headers['X-FrameOS-Preview-Token'], undefined)
+  assert.equal(result.proxied.withCredentials, true)
+})
 
 test('a public page never requests a private host directly; the proxy decides', () => {
   for (const url of ['http://192.168.1.1/admin', 'http://localhost:8123/api/states', 'http://homeassistant.local/', 'http://[fd00::1]/', 'http://nas/']) {

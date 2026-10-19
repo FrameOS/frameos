@@ -78,6 +78,8 @@
     "src/test/shared-spa/fleet-update.test.ts",
     // Same story: the preview key gate reaches utils/sceneApps through secretSettings.
     "src/test/shared-spa/preview-key-consent.test.ts",
+    // Same story: wasmSceneRenderCheck reaches framesModel through wasmPreviewModel.
+    "src/test/shared-spa/preview-proxy-token-render-check.test.ts",
     // Same story: frameStatusGroups imports decorators/frame.tsx, which
     // renders the legacy connection dot/spinner components (bare JSX
     // namespace). Vitest still runs it; only tsc leaves it out.
