@@ -379,9 +379,13 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
     "frame_device_scenes_import",
     {
       description:
-        "Import the scenes a frame was ALREADY running when it joined the cloud. A frame that ran standalone first reports its own scenes (frame_scenes_list: device_scenes, status \"ready\", with their names); until they are imported the cloud lists the frame as empty while it keeps rendering them. Requires confirm=true (it deploys to the device). Each reported scene becomes a private draft in the account's library — one the account already has with exactly the same content is reused, never copied again — the drafts are added after the scenes the frame already has (max 20 on a frame) and the set is pushed with the scene on screen kept. An import grants NO service API keys: what an imported scene declares is the device's claim, so needs_settings_groups only reports what each scene asks for, and the user grants it with frame_scenes_set settings_groups if they want to. Answers per scene: imported, reused, or skipped with the reason; status \"partial\" means a quota or an outage refused some and the call can be repeated later. dismiss=true instead drops the report without importing anything. Scenes on the device are never deleted either way.",
+        "Import the scenes a frame was ALREADY running when it joined the cloud. A frame that ran standalone first reports its own scenes (frame_scenes_list: device_scenes, status \"ready\", with their names); until they are imported the cloud lists the frame as empty while it keeps rendering them. Requires confirm=true (it deploys to the device). Each reported scene becomes a private draft in the account's library — one the account already has with exactly the same content is reused, never copied again — the drafts are added after the scenes the frame already has (max 20 on a frame) and the set is pushed with the scene on screen kept. An import grants NO service API keys: what an imported scene declares is the device's claim, so needs_settings_groups only reports what each scene asks for, and the user grants it with frame_scenes_set settings_groups if they want to. Answers per scene: imported, reused, or skipped with the reason; status \"partial\" means a quota or an outage refused some and the call can be repeated later. Compiled (Nim) scenes are left on the frame unless convert_compiled=true: then the ones the frame sent as JSON (device_scenes.compiled_scenes) are converted to interpreted scenes first, a few per call, and imported like the rest (converted: true); one the converter cannot finish is skipped with conversion_incomplete (try it on scenes.frameos.net/nim-converter) or conversion_needs_model (a later call can finish it). device_scenes.compiled_unsent names compiled scenes the frame could not send (their source is on the backend that built them). dismiss=true instead drops the report without importing anything. Scenes on the device are never deleted either way.",
       inputSchema: {
         confirm: confirmed("imports the frame's own scenes into the account and deploys them to the frame"),
+        convert_compiled: z
+          .boolean()
+          .optional()
+          .describe("Also convert the frame's compiled (Nim) scenes to interpreted scenes and import them. Uses the converter's model pass on the account's own OpenAI key, else the free shared budget."),
         dismiss: z
           .boolean()
           .optional()
@@ -389,11 +393,13 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
         frame_id: frameId,
       },
     },
-    async ({ dismiss, frame_id }) =>
+    async ({ convert_compiled, dismiss, frame_id }) =>
       run(async () =>
         text(
           await api.json("POST", `/api/frames/${frame_id}/device-scenes`, {
-            body: { action: dismiss ? "dismiss" : "import" },
+            body: dismiss
+              ? { action: "dismiss" }
+              : { action: "import", ...(convert_compiled ? { convert_compiled: true } : {}) },
           }),
         ),
       ),

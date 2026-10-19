@@ -247,9 +247,10 @@ type
     ## The current rendered image for `image_get` (error "no_image" until the
     ## first render).
     getImageFn*: proc(): AssetReadResult {.gcsafe.}
-    ## `scenes_get`: every interpreted scene the frame holds, as
-    ## {"scenes": [...], "skipped_compiled": N} with public scene ids
-    ## (server/api.nim deviceScenesPayload). nil = the verb is unsupported.
+    ## `scenes_get`: every scene the frame holds, as {"scenes": [...],
+    ## "compiled_scenes": [...], "compiled_unsent": [...], "skipped_compiled":
+    ## N} with public scene ids (server/api.nim deviceScenesPayload). nil = the
+    ## verb is unsupported.
     getScenesFn*: proc(): JsonNode {.gcsafe.}
     ## Accepts a `refresh_service_settings` nudge. The verb acks on ACCEPTANCE,
     ## never on completion: the fetch is an HTTPS request on the device's own
@@ -442,12 +443,13 @@ proc helloStatePayload*(frameConfig: FrameConfig, scenesChecksum: string): JsonN
       "states": states,
       "active_scene": sceneId.string,
       "scenes_checksum": scenesChecksum,
-      # How many interpreted scenes this frame holds, whoever put them there.
-      # With an empty scenes_checksum it is how a provider learns that a frame
-      # which just joined already runs scenes of its own, and that a
-      # `scenes_get` is worth asking. The registry count, not a disk read:
-      # this payload also rides every `state` message.
-      "scene_count": dynamicSceneCount(),
+      # How many scenes of its own this frame holds, whoever put them there:
+      # the interpreted ones and those a source build compiled in. With an
+      # empty scenes_checksum it is how a provider learns that a frame which
+      # just joined already runs scenes of its own, and that a `scenes_get`
+      # is worth asking. The registry count, not a disk read: this payload
+      # also rides every `state` message.
+      "scene_count": dynamicSceneCount() + compiledSceneOptions().len,
     }
 
 proc defaultReboot() {.gcsafe.} =
@@ -1139,10 +1141,11 @@ proc publicSceneId(sceneId: string): string =
 proc handleScenesGet(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
   ## "Which scenes do you hold?" — what a provider asks a frame that joined it
   ## already running scenes of its own, so they can be imported instead of the
-  ## frame arriving empty. The answer is one JSON document,
-  ## {"scenes", "active_scene", "skipped_compiled"}, streamed as the same
-  ## asset_chunk frames asset_get uses: a frame's scenes can run past what one
-  ## message should carry, and every provider already reassembles that stream.
+  ## frame arriving empty. The answer is one JSON document, {"scenes",
+  ## "compiled_scenes", "compiled_unsent", "active_scene", "skipped_compiled"},
+  ## streamed as the same asset_chunk frames asset_get uses: a frame's scenes
+  ## can run past what one message should carry, and every provider already
+  ## reassembles that stream.
   ## Read-only, and nothing a scene export from the local admin page would not
   ## hand over.
   if ctx.getScenesFn.isNil:

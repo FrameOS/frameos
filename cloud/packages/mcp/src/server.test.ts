@@ -378,6 +378,24 @@ describe("frameos-cloud MCP server", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("converts a frame's compiled scenes only when asked", async () => {
+    const client = await connect();
+    await client.callTool({ arguments: { confirm: true, frame_id: frameId }, name: "frame_device_scenes_import" });
+    await client.callTool({
+      arguments: { confirm: true, convert_compiled: true, frame_id: frameId },
+      name: "frame_device_scenes_import",
+    });
+    await client.callTool({
+      arguments: { confirm: true, convert_compiled: true, dismiss: true, frame_id: frameId },
+      name: "frame_device_scenes_import",
+    });
+    expect(calls.map((call) => call.body)).toEqual([
+      { action: "import" },
+      { action: "import", convert_compiled: true },
+      { action: "dismiss" },
+    ]);
+  });
+
   it("posts per-scene grants with frame_scenes_set", async () => {
     const client = await connect();
     await client.callTool({

@@ -1275,6 +1275,9 @@ export const frameDeviceScenes = pgTable("frame_device_scenes", {
   scenes: jsonb("scenes").default(sql`'[]'::jsonb`).notNull(),
   sceneCount: integer("scene_count").default(0).notNull(),
   skippedCompiled: integer("skipped_compiled").default(0).notNull(),
+  // [{id, name, sent}…] for the banner (migration 0067): the compiled scenes
+  // the frame reported, `sent` when the payload holds their JSON.
+  compiledScenes: jsonb("compiled_scenes").default(sql`'[]'::jsonb`).notNull(),
   activeScene: text("active_scene"),
   result: jsonb("result"),
   receivedAt: timestamp("received_at", { withTimezone: true })

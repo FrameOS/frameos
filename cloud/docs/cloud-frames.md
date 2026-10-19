@@ -599,8 +599,12 @@ never automatic: it mints scenes in their library, spends their daily
 new-scene budget and re-renders their panel. `store_scene_imports` is the
 dedupe ledger — (account, content digest) → the draft it became — so a frame
 that enrols again is handed the drafts it already has instead of a second copy
-of each. Wire details, the dedupe order and what happens to the frame's own
-copy: `docs/cloud-frames.md`, "Scenes the frame already had".
+of each. Compiled (Nim) scenes are imported only through "Convert and import":
+auth-web runs the public converter's code under its key policy
+(`device-scene-convert.ts`, `scene-convert-policy.ts`), a few scenes per call,
+and mints what converted fully. Wire details, the dedupe order and what
+happens to the frame's own copy and its state: `docs/cloud-frames.md`,
+"Scenes the frame already had".
 
 ### 3. Flash from browser (ESP32)
 
@@ -651,7 +655,9 @@ New tables, hanging off existing machinery:
 - `frame_device_scenes` — the latest `scenes_get` reply of a frame that
   joined with scenes of its own, one row per frame: the bytes as sent until
   the owner imports or dismisses, then only the verdict (which is what stops
-  the hub asking). `store_scene_imports` — the import's dedupe ledger,
+  the hub asking), plus a names-only list of its compiled scenes
+  (`compiled_scenes`: which ones it sent as JSON). `store_scene_imports` — the
+  import's dedupe ledger,
   (account, content sha256) → store scene; rows die with their scene.
 - `frame_telemetry` — recent health/log/metric samples, opt-in per scope,
   aggressively capped and pruned (single Postgres, 8 MB-blob-era budgets).
