@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "main.c"
         "fos_board.c"
+        "fos_board_panels.c"
         "fos_buttons.c"
         "fos_button_timing.c"
         "fos_buzzer.c"

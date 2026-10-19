@@ -79,7 +79,8 @@ export const hardwareCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince
 export const displayDriverCloudFrameSettingsMinVersion = '2026.9.22'
 
 /**
- * `device`, the display driver key (Pi/Linux only). Switching it is a
+ * `device`, the display driver key, on Pi/Linux (an ESP32 takes it from
+ * esp32DisplayPanelCloudFrameSettingsMinVersion, as its panel). Switching it is a
  * frame.json edit plus driver setup on the frame, which may rewrite
  * /boot/config.txt and reboot it; the panel's width and height follow from
  * the new driver. Callers gate on cloudFrameSupportsDisplayDriverSetting.
@@ -242,6 +243,19 @@ export const esp32PaletteCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysS
 
 export function cloudFrameSupportsEsp32Palette(frameosVersion: string | null | undefined): boolean {
   return cloudFrameSupportsSettingsFrom(esp32PaletteCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/**
+ * 2026.10.18: `device` on the ESP32, the display panel. The form offers only
+ * the panels the board can drive (utils/esp32BoardPanels.ts), the cloud
+ * refuses any other before queueing, and the chip, which reboots into the new
+ * panel, has the final word. Below the floor it refuses the whole push, so
+ * the form sends the key only from here on (esp32CloudFrameSettingKeysForVersion).
+ */
+export const esp32DisplayPanelCloudFrameSettingsMinVersion = '2026.10.18'
+
+export function cloudFrameSupportsEsp32DisplayPanel(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32DisplayPanelCloudFrameSettingsMinVersion, frameosVersion)
 }
 
 /** Every key any profile takes: what the form binds and diffs on. */

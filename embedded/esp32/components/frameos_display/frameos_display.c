@@ -141,6 +141,18 @@ bool fos_display_panel_known(const char *name)
     return false;
 }
 
+bool fos_display_panel_facts(const char *name, int *bus, bool *requires_cs2)
+{
+    if (!name) return false;
+    for (size_t i = 0; i < fos_panel_table_count; i++) {
+        if (strcmp(fos_panel_table[i].name, name) != 0) continue;
+        if (bus) *bus = fos_panel_table[i].bus;
+        if (requires_cs2) *requires_cs2 = fos_panel_table[i].requires_cs2 != 0;
+        return true;
+    }
+    return false;
+}
+
 const char *fos_display_panel_name(size_t index)
 {
     return index < fos_panel_table_count ? fos_panel_table[index].name : "";

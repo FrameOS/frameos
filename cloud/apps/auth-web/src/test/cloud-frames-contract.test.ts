@@ -90,11 +90,11 @@ describe("settings parity between the device planes", () => {
     for (const spec of Object.values(contract.settings)) {
       if (spec.parity) counts[spec.parity.only] = (counts[spec.parity.only] ?? 0) + 1;
     }
-    // 9 since `device` (2026.9.22): the display driver, Linux-only until the
-    // ESP32 can check a pushed panel against its board (convergence-todo §6).
-    // 10 since `input_settings` (2026.9.23): keyboard layout + grab, and the
-    // chip has no keyboard or pointer at all (events contract hosts.esp32).
-    expect(counts.linux ?? 0).toBeLessThanOrEqual(10);
+    // 9 since `device` went both-planes (2026.10.18): the ESP32 checks a
+    // pushed panel against its board (docs/esp32-board-panels.json).
+    // `input_settings` (keyboard layout + grab) stays: the chip has no
+    // keyboard or pointer at all (events contract hosts.esp32).
+    expect(counts.linux ?? 0).toBeLessThanOrEqual(9);
     // esp32 9 since `buzzer_pin` + `buzzer_tone_hz` (2026.10.12): the
     // button-press tone lives in the ESP32 button task, and no Pi preset has a
     // buzzer.

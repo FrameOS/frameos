@@ -109,6 +109,10 @@ export const cloudFramesContractSettings = {
       "since": "2026.8.31",
       "restart": true
     },
+    "device": {
+      "since": "2026.10.18",
+      "restart": true
+    },
     "deep_sleep": {
       "since": null
     },

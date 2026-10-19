@@ -114,6 +114,19 @@ export interface FrameType {
     /** ESP32 only: the `set hardware` bundle the board was provisioned with
      * (`seeed_reterminal_e1004`, …); absent on a custom build. */
     hardwarePreset?: string | null
+    /** ESP32 only (2026.10.18+): the display pins the board runs with, -1 =
+     * not wired. Which panels it can be pushed follows from them
+     * (utils/esp32BoardPanels.ts). */
+    pins?: {
+      rst?: number | null
+      dc?: number | null
+      cs?: number | null
+      cs2?: number | null
+      busy?: number | null
+      sck?: number | null
+      mosi?: number | null
+      pwr?: number | null
+    } | null
     /** The GPIO button map the device runs with (pin and label, never a
      * role), from 2026.10.7 firmware and the Linux runtime of the same
      * release. Absent on older firmware; `[]` is a frame with no buttons. */

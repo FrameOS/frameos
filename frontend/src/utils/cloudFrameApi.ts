@@ -3,6 +3,7 @@ import { apiFetch } from './apiFetch'
 import type { CloudDeviceScenes, CloudDeviceScenesImportResult } from './cloudDeviceScenes'
 import type { CloudFrameSceneRow } from './cloudFrameScenes'
 import { storeSceneErrorMessage, type StoreErrorDetail } from './storeSceneErrors'
+import { esp32PanelRefusalMessage } from './esp32BoardPanels'
 import {
   allCloudFrameSettingKeys,
   cloudFrameSettingKeys,
@@ -133,7 +134,14 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
     body: JSON.stringify({ settings }),
   })
   if (!response.ok) {
-    const detail = (await response.json().catch(() => ({}))) as { error?: string; min_frameos_version?: string }
+    const detail = (await response.json().catch(() => ({}))) as {
+      error?: string
+      min_frameos_version?: string
+      reason?: string
+    }
+    if (detail.error === 'panel_not_drivable') {
+      throw new Error(esp32PanelRefusalMessage(detail.reason))
+    }
     if (detail.error === 'settings_need_newer_firmware') {
       throw new Error(
         `Some of these settings need FrameOS ${

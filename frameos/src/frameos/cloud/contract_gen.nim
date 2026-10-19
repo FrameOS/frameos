@@ -206,7 +206,8 @@ const CloudContractSettings* = @[
   SettingSpec(key: "device", rule:
     Rule(kind: rkString, minLen: 1, maxLen: 64, format: sfDriverKey),
   profiles: @[
-    ProfileSpec(profile: "linux", since: "2026.9.22", restart: true)]),
+    ProfileSpec(profile: "linux", since: "2026.9.22", restart: true),
+    ProfileSpec(profile: "esp32", since: "2026.10.18", restart: true)]),
   SettingSpec(key: "input_settings", rule:
     Rule(kind: rkObject, minKeys: 1, keys: @[
       KeyRule(name: "keyboardLayout", rule:
