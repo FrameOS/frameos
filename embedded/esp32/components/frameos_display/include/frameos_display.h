@@ -47,6 +47,11 @@ size_t fos_display_panel_count(void); /* all panels compiled into this firmware 
  * firmware: the check the console and the setup page apply before storing a
  * panel key. */
 bool fos_display_panel_known(const char *name);
+/* For a panel compiled into this firmware ("none" is not one): the bus it is
+ * driven on (0 = the EPD SPI module, 1 = I2C on sck/mosi) and whether it
+ * needs pins.cs2. False when there is no such panel. The lookup a pushed
+ * `device` is judged with (fos_board_panels.c). */
+bool fos_display_panel_facts(const char *name, int *bus, bool *requires_cs2);
 const char *fos_display_panel_name(size_t index);
 int fos_display_panel_width(size_t index);
 int fos_display_panel_height(size_t index);

@@ -5,7 +5,7 @@ import { frameAdminLoginIsOnlyAccess } from '../../frameDeployUtils'
 import { framesModel } from '../../../../models/framesModel'
 import { DEFAULT_FRAME_ERROR_BEHAVIOR, frameLogic, normalizeFrameErrorBehavior } from '../../frameLogic'
 import { frameAdminUrl, frameControlUrl, frameImageUrl, frameUrl } from '../../../../decorators/frame'
-import { EMBEDDED_VIRTUAL, withCustomPalette } from '../../../../devices'
+import { EMBEDDED_VIRTUAL, cloudEsp32PanelOptions, withCustomPalette } from '../../../../devices'
 import { paletteDeviceOf } from '../../../../utils/assetColors/devicePalette'
 import {
   cloudFrameSupportsEsp32BatteryEnablePin,
@@ -18,6 +18,7 @@ import {
   esp32BatteryEnablePinCloudFrameSettingsMinVersion,
   esp32BuzzerCloudFrameSettingsMinVersion,
 } from '../../../../utils/cloudFrameApi'
+import { cloudFrameSupportsEsp32DisplayPanel } from '../../../../utils/cloudFrameSettings'
 import { appsLogic } from '../Apps/appsLogic'
 import { logsLogic } from '../Logs/logsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
@@ -104,6 +105,10 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
   cloudHardwareSettingsSupported: boolean
   /** Can this cloud frame be sent a new display driver (`device`)? */
   cloudDisplayDriverSupported: boolean
+  /** Can this ESP32 cloud frame be sent a new display panel (`device`)? */
+  cloudEsp32DisplayPanelSupported: boolean
+  /** ESP32 cloud frames: the panels the board can drive (utils/esp32BoardPanels.ts); [] elsewhere. */
+  esp32PanelOptions: Option[]
   cloudEsp32ExtendedSettingsSupported: boolean
   cloudEsp32TimeZoneSupported: boolean
   cloudBatteryEnablePinDisabledReason: string | undefined
@@ -285,6 +290,10 @@ export function FrameSettingsProvider({
   // ceiling and GPIO buttons (esp32ExtendedCloudFrameSettingKeys).
   const cloudEsp32ExtendedSettingsSupported =
     esp32CloudProfile && cloudFrameSupportsEsp32ExtendedSettings(frame.frameos_version)
+  // 2026.10.18: the panel itself, from those the board can drive (the chip
+  // reboots into it).
+  const cloudEsp32DisplayPanelSupported =
+    esp32CloudProfile && cloudFrameSupportsEsp32DisplayPanel(frame.frameos_version)
   // 2026.8.34: the chip maps an IANA name onto a POSIX TZ rule (fos_tz.c).
   const cloudEsp32TimeZoneSupported = esp32CloudProfile && cloudFrameSupportsEsp32TimeZone(frame.frameos_version)
   // 2026.8.39: the battery divider's enable GPIO joined the power keys. Below
@@ -593,6 +602,8 @@ export function FrameSettingsProvider({
     cloudExtendedSettingsSupported,
     cloudHardwareSettingsSupported,
     cloudDisplayDriverSupported,
+    cloudEsp32DisplayPanelSupported,
+    esp32PanelOptions: esp32CloudProfile ? cloudEsp32PanelOptions(frame.hardware ?? {}, paletteDevice) : [],
     cloudEsp32ExtendedSettingsSupported,
     cloudEsp32TimeZoneSupported,
     cloudBatteryEnablePinDisabledReason,

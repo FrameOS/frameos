@@ -25,6 +25,7 @@ import {
   esp32ColorsCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Palette,
   esp32PaletteCloudFrameSettingsMinVersion,
+  esp32DisplayPanelCloudFrameSettingsMinVersion,
 } from '../../../../../utils/cloudFrameSettings'
 import type { FrameType } from '../../../../../types'
 import { FrameActionsMenu } from '../FrameActionsMenu'
@@ -215,7 +216,8 @@ export function CloudExtendedSettingsSections(): JSX.Element | null {
 }
 
 /**
- * `device` (displayDriverCloudFrameSettingKeys, 2026.9.22), Pi/Linux only.
+ * `device` (displayDriverCloudFrameSettingKeys, 2026.9.22) on Pi/Linux; the
+ * ESP32's panel is CloudEsp32PanelField.
  * The frame runs driver setup for the new driver and restarts — or reboots,
  * when the driver needs a new overlay in /boot/config.txt. Until the frame
  * reports the new driver the field shows the one that was pushed; the rest
@@ -244,6 +246,41 @@ function CloudDisplayDriverField(): JSX.Element {
           {frame.frameos_version
             ? `Changing the display driver needs FrameOS ${displayDriverCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to change it here.`
             : `Changing the display driver needs FrameOS ${displayDriverCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`}
+        </p>
+      ) : null}
+    </fieldset>
+  )
+}
+
+/**
+ * `device` on an ESP32 (2026.10.18): the panel, offered from those the board
+ * can drive (utils/esp32BoardPanels.ts: a built-in display's board lists its
+ * own panel only, a driver board every panel its pins can drive). The chip
+ * reboots into the new panel.
+ */
+function CloudEsp32PanelField(): JSX.Element {
+  const { frame, paletteDevice, cloudEsp32DisplayPanelSupported, esp32PanelOptions } = useFrameSettings()
+  return (
+    <fieldset disabled={!cloudEsp32DisplayPanelSupported} className="min-w-0 space-y-2">
+      <Field
+        name="device"
+        label="Display panel"
+        tooltip="The panel the board drives. Only the panels this board's display pins can drive are listed; a board with a built-in display lists its own. Saving a new one reboots the frame."
+      >
+        {({ value, onChange }) => (
+          <Select
+            name="device"
+            value={(value as string) || paletteDevice}
+            onChange={onChange}
+            options={esp32PanelOptions}
+          />
+        )}
+      </Field>
+      {!cloudEsp32DisplayPanelSupported ? (
+        <p className="frameos-muted text-sm">
+          {frame.frameos_version
+            ? `Changing the panel needs firmware ${esp32DisplayPanelCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the firmware to change it here.`
+            : `Changing the panel needs firmware ${esp32DisplayPanelCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`}
         </p>
       ) : null}
     </fieldset>
@@ -384,10 +421,11 @@ export function CloudEsp32Sections(): JSX.Element | null {
             </p>
           ) : (
             <p className="frameos-muted text-sm">
-              Debug logging applies on the next render. The HTTP response limit and GPIO buttons are read at boot, so
-              saving a change to them reboots the frame.
+              Debug logging applies on the next render. The panel, the HTTP response limit and GPIO buttons are read at
+              boot, so saving a change to them reboots the frame.
             </p>
           )}
+          <CloudEsp32PanelField />
           <Field
             name="debug"
             label="Debug logging"

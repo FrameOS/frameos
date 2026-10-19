@@ -167,16 +167,9 @@ scene-execution rule is pinned the same way
 (`docs/scene-execution-fixtures.json`; new cases go in the JSON first), and
 so is the settings-key split: every single-plane key in
 `docs/cloud-frames-contract.json` carries `parity: {only, why}`, and the
-tests cap the count at 10 linux-only / 9 esp32-only — the cap can only go
+tests cap the count at 9 linux-only / 9 esp32-only — the cap can only go
 down (each raise carries its reason in that key's `parity.why`).
 Standing rule rather than a task:
-
-- [ ] ESP32 `device`: the firmware already switches panels at runtime
-  (`set panel <key>`, fos_console.c), but a panel key pushed without the
-  board's matching pins would drive a display that is not there. Needs the
-  compiled panel list in the SPA (per board, from the release metadata) and
-  `ws_handle_set_settings` refusing a panel the board's preset cannot drive;
-  then drop the parity entry and the cap back to 9.
 
 - [ ] `fos_cloud.c` beside `hub_client.nim` is the accepted cost of the C
   decision — hold the line: new verbs land as contract entry + fixtures +

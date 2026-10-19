@@ -41,6 +41,8 @@ import {
   esp32BuzzerCloudFrameSettingKeys,
   esp32BuzzerCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Buzzer,
+  cloudFrameSupportsEsp32DisplayPanel,
+  esp32DisplayPanelCloudFrameSettingsMinVersion,
   esp32PowerSettingKeys,
   extendedCloudFrameSettingKeys,
   extendedCloudFrameSettingsMinVersion,
@@ -54,6 +56,8 @@ import {
   esp32BatteryEnablePinFrameSettingsMinVersion,
   esp32BuzzerFrameSettingKeys,
   esp32BuzzerFrameSettingsMinVersion,
+  esp32DisplayPanelFrameSettingKeys,
+  esp32DisplayPanelFrameSettingsMinVersion,
   esp32ExtendedFrameSettingKeys,
   esp32ExtendedFrameSettingsMinVersion,
   esp32OnlySettableKeys,
@@ -137,7 +141,8 @@ describe("cloud settings push", () => {
         !esp32BatteryEnablePinFrameSettingKeys.has(key) &&
         !esp32ColorsFrameSettingKeys.has(key) &&
         !esp32PaletteFrameSettingKeys.has(key) &&
-        !esp32BuzzerFrameSettingKeys.has(key),
+        !esp32BuzzerFrameSettingKeys.has(key) &&
+        !esp32DisplayPanelFrameSettingKeys.has(key),
     );
     expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
     expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);
@@ -378,12 +383,19 @@ describe("cloud settings push", () => {
     }
   });
 
-  it("gates the display driver on its own floor, Pi/Linux only", () => {
+  it("gates the display driver on its own floor on each profile", () => {
     expect([...displayDriverCloudFrameSettingKeys]).toEqual(["device"]);
     expect(displayDriverCloudFrameSettingsMinVersion).toBe("2026.9.22");
     expect(allowedFrameSettings.get("device")?.("pimoroni.hyperpixel4sq_touch")).toBe(true);
     expect(allowedFrameSettings.get("device")?.("framebuffer; reboot")).toBe(false);
-    expect(esp32SettableKeys.has("device")).toBe(false);
+    // The ESP32 takes it later, behind its own floor, and only for a panel
+    // its board can drive (esp32-board-panels.test.ts).
+    expect(esp32SettableKeys.has("device")).toBe(true);
+    expect(esp32OnlySettableKeys.has("device")).toBe(false);
+    expect([...esp32DisplayPanelFrameSettingKeys]).toEqual(["device"]);
+    expect(esp32DisplayPanelCloudFrameSettingsMinVersion).toBe(esp32DisplayPanelFrameSettingsMinVersion);
+    expect(cloudFrameSupportsEsp32DisplayPanel("2026.10.17")).toBe(false);
+    expect(cloudFrameSupportsEsp32DisplayPanel("2026.10.18")).toBe(true);
     expect(cloudFrameSupportsDisplayDriverSetting("2026.9.21")).toBe(false);
     expect(cloudFrameSupportsDisplayDriverSetting("2026.9.22")).toBe(true);
     expect(cloudFrameSettingKeysForVersion("2026.9.21")).not.toContain("device");

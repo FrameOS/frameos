@@ -80,6 +80,7 @@ static const fos_rule_t k_fos_rules[] = {
     {FOS_RULE_OBJECT, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 29, 2, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 48.0f},
     {FOS_RULE_STRING, 3, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
+    {FOS_RULE_STRING, 4, 0, 0, 0, 0, 1, 64, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 86400.0f},
@@ -138,16 +139,17 @@ static const fos_contract_setting_t k_fos_contract_settings[] = {
     {"palette", 10, 0, NULL},
     {"colors", 16, 0, NULL},
     {"gpio_buttons", 44, 1, NULL},
-    {"deep_sleep", 48, 0, NULL},
-    {"deep_sleep_on_battery", 49, 0, NULL},
-    {"wake_check_seconds", 50, 0, NULL},
-    {"battery_pin", 51, 1, NULL},
-    {"battery_divider", 52, 1, NULL},
-    {"battery_enable_pin", 53, 1, NULL},
-    {"buzzer_pin", 54, 0, NULL},
-    {"buzzer_tone_hz", 55, 0, NULL},
+    {"device", 48, 1, NULL},
+    {"deep_sleep", 49, 0, NULL},
+    {"deep_sleep_on_battery", 50, 0, NULL},
+    {"wake_check_seconds", 51, 0, NULL},
+    {"battery_pin", 52, 1, NULL},
+    {"battery_divider", 53, 1, NULL},
+    {"battery_enable_pin", 54, 1, NULL},
+    {"buzzer_pin", 55, 0, NULL},
+    {"buzzer_tone_hz", 56, 0, NULL},
 };
-#define FOS_CONTRACT_SETTINGS_COUNT 19
+#define FOS_CONTRACT_SETTINGS_COUNT 20
 
 /* Every verb in the contract, with the scope it requires (NULL = none) and
  * whether it is a content verb (refused `backend_managed` when a backend owns the frame). */

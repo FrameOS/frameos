@@ -113,6 +113,10 @@ to end.
   API answers on 8443. Finally a board still on a per-frame image from
   before release images must OTA onto the release image from the new
   manifest (the legacy `sha256` field) and verify from then on.
+- [ ] **Pushing a panel from the cloud** (2026.10.18): on an E1002, a push
+  of another panel is refused with `builtin_display` and nothing is queued;
+  on a XIAO DIY kit, switching between the 7.5" and 4.26" panels reboots
+  into the new one and the hello reports it with `hardware.pins`.
 - [ ] **The event dispatcher's cloud and schedule paths on a board** (the
   console, render-rule, queued-dispatch, scene-switch and device-command
   paths passed on a reTerminal E1002, 2026-09-21). Still unseen, because they
