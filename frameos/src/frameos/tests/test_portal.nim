@@ -158,6 +158,11 @@ proc makeFrameOS(timeoutSeconds = 0.0): FrameOS =
     ),
   )
 
+proc connectFreshFrame(ssid, password: string): bool =
+  ## attemptConnect on a new frame, handed that frame's own config.
+  let frame = makeFrameOS()
+  attemptConnect(frame, frame.frameConfig, ssid, password)
+
 proc drainEventChannel() =
   while true:
     let (ok, _) = eventChannel.tryRecv()
@@ -344,7 +349,7 @@ suite "portal network orchestration":
   test "startAp issues hotspot commands and emits setup scene event":
     hookMode = hmStartApOk
     let frame = makeFrameOS(timeoutSeconds = 0.0)
-    startAp(frame)
+    startAp(frame, frame.frameConfig)
 
     check frame.network.hotspotStatus == HotspotStatus.enabled
     check runShowActiveCalls == 1
@@ -362,7 +367,7 @@ suite "portal network orchestration":
   test "startAp marks hotspot error when hotspot command fails":
     hookMode = hmStartApFail
     let frame = makeFrameOS()
-    startAp(frame)
+    startAp(frame, frame.frameConfig)
 
     check frame.network.hotspotStatus == HotspotStatus.error
     check runHotspotAddCalls == 6
@@ -377,7 +382,7 @@ suite "portal network orchestration":
   test "startAp retries transient hotspot command failures":
     hookMode = hmStartApTransientFail
     let frame = makeFrameOS(timeoutSeconds = 0.0)
-    startAp(frame)
+    startAp(frame, frame.frameConfig)
 
     check frame.network.hotspotStatus == HotspotStatus.enabled
     check runHotspotAddCalls == 2
@@ -405,7 +410,7 @@ suite "portal network orchestration":
   test "attemptConnect success uses nmcli hook and sleep hook":
     hookMode = hmAttemptSuccess
     let frame = makeFrameOS()
-    let ok = attemptConnect(frame, "home-wifi", "pw")
+    let ok = attemptConnect(frame, frame.frameConfig, "home-wifi", "pw")
 
     check ok
     check frame.network.status == NetworkStatus.connected
@@ -424,7 +429,7 @@ suite "portal network orchestration":
   test "attemptConnect failure sets error without post-connect sleep":
     hookMode = hmAttemptFail
     let frame = makeFrameOS()
-    let ok = attemptConnect(frame, "home-wifi", "bad")
+    let ok = attemptConnect(frame, frame.frameConfig, "home-wifi", "bad")
 
     check not ok
     check frame.network.status == NetworkStatus.error
@@ -564,7 +569,7 @@ suite "portal supplicant backend":
 
   test "attemptConnect writes a persistent wpa_supplicant.conf and takes a lease":
     let frame = makeFrameOS()
-    let ok = attemptConnect(frame, "home-wifi", "pw12345678")
+    let ok = attemptConnect(frame, frame.frameConfig, "home-wifi", "pw12345678")
 
     check ok
     check frame.network.status == NetworkStatus.connected
@@ -585,7 +590,7 @@ suite "portal supplicant backend":
     # A pre-hashed PSK only does WPA2; a WPA3-only access point needs the
     # passphrase itself, so the block offers both and stores it as typed.
     supHasWpaPassphrase = true
-    check attemptConnect(makeFrameOS(), "home-wifi", "pw12345678")
+    check connectFreshFrame("home-wifi", "pw12345678")
     let conf = supFiles["/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"]
     check conf.contains("key_mgmt=WPA-PSK SAE")
     check conf.contains("ieee80211w=1")
@@ -596,20 +601,20 @@ suite "portal supplicant backend":
   test "attemptConnect writes the frame's Wi-Fi country and sets the regulatory domain":
     let frame = makeFrameOS()
     frame.frameConfig.network.wifiCountry = "fr"
-    check attemptConnect(frame, "home-wifi", "pw12345678")
+    check attemptConnect(frame, frame.frameConfig, "home-wifi", "pw12345678")
     let conf = supFiles["/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"]
     check conf.contains("country=FR\n")
     check supRan("iw reg set FR")
     # Without a country nothing is written and nothing is set.
     supFiles.clear()
-    check attemptConnect(makeFrameOS(), "home-wifi", "pw12345678")
+    check connectFreshFrame("home-wifi", "pw12345678")
     check not supFiles["/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"].contains("country=")
 
   test "attemptConnect keeps the country the SD card's first boot wrote":
     # frame.json says nothing; the config on disk (first-boot mirror) does.
     supFiles["/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"] =
       "update_config=1\ncountry=EE\nnetwork={\n    ssid=\"old\"\n    key_mgmt=NONE\n}\n"
-    check attemptConnect(makeFrameOS(), "home-wifi", "pw12345678")
+    check connectFreshFrame("home-wifi", "pw12345678")
     let conf = supFiles["/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"]
     check conf.contains("country=EE\n")
     check conf.contains("ssid=\"home-wifi\"")
@@ -618,7 +623,7 @@ suite "portal supplicant backend":
   test "attemptConnect reports an actionable error when association stalls":
     supMode = smAssociateFails
     let frame = makeFrameOS()
-    let ok = attemptConnect(frame, "home-wifi", "pw12345678")
+    let ok = attemptConnect(frame, frame.frameConfig, "home-wifi", "pw12345678")
 
     check not ok
     check frame.network.status == NetworkStatus.error
@@ -626,12 +631,12 @@ suite "portal supplicant backend":
 
   test "attemptConnect fails loudly when no DHCP lease arrives":
     supMode = smNoDhcpLease
-    check not attemptConnect(makeFrameOS(), "home-wifi", "pw12345678")
+    check not connectFreshFrame("home-wifi", "pw12345678")
     check getLastError().contains("no DHCP lease")
 
   test "startAp raises hostapd with a static IP and a DHCP server":
     let frame = makeFrameOS(timeoutSeconds = 0.0)
-    startAp(frame)
+    startAp(frame, frame.frameConfig)
 
     check frame.network.hotspotStatus == HotspotStatus.enabled
     # Generated into the state dir; the image's own /etc/hostapd.conf sample
@@ -655,7 +660,7 @@ suite "portal supplicant backend":
     # instead of the whole portal tearing itself down.
     supMode = smDnsmasqFails
     let frame = makeFrameOS(timeoutSeconds = 0.0)
-    startAp(frame)
+    startAp(frame, frame.frameConfig)
 
     check frame.network.hotspotStatus == HotspotStatus.enabled
     check supRan("udhcpd '/srv/frameos/state/network/udhcpd.conf'")
@@ -665,12 +670,34 @@ suite "portal supplicant backend":
     # Same shape as the nmcli failure path: status error, no scene event.
     let frame = makeFrameOS()
     frame.frameConfig.network.wifiHotspotPassword = "short"
-    startAp(frame)
+    startAp(frame, frame.frameConfig)
 
     check frame.network.hotspotStatus == HotspotStatus.error
     check getLastError().contains("8-63")
     let (ok, _) = eventChannel.tryRecv()
     check not ok
+
+  test "the join and the hotspot read the config they are handed, not the live one":
+    # The connect thread hands in its own parse of frame.json; the runtime's
+    # config may be mid-reload on another thread (startAp).
+    let frame = makeFrameOS(timeoutSeconds = 0.0)
+    frame.frameConfig.network.wifiHotspotSsid = "Live-Setup"
+    frame.frameConfig.network.wifiHotspotPassword = "livepass99"
+    frame.frameConfig.network.wifiCountry = "de"
+    let own = makeFrameOS(timeoutSeconds = 0.0).frameConfig
+    own.network.wifiCountry = "fr"
+
+    check attemptConnect(frame, own, "home-wifi", "pw12345678")
+    check supFiles["/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"].contains("country=FR\n")
+    check not supRan("iw reg set DE")
+
+    startAp(frame, own)
+    check frame.network.hotspotStatus == HotspotStatus.enabled
+    let hostapd = supFiles["/srv/frameos/state/network/hostapd.conf"]
+    check hostapd.contains("ssid=FrameOS-Setup")
+    check hostapd.contains("wpa_passphrase=secret1234")
+    check not hostapd.contains("Live-Setup")
+    check not hostapd.contains("livepass99")
 
   test "stopAp kills the daemons and restores station mode":
     supMode = smHotspotUp
@@ -720,7 +747,7 @@ suite "portal supplicant backend":
     ensureNetworkBackendReady(frame)
     check not supFiles.hasKey("/etc/wpa_supplicant/wpa_supplicant-wlan0.conf")
 
-    startAp(frame)
+    startAp(frame, frame.frameConfig)
     check frame.network.hotspotStatus == HotspotStatus.enabled
     check supRan("hostapd -B -P '/run/frameos/hostapd.pid'")
 
