@@ -104,24 +104,6 @@ the images ship no FrameOS Remote. Verified on hardware 2026-09-04/05. Left:
 
 ---
 
-## Runtime: the last live-config reads off the runtime's thread
-
-The frame's web server runs up to four mummy worker threads and ORC refcounts
-are not atomic; the rule and the helpers are in `AGENTS.md`, "Refs do not
-cross threads". Workers copy what they read (`liveConfigValue`,
-`requestFrameConfig()`), and the hub thread keeps a copy of its own that it
-refreshes when the config's generation moves. Left:
-
-- The portal's start-AP path (`startAp`, `startApSupplicant`,
-  `checkNetwork`, `hotspotAutoTimeoutLoop`, `effectiveWifiCountry`) still
-  reads the hotspot name and password, `networkCheckUrl` and `wifiCountry`
-  off the live config. It runs on the main thread at boot, but `startAp`
-  also runs on the connect thread after a failed join, where a reload could
-  tear a string. Threading a private config through the start-AP path
-  closes it.
-
----
-
 ## On-device admin: no AI on the device
 
 The frame's own admin page (`http://<frame>:8787/admin`, the shared SPA in

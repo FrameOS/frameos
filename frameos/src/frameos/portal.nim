@@ -157,7 +157,8 @@ proc runtimeHandle*(frameOS: FrameOS): RuntimeHandle =
 template frameOSOf(handle: RuntimeHandle): FrameOS =
   cast[FrameOS](pointer(handle))
 
-proc hotspotAutoTimeoutLoop(handle: RuntimeHandle, startedAt: MonoTime) {.gcsafe, nimcall.}
+proc hotspotAutoTimeoutLoop(handle: RuntimeHandle, startedAt: MonoTime, timeoutSeconds: float,
+                            wifiCountry: string) {.gcsafe, nimcall.}
 
 var portalRunHook: PortalRunHook = defaultPortalRunHook
 var portalNmcliConnectHook: PortalNmcliConnectHook = defaultPortalNmcliConnectHook
@@ -182,12 +183,14 @@ var networkCheckTickHook*: proc(): float {.gcsafe.} = nil
 const stationRepairIntervalSeconds* = 20
 var lastStationRepair = getMonoTime()
 
-proc effectiveWifiCountry*(frameOS: FrameOS): string {.gcsafe.} =
+proc effectiveWifiCountry*(frameConfig: FrameConfig): string {.gcsafe.} =
   ## frame.json's network.wifiCountry, else the `wifi_country` a cloud SD
   ## card left in the pending enrollment (the enrollment that would write it
   ## into frame.json needs the network first). "" when neither says.
-  if frameOS != nil and frameOS.frameConfig != nil and frameOS.frameConfig.network != nil:
-    result = wpa.normalizeCountryCode(frameOS.frameConfig.network.wifiCountry)
+  ## `frameConfig` is one the calling thread owns: the runtime's own on its
+  ## thread, a portalRequestConfig on the connect thread.
+  if frameConfig != nil and frameConfig.network != nil:
+    result = wpa.normalizeCountryCode(frameConfig.network.wifiCountry)
     if result.len > 0:
       return
   try:
@@ -1377,12 +1380,12 @@ proc stopAp*(frameOS: FrameOS) {.gcsafe.} =
     stopHotspotListener(frameOS.server.mummy)
   pLog("portal:stopAp:done")
 
-proc finishStartedHotspot(frameOS: FrameOS): bool {.gcsafe.} =
+proc finishStartedHotspot(frameOS: FrameOS, frameConfig: FrameConfig): bool {.gcsafe.} =
   ## Shared by both backends: once the AP is up the rest of the portal
   ## (hotspot listener, hotspot scene, auto-timeout) behaves identically.
   frameOS.network.hotspotStatus = HotspotStatus.enabled
   if frameOS.server != nil:
-    let listeners = startHotspotListener(frameOS.server.mummy, frameOS.frameConfig)
+    let listeners = startHotspotListener(frameOS.server.mummy, frameConfig)
     pLog("portal:startAp:listener", %*{"port": listeners.port, "address": listeners.address,
                                         "captivePort": listeners.captivePort})
   let hotspotStarted = getMonoTime()
@@ -1390,10 +1393,14 @@ proc finishStartedHotspot(frameOS: FrameOS): bool {.gcsafe.} =
   pLog("portal:startAp:done")
   sendEvent("setCurrentScene", %*{"sceneId": "system/wifiHotspot".SceneId}, eoSystem)
   if portalAutoTimeoutEnabledHook():
-    spawn hotspotAutoTimeoutLoop(runtimeHandle(frameOS), hotspotStarted)
+    # The timeout thread outlives this call: it gets the two values it needs,
+    # not a config.
+    spawn hotspotAutoTimeoutLoop(runtimeHandle(frameOS), hotspotStarted,
+                                 frameConfig.network.wifiHotspotTimeoutSeconds,
+                                 effectiveWifiCountry(frameConfig))
   true
 
-proc startApSupplicant(frameOS: FrameOS) {.gcsafe.} =
+proc startApSupplicant(frameOS: FrameOS, frameConfig: FrameConfig) {.gcsafe.} =
   let device = supplicantWifiDevice()
   if device.len == 0:
     frameOS.network.hotspotStatus = HotspotStatus.error
@@ -1403,12 +1410,12 @@ proc startApSupplicant(frameOS: FrameOS) {.gcsafe.} =
 
   for attempt in 1..hotspotStartAttempts:
     let res = wpa.startHotspot(networkContext(), device,
-                               frameOS.frameConfig.network.wifiHotspotSsid,
-                               frameOS.frameConfig.network.wifiHotspotPassword,
+                               frameConfig.network.wifiHotspotSsid,
+                               frameConfig.network.wifiHotspotPassword,
                                networkToolProbe())
     if res.ok:
       pLog("portal:startAp:supplicant", %*{"device": device, "dhcp": res.message})
-      discard finishStartedHotspot(frameOS)
+      discard finishStartedHotspot(frameOS, frameConfig)
       return
     rememberError(res.message)
     pLog("portal:startAp:supplicantFailed",
@@ -1419,8 +1426,12 @@ proc startApSupplicant(frameOS: FrameOS) {.gcsafe.} =
   frameOS.network.hotspotStatus = HotspotStatus.error
   pLog("portal:startAp:error")
 
-proc startAp*(frameOS: FrameOS) {.gcsafe.} =
-  ## Bring up Wi-Fi AP with hard-coded SSID/pw
+proc startAp*(frameOS: FrameOS, frameConfig: FrameConfig) {.gcsafe.} =
+  ## Bring up the setup hotspot with the name and password in `frameConfig`.
+  ## That config is one the calling thread owns: the runtime's own at boot,
+  ## the connect thread's portalRequestConfig after a failed join, where a
+  ## string read off the live config could tear under a reload (AGENTS.md,
+  ## "Refs do not cross threads").
   if hotspotRunning(frameOS):
     pLog("portal:startAp:alreadyRunning")
     return
@@ -1431,7 +1442,7 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
     discard run("sudo rfkill unblock wifi || true")
 
   if activeNetworkBackend() == nbSupplicant:
-    startApSupplicant(frameOS)
+    startApSupplicant(frameOS, frameConfig)
     return
 
   if useDoor:
@@ -1439,8 +1450,8 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
   else:
     discard run("sudo nmcli radio wifi on || true")
 
-  let wifiHotspotSsid = frameOS.frameConfig.network.wifiHotspotSsid
-  let wifiHotspotPassword = frameOS.frameConfig.network.wifiHotspotPassword
+  let wifiHotspotSsid = frameConfig.network.wifiHotspotSsid
+  let wifiHotspotPassword = frameConfig.network.wifiHotspotPassword
   let maskedHotspotPassword = masked(wifiHotspotPassword)
 
   if useDoor:
@@ -1458,7 +1469,7 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
         "device": wifiDevice, "ssid": wifiHotspotSsid, "psk": wifiHotspotPassword,
       })
       if rc == 0:
-        discard finishStartedHotspot(frameOS)
+        discard finishStartedHotspot(frameOS, frameConfig)
         return
       pLog("portal:startAp:retry", %*{"attempt": attempt, "attempts": hotspotStartAttempts})
       if attempt < hotspotStartAttempts:
@@ -1502,7 +1513,7 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
       return false
 
     discard run("sudo nmcli connection modify " & shQuote(nmHotspotName) & " 802-11-wireless.ap-isolation 1 || true")
-    return finishStartedHotspot(frameOS)
+    return finishStartedHotspot(frameOS, frameConfig)
 
   for attempt in 1..hotspotStartAttempts:
     discard run("sudo nmcli connection delete " & shQuote(nmHotspotName) & " 2>/dev/null || true")
@@ -1524,17 +1535,19 @@ proc startAp*(frameOS: FrameOS) {.gcsafe.} =
   pLog("portal:startAp:error")
 
 
-proc hotspotAutoTimeoutLoop(handle: RuntimeHandle, startedAt: MonoTime) {.gcsafe, nimcall.} =
+proc hotspotAutoTimeoutLoop(handle: RuntimeHandle, startedAt: MonoTime, timeoutSeconds: float,
+                            wifiCountry: string) {.gcsafe, nimcall.} =
+  ## Its own thread: the timeout and the Wi-Fi country arrive as values,
+  ## copied from the config of the thread that raised the hotspot.
   let frameOS {.cursor.} = frameOSOf(handle)
   while true:
     portalSleepHook(1000)
     if frameOS.network.hotspotStatus != HotspotStatus.enabled:
       return
-    let timeoutSec = frameOS.frameConfig.network.wifiHotspotTimeoutSeconds
-    if timeoutSec <= 0:
+    if timeoutSeconds <= 0:
       return # disabled or mis-configured - bail out immediately
 
-    if (getMonoTime() - startedAt) >= initDuration(milliseconds = int(timeoutSec * 1000)):
+    if (getMonoTime() - startedAt) >= initDuration(milliseconds = int(timeoutSeconds * 1000)):
       pLog("portal:stopAp:autoTimeout")
       stopAp(frameOS)
       # NetworkManager autoconnects once the AP profile is down; the
@@ -1543,19 +1556,18 @@ proc hotspotAutoTimeoutLoop(handle: RuntimeHandle, startedAt: MonoTime) {.gcsafe
       # had no network at all until the next reboot.
       if activeNetworkBackend() == nbSupplicant:
         let device = supplicantWifiDevice()
-        let res = wpa.repairStation(networkContext(), device, networkToolProbe(),
-                                    effectiveWifiCountry(frameOS))
+        let res = wpa.repairStation(networkContext(), device, networkToolProbe(), wifiCountry)
         pLog("portal:stopAp:stationRestored", %*{"device": device, "ok": res.ok, "detail": res.message})
         frameOS.network.status = if res.ok: NetworkStatus.connected else: NetworkStatus.error
         if res.ok:
           requestEnrollmentNudge()
       sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
 
-proc attemptConnectSupplicant(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} =
+proc attemptConnectSupplicant(frameConfig: FrameConfig, ssid, password: string): bool {.gcsafe.} =
   ## No post-connect grace sleep here (unlike the nmcli path): wpa.connect
   ## only returns once the DHCP client has actually produced an address.
   let device = supplicantWifiDevice()
-  let res = wpa.connect(networkContext(), device, ssid, password, effectiveWifiCountry(frameOS),
+  let res = wpa.connect(networkContext(), device, ssid, password, effectiveWifiCountry(frameConfig),
                         networkToolProbe())
   pLog("portal:connect:supplicant",
        %*{"device": device, "ssid": ssid, "ok": res.ok, "detail": res.message})
@@ -1563,11 +1575,13 @@ proc attemptConnectSupplicant(frameOS: FrameOS, ssid, password: string): bool {.
     rememberError(res.message)
   res.ok
 
-proc attemptConnect*(frameOS: FrameOS, ssid, password: string): bool {.gcsafe.} =
+proc attemptConnect*(frameOS: FrameOS, frameConfig: FrameConfig, ssid, password: string): bool {.gcsafe.} =
+  ## Joins `ssid`. `frameConfig` is the calling thread's own (startAp says
+  ## why); only the supplicant backend reads it, for the Wi-Fi country.
   frameOS.network.status = NetworkStatus.connecting
 
   if activeNetworkBackend() == nbSupplicant:
-    result = attemptConnectSupplicant(frameOS, ssid, password)
+    result = attemptConnectSupplicant(frameConfig, ssid, password)
     frameOS.network.status = if result: NetworkStatus.connected else: NetworkStatus.error
     sendEvent("setCurrentScene", %*{"sceneId": getFirstSceneId()}, eoSystem)
     return
@@ -1697,7 +1711,7 @@ proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
   frameOS.network.status = NetworkStatus.connecting
   noteNetworkCheck(NetworkStatus.connecting)
 
-  if attemptConnect(frameOS, options.ssid, options.password):
+  if attemptConnect(frameOS, frameConfig, options.ssid, options.password):
     var connected = false
     syncClock()
     for attempt in 0..<4:
@@ -1737,13 +1751,13 @@ proc connectToWifi*(frameOS: FrameOS, options: PortalSetupOptions) {.gcsafe.} =
     if not connected:
       log(%*{"event": "portal:connect:netCheckFailed"})
       logNetworkDiagnostics("portal connect")
-      startAp(frameOS) # fall back to AP
+      startAp(frameOS, frameConfig) # fall back to AP
   else:
     log(%*{"event": "portal:connectFailed"})
     frameOS.network.status = NetworkStatus.error
     noteNetworkCheck(NetworkStatus.error, "Wi-Fi join failed")
     rememberError("Wifi connection failed. Check your credentials.")
-    startAp(frameOS)
+    startAp(frameOS, frameConfig)
 
 proc connectToWifiDetached*(handle: RuntimeHandle, options: PortalSetupOptions) {.gcsafe, nimcall.} =
   ## The `spawn` entry point for POST /setup: the runtime by handle (see
@@ -1752,6 +1766,8 @@ proc connectToWifiDetached*(handle: RuntimeHandle, options: PortalSetupOptions) 
   connectToWifi(frameOS, options)
 
 proc checkNetwork*(self: FrameOS): bool =
+  # Runs at boot on the runtime's own thread (frameos.nim), before anything
+  # can reload the config, so it reads the runtime's config directly.
   # A "bootOnly" hotspot needs the connectivity probe even when networkCheck
   # ("wait for network before rendering") is switched off.
   if (not self.frameConfig.network.networkCheck and self.frameConfig.network.wifiHotspot != "bootOnly") or
@@ -1851,7 +1867,7 @@ proc checkNetwork*(self: FrameOS): bool =
       let probe = networkToolProbe()
       if not wpa.stationUp(ctx, device, probe):
         lastStationRepair = getMonoTime()
-        let res = wpa.repairStation(ctx, device, probe, effectiveWifiCountry(self))
+        let res = wpa.repairStation(ctx, device, probe, effectiveWifiCountry(self.frameConfig))
         self.logger.log(%*{"event": "portal:networkBackend:stationRepair", "attempt": attempt,
                            "device": device, "ok": res.ok, "detail": res.message})
         if res.ok:
@@ -1871,7 +1887,7 @@ proc ensureNetworkBackendReady*(frameOS: FrameOS) {.gcsafe.} =
   ## saved network back up after a reboot.
   if frameOS.frameConfig != nil and frameOS.frameConfig.network != nil:
     setNetworkBackendOverride(frameOS.frameConfig.network.networkBackend)
-  let country = effectiveWifiCountry(frameOS)
+  let country = effectiveWifiCountry(frameOS.frameConfig)
   if activeNetworkBackend() != nbSupplicant:
     # NetworkManager never sets a regulatory domain; the kernel stays in the
     # world domain (no channel 12/13) unless someone says otherwise.
