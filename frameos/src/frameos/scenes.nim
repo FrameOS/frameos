@@ -497,6 +497,30 @@ proc removePersistedState*(sceneId: SceneId) =
   except OSError:
     discard
 
+proc seedUploadedStateFromDiskScene(publicId, uploadedId: SceneId) =
+  ## A provider's push registers every scene as "uploaded/<id>", whose
+  ## persisted state is a file of its own. When the frame already ran a scene
+  ## under the bare id — the frame joined the cloud with scenes of its own and
+  ## the owner imported them (`scenes_get`, docs/cloud-frames.md) — the
+  ## provider's copy starts from that scene's persisted state instead of its
+  ## defaults: the album keeps its place, the counter its count. Only when
+  ## the uploaded copy has no state of its own yet; the values never leave
+  ## the device, and the disk scene's file is left as it was.
+  let uploadedPath = &"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(uploadedId.string)}.json"
+  let diskPath = &"{SCENE_STATE_JSON_FOLDER}/scene-{sanitizePathString(publicId.string)}.json"
+  try:
+    if storedFileExists(uploadedPath) or not storedFileExists(diskPath):
+      return
+    let persisted = parseJson(readTextFile(diskPath))
+    if persisted.kind != JObject or persisted.len == 0:
+      return
+    writeTextFile(uploadedPath, $persisted)
+    lastPersistedStates[uploadedId.string] = persisted
+    log(%*{"event": "uploadScenes:stateCarried", "sceneId": uploadedId.string,
+           "keys": persisted.len})
+  except JsonParsingError, IOError, OSError:
+    discard
+
 proc updateUploadedScenesFromPayload*(
     payload: JsonNode,
     persistPayload: bool = true
@@ -548,6 +572,10 @@ proc updateUploadedScenesFromPayload*(
   for sceneId in oldUploaded.keys:
     if sceneId.string.startsWith("uploaded/") and not newScenes.hasKey(sceneId):
       removePersistedState(sceneId)
+  if persistPayload and payloadSource == "cloud":
+    for publicId, uploadedId in uploadedIdMap:
+      if not oldUploaded.hasKey(uploadedId):
+        seedUploadedStateFromDiskScene(publicId, uploadedId)
   if persistPayload:
     writeTextFile(UPLOADED_SCENES_JSON_PATH, $payload)
 

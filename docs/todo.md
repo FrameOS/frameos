@@ -120,22 +120,6 @@ device).
 
 ---
 
-## Frame scene import (`scenes_get`)
-
-Open on the import of a frame's own scenes (`docs/cloud-frames.md`, "Scenes
-the frame already had"):
-
-- Compiled scenes stay behind: the device counts them and the import's
-  summary says so, but the owner has to find `/nim-converter` themselves.
-  Sending their JSON along and offering the conversion inside the import
-  would finish the job for frames that came from an old backend deploy.
-- Persisted scene state does not travel: the push keeps the active scene on
-  screen, but the provider's copy runs as `uploaded/<id>`, so state persisted
-  under the old id is not carried over. `set_scenes` takes a `state` seed; the
-  import sends none.
-
----
-
 ## Backend Docker image: root, and a full build toolchain
 
 Both halves are held in place by the deprecated source-build path

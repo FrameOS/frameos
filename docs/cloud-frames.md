@@ -603,7 +603,13 @@ while the provider, which has assigned it nothing, would list an empty frame.
   `setCurrentScene` (the verb, a schedule entry, a button) resolves to the
   provider's copy, because that is the one being edited and deployed. Replace
   the uploaded set locally, or leave the provider, and the bare id is the disk
-  scene again.
+  scene again. **State travels on the device:** when a provider's push first
+  installs `uploaded/<id>` for an id the frame already ran, and that copy has
+  no persisted state of its own yet, the runtime starts it from the disk
+  scene's persisted state (`state/scene-<id>.json`), so an album keeps its
+  place. Nothing is sent to the provider for this; `set_scenes`' own `state`
+  seed still applies on top, to the scene it activates. The ESP32 stores
+  scenes by public id and needs no copy (it has no `scenes_get` anyway).
 
 ### Previews
 
