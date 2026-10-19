@@ -171,7 +171,8 @@ jobs:
                 -lm -o /tmp/test_fos_cloud_contract
               /tmp/test_fos_cloud_contract /fixtures/cloud-frames-fixtures.json
               # Which panels a board can be pushed (the `device` setting),
-              # against the same corpus's `panels` cases.
+              # against the `panels` cases of the same corpus. (This script
+              # sits inside single quotes: no apostrophes in its comments.)
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
                 -I"$IDF_PATH/components/json/cJSON" "$IDF_PATH/components/json/cJSON/cJSON.c" \
                 embedded/esp32/main/fos_board_panels.c embedded/esp32/main/tests/test_fos_board_panels.c \
