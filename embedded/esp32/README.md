@@ -715,8 +715,7 @@ planes:
   `download-failed:closed@12420/3106000 (3 tries: timeout@0, closed@12420, closed@12420)`.
   `image-rejected` and `set-boot-failed` carry the code in hex for the same
   reason. The serial console gets these lines through the log hook, so the
-  download adds no `ESP_LOG` lines of its own (the whole change is ~300
-  bytes of flash).
+  download adds no `ESP_LOG` lines of its own.
 
 The verdict the first pass replays after a restart (`replayed: true`) is now
 only the early-boot updater's and `verified`; a line that left while the
