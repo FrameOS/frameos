@@ -16,6 +16,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from app.middleware import GzipRequestMiddleware
 from app.ws.remote_ws import router as remote_ws_router
 from app.ws.terminal_ws import router as terminal_ws_router
+from app.ws.provider_hub import router as provider_hub_router
 from app.websockets import register_ws_routes, redis_listener
 from app.config import config, normalize_ingress_path
 from app.utils.posthog import initialize_posthog, capture_exception as posthog_capture_exception
@@ -50,6 +51,8 @@ if config.HASSIO_RUN_MODE == "ingress":
 register_ws_routes(app)
 app.include_router(remote_ws_router)
 app.include_router(terminal_ws_router)
+# Frames this backend is the provider of dial in here (docs/cloud-frames.md).
+app.include_router(provider_hub_router)
 
 if config.HASSIO_RUN_MODE:
     if config.HASSIO_RUN_MODE == "public":

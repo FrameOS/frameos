@@ -195,12 +195,20 @@ device's own signed self-upgrade, with the shell verbs refused and hidden.
 Deliberately NOT an escalation path: nothing installs a Remote or an SSH key
 on such a card.
 
-- [ ] Stage 1: the backend hosts the management WebSocket. Either port
-  `cloud/apps/frame-hub` (~3.7k lines of TS: session auth, protocol,
-  queue, rate limits) into the FastAPI app or run the hub as a sidecar
-  the add-on ships; either way it passes the contract fixtures as the
-  fourth walker. Exit: a cloud-enrolled frame pointed at a backend URL
-  behaves identically.
+Stage 1 is in place (`docs/api-triality.md` "Provider frames"): the backend
+hosts the management WebSocket in FastAPI (`backend/app/ws/provider_hub.py`,
+a port of `cloud/apps/frame-hub`), the claim-token enrollment and the
+service-settings pull (`backend/app/api/provider_frames.py`), on its own
+command queue table; its contract walker
+(`backend/app/utils/cloud_frames_contract.py`) is the fourth runner of
+`docs/cloud-frames-fixtures.json`. A frame enrolled with a backend claim
+code is managed with verbs alone. What Stage 1 left to Stage 2: the frame
+side has no "server to connect to" field yet (the code goes in through
+`/boot/frameos-cloud.txt`, the ESP32 console or the frame's
+`POST /api/cloud/enroll`), and the Linux runtime still refuses to enroll
+while frame.json names a `serverHost`, so an SSH-managed frame cannot move
+to the socket in place.
+
 - [ ] Stage 2: adoption is enrollment. The device mints its keypair, the
   backend mints the token, the write-back sets the provider URL — the
   same write-back adoption does today with `serverHost`. The setup portal,

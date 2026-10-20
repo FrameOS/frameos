@@ -11,6 +11,18 @@ Vocabulary: **provider** is the cloud (`https://cloud.frameos.net` by default,
 user-editable, same rules as `docs/cloud-link.md`). **Frame** is the device.
 **Owner** is the provider account that enrolled the frame.
 
+A self-hosted backend is a provider too (docs/convergence-todo.md item 7):
+"Add frame → Connect with a claim code" mints a claim token, and a frame
+that enrolls with it at the backend's URL dials the backend's
+`/api/frames/ws` exactly as it would dial the cloud's
+(`backend/app/ws/provider_hub.py`, `backend/app/api/provider_frames.py`).
+Everything below applies to it as written, except what is the cloud's
+account machinery: enrollment there is claim tokens only (no device flow,
+no multi-use SD-image tokens, so every enrollment is born active), the
+service settings are the backend's own (granted the way frame.json grants
+them), and a frame that joined with scenes of its own has them imported
+into its scene list when the backend holds none, without an import click.
+
 ## Principles (inherited, load-bearing)
 
 - **Outbound-only.** The frame initiates every connection, including the
@@ -731,10 +743,13 @@ wake and cannot be pushed to, so it pulls the queue over HTTP on every pass
 and acks each command by id (`embedded/esp32/README.md`, "Commands and state
 across deep sleep"); an awake frame is nudged to pull at once. A deploy there
 is two rows (`set_scenes`, `set_settings`) the backend acks itself when the
-frame's pull reports the ETags it serves. Its Linux frames are still deployed,
-restarted and rendered by immediate SSH/HTTP pushes with nothing durable to
-observe. Same wire shape either way, so the workspace's "Waiting for the
-frame" panel is one component (docs/api-triality.md).
+frame's pull reports the ETags it serves. A frame the backend is the
+provider of drains the same table over its management socket, deploy rows
+included, with the hub's rules (`redeliver_sent_commands`). Its other Linux
+frames are still deployed, restarted and rendered by immediate SSH/HTTP
+pushes with nothing durable to observe. Same wire shape either way, so the
+workspace's "Waiting for the frame" panel is one component
+(docs/api-triality.md).
 
 ## Service settings
 

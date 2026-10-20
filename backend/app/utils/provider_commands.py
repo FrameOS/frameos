@@ -70,6 +70,9 @@ PROVIDER_WAKE_CHANNEL = "frameos:provider:wake"
 
 
 async def wake_provider_frame(redis: Redis, frame_id: int) -> None:
+    from app.ws.provider_hub import wake_local
+
+    wake_local(int(frame_id))
     await redis.publish(PROVIDER_WAKE_CHANNEL, str(int(frame_id)))
 
 
