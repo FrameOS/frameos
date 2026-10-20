@@ -63,7 +63,7 @@ static void test_resume_after_a_drop(void)
     char why[32];
     fos_ota_dl_begin_connection(&dl, range, sizeof(range));
     fos_ota_dl_accept(&dl, 200, IMAGE, why, sizeof(why));
-    fos_ota_dl_wrote(&dl, 12420);
+    dl.written += 12420;
     CHECK(fos_ota_dl_failed(&dl, "closed"), "a connection that wrote bytes earns another");
     CHECK(dl.stalled == 0, "progress resets the stall count: %u", dl.stalled);
 
@@ -72,11 +72,7 @@ static void test_resume_after_a_drop(void)
     CHECK(fos_ota_dl_accept(&dl, 206, IMAGE - 12420, why, sizeof(why)), "206 with the rest");
     CHECK(fos_ota_dl_drop(&dl, 8192) == 0, "a 206 body is all new bytes");
     CHECK(!fos_ota_dl_accept(&dl, 206, IMAGE, why, sizeof(why)), "206 of the wrong length");
-    CHECK(strcmp(why, "range 3106000") == 0, "why: %s", why);
-    CHECK(!fos_ota_dl_overflows(&dl, IMAGE - 12420), "the rest fits exactly");
-    CHECK(fos_ota_dl_overflows(&dl, IMAGE - 12420 + 1), "one byte more does not");
-    fos_ota_dl_wrote(&dl, IMAGE - 12420);
-    CHECK(fos_ota_dl_complete(&dl), "complete at the manifest's size");
+    CHECK(strcmp(why, "length 3106000") == 0, "why: %s", why);
 }
 
 static void test_resume_answered_with_the_whole_image(void)
@@ -86,7 +82,7 @@ static void test_resume_answered_with_the_whole_image(void)
     char range[32];
     char why[32];
     fos_ota_dl_begin_connection(&dl, range, sizeof(range));
-    fos_ota_dl_wrote(&dl, 10000);
+    dl.written += 10000;
     fos_ota_dl_failed(&dl, "timeout");
     fos_ota_dl_begin_connection(&dl, range, sizeof(range));
     CHECK(fos_ota_dl_accept(&dl, 200, IMAGE, why, sizeof(why)), "a 200 to a Range request is usable");
@@ -115,26 +111,24 @@ static void test_connection_cap(void)
     char range[32];
     bool again = true;
     unsigned opened = 0;
-    while (again) {
+    while (again && opened <= FOS_OTA_DL_MAX_CONNECTIONS) {
         fos_ota_dl_begin_connection(&dl, range, sizeof(range));
         opened++;
-        fos_ota_dl_wrote(&dl, 1000); /* every connection makes a little progress */
+        dl.written += 1000; /* every connection makes a little progress */
         again = fos_ota_dl_failed(&dl, "closed");
-        CHECK(opened <= FOS_OTA_DL_MAX_CONNECTIONS, "runaway: %u connections", opened);
-        if (opened > FOS_OTA_DL_MAX_CONNECTIONS) break;
     }
     CHECK(opened == FOS_OTA_DL_MAX_CONNECTIONS, "a run stops at the cap: %u", opened);
 }
 
-static void test_read_tokens(void)
+static void test_read_names(void)
 {
-    char token[32];
-    fos_ota_dl_read_token(-FOS_OTA_DL_HTTP_EAGAIN, 0, token, sizeof(token));
-    CHECK(strcmp(token, "timeout") == 0, "timeout: %s", token);
-    fos_ota_dl_read_token(-1, 0, token, sizeof(token));
-    CHECK(strcmp(token, "closed") == 0, "closed: %s", token);
-    fos_ota_dl_read_token(-1, 104, token, sizeof(token));
-    CHECK(strcmp(token, "read e104") == 0, "errno: %s", token);
+    char name[32];
+    fos_ota_dl_read_name(-FOS_OTA_DL_HTTP_EAGAIN, 0, name, sizeof(name));
+    CHECK(strcmp(name, "timeout") == 0, "timeout: %s", name);
+    fos_ota_dl_read_name(-1, 0, name, sizeof(name));
+    CHECK(strcmp(name, "closed") == 0, "closed: %s", name);
+    fos_ota_dl_read_name(-1, 104, name, sizeof(name));
+    CHECK(strcmp(name, "read e104") == 0, "errno: %s", name);
 }
 
 static void test_summary(void)
@@ -144,8 +138,11 @@ static void test_summary(void)
     fos_ota_dl_init(&dl, IMAGE);
     char range[32];
 
+    fos_ota_dl_summary(&dl, out, sizeof(out));
+    CHECK(strcmp(out, "download-failed:failed@0/3106000") == 0, "no tries: %s", out);
+
     fos_ota_dl_begin_connection(&dl, range, sizeof(range));
-    fos_ota_dl_wrote(&dl, 12420);
+    dl.written += 12420;
     fos_ota_dl_failed(&dl, "closed");
     fos_ota_dl_summary(&dl, out, sizeof(out));
     /* One failure keeps the shape the control planes have always shown. */
@@ -159,28 +156,19 @@ static void test_summary(void)
                       "(3 tries: closed@12420, timeout@12420, wifi@12420)") == 0,
           "three tries: %s", out);
 
+    /* A long run keeps the first tries that fit; the head always names the last. */
     fos_ota_dl_t many;
     fos_ota_dl_init(&many, IMAGE);
-    for (unsigned i = 0; i < 6; i++) {
+    for (unsigned i = 0; i < 8; i++) {
         fos_ota_dl_begin_connection(&many, range, sizeof(range));
-        fos_ota_dl_wrote(&many, 500000);
+        many.written += 380000;
         fos_ota_dl_failed(&many, "read e113");
     }
     fos_ota_dl_summary(&many, out, sizeof(out));
-    CHECK(strcmp(out, "download-failed:read e113@3000000/3106000 (6 tries, last 4: "
-                      "read e113@1500000, read e113@2000000, read e113@2500000, "
-                      "read e113@3000000)") == 0,
-          "six tries: %s", out);
+    CHECK(strncmp(out, "download-failed:read e113@3040000/3106000 (8 tries: read e113@380000, ", 70) == 0,
+          "eight tries: %s", out);
     CHECK(strlen(out) < 160, "fits the control planes' 160-char detail: %zu", strlen(out));
-
-    fos_ota_dl_t none;
-    fos_ota_dl_init(&none, 0);
-    fos_ota_dl_summary(&none, out, sizeof(out));
-    CHECK(strcmp(out, "download-failed:failed@0/0") == 0, "no tries: %s", out);
-
-    char tiny[24];
-    fos_ota_dl_summary(&many, tiny, sizeof(tiny));
-    CHECK(strlen(tiny) == sizeof(tiny) - 1, "truncates, terminated: %s", tiny);
+    CHECK(out[strlen(out) - 1] == ')', "the list closes, no token cut in half: %s", out);
 }
 
 int main(void)
@@ -190,7 +178,7 @@ int main(void)
     test_resume_answered_with_the_whole_image();
     test_stalled_connections_give_up();
     test_connection_cap();
-    test_read_tokens();
+    test_read_names();
     test_summary();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

@@ -169,8 +169,8 @@ asleep) → downloading → verified → rendering ([bootup]) → done
 updater's verdict arrives after the [bootup] of the boot it ran in, and
 before this a failed download sat in "first render" (frame 70, 2026-10-20),
 or finished as done once the old firmware rendered. A connection
-that drops mid-image is a `progress` line with a `retry` field, not an
-[ota:error]: the device resumes it.
+that drops mid-image logs nothing: the device resumes it, and only the run's
+verdict ([ota:verified] or [ota:error]) names the tries.
 
 **USB** (`esp32_usb`): the browser flasher reports completion
 (`/embedded/usb_deploy_complete`); the record starts at booting → rendering

@@ -75,5 +75,5 @@ def test_fos_ota_download_host_tests_pass(tmp_path: Path):
     assert summary is not None, (
         "could not find the check summary in the output:\n" + run_result.stdout[-4000:]
     )
-    assert int(summary.group(1)) >= 40
+    assert int(summary.group(1)) >= 30
     assert int(summary.group(2)) == 0

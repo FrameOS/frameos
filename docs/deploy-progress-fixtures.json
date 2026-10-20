@@ -244,12 +244,12 @@
       ]
     },
     {
-      "name": "firmware: a dropped connection resumes; its retry line is progress, not an error",
+      "name": "firmware: a download that resumed names its tries in the verified line",
       "kind": "firmware",
       "start": { "stage": "downloading" },
       "steps": [
-        { "log": { "event": "ota:backend", "source": "esp32", "status": "progress", "detail": "12420/3106000", "retry": "closed@12420", "tries": 1 }, "expect": { "stage": "downloading", "status": "running", "progress": { "current": 12420, "total": 3106000 } } },
-        { "log": { "event": "ota:backend", "source": "esp32", "status": "verified", "detail": "rebooting" }, "expect": { "stage": "verified" } }
+        { "log": { "event": "ota:backend", "source": "esp32", "status": "progress", "detail": "524288/3106000" }, "expect": { "stage": "downloading", "status": "running", "progress": { "current": 524288, "total": 3106000 } } },
+        { "log": { "event": "ota:backend", "source": "esp32", "status": "verified", "detail": "rebooting (resumed after closed@12420)" }, "expect": { "stage": "verified", "status": "running" } }
       ]
     },
     {

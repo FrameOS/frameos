@@ -703,16 +703,20 @@ planes:
   (`Range: bytes=<written>-`, both planes answer 206; a 200 is read past),
   with the hash and the slot carried over. `main/fos_ota_download.c` keeps
   the budget (three connections in a row that add nothing, eight in all) and
-  is host tested (`tests/test_fos_ota_download.c`). A resume logs a
-  `progress` line with `retry` and `tries` fields, not an `error`, so the
-  deploy bar keeps its place.
+  is host tested (`tests/test_fos_ota_download.c`). A resume logs nothing of
+  its own (an `error` line would fail the deploy the resume is about to
+  finish); the verdict carries it, `verified` as `rebooting (resumed after
+  closed@12420)`. The manifest must carry `size` now (both planes always
+  sent it): every length check reads it.
 - Failures name themselves: `timeout`, `closed`, `read e<errno>`,
-  `connect 0x<err>`, `http <status>`, `range <length>`, `short`,
-  `write 0x<err>`, `wifi`, each at the byte count it stopped at, and the
-  verdict lists the run's tries:
+  `connect 0x<err>`, `http <status>`, `length <bytes>`, `short`, `write
+  0x<err>`, `wifi`, each at the byte count it stopped at, and the verdict
+  lists the run's tries:
   `download-failed:closed@12420/3106000 (3 tries: timeout@0, closed@12420, closed@12420)`.
-  `image-rejected`, `image-version-mismatch` and `set-boot-failed` carry the
-  code in hex for the same reason.
+  `image-rejected` and `set-boot-failed` carry the code in hex for the same
+  reason. The serial console gets these lines through the log hook, so the
+  download adds no `ESP_LOG` lines of its own (the whole change is ~300
+  bytes of flash).
 
 The verdict the first pass replays after a restart (`replayed: true`) is now
 only the early-boot updater's and `verified`; a line that left while the

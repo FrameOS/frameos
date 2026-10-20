@@ -28,7 +28,7 @@
       "render:done": "the runtime finished a render (`render:done`); on the cloud the device's `render` announce is the same signal",
       "ota:waiting": "ESP32 `ota:<plane>` status `waiting`: a render pass finishes before the download",
       "ota:downloading": "ESP32 `ota:<plane>` status `downloading`",
-      "ota:progress": "ESP32 `ota:<plane>` status `progress` (`detail` = `<written>/<total>` bytes); also the line a dropped connection leaves before the device resumes it (`retry`, `tries`)",
+      "ota:progress": "ESP32 `ota:<plane>` status `progress` (`detail` = `<written>/<total>` bytes)",
       "ota:verified": "ESP32 `ota:<plane>` status `verified`: installed, restarting into it",
       "ota:up-to-date": "ESP32 `ota:<plane>` status `up-to-date` / `skipped` / `downgrade-refused`: nothing to install, the frame restarts on what it has",
       "ota:error": "ESP32 `ota:<plane>` status `error` / `gave-up`. The early-boot updater's verdict reaches the plane after the `bootup` of the boot it ran in (the first pass replays it, `replayed: true`), so the ESP32 kinds' stages after a boot listen for it too: a boot on the old firmware is not an installed update",
