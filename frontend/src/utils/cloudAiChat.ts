@@ -1,13 +1,16 @@
 import { apiFetch } from './apiFetch'
 
-// Streaming client for the cloud's AI chat v2 endpoint (POST /api/ai/chat,
-// NDJSON — one event per line). Used by chatLogic in cloud mode only; the
-// self-hosted backend keeps its own /api/ai/scenes/chat protocol.
+// Streaming client for the AI chat (docs/ai-chat.md): POST /api/ai/chat on
+// the cloud, POST /api/projects/<id>/ai/chat on the self-hosted backend, the
+// same NDJSON events from both — one event per line. chatLogic reads it on
+// both planes.
 //
 // Turns run detached on the cloud: if this stream drops mid-turn (a proxy
 // idle cut, a flaky link) the turn keeps going and we reopen the stream at
 // GET /api/ai/chat/turns/<turnId>?after=<events seen>. Mirrors the store
-// panel's client (cloud/apps/auth-web/src/lib/ai-chat-client.ts).
+// panel's client (cloud/apps/auth-web/src/lib/ai-chat-client.ts). The
+// backend sends no turnId (its turn also outlives the stream, and its reply
+// lands on the chat), so a dropped backend stream is reported, not resumed.
 
 export type CloudAiChatEvent =
   | { type: 'chat'; chatId: string; turnId?: string }
@@ -68,7 +71,10 @@ export const cloudSettingsGroupLabels: Record<string, string> = {
 export interface CloudAiChatRequest {
   prompt: string
   chatId: string
-  frameId: string | number
+  /** Absent for a chat about no frame in particular (the frames home's AI box). */
+  frameId?: string | number | null
+  /** False when there is no scene editor to deliver scenes into. */
+  editor?: boolean
   sceneId?: string | null
   scene?: Record<string, any> | null
   selectedNodes?: Record<string, any>[]
@@ -152,6 +158,8 @@ export async function streamCloudAiChat(
   request: CloudAiChatRequest,
   onEvent: (event: CloudAiChatEvent) => void | Promise<void>,
   options: {
+    /** Where to POST the turn; the cloud's /api/ai/chat by default. */
+    path?: string
     onResume?: (info: { attempt: number; elapsedMs: number }) => void
     resumeAttempts?: number
     resumeBudgetMs?: number
@@ -195,7 +203,7 @@ export async function streamCloudAiChat(
     await onEvent(event)
   }
 
-  const response = await apiFetch('/api/ai/chat', {
+  const response = await apiFetch(options.path ?? '/api/ai/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),

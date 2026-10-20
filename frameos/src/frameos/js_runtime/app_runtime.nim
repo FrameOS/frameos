@@ -1735,16 +1735,8 @@ proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: string
   let (target, _) = owner.takeDecodeTarget(context)
   if target.isNil:
     return nil
-  if renderSvgIntoTarget(svg, target):
+  if renderSvgIntoTargetWithDegrade(svg, target):
     return target
-  var rungs: seq[tuple[width, height: int]] = @[]
-  for divisor in [1, 2, 4]:
-    let rung: tuple[width, height: int] = (max(1, rasterWidth div divisor), max(1, rasterHeight div divisor))
-    if rung notin rungs and (rung.width < target.width or rung.height < target.height):
-      rungs.add(rung)
-  for rung in rungs:
-    if renderSvgDegradedInto(svg, target, rung.width, rung.height):
-      return target
   nil
 
 proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, spec: JsonNode): Image =

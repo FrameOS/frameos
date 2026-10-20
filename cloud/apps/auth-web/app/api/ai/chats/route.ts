@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
 
   const result = await listChats(db, session.accountId, {
     frameId,
+    frameless: params.get("frameless") === "1",
     limit,
     offset,
   });

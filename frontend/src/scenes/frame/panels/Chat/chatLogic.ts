@@ -17,7 +17,6 @@ import type {
   FrameScene,
   FrameId,
 } from '../../../../types'
-import { socketLogic } from '../../../socketLogic'
 import { editAppLogic } from '../EditApp/editAppLogic'
 import { isFrameControlMode } from '../../../../utils/frameControlMode'
 import { isCloudMode } from '../../../../utils/cloudMode'
@@ -30,8 +29,11 @@ import {
 } from '../../../../utils/cloudAiChat'
 import { installCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
 import { renderSceneCheck } from '../../../../utils/wasmSceneRenderCheck'
+import { frameRenderDevice } from '../../../../utils/frameRenderDevice'
 import { wasmPreviewDimensions } from '../../../../utils/wasmScenePreview'
-import { projectApiPathForProject } from '../../../../utils/projectApi'
+import { getCurrentProjectId, projectApiPathForProject } from '../../../../utils/projectApi'
+import { urls } from '../../../../urls'
+import { router } from 'kea-router'
 
 const MAX_HISTORY = 8
 const CHAT_PAGE_SIZE = 20
@@ -46,10 +48,40 @@ function frameProjectId(frameForm: Partial<FrameType>, frame: FrameType | null |
   return frameForm.project_id ?? frame?.project_id ?? null
 }
 
+// Whether there is a stored chat list to load: never on a frame's own admin
+// pages, and on a backend only once the frame's project is known.
+function canListChats(
+  props: { frameId: FrameId | null },
+  values: { frameForm: Partial<FrameType>; frame: FrameType | null | undefined }
+): boolean {
+  return (
+    !isFrameControlMode() &&
+    (isCloudMode() || props.frameId === null || Boolean(frameProjectId(values.frameForm, values.frame)))
+  )
+}
+
 export interface ChatLogicProps {
-  frameId: FrameId
+  /** null for the chat about no frame in particular: the frames home's AI
+   * box. It has no editor, so delivered scenes are not applied anywhere and
+   * the assistant saves through its MCP tools instead (docs/ai-chat.md). */
+  frameId: FrameId | null
   sceneId?: string | null
 }
+
+/** The logic key of the frame-less chat. */
+export const HOME_CHAT_KEY = 'home'
+
+// Where a chat route lives: the account's origin on the cloud, the project
+// on a backend (the frame's, else the browser's current project).
+async function chatApiPath(path: string, projectId: number | null): Promise<string | null> {
+  if (isCloudMode()) {
+    return path
+  }
+  const resolved = projectId ?? (await getCurrentProjectId().catch(() => null))
+  return resolved ? projectApiPathForProject(resolved, path) : null
+}
+
+const frameValue = <T>(fallback: T) => [() => [() => fallback], (value: T) => value] as any
 
 export type ChatInstallProposalStatus =
   | { state: 'pending' }
@@ -127,12 +159,16 @@ const getChatContextId = (chat: ChatSummary | null): string | null => {
 
 const getChatContextKey = (chat: ChatSummary) => `${getChatContextType(chat)}:${getChatContextId(chat) ?? ''}`
 
-const buildLocalChat = (frameId: FrameId, contextType: ChatContextType, contextId?: string | null): ChatSummary => {
+const buildLocalChat = (
+  frameId: FrameId | null,
+  contextType: ChatContextType,
+  contextId?: string | null
+): ChatSummary => {
   const timestamp = new Date().toISOString()
   return {
     id: uuidv4(),
     frameId,
-    sceneId: contextType === 'scene' ? contextId ?? null : null,
+    sceneId: contextType === 'scene' ? (contextId ?? null) : null,
     contextType,
     contextId: contextId ?? null,
     createdAt: timestamp,
@@ -144,7 +180,7 @@ const buildLocalChat = (frameId: FrameId, contextType: ChatContextType, contextI
 
 const normalizeRemoteChat = (chat: ChatSummary): ChatSummary => {
   const contextType = (chat.contextType as ChatContextType | undefined) ?? (chat.sceneId ? 'scene' : 'frame')
-  const contextId = chat.contextId ?? (contextType === 'scene' ? chat.sceneId ?? null : null)
+  const contextId = chat.contextId ?? (contextType === 'scene' ? (chat.sceneId ?? null) : null)
   return {
     ...chat,
     contextType,
@@ -186,6 +222,7 @@ export interface chatLogicValues {
   chatMessagesLoading: Record<string, boolean>
   chatSceneId: string | null
   chatSceneName: string | null
+  chatTitleForChat: (chat: ChatSummary) => string | null
   chatView: ChatView
   chats: ChatSummary[]
   chatsOffset: number
@@ -313,6 +350,19 @@ export interface chatLogicActions {
     hasMore: boolean
     nextOffset: number
   }
+  openChatApp: () => {
+    value: true
+  }
+  openChatScene: (sceneId: string) => {
+    sceneId: string
+  }
+  rekeyChat: (
+    fromId: string,
+    toId: string
+  ) => {
+    fromId: string
+    toId: string
+  }
   selectChat: (chatId: string) => {
     chatId: string
   }
@@ -425,7 +475,8 @@ export interface chatLogicMeta {
       sceneName: any
     } | null
     chatLabelForChat: (scenes: any, frameForm: any) => (chat: ChatSummary) => string
-    visibleChats: (chats: any) => ChatSummary[]
+    chatTitleForChat: (messagesByChatId: any) => (chat: ChatSummary) => string | null
+    visibleChats: (chats: any, arg: FrameId | null) => ChatSummary[]
     messages: (messagesByChatId: any, activeChatId: any) => ChatMessage[]
     contextItemsExpanded: (contextItemsExpandedByChat: any, activeChatId: any) => Record<string, boolean>
     logExpanded: (logExpandedByChat: any, activeChatId: any) => Record<string, boolean>
@@ -465,19 +516,38 @@ export type chatLogicType = MakeLogicType<chatLogicValues, chatLogicActions, Cha
 export const chatLogic = kea<chatLogicType>([
   path(['src', 'scenes', 'frame', 'chatLogic']),
   props({} as ChatLogicProps),
-  key((props) => props.frameId),
-  connect((props: ChatLogicProps) => ({
-    logic: [socketLogic],
-    values: [
-      frameLogic(props),
-      ['frame', 'frameForm', 'scenes'],
-      frameEditorsLogic(props),
-      ['activeSceneEditorId', 'scenesOpen', 'activeEditApp'],
-      diagramLogic({ frameId: props.frameId, sceneId: props.sceneId ?? '' }),
-      ['selectedNodes', 'selectedEdges'],
-    ],
-    actions: [frameLogic(props), ['updateScene']],
-  })),
+  key((props) => props.frameId ?? HOME_CHAT_KEY),
+  connect((props: ChatLogicProps) =>
+    props.frameId !== null
+      ? {
+          values: [
+            frameLogic({ frameId: props.frameId }),
+            ['frame', 'frameForm', 'scenes'],
+            frameEditorsLogic({ frameId: props.frameId }),
+            ['activeSceneEditorId', 'scenesOpen', 'activeEditApp'],
+            diagramLogic({ frameId: props.frameId, sceneId: props.sceneId ?? '' }),
+            ['selectedNodes', 'selectedEdges'],
+          ],
+          actions: [frameLogic({ frameId: props.frameId }), ['updateScene']],
+        }
+      : {}
+  ),
+  // The frame-less chat has no frame, editor or diagram to read: the same
+  // names, empty, so every selector below reads one shape.
+  selectors(({ props }) =>
+    props.frameId !== null
+      ? {}
+      : {
+          frame: frameValue(null),
+          frameForm: frameValue({}),
+          scenes: frameValue([]),
+          activeSceneEditorId: frameValue(null),
+          scenesOpen: frameValue(false),
+          activeEditApp: frameValue(null),
+          selectedNodes: frameValue([]),
+          selectedEdges: frameValue([]),
+        }
+  ),
   actions({
     setInput: (input: string) => ({ input }),
     submitMessage: (content: string, chatId?: string | null, renderCheckRound?: number) => ({
@@ -537,6 +607,11 @@ export const chatLogic = kea<chatLogicType>([
     loadChatMessages: (chatId: string) => ({ chatId }),
     loadChatMessagesSuccess: (chatId: string, messages: ChatMessageRecord[]) => ({ chatId, messages }),
     loadChatMessagesFailure: (chatId: string, error: string) => ({ chatId, error }),
+    openChatScene: (sceneId: string) => ({ sceneId }),
+    openChatApp: true,
+    // The server stores a chat under its own id (the backend derives one per
+    // project); its first event says which, and the chat moves there.
+    rekeyChat: (fromId: string, toId: string) => ({ fromId, toId }),
   }),
   reducers({
     input: [
@@ -572,12 +647,20 @@ export const chatLogic = kea<chatLogicType>([
           const remoteChats = chats.map(normalizeRemoteChat)
           const remoteIds = new Set(remoteChats.map((chat) => chat.id))
           const remoteContextKeys = new Set(remoteChats.map((chat) => getChatContextKey(chat)))
+          // An empty local chat gives way to a stored one about the same
+          // thing; one the user already wrote in stays until the server
+          // lists it (a list that loaded before the first message was stored).
           const localChats = state.filter(
             (chat: ChatSummary) =>
-              chat.isLocal && !remoteIds.has(chat.id) && !remoteContextKeys.has(getChatContextKey(chat))
+              !remoteIds.has(chat.id) &&
+              (chat.isLocal ? (chat.messageCount ?? 0) > 0 || !remoteContextKeys.has(getChatContextKey(chat)) : false)
           )
           return [...remoteChats, ...localChats]
         },
+        rekeyChat: (state, { fromId, toId }) =>
+          state.some((chat) => chat.id === toId)
+            ? state.filter((chat) => chat.id !== fromId)
+            : state.map((chat) => (chat.id === fromId ? { ...chat, id: toId } : chat)),
         loadMoreChatsSuccess: (state, { chats }) => {
           const merged = new Map<string, ChatSummary>(state.map((chat) => [chat.id, chat]))
           for (const chat of chats.map(normalizeRemoteChat)) {
@@ -600,7 +683,6 @@ export const chatLogic = kea<chatLogicType>([
               ...chat,
               updatedAt: now,
               messageCount,
-              isLocal: false,
               sceneId: chat.sceneId ?? null,
             }
           })
@@ -650,6 +732,7 @@ export const chatLogic = kea<chatLogicType>([
       {
         selectChat: (_, { chatId }) => chatId,
         setActiveChatId: (_, { chatId }) => chatId,
+        rekeyChat: (state, { fromId, toId }) => (state === fromId ? toId : state),
       },
     ],
     chatView: [
@@ -686,6 +769,13 @@ export const chatLogic = kea<chatLogicType>([
           ...state,
           [chatId]: [],
         }),
+        rekeyChat: (state, { fromId, toId }) => {
+          if (fromId === toId || !(fromId in state)) {
+            return state
+          }
+          const { [fromId]: moved, ...rest } = state
+          return { ...rest, [toId]: moved }
+        },
         setProposalStatus: (state, { chatId, messageId, proposalId, status }) => ({
           ...state,
           [chatId]: (state[chatId] ?? []).map((message: ChatMessage) =>
@@ -753,6 +843,8 @@ export const chatLogic = kea<chatLogicType>([
           ...state,
           [chatId]: true,
         }),
+        // A chat this browser started holds every message already.
+        rekeyChat: (state, { toId }) => ({ ...state, [toId]: true }),
       },
     ],
     activeRequestId: [
@@ -891,7 +983,7 @@ export const chatLogic = kea<chatLogicType>([
     chatSceneName: [
       (s: any) => [s.chatSceneId, s.scenes],
       (chatSceneId: string | null, scenes: FrameScene[]): string | null =>
-        chatSceneId ? scenes?.find((scene: FrameScene) => scene.id === chatSceneId)?.name ?? null : null,
+        chatSceneId ? (scenes?.find((scene: FrameScene) => scene.id === chatSceneId)?.name ?? null) : null,
     ],
     chatAppContext: [
       (s: any) => [s.chatContextType, s.chatContextId, s.frameForm],
@@ -919,7 +1011,7 @@ export const chatLogic = kea<chatLogicType>([
         return (chat: ChatSummary) => {
           const contextType = getChatContextType(chat)
           if (contextType === 'frame') {
-            return 'Frame chat'
+            return chat.frameId == null ? 'Chat' : 'Frame chat'
           }
           if (contextType === 'scene') {
             return scenes?.find((scene: FrameScene) => scene.id === chat.sceneId)?.name ?? 'Frame chat'
@@ -938,24 +1030,48 @@ export const chatLogic = kea<chatLogicType>([
         }
       },
     ],
+    // What the history lists a chat under: its first question. The server
+    // names a stored chat by it (deriveChatTitle); one started in this
+    // session is named by the question it holds.
+    chatTitleForChat: [
+      (s: any) => [s.messagesByChatId],
+      (messagesByChatId: Record<string, ChatMessage[]>) =>
+        (chat: ChatSummary): string | null =>
+          chat.title ||
+          (messagesByChatId[chat.id] ?? [])
+            .find((message) => message.role === 'user' && !message.content.startsWith(RENDER_CHECK_PREFIX))
+            ?.content.replace(/\s+/g, ' ')
+            .trim() ||
+          null,
+    ],
     visibleChats: [
-      (s: any) => [s.chats],
-      (chats: ChatSummary[]) => chats.filter((chat) => chat.messageCount === undefined || chat.messageCount > 0),
+      (s: any) => [s.chats, (_: any, props: ChatLogicProps) => props.frameId],
+      (chats: ChatSummary[], frameId: FrameId | null) =>
+        chats
+          .filter(
+            (chat) =>
+              (chat.messageCount === undefined || chat.messageCount > 0) &&
+              // The frames home lists its own chats; a frame's chats are on the frame.
+              (frameId !== null || (chat.frameId ?? null) === null)
+          )
+          // Newest first: a chat from this session sits after the stored
+          // ones until the next load.
+          .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')),
     ],
     messages: [
       (s: any) => [s.messagesByChatId, s.activeChatId],
       (messagesByChatId: Record<string, ChatMessage[]>, activeChatId: string | null) =>
-        activeChatId ? messagesByChatId[activeChatId] ?? [] : [],
+        activeChatId ? (messagesByChatId[activeChatId] ?? []) : [],
     ],
     contextItemsExpanded: [
       (s: any) => [s.contextItemsExpandedByChat, s.activeChatId],
       (contextItemsExpandedByChat: Record<string, Record<string, boolean>>, activeChatId: string | null) =>
-        activeChatId ? contextItemsExpandedByChat[activeChatId] ?? {} : {},
+        activeChatId ? (contextItemsExpandedByChat[activeChatId] ?? {}) : {},
     ],
     logExpanded: [
       (s: any) => [s.logExpandedByChat, s.activeChatId],
       (logExpandedByChat: Record<string, Record<string, boolean>>, activeChatId: string | null) =>
-        activeChatId ? logExpandedByChat[activeChatId] ?? {} : {},
+        activeChatId ? (logExpandedByChat[activeChatId] ?? {}) : {},
     ],
     historyForRequest: [
       (s) => [s.messages],
@@ -1052,15 +1168,17 @@ export const chatLogic = kea<chatLogicType>([
       }
       try {
         // Cloud serves chats at the account origin; self-hosted scopes them
-        // under the project.
-        let path = `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=0`
-        if (!isCloudMode()) {
-          const projectId = frameProjectId(values.frameForm, values.frame)
-          if (!projectId) {
-            actions.loadChatsSuccess([], false, 0)
-            return
-          }
-          path = projectApiPathForProject(projectId, path)
+        // under the project. The frame-less chat asks for the frame-less ones,
+        // so a page of the history is a page of chats it shows (visibleChats
+        // still filters for a server from before `frameless`).
+        const frameQuery = props.frameId !== null ? `frameId=${props.frameId}&` : 'frameless=1&'
+        const path = await chatApiPath(
+          `/api/ai/chats?${frameQuery}limit=${CHAT_PAGE_SIZE}&offset=0`,
+          frameProjectId(values.frameForm, values.frame)
+        )
+        if (!path) {
+          actions.loadChatsSuccess([], false, 0)
+          return
         }
         const response = await apiFetch(path)
         if (!response.ok) {
@@ -1085,14 +1203,14 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       try {
-        let path = `/api/ai/chats?frameId=${props.frameId}&limit=${CHAT_PAGE_SIZE}&offset=${values.chatsOffset}`
-        if (!isCloudMode()) {
-          const projectId = frameProjectId(values.frameForm, values.frame)
-          if (!projectId) {
-            actions.loadMoreChatsSuccess([], false, values.chatsOffset)
-            return
-          }
-          path = projectApiPathForProject(projectId, path)
+        const frameQuery = props.frameId !== null ? `frameId=${props.frameId}&` : 'frameless=1&'
+        const path = await chatApiPath(
+          `/api/ai/chats?${frameQuery}limit=${CHAT_PAGE_SIZE}&offset=${values.chatsOffset}`,
+          frameProjectId(values.frameForm, values.frame)
+        )
+        if (!path) {
+          actions.loadMoreChatsSuccess([], false, values.chatsOffset)
+          return
         }
         const response = await apiFetch(path)
         if (!response.ok) {
@@ -1166,7 +1284,11 @@ export const chatLogic = kea<chatLogicType>([
     },
     ensureFrameChat: () => {
       const matchingChat = values.chats.find(
-        (chat) => getChatContextType(chat) === 'frame' && getChatContextId(chat) === null
+        (chat) =>
+          getChatContextType(chat) === 'frame' &&
+          getChatContextId(chat) === null &&
+          // The frames home's chat list holds every frame's chats too.
+          (props.frameId !== null || (chat.frameId ?? null) === null)
       )
       if (matchingChat) {
         if (matchingChat.id !== values.activeChatId) {
@@ -1177,6 +1299,13 @@ export const chatLogic = kea<chatLogicType>([
       const chat = buildLocalChat(props.frameId, 'frame', null)
       actions.createChatSuccess(chat)
       actions.selectChat(chat.id)
+    },
+    backToList: () => {
+      // The history opens on what is stored now: chats made in another tab
+      // or by the AI box since the drawer opened.
+      if (canListChats(props, values)) {
+        actions.loadChats()
+      }
     },
     selectChat: ({ chatId }) => {
       const chat = values.chats.find((item) => item.id === chatId)
@@ -1193,14 +1322,10 @@ export const chatLogic = kea<chatLogicType>([
         return
       }
       try {
-        let path = `/api/ai/chats/${chatId}`
-        if (!isCloudMode()) {
-          const projectId = frameProjectId(values.frameForm, values.frame)
-          if (!projectId) {
-            actions.loadChatMessagesSuccess(chatId, [])
-            return
-          }
-          path = projectApiPathForProject(projectId, path)
+        const path = await chatApiPath(`/api/ai/chats/${chatId}`, frameProjectId(values.frameForm, values.frame))
+        if (!path) {
+          actions.loadChatMessagesSuccess(chatId, [])
+          return
         }
         const response = await apiFetch(path)
         if (!response.ok) {
@@ -1242,7 +1367,7 @@ export const chatLogic = kea<chatLogicType>([
       }
       if (chatContextType === 'app') {
         const appContext = values.activeEditAppContext
-        if (!appContext) {
+        if (!appContext || props.frameId === null) {
           actions.setSubmitting(false)
           actions.setError('Open the app editor to chat about this app.')
           return
@@ -1353,6 +1478,8 @@ export const chatLogic = kea<chatLogicType>([
         isStreaming: true,
       })
       const selectedScene = values.selectedScene
+      // Where the chat lives once the server re-keyed it (rekeyChat).
+      let rekeyedChatId: string | null = null
       try {
         const selectedNodesPayload =
           selectedScene && values.selectedNodes.length > 0
@@ -1374,10 +1501,16 @@ export const chatLogic = kea<chatLogicType>([
                 targetHandle: edge.targetHandle,
               }))
             : []
-        if (isCloudMode()) {
-          // Cloud AI chat v2: a streaming agentic loop. Text arrives as
-          // real token deltas, tool activity feeds the message's log pane,
-          // and generated scenes are applied the moment they validate.
+        {
+          // The AI chat (docs/ai-chat.md): one streaming agentic loop, the
+          // same on the cloud and the backend. Text arrives as real token
+          // deltas, tool activity feeds the message's log pane, and
+          // generated scenes are applied the moment they validate — on the
+          // frame this chat is about; a frame-less chat has no editor, and
+          // the assistant saves through its MCP tools instead.
+          const frameId = props.frameId
+          // Re-keyed by the server's `chat` event (rekeyChat).
+          let turnChatId: string = chatId
           let streamedContent = ''
           let logContent = ''
           const proposals: ChatInstallProposal[] = []
@@ -1386,10 +1519,10 @@ export const chatLogic = kea<chatLogicType>([
           let streamError: string | null = null
           let deliveredSceneId: string | null = null
           const applyBuildScenes = async (scenes: Record<string, any>[], title?: string): Promise<string | null> => {
-            if (!scenes.length) {
+            if (!scenes.length || frameId === null) {
               return null
             }
-            const frameStore = frameLogic({ frameId: props.frameId })
+            const frameStore = frameLogic({ frameId })
             const existingSceneIds = new Set(frameStore.values.scenes.map((scene) => scene.id))
             const sanitizedScenes = scenes.map((scene: Partial<FrameScene>) => {
               const sanitizedScene = sanitizeScene(scene, frameStore.values.frameForm)
@@ -1409,35 +1542,54 @@ export const chatLogic = kea<chatLogicType>([
             const updatedScenes = frameStore.values.frameForm?.scenes ?? frameStore.values.scenes
             const newlyAddedScene = updatedScenes.find((scene) => !existingSceneIds.has(scene.id))
             if (newlyAddedScene) {
-              scenesLogic({ frameId: props.frameId }).actions.focusScene(newlyAddedScene.id)
+              scenesLogic({ frameId }).actions.focusScene(newlyAddedScene.id)
             }
             return newlyAddedScene?.id ?? null
           }
           // The assistant's render_scene looks at the scene the way this
           // frame's preview (and the render check below) draws it.
-          const previewFrame = frameLogic({ frameId: props.frameId }).values
+          const previewFrame = frameId !== null ? frameLogic({ frameId }).values : null
+          const chatPath = isCloudMode()
+            ? '/api/ai/chat'
+            : await chatApiPath('/api/ai/chat', frameProjectId(values.frameForm, values.frame))
+          if (!chatPath) {
+            throw new Error('Could not find the project for this chat.')
+          }
           await streamCloudAiChat(
             {
               prompt,
-              chatId,
-              frameId: props.frameId,
+              chatId: turnChatId,
+              frameId,
+              editor: frameId !== null,
               sceneId: selectedScene?.id ?? null,
               scene: selectedScene ?? null,
               selectedNodes: selectedNodesPayload.length ? selectedNodesPayload : undefined,
               selectedEdges: selectedEdgesPayload.length ? selectedEdgesPayload : undefined,
               history: values.historyForRequest,
-              renderSize: wasmPreviewDimensions({
-                width: previewFrame.frameForm?.width ?? previewFrame.frame?.width,
-                height: previewFrame.frameForm?.height ?? previewFrame.frame?.height,
-                rotate: previewFrame.frameForm?.rotate ?? previewFrame.frame?.rotate,
-              }),
-              timeZone: previewFrame.frameForm?.timezone ?? previewFrame.frame?.timezone ?? undefined,
+              renderSize: previewFrame
+                ? wasmPreviewDimensions({
+                    width: previewFrame.frameForm?.width ?? previewFrame.frame?.width,
+                    height: previewFrame.frameForm?.height ?? previewFrame.frame?.height,
+                    rotate: previewFrame.frameForm?.rotate ?? previewFrame.frame?.rotate,
+                  })
+                : undefined,
+              timeZone:
+                previewFrame?.frameForm?.timezone ??
+                previewFrame?.frame?.timezone ??
+                Intl.DateTimeFormat().resolvedOptions().timeZone,
             },
             async (event: CloudAiChatEvent) => {
               switch (event.type) {
+                case 'chat':
+                  if (event.chatId && event.chatId !== turnChatId) {
+                    actions.rekeyChat(turnChatId, event.chatId)
+                    turnChatId = event.chatId
+                    rekeyedChatId = event.chatId
+                  }
+                  break
                 case 'delta':
                   streamedContent += event.text
-                  actions.updateMessage(chatId, assistantMessageId, {
+                  actions.updateMessage(turnChatId, assistantMessageId, {
                     content: streamedContent,
                     isPlaceholder: false,
                     isStreaming: true,
@@ -1469,7 +1621,7 @@ export const chatLogic = kea<chatLogicType>([
                     break
                   }
                   logContent = lines.join('\n')
-                  actions.updateMessage(chatId, assistantMessageId, {
+                  actions.updateMessage(turnChatId, assistantMessageId, {
                     logContent,
                     isPlaceholder: false,
                   })
@@ -1488,7 +1640,10 @@ export const chatLogic = kea<chatLogicType>([
                   } else {
                     proposals[index] = entry
                   }
-                  actions.updateMessage(chatId, assistantMessageId, { proposals: [...proposals], isPlaceholder: false })
+                  actions.updateMessage(turnChatId, assistantMessageId, {
+                    proposals: [...proposals],
+                    isPlaceholder: false,
+                  })
                   break
                 }
                 case 'scenes':
@@ -1497,7 +1652,7 @@ export const chatLogic = kea<chatLogicType>([
                   } else {
                     const updatedScene = event.scenes?.[0]
                     const targetSceneId = updatedScene?.id || selectedScene?.id
-                    if (updatedScene && targetSceneId) {
+                    if (updatedScene && targetSceneId && frameId !== null) {
                       actions.updateScene(targetSceneId, updatedScene)
                       deliveredSceneId = targetSceneId
                     }
@@ -1512,66 +1667,85 @@ export const chatLogic = kea<chatLogicType>([
               }
             },
             {
+              path: chatPath,
               onResume: ({ attempt, elapsedMs }) => {
                 const lines = logContent ? logContent.split('\n') : []
                 lines.push(`Connection dropped after ${formatElapsed(elapsedMs)} — reconnecting (attempt ${attempt})…`)
                 logContent = lines.join('\n')
-                actions.updateMessage(chatId, assistantMessageId, { logContent, isPlaceholder: false })
+                actions.updateMessage(turnChatId, assistantMessageId, { logContent, isPlaceholder: false })
               },
             }
           )
           if (streamError) {
             throw new Error(streamError)
           }
-          actions.updateMessage(chatId, assistantMessageId, {
+          actions.updateMessage(turnChatId, assistantMessageId, {
             content: streamedContent || 'Done.',
             tool: finalTool ?? 'reply',
             isStreaming: false,
             isPlaceholder: false,
           })
-          if (deliveredSceneId) {
+          if (deliveredSceneId && frameId !== null) {
             // Render the delivered scene once in the wasm preview runtime and
             // hand runtime errors straight back to the agent — a scene that
             // validated as JSON can still fail at render time.
             logContent = `${logContent ? `${logContent}\n` : ''}Checking that the scene renders…`
-            actions.updateMessage(chatId, assistantMessageId, { logContent })
+            actions.updateMessage(turnChatId, assistantMessageId, { logContent })
             try {
-              const frameValues = frameLogic({ frameId: props.frameId }).values
+              const frameValues = frameLogic({ frameId }).values
+              // An ESP32 renders in a few megabytes: check the scene in that
+              // much, so one that would run the frame out of memory goes back
+              // to the assistant instead of onto the frame.
+              const device = frameRenderDevice({ ...frameValues.frame, ...frameValues.frameForm })
               const check = await renderSceneCheck(
                 {
-                  id: props.frameId,
+                  id: frameId,
                   width: frameValues.frameForm?.width ?? frameValues.frame?.width,
                   height: frameValues.frameForm?.height ?? frameValues.frame?.height,
                   rotate: frameValues.frameForm?.rotate ?? frameValues.frame?.rotate,
                   name: frameValues.frameForm?.name ?? frameValues.frame?.name,
                   timezone: frameValues.frameForm?.timezone ?? frameValues.frame?.timezone,
+                  device,
                 },
                 frameValues.frameForm?.scenes ?? frameValues.scenes,
                 deliveredSceneId
               )
+              const checkedAs = device ? ` in the frame's memory (${device.label})` : ''
               const uniqueErrors = Array.from(new Set(check.errors))
-              if (uniqueErrors.length === 0 && check.rendered) {
-                logContent = `${logContent}\nRender check passed${
+              if (check.unavailable) {
+                // The runtime never started: that says nothing about the
+                // scene, so the assistant is not asked to "fix" it.
+                logContent = `${logContent}\nRender check skipped: the preview runtime is not available here`
+                actions.updateMessage(turnChatId, assistantMessageId, { logContent })
+              } else if (uniqueErrors.length === 0 && check.rendered) {
+                logContent = `${logContent}\nRender check passed${checkedAs}${
                   check.renderMs !== null ? ` (${(check.renderMs / 1000).toFixed(1)}s)` : ''
                 }`
-                actions.updateMessage(chatId, assistantMessageId, { logContent })
+                actions.updateMessage(turnChatId, assistantMessageId, { logContent })
               } else {
                 const round = renderCheckRound ?? 0
-                logContent = `${logContent}\nRender check found ${uniqueErrors.length || 'render'} problem${
-                  uniqueErrors.length === 1 ? '' : 's'
-                }`
-                actions.updateMessage(chatId, assistantMessageId, { logContent })
+                logContent = check.outOfMemory
+                  ? `${logContent}\nRender check ran out of memory${checkedAs}`
+                  : `${logContent}\nRender check found ${uniqueErrors.length || 'render'} problem${
+                      uniqueErrors.length === 1 ? '' : 's'
+                    }`
+                actions.updateMessage(turnChatId, assistantMessageId, { logContent })
                 if (round < MAX_RENDER_CHECK_ROUNDS) {
                   const reported = uniqueErrors.slice(0, 8)
                   const feedback =
                     `${RENDER_CHECK_PREFIX} I rendered the delivered scene with the in-browser preview runtime` +
-                    `${check.rendered ? '' : ' and it produced no image'}. It reported these errors:\n` +
+                    `${checkedAs}${check.rendered ? '' : ' and it produced no image'}. It reported these errors:\n` +
                     reported.map((error) => `- ${error}`).join('\n') +
                     (uniqueErrors.length > reported.length
                       ? `\n(and ${uniqueErrors.length - reported.length} more)`
                       : '') +
-                    '\nPlease fix the scene so it renders without errors and deliver the corrected version.'
-                  actions.submitMessage(feedback, chatId, round + 1)
+                    (check.outOfMemory
+                      ? '\nOn the frame this aborts the render and restarts the device. Make the scene need less ' +
+                        'memory: every image the size of the frame is width x height x 4 bytes, so draw into the ' +
+                        "frame's canvas instead of building full-size images, and keep fetched data small. Then " +
+                        'deliver the corrected version.'
+                      : '\nPlease fix the scene so it renders without errors and deliver the corrected version.')
+                  actions.submitMessage(feedback, turnChatId, round + 1)
                   return
                 }
               }
@@ -1583,90 +1757,10 @@ export const chatLogic = kea<chatLogicType>([
           actions.setSubmitting(false)
           return
         }
-        const response = await apiFetch('/api/ai/scenes/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt,
-            chatId,
-            frameId: props.frameId,
-            sceneId: selectedScene?.id ?? null,
-            scene: selectedScene ?? null,
-            selectedNodes: selectedNodesPayload.length ? selectedNodesPayload : undefined,
-            selectedEdges: selectedEdgesPayload.length ? selectedEdgesPayload : undefined,
-            history: values.historyForRequest,
-            requestId,
-          }),
-        })
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}))
-          throw new Error(payload?.detail || 'Failed to send chat message')
-        }
-        const payload = await response.json()
-        const reply = typeof payload?.reply === 'string' ? payload.reply : 'Done.'
-        const tool = typeof payload?.tool === 'string' ? payload.tool : 'reply'
-
-        const chunks = reply.match(/\S+|\s+/g) ?? []
-        let current = ''
-        for (const chunk of chunks) {
-          current += chunk
-          actions.updateMessage(chatId, assistantMessageId, {
-            content: current,
-            tool,
-            isPlaceholder: false,
-            isStreaming: true,
-          })
-          await new Promise((resolve) => setTimeout(resolve, 12))
-        }
-        actions.updateMessage(chatId, assistantMessageId, {
-          content: current,
-          tool,
-          isStreaming: false,
-          isPlaceholder: false,
-        })
-
-        if (tool === 'build_scene') {
-          const scenes = Array.isArray(payload?.scenes) ? payload.scenes : []
-          if (!scenes.length) {
-            throw new Error('No scenes returned from AI')
-          }
-          const frameStore = frameLogic({ frameId: props.frameId })
-          const existingSceneIds = new Set(frameStore.values.scenes.map((scene) => scene.id))
-          const sanitizedScenes = scenes.map((scene: Partial<FrameScene>) => {
-            const sanitizedScene = sanitizeScene(scene, frameStore.values.frameForm)
-            return {
-              ...sanitizedScene,
-              settings: {
-                ...sanitizedScene.settings,
-                autoArrangeOnLoad: true,
-              },
-            }
-          })
-          await frameStore.asyncActions.applyTemplate({
-            scenes: sanitizedScenes,
-            name: payload?.title || 'AI Generated Scene',
-          })
-          await new Promise((resolve) => setTimeout(resolve, 0))
-          const updatedScenes = frameStore.values.frameForm?.scenes ?? frameStore.values.scenes
-          const newlyAddedScene = updatedScenes.find((scene) => !existingSceneIds.has(scene.id))
-          if (newlyAddedScene) {
-            scenesLogic({ frameId: props.frameId }).actions.focusScene(newlyAddedScene.id)
-          }
-        }
-
-        if (tool === 'modify_scene') {
-          const scenes = Array.isArray(payload?.scenes) ? payload.scenes : []
-          const updatedScene = scenes[0]
-          const sceneId = updatedScene?.id || selectedScene?.id
-          if (!updatedScene || !sceneId) {
-            throw new Error('No scene returned from AI to update')
-          }
-          actions.updateScene(sceneId, updatedScene)
-        }
       } catch (error) {
         console.error(error)
         actions.setError(error instanceof Error ? error.message : 'Failed to send chat message')
-        actions.updateMessage(chatId, assistantMessageId, {
+        actions.updateMessage(rekeyedChatId ?? chatId, assistantMessageId, {
           content: error instanceof Error ? error.message : 'Failed to send chat message',
           tool: 'error',
           isPlaceholder: false,
@@ -1675,38 +1769,24 @@ export const chatLogic = kea<chatLogicType>([
       }
       actions.setSubmitting(false)
     },
-    [socketLogic.actionTypes.aiSceneLog]: ({ log }) => {
-      if (!log.requestId || log.requestId !== values.activeRequestId) {
+    openChatScene: ({ sceneId }) => {
+      if (props.frameId === null) {
         return
       }
-      const logMessageId = values.activeLogMessageId
-      const chatId = values.activeChatId
-      if (!logMessageId || !chatId) {
+      scenesLogic({ frameId: props.frameId }).actions.focusScene(sceneId)
+      router.actions.push(urls.scenes(props.frameId, sceneId))
+    },
+    openChatApp: () => {
+      const context = values.chatAppContext
+      if (props.frameId === null || !context?.nodeData) {
         return
       }
-      const existing = values.messages.find((message) => message.id === logMessageId)?.logContent || ''
-      const startTimestamp = values.activeLogStartTime || log.timestamp
-      if (!values.activeLogStartTime) {
-        actions.setActiveLogStartTime(log.timestamp)
-      }
-      const startTime = new Date(startTimestamp).getTime()
-      const logTime = new Date(log.timestamp).getTime()
-      const elapsedSeconds = Number.isNaN(startTime) || Number.isNaN(logTime) ? null : Math.max(0, logTime - startTime)
-      const elapsedLabel = elapsedSeconds === null ? '' : `${Math.round((elapsedSeconds / 1000) * 10) / 10}s `
-      const stageLabel = log.stage ? `[${log.stage}] ` : ''
-      const statusLabel = log.status && log.status !== 'info' ? `${log.status.toUpperCase()}: ` : ''
-      const line = `${elapsedLabel}${stageLabel}${statusLabel}${log.message}`
-      const nextContent = existing ? `${existing}\n${line}` : line
-      const isTerminalStatus = log.status === 'success' || log.status === 'error'
-      actions.updateMessage(chatId, logMessageId, {
-        logContent: nextContent,
-        isPlaceholder: false,
-        isStreaming: !isTerminalStatus,
-      })
+      frameEditorsLogic({ frameId: props.frameId }).actions.editApp(context.sceneId, context.nodeId, context.nodeData)
+      router.actions.push(urls.apps(props.frameId, context.sceneId, context.nodeId))
     },
   })),
-  afterMount(({ actions, values }) => {
-    if (!isFrameControlMode() && (isCloudMode() || frameProjectId(values.frameForm, values.frame))) {
+  afterMount(({ actions, values, props }) => {
+    if (canListChats(props, values)) {
       actions.loadChats()
     }
     if (values.activeEditAppContext) {

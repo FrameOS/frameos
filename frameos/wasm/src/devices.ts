@@ -7,6 +7,10 @@
 // refused the way they are on a full frame, and the render comes back as
 // `outOfMemory` instead of a picture.
 //
+// frontend/src/utils/deviceLimits.ts is this file for the self-hosted
+// frontend, which does not depend on this package; the cloud's shared-spa
+// test `device-limits.test.ts` holds the two together.
+//
 // Every number below is either a firmware constant or a measurement off a
 // real frame — keep them in step with
 // embedded/esp32/components/frameos_display/frameos_display.c,
@@ -194,6 +198,29 @@ export function describeDeviceLimits(limits: DeviceLimits): string {
   return parts.join(', ')
 }
 
+/** The limits an ESP32 frame renders under: its PSRAM (what it reports as
+ * `hardware.memory.psramBytes`) at its panel size, running as an ESP32. */
+export function esp32DeviceLimits(
+  width: number,
+  height: number,
+  psramBytes: number = ESP32_PSRAM_BYTES
+): DeviceLimits {
+  return {
+    memoryBytes: esp32PreviewMemoryBytes(width, height, psramBytes),
+    // The firmware's separate PSRAM safety margin is deliberately not
+    // simulated: subtracting it here shrank the planning budget enough that
+    // the interpreter declined to fuse a panel into the canvas and allocated
+    // a standalone image instead — the opposite of what the device does, and
+    // a worse prediction of it. A Pi has no such cliff, so it keeps its.
+    memoryReserveBytes: 0,
+    previewOverheadBytes: esp32PreviewOverheadBytes(width, height, psramBytes),
+    jsMemoryLimitMb: ESP32_JS_MEMORY_LIMIT_MB,
+    jsMaxStackKb: ESP32_JS_MAX_STACK_KB,
+    maxHttpResponseBytes: ESP32_MAX_HTTP_RESPONSE_BYTES,
+    embedded: true,
+  }
+}
+
 /** The limits for a preset at a given panel size, or null for no simulation.
  * Panel size matters on the ESP32: the canvas comes out of the same PSRAM as
  * everything else, so a bigger panel leaves less of it. */
@@ -211,20 +238,6 @@ export function deviceLimitsFor(
     maxHttpResponseBytes: 0,
     embedded: false,
   })
-  const esp32 = (psramBytes: number): DeviceLimits => ({
-    memoryBytes: esp32PreviewMemoryBytes(width, height, psramBytes),
-    // The firmware's separate PSRAM safety margin is deliberately not
-    // simulated: subtracting it here shrank the planning budget enough that
-    // the interpreter declined to fuse a panel into the canvas and allocated
-    // a standalone image instead — the opposite of what the device does, and
-    // a worse prediction of it. A Pi has no such cliff, so it keeps its.
-    memoryReserveBytes: 0,
-    previewOverheadBytes: esp32PreviewOverheadBytes(width, height, psramBytes),
-    jsMemoryLimitMb: ESP32_JS_MEMORY_LIMIT_MB,
-    jsMaxStackKb: ESP32_JS_MAX_STACK_KB,
-    maxHttpResponseBytes: ESP32_MAX_HTTP_RESPONSE_BYTES,
-    embedded: true,
-  })
 
   switch (key) {
     case 'pi':
@@ -232,10 +245,29 @@ export function deviceLimitsFor(
     case 'piZero':
       return pi(PI_ZERO_NOMINAL_BYTES)
     case 'esp32_16mb':
-      return esp32(ESP32_PSRAM_BYTES_16MB)
+      return esp32DeviceLimits(width, height, ESP32_PSRAM_BYTES_16MB)
     case 'esp32':
-      return esp32(ESP32_PSRAM_BYTES)
+      return esp32DeviceLimits(width, height, ESP32_PSRAM_BYTES)
     default:
       return null
   }
+}
+
+function megabytes(bytes: number): string {
+  return `${(Math.max(0, bytes) / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** One sentence for a render that ran out of memory under `limits`, in the
+ * device's own bytes (the ones its logs report): for the person looking at
+ * the preview, and for an AI that wrote the scene and has to fix it. */
+export function describeOutOfMemory(
+  memory: { refusedBytes: number; usedBytes: number },
+  limits: DeviceLimits
+): string {
+  const ceiling = limits.memoryBytes - limits.previewOverheadBytes
+  const used = memory.usedBytes - limits.previewOverheadBytes
+  return (
+    `Out of memory: an allocation of ${megabytes(memory.refusedBytes)} was refused with ` +
+    `${megabytes(used)} of the device's ${megabytes(ceiling)} in use.`
+  )
 }

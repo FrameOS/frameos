@@ -3544,3 +3544,151 @@ html[data-frameos-theme='dark'] select.with-triangle:focus {
     transform: rotate(360deg);
   }
 }
+
+/* The AI box (AiPromptBox.tsx): the search box's size and shape, with a
+   moving gradient outline that shows on hover and focus, and example
+   questions that slide in and out of its placeholder. */
+@property --frameos-ai-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes frameosAiSpin {
+  to {
+    --frameos-ai-angle: 360deg;
+  }
+}
+
+.frameos-ai-box {
+  isolation: isolate;
+}
+
+.frameos-ai-box::before,
+.frameos-ai-box::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  border-radius: calc(1rem + 2px);
+  background: conic-gradient(
+    from var(--frameos-ai-angle),
+    #60a5fa,
+    #a78bfa,
+    #f472b6,
+    #fb923c,
+    #facc15,
+    #34d399,
+    #60a5fa
+  );
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  animation: frameosAiSpin 4s linear infinite;
+}
+
+/* The outline: the gradient with the middle masked out. */
+.frameos-ai-box::before {
+  inset: -2px;
+  padding: 2px;
+  z-index: 2;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+/* The glow behind it. */
+.frameos-ai-box::after {
+  inset: -3px;
+  z-index: 0;
+  filter: blur(14px);
+}
+
+.frameos-ai-box:hover::before,
+.frameos-ai-box:focus-within::before {
+  opacity: 1;
+}
+
+.frameos-ai-box:hover::after {
+  opacity: 0.3;
+}
+
+.frameos-ai-box:focus-within::after {
+  opacity: 0.45;
+}
+
+.frameos-ai-box-input:focus {
+  box-shadow: 0 16px 36px rgba(148, 163, 184, 0.35);
+}
+
+.frameos-ai-box-icon {
+  color: #8b5cf6;
+}
+
+.frameos-ai-title-icon {
+  color: #8b5cf6;
+}
+
+.frameos-ai-box-send {
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1, #a855f7 55%, #ec4899);
+  box-shadow: 0 6px 16px rgba(139, 92, 246, 0.35);
+}
+
+/* One example's life: slide up into view, stay, slide up out of view. The
+   duration is AI_EXAMPLE_INTERVAL_MS (aiPromptBoxLogic.ts); a new example
+   restarts it. */
+@keyframes frameosAiExample {
+  0% {
+    opacity: 0;
+    transform: translateY(60%);
+    filter: blur(2px);
+  }
+  10% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+  88% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-60%);
+    filter: blur(2px);
+  }
+}
+
+.frameos-ai-example {
+  display: block;
+  animation: frameosAiExample 4.2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.frameos-theme-dark .frameos-ai-box-icon,
+.frameos-theme-dark .frameos-ai-title-icon,
+html[data-frameos-theme='dark'] .frameos-ai-box-icon,
+html[data-frameos-theme='dark'] .frameos-ai-title-icon {
+  color: #c4b5fd;
+}
+
+.frameos-theme-dark .frameos-ai-example,
+html[data-frameos-theme='dark'] .frameos-ai-example {
+  color: #7d8593;
+}
+
+.frameos-theme-dark .frameos-ai-box-input:focus,
+html[data-frameos-theme='dark'] .frameos-ai-box-input:focus {
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .frameos-ai-box::before,
+  .frameos-ai-box::after {
+    animation: none;
+  }
+
+  .frameos-ai-example {
+    animation: none;
+  }
+}

@@ -1,3 +1,4 @@
+import re
 from uuid import NAMESPACE_URL, uuid4, uuid5
 from sqlalchemy import Integer, String, DateTime, ForeignKey, Text, func
 from sqlalchemy.orm import Session, relationship, backref, mapped_column
@@ -9,7 +10,8 @@ class Chat(Base):
     __tablename__ = 'chat'
     id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
-    frame_id = mapped_column(Integer, ForeignKey('frame.id'), nullable=False)
+    # Null for a chat about no frame in particular (the frames home's AI box).
+    frame_id = mapped_column(Integer, ForeignKey('frame.id'), nullable=True)
     scene_id = mapped_column(String(128), nullable=True)
     context_type = mapped_column(String(32), nullable=True)
     context_id = mapped_column(String(256), nullable=True)
@@ -79,3 +81,22 @@ def find_project_chat(db: Session, project_id: int, chat_id: str | None) -> "Cha
         return None
     candidates = {chat_id, project_chat_id(project_id, chat_id)}
     return db.query(Chat).filter(Chat.project_id == project_id, Chat.id.in_(candidates)).first()
+
+
+MAX_CHAT_TITLE_CHARS = 60
+
+
+def derive_chat_title(prompt: str) -> str | None:
+    """A chat's title is its first user message, cut to one line at a word:
+    deriveChatTitle in the cloud's chat-store.ts, which the history lists
+    chats under on both planes."""
+    line = re.sub(r"\s+", " ", prompt or "").strip()
+    if not line:
+        return None
+    if len(line) <= MAX_CHAT_TITLE_CHARS:
+        return line
+    cut = line[:MAX_CHAT_TITLE_CHARS]
+    if line[MAX_CHAT_TITLE_CHARS] == " ":
+        return f"{cut}…"
+    last_space = cut.rfind(" ")
+    return f"{(cut[:last_space] if last_space > MAX_CHAT_TITLE_CHARS / 2 else cut).rstrip()}…"

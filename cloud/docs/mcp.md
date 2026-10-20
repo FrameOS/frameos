@@ -222,6 +222,16 @@ the details the route sent, and — for the codes whose fix is not obvious
 `turn_in_progress`, quota errors, …) — one sentence on what to do
 (`packages/mcp/src/result.ts`).
 
+### The AI chat uses these tools
+
+The workspace's AI chat (`docs/ai-chat.md`, `POST /api/ai/chat`) connects to
+this server in-process (`connectInProcessMcp`, `src/lib/ai/mcp-tools.ts`) and
+offers the model every tool except the AI tools, the API-token tools,
+`frame_delete`, `frame_revoke` and `frame_claim_token_create`. The calls carry
+the chat request's own session cookie (and the Origin it passed the CSRF check
+with) or its API token, so the routes treat them like the user's own clicks.
+A tool added here is a tool the chat has.
+
 ### Tests
 
 `pnpm --filter @frameos-cloud/mcp test` drives the server through an

@@ -173,6 +173,43 @@ describe("chat titles and message counts", () => {
     ]);
   });
 
+  it("lists the chats about no frame for the frames home, every chat without the flag", async () => {
+    const { accountId } = await signIn();
+    const [client] = await db
+      .insert(linkedClients)
+      .values({
+        accountId,
+        clientKind: "frame",
+        publicDisplayName: "Hallway",
+        tokenReference: `ai-chats-frameless-${userCounter}`,
+      })
+      .returning();
+    const [frame] = await db
+      .insert(frames)
+      .values({
+        accountId,
+        linkedClientId: client!.id,
+        name: "Hallway",
+        publicKey: `ai-chats-frameless-key-${userCounter}`,
+        status: "active",
+      })
+      .returning();
+    const home = crypto.randomUUID();
+    const onFrame = crypto.randomUUID();
+    await ensureChat(db, accountId, { chatId: home });
+    await ensureChat(db, accountId, { chatId: onFrame, frameId: frame!.id });
+    for (const chatId of [home, onFrame]) {
+      await appendChatMessage(db, chatId, { content: "hello", role: "user" });
+    }
+    const ids = async (query: string) => {
+      const response = await listChatsRoute(new NextRequest(new URL(`/api/ai/chats${query}`, baseUrl)));
+      return ((await response.json()) as { chats: { id: string }[] }).chats.map((entry) => entry.id).sort();
+    };
+    expect(await ids("")).toEqual([home, onFrame].sort());
+    expect(await ids("?frameless=1")).toEqual([home]);
+    expect(await ids(`?frameId=${frame!.id}`)).toEqual([onFrame]);
+  });
+
   it("keeps message_count at what the cap retains", async () => {
     const { accountId } = await signIn();
     const chatId = crypto.randomUUID();

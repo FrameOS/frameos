@@ -13,6 +13,7 @@ from app.utils.embedded_render import (
     _STATE_MARKER,
     _parse_marker,
 )
+from app.utils.device_limits import esp32_device_limits
 
 STDERR = """[scene] {"event":"render:done","sceneId":"scene-a","ms":1.0}
 __FRAMEOS_SCENE_STATE__{"sceneId":"scene-a","state":{"word":"hi"},"seeded":true}
@@ -103,6 +104,48 @@ async def test_render_queue_refuses_past_the_waiter_cap(monkeypatch, tmp_path):
     assert all(result == b"\x00" * 16 for result in results)
     assert embedded_render.render_queue_depth() == 0
     assert await render() == b"\x00" * 16
+
+
+@pytest.mark.asyncio
+async def test_a_render_under_a_device_ceiling_reports_running_out(monkeypatch, tmp_path):
+    """The harness gets the ceiling, and a refused allocation comes back as
+    out_of_memory with the scene's log lines, not as a bare None."""
+    from types import SimpleNamespace
+
+    from app.utils import embedded_render
+
+    sent: list[dict] = []
+
+    class FakeProcess:
+        returncode = 1
+
+        async def communicate(self, request):
+            sent.append(json.loads(request))
+            return b"", (
+                b'[scene] {"event":"render:scene","sceneId":"s"}\n'
+                b'__FRAMEOS_OUT_OF_MEMORY__{"refusedBytes":7680004,"usedBytes":8416300}\n'
+                b"embedded_wasm_render: render ran out of memory\n"
+            )
+
+    async def fake_exec(*_args, **_kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(embedded_render.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(embedded_render.shutil, "which", lambda _name: "/usr/bin/node")
+    monkeypatch.setattr(embedded_render, "wasm_assets_dir", lambda: tmp_path)
+    monkeypatch.setattr(embedded_render, "RENDER_HARNESS", Path(embedded_render.__file__))
+    monkeypatch.setattr(embedded_render, "_render_semaphore", asyncio.Semaphore(embedded_render.RENDER_CONCURRENCY))
+    monkeypatch.setattr(embedded_render, "_render_waiters", 0)
+
+    frame = SimpleNamespace(id=1, name="f", timezone=None, network={}, scenes=[{"id": "s", "nodes": [], "edges": []}])
+    limits = esp32_device_limits(1200, 1600, 8 * 1024 * 1024)
+    result = await embedded_render.render_scene(frame, 1200, 1600, device_limits=limits)
+
+    assert sent[0]["deviceLimits"] == limits
+    assert result.rgba is None
+    assert result.out_of_memory == {"refusedBytes": 7680004, "usedBytes": 8416300}
+    assert result.error == "render ran out of memory"
+    assert result.scene_logs == ['{"event":"render:scene","sceneId":"s"}']
 
 
 # The renderer's HTTP child checks the address its socket connects to (its

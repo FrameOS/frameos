@@ -2,7 +2,7 @@
 // vanished on reload); v2 stores every turn. Chat ids are client-minted uuids
 // — ownership is checked on every access, and an id owned by another account
 // is refused, never adopted.
-import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { aiChatMessages, aiChats, createDb } from "@frameos-cloud/db";
 import { stopTurnsForChat } from "./turn-runner";
 
@@ -235,11 +235,14 @@ export async function appendChatMessage(
 export async function listChats(
   db: Database,
   accountId: string,
-  options: { frameId?: string | null; limit: number; offset: number },
+  options: { frameId?: string | null; frameless?: boolean; limit: number; offset: number },
 ) {
   const conditions = [eq(aiChats.accountId, accountId)];
   if (options.frameId) {
     conditions.push(eq(aiChats.frameId, options.frameId));
+  } else if (options.frameless) {
+    // The frames home's drawer: the chats about no frame.
+    conditions.push(isNull(aiChats.frameId));
   }
   const rows = await db
     .select()

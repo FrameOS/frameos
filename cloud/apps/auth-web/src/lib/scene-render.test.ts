@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
+import { esp32DeviceLimits } from "frameos-wasm";
 import {
   acquireRenderSlot,
   encodePng,
@@ -188,5 +189,45 @@ describe.skipIf(!rendererAvailable())("renderScenes", () => {
     expect(result.png.subarray(1, 4).toString("ascii")).toBe("PNG");
     expect(result.logs.some((line) => line.includes("initialized"))).toBe(true);
     expect(result.state).toMatchObject({ text: "hi" });
+  }, 60_000);
+
+  it("fails a render that does not fit the device's memory as render_out_of_memory", async () => {
+    // A full-panel SVG drawn with an offset is rasterized into an image of
+    // its own: 7.68 MB at 1200x1600, which the E1004 (8 MB PSRAM, RGB565
+    // canvas) does not have beside everything else.
+    const svg =
+      '<svg viewBox="0 0 1200 1600" width="1200" height="1600"><rect width="1200" height="1600" fill="#efe7d7"/></svg>';
+    const attempt = renderScenes({
+      deviceLimits: esp32DeviceLimits(1200, 1600, 8 * 1024 * 1024),
+      height: 1600,
+      scenes: [
+        {
+          edges: [
+            { id: "e", source: "e1", sourceHandle: "next", target: "svg", targetHandle: "prev" },
+          ],
+          fields: [],
+          id: "s1",
+          name: "Too big",
+          nodes: [
+            { data: { keyword: "render" }, id: "e1", position: { x: 0, y: 0 }, type: "event" },
+            {
+              data: {
+                config: { blendMode: "normal", offsetX: "1", offsetY: "0", placement: "center", svg },
+                keyword: "render/svg",
+              },
+              id: "svg",
+              position: { x: 200, y: 0 },
+              type: "app",
+            },
+          ],
+          settings: { execution: "interpreted" },
+        },
+      ],
+      width: 1200,
+    });
+    await expect(attempt).rejects.toMatchObject({
+      code: "render_out_of_memory",
+      message: expect.stringMatching(/^Out of memory: an allocation of 7\.3 MB was refused/),
+    });
   }, 60_000);
 });

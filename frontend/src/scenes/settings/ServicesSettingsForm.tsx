@@ -162,6 +162,25 @@ export function ServicesSettingsForm({ divider = true }: { divider?: boolean }):
                   <Field name="chatModel" label="Chat model">
                     <TextInput name="chatModel" placeholder="Use shared model" />
                   </Field>
+                  <Field
+                    name="chatReasoningEffort"
+                    label="Chat reasoning effort"
+                    tooltip="How much the AI chat's model thinks before answering. Higher is slower and costs more; it mostly pays off on complex scene builds. Ignored by models without reasoning."
+                  >
+                    {({ value, onChange }) => (
+                      <Select
+                        value={typeof value === 'string' ? value : ''}
+                        onChange={onChange}
+                        options={[
+                          { value: '', label: 'Default (low)' },
+                          { value: 'minimal', label: 'Minimal' },
+                          { value: 'low', label: 'Low' },
+                          { value: 'medium', label: 'Medium' },
+                          { value: 'high', label: 'High' },
+                        ]}
+                      />
+                    )}
+                  </Field>
                   <Field name="sceneModel" label="Scene generation model">
                     <TextInput name="sceneModel" placeholder="Use shared model" />
                   </Field>

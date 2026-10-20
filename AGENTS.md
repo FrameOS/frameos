@@ -139,8 +139,25 @@
   server's wasm runtime (`scene-render.ts`, as `POST /api/scenes/render`) at
   the client's preview size (`renderSize` in the request) and returns the PNG
   inside the tool result. Renders never carry the account's service keys and
-  spend the account's `scenes:render` budget. The backend's scene AI has no
-  tool loop and no equivalent.
+  spend the account's `scenes:render` budget.
+
+## The AI chat is one thing on both planes: `docs/ai-chat.md`
+
+- Every AI chat in the workspace (the frames home's AI box, the box at the
+  top of a frame's page, the editors' chat drawer) is ONE agent loop with the SAME
+  NDJSON events on both planes: the cloud's `src/lib/ai/loop.ts` and its port
+  `backend/app/utils/ai_chat_agent.py`, read by one `chatLogic`. An event,
+  rule or editor tool added on one plane is added on the other.
+- On an ESP32 frame the render check and `render_scene` run the scene in that
+  frame's memory (`esp32DeviceLimits`; `docs/device-limits-fixtures.json`
+  pins the TS copy and the Python port), so a scene that would abort the
+  device goes back to the model first. `docs/ai-chat.md` "Renders run in the
+  frame's memory".
+- Its tools are its plane's MCP tools, run in-process with the chat request's
+  own credential (`ai_chat_tools.py`, `mcp-tools.ts`), plus the editor tools.
+  A new MCP tool is automatically a chat tool; keep `EXCLUDED_MCP_TOOLS` in
+  step on both planes. `patch_scene` / `edit_app_source` replay
+  `docs/ai-scene-patch-fixtures.json` on both.
 
 ## Writing scenes: `docs/scene-guide.md` is what every author reads
 

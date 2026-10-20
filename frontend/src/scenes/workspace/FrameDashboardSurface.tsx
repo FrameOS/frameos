@@ -40,6 +40,7 @@ import { frameLogic } from '../frame/frameLogic'
 import { onlyAwaitingDeviceAck } from '../frame/frameDeployUtils'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
+import { AiPromptBox } from './AiPromptBox'
 import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
 import { SceneUpdateBanner } from './SceneUpdateBanner'
 import { CloudDeviceScenesBanner } from './CloudDeviceScenesBanner'
@@ -112,6 +113,9 @@ interface FrameDashboardSurfaceProps {
   frameMatchesSearch?: boolean
   sectionId?: string
   showSceneMenus?: boolean
+  /** The AI box at the top of the page, above the frame's header (a
+   * frame's own page; the frames home has it in the shell's top bar). */
+  showAiBox?: boolean
 }
 
 export function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefined): boolean {
@@ -1021,6 +1025,7 @@ export function FrameDashboardSurface({
   frameMatchesSearch,
   sectionId,
   showSceneMenus = false,
+  showAiBox = false,
 }: FrameDashboardSurfaceProps): JSX.Element {
   const { applyTemplate } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
@@ -1056,6 +1061,12 @@ export function FrameDashboardSurface({
       onDrop={handleFrameDrop}
       className={clsx('group @container scroll-mt-6', archived && 'opacity-80')}
     >
+      {showAiBox ? (
+        // Where the frames home has it: the shell's top bar row (FrameosShell).
+        <div className="mb-8 flex flex-row items-center gap-3">
+          <AiPromptBox frameId={frame.id} className="@md:max-w-xl" />
+        </div>
+      ) : null}
       <FrameDashboardHeader frame={frame} archived={archived} />
       <CloudPendingFrameBanner frame={frame} />
       <CloudDeviceScenesBanner frame={frame} />

@@ -1,10 +1,6 @@
 import { useActions, useValues } from 'kea'
-import { router } from 'kea-router'
 import { chatLogic, type ChatInstallProposal } from './chatLogic'
 import { cloudSettingsGroupLabels } from '../../../../utils/cloudAiChat'
-import { frameLogic } from '../../frameLogic'
-import { frameEditorsLogic } from '../../frameEditorsLogic'
-import { scenesLogic } from '../Scenes/scenesLogic'
 import { settingsLogic } from '../../../settings/settingsLogic'
 import { Button } from '../../../../components/Button'
 import { Markdown } from '../../../../components/Markdown'
@@ -14,14 +10,17 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import clsx from 'clsx'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
-import { ChevronLeftIcon } from '@heroicons/react/24/solid'
+import { ChatBubbleLeftRightIcon, ClockIcon, PlusIcon } from '@heroicons/react/24/outline'
 import { urls } from '../../../../urls'
+import { isCloudMode } from '../../../../utils/cloudMode'
+import type { FrameId } from '../../../../types'
 
-export function Chat() {
-  const { frameId, scenes } = useValues(frameLogic)
-  const { selectedSceneId } = useValues(frameEditorsLogic({ frameId }))
+/** The AI chat (docs/ai-chat.md): about one frame, or — frameId null, from
+ * the frames home — about no frame in particular. */
+export function Chat({ frameId, sceneId = null }: { frameId: FrameId | null; sceneId?: string | null }) {
   const { savedSettings } = useValues(settingsLogic)
   const {
+    scenes,
     messages,
     input,
     isSubmitting,
@@ -41,11 +40,12 @@ export function Chat() {
     contextSelectionSummary,
     logExpanded,
     chatLabelForChat,
-  } = useValues(chatLogic({ frameId, sceneId: selectedSceneId }))
+    chatTitleForChat,
+  } = useValues(chatLogic({ frameId, sceneId }))
   const {
     setInput,
     submitMessage,
-    clearChat,
+    createChat,
     toggleContextItemsExpanded,
     toggleLogExpanded,
     selectChat,
@@ -53,9 +53,9 @@ export function Chat() {
     loadMoreChats,
     approveInstallProposal,
     dismissInstallProposal,
-  } = useActions(chatLogic({ frameId, sceneId: selectedSceneId }))
-  const { editApp } = useActions(frameEditorsLogic({ frameId }))
-  const { focusScene } = useActions(scenesLogic({ frameId }))
+    openChatScene,
+    openChatApp,
+  } = useActions(chatLogic({ frameId, sceneId }))
   const [atBottom, setAtBottom] = useState(true)
   const virtuosoRef = useRef<VirtuosoHandle>(null)
   const scrollerElementRef = useRef<HTMLElement | null>(null)
@@ -63,12 +63,8 @@ export function Chat() {
   const lastMessage = messages[messages.length - 1]
   const isChatView = chatView === 'chat' && activeChatId
   const hasBackendApiKey = Boolean(savedSettings?.openAI?.backendApiKey?.trim())
-  const missingBackendApiKey = !hasBackendApiKey
-
-  const focusSceneById = (sceneId: string) => {
-    focusScene(sceneId)
-    router.actions.push(urls.scenes(frameId, sceneId))
-  }
+  // The cloud has a shared key; a backend chats only with its own.
+  const missingBackendApiKey = !isCloudMode() && !hasBackendApiKey
 
   const appLabel =
     chatAppContext?.nodeData?.name || chatAppContext?.nodeData?.keyword || chatAppContext?.nodeId || 'this app'
@@ -126,7 +122,9 @@ export function Chat() {
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+    // Enter sends; Shift+Enter starts a new line. Not mid-composition (an
+    // IME's Enter picks a candidate).
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
       if (!isSubmitting && input.trim()) {
         handleSubmit()
@@ -145,7 +143,7 @@ export function Chat() {
       return
     }
     event.preventDefault()
-    focusSceneById(sceneId)
+    openChatScene(sceneId)
   }
 
   const handleOpenScene = (event: React.MouseEvent<HTMLAnchorElement>) => {
@@ -154,18 +152,16 @@ export function Chat() {
 
   const handleOpenApp = (e: React.MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault()
-    if (!chatAppContext?.nodeData) {
-      return
-    }
-    editApp(chatAppContext.sceneId, chatAppContext.nodeId, chatAppContext.nodeData)
-    router.actions.push(urls.apps(frameId, chatAppContext.sceneId, chatAppContext.nodeId))
+    openChatApp()
   }
 
   const formatTimestamp = (timestamp?: string | null) => {
     if (!timestamp) {
       return 'Just now'
     }
-    const date = new Date(timestamp)
+    // The backend writes UTC without a zone (datetime.utcnow); read as local
+    // time it was off by the browser's offset.
+    const date = new Date(/(Z|[+-]\d\d:?\d\d)$/i.test(timestamp) ? timestamp : `${timestamp}Z`)
     if (Number.isNaN(date.getTime())) {
       return 'Just now'
     }
@@ -192,7 +188,7 @@ export function Chat() {
     return (
       <>
         <span>Scene generated: </span>
-        {targetScene ? (
+        {targetScene && frameId !== null ? (
           <a
             href={urls.scenes(frameId, targetScene.id)}
             onClick={(event) => handleSceneLinkClick(event, targetScene.id)}
@@ -472,7 +468,13 @@ export function Chat() {
       {missingBackendApiKey ? (
         <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-700">
           <div className="font-semibold">OpenAI backend API key not configured.</div>
-          <div className="mt-1 opacity-80">Add the backend API key in Settings to enable chat responses.</div>
+          <div className="mt-1 opacity-80">
+            Add the backend API key in{' '}
+            <a href={urls.settings()} className="underline underline-offset-2">
+              Settings
+            </a>{' '}
+            to enable chat responses.
+          </div>
         </div>
       ) : null}
       <div className="flex items-center justify-between">
@@ -482,7 +484,7 @@ export function Chat() {
               <span>
                 Chat about{' '}
                 <a
-                  href={chatSceneId ? urls.scenes(frameId, chatSceneId) : '#'}
+                  href={chatSceneId && frameId !== null ? urls.scenes(frameId, chatSceneId) : '#'}
                   onClick={handleOpenScene}
                   className="frameos-link underline underline-offset-2 inline"
                 >
@@ -500,6 +502,8 @@ export function Chat() {
                   `"${appLabel}"`
                 )}
               </span>
+            ) : frameId === null ? (
+              'Chat about your frames'
             ) : (
               'Chat about this frame'
             )
@@ -512,12 +516,36 @@ export function Chat() {
             <Button
               color="secondary"
               size="small"
-              onClick={() => activeChatId && clearChat(activeChatId)}
-              disabled={isSubmitting || !activeChatId}
+              onClick={() => backToList()}
+              title="Earlier chats"
+              className="flex items-center gap-1"
             >
-              Clear
+              <ClockIcon className="h-4 w-4" aria-hidden />
+              History
+            </Button>
+          ) : activeChatId ? (
+            <Button
+              color="secondary"
+              size="small"
+              onClick={() => selectChat(activeChatId)}
+              title="Back to the open chat"
+              className="flex items-center gap-1"
+            >
+              <ChatBubbleLeftRightIcon className="h-4 w-4" aria-hidden />
+              Back to chat
             </Button>
           ) : null}
+          <Button
+            color="secondary"
+            size="small"
+            onClick={() => createChat()}
+            disabled={isSubmitting}
+            title="Start a new chat"
+            className="flex items-center gap-1"
+          >
+            <PlusIcon className="h-4 w-4" aria-hidden />
+            New chat
+          </Button>
         </div>
       </div>
       {isChatView ? (
@@ -536,7 +564,9 @@ export function Chat() {
                       ? 'Ask for edits to this app, or ask questions about how it works.'
                       : chatSceneName
                       ? 'Ask for a new scene, request edits to the current scene, or ask questions about FrameOS.'
-                      : 'Ask for a new scene, or ask questions about this frame or FrameOS.'}
+                      : frameId === null
+                      ? 'Ask what is on a frame, change a frame or its scenes, or build something new.'
+                      : 'Ask what is on this frame, change its settings or scenes, or build something new.'}
                   </div>
                 </div>
               </div>
@@ -642,7 +672,7 @@ export function Chat() {
             className="min-h-24"
           />
           <div className="frame-tool-muted flex items-center justify-between text-xs">
-            <span>{contextSelectionSummary ?? 'Press Ctrl/Cmd + Enter to send'}</span>
+            <span>{contextSelectionSummary ?? 'Enter to send, Shift + Enter for a new line'}</span>
             <Button
               color={sendButtonColor}
               size="tiny"
@@ -660,11 +690,12 @@ export function Chat() {
               <Spinner />
             </div>
           ) : visibleChats.length === 0 ? (
-            <div className="frame-tool-muted text-sm">No chats yet. Start a new conversation.</div>
+            <div className="frame-tool-muted text-sm">No earlier chats yet.</div>
           ) : (
             <div className="space-y-2">
               {visibleChats.map((chat) => {
                 const isActive = chat.id === activeChatId
+                const title = chatTitleForChat(chat)
                 return (
                   <button
                     key={chat.id}
@@ -677,11 +708,11 @@ export function Chat() {
                     )}
                     onClick={() => selectChat(chat.id)}
                   >
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium">{chatLabelForChat(chat)}</span>
-                      <span className="frame-tool-muted text-xs">{formatTimestamp(chat.updatedAt)}</span>
+                    <div className="truncate text-sm font-medium">{title ?? chatLabelForChat(chat)}</div>
+                    <div className="frame-tool-muted mt-1 flex items-center justify-between gap-2 text-xs">
+                      <span className="truncate">{title ? chatLabelForChat(chat) : null}</span>
+                      <span className="shrink-0">{formatTimestamp(chat.updatedAt)}</span>
                     </div>
-                    <div className="frame-tool-muted text-xs mt-1">Chat ID: {chat.id}</div>
                   </button>
                 )
               })}

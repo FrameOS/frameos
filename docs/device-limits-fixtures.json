@@ -1,0 +1,37 @@
+{
+  "description": "esp32DeviceLimits (frameos/wasm/src/devices.ts, its copy frontend/src/utils/deviceLimits.ts) and esp32_device_limits (backend/app/utils/device_limits.py): the wasm renderer ceiling for an ESP32 frame. Replayed by cloud/apps/auth-web/src/lib/device-limits.test.ts and backend/app/utils/tests/test_device_limits.py.",
+  "cases": [
+    {
+      "name": "7.3 inch on an 8 MB board: RGBX canvas",
+      "width": 800,
+      "height": 480,
+      "psramBytes": 8388608,
+      "memoryBytes": 7148032,
+      "previewOverheadBytes": 0
+    },
+    {
+      "name": "13.3 inch on an 8 MB board (the E1004): RGB565 canvas",
+      "width": 1200,
+      "height": 1600,
+      "psramBytes": 8388608,
+      "memoryBytes": 10220032,
+      "previewOverheadBytes": 3840000
+    },
+    {
+      "name": "13.3 inch on a 16 MB board: RGBX canvas",
+      "width": 1200,
+      "height": 1600,
+      "psramBytes": 16777216,
+      "memoryBytes": 14768640,
+      "previewOverheadBytes": 0
+    },
+    {
+      "name": "a 2 MB board: the heap floor",
+      "width": 800,
+      "height": 480,
+      "psramBytes": 2097152,
+      "memoryBytes": 1624576,
+      "previewOverheadBytes": 768000
+    }
+  ]
+}

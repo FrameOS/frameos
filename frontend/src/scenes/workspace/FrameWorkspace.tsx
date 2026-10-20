@@ -1331,7 +1331,16 @@ function FrameToolSurface({
   pageScroll: boolean
 }): JSX.Element {
   if (activeTool === 'overview') {
-    return <FrameDashboardSurface frame={frame} scenes={scenes} totalScenes={totalScenes} showSceneMenus />
+    return (
+      <FrameDashboardSurface
+        frame={frame}
+        scenes={scenes}
+        totalScenes={totalScenes}
+        showSceneMenus
+        // The device has no AI to ask (AiElsewhereNote).
+        showAiBox={!isInFrameAdminMode()}
+      />
+    )
   }
   if (activeTool === 'logs') return <Logs fullScreen />
   if (activeTool === 'metrics') return <Metrics scrollContainer={!pageScroll} />

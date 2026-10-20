@@ -1177,13 +1177,16 @@ export type ChatContextType = 'scene' | 'frame' | 'app'
 
 export interface ChatSummary {
   id: string
-  frameId: FrameId
+  /** null for a chat about no frame in particular (the frames home's AI box). */
+  frameId: FrameId | null
   sceneId?: string | null
   contextType?: ChatContextType | null
   contextId?: string | null
   createdAt: string
   updatedAt: string
   messageCount?: number
+  /** The first user message, cut to one line (both planes' chat lists). */
+  title?: string | null
   isLocal?: boolean
 }
 

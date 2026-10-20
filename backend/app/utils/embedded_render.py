@@ -21,6 +21,7 @@ import asyncio
 import json
 import os
 import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.models.frame import Frame
@@ -80,6 +81,25 @@ def thin_client_renderer_available() -> bool:
 # `__FRAMEOS_SAVED_ASSETS__{"files":[...],"skippedOverBudget":n}`.
 _STATE_MARKER = "__FRAMEOS_SCENE_STATE__"
 _SAVED_ASSETS_MARKER = "__FRAMEOS_SAVED_ASSETS__"
+# A render under a device ceiling (app/utils/device_limits.py) that had an
+# allocation refused: `__FRAMEOS_OUT_OF_MEMORY__{"refusedBytes":...,"usedBytes":...}`.
+_OUT_OF_MEMORY_MARKER = "__FRAMEOS_OUT_OF_MEMORY__"
+# The scene's own log lines (onFrameosLog), one JSON payload each.
+_SCENE_LOG_PREFIX = "[scene] "
+MAX_SCENE_LOG_LINES = 200
+
+
+@dataclass
+class SceneRender:
+    """One render. ``rgba`` is None when it failed, and ``error`` says why;
+    ``out_of_memory`` is set when the device ceiling refused an allocation."""
+
+    rgba: bytes | None
+    state: dict | None = None
+    saved_assets: dict | None = None
+    error: str | None = None
+    out_of_memory: dict | None = None
+    scene_logs: list[str] = field(default_factory=list)
 
 
 def _parse_marker(stderr_text: str, marker: str) -> dict | None:
@@ -94,7 +114,7 @@ def _parse_marker(stderr_text: str, marker: str) -> dict | None:
     return None
 
 
-async def render_scene_rgba_and_state(
+async def render_scene(
     frame: Frame,
     width: int,
     height: int,
@@ -106,9 +126,10 @@ async def render_scene_rgba_and_state(
     assets_dir: str | None = None,
     save_assets=None,
     assets_write_budget: int | None = None,
+    device_limits: dict | None = None,
     timeout: float = RENDER_TIMEOUT_SECONDS,
-) -> tuple[bytes | None, dict | None, dict | None]:
-    """One frame of the scene as (RGBA bytes, post-render state, saved assets).
+) -> SceneRender:
+    """One frame of the scene, with its post-render state and saved assets.
 
     A None image means "no render available" (no scenes, no toolchain, render
     error, timeout) — the caller falls back to the diagnostic bitmap. Failures
@@ -123,15 +144,17 @@ async def render_scene_rgba_and_state(
     config forwarded to the runtime. The returned state is
     {"sceneId": ..., "state": {...}} and the saved-assets report is
     {"files": [...], "skippedOverBudget": n}; either is None when unavailable.
+    ``device_limits`` (device_limits.esp32_device_limits) renders under a
+    device's memory ceiling and as that device.
     """
     source = scenes_override if scenes_override is not None else frame.scenes
     scenes = [scene for scene in (source or []) if isinstance(scene, dict)]
     if not scenes:
-        return None, None, None
+        return SceneRender(None, error="There is no scene to render.")
     node = shutil.which("node")
     assets = wasm_assets_dir()
     if node is None or assets is None or not RENDER_HARNESS.is_file():
-        return None, None, None
+        return SceneRender(None, error="The scene renderer is not available (Node.js or the wasm runtime is missing).")
 
     network = frame.network if isinstance(frame.network, dict) else {}
     request = {
@@ -158,6 +181,8 @@ async def render_scene_rgba_and_state(
         request["saveAssetsJson"] = json.dumps(save_assets)
     if assets_write_budget is not None:
         request["assetsWriteBudget"] = max(0, int(assets_write_budget))
+    if device_limits:
+        request["deviceLimits"] = device_limits
 
     expected = int(width) * int(height) * 4
     global _render_waiters
@@ -184,23 +209,63 @@ async def render_scene_rgba_and_state(
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
-            return None, None, None
+            return SceneRender(None, error=f"The scene did not render within {int(timeout)} seconds.")
     finally:
         _render_semaphore.release()
 
+    stderr_text = stderr.decode("utf-8", errors="replace")
+    scene_logs = [
+        line[len(_SCENE_LOG_PREFIX):] for line in stderr_text.splitlines() if line.startswith(_SCENE_LOG_PREFIX)
+    ][-MAX_SCENE_LOG_LINES:]
     if process.returncode != 0 or len(stdout) != expected:
-        detail = stderr.decode("utf-8", errors="replace").strip().splitlines()
+        detail = stderr_text.strip().splitlines()
         tail = detail[-1] if detail else f"exit {process.returncode}"
         # Log through print (uvicorn stdout); the device-facing endpoint has
         # no frame log context worth spamming on every poll.
         print(f"embedded_render: frame {frame.id} scene render failed: {tail}")
-        return None, None, None
-    stderr_text = stderr.decode("utf-8", errors="replace")
-    return (
+        return SceneRender(
+            None,
+            error=tail.removeprefix("embedded_wasm_render: "),
+            out_of_memory=_parse_marker(stderr_text, _OUT_OF_MEMORY_MARKER),
+            scene_logs=scene_logs,
+        )
+    return SceneRender(
         stdout,
-        _parse_marker(stderr_text, _STATE_MARKER),
-        _parse_marker(stderr_text, _SAVED_ASSETS_MARKER),
+        state=_parse_marker(stderr_text, _STATE_MARKER),
+        saved_assets=_parse_marker(stderr_text, _SAVED_ASSETS_MARKER),
+        scene_logs=scene_logs,
     )
+
+
+async def render_scene_rgba_and_state(
+    frame: Frame,
+    width: int,
+    height: int,
+    *,
+    scene_id: str | None = None,
+    settings: dict | None = None,
+    scenes_override: list | None = None,
+    scene_states: dict | None = None,
+    assets_dir: str | None = None,
+    save_assets=None,
+    assets_write_budget: int | None = None,
+    timeout: float = RENDER_TIMEOUT_SECONDS,
+) -> tuple[bytes | None, dict | None, dict | None]:
+    """render_scene as (RGBA bytes, post-render state, saved assets)."""
+    result = await render_scene(
+        frame,
+        width,
+        height,
+        scene_id=scene_id,
+        settings=settings,
+        scenes_override=scenes_override,
+        scene_states=scene_states,
+        assets_dir=assets_dir,
+        save_assets=save_assets,
+        assets_write_budget=assets_write_budget,
+        timeout=timeout,
+    )
+    return result.rgba, result.state, result.saved_assets
 
 
 async def render_scene_rgba(
