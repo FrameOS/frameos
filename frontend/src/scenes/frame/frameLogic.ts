@@ -99,6 +99,7 @@ import { normalizeCustomEvent } from '../../utils/frameEvents'
 import { normalizeFieldOptions } from '../../utils/selectOptions'
 import { assetsPathError } from '../../utils/assetsPath'
 import { frameFormSceneErrors } from './frameFormSceneErrors'
+import { savedScenesWithPushed } from '../../utils/scenePush'
 import {
   cloneSplitScreenSceneLayout,
   defaultSplitScreenBackground,
@@ -298,7 +299,7 @@ function normalizeVersion(value: unknown): string | null {
   return version ? version.split('+')[0] : null
 }
 
-function frameCanUseFastDeploy(frame: FrameType | null | undefined, requiresRecompilation: boolean): boolean {
+export function frameCanUseFastDeploy(frame: FrameType | null | undefined, requiresRecompilation: boolean): boolean {
   if (!frame || requiresRecompilation) {
     return false
   }
@@ -398,8 +399,8 @@ export function pendingFrameosUpgrade(
   const details = isCloudManagedFrame(frame)
     ? cloudUndeployedChangeDetails(frame, latestPublishedRelease)
     : isInFrameAdminMode()
-    ? []
-    : deployChangeDetails(deployedFrameBaseline(frame), frame, frame.mode || 'rpios')
+      ? []
+      : deployChangeDetails(deployedFrameBaseline(frame), frame, frame.mode || 'rpios')
   const upgrade = details.find((change) => change.frameosVersionChange?.kind === 'upgrade')?.frameosVersionChange
   return upgrade?.previousVersion ? upgrade : null
 }
@@ -946,7 +947,7 @@ function withServiceKeyFingerprints(
   const fingerprints = frame?.settings_fingerprints
   return fingerprints && !frameForm?.settings_fingerprints
     ? { ...(frameForm ?? {}), settings_fingerprints: fingerprints }
-    : frameForm ?? {}
+    : (frameForm ?? {})
 }
 
 export function serviceKeysChangeDetail(
@@ -1036,7 +1037,7 @@ function firstDeploySceneLabel(scenes?: FrameScene[] | null): string | null {
   if (sceneCount === 0) {
     return null
   }
-  return `Deploy ${sceneCount} scene${sceneCount === 1 ? '' : 's'}`
+  return `Push ${sceneCount} scene${sceneCount === 1 ? '' : 's'}`
 }
 
 function firstDeployChangeDetails(
@@ -2365,6 +2366,13 @@ export interface frameLogicActions {
   saveFrame: () => {
     value: true
   }
+  saveScenes: (
+    sceneIds: string[],
+    activeSceneId?: string | null
+  ) => {
+    activeSceneId: string | null
+    sceneIds: string[]
+  }
   sceneConversionFinished: (
     sceneId: string,
     ok: boolean
@@ -2580,6 +2588,10 @@ export const frameLogic = kea<frameLogicType>([
     sceneConversionFinished: (sceneId: string, ok: boolean) => ({ sceneId, ok }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Partial<NodeData>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
+    saveScenes: (sceneIds: string[], activeSceneId?: string | null) => ({
+      sceneIds,
+      activeSceneId: activeSceneId ?? null,
+    }),
     saveAndDeployFrame: true,
     saveAndFastDeployFrame: true,
     saveAndFullDeployFrame: true,
@@ -3349,8 +3361,10 @@ export const frameLogic = kea<frameLogicType>([
         isFrameAdminMode
           ? []
           : lastDeploy
-          ? sortDeployChangeDetails(deployChangeDetails(lastDeploy, withServiceKeyFingerprints(frameForm, frame), mode))
-          : firstDeployChangeDetails(frameForm, mode),
+            ? sortDeployChangeDetails(
+                deployChangeDetails(lastDeploy, withServiceKeyFingerprints(frameForm, frame), mode)
+              )
+            : firstDeployChangeDetails(frameForm, mode),
     ],
     undeployedSummaryItems: [
       (s) => [s.lastDeploy, s.frame, s.frameForm, s.requiresRecompilation, s.isFrameAdminMode],
@@ -3607,7 +3621,7 @@ export const frameLogic = kea<frameLogicType>([
       longRunningTasksModel.actions.startTask({
         frameId: props.frameId,
         kind: 'deploy',
-        title: 'Deploying scenes',
+        title: 'Deploying scenes & settings',
         detail: 'Saving scenes to your cloud account',
       })
       try {
@@ -3789,6 +3803,53 @@ export const frameLogic = kea<frameLogicType>([
         } else if (openDrawer) {
           openSceneControlDrawer(props.frameId, scene.id)
         }
+      },
+      saveScenes: async ({ sceneIds, activeSceneId }) => {
+        // The scene drawer's push (utils/scenePush.ts): the saved frame with
+        // these scenes' edited versions in it, and nothing else. Every other
+        // unsaved edit stays in the form: the `frame` subscription resets it
+        // only when it matched the row this save replaces. A store scene
+        // keeps the service keys its install granted in the form.
+        if (!values.frame) {
+          throw new Error('The frame is not loaded yet')
+        }
+        const savedFrame = sanitizeFrame(values.frame)
+        const formFrame = getCurrentFrameForm(values.frame, values.frameForm)
+        const scenes = savedScenesWithPushed(savedFrame.scenes ?? [], formFrame.scenes ?? [], sceneIds)
+        if (isCloudMode()) {
+          // The cloud's save IS the push: new store-scene versions, the
+          // assignment list, one checksummed set_scenes. Not the ad-hoc
+          // uploadScenes shim: the assignment ledger records this push, so
+          // the scene counts as on the frame from now on. No settings push:
+          // it is not diffed, and the frame would apply every key again.
+          const outcome = await persistAndPushCloudFrameScenes(
+            props.frameId,
+            scenes,
+            activeSceneId ?? savedFrame.active_scene_id,
+            cloudScenePersistOptions(props.frameId, savedFrame)
+          )
+          for (const storeSceneId of outcome.changedStoreSceneIds) {
+            clearCloudSceneJsonCache(storeSceneId)
+          }
+          framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
+          return
+        }
+        const savedGroups = savedFrame.service_setting_groups ?? []
+        const formGroups = formFrame.service_setting_groups ?? []
+        const grantedGroups = collectSecretSettingsFromScenes(
+          scenes.filter((scene) => sceneIds.includes(scene.id) && typeof scene.origin?.storeSceneId === 'string'),
+          appsModel.findMounted()?.values.apps ?? {}
+        ).filter((group) => formGroups.includes(group) && !savedGroups.includes(group))
+        await saveFrameForm(
+          {
+            ...savedFrame,
+            scenes,
+            ...(grantedGroups.length ? { service_setting_groups: [...savedGroups, ...grantedGroups] } : {}),
+          },
+          props.frameId,
+          null
+        )
+        framesModel.actions.loadFrame(props.frameId)
       },
       deleteSceneAndSave: async ({ sceneId }) => {
         const frameForm = getCurrentFrameForm(values.frame, values.frameForm)

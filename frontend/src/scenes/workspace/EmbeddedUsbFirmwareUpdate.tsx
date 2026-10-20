@@ -404,7 +404,7 @@ export function EmbeddedUsbFirmwareUpdate({
           // failure here is reported as its own thing — the firmware update
           // itself already succeeded and must not be reported as failed.
           if (alsoPushScenes && scenes.length > 0) {
-            setFlashMessage(`Deploying ${scenes.length} scene${scenes.length === 1 ? '' : 's'} over USB.`)
+            setFlashMessage(`Pushing ${scenes.length} scene${scenes.length === 1 ? '' : 's'} over USB.`)
             try {
               await pushScenesOverUsb(frame.id, scenes)
               setPhase('done')
@@ -415,7 +415,7 @@ export function EmbeddedUsbFirmwareUpdate({
             } catch (pushError) {
               setPhase('error')
               const detail = pushError instanceof Error ? pushError.message : String(pushError)
-              setFlashMessage(`Firmware updated, but deploying the scenes over USB failed: ${detail}`)
+              setFlashMessage(`Firmware updated, but pushing the scenes over USB failed: ${detail}`)
             }
           } else {
             setPhase('done')

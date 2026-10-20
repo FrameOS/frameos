@@ -247,8 +247,8 @@ test.describe('backend frontend e2e coverage @e2e', () => {
   })
 
   test('frame workspace deploy vocabulary: sidebar Deploy opens a drawer that only deploys', async ({ page }) => {
-    // docs/ui-vocabulary.md: "deploy" is the one verb for sending scenes and
-    // settings to the device; "push" and "upgrade" never reach a label.
+    // docs/ui-vocabulary.md: "deploy" is the verb for sending settings (and
+    // FrameOS) to the device; "upgrade" never reaches a label.
     const readErrors = await prepareAuthenticatedPage(page)
     await page.route(projectApiPathPattern('/frames/1/deploy_plan*'), (route) =>
       route.fulfill({
@@ -267,7 +267,7 @@ test.describe('backend frontend e2e coverage @e2e', () => {
     await expect(drawer).toBeVisible()
     await expect(drawer.getByRole('button', { name: 'Deploy scenes & settings' })).toBeVisible()
     await expect(drawer.getByRole('button', { name: 'Deploy FrameOS, scenes & settings' })).toBeVisible()
-    await expect(drawer).not.toContainText(/\b(Push|Pushes|Pushing|Upgrade|Upgrades)\b/)
+    await expect(drawer).not.toContainText(/\b(Upgrade|Upgrades|Upgrading)\b/)
 
     expectNoFrontendErrors(readErrors)
   })

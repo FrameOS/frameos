@@ -432,7 +432,7 @@ export const controlLogic = kea<controlLogicType>([
           // select — a deploy, so say so rather than "activated".
           const body = await response.text()
           if (activationWasRedeploy(body)) {
-            detail = `${detail} — deployed, the frame shows it as soon as it syncs`
+            detail = `${detail}: pushed, the frame shows it as soon as it syncs`
           } else if (activationWasQueued(body)) {
             queued = true
             detail = `${detail}: ${ACTIVATION_QUEUED_DETAIL}`

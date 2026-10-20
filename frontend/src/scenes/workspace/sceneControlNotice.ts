@@ -4,27 +4,32 @@ import type { WorkspaceMode } from './workspaceSurfaces'
 // cloud app's node test suite can pin the per-mode copy and buttons
 // (workspace-surfaces.test.ts pattern; this module must stay React-free).
 //
-// Backend/frameAdmin keep the save/deploy split: Save persists the form on
-// the backend, Deploy rebuilds over SSH. The cloud has no scene "save" at all
-// — its settings push carries no scene graphs, and its deploy is one durable
-// set_scenes push through the uploadScenes shim — so the cloud copy offers a
-// single "Deploy to frame" action and never mentions saving.
+// docs/ui-vocabulary.md: scenes are pushed, FrameOS and settings deployed.
+// The backend keeps the save/push split: Save persists the form, Push sends
+// this scene and its changed connected scenes (utils/scenePush.ts). The
+// cloud has no scene "save" at all, so it offers the push alone and never
+// mentions saving. On the device (frameAdmin) Save is the whole story: there
+// is nowhere to push to. On the active scene the drawer's main action is the
+// push already ("Push to frame"), so the notice does not offer it twice.
 
 export interface SceneControlNoticeContent {
   statusText: string
   /** Offer a separate "Save changes" button (backend/frameAdmin only). */
   showSaveButton: boolean
-  deployLabel: string
+  /** The push button, which leaves the active scene as it is; null for none. */
+  pushLabel: string | null
 }
 
 export function sceneControlNoticeContent({
   mode,
   sceneIsUnsaved,
   sceneIsUndeployed,
+  sceneIsActive,
 }: {
   mode: WorkspaceMode
   sceneIsUnsaved: boolean
   sceneIsUndeployed: boolean
+  sceneIsActive: boolean
 }): SceneControlNoticeContent | null {
   if (!sceneIsUnsaved && !sceneIsUndeployed) {
     return null
@@ -34,17 +39,25 @@ export function sceneControlNoticeContent({
     return {
       statusText: 'This scene has changes that are not on the frame yet.',
       showSaveButton: false,
-      deployLabel: 'Deploy to frame',
+      pushLabel: sceneIsActive ? null : 'Push to frame',
+    }
+  }
+
+  if (mode === 'frameAdmin') {
+    return {
+      statusText: 'This scene has unsaved changes.',
+      showSaveButton: true,
+      pushLabel: null,
     }
   }
 
   return {
     statusText: sceneIsUnsaved
       ? sceneIsUndeployed
-        ? 'This scene has unsaved changes that are not deployed to the frame.'
+        ? 'This scene has unsaved changes that are not on the frame yet.'
         : 'This scene has unsaved changes.'
-      : 'This scene is saved but not deployed to the frame.',
+      : 'This scene is saved but not on the frame yet.',
     showSaveButton: sceneIsUnsaved,
-    deployLabel: sceneIsUnsaved ? 'Save & deploy' : 'Deploy changes',
+    pushLabel: sceneIsActive ? null : sceneIsUnsaved ? 'Save & push' : 'Push to frame',
   }
 }

@@ -3,6 +3,7 @@ import {
   FRAME_IMAGE_REFRESH_MIN_INTERVAL_MS,
   frameUpdateFromImageHeaders,
   planFrameImageRefresh,
+  renderLogRefreshesImage,
 } from "../../../../../../frontend/src/utils/frameImageRefresh";
 import {
   STATUS_SCREEN_SCENE_ID,
@@ -116,5 +117,35 @@ describe("frameUpdateFromImageHeaders", () => {
     const update = frameUpdateFromImageHeaders(35, new Headers({ "X-FrameOS-Sync-Changed": "0" }), now);
     expect(update).not.toHaveProperty("active_scene_id");
     expect(frameUpdateFromImageHeaders(35, new Headers(), now)).toBeNull();
+  });
+});
+
+// The self-hosted workspace re-fetches a frame's image on its render log
+// lines. An e-ink driver's image turns into the new picture at render:dither,
+// seconds after render:done: once a frame has logged render:dither on the
+// display it has now, render:done no longer fetches the old picture.
+describe("renderLogRefreshesImage", () => {
+  it("render:dither and server:start always refresh", () => {
+    expect(renderLogRefreshesImage("render:dither", "pimoroni.inky_impression_7", undefined)).toBe(true);
+    expect(renderLogRefreshesImage("server:start", "web_only", "web_only")).toBe(true);
+  });
+
+  it("render:done refreshes until the frame is known to dither", () => {
+    expect(renderLogRefreshesImage("render:done", "pimoroni.inky_impression_7", undefined)).toBe(true);
+    expect(renderLogRefreshesImage("render:done", "framebuffer", undefined)).toBe(true);
+  });
+
+  it("render:done stays quiet on a frame that dithers on this display", () => {
+    expect(
+      renderLogRefreshesImage("render:done", "pimoroni.inky_impression_7", "pimoroni.inky_impression_7"),
+    ).toBe(false);
+  });
+
+  it("a frame moved to another display refreshes on render:done again", () => {
+    expect(renderLogRefreshesImage("render:done", "framebuffer", "pimoroni.inky_impression_7")).toBe(true);
+  });
+
+  it("other lines do not refresh", () => {
+    expect(renderLogRefreshesImage("render:scene", "framebuffer", undefined)).toBe(false);
   });
 });

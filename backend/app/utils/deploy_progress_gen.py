@@ -130,7 +130,7 @@ DEPLOY_PROGRESS_KINDS: dict[str, dict] = {
         ],
     },
     "cloud_scenes": {
-        "label": "Deploy scenes",
+        "label": "Push scenes",
         "planes": ["cloud"],
         "stages": [
             {'on': {'command:acked:set_scenes': 'loading', 'command:sent:set_scenes': 'sending', 'scene_ack': 'rendering'}, 'stage': 'queued'},

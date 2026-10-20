@@ -197,7 +197,7 @@ describe("the deploy dialog in cloud mode", () => {
     // connect button until a board is attached).
     expect(screen.getByText("Scenes over USB")).toBeTruthy();
     expect(
-      screen.getByText(/Connect the board over USB to deploy scenes/),
+      screen.getByText(/Connect the board over USB to push scenes/),
     ).toBeTruthy();
     // Re-linking a WIPED board is the last card, not a pointer at some other
     // screen: it needs a claim token bound to this frame, so the cloud bundle

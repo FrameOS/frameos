@@ -28,6 +28,7 @@ import {
   deployCloudFrameScenes,
   cloudDeployActiveSceneId,
 } from '../utils/cloudFrameApi'
+import { renderLogRefreshesImage } from '../utils/frameImageRefresh'
 import {
   activeSceneFromLastState,
   cloudSceneCacheKey,
@@ -578,11 +579,15 @@ export interface framesModelActions {
     fastDeploy?: boolean,
     options?: {
       quiet?: boolean
+      sceneId?: string
+      title?: string
     }
   ) => {
     fastDeploy: boolean
     id: FrameId
     quiet: boolean
+    sceneId: string | null
+    title: string | null
   }
   deployRemote: (
     id: FrameId,
@@ -776,10 +781,17 @@ export const framesModel = kea<framesModelType>([
     addFrame: (frame: FrameType) => ({ frame }),
     loadFrame: (id: FrameId) => ({ id }),
     // `quiet`: no toast unless it fails ("Update all", whose sidebar rows draw the progress).
-    deployFrame: (id: FrameId, fastDeploy?: boolean, options?: { quiet?: boolean }) => ({
+    // `title` and `sceneId`: a scene drawer push (scenesLogic.pushScene), named as one.
+    deployFrame: (
+      id: FrameId,
+      fastDeploy?: boolean,
+      options?: { quiet?: boolean; title?: string; sceneId?: string }
+    ) => ({
       id,
       fastDeploy: fastDeploy || false,
       quiet: options?.quiet || false,
+      title: options?.title ?? null,
+      sceneId: options?.sceneId ?? null,
     }),
     cancelDeploy: (id: FrameId) => ({ id }),
     stopFrame: (id: FrameId) => ({ id }),
@@ -1032,7 +1044,7 @@ export const framesModel = kea<framesModelType>([
               embedded:
                 frame.embedded && state[frame.id]?.embedded?.layout && !frame.embedded.layout
                   ? { ...frame.embedded, layout: state[frame.id]?.embedded?.layout }
-                  : frame.embedded ?? state[frame.id]?.embedded,
+                  : (frame.embedded ?? state[frame.id]?.embedded),
             }),
             state[frame.id]
           ),
@@ -1124,7 +1136,7 @@ export const framesModel = kea<framesModelType>([
       cache.cloudFleetRefreshInterval = undefined
     }
   }),
-  listeners(({ actions, values }) => ({
+  listeners(({ actions, values, cache }) => ({
     renderFrame: async ({ id }) => {
       longRunningTasksModel.actions.startTask({
         frameId: id,
@@ -1243,8 +1255,8 @@ export const framesModel = kea<framesModelType>([
               ? 'Turn-on queued for the frame'
               : 'Turn-off queued for the frame'
             : on
-            ? 'Display turned on'
-            : 'Display turned off',
+              ? 'Display turned on'
+              : 'Display turned off',
         })
       } catch (error) {
         longRunningTasksModel.actions.taskFailed({
@@ -1255,7 +1267,7 @@ export const framesModel = kea<framesModelType>([
         })
       }
     },
-    deployFrame: async ({ id, fastDeploy, quiet }) => {
+    deployFrame: async ({ id, fastDeploy, quiet, title, sceneId }) => {
       // Cloud: there is no /deploy or /fast_deploy (both 404). The cloud's
       // deploy primitive is the uploadScenes event shim — one checksummed,
       // durable set_scenes push of the workspace's CURRENT scene list
@@ -1268,7 +1280,7 @@ export const framesModel = kea<framesModelType>([
           id: taskId,
           frameId: id,
           kind: 'deploy',
-          title: 'Deploying scenes',
+          title: 'Pushing scenes',
           detail: 'Sending scenes to the frame',
           quiet,
         })
@@ -1279,7 +1291,7 @@ export const framesModel = kea<framesModelType>([
           // hence findMounted.
           const scenes = frameLogic.findMounted({ frameId: id })?.values.frameForm?.scenes ?? frame?.scenes ?? []
           if (!scenes.length) {
-            throw new Error('This frame has no scenes to deploy')
+            throw new Error('This frame has no scenes to push')
           }
           // Keep the currently active scene active; the runtime otherwise
           // activates the payload sceneId or the first scene.
@@ -1291,7 +1303,7 @@ export const framesModel = kea<framesModelType>([
             frameId: id,
             kind: 'deploy',
             status: 'success',
-            detail: 'Deployed — the frame applies the scenes as soon as it syncs',
+            detail: 'Pushed. The frame applies the scenes as soon as it syncs.',
           })
         } catch (error) {
           // No rethrow: deployFrame is dispatched, never awaited, so a throw
@@ -1301,7 +1313,7 @@ export const framesModel = kea<framesModelType>([
             taskId,
             frameId: id,
             kind: 'deploy',
-            detail: error instanceof Error ? error.message : 'Failed to deploy scenes',
+            detail: error instanceof Error ? error.message : 'Failed to push scenes',
           })
         }
         return
@@ -1311,8 +1323,9 @@ export const framesModel = kea<framesModelType>([
         id: taskId,
         frameId: id,
         kind: 'deploy',
-        title: fastDeploy ? 'Deploying scenes & settings' : 'Deploying frame',
-        detail: 'Deploy request sent',
+        title: title ?? (fastDeploy ? 'Deploying scenes & settings' : 'Deploying frame'),
+        detail: title ? null : 'Deploy request sent',
+        sceneId,
         quiet,
       })
       try {
@@ -1848,7 +1861,12 @@ export const framesModel = kea<framesModelType>([
           // would skip the rest of the newLog listener chain for this action).
           return
         }
-        if (parsed.event == 'render:dither' || parsed.event == 'render:done' || parsed.event == 'server:start') {
+        const device = values.frames[log.frame_id]?.device ?? ''
+        const dithered: Record<string, string> = cache.ditheredOnDevice ?? (cache.ditheredOnDevice = {})
+        if (parsed.event === 'render:dither') {
+          dithered[String(log.frame_id)] = device
+        }
+        if (renderLogRefreshesImage(parsed.event, device, dithered[String(log.frame_id)])) {
           entityImagesModel.actions.updateEntityImage(`frames/${log.frame_id}`, 'image')
         }
       }

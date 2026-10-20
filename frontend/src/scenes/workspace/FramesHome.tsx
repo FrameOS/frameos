@@ -17,7 +17,6 @@ import {
   PhotoIcon,
   PencilSquareIcon,
   PlusIcon,
-  RocketLaunchIcon,
   SparklesIcon,
   Squares2X2Icon,
   StarIcon,
@@ -1399,8 +1398,9 @@ function SceneControlPanelContent({
   } = useValues(controlLogic({ frameId: sceneControlSelection.frameId }))
   const frameLogicProps = { frameId: sceneControlSelection.frameId }
   const { frameForm, isFrameFormSubmitting } = useValues(frameLogic(frameLogicProps))
-  const { saveAndDeployFrame, saveFrame } = useActions(frameLogic(frameLogicProps))
+  const { saveFrame } = useActions(frameLogic(frameLogicProps))
   const { undeployedSceneIds, unsavedSceneIds, sceneAccessFlagsById } = useValues(scenesLogic(frameLogicProps))
+  const { pushScene } = useActions(scenesLogic(frameLogicProps))
   const { openGenerator } = useActions(splitScreenLayoutLogic(frameLogicProps))
   // The drawer's footer, where ExpandedScene puts the scene's actions.
   const [actionsFooter, setActionsFooter] = useState<HTMLDivElement | null>(null)
@@ -1573,9 +1573,10 @@ function SceneControlPanelContent({
               <SceneControlPanelModeTitle />
               <SceneControlChangeNotice
                 busy={isFrameFormSubmitting}
+                sceneIsActive={selectedSceneIsActive}
                 sceneIsUndeployed={sceneIsUndeployed}
                 sceneIsUnsaved={sceneIsUnsaved}
-                onDeploy={saveAndDeployFrame}
+                onPush={() => pushScene(sceneId, false)}
                 onSave={saveFrame}
               />
               <ExpandedScene
@@ -1693,24 +1694,30 @@ function SceneControlPanelModeTitle(): JSX.Element {
 
 function SceneControlChangeNotice({
   busy,
+  sceneIsActive,
   sceneIsUndeployed,
   sceneIsUnsaved,
-  onDeploy,
+  onPush,
   onSave,
 }: {
-  // A cloud save/deploy is seconds of network (settings push, a store-scene
-  // version per scene, the assignment push) with nothing to look at; without
-  // this the button just sat there and people clicked it again.
+  // A save is seconds of network on the cloud with nothing to look at;
+  // without this the button just sat there and people clicked it again.
   busy: boolean
+  sceneIsActive: boolean
   sceneIsUndeployed: boolean
   sceneIsUnsaved: boolean
-  onDeploy: () => void
+  onPush: () => void
   onSave: () => void
 }): JSX.Element | null {
   // Copy and buttons per control plane live in sceneControlNotice.ts (pure,
   // pinned by the cloud test suite): the cloud has no scene "save", only the
-  // set_scenes deploy push, so it shows one "Deploy to frame" action.
-  const content = sceneControlNoticeContent({ mode: workspaceMode(), sceneIsUnsaved, sceneIsUndeployed })
+  // push, so it shows one "Push to frame" action.
+  const content = sceneControlNoticeContent({
+    mode: workspaceMode(),
+    sceneIsUnsaved,
+    sceneIsUndeployed,
+    sceneIsActive,
+  })
   if (!content) {
     return null
   }
@@ -1718,28 +1725,32 @@ function SceneControlChangeNotice({
   return (
     <div className="frameos-warning-button mb-4 rounded-xl border px-3 py-3 shadow-sm">
       <div className="text-sm font-semibold">{content.statusText}</div>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {content.showSaveButton ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onSave}
-            className="frameos-secondary-button inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-60"
-          >
-            {busy ? <Spinner /> : null}
-            {busy ? 'Saving…' : 'Save changes'}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          disabled={busy}
-          onClick={onDeploy}
-          className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-60"
-        >
-          {busy ? <Spinner color="white" /> : <RocketLaunchIcon className="h-4 w-4" />}
-          {busy ? 'Working…' : content.deployLabel}
-        </button>
-      </div>
+      {content.showSaveButton || content.pushLabel ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {content.showSaveButton ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onSave}
+              className="frameos-secondary-button inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-60"
+            >
+              {busy ? <Spinner /> : null}
+              {busy ? 'Saving…' : 'Save changes'}
+            </button>
+          ) : null}
+          {content.pushLabel ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onPush}
+              className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-60"
+            >
+              {busy ? <Spinner color="white" /> : <ArrowUpTrayIcon className="h-4 w-4" />}
+              {busy ? 'Working…' : content.pushLabel}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

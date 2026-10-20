@@ -3084,7 +3084,7 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
       <DrawerHeading>Scenes &amp; settings</DrawerHeading>
       <div className="frame-tool-card space-y-3 rounded-[22px] p-4">
         <div className="frame-tool-muted text-sm leading-5">
-          Saves this frame's settings and scenes to your cloud account, then deploys the scene list to the device.{' '}
+          Saves this frame's settings and scenes to your cloud account, then pushes the scene list to the device.{' '}
           {offline
             ? checkin?.kind === 'sleeping'
               ? `The frame is asleep — the deploy is queued and applied when it wakes ${formatFrameRelativeFuture(
@@ -3117,7 +3117,7 @@ function CloudScenesPushCard({ frame, onPushed }: { frame: FrameType; onPushed: 
           title={
             awaitingAck
               ? 'The last push is queued for the frame; pressing this sends it again'
-              : "Save this frame's settings and deploy its scenes to the device"
+              : "Save this frame's settings and push its scenes to the device"
           }
           onClick={() => {
             saveAndDeployFrame()
@@ -3334,7 +3334,7 @@ function CloudUsbScenesPushCard({ frame }: { frame: FrameType }): JSX.Element {
         {!usbConnected ? (
           <div className="flex flex-wrap items-center gap-3">
             <EmbeddedUsbConnectionButton frame={frame} />
-            <span className="frame-tool-muted text-xs leading-4">Connect the board over USB to deploy scenes.</span>
+            <span className="frame-tool-muted text-xs leading-4">Connect the board over USB to push scenes.</span>
           </div>
         ) : (
           <button
@@ -3345,7 +3345,7 @@ function CloudUsbScenesPushCard({ frame }: { frame: FrameType }): JSX.Element {
             className="frameos-primary-action inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40"
           >
             {busy ? <Spinner color="white" /> : <CloudArrowUpIcon className="h-4 w-4" />}
-            {busy ? 'Deploying scenes' : 'Deploy scenes over USB'}
+            {busy ? 'Pushing scenes' : 'Push scenes over USB'}
           </button>
         )}
         {message ? <div className="text-xs font-semibold text-green-600">{message}</div> : null}
@@ -3787,7 +3787,7 @@ function CloudDeploySection({
           <CloudDeployChoiceButton
             icon={<CpuChipIcon className="h-6 w-6" />}
             title="Over USB"
-            description="For a board plugged into this computer: update its firmware, deploy scenes over the cable, or fix Wi-Fi credentials. Works with no network."
+            description="For a board plugged into this computer: update its firmware, push scenes over the cable, or fix Wi-Fi credentials. Works with no network."
             onClick={() => onSelectView('cloudUsb')}
           />
         </section>

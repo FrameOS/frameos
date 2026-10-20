@@ -241,9 +241,9 @@ export function cloudSceneDeployErrorMessage(code: string | null | undefined, st
     case 'scenes_payload_too_large':
       return `These scenes are too large to push to a cloud frame (${cloudSceneUploadPayloadLimitMb} MB limit)`
     case 'invalid_scenes':
-      return `A cloud deploy pushes between 1 and ${cloudSceneUploadLimit} scenes`
+      return `A push sends between 1 and ${cloudSceneUploadLimit} scenes`
     case 'frame_not_active':
-      return 'This frame is still pending — confirm it on its dashboard before deploying to it'
+      return 'This frame is still pending — confirm it on its dashboard before pushing to it'
     case 'scene_not_assigned':
       return 'This scene is no longer on the frame'
     case 'invalid_scene':
@@ -253,7 +253,7 @@ export function cloudSceneDeployErrorMessage(code: string | null | undefined, st
     case 'scene_version_missing':
       return 'The store has no published version of this scene to update to'
     default:
-      return code ? `Failed to deploy the scenes (${code})` : `Failed to deploy the scenes (HTTP ${status})`
+      return code ? `Failed to push the scenes (${code})` : `Failed to push the scenes (HTTP ${status})`
   }
 }
 

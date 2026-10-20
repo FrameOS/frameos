@@ -61,7 +61,7 @@ const commandLabels: Record<string, string> = {
   scenes_get: "Read the frame's own scenes",
   set_current_scene: 'Switch scene',
   set_schedule: 'Update the schedule',
-  set_scenes: 'Deploy scenes',
+  set_scenes: 'Push scenes',
   set_settings: 'Deploy settings',
 }
 
