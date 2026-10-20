@@ -28,6 +28,7 @@ import {
   deployCloudFrameScenes,
   cloudDeployActiveSceneId,
 } from '../utils/cloudFrameApi'
+import { renderLogRefreshesImage } from '../utils/frameImageRefresh'
 import {
   activeSceneFromLastState,
   cloudSceneCacheKey,
@@ -1135,7 +1136,7 @@ export const framesModel = kea<framesModelType>([
       cache.cloudFleetRefreshInterval = undefined
     }
   }),
-  listeners(({ actions, values }) => ({
+  listeners(({ actions, values, cache }) => ({
     renderFrame: async ({ id }) => {
       longRunningTasksModel.actions.startTask({
         frameId: id,
@@ -1860,7 +1861,12 @@ export const framesModel = kea<framesModelType>([
           // would skip the rest of the newLog listener chain for this action).
           return
         }
-        if (parsed.event == 'render:dither' || parsed.event == 'render:done' || parsed.event == 'server:start') {
+        const device = values.frames[log.frame_id]?.device ?? ''
+        const dithered: Record<string, string> = cache.ditheredOnDevice ?? (cache.ditheredOnDevice = {})
+        if (parsed.event === 'render:dither') {
+          dithered[String(log.frame_id)] = device
+        }
+        if (renderLogRefreshesImage(parsed.event, device, dithered[String(log.frame_id)])) {
           entityImagesModel.actions.updateEntityImage(`frames/${log.frame_id}`, 'image')
         }
       }

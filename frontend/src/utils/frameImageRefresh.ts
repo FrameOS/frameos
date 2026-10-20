@@ -80,3 +80,27 @@ export function frameUpdateFromImageHeaders(
       : {}),
   }
 }
+
+/**
+ * Whether a render log line should re-fetch a frame's image (self-hosted
+ * backend). The image is what the panel shows: an e-ink driver serves its
+ * own dithered copy, which turns into the new picture at its render:dither,
+ * a few seconds AFTER render:done — the fetch on render:done only brought the
+ * old picture back, with the device encoding a PNG while it dithered. A
+ * frame counts as dithering once it has logged render:dither on the display
+ * it has now (`ditheredOnDevice`, the device it logged it on); until then,
+ * and on displays that never dither, render:done is the signal.
+ */
+export function renderLogRefreshesImage(
+  event: string,
+  device: string | null | undefined,
+  ditheredOnDevice: string | null | undefined
+): boolean {
+  if (event === 'render:dither' || event === 'server:start') {
+    return true
+  }
+  if (event === 'render:done') {
+    return ditheredOnDevice == null || ditheredOnDevice !== (device ?? '')
+  }
+  return false
+}
