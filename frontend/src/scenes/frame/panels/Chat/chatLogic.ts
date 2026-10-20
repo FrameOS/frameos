@@ -250,6 +250,7 @@ export interface chatLogicValues {
   logExpandedByChat: Record<string, Record<string, boolean>>
   messages: ChatMessage[]
   messagesByChatId: Record<string, ChatMessage[]>
+  newChatContexts: Record<string, string>
   openedChats: Record<string, ChatSummary>
   selectedScene: FrameScene | null
   visibleChats: ChatSummary[]
@@ -863,6 +864,16 @@ export const chatLogic = kea<chatLogicType>([
         }),
         // A chat this browser started holds every message already.
         rekeyChat: (state, { toId }) => ({ ...state, [toId]: true }),
+      },
+    ],
+    // What each chat started in this browser is about, by its first id: the
+    // history drops an empty one for a stored chat about the same thing, and
+    // the `chats` subscription follows it there.
+    newChatContexts: [
+      {} as Record<string, string>,
+      {
+        createChatSuccess: (state, { chat }) =>
+          chat.isLocal ? { ...state, [chat.id]: getChatContextKey(chat) } : state,
       },
     ],
     // What the server said about chats loaded one by one, for an opened chat
@@ -1882,22 +1893,23 @@ export const chatLogic = kea<chatLogicType>([
       actions.ensureChatForApp(editor.sceneId, editor.nodeId)
     },
     // The drawer opens on the latest chat about what is open, but it opens
-    // before the history has loaded: once it has, the stored chat takes the
-    // place of the empty one (ensureChatForScene / ensureFrameChat). Never
+    // before the history has loaded: once it has, the stored chat about the
+    // same scene, app or frame takes the place of the empty one the drawer
+    // made (ensureChatForScene / ensureChatForApp / ensureFrameChat). Never
     // over a chat somebody chose, and not while the history list is open.
     chats: (chats: ChatSummary[]) => {
-      if (values.activeEditAppContext || values.activeChatChosen || values.chatView !== 'chat') {
+      const activeChatId = values.activeChatId
+      const contextKey = activeChatId ? values.newChatContexts[activeChatId] : undefined
+      if (!contextKey || values.activeChatChosen || values.chatView !== 'chat') {
         return
       }
-      const sceneId = values.scenesOpen ? null : values.activeSceneEditorId
-      const matchingChat = chats.find((chat) =>
-        sceneId
-          ? getChatContextType(chat) === 'scene' && getChatContextId(chat) === sceneId
-          : getChatContextType(chat) === 'frame' &&
-            getChatContextId(chat) === null &&
-            (props.frameId !== null || (chat.frameId ?? null) === null)
+      const matchingChat = chats.find(
+        (chat) =>
+          getChatContextKey(chat) === contextKey &&
+          // The frames home's list may hold every frame's chats too.
+          (props.frameId !== null || (chat.frameId ?? null) === null)
       )
-      if (matchingChat && matchingChat.id !== values.activeChatId) {
+      if (matchingChat && matchingChat.id !== activeChatId) {
         actions.selectChat(matchingChat.id)
       }
     },

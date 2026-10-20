@@ -160,6 +160,16 @@ describe("the chat drawer's URL", () => {
     expect(chat.values.activeChatId).toBe("chat-new");
     expect(search().chatId).toBe("chat-new");
 
+    // An empty chat about something else is not swapped for this one: the
+    // app editor's drawer opened on the frame's chat (e2e "apps workspace AI
+    // chat opens app context").
+    chat.actions.createChat("scene-x");
+    const sceneChatId = chat.values.activeChatId;
+    chat.actions.loadChats();
+    await waitFor(() => expect(chat.values.isLoadingChats).toBe(false));
+    expect(chat.values.activeChatId).toBe(sceneChatId);
+    expect(chat.values.chatContextType).toBe("scene");
+
     // New chat, then History: the list stays open on its reload.
     chat.actions.createChat();
     expect(search().chatId).toBeUndefined();
