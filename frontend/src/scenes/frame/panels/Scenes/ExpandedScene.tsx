@@ -156,18 +156,20 @@ export function ExpandedScene({
     })
   }
 
-  // Three buttons and no menu: put it on the frame, preview it in the
-  // browser with these values, reset the values.
+  // Three buttons and no menu, on one line: put it on the frame, preview it
+  // in the browser with these values, reset the values. The drawer is 390px
+  // wide, so they are tighter than the default button and only the main one
+  // gives way (its label truncates) when even that does not fit.
   const activateButton = (
     <Button
       onClick={() => void handleActivate()}
       disabled={activating}
       aria-busy={activating || undefined}
       title={activateDescription}
-      className="flex items-center gap-2"
+      className="flex min-w-0 items-center gap-2 !px-3"
     >
       {activating ? <Spinner color="white" className="shrink-0" /> : <PlayIcon className="h-4 w-4 shrink-0" />}
-      {activateLabel}
+      <span className="truncate">{activateLabel}</span>
     </Button>
   )
   const previewButton = (
@@ -175,7 +177,7 @@ export function ExpandedScene({
       onClick={() => openLivePreview(sceneId, buildNextState())}
       color="secondary"
       title="Run this scene in your browser with these values"
-      className="flex items-center gap-2"
+      className="flex shrink-0 items-center gap-2 !px-3"
     >
       <WindowIcon className="h-4 w-4 shrink-0" />
       Preview
@@ -186,7 +188,7 @@ export function ExpandedScene({
   const placeActions = (actions: JSX.Element, inline: JSX.Element): JSX.Element | null =>
     actionsContainer === undefined ? inline : actionsContainer ? createPortal(actions, actionsContainer) : null
   const resetButton = (
-    <Button onClick={() => resetStateChanges()} color="secondary">
+    <Button onClick={() => resetStateChanges()} color="secondary" className="shrink-0 !px-3">
       Reset
     </Button>
   )
@@ -205,7 +207,7 @@ export function ExpandedScene({
       ) : null}
       {fieldCount === 0 ? (
         placeActions(
-          <div className="flex w-full flex-wrap items-center gap-2">
+          <div className="flex w-full min-w-0 items-center gap-2">
             {activateButton}
             {previewButton}
           </div>,
@@ -249,14 +251,14 @@ export function ExpandedScene({
             </Field>
           ))}
           {placeActions(
-            <div className="flex w-full flex-wrap items-center gap-2">
+            <div className="flex w-full min-w-0 items-center gap-2">
               {activateButton}
               {previewButton}
               {resetButton}
             </div>,
             <div className="flex w-full items-center gap-2">
               <div className="@md:w-1/3 hidden @md:block" />
-              <div className="flex w-full flex-wrap items-center gap-2">
+              <div className="flex w-full min-w-0 items-center gap-2">
                 {activateButton}
                 {previewButton}
                 {resetButton}
