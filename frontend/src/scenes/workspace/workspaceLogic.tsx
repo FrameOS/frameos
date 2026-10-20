@@ -139,6 +139,7 @@ function clearDrawerSearchParams(search: Record<string, unknown>): Record<string
   delete nextSearch.drawerSource
   delete nextSearch.drawerPage
   delete nextSearch.q
+  delete nextSearch.chatId
   return nextSearch
 }
 
@@ -336,6 +337,9 @@ export interface ChatDrawerSelection {
   nodeId?: string | null
   /** 'templates' when opened from the Add scene drawer's "Generate scene": the chat header then offers a way back. */
   source?: 'templates' | null
+  /** The chat it shows, kept in the URL (`chatId`) so a reload or the Back
+   * button opens it again; null on the history list and on a new chat. */
+  chatId?: string | null
 }
 
 /** The Add scene drawer's pages: the actions, its two scene lists, or the
@@ -1074,8 +1078,10 @@ export interface workspaceLogicActions {
     frameId: FrameId | null,
     sceneId?: string | null,
     nodeId?: string | null,
-    source?: 'templates' | null
+    source?: 'templates' | null,
+    chatId?: string | null
   ) => {
+    chatId: string | null
     frameId: FrameId | null
     nodeId: string | null
     sceneId: string | null
@@ -1179,6 +1185,9 @@ export interface workspaceLogicActions {
   }
   selectNode: (nodeId: string | null) => {
     nodeId: string | null
+  }
+  setChatDrawerChatId: (chatId: string | null) => {
+    chatId: string | null
   }
   setFrameAssetFolderExpanded: (
     frameId: FrameId,
@@ -1326,14 +1335,19 @@ export const workspaceLogic = kea<workspaceLogicType>([
       frameId: FrameId | null,
       sceneId: string | null = null,
       nodeId: string | null = null,
-      source: 'templates' | null = null
+      source: 'templates' | null = null,
+      chatId: string | null = null
     ) => ({
+      chatId,
       frameId,
       nodeId,
       sceneId,
       source,
     }),
     closeChatDrawer: true,
+    // The open drawer's chat changed (workspaceChatDrawerLogic): the URL
+    // follows, in place.
+    setChatDrawerChatId: (chatId: string | null) => ({ chatId }),
     // The AI box (AiPromptBox): open the chat drawer and send the question.
     startAiChat: (frameId: FrameId | null, prompt: string) => ({ frameId, prompt }),
     openFrameChangeDrawer: (
@@ -1495,7 +1509,14 @@ export const workspaceLogic = kea<workspaceLogicType>([
     chatDrawerSelection: [
       null as ChatDrawerSelection | null,
       {
-        openChatDrawer: (_, { frameId, sceneId, nodeId, source }) => ({ frameId, nodeId, sceneId, source }),
+        openChatDrawer: (_, { frameId, sceneId, nodeId, source, chatId }) => ({
+          chatId,
+          frameId,
+          nodeId,
+          sceneId,
+          source,
+        }),
+        setChatDrawerChatId: (state, { chatId }) => (state ? { ...state, chatId } : state),
         closeChatDrawer: () => null,
         setSearch: () => null,
         navigateToFrame: () => null,
@@ -1860,7 +1881,14 @@ export const workspaceLogic = kea<workspaceLogicType>([
       closeTemplateDrawer: preserveFramesScroll,
       openScheduleDrawer: hideNewFrameFormAndPreserveScroll,
       closeScheduleDrawer: preserveFramesScroll,
-      openChatDrawer: hideNewFrameFormAndPreserveScroll,
+      openChatDrawer: ({ frameId, chatId }) => {
+        hideNewFrameFormAndPreserveScroll()
+        // A URL naming another chat while the drawer is open (Back, a
+        // pasted link). A drawer that is still to mount reads it itself.
+        if (chatId) {
+          chatLogic.findMounted({ frameId })?.actions.openChat(chatId)
+        }
+      },
       closeChatDrawer: () => {
         cache.unmountStartedAiChat?.()
         cache.unmountStartedAiChat = null
@@ -2065,7 +2093,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
       if (!frameId) {
         if (drawer === 'chat') {
           // The frames home's chat, about no frame in particular.
-          actions.openChatDrawer(null)
+          actions.openChatDrawer(null, null, null, null, searchValue(search, 'chatId'))
           return
         }
         closeDrawersFromUrl()
@@ -2087,7 +2115,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
           frameId,
           sceneId,
           nodeId,
-          searchValue(search, 'drawerSource') === 'templates' ? 'templates' : null
+          searchValue(search, 'drawerSource') === 'templates' ? 'templates' : null,
+          searchValue(search, 'chatId')
         )
       } else if (drawer === 'unsavedChanges') {
         // Older links; where the deploy dialog exists it is the one that
@@ -2280,14 +2309,32 @@ export const workspaceLogic = kea<workspaceLogicType>([
       payload.frameId === null || payload.frameId === undefined
         ? [
             router.values.location.pathname,
-            { ...clearDrawerSearchParams(router.values.searchParams), drawer: 'chat' },
+            {
+              ...clearDrawerSearchParams(router.values.searchParams),
+              drawer: 'chat',
+              ...(payload.chatId ? { chatId: String(payload.chatId) } : {}),
+            },
             utilityDrawerClosedHash(),
           ]
         : drawerUrlForFrame(payloadFrameId(payload.frameId), 'chat', {
             ...(payload.sceneId ? { sceneId: String(payload.sceneId) } : {}),
             ...(payload.nodeId ? { nodeId: String(payload.nodeId) } : {}),
             ...(payload.source === 'templates' ? { drawerSource: 'templates' } : {}),
+            ...(payload.chatId ? { chatId: String(payload.chatId) } : {}),
           }),
+    // Replaced, not pushed: Back leaves the drawer on the chat it showed
+    // last instead of stepping through every chat opened in it.
+    setChatDrawerChatId: (payload: Record<string, any>) => {
+      if (searchValue(router.values.searchParams, 'drawer') !== 'chat') {
+        return undefined
+      }
+      const search = { ...router.values.searchParams }
+      delete search.chatId
+      if (payload.chatId) {
+        search.chatId = String(payload.chatId)
+      }
+      return [router.values.location.pathname, search, router.values.hashParams, { replace: true }]
+    },
     closeChatDrawer: clearDrawerUrl,
     openFrameChangeDrawer: (payload: Record<string, any>) =>
       payload.kind === 'unsaved'

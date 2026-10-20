@@ -13,6 +13,7 @@ import {
   searchExamples,
 } from "./context";
 import { buildSystemPrompt } from "./prompts";
+import { parseChatLink } from "../../../../../../frontend/src/utils/chatLinks";
 
 describe("bundled AI context", () => {
   it("carries the full app catalog", () => {
@@ -104,6 +105,19 @@ describe("bundled AI context", () => {
 });
 
 describe("buildSystemPrompt", () => {
+  // Names came back as bold text nobody could click. The chat resolves
+  // frameos:// links (frontend/src/utils/chatLinks.ts, docs/ai-chat.md
+  // "Links"), so the prompt's examples must be ones it reads.
+  it("teaches the frame and scene links the chat resolves", () => {
+    const links = [...buildSystemPrompt().matchAll(/\]\((frameos:\/\/[^)]+)\)/g)].map((match) =>
+      String(match[1]).replace("<frame id>", "f-1").replace("<scene id>", "s-1"),
+    );
+    expect(links.map(parseChatLink)).toEqual([
+      { frameId: "f-1", sceneId: null },
+      { frameId: "f-1", sceneId: "s-1" },
+    ]);
+  });
+
   it("is stable, Nim-free, and mentions the delivery tools", () => {
     const prompt = buildSystemPrompt();
     expect(prompt).toBe(buildSystemPrompt());

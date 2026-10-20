@@ -49,6 +49,8 @@ type NewSceneWithAiProps = {
   aiDisabled?: boolean | undefined;
   /** Where to turn AI back on. */
   aiSettingsUrl?: string | undefined;
+  /** The frames workspace, where the AI's links to frames and scenes go. */
+  framesUrl?: string | undefined;
   loginUrl?: string | undefined;
   /** Where "Back" goes. */
   myScenesUrl: string;
@@ -84,6 +86,7 @@ declare global {
 export function NewSceneWithAi({
   aiDisabled = false,
   aiSettingsUrl,
+  framesUrl,
   initialPrompt,
   settingsUrl,
   loginUrl,
@@ -489,6 +492,7 @@ export function NewSceneWithAi({
           onShowInPreview: showRenderInPreview,
           aiDisabled,
           ...(aiSettingsUrl ? { aiSettingsUrl } : {}),
+          ...(framesUrl ? { framesUrl } : {}),
           settingsUrl,
           signedIn: true,
         }}

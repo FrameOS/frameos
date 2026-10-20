@@ -200,6 +200,7 @@ export interface chatLogicValues {
   frameForm: Partial<FrameType> // frameLogic
   scenes: FrameScene[] // frameLogic
   activeChat: ChatSummary | null
+  activeChatChosen: boolean
   activeChatId: string | null
   activeEditAppContext: {
     nodeData: AppNodeData | null
@@ -244,10 +245,12 @@ export interface chatLogicValues {
   isLoadingChats: boolean
   isLoadingMoreChats: boolean
   isSubmitting: boolean
+  linkableChatId: string | null
   logExpanded: Record<string, boolean>
   logExpandedByChat: Record<string, Record<string, boolean>>
   messages: ChatMessage[]
   messagesByChatId: Record<string, ChatMessage[]>
+  openedChats: Record<string, ChatSummary>
   selectedScene: FrameScene | null
   visibleChats: ChatSummary[]
 }
@@ -322,8 +325,10 @@ export interface chatLogicActions {
   }
   loadChatMessagesSuccess: (
     chatId: string,
-    messages: ChatMessageRecord[]
+    messages: ChatMessageRecord[],
+    chat?: ChatSummary | null
   ) => {
+    chat: ChatSummary | null
     chatId: string
     messages: ChatMessageRecord[]
   }
@@ -349,6 +354,9 @@ export interface chatLogicActions {
     chats: ChatSummary[]
     hasMore: boolean
     nextOffset: number
+  }
+  openChat: (chatId: string) => {
+    chatId: string
   }
   openChatApp: () => {
     value: true
@@ -449,7 +457,9 @@ export interface chatLogicMeta {
       nodeId: string
       sceneId: string
     } | null
-    activeChat: (chats: any, activeChatId: any) => ChatSummary | null
+    activeChat: (chats: any, openedChats: any, activeChatId: any) => ChatSummary | null
+    activeChatChosen: (activeChatId: any, activeChat: any, chatMessagesLoading: any, chatMessagesLoaded: any) => boolean
+    linkableChatId: (chatView: any, activeChatId: any, activeChatChosen: any) => string | null
     chatSceneId: (activeChat: any, activeSceneEditorId: any) => string | null
     chatContextType: (
       activeChat: any,
@@ -602,10 +612,18 @@ export const chatLogic = kea<chatLogicType>([
     ensureChatForApp: (sceneId: string, nodeId: string) => ({ sceneId, nodeId }),
     ensureFrameChat: () => ({}),
     selectChat: (chatId: string) => ({ chatId }),
+    // A chat named by id (the drawer URL's `chatId`): shown even when it is
+    // not on the history's loaded page.
+    openChat: (chatId: string) => ({ chatId }),
     setActiveChatId: (chatId: string | null) => ({ chatId }),
     backToList: () => ({}),
     loadChatMessages: (chatId: string) => ({ chatId }),
-    loadChatMessagesSuccess: (chatId: string, messages: ChatMessageRecord[]) => ({ chatId, messages }),
+    // `chat` is the stored summary both planes return with the messages.
+    loadChatMessagesSuccess: (chatId: string, messages: ChatMessageRecord[], chat: ChatSummary | null = null) => ({
+      chatId,
+      messages,
+      chat,
+    }),
     loadChatMessagesFailure: (chatId: string, error: string) => ({ chatId, error }),
     openChatScene: (sceneId: string) => ({ sceneId }),
     openChatApp: true,
@@ -847,6 +865,21 @@ export const chatLogic = kea<chatLogicType>([
         rekeyChat: (state, { toId }) => ({ ...state, [toId]: true }),
       },
     ],
+    // What the server said about chats loaded one by one, for an opened chat
+    // the history page does not list (activeChat falls back to it).
+    openedChats: [
+      {} as Record<string, ChatSummary>,
+      {
+        loadChatMessagesSuccess: (state, { chatId, messages, chat }) =>
+          chat
+            ? {
+                ...state,
+                // The backend leaves the count out of one chat's summary.
+                [chatId]: { ...normalizeRemoteChat(chat), messageCount: chat.messageCount ?? messages.length },
+              }
+            : state,
+      },
+    ],
     activeRequestId: [
       null as string | null,
       {
@@ -921,8 +954,34 @@ export const chatLogic = kea<chatLogicType>([
       },
     ],
     activeChat: [
-      (s: any) => [s.chats, s.activeChatId],
-      (chats: ChatSummary[], activeChatId: string | null) => chats.find((chat) => chat.id === activeChatId) ?? null,
+      (s: any) => [s.chats, s.openedChats, s.activeChatId],
+      (chats: ChatSummary[], openedChats: Record<string, ChatSummary>, activeChatId: string | null) =>
+        chats.find((chat) => chat.id === activeChatId) ?? (activeChatId ? openedChats[activeChatId] : null) ?? null,
+    ],
+    // Whether somebody chose the open chat: picked from the history, named by
+    // the URL (loading or loaded by id), or written in. Not the empty one a
+    // drawer opens before the history loads, nor the id it leaves behind when
+    // the history drops that one for a stored chat about the same thing.
+    activeChatChosen: [
+      (s: any) => [s.activeChatId, s.activeChat, s.chatMessagesLoading, s.chatMessagesLoaded],
+      (
+        activeChatId: string | null,
+        activeChat: ChatSummary | null,
+        chatMessagesLoading: Record<string, boolean>,
+        chatMessagesLoaded: Record<string, boolean>
+      ): boolean =>
+        activeChatId !== null &&
+        (activeChat
+          ? !activeChat.isLocal || (activeChat.messageCount ?? 0) > 0
+          : Boolean(chatMessagesLoading[activeChatId] || chatMessagesLoaded[activeChatId])),
+    ],
+    // The chat the drawer URL names (`?drawer=chat&chatId=`), so a reload or
+    // the Back button opens it again: the open chat once the server holds it
+    // or is about to. Not the history list, not a new chat nobody wrote in.
+    linkableChatId: [
+      (s: any) => [s.chatView, s.activeChatId, s.activeChatChosen],
+      (chatView: ChatView, activeChatId: string | null, activeChatChosen: boolean): string | null =>
+        chatView === 'chat' && activeChatChosen ? activeChatId : null,
     ],
     chatSceneId: [
       (s: any) => [s.activeChat, s.activeSceneEditorId],
@@ -1307,6 +1366,11 @@ export const chatLogic = kea<chatLogicType>([
         actions.loadChats()
       }
     },
+    openChat: ({ chatId }) => {
+      if (values.activeChatId !== chatId || values.chatView !== 'chat') {
+        actions.selectChat(chatId)
+      }
+    },
     selectChat: ({ chatId }) => {
       const chat = values.chats.find((item) => item.id === chatId)
       if (chat?.isLocal && (chat.messageCount ?? 0) === 0) {
@@ -1334,7 +1398,13 @@ export const chatLogic = kea<chatLogicType>([
         }
         const payload = await response.json()
         const messages = Array.isArray(payload?.messages) ? payload.messages : []
-        actions.loadChatMessagesSuccess(chatId, messages)
+        const chat: ChatSummary | null = payload?.chat && typeof payload.chat.id === 'string' ? payload.chat : null
+        // The backend answers for the id the browser named a new chat with
+        // under the stored one (project_chat_id): move there.
+        if (chat && chat.id !== chatId) {
+          actions.rekeyChat(chatId, chat.id)
+        }
+        actions.loadChatMessagesSuccess(chat?.id ?? chatId, messages, chat)
       } catch (error) {
         actions.loadChatMessagesFailure(chatId, error instanceof Error ? error.message : 'Failed to load chat history')
       }
@@ -1795,7 +1865,7 @@ export const chatLogic = kea<chatLogicType>([
       actions.ensureFrameChat()
     }
   }),
-  subscriptions(({ actions, values }) => ({
+  subscriptions(({ actions, values, props }) => ({
     activeSceneEditorId: (sceneId: string | null) => {
       if (!sceneId) {
         return
@@ -1811,15 +1881,21 @@ export const chatLogic = kea<chatLogicType>([
       }
       actions.ensureChatForApp(editor.sceneId, editor.nodeId)
     },
+    // The drawer opens on the latest chat about what is open, but it opens
+    // before the history has loaded: once it has, the stored chat takes the
+    // place of the empty one (ensureChatForScene / ensureFrameChat). Never
+    // over a chat somebody chose, and not while the history list is open.
     chats: (chats: ChatSummary[]) => {
-      if (!values.activeSceneEditorId) {
+      if (values.activeEditAppContext || values.activeChatChosen || values.chatView !== 'chat') {
         return
       }
-      if (values.scenesOpen || values.activeEditAppContext) {
-        return
-      }
-      const matchingChat = chats.find(
-        (chat) => getChatContextType(chat) === 'scene' && getChatContextId(chat) === values.activeSceneEditorId
+      const sceneId = values.scenesOpen ? null : values.activeSceneEditorId
+      const matchingChat = chats.find((chat) =>
+        sceneId
+          ? getChatContextType(chat) === 'scene' && getChatContextId(chat) === sceneId
+          : getChatContextType(chat) === 'frame' &&
+            getChatContextId(chat) === null &&
+            (props.frameId !== null || (chat.frameId ?? null) === null)
       )
       if (matchingChat && matchingChat.id !== values.activeChatId) {
         actions.selectChat(matchingChat.id)

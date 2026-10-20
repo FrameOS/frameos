@@ -20,8 +20,9 @@ import {
   type MouseEvent,
 } from "react";
 import posthog from "posthog-js";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { chatLinkPath, parseChatLink } from "../../../../../frontend/src/utils/chatLinks";
 import {
   AiChatRequestError,
   AiChatTransportError,
@@ -138,6 +139,9 @@ export type SceneAiPanelProps = {
   aiDisabled?: boolean | undefined;
   /** Where to go to turn AI back on. */
   aiSettingsUrl?: string | undefined;
+  /** The frames workspace (getFramesUrl()): where the replies' links to
+   * frames and scenes (frameos://frame/…, docs/ai-chat.md "Links") go. */
+  framesUrl?: string | undefined;
   /** Submitted as the first turn as soon as the panel mounts (signed in), or
    * pre-filled into the prompt box (signed out). */
   initialPrompt?: string | undefined;
@@ -344,14 +348,28 @@ function RenderPreviewImage({ preview }: { preview: RenderPreview }) {
   );
 }
 
-function AssistantMarkdown({ content }: { content: string }) {
+// A frame or scene the reply names opens in the frames workspace, in a new
+// tab: this page holds an editor with unsaved work.
+function assistantUrl(url: string, framesUrl: string | undefined): string {
+  const link = parseChatLink(url);
+  if (!link) {
+    return defaultUrlTransform(url);
+  }
+  return framesUrl ? chatLinkPath(link, (frameId) => `${framesUrl.replace(/\/$/, "")}/${frameId}`) : "";
+}
+
+function AssistantMarkdown({ content, framesUrl }: { content: string; framesUrl?: string | undefined }) {
   return (
     <div className="markdown-description ai-panel__markdown">
       <ReactMarkdown
+        urlTransform={(url, key) => (key === "href" ? assistantUrl(url, framesUrl) : defaultUrlTransform(url))}
         components={{
           a: ({ children, href, node, ...props }) => {
             void node;
-            const external = href?.startsWith("https://") || href?.startsWith("http://");
+            if (!href) {
+              return <span>{children}</span>;
+            }
+            const external = href.startsWith("https://") || href.startsWith("http://");
             return (
               <a {...props} href={href} {...(external ? { rel: "noreferrer", target: "_blank" } : {})}>
                 {children}
@@ -504,6 +522,7 @@ function ToolActivity({ tools, streaming }: { tools: ToolLine[]; streaming: bool
 export function SceneAiPanel({
   aiDisabled = false,
   aiSettingsUrl,
+  framesUrl,
   storeSceneId,
   getScenes,
   selectedSceneId,
@@ -1044,7 +1063,7 @@ export function SceneAiPanel({
           ) : (
             <div className="ai-panel__bubble ai-panel__bubble--assistant" key={message.id}>
               <ToolActivity streaming={Boolean(message.streaming)} tools={message.tools ?? []} />
-              {message.content ? <AssistantMarkdown content={message.content} /> : null}
+              {message.content ? <AssistantMarkdown content={message.content} framesUrl={framesUrl} /> : null}
               {message.streaming && !message.content ? (
                 <span className="ai-panel__thinking">
                   <Loader2 aria-hidden className="ai-panel__spin" size={14} />

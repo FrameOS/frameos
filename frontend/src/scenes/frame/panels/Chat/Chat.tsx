@@ -13,6 +13,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
 import { ChatBubbleLeftRightIcon, ClockIcon, PlusIcon } from '@heroicons/react/24/outline'
 import { urls } from '../../../../urls'
 import { isCloudMode } from '../../../../utils/cloudMode'
+import { chatLinkRoute } from '../../../../utils/chatLinks'
 import type { FrameId } from '../../../../types'
 
 /** The AI chat (docs/ai-chat.md): about one frame, or — frameId null, from
@@ -413,12 +414,13 @@ export function Chat({ frameId, sceneId = null }: { frameId: FrameId | null; sce
 
   // Assistant replies are markdown (the cloud agent answers in it); user
   // messages stay plain text so typed characters are never re-interpreted.
+  // The frames and scenes it names are frameos:// links to their pages.
   const renderMessageContent = (messageContent: string, isUser: boolean) =>
     isUser ? (
       <div className="whitespace-pre-wrap break-words">{messageContent}</div>
     ) : (
       <div className="chat-markdown break-words">
-        <Markdown value={messageContent} />
+        <Markdown value={messageContent} inAppRoute={chatLinkRoute} />
       </div>
     )
 
