@@ -121,7 +121,9 @@ export function Chat({ frameId, sceneId = null }: { frameId: FrameId | null; sce
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+    // Enter sends; Shift+Enter starts a new line. Not mid-composition (an
+    // IME's Enter picks a candidate).
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
       if (!isSubmitting && input.trim()) {
         handleSubmit()
@@ -643,7 +645,7 @@ export function Chat({ frameId, sceneId = null }: { frameId: FrameId | null; sce
             className="min-h-24"
           />
           <div className="frame-tool-muted flex items-center justify-between text-xs">
-            <span>{contextSelectionSummary ?? 'Press Ctrl/Cmd + Enter to send'}</span>
+            <span>{contextSelectionSummary ?? 'Enter to send, Shift + Enter for a new line'}</span>
             <Button
               color={sendButtonColor}
               size="tiny"
