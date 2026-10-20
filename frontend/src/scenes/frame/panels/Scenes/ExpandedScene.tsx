@@ -13,10 +13,9 @@ import { StateFieldEdit } from './StateFieldEdit'
 import { FrameScene, FrameId } from '../../../../types'
 import { scenesLogic } from './scenesLogic'
 import { frameLogic } from '../../frameLogic'
-import { apiFetch } from '../../../../utils/apiFetch'
 import { isCloudMode } from '../../../../utils/cloudMode'
-import { deployCloudFrameScenes } from '../../../../utils/cloudFrameApi'
-import { longRunningTasksModel } from '../../../../models/longRunningTasksModel'
+import { scenePushActionCopy } from '../../../../utils/scenePush'
+import { sceneIdsRefer } from '../../../../utils/systemScenes'
 import { PlayIcon, EyeIcon } from '@heroicons/react/24/solid'
 import { WindowIcon } from '@heroicons/react/24/outline'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
@@ -50,10 +49,10 @@ export function ExpandedScene({
 }: ExpandedSceneProps) {
   const { stateChanges, visibleFields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
   const { states, sceneId: currentSceneId, activatingSceneId } = useValues(controlLogic({ frameId }))
-  const { requiresRecompilation, changedScenes } = useValues(frameLogic({ frameId }))
-  const { undeployedSceneIds } = useValues(scenesLogic({ frameId }))
+  const { changedScenes } = useValues(frameLogic({ frameId }))
+  const { undeployedSceneIds, unsavedSceneIds, scenePushIds } = useValues(scenesLogic({ frameId }))
   const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId, scene }))
-  const { previewScene, deleteScene } = useActions(scenesLogic({ frameId }))
+  const { previewScene, deleteScene, pushScene } = useActions(scenesLogic({ frameId }))
   const { openLivePreview } = useActions(livePreviewLogic({ frameId }))
   const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
   const { editScene } = useActions(frameEditorsLogic)
@@ -78,17 +77,32 @@ export function ExpandedScene({
   // Spins from the click until the frame logs this scene's render:done —
   // the request being accepted says nothing about the panel yet.
   const activating = sceneIsActivating(activatingSceneId, sceneId)
+  // With changes the main action is a push (docs/ui-vocabulary.md): this
+  // scene and the connected scenes that changed. "Apply to active scene"
+  // used to stay on the active scene even then, and read as if the edits
+  // would not go out.
+  const sceneIsCurrent = sceneIdsRefer(sceneId, currentSceneId)
+  const pushSceneIds = sceneHasChanges ? scenePushIds(sceneId) : []
+  const pushCopy = scenePushActionCopy({
+    active: sceneIsCurrent,
+    connected: pushSceneIds.filter((id) => id !== sceneId).length,
+    saves: !isCloudMode() && (sceneIsUnsaved || pushSceneIds.some((id) => unsavedSceneIds.has(id))),
+  })
   const activateLabel = activating
     ? 'Activating…'
     : frameAdminMode && sceneHasChanges
     ? 'Save & activate scene'
-    : sceneIsUndeployed && sceneId !== currentSceneId
-    ? sceneIsUnsaved
-      ? 'Save, deploy & activate'
-      : 'Deploy & activate'
-    : sceneId === currentSceneId
+    : sceneHasChanges
+    ? pushCopy.label
+    : sceneIsCurrent
     ? 'Apply to active scene'
     : 'Activate scene'
+  const activateDescription =
+    frameAdminMode && sceneHasChanges
+      ? 'Save your changes and make this the active scene'
+      : sceneHasChanges
+      ? pushCopy.description
+      : 'Make this the active scene on the frame'
 
   const buildNextState = (): Record<string, any> => {
     const desiredState = { ...currentState, ...stateChanges }
@@ -119,72 +133,7 @@ export function ExpandedScene({
     }
 
     if (sceneHasChanges) {
-      if (isCloudMode()) {
-        // The cloud has no /set_next_scene and no scene "save": deploy +
-        // activate is one durable set_scenes push through the uploadScenes
-        // shim, with this scene as the payload's active scene_id.
-        longRunningTasksModel.actions.startTask({
-          frameId,
-          kind: 'deploy',
-          sceneId,
-          title: 'Deploying scene changes',
-          detail: scene?.name || sceneId,
-        })
-        try {
-          const { frame, frameForm } = frameLogic({ frameId }).values
-          const scenes = frameForm?.scenes ?? frame?.scenes ?? []
-          if (!scenes.length) {
-            throw new Error('This frame has no scenes to deploy')
-          }
-          await deployCloudFrameScenes(frameId, scenes, { sceneId, state: buildNextState() })
-          longRunningTasksModel.actions.finishTask({
-            frameId,
-            kind: 'deploy',
-            sceneId,
-            status: 'success',
-            detail: 'Deployed — the frame activates the scene as soon as it syncs',
-          })
-        } catch (error) {
-          longRunningTasksModel.actions.taskFailed({
-            frameId,
-            kind: 'deploy',
-            sceneId,
-            detail: error instanceof Error ? error.message : 'Failed to deploy scene changes',
-          })
-          throw error
-        }
-        return
-      }
-      longRunningTasksModel.actions.startTask({
-        frameId,
-        kind: 'deploy',
-        sceneId,
-        title: 'Deploying scene changes',
-        detail: scene?.name || sceneId,
-      })
-      try {
-        await frameLogic({ frameId }).asyncActions.saveFrame()
-        const response = await apiFetch(`/api/frames/${frameId}/set_next_scene`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sceneId,
-            state: buildNextState(),
-            fastDeploy: !requiresRecompilation,
-          }),
-        })
-        if (!response.ok) {
-          throw new Error('Failed to queue scene deploy')
-        }
-      } catch (error) {
-        longRunningTasksModel.actions.taskFailed({
-          frameId,
-          kind: 'deploy',
-          sceneId,
-          detail: error instanceof Error ? error.message : 'Failed to deploy scene changes',
-        })
-        throw error
-      }
+      pushScene(sceneId, true, buildNextState())
     } else {
       submitStateChanges()
     }
@@ -207,9 +156,7 @@ export function ExpandedScene({
     {
       key: 'activate',
       label: activateLabel,
-      description: sceneHasChanges
-        ? 'Save your changes, deploy them and make this the active scene'
-        : 'Make this the active scene on the frame',
+      description: activateDescription,
       icon: <PlayIcon className="h-4 w-4 shrink-0" />,
       loading: activating,
       onRun: () => void handleActivate(),
@@ -217,7 +164,7 @@ export function ExpandedScene({
     {
       key: 'preview-frame',
       label: 'Preview on frame',
-      description: 'Temporarily show this scene on the frame, without saving or deploying',
+      description: 'Temporarily show this scene on the frame, without saving or pushing',
       icon: <EyeIcon className="h-4 w-4 shrink-0" />,
       onRun: handlePreview,
     },

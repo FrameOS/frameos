@@ -1241,7 +1241,7 @@ function FrameOverviewSurface({ frame, scenes }: { frame: FrameType; scenes: Fra
           <OverviewStatCard
             label="Scenes"
             value={String(scenes.length)}
-            detail={scenes.length === 1 ? '1 scene deployed' : `${scenes.length} scenes deployed`}
+            detail={scenes.length === 1 ? '1 scene installed' : `${scenes.length} scenes installed`}
             tone="neutral"
           />
           <OverviewStatCard

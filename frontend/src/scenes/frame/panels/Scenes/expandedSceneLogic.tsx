@@ -202,7 +202,7 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
             sceneId: props.sceneId,
             status: 'success',
             detail: redeployed
-              ? `${name} — deployed, the frame shows it as soon as it syncs`
+              ? `${name}: pushed, the frame shows it as soon as it syncs`
               : queued
               ? `${name}: ${ACTIVATION_QUEUED_DETAIL}`
               : name,

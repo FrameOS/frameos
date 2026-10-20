@@ -34,7 +34,7 @@ export function InstallSceneModal(): JSX.Element | null {
   const prompt =
     target.kind === 'install'
       ? 'Choose the frames this scene should be installed on.'
-      : 'Choose the frame the new scene goes on. It opens in the editor; nothing is deployed until you save.'
+      : 'Choose the frame the new scene goes on. It opens in the editor and reaches the frame once you push it.'
   const submitLabel =
     target.kind === 'install'
       ? selectedFrameIds.length > 1

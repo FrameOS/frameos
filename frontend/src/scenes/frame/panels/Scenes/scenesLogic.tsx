@@ -1,7 +1,8 @@
 import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { FrameScene, SceneNodeData, FrameId } from '../../../../types'
-import { frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
+import { frameCanUseFastDeploy, frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
 import { undeployedSceneIdsFor } from '../../../../utils/sceneDeployState'
+import { referencedSceneIds, savedScenesWithPushed, scenePushSceneIds } from '../../../../utils/scenePush'
 import { publicSceneId, sceneIdsRefer, sceneRecordEntry } from '../../../../utils/systemScenes'
 import { SceneAccessFlag, sceneAccessFlagsForScene, withAppPermissions } from '../../../../utils/sceneAccess'
 import { workspaceMode } from '../../../workspace/workspaceSurfaces'
@@ -25,7 +26,12 @@ import { assignSceneImages } from '../../../../utils/sceneImages'
 import { socketLogic } from '../../../socketLogic'
 import { longRunningTasksModel, reportTaskOutcome } from '../../../../models/longRunningTasksModel'
 import { embeddedUsbApiCanUse, runEmbeddedUsbApiCommand } from '../../../../models/embeddedUsbLogsModel'
-import { embeddedUsbUploadTimeoutMs, scheduleEmbeddedUsbFrameImageRefresh } from '../../../../models/framesModel'
+import {
+  embeddedUsbUploadTimeoutMs,
+  framesModel,
+  scheduleEmbeddedUsbFrameImageRefresh,
+} from '../../../../models/framesModel'
+import { cloudDeployActiveSceneId, deployCloudFrameScenes } from '../../../../utils/cloudFrameApi'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 import type { AppConfig, FrameType } from '../../../../types'
 import type { TemplateType } from '../../../../types'
@@ -53,24 +59,6 @@ const applyStateToSceneFields = (scene: FrameScene, state: Record<string, any> |
     return field
   })
   return { ...scene, fields }
-}
-
-function referencedSceneIds(scene: FrameScene): string[] {
-  const sceneIds = new Set<string>()
-
-  for (const node of scene.nodes ?? []) {
-    const data = node.data as any
-    if (node.type === 'scene' && typeof data?.keyword === 'string' && data.keyword) {
-      sceneIds.add(data.keyword)
-    } else if (node.type === 'dispatch' && data?.keyword === 'setCurrentScene') {
-      const targetSceneId = data?.config?.sceneId
-      if (typeof targetSceneId === 'string' && targetSceneId) {
-        sceneIds.add(targetSceneId)
-      }
-    }
-  }
-
-  return Array.from(sceneIds)
 }
 
 export function collectScenePreviewPayloadScenes(
@@ -187,6 +175,7 @@ export interface scenesLogicValues {
   rawScenes: FrameScene[]
   renameSceneDialog: SceneRenameDialog | null
   sceneAccessFlagsById: Record<string, SceneAccessFlag[]>
+  scenePushIds: (sceneId: string) => string[]
   sceneSecretSettings: Map<string, string[]>
   sceneTitles: {
     [k: string]: string
@@ -321,6 +310,15 @@ export interface scenesLogicActions {
   previewSceneSuccess: () => {
     value: true
   }
+  pushScene: (
+    sceneId: string,
+    activate: boolean,
+    state?: Record<string, any> | null
+  ) => {
+    activate: boolean
+    sceneId: string
+    state: Record<string, any> | null
+  }
   removeDefault: () => {
     value: true
   }
@@ -452,6 +450,11 @@ export interface scenesLogicMeta {
     sceneAccessFlagsById: (rawScenes: FrameScene[]) => Record<string, SceneAccessFlag[]>
     undeployedSceneIds: (rawScenes: FrameScene[], frame: FrameType, isFrameAdminMode: boolean) => Set<string>
     unsavedSceneIds: (frame: FrameType, frameForm: Partial<FrameType>) => Set<string>
+    scenePushIds: (
+      rawScenes: FrameScene[],
+      unsavedSceneIds: Set<string>,
+      undeployedSceneIds: Set<string>
+    ) => (sceneId: string) => string[]
     scenes: (rawScenes: FrameScene[], unsavedSceneIds: Set<string>, undeployedSceneIds: Set<string>) => FrameScene[]
     filteredScenes: (scenes: FrameScene[], search: string) => FrameScene[]
     sceneTitles: (scenes: FrameScene[]) => {
@@ -581,6 +584,13 @@ export const scenesLogic = kea<scenesLogicType>([
     }),
     previewSceneSuccess: true,
     previewSceneFailure: true,
+    // docs/ui-vocabulary.md "Push": the scene and its connected scenes with
+    // changes (utils/scenePush.ts) onto the frame; `activate` also shows it.
+    pushScene: (sceneId: string, activate: boolean, state?: Record<string, any> | null) => ({
+      sceneId,
+      activate,
+      state: state ?? null,
+    }),
     setAiPrompt: (prompt: string) => ({ prompt }),
     generateAiScene: true,
     generateAiSceneSuccess: true,
@@ -869,6 +879,19 @@ export const scenesLogic = kea<scenesLogicType>([
         return unsaved
       },
     ],
+    // Which scenes a push of each scene sends: itself and its connected
+    // scenes, those with changes (unsaved, or not on the frame yet).
+    scenePushIds: [
+      (s) => [s.rawScenes, s.unsavedSceneIds, s.undeployedSceneIds],
+      (
+        rawScenes: scenesLogicValues['rawScenes'],
+        unsavedSceneIds: scenesLogicValues['unsavedSceneIds'],
+        undeployedSceneIds: scenesLogicValues['undeployedSceneIds']
+      ): ((sceneId: string) => string[]) => {
+        const changed = new Set([...unsavedSceneIds, ...undeployedSceneIds])
+        return (sceneId: string) => scenePushSceneIds(sceneId, rawScenes, changed)
+      },
+    ],
     scenes: [
       (s) => [s.rawScenes, s.unsavedSceneIds, s.undeployedSceneIds],
       (
@@ -972,7 +995,7 @@ export const scenesLogic = kea<scenesLogicType>([
         uploadedScenes: scenesLogicValues['uploadedScenes']
       ) =>
         missingActiveSceneId
-          ? uploadedScenes.find((scene) => sceneIdsRefer(scene.id, missingActiveSceneId)) ?? null
+          ? (uploadedScenes.find((scene) => sceneIdsRefer(scene.id, missingActiveSceneId)) ?? null)
           : null,
     ],
     missingActiveMatchesSearch: [
@@ -1228,10 +1251,105 @@ export const scenesLogic = kea<scenesLogicType>([
             error instanceof Error
               ? error.message
               : values.isFrameAdminMode
-              ? 'Failed to activate the scene'
-              : 'Failed to preview the scene',
+                ? 'Failed to activate the scene'
+                : 'Failed to preview the scene',
         })
         actions.previewSceneFailure()
+      }
+    },
+    pushScene: async ({ sceneId, activate, state }) => {
+      // The scene itself always: pushing an unchanged copy changes nothing.
+      const sceneIds = Array.from(new Set([sceneId, ...values.scenePushIds(sceneId)]))
+      const scene = values.rawScenes.find((candidate) => candidate.id === sceneId)
+      const name = scene?.name || sceneId
+      const connected = sceneIds.filter((id) => id !== sceneId).length
+      const title = connected
+        ? `Pushing ${name} and ${connected} connected scene${connected === 1 ? '' : 's'}`
+        : `Pushing ${name}`
+      const frameLogicInstance = frameLogic({ frameId: props.frameId })
+      if (isCloudMode()) {
+        // One durable set_scenes push through the uploadScenes shim: the
+        // frame's saved list with the pushed scenes' edits in it, and this
+        // scene, or the one showing, active.
+        const taskId = `${props.frameId}:push:${sceneId}:${Date.now()}`
+        longRunningTasksModel.actions.startTask({ id: taskId, frameId: props.frameId, kind: 'deploy', sceneId, title })
+        try {
+          const scenes = savedScenesWithPushed(values.frame?.scenes ?? [], formScenesOf(values), sceneIds)
+          if (!scenes.length) {
+            throw new Error('This frame has no scenes to push')
+          }
+          await deployCloudFrameScenes(props.frameId, scenes, {
+            sceneId: activate ? sceneId : cloudDeployActiveSceneId(values.frame?.active_scene_id, scenes),
+            ...(activate && state ? { state } : {}),
+          })
+          longRunningTasksModel.actions.finishTask({
+            taskId,
+            frameId: props.frameId,
+            kind: 'deploy',
+            status: 'success',
+            detail: activate
+              ? 'Pushed. The frame shows it as soon as it syncs.'
+              : 'Pushed. The frame has it as soon as it syncs.',
+          })
+        } catch (error) {
+          longRunningTasksModel.actions.taskFailed({
+            taskId,
+            frameId: props.frameId,
+            kind: 'deploy',
+            detail: error instanceof Error ? error.message : 'Failed to push the scene',
+          })
+        }
+        return
+      }
+      // Save these scenes and only these, then the frame's saved scenes go
+      // out: with this one written as the scene to show (set_next_scene), or
+      // as they are.
+      const unsaved = sceneIds.filter((id) => values.unsavedSceneIds.has(id))
+      if (!activate) {
+        try {
+          if (unsaved.length) {
+            await frameLogicInstance.asyncActions.saveScenes(unsaved)
+          }
+        } catch (error) {
+          reportTaskOutcome('error', {
+            frameId: props.frameId,
+            kind: 'save',
+            title,
+            detail: error instanceof Error ? error.message : 'Failed to save the scene',
+          })
+          return
+        }
+        framesModel.actions.deployFrame(
+          props.frameId,
+          frameCanUseFastDeploy(values.frame, frameLogicInstance.values.requiresRecompilation),
+          { title, sceneId }
+        )
+        return
+      }
+      longRunningTasksModel.actions.startTask({ frameId: props.frameId, kind: 'deploy', sceneId, title })
+      try {
+        if (unsaved.length) {
+          await frameLogicInstance.asyncActions.saveScenes(unsaved)
+        }
+        const response = await apiFetch(`/api/frames/${props.frameId}/set_next_scene`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sceneId,
+            state: state ?? {},
+            fastDeploy: !frameLogicInstance.values.requiresRecompilation,
+          }),
+        })
+        if (!response.ok) {
+          throw new Error('Failed to queue the scene push')
+        }
+      } catch (error) {
+        longRunningTasksModel.actions.taskFailed({
+          frameId: props.frameId,
+          kind: 'deploy',
+          sceneId,
+          detail: error instanceof Error ? error.message : 'Failed to push the scene',
+        })
       }
     },
     installMissingActiveScene: async () => {

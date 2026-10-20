@@ -424,8 +424,8 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
             ? {
                 title: 'Update to the latest version?',
                 message: withAccess(
-                  `Version ${shortSceneVersion(version)} of ${name} replaces the one on this frame and is deployed ` +
-                    'right away. Unsaved changes to the scene are lost.'
+                  `Version ${shortSceneVersion(version)} of ${name} replaces the one on this frame and is pushed ` +
+                    'to it right away. Unsaved changes to the scene are lost.'
                 ),
                 confirmLabel: 'Update to latest',
               }
@@ -433,7 +433,7 @@ export const sceneUpdatesLogic = kea<sceneUpdatesLogicType>([
                 title: 'Update to the latest version?',
                 message: withAccess(
                   `The latest published version of ${name} replaces this copy; the values you set on its fields ` +
-                    'are kept, any other local changes to the scene are lost. Save and deploy afterwards to send it ' +
+                    'are kept, any other local changes to the scene are lost. Push it afterwards to send it ' +
                     'to the frame.'
                 ),
                 confirmLabel: 'Update to latest',

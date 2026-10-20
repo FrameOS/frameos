@@ -168,7 +168,7 @@ describe("cloud: a store scene the frame holds an older version of", () => {
     await waitFor(() => expect(logic.values.updatingSceneIds).toEqual({}));
 
     expect(confirmMock).toHaveBeenCalledTimes(1);
-    expect(confirmMock.mock.calls[0]![0].message).toContain("deployed right away");
+    expect(confirmMock.mock.calls[0]![0].message).toContain("pushed to it right away");
     // One scene with an update: nothing to offer beyond it.
     expect(confirmMock.mock.calls[0]![0].extraAction).toBeUndefined();
     const update = apiFetchMock.mock.calls.find(([input]) => String(input).endsWith("/scenes/update"));

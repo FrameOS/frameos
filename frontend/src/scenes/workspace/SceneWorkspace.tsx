@@ -304,7 +304,7 @@ function SceneSelector({
               const unsaved = unsavedSceneIds.has(scene.id)
               const undeployed = undeployedSceneIds.has(scene.id)
               const updateAvailable = !!sceneUpdateVersions[scene.id]
-              const changeStatusLabel = unsaved ? 'Unsaved changes' : undeployed ? 'Undeployed changes' : null
+              const changeStatusLabel = unsaved ? 'Unsaved changes' : undeployed ? 'Changes not on the frame yet' : null
               const sceneStatusTitle = [
                 active ? 'Active scene' : 'Inactive scene',
                 changeStatusLabel,
@@ -396,7 +396,7 @@ function SceneSelector({
                             title={changeStatusLabel}
                             className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
                           >
-                            {unsaved ? 'unsaved' : 'undeployed'}
+                            {unsaved ? 'unsaved' : 'not pushed'}
                           </Tag>
                         ) : null}
                         {updateAvailable ? (

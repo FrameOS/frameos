@@ -176,7 +176,7 @@
       ]
     },
     "cloud_scenes": {
-      "label": "Deploy scenes",
+      "label": "Push scenes",
       "planes": ["cloud"],
       "frames": "Every cloud frame: the set_scenes verb from queued through the device's scene_ack to its first render announce.",
       "stages": [

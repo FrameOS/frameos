@@ -45,7 +45,7 @@ COMMAND_LABELS: dict[str, str] = {
     "set_current_scene": "Switch scene",
     "scene_event": "Scene event",
     "notify_update_available": "Check for a firmware update",
-    "set_scenes": "Deploy scenes",
+    "set_scenes": "Push scenes",
     "set_settings": "Deploy settings",
 }
 

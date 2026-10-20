@@ -470,7 +470,7 @@ export const deployProgressContract: DeployProgressContract = {
       ]
     },
     "cloud_scenes": {
-      "label": "Deploy scenes",
+      "label": "Push scenes",
       "planes": [
         "cloud"
       ],

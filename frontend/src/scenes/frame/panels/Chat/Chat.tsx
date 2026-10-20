@@ -406,7 +406,7 @@ export function Chat() {
         ) : null}
         {status.state === 'installed' ? (
           <div className="text-xs text-green-600">
-            {status.queued ? 'Installed; the deploy lands when the frame reconnects.' : 'Installed and deployed.'}
+            {status.queued ? 'Installed; the push lands when the frame reconnects.' : 'Installed and pushed.'}
           </div>
         ) : null}
         {status.state === 'dismissed' ? <div className="frame-tool-muted text-xs">Not installed.</div> : null}

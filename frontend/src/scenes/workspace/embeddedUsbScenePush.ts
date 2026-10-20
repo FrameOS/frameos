@@ -24,5 +24,5 @@ export async function pushScenesOverUsb(frameId: FrameId, scenes: FrameScene[]):
 }
 
 export function pushedScenesMessage(count: number): string {
-  return `Deployed ${count} scene${count === 1 ? '' : 's'} over USB.`
+  return `Pushed ${count} scene${count === 1 ? '' : 's'} over USB.`
 }

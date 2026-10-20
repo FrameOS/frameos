@@ -264,6 +264,14 @@ function deployCompletedDetail(detail: string): string {
   return fast ? 'Scenes & settings deployed' : 'Deploy completed'
 }
 
+/** The same, for a deploy task the scene drawer started: a push of its scenes
+ * (scenesLogic.pushScene, docs/ui-vocabulary.md). */
+function pushCompletedDetail(detail: string): string {
+  return detail.toLowerCase().split(/\s+/).includes('queued')
+    ? 'Push queued. The frame picks it up on its next check-in.'
+    : 'Pushed to the frame'
+}
+
 function frameStatus(frame: Partial<FrameType>): string | null {
   return typeof frame.status === 'string' ? frame.status : null
 }
@@ -598,12 +606,19 @@ export const longRunningTasksModel = kea<longRunningTasksModelType>([
       const deploySignal = deployTaskSignal(log)
       if (deploySignal) {
         if (deploySignal.action === 'completed') {
+          const task = latestRunningTask(values.tasks, {
+            taskId: deploySignal.taskId,
+            frameId: log.frame_id,
+            kind: 'deploy',
+          })
           actions.finishTask({
             taskId: deploySignal.taskId,
             frameId: log.frame_id,
             kind: 'deploy',
             status: 'success',
-            detail: deployCompletedDetail(deploySignal.detail),
+            detail: task?.sceneId
+              ? pushCompletedDetail(deploySignal.detail)
+              : deployCompletedDetail(deploySignal.detail),
           })
         } else if (deploySignal.action === 'failed') {
           actions.taskFailed({

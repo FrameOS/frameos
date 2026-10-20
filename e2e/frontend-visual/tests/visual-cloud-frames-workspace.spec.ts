@@ -88,7 +88,7 @@ test.describe('cloud /frames workspace @e2e', () => {
 
   test('deploy drawer vocabulary: a cloud Pi frame deploys scenes and updates FrameOS', async ({ page }) => {
     // docs/ui-vocabulary.md: the cloud drawer says "Deploy scenes & settings"
-    // and "Update FrameOS"; "push" and "upgrade" never reach a label.
+    // and "Update FrameOS"; "upgrade" never reaches a label.
     const readErrors = attachFrontendErrorCollector(page)
     await page.setViewportSize({ width: 1440, height: 900 })
     await prepareCloudPage(page, 'light')
@@ -106,7 +106,7 @@ test.describe('cloud /frames workspace @e2e', () => {
     await expect(drawer.locator('.frame-tool-heading', { hasText: 'Scenes & settings' })).toBeVisible()
     await expect(drawer.getByRole('button', { name: 'Deploy scenes & settings' })).toBeVisible()
     await expect(drawer.getByRole('button', { name: 'Update FrameOS' })).toBeVisible()
-    await expect(drawer).not.toContainText(/\b(Push|Pushes|Pushing|Upgrade|Upgrades)\b/)
+    await expect(drawer).not.toContainText(/\b(Upgrade|Upgrades|Upgrading)\b/)
 
     expectNoCloudFrontendErrors(readErrors)
   })
