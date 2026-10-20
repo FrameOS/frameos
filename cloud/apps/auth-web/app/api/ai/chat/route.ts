@@ -62,6 +62,12 @@ import {
   rateLimitResponse,
 } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
+import { bearerToken, isApiToken } from "../../../../src/lib/api-tokens";
+import { getCloudBaseUrl, getScenesBaseUrl } from "../../../../src/lib/env";
+import { internalOrigin } from "../../../../src/lib/internal-origin";
+import { sessionCookieName } from "../../../../src/lib/session-cookie";
+import { guardedFetch } from "../../../../src/lib/ssrf";
+import { connectChatMcpTools } from "../../../../src/lib/ai/mcp-tools";
 
 export const runtime = "nodejs";
 // The relay stream of one turn. The turn itself has its own ceiling
@@ -283,6 +289,34 @@ async function storeSceneContextBlock(
   return { block: lines.join("\n"), storeSceneId: scene.id };
 }
 
+// The credential the chat's MCP tools call the routes with: the request's
+// own. A browser session (the cookie, and the Origin this request passed the
+// CSRF check with), or the personal API token a script sent.
+function chatMcpCredential(
+  request: NextRequest,
+): { cookie: string; origin: string } | { token: string } | null {
+  const cookie = request.headers.get("cookie");
+  const origin = request.headers.get("origin");
+  if (cookie && request.cookies.has(sessionCookieName) && origin) {
+    return { cookie, origin };
+  }
+  const token = bearerToken(request.headers.get("authorization"));
+  return isApiToken(token) ? { token } : null;
+}
+
+// The caller's address rides along so the routes' per-IP limits key on the
+// real client (as the MCP route does).
+function forwardedRequestHeaders(request: NextRequest): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const name of ["cf-connecting-ip", "user-agent", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto"]) {
+    const value = request.headers.get(name);
+    if (value) {
+      headers[name] = value;
+    }
+  }
+  return headers;
+}
+
 // Per account, on top of the per-IP window: a person iterating on a scene
 // sends a turn every minute or two; forty in fifteen minutes is a script.
 const aiTurnsPerAccountRateLimit = { limit: 40, windowMs: 15 * 60 * 1000 };
@@ -444,6 +478,11 @@ export async function POST(request: NextRequest) {
   const contextParts: string[] = [];
   if (frameBlock) {
     contextParts.push(frameBlock);
+  } else if (body.editor === false) {
+    contextParts.push(
+      "The user opened this chat from the frames overview, not from one frame, and has no scene editor open. " +
+        "Find the frame they mean with frames_list when the request is about one.",
+    );
   }
   if (storeBlock) {
     contextParts.push(storeBlock);
@@ -556,7 +595,10 @@ export async function POST(request: NextRequest) {
     renderSize: renderSizeFrom(body.renderSize) ?? frameResolution ?? null,
     renderTimeZone: timeZoneFrom(body.timeZone),
     storeSceneId,
+    // The frames home's AI box has no editor to deliver into.
+    editorAvailable: body.editor !== false,
   };
+  const mcpCredential = chatMcpCredential(request);
 
   // Reserved from here until onFinish: the next turn's admission gate counts
   // it, and the ledger takes over once the metering below has run.
@@ -622,6 +664,25 @@ export async function POST(request: NextRequest) {
     run: async (emit, signal, self) => {
       turnEmit = emit;
       emit({ chatId: chat.id, turnId, type: "chat" });
+      // Every MCP tool, for this user (mcp-tools.ts). A chat without them
+      // still works with its own tools, so a failure here is logged, not fatal.
+      let mcpTools: Awaited<ReturnType<typeof connectChatMcpTools>> | undefined;
+      if (mcpCredential) {
+        try {
+          mcpTools = await connectChatMcpTools({
+            baseUrl: internalOrigin(),
+            credential: mcpCredential,
+            fetchExternal: (input, init) => guardedFetch(input, init),
+            headers: forwardedRequestHeaders(request),
+            publicOrigin: getCloudBaseUrl().replace(/\/+$/, ""),
+            storeOrigin: getScenesBaseUrl().replace(/\/+$/, ""),
+            userAgent: `frameos-cloud-ai-chat (account ${accountId})`,
+          });
+          toolContext.extraTools = mcpTools;
+        } catch (error) {
+          logWarn("ai.chat.mcp_tools_unavailable", { accountId, message: String(error), turnId });
+        }
+      }
       try {
         const { reply, tool } = await runAgentLoop({
           apiKey: apiKey.trim(),
@@ -763,6 +824,8 @@ export async function POST(request: NextRequest) {
         } catch {
           // persisting the failure is best-effort
         }
+      } finally {
+        await mcpTools?.close();
       }
     },
   });

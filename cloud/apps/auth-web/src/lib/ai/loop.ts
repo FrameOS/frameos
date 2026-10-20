@@ -210,6 +210,9 @@ export async function runAgentLoop({
   if (photoLinksNoted) {
     input.splice(Math.max(0, input.length - 1), 0, userMessage(photoLinkNote));
   }
+  // This file's tools plus the MCP server's (toolContext.extraTools).
+  const tools = [...toolDefinitions, ...(toolContext.extraTools?.definitions ?? [])];
+  const labelFor = (name: string) => toolLabels[name] ?? toolContext.extraTools?.labels[name] ?? name;
   let reply = "";
   let usage: ResponseUsage = emptyUsage();
   let rounds = 0;
@@ -237,7 +240,7 @@ export async function runAgentLoop({
           progressReported.set(name, bytes);
           emit({
             detail: bytes === 0 ? "writing…" : `${formatBytes(bytes)} written`,
-            label: toolLabels[name] ?? name,
+            label: labelFor(name),
             name,
             status: "progress",
             type: "tool",
@@ -249,7 +252,7 @@ export async function runAgentLoop({
         },
         reasoningEffort,
         ...(signal ? { signal } : {}),
-        tools: toolDefinitions,
+        tools,
       });
     } catch (error) {
       // An aborted or failed round is still a round OpenAI bills: everything
@@ -292,7 +295,7 @@ export async function runAgentLoop({
     // each call's result.
     input.push(...response.output);
     for (const call of response.functionCalls) {
-      const label = toolLabels[call.name] ?? call.name;
+      const label = labelFor(call.name);
       toolCalls.push(call.name);
       emit({ label, name: call.name, status: "start", type: "tool" });
       let output: string;

@@ -4,7 +4,8 @@ import { frameEditorsLogic } from '../frame/frameEditorsLogic'
 import type { FrameId } from '../../types'
 
 export interface WorkspaceChatDrawerLogicProps {
-  frameId: FrameId
+  /** null for the frames home's chat, about no frame in particular. */
+  frameId: FrameId | null
   nodeId?: string | null
   sceneId?: string | null
 }
@@ -20,18 +21,25 @@ export type workspaceChatDrawerLogicType = MakeLogicType<{}, {}, WorkspaceChatDr
 export const workspaceChatDrawerLogic = kea<workspaceChatDrawerLogicType>([
   path(['src', 'scenes', 'workspace', 'workspaceChatDrawerLogic']),
   props({} as WorkspaceChatDrawerLogicProps),
-  key((props) => `${props.frameId}:${props.sceneId ?? 'frame'}:${props.nodeId ?? 'scene'}`),
+  key((props) => `${props.frameId ?? 'home'}:${props.sceneId ?? 'frame'}:${props.nodeId ?? 'scene'}`),
   afterMount(({ props }) => {
-    const chat = chatLogic({ frameId: props.frameId, sceneId: props.sceneId ?? null }).actions
+    const chat = chatLogic({ frameId: props.frameId, sceneId: props.sceneId ?? null })
+    // An AI box question (workspaceLogic.startAiChat) is already on its way
+    // in a chat of its own: keep showing that one.
+    if (chat.values.isSubmitting && chat.values.activeChatId) {
+      return
+    }
 
-    if (props.sceneId && props.nodeId) {
+    if (props.frameId === null) {
+      chat.actions.ensureFrameChat()
+    } else if (props.sceneId && props.nodeId) {
       frameEditorsLogic({ frameId: props.frameId }).actions.selectScene(props.sceneId)
-      chat.ensureChatForApp(props.sceneId, props.nodeId)
+      chat.actions.ensureChatForApp(props.sceneId, props.nodeId)
     } else if (props.sceneId) {
       frameEditorsLogic({ frameId: props.frameId }).actions.selectScene(props.sceneId)
-      chat.ensureChatForScene(props.sceneId)
+      chat.actions.ensureChatForScene(props.sceneId)
     } else {
-      chat.ensureFrameChat()
+      chat.actions.ensureFrameChat()
     }
   }),
 ])

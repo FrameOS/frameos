@@ -40,6 +40,7 @@ import { frameLogic } from '../frame/frameLogic'
 import { onlyAwaitingDeviceAck } from '../frame/frameDeployUtils'
 import { HeaderMetrics } from '../frame/panels/Metrics/HeaderMetrics'
 import { CompiledSceneTag } from '../frame/panels/Scenes/CompiledSceneTag'
+import { AiPromptBox } from './AiPromptBox'
 import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
 import { SceneUpdateBanner } from './SceneUpdateBanner'
 import { CloudDeviceScenesBanner } from './CloudDeviceScenesBanner'
@@ -112,6 +113,8 @@ interface FrameDashboardSurfaceProps {
   frameMatchesSearch?: boolean
   sectionId?: string
   showSceneMenus?: boolean
+  /** The AI box above the scenes (a frame's own page). */
+  showAiBox?: boolean
 }
 
 export function sceneIsActive(scene: FrameScene, currentSceneId: string | null | undefined): boolean {
@@ -750,12 +753,14 @@ function FrameScenesBlock({
   totalScenes,
   frameMatchesSearch,
   showSceneMenus,
+  showAiBox,
 }: {
   frame: FrameType
   scenes: FrameScene[]
   totalScenes: number
   frameMatchesSearch?: boolean
   showSceneMenus?: boolean
+  showAiBox?: boolean
 }): JSX.Element {
   const { frameAssetFolderExpansion, sceneControlSelection, search } = useValues(workspaceLogic)
   const { openSceneControl, setFrameAssetFolderExpanded } = useActions(workspaceLogic)
@@ -870,6 +875,7 @@ function FrameScenesBlock({
 
   return (
     <div className="min-w-0" onDragOver={handleScenesDragOver} onDrop={handleScenesDrop}>
+      {showAiBox ? <AiPromptBox frameId={frame.id} className="mb-4 flex w-full @md:max-w-xl" /> : null}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {visibleSceneToolButtons.map(({ label, panel, icon: Icon, disabledReason }) =>
           disabledReason ? (
@@ -1021,6 +1027,7 @@ export function FrameDashboardSurface({
   frameMatchesSearch,
   sectionId,
   showSceneMenus = false,
+  showAiBox = false,
 }: FrameDashboardSurfaceProps): JSX.Element {
   const { applyTemplate } = useActions(frameLogic({ frameId: frame.id }))
   const { applyRemoteToFrame } = useActions(templatesLogic({ frameId: frame.id }))
@@ -1067,6 +1074,7 @@ export function FrameDashboardSurface({
           totalScenes={totalScenes}
           frameMatchesSearch={frameMatchesSearch}
           showSceneMenus={showSceneMenus}
+          showAiBox={showAiBox}
         />
       </div>
     </section>

@@ -170,6 +170,13 @@ status, the detail the route sent and — for the ones whose fix is not
 obvious (`read_only_token`, `api_token_not_allowed`, 401, 404, 409, 502,
 504) — one sentence on what to do (`backend/app/mcp/result.py`).
 
+### The AI chat uses these tools
+
+The workspace's AI chat (`docs/ai-chat.md`, `POST /api/projects/{id}/ai/chat`)
+offers the model every tool here except the AI tools, the API-token tools and
+`frame_delete`, called in-process with the chat user's credential exactly as
+this endpoint calls them. A tool added here is a tool the chat has.
+
 ### What the cloud has that this does not
 
 The cloud's scene store, versioned scenes and the hub's durable command queue

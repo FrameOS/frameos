@@ -38,13 +38,17 @@ async def create_chat(data: ChatCreateRequest, db: Session = Depends(get_db)):
 
 @api_project.get("/ai/chats", response_model=ChatListResponse)
 async def list_chats(
-    frame_id: int = Query(..., alias="frameId"),
+    frame_id: int | None = Query(None, alias="frameId"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
-    project_get_or_404(db, Frame, frame_id, detail="Frame not found")
-    base_query = project_query(db, Chat).filter(Chat.frame_id == frame_id, Chat.messages.any())
+    # Without a frame: every chat of the project, as the frames home's AI
+    # drawer lists them (docs/ai-chat.md).
+    base_query = project_query(db, Chat).filter(Chat.messages.any())
+    if frame_id is not None:
+        project_get_or_404(db, Frame, frame_id, detail="Frame not found")
+        base_query = base_query.filter(Chat.frame_id == frame_id)
     total = base_query.count()
     chats = (
         base_query.order_by(Chat.updated_at.desc(), Chat.created_at.desc())

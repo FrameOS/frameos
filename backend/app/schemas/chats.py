@@ -17,7 +17,7 @@ class ChatSummary(BaseModel):
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: str
-    frame_id: int = Field(alias="frameId")
+    frame_id: Optional[int] = Field(default=None, alias="frameId")
     scene_id: Optional[str] = Field(default=None, alias="sceneId")
     context_type: Optional[str] = Field(default=None, alias="contextType")
     context_id: Optional[str] = Field(default=None, alias="contextId")

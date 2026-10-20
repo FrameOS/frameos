@@ -33,6 +33,9 @@ export interface SceneRenderCheckResult {
   errors: string[]
   /** All collected log lines, errors included, oldest first. */
   logs: string[]
+  /** The preview runtime itself never started (no wasm build here, a
+   * blocked worker): nothing was learned about the scene. */
+  unavailable?: boolean
 }
 
 function pushCapped(list: string[], entry: string, cap: number): void {
@@ -83,6 +86,8 @@ export async function renderSceneCheck(
   const logs: string[] = []
   let rendered = false
   let renderMs: number | null = null
+  let workerSpoke = false
+  let unavailable = false
 
   const worker = new Worker(assetUrl('/frameos-wasm/preview-worker.js'), { type: 'module' })
   await new Promise<void>((resolve) => {
@@ -102,12 +107,14 @@ export async function renderSceneCheck(
       finish()
     }, RENDER_CHECK_TIMEOUT_MS)
     worker.onerror = (event) => {
+      unavailable = !workerSpoke
       pushCapped(errors, event.message || 'Preview worker failed to load', MAX_COLLECTED_ERRORS)
       if (!rendered) {
         finish()
       }
     }
     worker.onmessage = (event: MessageEvent) => {
+      workerSpoke = true
       const msg = event.data || {}
       if (msg.type === 'frame') {
         const firstFrame = !rendered
@@ -143,5 +150,5 @@ export async function renderSceneCheck(
       sceneId: scene.id,
     })
   })
-  return { rendered, renderMs, errors, logs }
+  return { rendered, renderMs, errors, logs, unavailable }
 }

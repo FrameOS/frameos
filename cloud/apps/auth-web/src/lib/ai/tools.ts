@@ -140,6 +140,19 @@ export type ToolContext = {
   renderTimeZone?: string | null;
   // render_scene calls so far this turn (MAX_RENDERS_PER_TURN bounds them).
   rendersThisTurn?: number;
+  // False when the chat has no editor to deliver a scene into (the frames
+  // home's AI box): create_scenes then points at the MCP tools that save.
+  editorAvailable?: boolean;
+  // Tools beyond this file's own: the cloud MCP server's, run in-process for
+  // the signed-in user (mcp-tools.ts, docs/ai-chat.md).
+  extraTools?: ExtraTools | undefined;
+};
+
+// A second set of tools the loop offers next to toolDefinitions.
+export type ExtraTools = {
+  definitions: ResponsesToolDefinition[];
+  labels: Record<string, string>;
+  call(name: string, args: JsonObject): Promise<ToolOutput>;
 };
 
 const MAX_TOOL_OUTPUT_CHARS = 60_000;
@@ -1766,6 +1779,9 @@ export async function runTool(name: string, args: JsonObject, ctx: ToolContext):
   if (name === "render_scene") {
     return renderSceneForModel(ctx, args);
   }
+  if (ctx.extraTools && !(name in toolLabels) && ctx.extraTools.labels[name] !== undefined) {
+    return ctx.extraTools.call(name, args);
+  }
   return { images: [], text: await executeTool(name, args, ctx) };
 }
 
@@ -2131,6 +2147,15 @@ export async function executeTool(
       );
     }
     case "create_scenes": {
+      if (ctx.editorAvailable === false) {
+        return JSON.stringify({
+          error:
+            "This chat has no scene editor open, so create_scenes has nowhere to deliver to. Save the scene to the " +
+            "account with scene_create, or — when the user asked for it to go on a frame — install it with " +
+            "frame_scene_install (it takes confirm).",
+          ok: false,
+        });
+      }
       return deliverScenes(ctx, args.scenes, "build_scene", asString(args.title));
     }
     case "save_scene": {

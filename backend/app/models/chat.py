@@ -9,7 +9,8 @@ class Chat(Base):
     __tablename__ = 'chat'
     id = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     project_id = mapped_column(Integer, ForeignKey("project.id"), nullable=False, index=True)
-    frame_id = mapped_column(Integer, ForeignKey('frame.id'), nullable=False)
+    # Null for a chat about no frame in particular (the frames home's AI box).
+    frame_id = mapped_column(Integer, ForeignKey('frame.id'), nullable=True)
     scene_id = mapped_column(String(128), nullable=True)
     context_type = mapped_column(String(32), nullable=True)
     context_id = mapped_column(String(256), nullable=True)

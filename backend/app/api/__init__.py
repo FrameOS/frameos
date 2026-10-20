@@ -21,6 +21,7 @@ api_project: APIRouter = APIRouter()
 
 from .auth import *  # noqa: E402, F403
 from .ai_apps import *  # noqa: E402, F403
+from .ai_chat import *  # noqa: E402, F403
 from .ai_scenes import *  # noqa: E402, F403
 from .api_tokens import *  # noqa: E402, F403
 from .mcp import *  # noqa: E402, F403

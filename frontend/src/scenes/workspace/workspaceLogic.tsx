@@ -11,6 +11,7 @@ import { isCloudMode } from '../../utils/cloudMode'
 import { getFrameControlFrameId } from '../../utils/frameControlMode'
 import { DeployDrawerView, frameLogic } from '../frame/frameLogic'
 import { controlLogic } from '../frame/panels/Scenes/controlLogic'
+import { chatLogic } from '../frame/panels/Chat/chatLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 
 import { frameChangeDrawerKind, type WorkspaceUtilityPanel } from './workspaceSurfaces'
@@ -329,7 +330,8 @@ export interface SceneSelection {
 }
 
 export interface ChatDrawerSelection {
-  frameId: FrameId
+  /** null for the chat about no frame in particular (the frames home's AI box). */
+  frameId: FrameId | null
   sceneId: string | null
   nodeId?: string | null
   /** 'templates' when opened from the Add scene drawer's "Generate scene": the chat header then offers a way back. */
@@ -1069,12 +1071,12 @@ export interface workspaceLogicActions {
     frameId: FrameId
   }
   openChatDrawer: (
-    frameId: FrameId,
+    frameId: FrameId | null,
     sceneId?: string | null,
     nodeId?: string | null,
     source?: 'templates' | null
   ) => {
-    frameId: FrameId
+    frameId: FrameId | null
     nodeId: string | null
     sceneId: string | null
     source: 'templates' | null
@@ -1216,6 +1218,13 @@ export interface workspaceLogicActions {
   snapshotFrameOrder: () => {
     value: true
   }
+  startAiChat: (
+    frameId: FrameId | null,
+    prompt: string
+  ) => {
+    frameId: FrameId | null
+    prompt: string
+  }
   toggleSecondarySidebar: () => {
     value: true
   }
@@ -1314,7 +1323,7 @@ export const workspaceLogic = kea<workspaceLogicType>([
     openScheduleDrawer: (frameId: FrameId) => ({ frameId }),
     closeScheduleDrawer: true,
     openChatDrawer: (
-      frameId: FrameId,
+      frameId: FrameId | null,
       sceneId: string | null = null,
       nodeId: string | null = null,
       source: 'templates' | null = null
@@ -1325,6 +1334,8 @@ export const workspaceLogic = kea<workspaceLogicType>([
       source,
     }),
     closeChatDrawer: true,
+    // The AI box (AiPromptBox): open the chat drawer and send the question.
+    startAiChat: (frameId: FrameId | null, prompt: string) => ({ frameId, prompt }),
     openFrameChangeDrawer: (
       frameId: FrameId,
       kind: FrameChangeDrawerKind,
@@ -1783,6 +1794,15 @@ export const workspaceLogic = kea<workspaceLogicType>([
     ],
   }),
   listeners(({ actions, cache, values }) => {
+    const startAiChat = ({ frameId, prompt }: { frameId: FrameId | null; prompt: string }) => {
+      // Mounted here so the question is sent before the drawer renders; the
+      // drawer mounts the same keyed logic and finds the chat running.
+      const chat = chatLogic({ frameId })
+      cache.unmountStartedAiChat?.()
+      cache.unmountStartedAiChat = chat.mount()
+      actions.openChatDrawer(frameId, null, null)
+      chat.actions.startNewChatWithMessage(prompt)
+    }
     const preserveFramesScroll = () => preserveFramesScrollAfterLayoutChange(cache)
     const hideNewFrameFormAndPreserveScroll = () => {
       newFrameForm.actions.hideForm()
@@ -1841,7 +1861,12 @@ export const workspaceLogic = kea<workspaceLogicType>([
       openScheduleDrawer: hideNewFrameFormAndPreserveScroll,
       closeScheduleDrawer: preserveFramesScroll,
       openChatDrawer: hideNewFrameFormAndPreserveScroll,
-      closeChatDrawer: preserveFramesScroll,
+      closeChatDrawer: () => {
+        cache.unmountStartedAiChat?.()
+        cache.unmountStartedAiChat = null
+        preserveFramesScroll()
+      },
+      startAiChat,
       openFrameChangeDrawer: ({ frameId, kind, deployDrawerView }) => {
         if (cache.skipNextFrameChangeDrawerScrollPreserve) {
           cache.skipNextFrameChangeDrawerScrollPreserve = false
@@ -2038,6 +2063,11 @@ export const workspaceLogic = kea<workspaceLogicType>([
       const nodeId = searchValue(search, 'nodeId')
 
       if (!frameId) {
+        if (drawer === 'chat') {
+          // The frames home's chat, about no frame in particular.
+          actions.openChatDrawer(null)
+          return
+        }
         closeDrawersFromUrl()
         return
       }
@@ -2247,11 +2277,17 @@ export const workspaceLogic = kea<workspaceLogicType>([
     ],
     closeScheduleDrawer: clearDrawerUrl,
     openChatDrawer: (payload: Record<string, any>) =>
-      drawerUrlForFrame(payloadFrameId(payload.frameId), 'chat', {
-        ...(payload.sceneId ? { sceneId: String(payload.sceneId) } : {}),
-        ...(payload.nodeId ? { nodeId: String(payload.nodeId) } : {}),
-        ...(payload.source === 'templates' ? { drawerSource: 'templates' } : {}),
-      }),
+      payload.frameId === null || payload.frameId === undefined
+        ? [
+            router.values.location.pathname,
+            { ...clearDrawerSearchParams(router.values.searchParams), drawer: 'chat' },
+            utilityDrawerClosedHash(),
+          ]
+        : drawerUrlForFrame(payloadFrameId(payload.frameId), 'chat', {
+            ...(payload.sceneId ? { sceneId: String(payload.sceneId) } : {}),
+            ...(payload.nodeId ? { nodeId: String(payload.nodeId) } : {}),
+            ...(payload.source === 'templates' ? { drawerSource: 'templates' } : {}),
+          }),
     closeChatDrawer: clearDrawerUrl,
     openFrameChangeDrawer: (payload: Record<string, any>) =>
       payload.kind === 'unsaved'

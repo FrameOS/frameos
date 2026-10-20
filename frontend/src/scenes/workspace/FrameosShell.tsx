@@ -44,6 +44,7 @@ import { FrameDeployPlanDrawer } from './FrameDeployPlanDrawer'
 import { FrameUnsavedChangesDrawer } from './FrameUnsavedChangesDrawer'
 import { frameChangeDrawerKind, photosLibraryIsAvailable } from './workspaceSurfaces'
 import { AiElsewhereNote } from './AiElsewhereNote'
+import { AiPromptBox } from './AiPromptBox'
 import { FrameRenameModal } from './FrameActionsMenu'
 import { isInFrameAdminMode } from '../../utils/frameAdmin'
 import { getFrameControlFrameId } from '../../utils/frameControlMode'
@@ -75,6 +76,9 @@ interface FrameosShellProps {
   onPrimaryAction?: () => void
   showAiButton?: boolean
   chatNodeId?: string | null
+  /** What the default top bar opens with: the search box, or the AI box
+   * (the frames home: a question about any frame, AiPromptBox). */
+  topBarInput?: 'search' | 'ai'
 }
 
 function NavButton({
@@ -226,7 +230,8 @@ export function WorkspaceChatDrawer({
   sceneId,
   source,
 }: {
-  frameId: FrameId
+  /** null: the frames home's chat, about no frame in particular. */
+  frameId: FrameId | null
   nodeId?: string | null
   sceneId: string | null
   source?: 'templates' | null
@@ -234,10 +239,74 @@ export function WorkspaceChatDrawer({
   // The device runs no AI: its AI buttons answer with where the AI is, as
   // Generate scene does (workspaceSurfaces.ts, allowedAddSceneActions).
   if (isInFrameAdminMode()) {
-    return <WorkspaceChatElsewhereDrawer frameId={frameId} source={source} />
+    return frameId === null ? null : <WorkspaceChatElsewhereDrawer frameId={frameId} source={source} />
+  }
+
+  if (frameId === null) {
+    return <WorkspaceHomeChatDrawer />
   }
 
   return <WorkspaceChatDrawerContent frameId={frameId} nodeId={nodeId} sceneId={sceneId} source={source} />
+}
+
+function WorkspaceChatDrawerShell({
+  subtitle,
+  onBack,
+  children,
+}: {
+  subtitle: string
+  onBack?: () => void
+  children: JSX.Element
+}): JSX.Element {
+  const { closeChatDrawer } = useActions(workspaceLogic)
+  return (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <div className="frameos-divider flex items-start justify-between gap-3 border-b px-5 py-4">
+        <div className="flex min-w-0 items-start gap-3">
+          {onBack ? (
+            <button
+              type="button"
+              title="Back to Add scene"
+              aria-label="Back to Add scene"
+              onClick={onBack}
+              className="frameos-icon-button mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            >
+              <ArrowLeftIcon className="h-5 w-5" />
+            </button>
+          ) : null}
+          <div className="min-w-0">
+            <h2 className="frameos-strong flex items-center gap-2 truncate text-xl font-bold tracking-normal">
+              <SparklesIcon className="frameos-ai-title-icon h-5 w-5 shrink-0" aria-hidden />
+              AI chat
+            </h2>
+            <div className="frameos-muted truncate text-xs font-semibold uppercase tracking-wide">{subtitle}</div>
+          </div>
+        </div>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={closeChatDrawer}
+          className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          <XMarkIcon className="h-6 w-6" />
+        </button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden p-5">{children}</div>
+    </div>
+  )
+}
+
+/** The frames home's chat: about no frame in particular, so no editor. */
+function WorkspaceHomeChatDrawer(): JSX.Element {
+  useMountedLogic(chatLogic({ frameId: null }))
+  useMountedLogic(workspaceChatDrawerLogic({ frameId: null }))
+  return (
+    <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 flex w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
+      <WorkspaceChatDrawerShell subtitle="All frames">
+        <Chat frameId={null} />
+      </WorkspaceChatDrawerShell>
+    </div>
+  )
 }
 
 function WorkspaceChatElsewhereDrawer({
@@ -322,7 +391,7 @@ function WorkspaceChatDrawerContent({
   useMountedLogic(chatLogic({ frameId, sceneId }))
   useMountedLogic(workspaceChatDrawerLogic({ frameId, nodeId, sceneId }))
   const { frames } = useValues(framesModel)
-  const { closeChatDrawer, openTemplateDrawer } = useActions(workspaceLogic)
+  const { openTemplateDrawer } = useActions(workspaceLogic)
   const frame = frames[frameId]
   const frameLogicProps = { frameId }
 
@@ -334,40 +403,12 @@ function WorkspaceChatDrawerContent({
     <div className="workspace-drawer frameos-drawer fixed bottom-5 right-5 top-5 z-40 flex w-[430px] overflow-hidden rounded-[24px] border border-white/80 bg-white/95 shadow-2xl shadow-slate-500/30 backdrop-blur-xl">
       <BindLogic logic={frameLogic} props={frameLogicProps}>
         <BindLogic logic={frameEditorsLogic} props={frameLogicProps}>
-          <div className="flex min-w-0 flex-1 flex-col">
-            <div className="frameos-divider flex items-start justify-between gap-3 border-b px-5 py-4">
-              <div className="flex min-w-0 items-start gap-3">
-                {source === 'templates' ? (
-                  <button
-                    type="button"
-                    title="Back to Add scene"
-                    aria-label="Back to Add scene"
-                    onClick={() => openTemplateDrawer(frameId)}
-                    className="frameos-icon-button mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                  >
-                    <ArrowLeftIcon className="h-5 w-5" />
-                  </button>
-                ) : null}
-                <div className="min-w-0">
-                  <h2 className="frameos-strong truncate text-xl font-bold tracking-normal">AI chat</h2>
-                  <div className="frameos-muted truncate text-xs font-semibold uppercase tracking-wide">
-                    {frame.name || frameHost(frame)}
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label="Close"
-                onClick={closeChatDrawer}
-                className="frameos-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                <XMarkIcon className="h-6 w-6" />
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-hidden p-5">
-              <Chat />
-            </div>
-          </div>
+          <WorkspaceChatDrawerShell
+            subtitle={frame.name || frameHost(frame)}
+            onBack={source === 'templates' ? () => openTemplateDrawer(frameId) : undefined}
+          >
+            <Chat frameId={frameId} sceneId={sceneId} />
+          </WorkspaceChatDrawerShell>
         </BindLogic>
       </BindLogic>
     </div>
@@ -391,6 +432,7 @@ export function FrameosShell({
   onPrimaryAction,
   showAiButton: showAiButtonProp,
   chatNodeId,
+  topBarInput = 'search',
 }: FrameosShellProps): JSX.Element {
   const {
     chatDrawerSelection,
@@ -736,15 +778,19 @@ export function FrameosShell({
               topBarClassName
             )}
           >
-            <div className="relative min-w-0 flex-1 @md:max-w-sm">
-              <MagnifyingGlassIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search..."
-                className="frameos-input h-12 w-full rounded-2xl border border-white/90 bg-white/90 pl-12 pr-4 text-base text-slate-900 shadow-lg shadow-slate-300/35 outline-none transition placeholder:text-slate-400 focus:ring-2 focus:ring-blue-400"
-              />
-            </div>
+            {topBarInput === 'ai' ? (
+              <AiPromptBox frameId={null} className="@md:max-w-xl" />
+            ) : (
+              <div className="relative min-w-0 flex-1 @md:max-w-sm">
+                <MagnifyingGlassIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search..."
+                  className="frameos-input h-12 w-full rounded-2xl border border-white/90 bg-white/90 pl-12 pr-4 text-base text-slate-900 shadow-lg shadow-slate-300/35 outline-none transition placeholder:text-slate-400 focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
+            )}
             <div className="flex shrink-0 items-center justify-end gap-3">
               {toolbar}
               {aiButton}

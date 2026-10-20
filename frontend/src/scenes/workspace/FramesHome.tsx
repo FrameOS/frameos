@@ -1834,8 +1834,10 @@ export function FramesHome(): JSX.Element {
       title="Frames"
       browserTitle={null}
       tree={FirstRunPanel ? null : <FrameTree />}
-      // Nothing to search while the fleet is empty.
+      // Nothing to ask about while the fleet is empty.
       topBar={FirstRunPanel ? null : undefined}
+      // The AI box where the search was: "update the kitchen frame".
+      topBarInput={isInFrameAdminMode() ? 'search' : 'ai'}
       primaryActionLabel={FirstRunPanel ? undefined : 'Add frame'}
       onPrimaryAction={
         FirstRunPanel

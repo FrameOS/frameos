@@ -1,0 +1,1536 @@
+{
+  "description": "What patch_scene and edit_app_source make of a scene, on both control planes (docs/ai-chat.md). The cloud (src/lib/ai/tools.ts applyScenePatch / applySourceEdits) and the backend (app/utils/ai_chat_scene.py) replay every case; change one, change the other and these.",
+  "base": {
+    "id": "s1",
+    "name": "Weather",
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "a",
+        "type": "app",
+        "data": {
+          "keyword": "weatherPanel",
+          "config": {
+            "units": "metric"
+          }
+        }
+      },
+      {
+        "id": "b",
+        "type": "app",
+        "data": {
+          "keyword": "text",
+          "config": {
+            "text": "Hi"
+          }
+        }
+      },
+      {
+        "id": "c",
+        "type": "code",
+        "data": {
+          "codeJS": "return state.a + 1\nreturn state.a + 1"
+        }
+      },
+      {
+        "id": "d",
+        "type": "app",
+        "data": {
+          "keyword": "inline",
+          "sources": {
+            "app.ts": "export const x = 1\n"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "source": "render",
+        "target": "a",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "e2",
+        "source": "a",
+        "target": "b",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "source": "c",
+        "target": "b",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/text"
+      }
+    ],
+    "fields": [
+      {
+        "name": "city",
+        "type": "string"
+      }
+    ],
+    "settings": {
+      "refreshInterval": 600
+    },
+    "apps": {
+      "weatherPanel": {
+        "name": "Weather panel",
+        "sources": {
+          "app.ts": "const units = 'metric'\nexport function get() { return units }\n",
+          "config.json": "{}"
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "name": "rename and merge settings",
+      "kind": "patch",
+      "args": {
+        "name": "  Rainy  ",
+        "settings": {
+          "refreshInterval": 60,
+          "backgroundColor": "#000"
+        }
+      },
+      "expected": {
+        "changes": [
+          "renamed scene to \"Rainy\"",
+          "settings merged (refreshInterval, backgroundColor)"
+        ],
+        "issues": [],
+        "scene": {
+          "id": "s1",
+          "name": "Rainy",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "b",
+              "type": "app",
+              "data": {
+                "keyword": "text",
+                "config": {
+                  "text": "Hi"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.a + 1\nreturn state.a + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 1\n"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "render",
+              "target": "a",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "id": "e2",
+              "source": "a",
+              "target": "b",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "source": "c",
+              "target": "b",
+              "sourceHandle": "fieldOutput",
+              "targetHandle": "fieldInput/text"
+            }
+          ],
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "settings": {
+            "refreshInterval": 60,
+            "backgroundColor": "#000"
+          },
+          "apps": {
+            "weatherPanel": {
+              "name": "Weather panel",
+              "sources": {
+                "app.ts": "const units = 'metric'\nexport function get() { return units }\n",
+                "config.json": "{}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "remove a node takes its edges",
+      "kind": "patch",
+      "args": {
+        "remove_nodes": [
+          "b"
+        ]
+      },
+      "expected": {
+        "changes": [
+          "removed 1 node(s) and 2 attached edge(s)"
+        ],
+        "issues": [],
+        "scene": {
+          "id": "s1",
+          "name": "Weather",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.a + 1\nreturn state.a + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 1\n"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "render",
+              "target": "a",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            }
+          ],
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "settings": {
+            "refreshInterval": 600
+          },
+          "apps": {
+            "weatherPanel": {
+              "name": "Weather panel",
+              "sources": {
+                "app.ts": "const units = 'metric'\nexport function get() { return units }\n",
+                "config.json": "{}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "remove an unknown node is refused",
+      "kind": "patch",
+      "args": {
+        "remove_nodes": [
+          "zz"
+        ]
+      },
+      "expected": {
+        "changes": [],
+        "issues": [
+          "remove_nodes: no node with id \"zz\"."
+        ],
+        "scene": null
+      }
+    },
+    {
+      "name": "set nodes adds and replaces",
+      "kind": "patch",
+      "args": {
+        "set_nodes": [
+          {
+            "id": "b",
+            "type": "app",
+            "data": {
+              "keyword": "text",
+              "config": {
+                "text": "Bye"
+              }
+            }
+          },
+          {
+            "id": "n",
+            "type": "app",
+            "data": {
+              "keyword": "clock"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          "nodes: 1 replaced, 1 added"
+        ],
+        "issues": [],
+        "scene": {
+          "id": "s1",
+          "name": "Weather",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "b",
+              "type": "app",
+              "data": {
+                "keyword": "text",
+                "config": {
+                  "text": "Bye"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.a + 1\nreturn state.a + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 1\n"
+                }
+              }
+            },
+            {
+              "id": "n",
+              "type": "app",
+              "data": {
+                "keyword": "clock"
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "render",
+              "target": "a",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "id": "e2",
+              "source": "a",
+              "target": "b",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "source": "c",
+              "target": "b",
+              "sourceHandle": "fieldOutput",
+              "targetHandle": "fieldInput/text"
+            }
+          ],
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "settings": {
+            "refreshInterval": 600
+          },
+          "apps": {
+            "weatherPanel": {
+              "name": "Weather panel",
+              "sources": {
+                "app.ts": "const units = 'metric'\nexport function get() { return units }\n",
+                "config.json": "{}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "set node without a type is refused",
+      "kind": "patch",
+      "args": {
+        "set_nodes": [
+          {
+            "id": "x"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [],
+        "issues": [
+          "set_nodes: node \"x\" needs a type."
+        ],
+        "scene": null
+      }
+    },
+    {
+      "name": "remove edges by id and matcher",
+      "kind": "patch",
+      "args": {
+        "remove_edges": [
+          "e1",
+          {
+            "source": "c",
+            "target": "b"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          "removed 2 edge(s)"
+        ],
+        "issues": [],
+        "scene": {
+          "id": "s1",
+          "name": "Weather",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "b",
+              "type": "app",
+              "data": {
+                "keyword": "text",
+                "config": {
+                  "text": "Hi"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.a + 1\nreturn state.a + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 1\n"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e2",
+              "source": "a",
+              "target": "b",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            }
+          ],
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "settings": {
+            "refreshInterval": 600
+          },
+          "apps": {
+            "weatherPanel": {
+              "name": "Weather panel",
+              "sources": {
+                "app.ts": "const units = 'metric'\nexport function get() { return units }\n",
+                "config.json": "{}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "remove edge that matches nothing",
+      "kind": "patch",
+      "args": {
+        "remove_edges": [
+          {
+            "source": "b",
+            "target": "a"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [],
+        "issues": [
+          "remove_edges: nothing matched {\"source\":\"b\",\"target\":\"a\"}."
+        ],
+        "scene": null
+      }
+    },
+    {
+      "name": "set edges adds and replaces",
+      "kind": "patch",
+      "args": {
+        "set_edges": [
+          {
+            "id": "e2",
+            "source": "a",
+            "target": "n"
+          },
+          {
+            "source": "render",
+            "target": "b"
+          }
+        ]
+      },
+      "expected": {
+        "changes": [
+          "edges: 1 replaced, 1 added"
+        ],
+        "issues": [],
+        "scene": {
+          "id": "s1",
+          "name": "Weather",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "b",
+              "type": "app",
+              "data": {
+                "keyword": "text",
+                "config": {
+                  "text": "Hi"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.a + 1\nreturn state.a + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 1\n"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "render",
+              "target": "a",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "id": "e2",
+              "source": "a",
+              "target": "n"
+            },
+            {
+              "source": "c",
+              "target": "b",
+              "sourceHandle": "fieldOutput",
+              "targetHandle": "fieldInput/text"
+            },
+            {
+              "source": "render",
+              "target": "b"
+            }
+          ],
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "settings": {
+            "refreshInterval": 600
+          },
+          "apps": {
+            "weatherPanel": {
+              "name": "Weather panel",
+              "sources": {
+                "app.ts": "const units = 'metric'\nexport function get() { return units }\n",
+                "config.json": "{}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "replace fields",
+      "kind": "patch",
+      "args": {
+        "fields": []
+      },
+      "expected": {
+        "changes": [
+          "fields replaced (0)"
+        ],
+        "issues": [],
+        "scene": {
+          "id": "s1",
+          "name": "Weather",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "b",
+              "type": "app",
+              "data": {
+                "keyword": "text",
+                "config": {
+                  "text": "Hi"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.a + 1\nreturn state.a + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 1\n"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "render",
+              "target": "a",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "id": "e2",
+              "source": "a",
+              "target": "b",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "source": "c",
+              "target": "b",
+              "sourceHandle": "fieldOutput",
+              "targetHandle": "fieldInput/text"
+            }
+          ],
+          "fields": [],
+          "settings": {
+            "refreshInterval": 600
+          },
+          "apps": {
+            "weatherPanel": {
+              "name": "Weather panel",
+              "sources": {
+                "app.ts": "const units = 'metric'\nexport function get() { return units }\n",
+                "config.json": "{}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "app sources add replace and remove",
+      "kind": "patch",
+      "args": {
+        "apps": {
+          "weatherPanel": {
+            "name": "Panel",
+            "sources": {
+              "app.ts": "export function get() { return 1 }\n",
+              "config.json": null,
+              "lib/util.ts": "export {}\n"
+            }
+          }
+        }
+      },
+      "expected": {
+        "changes": [
+          "app weatherPanel sources: app.ts, -config.json, +lib/util.ts"
+        ],
+        "issues": [],
+        "scene": {
+          "id": "s1",
+          "name": "Weather",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "b",
+              "type": "app",
+              "data": {
+                "keyword": "text",
+                "config": {
+                  "text": "Hi"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.a + 1\nreturn state.a + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 1\n"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "render",
+              "target": "a",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "id": "e2",
+              "source": "a",
+              "target": "b",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "source": "c",
+              "target": "b",
+              "sourceHandle": "fieldOutput",
+              "targetHandle": "fieldInput/text"
+            }
+          ],
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "settings": {
+            "refreshInterval": 600
+          },
+          "apps": {
+            "weatherPanel": {
+              "name": "Panel",
+              "sources": {
+                "app.ts": "export function get() { return 1 }\n",
+                "lib/util.ts": "export {}\n"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "remove an app",
+      "kind": "patch",
+      "args": {
+        "apps": {
+          "weatherPanel": null
+        }
+      },
+      "expected": {
+        "changes": [
+          "removed app weatherPanel"
+        ],
+        "issues": [],
+        "scene": {
+          "id": "s1",
+          "name": "Weather",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "b",
+              "type": "app",
+              "data": {
+                "keyword": "text",
+                "config": {
+                  "text": "Hi"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.a + 1\nreturn state.a + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 1\n"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "render",
+              "target": "a",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "id": "e2",
+              "source": "a",
+              "target": "b",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "source": "c",
+              "target": "b",
+              "sourceHandle": "fieldOutput",
+              "targetHandle": "fieldInput/text"
+            }
+          ],
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "settings": {
+            "refreshInterval": 600
+          },
+          "apps": {}
+        }
+      }
+    },
+    {
+      "name": "remove a missing app",
+      "kind": "patch",
+      "args": {
+        "apps": {
+          "nope": null
+        }
+      },
+      "expected": {
+        "changes": [],
+        "issues": [
+          "apps: no app \"nope\" to remove."
+        ],
+        "scene": null
+      }
+    },
+    {
+      "name": "edit an app file",
+      "kind": "edit",
+      "args": {
+        "app": "weatherPanel",
+        "file": "app.ts",
+        "edits": [
+          {
+            "find": "'metric'",
+            "replace": "'imperial'"
+          }
+        ]
+      },
+      "expected": {
+        "issues": [],
+        "summary": "weatherPanel/app.ts: 1 replacement(s), 62 → 64 chars",
+        "scene": {
+          "id": "s1",
+          "name": "Weather",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "b",
+              "type": "app",
+              "data": {
+                "keyword": "text",
+                "config": {
+                  "text": "Hi"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.a + 1\nreturn state.a + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 1\n"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "render",
+              "target": "a",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "id": "e2",
+              "source": "a",
+              "target": "b",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "source": "c",
+              "target": "b",
+              "sourceHandle": "fieldOutput",
+              "targetHandle": "fieldInput/text"
+            }
+          ],
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "settings": {
+            "refreshInterval": 600
+          },
+          "apps": {
+            "weatherPanel": {
+              "name": "Weather panel",
+              "sources": {
+                "app.ts": "const units = 'imperial'\nexport function get() { return units }\n",
+                "config.json": "{}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "edit ambiguous find",
+      "kind": "edit",
+      "args": {
+        "node_id": "c",
+        "edits": [
+          {
+            "find": "return state.a + 1",
+            "replace": "return 2"
+          }
+        ]
+      },
+      "expected": {
+        "issues": [
+          "edits[0]: matches 2 times in code node c; include more surrounding text or set all: true."
+        ],
+        "summary": "",
+        "scene": null
+      }
+    },
+    {
+      "name": "edit all occurrences in a code node",
+      "kind": "edit",
+      "args": {
+        "node_id": "c",
+        "edits": [
+          {
+            "find": "state.a",
+            "replace": "state.b",
+            "all": true
+          }
+        ]
+      },
+      "expected": {
+        "issues": [],
+        "summary": "code node c: 2 replacement(s), 37 → 37 chars",
+        "scene": {
+          "id": "s1",
+          "name": "Weather",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "b",
+              "type": "app",
+              "data": {
+                "keyword": "text",
+                "config": {
+                  "text": "Hi"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.b + 1\nreturn state.b + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 1\n"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "render",
+              "target": "a",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "id": "e2",
+              "source": "a",
+              "target": "b",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "source": "c",
+              "target": "b",
+              "sourceHandle": "fieldOutput",
+              "targetHandle": "fieldInput/text"
+            }
+          ],
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "settings": {
+            "refreshInterval": 600
+          },
+          "apps": {
+            "weatherPanel": {
+              "name": "Weather panel",
+              "sources": {
+                "app.ts": "const units = 'metric'\nexport function get() { return units }\n",
+                "config.json": "{}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "edit a node's only source",
+      "kind": "edit",
+      "args": {
+        "node_id": "d",
+        "edits": [
+          {
+            "find": "x = 1",
+            "replace": "x = 2"
+          }
+        ]
+      },
+      "expected": {
+        "issues": [],
+        "summary": "node d/app.ts: 1 replacement(s), 19 → 19 chars",
+        "scene": {
+          "id": "s1",
+          "name": "Weather",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "b",
+              "type": "app",
+              "data": {
+                "keyword": "text",
+                "config": {
+                  "text": "Hi"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.a + 1\nreturn state.a + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 2\n"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "render",
+              "target": "a",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "id": "e2",
+              "source": "a",
+              "target": "b",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "source": "c",
+              "target": "b",
+              "sourceHandle": "fieldOutput",
+              "targetHandle": "fieldInput/text"
+            }
+          ],
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "settings": {
+            "refreshInterval": 600
+          },
+          "apps": {
+            "weatherPanel": {
+              "name": "Weather panel",
+              "sources": {
+                "app.ts": "const units = 'metric'\nexport function get() { return units }\n",
+                "config.json": "{}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "edit missing text",
+      "kind": "edit",
+      "args": {
+        "app": "weatherPanel",
+        "file": "app.ts",
+        "edits": [
+          {
+            "find": "nothing here\nsecond",
+            "replace": "y"
+          }
+        ]
+      },
+      "expected": {
+        "issues": [
+          "edits[0]: not found in weatherPanel/app.ts: \"nothing here\" (first line shown). Check whitespace and quote the text exactly as it appears."
+        ],
+        "summary": "",
+        "scene": null
+      }
+    },
+    {
+      "name": "edit names no target",
+      "kind": "edit",
+      "args": {
+        "edits": [
+          {
+            "find": "a",
+            "replace": "b"
+          }
+        ]
+      },
+      "expected": {
+        "issues": [
+          "Name the target: `app` (+ `file`) for a bundled app, or `node_id` for a node."
+        ],
+        "summary": "",
+        "scene": null
+      }
+    },
+    {
+      "name": "edit a missing app",
+      "kind": "edit",
+      "args": {
+        "app": "ghost",
+        "edits": [
+          {
+            "find": "a",
+            "replace": "b"
+          }
+        ]
+      },
+      "expected": {
+        "issues": [
+          "No app \"ghost\" in this scene's apps map (have: weatherPanel)."
+        ],
+        "summary": "",
+        "scene": null
+      }
+    },
+    {
+      "name": "edit which file",
+      "kind": "edit",
+      "args": {
+        "app": "weatherPanel",
+        "edits": [
+          {
+            "find": "a",
+            "replace": "b"
+          }
+        ]
+      },
+      "expected": {
+        "issues": [
+          "Which file? App \"weatherPanel\" has: app.ts, config.json."
+        ],
+        "summary": "",
+        "scene": null
+      }
+    },
+    {
+      "name": "edit sequence",
+      "kind": "edit",
+      "args": {
+        "app": "weatherPanel",
+        "file": "app.ts",
+        "edits": [
+          {
+            "find": "const units",
+            "replace": "let units"
+          },
+          {
+            "find": "let units = 'metric'",
+            "replace": "let units = 'kelvin'"
+          }
+        ]
+      },
+      "expected": {
+        "issues": [],
+        "summary": "weatherPanel/app.ts: 2 replacement(s), 62 → 60 chars",
+        "scene": {
+          "id": "s1",
+          "name": "Weather",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "b",
+              "type": "app",
+              "data": {
+                "keyword": "text",
+                "config": {
+                  "text": "Hi"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.a + 1\nreturn state.a + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 1\n"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "render",
+              "target": "a",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "id": "e2",
+              "source": "a",
+              "target": "b",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "source": "c",
+              "target": "b",
+              "sourceHandle": "fieldOutput",
+              "targetHandle": "fieldInput/text"
+            }
+          ],
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "settings": {
+            "refreshInterval": 600
+          },
+          "apps": {
+            "weatherPanel": {
+              "name": "Weather panel",
+              "sources": {
+                "app.ts": "let units = 'kelvin'\nexport function get() { return units }\n",
+                "config.json": "{}"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
