@@ -2,6 +2,8 @@ import { collectScenePreviewPayloadScenes } from '../scenes/frame/panels/Scenes/
 import { fetchSettingsJson, previewProxyUrl } from '../models/wasmPreviewModel'
 import { assetUrl } from './assetUrl'
 import { wasmPreviewDimensions } from './wasmScenePreview'
+import { describeOutOfMemory } from './deviceLimits'
+import type { FrameRenderDevice } from './frameRenderDevice'
 import type { FrameId, FrameScene } from '../types'
 
 // Headless render check for AI-delivered scenes: run the scene once in the
@@ -9,7 +11,9 @@ import type { FrameId, FrameScene } from '../types'
 // logs instead of what it draws. The chat uses the result to feed runtime
 // errors back to the AI agent for another pass — a scene that validates as
 // JSON can still fail at render time (unsupported SVG, missing fields, app
-// errors), and the device is too far away to tell us quickly.
+// errors), and the device is too far away to tell us quickly. On a frame
+// with little memory (an ESP32) it renders under that frame's ceiling, so a
+// scene that would run the device out of memory fails here first.
 
 const RENDER_CHECK_SETTLE_MS = 2000
 const RENDER_CHECK_TIMEOUT_MS = 30_000
@@ -23,6 +27,9 @@ export interface SceneRenderCheckFrame {
   rotate?: number
   name?: string
   timezone?: string
+  /** Render under this device's memory and run as it (frameRenderDevice);
+   * null renders with the browser's memory. */
+  device?: FrameRenderDevice | null
 }
 
 export interface SceneRenderCheckResult {
@@ -36,6 +43,9 @@ export interface SceneRenderCheckResult {
   /** The preview runtime itself never started (no wasm build here, a
    * blocked worker): nothing was learned about the scene. */
   unavailable?: boolean
+  /** The render ran out of the device's memory (`frame.device`); the
+   * reason is in `errors`. */
+  outOfMemory?: boolean
 }
 
 function pushCapped(list: string[], entry: string, cap: number): void {
@@ -88,6 +98,7 @@ export async function renderSceneCheck(
   let renderMs: number | null = null
   let workerSpoke = false
   let unavailable = false
+  let outOfMemory = false
 
   const worker = new Worker(assetUrl('/frameos-wasm/preview-worker.js'), { type: 'module' })
   await new Promise<void>((resolve) => {
@@ -136,6 +147,19 @@ export async function renderSceneCheck(
         if (!rendered) {
           finish()
         }
+      } else if (msg.type === 'outOfMemory' && frame.device) {
+        // The worker stops rendering after this: it is what the device
+        // would do (abort the render, then restart), so it is the answer.
+        outOfMemory = true
+        pushCapped(
+          errors,
+          describeOutOfMemory(
+            { refusedBytes: Number(msg.refusedBytes) || 0, usedBytes: Number(msg.usedBytes) || 0 },
+            frame.device.limits
+          ),
+          MAX_COLLECTED_ERRORS
+        )
+        finish()
       }
     }
     worker.postMessage({
@@ -148,7 +172,9 @@ export async function renderSceneCheck(
       settingsJson,
       proxyUrl,
       sceneId: scene.id,
+      deviceLimits: frame.device?.limits ?? null,
+      embedded: Boolean(frame.device?.limits.embedded),
     })
   })
-  return { rendered, renderMs, errors, logs, unavailable }
+  return { rendered, renderMs, errors, logs, unavailable, outOfMemory }
 }

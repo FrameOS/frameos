@@ -329,6 +329,30 @@ const ok = call(
 )
 if (!ok) fail(`init failed: ${lastError()}`)
 
+// A device's memory ceiling (app/utils/device_limits.py), set after init like
+// the preview worker does: module startup lives in a frame's flash, not in its
+// render budget. Old bundles predate the exports and render unlimited.
+if (request.deviceLimits) {
+  try {
+    call('frameos_wasm_set_memory_limit', null, ['number', 'number'], [
+      Math.max(0, Math.floor(request.deviceLimits.memoryBytes || 0)),
+      Math.max(0, Math.floor(request.deviceLimits.memoryReserveBytes || 0)),
+    ])
+    if (request.deviceLimits.embedded) {
+      call('frameos_wasm_set_embedded', null, ['boolean'], [true])
+    }
+  } catch (error) {
+    process.stderr.write(`embedded_wasm_render: device simulation unavailable (${error})\n`)
+  }
+}
+const memoryStat = (name) => {
+  try {
+    return call(name, 'number', [], [])
+  } catch {
+    return 0
+  }
+}
+
 // The corpus differential renders each scene with the planner on and off and
 // compares the pixels; plans are built at scene init, so the toggle must land
 // before the scene is selected.
@@ -496,6 +520,15 @@ function writeBackSavedAssets() {
 }
 
 const rc = call('frameos_wasm_render', 'number', [], [])
+// 3: an allocation was refused under the device ceiling. The longjmp out of
+// it leaks what the render held, as on the device (which then restarts).
+if (rc === 3) {
+  process.stderr.write('__FRAMEOS_OUT_OF_MEMORY__' + JSON.stringify({
+    refusedBytes: memoryStat('frameos_wasm_memory_failed'),
+    usedBytes: memoryStat('frameos_wasm_memory_used'),
+  }) + '\n')
+  fail('render ran out of memory')
+}
 const outWidth = call('frameos_wasm_width', 'number', [], [])
 const outHeight = call('frameos_wasm_height', 'number', [], [])
 const ptr = call('frameos_wasm_buffer', 'number', [], [])

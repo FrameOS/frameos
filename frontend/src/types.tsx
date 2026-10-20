@@ -1185,6 +1185,8 @@ export interface ChatSummary {
   createdAt: string
   updatedAt: string
   messageCount?: number
+  /** The first user message, cut to one line (both planes' chat lists). */
+  title?: string | null
   isLocal?: boolean
 }
 

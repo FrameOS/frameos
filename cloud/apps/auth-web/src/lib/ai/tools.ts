@@ -53,6 +53,7 @@ import { forkStoreScene, sceneIdPattern } from "../store-fork";
 import { readBlob } from "../blobs";
 import { extractScenesFromZip } from "../scene-title";
 import { checkIdentityRateLimit } from "../rate-limit";
+import { renderDeviceLimits, type RenderDevice } from "./render-device";
 import {
   accountRenderRateLimit,
   maxRenderDimension,
@@ -138,6 +139,10 @@ export type ToolContext = {
   // otherwise. The zone is the preview's clock.
   renderSize?: { width: number; height: number } | null;
   renderTimeZone?: string | null;
+  // The memory of the frame the chat is about, when it has little of it (an
+  // ESP32): render_scene renders under that ceiling, so a scene that would
+  // run the frame out of memory fails here first (render-device.ts).
+  renderDevice?: RenderDevice | null;
   // render_scene calls so far this turn (MAX_RENDERS_PER_TURN bounds them).
   rendersThisTurn?: number;
   // False when the chat has no editor to deliver a scene into (the frames
@@ -1641,6 +1646,10 @@ const renderFailureNotes: Record<SceneRenderError["code"], string> = {
   render_concurrency_limit:
     "Another render for this account is still running. Try once more; if that is refused too, answer without the image and say you could not look.",
   render_failed: "The runtime could not draw the scene. Its output says why: fix the scene.",
+  render_out_of_memory:
+    "The scene needs more memory than the frame has, so on the frame this render aborts and the device restarts. " +
+    "Make it need less: every image the size of the frame is width x height x 4 bytes, so draw into the frame's " +
+    "canvas instead of building full-size images, and keep fetched data small. Then render again.",
   render_timeout:
     "The scene drew no frame within 30 seconds: something in it hangs or waits on a slow request.",
   renderer_busy:
@@ -1734,6 +1743,7 @@ async function renderSceneForModel(ctx: ToolContext, args: JsonObject): Promise<
   }
   try {
     const result = await renderScenes({
+      deviceLimits: ctx.renderDevice ? renderDeviceLimits(ctx.renderDevice, width, height) : null,
       height,
       owner: ctx.accountId,
       sceneId,
@@ -1760,6 +1770,7 @@ async function renderSceneForModel(ctx: ToolContext, args: JsonObject): Promise<
           render_ms: result.renderMs,
           scene_id: sceneId,
           width: result.width,
+          ...(ctx.renderDevice ? { rendered_in: `the frame's memory: ${ctx.renderDevice.label}` } : {}),
         }) + renderOutput([...new Set(result.errors)], result.logs),
     };
   } catch (error) {
@@ -1767,7 +1778,13 @@ async function renderSceneForModel(ctx: ToolContext, args: JsonObject): Promise<
       throw error;
     }
     return answer(
-      { detail: error.message, error: error.code, note: renderFailureNotes[error.code], ok: false },
+      {
+        detail: error.message,
+        error: error.code,
+        note: renderFailureNotes[error.code],
+        ok: false,
+        ...(ctx.renderDevice ? { rendered_in: `the frame's memory: ${ctx.renderDevice.label}` } : {}),
+      },
       renderOutput([], error.logs),
     );
   }

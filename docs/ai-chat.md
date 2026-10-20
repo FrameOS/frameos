@@ -46,6 +46,41 @@ and sends runtime errors back as an automatic follow-up (`[Automatic render
 check]`), at most twice per message; a preview runtime that never started is
 skipped, not reported.
 
+## Renders run in the frame's memory
+
+A scene that renders in the browser can still abort on an ESP32, which
+renders in a few megabytes of PSRAM (the E1004's clock scene, 2026-10-20).
+So on a chat about an ESP32 that renders on the device, both the browser's
+render check and `render_scene` run the scene under that frame's ceiling
+and as an ESP32: `esp32DeviceLimits(width, height, psramBytes)` in
+`frameos/wasm/src/devices.ts` (copied to `frontend/src/utils/deviceLimits.ts`,
+ported to `backend/app/utils/device_limits.py`, all three pinned by
+`docs/device-limits-fixtures.json`). The PSRAM is what the backend derives
+for the board (`embedded.layout.ram`) or what a cloud frame reports
+(`hardware.memory.psramBytes`), 8 MB when it reports nothing. A Pi, a thin
+client (the control plane renders it) and a chat about no frame render
+unlimited. Which device: `frameRenderDevice` in the SPA and the cloud
+(`frontend/src/utils/frameRenderDevice.ts`, `src/lib/ai/render-device.ts`),
+`frame_render_device` on the backend.
+
+Running out is its own answer, not a generic failure: the check's follow-up
+and `render_scene`'s result (`render_out_of_memory` on the cloud, an
+`Out of memory: …` error with a `note` on the backend) say what was refused
+in the device's own bytes and how to need less. The frame's context line
+`- Memory: ESP32 with 8 MB PSRAM.` tells the model before it writes anything.
+
+Installs are checked too, because a chat with no editor (the frames home's)
+writes a scene with `scene_create` and puts it on a frame with
+`frame_scene_install`, and nothing on that path rendered it. Before
+`frame_scene_install` or `frame_scene_update` reaches a frame that renders in
+a few megabytes, the chat renders the scene being installed (the call's
+`scenes` / `scene`, the saved template or store version it names) at that
+frame's size in its memory, and refuses the call with `installed: false` and
+the reason when it runs out (`check_install` in `app/api/ai_chat.py`,
+`install-memory-check.ts`). Only memory refuses: a scene from a URL or a
+catalog, a source the tool will reject, or a render that fails another way
+goes through to the tool as before. The MCP tools themselves are unchanged.
+
 ## One agent loop, two implementations
 
 Both planes run the same loop: a streaming OpenAI Responses call, the tool
@@ -107,6 +142,13 @@ Enter calls `workspaceLogic.startAiChat(frameId | null, prompt)`, which opens
 the chat drawer with the question already sent. The drawer for `frameId: null`
 (`?drawer=chat` on any page) is the frames home's chat: it lists the chats that
 are about no frame.
+
+The drawer opens on the latest chat for what is open. **History** lists the
+earlier ones, newest first, each under its first question: both planes'
+`GET …/ai/chats` return a `title` (the first user message cut to one line,
+`deriveChatTitle` / `derive_chat_title`) and a `messageCount`, and take
+`frameId=` for one frame's chats or `frameless=1` for the frames home's.
+**New chat** starts an empty one.
 
 ## Settings
 

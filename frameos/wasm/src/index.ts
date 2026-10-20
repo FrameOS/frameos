@@ -13,11 +13,13 @@ export {
 } from './preview'
 export {
   describeDeviceLimits,
+  describeOutOfMemory,
   deviceLimitsFor,
   devicePresetFor,
   devicePresets,
   esp32CanvasBytesPerPixel,
   esp32DeviceHeapBytes,
+  esp32DeviceLimits,
   esp32PreviewMemoryBytes,
   esp32PreviewOverheadBytes,
   piDeviceHeapBytes,

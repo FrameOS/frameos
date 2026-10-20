@@ -148,6 +148,11 @@
   NDJSON events on both planes: the cloud's `src/lib/ai/loop.ts` and its port
   `backend/app/utils/ai_chat_agent.py`, read by one `chatLogic`. An event,
   rule or editor tool added on one plane is added on the other.
+- On an ESP32 frame the render check and `render_scene` run the scene in that
+  frame's memory (`esp32DeviceLimits`; `docs/device-limits-fixtures.json`
+  pins the TS copy and the Python port), so a scene that would abort the
+  device goes back to the model first. `docs/ai-chat.md` "Renders run in the
+  frame's memory".
 - Its tools are its plane's MCP tools, run in-process with the chat request's
   own credential (`ai_chat_tools.py`, `mcp-tools.ts`), plus the editor tools.
   A new MCP tool is automatically a chat tool; keep `EXCLUDED_MCP_TOOLS` in

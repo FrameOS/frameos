@@ -120,6 +120,19 @@ async def test_frameless_chat_finds_a_frame_with_the_mcp_tools(async_client, db,
     listed = await async_client.get(f"/api/projects/{frame.project_id}/ai/chats")
     assert listed.status_code == 200
     assert [entry["id"] for entry in listed.json()["chats"]] == [chat.id]
+    # The history lists it under its first question, as the cloud does.
+    assert listed.json()["chats"][0]["title"] == "How is the kitchen frame?"
+    assert listed.json()["chats"][0]["messageCount"] == 2
+    # The frames home's drawer pages through the chats about no frame only.
+    on_frame = Chat(project_id=frame.project_id, frame_id=frame.id, context_type="frame")
+    db.add(on_frame)
+    db.flush()
+    db.add(ChatMessage(project_id=frame.project_id, chat_id=on_frame.id, role="user", content="Kitchen?"))
+    db.commit()
+    everything = await async_client.get(f"/api/projects/{frame.project_id}/ai/chats")
+    assert {entry["id"] for entry in everything.json()["chats"]} == {chat.id, on_frame.id}
+    home = await async_client.get(f"/api/projects/{frame.project_id}/ai/chats?frameless=1")
+    assert [entry["id"] for entry in home.json()["chats"]] == [chat.id]
     detail = await async_client.get(f"/api/projects/{frame.project_id}/ai/chats/home-chat-1")
     assert detail.status_code == 200 and detail.json()["chat"]["frameId"] is None
 
@@ -187,6 +200,118 @@ async def test_scenes_are_delivered_to_the_editor_and_patched(async_client, db, 
     # The open scene is context for the model, inside the untrusted frame.
     context = openai.requests[0]["input"][0]["content"][0]["text"]
     assert "Kitchen" in context and '<untrusted_data source="open_scene">' in context
+
+
+@pytest.mark.asyncio
+async def test_render_scene_on_an_esp32_renders_in_the_frames_memory(async_client, db, redis, monkeypatch):
+    """The E1004 aborted a scene that rendered fine everywhere else: a chat
+    about an ESP32 frame renders in that frame's PSRAM, and running out comes
+    back to the model as what it is."""
+    from app.utils import embedded_render
+    from app.utils.embedded_render import SceneRender
+
+    frame = await _setup(db, redis)
+    frame.mode = "embedded"
+    frame.width, frame.height = 1200, 1600
+    frame.embedded = {"hardwarePreset": "seeed_reterminal_e1004"}
+    db.commit()
+
+    asked: list[dict] = []
+
+    async def fake_render(_frame, width, height, **kwargs):
+        asked.append({"width": width, "height": height, **kwargs})
+        return SceneRender(
+            None,
+            error="render ran out of memory",
+            out_of_memory={"refusedBytes": 7_680_004, "usedBytes": 8_416_300},
+            scene_logs=['{"event":"render:scene"}'],
+        )
+
+    monkeypatch.setattr(embedded_render, "render_scene", fake_render)
+    monkeypatch.setattr(embedded_render, "thin_client_renderer_available", lambda: True)
+    scene = {
+        "id": "clock",
+        "name": "Clock",
+        "nodes": [{"id": "render", "type": "event", "data": {"keyword": "render"}}],
+        "edges": [],
+    }
+    openai = ScriptedOpenAi([("", [call("render_scene", {}, "c1")]), ("It is too heavy for this frame.", [])])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    response = await async_client.post(
+        f"/api/projects/{frame.project_id}/ai/chat",
+        json={"prompt": "how does it look?", "frameId": frame.id, "sceneId": "clock", "scene": scene},
+    )
+    assert response.status_code == 200, response.text
+
+    assert asked[0]["device_limits"]["memoryBytes"] == 10_220_032
+    assert asked[0]["device_limits"]["embedded"] is True
+    context = openai.requests[0]["input"][0]["content"][0]["text"]
+    assert "- Memory: ESP32 with 8 MB PSRAM." in context
+    output = tool_outputs(openai.requests[1])["c1"]
+    result = json.loads(output.split("\n", 1)[0])
+    assert result["ok"] is False
+    assert result["error"].startswith("Out of memory: an allocation of 7.3 MB was refused")
+    assert result["rendered_in"] == "the frame's memory: ESP32 with 8 MB PSRAM"
+    assert "draw into the frame's canvas" in result["note"]
+    assert '<untrusted_data source="scene_render_output">' in output
+
+
+@pytest.mark.asyncio
+async def test_an_install_that_runs_the_frame_out_of_memory_is_refused(async_client, db, redis, monkeypatch):
+    """The E1004 clock came from the frames home: scene_create, then
+    frame_scene_install, with no editor and no render on the way. An install
+    on a frame that renders in a few megabytes renders there first."""
+    from app.models.frame import Frame
+    from app.utils import embedded_render
+    from app.utils.embedded_render import SceneRender
+
+    frame = await _setup(db, redis)
+    frame.mode = "embedded"
+    frame.width, frame.height = 1200, 1600
+    frame.embedded = {"hardwarePreset": "seeed_reterminal_e1004"}
+    frame.scenes = []
+    db.commit()
+
+    fits = {"value": False}
+    rendered: list[dict] = []
+
+    async def fake_render(target, width, height, **kwargs):
+        rendered.append({"frame": target.id, "width": width, "height": height, **kwargs})
+        if fits["value"]:
+            return SceneRender(b"\x00" * (width * height * 4))
+        return SceneRender(None, error="render ran out of memory", out_of_memory={"refusedBytes": 7_680_004, "usedBytes": 8_416_300})
+
+    monkeypatch.setattr(embedded_render, "render_scene", fake_render)
+    monkeypatch.setattr(embedded_render, "thin_client_renderer_available", lambda: True)
+    clock = {"id": "clock", "name": "Clock", "nodes": [{"id": "render", "type": "event", "data": {"keyword": "render"}}], "edges": []}
+    install = {"frame_id": frame.id, "scenes": [clock], "confirm": True, "deploy": "none"}
+
+    openai = ScriptedOpenAi([("", [call("frame_scene_install", install, "c1")]), ("It does not fit.", [])])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    response = await async_client.post(
+        f"/api/projects/{frame.project_id}/ai/chat", json={"prompt": "put a clock on the kitchen wall", "chatId": "home-2"}
+    )
+    assert response.status_code == 200, response.text
+    refused = json.loads(tool_outputs(openai.requests[1])["c1"])
+    assert refused["installed"] is False
+    assert refused["error"].startswith("Out of memory: an allocation of 7.3 MB was refused")
+    assert refused["rendered_in"] == "the frame's memory: ESP32 with 8 MB PSRAM"
+    assert rendered[0]["device_limits"]["memoryBytes"] == 10_220_032
+    assert (rendered[0]["width"], rendered[0]["height"]) == (1200, 1600)
+    db.expire_all()
+    assert db.get(Frame, frame.id).scenes == []
+
+    fits["value"] = True
+    openai = ScriptedOpenAi([("", [call("frame_scene_install", install, "c1")]), ("Installed.", [])])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    response = await async_client.post(
+        f"/api/projects/{frame.project_id}/ai/chat", json={"prompt": "now it fits", "chatId": "home-3"}
+    )
+    assert response.status_code == 200, response.text
+    installed = tool_outputs(openai.requests[1])["c1"]
+    assert '"installed"' in installed and "Out of memory" not in installed
+    db.expire_all()
+    assert [scene["name"] for scene in db.get(Frame, frame.id).scenes] == ["Clock"]
 
 
 @pytest.mark.asyncio

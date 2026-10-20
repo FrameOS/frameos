@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { zlibSync } from "fflate";
+import { describeOutOfMemory, type DeviceLimits } from "frameos-wasm";
 import { logWarn } from "./log";
 import { addressIsPrivateSource } from "./ssrf";
 
@@ -22,6 +23,13 @@ import { addressIsPrivateSource } from "./ssrf";
 // pool below bounds how many 64 MB wasm heaps exist at once.
 
 export type SceneRenderOptions = {
+  /**
+   * Render under a device's memory and run as it (esp32DeviceLimits): a
+   * scene that would run that frame out of memory fails with
+   * render_out_of_memory instead of drawing. Omitted renders with the
+   * worker's own memory.
+   */
+  deviceLimits?: DeviceLimits | null | undefined;
   height: number;
   /**
    * Who the render is for (an account id, or a client key for anonymous
@@ -77,6 +85,7 @@ export class SceneRenderError extends Error {
     public readonly code:
       | "render_concurrency_limit"
       | "render_failed"
+      | "render_out_of_memory"
       | "render_timeout"
       | "renderer_busy"
       | "renderer_unavailable",
@@ -256,7 +265,12 @@ type WorkerResult =
       state: unknown;
       width: number;
     }
-  | { logs: string[]; message: string; ok: false };
+  | {
+      logs: string[];
+      message: string;
+      ok: false;
+      outOfMemory?: { refusedBytes: number; usedBytes: number };
+    };
 
 function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
   const timeoutMs = options.timeoutMs ?? defaultRenderTimeoutMs;
@@ -267,6 +281,7 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
       resourceLimits: { maxOldGenerationSizeMb: 512 },
       workerData: {
         assetsDir: wasmAssetsDir(),
+        deviceLimits: options.deviceLimits ?? null,
         height: options.height,
         maxLogs: maxCollectedLogs,
         sceneId: options.sceneId ?? "",
@@ -301,7 +316,15 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
     worker.once("message", (result: WorkerResult) => {
       finish(() => {
         if (!result.ok) {
-          reject(new SceneRenderError("render_failed", result.message, result.logs));
+          reject(
+            result.outOfMemory && options.deviceLimits
+              ? new SceneRenderError(
+                  "render_out_of_memory",
+                  describeOutOfMemory(result.outOfMemory, options.deviceLimits),
+                  result.logs,
+                )
+              : new SceneRenderError("render_failed", result.message, result.logs),
+          );
           return;
         }
         try {
@@ -523,6 +546,29 @@ async function main() {
   if (!ok) {
     return fail("init failed: " + lastError());
   }
+  // A device's memory ceiling, set after init like the preview worker does:
+  // module startup lives in a frame's flash, not in its render budget.
+  const limits = workerData.deviceLimits;
+  if (limits) {
+    try {
+      call("frameos_wasm_set_memory_limit", null, ["number", "number"], [
+        Math.max(0, Math.floor(limits.memoryBytes || 0)),
+        Math.max(0, Math.floor(limits.memoryReserveBytes || 0)),
+      ]);
+      if (limits.embedded) {
+        call("frameos_wasm_set_embedded", null, ["boolean"], [true]);
+      }
+    } catch (error) {
+      pushLog("device simulation unavailable in this runtime build: " + error);
+    }
+  }
+  const memoryStat = (name) => {
+    try {
+      return call(name, "number", [], []);
+    } catch {
+      return 0;
+    }
+  };
   const loaded = call("frameos_wasm_load_scenes", "number", ["string"], [workerData.scenesJson]);
   if (!loaded) {
     return fail("no scenes loaded: " + lastError());
@@ -547,12 +593,30 @@ async function main() {
     }
   }
 
+  // 3: an allocation was refused under the device ceiling. The longjmp out
+  // of it leaks what the render held, as on a device (which then restarts),
+  // so that is the answer and nothing renders after it.
+  let outOfMemory = null;
   const renderOnce = () => {
     const rc = call("frameos_wasm_render", "number", [], []);
+    if (rc === 3) {
+      outOfMemory = {
+        refusedBytes: memoryStat("frameos_wasm_memory_failed"),
+        usedBytes: memoryStat("frameos_wasm_memory_used"),
+      };
+      return false;
+    }
     return rc !== 2;
   };
+  const failRender = () => {
+    if (outOfMemory) {
+      parentPort.postMessage({ ok: false, message: "out of memory", outOfMemory, logs });
+      return;
+    }
+    fail("render failed: " + lastError());
+  };
   if (!renderOnce()) {
-    return fail("render failed: " + lastError());
+    return failRender();
   }
   // Scenes that fetch or animate ask for another pass right after the first
   // one; give them a moment, like the browser preview's settle window.
@@ -568,7 +632,10 @@ async function main() {
     }
     if (!requested) continue;
     extra += 1;
-    if (!renderOnce()) break;
+    if (!renderOnce()) {
+      if (outOfMemory) return failRender();
+      break;
+    }
   }
 
   const width = call("frameos_wasm_width", "number", [], []);

@@ -14,6 +14,7 @@ vi.mock("../scene-render", async (importOriginal) => ({
 vi.mock("../rate-limit", () => ({ checkIdentityRateLimit }));
 
 const { SceneRenderError } = await import("../scene-render");
+const { esp32DeviceLimits } = await import("frameos-wasm");
 const { MAX_RENDERS_PER_TURN, runTool, scenesToRender } = await import("./tools");
 type ToolContext = import("./tools").ToolContext;
 
@@ -137,6 +138,39 @@ describe("render_scene", () => {
     expect(refused.images).toEqual([]);
     expect(JSON.parse(refused.text).ok).toBe(false);
     expect(renderScenes).toHaveBeenCalledTimes(MAX_RENDERS_PER_TURN);
+  });
+
+  it("renders an ESP32 frame's scene in that frame's memory", async () => {
+    renderScenes.mockResolvedValue(rendered({ height: 1600, width: 1200 }));
+    const device = { label: "ESP32 with 8 MB PSRAM", psramBytes: 8 * 1024 * 1024 };
+    const result = await runTool(
+      "render_scene",
+      {},
+      context({ renderDevice: device, renderSize: { height: 1600, width: 1200 } }),
+    );
+    expect(renderScenes.mock.calls[0]![0].deviceLimits).toEqual(esp32DeviceLimits(1200, 1600, 8 * 1024 * 1024));
+    expect(JSON.parse(result.text.split("\n")[0]!)).toMatchObject({
+      ok: true,
+      rendered_in: "the frame's memory: ESP32 with 8 MB PSRAM",
+    });
+    // Everywhere else the renderer keeps its own memory.
+    await runTool("render_scene", {}, context());
+    expect(renderScenes.mock.calls[1]![0].deviceLimits).toBeNull();
+  });
+
+  it("tells the model what running the frame out of memory means", async () => {
+    renderScenes.mockRejectedValueOnce(
+      new SceneRenderError(
+        "render_out_of_memory",
+        "Out of memory: an allocation of 7.3 MB was refused with 4.4 MB of the device's 6.1 MB in use.",
+      ),
+    );
+    const device = { label: "ESP32 with 8 MB PSRAM", psramBytes: 8 * 1024 * 1024 };
+    const result = await runTool("render_scene", {}, context({ renderDevice: device }));
+    const parsed = JSON.parse(result.text);
+    expect(parsed).toMatchObject({ error: "render_out_of_memory", ok: false });
+    expect(parsed.detail).toMatch(/^Out of memory/);
+    expect(parsed.note).toMatch(/aborts and the device restarts/);
   });
 
   it("explains a renderer refusal instead of throwing", async () => {

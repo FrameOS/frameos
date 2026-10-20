@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import clsx from 'clsx'
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso'
-import { ChevronLeftIcon } from '@heroicons/react/24/solid'
+import { ChatBubbleLeftRightIcon, ClockIcon, PlusIcon } from '@heroicons/react/24/outline'
 import { urls } from '../../../../urls'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import type { FrameId } from '../../../../types'
@@ -40,11 +40,12 @@ export function Chat({ frameId, sceneId = null }: { frameId: FrameId | null; sce
     contextSelectionSummary,
     logExpanded,
     chatLabelForChat,
+    chatTitleForChat,
   } = useValues(chatLogic({ frameId, sceneId }))
   const {
     setInput,
     submitMessage,
-    clearChat,
+    createChat,
     toggleContextItemsExpanded,
     toggleLogExpanded,
     selectChat,
@@ -158,7 +159,9 @@ export function Chat({ frameId, sceneId = null }: { frameId: FrameId | null; sce
     if (!timestamp) {
       return 'Just now'
     }
-    const date = new Date(timestamp)
+    // The backend writes UTC without a zone (datetime.utcnow); read as local
+    // time it was off by the browser's offset.
+    const date = new Date(/(Z|[+-]\d\d:?\d\d)$/i.test(timestamp) ? timestamp : `${timestamp}Z`)
     if (Number.isNaN(date.getTime())) {
       return 'Just now'
     }
@@ -513,12 +516,36 @@ export function Chat({ frameId, sceneId = null }: { frameId: FrameId | null; sce
             <Button
               color="secondary"
               size="small"
-              onClick={() => activeChatId && clearChat(activeChatId)}
-              disabled={isSubmitting || !activeChatId}
+              onClick={() => backToList()}
+              title="Earlier chats"
+              className="flex items-center gap-1"
             >
-              Clear
+              <ClockIcon className="h-4 w-4" aria-hidden />
+              History
+            </Button>
+          ) : activeChatId ? (
+            <Button
+              color="secondary"
+              size="small"
+              onClick={() => selectChat(activeChatId)}
+              title="Back to the open chat"
+              className="flex items-center gap-1"
+            >
+              <ChatBubbleLeftRightIcon className="h-4 w-4" aria-hidden />
+              Back to chat
             </Button>
           ) : null}
+          <Button
+            color="secondary"
+            size="small"
+            onClick={() => createChat()}
+            disabled={isSubmitting}
+            title="Start a new chat"
+            className="flex items-center gap-1"
+          >
+            <PlusIcon className="h-4 w-4" aria-hidden />
+            New chat
+          </Button>
         </div>
       </div>
       {isChatView ? (
@@ -663,11 +690,12 @@ export function Chat({ frameId, sceneId = null }: { frameId: FrameId | null; sce
               <Spinner />
             </div>
           ) : visibleChats.length === 0 ? (
-            <div className="frame-tool-muted text-sm">No chats yet. Start a new conversation.</div>
+            <div className="frame-tool-muted text-sm">No earlier chats yet.</div>
           ) : (
             <div className="space-y-2">
               {visibleChats.map((chat) => {
                 const isActive = chat.id === activeChatId
+                const title = chatTitleForChat(chat)
                 return (
                   <button
                     key={chat.id}
@@ -680,11 +708,11 @@ export function Chat({ frameId, sceneId = null }: { frameId: FrameId | null; sce
                     )}
                     onClick={() => selectChat(chat.id)}
                   >
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium">{chatLabelForChat(chat)}</span>
-                      <span className="frame-tool-muted text-xs">{formatTimestamp(chat.updatedAt)}</span>
+                    <div className="truncate text-sm font-medium">{title ?? chatLabelForChat(chat)}</div>
+                    <div className="frame-tool-muted mt-1 flex items-center justify-between gap-2 text-xs">
+                      <span className="truncate">{title ? chatLabelForChat(chat) : null}</span>
+                      <span className="shrink-0">{formatTimestamp(chat.updatedAt)}</span>
                     </div>
-                    <div className="frame-tool-muted text-xs mt-1">Chat ID: {chat.id}</div>
                   </button>
                 )
               })}

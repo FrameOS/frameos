@@ -8,6 +8,7 @@
 // make no sense from inside a chat are left out (EXCLUDED_MCP_TOOLS).
 import { connectInProcessMcp, type InProcessMcp } from "@frameos-cloud/mcp";
 import type { FetchLike } from "@frameos-cloud/mcp";
+import { installRefusal, type InstallMemoryCheck } from "./install-memory-check";
 import type { ResponsesToolDefinition } from "./openai";
 import { untrustedResult, type ExtraTools, type ToolOutput } from "./tools";
 
@@ -94,6 +95,8 @@ export async function connectChatMcpTools(options: {
   headers?: Record<string, string>;
   fetchExternal?: FetchLike;
   userAgent?: string;
+  // Installs on a frame that renders in a few megabytes render there first.
+  installCheck?: InstallMemoryCheck;
 }): Promise<ExtraTools & { close(): Promise<void> }> {
   const mcp = await connectInProcessMcp({
     baseUrl: options.baseUrl,
@@ -106,16 +109,25 @@ export async function connectChatMcpTools(options: {
     token: "token" in options.credential ? options.credential.token : "session",
     userAgent: options.userAgent,
   });
-  return extraToolsFrom(mcp);
+  return extraToolsFrom(mcp, options.installCheck);
 }
 
-export function extraToolsFrom(mcp: InProcessMcp): ExtraTools & { close(): Promise<void> } {
+export function extraToolsFrom(
+  mcp: InProcessMcp,
+  installCheck?: InstallMemoryCheck,
+): ExtraTools & { close(): Promise<void> } {
   const tools = mcp.tools.filter((tool) => !EXCLUDED_MCP_TOOLS.has(tool.name));
   const names = new Set(tools.map((tool) => tool.name));
   return {
     async call(name, args) {
       if (!names.has(name)) {
         return { images: [], text: JSON.stringify({ error: `Unknown tool: ${name}` }) };
+      }
+      if (installCheck) {
+        const refusal = await installRefusal(mcp, installCheck, name, args);
+        if (refusal) {
+          return refusal;
+        }
       }
       return mcpResultOutput(name, await mcp.call(name, args));
     },

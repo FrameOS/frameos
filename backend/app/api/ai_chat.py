@@ -33,7 +33,14 @@ from app.models.settings import get_settings_dict
 from app.tenancy import current_project_id
 from app.utils.ai_chat_agent import OpenAiRequestError, build_initial_input, run_agent_loop
 from app.utils.ai_chat_prompt import build_chat_system_prompt
-from app.utils.ai_chat_tools import BackendChatTools, rgba_to_png, untrusted_result
+from app.utils.ai_chat_tools import (
+    INSTALL_OUT_OF_MEMORY_NOTE,
+    BackendChatTools,
+    RenderedScene,
+    rgba_to_png,
+    untrusted_result,
+)
+from app.utils.device_limits import describe_out_of_memory, frame_render_device
 from app.utils.ai_scene import CHAT_MODEL, openai_model
 from app.utils.public_origin import public_origin
 from app.utils.repo_apps import repo_app_configs
@@ -79,6 +86,12 @@ def _frame_context(frame: Frame) -> str:
         lines.append(f"- Color mode: {frame.color}")
     if frame.mode:
         lines.append(f"- Frame type: {frame.mode}")
+    render_device = frame_render_device(frame)
+    if render_device:
+        lines.append(
+            f"- Memory: {render_device.label}. A scene that needs more aborts on the frame; "
+            "render_scene renders in the same memory."
+        )
     lines.append(f"- Status: {frame.status}")
     scenes = [scene for scene in (frame.scenes or []) if isinstance(scene, dict)]
     if scenes:
@@ -229,16 +242,98 @@ async def ai_chat_turn(data: AiChatRequest, request: Request, db: Session = Depe
         await queue.put(event)
 
     render_frame = frame or Frame(id=0, name="Preview", timezone=data.time_zone, network={})
+    # An ESP32 renders in a few megabytes: render_scene renders in as much, so
+    # a scene that would run the frame out of memory fails here first.
+    render_device = frame_render_device(frame)
 
-    async def render(scenes: list[dict[str, Any]], scene_id: str | None, width: int, height: int):
-        from app.utils.embedded_render import render_scene_rgba, thin_client_renderer_available
+    async def render(scenes: list[dict[str, Any]], scene_id: str | None, width: int, height: int) -> RenderedScene:
+        from app.utils.embedded_render import render_scene, thin_client_renderer_available
 
         if not thin_client_renderer_available():
-            return None, "The scene renderer is not available on this backend (Node.js or the wasm runtime is missing)."
-        rgba = await render_scene_rgba(render_frame, width, height, scene_id=scene_id, scenes_override=scenes)
-        if rgba is None:
-            return None, "The scene failed to render (the runtime reported an error or timed out). Check the scene's code nodes and app fields."
-        return rgba_to_png(rgba, width, height), None
+            return RenderedScene(
+                None, "The scene renderer is not available on this backend (Node.js or the wasm runtime is missing)."
+            )
+        limits = render_device.limits(width, height) if render_device else None
+        result = await render_scene(
+            render_frame, width, height, scene_id=scene_id, scenes_override=scenes, device_limits=limits
+        )
+        rendered_in = f"the frame's memory: {render_device.label}" if render_device else None
+        if result.rgba is None:
+            if result.out_of_memory and limits:
+                error = describe_out_of_memory(
+                    int(result.out_of_memory.get("refusedBytes") or 0),
+                    int(result.out_of_memory.get("usedBytes") or 0),
+                    limits,
+                )
+                return RenderedScene(None, error, rendered_in, out_of_memory=True, logs=result.scene_logs)
+            return RenderedScene(
+                None,
+                f"The scene failed to render ({result.error or 'the runtime reported an error'}). "
+                "Check the scene's code nodes and app fields.",
+                rendered_in,
+                logs=result.scene_logs,
+            )
+        return RenderedScene(rgba_to_png(result.rgba, width, height), None, rendered_in, logs=result.scene_logs)
+
+    async def check_install(name: str, args: dict[str, Any]) -> str | None:
+        """Before frame_scene_install / frame_scene_update puts a scene on a frame
+        that renders in a few megabytes, render it in that frame's memory: one
+        that runs out is not installed. Only memory refuses; a source the tool
+        will reject, or a render that fails some other way, goes through."""
+        from app.mcp.client import ApiError
+        from app.mcp.result import McpInputError
+        from app.mcp.tools.frames import as_scene_list
+        from app.utils.embedded_render import RenderQueueFull, render_scene, thin_client_renderer_available
+
+        raw_frame_id = args.get("frame_id")
+        target_id: int | None = None
+        if isinstance(raw_frame_id, int):
+            target_id = raw_frame_id
+        elif isinstance(raw_frame_id, str) and raw_frame_id.isdigit():
+            target_id = int(raw_frame_id)
+        target = (
+            db.query(Frame).filter(Frame.project_id == project_id, Frame.id == target_id).first()
+            if target_id is not None
+            else None
+        )
+        device = frame_render_device(target)
+        if target is None or device is None or not thin_client_renderer_available():
+            return None
+        try:
+            if name == "frame_scene_update":
+                scenes = as_scene_list(args.get("scene"))
+            elif args.get("scenes") is not None:
+                scenes = as_scene_list(args.get("scenes"))
+            elif isinstance(args.get("template_id"), str):
+                payload = await api.json("GET", f"/api/templates/{args['template_id']}", project_id=project_id)
+                scenes = as_scene_list(payload.get("scenes"))
+            else:
+                # A catalog template or a URL: a published scene, not one this chat wrote.
+                return None
+        except (McpInputError, ApiError):
+            return None
+        width, height = _render_size(None, target) or (800, 480)
+        main = next((scene for scene in scenes if scene.get("default")), scenes[0])
+        limits = device.limits(width, height)
+        try:
+            result = await render_scene(
+                target, width, height, scene_id=main.get("id"), scenes_override=scenes, device_limits=limits
+            )
+        except RenderQueueFull:
+            return None
+        if not result.out_of_memory:
+            return None
+        return json.dumps({
+            "ok": False,
+            "installed": False,
+            "error": describe_out_of_memory(
+                int(result.out_of_memory.get("refusedBytes") or 0),
+                int(result.out_of_memory.get("usedBytes") or 0),
+                limits,
+            ),
+            "rendered_in": f"the frame's memory: {device.label}",
+            "note": INSTALL_OUT_OF_MEMORY_NOTE,
+        })
 
     editor_scenes = [s for s in (frame.scenes or []) if isinstance(s, dict)] if frame is not None else []
     tools = BackendChatTools(
@@ -252,6 +347,7 @@ async def ai_chat_turn(data: AiChatRequest, request: Request, db: Session = Depe
         render_size=_render_size(data.render_size, frame),
         split_state_nodes=_split_state_nodes_by_app,
         editor_available=frame is not None and data.editor is not False,
+        check_install=check_install,
     )
 
     def record(content: str, tool: str) -> None:

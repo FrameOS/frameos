@@ -1,11 +1,15 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   describeDeviceLimits,
+  describeOutOfMemory,
   deviceLimitsFor,
   devicePresetFor,
   devicePresets,
   esp32CanvasBytesPerPixel,
   esp32DeviceHeapBytes,
+  esp32DeviceLimits,
   esp32PreviewMemoryBytes,
   esp32PreviewOverheadBytes,
   piDeviceHeapBytes,
@@ -184,5 +188,44 @@ describe("deviceLimitsFor", () => {
     expect(text).toContain("6 MB max HTTP response");
     expect(text).toContain("JS apps restart on every render");
     expect(describeDeviceLimits(deviceLimitsFor("pi", 800, 480)!)).not.toContain("restart");
+  });
+});
+
+// The ceiling an ESP32 frame's AI render runs under, on both planes: the
+// backend ports esp32DeviceLimits (app/utils/device_limits.py) and replays the
+// same file.
+const deviceLimitsFixtures = JSON.parse(
+  readFileSync(fileURLToPath(new URL("../../../../../docs/device-limits-fixtures.json", import.meta.url)), "utf8"),
+) as {
+  cases: {
+    height: number;
+    memoryBytes: number;
+    name: string;
+    previewOverheadBytes: number;
+    psramBytes: number;
+    width: number;
+  }[];
+};
+
+describe("esp32DeviceLimits", () => {
+  it.each(deviceLimitsFixtures.cases.map((entry) => [entry.name, entry] as const))("%s", (_name, entry) => {
+    const limits = esp32DeviceLimits(entry.width, entry.height, entry.psramBytes);
+    expect(limits.memoryBytes).toBe(entry.memoryBytes);
+    expect(limits.previewOverheadBytes).toBe(entry.previewOverheadBytes);
+    expect(limits.memoryReserveBytes).toBe(0);
+    expect(limits.embedded).toBe(true);
+  });
+
+  it("is what the ESP32 presets use", () => {
+    expect(deviceLimitsFor("esp32", 1200, 1600)).toEqual(esp32DeviceLimits(1200, 1600, PSRAM_8MB));
+    expect(deviceLimitsFor("esp32_16mb", 1200, 1600)).toEqual(esp32DeviceLimits(1200, 1600, PSRAM_16MB));
+  });
+
+  it("describes running out in the device's own bytes", () => {
+    // The E1004 clock scene: a second 1200x1600 RGBX image refused, with the
+    // preview's RGBX canvas (3.84 MB more than the device's 565 one) in use.
+    expect(
+      describeOutOfMemory({ refusedBytes: 7_680_004, usedBytes: 8_416_300 }, esp32DeviceLimits(1200, 1600, PSRAM_8MB)),
+    ).toBe("Out of memory: an allocation of 7.3 MB was refused with 4.4 MB of the device's 6.1 MB in use.");
   });
 });

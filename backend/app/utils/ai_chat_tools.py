@@ -13,6 +13,7 @@ import base64
 import io
 import json
 import re
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from app.mcp.protocol import JsonRpcError, McpServer
@@ -214,7 +215,64 @@ EDITOR_TOOL_LABELS = {
     "render_scene": "Rendering the scene",
 }
 
-RenderScene = Callable[[list[JsonObject], str | None, int, int], Awaitable[tuple[bytes | None, str | None]]]
+@dataclass
+class RenderedScene:
+    """What render_scene's renderer answers: the PNG, or why there is none."""
+
+    png: bytes | None
+    error: str | None = None
+    # Set when the render ran under the frame's memory (device_limits.py).
+    rendered_in: str | None = None
+    out_of_memory: bool = False
+    # What the scene logged, oldest first: third-party text, like a frame's logs.
+    logs: list[str] = field(default_factory=list)
+
+
+RenderScene = Callable[[list[JsonObject], str | None, int, int], Awaitable[RenderedScene]]
+# Answers a refusal (the tool result) or None to let the call through.
+InstallCheck = Callable[[str, JsonObject], Awaitable[str | None]]
+
+# The MCP tools that put scene JSON on a frame: on a frame that renders in a few
+# megabytes the chat renders the scene in that memory first (docs/ai-chat.md).
+INSTALL_TOOLS = frozenset({"frame_scene_install", "frame_scene_update"})
+INSTALL_OUT_OF_MEMORY_NOTE = (
+    "Nothing was installed: on this frame the scene would abort every render and restart the device. Make it "
+    "need less memory (every image the size of the frame is width x height x 4 bytes, so draw into the frame's "
+    "canvas instead of building full-size images, and keep fetched data small), then install it again."
+)
+
+MAX_RENDER_LOG_LINES = 20
+RENDER_OUT_OF_MEMORY_NOTE = (
+    "The scene needs more memory than the frame has, so on the frame this render aborts and the device restarts. "
+    "Make it need less: every image the size of the frame is width x height x 4 bytes, so draw into the frame's "
+    "canvas instead of building full-size images, and keep fetched data small. Then render again."
+)
+
+
+def is_render_error_line(line: str) -> bool:
+    """isRenderErrorLine in the cloud's scene-render.ts: a JSON log whose
+    event starts with "error" or that carries an `error` key, or a plain line
+    that mentions the word."""
+    try:
+        payload = json.loads(line)
+    except ValueError:
+        payload = None
+    if isinstance(payload, dict):
+        event = payload.get("event")
+        return (isinstance(event, str) and event.startswith("error")) or "error" in payload
+    return re.search(r"\berror\b", line, re.IGNORECASE) is not None
+
+
+def render_output(logs: list[str]) -> str:
+    """renderOutput in the cloud's tools.ts: what the scene printed while it
+    rendered, inside the untrusted frame."""
+    if not logs:
+        return ""
+    errors = list(dict.fromkeys(line for line in logs if is_render_error_line(line)))
+    return "\n" + untrusted_result(
+        "scene_render_output",
+        json.dumps({"errors": errors[:MAX_RENDER_LOG_LINES], "logs": logs[-MAX_RENDER_LOG_LINES:]}),
+    )
 
 
 def untrusted_result(source: str, serialized: str) -> str:
@@ -281,8 +339,10 @@ class BackendChatTools(ToolBox):
         render_size: tuple[int, int] | None = None,
         split_state_nodes: Callable[[JsonObject], None] | None = None,
         editor_available: bool = True,
+        check_install: InstallCheck | None = None,
     ) -> None:
         self.editor_available = editor_available
+        self.check_install = check_install
         self.mcp = mcp
         self.project_id = project_id
         self.emit_scenes = emit_scenes
@@ -341,6 +401,10 @@ class BackendChatTools(ToolBox):
         if name == "render_scene":
             return await self._render(args)
         if name in self._mcp_tools:
+            if self.check_install is not None and name in INSTALL_TOOLS:
+                refusal = await self.check_install(name, args)
+                if refusal is not None:
+                    return ToolOutput(text=refusal)
             tool = self._mcp_tools[name]
             arguments = dict(args)
             if tool.scoped:
@@ -422,12 +486,17 @@ class BackendChatTools(ToolBox):
         width, height = self.render_size or (800, 480)
         width = _dimension(args.get("width"), width)
         height = _dimension(args.get("height"), height)
-        png, error = await self.render_scene_fn(scenes, scene_id, width, height)
-        if png is None:
-            return ToolOutput(text=json.dumps({"ok": False, "error": error or "The scene did not render."}))
-        data_url = f"data:image/png;base64,{base64.b64encode(png).decode('ascii')}"
+        rendered = await self.render_scene_fn(scenes, scene_id, width, height)
+        where = {"rendered_in": rendered.rendered_in} if rendered.rendered_in else {}
+        if rendered.png is None:
+            failure: JsonObject = {"ok": False, "error": rendered.error or "The scene did not render.", **where}
+            if rendered.out_of_memory:
+                failure["note"] = RENDER_OUT_OF_MEMORY_NOTE
+            return ToolOutput(text=json.dumps(failure) + render_output(rendered.logs))
+        data_url = f"data:image/png;base64,{base64.b64encode(rendered.png).decode('ascii')}"
         return ToolOutput(
-            text=json.dumps({"ok": True, "rendered": scene_id, "width": width, "height": height}),
+            text=json.dumps({"ok": True, "rendered": scene_id, "width": width, "height": height, **where})
+            + render_output(rendered.logs),
             images=[data_url],
         )
 

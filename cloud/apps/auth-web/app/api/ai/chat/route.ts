@@ -68,6 +68,8 @@ import { internalOrigin } from "../../../../src/lib/internal-origin";
 import { sessionCookieName } from "../../../../src/lib/session-cookie";
 import { guardedFetch } from "../../../../src/lib/ssrf";
 import { connectChatMcpTools } from "../../../../src/lib/ai/mcp-tools";
+import { frameRenderDevice, type RenderDevice } from "../../../../src/lib/ai/render-device";
+import { accountInstallMemoryCheck } from "../../../../src/lib/ai/install-memory-check";
 
 export const runtime = "nodejs";
 // The relay stream of one turn. The turn itself has its own ceiling
@@ -134,6 +136,7 @@ async function frameContextBlock(
 ): Promise<{
   block: string;
   frameId: string | null;
+  renderDevice?: RenderDevice | null;
   resolution?: { width: number; height: number } | null;
 }> {
   if (!frameId) {
@@ -160,6 +163,12 @@ async function frameContextBlock(
   if (typeof hardware.color === "string" && hardware.color) {
     lines.push(`- Color mode: ${hardware.color}`);
   }
+  const renderDevice = frameRenderDevice(frame);
+  if (renderDevice) {
+    lines.push(
+      `- Memory: ${renderDevice.label}. A scene that needs more aborts on the frame; render_scene renders in the same memory.`,
+    );
+  }
   lines.push(`- Connected: ${frame.connected ? "yes" : "no"} (status: ${frame.status})`);
   const assignments = await db
     .select({ name: storeScenes.name, sceneId: frameSceneAssignments.sceneId })
@@ -183,6 +192,7 @@ async function frameContextBlock(
   return {
     block: lines.join("\n"),
     frameId: frame.id,
+    renderDevice,
     resolution: renderSizeFrom({ height, width }),
   };
 }
@@ -426,7 +436,12 @@ export async function POST(request: NextRequest) {
     });
   }
   const sceneId = stringOrNull(body.sceneId);
-  const { block: frameBlock, frameId, resolution: frameResolution } = await frameContextBlock(
+  const {
+    block: frameBlock,
+    frameId,
+    renderDevice,
+    resolution: frameResolution,
+  } = await frameContextBlock(
     db,
     accountId,
     stringOrNull(body.frameId),
@@ -594,6 +609,7 @@ export async function POST(request: NextRequest) {
     // resolution (older clients send no size), else the default.
     renderSize: renderSizeFrom(body.renderSize) ?? frameResolution ?? null,
     renderTimeZone: timeZoneFrom(body.timeZone),
+    renderDevice: renderDevice ?? null,
     storeSceneId,
     // The frames home's AI box has no editor to deliver into.
     editorAvailable: body.editor !== false,
@@ -677,6 +693,7 @@ export async function POST(request: NextRequest) {
             publicOrigin: getCloudBaseUrl().replace(/\/+$/, ""),
             storeOrigin: getScenesBaseUrl().replace(/\/+$/, ""),
             userAgent: `frameos-cloud-ai-chat (account ${accountId})`,
+            installCheck: accountInstallMemoryCheck({ accountId, db, timeZone: timeZoneFrom(body.timeZone) }),
           });
           toolContext.extraTools = mcpTools;
         } catch (error) {

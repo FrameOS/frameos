@@ -23,6 +23,10 @@ class ChatSummary(BaseModel):
     context_id: Optional[str] = Field(default=None, alias="contextId")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
+    # The chat's first user message, cut to one line: what the drawer's
+    # history lists it under (the cloud's deriveChatTitle rule).
+    title: Optional[str] = None
+    message_count: Optional[int] = Field(default=None, alias="messageCount")
 
 
 class ChatMessageResponse(BaseModel):
