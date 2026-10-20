@@ -572,7 +572,9 @@ class Frame(Base):
             'last_successful_deploy': served_deploy_baseline(self.last_successful_deploy),
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
-        provider = self.provider_link
+        from .frame_provider import frame_provider_link
+
+        provider = frame_provider_link(self)
         if provider is not None:
             # The cloud's names for the same facts (frontend/src/types.tsx):
             # the workspace reads a provider frame here exactly as it reads a
@@ -818,7 +820,9 @@ def frame_has_shell_access(frame: Any) -> bool:
     SSH/Remote-based deploy cannot even connect (2026-09-07). rpios frames
     are SSH-managed by definition. A frame this backend is the provider of
     (it dials the management socket) has no shell either, by design."""
-    if getattr(frame, "provider_link", None) is not None:
+    from .frame_provider import frame_provider_link
+
+    if frame_provider_link(frame) is not None:
         return False
     if (getattr(frame, "mode", None) or "rpios") != "buildroot":
         return True

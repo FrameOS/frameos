@@ -130,14 +130,26 @@ async def test_a_deploy_is_three_verbs(db, redis, project):
     applied = await deploy_over_provider_socket(db, redis, int(frame.id), job_id=None, task_id=None)
     assert applied is False  # away: queued for its next connection
     rows = commands(db, frame)
-    assert [row.type for row in rows] == ["set_settings", "set_schedule", "set_scenes"]
-    settings_row, _schedule_row, scenes_row = rows
+    assert [row.type for row in rows] == ["set_settings", "set_schedule", "set_scenes", "refresh_service_settings"]
+    settings_row, _schedule_row, scenes_row, _nudge = rows
+    rows = rows[:3]
     assert settings_row.payload["settings"]["name"] == "Hall"
     # Only the interpreted scene: the device refuses a compiled payload.
     assert [scene["id"] for scene in scenes_row.payload["scenes"]] == ["s1"]
     assert scenes_row.payload["checksum"] == scenes_checksum(scenes_row.payload["scenes"])
     assert scenes_row.payload["_deploy"]["snapshot"]["frameos_version"] == "2026.10.17"
     assert all(row.expires_at is None for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_saved_service_keys_nudge_the_frames_that_pull_them(db, redis, project, async_client):
+    frame = make_provider_frame(db, project.id)
+    response = await async_client.post("/api/settings", json={"unsplash": {"accessKey": "new-key"}})
+    assert response.status_code == 200
+    assert [row.type for row in commands(db, frame)] == ["refresh_service_settings"]
+    # A setting no frame pulls nudges nobody.
+    await async_client.post("/api/settings", json={"defaults": {"timezone": "Europe/Tallinn"}})
+    assert len(commands(db, frame)) == 1
 
 
 @pytest.mark.asyncio

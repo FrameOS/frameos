@@ -76,8 +76,9 @@ def decode_public_key(value: Any) -> Optional[bytes]:
 # ------------------------------------------------------------------ frames
 
 def provider_link(frame: Any) -> Optional[FrameProviderLink]:
-    link = getattr(frame, "provider_link", None)
-    return link if isinstance(link, FrameProviderLink) else None
+    from app.models.frame_provider import frame_provider_link
+
+    return frame_provider_link(frame)
 
 
 def is_provider_frame(frame: Any) -> bool:

@@ -273,6 +273,8 @@ async def queue_provider_deploy(
         {**scenes_payload, "_deploy": {"id": deploy_id, "snapshot": snapshot}},
         detail=f"{scene_count} scene{'' if scene_count == 1 else 's'}",
     )
+    # The keys the new scenes may read: the device pulls them on the nudge.
+    enqueue_frame_command(db, frame, "refresh_service_settings")
     if skipped:
         await new_log(
             db, redis, int(frame.id), "stderr",
@@ -304,6 +306,23 @@ async def queue_provider_scene_preview(
     return await queue_provider_command(
         db, redis, frame, "set_scenes", payload, detail=f"preview of {name}", wait_seconds=wait_seconds
     )
+
+
+async def nudge_provider_service_settings(db: Session, redis: Redis, project_id: int) -> int:
+    """The project's service keys changed: every provider frame that pulls
+    them is told to pull again (`refresh_service_settings`, the zero-payload
+    nudge; the keys themselves never ride the queue). Returns how many."""
+    from app.models.frame_provider import FrameProviderLink
+    from app.utils.provider_frames import SERVICE_SETTINGS_SCOPE
+
+    links = db.query(FrameProviderLink).filter_by(project_id=int(project_id), status="active").all()
+    nudged = 0
+    for link in links:
+        if SERVICE_SETTINGS_SCOPE not in link.scope_list() or link.frame is None:
+            continue
+        await queue_provider_command(db, redis, link.frame, "refresh_service_settings", quiet=True)
+        nudged += 1
+    return nudged
 
 
 # ---------------------------------------------------------------- queries
