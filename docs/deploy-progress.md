@@ -187,7 +187,7 @@ the fleet update all get a bar.
 
 | Verb | Kind |
 | --- | --- |
-| `set_scenes` (assign, install, update, preview push) | `cloud_scenes`: queued → sending ([command:sent]) → loading ([command:acked]) → rendering ([scene_ack] of this push's checksum) → done ([render:done] / the `render` announce) |
+| `set_scenes` (assign, install, update, preview push; a backend's deploy to a frame it is the provider of) | `cloud_scenes`: queued → sending ([command:sent]) → loading ([command:acked]) → rendering ([scene_ack] of this push's checksum) → done ([render:done] / the `render` announce) |
 | `notify_update_available` on an ESP32 | `firmware` (as on the backend, with `ota:cloud` lines and the hello as [bootup]) |
 | `notify_update_available` on a Linux frame | `upgrade` (`cloud:upgrade` lines, then the hello) |
 | `restart_runtime`, `reboot` | `restart`, `reboot` |

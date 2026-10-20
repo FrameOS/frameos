@@ -177,8 +177,8 @@
     },
     "cloud_scenes": {
       "label": "Deploy scenes",
-      "planes": ["cloud"],
-      "frames": "Every cloud frame: the set_scenes verb from queued through the device's scene_ack to its first render announce.",
+      "planes": ["backend", "cloud"],
+      "frames": "Every frame on its management socket (a cloud frame, or a backend's provider frame): the set_scenes verb from queued through the device's scene_ack to its first render announce.",
       "stages": [
         { "stage": "queued", "on": { "command:sent:set_scenes": "sending", "command:acked:set_scenes": "loading", "scene_ack": "rendering" } },
         { "stage": "sending", "on": { "command:acked:set_scenes": "loading", "command:failed:set_scenes": "error", "scene_ack": "rendering" } },

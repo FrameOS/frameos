@@ -472,6 +472,7 @@ export const deployProgressContract: DeployProgressContract = {
     "cloud_scenes": {
       "label": "Deploy scenes",
       "planes": [
+        "backend",
         "cloud"
       ],
       "stages": [

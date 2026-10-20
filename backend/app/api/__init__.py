@@ -40,6 +40,7 @@ from .fonts import *  # noqa: E402, F403
 from .log import *  # noqa: E402, F403
 from .photos import *  # noqa: E402, F403
 from .projects import *  # noqa: E402, F403
+from .provider_frames import *  # noqa: E402, F403
 from .repositories import *  # noqa: E402, F403
 from .scene_images import *  # noqa: E402, F403
 from .settings import *  # noqa: E402, F403

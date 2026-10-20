@@ -8,7 +8,7 @@ import time
 from typing import Any, Optional
 from sqlalchemy import JSON
 from sqlalchemy import ForeignKey, Integer, String, Double, DateTime, Boolean, Text
-from sqlalchemy.orm import Session, mapped_column, object_session
+from sqlalchemy.orm import Session, mapped_column, object_session, relationship
 from app.utils.scene_execution import scene_is_interpreted
 from app.database import Base
 
@@ -480,6 +480,14 @@ class Frame(Base):
     rpios = mapped_column(JSON, nullable=True)
     terminal_history = mapped_column(JSON, nullable=True, default=list)
 
+    # Set when this backend is the frame's PROVIDER: the frame enrolled with a
+    # claim token and dials the management WebSocket (app/models/frame_provider.py).
+    # Loaded on access, never joined: the data migrations that query Frame
+    # (f4fafd71db11, a9c1e5f2b8d4) run before the link table exists.
+    provider_link = relationship(
+        "FrameProviderLink", back_populates="frame", uselist=False, cascade="all, delete-orphan"
+    )
+
     # not used
     apps = mapped_column(JSON, nullable=True)
     image_url = mapped_column(String(256), nullable=True)
@@ -564,6 +572,21 @@ class Frame(Base):
             'last_successful_deploy': served_deploy_baseline(self.last_successful_deploy),
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
+        provider = self.provider_link
+        if provider is not None:
+            # The cloud's names for the same facts (frontend/src/types.tsx):
+            # the workspace reads a provider frame here exactly as it reads a
+            # cloud-managed frame there.
+            result['provider'] = {
+                'status': provider.status,
+                'scopes': provider.scope_list(),
+                'local_origin': provider.local_origin,
+                'enrolled_at': _utc_iso(provider.created_at),
+            }
+            result['connected'] = bool(provider.connected) and provider.status == 'active'
+            result['last_seen_at'] = _utc_iso(provider.last_seen_at)
+            result['frameos_version'] = provider.frameos_version
+            result['hardware'] = provider.hardware
         result['secret_fingerprints'] = frame_secret_fingerprints(result)
         # Fingerprints of the service keys frame.json would ship right now.
         # Every deploy path snapshots this dict as its baseline, so the
@@ -579,6 +602,10 @@ class Frame(Base):
         except Exception:  # noqa: BLE001 — the baseline must never break serialisation
             pass
         return result
+
+def _utc_iso(value: Optional[datetime]) -> Optional[str]:
+    return value.replace(tzinfo=timezone.utc).isoformat() if value else None
+
 
 def server_scheme_from_port(port: Optional[int]) -> str:
     """The pre-2026.9.13 guess, kept only to seed rows and frame.json files
@@ -789,7 +816,10 @@ def frame_has_shell_access(frame: Any) -> bool:
     Remote and accepts root SSH only with keys or a password installed from
     the boot partition — so for it the admin login is THE way in, and the
     SSH/Remote-based deploy cannot even connect (2026-09-07). rpios frames
-    are SSH-managed by definition."""
+    are SSH-managed by definition. A frame this backend is the provider of
+    (it dials the management socket) has no shell either, by design."""
+    if getattr(frame, "provider_link", None) is not None:
+        return False
     if (getattr(frame, "mode", None) or "rpios") != "buildroot":
         return True
     agent = getattr(frame, "agent", None) or {}
@@ -841,8 +871,16 @@ async def delete_frame(db: Session, redis: Redis, frame_id: int, project_id: int
         cache_key = f'frame:{frame_id}:image'
         await redis.delete(cache_key)
 
+        from .frame_command import FrameCommand
+        db.query(FrameCommand).filter_by(project_id=project_id, frame_id=frame_id).delete()
+        was_provider_frame = frame.provider_link is not None
+
         db.delete(frame)
         db.commit()
+        if was_provider_frame:
+            # Its link went with it: the hub closes a live socket with 4401.
+            from app.utils.provider_commands import provider_link_changed
+            await provider_link_changed(redis, frame_id)
         await publish_message(redis, "delete_frame", {"id": frame_id, "project_id": project_id})
         return True
     return False

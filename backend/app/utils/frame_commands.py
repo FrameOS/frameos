@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from app.models.frame import Frame
 from app.models.frame_command import FrameCommand
+from app.utils.cloud_frames_contract import CONTRACT_VERB_TYPES
 
 # --------------------------------------------------------------------- rules
 
@@ -45,6 +46,18 @@ MAX_SLEEP_WAIT_SECONDS = 7 * 86400 + 3600
 # is handed over again — once the device has had this long to answer. The
 # cloud's commandRedeliverAfterMs.
 REDELIVER_AFTER_SECONDS = 180
+
+# A query or a file transfer is only worth answering while someone waits for
+# it: the cloud's deviceQueryCommandTtlMs and its asset command TTL.
+QUERY_TTL_SECONDS = 60
+ASSET_TTL_SECONDS = 2 * 60
+QUERY_TYPES: frozenset[str] = frozenset({"get_state", "get_logs", "get_metrics", "assets_list"})
+ASSET_TYPES: frozenset[str] = frozenset(
+    {"asset_get", "asset_put", "asset_put_chunk", "asset_mkdir", "asset_delete", "asset_rename", "image_get"}
+)
+# A frame that joined with scenes of its own is asked for them once per
+# connection; the next connection asks again (the hub's deviceScenesRequestTtlMs).
+SCENES_GET_TTL_SECONDS = 10 * 60
 
 # Written once, never resent (docs/cloud-frames.md, "delivery guarantees").
 DELIVERED_ONCE_TYPES: frozenset[str] = frozenset(
@@ -62,30 +75,27 @@ SUPERSEDED_TYPES: frozenset[str] = frozenset(
         "render",
         "reboot",
         "restart_runtime",
+        "set_schedule",
+        "set_display_power",
+        "refresh_service_settings",
+        "scenes_get",
     }
 )
-# Never handed to the device as a verb: the device already pulls its scenes
-# and settings on every pass (`/embedded/scenes`, `/embedded/settings`), so
-# a deploy is recorded here as the intention and acked by the checksum the
-# device reports holding on its next pull (ack_pull_backed_commands).
+# Never handed to an ESP32 on its HTTP pulls as a verb: the device already
+# pulls its scenes and settings on every pass (`/embedded/scenes`,
+# `/embedded/settings`), so a deploy is recorded here as the intention and
+# acked by the checksum the device reports holding on its next pull
+# (ack_pull_backed_commands). A frame on the management socket (a provider
+# frame) is handed them like every other verb.
 PULL_BACKED_TYPES: frozenset[str] = frozenset({"set_scenes", "set_settings"})
-# Every verb the backend may queue; anything else is a programming error,
+# Every verb the backend may queue: the contract's
+# (docs/cloud-frames-contract.json). Anything else is a programming error,
 # not something to hand a device that would answer unknown_verb.
-QUEUEABLE_TYPES: frozenset[str] = frozenset(
-    {
-        "render",
-        "reboot",
-        "restart_runtime",
-        "set_current_scene",
-        "scene_event",
-        "notify_update_available",
-        "set_scenes",
-        "set_settings",
-    }
-)
+QUEUEABLE_TYPES: frozenset[str] = CONTRACT_VERB_TYPES
 # No TTL: a deploy waits for the frame however long it sleeps (the cloud's
-# set_scenes / set_settings pushes carry none either).
-_NO_TTL_TYPES: frozenset[str] = PULL_BACKED_TYPES
+# set_scenes / set_settings pushes carry none either; a schedule is the same
+# kind of declarative state).
+_NO_TTL_TYPES: frozenset[str] = PULL_BACKED_TYPES | {"set_schedule"}
 
 LIVE_STATUSES: tuple[str, ...] = ("pending", "sent")
 
@@ -108,6 +118,12 @@ def base_ttl_seconds(command_type: str) -> int | None:
         return None
     if command_type == "notify_update_available":
         return UPDATE_NOTIFY_TTL_SECONDS
+    if command_type in QUERY_TYPES:
+        return QUERY_TTL_SECONDS
+    if command_type in ASSET_TYPES:
+        return ASSET_TTL_SECONDS
+    if command_type == "scenes_get":
+        return SCENES_GET_TTL_SECONDS
     return COMMAND_TTL_SECONDS
 
 
@@ -294,14 +310,50 @@ def cancel_frame_command(db: Session, frame: Frame, command_id: str, now: dateti
     return True
 
 
-def drain_frame_commands(db: Session, frame: Frame, now: datetime | None = None) -> list[FrameCommand]:
+def redeliver_sent_commands(db: Session, frame: Frame, cutoff: datetime) -> int:
+    """Rows written at or before `cutoff` without an ack go back to pending
+    (delivered again), except the at-most-once verbs, which are retired —
+    and a sent row a newer one of its type replaces, which is superseded.
+    The hub runs this with `cutoff = now` on a new connection (whatever the
+    old socket was sent, it never answered) and `now - 180 s` on a live one.
+    Does not commit."""
+    count = 0
+    live = _live_rows(db, frame).all()
+    for row in live:
+        if row.status != "sent":
+            continue
+        if row.sent_at is not None and row.sent_at > cutoff:
+            continue  # still inside the device's answer window
+        newer = any(
+            other.type == row.type and other.id != row.id and (other.created_at, other.id) > (row.created_at, row.id)
+            for other in live
+        )
+        if row.type in DELIVERED_ONCE_TYPES:
+            row.status = "expired"
+            row.error = "delivered_once"
+        elif newer:
+            row.status = "expired"
+            row.error = "superseded"
+        else:
+            row.status = "pending"
+            row.sent_at = None
+        count += 1
+    db.flush()
+    return count
+
+
+def drain_frame_commands(
+    db: Session, frame: Frame, now: datetime | None = None, *, pull_backed: bool = True
+) -> list[FrameCommand]:
     """What the device takes on this pull, oldest first, now marked `sent`.
 
     Mirrors the hub's drain on a session start: expire what ran out, requeue
     what was written long enough ago without an ack (or retire it, for the
-    at-most-once verbs), then hand over everything pending. Pull-backed rows
-    (a deploy) are never handed over; the device's checksums ack those
-    (ack_pull_backed_commands). Does not commit."""
+    at-most-once verbs), then hand over everything pending. With
+    `pull_backed` (an ESP32 on its HTTP pulls) the deploy rows are never
+    handed over; the device's checksums ack those (ack_pull_backed_commands).
+    A frame on its management socket takes them like any verb. Does not
+    commit."""
     now = now or utcnow()
     expire_stale_commands(db, frame, now)
     cutoff = now - timedelta(seconds=REDELIVER_AFTER_SECONDS)
@@ -317,7 +369,7 @@ def drain_frame_commands(db: Session, frame: Frame, now: datetime | None = None)
     db.flush()
     handed: list[FrameCommand] = []
     for row in _live_rows(db, frame).filter(FrameCommand.status == "pending").all():
-        if row.type in PULL_BACKED_TYPES:
+        if pull_backed and row.type in PULL_BACKED_TYPES:
             continue
         row.status = "sent"
         row.sent_at = now

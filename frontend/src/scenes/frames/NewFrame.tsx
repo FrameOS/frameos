@@ -7,6 +7,7 @@ import {
   CommandLineIcon,
   ComputerDesktopIcon,
   CpuChipIcon,
+  KeyIcon,
   ServerStackIcon,
 } from '@heroicons/react/24/outline'
 import { ExclamationCircleIcon } from '@heroicons/react/24/solid'
@@ -50,6 +51,7 @@ import { urls } from '../../urls'
 import { defaultNewFrameServerHost } from '../../utils/backendAddress'
 import { apiFetch } from '../../utils/apiFetch'
 import { framesModel } from '../../models/framesModel'
+import { claimCodeLogic } from './claimCodeLogic'
 import { useState } from 'react'
 
 function isLocalServer(host?: string | null): boolean {
@@ -688,7 +690,7 @@ function renderPlatformOptions(installMethod: FrameInstallMethod): JSX.Element[]
 // 'virtual' is not its own install_method: it is the embedded install flow on
 // the "virtual" platform, surfaced as a separate card because there is no
 // hardware to flash and none of the ESP32 steps apply.
-type AddFrameMode = FrameInstallMethod | 'import' | 'virtual' | 'adopt'
+type AddFrameMode = FrameInstallMethod | 'import' | 'virtual' | 'adopt' | 'claim'
 type UploadHeader = { name: string; value: string }
 
 function installMethodTitle(installMethod: AddFrameMode): string {
@@ -709,6 +711,9 @@ function installMethodTitle(installMethod: AddFrameMode): string {
   }
   if (installMethod === 'adopt') {
     return 'Adopt frame'
+  }
+  if (installMethod === 'claim') {
+    return 'Connect with a claim code'
   }
   return 'Install over SSH'
 }
@@ -847,6 +852,8 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
       ? 'import'
       : newFrame.mode === 'adopt'
       ? 'adopt'
+      : newFrame.mode === 'claim'
+      ? 'claim'
       : isVirtualPlatform
       ? 'virtual'
       : installMethod
@@ -1024,6 +1031,13 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
               description="Take over a standalone frame already running FrameOS: import its config and scenes, then manage it from here."
             >
               <ServerStackIcon className="h-4 w-4" />
+            </ModeButton>
+            <ModeButton
+              onClick={() => setNewFrameValues({ mode: 'claim', install_method: undefined })}
+              title="Connect with a claim code"
+              description="A frame enrolls with this backend the way it would with FrameOS Cloud, and dials in over its management socket. No SSH."
+            >
+              <KeyIcon className="h-4 w-4" />
             </ModeButton>
           </div>
         </div>
@@ -1512,6 +1526,8 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
         </div>
       ) : addFrameMode === 'adopt' ? (
         <AdoptFramePane cancel={cancel} />
+      ) : addFrameMode === 'claim' ? (
+        <ClaimCodeFramePane cancel={cancel} />
       ) : null}
     </div>
   )
@@ -1661,6 +1677,101 @@ function AdoptFramePane({ cancel }: { cancel: () => void }): JSX.Element {
           className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
           Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// This backend as the frame's provider: a single-use claim code the frame
+// redeems with its own key at {provider}/api/frames/enroll, after which it
+// dials the management socket here as it would dial FrameOS Cloud
+// (docs/cloud-frames.md). The frame appears in the list when it enrolls.
+function ClaimCodeFramePane({ cancel }: { cancel: () => void }): JSX.Element {
+  const { claimCode, claimCodeError, claimCodeLoading, name, providerUrl, sdCardLines } = useValues(claimCodeLogic)
+  const { createClaimCode, reset, setName, setProviderUrl } = useActions(claimCodeLogic)
+  const inputClass =
+    'frameos-input h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400'
+  const labelClass = 'frameos-strong mb-1 block text-xs font-semibold text-slate-700'
+  const codeClass =
+    'frameos-input block w-full overflow-x-auto whitespace-pre rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-800'
+
+  return (
+    <div className="space-y-4">
+      <p className="frameos-muted text-xs text-slate-500">
+        The frame makes its own key and dials this backend, the way it dials FrameOS Cloud: no SSH, no FrameOS Remote,
+        no admin login. Deploys, scene switches, logs, metrics and assets all go over that one connection, and a frame
+        that is away picks up what was queued when it is back.
+      </p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <label className={labelClass}>Name (optional)</label>
+          <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} disabled={!!claimCode} />
+        </div>
+        <div>
+          <label className={labelClass}>This backend's URL, as seen from the frame</label>
+          <input
+            className={inputClass}
+            value={providerUrl}
+            onChange={(e) => setProviderUrl(e.target.value)}
+            placeholder="http://10.0.0.5:8989"
+          />
+        </div>
+      </div>
+      {claimCodeError ? (
+        <p className="flex items-start gap-1.5 text-xs font-medium text-red-600" role="alert">
+          <ExclamationCircleIcon className="mt-0.5 h-4 w-4 shrink-0" />
+          {claimCodeError}
+        </p>
+      ) : null}
+      {claimCode ? (
+        <div className="space-y-3">
+          <div>
+            <label className={labelClass}>Claim code (single use, until {new Date(claimCode.expires_at).toLocaleString()})</label>
+            <code className={codeClass}>{claimCode.token}</code>
+          </div>
+          <div>
+            <label className={labelClass}>On a FrameOS SD card: /boot/frameos-cloud.txt</label>
+            <code className={codeClass}>{sdCardLines}</code>
+          </div>
+          <div>
+            <label className={labelClass}>On an ESP32, over its USB console</label>
+            <code className={codeClass}>{`set cloud_url ${providerUrl}\nset claim_token ${claimCode.token}\nreboot`}</code>
+          </div>
+          <div>
+            <label className={labelClass}>On a running frame with no backend set, through its admin API</label>
+            <code className={codeClass}>{`POST /api/cloud/enroll  {"provider_url": "${providerUrl}", "claim_token": "${claimCode.token}"}`}</code>
+          </div>
+          <p className="frameos-muted text-xs text-slate-500">
+            The frame shows up in the frames list as soon as it enrolls.
+          </p>
+        </div>
+      ) : null}
+      <div className="flex gap-2">
+        {claimCode ? (
+          <button
+            type="button"
+            onClick={reset}
+            className="frameos-secondary-button flex h-11 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          >
+            Another code
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={createClaimCode}
+            disabled={claimCodeLoading || !providerUrl.trim()}
+            className="frameos-primary-action flex h-11 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {claimCodeLoading ? <Spinner color="white" /> : 'Create claim code'}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={cancel}
+          className="frameos-secondary-button h-11 rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        >
+          Close
         </button>
       </div>
     </div>

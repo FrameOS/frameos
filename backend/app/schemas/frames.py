@@ -171,6 +171,16 @@ class FrameBase(BaseModel):
     active_connections: Optional[int] = None
     active_scene_id: Optional[str] = None
     frame_sync_hint: Optional[FrameSyncHint] = None
+    # Set for a frame this backend is the provider of (it dials the
+    # management socket, docs/cloud-frames.md): the link's status, scopes and
+    # local origin, plus what the cloud reports for the same frame under the
+    # same names — whether the socket is up, when the frame was last heard,
+    # the FrameOS and hardware it reported (frontend/src/types.tsx).
+    provider: Optional[Dict[str, Any]] = None
+    connected: Optional[bool] = None
+    last_seen_at: Optional[datetime] = None
+    frameos_version: Optional[str] = None
+    hardware: Optional[Dict[str, Any]] = None
 
 class FrameResponse(BaseModel):
     frame: FrameBase

@@ -118,6 +118,7 @@ import {
   frameMenuActionDisabledReason,
   frameMenuActionIsAllowed,
   isEsp32CloudFrame,
+  isProviderFrame,
   workspaceMode,
 } from './workspaceSurfaces'
 import { timezoneOptions } from '../../decorators/timezones'
@@ -1178,7 +1179,11 @@ function ShellLessDeploySection({
             <button
               type="button"
               onClick={onDeploy}
-              title="Sends this frame's scenes and settings over its admin API and reloads the runtime"
+              title={
+                isProviderFrame(frame)
+                  ? "Sends this frame's scenes, settings and schedule over its management socket"
+                  : "Sends this frame's scenes and settings over its admin API and reloads the runtime"
+              }
               className={clsx(
                 pendingChanges.length > 0 || !updateAvailable ? 'frameos-primary-action' : 'frameos-secondary-button',
                 buttonClass

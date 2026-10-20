@@ -83,6 +83,35 @@ async def _embedded_device_action(
         raise
 
 
+async def _provider_action(
+    db: Session,
+    redis: Redis,
+    frame: Frame,
+    *,
+    command_type: str,
+    action_label: str,
+) -> None:
+    """Restart / reboot a frame on its management socket: the verb, and the
+    record moves on its ack (the hub folds command:acked:<verb>)."""
+    from app.utils.provider_commands import queue_provider_command
+
+    try:
+        outcome = await queue_provider_command(
+            db, redis, frame, command_type, wait_seconds=EMBEDDED_ACTION_WAIT_SECONDS
+        )
+        if outcome["status"] == "failed":
+            raise Exception(f"The frame refused the {action_label}: {outcome.get('error')}")
+        if outcome["applied"]:
+            await log(db, redis, int(frame.id), "stdout",
+                      f"The frame took the {action_label}; it is back in a few seconds")
+        else:
+            await log(db, redis, int(frame.id), "stdout",
+                      f"The {action_label} is queued; the frame runs it when it next connects")
+    except Exception as e:
+        await record_task_failure(db, redis, int(frame.id), e, frame=frame)
+        raise
+
+
 async def _shell_less_control_event(
     db: Session,
     redis: Redis,
@@ -162,6 +191,12 @@ async def restart_frame_task(ctx: dict[str, Any], id: int):
         await log(db, redis, id, "stderr", "Frame not found")
         return
 
+    from app.utils.provider_frames import is_provider_frame
+
+    if is_provider_frame(frame):
+        await _provider_action(db, redis, frame, command_type="restart_runtime", action_label="restart")
+        return
+
     if (frame.mode or "rpios") == "embedded":
         await _embedded_device_action(
             db,
@@ -219,6 +254,12 @@ async def reboot_frame_task(ctx: dict[str, Any], id: int):
     frame = get_fresh_frame(db, id)
     if not frame:
         await log(db, redis, id, "stderr", "Frame not found")
+        return
+
+    from app.utils.provider_frames import is_provider_frame
+
+    if is_provider_frame(frame):
+        await _provider_action(db, redis, frame, command_type="reboot", action_label="reboot")
         return
 
     if (frame.mode or "rpios") == "embedded":

@@ -5,9 +5,10 @@
     "  Linux runtime  frameos/src/frameos/cloud/tests/test_cloud_contract.nim",
     "  ESP32 firmware embedded/esp32/main/tests/test_fos_cloud_contract.c (host build)",
     "  cloud          cloud/apps/auth-web/src/test/cloud-frames-contract.test.ts",
+    "  backend        backend/app/utils/tests/test_cloud_frames_contract.py (the self-hosted backend as a provider)",
     "A `settings` case is the object a set_settings push carries; `expect`",
     "is the verdict per profile: \"ok\", or the error token the push is refused",
-    "with. `verbs` cases check the verb table (Linux runtime + cloud)."
+    "with. `verbs` cases check the verb table (Linux runtime, cloud, backend)."
   ],
   "settings": [
     {"name": "base six on both profiles",

@@ -141,7 +141,8 @@ from app.utils.frame_http import (
     _frame_scheme_port,
     _is_embedded_frame,
 )
-from app.utils import admin_api_assets, embedded_assets, virtual_assets
+from app.utils import admin_api_assets, embedded_assets, provider_assets, virtual_assets
+from app.utils.provider_frames import is_provider_frame, provider_link, provider_profile, provider_reported_version
 from app.api.frame_sync import (
     _frame_admin_request,
     frame_has_shell_access,
@@ -582,6 +583,9 @@ def _apply_frame_preview_update(frame: Frame, data: FrameUpdateRequest) -> Any:
     preview.last_successful_deploy_at = frame.last_successful_deploy_at
     preview.apps = frame.apps
     preview.image_url = frame.image_url
+    # Whether the frame is reached over its management socket decides the
+    # whole deploy plan (frame_deploy_workflow._plan_provider).
+    preview.provider_link = frame.provider_link
 
     if "https_proxy" in update_data:
         preview.https_proxy = normalize_https_proxy(preview.https_proxy)
@@ -1049,7 +1053,41 @@ async def _forward_frame_request(
     )
 
 
+def _provider_states_payload(frame: Frame) -> dict[str, Any]:
+    """What a provider frame last said it shows (its hello / state message,
+    app/ws/provider_hub.py), in the `/states` shape."""
+    link = provider_link(frame)
+    state = dict(link.last_state) if link is not None and isinstance(link.last_state, dict) else {}
+    scene_id = state.pop("active_scene", None)
+    states = state
+    if scene_id and not any(isinstance(value, dict) for value in states.values()):
+        states = {scene_id: states}
+    return {"sceneId": scene_id or "", "states": states}
+
+
 async def _load_frame_states(redis: Redis, frame: Frame) -> dict[str, Any]:
+    if is_provider_frame(frame):
+        # Never a LAN request: a connected frame is asked over its socket,
+        # an away one answers from what it last reported.
+        link = provider_link(frame)
+        if link is not None and link.connected:
+            from app.database import SessionLocal
+            from app.utils.provider_commands import ProviderCommandError, provider_request_state
+
+            db = SessionLocal()
+            try:
+                own = db.get(Frame, int(frame.id))
+                if own is not None:
+                    await provider_request_state(db, redis, own, timeout=8.0)
+                db.expire_all()
+                fresh = db.get(Frame, int(frame.id))
+                if fresh is not None:
+                    return _normalise_frame_states_payload(_provider_states_payload(fresh))
+            except ProviderCommandError:
+                pass
+            finally:
+                db.close()
+        return _normalise_frame_states_payload(_provider_states_payload(frame))
     if is_virtual_frame(frame):
         from .virtual_frame import virtual_frame_states_payload
 
@@ -1358,6 +1396,10 @@ async def api_frame_get_state(
         payload = await virtual_frame_states_payload(redis, frame)
         scene_id = payload["sceneId"]
         return {"sceneId": scene_id, "state": payload["states"].get(scene_id) or {}}
+    if is_provider_frame(frame):
+        payload = _provider_states_payload(frame)
+        scene_id = payload["sceneId"]
+        return {"sceneId": scene_id, "state": payload["states"].get(scene_id) or {}}
     state = await _forward_frame_request(
         frame,
         redis,
@@ -1471,6 +1513,20 @@ async def api_frame_ping(
     if mode_normalised not in {"icmp", "http"}:
         _bad_request("Ping mode must be 'icmp' or 'http'")
 
+    if is_provider_frame(frame):
+        # The frame dials us; whether its socket is up is the answer.
+        link = provider_link(frame)
+        connected = bool(link is not None and link.connected)
+        seen = link.last_seen_at.replace(tzinfo=timezone.utc).isoformat() if link is not None and link.last_seen_at else None
+        return FramePingResponse(
+            ok=connected,
+            mode="http" if mode_normalised == "http" else "icmp",
+            target="management socket",
+            elapsed_ms=0,
+            status=None,
+            message="connected" if connected else (f"not connected (last seen {seen})" if seen else "never connected"),
+        )
+
     if not is_safe_host(frame.frame_host):
         raise HTTPException(status_code=400, detail="Unsafe frame host")
     await assert_target_allowed(frame.frame_host, what="Frame host")
@@ -1579,6 +1635,48 @@ def _embedded_event_command(frame: Frame, event: str, body: Any) -> tuple[str, d
     return None
 
 
+def _provider_event_command(frame: Frame, event: str, body: Any) -> tuple[str, dict[str, Any], str | None] | None:
+    """The verb an event becomes for a frame on its management socket: the
+    contract's `cloud` column (CLOUD_EVENT_ROUTE_VERBS, the table the cloud's
+    event route reads), for the profile and firmware the frame reported.
+    None for an event no verb carries to this frame."""
+    from app.utils.provider_payloads import supports_since
+
+    payload = body if isinstance(body, dict) else {}
+    profile = provider_profile(frame)
+    version = provider_reported_version(frame)
+    route = CLOUD_EVENT_ROUTE_VERBS.get(event)
+    if route is None:
+        if event in CONTRACT_EVENTS:
+            return None
+        # A custom scene event rides scene_event (FrameOS 2026.9.21+).
+        route = {"verb": "scene_event", "since": CLOUD_EVENT_ROUTE_VERBS["button"].get("since")}
+    if route.get("eventRoute") is False:
+        return None
+    if route.get("since") and not supports_since(route["since"], version):
+        route = route.get("before") or {}
+    profiles = route.get("profiles")
+    if isinstance(profiles, list) and profile not in profiles:
+        return None
+    verb = route.get("verb")
+    if verb == "set_current_scene":
+        scene_id = payload.get("sceneId")
+        if not isinstance(scene_id, str) or not scene_id:
+            return None
+        command: dict[str, Any] = {"scene_id": scene_id}
+        state = payload.get("state")
+        if isinstance(state, dict) and state:
+            command["state"] = state
+        return verb, command, _scene_name(frame, scene_id)
+    if verb == "scene_event":
+        return verb, {"name": event, "payload": payload}, None
+    if verb in ("render", "get_metrics"):
+        return verb, {}, None
+    if verb == "set_display_power":
+        return verb, {"on": event == "turnOn"}, "on" if event == "turnOn" else "off"
+    return None
+
+
 def _scene_name(frame: Frame, scene_id: str) -> str | None:
     for scene in frame.scenes or []:
         if isinstance(scene, dict) and scene.get("id") == scene_id:
@@ -1649,6 +1747,43 @@ async def api_frame_event(
             db, redis, frame, scenes_override=upload, scene_id=scene_id
         )
         return "OK"
+    # A frame on its management socket: every event is a contract verb on
+    # its queue, and a preview is one set_scenes naming the scene to show.
+    if is_provider_frame(frame):
+        from app.utils.provider_commands import (
+            ProviderCommandError,
+            queue_provider_command,
+            queue_provider_scene_preview,
+        )
+
+        try:
+            if event == "uploadScenes":
+                preview_scene_id = body.get("sceneId") if isinstance(body, dict) else None
+                preview_state = body.get("state") if isinstance(body, dict) else None
+                return await queue_provider_scene_preview(
+                    db, redis, frame, scenes or [],
+                    preview_scene_id if isinstance(preview_scene_id, str) and preview_scene_id else None,
+                    preview_state if isinstance(preview_state, dict) else None,
+                    wait_seconds=EMBEDDED_PREVIEW_WAIT_SECONDS,
+                )
+            queued = _provider_event_command(frame, event, body)
+            if queued is None:
+                raise HTTPException(
+                    status_code=HTTPStatus.BAD_REQUEST,
+                    detail=f"{event} cannot be sent to this frame over its management socket",
+                )
+            command_type, payload, detail = queued
+            outcome = await queue_provider_command(
+                db, redis, frame, command_type, payload, detail=detail, wait_seconds=EMBEDDED_EVENT_WAIT_SECONDS
+            )
+        except ProviderCommandError as exc:
+            _bad_request(f"The frame cannot take {event}: {exc.error}")
+        if outcome["status"] == "failed":
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_GATEWAY,
+                detail=f"The frame refused {event}: {outcome.get('error')}",
+            )
+        return outcome
     # An ESP32 is a fresh boot on every wake and cannot be pushed to while
     # it sleeps: the event goes on its command queue, the cloud way, and the
     # answer says whether the frame has already taken it or still will.
@@ -2018,15 +2153,19 @@ async def api_frame_local_binary_zip(
 def _assets_over_device_http(frame: Frame) -> bool:
     """Whether this frame's assets are reached through the device's own HTTP
     API rather than SSH/Remote: embedded boards (no shell by nature) and the
-    Linux frames this backend reaches only over their admin API."""
-    return _is_embedded_frame(frame) or not frame_has_shell_access(frame)
+    Linux frames this backend reaches only over their admin API, and frames
+    on their management socket (the asset verbs)."""
+    return is_provider_frame(frame) or _is_embedded_frame(frame) or not frame_has_shell_access(frame)
 
 
 def _device_assets(frame: Frame):
     """Asset backend for frames without SSH: virtual frames keep assets on the
     backend disk, embedded frames proxy to the device HTTP API, and a Linux
     frame the backend reaches only over its admin API proxies to that. The
-    three modules share the same function signatures."""
+    three modules share the same function signatures. A frame on its
+    management socket rides the contract's asset verbs."""
+    if is_provider_frame(frame):
+        return provider_assets
     if is_virtual_frame(frame):
         return virtual_assets
     if _is_embedded_frame(frame):
@@ -2096,11 +2235,13 @@ async def _admin_api_asset_file_response(
     filename: str,
     thumb: bool,
 ) -> StreamingResponse:
-    """Serve one asset from a Linux frame reached over its admin API. The
-    runtime renders thumbnails itself (PNG, cached under .thumbs/), so a
-    thumb request asks for that instead of pulling the original."""
+    """Serve one asset from a Linux frame reached over its admin API, or
+    from any frame on its management socket (`asset_get`). The runtime
+    renders thumbnails itself (PNG, cached under .thumbs/), so a thumb
+    request asks for that instead of pulling the original."""
     try:
-        data, device_content_type = await admin_api_assets.download_asset(frame, redis, full_path, thumb=thumb)
+        assets_client = provider_assets if is_provider_frame(frame) else admin_api_assets
+        data, device_content_type = await assets_client.download_asset(frame, redis, full_path, thumb=thumb)
     except HTTPException as exc:
         if exc.status_code == HTTPStatus.NOT_FOUND:
             raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Asset not found")
@@ -2672,6 +2813,20 @@ async def api_embedded_device_image(
     return {"message": "Frame image updated", **image_info}
 
 
+async def _fetch_provider_frame_image(db: Session, redis: Redis, frame: Frame) -> tuple[int, bytes, dict[str, str]]:
+    """A provider frame's current image: the `image_get` verb, streamed back
+    over its socket (PNG from the Linux runtime, BMP from the ESP32). The
+    shape _fetch_frame_http_bytes answers, so the route stays one path."""
+    from app.utils.provider_commands import ProviderCommandError, provider_get_file
+
+    try:
+        body, content_type = await provider_get_file(db, redis, frame, "image_get", timeout=30.0)
+    except ProviderCommandError as exc:
+        status = HTTPStatus.SERVICE_UNAVAILABLE if exc.error in ("frame_offline", "frame_not_responding") else HTTPStatus.BAD_GATEWAY
+        raise HTTPException(status_code=status, detail=f"The frame answered: {exc.error}")
+    return 200, body, {"content-type": content_type or "application/octet-stream"}
+
+
 @api_open.api_route("/projects/{project_id}/frames/{id:int}/image", methods=["GET", "HEAD"])
 async def api_frame_get_image(
     project_id: int,
@@ -2791,8 +2946,11 @@ async def api_frame_get_image(
 
         async def log_fetch_error(detail: str) -> None:
             # A frame that was never deployed has no image to fetch yet, so
-            # the failure is expected and stays out of its log.
+            # the failure is expected and stays out of its log. Nor is a
+            # provider frame that is simply away an error.
             if frame.status == "uninitialized" and not frame.last_successful_deploy:
+                return
+            if is_provider_frame(frame) and not getattr(provider_link(frame), "connected", False):
                 return
             await log(db, redis, id, "stderr", f"Error fetching image from frame {id}: {detail}")
 
@@ -2800,9 +2958,12 @@ async def api_frame_get_image(
         status = 0
         body = b""
         try:
-            status, body, headers = await _fetch_frame_http_bytes(
-                frame, redis, path=path
-            )
+            if is_provider_frame(frame):
+                status, body, headers = await _fetch_provider_frame_image(db, redis, frame)
+            else:
+                status, body, headers = await _fetch_frame_http_bytes(
+                    frame, redis, path=path
+                )
 
             if status == 200:
                 body = await asyncio.get_running_loop().run_in_executor(
@@ -3251,13 +3412,15 @@ async def api_frame_assets_sync(
             "uploaded": uploaded,
         }
     if not frame_has_shell_access(frame):
-        # A Linux frame reached over its admin API: the same size-compared
-        # upload the ESP32 path makes, through the runtime's asset routes.
+        # A Linux frame reached over its admin API, or any frame on its
+        # management socket: the same size-compared upload the ESP32 path
+        # makes, through the runtime's asset routes or the asset verbs.
         from app.models.assets import sync_embedded_font_assets
 
-        listing = await admin_api_assets.list_assets(frame, redis)
+        assets_client = _device_assets(frame)
+        listing = await assets_client.list_assets(frame, redis)
         try:
-            uploaded = await sync_embedded_font_assets(db, redis, frame, listing, assets_client=admin_api_assets)
+            uploaded = await sync_embedded_font_assets(db, redis, frame, listing, assets_client=assets_client)
         except HTTPException:
             raise
         except Exception as e:
@@ -3626,8 +3789,21 @@ def _reject_embedded_frame(frame: Frame, reason: str) -> None:
     Embedded frames have no shell, no systemd service and no FrameOS Remote
     agent; /restart and /reboot stay available through the device's HTTP API.
     """
+    _reject_provider_frame(frame)
     if _is_embedded_frame(frame):
         _bad_request(reason)
+
+
+PROVIDER_FRAME_REASON = (
+    "This frame is managed over its management socket, the way FrameOS Cloud manages a frame "
+    "(no SSH, no FrameOS Remote), so this action is not available"
+)
+
+
+def _reject_provider_frame(frame: Frame) -> None:
+    """400 for SSH/Remote verbs on a frame this backend is the provider of."""
+    if is_provider_frame(frame):
+        _bad_request(PROVIDER_FRAME_REASON)
 
 
 def _reject_admin_api_only_frame(frame: Frame, reason: str) -> None:
@@ -3636,6 +3812,7 @@ def _reject_admin_api_only_frame(frame: Frame, reason: str) -> None:
     password). The SSH path would only fail with "No SSH private keys
     available" deep in a task log; saying so up front is kinder — and the
     workspace hides these controls for such frames anyway."""
+    _reject_provider_frame(frame)
     if not _is_embedded_frame(frame) and not frame_has_shell_access(frame):
         _bad_request(reason)
 
@@ -4019,6 +4196,8 @@ async def api_frame_embedded_firmware_ota(
     frame = _project_frame(db, id)
     if not frame:
         _not_found()
+    if is_provider_frame(frame):
+        return await _provider_update_nudge(db, redis, frame)
     if (frame.mode or "rpios") != "embedded":
         _bad_request("OTA updates are only available for embedded frames")
 
@@ -4089,6 +4268,50 @@ async def _relay_device_admin(
     return payload if isinstance(payload, dict) else {"result": payload}
 
 
+def _provider_upgrade_status(frame: Frame) -> dict[str, Any]:
+    """The shape of the device's `/api/upgrade/status`, from what a provider
+    frame reported: its version, and whether the release this backend ships
+    with is newer."""
+    from app.utils.versions import version_tuple
+
+    current = provider_reported_version(frame)
+    latest = current_frameos_version()
+    have, want = version_tuple(current), version_tuple(latest)
+    return {
+        "status": "idle",
+        "current_version": current,
+        "latest_version": latest,
+        "update_available": bool(have and want and have < want),
+        "shell_access": False,
+    }
+
+
+async def _provider_update_nudge(db: Session, redis: Redis, frame: Frame) -> dict[str, Any]:
+    """"Update FrameOS" for a frame on its management socket: the
+    `notify_update_available` nudge. The frame fetches the latest signed
+    release itself, verifies it and installs it (Linux: frameos/upgrade.nim;
+    ESP32: the signed OTA manifest at `/api/frames/{id}/firmware/manifest`);
+    its `cloud:upgrade` / `ota:cloud` lines move the record."""
+    from app.tasks.utils import begin_deploy_progress
+    from app.utils.provider_commands import queue_provider_command
+
+    kind = "firmware" if provider_profile(frame) == "esp32" else "upgrade"
+    await begin_deploy_progress(db, redis, frame, kind, detail="the frame downloads the release itself")
+    outcome = await queue_provider_command(
+        db, redis, frame, "notify_update_available", wait_seconds=EMBEDDED_EVENT_WAIT_SECONDS
+    )
+    return {
+        "message": (
+            "Update requested; the frame installs the latest release itself"
+            if outcome["applied"]
+            else "Update queued; the frame checks for it when it next connects"
+        ),
+        "status": "requested" if outcome["applied"] else "queued",
+        "shell_access": False,
+        "device": outcome,
+    }
+
+
 @api_project.get("/frames/{id:int}/device/upgrade")
 async def api_frame_device_upgrade_status(
     id: int,
@@ -4104,6 +4327,11 @@ async def api_frame_device_upgrade_status(
     frame = _project_frame(db, id)
     if not frame:
         _not_found()
+    if is_provider_frame(frame):
+        # What the frame said over its socket, against the release this
+        # backend ships with; the frame checks for releases itself when
+        # nudged, so there is nothing to relay.
+        return _provider_upgrade_status(frame)
     payload = await _relay_device_admin(frame, redis, "/api/upgrade/status" + ("?check=1" if check else ""))
     payload["shell_access"] = frame_has_shell_access(frame)
     await _record_device_reported_frameos_version(db, redis, frame, payload)
@@ -4128,6 +4356,10 @@ async def api_frame_device_upgrade(
     except Exception:  # noqa: BLE001 - an empty body is "start"
         body = {}
     dry_run = bool(isinstance(body, dict) and body.get("dry_run"))
+    if is_provider_frame(frame):
+        if dry_run:
+            return _provider_upgrade_status(frame)
+        return await _provider_update_nudge(db, redis, frame)
     payload = await _relay_device_admin(frame, redis, "/api/upgrade", method="POST", body={"dry_run": dry_run})
     payload["shell_access"] = frame_has_shell_access(frame)
     await _record_device_reported_frameos_version(db, redis, frame, payload)
@@ -4411,6 +4643,21 @@ async def api_frame_set_next_scene(
         await refresh_virtual_frame_image(db, redis, frame, scene_id=data.sceneId)
         await mark_virtual_frame_deployed(db, redis, frame)
         return {"message": "Scene applied"}
+
+    if is_provider_frame(frame):
+        # One deploy whose set_scenes names the scene to show: the frame
+        # takes the saved scenes and switches in the same verb.
+        try:
+            from app.tasks import fast_deploy_frame
+
+            await _begin_deploy_progress_for(db, redis, frame, "fast", None)
+            await fast_deploy_frame(
+                id, redis, activate_scene={"sceneId": data.sceneId, "state": data.state or {}}
+            )
+        except Exception as e:
+            await _fail_deploy_progress_for(db, redis, frame, str(e))
+            raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+        return {"message": "Scene deploy queued for the frame's management socket"}
 
     if is_queued_embedded_frame(frame):
         # The scenes and settings the frame pulls are already the saved

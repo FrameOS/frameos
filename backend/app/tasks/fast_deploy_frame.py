@@ -124,6 +124,15 @@ async def fast_deploy_frame_task(
     # Buildroot card: no Remote, no SSH): the fast deploy IS that API — one
     # push of scenes and settings with a runtime reload. SSH would only fail.
     from app.models.frame import frame_has_shell_access
+    from app.utils.provider_frames import is_provider_frame
+
+    if is_provider_frame(frame):
+        from app.tasks.provider_deploy import deploy_over_provider_socket
+
+        await deploy_over_provider_socket(
+            db, redis, id, job_id=job_id, task_id=task_id, activate_scene=activate_scene, task_label="fast"
+        )
+        return
 
     if not frame_has_shell_access(frame):
         await deploy_over_admin_api(

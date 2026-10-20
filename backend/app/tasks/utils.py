@@ -93,7 +93,12 @@ def deploy_progress_kind_for_frame(frame: Any, mode: str) -> str:
     branches)."""
     from app.models.frame import frame_has_shell_access
     from app.tasks.embedded_firmware import embedded_platform_spec_for_frame
+    from app.utils.provider_frames import is_provider_frame
 
+    if is_provider_frame(frame):
+        # On its management socket: a deploy is the set_scenes verb's journey
+        # (full or fast alike — the firmware updates itself on a nudge).
+        return "cloud_scenes"
     if (getattr(frame, "mode", None) or "rpios") == "embedded":
         if embedded_platform_spec_for_frame(frame)["family"] == "virtual":
             return "virtual"

@@ -2,7 +2,7 @@ import type { FrameType } from '../../types'
 import versions from '../../../../versions.json'
 import { type FrameCompilationMode, normalizeFrameCompilationMode } from '../../utils/frameBuildOptions'
 import { sceneIsCompiledForFrame } from '../../utils/sceneExecution'
-import { isAdminApiOnlyFrame } from '../workspace/workspaceSurfaces'
+import { isAdminApiOnlyFrame, isProviderFrame } from '../workspace/workspaceSurfaces'
 
 export interface ChangeDetail {
   label: string
@@ -477,8 +477,11 @@ export function frameAdminLoginIsOnlyAccess(frame: Partial<FrameType> | null | u
   // One predicate for the whole SPA: the surface gating in
   // workspaceSurfaces.ts (the terminal, the Remote verbs, the settings
   // sections) and the deploy logic here must agree on which frames these
-  // are. Mirrors the backend's frame_has_shell_access(), inverted.
-  return isAdminApiOnlyFrame(frame)
+  // are. Mirrors the backend's frame_has_shell_access(), inverted — which
+  // a provider frame (on its management socket, no shell by design) is too:
+  // its deploy is the same scenes-and-settings push, and it updates FrameOS
+  // itself on a nudge.
+  return isAdminApiOnlyFrame(frame) || isProviderFrame(frame)
 }
 
 export function buildDeployPlanRequestBody(
@@ -683,7 +686,9 @@ export function buildDeployRecommendation(
     return {
       mode: 'fast',
       title: 'Deploy scenes & settings',
-      description: 'Scenes and settings go to the frame over its admin API; the frame updates FrameOS itself.',
+      description: isProviderFrame(frame)
+        ? 'Scenes, settings and schedule go to the frame over its management socket; the frame updates FrameOS itself.'
+        : 'Scenes and settings go to the frame over its admin API; the frame updates FrameOS itself.',
     }
   }
 

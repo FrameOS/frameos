@@ -141,6 +141,15 @@ async def deploy_frame_task(ctx: dict[str, Any], id: int, task_id: str | None = 
     # everything else is the same push the fast deploy makes. Every enqueue
     # path (the deploy button, next_action, set_next_scene) lands here.
     from app.models.frame import frame_has_shell_access
+    from app.utils.provider_frames import is_provider_frame
+
+    if is_provider_frame(frame):
+        # On its management socket: the deploy is the provider verbs, and
+        # FrameOS itself updates on a nudge, never over SSH.
+        from app.tasks.provider_deploy import deploy_over_provider_socket
+
+        await deploy_over_provider_socket(db, redis, id, job_id=job_id, task_id=task_id, task_label="full")
+        return
 
     if not frame_has_shell_access(frame):
         from app.tasks.fast_deploy_frame import deploy_over_admin_api

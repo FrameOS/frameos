@@ -95,6 +95,11 @@ def _embedded_last_boot_ip(frame: Frame) -> str | None:
 
 
 def _is_embedded_frame(frame: Frame) -> bool:
+    """An ESP32 this backend talks to over its LAN HTTP server. Not a
+    provider frame of any chip: that one is reached only over its management
+    socket (app/utils/provider_frames.py)."""
+    if getattr(frame, "provider_link", None) is not None:
+        return False
     return (frame.mode or "rpios") == "embedded"
 
 

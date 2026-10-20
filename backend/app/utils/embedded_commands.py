@@ -87,7 +87,10 @@ def embedded_frame_pulls_commands(frame: Frame) -> bool:
 
 def is_embedded_device_frame(frame: Frame) -> bool:
     """An ESP32-class frame with a device behind it: embedded, and not a
-    virtual frame (which renders in the backend and queues nothing)."""
+    virtual frame (which renders in the backend and queues nothing), and not
+    a provider frame (its queue is drained over its management socket)."""
+    if getattr(frame, "provider_link", None) is not None:
+        return False
     if (getattr(frame, "mode", None) or "rpios") != "embedded":
         return False
     from app.tasks.embedded_firmware import embedded_platform_spec_for_frame

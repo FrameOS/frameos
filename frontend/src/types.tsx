@@ -428,10 +428,23 @@ export interface FrameType {
   rpios?: FrameRpiOSConfig
   terminal_history?: string[]
   active_connections?: number
-  // Cloud frames only: whether the device's management WebSocket is live on
-  // the hub right now. Commands sent while false queue until it redials.
+  // Whether the device's management WebSocket is live right now: on the
+  // cloud's hub, or on a backend that is the frame's provider. Commands sent
+  // while false queue until it redials.
   connected?: boolean
+  /** Backend only: set when this backend is the frame's PROVIDER — the frame
+   * enrolled with a claim code and dials the backend's management socket, as
+   * it would FrameOS Cloud's (docs/cloud-frames.md). Everything reaches it as
+   * a contract verb; there is no SSH, Remote or admin login. */
+  provider?: FrameProviderInfo | null
   frame_sync_hint?: FrameSyncHint
+}
+
+export interface FrameProviderInfo {
+  status: 'active' | 'revoked' | string
+  scopes: string[]
+  local_origin?: string | null
+  enrolled_at?: string | null
 }
 
 export type FrameSyncSectionId = 'frame_json' | 'scenes_json'
@@ -512,7 +525,7 @@ export interface FrameMountpointsConfig {
   items?: FrameMountpointConfig[]
 }
 
-export type FrameMode = 'rpios' | 'buildroot' | 'embedded' | 'import' | 'adopt'
+export type FrameMode = 'rpios' | 'buildroot' | 'embedded' | 'import' | 'adopt' | 'claim'
 export type FrameInstallMethod = 'sd_card' | 'ssh' | 'script' | 'embedded'
 export interface NewFrameFormType {
   mode: FrameMode

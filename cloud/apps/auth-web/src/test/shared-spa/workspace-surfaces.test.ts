@@ -26,6 +26,7 @@ import {
   isAdminApiOnlyFrame,
   isEmbeddedHardwareFrame,
   isEsp32CloudFrame,
+  isProviderFrame,
   isVirtualFrame,
   photosLibraryIsAvailable,
   scenesLibraryPageIsAvailable,
@@ -690,6 +691,55 @@ describe("frames the backend reaches only over their admin API", () => {
     expect(frameToolPanelIsAllowed("backend", "terminal", ownCard)).toBe(true);
     expect(frameMenuActionIsAllowed("backend", "stop", ownCard)).toBe(true);
     expect(frameSettingsSectionIsAllowed("backend", "frame-settings-agent", ownCard)).toBe(true);
+  });
+});
+
+describe("frames the backend is the provider of", () => {
+  // A frame enrolled with a claim code that dials the backend's management
+  // socket, as it would dial FrameOS Cloud's (docs/cloud-frames.md): the
+  // backend reaches it only with contract verbs, so it gets the cloud's
+  // surfaces — the admin-API-only set plus the SD-card builder, the local
+  // deploy and every settings section no verb carries.
+  const providerFrame = { mode: "buildroot", provider: { status: "active" } };
+  const providerEsp32 = { mode: "embedded", embedded: { platform: "esp32-s3" }, provider: { status: "active" } };
+
+  it("is a provider frame because the backend says so, whatever its mode", () => {
+    expect(isProviderFrame(providerFrame)).toBe(true);
+    expect(isProviderFrame(providerEsp32)).toBe(true);
+    for (const frame of [undefined, null, {}, { mode: "buildroot", provider: null }]) {
+      expect(isProviderFrame(frame)).toBe(false);
+    }
+  });
+
+  it("hides every shell surface and keeps the verbs", () => {
+    expect(frameToolPanelIsAllowed("backend", "terminal", providerFrame)).toBe(false);
+    for (const action of ["deployRemote", "restartRemote", "stop", "buildSdCard", "localDeploy"] as const) {
+      expect(frameMenuActionIsAllowed("backend", action, providerFrame)).toBe(false);
+    }
+    for (const action of ["reboot", "restart", "render", "deploy", "rename", "delete"] as const) {
+      expect(frameMenuActionIsAllowed("backend", action, providerFrame)).toBe(true);
+    }
+    for (const panel of ["assets", "logs", "metrics", "schedule", "settings", "ping"] as const) {
+      expect(frameToolPanelIsAllowed("backend", panel, providerFrame)).toBe(true);
+    }
+  });
+
+  it("links only to settings a verb carries", () => {
+    for (const section of [
+      "frame-settings-ssh",
+      "frame-settings-agent",
+      "frame-settings-backend",
+      "frame-settings-network",
+      "frame-settings-mountpoints",
+      "frame-settings-assets",
+      "frame-settings-logs",
+      "frame-settings-reboot",
+    ]) {
+      expect(frameSettingsSectionIsAllowed("backend", section, providerFrame)).toBe(false);
+    }
+    for (const section of ["frame-settings-info", "frame-settings-device", "frame-settings-error-behavior", "frame-settings-gpio"]) {
+      expect(frameSettingsSectionIsAllowed("backend", section, providerFrame)).toBe(true);
+    }
   });
 });
 

@@ -284,7 +284,14 @@ async def _pull_scene_image_from_device(
     the frame had posted it. Only for a frame the backend reaches through its
     admin API alone — an adopted card, whose earlier renders never reached
     this backend; a frame the backend deploys to posts every snapshot itself.
-    Best effort: any failure means "no picture yet"."""
+    Best effort: any failure means "no picture yet".
+
+    A frame on its management socket keeps the same snapshots; it is asked
+    for the file with `asset_get` while it is connected."""
+    from app.utils.provider_frames import is_provider_frame
+
+    if is_provider_frame(frame):
+        return await _pull_scene_image_over_socket(db, redis, frame, scene_id)
     if frame_has_shell_access(frame) or (frame.mode or "rpios") == "embedded":
         return None
     from app.api.frame_sync import _frame_admin_request
@@ -310,6 +317,29 @@ async def _pull_scene_image_from_device(
             await redis.set(miss_key, "1", ex=SCENE_IMAGE_DEVICE_MISS_TTL_SECONDS)
         except Exception:  # noqa: BLE001
             pass
+        return None
+    try:
+        return await _store_scene_image(db, int(frame.project_id), int(frame.id), scene_id, body)
+    except HTTPException:
+        return None
+
+
+async def _pull_scene_image_over_socket(
+    db: Session, redis: Redis, frame: Frame, scene_id: str
+) -> SceneImage | None:
+    from app.utils.provider_commands import ProviderCommandError, provider_get_file
+    from app.utils.provider_frames import provider_link, scene_snapshot_asset_path
+
+    link = provider_link(frame)
+    miss_key = f"frame:{frame.id}:scene_image_miss:{scene_id}"
+    if link is None or not link.connected or await redis.get(miss_key):
+        return None
+    try:
+        body, _content_type = await provider_get_file(
+            db, redis, frame, "asset_get", {"path": scene_snapshot_asset_path(scene_id)}, timeout=20.0
+        )
+    except ProviderCommandError:
+        await redis.set(miss_key, "1", ex=SCENE_IMAGE_DEVICE_MISS_TTL_SECONDS)
         return None
     try:
         return await _store_scene_image(db, int(frame.project_id), int(frame.id), scene_id, body)

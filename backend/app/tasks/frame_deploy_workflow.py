@@ -545,7 +545,13 @@ class FrameDeployWorkflow:
         frame_dict.pop("last_successful_deploy_at", None)
         previous_frameos_version = (self.frame.last_successful_deploy or {}).get("frameos_version")
 
-        if (getattr(self.frame, "mode", None) or "rpios") != "embedded" and not frame_has_shell_access(self.frame):
+        from app.utils.provider_frames import is_provider_frame
+
+        if is_provider_frame(self.frame):
+            # On its management socket: the deploy is the provider verbs,
+            # nothing to probe (app/tasks/provider_deploy.py runs it).
+            plan = self._plan_provider(mode=mode, frame_dict=frame_dict, previous_frameos_version=previous_frameos_version)
+        elif (getattr(self.frame, "mode", None) or "rpios") != "embedded" and not frame_has_shell_access(self.frame):
             # No SSH, no Remote: probing the distro over SSH is the very step
             # that fails. The admin API is the whole deploy story here.
             if mode == "full":
@@ -671,6 +677,33 @@ class FrameDeployWorkflow:
             fast_deploy=fast_plan.fast_deploy,
             full_deploy=full_plan.full_deploy,
             notes=notes,
+        )
+
+    def _plan_provider(
+        self, *, mode: str, frame_dict: dict[str, Any], previous_frameos_version: str | None
+    ) -> FrameDeployPlan:
+        """The plan for a frame this backend is the provider of: one fast
+        section (set_settings, set_schedule, set_scenes over its management
+        socket), whatever mode was asked; FrameOS updates itself on a nudge."""
+        from app.utils.provider_frames import provider_reported_version
+
+        frame_dict["mode"] = getattr(self.frame, "mode", frame_dict.get("mode"))
+        reported = provider_reported_version(self.frame)
+        frame_dict["frameos_version"] = reported or previous_frameos_version or current_frameos_version()
+        return FrameDeployPlan(
+            mode="fast",
+            frame_id=int(self.frame.id),
+            frame_name=self.frame.name,
+            build_id=self.deployer.build_id,
+            frame_dict=frame_dict,
+            previous_frameos_version=previous_frameos_version if isinstance(previous_frameos_version, str) else None,
+            fast_deploy=FastDeployPlan(reload_supported=True, tls_settings_changed=False, action="provider_socket"),
+            full_deploy=None,
+            notes=[
+                "This frame dials this backend's management socket, as it would FrameOS Cloud's: a deploy sends "
+                "its scenes, settings and schedule as contract verbs, and a frame that is away takes them when it "
+                "next connects. FrameOS itself updates through the frame's own signed release upgrade.",
+            ],
         )
 
     def _plan_http_admin(

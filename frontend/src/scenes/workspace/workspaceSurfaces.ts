@@ -464,6 +464,8 @@ export interface FrameCapabilityInput {
   // `platform` is listed so a card the backend wrote (platform, no
   // `adopted`) types as this shape too, not only an adopted one.
   buildroot?: { adopted?: boolean | null; platform?: string | null } | null
+  // Set when the backend is the frame's provider (isProviderFrame).
+  provider?: { status?: string | null } | null
 }
 
 /** Whether any installed scene came from the public scene store. */
@@ -601,6 +603,53 @@ export function isAdminApiOnlyFrame(frame?: FrameCapabilityInput | null): boolea
 }
 
 /**
+ * A frame this backend is the PROVIDER of: it enrolled with a claim code and
+ * dials the backend's management WebSocket exactly as it would dial FrameOS
+ * Cloud's (docs/cloud-frames.md; backend/app/utils/provider_frames.py). The
+ * backend reaches it only with contract verbs — never SSH, the Remote or an
+ * admin login — so it gets the cloud's surfaces: everything that rides a
+ * verb stays, everything whose transport is a shell or a LAN request goes.
+ */
+export function isProviderFrame(frame?: FrameCapabilityInput | null): boolean {
+  return Boolean(frame?.provider)
+}
+
+/**
+ * What a provider frame hides on top of the admin-API-only set: the SD-card
+ * builder and the local deploy (a card for this frame is enrolled, not
+ * written by the backend), ping stays (it answers from the socket).
+ */
+const providerHiddenMenuActions: readonly FrameMenuAction[] = [
+  'buildSdCard',
+  'deployRemote',
+  'localDeploy',
+  'restartRemote',
+  'stop',
+]
+
+/**
+ * The settings a provider frame's verbs cannot carry, the way the cloud's
+ * frame panel omits them: how the backend would reach the frame (SSH, the
+ * Remote, the server address, the frame's HTTP API, admin login and proxy),
+ * and what only a deploy over SSH writes (network, mountpoints, log files,
+ * the assets path, the reboot cron). What stays is what `set_settings`,
+ * `set_schedule` and the asset verbs carry.
+ */
+const providerHiddenFrameSettingsSections: readonly string[] = [
+  'frame-settings-ssh',
+  'frame-settings-agent',
+  'frame-settings-backend',
+  'frame-http-api-section',
+  'frame-settings-admin',
+  'frame-http-proxy-section',
+  'frame-settings-network',
+  'frame-settings-mountpoints',
+  'frame-settings-assets',
+  'frame-settings-logs',
+  'frame-settings-reboot',
+]
+
+/**
  * What an admin-API-only frame HIDES, the cloud way: the surfaces whose
  * transport is a shell. Ping stays (ICMP and HTTP from the backend host),
  * and so do reboot and restart (the runtime's own control verbs), the SD
@@ -654,9 +703,14 @@ export function frameDisplayDevice(frame?: FrameCapabilityInput | null): string 
 
 const displayPowerMenuActions: readonly FrameMenuAction[] = ['displayOff', 'displayOn']
 
-/** The admin-API-only gating applies on the backend control plane alone. */
+/** The admin-API-only gating applies on the backend control plane alone,
+ * and a provider frame is shell-less by design, so it takes it too. */
 function hidesForAdminApiOnly(mode: WorkspaceMode, frame?: FrameCapabilityInput | null): boolean {
-  return mode === 'backend' && isAdminApiOnlyFrame(frame)
+  return mode === 'backend' && (isAdminApiOnlyFrame(frame) || isProviderFrame(frame))
+}
+
+function hidesForProvider(mode: WorkspaceMode, frame?: FrameCapabilityInput | null): boolean {
+  return mode === 'backend' && isProviderFrame(frame)
 }
 
 /**
@@ -800,6 +854,9 @@ export function frameMenuActionIsAllowed(
   if (hidesForAdminApiOnly(mode, frame) && adminApiOnlyHiddenMenuActions.includes(action)) {
     return false
   }
+  if (hidesForProvider(mode, frame) && providerHiddenMenuActions.includes(action)) {
+    return false
+  }
   // The one gate that hides rather than disables on the DEVICE rather than
   // the mode, and the one that answers false without a frame: a panel whose
   // driver cannot switch off has no off to explain, and a caller asking the
@@ -921,6 +978,9 @@ export function frameSettingsSectionIsAllowed(
     return false
   }
   if (hidesForAdminApiOnly(mode, frame) && adminApiOnlyHiddenFrameSettingsSections.includes(sectionId)) {
+    return false
+  }
+  if (hidesForProvider(mode, frame) && providerHiddenFrameSettingsSections.includes(sectionId)) {
     return false
   }
   return allowedFrameSettingsSections[mode].includes(sectionId)

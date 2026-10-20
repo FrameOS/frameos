@@ -9,6 +9,7 @@ import pytest
 from app.models.frame import Frame, new_frame
 from app.models.frame_command import FrameCommand
 from app.utils.frame_commands import (
+    ASSET_TTL_SECONDS,
     COMMAND_TTL_SECONDS,
     REDELIVER_AFTER_SECONDS,
     UPDATE_NOTIFY_TTL_SECONDS,
@@ -67,8 +68,14 @@ async def test_enqueue_sizes_the_ttl_per_type(db, redis):
     assert notify.expires_at == NOW + timedelta(seconds=UPDATE_NOTIFY_TTL_SECONDS)
     assert deploy.expires_at is None
     assert render.status == notify.status == deploy.status == "pending"
+    # A provider frame takes every contract verb; a file transfer or a query
+    # keeps only while someone waits for it.
+    asset = enqueue_frame_command(db, frame, "asset_get", {"path": "a.png"}, now=NOW)
+    assert asset.expires_at == NOW + timedelta(seconds=ASSET_TTL_SECONDS)
+    schedule = enqueue_frame_command(db, frame, "set_schedule", {"schedule": {"events": []}}, now=NOW)
+    assert schedule.expires_at is None
     with pytest.raises(ValueError):
-        enqueue_frame_command(db, frame, "asset_get", now=NOW)
+        enqueue_frame_command(db, frame, "shell", now=NOW)
 
 
 @pytest.mark.asyncio
