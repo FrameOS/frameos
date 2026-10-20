@@ -125,6 +125,25 @@
       ]
     },
     {
+      "name": "esp32_full: the early-boot updater failed; the frame still pulls its scenes on the old firmware",
+      "kind": "esp32_full",
+      "start": { "stage": "waiting" },
+      "steps": [
+        { "log": { "event": "bootup", "source": "esp32", "version": "2026.10.17" }, "expect": { "stage": "receiving" } },
+        { "log": { "event": "ota:backend", "source": "esp32", "status": "error", "detail": "download-failed:timeout@0/3106000 (3 tries: timeout@0, timeout@0, timeout@0)", "replayed": true }, "expect": { "stage": "receiving", "status": "error", "error": "download-failed:timeout@0/3106000 (3 tries: timeout@0, timeout@0, timeout@0)" } }
+      ]
+    },
+    {
+      "name": "esp32_full: a verdict that lands after the scenes settled still fails the deploy",
+      "kind": "esp32_full",
+      "start": { "stage": "waiting" },
+      "steps": [
+        { "log": { "event": "bootup", "source": "esp32" }, "expect": { "stage": "receiving" } },
+        { "signal": "commands:settled", "expect": { "stage": "rendering" } },
+        { "log": { "event": "ota:backend", "source": "esp32", "status": "error", "detail": "download-failed:closed@12420/3106000", "replayed": true }, "expect": { "stage": "rendering", "status": "error" } }
+      ]
+    },
+    {
       "name": "esp32_fast: the frame was asleep and pulled the rows on its wake",
       "kind": "esp32_fast",
       "steps": [
@@ -212,6 +231,25 @@
       "steps": [
         { "log": { "event": "ota:cloud", "status": "downloading", "detail": "2026.10.11" }, "expect": { "stage": "downloading" } },
         { "log": { "event": "ota:cloud", "status": "up-to-date" }, "expect": { "stage": "done", "status": "done" } }
+      ]
+    },
+    {
+      "name": "firmware: the early-boot updater failed; its verdict arrives after the boot it ran in",
+      "kind": "firmware",
+      "start": { "stage": "downloading" },
+      "steps": [
+        { "log": { "event": "bootup", "source": "esp32", "version": "2026.10.17" }, "expect": { "stage": "rendering" } },
+        { "log": { "event": "ota:backend", "source": "esp32", "status": "error", "detail": "download-failed:closed@12420/3106000", "replayed": true }, "expect": { "stage": "rendering", "status": "error", "error": "download-failed:closed@12420/3106000" } },
+        { "log": { "event": "render:done" }, "expect": { "stage": "rendering", "status": "error", "changed": false } }
+      ]
+    },
+    {
+      "name": "firmware: a dropped connection resumes; its retry line is progress, not an error",
+      "kind": "firmware",
+      "start": { "stage": "downloading" },
+      "steps": [
+        { "log": { "event": "ota:backend", "source": "esp32", "status": "progress", "detail": "12420/3106000", "retry": "closed@12420", "tries": 1 }, "expect": { "stage": "downloading", "status": "running", "progress": { "current": 12420, "total": 3106000 } } },
+        { "log": { "event": "ota:backend", "source": "esp32", "status": "verified", "detail": "rebooting" }, "expect": { "stage": "verified" } }
       ]
     },
     {

@@ -1,3 +1,6 @@
+import { promises as fs } from "fs";
+import os from "os";
+import path from "path";
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authenticateFrameDevice } from "../../../../../src/lib/frame-device-auth";
@@ -49,7 +52,8 @@ const frameRateLimitMock = vi.mocked(identityRateLimitResponse);
 const fetchMock = vi.fn<typeof fetch>();
 
 const frameId = "11111111-2222-3333-4444-555555555555";
-const firmwareBytes = new Uint8Array(32).fill(0x5a);
+// Every byte different, so a resumed tail is visibly the right slice.
+const firmwareBytes = Uint8Array.from({ length: 32 }, (_, i) => 0x40 + i);
 const minisigText =
   "untrusted comment: signature from FrameOS firmware key\n" +
   "RWQfakeSignatureBase64\n" +
@@ -97,8 +101,12 @@ const releasePayload = {
   tag_name: "v1.2.3",
 };
 
-function mockGitHub(release: unknown = releasePayload) {
-  fetchMock.mockImplementation((input) => {
+// `honorRange: false` is a CDN that ignores Range and sends the whole file.
+function mockGitHub(
+  release: unknown = releasePayload,
+  { honorRange = true }: { honorRange?: boolean } = {},
+) {
+  fetchMock.mockImplementation((input, init) => {
     const url = String(input);
     if (url.startsWith("https://api.github.com/")) {
       return Promise.resolve(Response.json(release));
@@ -109,6 +117,21 @@ function mockGitHub(release: unknown = releasePayload) {
       }
       // Distinct bytes per artifact, so "served the wrong one" is visible.
       const body = url.endsWith("-app.bin") ? firmwareBytes : mergedBytes;
+      const range = /^bytes=(\d+)-$/.exec(
+        new Headers(init?.headers).get("range") ?? "",
+      );
+      if (range && honorRange) {
+        const start = Number(range[1]);
+        return Promise.resolve(
+          new Response(body.slice(start), {
+            status: 206,
+            headers: {
+              "content-length": String(body.length - start),
+              "content-range": `bytes ${start}-${body.length - 1}/${body.length}`,
+            },
+          }),
+        );
+      }
       return Promise.resolve(
         new Response(body.slice(), {
           headers: { "content-length": String(body.length) },
@@ -119,9 +142,9 @@ function mockGitHub(release: unknown = releasePayload) {
   });
 }
 
-function request(path: string) {
-  return new NextRequest(`https://cloud.example${path}`, {
-    headers: { authorization: "Bearer fc_link_test" },
+function request(urlPath: string, headers: Record<string, string> = {}) {
+  return new NextRequest(`https://cloud.example${urlPath}`, {
+    headers: { authorization: "Bearer fc_link_test", ...headers },
   });
 }
 
@@ -351,11 +374,94 @@ describe("GET /api/frames/[frameId]/firmware/manifest", () => {
 });
 
 describe("GET /api/frames/[frameId]/firmware/download", () => {
-  const download = (platform = "esp32-s3-generic", id = frameId) =>
+  const download = (
+    platform = "esp32-s3-generic",
+    id = frameId,
+    headers: Record<string, string> = {},
+  ) =>
     getDownload(
-      request(`/api/frames/${id}/firmware/download?platform=${platform}`),
+      request(`/api/frames/${id}/firmware/download?platform=${platform}`, headers),
       routeParams(id),
     );
+
+  const binaryFetchRange = () => {
+    const call = fetchMock.mock.calls.find(([input]) =>
+      String(input).endsWith("-app.bin"),
+    );
+    return new Headers(call?.[1]?.headers).get("range");
+  };
+
+  it("resumes a dropped download: forwards bytes=N- and relays the 206", async () => {
+    mockGitHub();
+
+    const response = await download("esp32-s3-generic", frameId, {
+      range: "bytes=10-",
+    });
+
+    expect(response.status).toBe(206);
+    expect(binaryFetchRange()).toBe("bytes=10-");
+    expect(response.headers.get("content-range")).toBe("bytes 10-31/32");
+    expect(response.headers.get("content-length")).toBe("22");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+      firmwareBytes.slice(10),
+    );
+  });
+
+  it("serves the whole image for a range the device never sends", async () => {
+    mockGitHub();
+
+    const response = await download("esp32-s3-generic", frameId, {
+      range: "bytes=0-9",
+    });
+
+    expect(response.status).toBe(200);
+    expect(binaryFetchRange()).toBeNull();
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(firmwareBytes);
+  });
+
+  it("relays a 200 when GitHub answers a resume with the whole file", async () => {
+    mockGitHub(releasePayload, { honorRange: false });
+
+    const response = await download("esp32-s3-generic", frameId, {
+      range: "bytes=10-",
+    });
+
+    // The device reads past the bytes it already has (fos_ota_download.c).
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-range")).toBeNull();
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(firmwareBytes);
+  });
+
+  it("resumes a .dev-firmware image too, and 416s past its end", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "frameos-dev-firmware-"));
+    const filePath = path.join(dir, "esp32-s3-generic.bin");
+    await fs.writeFile(filePath, firmwareBytes);
+    devFirmwareMock.mockResolvedValue({
+      version: "9.9.9-dev",
+      size: firmwareBytes.length,
+      minisig: minisigText,
+      filePath,
+    });
+    try {
+      const resumed = await download("esp32-s3-generic", frameId, {
+        range: "bytes=30-",
+      });
+      expect(resumed.status).toBe(206);
+      expect(resumed.headers.get("content-range")).toBe("bytes 30-31/32");
+      expect(new Uint8Array(await resumed.arrayBuffer())).toEqual(
+        firmwareBytes.slice(30),
+      );
+
+      const past = await download("esp32-s3-generic", frameId, {
+        range: "bytes=32-",
+      });
+      expect(past.status).toBe(416);
+      expect(past.headers.get("content-range")).toBe("bytes */32");
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
 
   it("streams the firmware through the host-pinned pipe with its name and release", async () => {
     mockGitHub();

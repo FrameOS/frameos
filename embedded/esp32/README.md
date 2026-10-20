@@ -77,7 +77,7 @@ build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcac
 main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
                           header carries its command line). The netguard, local network access code
                           (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), SD probe, board,
-                          power, wake, battery-filter, version and scene-event (contract table +
+                          power, wake, battery-filter, version, OTA download and scene-event (contract table +
                           fos_events.c dispatch) tests run from the backend's
                           pytest suite (backend/app/tasks/tests/test_esp32_*.py, which also
                           checks that every frameos_nim.h function has a frameos_nim_stub.c
@@ -687,6 +687,37 @@ names its failure (`download-failed:<err>@<bytes>/<expected>`,
 `image-rejected:<err>`, `signature-rejected`), and after 3 consecutive
 failures of one offered version stops re-downloading it (`gave-up`, kept in
 RTC memory: a newer release or a power cycle resets it).
+
+**Resumed downloads (2026-10-21).** Frame 70 (E1004) lost a backend OTA
+12 KB into a 3.1 MB image, and the one line that survived the restart said
+`download-failed:UNKNOWN ERROR@12420/3106000`: `CONFIG_ESP_ERR_TO_NAME_LOOKUP`
+is off, so a timeout, a closed socket and a flash write error all printed
+alike, and only the last of three attempts was kept. Three changes, both
+planes:
+
+- The slot is erased as the bytes arrive (`OTA_WITH_SEQUENTIAL_WRITES`, as
+  `esp_https_ota` does by default). Passing the size to `esp_ota_begin` erased
+  the whole image before the first read, seconds of flash work with the
+  socket unread right after its headers.
+- A connection that drops is resumed from the byte it stopped at
+  (`Range: bytes=<written>-`, both planes answer 206; a 200 is read past),
+  with the hash and the slot carried over. `main/fos_ota_download.c` keeps
+  the budget (three connections in a row that add nothing, eight in all) and
+  is host tested (`tests/test_fos_ota_download.c`). A resume logs a
+  `progress` line with `retry` and `tries` fields, not an `error`, so the
+  deploy bar keeps its place.
+- Failures name themselves: `timeout`, `closed`, `read e<errno>`,
+  `connect 0x<err>`, `http <status>`, `range <length>`, `short`,
+  `write 0x<err>`, `wifi`, each at the byte count it stopped at, and the
+  verdict lists the run's tries:
+  `download-failed:closed@12420/3106000 (3 tries: timeout@0, closed@12420, closed@12420)`.
+  `image-rejected`, `image-version-mismatch` and `set-boot-failed` carry the
+  code in hex for the same reason.
+
+The verdict the first pass replays after a restart (`replayed: true`) is now
+only the early-boot updater's and `verified`; a line that left while the
+uploads were live is not sent again on the next wake, where it would fail a
+deploy started since.
 
 **The follow-ups the same log asked for (2026.8.42).**
 

@@ -275,13 +275,15 @@ export const deployProgressContract: DeployProgressContract = {
           "stage": "receiving",
           "on": {
             "commands:settled": "rendering",
-            "command:failed:set_scenes": "error"
+            "command:failed:set_scenes": "error",
+            "ota:error": "error"
           }
         },
         {
           "stage": "rendering",
           "on": {
-            "render:done": "done"
+            "render:done": "done",
+            "ota:error": "error"
           }
         }
       ]
@@ -464,7 +466,8 @@ export const deployProgressContract: DeployProgressContract = {
         {
           "stage": "rendering",
           "on": {
-            "render:done": "done"
+            "render:done": "done",
+            "ota:error": "error"
           }
         }
       ]
