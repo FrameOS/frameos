@@ -54,10 +54,13 @@ suite "render/svg app":
     check context.image.width == 4
     check context.image.height == 2
 
-  test "paints onto the canvas it is given: the picture a standalone raster drew, over what was there":
+  test "paints onto the canvas it is given, over what was there":
     # A gradient, a half-transparent shape and an outline over a canvas that
     # already has content. The app used to rasterize into a second image the
     # size of the canvas and draw that; it now paints the canvas directly.
+    # The two composite in a different order, so anti-aliased edges round
+    # differently (and differently again under x86 SIMD): the picture is
+    # checked where only the content decides it.
     const svg = """<svg viewBox="0 0 48 32" width="48" height="32">
       <defs><linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="32">
         <stop offset="0" stop-color="#efe7d7" stop-opacity="0.6"/><stop offset="1" stop-color="#20305f"/>
@@ -81,14 +84,16 @@ suite "render/svg app":
       )
       let context = ExecutionContext(image: under.copy(), hasImage: true)
       app.run(context)
-      var worst = 0
-      for y in 0 ..< expected.height:
-        for x in 0 ..< expected.width:
-          let a = expected[x, y]
-          let b = context.image[x, y]
-          worst = max(worst, max(max(abs(a.r.int - b.r.int), abs(a.g.int - b.g.int)),
-            max(abs(a.b.int - b.b.int), abs(a.a.int - b.a.int))))
-      check worst <= 1
+      # Outside every shape the canvas is untouched: composited, not replaced.
+      check context.image[1, 1] == under[1, 1]
+      check context.image[46, 31] == under[46, 31]
+      # Inside them, well away from any edge: the half-transparent gradient
+      # over the canvas, the circle over both, the gradient's opaque end.
+      for (x, y) in [(12, 6), (24, 12), (8, 20), (38, 26)]:
+        let a = expected[x, y]
+        let b = context.image[x, y]
+        check max(max(abs(a.r.int - b.r.int), abs(a.g.int - b.g.int)), abs(a.b.int - b.b.int)) <= 3
+        check b.a == 255
 
   test "markup pixie cannot parse is logged with the parser's reason":
     var logged: seq[string] = @[]
