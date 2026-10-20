@@ -30,6 +30,7 @@ import {
 import { isEsp32CloudFrame } from '../scenes/workspace/workspaceSurfaces'
 import type { FrameId } from './frameId'
 import { withScenesAppPermissions } from './sceneAccess'
+import { publicSceneId } from './systemScenes'
 
 // FrameOS Cloud speaks a much narrower dialect than the FrameOS backend: an
 // enqueued command from a short verb list, or a declarative settings push.
@@ -216,12 +217,10 @@ export async function pushCloudFrameSchedule(frameId: FrameId, schedule: FrameSc
 export const cloudSceneUploadLimit = 20
 const cloudSceneUploadPayloadLimitMb = 3
 
-const uploadedScenePrefix = 'uploaded/'
-
 /**
  * Which scene a deploy push should activate: the frame's currently active
  * scene, so deploying updated content never yanks the display to another
- * scene. The runtime reports ad-hoc scenes as "uploaded/<id>" — strip that.
+ * scene (an older runtime's legacy id included: publicSceneId).
  * Activating an id that is not in the pushed set would strand the frame, so
  * fall back to "let the runtime pick" (payload sceneId or first) instead.
  */
@@ -232,9 +231,7 @@ export function cloudDeployActiveSceneId(
   if (!activeSceneId) {
     return undefined
   }
-  const sceneId = activeSceneId.startsWith(uploadedScenePrefix)
-    ? activeSceneId.slice(uploadedScenePrefix.length)
-    : activeSceneId
+  const sceneId = publicSceneId(activeSceneId)
   return sceneId && scenes.some((scene) => scene.id === sceneId) ? sceneId : undefined
 }
 

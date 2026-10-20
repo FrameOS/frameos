@@ -774,33 +774,13 @@ proc runSceneEvent(self: RunnerThread, scene: FrameScene, event: string, payload
 proc selectScene(self: RunnerThread, payload: JsonNode): bool =
   ## `setCurrentScene`. True when the frame has something new to draw: it
   ## switched, or `state` was applied to the scene already showing.
-  var sceneId = SceneId(payload{"sceneId"}.getStr())
-  if not sceneId.string.startsWith("uploaded/") and cloudUploadedScenesResident():
-    # A frame that joined a provider with scenes of its own has them
-    # imported and pushed back (`scenes_get`, docs/cloud-frames.md),
-    # so the same public id now names two scenes here: the owner's
-    # copy on disk and the provider's "uploaded/<id>". The provider's
-    # copy is the one being edited and deployed, so while its set is
-    # resident it shadows the disk copy for a bare id — the ESP32
-    # profile stores scenes by public id and simply replaces them,
-    # and this keeps the two profiles answering alike. The disk copy
-    # is never touched: replace the uploaded set locally, or leave
-    # the provider, and the bare id is the disk scene again.
-    let providerSceneId = SceneId("uploaded/" & sceneId.string)
-    if hasExportedScene(providerSceneId):
-      sceneId = providerSceneId
-      payload["sceneId"] = %sceneId.string
-  var exportedScene = findExportedScene(sceneId)
-  if exportedScene.isNone and not sceneId.string.startsWith("uploaded/"):
-    # Cloud pushes register every scene as "uploaded/<id>", but the
-    # provider's set_current_scene (and workspace-authored schedules)
-    # carry the public id — resolve it before declaring it missing,
-    # like the esp32 profile's fos_scenes_select does.
-    let uploadedSceneId = SceneId("uploaded/" & sceneId.string)
-    exportedScene = findExportedScene(uploadedSceneId)
-    if exportedScene.isSome:
-      sceneId = uploadedSceneId
-      payload["sceneId"] = %sceneId.string
+  # An uploaded scene and a deployed one with the same id are one scene here:
+  # the uploaded copy, while its set is resident (scenes.nim). A client
+  # written for a runtime before 2026.10.18 may still name it "uploaded/<id>".
+  let sceneId = withoutLegacyUploadedPrefix(SceneId(payload{"sceneId"}.getStr()))
+  if sceneId.string != payload{"sceneId"}.getStr():
+    payload["sceneId"] = %sceneId.string
+  let exportedScene = findExportedScene(sceneId)
   if exportedScene.isNone:
     self.logSignal(%*{"event": "dispatchEvent:error", "error": "Scene not found", "sceneId": sceneId.string,
         "contextEvent": "setCurrentScene", "payload": payload})
@@ -847,6 +827,7 @@ proc runtimeCommand(self: RunnerThread, command: RuntimeCommand, payload: JsonNo
     except Exception as e:
       self.logger.log(%*{"event": "reload:config:error", "error": e.msg, "stacktrace": e.getStackTrace()})
     reloadInterpretedScenes(self.logger)
+    applyDeployToUploads()
     cleanupSceneTableRuntime(self.scenes)
     self.scenes = initTable[SceneId, FrameScene]()
     self.currentSceneId = getFirstSceneId()

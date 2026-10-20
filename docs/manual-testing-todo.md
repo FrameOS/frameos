@@ -153,5 +153,5 @@ redirect-only listener on `10.42.0.1:80`) and the made-up hotspot credentials
 - [ ] **Import from a frame that ran standalone first** (`scenes_get` + the
   importer, `docs/cloud-frames.md` "Scenes the frame already had"): the
   scenes land, the one on screen stays there, and an album scene keeps its
-  place after the push (`uploadScenes:stateCarried` in the log). So far
-  covered by Nim, hub and auth-web tests against a fake device only.
+  place after the push. So far covered by Nim, hub and auth-web tests
+  against a fake device only.

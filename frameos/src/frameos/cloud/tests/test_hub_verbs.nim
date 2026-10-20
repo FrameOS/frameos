@@ -553,7 +553,7 @@ suite "cloud hub verb dispatcher":
     check reply.extra.len == 1
     check reply.extra[0]{"type"}.getStr("") == "scene_ack"
     check reply.extra[0]{"checksum"}.getStr("") == "sum-1"
-    check reply.extra[0]{"active_scene"}.getStr("") == "uploaded/scene1"
+    check reply.extra[0]{"active_scene"}.getStr("") == "scene1"
 
   test "set_scenes redelivering the applied checksum is acked without a re-upload":
     let recorded = Recorded()
@@ -682,17 +682,17 @@ suite "cloud hub verb dispatcher":
     let recorded = Recorded()
     let ctx = makeContext(recorded)
     check handleCloudVerb(ctx, %*{"type": "render"}).ack{"ok"}.getBool(false)
-    check handleCloudVerb(ctx, %*{"type": "set_current_scene", "scene_id": "uploaded/x"})
+    check handleCloudVerb(ctx, %*{"type": "set_current_scene", "scene_id": "x"})
       .ack{"ok"}.getBool(false)
     check handleCloudVerb(ctx, %*{"type": "set_current_scene"})
       .ack{"error"}.getStr("") == "invalid_scene_id"
     check recorded.events.mapIt(it[0]) == @["render", "setCurrentScene"]
-    check recorded.events[1][1]{"sceneId"}.getStr("") == "uploaded/x"
+    check recorded.events[1][1]{"sceneId"}.getStr("") == "x"
 
   test "set_current_scene forwards the optional state object":
     let recorded = Recorded()
     let reply = handleCloudVerb(makeContext(recorded), %*{
-      "type": "set_current_scene", "scene_id": "uploaded/x",
+      "type": "set_current_scene", "scene_id": "x",
       "state": {"message": "hi", "count": 3},
     })
     check reply.ack{"ok"}.getBool(false) == true
@@ -720,7 +720,7 @@ suite "cloud hub verb dispatcher":
     check recorded.events[0][1]{"sceneId"}.getStr("") == "scene2"
     check recorded.events[0][1]{"state"}{"greeting"}.getStr("") == "hey"
     # scene_ack predicts the activation updateUploadedScenesFromPayload makes.
-    check reply.extra[0]{"active_scene"}.getStr("") == "uploaded/scene2"
+    check reply.extra[0]{"active_scene"}.getStr("") == "scene2"
     # A scene_id not in the push falls back to the first scene.
     let recorded2 = Recorded()
     let reply2 = handleCloudVerb(makeContext(recorded2), %*{
@@ -728,7 +728,7 @@ suite "cloud hub verb dispatcher":
       "scene_id": "not-there",
       "scenes": [{"id": "scene1", "name": "One", "nodes": [], "edges": []}],
     })
-    check reply2.extra[0]{"active_scene"}.getStr("") == "uploaded/scene1"
+    check reply2.extra[0]{"active_scene"}.getStr("") == "scene1"
 
   test "assets_list replies with the listing":
     let recorded = Recorded()
@@ -821,7 +821,7 @@ suite "cloud hub verb dispatcher":
     let recorded = Recorded()
     let ctx = makeContext(recorded)
     ctx.getStateFn = proc(): JsonNode {.gcsafe.} =
-      %*{"frameos_version": "test", "states": {}, "active_scene": "uploaded/sceneB"}
+      %*{"frameos_version": "test", "states": {}, "active_scene": "sceneB"}
     let reply = handleCloudVerb(ctx, %*{"id": "s1", "type": "scenes_get"})
     check reply.ack{"ok"}.getBool(false) == true
     check reply.extra.len == 1
@@ -833,8 +833,7 @@ suite "cloud hub verb dispatcher":
     check document{"scenes"}.len == 2
     check document{"scenes"}[0]{"id"}.getStr("") == "sceneA"
     check document{"skipped_compiled"}.getInt(-1) == 1
-    # The provider knows scenes by their public id, never by the runtime's
-    # "uploaded/" registration.
+    # The scene on screen, by the id the provider pushed it with.
     check document{"active_scene"}.getStr("") == "sceneB"
     check auditedVerbs(recorded) == @["scenes_get"]
 

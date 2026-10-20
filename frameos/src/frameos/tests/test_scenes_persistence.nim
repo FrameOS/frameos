@@ -75,7 +75,7 @@ suite "scene persistence helpers":
     check exported.persistedStateKeys == @["diskField", "refreshInterval"]
 
   test "an implicit refresh interval persists only once it leaves the scene's default":
-    let sceneId = "uploaded/persist-refresh".SceneId
+    let sceneId = "test/persist-refresh".SceneId
     let path = persistedPath(sceneId)
     let uploadedBackupTable = uploadedScenes
     try:
@@ -110,7 +110,7 @@ suite "scene persistence helpers":
     # render while still at their defaults, so "set 10 s in the editor, Save +
     # Deploy" changed nothing on a frame that had rendered the scene once:
     # init seeds from the file before the field defaults.
-    let sceneId = "uploaded/persist-defaults".SceneId
+    let sceneId = "test/persist-defaults".SceneId
     let path = persistedPath(sceneId)
     let uploadedBackupTable = uploadedScenes
     try:
@@ -155,7 +155,7 @@ suite "scene persistence helpers":
       removePersistedState(sceneId)
 
   test "updateLastPersistedState removes stale keys when fields stop persisting":
-    let sceneId = "uploaded/persist-prune".SceneId
+    let sceneId = "test/persist-prune".SceneId
     let path = persistedPath(sceneId)
     let uploadedBackupTable = uploadedScenes
     try:
@@ -202,13 +202,25 @@ suite "scene persistence helpers":
     writeFile(sceneFile, $(%*{"sceneId": "system/index"}))
     check loadLastScene().isSome()
 
-  test "getFirstSceneId falls back when persisted uploaded scene is missing":
-    let missingUploaded = "uploaded/does-not-exist".SceneId
-    writeFile(sceneFile, $(%*{"sceneId": missingUploaded.string}))
+  test "getFirstSceneId falls back when the last scene is gone":
+    let missing = "does-not-exist".SceneId
+    writeFile(sceneFile, $(%*{"sceneId": missing.string}))
 
     let first = getFirstSceneId()
-    check first != missingUploaded
+    check first != missing
     check first.string.len > 0
+
+  test "the frame starts where it left off, not on the registry's default":
+    # A release binary's registry names its placeholder "default" as the
+    # default scene; until 2026.10.18 that came before the last scene shown,
+    # so every reboot landed on the placeholder.
+    discard updateUploadedScenesFromPayload(%*{"scenes": [{
+      "id": "boot-last", "name": "Boot last", "nodes": [], "edges": []}]}, persistPayload = false)
+    writeFile(sceneFile, $(%*{"sceneId": "boot-last"}))
+    check getFirstSceneId() == "boot-last".SceneId
+    # What a runtime before 2026.10.18 wrote names the same scene.
+    writeFile(sceneFile, $(%*{"sceneId": "uploaded/boot-last"}))
+    check getFirstSceneId() == "boot-last".SceneId
 
   test "uploaded payloads record their runtime origin":
     # hub_client stamps source=cloud on the set_scenes verb; a local admin
@@ -270,65 +282,80 @@ suite "scene persistence helpers":
       %*{"scenes": scenes}, persistPayload = false)
     check localMain.isSome
 
-  test "a provider's first push of a scene the frame already ran carries its state":
-    # The frame ran "album" on its own; the owner imported it into the cloud,
-    # which pushes it back as uploaded/album (`scenes_get`, cloud-frames.md).
-    # The provider's copy starts where the frame's copy was, not at defaults.
-    let diskId = "carry-album".SceneId
-    let uploadedId = "uploaded/carry-album".SceneId
-    for sceneId in [diskId, uploadedId]:
-      if fileExists(persistedPath(sceneId)):
-        removeFile(persistedPath(sceneId))
-    writeFile(persistedPath(diskId), $(%*{"index": 7, "albumId": "abc"}))
+  test "an uploaded scene keeps the deployed scene's state, under the one id":
+    let sceneId = "shared-album".SceneId
+    writeFile(persistedPath(sceneId), $(%*{"index": 7}))
+    let deployedBackup = interpretedScenes
     defer:
-      removePersistedState(uploadedId)
-      if fileExists(persistedPath(diskId)):
-        removeFile(persistedPath(diskId))
-    let scenes = %*[{
-      "id": "carry-album", "name": "Album",
-      "fields": [{"name": "index", "type": "integer", "persist": "disk"}],
-      "nodes": [], "edges": [],
-    }]
-    # Forget any earlier uploaded set, so carry-album is new to this one.
+      interpretedScenes = deployedBackup
+      refreshExportedScenes()
+      removePersistedState(sceneId)
+    interpretedScenes[sceneId] = ExportedInterpretedScene(name: "Deployed album")
+    refreshExportedScenes()
+
+    let (main, _) = updateUploadedScenesFromPayload(%*{"scenes": [{
+      "id": "shared-album", "name": "Uploaded album", "nodes": [], "edges": []}],
+      "source": "cloud"}, persistPayload = false)
+    check main == some(sceneId)
+    check getSceneDisplayName(sceneId).get() == "Uploaded album"
+    check loadPersistedState(sceneId){"index"}.getInt() == 7
+
+    # Replaced by another set, the deployed scene is back, with its state.
     discard updateUploadedScenesFromPayload(%*{"scenes": [{
-      "id": "carry-other", "name": "Other", "nodes": [], "edges": []}]}, persistPayload = false)
+      "id": "other", "name": "Other", "nodes": [], "edges": []}]}, persistPayload = false)
+    check getSceneDisplayName(sceneId).get() == "Deployed album"
+    check fileExists(persistedPath(sceneId))
 
-    discard updateUploadedScenesFromPayload(
-      %*{"scenes": scenes, "source": "cloud"}, persistPayload = true)
-    let carried = loadPersistedState(uploadedId)
-    check carried{"index"}.getInt() == 7
-    check carried{"albumId"}.getStr() == "abc"
-    # The frame's own copy keeps its file.
-    check parseJson(readFile(persistedPath(diskId))){"index"}.getInt() == 7
+    # A scene the frame no longer holds at all loses its state.
+    writeFile(persistedPath("other".SceneId), $(%*{"index": 1}))
+    discard updateUploadedScenesFromPayload(%*{"scenes": [{
+      "id": "third", "name": "Third", "nodes": [], "edges": []}]}, persistPayload = false)
+    check not fileExists(persistedPath("other".SceneId))
 
-    # A later push of the same set never copies again: the provider's copy
-    # has its own state now, defaults included.
-    removePersistedState(uploadedId)
-    discard updateUploadedScenesFromPayload(
-      %*{"scenes": scenes, "source": "cloud"}, persistPayload = true)
-    check not fileExists(persistedPath(uploadedId))
-
-  test "local uploads and boot replays do not carry a disk scene's state":
-    let diskId = "carry-local".SceneId
-    let uploadedId = "uploaded/carry-local".SceneId
-    for sceneId in [diskId, uploadedId]:
-      if fileExists(persistedPath(sceneId)):
-        removeFile(persistedPath(sceneId))
-    writeFile(persistedPath(diskId), $(%*{"index": 3}))
+  test "a deploy after an upload wins the ids they share":
+    let deployedBackup = interpretedScenes
     defer:
-      removePersistedState(uploadedId)
-      if fileExists(persistedPath(diskId)):
-        removeFile(persistedPath(diskId))
-    let scenes = %*[{"id": "carry-local", "name": "Local", "nodes": [], "edges": []}]
-    discard updateUploadedScenesFromPayload(%*{"scenes": [{
-      "id": "carry-other", "name": "Other", "nodes": [], "edges": []}]}, persistPayload = false)
+      interpretedScenes = deployedBackup
+      refreshExportedScenes()
+      setDeployedScenesFingerprintForTest("")
+    interpretedScenes["shared".SceneId] = ExportedInterpretedScene(name: "Deployed")
+    refreshExportedScenes()
+    setDeployedScenesFingerprintForTest("before")
+    discard updateUploadedScenesFromPayload(%*{"scenes": [
+      {"id": "shared", "name": "Preview", "nodes": [], "edges": []},
+      {"id": "extra", "name": "Extra", "nodes": [], "edges": []}]}, persistPayload = true)
+    check parseJson(readFile(uploadedFile)){"deployedScenes"}.getStr() == "before"
+    check getSceneDisplayName("shared".SceneId).get() == "Preview"
 
-    # A local admin upload (no source) and a reboot's replay of a cloud set
-    # (persistPayload = false) are not a provider installing the scene.
-    discard updateUploadedScenesFromPayload(%*{"scenes": scenes}, persistPayload = true)
-    check not fileExists(persistedPath(uploadedId))
-    discard updateUploadedScenesFromPayload(%*{"scenes": [{
-      "id": "carry-other", "name": "Other", "nodes": [], "edges": []}]}, persistPayload = false)
-    discard updateUploadedScenesFromPayload(
-      %*{"scenes": scenes, "source": "cloud"}, persistPayload = false)
-    check not fileExists(persistedPath(uploadedId))
+    # Read again with the same deployed scenes (a reload, an upgrade's copy):
+    # the upload stands.
+    applyDeployToUploads()
+    check getSceneDisplayName("shared".SceneId).get() == "Preview"
+
+    # A deploy changed them: the deployed copy shows; the rest of the upload
+    # stays, and the file says which deploy it now sits on.
+    setDeployedScenesFingerprintForTest("after")
+    applyDeployToUploads()
+    check getSceneDisplayName("shared".SceneId).get() == "Deployed"
+    check getSceneDisplayName("extra".SceneId).get() == "Extra"
+    let persisted = parseJson(readFile(uploadedFile))
+    check persisted{"deployedScenes"}.getStr() == "after"
+    check persisted["scenes"].len == 1
+
+    # One that replaces everything uploaded clears the upload.
+    interpretedScenes["extra".SceneId] = ExportedInterpretedScene(name: "Deployed extra")
+    refreshExportedScenes()
+    setDeployedScenesFingerprintForTest("later")
+    applyDeployToUploads()
+    check getSceneDisplayName("extra".SceneId).get() == "Deployed extra"
+    check not fileExists(uploadedFile)
+    check not cloudUploadedScenesResident()
+
+  test "an upload an older runtime saved is kept, and gets its deploy noted":
+    setDeployedScenesFingerprintForTest("current")
+    defer: setDeployedScenesFingerprintForTest("")
+    writeFile(uploadedFile, $(%*{"scenes": [
+      {"id": "old-upload", "name": "Old upload", "nodes": [], "edges": []}]}))
+    applyDeployToUploads()
+    check hasExportedScene("old-upload".SceneId)
+    check parseJson(readFile(uploadedFile)){"deployedScenes"}.getStr() == "current"

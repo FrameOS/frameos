@@ -2,6 +2,7 @@ import { MakeLogicType, actions, connect, kea, listeners, path, reducers, select
 import type { LogType, FrameType, FrameId } from '../types'
 import { socketLogic } from '../scenes/socketLogic'
 import { frameDeployProgress } from '../decorators/frame'
+import { sceneIdsRefer } from '../utils/systemScenes'
 
 export type LongRunningTaskKind =
   | 'deploy'
@@ -98,7 +99,6 @@ const SOCKET_NEW_LOG = 'new log (src.scenes.socketLogic)'
 const SOCKET_NEW_SCENE_IMAGE = 'new scene image (src.scenes.socketLogic)'
 const SOCKET_FRAME_RENDERED = 'frame rendered (src.scenes.socketLogic)'
 const SOCKET_UPDATE_FRAME = 'update frame (src.scenes.socketLogic)'
-const UPLOADED_SCENE_PREFIX = 'uploaded/'
 
 let nextTaskCounter = 0
 
@@ -127,17 +127,8 @@ function latestRunningTaskIndex(tasks: LongRunningTask[], payload: FinishTaskPay
   return -1
 }
 
-function normalizeTaskSceneId(sceneId?: string | null): string | null {
-  if (!sceneId) {
-    return null
-  }
-  return sceneId.startsWith(UPLOADED_SCENE_PREFIX) ? sceneId.slice(UPLOADED_SCENE_PREFIX.length) : sceneId
-}
-
 function sceneIdsMatch(first?: string | null, second?: string | null): boolean {
-  const normalizedFirst = normalizeTaskSceneId(first)
-  const normalizedSecond = normalizeTaskSceneId(second)
-  return !!normalizedFirst && !!normalizedSecond && normalizedFirst === normalizedSecond
+  return sceneIdsRefer(first, second)
 }
 
 function taskMatchesPayload(task: LongRunningTask, payload: FinishTaskPayload | StartTaskPayload): boolean {

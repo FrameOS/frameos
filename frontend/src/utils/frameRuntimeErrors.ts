@@ -1,4 +1,5 @@
 import type { FrameScene, LogType } from '../types'
+import { publicSceneId, sceneIdsRefer } from './systemScenes'
 
 export interface RuntimeNodeError {
   event: string
@@ -87,49 +88,6 @@ export function parseRuntimeNodeErrorLog(log: LogType): RuntimeLogPayload | null
   }
 }
 
-function referencedSceneIds(scene: FrameScene): string[] {
-  const sceneIds = new Set<string>()
-  for (const node of scene.nodes ?? []) {
-    const data = node.data as Record<string, any>
-    if (node.type === 'scene' && typeof data?.keyword === 'string' && data.keyword) {
-      sceneIds.add(data.keyword)
-    } else if (node.type === 'dispatch' && data?.keyword === 'setCurrentScene') {
-      const targetSceneId = data?.config?.sceneId
-      if (typeof targetSceneId === 'string' && targetSceneId) {
-        sceneIds.add(targetSceneId)
-      }
-    }
-  }
-  return Array.from(sceneIds)
-}
-
-function previewSceneOrder(scenes: FrameScene[], sceneId: string): FrameScene[] {
-  const sceneById = new Map(scenes.map((scene) => [scene.id, scene]))
-  const rootScene = sceneById.get(sceneId)
-  if (!rootScene) {
-    return scenes
-  }
-
-  const ordered: FrameScene[] = []
-  const visited = new Set<string>()
-  const visit = (scene: FrameScene): void => {
-    if (visited.has(scene.id)) {
-      return
-    }
-    visited.add(scene.id)
-    ordered.push(scene)
-    for (const referencedSceneId of referencedSceneIds(scene)) {
-      const referencedScene = sceneById.get(referencedSceneId)
-      if (referencedScene) {
-        visit(referencedScene)
-      }
-    }
-  }
-
-  visit(rootScene)
-  return ordered
-}
-
 interface RuntimeNodeMapBuilder {
   maps: Record<string, Record<number, string>>
   runtimeNodeIdFor: (sourceId: unknown) => number | null
@@ -154,15 +112,10 @@ function createRuntimeNodeMapBuilder(): RuntimeNodeMapBuilder {
   return { maps: {}, runtimeNodeIdFor }
 }
 
-function appendRuntimeNodeMaps(
-  builder: RuntimeNodeMapBuilder,
-  scenes: FrameScene[],
-  sceneIdForRuntime: (scene: FrameScene) => string
-): void {
+function appendRuntimeNodeMaps(builder: RuntimeNodeMapBuilder, scenes: FrameScene[]): void {
   for (const scene of scenes) {
-    const sceneRuntimeId = sceneIdForRuntime(scene)
     const nodeMap: Record<number, string> = {}
-    builder.maps[sceneRuntimeId] = nodeMap
+    builder.maps[scene.id] = nodeMap
     for (const node of scene.nodes ?? []) {
       const runtimeNodeId = builder.runtimeNodeIdFor(node.id)
       if (runtimeNodeId !== null) {
@@ -177,10 +130,12 @@ function appendRuntimeNodeMaps(
   }
 }
 
-function buildRuntimeNodeMaps(scenes: FrameScene[], sceneId: string): Record<string, Record<number, string>> {
+// Keyed by the scene's own id: a scene the frame was handed (Preview on
+// frame) numbers its nodes the same way, and an older runtime's legacy
+// `uploaded/<id>` is looked up through publicSceneId.
+function buildRuntimeNodeMaps(scenes: FrameScene[]): Record<string, Record<number, string>> {
   const builder = createRuntimeNodeMapBuilder()
-  appendRuntimeNodeMaps(builder, scenes, (scene) => scene.id)
-  appendRuntimeNodeMaps(builder, previewSceneOrder(scenes, sceneId), (scene) => `uploaded/${scene.id}`)
+  appendRuntimeNodeMaps(builder, scenes)
   return builder.maps
 }
 
@@ -195,15 +150,18 @@ export function runtimeNodeErrorsByNodeId(
   }
 
   const nodeIds = new Set((scene.nodes ?? []).map((node) => node.id))
-  const runtimeNodeMaps = buildRuntimeNodeMaps(scenes, sceneId)
+  const runtimeNodeMaps = buildRuntimeNodeMaps(scenes)
   const errors: Record<string, RuntimeNodeError> = {}
   const start = Math.max(0, logs.length - RECENT_RUNTIME_ERROR_LOG_LIMIT)
 
   for (let index = logs.length - 1; index >= start; index--) {
     const log = logs[index]
+    if (!log) {
+      continue
+    }
     const payload = parseRuntimeNodeErrorLog(log)
     const runtimeSceneId = valueAsId(payload?.sceneId)
-    if (!payload || !runtimeSceneId || (runtimeSceneId !== sceneId && runtimeSceneId !== `uploaded/${sceneId}`)) {
+    if (!payload || !runtimeSceneId || !sceneIdsRefer(runtimeSceneId, sceneId)) {
       continue
     }
 
@@ -211,7 +169,7 @@ export function runtimeNodeErrorsByNodeId(
     const explicitNodeId = valueAsId(payload.sourceNodeId)
     const fallbackNodeId =
       runtimeNodeId !== null
-        ? runtimeNodeMaps[runtimeSceneId]?.[runtimeNodeId] ?? valueAsId(payload.nodeId)
+        ? runtimeNodeMaps[publicSceneId(runtimeSceneId)]?.[runtimeNodeId] ?? valueAsId(payload.nodeId)
         : valueAsId(payload.nodeId)
     const nodeId = explicitNodeId && nodeIds.has(explicitNodeId) ? explicitNodeId : fallbackNodeId
     if (!nodeId || !nodeIds.has(nodeId) || errors[nodeId]) {

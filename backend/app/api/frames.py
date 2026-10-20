@@ -345,6 +345,10 @@ def _frame_image_cache_key(frame_id: int) -> str:
     return f"frame:{frame_id}:image"
 
 
+# Runtimes before 2026.10.18 reported a scene they were handed (Preview on
+# frame, a cloud push) as "uploaded/<id>"; later ones use the scene's own id.
+# Only those older runtimes need the mapping below: delete both once they are
+# gone.
 UPLOADED_SCENE_PREFIX = "uploaded/"
 
 
@@ -358,6 +362,8 @@ def _configured_scene_ids(frame: Frame) -> set[str]:
 
 
 def _scene_image_scene_id_for_frame(frame: Frame, scene_id: str) -> str:
+    """The id a scene image is stored under: a plain id as it is, an older
+    runtime's "uploaded/<id>" as the configured scene it names."""
     if not scene_id.startswith(UPLOADED_SCENE_PREFIX):
         return scene_id
 

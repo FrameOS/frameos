@@ -386,6 +386,19 @@ var allScenesLoaded = false
 var loadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var uploadedScenes = initTable[SceneId, ExportedInterpretedScene]()
 var lastInterpretedScenesLoadError = ""
+# The deployed scenes' content, as last read off the disk: what an uploaded
+# scene set records it was made over (scenes.nim, dropUploadsTheDeployReplaced).
+# Linux only; the ESP32 and the preview hold one scene set, no uploads beside it.
+when compileOption("threads"):
+  import checksums/md5
+var deployedScenesDigest = ""
+
+proc deployedScenesFingerprint*(): string =
+  deployedScenesDigest
+
+when defined(testing):
+  proc setDeployedScenesFingerprintForTest*(fingerprint: string) =
+    deployedScenesDigest = fingerprint
 var sceneLoader*: proc (sceneId: SceneId): bool {.nimcall.}
   ## Set on the ESP32, which keeps one scene resident (embedded_runtime.nim):
   ## a scene node naming one that is not resident yet (a split's panel) asks
@@ -1103,16 +1116,16 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
       if self.sceneExportByNodeId.hasKey(currentNodeId):
         exportedChild = self.sceneExportByNodeId[currentNodeId]
       else:
-        if loadedScenes.hasKey(childSceneId):
+        # An uploaded scene comes before a deployed one with its id, as in
+        # the frame's scene registry (scenes.nim).
+        if uploadedScenes.hasKey(childSceneId):
+          let interpretedExport = uploadedScenes[childSceneId]
+          exportedChild = ExportedScene(interpretedExport)
+        elif loadedScenes.hasKey(childSceneId):
           let interpretedExport = loadedScenes[childSceneId]
           exportedChild = ExportedScene(interpretedExport)
         elif compiledSceneExports.hasKey(childSceneId):
           exportedChild = compiledSceneExports[childSceneId]
-        elif uploadedScenes.hasKey(childSceneId):
-          # uploaded scene id-s start with "uploaded/"
-          # we should implement isloated scopes/applications later, but this will do for now
-          let interpretedExport = uploadedScenes[childSceneId]
-          exportedChild = ExportedScene(interpretedExport)
         else:
           raise newException(Exception,
             "Scene node references unknown scene id: " & childSceneId.string)
@@ -1295,10 +1308,10 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     logger.log(%*{"event": "initInterpreted", "sceneId": sceneId.string})
 
   var exportedScene: ExportedInterpretedScene
-  if loadedScenes.hasKey(sceneId):
-    exportedScene = loadedScenes[sceneId]
-  elif uploadedScenes.hasKey(sceneId):
+  if uploadedScenes.hasKey(sceneId):
     exportedScene = uploadedScenes[sceneId]
+  elif loadedScenes.hasKey(sceneId):
+    exportedScene = loadedScenes[sceneId]
   else:
     raise newException(Exception, "Scene not found: " & sceneId.string)
 
@@ -1519,16 +1532,16 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
       var exportedChild: ExportedScene
       var isInterpretedChild = false
 
-      if loadedScenes.hasKey(childSceneId):
+      if uploadedScenes.hasKey(childSceneId):
+        let interpretedExport = uploadedScenes[childSceneId]
+        exportedChild = ExportedScene(interpretedExport)
+        isInterpretedChild = true
+      elif loadedScenes.hasKey(childSceneId):
         let interpretedExport = loadedScenes[childSceneId]
         exportedChild = ExportedScene(interpretedExport)
         isInterpretedChild = true
       elif compiledSceneExports.hasKey(childSceneId):
         exportedChild = compiledSceneExports[childSceneId]
-      elif uploadedScenes.hasKey(childSceneId):
-        let interpretedExport = uploadedScenes[childSceneId]
-        exportedChild = ExportedScene(interpretedExport)
-        isInterpretedChild = true
       elif not sceneLoader.isNil and sceneLoader(childSceneId) and loadedScenes.hasKey(childSceneId):
         exportedChild = ExportedScene(loadedScenes[childSceneId])
         isInterpretedChild = true
@@ -1987,6 +2000,8 @@ proc loadInterpretedScenesFromDisk*(): Table[SceneId, ExportedInterpretedScene] 
     sourcePath = "./scenes.json"
 
   if sourcePath.len == 0:
+    when compileOption("threads"):
+      deployedScenesDigest = ""
     return initTable[SceneId, ExportedInterpretedScene]()
 
   let encoded =
@@ -2013,6 +2028,10 @@ proc loadInterpretedScenesFromDisk*(): Table[SceneId, ExportedInterpretedScene] 
     raise newException(InterpretedScenesLoadError,
       "The scenes on this frame are corrupt: " & sourcePath & " could not be parsed: " &
       e.msg & ". Deploy the frame again.")
+  when compileOption("threads"):
+    # By content, not by file time: an upgrade copies scenes.json.gz into the
+    # new release unchanged.
+    deployedScenesDigest = getMD5(decoded)
 
 proc replaceInterpretedScenesCache*(scenes: Table[SceneId, ExportedInterpretedScene]) =
   loadedScenes = scenes

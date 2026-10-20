@@ -717,18 +717,16 @@ proc validateInterpretedScenesPayload*(scenes: JsonNode): tuple[ok: bool, error:
       return (false, "invalid_scenes")
   (true, "")
 
-proc expectedUploadedSceneId(scenes: JsonNode, requestedSceneId = ""): string =
-  ## updateUploadedScenesFromPayload prefixes every scene id with "uploaded/",
-  ## and activates the payload's `sceneId` when it names one of the pushed
-  ## scenes (the first scene otherwise) — mirror that choice here.
+proc expectedActiveSceneId(scenes: JsonNode, requestedSceneId = ""): string =
+  ## updateUploadedScenesFromPayload activates the payload's `sceneId` when it
+  ## names one of the pushed scenes (the first scene otherwise) — mirror that
+  ## choice here.
   if scenes.kind == JArray and scenes.len > 0 and scenes[0].kind == JObject:
     if requestedSceneId.len > 0:
       for scene in scenes:
         if scene.kind == JObject and scene{"id"}.getStr("") == requestedSceneId:
-          return "uploaded/" & requestedSceneId
-    let firstId = scenes[0]{"id"}.getStr("")
-    if firstId.len > 0:
-      return "uploaded/" & firstId
+          return requestedSceneId
+    return scenes[0]{"id"}.getStr("")
   ""
 
 # ---------------------------------------------------------------------------
@@ -798,8 +796,8 @@ proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudV
     # — the payload's default would be a guess that goes wrong the moment the
     # user has switched scenes since the last real push.
     let currentActive =
-      if ctx.getStateFn.isNil: expectedUploadedSceneId(scenes, requestedSceneId)
-      else: ctx.getStateFn(){"active_scene"}.getStr(expectedUploadedSceneId(scenes, requestedSceneId))
+      if ctx.getStateFn.isNil: expectedActiveSceneId(scenes, requestedSceneId)
+      else: ctx.getStateFn(){"active_scene"}.getStr(expectedActiveSceneId(scenes, requestedSceneId))
     var unchangedAck = %*{"type": "scene_ack", "checksum": checksum,
                           "active_scene": currentActive}
     if id != nil and id.kind != JNull:
@@ -816,7 +814,7 @@ proc handleSetScenes(ctx: CloudVerbContext, id: JsonNode, msg: JsonNode): CloudV
     ctx.persistChecksumFn(checksum)
   ctx.audit("set_scenes", true)
   var sceneAck = %*{"type": "scene_ack", "checksum": checksum,
-                    "active_scene": expectedUploadedSceneId(scenes, requestedSceneId)}
+                    "active_scene": expectedActiveSceneId(scenes, requestedSceneId)}
   if id != nil and id.kind != JNull:
     sceneAck["id"] = id
   CloudVerbReply(ack: ackOk(id), extra: @[sceneAck])
@@ -1131,11 +1129,6 @@ proc handleImageGet(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
   ctx.audit("image_get", true)
   CloudVerbReply(ack: ackOk(id), extra: assetChunkExtras(id, image))
 
-proc publicSceneId(sceneId: string): string =
-  ## The id a provider knows a scene by: the runtime registers every uploaded
-  ## scene as "uploaded/<id>", which is this frame's own bookkeeping.
-  if sceneId.startsWith("uploaded/"): sceneId["uploaded/".len .. ^1] else: sceneId
-
 proc handleScenesGet(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
   ## "Which scenes do you hold?" — what a provider asks a frame that joined it
   ## already running scenes of its own, so they can be imported instead of the
@@ -1161,7 +1154,7 @@ proc handleScenesGet(ctx: CloudVerbContext, id: JsonNode): CloudVerbReply =
   let activeScene =
     if ctx.getStateFn.isNil: ""
     else: ctx.getStateFn(){"active_scene"}.getStr("")
-  document["active_scene"] = %publicSceneId(activeScene)
+  document["active_scene"] = %activeScene
   let body = $document
   if body.len > HubMaxAssetFileBytes:
     ctx.audit("scenes_get", false, "too_large")
