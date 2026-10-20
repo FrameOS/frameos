@@ -201,6 +201,26 @@ proc renderSvgDegradedInto*(svg: string, target: Image, rasterWidth, rasterHeigh
   })
   true
 
+proc renderSvgIntoTargetWithDegrade*(svg: string, target: Image): bool =
+  ## An SVG drawn at the size of a buffer the caller already owns: painted
+  ## straight into it (renderSvgIntoTarget), and only when pixie refuses that
+  ## (a budget refusal inside a fill) down the degrade ladder — the bounded
+  ## raster, then half and a quarter of it, each stretched onto the target.
+  ## Nothing the size of the target is allocated on any rung. False when every
+  ## rung failed, which is markup pixie cannot parse.
+  if renderSvgIntoTarget(svg, target):
+    return true
+  let (rasterWidth, rasterHeight) = boundedRequestedDimensions(target.width, target.height)
+  var rungs: seq[tuple[width, height: int]] = @[]
+  for divisor in [1, 2, 4]:
+    let rung: tuple[width, height: int] = (max(1, rasterWidth div divisor), max(1, rasterHeight div divisor))
+    if rung notin rungs and (rung.width < target.width or rung.height < target.height):
+      rungs.add(rung)
+  for rung in rungs:
+    if renderSvgDegradedInto(svg, target, rung.width, rung.height):
+      return true
+  false
+
 proc decodeImageWithFallback*(data: string): Image =
   decodeImage(data)
 

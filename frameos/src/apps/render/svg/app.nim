@@ -41,10 +41,6 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     if self.appConfig.svg.len == 0:
       raise newException(Exception, "No SVG provided.")
     let svgMarkup = decodeSvgInput(self.appConfig.svg)
-    let svgImageOption = decodeSvgWithFallback(svgMarkup, image.width, image.height)
-    if svgImageOption.isNone:
-      raise newException(Exception, "Failed to render SVG.")
-    let svgImage = svgImageOption.get()
     let blendMode = case self.appConfig.blendMode:
       of "normal": NormalBlend
       of "overwrite": OverwriteBlend
@@ -67,6 +63,20 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
       of "inverse-mask": SubtractMaskBlend
       of "exclude-mask": ExcludeMaskBlend
       else: NormalBlend
+    # The SVG is drawn at the image's own size, so every placement lands it
+    # 1:1, and with no offset and a normal blend it can be painted straight
+    # onto the image. A standalone raster beside it was a second image the
+    # size of the canvas: 7.7 MB at 1200x1600, which an 8 MB ESP32 (the
+    # E1004) does not have, so the render aborted out of memory.
+    if blendMode == NormalBlend and self.appConfig.offsetX == 0 and self.appConfig.offsetY == 0:
+      if not renderSvgIntoTargetWithDegrade(svgMarkup, image):
+        let reason = svgDecodeError(svgMarkup, image.width, image.height)
+        raise newException(Exception, if reason.len > 0: reason else: "Failed to render SVG.")
+      return
+    let svgImageOption = decodeSvgWithFallback(svgMarkup, image.width, image.height)
+    if svgImageOption.isNone:
+      raise newException(Exception, "Failed to render SVG.")
+    let svgImage = svgImageOption.get()
     scaleAndDrawImage(image, svgImage, self.appConfig.placement, self.appConfig.offsetX,
       self.appConfig.offsetY, blendMode)
   except Exception as e:
