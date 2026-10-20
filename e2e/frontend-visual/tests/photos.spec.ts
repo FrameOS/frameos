@@ -7,6 +7,7 @@ import { attachFrontendErrorCollector, currentProjectApiPath, login, prepareStab
 // .tmp), so every test here leaves the library the way it found it. Albums
 // made here carry a unique prefix, and "2024" is the one name the URL test
 // needs verbatim: both are cleaned up before the first test and after the last.
+// So is the scene the install test puts on the seeded frame.
 const albumPrefix = 'E2E photos'
 const numericAlbum = '2024'
 const albumName = `${albumPrefix} ${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -40,6 +41,26 @@ async function cleanupE2EAlbums(page: Page): Promise<void> {
     if (!deleteResponse.ok()) {
       throw new Error(`Could not delete E2E albums: ${deleteResponse.status()}`)
     }
+  }
+}
+
+// The install test adds a scene named after the album to the seeded frame.
+// Left there, it showed up in later specs' screenshots of that frame (the
+// "Save to cloud (private)" modal lists its scenes) with the album's random
+// name and the scene's random id, so those pictures differed run to run.
+async function removeE2EAlbumScenes(request: APIRequestContext, framePath: string): Promise<void> {
+  const response = await request.get(framePath)
+  if (!response.ok()) {
+    throw new Error(`Could not read the seeded frame for cleanup: ${response.status()}`)
+  }
+  const scenes = ((await response.json())?.frame?.scenes ?? []) as { name?: string }[]
+  const kept = scenes.filter((scene) => !(scene.name ?? '').startsWith(`${albumPrefix} `))
+  if (kept.length === scenes.length) {
+    return
+  }
+  const saved = await request.post(framePath, { data: { scenes: kept } })
+  if (!saved.ok()) {
+    throw new Error(`Could not remove the E2E album scene from the seeded frame: ${saved.status()}`)
   }
 }
 
@@ -136,6 +157,8 @@ test.describe.serial('@e2e photos library', () => {
       if (paths.length) {
         await context.post(`/api/projects/${projectId}/photos/delete`, { data: { paths } })
       }
+      // A failed install test can leave its scene behind.
+      await removeE2EAlbumScenes(context, `/api/projects/${projectId}/frames/1`)
     } finally {
       await context.dispose()
     }
@@ -311,12 +334,14 @@ test.describe.serial('@e2e photos library', () => {
     await expect(drawer.getByRole('heading', { name: albumName })).toBeVisible()
     await expect(page.getByText('unsaved changes')).toHaveCount(0)
 
-    const frame = await page.request.get(await currentProjectApiPath(page, '/api/frames/1'))
+    const framePath = await currentProjectApiPath(page, '/api/frames/1')
+    const frame = await page.request.get(framePath)
     expect(frame.ok()).toBeTruthy()
     const scenes = ((await frame.json()).frame?.scenes ?? []) as { id: string; name: string }[]
     const installed = scenes.filter((scene) => scene.name === albumName)
     expect(installed).toHaveLength(1)
     await expect(page).toHaveURL(new RegExp(`sceneId=${installed[0].id}`))
+    await removeE2EAlbumScenes(page.request, framePath)
   })
 
   test('deletes the album after a confirmation and leaves the library empty @e2e', async ({ page }) => {
