@@ -29,16 +29,11 @@ fi
 #    PostgreSQL of its own, with the cloud's schema; both live in the data
 #    volume next to the backend's database. FRAMEOS_PROVIDER_SIDECAR=0 turns
 #    the pair off (enrolled frames then cannot connect).
-if [ "${FRAMEOS_PROVIDER_SIDECAR:-1}" != "0" ] && [ -f /app/provider/index.cjs ]; then
-  if [ -z "$FRAMEOS_PROVIDER_DATA_DIR" ]; then
-    if [ -n "$HASSIO_TOKEN" ] && [ -d /data ]; then
-      FRAMEOS_PROVIDER_DATA_DIR=/data/provider
-    else
-      FRAMEOS_PROVIDER_DATA_DIR=/app/db/provider
-    fi
-  fi
+start_provider_sidecar() {
   mkdir -p "$FRAMEOS_PROVIDER_DATA_DIR/objects"
-  chmod 700 "$FRAMEOS_PROVIDER_DATA_DIR"
+  # Traversable, not listable: the postgres user reaches its own directory
+  # below; the secrets file is 0600 and the objects are root's.
+  chmod 711 "$FRAMEOS_PROVIDER_DATA_DIR"
   # Generated once and kept with the data: the database password, the hub's
   # session secret and the secret the backend presents to the bridge.
   provider_secrets="$FRAMEOS_PROVIDER_DATA_DIR/sidecar.env"
@@ -74,11 +69,17 @@ if [ "${FRAMEOS_PROVIDER_SIDECAR:-1}" != "0" ] && [ -f /app/provider/index.cjs ]
   chown -R postgres:postgres "$pg_data"
   # A fresh container runs no postgres: a lock file is the last one's.
   rm -f "$pg_data/postmaster.pid"
+  # postgres appends to its log but cannot create files next to it.
+  pg_log="$FRAMEOS_PROVIDER_DATA_DIR/postgres.log"
+  touch "$pg_log"
+  chown postgres:postgres "$pg_log"
   echo "🐘 Starting the provider sidecar's PostgreSQL (127.0.0.1:5433)"
   # Sized for a Raspberry Pi running Home Assistant: one hub and one bridge
-  # connect, and the tables are a frame queue and a log buffer.
-  runuser -u postgres -- "$pg_bin/pg_ctl" -D "$pg_data" -l "$FRAMEOS_PROVIDER_DATA_DIR/postgres.log" -w \
-    -o "-c listen_addresses=127.0.0.1 -p 5433 -k /tmp -c shared_buffers=16MB -c max_connections=30 -c work_mem=2MB" \
+  # connect, and the tables are a frame queue and a log buffer. No
+  # checkpoint lines: the hub writes every few minutes and the log is
+  # never rotated.
+  runuser -u postgres -- "$pg_bin/pg_ctl" -D "$pg_data" -l "$pg_log" -w \
+    -o "-c listen_addresses=127.0.0.1 -p 5433 -k /tmp -c shared_buffers=16MB -c max_connections=30 -c work_mem=2MB -c log_checkpoints=off" \
     start > /dev/null
   if ! PGPASSWORD="$PROVIDER_PG_PASSWORD" "$pg_bin/psql" -h 127.0.0.1 -p 5433 -U frameos -d postgres -tAc \
       "SELECT 1 FROM pg_database WHERE datname = 'frameos_provider'" | grep -q 1; then
@@ -96,6 +97,33 @@ if [ "${FRAMEOS_PROVIDER_SIDECAR:-1}" != "0" ] && [ -f /app/provider/index.cjs ]
   FRAMEOS_CLOUD_MAX_FRAME_LOG_MB=256 \
   NODE_ENV=production \
     node /app/provider/index.cjs &
+}
+
+if [ "${FRAMEOS_PROVIDER_SIDECAR:-1}" != "0" ] && [ -f /app/provider/index.cjs ]; then
+  if [ -z "$FRAMEOS_PROVIDER_DATA_DIR" ]; then
+    if [ -n "$HASSIO_TOKEN" ] && [ -d /data ]; then
+      FRAMEOS_PROVIDER_DATA_DIR=/data/provider
+    else
+      FRAMEOS_PROVIDER_DATA_DIR=/app/db/provider
+    fi
+  fi
+  # Never fatal: a sidecar that cannot start (a full disk, a data volume it
+  # cannot write) leaves the backend running and only the frames enrolled
+  # with it offline. A subshell outside any `||` list, because errexit is
+  # ignored inside one and each step must stop the ones after it.
+  set +e
+  (set -e; start_provider_sidecar)
+  provider_status=$?
+  set -e
+  if [ "$provider_status" -ne 0 ]; then
+    echo "⚠️  The provider sidecar did not start (exit $provider_status); frames enrolled with this backend cannot connect until it does"
+  fi
+  # The secret the backend presents to the bridge; the database password
+  # and the hub's session secret stay out of the backend's environment.
+  if [ -r "$FRAMEOS_PROVIDER_DATA_DIR/sidecar.env" ]; then
+    FRAMEOS_PROVIDER_BRIDGE_SECRET="$(sed -n 's/^FRAMEOS_PROVIDER_BRIDGE_SECRET=//p' "$FRAMEOS_PROVIDER_DATA_DIR/sidecar.env")"
+    export FRAMEOS_PROVIDER_BRIDGE_SECRET
+  fi
 fi
 
 cd backend
