@@ -1,7 +1,7 @@
 # The AI chat
 
 One assistant, on both control planes, everywhere the workspace offers AI:
-the AI box on the frames home, the AI box above a frame's scenes, the chat
+the AI box on the frames home, the AI box at the top of a frame's page, the chat
 drawer in the scene and app editors, and "Generate scene" in Add scene. It can
 answer from live data ("what's on the kitchen frame right now?"), change frames
 and their settings, build and edit scenes (split scenes included), and explain
@@ -136,8 +136,8 @@ to both goes in both.
 ## The UI
 
 `AiPromptBox` (`frontend/src/scenes/workspace/AiPromptBox.tsx`): the frames
-home's top bar (where the search was) and above a frame's scenes on its
-overview. Example questions cycle in its placeholder (Tab takes one), and
+home's top bar (where the search was) and, in the same place, at the top of
+a frame's overview, above its header. Example questions cycle in its placeholder (Tab takes one), and
 Enter calls `workspaceLogic.startAiChat(frameId | null, prompt)`, which opens
 the chat drawer with the question already sent. The drawer for `frameId: null`
 (`?drawer=chat` on any page) is the frames home's chat: it lists the chats that

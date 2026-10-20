@@ -143,8 +143,8 @@
 
 ## The AI chat is one thing on both planes: `docs/ai-chat.md`
 
-- Every AI chat in the workspace (the frames home's AI box, the box above a
-  frame's scenes, the editors' chat drawer) is ONE agent loop with the SAME
+- Every AI chat in the workspace (the frames home's AI box, the box at the
+  top of a frame's page, the editors' chat drawer) is ONE agent loop with the SAME
   NDJSON events on both planes: the cloud's `src/lib/ai/loop.ts` and its port
   `backend/app/utils/ai_chat_agent.py`, read by one `chatLogic`. An event,
   rule or editor tool added on one plane is added on the other.

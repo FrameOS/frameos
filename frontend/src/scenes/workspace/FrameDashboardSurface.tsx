@@ -113,7 +113,8 @@ interface FrameDashboardSurfaceProps {
   frameMatchesSearch?: boolean
   sectionId?: string
   showSceneMenus?: boolean
-  /** The AI box above the scenes (a frame's own page). */
+  /** The AI box at the top of the page, above the frame's header (a
+   * frame's own page; the frames home has it in the shell's top bar). */
   showAiBox?: boolean
 }
 
@@ -753,14 +754,12 @@ function FrameScenesBlock({
   totalScenes,
   frameMatchesSearch,
   showSceneMenus,
-  showAiBox,
 }: {
   frame: FrameType
   scenes: FrameScene[]
   totalScenes: number
   frameMatchesSearch?: boolean
   showSceneMenus?: boolean
-  showAiBox?: boolean
 }): JSX.Element {
   const { frameAssetFolderExpansion, sceneControlSelection, search } = useValues(workspaceLogic)
   const { openSceneControl, setFrameAssetFolderExpanded } = useActions(workspaceLogic)
@@ -875,7 +874,6 @@ function FrameScenesBlock({
 
   return (
     <div className="min-w-0" onDragOver={handleScenesDragOver} onDrop={handleScenesDrop}>
-      {showAiBox ? <AiPromptBox frameId={frame.id} className="mb-4 flex w-full @md:max-w-xl" /> : null}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {visibleSceneToolButtons.map(({ label, panel, icon: Icon, disabledReason }) =>
           disabledReason ? (
@@ -1063,6 +1061,12 @@ export function FrameDashboardSurface({
       onDrop={handleFrameDrop}
       className={clsx('group @container scroll-mt-6', archived && 'opacity-80')}
     >
+      {showAiBox ? (
+        // Where the frames home has it: the shell's top bar row (FrameosShell).
+        <div className="mb-8 flex flex-row items-center gap-3">
+          <AiPromptBox frameId={frame.id} className="@md:max-w-xl" />
+        </div>
+      ) : null}
       <FrameDashboardHeader frame={frame} archived={archived} />
       <CloudPendingFrameBanner frame={frame} />
       <CloudDeviceScenesBanner frame={frame} />
@@ -1074,7 +1078,6 @@ export function FrameDashboardSurface({
           totalScenes={totalScenes}
           frameMatchesSearch={frameMatchesSearch}
           showSceneMenus={showSceneMenus}
-          showAiBox={showAiBox}
         />
       </div>
     </section>
