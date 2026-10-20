@@ -2,7 +2,7 @@ import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path,
 import { FrameScene, SceneNodeData, FrameId } from '../../../../types'
 import { frameCanUseFastDeploy, frameLogic, sanitizeScene, sceneEqualForComparison } from '../../frameLogic'
 import { undeployedSceneIdsFor } from '../../../../utils/sceneDeployState'
-import { referencedSceneIds, savedScenesWithPushed, scenePushSceneIds } from '../../../../utils/scenePush'
+import { referencedSceneIds, scenePushSceneIds } from '../../../../utils/scenePush'
 import { publicSceneId, sceneIdsRefer, sceneRecordEntry } from '../../../../utils/systemScenes'
 import { SceneAccessFlag, sceneAccessFlagsForScene, withAppPermissions } from '../../../../utils/sceneAccess'
 import { workspaceMode } from '../../../workspace/workspaceSurfaces'
@@ -31,7 +31,6 @@ import {
   framesModel,
   scheduleEmbeddedUsbFrameImageRefresh,
 } from '../../../../models/framesModel'
-import { cloudDeployActiveSceneId, deployCloudFrameScenes } from '../../../../utils/cloudFrameApi'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 import type { AppConfig, FrameType } from '../../../../types'
 import type { TemplateType } from '../../../../types'
@@ -1267,48 +1266,14 @@ export const scenesLogic = kea<scenesLogicType>([
         ? `Pushing ${name} and ${connected} connected scene${connected === 1 ? '' : 's'}`
         : `Pushing ${name}`
       const frameLogicInstance = frameLogic({ frameId: props.frameId })
-      if (isCloudMode()) {
-        // One durable set_scenes push through the uploadScenes shim: the
-        // frame's saved list with the pushed scenes' edits in it, and this
-        // scene, or the one showing, active.
-        const taskId = `${props.frameId}:push:${sceneId}:${Date.now()}`
-        longRunningTasksModel.actions.startTask({ id: taskId, frameId: props.frameId, kind: 'deploy', sceneId, title })
-        try {
-          const scenes = savedScenesWithPushed(values.frame?.scenes ?? [], formScenesOf(values), sceneIds)
-          if (!scenes.length) {
-            throw new Error('This frame has no scenes to push')
-          }
-          await deployCloudFrameScenes(props.frameId, scenes, {
-            sceneId: activate ? sceneId : cloudDeployActiveSceneId(values.frame?.active_scene_id, scenes),
-            ...(activate && state ? { state } : {}),
-          })
-          longRunningTasksModel.actions.finishTask({
-            taskId,
-            frameId: props.frameId,
-            kind: 'deploy',
-            status: 'success',
-            detail: activate
-              ? 'Pushed. The frame shows it as soon as it syncs.'
-              : 'Pushed. The frame has it as soon as it syncs.',
-          })
-        } catch (error) {
-          longRunningTasksModel.actions.taskFailed({
-            taskId,
-            frameId: props.frameId,
-            kind: 'deploy',
-            detail: error instanceof Error ? error.message : 'Failed to push the scene',
-          })
-        }
-        return
-      }
-      // Save these scenes and only these, then the frame's saved scenes go
-      // out: with this one written as the scene to show (set_next_scene), or
-      // as they are.
-      const unsaved = sceneIds.filter((id) => values.unsavedSceneIds.has(id))
+      const control = controlLogic({ frameId: props.frameId })
+      // Only what changed is saved (backend) or persisted (cloud): every
+      // other unsaved edit stays in the form.
+      const toSave = isCloudMode() ? sceneIds : sceneIds.filter((id) => values.unsavedSceneIds.has(id))
       if (!activate) {
         try {
-          if (unsaved.length) {
-            await frameLogicInstance.asyncActions.saveScenes(unsaved)
+          if (toSave.length) {
+            await frameLogicInstance.asyncActions.saveScenes(toSave)
           }
         } catch (error) {
           reportTaskOutcome('error', {
@@ -1319,17 +1284,58 @@ export const scenesLogic = kea<scenesLogicType>([
           })
           return
         }
-        framesModel.actions.deployFrame(
-          props.frameId,
-          frameCanUseFastDeploy(values.frame, frameLogicInstance.values.requiresRecompilation),
-          { title, sceneId }
-        )
+        if (isCloudMode()) {
+          reportTaskOutcome('success', {
+            frameId: props.frameId,
+            kind: 'deploy',
+            title,
+            detail: 'Pushed. The frame has it as soon as it syncs.',
+          })
+        } else {
+          framesModel.actions.deployFrame(
+            props.frameId,
+            frameCanUseFastDeploy(values.frame, frameLogicInstance.values.requiresRecompilation),
+            { title, sceneId }
+          )
+        }
         return
       }
+      // Spins until the frame logs this scene's render:done, like Activate.
       longRunningTasksModel.actions.startTask({ frameId: props.frameId, kind: 'deploy', sceneId, title })
+      control.actions.sceneActivationStarted(sceneId)
       try {
-        if (unsaved.length) {
-          await frameLogicInstance.asyncActions.saveScenes(unsaved)
+        if (isCloudMode()) {
+          // The push names this scene active; the drawer's field values go
+          // with a select behind it. Until the frame acks the push the cloud
+          // answers that select by re-pushing the set with this scene active
+          // and these values, in place of the pending one.
+          if (toSave.length) {
+            await frameLogicInstance.asyncActions.saveScenes(toSave, sceneId)
+          }
+          if (state && Object.keys(state).length > 0) {
+            const response = await apiFetch(`/api/frames/${props.frameId}/event/setCurrentScene`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sceneId, state }),
+            })
+            if (!response.ok) {
+              throw new Error('Failed to send the scene values')
+            }
+          }
+          control.actions.sceneActivationSettled(sceneId)
+          longRunningTasksModel.actions.finishTask({
+            frameId: props.frameId,
+            kind: 'deploy',
+            sceneId,
+            status: 'success',
+            detail: 'Pushed. The frame shows it as soon as it syncs.',
+          })
+          return
+        }
+        // Backend: save, then the frame's saved scenes go out with this one
+        // written as the scene to show (set_next_scene).
+        if (toSave.length) {
+          await frameLogicInstance.asyncActions.saveScenes(toSave)
         }
         const response = await apiFetch(`/api/frames/${props.frameId}/set_next_scene`, {
           method: 'POST',
@@ -1344,6 +1350,7 @@ export const scenesLogic = kea<scenesLogicType>([
           throw new Error('Failed to queue the scene push')
         }
       } catch (error) {
+        control.actions.sceneActivationSettled(sceneId)
         longRunningTasksModel.actions.taskFailed({
           frameId: props.frameId,
           kind: 'deploy',

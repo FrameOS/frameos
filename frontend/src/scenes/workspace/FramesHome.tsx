@@ -1725,30 +1725,32 @@ function SceneControlChangeNotice({
   return (
     <div className="frameos-warning-button mb-4 rounded-xl border px-3 py-3 shadow-sm">
       <div className="text-sm font-semibold">{content.statusText}</div>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {content.showSaveButton ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onSave}
-            className="frameos-secondary-button inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-60"
-          >
-            {busy ? <Spinner /> : null}
-            {busy ? 'Saving…' : 'Save changes'}
-          </button>
-        ) : null}
-        {content.pushLabel ? (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onPush}
-            className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-60"
-          >
-            {busy ? <Spinner color="white" /> : <ArrowUpTrayIcon className="h-4 w-4" />}
-            {busy ? 'Working…' : content.pushLabel}
-          </button>
-        ) : null}
-      </div>
+      {content.showSaveButton || content.pushLabel ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {content.showSaveButton ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onSave}
+              className="frameos-secondary-button inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-60"
+            >
+              {busy ? <Spinner /> : null}
+              {busy ? 'Saving…' : 'Save changes'}
+            </button>
+          ) : null}
+          {content.pushLabel ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onPush}
+              className="frameos-primary-action inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-white transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-60"
+            >
+              {busy ? <Spinner color="white" /> : <ArrowUpTrayIcon className="h-4 w-4" />}
+              {busy ? 'Working…' : content.pushLabel}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }

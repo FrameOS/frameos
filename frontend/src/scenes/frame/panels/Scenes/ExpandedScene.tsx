@@ -16,13 +16,12 @@ import { frameLogic } from '../../frameLogic'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { scenePushActionCopy } from '../../../../utils/scenePush'
 import { sceneIdsRefer } from '../../../../utils/systemScenes'
-import { PlayIcon, EyeIcon } from '@heroicons/react/24/solid'
+import { PlayIcon } from '@heroicons/react/24/solid'
 import { WindowIcon } from '@heroicons/react/24/outline'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { livePreviewLogic, LIVE_PREVIEW_HASH_KEY } from './livePreviewLogic'
 import { LivePreviewModal } from './LivePreviewModal'
-import { SceneActionsButton, SceneActionOption } from './SceneActionsButton'
-import { SceneActionKey } from './sceneActionsLogic'
+import { Spinner } from '../../../../components/Spinner'
 import { confirmDialog } from '../../../../utils/confirmDialogLogic'
 
 export interface ExpandedSceneProps {
@@ -73,35 +72,44 @@ export function ExpandedScene({
   const sceneIsUndeployed = isUndeployed ?? undeployedSceneIds.has(sceneId)
   const sceneIsUnsaved = isUnsaved ?? changedScenes.has(sceneId)
   const sceneHasChanges = sceneIsUnsaved || sceneIsUndeployed
-  const canPreviewUnsavedChanges = sceneHasChanges && !frameAdminMode
   // Spins from the click until the frame logs this scene's render:done —
   // the request being accepted says nothing about the panel yet.
   const activating = sceneIsActivating(activatingSceneId, sceneId)
-  // With changes the main action is a push (docs/ui-vocabulary.md): this
-  // scene and the connected scenes that changed. "Apply to active scene"
-  // used to stay on the active scene even then, and read as if the edits
-  // would not go out.
+  // One button puts the scene on the frame as it stands here, saved or not
+  // (docs/ui-vocabulary.md). When it or a connected scene it draws or
+  // switches to has changes, or is not on the frame by the control plane's
+  // own record (the backend's last deploy, the cloud's acked push), it
+  // pushes first; the push updates that record, so the next click only
+  // activates. The cloud also re-pushes an assigned scene its frame turns
+  // out not to hold.
   const sceneIsCurrent = sceneIdsRefer(sceneId, currentSceneId)
-  const pushSceneIds = sceneHasChanges ? scenePushIds(sceneId) : []
+  const pushSceneIds = scenePushIds(sceneId)
+  const needsPush = !frameAdminMode && (sceneHasChanges || pushSceneIds.length > 0)
   const pushCopy = scenePushActionCopy({
     active: sceneIsCurrent,
     connected: pushSceneIds.filter((id) => id !== sceneId).length,
     saves: !isCloudMode() && (sceneIsUnsaved || pushSceneIds.some((id) => unsavedSceneIds.has(id))),
   })
+  // "Pushing…" turns into "Activating…" once the push has landed and the
+  // scene counts as on the frame.
   const activateLabel = activating
-    ? 'Activating…'
-    : frameAdminMode && sceneHasChanges
-    ? 'Save & activate scene'
-    : sceneHasChanges
+    ? needsPush
+      ? 'Pushing…'
+      : 'Activating…'
+    : frameAdminMode && sceneIsUnsaved
+    ? 'Save & activate'
+    : needsPush
     ? pushCopy.label
     : sceneIsCurrent
-    ? 'Apply to active scene'
-    : 'Activate scene'
+    ? 'Apply'
+    : 'Activate'
   const activateDescription =
-    frameAdminMode && sceneHasChanges
+    frameAdminMode && sceneIsUnsaved
       ? 'Save your changes and make this the active scene'
-      : sceneHasChanges
+      : needsPush
       ? pushCopy.description
+      : sceneIsCurrent
+      ? 'Send these values to the scene on the frame'
       : 'Make this the active scene on the frame'
 
   const buildNextState = (): Record<string, any> => {
@@ -119,10 +127,6 @@ export function ExpandedScene({
     return state
   }
 
-  const handlePreview = () => {
-    previewScene(sceneId, buildNextState())
-  }
-
   const handleActivate = async () => {
     if (frameAdminMode) {
       if (sceneIsUnsaved) {
@@ -132,7 +136,7 @@ export function ExpandedScene({
       return
     }
 
-    if (sceneHasChanges) {
+    if (needsPush) {
       pushScene(sceneId, true, buildNextState())
     } else {
       submitStateChanges()
@@ -152,33 +156,31 @@ export function ExpandedScene({
     })
   }
 
-  const actionOptions: SceneActionOption[] = [
-    {
-      key: 'activate',
-      label: activateLabel,
-      description: activateDescription,
-      icon: <PlayIcon className="h-4 w-4 shrink-0" />,
-      loading: activating,
-      onRun: () => void handleActivate(),
-    },
-    {
-      key: 'preview-frame',
-      label: 'Preview on frame',
-      description: 'Temporarily show this scene on the frame, without saving or pushing',
-      icon: <EyeIcon className="h-4 w-4 shrink-0" />,
-      onRun: handlePreview,
-    },
-    {
-      key: 'preview-browser',
-      label: 'Preview in browser',
-      description: 'Run this scene in your browser via WebAssembly',
-      icon: <WindowIcon className="h-4 w-4 shrink-0" />,
-      onRun: () => openLivePreview(sceneId, buildNextState()),
-    },
-  ]
-  // Matches the old standalone buttons: with unsaved/undeployed changes the
-  // primary action was the on-frame preview, otherwise activate.
-  const defaultActionKey: SceneActionKey = canPreviewUnsavedChanges ? 'preview-frame' : 'activate'
+  // Three buttons and no menu: put it on the frame, preview it in the
+  // browser with these values, reset the values.
+  const activateButton = (
+    <Button
+      onClick={() => void handleActivate()}
+      disabled={activating}
+      aria-busy={activating || undefined}
+      title={activateDescription}
+      className="flex items-center gap-2"
+    >
+      {activating ? <Spinner color="white" className="shrink-0" /> : <PlayIcon className="h-4 w-4 shrink-0" />}
+      {activateLabel}
+    </Button>
+  )
+  const previewButton = (
+    <Button
+      onClick={() => openLivePreview(sceneId, buildNextState())}
+      color="secondary"
+      title="Run this scene in your browser with these values"
+      className="flex items-center gap-2"
+    >
+      <WindowIcon className="h-4 w-4 shrink-0" />
+      Preview
+    </Button>
+  )
   // Under the fields, or in the drawer's footer: portaled there, but still
   // inside this card's Form in the React tree.
   const placeActions = (actions: JSX.Element, inline: JSX.Element): JSX.Element | null =>
@@ -203,10 +205,14 @@ export function ExpandedScene({
       ) : null}
       {fieldCount === 0 ? (
         placeActions(
-          <SceneActionsButton options={actionOptions} defaultKey={defaultActionKey} />,
+          <div className="flex w-full flex-wrap items-center gap-2">
+            {activateButton}
+            {previewButton}
+          </div>,
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <SceneActionsButton options={actionOptions} defaultKey={defaultActionKey} />
+              {activateButton}
+              {previewButton}
             </div>
           </div>
         )
@@ -244,13 +250,15 @@ export function ExpandedScene({
           ))}
           {placeActions(
             <div className="flex w-full flex-wrap items-center gap-2">
-              <SceneActionsButton options={actionOptions} defaultKey={defaultActionKey} />
+              {activateButton}
+              {previewButton}
               {resetButton}
             </div>,
             <div className="flex w-full items-center gap-2">
               <div className="@md:w-1/3 hidden @md:block" />
               <div className="flex w-full flex-wrap items-center gap-2">
-                <SceneActionsButton options={actionOptions} defaultKey={defaultActionKey} />
+                {activateButton}
+                {previewButton}
                 {resetButton}
               </div>
             </div>

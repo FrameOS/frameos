@@ -2366,7 +2366,11 @@ export interface frameLogicActions {
   saveFrame: () => {
     value: true
   }
-  saveScenes: (sceneIds: string[]) => {
+  saveScenes: (
+    sceneIds: string[],
+    activeSceneId?: string | null
+  ) => {
+    activeSceneId: string | null
     sceneIds: string[]
   }
   sceneConversionFinished: (
@@ -2584,7 +2588,10 @@ export const frameLogic = kea<frameLogicType>([
     sceneConversionFinished: (sceneId: string, ok: boolean) => ({ sceneId, ok }),
     updateNodeData: (sceneId: string, nodeId: string, nodeData: Partial<NodeData>) => ({ sceneId, nodeId, nodeData }),
     saveFrame: true,
-    saveScenes: (sceneIds: string[]) => ({ sceneIds }),
+    saveScenes: (sceneIds: string[], activeSceneId?: string | null) => ({
+      sceneIds,
+      activeSceneId: activeSceneId ?? null,
+    }),
     saveAndDeployFrame: true,
     saveAndFastDeployFrame: true,
     saveAndFullDeployFrame: true,
@@ -3797,7 +3804,7 @@ export const frameLogic = kea<frameLogicType>([
           openSceneControlDrawer(props.frameId, scene.id)
         }
       },
-      saveScenes: async ({ sceneIds }) => {
+      saveScenes: async ({ sceneIds, activeSceneId }) => {
         // The scene drawer's push (utils/scenePush.ts): the saved frame with
         // these scenes' edited versions in it, and nothing else. Every other
         // unsaved edit stays in the form: the `frame` subscription resets it
@@ -3809,6 +3816,24 @@ export const frameLogic = kea<frameLogicType>([
         const savedFrame = sanitizeFrame(values.frame)
         const formFrame = getCurrentFrameForm(values.frame, values.frameForm)
         const scenes = savedScenesWithPushed(savedFrame.scenes ?? [], formFrame.scenes ?? [], sceneIds)
+        if (isCloudMode()) {
+          // The cloud's save IS the push: new store-scene versions, the
+          // assignment list, one checksummed set_scenes. Not the ad-hoc
+          // uploadScenes shim: the assignment ledger records this push, so
+          // the scene counts as on the frame from now on. No settings push:
+          // it is not diffed, and the frame would apply every key again.
+          const outcome = await persistAndPushCloudFrameScenes(
+            props.frameId,
+            scenes,
+            activeSceneId ?? savedFrame.active_scene_id,
+            cloudScenePersistOptions(props.frameId, savedFrame)
+          )
+          for (const storeSceneId of outcome.changedStoreSceneIds) {
+            clearCloudSceneJsonCache(storeSceneId)
+          }
+          framesModel.actions.hydrateCloudFrameScenes(props.frameId, true)
+          return
+        }
         const savedGroups = savedFrame.service_setting_groups ?? []
         const formGroups = formFrame.service_setting_groups ?? []
         const grantedGroups = collectSecretSettingsFromScenes(
