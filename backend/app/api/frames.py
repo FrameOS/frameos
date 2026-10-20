@@ -4391,6 +4391,11 @@ async def api_frame_pending_commands(id: int, db: Session = Depends(get_db)):
     frame = _project_frame(db, id)
     if not frame:
         _not_found()
+    if is_provider_frame(frame):
+        # The provider sidecar's hub holds this frame's queue.
+        from app.utils.provider_commands import provider_pending_commands
+
+        return {"commands": await provider_pending_commands(frame)}
     return {"commands": list_pending_frame_commands(db, frame)}
 
 
@@ -4409,7 +4414,13 @@ async def api_frame_cancel_pending_command(
     frame = _project_frame(db, id)
     if not frame:
         _not_found()
-    if not cancel_frame_command(db, frame, command_id):
+    if is_provider_frame(frame):
+        from app.utils.provider_commands import provider_cancel_command
+
+        cancelled = await provider_cancel_command(frame, command_id)
+    else:
+        cancelled = cancel_frame_command(db, frame, command_id)
+    if not cancelled:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="No pending action with that id")
     await log(db, redis, int(frame.id), "stdinfo", "Cancelled a queued command before the frame took it")
     return {"ok": True}

@@ -269,9 +269,10 @@ async def enroll_provider_frame(
         f'The frame "{frame.name}" enrolled with this backend as its provider'
         + ("" if created else " again, with a new device key"),
     )
-    if not created:
-        # A socket still open under the old key is a different device now.
-        await provider_link_changed(redis, int(frame.id))
+    # The sidecar's hub authenticates the socket against its own copy of the
+    # link; for a re-key, a socket still open under the old key is a
+    # different device now and is closed.
+    await provider_link_changed(redis, int(frame.id))
     return _enroll_response(frame, link, access_token)
 
 

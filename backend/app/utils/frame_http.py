@@ -98,7 +98,9 @@ def _is_embedded_frame(frame: Frame) -> bool:
     """An ESP32 this backend talks to over its LAN HTTP server. Not a
     provider frame of any chip: that one is reached only over its management
     socket (app/utils/provider_frames.py)."""
-    if getattr(frame, "provider_link", None) is not None:
+    from app.models.frame_provider import frame_provider_link
+
+    if frame_provider_link(frame) is not None:
         return False
     return (frame.mode or "rpios") == "embedded"
 

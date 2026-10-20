@@ -257,6 +257,15 @@ COPY frontend/package.json frontend/package.json
 COPY frameos/frontend/package.json frameos/frontend/package.json
 COPY frameos/wasm/package.json frameos/wasm/package.json
 COPY frameos/editor/package.json frameos/editor/package.json
+# The provider sidecar (cloud/apps/backend-provider: FrameOS Cloud's frame hub,
+# which frames enrolled with this backend dial through /api/frames/ws) and the
+# workspace packages it bundles. Its bundle also reads auth-web's src/lib and
+# frame-hub's src, but by relative path, with no install of their own.
+COPY cloud/package.json cloud/package.json
+COPY cloud/apps/backend-provider/package.json cloud/apps/backend-provider/package.json
+COPY cloud/packages/db/package.json cloud/packages/db/package.json
+COPY cloud/packages/ledger/package.json cloud/packages/ledger/package.json
+COPY cloud/packages/scene-convert/package.json cloud/packages/scene-convert/package.json
 RUN pnpm install --offline --frozen-lockfile
 
 COPY frontend frontend
@@ -283,6 +292,15 @@ RUN nimble assets -y
 RUN bash -c 'source /opt/emsdk/emsdk_env.sh && bash /app/frameos/tools/build_wasm.sh'
 
 WORKDIR /app/frontend
+RUN pnpm run build
+
+# The provider sidecar, one self-contained CommonJS file (esbuild; the six npm
+# packages it uses resolve from its own node_modules through NODE_PATH).
+COPY cloud/apps/backend-provider /app/cloud/apps/backend-provider
+COPY cloud/apps/frame-hub/src /app/cloud/apps/frame-hub/src
+COPY cloud/apps/auth-web/src/lib /app/cloud/apps/auth-web/src/lib
+COPY cloud/packages /app/cloud/packages
+WORKDIR /app/cloud/apps/backend-provider
 RUN pnpm run build
 
 RUN find /app/frameos -path '*/tests' -type d -prune -exec rm -rf {} + \
@@ -404,6 +422,15 @@ RUN set -eux; \
       > /etc/apt/sources.list.d/nodesource.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends nodejs; \
+    # PostgreSQL for the provider sidecar: FrameOS Cloud's schema, on the
+    # version the cloud runs (cloud CI's postgres:17), from the PostgreSQL
+    # project's own repository rather than bookworm's 15.
+    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      | gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg; \
+    echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends postgresql-17; \
     apt-get purge -y --auto-remove curl gnupg; \
     rm -rf /var/lib/apt/lists/*
 
@@ -425,6 +452,11 @@ COPY tools/prebuilt-deps/manifest.json tools/prebuilt-deps/manifest.json
 COPY --from=app-builder /app/frontend/dist frontend/dist
 COPY --from=app-builder /app/frontend/schema frontend/schema
 COPY --from=app-builder /app/frameos frameos
+# The provider sidecar and the cloud migrations it applies to its database at
+# boot (docker-entrypoint.sh starts both, cloud/apps/backend-provider).
+COPY --from=app-builder /app/cloud/apps/backend-provider/dist/index.cjs provider/index.cjs
+COPY cloud/packages/db/drizzle provider/drizzle
+ENV FRAMEOS_PROVIDER_MIGRATIONS_DIR=/app/provider/drizzle
 # Last, so a release bump does not invalidate (and force a re-push of) every
 # layer above it.
 COPY versions.json ./

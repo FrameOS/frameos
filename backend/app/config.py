@@ -160,6 +160,14 @@ class Config:
     # (/api/cloud/setup/*) answer, beyond IP literals and local names. See
     # app/api/cloud.py setup_host_allowed.
     FRAMEOS_SETUP_ALLOWED_HOSTS = os.environ.get('FRAMEOS_SETUP_ALLOWED_HOSTS') or ''
+    # The provider sidecar (cloud/apps/backend-provider): FrameOS Cloud's
+    # frame hub next to the backend, on its own Postgres. Frames this backend
+    # enrolled dial /api/frames/ws here, which relays to the hub; the backend
+    # queues their verbs and reads them back through the bridge. The
+    # container's entrypoint starts both and sets these.
+    FRAMEOS_PROVIDER_HUB_URL = os.environ.get('FRAMEOS_PROVIDER_HUB_URL') or 'ws://127.0.0.1:3100'
+    FRAMEOS_PROVIDER_BRIDGE_URL = os.environ.get('FRAMEOS_PROVIDER_BRIDGE_URL') or 'http://127.0.0.1:3101'
+    FRAMEOS_PROVIDER_BRIDGE_SECRET = os.environ.get('FRAMEOS_PROVIDER_BRIDGE_SECRET') or ''
     HASSIO_RUN_MODE = os.environ.get('HASSIO_RUN_MODE', None)
     HASSIO_TOKEN = os.environ.get('HASSIO_TOKEN', None)
     SUPERVISOR_TOKEN = os.environ.get('SUPERVISOR_TOKEN', None)

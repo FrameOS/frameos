@@ -62,13 +62,18 @@ async def startup(ctx: Dict[str, Any]):
         # inventory heartbeat, automatic frame backups after deploys).
         from app.cloud.sync import cloud_sync_service
         ctx['cloud_sync_task'] = asyncio.create_task(cloud_sync_service.run())
+        # And for the provider mirror: what the sidecar's frame hub hears from
+        # the frames this backend is the provider of, into the backend's
+        # tables (app/tasks/provider_mirror.py).
+        from app.tasks.provider_mirror import provider_mirror
+        ctx['provider_mirror_task'] = asyncio.create_task(provider_mirror.run())
     print("Worker startup: created shared HTTPX client and Redis")
 
 # Optional: on_shutdown logic
 async def shutdown(ctx: Dict[str, Any]):
     if 'client' in ctx:
         await ctx['client'].aclose()
-    for task_key in ('ha_sync_task', 'cloud_sync_task'):
+    for task_key in ('ha_sync_task', 'cloud_sync_task', 'provider_mirror_task'):
         if task := ctx.pop(task_key, None):
             task.cancel()
             try:

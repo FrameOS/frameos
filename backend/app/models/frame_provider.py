@@ -26,7 +26,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+from typing import Any, Optional
+
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import mapped_column, relationship
 
@@ -57,6 +60,9 @@ class FrameProviderLink(Base):
     revoked_at = mapped_column(DateTime, nullable=True)
     # Where a browser on the LAN reaches the device's own admin page.
     local_origin = mapped_column(String(512), nullable=True)
+    # The frame's id in the provider sidecar (cloud/apps/backend-provider):
+    # the cloud's frame hub that holds the socket and the queue.
+    remote_frame_id = mapped_column(String(36), nullable=True, unique=True)
 
     # What the device last said over the socket. `session_id` names the
     # socket that wrote `connected`, so a late disconnect of a superseded
@@ -93,3 +99,31 @@ class FrameClaimToken(Base):
     # lost in flight) gets the same frame back instead of a refusal.
     used_public_key = mapped_column(Text, nullable=True)
     used_frame_id = mapped_column(Integer, ForeignKey("frame.id", ondelete="SET NULL"), nullable=True)
+
+
+def frame_provider_link(frame: Any) -> Optional[FrameProviderLink]:
+    """The frame's link, however the frame object came to the caller.
+
+    The relationship loads on access (never joined: the data migrations that
+    query Frame run before the table exists), and a Frame whose session has
+    closed cannot load it — the Remote's socket and the deploy jobs hand such
+    rows around. A detached row is answered with a short query of its own; a
+    stand-in (the deploy plan's SimpleNamespace preview) carries the link as
+    a plain attribute."""
+    state = sa_inspect(frame, raiseerr=False)
+    if state is None:
+        link = getattr(frame, "provider_link", None)
+        return link if isinstance(link, FrameProviderLink) else None
+    if state.detached and "provider_link" in state.unloaded:
+        from app.database import SessionLocal
+
+        session = SessionLocal()
+        try:
+            link = session.query(FrameProviderLink).filter_by(frame_id=frame.id).first()
+            if link is not None:
+                session.expunge(link)
+            return link
+        finally:
+            session.close()
+    link = frame.provider_link
+    return link if isinstance(link, FrameProviderLink) else None

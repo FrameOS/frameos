@@ -572,7 +572,9 @@ class Frame(Base):
             'last_successful_deploy': served_deploy_baseline(self.last_successful_deploy),
             'last_successful_deploy_at': self.last_successful_deploy_at.replace(tzinfo=timezone.utc).isoformat() if self.last_successful_deploy_at else None,
         }
-        provider = self.provider_link
+        from .frame_provider import frame_provider_link
+
+        provider = frame_provider_link(self)
         if provider is not None:
             # The cloud's names for the same facts (frontend/src/types.tsx):
             # the workspace reads a provider frame here exactly as it reads a
@@ -818,7 +820,9 @@ def frame_has_shell_access(frame: Any) -> bool:
     SSH/Remote-based deploy cannot even connect (2026-09-07). rpios frames
     are SSH-managed by definition. A frame this backend is the provider of
     (it dials the management socket) has no shell either, by design."""
-    if getattr(frame, "provider_link", None) is not None:
+    from .frame_provider import frame_provider_link
+
+    if frame_provider_link(frame) is not None:
         return False
     if (getattr(frame, "mode", None) or "rpios") != "buildroot":
         return True
@@ -873,14 +877,16 @@ async def delete_frame(db: Session, redis: Redis, frame_id: int, project_id: int
 
         from .frame_command import FrameCommand
         db.query(FrameCommand).filter_by(project_id=project_id, frame_id=frame_id).delete()
-        was_provider_frame = frame.provider_link is not None
+        link = frame.provider_link
+        remote_frame_id = link.remote_frame_id if link is not None else None
 
         db.delete(frame)
         db.commit()
-        if was_provider_frame:
-            # Its link went with it: the hub closes a live socket with 4401.
-            from app.utils.provider_commands import provider_link_changed
-            await provider_link_changed(redis, frame_id)
+        if remote_frame_id:
+            # The sidecar revokes it (the hub closes a live socket with 4401)
+            # and drops its rows.
+            from app.utils.provider_commands import forget_provider_frame
+            await forget_provider_frame(remote_frame_id)
         await publish_message(redis, "delete_frame", {"id": frame_id, "project_id": project_id})
         return True
     return False

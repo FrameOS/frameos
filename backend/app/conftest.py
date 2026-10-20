@@ -56,6 +56,10 @@ class ProjectAsyncClient(AsyncClient):
         return await super().request(method, self._project_url(url), *args, **kwargs)
 
 
+# The provider sidecar's bridge, in memory (app/utils/provider_bridge.py).
+from app.utils.tests.provider_bridge_fake import fake_bridge  # noqa: E402, F401
+
+
 @pytest.fixture(autouse=True)
 def fictional_hosts_resolve(monkeypatch):
     """The outbound target guard (app/utils/network.py) resolves every host

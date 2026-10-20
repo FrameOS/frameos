@@ -2,6 +2,10 @@
 set -euo pipefail
 
 export DEBUG=${DEBUG:-1}
+# The provider sidecar's dev ports and secret (scripts/backend-provider-dev.sh).
+export FRAMEOS_PROVIDER_HUB_URL=${FRAMEOS_PROVIDER_HUB_URL:-ws://127.0.0.1:3110}
+export FRAMEOS_PROVIDER_BRIDGE_URL=${FRAMEOS_PROVIDER_BRIDGE_URL:-http://127.0.0.1:3111}
+export FRAMEOS_PROVIDER_BRIDGE_SECRET=${FRAMEOS_PROVIDER_BRIDGE_SECRET:-frameos-dev-provider-bridge-secret}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

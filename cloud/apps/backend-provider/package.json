@@ -1,0 +1,36 @@
+{
+  "name": "@frameos-cloud/backend-provider",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "NODE_PATH=./node_modules esbuild src/index.ts --bundle --platform=node --target=node22 --format=cjs --outfile=dist/index.cjs --external:bufferutil --external:utf-8-validate",
+    "start": "node dist/index.cjs",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@frameos-cloud/db": "workspace:*",
+    "@frameos-cloud/ledger": "workspace:*",
+    "@frameos-cloud/scene-convert": "workspace:*",
+    "aws4fetch": "^1.0.20",
+    "drizzle-orm": "^0.45.2",
+    "fflate": "^0.8.3",
+    "jose": "^6.2.3",
+    "postgres": "^3.4.9",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.1",
+    "eslint": "^9.39.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  }
+}

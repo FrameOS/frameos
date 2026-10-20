@@ -6,9 +6,10 @@ verbs on its management socket — `set_settings`, `set_schedule`,
 difference: the frame's FrameOS changes only through its own signed upgrade,
 on a `notify_update_available` nudge ("Update FrameOS"). The deploy is
 recorded as the frame's baseline when the device acks the scenes and the
-settings (app/ws/provider_hub.py), never when it is queued; a frame that is
-away takes it when it next connects, and the deploy-progress bar
-(`cloud_scenes`) follows the verb there.
+settings, never when it is queued: here when it does so within the job's
+wait, otherwise by the mirror when it reconnects and does
+(app/tasks/provider_mirror.py). The deploy-progress bar (`cloud_scenes`) is
+the hub's, started by the cloud's enqueueFrameCommand and moved by the hub.
 """
 from __future__ import annotations
 
@@ -21,7 +22,12 @@ from sqlalchemy.orm import Session
 
 from app.models.log import new_log as log
 from app.tasks.utils import get_fresh_frame, record_task_failure
-from app.utils.provider_commands import ProviderCommandError, provider_deploy_settled, queue_provider_deploy
+from app.utils.provider_commands import (
+    ProviderCommandError,
+    provider_deploy_state,
+    queue_provider_deploy,
+    record_settled_provider_deploys,
+)
 from app.utils.provider_frames import provider_link, provider_reported_version
 from app.utils.versions import current_frameos_version
 
@@ -30,14 +36,14 @@ from app.utils.versions import current_frameos_version
 DEPLOY_WAIT_SECONDS = 20.0
 
 
-async def _await_settled(db: Session, frame: Any, deploy_id: str, timeout: float) -> bool:
+async def _await_settled(db: Session, redis: Redis, frame: Any, deploy_id: str, timeout: float) -> str:
+    """`acked`, `failed`, or `pending` when the frame did not answer in time."""
     deadline = time.monotonic() + timeout
     while True:
         db.expire_all()
-        if provider_deploy_settled(db, frame, deploy_id):
-            return True
-        if time.monotonic() >= deadline:
-            return False
+        state = await provider_deploy_state(db, frame, deploy_id, redis)
+        if state != "pending" or time.monotonic() >= deadline:
+            return state
         await asyncio.sleep(0.5)
 
 
@@ -71,16 +77,23 @@ async def deploy_over_provider_socket(
         snapshot.pop("last_successful_deploy_at", None)
         snapshot["frameos_version"] = provider_reported_version(frame) or current_frameos_version()
         scene_id = activate_scene.get("sceneId") if isinstance(activate_scene, dict) else None
-        state = activate_scene.get("state") if isinstance(activate_scene, dict) else None
+        scene_state = activate_scene.get("state") if isinstance(activate_scene, dict) else None
         deploy_id = await queue_provider_deploy(
             db, redis, frame, snapshot,
             scene_id=scene_id if isinstance(scene_id, str) and scene_id else None,
-            state=state if isinstance(state, dict) else None,
+            state=scene_state if isinstance(scene_state, dict) else None,
         )
         link = provider_link(frame)
-        applied = bool(link is not None and link.connected) and await _await_settled(
-            db, frame, deploy_id, DEPLOY_WAIT_SECONDS
+        state = (
+            await _await_settled(db, redis, frame, deploy_id, DEPLOY_WAIT_SECONDS)
+            if link is not None and link.connected
+            else "pending"
         )
+        if state != "pending":
+            await record_settled_provider_deploys(db, redis, frame)
+        if state == "failed":
+            raise RuntimeError("The frame refused the deploy; its log says why")
+        applied = state == "acked"
         if applied:
             await log(db, redis, id, "stdout", "The frame took the scenes and settings")
         else:

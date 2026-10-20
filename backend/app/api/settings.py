@@ -79,6 +79,14 @@ async def set_settings(data: SettingsUpdateRequest, db: Session = Depends(get_db
         # Wake the sync service (it lives in the worker process) so it picks up
         # the new configuration and republishes discovery data.
         await redis.publish(HA_SYNC_CHANNEL, json.dumps({"event": "settings_changed", "project_id": project_id}))
+    from app.api.provider_frames import DEVICE_DELIVERABLE_FIELDS
+
+    if any(group in payload for group in DEVICE_DELIVERABLE_FIELDS):
+        # Frames this backend is the provider of pull these keys themselves
+        # (GET /api/frames/{id}/service-settings): tell them to pull again.
+        from app.utils.provider_commands import nudge_provider_service_settings
+
+        await nudge_provider_service_settings(db, redis, project_id)
     return mask_settings(_form_settings(updated_settings))
 
 
