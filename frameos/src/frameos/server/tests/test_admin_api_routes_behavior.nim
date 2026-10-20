@@ -644,3 +644,55 @@ suite "Local network access routes":
       clearLocalAccessCodeOnPanel()
       "DRIVER-PNG"
     check fetchImage() != "DRIVER-PNG"
+
+# What the driver hook below hands out, and how often it was asked. Plain
+# ints: the hook runs on a server worker, and each request is answered
+# before the test reads them.
+var driverPictureVersion = 0
+var driverPngEncodes = 0
+
+suite "GET /image cache":
+  ## Last in the file: the cases above count on generation 0, where nothing
+  ## is cached.
+  teardown:
+    frameDriverPngHook = nil
+
+  test "nothing encoded while the driver has the picture is cached":
+    # An e-ink driver swaps in the new picture mid-push (it logs
+    # render:dither, and the workspace asks again) and then refreshes the
+    # panel for half a minute. That answer must be the new picture, not the
+    # one cached before the push — nothing asks again after it.
+    configureServerState(lanConfig("pimoroni.inky_impression_7"))
+    let cookie = adminLogin()
+    setLastImage(newImage(4, 4))
+    frameDriverPngHook = proc(rotate: int, flip: string): string {.nimcall, gcsafe.} =
+      driverPngEncodes += 1
+      "DRIVER-PNG-" & $driverPictureVersion
+    proc fetchImage(): string =
+      let response = httpRequest(server.port, "GET", "/api/frames/1/image",
+        headers = [("Cookie", cookie)])
+      check response.status == 200
+      response.body
+
+    check driverRenderGenerationValue() == 0
+    noteDriverRenderStarted()
+    driverPictureVersion = 1
+    noteDriverRendered()
+    check fetchImage() == "DRIVER-PNG-1"
+    check fetchImage() == "DRIVER-PNG-1"
+    check driverPngEncodes == 1
+
+    # The next push: the driver still shows the old picture, then dithers
+    # the new one in while the panel refreshes.
+    noteDriverRenderStarted()
+    check fetchImage() == "DRIVER-PNG-1"
+    driverPictureVersion = 2
+    check fetchImage() == "DRIVER-PNG-2"
+    check fetchImage() == "DRIVER-PNG-2"
+    check driverPngEncodes == 4
+
+    # At rest again: cached once more.
+    noteDriverRendered()
+    check fetchImage() == "DRIVER-PNG-2"
+    check fetchImage() == "DRIVER-PNG-2"
+    check driverPngEncodes == 5

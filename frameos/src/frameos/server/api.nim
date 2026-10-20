@@ -1138,9 +1138,10 @@ var frameImageCache {.guard: frameImageCacheLock.}: CachedFrameImage
 
 proc cachedFrameImagePng(generation: int): tuple[hit: bool, source: string, png: string] {.gcsafe.} =
   ## The PNG encoded for this driver render, if it is the one in the cache.
-  ## Generation 0 is "nothing has been pushed to the panel yet" — never
-  ## cached, so a frame that is still booting keeps answering live.
-  if generation <= 0:
+  ## Generation 0 is "nothing has been pushed to the panel yet" and an odd
+  ## one "a push is under way" (channels.nim) — neither is cached, so a frame
+  ## that is still booting or refreshing its panel keeps answering live.
+  if generation <= 0 or generation mod 2 == 1:
     return (hit: false, source: "", png: "")
   {.gcsafe.}:
     withLock frameImageCacheLock:
@@ -1150,7 +1151,7 @@ proc cachedFrameImagePng(generation: int): tuple[hit: bool, source: string, png:
   (hit: false, source: "", png: "")
 
 proc rememberFrameImagePng(generation: int, source: string, png: string) {.gcsafe.} =
-  if generation <= 0 or png.len == 0:
+  if generation <= 0 or generation mod 2 == 1 or png.len == 0:
     return
   {.gcsafe.}:
     withLock frameImageCacheLock:

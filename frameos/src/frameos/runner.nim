@@ -61,6 +61,16 @@ proc nextDriverRetrySeconds*(requested: float, floor: var float): float =
   floor = min(floor * 2, DRIVER_RETRY_MAX_SECONDS)
   max(requested, floor)
 
+proc pushToPanel(image: Image) =
+  ## Every push to the display driver. The generation is odd for as long as
+  ## the driver has the picture, and `GET /image` caches nothing meanwhile
+  ## (channels.nim).
+  noteDriverRenderStarted()
+  try:
+    drivers.render(image)
+  finally:
+    noteDriverRendered()
+
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0
 const RENDER_SLEEP_SLICE_MS = 100.0
@@ -513,8 +523,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         if self.localAccessDrawn:
           markLocalAccessCodeOnPanel()
         # TODO: render the driver part in another thread
-        drivers.render(lastRotatedImage)
-        noteDriverRendered()
+        pushToPanel(lastRotatedImage)
         if not self.localAccessDrawn:
           clearLocalAccessCodeOnPanel()
         # The framebuffer's late probe (Pi 5 KMS) reports the real panel
@@ -649,8 +658,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
             # The held canvas is the frame rendered above, code and all.
             if self.localAccessDrawn:
               markLocalAccessCodeOnPanel()
-            drivers.render(driverRetryImage)
-            noteDriverRendered()
+            pushToPanel(driverRetryImage)
             if not self.localAccessDrawn:
               clearLocalAccessCodeOnPanel()
             # This retry is exactly where a late framebuffer probe lands.
@@ -732,8 +740,7 @@ proc presentCursor(self: RunnerThread) =
   try:
     if codeDrawn:
       markLocalAccessCodeOnPanel()
-    drivers.render(image.rotateDegrees(self.frameConfig.rotate))
-    noteDriverRendered()
+    pushToPanel(image.rotateDegrees(self.frameConfig.rotate))
     if not codeDrawn:
       clearLocalAccessCodeOnPanel()
   except Exception as e:
