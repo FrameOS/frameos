@@ -2120,6 +2120,10 @@ export async function startFrameHub(
             ? { frameos_version: msg.frameos_version }
             : {}),
           ...(isRecord(msg.states) ? { states: msg.states } : {}),
+          // Both runtimes send the shown scene beside `states`, not in it.
+          ...(typeof msg.active_scene === "string"
+            ? { active_scene: msg.active_scene.slice(0, maxSceneIdChars) }
+            : {}),
           ...(typeof msg.scenes_checksum === "string"
             ? { scenes_checksum: msg.scenes_checksum }
             : {}),

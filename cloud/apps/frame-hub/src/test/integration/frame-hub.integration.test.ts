@@ -546,6 +546,24 @@ describe("device socket", () => {
     }, "frame marked disconnected");
   });
 
+  it("keeps the scene a hello reports beside its states", async () => {
+    // The Linux runtime and the ESP32 both send active_scene at the top of
+    // hello, next to scene-keyed states; the pre-auth copy of the hello
+    // must carry it into last_state.
+    const { frame, privateKey, token } = await createFrameFixture();
+    const device = await openDevice(token);
+    await handshake(device, privateKey, {
+      active_scene: "clock",
+      states: { clock: { zone: "UTC" } },
+    });
+    const row = await waitFor(async () => {
+      const [r] = await db.select().from(frames).where(eq(frames.id, frame.id));
+      return r?.connected ? r : undefined;
+    }, "frame marked connected");
+    expect(row.lastState).toEqual({ active_scene: "clock", clock: { zone: "UTC" } });
+    device.ws.close();
+  });
+
   it("rejects missing, invalid, and revoked credentials with 401", async () => {
     const { frame, token } = await createFrameFixture();
     expect(await expectUpgradeRejected("/api/frames/ws", {})).toBe(401);
