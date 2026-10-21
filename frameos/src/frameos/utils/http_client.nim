@@ -115,6 +115,13 @@ proc httpHostOf*(url: string): string =
   if mark >= 0:
     result = result.substr(mark + 3)
 
+proc streamReadCutBody*(got, received, contentLength: int64): bool =
+  ## Whether a body-stream read that returned `got` (0 or less) ended the
+  ## body early: a read error, or the end of the body before the length the
+  ## response announced (`contentLength`, -1 when it announced none) with
+  ## `received` bytes in hand. A decoder sees both as the end of its input.
+  got < 0 or (contentLength > 0 and received < contentLength)
+
 proc noteHttpWait(what, url: string, startedAt: MonoTime) =
   ## Lets the render deadline name the request that ate its time.
   let ms = int((getMonoTime() - startedAt).inMilliseconds)
@@ -287,6 +294,9 @@ when defined(frameosEmbedded) or defined(frameosWasm):
         prefixPos: int
         consumed: int64       ## bytes handed out past the retained prefix;
                               ## once > 0 a rewind must reopen the request
+        received*: int64      ## bytes read off the socket since the last open
+        interrupted*: bool    ## the body ended early: a read failed, or the
+                              ## connection closed before its Content-Length
         openedAt: MonoTime
 
     proc closeHttpBodyStream*(stream: HttpBodyStream) =
@@ -314,6 +324,8 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       stream.prefix = ""
       stream.prefixPos = 0
       stream.consumed = 0
+      stream.received = 0
+      stream.interrupted = false
       if stream.handle == nil:
         noteHttpWait("a reply from", stream.url, stream.openedAt)
         let detail = $errBuf.cstring
@@ -343,7 +355,12 @@ when defined(frameosEmbedded) or defined(frameosWasm):
         return 0
       let got = fos_nim_http_stream_read(stream.handle, dst, maxBytes.csize_t)
       if got <= 0:
+        # Both look like the end of the body to a decoder, which then calls
+        # the picture invalid; the caller needs to know the network cut it.
+        if streamReadCutBody(got, stream.received, stream.contentLength):
+          stream.interrupted = true
         return 0
+      stream.received += got
       got.int
 
     proc retainFromSocket(stream: HttpBodyStream, bytes: int): int =

@@ -1024,45 +1024,42 @@ when defined(frameosEmbedded):
   proc monoMs(): int64 =
     getMonoTime().ticks div 1_000_000
 
-  proc downloadImageStreamingInto(url: string, maxBytes: int, target: Image,
-      headers: seq[SimpleHttpHeader], fit: ScaledDecodeFit): bool =
-    ## Decodes a remote JPEG/PNG (BMP/PPM/WebP too) straight off the socket
-    ## into `target` — no copy of the compressed body ever lives in PSRAM or
-    ## on flash. Returns false when this fetch should go through the
-    ## buffered path instead (error status, unknown length, format without
-    ## a stream decoder, a decoder refusal such as a progressive JPEG, or a
-    ## transport/status failure while re-reading the body), which then
-    ## re-requests the URL and produces the same errors it always did. No
-    ## IOError leaves here: a transport problem is the buffered path's to
-    ## report, exactly as it was before streaming existed.
-    ##
-    ## Why: the buffered fetch holds the whole body before decoding. On a
-    ## board whose canvas already owns most of its PSRAM (8 MB reTerminal
-    ## E1004, 1200x1600) that meant every 1-2 MB gallery image spilled to a
-    ## /state partition with a few hundred KB free and failed. Budget
-    ## refusals still degrade to a reduced-resolution decode; the ladder's
-    ## retries rewind the stream, which replays the retained start of the
-    ## body when the refusal came from the header (the usual case) and
-    ## reopens the request otherwise.
-    if target.isNil or target.width <= 0 or target.height <= 0:
-      return false
+  type StreamAttempt = enum
+    streamDecoded  ## the picture is in the target
+    streamCut      ## the body ended early (Wi-Fi dropped, the connection
+                   ## closed): worth streaming once more
+    streamDeclined ## the buffered path takes this fetch
+
+  const StreamImageAttempts = 2
+
+  proc cutShortReason(stream: HttpBodyStream): string =
+    "the download stopped after " & $stream.received &
+      (if stream.contentLength > 0: " of " & $stream.contentLength else: "") & " bytes"
+
+  proc logStreamRetry(stream: HttpBodyStream, format: string, totalLen: int) =
+    log(%*{"event": "image:stream:retry", "format": format,
+           "bytes": totalLen, "reason": stream.cutShortReason()})
+
+  proc streamImageIntoOnce(url: string, target: Image,
+      headers: seq[SimpleHttpHeader], fit: ScaledDecodeFit, timeoutMs: int,
+      lastTry: bool): StreamAttempt =
     var stream: HttpBodyStream
     try:
-      stream = openHttpBodyStream(url, headers = headers)
+      stream = openHttpBodyStream(url, headers = headers, timeoutMs = timeoutMs)
     except IOError:
       # Transport failure: let the buffered path report it the usual way.
-      return false
+      return streamDeclined
     defer: stream.closeHttpBodyStream()
     if stream.httpBodyStreamFailed:
-      return false
-    # `maxBytes` bounds what the BUFFERED path may hold; a streamed decode
-    # holds a window of the body, whatever its length, so a photographer's
-    # 14 MB camera JPEG decodes here on a board whose buffered ceiling is
-    # 6 MB. Handing it over on size (as this once did) sent it to the
-    # buffered fetch, which refused it with "response too large". Only a
+      return streamDeclined
+    # The caller's `maxBytes` bounds what the BUFFERED path may hold; a
+    # streamed decode holds a window of the body, whatever its length, so a
+    # photographer's 14 MB camera JPEG decodes here on a board whose buffered
+    # ceiling is 6 MB. Handing it over on size (as this once did) sent it to
+    # the buffered fetch, which refused it with "response too large". Only a
     # body past any plausible photo is left to that path and its error.
     if stream.contentLength > StreamedImageMaxBytes:
-      return false
+      return streamDeclined
     var format = "unknown"
     var totalLen = 0
     try:
@@ -1103,15 +1100,25 @@ when defined(frameosEmbedded):
             stream.rewindHttpBodyStream()
             progress.restart(monoMs()),
           collectBeforeDecode = true):
-        return false
+        # A peek the network cut short sniffs as no format at all.
+        if stream.interrupted and not lastTry:
+          stream.logStreamRetry(format, totalLen)
+          return streamCut
+        return streamDeclined
     except HttpStreamReopenError as e:
       # A degrade rung needed the body again and the re-issued GET did not
       # give it back (rate limited, server error, transport). The buffered
       # path's own request surfaces that status the way it always did.
       log(%*{"event": "image:stream:fallback", "format": format,
              "bytes": totalLen, "reason": e.msg})
-      return false
+      return streamDeclined
     except PixieError as e:
+      # A body the network cut short reads as a broken picture ("Invalid
+      # JPEG, unable to load"). It is not one, and the next GET is likely
+      # to arrive whole.
+      if stream.interrupted and not lastTry:
+        stream.logStreamRetry(format, totalLen)
+        return streamCut
       if e.msg.contains("memory budget") or format == "WEBP":
         # The degrade ladder already ran out of rungs; buffering the body
         # would only add to the pressure that refused the decode. WebP has
@@ -1121,18 +1128,64 @@ when defined(frameosEmbedded):
       # Progressive JPEG, interlaced/16-bit PNG, truncated body, ...: the
       # buffered decoders handle more shapes, so hand over to them.
       log(%*{"event": "image:stream:fallback", "format": format,
-             "bytes": totalLen, "reason": e.msg})
-      return false
+             "bytes": totalLen,
+             "reason": if stream.interrupted: stream.cutShortReason() else: e.msg})
+      return streamDeclined
     except IOError, OSError:
       # Nothing on the streaming path is expected to raise these past the
       # reopen error above; if something does, the buffered fetch still
       # owns the error reporting rather than an app's error frame.
       log(%*{"event": "image:stream:fallback", "format": format,
              "bytes": totalLen, "reason": getCurrentExceptionMsg()})
-      return false
+      return streamDeclined
     log(%*{"event": "image:streamed", "format": format, "bytes": totalLen,
            "width": target.width, "height": target.height})
-    true
+    streamDecoded
+
+  proc downloadImageStreamingInto(url: string, maxBytes: int, target: Image,
+      headers: seq[SimpleHttpHeader], fit: ScaledDecodeFit): bool =
+    ## Decodes a remote JPEG/PNG (BMP/PPM/WebP too) straight off the socket
+    ## into `target` — no copy of the compressed body ever lives in PSRAM or
+    ## on flash. Returns false when this fetch should go through the
+    ## buffered path instead (error status, unknown length, format without
+    ## a stream decoder, a decoder refusal such as a progressive JPEG, or a
+    ## transport/status failure while re-reading the body), which then
+    ## re-requests the URL and produces the same errors it always did. No
+    ## IOError leaves here: a transport problem is the buffered path's to
+    ## report, exactly as it was before streaming existed.
+    ##
+    ## Why: the buffered fetch holds the whole body before decoding. On a
+    ## board whose canvas already owns most of its PSRAM (8 MB reTerminal
+    ## E1004, 1200x1600) that meant every 1-2 MB gallery image spilled to a
+    ## /state partition with a few hundred KB free and failed. Budget
+    ## refusals still degrade to a reduced-resolution decode; the ladder's
+    ## retries rewind the stream, which replays the retained start of the
+    ## body when the refusal came from the header (the usual case) and
+    ## reopens the request otherwise.
+    ##
+    ## A body the network cut short is streamed once more before the
+    ## buffered path gets it. The socket stays open for the whole decode
+    ## (30 s for a gallery JPEG on the E1004), so a Wi-Fi drop in that window
+    ## used to fail the picture: the decoder called it invalid and the
+    ## buffered request went out before the station was back (frame 70,
+    ## 2026-10-17..21). The second open waits for the station
+    ## (frameos_nim_glue.c, http_wait_for_wifi), within what is left of the
+    ## render deadline.
+    if target.isNil or target.width <= 0 or target.height <= 0:
+      return false
+    for attempt in 1 .. StreamImageAttempts:
+      let timeoutMs = if attempt == 1: DefaultFetchTimeoutMs
+                      else: capToRenderDeadline(DefaultFetchTimeoutMs)
+      case streamImageIntoOnce(url, target, headers, fit, timeoutMs,
+          lastTry = attempt == StreamImageAttempts)
+      of streamDecoded:
+        return true
+      of streamDeclined:
+        return false
+      of streamCut:
+        if renderDeadlineRemainingMs() == 0:
+          return false
+    false
 
   proc downloadImageFromResolvedBuffer(url: string, maxBytes: int, target: Image = nil,
       headers: seq[SimpleHttpHeader] = @[], fit = fitCover,

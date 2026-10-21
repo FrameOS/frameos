@@ -25,7 +25,7 @@ static const char *TAG = "fos_wifi";
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAILED_BIT BIT1
 #define WIFI_MAX_RETRIES 12
-#define WIFI_PORTAL_RETRY_LOG_INTERVAL 10
+#define WIFI_RETRY_LOG_INTERVAL 10
 
 static EventGroupHandle_t s_events;
 static fos_wifi_state_t s_state = FOS_WIFI_OFFLINE;
@@ -41,32 +41,43 @@ static bool s_portal_sta_retry = false;
  * retry is an all-channel scan that takes the soft-AP off the air, and an
  * immediate retry loop kept it off most of the time: a phone saw the
  * hotspot in one scan out of three and lost it mid-join (2026-09-04, E1002).
- * Space the retries out instead. */
-#define WIFI_PORTAL_RETRY_INTERVAL_MS 30000
-static esp_timer_handle_t s_portal_retry_timer = NULL;
+ * Space the retries out instead. A link that was up and went away gets the
+ * same slow retries once its quick ones are spent: those last well under a
+ * minute, a router restart takes longer, and a frame that stays awake used
+ * to stay offline until it was rebooted. */
+#define WIFI_STA_RETRY_INTERVAL_MS 30000
+static esp_timer_handle_t s_sta_retry_timer = NULL;
+/* When an established link went down (0 while it is up), and what the drops
+ * of this boot looked like: the metrics line reports them, the only record
+ * of a link that comes and goes. */
+static int64_t s_down_since_us = 0;
+static uint32_t s_drops = 0;
+static uint8_t s_last_drop_reason = 0;
+static uint32_t s_last_down_ms = 0;
 
-static void portal_retry_timer_cb(void *arg)
+static void sta_retry_timer_cb(void *arg)
 {
     (void)arg;
-    if (s_portal_active && s_portal_sta_retry && !s_scan_only) {
+    if (s_scan_only) return;
+    if (s_portal_active ? s_portal_sta_retry : s_state == FOS_WIFI_CONNECTING) {
         esp_wifi_connect();
     }
 }
 
-static void schedule_portal_retry(void)
+static void schedule_sta_retry(void)
 {
-    if (!s_portal_retry_timer) {
+    if (!s_sta_retry_timer) {
         const esp_timer_create_args_t args = {
-            .callback = portal_retry_timer_cb,
-            .name = "fos_portal_retry",
+            .callback = sta_retry_timer_cb,
+            .name = "fos_sta_retry",
         };
-        if (esp_timer_create(&args, &s_portal_retry_timer) != ESP_OK) {
+        if (esp_timer_create(&args, &s_sta_retry_timer) != ESP_OK) {
             esp_wifi_connect();
             return;
         }
     }
-    esp_timer_stop(s_portal_retry_timer);
-    if (esp_timer_start_once(s_portal_retry_timer, (uint64_t)WIFI_PORTAL_RETRY_INTERVAL_MS * 1000) != ESP_OK) {
+    esp_timer_stop(s_sta_retry_timer);
+    if (esp_timer_start_once(s_sta_retry_timer, (uint64_t)WIFI_STA_RETRY_INTERVAL_MS * 1000) != ESP_OK) {
         esp_wifi_connect();
     }
 }
@@ -191,12 +202,19 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
             s_state = FOS_WIFI_PORTAL;
             strlcpy(s_ip, "192.168.4.1", sizeof(s_ip));
             s_retries++;
-            if (s_retries == 1 || (s_retries % WIFI_PORTAL_RETRY_LOG_INTERVAL) == 0) {
+            if (s_retries == 1 || (s_retries % WIFI_RETRY_LOG_INTERVAL) == 0) {
                 ESP_LOGW(TAG, "portal STA disconnected reason=%u (%s), background retry #%d in %d s",
                          (unsigned)reason, disconnect_reason_name(reason), s_retries,
-                         WIFI_PORTAL_RETRY_INTERVAL_MS / 1000);
+                         WIFI_STA_RETRY_INTERVAL_MS / 1000);
             }
-            schedule_portal_retry();
+            schedule_sta_retry();
+        } else if (s_state == FOS_WIFI_CONNECTING && s_down_since_us != 0) {
+            if ((s_retries % WIFI_RETRY_LOG_INTERVAL) == 0) {
+                ESP_LOGW(TAG, "still disconnected reason=%u (%s), retrying every %d s",
+                         (unsigned)reason, disconnect_reason_name(reason),
+                         WIFI_STA_RETRY_INTERVAL_MS / 1000);
+            }
+            schedule_sta_retry();
         } else if (s_state == FOS_WIFI_CONNECTING) {
             xEventGroupSetBits(s_events, WIFI_FAILED_BIT);
         } else if (s_state == FOS_WIFI_CONNECTED) {
@@ -207,7 +225,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
                 s_state = s_portal_active ? FOS_WIFI_PORTAL : FOS_WIFI_CONNECTING;
                 s_retries = 0;
             } else {
-                ESP_LOGW(TAG, "connection lost, reconnecting");
+                ESP_LOGW(TAG, "connection lost reason=%u (%s), reconnecting",
+                         (unsigned)reason, disconnect_reason_name(reason));
+                s_drops++;
+                s_last_drop_reason = reason;
+                s_down_since_us = esp_timer_get_time();
                 s_state = s_portal_active ? FOS_WIFI_PORTAL : FOS_WIFI_CONNECTING;
                 s_retries = 0;
                 esp_wifi_connect();
@@ -218,6 +240,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
         snprintf(s_ip, sizeof(s_ip), IPSTR, IP2STR(&event->ip_info.ip));
         s_retries = 0;
         s_state = FOS_WIFI_CONNECTED;
+        if (s_down_since_us != 0) {
+            s_last_down_ms = (uint32_t)((esp_timer_get_time() - s_down_since_us) / 1000);
+            s_down_since_us = 0;
+        }
+        if (s_sta_retry_timer) esp_timer_stop(s_sta_retry_timer);
         ESP_LOGI(TAG, "got ip %s", s_ip);
         xEventGroupSetBits(s_events, WIFI_CONNECTED_BIT);
         if (s_portal_active) {
@@ -228,7 +255,6 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
              * SNTP wait in the callback), not the event task's. */
             s_portal_active = false;
             s_portal_sta_retry = false;
-            if (s_portal_retry_timer) esp_timer_stop(s_portal_retry_timer);
             if (xTaskCreate(portal_exit_task, "fos_portal_exit", 6144, NULL, 5, NULL) != pdPASS) {
                 ESP_LOGW(TAG, "portal teardown task failed to start");
             }
@@ -291,7 +317,8 @@ esp_err_t fos_wifi_connect(uint32_t timeout_ms)
     s_retries = 0;
     s_portal_active = false;
     s_portal_sta_retry = false;
-    if (s_portal_retry_timer) esp_timer_stop(s_portal_retry_timer);
+    s_down_since_us = 0;
+    if (s_sta_retry_timer) esp_timer_stop(s_sta_retry_timer);
     xEventGroupClearBits(s_events, WIFI_CONNECTED_BIT | WIFI_FAILED_BIT);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
@@ -494,6 +521,13 @@ int fos_wifi_rssi(void)
         return ap.rssi;
     }
     return 0;
+}
+
+void fos_wifi_drop_stats(uint32_t *drops, uint8_t *last_reason, uint32_t *last_down_ms)
+{
+    *drops = s_drops;
+    *last_reason = s_last_drop_reason;
+    *last_down_ms = s_last_down_ms;
 }
 
 /* SNTP keeps polling in the background after the boot-time wait; a pool

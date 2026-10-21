@@ -1784,6 +1784,43 @@ static void http_connect_reason(const char *url, esp_err_t err, char *buf, size_
     }
 }
 
+/* A request that finds the station without an address waits for it to come
+ * back: the Wi-Fi driver reconnects on its own after a drop, usually within
+ * seconds, and going out at once turned every short drop into an error frame
+ * that stayed up until the next render (frame 70, a reTerminal E1004: its
+ * gallery download died mid-body and the fallback request left before the
+ * station was back, 2026-10-17..21). The wait is bounded by the
+ * request's own timeout, which the Nim side caps to what is left of the
+ * render deadline. A wait that ran out is not repeated while the station
+ * stays away, or every request of a scene would spend the same 20 s. */
+#define HTTP_WIFI_WAIT_MS (20 * 1000)
+#define HTTP_WIFI_POLL_MS 250
+static int64_t s_http_wifi_gave_up_us = 0;
+
+static void http_wait_for_wifi(int timeout_ms, const char *log_url)
+{
+    if (http_wifi_has_ip()) {
+        s_http_wifi_gave_up_us = 0;
+        return;
+    }
+    if (s_http_wifi_gave_up_us != 0) return;
+    int wait_ms = timeout_ms > 0 && timeout_ms < HTTP_WIFI_WAIT_MS ? timeout_ms : HTTP_WIFI_WAIT_MS;
+    int64_t started_us = esp_timer_get_time();
+    bool back = false;
+    while (!back && esp_timer_get_time() - started_us < (int64_t)wait_ms * 1000) {
+        vTaskDelay(pdMS_TO_TICKS(HTTP_WIFI_POLL_MS));
+        back = http_wifi_has_ip();
+    }
+    if (!back) s_http_wifi_gave_up_us = esp_timer_get_time();
+    char line[224];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"http:wifiWait\",\"source\":\"esp32\",\"url\":\"%s\","
+             "\"waitedMs\":%lld,\"back\":%s}",
+             log_url, (long long)((esp_timer_get_time() - started_us) / 1000),
+             back ? "true" : "false");
+    frameos_nim_log_hook(line);
+}
+
 /* The first connect after a deep-sleep wake is sometimes refused at once
  * while the next one, a second later, goes through (fos_backend_http.c does
  * the same for the firmware's own requests). Only an instant refusal is
@@ -1840,6 +1877,8 @@ static esp_http_client_handle_t http_open_request(
     *out_status = 0;
     *out_content_length = -1;
     if (err_buf != NULL && err_buf_len > 0) err_buf[0] = '\0';
+    /* Before the policy check: its DNS lookup needs the station too. */
+    http_wait_for_wifi(timeout_ms, log_url);
     /* Private-network policy (fos_netguard.h). This is the one funnel every
      * scene HTTP request goes through, and on a cloud-managed frame a scene is
      * something a provider installed — so it does not get to reach the owner's

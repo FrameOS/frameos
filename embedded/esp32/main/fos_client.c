@@ -209,7 +209,7 @@ static const char *wake_cause_name(void)
 
 static void log_metrics_sample(void)
 {
-    char json[640];
+    char json[720];
     int battery_pct = -1, battery_mv = 0, battery_raw_mv = 0;
     if (fos_battery_present()) {
         fos_battery_read(&battery_raw_mv, &battery_pct);
@@ -279,6 +279,19 @@ static void log_metrics_sample(void)
             used += (size_t)snprintf(json + used, sizeof(json) - used,
                                      ",\"batteryRawMillivolts\":%d", battery_raw_mv);
         }
+    }
+    uint32_t wifi_drops = 0, wifi_down_ms = 0;
+    uint8_t wifi_drop_reason = 0;
+    fos_wifi_drop_stats(&wifi_drops, &wifi_drop_reason, &wifi_down_ms);
+    if (wifi_drops > 0 && used < sizeof(json) - 80) {
+        /* Only when the link went away this boot: the reason is the 802.11
+         * code (WIFI_REASON_*: 200 beacon timeout, 2/4 the AP expired us,
+         * 15 a key handshake timed out), which tells a bad signal from an
+         * access point that dropped the frame. */
+        used += (size_t)snprintf(json + used, sizeof(json) - used,
+                                 ",\"wifiDrops\":%lu,\"wifiDropReason\":%u,\"wifiDownMs\":%lu",
+                                 (unsigned long)wifi_drops, (unsigned)wifi_drop_reason,
+                                 (unsigned long)wifi_down_ms);
     }
     if (used < sizeof(json) - 2) {
         snprintf(json + used, sizeof(json) - used, "}");
