@@ -4,8 +4,9 @@ import { getFrameControlFrameId } from './utils/frameControlMode'
 import type { FrameId } from './utils/frameId'
 import { isCloudMode } from './utils/cloudMode'
 
-// Self-hosted: /frames/<id> and /scenes/<frameId>/<sceneId> beside each
-// other under the base path. Cloud: the SPA is mounted AT /frames, so a
+// Self-hosted: the frames home at /frames, a frame at /frames/<id> and
+// /scenes/<frameId>/<sceneId> beside them under the base path; the base
+// path's root goes to the home page (getRouteRedirects in scenes/scenes.tsx). Cloud: the SPA is mounted AT /frames, so a
 // frame is /frames/<id> (not /frames/frames/<id>) and its scenes nest under
 // it — /frames/<id>/scenes/<sceneId>. The apps and photos pages are not
 // about one frame, so on the cloud they sit beside the mount at the origin
@@ -69,7 +70,11 @@ function frameControlScenesUrl(sceneId?: string): string {
 }
 
 function framesUrl(): string {
-  return isInFrameAdminMode() ? getRouteBasePath() + frameAdminPath() : getRouteBasePath() ? getRouteBasePath() : '/'
+  if (isInFrameAdminMode()) {
+    return getRouteBasePath() + frameAdminPath()
+  }
+  // The cloud mounts the SPA AT /frames (its route base path).
+  return isCloudMode() ? getRouteBasePath() || '/' : getRouteBasePath() + '/frames'
 }
 
 export const urls = {
@@ -77,8 +82,8 @@ export const urls = {
   accountUsage: () => settingsUrl('usage'),
   frames: framesUrl,
   /** Where the rail's logo goes: the home page (hello, recent frames,
-   * scenes and albums, usage) beside the frames home; the on-device admin
-   * panel is one frame and has none. */
+   * scenes and albums, usage), also where a backend's root and its login
+   * land; the on-device admin panel is one frame and has none. */
   home: () => (isCloudMode() ? '/home' : isInFrameAdminMode() ? framesUrl() : getRouteBasePath() + '/home'),
   frame: frameUrl,
   frameControl: frameControlUrl,

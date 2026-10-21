@@ -231,7 +231,7 @@ export const visualCases: VisualCase[] = [
   {
     id: 'frames-home',
     title: 'Frames home',
-    path: '/',
+    path: '/frames',
     fullPage: true,
     variants: [
       { id: 'default' },

@@ -29,7 +29,7 @@ test.describe.serial('@e2e frame installation setup flow', () => {
     await installE2ERoutes(page)
     await login(page)
     await cleanupE2EInstallFrames(page)
-    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await page.goto('/frames', { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('button', { name: /Add frame/i }).first()).toBeVisible()
   })
 

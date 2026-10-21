@@ -99,7 +99,7 @@ export const signupLogic = kea<signupLogicType>([
           })
           if (response.ok) {
             clearCachedProjectId()
-            window.location.href = urls.frames()
+            window.location.href = urls.home()
           } else {
             let errors = {}
             try {

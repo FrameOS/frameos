@@ -100,7 +100,7 @@ export const loginLogic = kea<loginLogicType>([
           })
           if (response.ok) {
             clearCachedProjectId()
-            window.location.href = urls.frames()
+            window.location.href = urls.home()
           } else {
             let error
             try {
@@ -125,7 +125,7 @@ export const loginLogic = kea<loginLogicType>([
         credentials: 'include',
       })
       if (response.ok) {
-        window.location.href = urls.frames()
+        window.location.href = urls.home()
       }
     } catch (error) {
       console.error('Error checking current user:', error)

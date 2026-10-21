@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 // The home page behind the rail's logo is shared: the cloud's /home and a
 // backend's /home (under its ingress path), never the on-device admin panel,
-// whose logo is its one frame. A backend's frames carry last_log_at where a
+// whose logo is its one frame. A backend's frames home is /frames, and its
+// root goes on to /home the way the cloud's does. A backend's frames carry
+// last_log_at where a
 // cloud frame has the hub's last_seen_at, so "recent" has to read both, and
 // its numbers at a glance leave archived frames out.
 import { afterEach, describe, expect, it } from "vitest";
@@ -24,19 +26,38 @@ afterEach(() => {
     .FRAMEOS_APP_CONFIG;
 });
 
-async function routesUnder(
-  config: Record<string, unknown>,
-): Promise<Record<string, string>> {
+type ScenesModule = {
+  getRoutes: () => Record<string, string>;
+  getRouteRedirects: () => Record<string, () => string>;
+};
+
+async function scenesModule(): Promise<ScenesModule> {
   // Through a variable, like cloud-frames-routes.test.ts: the module pulls
   // in every scene's types.
   const scenesModulePath = new URL(
     "../../../../../../frontend/src/scenes/scenes.tsx",
     import.meta.url,
   ).pathname;
-  const { getRoutes } = (await import(scenesModulePath)) as {
-    getRoutes: () => Record<string, string>;
-  };
+  return (await import(scenesModulePath)) as ScenesModule;
+}
+
+async function routesUnder(
+  config: Record<string, unknown>,
+): Promise<Record<string, string>> {
+  const { getRoutes } = await scenesModule();
   return withSpaConfig(config, () => getRoutes());
+}
+
+/** Each redirect as "from -> to". */
+async function redirectsUnder(
+  config: Record<string, unknown>,
+): Promise<string[]> {
+  const { getRouteRedirects } = await scenesModule();
+  return withSpaConfig(config, () =>
+    Object.entries(getRouteRedirects()).map(
+      ([from, target]) => `${from} -> ${target()}`,
+    ),
+  );
 }
 
 const minutesAgo = (minutes: number) =>
@@ -47,11 +68,15 @@ function frame(id: number, fields: Partial<FrameType>): FrameType {
 }
 
 describe("the home page's address", () => {
-  it("is /home on a backend, beside the frames home at /", async () => {
+  it("is /home on a backend, where its root goes; the frames home is /frames", async () => {
     expect(withSpaConfig({}, () => urls.home())).toBe("/home");
+    expect(withSpaConfig({}, () => urls.frames())).toBe("/frames");
     const routes = await routesUnder({});
     expect(routes["/home"]).toBe("home");
-    expect(routes["/"]).toBe("frames");
+    expect(routes["/frames"]).toBe("frames");
+    expect(routes["/frames/:id"]).toBe("frame");
+    expect(routes["/"]).toBeUndefined();
+    expect(await redirectsUnder({})).toEqual(["/ -> /home"]);
   });
 
   it("sits under Home Assistant's ingress path", async () => {
@@ -59,9 +84,17 @@ describe("the home page's address", () => {
     expect(withSpaConfig(config, () => urls.home())).toBe(
       "/api/hassio_ingress/abc/home",
     );
-    expect((await routesUnder(config))["/api/hassio_ingress/abc/home"]).toBe(
-      "home",
+    expect(withSpaConfig(config, () => urls.frames())).toBe(
+      "/api/hassio_ingress/abc/frames",
     );
+    const routes = await routesUnder(config);
+    expect(routes["/api/hassio_ingress/abc/home"]).toBe("home");
+    expect(routes["/api/hassio_ingress/abc/frames"]).toBe("frames");
+    // The bare ingress URL, with or without its slash, opens the home page.
+    expect(await redirectsUnder(config)).toEqual([
+      "/api/hassio_ingress/abc -> /api/hassio_ingress/abc/home",
+      "/api/hassio_ingress/abc/ -> /api/hassio_ingress/abc/home",
+    ]);
   });
 
   it("is /home on the cloud", async () => {
@@ -71,13 +104,21 @@ describe("the home page's address", () => {
       route_base_path: "/frames",
     };
     expect(withSpaConfig(config, () => urls.home())).toBe("/home");
-    expect((await routesUnder(config))["/home"]).toBe("home");
+    // The SPA is mounted AT /frames: the frames home is the mount itself.
+    expect(withSpaConfig(config, () => urls.frames())).toBe("/frames");
+    const routes = await routesUnder(config);
+    expect(routes["/home"]).toBe("home");
+    expect(routes["/frames"]).toBe("frames");
+    expect(routes["/frames/"]).toBe("frames");
+    expect(await redirectsUnder(config)).toEqual([]);
   });
 
   it("does not exist on the on-device admin panel", async () => {
     const config = { frameAdminMode: true };
     expect(withSpaConfig(config, () => urls.home())).toBe("/admin");
+    expect(withSpaConfig(config, () => urls.frames())).toBe("/admin");
     expect(Object.values(await routesUnder(config))).not.toContain("home");
+    expect(await redirectsUnder(config)).toEqual([]);
   });
 });
 

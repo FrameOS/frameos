@@ -91,11 +91,15 @@ export function preloadSceneComponent(scene: LoadableSceneKey): void {
 // settings/account/accountPages.ts). It is not registered in frame-admin
 // mode, where urls.settings() IS a frame tool path (/frames/<id>/settings)
 // that the frame scene renders.
+function isBackendShell(): boolean {
+  return !isCloudMode() && !isInFrameAdminMode()
+}
+
 export const getRoutes = () =>
   ({
-    ...(getRouteBasePath() ? { [getRouteBasePath() + '/']: 'frames' } : {}),
+    ...(getRouteBasePath() && !isBackendShell() ? { [getRouteBasePath() + '/']: 'frames' } : {}),
     ...(isCloudMode() ? { [urls.home()]: 'home', [urls.store()]: 'storeFront', '/': 'storeFront' } : {}),
-    ...(isCloudMode() || isInFrameAdminMode() ? {} : { [urls.home()]: 'home' }),
+    ...(isBackendShell() ? { [urls.home()]: 'home' } : {}),
     [urls.frames()]: isInFrameAdminMode() ? 'frame' : 'frames',
     ...(isInFrameAdminMode()
       ? {}
@@ -129,3 +133,10 @@ export const getRoutes = () =>
     [urls.frame(':id')]: 'frame',
     [urls.frame(':id', ':tool')]: 'frame',
   } as const)
+
+// Addresses that only send the browser on, replaced before any scene
+// renders (sceneLogic). A backend's root, and under Home Assistant the bare
+// ingress URL, is the home page, the way the cloud's root is /home; the
+// frames home is /frames.
+export const getRouteRedirects = (): Record<string, () => string> =>
+  isBackendShell() ? { [getRouteBasePath() || '/']: urls.home, [getRouteBasePath() + '/']: urls.home } : {}
