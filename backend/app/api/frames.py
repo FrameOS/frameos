@@ -1680,6 +1680,19 @@ async def api_frame_event(
             )
         elif event == "setCurrentScene":
             await clear_thin_client_preview(redis, frame)
+    # A scene event for a thin client (a custom event, a `button` said over
+    # HTTP; what the contract's `cloud` column sends as `scene_event`): the
+    # board has no runtime to hand it to, so it waits for the board's next
+    # render pull, which runs it in the scene before drawing. The board is
+    # only asked to pull. `setSceneState` is in the store already (above).
+    held_for_pull = False
+    if is_thin_client_frame(frame) and event != "setSceneState":
+        scene_event = _embedded_event_command(frame, event, body)
+        if scene_event is not None and scene_event[0] == "scene_event":
+            from .embedded_device import hold_thin_client_event
+
+            await hold_thin_client_event(redis, frame, scene_event[1]["name"], scene_event[1]["payload"])
+            held_for_pull = True
     # An ESP32 is a fresh boot on every wake and cannot be pushed to while
     # it sleeps: the event goes on its command queue, the cloud way, and the
     # answer says whether the frame has already taken it or still will.
@@ -1696,7 +1709,8 @@ async def api_frame_event(
                 preview_scene_id if isinstance(preview_scene_id, str) and preview_scene_id else None,
                 wait_seconds=EMBEDDED_PREVIEW_WAIT_SECONDS,
             )
-        queued = _embedded_event_command(frame, event, body)
+        # A held event's board (an ESP32-C3) only has to pull.
+        queued = ("render", {}, None) if held_for_pull else _embedded_event_command(frame, event, body)
         if queued is not None:
             command_type, payload, detail = queued
             outcome = await queue_embedded_command(
@@ -1719,7 +1733,7 @@ async def api_frame_event(
     # A board that does not answer (asleep on battery, between networks)
     # shows it on its next pull, which is the queued answer, not an error.
     thin_push = (
-        event in {"setCurrentScene", "setSceneState", "uploadScenes", "render"}
+        (held_for_pull or event in {"setCurrentScene", "setSceneState", "uploadScenes", "render"})
         and is_thin_client_frame(frame)
         and not is_queued_embedded_frame(frame)
     )

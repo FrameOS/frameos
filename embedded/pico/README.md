@@ -36,6 +36,7 @@ Everything *else* an ESP32 frame does, this firmware does too:
 | Battery | RTC power-cut sleep between renders (~20 µA), always or only when off USB; wake on the interval or any front button |
 | Inky Frame extras | Front buttons that reach the scene (below), button/activity/connection LEDs, battery-backed clock seeded from SNTP |
 | Buttons | A–E reach the scene as `gpio` edges and the `press` / `doublePress` / `longPress` they make, exactly as on any frame: the board sends its edges with the next render pull, once the press is decided, and the backend's runtime hears them before it renders (`docs/events.md`, "Thin clients"). The press that woke the board counts |
+| Scene events | A custom event sent from FrameOS (the workspace, the API) waits in the backend and runs in the scene on the board's next pull, which the backend asks for; a board asleep on battery gets it when it wakes |
 
 What it does **not** have: OTA (2–4 MB of flash with no second slot — update
 by UF2, `bootsel` makes that one click), a FrameOS Cloud link (the cloud

@@ -381,6 +381,31 @@ proc frameos_wasm_device_input(inputJson: cstring): cint {.exportc, cdecl.} =
     setLastError("device input failed: " & e.msg)
     -1
 
+proc frameos_wasm_control_event(origin: cstring, eventName: cstring, payloadJson: cstring): bool {.exportc, cdecl.} =
+  ## An event a control plane sent a thin client (a custom event from the
+  ## workspace), held for its render pull and delivered here before the
+  ## render, as the frame's own HTTP API or hub would have. From `http:admin`
+  ## or `cloud` only, so the contract's origin rules still decide (the cloud
+  ## may fire a custom event only where the scene declared it). False when it
+  ## came to nothing.
+  try:
+    let source =
+      case $origin
+      of $eoHttpAdmin: eoHttpAdmin
+      of $eoCloud: eoCloud
+      else:
+        setLastError("control event from " & $origin & ", which is not a control plane")
+        return false
+    let payload =
+      if payloadJson == nil or ($payloadJson).len == 0:
+        %*{}
+      else:
+        parseJson($payloadJson)
+    host.send(source, $eventName, payload)
+  except Exception as e:
+    setLastError("control event " & $eventName & " failed: " & e.msg)
+    false
+
 proc frameos_wasm_tick(): bool {.exportc, cdecl.} =
   ## Time passing with nothing sent — the worker calls this while a pointer or
   ## a button is held or a button press waits for a possible second one, so a

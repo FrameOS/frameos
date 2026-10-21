@@ -356,6 +356,15 @@ render, and the backend writes what the scene heard into the frame's log. The
 Inky Frame's five buttons have no GPIO of their own (a shift register reads
 them): they are pin `-1`, labelled `A` to `E`.
 
+What a control plane sends a thin client for its scene (a custom event, a
+`button` said over HTTP: what the contract's `cloud` column carries as
+`scene_event`) waits the same way: the backend holds it, asks the board to
+pull (a push to a Pico, a `render` command on an ESP32-C3's queue), and the
+pull runs it in the scene, from `http:admin`, before the render
+(`frameos_wasm_control_event`, which takes `http:admin` or `cloud` and
+nothing else, so the origin rules above still decide). A board asleep on
+battery gets it on its next wake.
+
 A `button` that is not an edge (no `level`, and an `action` other than `down`
 / `up`) is someone saying a button was pressed: HTTP, the cloud, a schedule,
 a scene. It moved no line and has nothing to time, so it is delivered as said,

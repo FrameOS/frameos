@@ -567,9 +567,16 @@ async def test_a_pico_that_does_not_answer_gets_the_switch_on_its_next_pull(asyn
         assert response.json()['status'] == 'queued'
         assert await redis.get(f'frame:{frame.id}:active_scene') in (b'other', 'other')
 
-        # A custom event is not in the store: that still says it failed.
+        # A custom event waits for the next pull the same way.
         response = await async_client.post(
             f'/api/frames/{frame.id}/event/wiggle', json={}, headers={'content-type': 'application/json'})
+        assert response.status_code == 200, response.text
+        assert response.json()['status'] == 'queued'
+        assert await redis.llen(f'frame:{frame.id}:thin_client_events') == 1
+
+        # An event with nothing held for it (a metrics request) still fails.
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/metrics', json={}, headers={'content-type': 'application/json'})
         assert response.status_code == 502
 
 
@@ -641,6 +648,89 @@ async def test_a_render_pull_with_presses_hands_them_to_the_scene(async_client, 
     assert response.status_code == 200
     assert calls[-1]['device_input'] is None
     assert db.query(Log).filter(Log.frame_id == frame.id).count() == before
+
+
+@pytest.mark.asyncio
+async def test_a_custom_event_for_a_pico_waits_for_its_next_pull(
+    async_client, no_auth_client, db, redis, monkeypatch
+):
+    """The board has no runtime to hand a scene event to: it is held, the
+    board is asked to pull, and that pull runs it in the scene once."""
+    from app.models.log import Log
+
+    frame = await pico_spectra_frame(async_client, db)
+    frame.scenes = [_slideshow_scene()]
+    db.add(frame)
+    db.commit()
+
+    with patch('app.api.frames._forward_frame_request', new_callable=AsyncMock, return_value='OK') as forward:
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/wiggle', json={'times': 3}, headers={'content-type': 'application/json'})
+        assert response.status_code == 200, response.text
+        assert forward.await_args.kwargs['path'] == '/event/wiggle'
+        # Said over HTTP, `button` is a scene event too.
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/button', json={'label': 'A'}, headers={'content-type': 'application/json'})
+        assert response.status_code == 200, response.text
+
+    calls: list = []
+
+    async def fake_render(frame_arg, width, height, **kwargs):
+        calls.append(kwargs)
+        if kwargs.get('control_events'):
+            kwargs['scene_logs'].append('{"event":"event:wiggle","origin":"http:admin","payload":{"times":3}}')
+        return bytes((0, 0, 0, 255)) * (width * height), None, None
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', fake_render)
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert calls[-1]['control_events'] == [
+        {'name': 'wiggle', 'payload': {'times': 3}, 'origin': 'http:admin'},
+        {'name': 'button', 'payload': {'label': 'A'}, 'origin': 'http:admin'},
+    ]
+    lines = [row.line for row in db.query(Log).filter(Log.frame_id == frame.id).all()]
+    assert any('event:wiggle' in line for line in lines)
+
+    # Once.
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 200
+    assert calls[-1]['control_events'] is None
+
+
+@pytest.mark.asyncio
+async def test_a_pull_turned_away_keeps_the_held_events(async_client, no_auth_client, db, redis, monkeypatch):
+    from app.api.embedded_device import hold_thin_client_event
+    from app.utils.embedded_render import RenderQueueFull
+
+    frame = await pico_spectra_frame(async_client, db)
+    await hold_thin_client_event(redis, frame, 'first', {})
+
+    async def queue_full(frame_arg, width, height, **kwargs):
+        raise RenderQueueFull()
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', queue_full)
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 503
+    await hold_thin_client_event(redis, frame, 'second', {})
+
+    calls: list = []
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', scene_renderer(calls))
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 200
+    assert [event['name'] for event in calls[-1]['control_events']] == ['first', 'second']
+
+
+@pytest.mark.asyncio
+async def test_held_events_keep_the_newest(async_client, db, redis):
+    from app.api.embedded_device import MAX_THIN_CLIENT_EVENTS, _take_thin_client_events, hold_thin_client_event
+
+    frame = await pico_spectra_frame(async_client, db)
+    for index in range(MAX_THIN_CLIENT_EVENTS + 5):
+        await hold_thin_client_event(redis, frame, f'e{index}', {'index': index})
+    events = await _take_thin_client_events(redis, frame)
+    assert len(events) == MAX_THIN_CLIENT_EVENTS
+    assert events[0]['name'] == 'e5' and events[-1]['name'] == f'e{MAX_THIN_CLIENT_EVENTS + 4}'
+    assert await _take_thin_client_events(redis, frame) == []
 
 
 @pytest.mark.asyncio

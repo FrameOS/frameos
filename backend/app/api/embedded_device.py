@@ -450,11 +450,71 @@ def embedded_device_input(body: object) -> dict:
     return {"nowMs": now_ms, "edges": edges}
 
 
-async def _log_relayed_input(db: Session, redis, frame: Frame, scene_logs: list[str]) -> None:
-    """What the scene heard of a thin client's presses, into the frame log: the
-    dispatcher's `event:*` lines (the `gpio` edges, the `button` they made,
-    what the scene dispatched in turn), as an ESP32's own runtime logs them.
-    Only for a pull that carried presses; an ordinary poll logs nothing."""
+# Scene events sent to a thin client wait for its next render pull; a board
+# asleep for a day still gets the last few.
+MAX_THIN_CLIENT_EVENTS = 32
+
+
+def _thin_client_events_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:thin_client_events"
+
+
+async def hold_thin_client_event(redis, frame: Frame, name: str, payload: object, origin: str = "http:admin") -> None:
+    """A scene event for a thin client (a custom event from the workspace, a
+    `button` said over HTTP). The board has no runtime to hand it to, so it
+    waits here, and the board's next render pull runs it in the scene before
+    drawing: the board is only asked to pull. The oldest go first past
+    MAX_THIN_CLIENT_EVENTS."""
+    key = _thin_client_events_key(int(frame.id))
+    record = {"name": name, "payload": payload if isinstance(payload, dict) else {}, "origin": origin}
+    await redis.rpush(key, json.dumps(record, separators=(",", ":")))
+    await redis.ltrim(key, -MAX_THIN_CLIENT_EVENTS, -1)
+
+
+async def _take_thin_client_events(redis, frame: Frame) -> list[dict]:
+    """Every held event, oldest first, gone from the store: one pull runs
+    them, and a pull that runs at the same time does not get them twice."""
+    if redis is None:
+        return []
+    key = _thin_client_events_key(int(frame.id))
+    try:
+        async with redis.pipeline(transaction=True) as pipe:
+            pipe.lrange(key, 0, -1)
+            pipe.delete(key)
+            raw, _deleted = await pipe.execute()
+    except Exception:
+        return []
+    events: list[dict] = []
+    for item in raw or []:
+        try:
+            record = json.loads(item)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(record, dict) and isinstance(record.get("name"), str) and record["name"]:
+            events.append(record)
+    return events
+
+
+async def _give_back_thin_client_events(redis, frame: Frame, events: list[dict]) -> None:
+    """A pull turned away before it rendered (the queue was full): the events
+    go back in front of anything held since, for the retry."""
+    if not events:
+        return
+    key = _thin_client_events_key(int(frame.id))
+    try:
+        for record in reversed(events):
+            await redis.lpush(key, json.dumps(record, separators=(",", ":")))
+        await redis.ltrim(key, -MAX_THIN_CLIENT_EVENTS, -1)
+    except Exception:
+        pass
+
+
+async def _log_scene_heard(db: Session, redis, frame: Frame, scene_logs: list[str]) -> None:
+    """What the scene heard of a thin client's presses and of the events held
+    for it, into the frame log: the dispatcher's `event:*` lines (the `gpio`
+    edges, the `button` they made, a custom event, what the scene dispatched
+    in turn), as an ESP32's own runtime logs them. Only for a pull that
+    carried any; an ordinary poll logs nothing."""
     from app.models.log import new_log
 
     for line in scene_logs:
@@ -530,6 +590,7 @@ async def _embedded_render_response(db: Session, redis, frame: Frame, device_inp
         scene_states = {}
     scenes_override, scene_id, scene_states = await _thin_client_scenes(db, redis, frame, scene_states)
     relayed = device_input if device_input and device_input["edges"] else None
+    control_events = await _take_thin_client_events(redis, frame)
     scene_logs: list[str] = []
     try:
         rgba, rendered_state, _saved_assets = await render_scene_rgba_and_state(
@@ -540,10 +601,12 @@ async def _embedded_render_response(db: Session, redis, frame: Frame, device_inp
             settings=embedded_settings_payload(db, frame),
             scenes_override=scenes_override,
             scene_states=scene_states,
+            control_events=control_events or None,
             device_input=relayed,
             scene_logs=scene_logs,
         )
     except RenderQueueFull as exc:
+        await _give_back_thin_client_events(redis, frame, control_events)
         # Not a render failure but a full queue: the device keeps what it
         # shows and polls again after Retry-After, instead of this request
         # parking until a slot frees (or a diagnostic card replacing a
@@ -563,9 +626,9 @@ async def _embedded_render_response(db: Session, redis, frame: Frame, device_inp
         except Exception:
             # A state that could not be saved must not cost the device its frame.
             pass
-    if relayed:
+    if relayed or control_events:
         try:
-            await _log_relayed_input(db, redis, frame, scene_logs)
+            await _log_scene_heard(db, redis, frame, scene_logs)
         except Exception:
             # Nor may a log line that could not be written.
             pass

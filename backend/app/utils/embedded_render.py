@@ -127,6 +127,7 @@ async def render_scene(
     save_assets=None,
     assets_write_budget: int | None = None,
     device_limits: dict | None = None,
+    control_events: list[dict] | None = None,
     device_input: dict | None = None,
     timeout: float = RENDER_TIMEOUT_SECONDS,
 ) -> SceneRender:
@@ -146,10 +147,12 @@ async def render_scene(
     {"sceneId": ..., "state": {...}} and the saved-assets report is
     {"files": [...], "skippedOverBudget": n}; either is None when unavailable.
     ``device_limits`` (device_limits.esp32_device_limits) renders under a
-    device's memory ceiling and as that device. ``device_input``
-    ({"nowMs", "edges"}, embedded_device.embedded_device_input) is the button
-    edges a thin client saw since its last pull, delivered to the scene as
-    its driver's before the render (frameos/relayed_input.nim).
+    device's memory ceiling and as that device. ``control_events``
+    ([{"name", "payload", "origin"}]) are the events a control plane sent a
+    thin client since its last pull, and ``device_input`` ({"nowMs",
+    "edges"}, embedded_device.embedded_device_input) the button edges it saw;
+    the scene hears both before the render, the edges as its driver's
+    (frameos/relayed_input.nim).
     """
     source = scenes_override if scenes_override is not None else frame.scenes
     scenes = [scene for scene in (source or []) if isinstance(scene, dict)]
@@ -187,6 +190,8 @@ async def render_scene(
         request["assetsWriteBudget"] = max(0, int(assets_write_budget))
     if device_limits:
         request["deviceLimits"] = device_limits
+    if control_events:
+        request["controlEventsJson"] = json.dumps(control_events, separators=(",", ":"))
     if device_input and device_input.get("edges"):
         request["deviceInputJson"] = json.dumps(device_input, separators=(",", ":"))
 
@@ -255,6 +260,7 @@ async def render_scene_rgba_and_state(
     assets_dir: str | None = None,
     save_assets=None,
     assets_write_budget: int | None = None,
+    control_events: list[dict] | None = None,
     device_input: dict | None = None,
     scene_logs: list[str] | None = None,
     timeout: float = RENDER_TIMEOUT_SECONDS,
@@ -272,6 +278,7 @@ async def render_scene_rgba_and_state(
         assets_dir=assets_dir,
         save_assets=save_assets,
         assets_write_budget=assets_write_budget,
+        control_events=control_events,
         device_input=device_input,
         timeout=timeout,
     )

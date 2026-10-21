@@ -284,3 +284,63 @@ async def test_a_relayed_tap_reaches_the_scene_in_the_real_runtime():
     events = [json.loads(line) for line in result.scene_logs if line.startswith("{")]
     heard = [(e["event"], e["payload"]["action"]) for e in events if e.get("origin") == "driver"]
     assert heard == [("event:gpio", "down"), ("event:gpio", "up"), ("event:button", "press")]
+
+
+def _renderer_takes_control_events() -> bool:
+    from app.utils.embedded_render import thin_client_renderer_available, wasm_assets_dir
+
+    assets = wasm_assets_dir()
+    return (
+        thin_client_renderer_available()
+        and assets is not None
+        and "frameos_wasm_control_event" in (assets / "frameos.js").read_text(errors="replace")
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_control_events(), reason="no wasm bundle with frameos_wasm_control_event")
+async def test_a_held_custom_event_reaches_the_scene_in_the_real_runtime():
+    """A custom event the backend held for a thin client runs in the scene,
+    from `http:admin`, before the render; an origin no control plane is
+    refused."""
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    scene = {
+        "id": "pager",
+        "name": "Pager",
+        "default": True,
+        "settings": {"execution": "interpreted"},
+        "fields": [{"name": "page", "type": "integer", "value": "1", "access": "public"}],
+        "nodes": [
+            {"id": "turn", "type": "event", "position": {"x": 0, "y": 0}, "data": {"keyword": "nextPage"}},
+            {"id": "set", "type": "app", "position": {"x": 0, "y": 0},
+             "data": {"keyword": "logic/setAsState", "config": {"stateKey": "page"}}},
+            {"id": "value", "type": "code", "position": {"x": 0, "y": 0},
+             "data": {"code": "", "codeArgs": [], "codeOutputs": [{"name": "valueJson", "type": "json"}],
+                      "codeJS": "Number(state.page || 0) + Number(context.payload.by || 1)"}},
+            {"id": "render", "type": "event", "position": {"x": 0, "y": 0}, "data": {"keyword": "render"}},
+            {"id": "color", "type": "app", "position": {"x": 0, "y": 0},
+             "data": {"keyword": "render/color", "config": {"color": "#ffffff"}}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "turn", "sourceHandle": "next", "target": "set", "targetHandle": "prev"},
+            {"id": "e2", "source": "value", "sourceHandle": "fieldOutput", "target": "set",
+             "targetHandle": "fieldInput/valueJson"},
+            {"id": "e3", "source": "render", "sourceHandle": "next", "target": "color", "targetHandle": "prev"},
+        ],
+        "customEvents": [{"name": "nextPage"}],
+    }
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=[scene])
+    events = [
+        {"name": "nextPage", "payload": {"by": 2}, "origin": "http:admin"},
+        {"name": "nextPage", "payload": {"by": 100}, "origin": "driver"},
+    ]
+
+    result = await render_scene(frame, 16, 16, scene_states={"pager": {"page": 4}}, control_events=events)
+
+    assert result.rgba is not None, result.error
+    assert result.state["state"]["page"] == 6
+    heard = [json.loads(line) for line in result.scene_logs if line.startswith('{"event":"event:nextPage"')]
+    assert [entry.get("origin") for entry in heard] == ["http:admin"]
