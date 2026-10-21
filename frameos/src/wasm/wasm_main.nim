@@ -9,12 +9,13 @@
 # emscripten JS-library hooks (log + event notifications go out through
 # postMessage, HTTP comes in through synchronous XHR).
 
-import std/[json, locks, math, options, strformat, strutils, tables, times]
+import std/[json, locks, math, monotimes, options, strformat, strutils, tables, times]
 import pixie
 
 import frameos/types
 import frameos/channels
 import frameos/single_scene_host
+import frameos/relayed_input
 import frameos/interpreter
 import frameos/planner
 import frameos/utils/image as frameos_image
@@ -362,6 +363,47 @@ proc frameos_wasm_event(eventName: cstring, payloadJson: cstring): bool {.export
     host.send(eoPreview, $eventName, payload)
   except Exception as e:
     setLastError("event " & $eventName & " failed: " & e.msg)
+    false
+
+proc frameos_wasm_device_input(inputJson: cstring): cint {.exportc, cdecl.} =
+  ## Button edges a thin client saw, relayed with the render pull they asked
+  ## for (frameos/relayed_input.nim): delivered as the board's own driver's,
+  ## `gpio` from `driver`, then time passes to now, so a tap whose
+  ## double-press window closed on the board is a `press` before the render.
+  ## Returns how many edges were delivered, -1 when the input was unreadable.
+  try:
+    let edges = relayedButtonEdges(parseJson($inputJson), getMonoTime().ticks div 1_000_000)
+    for payload in edges:
+      discard host.send(eoDriver, "gpio", payload)
+    discard host.tick()
+    edges.len.cint
+  except Exception as e:
+    setLastError("device input failed: " & e.msg)
+    -1
+
+proc frameos_wasm_control_event(origin: cstring, eventName: cstring, payloadJson: cstring): bool {.exportc, cdecl.} =
+  ## An event a control plane sent a thin client (a custom event from the
+  ## workspace), held for its render pull and delivered here before the
+  ## render, as the frame's own HTTP API or hub would have. From `http:admin`
+  ## or `cloud` only, so the contract's origin rules still decide (the cloud
+  ## may fire a custom event only where the scene declared it). False when it
+  ## came to nothing.
+  try:
+    let source =
+      case $origin
+      of $eoHttpAdmin: eoHttpAdmin
+      of $eoCloud: eoCloud
+      else:
+        setLastError("control event from " & $origin & ", which is not a control plane")
+        return false
+    let payload =
+      if payloadJson == nil or ($payloadJson).len == 0:
+        %*{}
+      else:
+        parseJson($payloadJson)
+    host.send(source, $eventName, payload)
+  except Exception as e:
+    setLastError("control event " & $eventName & " failed: " & e.msg)
     false
 
 proc frameos_wasm_tick(): bool {.exportc, cdecl.} =

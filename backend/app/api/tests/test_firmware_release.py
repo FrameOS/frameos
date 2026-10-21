@@ -65,12 +65,13 @@ async def test_firmware_listing(async_client):
     payload = response.json()
     assert payload["release"] == "v1.2.3"
     assert payload["assets"] == [
-        {"name": "frameos-1.2.3-esp32-s3-generic.bin", "platform": "esp32-s3-generic", "size": 64},
-        {"name": "frameos-1.2.3-esp32-c3-generic.bin", "platform": "esp32-c3-generic", "size": 32},
+        {"name": "frameos-1.2.3-esp32-s3-generic.bin", "platform": "esp32-s3-generic", "size": 64, "format": "bin"},
+        {"name": "frameos-1.2.3-esp32-c3-generic.bin", "platform": "esp32-c3-generic", "size": 32, "format": "bin"},
         {
             "name": "frameos-1.2.3-raspberry-pi-64-buildroot.img.gz",
             "platform": "raspberry-pi-64",
             "size": 1024,
+            "format": "img.gz",
         },
     ]
     fetch.assert_awaited_once()
@@ -129,6 +130,86 @@ async def test_firmware_listing_includes_the_per_layout_images(async_client):
     assert "esp32-c3-16mb" in firmware_release_module.STREAMABLE_PLATFORMS
     assert "esp32-s3-32mb" in firmware_release_module.STREAMABLE_PLATFORMS
     assert "raspberry-pi-64" not in firmware_release_module.STREAMABLE_PLATFORMS
+
+
+PICO_RELEASE = {
+    "tag_name": "v1.3.0",
+    "assets": [
+        *RELEASE["assets"],
+        _asset("frameos-1.3.0-pico-w.uf2", 700_000),
+        _asset("frameos-1.3.0-pico-w.uf2.minisig", 120),
+        _asset("frameos-1.3.0-pico-2w.uf2", 800_000),
+        _asset("frameos-1.3.0-pico-2w.uf2.minisig", 120),
+    ],
+}
+
+
+@pytest.mark.asyncio
+async def test_firmware_listing_includes_the_pico_uf2_images(async_client):
+    # The pico family's release image is a UF2, not a merged .bin: `format`
+    # is how the SPA tells "save this and drop it on the BOOTSEL drive" from
+    # "esptool-flash this". The .minisig beside each is never listed.
+    with patch_release(release=PICO_RELEASE):
+        response = await async_client.get("/api/frames/firmware")
+
+    assert response.status_code == 200, response.text
+    assets = response.json()["assets"]
+    assert [asset for asset in assets if asset["format"] == "uf2"] == [
+        {"name": "frameos-1.3.0-pico-w.uf2", "platform": "pico-w", "size": 700_000, "format": "uf2"},
+        {"name": "frameos-1.3.0-pico-2w.uf2", "platform": "pico-2w", "size": 800_000, "format": "uf2"},
+    ]
+    assert not any(str(asset["name"]).endswith(".minisig") for asset in assets)
+    assert {"pico-w", "pico-2w"} <= firmware_release_module.published_provisioning_assets(PICO_RELEASE)
+    assert {"pico-w", "pico-2w"} <= firmware_release_module.STREAMABLE_PLATFORMS
+    # Provisioning-only: a Pico has no OTA, so no OTA asset is ever named.
+    assert "pico-w" not in firmware_release_module.OTA_ASSETS
+    assert "pico-2w" not in firmware_release_module.OTA_ASSETS
+
+
+@pytest.mark.asyncio
+async def test_firmware_platform_streams_a_uf2_as_a_named_download(async_client):
+    uf2_bytes = b"UF2\n" + b"\x57" * 508
+    requested_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_urls.append(str(request.url))
+        return httpx.Response(200, content=uf2_bytes)
+
+    real_async_client = httpx.AsyncClient
+
+    def mocked_async_client(*args, **kwargs):
+        kwargs.pop("timeout", None)
+        kwargs.pop("follow_redirects", None)
+        return real_async_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    with patch_release(release=PICO_RELEASE), patch.object(httpx, "AsyncClient", mocked_async_client):
+        response = await async_client.get("/api/frames/firmware?platform=pico-2w")
+        esp32 = await async_client.get("/api/frames/firmware?platform=esp32-s3-generic")
+
+    assert response.status_code == 200, response.text
+    assert response.content == uf2_bytes
+    assert response.headers["content-type"] == "application/octet-stream"
+    # A person saves this file; the name it lands with is the release's.
+    assert response.headers["content-disposition"] == 'attachment; filename="frameos-1.3.0-pico-2w.uf2"'
+    assert response.headers["x-frameos-image-name"] == "frameos-1.3.0-pico-2w.uf2"
+    assert response.headers["x-frameos-release"] == "v1.3.0"
+    assert requested_urls[0].endswith("/frameos-1.3.0-pico-2w.uf2")
+    # The flasher fetch()es the .bin images; those stay as they were.
+    assert "content-disposition" not in esp32.headers
+
+    # A release from before the UF2 images were listed.
+    firmware_release_module.clear_release_cache()
+    with patch_release():
+        response = await async_client.get("/api/frames/firmware?platform=pico-2w")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "firmware_not_published"
+
+
+def test_attachment_filename_cannot_break_out_of_the_header():
+    assert firmware_release_module._attachment_filename(
+        {"name": 'frameos-1.0-pico-w"\r\nx-evil: 1.uf2'}
+    ) == "frameos-1.0-pico-w___x-evil__1.uf2"
+    assert firmware_release_module._attachment_filename({}) == "firmware"
 
 
 @pytest.mark.asyncio
@@ -238,6 +319,7 @@ async def test_dev_override_serves_local_file(async_client, tmp_path, monkeypatc
         "name": "merged-binary.bin",
         "platform": "esp32-s3-generic",
         "size": local.stat().st_size,
+        "format": "bin",
     }
 
     with patch_release(release=without_generic):
@@ -260,7 +342,7 @@ async def test_dev_override_wins_only_when_release_lacks_the_asset(async_client,
     generic = [asset for asset in listing.json()["assets"] if asset["platform"] == "esp32-s3-generic"]
     # The published release wins over the local build.
     assert generic == [
-        {"name": "frameos-1.2.3-esp32-s3-generic.bin", "platform": "esp32-s3-generic", "size": 64},
+        {"name": "frameos-1.2.3-esp32-s3-generic.bin", "platform": "esp32-s3-generic", "size": 64, "format": "bin"},
     ]
 
 
@@ -279,7 +361,12 @@ async def test_dev_override_survives_github_outage(async_client, tmp_path, monke
     assert listing.status_code == 200
     assert listing.json() == {
         "assets": [
-            {"name": "merged-binary.bin", "platform": "esp32-s3-generic", "size": local.stat().st_size},
+            {
+                "name": "merged-binary.bin",
+                "platform": "esp32-s3-generic",
+                "size": local.stat().st_size,
+                "format": "bin",
+            },
         ],
         "release": "",
     }

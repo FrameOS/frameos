@@ -7,7 +7,8 @@
 //
 // Protocol: a single JSON object on stdin
 //   {assetsDir, width, height, name, timeZone, settingsJson, scenesJson,
-//    sceneId, statesJson, frameAssetsRoot, saveAssetsJson, assetsWriteBudget}
+//    sceneId, statesJson, frameAssetsRoot, saveAssetsJson, assetsWriteBudget,
+//    controlEventsJson, deviceInputJson}
 // and exactly width*height*4 bytes of RGBA on stdout on success (exit 0).
 // All logs go to stderr; any failure exits non-zero with a message there.
 // statesJson ({sceneId: stateObject}) seeds backend-persisted scene state;
@@ -22,6 +23,9 @@
 // frameAssetsRoot after the render, up to assetsWriteBudget bytes (the
 // frame's remaining asset quota), reported on stderr as one
 // `__FRAMEOS_SAVED_ASSETS__{"files":[...],"skippedOverBudget":n}` line.
+// controlEventsJson ([{name, payload, origin}]) is the events a control plane
+// sent a thin client since its last pull, and deviceInputJson ({nowMs,
+// edges}) the button edges it saw; the scene hears both before the render.
 //
 // Sandbox posture: user scene code (QuickJS) runs inside the wasm module,
 // never natively in Node. Its host hooks are logging and the synchronous
@@ -516,6 +520,44 @@ function writeBackSavedAssets() {
   walk(MEMFS_ASSETS_ROOT)
   if (files.length > 0 || skippedOverBudget > 0) {
     process.stderr.write('__FRAMEOS_SAVED_ASSETS__' + JSON.stringify({ files, skippedOverBudget }) + '\n')
+  }
+}
+
+// The events a control plane sent a thin client since its last pull (a
+// custom event from the workspace): the scene hears them as from that plane
+// (`http:admin`, `cloud`) before this render. Bundles from before the export
+// cannot; the event then only re-renders, as it used to.
+if (request.controlEventsJson) {
+  let events = []
+  try {
+    events = JSON.parse(request.controlEventsJson)
+  } catch {
+    process.stderr.write('embedded_wasm_render: invalid controlEventsJson, ignoring\n')
+  }
+  for (const event of Array.isArray(events) ? events : []) {
+    if (!event || typeof event.name !== 'string') continue
+    try {
+      if (!call('frameos_wasm_control_event', 'boolean', ['string', 'string', 'string'],
+          [String(event.origin || 'http:admin'), event.name, JSON.stringify(event.payload ?? {})])) {
+        process.stderr.write(`embedded_wasm_render: control event ${event.name} refused: ${lastError()}\n`)
+      }
+    } catch (error) {
+      process.stderr.write(`embedded_wasm_render: control events unavailable (${error})\n`)
+      break
+    }
+  }
+}
+
+// The button edges a thin client saw since its last pull: the scene hears
+// them as the board's driver before this render (frameos/relayed_input.nim).
+// Bundles from before the export cannot; the press then only re-renders.
+if (request.deviceInputJson) {
+  try {
+    if (call('frameos_wasm_device_input', 'number', ['string'], [request.deviceInputJson]) < 0) {
+      process.stderr.write(`embedded_wasm_render: device input refused: ${lastError()}\n`)
+    }
+  } catch (error) {
+    process.stderr.write(`embedded_wasm_render: device input unavailable (${error})\n`)
   }
 }
 

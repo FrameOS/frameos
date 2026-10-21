@@ -46,6 +46,12 @@ export default tseslint.config(
       "**/src/test/shared-spa/app-list-category.test.ts",
       // Same exclusion, same reason: mounts embeddedUsbConnectLogic.
       "**/src/test/shared-spa/usb-connect-probe.test.ts",
+      // Same exclusion, same reason: embeddedUsbLogsModel itself, and
+      // esp32Hardware.ts (devices.ts reaches components/Select.tsx), and the
+      // mounted USB connect card.
+      "**/src/test/shared-spa/pico-usb-bootsel.test.ts",
+      "**/src/test/shared-spa/pico-inky-frame-pins.test.ts",
+      "**/src/test/shared-spa/pico-firmware-card.test.tsx",
       // Same exclusion, same reason: imports frameLogic, whose graph reaches
       // the legacy workspace components.
       "**/src/test/shared-spa/frame-change-value.test.ts",

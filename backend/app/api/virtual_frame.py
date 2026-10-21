@@ -87,7 +87,9 @@ def _virtual_frame(db: Session, frame_id: int, token: str | None) -> Frame:
 # time, so the backend is the memory: per-scene state lives in redis (no
 # TTL, same as frame:{id}:active_scene) and is injected into the renderer on
 # every pass, then read back after the render so state the scene itself
-# changed sticks too.
+# changed sticks too. Thin-client boards (ESP32-C3, Pico) are in the same
+# position and share this store — embedded_device.py's /embedded/render and
+# the frame event route — which is why the key says "virtual" for them too.
 
 
 def _virtual_states_key(frame_id: int) -> str:

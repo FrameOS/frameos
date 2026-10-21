@@ -133,7 +133,7 @@ event. A new origin starts with nothing.
 
 | Origin | Who |
 |---|---|
-| `driver` | An input driver on the frame |
+| `driver` | An input driver on the frame, or a thin client's buttons relayed with its render pull |
 | `preview` | The browser preview's canvas and buttons |
 | `scene` | A scene's own `dispatch` node |
 | `schedule` | A schedule entry firing on the frame |
@@ -342,6 +342,28 @@ Debounce is kept to contact bounce, 30 ms on both kinds of frame: the ESP32
 takes the first change as the edge and ignores changes for 30 ms after it, a
 Pi asks lgpio for 30 ms of steady level. Until 2026.10.16 they waited 80 ms and
 100 ms, which lost quick taps and the second tap of a quick double.
+
+**Thin clients.** A board that renders nothing itself (the Pico,
+`embedded/pico`) has no dispatcher: its scene runs in the backend's wasm
+runtime, a fresh process per render pull. So the board keeps its edges, each
+with its `atMs` on the board's clock, and once every press they belong to is
+decided (no key down, no tap inside its window: the ESP32's rule, shared in
+`fos_button_timing.c`) sends them as the body of its next pull, `POST
+/api/frames/{id}/embedded/render`. The runtime delivers them as the
+`driver`'s, every `atMs` moved onto its own clock (`frameos/relayed_input.nim`),
+so the same `press`, `doublePress` and `longPress` come out of them before the
+render, and the backend writes what the scene heard into the frame's log. The
+Inky Frame's five buttons have no GPIO of their own (a shift register reads
+them): they are pin `-1`, labelled `A` to `E`.
+
+What a control plane sends a thin client for its scene (a custom event, a
+`button` said over HTTP: what the contract's `cloud` column carries as
+`scene_event`) waits the same way: the backend holds it, asks the board to
+pull (a push to a Pico, a `render` command on an ESP32-C3's queue), and the
+pull runs it in the scene, from `http:admin`, before the render
+(`frameos_wasm_control_event`, which takes `http:admin` or `cloud` and
+nothing else, so the origin rules above still decide). A board asleep on
+battery gets it on its next wake.
 
 A `button` that is not an edge (no `level`, and an `action` other than `down`
 / `up`) is someone saying a button was pressed: HTTP, the cloud, a schedule,

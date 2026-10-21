@@ -77,9 +77,20 @@ def embedded_reported_frameos_version(frame: Frame) -> str | None:
 def embedded_frame_pulls_commands(frame: Frame) -> bool:
     """Does this frame's firmware drain the command queue? Unknown (never
     booted against this backend) counts as yes: the release that carries
-    this backend carries the firmware, and the fresh flash is that release."""
+    this backend carries the firmware, and the fresh flash is that release.
+
+    The Pico firmware (embedded/pico) has no queue client at any version: it
+    is a thin client whose scenes and state already live here, so its events
+    and deploys reach it over its own HTTP server, as an ESP32's did before
+    the queue (docs/embedded-todo.md "Pico")."""
+    from app.tasks.embedded_firmware import embedded_platform_spec_for_frame
     from app.utils.versions import version_tuple
 
+    try:
+        if embedded_platform_spec_for_frame(frame)["family"] == "pico":
+            return False
+    except Exception:  # noqa: BLE001 - an unknown platform is judged by its version
+        pass
     reported = version_tuple(embedded_reported_frameos_version(frame))
     floor = version_tuple(COMMAND_QUEUE_FIRMWARE_VERSION)
     return reported is None or floor is None or reported >= floor

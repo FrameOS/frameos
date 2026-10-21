@@ -37,11 +37,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import struct
 from datetime import datetime, timezone
 from http import HTTPStatus
 
-from fastapi import Depends, Header, HTTPException, Query
+from fastapi import Depends, Header, HTTPException, Query, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -51,10 +52,11 @@ from app.database import get_db
 from app.drivers.devices import device_dimensions
 from app.models.frame import Frame, get_frame_json, normalize_frame_admin_auth, normalize_https_proxy
 from app.redis import get_redis
-from app.utils.embedded_render import RenderQueueFull, render_scene_rgba
+from app.utils.embedded_render import RenderQueueFull, render_scene_rgba_and_state
 from app.utils.frame_commands import previewed_scenes
 from app.api.firmware_release import latest_release_ota_manifest, stream_latest_release_ota_image
 from app.tasks.embedded_firmware import (
+    EMBEDDED_IMAGE_FORMAT_BIN,
     FOS_PIXEL_1BPP,
     FOS_PIXEL_2BPP_BWYR,
     FOS_PIXEL_2BPP_GRAY,
@@ -285,15 +287,106 @@ def pack_image_for_panel(image, pixel_format: int) -> bytes:
     raise ValueError(f"Unsupported embedded pixel format: {pixel_format}")
 
 
+def embedded_scene_dimensions(frame: Frame, width: int, height: int) -> tuple[int, int]:
+    """The size the scene renders at for a panel of ``width`` x ``height``.
+
+    A frame hung in portrait (``rotate`` 90 or 270) runs its scenes on the
+    swapped canvas, exactly as the on-device runtime does (runner.nim); the
+    result is turned back to the panel's native orientation before packing.
+    """
+    if int(frame.rotate or 0) % 360 in (90, 270):
+        return height, width
+    return width, height
+
+
+def rotate_for_panel(image, rotate: int):
+    """Turn a rendered scene to the panel's native orientation.
+
+    Same direction as ``rotateDegrees`` in frameos/utils/image.nim, which a
+    frame with its own renderer applies last: clockwise by ``rotate``. A thin
+    client has no pixels of its own to turn, so the control plane does it.
+    """
+    from PIL import Image
+
+    rotate = int(rotate or 0) % 360
+    if rotate == 90:
+        return image.transpose(Image.Transpose.ROTATE_270)  # PIL counts counter-clockwise
+    if rotate == 180:
+        return image.transpose(Image.Transpose.ROTATE_180)
+    if rotate == 270:
+        return image.transpose(Image.Transpose.ROTATE_90)
+    return image
+
+
 def fosb_payload(width: int, height: int, pixel_format: int, packed: bytes) -> bytes:
     header = b"FOSB" + struct.pack("<BBHHH", 1, pixel_format, width, height, 0)
     return header + packed
 
 
-async def _active_scene_id(redis, frame: Frame) -> str | None:
-    """The workspace-activated scene, when one is cached; None lets the wasm
-    runtime fall back to the scene marked default (same choice the device
-    runtime makes)."""
+def _thin_client_preview_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:thin_client_preview"
+
+
+async def set_thin_client_preview(
+    redis, frame: Frame, scenes: list, scene_id: str | None, state: dict | None = None
+) -> None:
+    """A "Preview on frame" for a thin client without the command queue (the
+    Pico): its render pull runs these scenes, showing `scene_id` with
+    `state`, in place of the saved ones until the next deploy or scene switch
+    clears it. That is the rule a queued preview follows
+    (frame_commands.previewed_scenes), kept here because nothing is queued for
+    a board that pulls no queue. The state rides in the record: the scene
+    store keeps saved scenes' fields only."""
+    record = {
+        "scenes": [scene for scene in scenes if isinstance(scene, dict)],
+        "sceneId": scene_id,
+        "state": state or {},
+    }
+    await redis.set(_thin_client_preview_key(int(frame.id)), json.dumps(record, separators=(",", ":")))
+
+
+async def clear_thin_client_preview(redis, frame: Frame) -> None:
+    await redis.delete(_thin_client_preview_key(int(frame.id)))
+
+
+async def _thin_client_preview(redis, frame: Frame) -> dict | None:
+    if redis is None:
+        return None
+    try:
+        raw = await redis.get(_thin_client_preview_key(int(frame.id)))
+        record = json.loads(raw) if raw else None
+    except Exception:
+        return None
+    if not isinstance(record, dict) or not isinstance(record.get("scenes"), list):
+        return None
+    return record
+
+
+async def _thin_client_scenes(
+    db: Session, redis, frame: Frame, scene_states: dict
+) -> tuple[list | None, str | None, dict]:
+    """The scenes a thin client's render runs (None: the saved ones), the
+    scene it shows (None: the default) and the states it is seeded with. A
+    preview, pushed (the Pico) or queued (an ESP32-C3), runs in place of the
+    saved scenes."""
+    preview = await _thin_client_preview(redis, frame)
+    if preview is not None:
+        scenes = preview["scenes"]
+        scene_id = preview.get("sceneId")
+        if not isinstance(scene_id, str) or not scene_id:
+            scene_id = await _active_scene_id(redis, frame, scenes)
+        state = preview.get("state")
+        if scene_id and isinstance(state, dict) and state:
+            scene_states = {**scene_states, scene_id: {**scene_states.get(scene_id, {}), **state}}
+        return scenes, scene_id, scene_states
+    queued = previewed_scenes(db, frame)
+    return queued, await _active_scene_id(redis, frame, queued), scene_states
+
+
+async def _active_scene_id(redis, frame: Frame, scenes: list | None = None) -> str | None:
+    """The workspace-activated scene, when one is cached and is one of
+    `scenes` (default: the saved ones); None lets the wasm runtime fall back
+    to the scene marked default (same choice the device runtime makes)."""
     if redis is None:
         return None
     try:
@@ -309,8 +402,133 @@ async def _active_scene_id(redis, frame: Frame) -> str | None:
     # is gone) the wasm harness fails "scene not found" on every poll and the
     # thin client shows the diagnostic card until someone activates another
     # scene (bench-c3, 2026-09-05). A stale id is the same as no id.
-    known = {scene.get("id") for scene in (frame.scenes or []) if isinstance(scene, dict)}
+    source = scenes if scenes is not None else (frame.scenes or [])
+    known = {scene.get("id") for scene in source if isinstance(scene, dict)}
     return value if value in known else None
+
+
+# A thin client's button edges since its last pull: a few per press, and a
+# board that was mashed is still a handful (frameos/relayed_input.nim takes 32).
+MAX_DEVICE_INPUT_BYTES = 16 * 1024
+MAX_DEVICE_INPUT_EDGES = 32
+_DEVICE_INPUT_LABEL = re.compile(r"^[A-Za-z0-9_.-]{1,16}$")
+
+
+def _json_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def embedded_device_input(body: object) -> dict:
+    """The button edges a thin client sent with its render pull, as the wasm
+    runtime takes them (frameos/relayed_input.nim): ``{"nowMs": <the board's
+    clock>, "edges": [{"label", "action": "down" | "up", "atMs", "pin"?,
+    "wake"?}]}``, oldest first. A body of another shape is a 400; an edge
+    that says nothing usable is dropped, and past MAX_DEVICE_INPUT_EDGES the
+    rest are."""
+    if not isinstance(body, dict) or not _json_int(body.get("nowMs")) or not isinstance(body.get("edges"), list):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Expected {nowMs, edges}")
+    now_ms = int(body["nowMs"])
+    edges: list[dict] = []
+    for edge in body["edges"]:
+        if len(edges) >= MAX_DEVICE_INPUT_EDGES:
+            break
+        if not isinstance(edge, dict):
+            continue
+        label, action, at_ms = edge.get("label"), edge.get("action"), edge.get("atMs")
+        if not isinstance(label, str) or not _DEVICE_INPUT_LABEL.match(label):
+            continue
+        if action not in ("down", "up") or isinstance(at_ms, bool) or not isinstance(at_ms, int):
+            continue
+        if not 0 <= at_ms <= now_ms:
+            continue
+        kept: dict = {"label": label, "action": action, "atMs": at_ms}
+        if _json_int(edge.get("pin")):
+            kept["pin"] = edge["pin"]
+        if edge.get("wake") is True:
+            kept["wake"] = True
+        edges.append(kept)
+    return {"nowMs": now_ms, "edges": edges}
+
+
+# Scene events sent to a thin client wait for its next render pull; a board
+# asleep for a day still gets the last few.
+MAX_THIN_CLIENT_EVENTS = 32
+
+
+def _thin_client_events_key(frame_id: int) -> str:
+    return f"frame:{frame_id}:thin_client_events"
+
+
+async def hold_thin_client_event(redis, frame: Frame, name: str, payload: object, origin: str = "http:admin") -> None:
+    """A scene event for a thin client (a custom event from the workspace, a
+    `button` said over HTTP). The board has no runtime to hand it to, so it
+    waits here, and the board's next render pull runs it in the scene before
+    drawing: the board is only asked to pull. The oldest go first past
+    MAX_THIN_CLIENT_EVENTS."""
+    key = _thin_client_events_key(int(frame.id))
+    record = {"name": name, "payload": payload if isinstance(payload, dict) else {}, "origin": origin}
+    await redis.rpush(key, json.dumps(record, separators=(",", ":")))
+    await redis.ltrim(key, -MAX_THIN_CLIENT_EVENTS, -1)
+
+
+async def _take_thin_client_events(redis, frame: Frame) -> list[dict]:
+    """Every held event, oldest first, gone from the store: one pull runs
+    them, and a pull that runs at the same time does not get them twice."""
+    if redis is None:
+        return []
+    key = _thin_client_events_key(int(frame.id))
+    try:
+        async with redis.pipeline(transaction=True) as pipe:
+            pipe.lrange(key, 0, -1)
+            pipe.delete(key)
+            raw, _deleted = await pipe.execute()
+    except Exception:
+        return []
+    events: list[dict] = []
+    for item in raw or []:
+        try:
+            record = json.loads(item)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(record, dict) and isinstance(record.get("name"), str) and record["name"]:
+            events.append(record)
+    return events
+
+
+async def _give_back_thin_client_events(redis, frame: Frame, events: list[dict]) -> None:
+    """A pull turned away before it rendered (the queue was full): the events
+    go back in front of anything held since, for the retry."""
+    if not events:
+        return
+    key = _thin_client_events_key(int(frame.id))
+    try:
+        for record in reversed(events):
+            await redis.lpush(key, json.dumps(record, separators=(",", ":")))
+        await redis.ltrim(key, -MAX_THIN_CLIENT_EVENTS, -1)
+    except Exception:
+        pass
+
+
+async def _log_scene_heard(db: Session, redis, frame: Frame, scene_logs: list[str]) -> None:
+    """What the scene heard of a thin client's presses and of the events held
+    for it, into the frame log: the dispatcher's `event:*` lines (the `gpio`
+    edges, the `button` they made, a custom event, what the scene dispatched
+    in turn), as an ESP32's own runtime logs them. Only for a pull that
+    carried any; an ordinary poll logs nothing."""
+    from app.models.log import new_log
+
+    for line in scene_logs:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        event = entry.get("event")
+        # `open` is the fresh render process starting its scene, not news.
+        if not isinstance(event, str) or not event.startswith("event:") or entry.get("origin") == "system":
+            continue
+        await new_log(db, redis, int(frame.id), "webhook", line)
 
 
 @api_public.get("/frames/{id:int}/embedded/render")
@@ -321,7 +539,34 @@ async def api_embedded_device_render(
     authorization: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
+    return await _embedded_render_response(db, redis, frame)
+
+
+@api_public.post("/frames/{id:int}/embedded/render")
+async def api_embedded_device_render_with_input(
+    id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    redis=Depends(get_redis),
+    authorization: str = Header(None),
+):
+    """The pull of a thin client whose buttons were pressed since the last
+    one: the same frame, with the presses delivered to the scene first, as
+    its driver's `gpio` edges (docs/events.md, "Thin clients")."""
+    frame = _embedded_frame_from_bearer(db, id, authorization)
+    raw = await request.body()
+    if len(raw) > MAX_DEVICE_INPUT_BYTES:
+        raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="Body too large")
+    try:
+        body = json.loads(raw or b"null")
+    except ValueError:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid JSON")
+    return await _embedded_render_response(db, redis, frame, embedded_device_input(body))
+
+
+async def _embedded_render_response(db: Session, redis, frame: Frame, device_input: dict | None = None) -> Response:
     width, height = embedded_render_dimensions(frame)
+    scene_width, scene_height = embedded_scene_dimensions(frame, width, height)
     pixel_format = embedded_pixel_format_for_panel(embedded_panel_for_frame(frame))
 
     # Thin-client scene render: the frame's scenes run inside the wasm scene
@@ -329,16 +574,39 @@ async def api_embedded_device_render(
     # Node subprocess. Any failure — no scenes, no node/wasm toolchain, scene
     # error, timeout — falls back to the diagnostic bitmap below, so the
     # device always gets a valid frame.
+    #
+    # A thin client keeps no scene state — every pass is a fresh wasm process
+    # — so the backend is the memory, exactly as for virtual frames and in
+    # the same redis store: seed the renderer with it, keep what comes back.
+    # Without this a slideshow never advances. (Imported here: virtual_frame
+    # imports this module.)
+    from .virtual_frame import get_virtual_scene_states, store_rendered_scene_state
+
     packed: bytes | None = None
     try:
-        rgba = await render_scene_rgba(
+        scene_states = await get_virtual_scene_states(redis, frame)
+    except Exception:
+        # Same tolerance as _active_scene_id: no redis, no memory, still a frame.
+        scene_states = {}
+    scenes_override, scene_id, scene_states = await _thin_client_scenes(db, redis, frame, scene_states)
+    relayed = device_input if device_input and device_input["edges"] else None
+    control_events = await _take_thin_client_events(redis, frame)
+    scene_logs: list[str] = []
+    try:
+        rgba, rendered_state, _saved_assets = await render_scene_rgba_and_state(
             frame,
-            width,
-            height,
-            scene_id=await _active_scene_id(redis, frame),
+            scene_width,
+            scene_height,
+            scene_id=scene_id,
             settings=embedded_settings_payload(db, frame),
+            scenes_override=scenes_override,
+            scene_states=scene_states,
+            control_events=control_events or None,
+            device_input=relayed,
+            scene_logs=scene_logs,
         )
     except RenderQueueFull as exc:
+        await _give_back_thin_client_events(redis, frame, control_events)
         # Not a render failure but a full queue: the device keeps what it
         # shows and polls again after Retry-After, instead of this request
         # parking until a slot frees (or a diagnostic card replacing a
@@ -348,14 +616,34 @@ async def api_embedded_device_render(
             detail="Render queue is full, retry later",
             headers={"Retry-After": str(exc.retry_after)},
         )
+    # Stored under the scene the renderer says it showed. A render whose
+    # state seeding failed (old wasm bundle without the set_scene_state
+    # export) reads back bare scene defaults, which must not clobber the store.
+    state = rendered_state.get("state") if rendered_state is not None else None
+    if rendered_state is not None and isinstance(state, dict) and rendered_state.get("seeded", True):
+        try:
+            await store_rendered_scene_state(redis, frame, rendered_state.get("sceneId"), state)
+        except Exception:
+            # A state that could not be saved must not cost the device its frame.
+            pass
+    if relayed or control_events:
+        try:
+            await _log_scene_heard(db, redis, frame, scene_logs)
+        except Exception:
+            # Nor may a log line that could not be written.
+            pass
     if rgba is not None:
         from PIL import Image
 
-        image = Image.frombytes("RGBA", (width, height), rgba).convert("RGB")
-        packed = pack_image_for_panel(image, pixel_format)
+        image = Image.frombytes("RGBA", (scene_width, scene_height), rgba).convert("RGB")
+        packed = pack_image_for_panel(rotate_for_panel(image, frame.rotate), pixel_format)
 
     if packed is None:
-        packed = render_embedded_diagnostic_bitmap(frame, width, height, pixel_format)
+        # Drawn upright for the viewer too, then turned like a scene.
+        packed = pack_image_for_panel(
+            rotate_for_panel(embedded_diagnostic_image(frame, scene_width, scene_height), frame.rotate),
+            pixel_format,
+        )
     expected = embedded_buffer_size(width, height, pixel_format)
     if len(packed) != expected:
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -619,10 +907,20 @@ def _embedded_ota_platform(frame: Frame, platform: str | None) -> str:
     """The release image family the device asks for. Firmware since the
     signed release OTA names its own flash layout (fos_ota_platform);
     older firmware sends nothing and gets the frame's configured layout —
-    which, for a board it was flashed to match, is the same answer."""
+    which, for a board it was flashed to match, is the same answer.
+
+    A frame whose release image is not an ESP32 one (the pico family's UF2
+    is provisioning-only) has no OTA image under any name."""
+    try:
+        release = embedded_release_firmware_for_frame(frame)
+    except ValueError:
+        # Malformed platform/flash metadata: the layout the device names
+        # itself still stands.
+        release = None
+    if release is not None and release["format"] != EMBEDDED_IMAGE_FORMAT_BIN:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="ota_image_not_published")
     if platform:
         return platform
-    release = embedded_release_firmware_for_frame(frame)
     if release is None:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="ota_image_not_published")
     return str(release["asset"])

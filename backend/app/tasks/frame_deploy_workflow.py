@@ -1122,6 +1122,30 @@ class FrameDeployWorkflow:
                 return False
             await asyncio.sleep(self.EMBEDDED_POLL_INTERVAL_SECONDS)
 
+    async def _nudge_thin_client_render(self, frame: Frame) -> None:
+        """A thin client keeps no scenes: the backend renders the saved ones
+        on its next pull, so there is nothing to upload. Ask it to pull now.
+        A board that does not answer (asleep on battery, between networks)
+        shows them on its next wake, which is not a failed deploy."""
+        try:
+            status, body, _headers = await _fetch_frame_http_bytes(
+                frame, self.redis, path="/reload", method="POST", attempts=1
+            )
+        except Exception as exc:  # noqa: BLE001 - unreachable is the expected failure
+            reason = str(exc) or type(exc).__name__
+        else:
+            if status < 300:
+                await log(self.db, self.redis, int(frame.id), "stdinfo", f"{icon} The frame is rendering the saved scenes")
+                return
+            reason = f"status {status}: {body.decode('utf-8', errors='replace').strip()}"
+        await log(
+            self.db,
+            self.redis,
+            int(frame.id),
+            "stdinfo",
+            f"{icon} The frame did not answer ({reason}); it shows the saved scenes on its next render",
+        )
+
     async def _upload_embedded_scenes_and_reload(self, frame: Frame) -> None:
         # As this firmware reads them: one that predates a retired Nim app's
         # replacement gets the Nim keyword (utils/retired_apps.py).
@@ -1214,9 +1238,21 @@ class FrameDeployWorkflow:
     async def _execute_embedded_fast_direct(self, plan: FrameDeployPlan, frame: Frame) -> None:
         """Firmware from before the command queue (2026.10.5): push the scenes
         over the board's HTTP server and ask it to reload. The board has to be
-        awake."""
-        await self._progress("receiving", "sending the scenes over the board's HTTP server", kind="esp32_fast")
-        await self._upload_embedded_scenes_and_reload(frame)
+        awake. A thin client without the queue (the Pico) gets no scenes at
+        all, only the nudge."""
+        from app.tasks.embedded_firmware import is_thin_client_frame
+
+        if is_thin_client_frame(frame):
+            from app.api.embedded_device import clear_thin_client_preview
+
+            await self._progress("receiving", "asking the frame to render the saved scenes", kind="esp32_fast")
+            # A deploy ends a "Preview on frame": the saved scenes are back.
+            if self.redis is not None:
+                await clear_thin_client_preview(self.redis, frame)
+            await self._nudge_thin_client_render(frame)
+        else:
+            await self._progress("receiving", "sending the scenes over the board's HTTP server", kind="esp32_fast")
+            await self._upload_embedded_scenes_and_reload(frame)
         frame.status = "starting"
         record_successful_deploy(frame, plan.frame_dict)
         await update_frame(self.db, self.redis, frame)

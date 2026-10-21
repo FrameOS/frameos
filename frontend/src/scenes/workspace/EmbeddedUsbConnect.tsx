@@ -1,6 +1,7 @@
 import { useActions, useValues } from 'kea'
 import clsx from 'clsx'
 import {
+  ArrowDownOnSquareIcon,
   ArrowPathIcon,
   CheckCircleIcon,
   ClipboardDocumentIcon,
@@ -28,6 +29,12 @@ import { embeddedUsbConnectLogic } from './embeddedUsbConnectLogic'
 //   other frame    re-provision only after a confirm
 // Decisions live in embeddedUsbConnectLogic. On the cloud a blank board goes
 // to the redeploy panel below the card instead.
+//
+// A Pico frame (self-hosted only) mounts it too, as step 2 under
+// PicoFirmwareCard: same console, same identity check, same settings, but no
+// browser can write a Pico's flash, so `affordances` (picoFirmware.ts) turns
+// every esptool path off. A silent board is sent back to step 1, and the
+// firmware update is "Reboot into BOOTSEL".
 
 // fos_wifi_state_t in embedded/esp32/main/fos_wifi.h
 const WIFI_STATE_LABELS = ['offline', 'connecting', 'connected', 'captive portal'] as const
@@ -150,11 +157,37 @@ function WifiSection({ frame }: { frame: FrameType }): JSX.Element {
   )
 }
 
+/** The Pico's "update firmware": no OTA and nothing esptool can write, so the
+ * board is sent into its UF2 bootloader and the person copies the file. */
+function BootselSection({ frame, label }: { frame: FrameType; label: string }): JSX.Element {
+  const logic = embeddedUsbConnectLogic({ frameId: frame.id, frame })
+  const { busy, bootselBusy, bootselDrive, uf2DownloadAvailable } = useValues(logic)
+  const { rebootIntoBootsel } = useActions(logic)
+  return (
+    <div className="space-y-2">
+      <SectionLabel>{label}</SectionLabel>
+      <div className="frame-tool-muted text-xs leading-4">
+        A Pico has no over-the-air update: new firmware is a .uf2 copied onto its bootloader drive. This reboots the
+        board into that drive ({bootselDrive}) without the BOOTSEL button
+        {uf2DownloadAvailable ? '. Download the firmware in step 1, then drag it onto the drive.' : '.'} Its Wi-Fi and frame
+        settings are kept. The board leaves USB serial until the copy finishes, so connect again afterwards.
+      </div>
+      <button type="button" onClick={rebootIntoBootsel} disabled={busy} className={secondaryButtonClass}>
+        {bootselBusy ? <Spinner /> : <ArrowDownOnSquareIcon className="h-4 w-4" />}
+        {bootselBusy ? 'Rebooting' : 'Reboot into BOOTSEL'}
+      </button>
+    </div>
+  )
+}
+
 function FirmwareUpdateSection({ frame, label }: { frame: FrameType; label: string }): JSX.Element | null {
   const logic = embeddedUsbConnectLogic({ frameId: frame.id, frame })
-  const { releaseAvailable } = useValues(logic)
+  const { releaseAvailable, affordances } = useValues(logic)
   const { setUpdateBusy } = useActions(logic)
-  if (!releaseAvailable) {
+  if (affordances.rebootIntoBootsel) {
+    return <BootselSection frame={frame} label={label} />
+  }
+  if (!releaseAvailable || !affordances.firmwareUpdateOverUsb) {
     return null
   }
   return (
@@ -210,6 +243,10 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
     status,
     wifiConfigured,
     wifiConnected,
+    uf2,
+    affordances,
+    bootselDrive,
+    boardMismatch,
   } = useValues(logic)
   const { recheck, setFlasherBusy } = useActions(logic)
 
@@ -218,6 +255,46 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
       <div className="flex items-center gap-2 text-sm font-semibold text-[color:var(--tool-strong)]">
         <Spinner />
         Reading the board over USB
+      </div>
+    )
+  }
+
+  // A board of the other family (a Pico on an ESP32 frame's cable, or the
+  // reverse): say so and offer nothing that would write this frame onto it.
+  if (boardMismatch && identity.kind !== 'silent') {
+    return (
+      <div className="space-y-3">
+        <div className="frameos-warning-button rounded-xl border px-3 py-2 text-sm leading-5">{boardMismatch}</div>
+        <button type="button" onClick={recheck} disabled={busy} className={secondaryButtonClass}>
+          <ArrowPathIcon className="h-4 w-4" />
+          Read the board again
+        </button>
+      </div>
+    )
+  }
+
+  if (identity.kind === 'silent' && !affordances.browserFlash) {
+    // No browser flasher for a Pico: whatever answers on this port is not
+    // FrameOS yet, and the only way to change that is the .uf2 in step 1.
+    return (
+      <div className="space-y-3">
+        <div className="text-sm leading-5 text-[color:var(--tool-strong)]">
+          <span className="font-semibold">{identity.detail}</span>{' '}
+          <span className="frame-tool-muted">
+            Flash the UF2 first (step 1): hold BOOTSEL while plugging the board in, copy the .uf2 onto the{' '}
+            {bootselDrive} drive, wait for it to restart, then connect again. A board still running its stock firmware
+            looks like this.
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={recheck} disabled={busy} className={secondaryButtonClass}>
+            <ArrowPathIcon className="h-4 w-4" />
+            Read the board again
+          </button>
+          <span className="frame-tool-muted text-xs leading-4">
+            If the board was mid-boot, or this was some other device&apos;s port, try again.
+          </span>
+        </div>
       </div>
     )
   }
@@ -264,7 +341,9 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
           <span className="font-semibold">This board runs {versionLine} but is not set up as a frame yet.</span>{' '}
           <span className="frame-tool-muted">
             {canProvision
-              ? 'Send it this frame’s settings over USB:'
+              ? uf2
+                ? 'Send it this frame’s settings and Wi-Fi network over USB:'
+                : 'Send it this frame’s settings over USB:'
               : cloudManaged
               ? 'Use “Redeploy to this board” below to set it up as this frame.'
               : 'Set it up from the backend that manages this frame.'}
@@ -335,7 +414,8 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
         <div className="space-y-2">
           <SectionLabel>Settings</SectionLabel>
           <div className="frame-tool-muted text-xs leading-4">
-            Send this frame’s settings to the board over USB and restart it. Useful when the board is offline.
+            Send this frame’s settings{uf2 ? ' and Wi-Fi network' : ''} to the board over USB and restart it. Useful
+            when the board is offline.
           </div>
           <ApplySettingsButton frame={frame} label="Apply frame settings" />
         </div>
@@ -362,6 +442,7 @@ function MoreSection({ frame, manualFlashCommand }: { frame: FrameType; manualFl
     restartBusy,
     factoryResetBusy,
     copied,
+    affordances,
   } = useValues(logic)
   const { restartDevice, factoryReset, disconnectUsb, setFlasherBusy, copyManualCommand } = useActions(logic)
   const isThisFrame = identity?.kind === 'this-frame'
@@ -379,6 +460,11 @@ function MoreSection({ frame, manualFlashCommand }: { frame: FrameType; manualFl
             frame={frame}
             label={deviceVersion && latestRelease ? 'Reinstall the current release' : 'Firmware'}
           />
+        ) : null}
+        {/* Another frame's Pico gets no inline firmware section above, and
+            BOOTSEL changes nothing about whose frame it is. */}
+        {boardRunsFrameOS && affordances.rebootIntoBootsel && identity?.kind === 'other-frame' ? (
+          <FirmwareUpdateSection frame={frame} label="Firmware" />
         ) : null}
         {boardRunsFrameOS ? (
           <div className="space-y-2">
@@ -399,7 +485,7 @@ function MoreSection({ frame, manualFlashCommand }: { frame: FrameType; manualFl
             </div>
           </div>
         ) : null}
-        {boardRunsFrameOS && canProvision && releaseAvailable ? (
+        {boardRunsFrameOS && canProvision && releaseAvailable && affordances.eraseAndReflash ? (
           <div className="space-y-2">
             <SectionLabel>Start over</SectionLabel>
             <div className="frame-tool-muted text-xs leading-4">
@@ -409,7 +495,7 @@ function MoreSection({ frame, manualFlashCommand }: { frame: FrameType; manualFl
             <EmbeddedReleaseFlasher frame={frame} onBusyChange={setFlasherBusy} label="Erase & flash FrameOS again" />
           </div>
         ) : null}
-        {manualFlashCommand ? (
+        {manualFlashCommand && affordances.manualEsptoolCommand ? (
           <div className="space-y-2">
             <SectionLabel>By hand</SectionLabel>
             <div className="frame-tool-muted text-xs leading-4">
@@ -452,15 +538,20 @@ export function EmbeddedUsbConnect({
 }): JSX.Element {
   const webSerialSupported = isWebSerialSupported()
   const logic = embeddedUsbConnectLogic({ frameId: frame.id, frame })
-  const { connected, streamBusy, usbLogStreamState, probeError, busy, identityKnown, message, error } = useValues(logic)
+  const { connected, streamBusy, usbLogStreamState, probeError, busy, identityKnown, message, error, uf2 } =
+    useValues(logic)
   const { connectUsb, recheck } = useActions(logic)
 
   return (
     <div className="frame-tool-card space-y-4 rounded-[22px] p-4">
       <div>
-        <div className="text-sm font-semibold text-[color:var(--tool-strong)]">Connect over USB</div>
+        <div className="text-sm font-semibold text-[color:var(--tool-strong)]">
+          {uf2 ? '2. Connect over USB and apply settings' : 'Connect over USB'}
+        </div>
         <div className="frame-tool-muted mt-1 text-sm leading-5">
-          Plug the board into this computer and connect. The browser checks what is on it and shows what to do next.
+          {uf2
+            ? 'Once the board runs FrameOS, plug it into this computer and connect. The browser checks which frame it is and sends it this frame’s settings and Wi-Fi network.'
+            : 'Plug the board into this computer and connect. The browser checks what is on it and shows what to do next.'}
         </div>
       </div>
 
@@ -477,7 +568,9 @@ export function EmbeddedUsbConnect({
               : 'Connect over USB'}
           </button>
           <span className="frame-tool-muted text-xs leading-4">
-            If you see two ports, either works. “USB JTAG/serial debug unit” is faster.
+            {uf2
+              ? 'No port for the board in the picker? It is still in BOOTSEL mode or not running FrameOS yet. Finish step 1 first.'
+              : 'If you see two ports, either works. “USB JTAG/serial debug unit” is faster.'}
           </span>
         </div>
       ) : (

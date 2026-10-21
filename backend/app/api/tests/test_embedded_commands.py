@@ -3,6 +3,7 @@
 that queue instead of pushing for an ESP32 (events, scene switches, OTA)."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
@@ -264,6 +265,21 @@ async def test_owner_lists_and_cancels_queued_commands(async_client, db):
 
 
 # ---------------------------------------------------------------- producers
+
+@pytest.mark.asyncio
+async def test_a_scene_event_for_a_queued_thin_client_is_held_and_it_pulls(async_client, db, redis):
+    """A thin client's firmware has no runtime to run a scene_event: the event
+    waits for its render pull, and the queue only tells it to pull."""
+    frame = await _embedded_frame(async_client, db)
+    frame.device_config = {**(frame.device_config or {}), 'renderMode': 'remote'}
+    db.commit()
+    with _no_nudge():
+        response = await async_client.post(f'/api/frames/{frame.id}/event/nextPage', json={'page': 2})
+        assert response.status_code == 200, response.text
+        assert response.json()['command']['type'] == 'render'
+    held = await redis.lrange(f'frame:{frame.id}:thin_client_events', 0, -1)
+    assert [json.loads(item) for item in held] == [{'name': 'nextPage', 'payload': {'page': 2}, 'origin': 'http:admin'}]
+
 
 @pytest.mark.asyncio
 async def test_event_route_queues_for_an_embedded_frame(async_client, db):

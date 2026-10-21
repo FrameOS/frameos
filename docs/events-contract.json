@@ -3,7 +3,7 @@
   "version": 1,
   "hosts": ["linux", "esp32", "wasm"],
   "origins": {
-    "driver": "An input driver on the frame (evdev, gpioButton, the ESP32 button task).",
+    "driver": "An input driver on the frame (evdev, gpioButton, the ESP32 button task), or a thin client's buttons, relayed with its render pull.",
     "preview": "The browser preview's canvas and buttons.",
     "scene": "A scene's own `dispatch` node.",
     "schedule": "A schedule entry firing on the frame.",

@@ -13,6 +13,7 @@ import {
   ESP32_SD_CARD_PIN_FIELDS,
   ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET,
   ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET,
+  INKY_FRAME_EXTRA_PIN_FIELDS,
   esp32HardwarePresetConfig,
   esp32PinLayoutForPreset,
   esp32PinLayoutPresetOptions,
@@ -148,6 +149,29 @@ export function Esp32HardwareFields(): JSX.Element {
                       </label>
                     ))}
                   </div>
+                  {/* The Inky Frame's shift-register wiring: stored next to the
+                      eight SPI pins and carried through every edit above
+                      (normalizeEsp32PinLayout). Read-only: the board applies it
+                      from its hardware preset — `set pins` sends the eight SPI
+                      keys only — so an edit here would save and change nothing. */}
+                  {INKY_FRAME_EXTRA_PIN_FIELDS.some(({ key }) => pins[key] !== undefined) ? (
+                    <div className="space-y-1">
+                      <span className="frame-tool-muted block text-xs">
+                        Inky Frame carrier, fixed by the board: BUSY and the front buttons sit behind a shift register,
+                        and HOLD VSYS keeps the Pico powered while on battery.
+                      </span>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                        {INKY_FRAME_EXTRA_PIN_FIELDS.filter(({ key }) => pins[key] !== undefined).map(
+                          ({ key, label }) => (
+                            <span key={key}>
+                              <span className="frame-tool-muted font-semibold">{label}</span>{' '}
+                              <span className="text-[color:var(--tool-strong)]">{pins[key]}</span>
+                            </span>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               )
             }}
