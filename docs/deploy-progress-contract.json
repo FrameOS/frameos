@@ -31,7 +31,7 @@
       "ota:progress": "ESP32 `ota:<plane>` status `progress` (`detail` = `<written>/<total>` bytes)",
       "ota:verified": "ESP32 `ota:<plane>` status `verified`: installed, restarting into it",
       "ota:up-to-date": "ESP32 `ota:<plane>` status `up-to-date` / `skipped` / `downgrade-refused`: nothing to install, the frame restarts on what it has",
-      "ota:error": "ESP32 `ota:<plane>` status `error` / `gave-up`",
+      "ota:error": "ESP32 `ota:<plane>` status `error` / `gave-up`. The early-boot updater's verdict reaches the plane after the `bootup` of the boot it ran in (the first pass replays it, `replayed: true`), so the ESP32 kinds' stages after a boot listen for it too: a boot on the old firmware is not an installed update",
       "upgrade:downloading": "Pi `cloud:upgrade` status starting / scheduled / running",
       "upgrade:verified": "Pi `cloud:upgrade` status success / reboot_required",
       "upgrade:up-to-date": "Pi `cloud:upgrade` status up_to_date / skipped",
@@ -117,8 +117,8 @@
         { "stage": "downloading", "holdOn": ["ota:waiting", "ota:downloading", "ota:progress"], "on": { "ota:verified": "verified", "ota:up-to-date": "booting", "ota:error": "error", "bootup": "receiving", "commands:settled": "rendering" } },
         { "stage": "verified", "on": { "bootup": "receiving", "commands:settled": "rendering" } },
         { "stage": "booting", "on": { "bootup": "receiving", "commands:settled": "rendering" } },
-        { "stage": "receiving", "on": { "commands:settled": "rendering", "command:failed:set_scenes": "error" } },
-        { "stage": "rendering", "on": { "render:done": "done" } }
+        { "stage": "receiving", "on": { "commands:settled": "rendering", "command:failed:set_scenes": "error", "ota:error": "error" } },
+        { "stage": "rendering", "on": { "render:done": "done", "ota:error": "error" } }
       ]
     },
     "esp32_fast": {
@@ -172,7 +172,7 @@
         { "stage": "waiting", "on": { "command:acked:notify_update_available": "downloading", "ota:waiting": "downloading", "ota:downloading": "downloading", "ota:progress": "downloading", "ota:verified": "verified", "ota:up-to-date": "done", "ota:error": "error", "command:failed:notify_update_available": "error" } },
         { "stage": "downloading", "holdOn": ["ota:waiting", "ota:downloading", "ota:progress"], "on": { "ota:verified": "verified", "ota:up-to-date": "done", "ota:error": "error", "bootup": "rendering" } },
         { "stage": "verified", "on": { "bootup": "rendering" } },
-        { "stage": "rendering", "on": { "render:done": "done" } }
+        { "stage": "rendering", "on": { "render:done": "done", "ota:error": "error" } }
       ]
     },
     "cloud_scenes": {

@@ -502,6 +502,14 @@ Both halves are in place.
   (`release-signing.ts`). A `.minisig` with no signed comment is refused, not
   treated as an older format; the release job's own `verify` step makes the
   same check, so an asset renamed after signing fails the release.
+- A dropped ESP32 download resumes (2026-10-21): the device asks for the
+  rest with `Range: bytes=<written>-` and carries its BLAKE2b hash and OTA
+  slot over (`main/fos_ota_download.c`). Both planes answer 206 (the cloud's
+  `firmware/download` forwards the range to GitHub, the backend's
+  `/embedded/ota/download` relays it), and a 200 to a resume is read past.
+  The signature still covers every byte, so a resumed image verifies exactly
+  like an unbroken one. Each resume is one more request against the route's
+  per-frame budget; the firmware stops a run at 8 connections.
 - The cloud can only *suggest*: `notify_update_available` carries no URL,
   and the device fetches release metadata from its own configured archive.
   Since 2026-08-13 the buildroot/Pi client acts on the nudge by launching

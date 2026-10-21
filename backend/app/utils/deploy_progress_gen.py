@@ -76,8 +76,8 @@ DEPLOY_PROGRESS_KINDS: dict[str, dict] = {
             {'holdOn': ['ota:waiting', 'ota:downloading', 'ota:progress'], 'on': {'bootup': 'receiving', 'commands:settled': 'rendering', 'ota:error': 'error', 'ota:up-to-date': 'booting', 'ota:verified': 'verified'}, 'stage': 'downloading'},
             {'on': {'bootup': 'receiving', 'commands:settled': 'rendering'}, 'stage': 'verified'},
             {'on': {'bootup': 'receiving', 'commands:settled': 'rendering'}, 'stage': 'booting'},
-            {'on': {'command:failed:set_scenes': 'error', 'commands:settled': 'rendering'}, 'stage': 'receiving'},
-            {'on': {'render:done': 'done'}, 'stage': 'rendering'},
+            {'on': {'command:failed:set_scenes': 'error', 'commands:settled': 'rendering', 'ota:error': 'error'}, 'stage': 'receiving'},
+            {'on': {'ota:error': 'error', 'render:done': 'done'}, 'stage': 'rendering'},
         ],
     },
     "esp32_fast": {
@@ -126,7 +126,7 @@ DEPLOY_PROGRESS_KINDS: dict[str, dict] = {
             {'on': {'command:acked:notify_update_available': 'downloading', 'command:failed:notify_update_available': 'error', 'ota:downloading': 'downloading', 'ota:error': 'error', 'ota:progress': 'downloading', 'ota:up-to-date': 'done', 'ota:verified': 'verified', 'ota:waiting': 'downloading'}, 'stage': 'waiting'},
             {'holdOn': ['ota:waiting', 'ota:downloading', 'ota:progress'], 'on': {'bootup': 'rendering', 'ota:error': 'error', 'ota:up-to-date': 'done', 'ota:verified': 'verified'}, 'stage': 'downloading'},
             {'on': {'bootup': 'rendering'}, 'stage': 'verified'},
-            {'on': {'render:done': 'done'}, 'stage': 'rendering'},
+            {'on': {'ota:error': 'error', 'render:done': 'done'}, 'stage': 'rendering'},
         ],
     },
     "cloud_scenes": {

@@ -101,6 +101,8 @@ type SceneEditorModalProps = {
   aiDisabled?: boolean;
   /** Where to turn AI back on (the account's AI usage page). */
   aiSettingsUrl?: string;
+  /** The frames workspace, where the AI's links to frames and scenes go. */
+  framesUrl?: string;
   /** Share token for private scenes, so shared visitors can load scenes.json. */
   share?: string | undefined;
   /** The store zip of the scene as the page shows it (its "Download zip"
@@ -1362,6 +1364,7 @@ export function SceneEditorModal({
   signedIn = canFork,
   aiDisabled = false,
   aiSettingsUrl,
+  framesUrl,
   share,
   downloadUrl,
   settingsUrl,
@@ -2184,6 +2187,7 @@ export function SceneEditorModal({
         ai={{
           aiDisabled,
           ...(aiSettingsUrl ? { aiSettingsUrl } : {}),
+          ...(framesUrl ? { framesUrl } : {}),
           getListing: () => listingRef.current,
           getScenes: () => latestScenesRef.current,
           initialPrompt,

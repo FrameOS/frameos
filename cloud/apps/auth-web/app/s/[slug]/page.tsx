@@ -19,6 +19,7 @@ import {
   getAccountBaseUrl,
   getAccountSettingsUrl,
   getCloudBaseUrl,
+  getFramesUrl,
   getScenesBaseUrl,
   getStorePath,
   hasDatabaseUrl,
@@ -422,6 +423,7 @@ export default async function ScenePage({
       <SceneEditorModal
         aiDisabled={aiDisabled}
         aiSettingsUrl={`${getAccountSettingsUrl("usage")}#ai`}
+        framesUrl={getFramesUrl()}
         backUrl={getStorePath()}
         canFork={Boolean(session?.accountId)}
         canPreview={scene.status !== "pulled"}

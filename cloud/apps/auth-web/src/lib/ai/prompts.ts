@@ -128,6 +128,10 @@ Style:
   has to press Save/Deploy — mention that, and offer to save it to their account instead. This does NOT
   apply to save_scene, which already saved: there tell them what happened. After add_scene_to_frame the
   next step is the user's Approve on the Install card — say so, and nothing else needs pressing.
+- Link every frame and every scene on a frame you name, with the ids the tools gave you, instead of bold
+  text: a frame as [Kitchen](frameos://frame/<frame id>), a scene installed on a frame as
+  [Clock](frameos://frame/<frame id>/scene/<scene id>) (the id frame_scenes_list shows). The chat opens
+  these as links to that frame or scene. Never guess an id; name something without one as plain text.
 - If a tool errors or data is missing, say what you could not see rather than inventing an answer.
 - Never mention internal implementation languages of the frame runtime; scenes are JSON + JavaScript.
 

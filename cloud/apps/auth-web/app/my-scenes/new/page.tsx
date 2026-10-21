@@ -5,6 +5,7 @@ import { NewSceneWithAi } from "../../../src/components/NewSceneWithAi";
 import {
   getAccountSettingsUrl,
   getCloudBaseUrl,
+  getFramesUrl,
   getMyScenesUrl,
   getScenesBaseUrl,
   hasDatabaseUrl,
@@ -61,6 +62,7 @@ export default async function NewScenePage({
     <NewSceneWithAi
       aiDisabled={aiDisabled}
       aiSettingsUrl={`${getAccountSettingsUrl("usage")}#ai`}
+      framesUrl={getFramesUrl()}
       handoffKey={fromConverter ? convertedScenesHandoffKey : undefined}
       initialPrompt={prompt}
       loginUrl={new URL("/login", getCloudBaseUrl()).toString()}

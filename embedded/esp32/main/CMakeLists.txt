@@ -18,6 +18,7 @@ idf_component_register(
         "fos_cloud_contract.c"
         "fos_json_guard.c"
         "fos_ota.c"
+        "fos_ota_download.c"
         "fos_minisig.c"
         "fos_status_screen.c"
         "fos_panel_draw.c"
