@@ -110,10 +110,22 @@ static void usb_error(const char *name, const char *code, const char *message)
     stdio_flush();
 }
 
+// Raw bytes go out through the SDK's stdio, the path printf takes. Never
+// newlib's FILE (fwrite/fputs on stdout): printf bypasses that buffer, so what
+// fwrite left in it went out again with the next payload (on glass, 2026-10-21:
+// `usb_api status` sent its 974 bytes plus the first 50 again, `usb_api logs`
+// carried the previous status), and the browser read no status at all.
+// A payload goes out as is, so the bytes match the length BEGIN declared;
+// log lines get CRLF like everything printf writes.
+static void console_write(const char *data, size_t len, bool crlf)
+{
+    if (len > 0) stdio_put_string(data, (int)len, false, crlf);
+}
+
 static void usb_payload(const char *name, const char *text, size_t len)
 {
     printf("%s %s %u text\n", USB_API_BEGIN, name, (unsigned)len);
-    if (len > 0) fwrite(text, 1, len, stdout);
+    console_write(text, len, false);
     printf("\n%s %s\n", USB_API_END, name);
     stdio_flush();
 }
@@ -261,7 +273,7 @@ static void print_status(void)
 static void log_line_to_stdout(void *arg, const char *data, size_t len)
 {
     (void)arg;
-    fwrite(data, 1, len, stdout);
+    console_write(data, len, true);
 }
 
 static void handle_line(char *line)

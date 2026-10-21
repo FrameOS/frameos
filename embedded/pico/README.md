@@ -184,8 +184,11 @@ src/pk_rtc.c pk_leds.c pk_shiftreg.c pk_display.c drivers/   Inky Frame hardware
 
 ## First power-on checklist (hardware validation)
 
-None of this firmware has met glass yet; the host tests cover the logic, not
-the wiring. In order, with the console open:
+Steps 1–6 pass on an Inky Frame 7.3" Spectra 6 (Pico 2 W, 2026-10-21),
+provisioned from the deploy drawer's "Connect over USB" against a backend
+on the LAN. Not yet run: the battery steps (7–8), an `https://` backend (9),
+a Pico W board and the 4.0" / 5.7" panels. The host tests cover the logic,
+not the wiring. In order, with the console open:
 
 1. Flash the UF2; `status` answers, `buttons` prints a shift-register byte that
    changes while a button is held.
@@ -207,9 +210,10 @@ the wiring. In order, with the console open:
 9. An `https://` backend, if you use one: a render and a log upload both
    complete (16 KB TLS records need the 17 KB TCP window; request bodies go
    out in 1 KB pieces because mbedTLS's output record is 2 KB).
-10. Known unknowns worth a look: the Spectra init is Waveshare's 7.3" E table
-    (Pimoroni drives the panel with the ACeP one); the 4.0" panel's scan
-    orientation; TLS handshake time against the 8 s watchdog on the RP2040.
+10. Known unknowns worth a look: the 4.0" panel's scan orientation; TLS
+    handshake time against the 8 s watchdog on the RP2040. (The Spectra panel
+    is fine with Waveshare's 7.3" E init table, where Pimoroni uses the ACeP
+    one.)
 
 ## Limitations
 

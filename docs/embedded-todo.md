@@ -24,9 +24,13 @@ UF2s that the backend lists and serves. The four items that used to be here
 (stale http-only comment, chunked responses, SSIDs with spaces, sub-minute
 sleep) are fixed and host-tested. Still open:
 
-- **Nothing has run on hardware yet.** The README's "First power-on
-  checklist" is the list; the Spectra init table and the 16 KB stack under a
-  TLS handshake are the two things most likely to need a second look.
+- **Hardware: half the checklist.** Steps 1–6 of the README's "First
+  power-on checklist" pass on an Inky Frame 7.3" Spectra 6 (2026-10-21:
+  USB provisioning from the drawer, setup screen, render, unchanged-frame
+  skip, device API, rotation, scene switch, preview and deploy from the
+  backend). Not yet run: battery sleep and restart-on-battery (7–8), an
+  `https://` backend with the 16 KB stack under a TLS handshake (9), a
+  Pico W board, the 4.0" / 5.7" panels.
 - **No command queue.** The backend pushes events, scene switches, previews
   and deploys to the Pico's HTTP server (`embedded_frame_pulls_commands` is
   false for the `pico` family). Its scenes and state already live on the
