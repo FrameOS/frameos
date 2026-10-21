@@ -1024,6 +1024,10 @@ when defined(frameosEmbedded):
   proc monoMs(): int64 =
     getMonoTime().ticks div 1_000_000
 
+  var lastStreamCut = false
+    ## The last downloadImageStreamingInto handed over because the network
+    ## cut its body short (HttpBodyStream.interrupted in http_client.nim).
+
   proc downloadImageStreamingInto(url: string, maxBytes: int, target: Image,
       headers: seq[SimpleHttpHeader], fit: ScaledDecodeFit): bool =
     ## Decodes a remote JPEG/PNG (BMP/PPM/WebP too) straight off the socket
@@ -1046,9 +1050,13 @@ when defined(frameosEmbedded):
     ## reopens the request otherwise.
     if target.isNil or target.width <= 0 or target.height <= 0:
       return false
+    lastStreamCut = false
     var stream: HttpBodyStream
     try:
-      stream = openHttpBodyStream(url, headers = headers)
+      # Within what is left of the render deadline, like every buffered
+      # request (boundedRequestBuffer).
+      stream = openHttpBodyStream(url, headers = headers,
+        timeoutMs = capToRenderDeadline(DefaultFetchTimeoutMs))
     except IOError:
       # Transport failure: let the buffered path report it the usual way.
       return false
@@ -1119,9 +1127,12 @@ when defined(frameosEmbedded):
         # full-size RGBA intermediate this decoder exists to avoid.
         raise
       # Progressive JPEG, interlaced/16-bit PNG, truncated body, ...: the
-      # buffered decoders handle more shapes, so hand over to them.
-      log(%*{"event": "image:stream:fallback", "format": format,
-             "bytes": totalLen, "reason": e.msg})
+      # buffered decoders handle more shapes, so hand over to them. A body
+      # the network cut short only reads as a broken picture ("Invalid
+      # JPEG, unable to load").
+      lastStreamCut = stream.interrupted
+      log(%*{"event": "image:stream:fallback", "format": format, "bytes": totalLen,
+             "reason": if lastStreamCut: "the download stopped partway" else: e.msg})
       return false
     except IOError, OSError:
       # Nothing on the streaming path is expected to raise these past the
@@ -1138,9 +1149,17 @@ when defined(frameosEmbedded):
       headers: seq[SimpleHttpHeader] = @[], fit = fitCover,
       boundWidth = 0, boundHeight = 0):
       tuple[image: Image, data: string] =
-    if boundWidth <= 0 and boundHeight <= 0 and
-        downloadImageStreamingInto(url, maxBytes, target, headers, fit):
-      return (target, "")
+    if boundWidth <= 0 and boundHeight <= 0:
+      if downloadImageStreamingInto(url, maxBytes, target, headers, fit):
+        return (target, "")
+      # The socket stays open for the whole decode (30 s for a gallery JPEG
+      # on the E1004), so a Wi-Fi drop in that window cut the body and failed
+      # the picture: the buffered request below went out before the station
+      # was back (frame 70, 2026-10-17..21). Stream it once more instead; the
+      # open waits for the station (frameos_nim_glue.c, http_wait_for_wifi)
+      # within what is left of the render deadline.
+      if lastStreamCut and downloadImageStreamingInto(url, maxBytes, target, headers, fit):
+        return (target, "")
     var response = boundedRequestBuffer(url, maxBytes = maxBytes, headers = headers)
     # The budget must reflect the heap the decode is about to run on, not the
     # one some earlier render saw. This path never went through the

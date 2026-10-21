@@ -287,6 +287,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
         prefixPos: int
         consumed: int64       ## bytes handed out past the retained prefix;
                               ## once > 0 a rewind must reopen the request
+        interrupted*: bool    ## a read failed: the network cut the body short
         openedAt: MonoTime
 
     proc closeHttpBodyStream*(stream: HttpBodyStream) =
@@ -314,6 +315,7 @@ when defined(frameosEmbedded) or defined(frameosWasm):
       stream.prefix = ""
       stream.prefixPos = 0
       stream.consumed = 0
+      stream.interrupted = false
       if stream.handle == nil:
         noteHttpWait("a reply from", stream.url, stream.openedAt)
         let detail = $errBuf.cstring
@@ -343,6 +345,12 @@ when defined(frameosEmbedded) or defined(frameosWasm):
         return 0
       let got = fos_nim_http_stream_read(stream.handle, dst, maxBytes.csize_t)
       if got <= 0:
+        # A whole body ends with 0. A timeout, or the connection closing
+        # before the Content-Length, is negative (esp_http_client_read); a
+        # decoder sees both as the end of its input and calls the picture
+        # invalid, so say that the network cut it.
+        if got < 0:
+          stream.interrupted = true
         return 0
       got.int
 

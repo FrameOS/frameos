@@ -44,6 +44,10 @@ const char *fos_wifi_ap_ssid(void);
  * same every boot and can be read off the status screen or the console. */
 const char *fos_wifi_ap_psk(void);
 int fos_wifi_rssi(void);
+/* Drops of an established station link since boot: how many, the 802.11
+ * reason code of the last one (WIFI_REASON_*), and how long the last one
+ * that came back stayed down (0 until one has). */
+void fos_wifi_drop_stats(uint32_t *drops, uint8_t *last_reason, uint32_t *last_down_ms);
 /* Wait up to timeout for SNTP time sync after connecting. */
 esp_err_t fos_wifi_sync_time(uint32_t timeout_ms);
 bool fos_wifi_time_synced(void);
