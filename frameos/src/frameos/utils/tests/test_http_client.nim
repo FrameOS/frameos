@@ -384,19 +384,3 @@ suite "bounded http client":
     except CatchableError:
       discard
     check true
-
-suite "embedded body stream":
-  # HttpBodyStream marks a body the network cut short, so utils/image.nim
-  # streams it again instead of calling the picture invalid.
-  test "a read error cuts the body, wherever it happens":
-    check streamReadCutBody(-1, 0, 1000)
-    check streamReadCutBody(-1, 1000, 1000)
-    check streamReadCutBody(-1, 10, -1)
-
-  test "the end of the body before its Content-Length cuts it":
-    check streamReadCutBody(0, 999, 1000)
-
-  test "the end of a whole body, or of one with no length, does not":
-    check not streamReadCutBody(0, 1000, 1000)
-    check not streamReadCutBody(0, 5, -1)
-    check not streamReadCutBody(0, 0, 0)

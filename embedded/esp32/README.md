@@ -1032,17 +1032,16 @@ JPEG or PNG still saves the 8 MB boards that copy. WebP does not stream.
 the whole decode (about 30 s for a gallery JPEG on the E1004), so a short
 Wi-Fi drop in that window used to fail the picture. Now a scene request that
 finds the station without an address waits up to 20 s for it, within the
-request's timeout and so within the render deadline (`http:wifiWait` in the
-log, with `waitedMs` and whether it came `back`); after a wait that ran out
-the next requests fail at once until the station is back. A streamed image
-whose body the network cut short is streamed once more (`image:stream:retry`)
-before the buffered path gets it, and that path's log line names the cut
-instead of "Invalid JPEG". The metrics line adds `wifiDrops`,
-`wifiDropReason` (the 802.11 reason code of the last drop: 200 beacon
-timeout, 2/4 the access point expired the frame, 15 a key handshake timed
-out) and `wifiDownMs` once an established link went away during a boot. Such
-a link keeps reconnecting every 30 s after its 12 quick retries; it used to
-stop there until the next boot.
+request's timeout and so within the render deadline; after a wait that ran
+out the next requests fail at once until the station is back. A streamed
+image whose body the network cut short is streamed once more before the
+buffered path gets it (the `image:stream:fallback` line between the two says
+"the download stopped partway" instead of "Invalid JPEG"). The metrics line
+adds `wifiDrops`, `wifiDropReason` (the 802.11 reason code of the last drop:
+200 beacon timeout, 2/4 the access point expired the frame, 15 a key
+handshake timed out) and `wifiDownMs` once an established link went away
+during a boot. Such a link keeps reconnecting every 30 s after its 12 quick
+retries; it used to stop there until the next boot.
 
 Default pins target the XIAO ESP32-S3: CS=GPIO3 (D2), DC=GPIO4 (D3), RST=GPIO5 (D4),
 BUSY=GPIO6 (D5), SCK=GPIO7 (D8), MOSI=GPIO9 (D10). Remap at runtime with `set pins`,
