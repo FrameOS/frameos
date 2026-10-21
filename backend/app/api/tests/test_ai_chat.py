@@ -4,6 +4,7 @@ in-process, and delivers scenes to the editor through the editor tools.
 OpenAI is replaced by a scripted stream_response."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -12,10 +13,23 @@ from app.models import new_frame
 from app.models.chat import Chat, ChatMessage
 from app.models.settings import Settings
 from app.utils import ai_chat_agent
+from app.utils.ai_chat_prompt import build_chat_system_prompt
 from app.utils.ai_chat_scene import apply_scene_patch, apply_source_edits
 from app.utils.ai_chat_tools import EXCLUDED_MCP_TOOLS
 
-FIXTURES = json.loads((Path(__file__).resolve().parents[4] / "docs" / "ai-scene-patch-fixtures.json").read_text())
+REPO = Path(__file__).resolve().parents[4]
+FIXTURES = json.loads((REPO / "docs" / "ai-scene-patch-fixtures.json").read_text())
+CHAT_LINK = re.compile(r"\]\((frameos://[^)]+)\)")
+
+
+def test_both_prompts_teach_the_links_the_chat_resolves():
+    """The chat turns frameos:// links into the frame's or the scene's page
+    (frontend/src/utils/chatLinks.ts, docs/ai-chat.md "Links"): both planes'
+    prompts teach the same two."""
+    links = CHAT_LINK.findall(build_chat_system_prompt())
+    assert links == ["frameos://frame/<frame id>", "frameos://frame/<frame id>/scene/<scene id>"]
+    cloud_prompt = (REPO / "cloud" / "apps" / "auth-web" / "src" / "lib" / "ai" / "prompts.ts").read_text()
+    assert CHAT_LINK.findall(cloud_prompt) == links
 
 
 @pytest.mark.parametrize("case", FIXTURES["cases"], ids=[case["name"] for case in FIXTURES["cases"]])

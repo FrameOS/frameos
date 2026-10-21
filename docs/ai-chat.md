@@ -150,6 +150,27 @@ earlier ones, newest first, each under its first question: both planes'
 `frameId=` for one frame's chats or `frameless=1` for the frames home's.
 **New chat** starts an empty one.
 
+The drawer's URL names the chat it shows: `?drawer=chat&chatId=<id>`, written
+by `workspaceChatDrawerLogic` (replaced in place, so Back skips the chats in
+between) once the chat has messages, dropped on the History list and on a new
+chat. A reload or the Back button opens that chat again, also one older than
+the history's first page: `GET …/ai/chats/{id}` returns its summary with the
+messages (`chatLogic.openChat`).
+
+## Links
+
+The assistant links the frames and scenes it names, with the ids its tools
+returned: `[Kitchen](frameos://frame/<frame id>)` and
+`[Clock](frameos://frame/<frame id>/scene/<scene id>)` (a scene on a frame,
+by the id `frame_scenes_list` shows). Both prompts carry the rule. The model
+cannot know where the pages are, so the chat resolves them:
+`frontend/src/utils/chatLinks.ts` turns one into the frame's page, or the
+frame's page with that scene's drawer open, on this plane (`urls.frame`), and
+`Markdown`'s `inAppRoute` opens it in the same tab; the store's AI panel
+(`SceneAiPanel`) opens it in the frames workspace in a new tab. An id is only
+encoded into the path, and anything else that is not a safe URL renders as
+text.
+
 ## Settings
 
 Backend: Settings → OpenAI, `backendApiKey`, `chatModel` (else `model`, else
