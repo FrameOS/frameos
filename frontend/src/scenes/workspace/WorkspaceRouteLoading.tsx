@@ -219,7 +219,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
     '--workspace-main-offset': secondarySidebarOpen ? '480px' : '128px',
     '--workspace-sidebar-edge': secondarySidebarOpen ? '440px' : '108px',
   } as CSSProperties
-  const preloadHome = () => preloadSceneComponent('frames')
+  const preloadHome = () => preloadSceneComponent(inFrameAdminMode ? 'frames' : 'home')
 
   return (
     <div
@@ -242,7 +242,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
         >
           <a
             href={homeHref}
-            title={inFrameAdminMode ? 'Frame' : isCloudMode() ? 'Home' : 'Frames home'}
+            title={inFrameAdminMode ? 'Frame' : 'Home'}
             onPointerEnter={preloadHome}
             onFocus={preloadHome}
             onMouseDown={preloadHome}
@@ -256,14 +256,7 @@ export function WorkspaceRouteLoading({ scene }: { scene: string | null }): JSX.
                 return
               }
               requestNextFramesHomeScrollTop()
-              if (isCloudMode()) {
-                router.actions.push(homeHref)
-              } else if (mode === 'frames') {
-                scrollFramesHomeToTop('smooth', false)
-              } else {
-                router.actions.push(homeHref)
-                scrollFramesHomeToTop()
-              }
+              router.actions.push(homeHref)
             }}
             className={clsx(
               'workspace-logo-button frameos-icon-button flex h-12 w-12 items-center justify-center rounded-xl transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400',

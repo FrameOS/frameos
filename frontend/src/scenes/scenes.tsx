@@ -12,9 +12,9 @@ export type SceneComponent = ComponentType<Record<string, any>>
 export const Error404 = NotFound
 
 const sceneLoaders = {
-  // The cloud's home page (hello, recent frames and albums, usage); the
-  // self-hosted shells never route to it.
-  home: () => import('./home/CloudHome'),
+  // The home page behind the rail's logo (hello, recent frames, scenes and
+  // albums, usage); the on-device admin panel never routes to it.
+  home: () => import('./home/Home'),
   // The signed-out scene store (the cloud's /store, the scenes host's root).
   storeFront: () => import('./store/PublicStoreFront'),
   frames: () => import('./frames/Frames'),
@@ -95,6 +95,7 @@ export const getRoutes = () =>
   ({
     ...(getRouteBasePath() ? { [getRouteBasePath() + '/']: 'frames' } : {}),
     ...(isCloudMode() ? { [urls.home()]: 'home', [urls.store()]: 'storeFront', '/': 'storeFront' } : {}),
+    ...(isCloudMode() || isInFrameAdminMode() ? {} : { [urls.home()]: 'home' }),
     [urls.frames()]: isInFrameAdminMode() ? 'frame' : 'frames',
     ...(isInFrameAdminMode()
       ? {}

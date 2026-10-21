@@ -76,9 +76,10 @@ export const urls = {
   /** Cloud only: the account's usage page (quotas, AI usage). */
   accountUsage: () => settingsUrl('usage'),
   frames: framesUrl,
-  /** Where the rail's logo goes: the cloud's home page (hello, recent
-   * frames and albums, usage), the frames home everywhere else. */
-  home: () => (isCloudMode() ? '/home' : framesUrl()),
+  /** Where the rail's logo goes: the home page (hello, recent frames,
+   * scenes and albums, usage) beside the frames home; the on-device admin
+   * panel is one frame and has none. */
+  home: () => (isCloudMode() ? '/home' : isInFrameAdminMode() ? framesUrl() : getRouteBasePath() + '/home'),
   frame: frameUrl,
   frameControl: frameControlUrl,
   scenes: scenesUrl,

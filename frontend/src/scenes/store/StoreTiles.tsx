@@ -2,6 +2,7 @@ import clsx from 'clsx'
 import { STORE_SORT_OPTIONS, storeSortOf, type StoreSort } from '../../utils/storeSort'
 import { useEffect, useState, type ReactNode } from 'react'
 import { PhotoIcon } from '@heroicons/react/24/outline'
+import { A } from 'kea-router'
 
 import type { TemplateType } from '../../types'
 import { imageElementIsBlank } from '../../utils/blankImage'
@@ -69,10 +70,14 @@ export function SceneTile({
   template,
   showAuthor = true,
   actions,
+  appHref,
 }: {
   template: TemplateType
   showAuthor?: boolean
   actions?: ReactNode
+  /** A page of this app the tile opens, for a scene with no page of its own
+   * (a backend's saved scenes have no `url`). */
+  appHref?: string
 }): JSX.Element {
   const href = typeof template.url === 'string' && template.url ? template.url : null
   const flags = templateAccessFlags(template)
@@ -110,6 +115,10 @@ export function SceneTile({
         <a href={href} className="flex flex-col focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
           {body}
         </a>
+      ) : appHref ? (
+        <A href={appHref} className="flex flex-col focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+          {body}
+        </A>
       ) : (
         <div className="flex flex-col">{body}</div>
       )}

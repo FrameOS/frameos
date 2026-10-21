@@ -132,6 +132,8 @@ export default tseslint.config(
       "**/src/test/shared-spa/save-and-deploy-waits-for-save.test.ts",
       // Mounts lanAccessLogic and renders FrameSettings; out of the tsconfig too.
       "**/src/test/shared-spa/lan-access.test.tsx",
+      // Imports the home page's logics (→ decorators/frame.tsx); out of the tsconfig too.
+      "**/src/test/shared-spa/home-page.test.ts",
     ],
   },
   js.configs.recommended,
