@@ -151,7 +151,10 @@ rendering ([commands:settled]) → done ([render:done]).
 The early-boot updater writes its `ota:backend` lines before log upload
 exists, so a whole update can arrive as nothing but the [bootup]: every stage
 from waiting on accepts it. [ota:up-to-date] goes to booting; [ota:error]
-fails the record.
+fails the record, after the [bootup] too: the first pass replays the
+updater's verdict (`replayed: true`), so a failed download reads as [bootup]
+on the old firmware, then [ota:error], and receiving / rendering listen for
+it.
 
 **Fast deploy** (`esp32_fast`): queued → waiting (rows queued, frame nudged)
 → receiving ([command:acked:set_scenes / set_settings]) → rendering
@@ -162,7 +165,12 @@ skipped and receiving / rendering are plane steps.
 **Firmware update only** (`firmware`, the OTA card's "Update over the air",
 `POST /frames/{id}/embedded/firmware/ota`): queued → waiting (the frame is
 asleep) → downloading → verified → rendering ([bootup]) → done
-([render:done]).
+([render:done]). [ota:error] fails it in rendering as well: the early-boot
+updater's verdict arrives after the [bootup] of the boot it ran in, and
+before this a failed download sat in "first render" (frame 70, 2026-10-20),
+or finished as done once the old firmware rendered. A connection
+that drops mid-image logs nothing: the device resumes it, and only the run's
+verdict ([ota:verified] or [ota:error]) names the tries.
 
 **USB** (`esp32_usb`): the browser flasher reports completion
 (`/embedded/usb_deploy_complete`); the record starts at booting → rendering

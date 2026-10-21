@@ -279,22 +279,49 @@ export function pinnedAssetUrl(asset: ReleaseAsset): URL | undefined {
 }
 
 /**
+ * Where a device's resumed OTA download picks up: the start of
+ * `Range: bytes=<start>-`, the one form the firmware sends
+ * (embedded/esp32/main/fos_ota_download.c) after a connection dropped
+ * mid-image. Any other Range is ignored and the whole image served, which
+ * is always a correct answer: the device reads past the bytes it has.
+ */
+export function resumeRangeStart(header: string | null): number | undefined {
+  const match = /^bytes=(\d{1,10})-$/.exec(header?.trim() ?? "");
+  if (!match) {
+    return undefined;
+  }
+  const start = Number(match[1]);
+  return start > 0 ? start : undefined;
+}
+
+/**
  * Pipe one release asset straight through — the bytes are never buffered.
- * Returns the streaming 200 or the appropriate jsonError response.
+ * Returns the streaming 200 (206 from `rangeStart` on, when GitHub serves
+ * the range) or the appropriate jsonError response.
  */
 export async function streamReleaseAssetResponse(
   asset: ReleaseAsset,
   releaseTag: string,
+  rangeStart?: number,
 ): Promise<NextResponse> {
   const assetUrl = pinnedAssetUrl(asset);
   if (!assetUrl) {
     return jsonError("release_lookup_failed", 502);
   }
 
-  const upstream = await fetch(assetUrl, { redirect: "follow" });
+  const upstream = await fetch(assetUrl, {
+    redirect: "follow",
+    ...(rangeStart === undefined
+      ? {}
+      : { headers: { range: `bytes=${rangeStart}-` } }),
+  });
+  if (rangeStart !== undefined && upstream.status === 416) {
+    return jsonError("range_not_satisfiable", 416);
+  }
   if (!upstream.ok || !upstream.body) {
     return jsonError("firmware_download_failed", 502);
   }
+  const partial = rangeStart !== undefined && upstream.status === 206;
 
   const headers = new Headers({
     // The URL names a platform, not a release: a cached copy would be the
@@ -308,7 +335,14 @@ export async function streamReleaseAssetResponse(
   if (contentLength) {
     headers.set("content-length", contentLength);
   }
-  return new NextResponse(upstream.body, { headers, status: 200 });
+  const contentRange = upstream.headers.get("content-range");
+  if (partial && contentRange) {
+    headers.set("content-range", contentRange);
+  }
+  return new NextResponse(upstream.body, {
+    headers,
+    status: partial ? 206 : 200,
+  });
 }
 
 // A minisign signature file is a comment line plus two short base64 lines —
@@ -400,11 +434,33 @@ export async function devFirmwareOverride(
   return undefined;
 }
 
-/** Stream a dev-override firmware file (dev builds only). */
+/** Stream a dev-override firmware file (dev builds only), from `rangeStart` on when given. */
 export async function streamDevFirmwareResponse(
   dev: DevFirmware,
+  rangeStart?: number,
 ): Promise<NextResponse> {
   const data = await fs.readFile(dev.filePath);
+  if (rangeStart !== undefined) {
+    if (rangeStart >= data.byteLength) {
+      return new NextResponse(null, {
+        status: 416,
+        headers: {
+          "content-range": `bytes */${data.byteLength}`,
+          "cache-control": "no-store",
+        },
+      });
+    }
+    const rest = data.subarray(rangeStart);
+    return new NextResponse(new Uint8Array(rest), {
+      status: 206,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-length": String(rest.byteLength),
+        "content-range": `bytes ${rangeStart}-${data.byteLength - 1}/${data.byteLength}`,
+        "cache-control": "no-store",
+      },
+    });
+  }
   return new NextResponse(new Uint8Array(data), {
     status: 200,
     headers: {

@@ -9,6 +9,7 @@ import {
   devFirmwareOverride,
   streamDevFirmwareResponse,
   streamReleaseAssetResponse,
+  resumeRangeStart,
 } from "../../../../../../src/lib/firmware-release";
 import {
   identityRateLimitResponse,
@@ -23,7 +24,10 @@ export const runtime = "nodejs";
 // (src/lib/firmware-release.ts). Auth is the frame's enrollment bearer, same
 // as the manifest; the device hashes the stream incrementally and verifies
 // the minisign signature before switching boot slots, so these bytes are
-// untrusted until the device itself says otherwise.
+// untrusted until the device itself says otherwise. A connection that drops
+// mid-image is resumed with `Range: bytes=<written>-` and answered 206 (the
+// backend's /embedded/ota/download relays the same); each resume is one more
+// request against the budget below, and the firmware stops a run at 8.
 
 const deviceDownloadBudget = { limit: 10, windowMs: 60 * 60 * 1000 };
 // How many frames one address's budget is sized for (manifest route too).
@@ -77,9 +81,10 @@ export async function GET(
     return jsonError("platform_mismatch", 409, { platform });
   }
 
+  const rangeStart = resumeRangeStart(request.headers.get("range"));
   const dev = await devFirmwareOverride(platform);
   if (dev) {
-    return streamDevFirmwareResponse(dev);
+    return streamDevFirmwareResponse(dev, rangeStart);
   }
 
   const release = await fetchLatestRelease();
@@ -108,5 +113,5 @@ export async function GET(
     });
   }
 
-  return streamReleaseAssetResponse(asset, release.tag_name ?? "");
+  return streamReleaseAssetResponse(asset, release.tag_name ?? "", rangeStart);
 }

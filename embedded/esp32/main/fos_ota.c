@@ -33,6 +33,7 @@
 #include "fos_http.h"
 #include "fos_minisig.h"
 #include "fos_netguard.h"
+#include "fos_ota_download.h"
 #include "fos_ota_pubkey.h"
 #include "fos_url_guard.h"
 #include "fos_version.h"
@@ -45,13 +46,16 @@ static const char *TAG = "fos_ota";
 #define FOS_OTA_REBOOT_TASK_STACK_SIZE 2048
 #define FOS_OTA_MANIFEST_MAX (8 * 1024)
 #define FOS_OTA_CHUNK (8 * 1024)
-/* Transient download failures (a dropped socket, a short read) are retried
- * this many times within one run, after the Wi-Fi is back; a signature or
- * image-validation failure is final for the run. Across runs the RTC give-up
- * counter below stops a frame redialing an image it keeps failing. */
-#define FOS_OTA_DOWNLOAD_ATTEMPTS 3
+/* A dropped socket or a short read is resumed within one run, after the
+ * Wi-Fi is back, from the byte it stopped at (fos_ota_download.c holds the
+ * budget: three connections in a row that add nothing, eight in all); a
+ * signature or image-validation failure is final for the run. Across runs
+ * the RTC give-up counter below stops a frame redialing an image it keeps
+ * failing. */
 #define FOS_OTA_RETRY_DELAY_MS 3000
 #define FOS_OTA_WIFI_RECONNECT_TIMEOUT_MS 30000
+_Static_assert(FOS_OTA_DL_HTTP_EAGAIN == ESP_ERR_HTTP_EAGAIN,
+               "fos_ota_download.h names esp_http_client_read's timeout");
 /* A render pass that is already under way finishes before the OTA touches
  * the network: the two would share one Wi-Fi link and the internal heap
  * (three TLS contexts on ~80 KB: the hub socket, the scene's image stream
@@ -235,11 +239,18 @@ RTC_DATA_ATTR static uint8_t s_ota_allow_downgrade;
  * the chip right after — so on the backend plane an update left no line at
  * all (frame 70, 2026-10-12: 2026.10.8 -> 2026.10.9 in 100 s, nothing in
  * the drawer). The first pass after the boot logs it again, marked
- * `replayed`, once the uploads are live (fos_ota_replay_last_line). */
+ * `replayed`, once the uploads are live (fos_ota_replay_last_line).
+ *
+ * Only those two kinds of line are kept: the early-boot updater's, and
+ * `verified` (a restart follows it). A line logged while the uploads were
+ * live already left, and replaying it on the next wake is how an old run's
+ * error would land on a deploy started since (the control planes fail a
+ * firmware deploy on an `ota:error` that follows its boot). */
 RTC_DATA_ATTR static char s_ota_last_plane[16];
 RTC_DATA_ATTR static char s_ota_last_status[24];
-RTC_DATA_ATTR static char s_ota_last_detail[96];
+RTC_DATA_ATTR static char s_ota_last_detail[160];
 RTC_DATA_ATTR static uint8_t s_ota_last_pending;
+static bool s_ota_in_boot_request = false;
 
 void fos_ota_allow_downgrade_once(void)
 {
@@ -267,7 +278,7 @@ static bool ota_gave_up(const char *version)
  * can look. */
 static void ota_log(const ota_source_t *src, const char *status, const char *detail)
 {
-    char line[224];
+    char line[320];
     snprintf(line, sizeof(line),
              "{\"event\":\"ota:%s\",\"source\":\"esp32\","
              "\"status\":\"%s\",\"detail\":\"%s\"}",
@@ -275,7 +286,8 @@ static void ota_log(const ota_source_t *src, const char *status, const char *det
     frameos_nim_log_hook(line);
     frameos_nim_flush_logs();
     /* Progress is noise after a restart; every other line is the verdict. */
-    if (strcmp(status, "progress") != 0) {
+    if (strcmp(status, "progress") != 0 &&
+        (s_ota_in_boot_request || strcmp(status, "verified") == 0)) {
         strlcpy(s_ota_last_plane, src->plane, sizeof(s_ota_last_plane));
         strlcpy(s_ota_last_status, status, sizeof(s_ota_last_status));
         strlcpy(s_ota_last_detail, detail ? detail : "", sizeof(s_ota_last_detail));
@@ -288,7 +300,7 @@ void fos_ota_replay_last_line(void)
     if (!s_ota_last_pending) return;
     s_ota_last_pending = 0;
     if (s_ota_last_plane[0] == '\0' || s_ota_last_status[0] == '\0') return;
-    char line[256];
+    char line[352];
     snprintf(line, sizeof(line),
              "{\"event\":\"ota:%s\",\"source\":\"esp32\",\"status\":\"%s\","
              "\"detail\":\"%s\",\"replayed\":true}",
@@ -300,11 +312,7 @@ void fos_ota_replay_last_line(void)
 static void ota_log_progress(const ota_source_t *src, size_t written, size_t expected)
 {
     char detail[64];
-    if (expected > 0) {
-        snprintf(detail, sizeof(detail), "%u/%u", (unsigned)written, (unsigned)expected);
-    } else {
-        snprintf(detail, sizeof(detail), "%u", (unsigned)written);
-    }
+    snprintf(detail, sizeof(detail), "%u/%u", (unsigned)written, (unsigned)expected);
     ota_log(src, "progress", detail);
 }
 
@@ -382,8 +390,11 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
     const cJSON *minisig = cJSON_GetObjectItem(root, "minisig");
     const cJSON *download = cJSON_GetObjectItem(root, "downloadUrl");
     const cJSON *size_item = cJSON_GetObjectItem(root, "size");
+    /* Both planes always send `size`: the slot check, the resume and the
+     * length checks of every response read it. */
     if (!cJSON_IsString(version) || !cJSON_IsString(minisig) || !cJSON_IsString(download) ||
-        strlen(version->valuestring) >= sizeof(out->version)) {
+        strlen(version->valuestring) >= sizeof(out->version) ||
+        !cJSON_IsNumber(size_item) || size_item->valuedouble < 1) {
         cJSON_Delete(root);
         ota_log(src, "error", "manifest-incomplete");
         return ESP_FAIL;
@@ -450,9 +461,98 @@ static esp_err_t ota_fetch_manifest(const ota_source_t *src, ota_manifest_t *out
     } else {
         strlcpy(out->download_url, download->valuestring, sizeof(out->download_url));
     }
-    out->size = cJSON_IsNumber(size_item) ? (size_t)size_item->valuedouble : 0;
+    out->size = (size_t)size_item->valuedouble;
     cJSON_Delete(root);
     return ESP_OK;
+}
+
+/* One connection of a download: open it (asking for the rest when
+ * dl->written is past zero), then hash and write the body into the slot
+ * until it ends or the link fails. ESP_OK: the body ended with the whole
+ * image. ESP_FAIL: the connection failed and `token` says how; another one
+ * may resume it. Anything else is final for the run (no memory, a flash
+ * write that failed). */
+static esp_err_t ota_download_connection(const ota_source_t *src, const char *download_url,
+                                         const char *auth_header,
+                                         const fos_netguard_pin_t *pin, esp_ota_handle_t ota,
+                                         crypto_blake2b_ctx *hash_ctx, uint8_t *chunk,
+                                         fos_ota_dl_t *dl, char *token, size_t token_len)
+{
+    esp_http_client_config_t config = {
+        .url = download_url,
+        .timeout_ms = 30000,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .buffer_size = 4096,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        snprintf(token, token_len, "no-memory");
+        return ESP_ERR_NO_MEM;
+    }
+    if (auth_header != NULL) {
+        esp_http_client_set_header(client, "Authorization", auth_header);
+    }
+    char range[32];
+    if (fos_ota_dl_begin_connection(dl, range, sizeof(range))) {
+        esp_http_client_set_header(client, "Range", range);
+    }
+
+    /* An off-origin download connects to the address its check resolved,
+     * not to a second answer (fos_netguard_pin_t). */
+    if (!fos_netguard_pin_for_task(pin)) {
+        esp_http_client_cleanup(client);
+        snprintf(token, token_len, "connect busy");
+        return ESP_FAIL;
+    }
+    esp_err_t err = esp_http_client_open(client, 0);
+    fos_netguard_unpin_for_task();
+    if (err != ESP_OK) {
+        esp_http_client_cleanup(client);
+        snprintf(token, token_len, "connect 0x%x", (unsigned)err);
+        return ESP_FAIL;
+    }
+    int64_t content_length = esp_http_client_fetch_headers(client);
+    int status = esp_http_client_get_status_code(client);
+    if (!fos_ota_dl_accept(dl, status, content_length, token, token_len)) {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return ESP_FAIL;
+    }
+
+    err = ESP_OK;
+    while (true) {
+        int r = esp_http_client_read(client, (char *)chunk, FOS_OTA_CHUNK);
+        if (r < 0) {
+            fos_ota_dl_read_name(r, esp_http_client_get_errno(client), token, token_len);
+            err = ESP_FAIL;
+            break;
+        }
+        if (r == 0) {
+            if (dl->written != dl->expected) {
+                snprintf(token, token_len, "short");
+                err = ESP_FAIL;
+            }
+            break;
+        }
+        size_t drop = fos_ota_dl_drop(dl, (size_t)r);
+        size_t n = (size_t)r - drop;
+        if (n == 0) continue;
+        crypto_blake2b_update(hash_ctx, chunk + drop, n);
+        err = esp_ota_write(ota, chunk + drop, n);
+        if (err != ESP_OK) {
+            snprintf(token, token_len, "write 0x%x", (unsigned)err);
+            break;
+        }
+        size_t before = dl->written;
+        dl->written += n;
+        if (before / (512 * 1024) != dl->written / (512 * 1024)) {
+            ESP_LOGW(TAG, "ota: %u bytes written", (unsigned)dl->written);
+            ota_log_progress(src, dl->written, dl->expected);
+        }
+    }
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return err;
 }
 
 static esp_err_t ota_download_verify(const ota_source_t *src, const char *download_url,
@@ -475,57 +575,16 @@ static esp_err_t ota_download_verify(const ota_source_t *src, const char *downlo
         return ESP_ERR_INVALID_SIZE;
     }
 
-    esp_http_client_config_t config = {
-        .url = download_url,
-        .timeout_ms = 30000,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .buffer_size = 4096,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) {
-        ota_log(src, "error", "no-memory");
-        return ESP_ERR_NO_MEM;
-    }
-    if (auth_header != NULL) {
-        esp_http_client_set_header(client, "Authorization", auth_header);
-    }
-
-    /* An off-origin download connects to the address its check resolved,
-     * not to a second answer (fos_netguard_pin_t). */
-    if (!fos_netguard_pin_for_task(pin)) {
-        esp_http_client_cleanup(client);
-        ota_log(src, "error", "download-connect-failed:busy");
-        return ESP_FAIL;
-    }
-    esp_err_t err = esp_http_client_open(client, 0);
-    fos_netguard_unpin_for_task();
-    if (err != ESP_OK) {
-        esp_http_client_cleanup(client);
-        char detail[80];
-        snprintf(detail, sizeof(detail), "download-connect-failed:%s", esp_err_to_name(err));
-        ota_log(src, "error", detail);
-        return err;
-    }
-    int64_t content_length = esp_http_client_fetch_headers(client);
-    int status = esp_http_client_get_status_code(client);
-    if (status != 200) {
-        ESP_LOGW(TAG, "ota: download HTTP %d", status);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        char detail[48];
-        snprintf(detail, sizeof(detail), "download-http-%d", status);
-        ota_log(src, "error", detail);
-        return ESP_FAIL;
-    }
-
+    /* Erase as the bytes arrive, one sector ahead of the writes. Handing
+     * esp_ota_begin the size erased the whole image first: seconds of flash
+     * work while the socket sat unread right after its headers, the likeliest
+     * reason frame 70's download (reTerminal E1004, 2026-10-20) died 12 KB
+     * in. ESP-IDF's own esp_https_ota erases this way by default. */
     esp_ota_handle_t ota = 0;
-    err = esp_ota_begin(target, content_length > 0 ? (size_t)content_length
-                                                   : OTA_SIZE_UNKNOWN, &ota);
+    esp_err_t err = esp_ota_begin(target, OTA_WITH_SEQUENTIAL_WRITES, &ota);
     if (err != ESP_OK) {
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
         char detail[80];
-        snprintf(detail, sizeof(detail), "ota-begin-failed:%s", esp_err_to_name(err));
+        snprintf(detail, sizeof(detail), "ota-begin-failed:0x%x", (unsigned)err);
         ota_log(src, "error", detail);
         return err;
     }
@@ -534,46 +593,40 @@ static esp_err_t ota_download_verify(const ota_source_t *src, const char *downlo
     if (chunk == NULL) chunk = malloc(FOS_OTA_CHUNK);
     if (chunk == NULL) {
         esp_ota_abort(ota);
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
         ota_log(src, "error", "no-memory");
         return ESP_ERR_NO_MEM;
     }
 
+    /* The hash and the slot carry on across connections: a dropped link
+     * resumes at the byte it stopped at instead of starting over. */
     crypto_blake2b_ctx hash_ctx;
     crypto_blake2b_init(&hash_ctx, 64);
-    size_t total = 0;
+    fos_ota_dl_t dl;
+    fos_ota_dl_init(&dl, expected_size);
+    char token[sizeof(dl.last)];
     while (true) {
-        int r = esp_http_client_read(client, (char *)chunk, FOS_OTA_CHUNK);
-        if (r < 0) {
-            err = ESP_FAIL;
-            break;
+        if (dl.tries > 0) {
+            vTaskDelay(pdMS_TO_TICKS(FOS_OTA_RETRY_DELAY_MS));
+            if (!wait_for_wifi_connected(FOS_OTA_WIFI_RECONNECT_TIMEOUT_MS)) {
+                err = ESP_FAIL;
+                if (!fos_ota_dl_failed(&dl, "wifi")) break;
+                continue;
+            }
         }
-        if (r == 0) break;
-        crypto_blake2b_update(&hash_ctx, chunk, (size_t)r);
-        err = esp_ota_write(ota, chunk, (size_t)r);
-        if (err != ESP_OK) break;
-        total += (size_t)r;
-        if ((total % (512 * 1024)) < FOS_OTA_CHUNK) {
-            ESP_LOGW(TAG, "ota: %u bytes written", (unsigned)total);
-            ota_log_progress(src, total, expected_size);
-        }
+        token[0] = '\0';
+        err = ota_download_connection(src, download_url, auth_header, pin, ota, &hash_ctx,
+                                      chunk, &dl, token, sizeof(token));
+        if (err == ESP_OK) break;
+        if (!fos_ota_dl_failed(&dl, token) || err != ESP_FAIL) break;
     }
     free(chunk);
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
 
-    if (err != ESP_OK || total == 0 ||
-        (expected_size > 0 && total != expected_size)) {
-        ESP_LOGE(TAG, "ota: download failed at %u bytes (%s)",
-                 (unsigned)total, esp_err_to_name(err));
-        char detail[96];
-        snprintf(detail, sizeof(detail), "download-failed:%s@%u/%u",
-                 err != ESP_OK ? esp_err_to_name(err) : "short-read",
-                 (unsigned)total, (unsigned)expected_size);
+    if (err != ESP_OK) {
+        char detail[160];
+        fos_ota_dl_summary(&dl, detail, sizeof(detail));
         ota_log(src, "error", detail);
         esp_ota_abort(ota);
-        return err != ESP_OK ? err : ESP_FAIL;
+        return err;
     }
 
     uint8_t digest[64];
@@ -587,9 +640,9 @@ static esp_err_t ota_download_verify(const ota_source_t *src, const char *downlo
 
     err = esp_ota_end(ota);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "ota: image validation failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "ota: image validation failed: 0x%x", (unsigned)err);
         char detail[80];
-        snprintf(detail, sizeof(detail), "image-rejected:%s", esp_err_to_name(err));
+        snprintf(detail, sizeof(detail), "image-rejected:0x%x", (unsigned)err);
         ota_log(src, "error", detail);
         return ESP_ERR_INVALID_CRC;
     }
@@ -602,23 +655,27 @@ static esp_err_t ota_download_verify(const ota_source_t *src, const char *downlo
     esp_app_desc_t desc;
     err = esp_ota_get_partition_description(target, &desc);
     if (err != ESP_OK || !fos_version_same_release(desc.version, version)) {
-        ESP_LOGE(TAG, "ota: image says %s, signed as %s — refused",
-                 err == ESP_OK ? desc.version : esp_err_to_name(err), version);
+        const char *said = err == ESP_OK ? desc.version : "unreadable";
+        ESP_LOGE(TAG, "ota: image says %s, signed as %s — refused", said, version);
         char detail[80];
-        snprintf(detail, sizeof(detail), "image-version-mismatch:%s",
-                 err == ESP_OK ? desc.version : esp_err_to_name(err));
+        snprintf(detail, sizeof(detail), "image-version-mismatch:%s", said);
         ota_log(src, "error", detail);
         return ESP_ERR_INVALID_CRC;
     }
     err = esp_ota_set_boot_partition(target);
     if (err != ESP_OK) {
         char detail[80];
-        snprintf(detail, sizeof(detail), "set-boot-failed:%s", esp_err_to_name(err));
+        snprintf(detail, sizeof(detail), "set-boot-failed:0x%x", (unsigned)err);
         ota_log(src, "error", detail);
         return err;
     }
-    ESP_LOGW(TAG, "ota: %u bytes verified and staged in %s; rebooting",
-             (unsigned)total, target->label);
+    /* A download that had to resume says after what: whether links drop
+     * mid-image at all is what frame 70's failure left open. */
+    char detail[128] = "rebooting";
+    if (dl.tries > 0) {
+        snprintf(detail, sizeof(detail), "rebooting (resumed after %s)", dl.trail);
+    }
+    ota_log(src, "verified", detail);
     return ESP_OK;
 }
 
@@ -697,29 +754,12 @@ static esp_err_t ota_run_signed(const ota_source_t *src)
              esp_app_get_description()->version, manifest.version, manifest.download_url);
     ota_log(src, "downloading", manifest.version);
 
-    err = ESP_FAIL;
-    for (int attempt = 1; attempt <= FOS_OTA_DOWNLOAD_ATTEMPTS; attempt++) {
-        if (attempt > 1) {
-            vTaskDelay(pdMS_TO_TICKS(FOS_OTA_RETRY_DELAY_MS));
-            if (!wait_for_wifi_connected(FOS_OTA_WIFI_RECONNECT_TIMEOUT_MS)) {
-                ESP_LOGW(TAG, "ota: retry %d skipped, Wi-Fi %s", attempt,
-                         wifi_state_name(fos_wifi_state()));
-                continue;
-            }
-        }
-        err = ota_download_verify(src, manifest.download_url, first_party ? src->auth : NULL,
-                                  manifest.sig, manifest.version, manifest.size, &pin);
-        if (err == ESP_OK || err == ESP_ERR_INVALID_CRC || err == ESP_ERR_INVALID_SIZE ||
-            err == ESP_ERR_NO_MEM) {
-            break; /* staged, or a failure no retry can fix */
-        }
-        ESP_LOGW(TAG, "ota: attempt %d/%d failed: %s", attempt, FOS_OTA_DOWNLOAD_ATTEMPTS,
-                 esp_err_to_name(err));
-    }
+    /* Resumes within itself (fos_ota_download.c); one call is the run's download. */
+    err = ota_download_verify(src, manifest.download_url, first_party ? src->auth : NULL,
+                              manifest.sig, manifest.version, manifest.size, &pin);
     if (err == ESP_OK) {
         s_ota_failures = 0;
-        ota_log(src, "verified", "rebooting");
-        vTaskDelay(pdMS_TO_TICKS(750)); /* flush the log line */
+        vTaskDelay(pdMS_TO_TICKS(750)); /* flush the verified line */
         esp_restart();
         return ESP_OK;
     }
@@ -830,7 +870,13 @@ esp_err_t fos_ota_run_boot_request(void)
     if (clear_err != ESP_OK) {
         ESP_LOGW(TAG, "failed to clear boot OTA request: %s", esp_err_to_name(clear_err));
     }
-    return fos_ota_check_and_apply();
+    /* This run's lines are the ones the first pass replays; an older
+     * verdict still waiting in RTC memory is not this run's to report. */
+    s_ota_last_pending = 0;
+    s_ota_in_boot_request = true;
+    esp_err_t err = fos_ota_check_and_apply();
+    s_ota_in_boot_request = false;
+    return err;
 }
 
 static void ota_task(void *arg)
