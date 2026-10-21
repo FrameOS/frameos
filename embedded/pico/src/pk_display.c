@@ -6,6 +6,7 @@
 #include "hardware/spi.h"
 #include "pico/stdlib.h"
 
+#include "pk_config_keys.h"
 #include "pk_platform.h"
 #include "pk_shiftreg.h"
 
@@ -47,6 +48,11 @@ bool pk_display_panel_known(const char *panel_key)
 const pk_panel_t *pk_display_current(void)
 {
     return pk_display_find(pk_config()->panel);
+}
+
+bool pk_display_upside_down(void)
+{
+    return pk_config_panel_upside_down(pk_config());
 }
 
 bool pk_display_show_rows(const pk_panel_t *panel, const pk_pins_t *pins,

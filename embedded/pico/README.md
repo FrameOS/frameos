@@ -106,7 +106,10 @@ includes nothing from the SDK; keep it that way.
 
 Updating later is the same file onto the same drive; *Reboot into BOOTSEL*
 (or `bootsel` on the console) saves holding the button. Config and render
-state live in the last two flash sectors, which a UF2 does not touch.
+state live in two sectors near the end of the flash, which a UF2 does not
+touch. Not the very last sector: every RP2350 UF2 carries a block for it (the
+RP2350-E10 workaround the SDK adds), so anything kept there is erased by the
+update (`src/pk_flash_layout.h`).
 
 **Without a computer.** A board with no network to join opens the hotspot
 shown on its panel. Join it, the setup page opens by itself (or browse to

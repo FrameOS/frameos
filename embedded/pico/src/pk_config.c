@@ -81,28 +81,40 @@ static void terminate_strings(pk_config_t *config)
     config->ap_psk[sizeof(config->ap_psk) - 1] = '\0';
 }
 
-void pk_config_load(void)
+// The config blob at `offset`, over the defaults already in s_config. False
+// when there is none there (erased, another version, a torn write).
+static bool load_from(uint32_t offset)
 {
-    const uint8_t *flash = (const uint8_t *)(XIP_BASE + PK_FLASH_CONFIG_OFFSET);
+    const uint8_t *flash = (const uint8_t *)(XIP_BASE + offset);
     const pk_config_blob_t *blob = (const pk_config_blob_t *)flash;
-    pk_config_defaults(&s_config);
-    if (blob->magic != PK_CONFIG_MAGIC) return;
+    if (blob->magic != PK_CONFIG_MAGIC) return false;
 
     if (blob->version == PK_CONFIG_VERSION) {
-        if (crc32_of(&blob->config, sizeof(blob->config)) != blob->crc) return;
+        if (crc32_of(&blob->config, sizeof(blob->config)) != blob->crc) return false;
         s_config = blob->config;
     } else if (blob->version == PK_CONFIG_VERSION_2) {
         const pk_config_blob_v2_t *old = (const pk_config_blob_v2_t *)flash;
-        if (crc32_of(&old->config, sizeof(old->config)) != old->crc) return;
+        if (crc32_of(&old->config, sizeof(old->config)) != old->crc) return false;
         // Defaults for everything v2 did not have, then the old fields over them.
         memcpy(&s_config, &old->config, offsetof(pk_config_v2_t, deep_sleep) + 1);
     } else {
-        return;
+        return false;
     }
     terminate_strings(&s_config);
     if (s_config.interval_seconds < PK_INTERVAL_MIN_SECONDS) {
         s_config.interval_seconds = PK_INTERVAL_MIN_SECONDS;
     }
+    return true;
+}
+
+void pk_config_load(void)
+{
+    pk_config_defaults(&s_config);
+    if (load_from(PK_FLASH_CONFIG_OFFSET)) return;
+    // Firmware from before 2026-10-21 kept it in the last sector
+    // (pk_flash_layout.h): carried over once, to where an RP2350 update
+    // cannot erase it.
+    if (load_from(PK_FLASH_LEGACY_CONFIG_OFFSET)) pk_config_save();
 }
 
 bool pk_config_save(void)
@@ -142,6 +154,8 @@ void pk_config_factory_reset(void)
     uint32_t interrupts = save_and_disable_interrupts();
     flash_range_erase(PK_FLASH_CONFIG_OFFSET, FLASH_SECTOR_SIZE);
     flash_range_erase(PK_FLASH_STATE_OFFSET, FLASH_SECTOR_SIZE);
+    // Or the next boot would carry the old settings over again.
+    flash_range_erase(PK_FLASH_LEGACY_CONFIG_OFFSET, FLASH_SECTOR_SIZE);
     restore_interrupts(interrupts);
     pk_config_defaults(&s_config);
 }

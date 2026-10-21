@@ -34,6 +34,9 @@ const pk_panel_t *pk_display_panels(size_t *count);
 bool pk_display_panel_known(const char *panel_key);
 // The configured panel, or NULL ("none", unset, or no driver).
 const pk_panel_t *pk_display_current(void);
+// The board's panel is mounted turned 180° (its preset says so): a driver
+// that can reverses its scan directions in begin().
+bool pk_display_upside_down(void);
 
 // Produces packed row `y` into `row` (pk_fosb_row_bytes() bytes).
 typedef void (*pk_display_row_fn)(void *ctx, int y, uint8_t *row);

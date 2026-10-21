@@ -17,13 +17,14 @@
 // Hardware presets: keep in sync with EMBEDDED_HARDWARE_PRESETS in
 // backend/app/tasks/embedded_firmware.py (pico entries).
 static const pk_preset_t s_presets[] = {
-    {"pimoroni_inky_frame_4", "EPD_4in01f", INKY_FRAME_PINS},
-    {"pimoroni_inky_frame_5_7", "EPD_5in65f", INKY_FRAME_PINS},
-    {"pimoroni_inky_frame_7_3", "EPD_7in3f", INKY_FRAME_PINS},
+    {"pimoroni_inky_frame_4", "EPD_4in01f", INKY_FRAME_PINS, false},
+    {"pimoroni_inky_frame_5_7", "EPD_5in65f", INKY_FRAME_PINS, false},
+    {"pimoroni_inky_frame_7_3", "EPD_7in3f", INKY_FRAME_PINS, false},
     // Dec 2024 refresh: Pico 2 W with the same ACeP panel.
-    {"pimoroni_inky_frame_7_3_pico2", "EPD_7in3f", INKY_FRAME_PINS},
-    // Aug 2025 refresh: Pico 2 W with the Spectra 6 panel (black top border).
-    {"pimoroni_inky_frame_7_3_spectra", "EPD_7in3e", INKY_FRAME_PINS},
+    {"pimoroni_inky_frame_7_3_pico2", "EPD_7in3f", INKY_FRAME_PINS, false},
+    // Aug 2025 refresh: Pico 2 W with the Spectra 6 panel (black top border),
+    // mounted upside down on the board (seen on the bench, 2026-10-21).
+    {"pimoroni_inky_frame_7_3_spectra", "EPD_7in3e", INKY_FRAME_PINS, true},
 };
 
 // Keys the ESP32 console stores that mean nothing without an on-device
@@ -50,6 +51,14 @@ const pk_preset_t *pk_config_find_preset(const char *name)
         if (strcmp(name, s_presets[i].name) == 0) return &s_presets[i];
     }
     return NULL;
+}
+
+bool pk_config_panel_upside_down(const pk_config_t *config)
+{
+    const pk_preset_t *preset = pk_config_find_preset(config->hardware_preset);
+    // Only with the preset's own panel: a board re-set to another panel by
+    // hand is wired some other way.
+    return preset && preset->upside_down && strcmp(config->panel, preset->panel) == 0;
 }
 
 void pk_config_defaults(pk_config_t *config)

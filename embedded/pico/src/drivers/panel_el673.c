@@ -30,6 +30,13 @@ static bool el673_begin(const pk_panel_t *panel, const pk_pins_t *pins)
     pk_epd_reset(pins);
     if (!panel_wait_idle(pins, 5000)) return false;
     panel_run_sequence(pins, seq_7in3e_init);
+    if (pk_display_upside_down()) {
+        // The Inky Frame 7.3" Spectra carries this panel turned 180°: both
+        // scan directions reversed, gate (UD, bit 3) and source (SHL, bit 2),
+        // so the controller turns every picture and nothing else has to.
+        static const uint8_t seq_turned[] = {3, 0x00, 0x53, 0x69, 0};
+        panel_run_sequence(pins, seq_turned);
+    }
     pk_epd_command(pins, 0x04); // power on
     if (!panel_wait_idle(pins, 15000)) return false;
     pk_epd_command(pins, 0x10);

@@ -31,10 +31,15 @@ typedef struct {
     const char *name;
     const char *panel;
     pk_pins_t pins;
+    // The board's panel is mounted turned 180°: its driver reverses both scan
+    // directions, so scenes, the setup screen and `rotate` 0 are upright.
+    bool upside_down;
 } pk_preset_t;
 
 const pk_preset_t *pk_config_presets(size_t *count);
 const pk_preset_t *pk_config_find_preset(const char *name);
+// Whether the configured board's panel is mounted turned (its preset says so).
+bool pk_config_panel_upside_down(const pk_config_t *config);
 
 // Applies one key. `message` always receives a short human-readable outcome.
 pk_set_result_t pk_config_set(pk_config_t *config, const char *key, const char *value,

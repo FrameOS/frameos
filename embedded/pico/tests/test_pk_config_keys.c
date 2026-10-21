@@ -152,11 +152,27 @@ static void test_presets(void)
     CHECK(pk_config_find_preset(NULL) == NULL);
 }
 
+static void test_the_spectra_panel_is_mounted_turned(void)
+{
+    pk_config_t config;
+    pk_config_defaults(&config);
+    CHECK(!pk_config_panel_upside_down(&config));
+    CHECK(set(&config, "hardware", "pimoroni_inky_frame_7_3_spectra") == PK_SET_OK);
+    CHECK(pk_config_panel_upside_down(&config));
+    // The same panel on another board is upright, and so is a board whose
+    // panel was changed by hand: it is wired some other way.
+    CHECK(set(&config, "panel", "EPD_7in3f") == PK_SET_OK);
+    CHECK(!pk_config_panel_upside_down(&config));
+    CHECK(set(&config, "hardware", "pimoroni_inky_frame_7_3_pico2") == PK_SET_OK);
+    CHECK(!pk_config_panel_upside_down(&config));
+}
+
 int main(void)
 {
     test_backend_plan_applies();
     test_validation();
     test_pins();
     test_presets();
+    test_the_spectra_panel_is_mounted_turned();
     return pk_test_result("test_pk_config_keys");
 }
