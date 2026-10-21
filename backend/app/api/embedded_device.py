@@ -37,11 +37,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import struct
 from datetime import datetime, timezone
 from http import HTTPStatus
 
-from fastapi import Depends, Header, HTTPException, Query
+from fastapi import Depends, Header, HTTPException, Query, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -406,6 +407,70 @@ async def _active_scene_id(redis, frame: Frame, scenes: list | None = None) -> s
     return value if value in known else None
 
 
+# A thin client's button edges since its last pull: a few per press, and a
+# board that was mashed is still a handful (frameos/relayed_input.nim takes 32).
+MAX_DEVICE_INPUT_BYTES = 16 * 1024
+MAX_DEVICE_INPUT_EDGES = 32
+_DEVICE_INPUT_LABEL = re.compile(r"^[A-Za-z0-9_.-]{1,16}$")
+
+
+def _json_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def embedded_device_input(body: object) -> dict:
+    """The button edges a thin client sent with its render pull, as the wasm
+    runtime takes them (frameos/relayed_input.nim): ``{"nowMs": <the board's
+    clock>, "edges": [{"label", "action": "down" | "up", "atMs", "pin"?,
+    "wake"?}]}``, oldest first. A body of another shape is a 400; an edge
+    that says nothing usable is dropped, and past MAX_DEVICE_INPUT_EDGES the
+    rest are."""
+    if not isinstance(body, dict) or not _json_int(body.get("nowMs")) or not isinstance(body.get("edges"), list):
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Expected {nowMs, edges}")
+    now_ms = int(body["nowMs"])
+    edges: list[dict] = []
+    for edge in body["edges"]:
+        if len(edges) >= MAX_DEVICE_INPUT_EDGES:
+            break
+        if not isinstance(edge, dict):
+            continue
+        label, action, at_ms = edge.get("label"), edge.get("action"), edge.get("atMs")
+        if not isinstance(label, str) or not _DEVICE_INPUT_LABEL.match(label):
+            continue
+        if action not in ("down", "up") or isinstance(at_ms, bool) or not isinstance(at_ms, int):
+            continue
+        if not 0 <= at_ms <= now_ms:
+            continue
+        kept: dict = {"label": label, "action": action, "atMs": at_ms}
+        if _json_int(edge.get("pin")):
+            kept["pin"] = edge["pin"]
+        if edge.get("wake") is True:
+            kept["wake"] = True
+        edges.append(kept)
+    return {"nowMs": now_ms, "edges": edges}
+
+
+async def _log_relayed_input(db: Session, redis, frame: Frame, scene_logs: list[str]) -> None:
+    """What the scene heard of a thin client's presses, into the frame log: the
+    dispatcher's `event:*` lines (the `gpio` edges, the `button` they made,
+    what the scene dispatched in turn), as an ESP32's own runtime logs them.
+    Only for a pull that carried presses; an ordinary poll logs nothing."""
+    from app.models.log import new_log
+
+    for line in scene_logs:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        event = entry.get("event")
+        # `open` is the fresh render process starting its scene, not news.
+        if not isinstance(event, str) or not event.startswith("event:") or entry.get("origin") == "system":
+            continue
+        await new_log(db, redis, int(frame.id), "webhook", line)
+
+
 @api_public.get("/frames/{id:int}/embedded/render")
 async def api_embedded_device_render(
     id: int,
@@ -414,6 +479,32 @@ async def api_embedded_device_render(
     authorization: str = Header(None),
 ):
     frame = _embedded_frame_from_bearer(db, id, authorization)
+    return await _embedded_render_response(db, redis, frame)
+
+
+@api_public.post("/frames/{id:int}/embedded/render")
+async def api_embedded_device_render_with_input(
+    id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    redis=Depends(get_redis),
+    authorization: str = Header(None),
+):
+    """The pull of a thin client whose buttons were pressed since the last
+    one: the same frame, with the presses delivered to the scene first, as
+    its driver's `gpio` edges (docs/events.md, "Thin clients")."""
+    frame = _embedded_frame_from_bearer(db, id, authorization)
+    raw = await request.body()
+    if len(raw) > MAX_DEVICE_INPUT_BYTES:
+        raise HTTPException(status_code=HTTPStatus.REQUEST_ENTITY_TOO_LARGE, detail="Body too large")
+    try:
+        body = json.loads(raw or b"null")
+    except ValueError:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid JSON")
+    return await _embedded_render_response(db, redis, frame, embedded_device_input(body))
+
+
+async def _embedded_render_response(db: Session, redis, frame: Frame, device_input: dict | None = None) -> Response:
     width, height = embedded_render_dimensions(frame)
     scene_width, scene_height = embedded_scene_dimensions(frame, width, height)
     pixel_format = embedded_pixel_format_for_panel(embedded_panel_for_frame(frame))
@@ -438,6 +529,8 @@ async def api_embedded_device_render(
         # Same tolerance as _active_scene_id: no redis, no memory, still a frame.
         scene_states = {}
     scenes_override, scene_id, scene_states = await _thin_client_scenes(db, redis, frame, scene_states)
+    relayed = device_input if device_input and device_input["edges"] else None
+    scene_logs: list[str] = []
     try:
         rgba, rendered_state, _saved_assets = await render_scene_rgba_and_state(
             frame,
@@ -447,6 +540,8 @@ async def api_embedded_device_render(
             settings=embedded_settings_payload(db, frame),
             scenes_override=scenes_override,
             scene_states=scene_states,
+            device_input=relayed,
+            scene_logs=scene_logs,
         )
     except RenderQueueFull as exc:
         # Not a render failure but a full queue: the device keeps what it
@@ -467,6 +562,12 @@ async def api_embedded_device_render(
             await store_rendered_scene_state(redis, frame, rendered_state.get("sceneId"), state)
         except Exception:
             # A state that could not be saved must not cost the device its frame.
+            pass
+    if relayed:
+        try:
+            await _log_relayed_input(db, redis, frame, scene_logs)
+        except Exception:
+            # Nor may a log line that could not be written.
             pass
     if rgba is not None:
         from PIL import Image

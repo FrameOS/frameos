@@ -31,6 +31,12 @@ static bool s_usb_powered = true;
 static int s_rssi = 0;
 static absolute_time_t s_next_sample;
 static absolute_time_t s_next_deadman;
+static void (*s_input_poll)(void) = NULL;
+
+void pk_platform_set_input_poll(void (*poll)(void))
+{
+    s_input_poll = poll;
+}
 
 void pk_poll(void)
 {
@@ -45,6 +51,7 @@ void pk_poll(void)
         s_in_network_poll = false;
     }
     pk_leds_tick();
+    if (s_input_poll) s_input_poll();
     // A console command may itself wait (a Wi-Fi scan, a reboot countdown);
     // only the outermost turn reads the console, so commands never nest.
     if (s_poll_depth == 1) {

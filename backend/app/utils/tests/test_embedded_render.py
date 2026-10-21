@@ -187,3 +187,100 @@ def test_renderer_http_child_checks_what_the_socket_connects_to():
     assert name["status"] == 0 and "local network access is off" in name["error"]
     assert literal["status"] == 0 and "local network access is off" in literal["error"]
     assert metadata["status"] == 0 and "cloud metadata address" in metadata["error"]
+
+
+@pytest.mark.asyncio
+async def test_a_thin_clients_presses_go_to_the_harness_with_the_render(monkeypatch, tmp_path):
+    """The edges ride the render request; a pull without any sends none, and
+    the scene's log lines come back to a caller that collects them."""
+    from types import SimpleNamespace
+
+    from app.utils import embedded_render
+
+    sent: list[dict] = []
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self, request):
+            sent.append(json.loads(request))
+            return b"\x00" * 16, b'[scene] {"event":"event:button","origin":"driver"}\n'
+
+    async def fake_exec(*_args, **_kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(embedded_render.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(embedded_render.shutil, "which", lambda _name: "/usr/bin/node")
+    monkeypatch.setattr(embedded_render, "wasm_assets_dir", lambda: tmp_path)
+    monkeypatch.setattr(embedded_render, "RENDER_HARNESS", Path(embedded_render.__file__))
+    monkeypatch.setattr(embedded_render, "_render_semaphore", asyncio.Semaphore(embedded_render.RENDER_CONCURRENCY))
+    monkeypatch.setattr(embedded_render, "_render_waiters", 0)
+
+    frame = SimpleNamespace(id=1, name="f", timezone=None, network={}, scenes=[{"id": "s", "nodes": [], "edges": []}])
+    tap = {"nowMs": 900, "edges": [{"label": "B", "action": "down", "atMs": 400}]}
+    logs: list[str] = []
+    await embedded_render.render_scene_rgba_and_state(frame, 2, 2, device_input=tap, scene_logs=logs)
+    await embedded_render.render_scene_rgba_and_state(frame, 2, 2, device_input={"nowMs": 900, "edges": []})
+    await embedded_render.render_scene_rgba_and_state(frame, 2, 2)
+
+    assert json.loads(sent[0]["deviceInputJson"]) == tap
+    assert "deviceInputJson" not in sent[1] and "deviceInputJson" not in sent[2]
+    assert logs == ['{"event":"event:button","origin":"driver"}']
+
+
+def _renderer_takes_device_input() -> bool:
+    from app.utils.embedded_render import thin_client_renderer_available, wasm_assets_dir
+
+    assets = wasm_assets_dir()
+    return (
+        thin_client_renderer_available()
+        and assets is not None
+        and "frameos_wasm_device_input" in (assets / "frameos.js").read_text(errors="replace")
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _renderer_takes_device_input(), reason="no wasm bundle with frameos_wasm_device_input")
+async def test_a_relayed_tap_reaches_the_scene_in_the_real_runtime():
+    """Through the harness and the wasm runtime: a tap the board saw is the
+    driver's `gpio` down and up, the `press` they make, and what the scene's
+    `button` listener does with it, before the render."""
+    from types import SimpleNamespace
+
+    from app.utils.embedded_render import render_scene
+
+    scene = {
+        "id": "taps",
+        "name": "Taps",
+        "default": True,
+        "settings": {"execution": "interpreted"},
+        "fields": [{"name": "taps", "type": "integer", "value": "0", "access": "public"}],
+        "nodes": [
+            {"id": "press", "type": "event", "position": {"x": 0, "y": 0}, "data": {"keyword": "button"}},
+            {"id": "count", "type": "app", "position": {"x": 0, "y": 0},
+             "data": {"keyword": "logic/setAsState", "config": {"stateKey": "taps"}}},
+            {"id": "next", "type": "code", "position": {"x": 0, "y": 0},
+             "data": {"code": "", "codeArgs": [], "codeOutputs": [{"name": "valueJson", "type": "json"}],
+                      "codeJS": "Number(state.taps || 0) + 1"}},
+            {"id": "render", "type": "event", "position": {"x": 0, "y": 0}, "data": {"keyword": "render"}},
+            {"id": "color", "type": "app", "position": {"x": 0, "y": 0},
+             "data": {"keyword": "render/color", "config": {"color": "#ffffff"}}},
+        ],
+        "edges": [
+            {"id": "e1", "source": "press", "sourceHandle": "next", "target": "count", "targetHandle": "prev"},
+            {"id": "e2", "source": "next", "sourceHandle": "fieldOutput", "target": "count",
+             "targetHandle": "fieldInput/valueJson"},
+            {"id": "e3", "source": "render", "sourceHandle": "next", "target": "color", "targetHandle": "prev"},
+        ],
+    }
+    frame = SimpleNamespace(id=1, name="f", timezone="UTC", network={}, scenes=[scene])
+    tap = {"nowMs": 10_600, "edges": [
+        {"label": "B", "action": "down", "atMs": 10_000}, {"label": "B", "action": "up", "atMs": 10_080}]}
+
+    result = await render_scene(frame, 16, 16, scene_states={"taps": {"taps": 4}}, device_input=tap)
+
+    assert result.rgba is not None, result.error
+    assert result.state["state"]["taps"] == 5
+    events = [json.loads(line) for line in result.scene_logs if line.startswith("{")]
+    heard = [(e["event"], e["payload"]["action"]) for e in events if e.get("origin") == "driver"]
+    assert heard == [("event:gpio", "down"), ("event:gpio", "up"), ("event:button", "press")]

@@ -9,12 +9,13 @@
 # emscripten JS-library hooks (log + event notifications go out through
 # postMessage, HTTP comes in through synchronous XHR).
 
-import std/[json, locks, math, options, strformat, strutils, tables, times]
+import std/[json, locks, math, monotimes, options, strformat, strutils, tables, times]
 import pixie
 
 import frameos/types
 import frameos/channels
 import frameos/single_scene_host
+import frameos/relayed_input
 import frameos/interpreter
 import frameos/planner
 import frameos/utils/image as frameos_image
@@ -363,6 +364,22 @@ proc frameos_wasm_event(eventName: cstring, payloadJson: cstring): bool {.export
   except Exception as e:
     setLastError("event " & $eventName & " failed: " & e.msg)
     false
+
+proc frameos_wasm_device_input(inputJson: cstring): cint {.exportc, cdecl.} =
+  ## Button edges a thin client saw, relayed with the render pull they asked
+  ## for (frameos/relayed_input.nim): delivered as the board's own driver's,
+  ## `gpio` from `driver`, then time passes to now, so a tap whose
+  ## double-press window closed on the board is a `press` before the render.
+  ## Returns how many edges were delivered, -1 when the input was unreadable.
+  try:
+    let edges = relayedButtonEdges(parseJson($inputJson), getMonoTime().ticks div 1_000_000)
+    for payload in edges:
+      discard host.send(eoDriver, "gpio", payload)
+    discard host.tick()
+    edges.len.cint
+  except Exception as e:
+    setLastError("device input failed: " & e.msg)
+    -1
 
 proc frameos_wasm_tick(): bool {.exportc, cdecl.} =
   ## Time passing with nothing sent — the worker calls this while a pointer or

@@ -44,8 +44,13 @@ typedef struct {
 } pk_render_stats_t;
 
 void pk_render_init(void);
-// `retry_after_seconds` is set for PK_RENDER_RETRY_LATER.
-pk_render_result_t pk_render_once(uint32_t *retry_after_seconds);
+// `retry_after_seconds` is set for PK_RENDER_RETRY_LATER. `input_json`
+// (NULL for none) is the front buttons' edges since the last pull
+// (pk_buttons_json), sent as the body of a POST pull so the scene hears them
+// before it renders; `*input_taken` says the backend answered that request
+// (200, or a 4xx that would only repeat), so the edges are not sent again.
+pk_render_result_t pk_render_once(uint32_t *retry_after_seconds, const char *input_json, size_t input_len,
+                                  bool *input_taken);
 const pk_render_stats_t *pk_render_stats(void);
 // True while the glass holds a rendered frame (not a status screen, not
 // factory-blank) — survives power cuts.

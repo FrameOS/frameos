@@ -548,6 +548,32 @@ async def test_preview_on_a_pico_is_what_its_render_pull_runs_until_a_switch(
 
 
 @pytest.mark.asyncio
+async def test_a_pico_that_does_not_answer_gets_the_switch_on_its_next_pull(async_client, db, redis):
+    """The switch is in the store before the push; a board asleep on battery
+    does not answer it, and that is the queued answer, not a 502."""
+    from fastapi import HTTPException
+
+    frame = await pico_spectra_frame(async_client, db)
+    frame.scenes = [_slideshow_scene(), {**_slideshow_scene(), 'id': 'other', 'name': 'Other'}]
+    db.add(frame)
+    db.commit()
+
+    with patch('app.api.frames._forward_frame_request', new_callable=AsyncMock,
+               side_effect=HTTPException(status_code=502, detail='All connection attempts failed')):
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/setCurrentScene', json={'sceneId': 'other'},
+            headers={'content-type': 'application/json'})
+        assert response.status_code == 200, response.text
+        assert response.json()['status'] == 'queued'
+        assert await redis.get(f'frame:{frame.id}:active_scene') in (b'other', 'other')
+
+        # A custom event is not in the store: that still says it failed.
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/wiggle', json={}, headers={'content-type': 'application/json'})
+        assert response.status_code == 502
+
+
+@pytest.mark.asyncio
 async def test_set_next_scene_on_a_pico_moves_the_store_and_deploys(async_client, db, redis):
     """No SSH, no files, no queue: the switch is the store the render pull
     reads, and the deploy job asks the board to pull."""
@@ -566,6 +592,94 @@ async def test_set_next_scene_on_a_pico_moves_the_store_and_deploys(async_client
     fast_deploy.assert_awaited_once()
     assert await redis.get(f'frame:{frame.id}:active_scene') in (b'other', 'other')
     assert json.loads(await redis.get(_states_key(frame))) == {'other': {'index': 7}}
+
+
+@pytest.mark.asyncio
+async def test_a_render_pull_with_presses_hands_them_to_the_scene(async_client, no_auth_client, db, redis, monkeypatch):
+    """A thin client's buttons ride its render pull (POST): the renderer gets
+    the edges, and what the scene heard of them lands in the frame log."""
+    from app.models.log import Log
+
+    frame = await pico_spectra_frame(async_client, db)
+    frame.scenes = [_slideshow_scene()]
+    db.add(frame)
+    db.commit()
+    calls: list = []
+
+    async def fake_render(frame_arg, width, height, **kwargs):
+        calls.append(kwargs)
+        if kwargs.get('device_input'):
+            kwargs['scene_logs'].extend([
+                '{"event":"event:open","origin":"system","payload":{}}',
+                '{"event":"event:gpio","origin":"driver","payload":{"label":"B","action":"down"}}',
+                '{"event":"event:button","origin":"driver","payload":{"label":"B","action":"press"}}',
+                '{"event":"render:done","sceneId":"slides"}',
+                'scene "Slides" initialized',
+            ])
+        return bytes((0, 0, 0, 255)) * (width * height), None, None
+
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', fake_render)
+    tap = {'nowMs': 9_000, 'edges': [
+        {'label': 'B', 'action': 'down', 'atMs': 8_000, 'wake': True},
+        {'label': 'B', 'action': 'up', 'atMs': 8_090, 'pin': -1, 'extra': 'dropped'},
+    ]}
+    response = await no_auth_client.post(f'/api/frames/{frame.id}/embedded/render', json=tap, headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert response.content[:4] == b'FOSB'
+    assert calls[-1]['device_input'] == {'nowMs': 9_000, 'edges': [
+        {'label': 'B', 'action': 'down', 'atMs': 8_000, 'wake': True},
+        {'label': 'B', 'action': 'up', 'atMs': 8_090, 'pin': -1},
+    ]}
+    lines = [row.line for row in db.query(Log).filter(Log.frame_id == frame.id).all()]
+    assert any('"event:button"' in line for line in lines)
+    assert any('"event:gpio"' in line for line in lines)
+    assert not any('event:open' in line or 'render:done' in line or 'initialized' in line for line in lines)
+
+    # An ordinary pull (GET) carries none, and logs none.
+    before = db.query(Log).filter(Log.frame_id == frame.id).count()
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/render', headers=auth(frame))
+    assert response.status_code == 200
+    assert calls[-1]['device_input'] is None
+    assert db.query(Log).filter(Log.frame_id == frame.id).count() == before
+
+
+@pytest.mark.asyncio
+async def test_a_render_pull_takes_only_edges_it_can_time(async_client, no_auth_client, db, monkeypatch):
+    frame = await pico_spectra_frame(async_client, db)
+    calls: list = []
+    monkeypatch.setattr('app.api.embedded_device.render_scene_rgba_and_state', scene_renderer(calls))
+    url = f'/api/frames/{frame.id}/embedded/render'
+
+    edges = [
+        {'label': 'A', 'action': 'down', 'atMs': 100},
+        {'label': 'A', 'action': 'press', 'atMs': 100},     # not an edge
+        {'label': 'A', 'action': 'up', 'atMs': 5_000},      # after the board's now
+        {'label': 'A', 'action': 'up', 'atMs': -1},
+        {'label': 'A', 'action': 'up', 'atMs': True},
+        {'label': '<b>', 'action': 'up', 'atMs': 200},
+        {'label': 'A', 'action': 'up'},
+        'A',
+    ] + [{'label': 'C', 'action': 'down', 'atMs': 1} for _ in range(40)]
+    response = await no_auth_client.post(url, json={'nowMs': 1_000, 'edges': edges}, headers=auth(frame))
+    assert response.status_code == 200, response.text
+    kept = calls[-1]['device_input']['edges']
+    assert kept[0] == {'label': 'A', 'action': 'down', 'atMs': 100}
+    assert len(kept) == 32 and all(edge['label'] == 'C' for edge in kept[1:])
+
+    # Nothing it can time is an ordinary render.
+    response = await no_auth_client.post(url, json={'nowMs': 1_000, 'edges': []}, headers=auth(frame))
+    assert response.status_code == 200
+    assert calls[-1]['device_input'] is None
+
+    for body in ([], {'edges': []}, {'nowMs': 'soon', 'edges': []}, {'nowMs': 1, 'edges': {}}):
+        response = await no_auth_client.post(url, json=body, headers=auth(frame))
+        assert response.status_code == 400, body
+    response = await no_auth_client.post(url, content=b'{not json', headers=auth(frame))
+    assert response.status_code == 400
+    response = await no_auth_client.post(url, content=b'x' * (17 * 1024), headers=auth(frame))
+    assert response.status_code == 413
+    response = await no_auth_client.post(url, json={'nowMs': 1, 'edges': []})
+    assert response.status_code == 401
 
 
 @pytest.mark.asyncio

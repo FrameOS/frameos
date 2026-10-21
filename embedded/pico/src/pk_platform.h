@@ -18,6 +18,10 @@
 // skip the console so a command never runs inside another.
 void pk_poll(void);
 void pk_wait_ms(uint32_t ms);
+// Run on every pk_poll() outside an lwIP callback: what must keep watching
+// while anything waits (the Inky Frame's front buttons, so a press made
+// during a 30 s panel refresh keeps its timing).
+void pk_platform_set_input_poll(void (*poll)(void));
 
 uint32_t pk_uptime_seconds(void);
 uint32_t pk_random32(void);

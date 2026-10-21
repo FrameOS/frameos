@@ -16,6 +16,7 @@
 #include "hardware/gpio.h"
 #include "pico/stdlib.h"
 
+#include "pk_buttons.h"
 #include "pk_config.h"
 #include "pk_console.h"
 #include "pk_display.h"
@@ -43,6 +44,9 @@
 #define FAILED_RENDER_RETRY_SECONDS 60u
 #define MAX_BUSY_RETRIES 3u
 #define BUTTON_POLL_MS 20
+// A key held longer than this (stuck, or a cat on the frame) stops holding
+// back the render it is part of.
+#define BUTTON_HOLD_GIVE_UP_MS 15000u
 
 // Shift register bits (Pimoroni inky_frame.hpp): buttons A-E are 0-4.
 #define SR_BUTTON_MASK 0x1Fu
@@ -50,7 +54,7 @@
 #define SR_EXTERNAL_TRIGGER (1u << 6)
 
 static bool s_render_requested = false;
-static uint8_t s_buttons_last = 0;
+static pk_buttons_t s_buttons;
 static absolute_time_t s_next_button_poll;
 
 static uint32_t now_ms(void)
@@ -95,32 +99,33 @@ static void log_bootup(void)
     pk_log_event(line);
 }
 
-// Front buttons: any press re-renders (the ESP32 thin client's behaviour —
-// the scene runs on the backend, so there is no local scene to hand the
-// event to) and is logged, so the backend's log shows which one it was.
+// Front buttons, on every pk_poll(): the edges go to the scene with the next
+// render pull (pk_buttons.h), which the main loop makes once the press they
+// belong to is decided. The backend's log then shows what the scene heard.
 static void poll_buttons(void)
 {
-    if (!has_shift_register()) return;
     if (absolute_time_diff_us(get_absolute_time(), s_next_button_poll) > 0) return;
     s_next_button_poll = make_timeout_time_ms(BUTTON_POLL_MS);
-    uint8_t buttons = pk_shiftreg_read(&pk_config()->pins) & SR_BUTTON_MASK;
-    uint8_t pressed = buttons & (uint8_t)~s_buttons_last;
-    s_buttons_last = buttons;
-    for (int index = 0; index < 5; index++) {
-        if (!(pressed & (1u << index))) continue;
-        pk_leds_button(index);
-        char line[PK_LOG_LINE_MAX];
-        snprintf(line, sizeof(line),
-                 "{\"event\":\"button\",\"source\":\"pico\",\"label\":\"%c\",\"dispatched\":false}", 'A' + index);
-        pk_log_event(line);
-        s_render_requested = true;
+    uint8_t held = pk_shiftreg_read(&pk_config()->pins) & SR_BUTTON_MASK;
+    uint8_t pressed = pk_buttons_sample(&s_buttons, held, now_ms());
+    for (int index = 0; index < PK_BUTTON_COUNT; index++) {
+        if (pressed & (1u << index)) pk_leds_button(index);
     }
+}
+
+// A press is still being decided (a key down, a tap inside its double-press
+// window): the next render waits for it, and the board does not power off.
+static bool buttons_deciding(void)
+{
+    if (!pk_buttons_busy(&s_buttons, now_ms())) return false;
+    uint32_t last = s_buttons.count ? s_buttons.edges[s_buttons.count - 1].at_ms : 0;
+    return now_ms() - last < BUTTON_HOLD_GIVE_UP_MS;
 }
 
 static void gather_requests(void)
 {
     pk_platform_sample();
-    poll_buttons();
+    if (pk_buttons_ready(&s_buttons, now_ms())) s_render_requested = true;
     if (pk_console_take_render_request()) s_render_requested = true;
     switch (pk_httpd_take_action()) {
         case PK_HTTPD_ACTION_RENDER:
@@ -207,9 +212,10 @@ int main(void)
         gpio_set_dir(config->pins.hold_vsys, GPIO_OUT);
         gpio_put(config->pins.hold_vsys, 1);
     }
-    // Next, before the finger lifts: which button (or the RTC) woke us.
+    // Next, before the finger lifts: which button (or the RTC) woke us. A key
+    // still down is a press like any other, starting at the reset.
     uint8_t wake_bits = has_shift_register() ? pk_shiftreg_read(&config->pins) : 0;
-    s_buttons_last = wake_bits & SR_BUTTON_MASK;
+    pk_buttons_init(&s_buttons, wake_bits & SR_BUTTON_MASK, now_ms());
 
     stdio_init_all();
     pk_log_init(pk_epoch_or_zero, pk_console_print_line);
@@ -219,6 +225,7 @@ int main(void)
     pk_rtc_init();
     pk_time_seed(pk_rtc_read_epoch());
     s_next_button_poll = get_absolute_time();
+    if (has_shift_register()) pk_platform_set_input_poll(poll_buttons);
 
     printf("\nFrameOS Pico thin client %s (%s)\nframeos> ", FRAMEOS_VERSION, pk_platform_name());
     if (has_shift_register()) log_wake(wake_bits);
@@ -284,7 +291,9 @@ int main(void)
         pk_leds_connection(PK_LED_ON);
 
         bool due = absolute_time_diff_us(get_absolute_time(), next_render) <= 0;
-        if (!due && !s_render_requested) {
+        // A press still being decided is part of this render: wait for it
+        // (its double-press window is 350 ms; a panel refresh is 30 s).
+        if ((!due && !s_render_requested) || buttons_deciding()) {
             sleep_ms(1);
             continue;
         }
@@ -292,7 +301,13 @@ int main(void)
 
         pk_render_sync_settings();
         uint32_t retry_after = 0;
-        pk_render_result_t result = pk_render_once(&retry_after);
+        static char input[PK_BUTTONS_JSON_MAX];
+        size_t input_edges = 0;
+        size_t input_len = pk_buttons_json(&s_buttons, now_ms(), input, sizeof(input), &input_edges);
+        bool input_taken = false;
+        pk_render_result_t result =
+            pk_render_once(&retry_after, input_edges ? input : NULL, input_edges ? input_len : 0, &input_taken);
+        if (input_taken) pk_buttons_consume(&s_buttons, input_edges);
         uint32_t wait_seconds = config->interval_seconds;
         // A backend whose queue stays full must not keep a battery frame
         // awake: after a few polite retries it counts as a failed pass.
@@ -312,8 +327,10 @@ int main(void)
         // the cells for nothing.
         bool sleep_wanted = config->deep_sleep || (config->deep_sleep_on_battery && !pk_usb_powered());
         bool can_sleep = pk_rtc_present() && config->pins.hold_vsys >= 0;
+        // Presses made during the pass go out before the power does.
+        bool buttons_quiet = s_buttons.count == 0 && !buttons_deciding();
         if (sleep_wanted && can_sleep && pk_config_backend_ready() && result != PK_RENDER_RETRY_LATER &&
-            !somebody_is_here()) {
+            !somebody_is_here() && buttons_quiet) {
             char line[PK_LOG_LINE_MAX];
             snprintf(line, sizeof(line),
                      "{\"event\":\"sleep\",\"source\":\"pico\",\"wakeInSeconds\":%lu,\"onBattery\":%s}",

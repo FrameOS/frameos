@@ -1714,6 +1714,15 @@ async def api_frame_event(
         from app.utils.retired_apps import frame_runtime_version, scenes_for_runtime
 
         body = {**body, "scenes": scenes_for_runtime(scenes, frame_runtime_version(frame))}
+    # For a thin client without the queue (the Pico) these only ask it to
+    # render now: the change is already in the store its pull reads (above).
+    # A board that does not answer (asleep on battery, between networks)
+    # shows it on its next pull, which is the queued answer, not an error.
+    thin_push = (
+        event in {"setCurrentScene", "setSceneState", "uploadScenes", "render"}
+        and is_thin_client_frame(frame)
+        and not is_queued_embedded_frame(frame)
+    )
     try:
         await _forward_frame_request(
             frame, redis, path=f"/event/{event}", method="POST", json_body=body
@@ -1726,13 +1735,15 @@ async def api_frame_event(
                 scene_id=scene_id if isinstance(scene_id, str) else None,
             )
         return "OK"
-    except HTTPException as exc:
-        await log(
-            db, redis, id, "stderr", f"Error on frame event {event}: {exc.detail}"
-        )
-        raise exc
-    except RuntimeError as exc:
-        await log(db, redis, id, "stderr", f"Error on frame event {event}: {str(exc)}")
+    except (HTTPException, RuntimeError) as exc:
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        if thin_push:
+            await log(
+                db, redis, id, "stdinfo",
+                f"The frame did not answer {event} ({detail}); it shows the change on its next render",
+            )
+            return {"status": "queued", "applied": False, "command": None}
+        await log(db, redis, id, "stderr", f"Error on frame event {event}: {detail}")
         raise exc
 
 

@@ -188,8 +188,10 @@ static pk_render_result_t fail(const char *stage, const char *message)
 
 // ------------------------------------------------------------ the pass
 
-pk_render_result_t pk_render_once(uint32_t *retry_after_seconds)
+pk_render_result_t pk_render_once(uint32_t *retry_after_seconds, const char *input_json, size_t input_len,
+                                  bool *input_taken)
 {
+    if (input_taken) *input_taken = false;
     pk_config_t *config = pk_config();
     const pk_panel_t *panel = pk_display_current();
     if (!pk_config_backend_ready()) {
@@ -247,7 +249,14 @@ pk_render_result_t pk_render_once(uint32_t *retry_after_seconds)
         .sink = fosb_sink,
         .sink_arg = &sink,
     };
+    if (input_json && input_len > 0) {
+        request.method = "POST";
+        request.content_type = "application/json";
+        request.body = input_json;
+        request.body_len = input_len;
+    }
     pk_http_result_t result = pk_http_request(&request);
+    if (input_taken) *input_taken = input_json && result.status >= 200 && result.status < 500;
 
     bool whole = result.status == 200 && result.complete && sink.error == NULL &&
                  sink.payload_written == sink.payload_expected;

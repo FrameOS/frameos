@@ -43,9 +43,18 @@ sleep) are fixed and host-tested. Still open:
   (`docs/convergence-todo.md` §3). When that exists: a WebSocket client over
   altcp TLS, Ed25519 enrollment (Monocypher is portable), and the contract's
   `pico` profile (`docs/cloud-frames-contract.json` has only `linux`/`esp32`).
-- Front buttons re-render but never reach the scene as a `button` event. The
-  scene runs on the backend, so this needs a device → backend event route and
-  the wasm harness accepting events; the ESP32 thin client has the same gap.
+- The ESP32-C3 thin client's buttons do not reach its scene: the firmware
+  has no runtime there (`frameos_nim_available()` is false) and drops the
+  edges. The
+  backend half the Pico uses is there for it (`POST /embedded/render` with
+  `{nowMs, edges}`, docs/events.md "Thin clients"): `fos_buttons.c` keeps the
+  edges while there is no runtime, `fos_client.c` sends them with the remote
+  pull once `fos_button_timing_busy` is false for every key.
+- A custom scene event sent to a thin client (the workspace's event sender,
+  `/event/<name>`) only makes it re-render: the event never runs in the
+  backend's runtime, so the scene does not hear it. Button presses ride the
+  render pull (`deviceInputJson` in the harness); events for the scene could
+  wait in the backend for the next pull the same way.
 - `GET /state` / `/states` on the device 404, so the workspace's state panel
   for a thin client falls back instead of reading the backend's store, which
   is where a thin client's scene state actually lives.

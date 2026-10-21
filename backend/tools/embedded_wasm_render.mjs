@@ -7,7 +7,8 @@
 //
 // Protocol: a single JSON object on stdin
 //   {assetsDir, width, height, name, timeZone, settingsJson, scenesJson,
-//    sceneId, statesJson, frameAssetsRoot, saveAssetsJson, assetsWriteBudget}
+//    sceneId, statesJson, frameAssetsRoot, saveAssetsJson, assetsWriteBudget,
+//    deviceInputJson}
 // and exactly width*height*4 bytes of RGBA on stdout on success (exit 0).
 // All logs go to stderr; any failure exits non-zero with a message there.
 // statesJson ({sceneId: stateObject}) seeds backend-persisted scene state;
@@ -22,6 +23,8 @@
 // frameAssetsRoot after the render, up to assetsWriteBudget bytes (the
 // frame's remaining asset quota), reported on stderr as one
 // `__FRAMEOS_SAVED_ASSETS__{"files":[...],"skippedOverBudget":n}` line.
+// deviceInputJson ({nowMs, edges}) is the button edges a thin client saw
+// since its last pull; the scene hears them before the render.
 //
 // Sandbox posture: user scene code (QuickJS) runs inside the wasm module,
 // never natively in Node. Its host hooks are logging and the synchronous
@@ -516,6 +519,19 @@ function writeBackSavedAssets() {
   walk(MEMFS_ASSETS_ROOT)
   if (files.length > 0 || skippedOverBudget > 0) {
     process.stderr.write('__FRAMEOS_SAVED_ASSETS__' + JSON.stringify({ files, skippedOverBudget }) + '\n')
+  }
+}
+
+// The button edges a thin client saw since its last pull: the scene hears
+// them as the board's driver before this render (frameos/relayed_input.nim).
+// Bundles from before the export cannot; the press then only re-renders.
+if (request.deviceInputJson) {
+  try {
+    if (call('frameos_wasm_device_input', 'number', ['string'], [request.deviceInputJson]) < 0) {
+      process.stderr.write(`embedded_wasm_render: device input refused: ${lastError()}\n`)
+    }
+  } catch (error) {
+    process.stderr.write(`embedded_wasm_render: device input unavailable (${error})\n`)
   }
 }
 

@@ -31,10 +31,11 @@ Everything *else* an ESP32 frame does, this firmware does too:
 | Setup without a computer | No network to join → WPA2 hotspot `FrameOS-XXXX` with a captive-portal setup page; SSID, password and address are drawn on the panel |
 | Settings that follow the frame | Pulls `/embedded/settings` (ETag'd) each pass: interval, name, deep sleep, device login |
 | Device HTTP API | `/status`, `/logs`, `/image`, `/ping`, `/event/*`, `/api/action/*` — what the backend calls on an embedded frame — and `<hostname>.local` over mDNS |
-| Logs | A log ring on the device, `usb_api logs`, `GET /logs`, and batched upload to the backend's log view (`bootup`, `render:*`, `metrics`, `wake`, `button`, `sleep`) |
+| Logs | A log ring on the device, `usb_api logs`, `GET /logs`, and batched upload to the backend's log view (`bootup`, `render:*`, `metrics`, `wake`, `sleep`), and what the scene heard of a button press |
 | No wasted refreshes | The payload is hashed; an unchanged frame skips the 25-second refresh. The hash lives in a wear-levelled flash log, so it survives the power cut |
 | Battery | RTC power-cut sleep between renders (~20 µA), always or only when off USB; wake on the interval or any front button |
-| Inky Frame extras | Front buttons (press = render now, logged with its label), button/activity/connection LEDs, battery-backed clock seeded from SNTP |
+| Inky Frame extras | Front buttons that reach the scene (below), button/activity/connection LEDs, battery-backed clock seeded from SNTP |
+| Buttons | A–E reach the scene as `gpio` edges and the `press` / `doublePress` / `longPress` they make, exactly as on any frame: the board sends its edges with the next render pull, once the press is decided, and the backend's runtime hears them before it renders (`docs/events.md`, "Thin clients"). The press that woke the board counts |
 
 What it does **not** have: OTA (2–4 MB of flash with no second slot — update
 by UF2, `bootsel` makes that one click), a FrameOS Cloud link (the cloud
@@ -169,7 +170,8 @@ login, in hotspot mode by the WPA2 passphrase.
 ## Layout
 
 ```
-src/main.c              boot order, the render/sleep loop, buttons, wake reason
+src/main.c              boot order, the render/sleep loop, wake reason
+src/pk_buttons.c*       front buttons: edges for the next pull (with esp32's fos_button_timing.c)
 src/pk_platform.c       pk_poll()/pk_wait_ms(): nothing in here sleeps blind
 src/pk_render.c         the pass: settings → FOSB → hash → panel; status screens; log upload
 src/pk_http.c           streaming HTTP(S) client        pk_http_response.c*  framing, chunked, ETag
@@ -225,8 +227,5 @@ not the wiring. In order, with the console open:
   not), so a cloud-only Pico would have nothing to show. `set cloud_url` says
   so. When the hub renders, this firmware needs a WebSocket client and the
   enrollment handshake; everything else is already shaped for it.
-- Front buttons re-render and are logged with their label, but do not reach
-  the scene as a `button` event (the scene lives on the backend; the ESP32
-  thin client has the same limit).
 - `GET /state` / `/states` are not served: scene state for a thin client lives
   in the backend's store.

@@ -12,8 +12,10 @@ CFLAGS ?= -std=c11 -D_DEFAULT_SOURCE -O1 -g -Wall -Wextra -Werror -Wno-unused-pa
 INCLUDES = -I../src -I../../esp32/main
 
 PORTABLE = \
+	../../esp32/main/fos_button_timing.c \
 	../src/pk_args.c \
 	../src/pk_bmp.c \
+	../src/pk_buttons.c \
 	../src/pk_config_keys.c \
 	../src/pk_fosb.c \
 	../src/pk_hotspot.c \
@@ -28,6 +30,7 @@ PORTABLE = \
 TESTS = \
 	test_pk_args \
 	test_pk_bmp \
+	test_pk_buttons \
 	test_pk_config_keys \
 	test_pk_datetime \
 	test_pk_fosb \
