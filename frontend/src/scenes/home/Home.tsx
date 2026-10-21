@@ -1,7 +1,7 @@
 import { useValues } from 'kea'
 import { A } from 'kea-router'
 import type { ReactNode } from 'react'
-import { ComputerDesktopIcon, FolderIcon, PhotoIcon, RectangleGroupIcon } from '@heroicons/react/24/outline'
+import { ComputerDesktopIcon, FolderIcon, PhotoIcon, PlusIcon, RectangleGroupIcon } from '@heroicons/react/24/outline'
 
 import { FrameImage } from '../../components/FrameImage'
 import { FrameosLogo } from '../../components/FrameosLogo'
@@ -123,6 +123,28 @@ function Empty({ icon, children }: { icon: ReactNode; children: ReactNode }): JS
       <span className="frameos-muted [&>svg]:h-6 [&>svg]:w-6">{icon}</span>
       <span>{children}</span>
     </div>
+  )
+}
+
+// A new account or install has no frames, and adding one is the first thing
+// to do there: the whole row says so. /frames opens the add-frame flow by
+// itself while the fleet is empty, on both control planes.
+function FirstFrameCard(): JSX.Element {
+  return (
+    <A
+      href={urls.frames()}
+      className="frameos-card flex flex-col items-center gap-3 rounded-2xl border border-dashed px-6 py-10 text-center transition hover:border-blue-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+    >
+      <ComputerDesktopIcon className="frameos-muted h-12 w-12" aria-hidden="true" />
+      <div className="frameos-strong text-xl font-bold">Add your first frame</div>
+      <p className="frameos-muted max-w-md text-sm leading-relaxed">
+        A frame is a Raspberry Pi or an ESP32 board with a screen. Set one up and it shows the scenes you pick.
+      </p>
+      <span className="frameos-primary-action mt-1 inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold">
+        <PlusIcon className="h-4 w-4" aria-hidden="true" />
+        Add frame
+      </span>
+    </A>
   )
 }
 
@@ -309,13 +331,7 @@ export function Home(): JSX.Element {
           {!framesEverLoaded ? (
             <Loading>Loading frames…</Loading>
           ) : recentFrames.length === 0 ? (
-            <Empty icon={<ComputerDesktopIcon />}>
-              No frames yet.{' '}
-              <A href={urls.frames()} className="font-semibold underline-offset-2 hover:underline">
-                Add your first frame
-              </A>
-              .
-            </Empty>
+            <FirstFrameCard />
           ) : (
             <OneRowGrid>
               {recentFrames.map((frame) => (
