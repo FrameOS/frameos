@@ -608,6 +608,11 @@ export function frameHasActivityLog(frame: FrameType): boolean {
   return Number.isFinite(parseFrameTimestamp(frameActivityTimestamp(frame)))
 }
 
+/** When the frame was last heard from, in ms; NaN when never. */
+export function frameLastActivityAt(frame: FrameType): number {
+  return parseFrameTimestamp(frameActivityTimestamp(frame))
+}
+
 export function frameIsHealthy(frame: FrameType): boolean {
   return frame.status === 'ready' && !frameIsStale(frame)
 }

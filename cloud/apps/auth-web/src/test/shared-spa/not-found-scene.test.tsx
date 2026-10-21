@@ -28,8 +28,8 @@ describe("<NotFound>", () => {
     expect(html).toContain("Page not found");
     expect(html).toContain("/frames/7/nonsense");
     expect(html).toContain("Back to your frames");
-    // Self-hosted, the frames list is the SPA's root.
-    expect(html).toMatch(/<a [^>]*href="\/"/);
+    // Self-hosted, the frames list is /frames (the root is the home page).
+    expect(html).toMatch(/<a [^>]*href="\/frames"/);
     expect(html).not.toBe("<div>404</div>");
   });
 

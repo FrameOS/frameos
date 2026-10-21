@@ -12,9 +12,9 @@ export type SceneComponent = ComponentType<Record<string, any>>
 export const Error404 = NotFound
 
 const sceneLoaders = {
-  // The cloud's home page (hello, recent frames and albums, usage); the
-  // self-hosted shells never route to it.
-  home: () => import('./home/CloudHome'),
+  // The home page behind the rail's logo (hello, recent frames, scenes and
+  // albums, usage); the on-device admin panel never routes to it.
+  home: () => import('./home/Home'),
   // The signed-out scene store (the cloud's /store, the scenes host's root).
   storeFront: () => import('./store/PublicStoreFront'),
   frames: () => import('./frames/Frames'),
@@ -91,10 +91,15 @@ export function preloadSceneComponent(scene: LoadableSceneKey): void {
 // settings/account/accountPages.ts). It is not registered in frame-admin
 // mode, where urls.settings() IS a frame tool path (/frames/<id>/settings)
 // that the frame scene renders.
+function isBackendShell(): boolean {
+  return !isCloudMode() && !isInFrameAdminMode()
+}
+
 export const getRoutes = () =>
   ({
-    ...(getRouteBasePath() ? { [getRouteBasePath() + '/']: 'frames' } : {}),
+    ...(getRouteBasePath() && !isBackendShell() ? { [getRouteBasePath() + '/']: 'frames' } : {}),
     ...(isCloudMode() ? { [urls.home()]: 'home', [urls.store()]: 'storeFront', '/': 'storeFront' } : {}),
+    ...(isBackendShell() ? { [urls.home()]: 'home' } : {}),
     [urls.frames()]: isInFrameAdminMode() ? 'frame' : 'frames',
     ...(isInFrameAdminMode()
       ? {}
@@ -128,3 +133,10 @@ export const getRoutes = () =>
     [urls.frame(':id')]: 'frame',
     [urls.frame(':id', ':tool')]: 'frame',
   } as const)
+
+// Addresses that only send the browser on, replaced before any scene
+// renders (sceneLogic). A backend's root, and under Home Assistant the bare
+// ingress URL, is the home page, the way the cloud's root is /home; the
+// frames home is /frames.
+export const getRouteRedirects = (): Record<string, () => string> =>
+  isBackendShell() ? { [getRouteBasePath() || '/']: urls.home, [getRouteBasePath() + '/']: urls.home } : {}

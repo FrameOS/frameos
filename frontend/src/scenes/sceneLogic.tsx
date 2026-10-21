@@ -1,7 +1,7 @@
 import { MakeLogicType, actions, kea, listeners, path, reducers } from 'kea'
 
-import { urlToAction } from 'kea-router'
-import { getRoutes } from './scenes'
+import { router, urlToAction } from 'kea-router'
+import { getRouteRedirects, getRoutes } from './scenes'
 import { getBasePath } from '../utils/getBasePath'
 import { urls } from '../urls'
 import { inHassioIngress } from '../utils/inHassioIngress'
@@ -55,11 +55,18 @@ export const sceneLogic = kea<sceneLogicType>([
     ],
   })),
   urlToAction(({ actions }) => {
-    return Object.fromEntries(
-      Object.entries(getRoutes()).map(([path, scene]) => {
-        return [path, (params) => actions.setScene(scene, params)]
-      })
-    )
+    return {
+      ...Object.fromEntries(
+        Object.entries(getRouteRedirects()).map(([path, target]) => {
+          return [path, () => router.actions.replace(target())]
+        })
+      ),
+      ...Object.fromEntries(
+        Object.entries(getRoutes()).map(([path, scene]) => {
+          return [path, (params) => actions.setScene(scene, params)]
+        })
+      ),
+    }
   }),
   listeners(({ actions }) => ({
     logout: async () => {

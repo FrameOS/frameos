@@ -10,7 +10,7 @@ import { Frame } from '../../../../frontend/src/scenes/frame/Frame'
 import { socketLogic } from '../../../../frontend/src/scenes/socketLogic'
 import { AppsWorkspace } from '../../../../frontend/src/scenes/workspace/AppsWorkspace'
 import { FramesHome } from '../../../../frontend/src/scenes/workspace/FramesHome'
-import { CloudHome } from '../../../../frontend/src/scenes/home/CloudHome'
+import { Home } from '../../../../frontend/src/scenes/home/Home'
 import { PublicStoreFront } from '../../../../frontend/src/scenes/store/PublicStoreFront'
 import { cloudSignedIn } from '../../../../frontend/src/utils/cloudMode'
 import { urls } from '../../../../frontend/src/urls'
@@ -72,11 +72,11 @@ export function CloudStoreFront() {
 }
 
 // The home page behind the rail's logo: hello, the recent frames and
-// albums, the account's usage (frontend/src/scenes/home/CloudHome.tsx).
+// albums, the account's usage (frontend/src/scenes/home/Home.tsx).
 export function CloudHomePage() {
   return (
     <CloudGate>
-      <CloudHome />
+      <Home />
     </CloudGate>
   )
 }

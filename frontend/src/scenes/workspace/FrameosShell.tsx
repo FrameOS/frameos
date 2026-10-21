@@ -28,7 +28,6 @@ import { sceneLogic } from '../sceneLogic'
 import {
   isMobileWorkspaceViewport,
   requestNextFramesHomeScrollTop,
-  scrollFramesHomeToTop,
   workspaceLogic,
   rememberedAppsHref,
 } from './workspaceLogic'
@@ -521,7 +520,7 @@ export function FrameosShell({
   const { activeMode, pendingMode } = useDelayedPendingMode(mode)
   const resolvedBrowserTitle =
     browserTitle === null ? DEFAULT_BROWSER_TITLE : `${browserTitle ?? title} · ${DEFAULT_BROWSER_TITLE}`
-  const preloadHome = () => preloadSceneComponent(isCloudMode() ? 'home' : 'frames')
+  const preloadHome = () => preloadSceneComponent(inFrameAdminMode ? 'frames' : 'home')
   const prepareFirstLevelNavigation = () => {
     closeTemplateDrawer()
     closeScheduleDrawer()
@@ -556,11 +555,11 @@ export function FrameosShell({
             secondaryPanelOpen ? 'border-r border-slate-200/80' : 'max-lg:border-r max-lg:border-slate-200/80'
           )}
         >
-          {/* The logo is the way home: the cloud's home page, the frames home
-              (or the one frame) elsewhere. */}
+          {/* The logo is the way home: the home page, or the one frame on
+              the on-device admin panel. */}
           <a
             href={homeHref}
-            title={inFrameAdminMode ? 'Frame' : isCloudMode() ? 'Home' : 'Frames home'}
+            title={inFrameAdminMode ? 'Frame' : 'Home'}
             onPointerEnter={preloadHome}
             onFocus={preloadHome}
             onMouseDown={preloadHome}
@@ -576,15 +575,8 @@ export function FrameosShell({
               }
               requestNextFramesHomeScrollTop()
               prepareFirstLevelNavigation()
-              if (isCloudMode()) {
-                if (mode !== 'home') {
-                  router.actions.push(homeHref)
-                }
-              } else if (mode === 'frames') {
-                scrollFramesHomeToTop('smooth', false)
-              } else {
+              if (mode !== 'home') {
                 router.actions.push(homeHref)
-                scrollFramesHomeToTop()
               }
             }}
             className={clsx(

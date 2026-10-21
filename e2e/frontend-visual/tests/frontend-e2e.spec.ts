@@ -116,7 +116,10 @@ test.describe('backend frontend e2e coverage @e2e', () => {
   test('workspace route variants render from the backend fixture', async ({ page }) => {
     const readErrors = await prepareAuthenticatedPage(page)
     const routes = [
-      { path: '/', text: /Kitchen dashboard/i },
+      // The root goes on to the home page.
+      { path: '/', text: /in one place/i },
+      { path: '/home', text: /Kitchen dashboard/i },
+      { path: '/frames', text: /Kitchen dashboard/i },
       { path: '/frames/1', text: /Kitchen dashboard/i },
       { path: '/scenes', text: /Scenes/i },
       { path: '/scenes/1', text: /Scenes/i },
@@ -152,7 +155,7 @@ test.describe('backend frontend e2e coverage @e2e', () => {
       })
     })
 
-    await page.goto('/', { waitUntil: 'domcontentloaded' })
+    await page.goto('/frames', { waitUntil: 'domcontentloaded' })
     await expect(page.locator('body')).toContainText(/Kitchen dashboard/i)
     await page.waitForTimeout(500)
 

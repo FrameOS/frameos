@@ -7,7 +7,7 @@ import { login } from './visual-helpers'
 test('sidebar closes when the viewport shrinks from desktop to mobile', async ({ page }) => {
   await login(page)
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await page.goto('/frames', { waitUntil: 'domcontentloaded' })
 
   const sidebar = page.locator('.workspace-sidebar-collapsed')
   await expect(sidebar).toHaveCount(0) // desktop: sidebar expanded
