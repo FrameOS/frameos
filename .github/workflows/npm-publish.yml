@@ -39,7 +39,10 @@ concurrency:
 jobs:
   publish-npm:
     name: Publish FrameOS npm packages
-    runs-on: ubuntu-latest
+    # Pinned: the artifact check installs tools/requirements-signing.txt,
+    # cp312 wheels that ubuntu-26.04's Python 3.14 refuses (see the top of
+    # docker-publish-multi.yml).
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v6

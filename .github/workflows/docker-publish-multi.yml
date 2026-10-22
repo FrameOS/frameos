@@ -26,8 +26,15 @@ jobs:
   # (depot/build-push-action: the esp32-ci layer cache shared with
   # e2e-docker.yml, and push-multiarch's remote amd64+arm64 builders) — only
   # the billed runner minutes moved off Depot.
+  #
+  # GitHub-hosted jobs are pinned to ubuntu-24.04, not ubuntu-latest (26.04
+  # since 2026-10-22). On 26.04 the signing steps fail: the system Python is
+  # 3.14 and tools/requirements-signing.txt pins cp312 wheels (cffi). The Pico
+  # build fails too: pico-sdk 2.1.1's pioasm does not build under GCC 15. A
+  # release can't be tried out first, so move these jobs to a new image only
+  # after both are fixed.
   update-versions:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       release_sha: ${{ steps.release-ref.outputs.release_sha }}
       docker_version: ${{ steps.release-ref.outputs.docker_version }}
@@ -97,7 +104,7 @@ jobs:
   publish-npm:
     name: Publish FrameOS npm packages
     needs: [update-versions, build-wasm-runtime]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # npm auth uses trusted publishing (OIDC), which matches on the
       # top-level workflow file — so publishing lives in npm-publish.yml and
@@ -120,7 +127,7 @@ jobs:
   release-notes:
     name: Generate Release Notes
     needs: update-versions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout release commit
         uses: actions/checkout@v4
@@ -150,7 +157,7 @@ jobs:
 
   determine-release-targets:
     needs: update-versions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       targets: ${{ steps.set-matrix.outputs.targets }}
     steps:
@@ -523,7 +530,7 @@ jobs:
   build-esp32-layout-firmware:
     name: Build ESP32 firmware per flash layout
     needs: [update-versions]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -652,7 +659,7 @@ jobs:
   build-wasm-runtime:
     name: Build wasm runtime
     needs: [update-versions]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout release commit
         uses: actions/checkout@v4
@@ -758,8 +765,8 @@ jobs:
   build-pico-firmware:
     name: Build Pico W / Pico 2 W firmware
     needs: [update-versions]
-    # Pinned to the image the shipped UF2s were built on; see the
-    # pico-firmware job in pull-request-tests.yml.
+    # Pinned like every hosted job here (see the top of this file), and in
+    # step with the pico-firmware job in pull-request-tests.yml.
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
@@ -825,7 +832,7 @@ jobs:
     needs: [update-versions, build-prebuilt-cross, build-buildroot-release-image]
     # The image itself is built on Depot's remote builders, so this runner
     # only orchestrates: a free GitHub-hosted runner is plenty.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -881,7 +888,7 @@ jobs:
   update-addon-repo:
     name: Update Home Assistant Addon
     needs: [update-versions, push-multiarch, release-notes]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout frameos
         uses: actions/checkout@v4
@@ -960,7 +967,7 @@ jobs:
   github-release:
     name: Create GitHub Release
     needs: [update-versions, push-multiarch, build-prebuilt-cross, build-buildroot-release-image, build-esp32-generic-firmware, build-esp32-layout-firmware, build-wasm-runtime, build-pico-firmware, update-addon-repo, release-notes]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # Shallow: this job only needs a working directory for `gh` and the
       # downloaded artifacts. Release notes come from an artifact and the tag
