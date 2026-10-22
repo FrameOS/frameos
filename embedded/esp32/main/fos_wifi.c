@@ -5,6 +5,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "esp_event.h"
@@ -147,16 +148,6 @@ static void apply_hostname(esp_netif_t *netif)
     }
 }
 
-static void disable_power_save(void)
-{
-    esp_err_t err = esp_wifi_set_ps(WIFI_PS_NONE);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "wifi power save disabled");
-    } else {
-        ESP_LOGW(TAG, "failed to disable wifi power save: %s", esp_err_to_name(err));
-    }
-}
-
 /* Station power policy. A frame that deep-sleeps between renders is a
  * battery frame first and a low-latency HTTP server second: with modem
  * sleep off the radio listens continuously (~80-100 mA on an S3) for the
@@ -165,21 +156,60 @@ static void disable_power_save(void)
  * DTIM cadence instead (~20 mA idle) and costs a little throughput and a
  * few ms of latency — the right trade while the CPU spends 20 s dithering
  * and 30 s waiting on BUSY. Stay-connected frames keep the old behaviour:
- * their local HTTP API and the workspace's live preview want the latency. */
+ * their local HTTP API and the workspace's live preview want the latency.
+ *
+ * Not while a download is open, though (fos_wifi_hold_awake): a dozing
+ * station misses frames the AP sends it, and the AP drops a station that
+ * stops acknowledging (hostapd's disassoc_low_ack, reason 34
+ * MISSING_ACKS). Frame 70, a reTerminal E1004 on a UniFi AP, was dropped
+ * up to five times in one gallery render while the owner's stay-connected
+ * ESP32 frames saw no drop in a day (2026-10-22). */
+static SemaphoreHandle_t s_ps_lock = NULL;
+static bool s_modem_sleep = false;
+static int s_awake_holds = 0;
+
+/* With s_ps_lock held. */
+static void apply_power_save(void)
+{
+    wifi_ps_type_t ps = s_modem_sleep && s_awake_holds == 0 ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE;
+    esp_err_t err = esp_wifi_set_ps(ps);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "failed to set wifi power save %d: %s", (int)ps, esp_err_to_name(err));
+    }
+}
+
+static void set_power_save_policy(bool modem_sleep)
+{
+    xSemaphoreTake(s_ps_lock, portMAX_DELAY);
+    s_modem_sleep = modem_sleep;
+    apply_power_save();
+    xSemaphoreGive(s_ps_lock);
+}
+
+static void disable_power_save(void)
+{
+    set_power_save_policy(false);
+}
+
 static void apply_power_save_policy(void)
 {
     fos_config_t *config = fos_config();
-    bool sleeps = config->deep_sleep || config->deep_sleep_on_battery;
-    if (!sleeps) {
-        disable_power_save();
-        return;
+    set_power_save_policy(config->deep_sleep || config->deep_sleep_on_battery);
+}
+
+void fos_wifi_hold_awake(bool hold)
+{
+    if (s_ps_lock == NULL) return;
+    xSemaphoreTake(s_ps_lock, portMAX_DELAY);
+    if (hold) {
+        s_awake_holds++;
+    } else if (s_awake_holds > 0) {
+        s_awake_holds--;
     }
-    esp_err_t err = esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "wifi modem sleep enabled (deep-sleep frame)");
-    } else {
-        ESP_LOGW(TAG, "failed to enable wifi modem sleep: %s", esp_err_to_name(err));
+    if (s_modem_sleep && s_awake_holds == (hold ? 1 : 0)) {
+        apply_power_save();
     }
+    xSemaphoreGive(s_ps_lock);
 }
 
 static void portal_exit_task(void *arg);
@@ -261,6 +291,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
 esp_err_t fos_wifi_init(void)
 {
     s_events = xEventGroupCreate();
+    s_ps_lock = xSemaphoreCreateMutex();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();

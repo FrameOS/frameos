@@ -125,6 +125,7 @@ void fos_nim_http_set_spill_dir(const char *dir, size_t max_spill_bytes)
     (void)dir; (void)max_spill_bytes;
 }
 void fos_nim_http_set_spill_force_bytes(size_t threshold) { (void)threshold; }
+void fos_nim_http_set_busy_hook(void (*hook)(bool busy)) { (void)hook; }
 fos_nim_http_chunk *fos_nim_http_request_chunked(const char *method, const char *url,
                                                  const void *body, size_t body_len,
                                                  const char *headers, size_t headers_len,

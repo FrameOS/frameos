@@ -268,6 +268,10 @@ void fos_nim_http_set_spill_dir(const char *dir, size_t max_spill_bytes);
  * even with PSRAM free (0 = off). Lets the spill decode path be validated
  * on frames that would otherwise never hit real memory pressure. */
 void fos_nim_http_set_spill_force_bytes(size_t threshold);
+/* Called with true when a scene request opens and with false when it is
+ * done (buffered: body read; streamed: fos_nim_http_stream_close). The
+ * firmware keeps the radio out of modem sleep in between. */
+void fos_nim_http_set_busy_hook(void (*hook)(bool busy));
 
 /* Streaming GET: the caller pulls the body off the socket in pieces, so no
  * copy of it is ever buffered in PSRAM or spilled to flash. Same policy,

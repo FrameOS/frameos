@@ -262,6 +262,7 @@ void app_main(void)
 
     BOOTMEM("after-sd");
     ESP_ERROR_CHECK(fos_wifi_init());
+    fos_nim_http_set_busy_hook(fos_wifi_hold_awake);
     fos_http_set_actions(action_render_now, action_ota_now);
     /* Scene state across deep sleep: the runtime reads a scene's last public
      * state when it builds the scene and writes it when it changes. */

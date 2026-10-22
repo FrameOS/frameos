@@ -48,6 +48,10 @@ int fos_wifi_rssi(void);
  * reason code of the last one (WIFI_REASON_*), and how long the last one
  * that came back stayed down (0 until one has). */
 void fos_wifi_drop_stats(uint32_t *drops, uint8_t *last_reason, uint32_t *last_down_ms);
+/* Keeps the radio out of modem sleep while held (calls nest): the scene's
+ * downloads hold it from connect to close (frameos_nim's HTTP busy hook).
+ * No effect on frames whose power policy keeps modem sleep off anyway. */
+void fos_wifi_hold_awake(bool hold);
 /* Wait up to timeout for SNTP time sync after connecting. */
 esp_err_t fos_wifi_sync_time(uint32_t timeout_ms);
 bool fos_wifi_time_synced(void);

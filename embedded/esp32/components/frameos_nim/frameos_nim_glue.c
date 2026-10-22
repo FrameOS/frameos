@@ -1452,6 +1452,21 @@ static esp_http_client_handle_t http_open_request(
     int timeout_ms, int *out_status, int64_t *out_content_length,
     char *err_buf, size_t err_buf_len);
 
+/* The firmware's hook for "a scene request is open" (fos_wifi_hold_awake):
+ * true before the connect, false once the body is read or the stream
+ * closed. Modem sleep stays off in between. */
+static void (*s_http_busy_hook)(bool busy) = NULL;
+
+void fos_nim_http_set_busy_hook(void (*hook)(bool busy))
+{
+    s_http_busy_hook = hook;
+}
+
+static void http_busy(bool busy)
+{
+    if (s_http_busy_hook != NULL) s_http_busy_hook(busy);
+}
+
 fos_nim_http_stream *fos_nim_http_stream_open(
     const char *url, const char *headers, size_t headers_len,
     int timeout_ms, int *out_status, int64_t *out_content_length,
@@ -1460,15 +1475,20 @@ fos_nim_http_stream *fos_nim_http_stream_open(
     int64_t content_length = -1;
     char log_url[FOS_NETGUARD_LOG_URL_LEN];
     fos_netguard_url_origin(url, log_url, sizeof(log_url));
+    http_busy(true);
     esp_http_client_handle_t client = http_open_request(
         "GET", url, log_url, NULL, 0, headers, headers_len, timeout_ms,
         out_status, &content_length, err_buf, err_buf_len);
     *out_content_length = content_length;
-    if (client == NULL) return NULL;
+    if (client == NULL) {
+        http_busy(false);
+        return NULL;
+    }
     fos_nim_http_stream *stream = calloc(1, sizeof(*stream));
     if (stream == NULL) {
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
+        http_busy(false);
         if (err_buf != NULL && err_buf_len > 0) snprintf(err_buf, err_buf_len, "out of memory");
         return NULL;
     }
@@ -1492,6 +1512,7 @@ void fos_nim_http_stream_close(fos_nim_http_stream *stream)
         stream->client = NULL;
     }
     free(stream);
+    http_busy(false);
 }
 
 typedef enum {
@@ -2057,7 +2078,7 @@ static esp_http_client_handle_t http_open_request(
 }
 #undef HTTP_OPEN_FAIL
 
-fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
+static fos_nim_http_chunk *request_chunked_spill(
                               const char *method, const char *url,
                               const void *body, size_t body_len,
                               const char *headers, size_t headers_len,
@@ -2269,6 +2290,22 @@ fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
     chunks[chunk_count - 1].data[chunks[chunk_count - 1].len] = 0;
 
     *out_count = chunk_count;
+    return chunks;
+}
+
+fos_nim_http_chunk *fos_nim_http_request_chunked_spill(
+                              const char *method, const char *url,
+                              const void *body, size_t body_len,
+                              const char *headers, size_t headers_len,
+                              int timeout_ms, size_t max_bytes,
+                              int *out_status, size_t *out_count,
+                              char **out_spill_path, size_t *out_spill_len)
+{
+    http_busy(true);
+    fos_nim_http_chunk *chunks = request_chunked_spill(
+        method, url, body, body_len, headers, headers_len, timeout_ms, max_bytes,
+        out_status, out_count, out_spill_path, out_spill_len);
+    http_busy(false);
     return chunks;
 }
 
