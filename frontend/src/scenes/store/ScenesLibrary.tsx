@@ -187,9 +187,11 @@ export function ScenesSidePanel({
   )
 }
 
+// The owner's own drafts first, then what the store shows (the cloud's
+// /my-scenes groups the same way). The side panel and the page share it.
 const myScenesShelves = [
-  { key: 'public' as const, title: 'Published in the store', match: (visibility?: string) => visibility === 'public' },
   { key: 'private' as const, title: 'Private scenes', match: (visibility?: string) => visibility !== 'public' },
+  { key: 'public' as const, title: 'Published in the store', match: (visibility?: string) => visibility === 'public' },
 ]
 
 function CategoryLink({
@@ -536,7 +538,7 @@ function CloudScenesPage(): JSX.Element {
   }, [visibility, drivePageTemplates.length, setVisibleShelf])
   const description =
     mode === 'cloud'
-      ? 'Your own scenes: the ones you have published to the store, and the ones private to your account.'
+      ? 'Your own scenes: the ones private to your account, and the ones you have published to the store.'
       : 'Your copies in FrameOS Cloud, private to your account: install them on any frame, from any backend you link.'
   if (!cloudEnabled) {
     return (
@@ -583,8 +585,8 @@ function CloudScenesPage(): JSX.Element {
               : `No private scenes match "${search}".`}
           </Note>
         ) : (
-          // Two shelves: what the account has published to the store, and
-          // what it keeps to itself (or the one the side panel picked).
+          // Two shelves: what the account keeps to itself, and what it has
+          // published to the store (or the one the side panel picked).
           shownShelves.map(({ key, title, match }) => {
             const templates = drivePageTemplates.filter((template) => match(template.visibility))
             return templates.length === 0 ? null : (
