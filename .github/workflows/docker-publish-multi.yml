@@ -758,7 +758,9 @@ jobs:
   build-pico-firmware:
     name: Build Pico W / Pico 2 W firmware
     needs: [update-versions]
-    runs-on: ubuntu-latest
+    # Pinned to the image the shipped UF2s were built on; see the
+    # pico-firmware job in pull-request-tests.yml.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

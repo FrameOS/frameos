@@ -1115,7 +1115,10 @@ jobs:
 
   pico-firmware:
     name: Pico W / Pico 2 W firmware
-    runs-on: ubuntu-latest
+    # Pinned: pico-sdk 2.1.1's host pioasm misses <cstdint> and fails under
+    # ubuntu-26.04's GCC 15. Moving on means pico-sdk >= 2.2.0 here AND in the
+    # release job (docker-publish-multi.yml), plus a bench run of the UF2s.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
