@@ -10,6 +10,7 @@ import {
   CloudArrowDownIcon,
   CloudArrowUpIcon,
   Cog6ToothIcon,
+  CursorArrowRippleIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
   FolderPlusIcon,
@@ -20,6 +21,8 @@ import { cloudDriveLogic } from '../Templates/cloudDriveLogic'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { findConnectedScenes } from './utils'
 import { openWorkspaceSceneUtility, workspaceLogic } from '../../../workspace/workspaceLogic'
+import { ButtonMapModal } from './ButtonMapModal'
+import { buttonMapLogic } from './buttonMapLogic'
 
 interface SceneDropDownProps {
   sceneId: string
@@ -34,7 +37,20 @@ function isNotNull<T>(value: T | null): value is T {
   return value !== null
 }
 
-export function SceneDropDown({
+export function SceneDropDown(props: SceneDropDownProps) {
+  // The menu, plus the "Map buttons" dialog one of its items opens (the
+  // dialog's state is the scene's, buttonMapLogic).
+  const { frameId } = useValues(frameLogic)
+  const { isOpen: buttonMapOpen } = useValues(buttonMapLogic({ frameId, sceneId: props.sceneId }))
+  return (
+    <>
+      <SceneDropDownMenu {...props} />
+      {buttonMapOpen ? <ButtonMapModal frameId={frameId} sceneId={props.sceneId} /> : null}
+    </>
+  )
+}
+
+function SceneDropDownMenu({
   sceneId,
   context,
   className,
@@ -50,6 +66,7 @@ export function SceneDropDown({
     useActions(scenesLogic({ frameId }))
   const { saveAsTemplate, saveAsZip, saveAsCloudTemplate } = useActions(templatesLogic({ frameId }))
   const { hasDriveScope } = useValues(cloudDriveLogic)
+  const { openButtonMap } = useActions(buttonMapLogic({ frameId, sceneId }))
   const scene = scenes.find((s) => s.id === sceneId)
   if (!scene) {
     return null
@@ -114,6 +131,14 @@ export function SceneDropDown({
               label: 'Edit scene JSON',
               onClick: openSceneJSON,
               icon: <DocumentMagnifyingGlassIcon className="w-5 h-5" />,
+            }
+          : null,
+        context === 'scenes'
+          ? {
+              // The install's button map (docs/events.md "Event map").
+              label: 'Map buttons',
+              onClick: () => openButtonMap(),
+              icon: <CursorArrowRippleIcon className="w-5 h-5" />,
             }
           : null,
         {

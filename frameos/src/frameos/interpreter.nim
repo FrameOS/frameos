@@ -13,6 +13,7 @@ import frameos/channels
 import frameos/js_runtime/run_budget
 import frameos/node_config
 import frameos/event_log
+import frameos/event_map
 import frameos/events
 import frameos/planner
 import frameos/refresh_interval
@@ -1329,6 +1330,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     edges: @[],
     apps: exportedScene.apps,
     customEventOrigins: exportedScene.customEventOrigins,
+    eventMap: exportedScene.eventMap,
     refreshFollowsChildren: exportedScene.refreshFollowsChildren,
     followInterval: -1,
     nextNodeIds: initTable[NodeId, NodeId](),
@@ -1937,6 +1939,7 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     apps: if scene.apps.isNil: %*{} else: scene.apps,
     stateFields: refresh.fields,
     customEventOrigins: declaredCustomEventOrigins(scene.customEvents),
+    eventMap: parseEventMap(scene.eventMap),
     # A scene the split drawer generated draws nothing of its own that
     # changes: it waits for its panels, but never renders more often than
     # its own interval (scene_rhythm.nim).

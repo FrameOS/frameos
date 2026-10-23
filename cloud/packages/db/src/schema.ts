@@ -1150,6 +1150,11 @@ export const frameSceneAssignments = pgTable(
     // saves the frame's scene list. Group NAMES only, never a value.
     declaredSettingsGroups: jsonb("declared_settings_groups"),
     grantedSettingsGroups: jsonb("granted_settings_groups"),
+    // The owner's per-install button maps (migration 0067, docs/events.md
+    // "Event map"): { [runtime scene id]: [{event, match, as}, …] }, written
+    // onto each pushed scene as `eventMap`. Kept across every assignment
+    // write that omits it, so a scene update leaves it alone. NULL = none.
+    eventMaps: jsonb("event_maps"),
     ...timestamps,
   },
   (table) => ({
