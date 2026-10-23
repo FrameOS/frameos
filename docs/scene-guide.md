@@ -262,7 +262,10 @@ calls, and it calls no other:
 - `app.nodeId`, `app.nodeName`.
 - `context`: this run: `event`, `payload`, and when an image is flowing
   through, `imageWidth` / `imageHeight`. That is the area being drawn into (a
-  split cell, say), which can be smaller than `app.frame`.
+  split cell, say), which can be smaller than `app.frame`. An app that
+  returns an image gets `targetWidth` / `targetHeight`, the size that image
+  will be drawn at, and `targetFit`, the consumer's placement: ask a picture
+  source for that size (the gallery app does), never for `app.frame`'s.
 - `frameos`: everything the app can do: fetch (`fetchJson`, `fetchText`,
   `httpRequest`, `fetchImage`), make images (`svg`, `image`), log (`log`,
   `error`), keep values (`setState`, `remember`, `recall`), read the account's
@@ -629,6 +632,12 @@ interface FrameOSContext {
   imageWidth?: number;
   /** Height of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none. */
   imageHeight?: number;
+  /** Width the image this app returns will be drawn at, in scene pixels: the decode target the interpreter addressed to this node (the frame, a split cell, or the bounds of a consumer that cannot draw it straight in). Absent when nothing is addressed to the node. An app that fetches a picture asks its source for this size, not app.frame's (2026.10.24+). */
+  targetWidth?: number;
+  /** Height of that target, in scene pixels; absent with targetWidth (2026.10.24+). */
+  targetHeight?: number;
+  /** How the consumer places the image into that target: its placement (cover, contain, stretch, center, ...). Absent with targetWidth, and when the consumer's bounds rather than a target were addressed (2026.10.24+). */
+  targetFit?: string;
   [key: string]: any;
 }
 

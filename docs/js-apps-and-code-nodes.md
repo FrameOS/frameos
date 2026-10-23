@@ -83,7 +83,8 @@ App nodes then use `keyword: "myPanel"`. Inside `app.ts` the app sees
 `app.config` (its fields), `app.state`, `app.frame` (`width`, `height`,
 `rotate`, `timeZone`, and from 2026.10.13 `debug` and `embedded`, true on an
 ESP32-class runtime), `context` (`imageWidth`/`imageHeight` when an image
-is flowing through), and the `frameos` helpers — the full bridge, as the
+is flowing through; `targetWidth`/`targetHeight`/`targetFit` when the image
+the app returns has a known destination, from 2026.10.24), and the `frameos` helpers — the full bridge, as the
 type declarations (`frontend/src/utils/appTypeDeclarations.ts`,
 `cloud/apps/auth-web/scripts/generate-ai-context.mjs`) list it:
 `frameos.fetchJson(url)`, `frameos.fetchText(url)`,

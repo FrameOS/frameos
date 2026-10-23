@@ -42,11 +42,11 @@
     {
       "name": "fit",
       "type": "select",
-      "options": ["cover", "contain"],
-      "value": "cover",
+      "options": ["auto", "cover", "contain"],
+      "value": "auto",
       "required": false,
-      "label": "Scale to the panel",
-      "hint": "Match the image node's placement: cover fills the panel and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.",
+      "label": "Scale to the target",
+      "hint": "The gallery scales the image to the area it will be drawn in (the frame, or a split cell). auto follows the image node's placement; cover fills the area and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.",
       "showIf": [{ "field": "format", "operator": "ne", "value": "original" }]
     }
   ],

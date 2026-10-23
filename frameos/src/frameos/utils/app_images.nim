@@ -72,6 +72,33 @@ proc offeredDecodeTargetSize*(self: AppRoot, context: ExecutionContext):
   else:
     (0, 0)
 
+proc addressedTargetSize*(self: AppRoot, context: ExecutionContext):
+    tuple[width, height: int] =
+  ## What a JavaScript app reads as `context.targetWidth` / `targetHeight`:
+  ## the size the image it returns will be drawn at, from the decode target
+  ## addressed to this node, else from the consumer's bounds (an edge that
+  ## cannot fuse still says how many pixels are useful). (0, 0) when neither
+  ## is addressed here. Nothing is taken: the app only asks its source for
+  ## that size, and `fetchImage` claims the offer itself afterwards.
+  result = self.offeredDecodeTargetSize(context)
+  if result.width > 0:
+    return
+  if context.isNil or context.decodeBoundsWidth <= 0 or context.decodeBoundsHeight <= 0:
+    return (0, 0)
+  if context.decodeBoundsNodeId != 0.NodeId and
+      (self.isNil or self.nodeId != context.decodeBoundsNodeId):
+    return (0, 0)
+  result = (context.decodeBoundsWidth, context.decodeBoundsHeight)
+
+proc addressedTargetFit*(self: AppRoot, context: ExecutionContext): string =
+  ## `context.targetFit`: how the consumer places the image into the decode
+  ## target addressed to this node; "" when only bounds are addressed (bounds
+  ## have cover semantics by definition) or nothing is.
+  if self.offeredDecodeTargetSize(context).width > 0:
+    context.decodeTargetScalingMode
+  else:
+    ""
+
 proc takeDecodeTarget*(self: AppRoot, context: ExecutionContext):
     tuple[image: Image, scalingMode: string] =
   ## The producer's half of the `intoTarget` handshake: consumes the target the

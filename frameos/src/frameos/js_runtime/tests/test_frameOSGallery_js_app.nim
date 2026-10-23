@@ -54,13 +54,20 @@ proc newHarness(rotate = 0): Harness =
     sources = %*{"app.ts": appSource, "config.json": appConfigJson})
   Harness(scene: scene, owner: owner, runtime: runtime, logs: logs)
 
-proc render(h: Harness, config: JsonNode): Value =
+proc render(h: Harness, config: JsonNode, target: tuple[width, height: int, fit: string] = (0, 0, ""),
+    targetNode = 0.NodeId): Value =
   ## The config a scene node hands the app: every field's default, then the node's own values.
-  var full = %*{"category": "cute", "categoryOther": "", "format": "jpg", "fit": "cover"}
+  ## `target` is the decode target the planner addressed to `targetNode` (this node when 0).
+  var full = %*{"category": "cute", "categoryOther": "", "format": "jpg", "fit": "auto"}
   for key, value in config.pairs:
     full[key] = value
   let context = ExecutionContext(scene: h.scene, event: "render", payload: %*{}, hasImage: true,
     image: newImage(200, 120), loopIndex: 0, loopKey: ".", nextSleep: -1)
+  if target.width > 0:
+    context.decodeTargetWidth = target.width
+    context.decodeTargetHeight = target.height
+    context.decodeTargetScalingMode = target.fit
+    context.decodeTargetNodeId = if targetNode == 0.NodeId: h.owner.nodeId else: targetNode
   h.runtime.get(h.owner, full, context)
 
 proc logged(h: Harness, needle: string): bool =
@@ -94,6 +101,19 @@ suite "FrameOS Gallery code app":
     let h = newHarness()
     check h.render(%*{}).kind == fkImage
     check requestedUrls == @["https://gallery.frameos.net/image?category=cute" & Scaled]
+
+  test "a decode target addressed to the node is the size asked for, with its placement":
+    let h = newHarness()
+    check h.render(%*{}, target = (100, 60, "contain")).kind == fkImage
+    check h.render(%*{}, target = (100, 60, "cover")).kind == fkImage
+    check h.render(%*{"fit": "contain"}, target = (100, 60, "stretch")).kind == fkImage
+    # A target meant for another node is not this node's size.
+    check h.render(%*{}, target = (100, 60, "cover"), targetNode = 9.NodeId).kind == fkImage
+    check requestedUrls == @[
+      "https://gallery.frameos.net/image?category=cute&width=100&height=60&fit=contain&format=jpg",
+      "https://gallery.frameos.net/image?category=cute&width=100&height=60&fit=cover&format=jpg",
+      "https://gallery.frameos.net/image?category=cute&width=100&height=60&fit=contain&format=jpg",
+      "https://gallery.frameos.net/image?category=cute" & Scaled]
 
   test "a turned frame asks for its sides swapped":
     let h = newHarness(rotate = 90)
