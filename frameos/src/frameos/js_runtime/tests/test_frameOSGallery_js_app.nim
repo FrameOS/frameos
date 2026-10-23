@@ -35,11 +35,11 @@ type Harness = object
   runtime: JsAppRuntime
   logs: ref seq[JsonNode]
 
-proc newHarness(): Harness =
+proc newHarness(rotate = 0): Harness =
   requestedUrls = @[]
   downloadError = ""
   var logs = new(seq[JsonNode])
-  let config = FrameConfig(width: 200, height: 120, rotate: 0, scalingMode: "cover", debug: true,
+  let config = FrameConfig(width: 200, height: 120, rotate: rotate, scalingMode: "cover", debug: true,
     saveAssets: %*false, settings: %*{})
   var logger = Logger(frameConfig: config, enabled: true)
   logger.log = proc(payload: JsonNode) =
@@ -56,7 +56,7 @@ proc newHarness(): Harness =
 
 proc render(h: Harness, config: JsonNode): Value =
   ## The config a scene node hands the app: every field's default, then the node's own values.
-  var full = %*{"category": "cute", "categoryOther": ""}
+  var full = %*{"category": "cute", "categoryOther": "", "format": "jpg", "fit": "cover"}
   for key, value in config.pairs:
     full[key] = value
   let context = ExecutionContext(scene: h.scene, event: "render", payload: %*{}, hasImage: true,
@@ -75,26 +75,43 @@ proc errorLogged(h: Harness, needle: string): bool =
       return true
   false
 
+# The gallery scales the image to the panel: the app asks for the frame's size
+# (turned with the frame) as a baseline JPEG, see repo/apps/image/frameOSGallery.
+const Scaled = "&width=200&height=120&fit=cover&format=jpg"
+
 suite "FrameOS Gallery code app":
-  test "a category downloads a random image from that gallery":
+  test "a category downloads a random image from that gallery, scaled to the panel":
     let h = newHarness()
     let value = h.render(%*{"category": "low-poly-animals"})
     check value.kind == fkImage
     check value.asImage().width == 5
     check value.asImage().height == 3
-    check requestedUrls == @["https://gallery.frameos.net/image?category=low-poly-animals"]
+    check requestedUrls == @["https://gallery.frameos.net/image?category=low-poly-animals" & Scaled]
     check h.logged("FrameOS Gallery category: low-poly-animals")
     check h.runtime.images.len == 0
 
   test "no category is the field's default":
     let h = newHarness()
     check h.render(%*{}).kind == fkImage
-    check requestedUrls == @["https://gallery.frameos.net/image?category=cute"]
+    check requestedUrls == @["https://gallery.frameos.net/image?category=cute" & Scaled]
+
+  test "a turned frame asks for its sides swapped":
+    let h = newHarness(rotate = 90)
+    check h.render(%*{}).kind == fkImage
+    check requestedUrls == @["https://gallery.frameos.net/image?category=cute&width=120&height=200&fit=cover&format=jpg"]
+
+  test "format and fit pick a lossless PNG inside the panel, or the original file":
+    let h = newHarness()
+    check h.render(%*{"format": "png", "fit": "contain"}).kind == fkImage
+    check h.render(%*{"format": "original"}).kind == fkImage
+    check requestedUrls == @[
+      "https://gallery.frameos.net/image?category=cute&width=200&height=120&fit=contain&format=png",
+      "https://gallery.frameos.net/image?category=cute"]
 
   test "other sends the free-text category, URL-encoded":
     let h = newHarness()
     check h.render(%*{"category": "other", "categoryOther": " my gallery&x=1 "}).kind == fkImage
-    check requestedUrls == @["https://gallery.frameos.net/image?category=my%20gallery%26x%3D1"]
+    check requestedUrls == @["https://gallery.frameos.net/image?category=my%20gallery%26x%3D1" & Scaled]
 
   # A failure is thrown; the interpreter paints it into the consumer's image.
   test "other without a name fails without downloading":
@@ -109,5 +126,5 @@ suite "FrameOS Gallery code app":
     downloadError = "HTTP 404"
     expect(JsAppError):
       discard h.render(%*{"category": "no-such-gallery"})
-    check requestedUrls == @["https://gallery.frameos.net/image?category=no-such-gallery"]
+    check requestedUrls == @["https://gallery.frameos.net/image?category=no-such-gallery" & Scaled]
     check h.errorLogged("An error occurred while downloading the gallery image. HTTP 404")

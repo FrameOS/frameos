@@ -31,13 +31,13 @@
       "showIf": [{ "field": "category", "operator": "eq", "value": "other" }]
     },
     {
-      "name": "download",
+      "name": "format",
       "type": "select",
       "options": ["jpg", "png", "original"],
       "value": "jpg",
       "required": false,
-      "label": "Download",
-      "hint": "jpg: the gallery scales the image to this frame's panel first and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame."
+      "label": "Image format",
+      "hint": "jpg: the gallery scales the image to this frame's panel and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame."
     },
     {
       "name": "fit",
@@ -47,7 +47,7 @@
       "required": false,
       "label": "Scale to the panel",
       "hint": "Match the image node's placement: cover fills the panel and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.",
-      "showIf": [{ "field": "download", "operator": "ne", "value": "original" }]
+      "showIf": [{ "field": "format", "operator": "ne", "value": "original" }]
     }
   ],
   "output": [{ "name": "image", "type": "image" }],

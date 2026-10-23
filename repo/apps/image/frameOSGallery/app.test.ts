@@ -20,13 +20,13 @@ describe('frameOSGallery', () => {
 
   it('asks for a lossless PNG that fits inside the panel when told to', () => {
     const fetchImage = mock.fetchImage(() => mock.image())
-    get(makeApp({ config: { category: 'landscapes', download: 'png', fit: 'contain' } }))
+    get(makeApp({ config: { category: 'landscapes', format: 'png', fit: 'contain' } }))
     expect(fetchImage.calls[0][0]).toBe(`${base}&width=800&height=480&fit=contain&format=png`)
   })
 
   it('asks for the original file when told to', () => {
     const fetchImage = mock.fetchImage(() => mock.image())
-    get(makeApp({ config: { category: 'landscapes', download: 'original' } }))
+    get(makeApp({ config: { category: 'landscapes', format: 'original' } }))
     expect(fetchImage.calls[0][0]).toBe(base)
   })
 
