@@ -56,12 +56,13 @@ Supported are all the most common e-ink displays out there, on a Raspberry Pi or
 FrameOS supports Seeed Studio's reTerminal ePaper displays out of the box. Each one has a hardware
 preset: pick it, flash the frame from the browser, and scenes render on the device itself.
 
-- [reTerminal E1004](https://www.seeedstudio.com/reTerminal-E1004-p-6692.html) - 13.3" Spectra 6 color
-- [reTerminal E1002](https://www.seeedstudio.com/reTerminal-E1002-p-6533.html) - 7.3" Spectra 6 color
-- [reTerminal E1001](https://www.seeedstudio.com/reTerminal-E1001-p-6534.html) - 7.5" black/white
-- [reTerminal Sticky](https://www.seeedstudio.com/reTerminal-Sticky-p-6861.html) - 3.97" black/white
-- [XIAO ePaper Display Board EE04](https://www.seeedstudio.com/XIAO-ePaper-Display-Board-EE04-p-6560.html)
-  and [EE05](https://www.seeedstudio.com/XIAO-ePaper-Display-Board-EE05-p-6755.html) - bring your own panel
+- [reTerminal E1004](https://frameos.net/devices/seeed-reterminal-e1004) - 13.3" Spectra 6 color ([buy](https://www.seeedstudio.com/reTerminal-E1004-p-6692.html?sensecap_affiliate=NK0JMuC&referring_service=link))
+- [reTerminal E1002](https://frameos.net/devices/seeed-reterminal-e1002) - 7.3" Spectra 6 color ([buy](https://www.seeedstudio.com/reTerminal-E1002-p-6533.html?sensecap_affiliate=NK0JMuC&referring_service=link))
+- [reTerminal E1001](https://frameos.net/devices/seeed-reterminal-e1001) - 7.5" black/white ([buy](https://www.seeedstudio.com/reTerminal-E1001-p-6534.html?sensecap_affiliate=NK0JMuC&referring_service=link))
+- [reTerminal Sticky](https://frameos.net/devices/seeed-reterminal-sticky) - 3.97" black/white ([buy](https://www.seeedstudio.com/reTerminal-Sticky-p-6861.html?sensecap_affiliate=NK0JMuC&referring_service=link))
+- [XIAO ePaper Display Board EE04](https://frameos.net/devices/seeed-xiao-epaper-ee04) and [EE05](https://frameos.net/devices/seeed-xiao-epaper-ee05) - bring your own panel
+  ([buy EE04](https://www.seeedstudio.com/XIAO-ePaper-Display-Board-EE04-p-6560.html?sensecap_affiliate=NK0JMuC&referring_service=link),
+  [buy EE05](https://www.seeedstudio.com/XIAO-ePaper-Display-Board-EE05-p-6755.html?sensecap_affiliate=NK0JMuC&referring_service=link))
 
 The [Seeed Studio buying guide](https://frameos.net/devices/seeed-buying-guide) covers the whole
 lineup.
@@ -69,14 +70,19 @@ lineup.
 ### Waveshare
 
 Nearly a hundred Waveshare e-Paper panels have native drivers, on a Raspberry Pi or wired to an
-ESP32-S3, and the all-in-one boards have presets:
+ESP32-S3. Waveshare's ready-made frames work out of the box:
 
-- [ESP32-S3 PhotoPainter](https://frameos.net/devices/waveshare-esp32-s3-photopainter) - 7.3" Spectra 6 color
-- [ESP32-S3 ePaper 13.3E6](https://frameos.net/devices/waveshare-esp32-s3-epaper-13in3e6) - 13.3" Spectra 6 color
-- [13.3" (E)](https://frameos.net/devices/waveshare-epd-13in3e), [7.3" (E)](https://frameos.net/devices/waveshare-epd-7in3e)
-  and [4" (E)](https://frameos.net/devices/waveshare-epd-4in0e) Spectra 6 panels
-- [7.5" black/white](https://frameos.net/devices/waveshare-7.5inch-800x480-epaper) and the
-  [10.3" 16-level grayscale](https://frameos.net/devices/waveshare-epd-10in3) panel (Raspberry Pi)
+- [ESP32-S3 PhotoPainter](https://frameos.net/devices/waveshare-esp32-s3-photopainter) - 7.3" Spectra 6 color ([buy](https://www.waveshare.com/esp32-s3-photopainter.htm?aff_id=79380))
+- [ESP32-S3 ePaper 13.3E6](https://frameos.net/devices/waveshare-esp32-s3-epaper-13in3e6) - 13.3" Spectra 6 color ([buy](https://www.waveshare.com/esp32-s3-epaper-13.3e6.htm?aff_id=79380))
+- [RPi Zero PhotoPainter](https://frameos.net/devices/waveshare-rpi-zero-photopainter-7in3e) - 7.3" Spectra 6 color, on a Raspberry Pi Zero ([buy](https://www.waveshare.com/photopainter-b.htm?aff_id=79380))
+
+And panels to build into a frame of your own:
+
+- [13.3" (E)](https://frameos.net/devices/waveshare-epd-13in3e) - Spectra 6 color ([buy](https://www.waveshare.com/13.3inch-e-paper-hat-plus-e.htm?sku=29355&aff_id=79380))
+- [7.3" (E)](https://frameos.net/devices/waveshare-epd-7in3e) - Spectra 6 color ([buy](https://www.waveshare.com/7.3inch-e-paper-hat-e.htm?sku=27875&aff_id=79380))
+- [4" (E)](https://frameos.net/devices/waveshare-epd-4in0e) - Spectra 6 color ([buy](https://www.waveshare.com/4inch-e-paper-hat-plus-e.htm?sku=27367&aff_id=79380))
+- [7.5"](https://frameos.net/devices/waveshare-7.5inch-800x480-epaper) - black/white ([buy](https://www.waveshare.com/7.5inch-e-Paper-HAT.htm?aff_id=79380))
+- [10.3"](https://frameos.net/devices/waveshare-epd-10in3) - 16-level grayscale, Raspberry Pi only ([buy](https://www.waveshare.com/10.3inch-e-Paper-HAT.htm?aff_id=79380))
 
 The [Waveshare buying guide](https://frameos.net/devices/waveshare-other-displays) lists what's
 tested on real hardware and what to know before buying.
