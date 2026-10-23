@@ -147,6 +147,23 @@ static void apply_hostname(esp_netif_t *netif)
     }
 }
 
+/* The station joins at 20 MHz whatever the AP offers. A frame needs a few
+ * KB/s, and a 40 MHz channel in 2.4 GHz only adds risk: it spans most of the
+ * band, so it shares air with every neighbouring network, and the wider
+ * receiver is about 3 dB less sensitive at the same rate. The IDF default
+ * takes 40 MHz when the AP has it: frame 70 (reTerminal E1004) joined its
+ * UniFi AP at 40 MHz on channel 11 and lost gallery downloads to AP-side
+ * drops (reason 34, missing ACKs) and to downloads that stalled while still
+ * associated, while the Raspberry Pi frames on the same AP join at 20 MHz
+ * (2026-10-22). Called between esp_wifi_set_config and esp_wifi_start. */
+static void apply_station_bandwidth(void)
+{
+    esp_err_t err = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "failed to set the station to 20 MHz: %s", esp_err_to_name(err));
+    }
+}
+
 static void disable_power_save(void)
 {
     esp_err_t err = esp_wifi_set_ps(WIFI_PS_NONE);
@@ -318,6 +335,7 @@ esp_err_t fos_wifi_connect(uint32_t timeout_ms)
     xEventGroupClearBits(s_events, WIFI_CONNECTED_BIT | WIFI_FAILED_BIT);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    apply_station_bandwidth();
     ESP_ERROR_CHECK(esp_wifi_start());
     apply_power_save_policy();
     ESP_LOGI(TAG, "connecting to \"%s\"", config->wifi_ssid);
@@ -484,6 +502,7 @@ esp_err_t fos_wifi_start_portal(void)
     bool keep_sta_retrying = fos_config_wifi_ready();
     ESP_ERROR_CHECK(esp_wifi_set_mode(keep_sta_retrying ? WIFI_MODE_APSTA : WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+    if (keep_sta_retrying) apply_station_bandwidth();
     ESP_ERROR_CHECK(esp_wifi_start());
     disable_power_save();
     s_portal_active = true;
