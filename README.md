@@ -51,6 +51,53 @@ Supported are all the most common e-ink displays out there, on a Raspberry Pi or
 
 [See the full list here!](https://frameos.net/devices/)
 
+### Seeed Studio reTerminal
+
+FrameOS supports Seeed Studio's reTerminal ePaper displays out of the box. Each one has a hardware
+preset: pick it, flash the frame from the browser, and scenes render on the device itself.
+
+- [reTerminal E1004](https://www.seeedstudio.com/reTerminal-E1004-p-6692.html) - 13.3" Spectra 6 color
+- [reTerminal E1002](https://www.seeedstudio.com/reTerminal-E1002-p-6533.html) - 7.3" Spectra 6 color
+- [reTerminal E1001](https://www.seeedstudio.com/reTerminal-E1001-p-6534.html) - 7.5" black/white
+- [reTerminal Sticky](https://www.seeedstudio.com/reTerminal-Sticky-p-6861.html) - 3.97" black/white
+- [XIAO ePaper Display Board EE04](https://www.seeedstudio.com/XIAO-ePaper-Display-Board-EE04-p-6560.html)
+  and [EE05](https://www.seeedstudio.com/XIAO-ePaper-Display-Board-EE05-p-6755.html) - bring your own panel
+
+The [Seeed Studio buying guide](https://frameos.net/devices/seeed-buying-guide) covers the whole
+lineup.
+
+### Waveshare
+
+Nearly a hundred Waveshare e-Paper panels have native drivers, on a Raspberry Pi or wired to an
+ESP32-S3, and the all-in-one boards have presets:
+
+- [ESP32-S3 PhotoPainter](https://frameos.net/devices/waveshare-esp32-s3-photopainter) - 7.3" Spectra 6 color
+- [ESP32-S3 ePaper 13.3E6](https://frameos.net/devices/waveshare-esp32-s3-epaper-13in3e6) - 13.3" Spectra 6 color
+- [13.3" (E)](https://frameos.net/devices/waveshare-epd-13in3e), [7.3" (E)](https://frameos.net/devices/waveshare-epd-7in3e)
+  and [4" (E)](https://frameos.net/devices/waveshare-epd-4in0e) Spectra 6 panels
+- [7.5" black/white](https://frameos.net/devices/waveshare-7.5inch-800x480-epaper) and the
+  [10.3" 16-level grayscale](https://frameos.net/devices/waveshare-epd-10in3) panel (Raspberry Pi)
+
+The [Waveshare buying guide](https://frameos.net/devices/waveshare-other-displays) lists what's
+tested on real hardware and what to know before buying.
+
+### Pimoroni
+
+Pimoroni's boards plug straight onto a Raspberry Pi's header, no wiring:
+
+- [Inky Impression 13.3"](https://frameos.net/devices/pimoroni-inky-impression-13-2025),
+  [7.3"](https://frameos.net/devices/pimoroni-inky-impression-7-2025) and
+  [4"](https://frameos.net/devices/pimoroni-inky-impression-4-2025) - Spectra 6 color, plus the
+  older 7-color models
+- [Inky pHAT](https://frameos.net/devices/pimoroni-inky-phat-black) and
+  [Inky wHAT](https://frameos.net/devices/pimoroni-inky-what-black) - small black/white and
+  three-color panels
+- [HyperPixel 4.0](https://frameos.net/devices/pimoroni-hyperpixel-4-touch),
+  [4.0 Square](https://frameos.net/devices/pimoroni-hyperpixel-4-square-touch) and
+  [2.1 Round](https://frameos.net/devices/pimoroni-hyperpixel-2.1inch-round-480x480-lcd) - touch LCDs
+- [Inky Frame](https://frameos.net/devices/pimoroni-inky-frame-7-3-spectra) - all-in-one
+  Pico W frames, run as thin clients that the backend renders for
+
 ## FrameOS backend
 
 The FrameOS backend is where you set up your frames. You can run it continuously on a server, or locally on your computer when needed. You'll just miss out on log aggregation if the backend is offline. The frames run independently.
