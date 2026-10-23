@@ -40,10 +40,12 @@ flox services start redis
 
 ## Supported platforms
 
-Supported are all the most common e-ink displays out there.
+Supported are all the most common e-ink displays out there, on a Raspberry Pi or an
+[ESP32-S3](https://frameos.net/guide/esp32).
 
 - Pimoroni e-ink frames
 - Waveshare e-ink
+- Seeed Studio reTerminal e-paper displays
 - Framebuffer HDMI output
 - Web server kiosk mode
 
