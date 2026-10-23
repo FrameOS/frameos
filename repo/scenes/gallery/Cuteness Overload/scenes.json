@@ -111,11 +111,9 @@
         "name": "FrameOS Gallery",
         "description": "Random image from the FrameOS gallery",
         "category": "data",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "fields": [
-          {
-            "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries."
-          },
+          { "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries." },
           {
             "name": "category",
             "type": "select",
@@ -139,31 +137,34 @@
             "value": "",
             "required": false,
             "label": "Category (if other)",
-            "showIf": [
-              {
-                "field": "category",
-                "operator": "eq",
-                "value": "other"
-              }
-            ]
-          }
-        ],
-        "output": [
+            "showIf": [{ "field": "category", "operator": "eq", "value": "other" }]
+          },
           {
-            "name": "image",
-            "type": "image"
+            "name": "download",
+            "type": "select",
+            "options": ["jpg", "png", "original"],
+            "value": "jpg",
+            "required": false,
+            "label": "Download",
+            "hint": "jpg: the gallery scales the image to this frame's panel first and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame."
+          },
+          {
+            "name": "fit",
+            "type": "select",
+            "options": ["cover", "contain"],
+            "value": "cover",
+            "required": false,
+            "label": "Scale to the panel",
+            "hint": "Match the image node's placement: cover fills the panel and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.",
+            "showIf": [{ "field": "download", "operator": "ne", "value": "original" }]
           }
         ],
-        "cache": {
-          "enabled": true,
-          "inputEnabled": true,
-          "durationEnabled": true,
-          "duration": "900"
-        },
+        "output": [{ "name": "image", "type": "image" }],
+        "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "900" },
         "origin": "repo/apps/image/frameOSGallery",
         "sources": {
-          "app.ts": "export function get(app: FrameOSApp) {\n  const { category, categoryOther } = app.config\n  const name = category === 'other' ? categoryOther.trim() : category\n  if (!name) throw new Error('Please enter the name of a gallery under \"Category (if other)\".')\n  frameos.log(`FrameOS Gallery category: ${name}`)\n  const photo = frameos.fetchImage(`https://gallery.frameos.net/image?category=${encodeURIComponent(name)}`)\n  if (!photo.image)\n    throw new Error(`An error occurred while downloading the gallery image. ${photo.error ?? 'unknown error'}`)\n  return photo.image\n}\n",
-          "config.json": "{\n  \"name\": \"FrameOS Gallery\",\n  \"description\": \"Random image from the FrameOS gallery\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    { \"markdown\": \"[Click here](https://gallery.frameos.net/) to see all the galleries.\" },\n    {\n      \"name\": \"category\",\n      \"type\": \"select\",\n      \"options\": [\n        \"building-art-styles\",\n        \"cute\",\n        \"cyberpunk-europe\",\n        \"low-poly-animals\",\n        \"masterpieces\",\n        \"space-gallery\",\n        \"space-odyssey\",\n        \"other\"\n      ],\n      \"value\": \"cute\",\n      \"required\": false,\n      \"label\": \"Category\"\n    },\n    {\n      \"name\": \"categoryOther\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Category (if other)\",\n      \"showIf\": [{ \"field\": \"category\", \"operator\": \"eq\", \"value\": \"other\" }]\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
+          "app.ts": "// A random image from a FrameOS gallery, scaled on the gallery server to this\n// frame's panel: the frame then downloads and decodes only the pixels it\n// shows (an 800x480 JPEG is ~125 KB where the original PNG is 1.5 to 4.7 MB),\n// which on a battery-powered ESP32 is most of what a render costs.\nexport function get(app: FrameOSApp) {\n  const { category, categoryOther, download, fit } = app.config\n  const name = category === 'other' ? categoryOther.trim() : category\n  if (!name) throw new Error('Please enter the name of a gallery under \"Category (if other)\".')\n  let url = `https://gallery.frameos.net/image?category=${encodeURIComponent(name)}`\n  if (download !== 'original') {\n    // The panel as the scene sees it: a turned frame swaps its sides.\n    const f = app.frame\n    const turned = f.rotate === 90 || f.rotate === 270\n    const width = turned ? f.height : f.width\n    const height = turned ? f.width : f.height\n    if (width > 0 && height > 0) {\n      const format = download === 'png' ? 'png' : 'jpg'\n      url += `&width=${width}&height=${height}&fit=${fit === 'contain' ? 'contain' : 'cover'}&format=${format}`\n    }\n  }\n  frameos.log(`FrameOS Gallery category: ${name}`)\n  const photo = frameos.fetchImage(url)\n  if (!photo.image)\n    throw new Error(`An error occurred while downloading the gallery image. ${photo.error ?? 'unknown error'}`)\n  return photo.image\n}\n",
+          "config.json": "{\n  \"name\": \"FrameOS Gallery\",\n  \"description\": \"Random image from the FrameOS gallery\",\n  \"category\": \"data\",\n  \"version\": \"1.1.0\",\n  \"fields\": [\n    { \"markdown\": \"[Click here](https://gallery.frameos.net/) to see all the galleries.\" },\n    {\n      \"name\": \"category\",\n      \"type\": \"select\",\n      \"options\": [\n        \"building-art-styles\",\n        \"cute\",\n        \"cyberpunk-europe\",\n        \"low-poly-animals\",\n        \"masterpieces\",\n        \"space-gallery\",\n        \"space-odyssey\",\n        \"other\"\n      ],\n      \"value\": \"cute\",\n      \"required\": false,\n      \"label\": \"Category\"\n    },\n    {\n      \"name\": \"categoryOther\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Category (if other)\",\n      \"showIf\": [{ \"field\": \"category\", \"operator\": \"eq\", \"value\": \"other\" }]\n    },\n    {\n      \"name\": \"download\",\n      \"type\": \"select\",\n      \"options\": [\"jpg\", \"png\", \"original\"],\n      \"value\": \"jpg\",\n      \"required\": false,\n      \"label\": \"Download\",\n      \"hint\": \"jpg: the gallery scales the image to this frame's panel first and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame.\"\n    },\n    {\n      \"name\": \"fit\",\n      \"type\": \"select\",\n      \"options\": [\"cover\", \"contain\"],\n      \"value\": \"cover\",\n      \"required\": false,\n      \"label\": \"Scale to the panel\",\n      \"hint\": \"Match the image node's placement: cover fills the panel and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.\",\n      \"showIf\": [{ \"field\": \"download\", \"operator\": \"ne\", \"value\": \"original\" }]\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
         }
       }
     }

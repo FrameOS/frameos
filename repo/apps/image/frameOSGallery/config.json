@@ -2,7 +2,7 @@
   "name": "FrameOS Gallery",
   "description": "Random image from the FrameOS gallery",
   "category": "data",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "fields": [
     { "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries." },
     {
@@ -29,6 +29,25 @@
       "required": false,
       "label": "Category (if other)",
       "showIf": [{ "field": "category", "operator": "eq", "value": "other" }]
+    },
+    {
+      "name": "download",
+      "type": "select",
+      "options": ["jpg", "png", "original"],
+      "value": "jpg",
+      "required": false,
+      "label": "Download",
+      "hint": "jpg: the gallery scales the image to this frame's panel first and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame."
+    },
+    {
+      "name": "fit",
+      "type": "select",
+      "options": ["cover", "contain"],
+      "value": "cover",
+      "required": false,
+      "label": "Scale to the panel",
+      "hint": "Match the image node's placement: cover fills the panel and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.",
+      "showIf": [{ "field": "download", "operator": "ne", "value": "original" }]
     }
   ],
   "output": [{ "name": "image", "type": "image" }],
