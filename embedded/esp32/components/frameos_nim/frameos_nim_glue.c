@@ -3,6 +3,7 @@
  * outbound-HTTP hook the Nim http_client HAL calls into. */
 #include "frameos_nim.h"
 
+#include "fos_log_backoff.h"
 #include "fos_netguard.h"
 
 #include <ctype.h>
@@ -89,6 +90,13 @@ static bool s_log_upload_enabled = false;
 #define FOS_NIM_LOG_MAX_PENDING 128
 #define FOS_NIM_LOG_BATCH_MAX 8
 #define FOS_NIM_LOG_BODY_MAX (8 * 1024)
+/* A backend that is up accepts the connection in milliseconds, so the
+ * connect gets a short timeout; the request and its reply keep the long one.
+ * A frame whose self-hosted backend runs on a laptop spent 10 s on every
+ * flush while the laptop slept, five of them inside a render (frame 70:
+ * 140 s renders instead of 100 s, 2026-10-23). */
+#define FOS_NIM_LOG_CONNECT_TIMEOUT_MS 5000
+#define FOS_NIM_LOG_TIMEOUT_MS 10000
 /* TLS handshakes genuinely need internal-heap headroom; a plain-http POST
  * only needs the client struct + a 2K buffer. A single 48K floor silently
  * disabled log upload forever on frames that idle under it (the 13.3E6
@@ -108,6 +116,9 @@ static fos_nim_log_node_t *s_log_head = NULL;
 static fos_nim_log_node_t *s_log_tail = NULL;
 static size_t s_log_pending = 0;
 static size_t s_log_dropped = 0;
+/* Guarded by s_log_lock: when the upload may try a backend that did not
+ * answer again (fos_log_backoff.h). */
+static fos_log_backoff_t s_log_backoff = {0};
 
 static bool nim_lock_take(void)
 {
@@ -1265,6 +1276,10 @@ static fos_nim_log_node_t *pop_log_batch(size_t *count, size_t *dropped)
     *dropped = 0;
     if (s_log_lock == NULL) return NULL;
     if (xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(50)) != pdTRUE) return NULL;
+    if (!fos_log_backoff_ready(&s_log_backoff, esp_timer_get_time() / 1000)) {
+        xSemaphoreGive(s_log_lock);
+        return NULL;
+    }
 
     *dropped = s_log_dropped;
     s_log_dropped = 0;
@@ -1287,6 +1302,40 @@ static fos_nim_log_node_t *pop_log_batch(size_t *count, size_t *dropped)
     return head;
 }
 
+/* A batch the backend did not answer goes back to the head of the queue, in
+ * order and with the drop count it carried, for the flush after the backoff.
+ * Returns that wait in ms. */
+static uint32_t requeue_log_batch(fos_nim_log_node_t *batch, size_t count, size_t dropped)
+{
+    if (s_log_lock == NULL || xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        free_log_nodes(batch);
+        return 0;
+    }
+    if (batch != NULL) {
+        fos_nim_log_node_t *tail = batch;
+        while (tail->next != NULL) tail = tail->next;
+        tail->next = s_log_head;
+        s_log_head = batch;
+        if (s_log_tail == NULL) s_log_tail = tail;
+        s_log_pending += count;
+    }
+    s_log_dropped += dropped;
+    uint32_t wait_ms = fos_log_backoff_failed(&s_log_backoff, esp_timer_get_time() / 1000);
+    xSemaphoreGive(s_log_lock);
+    return wait_ms;
+}
+
+static void note_log_post_answered(void)
+{
+    if (s_log_lock == NULL || xSemaphoreTake(s_log_lock, pdMS_TO_TICKS(50)) != pdTRUE) return;
+    fos_log_backoff_succeeded(&s_log_backoff);
+    xSemaphoreGive(s_log_lock);
+}
+
+/* ESP_OK when the backend took the batch, ESP_ERR_INVALID_RESPONSE when it
+ * answered with an error (the batch is dropped, as a retry would get the same
+ * answer), ESP_ERR_INVALID_STATE / ESP_ERR_INVALID_SIZE when there is nothing
+ * to post to; anything else means the backend did not answer. */
 static esp_err_t post_log_body(const char *body, size_t body_len)
 {
     if (body == NULL || body_len == 0 || s_backend_url[0] == '\0' || s_backend_auth[0] == '\0') {
@@ -1302,12 +1351,12 @@ static esp_err_t post_log_body(const char *body, size_t body_len)
     esp_http_client_config_t config = {
         .url = url,
         .method = HTTP_METHOD_POST,
-        .timeout_ms = 10000,
+        .timeout_ms = FOS_NIM_LOG_CONNECT_TIMEOUT_MS,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .buffer_size = 2048,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) return ESP_FAIL;
+    if (client == NULL) return ESP_ERR_NO_MEM;
     esp_http_client_set_header(client, "Authorization", s_backend_auth);
     esp_http_client_set_header(client, "Content-Type", "application/json");
     esp_http_client_set_header(client, "User-Agent", "FrameOS-ESP32/1");
@@ -1318,6 +1367,7 @@ static esp_err_t post_log_body(const char *body, size_t body_len)
         esp_http_client_cleanup(client);
         return err;
     }
+    esp_http_client_set_timeout_ms(client, FOS_NIM_LOG_TIMEOUT_MS);
     size_t offset = 0;
     while (offset < body_len) {
         int sent = esp_http_client_write(client, body + offset, body_len - offset);
@@ -1333,9 +1383,13 @@ static esp_err_t post_log_body(const char *body, size_t body_len)
     int status = esp_http_client_get_status_code(client);
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
+    if (status == 0) {
+        ESP_LOGW("fos_nim_log", "POST %s got no reply", url);
+        return ESP_ERR_TIMEOUT;
+    }
     if (status < 200 || status >= 300) {
         ESP_LOGW("fos_nim_log", "POST %s returned HTTP %d", url, status);
-        return ESP_FAIL;
+        return ESP_ERR_INVALID_RESPONSE;
     }
     return ESP_OK;
 }
@@ -1378,12 +1432,21 @@ void frameos_nim_flush_logs(void)
         }
         if (ok) ok = json_buf_append(&body, "]}");
 
+        esp_err_t err = ESP_ERR_INVALID_SIZE;
         if (ok) {
-            post_log_body(body.data, body.len);
+            err = post_log_body(body.data, body.len);
         } else {
             ESP_LOGW("fos_nim_log", "dropping log batch: JSON body too large or out of memory");
         }
         json_buf_free(&body);
+        if (ok && err != ESP_OK && err != ESP_ERR_INVALID_RESPONSE &&
+            err != ESP_ERR_INVALID_STATE && err != ESP_ERR_INVALID_SIZE) {
+            uint32_t wait_ms = requeue_log_batch(batch, count, dropped);
+            ESP_LOGW("fos_nim_log", "backend did not answer (%s); holding %u log lines, next try in %u s",
+                     esp_err_to_name(err), (unsigned)count, (unsigned)(wait_ms / 1000));
+            break;
+        }
+        if (err == ESP_OK || err == ESP_ERR_INVALID_RESPONSE) note_log_post_answered();
         free_log_nodes(batch);
     }
 }
