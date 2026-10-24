@@ -18,6 +18,7 @@ import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { ACTIVATION_QUEUED_DETAIL, activationWasQueued, controlLogic } from './controlLogic'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { confirmDialog } from '../../../../utils/confirmDialogLogic'
 import { pushCloudFrameSceneList } from '../../../../utils/cloudFrameApi'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
@@ -379,7 +380,7 @@ export interface scenesLogicActions {
   toggleMissingActiveExpanded: () => {
     value: true
   }
-  pushSavedScenes: () => {
+  discardPreview: () => {
     value: true
   }
   installPreviewScene: () => {
@@ -539,10 +540,11 @@ export const scenesLogic = kea<scenesLogicType>([
     toggleSceneSelection: (sceneId: string) => ({ sceneId }),
     setSelectedSceneIds: (sceneIds: string[]) => ({ sceneIds }),
     toggleMissingActiveExpanded: true,
-    // docs/ui-vocabulary.md "Push": the frame's saved scene list, as it
-    // stands. What takes a preview (frame.scene_preview: the editor's
-    // "Preview on frame", the voice chat's picture) off the frame.
-    pushSavedScenes: true,
+    // docs/ui-vocabulary.md "Discard": takes the preview (frame.scene_preview:
+    // the editor's "Preview on frame", the voice chat's picture) off the frame
+    // by pushing the saved scene list as it stands. Behind a confirmation: a
+    // preview is held nowhere else, so what goes is gone.
+    discardPreview: true,
     // docs/ui-vocabulary.md "Install": the previewed scene onto the frame's
     // scene list, saved and pushed, so it stays.
     installPreviewScene: true,
@@ -1182,38 +1184,50 @@ export const scenesLogic = kea<scenesLogicType>([
         })
       }
     },
-    pushSavedScenes: async () => {
-      const title = 'Pushing scenes'
-      if (isCloudMode()) {
-        // The assigned list again, every row as the frame holds it: the
-        // route queues a set_scenes, which is then the newest push.
-        try {
-          await pushCloudFrameSceneList(props.frameId)
-          reportTaskOutcome('success', {
-            frameId: props.frameId,
-            kind: 'deploy',
-            title,
-            detail: 'Pushed. The frame has it as soon as it syncs.',
-          })
-        } catch (error) {
-          reportTaskOutcome('error', {
-            frameId: props.frameId,
-            kind: 'deploy',
-            title,
-            detail: error instanceof Error && error.message ? error.message : 'Failed to push the scenes',
-          })
-        }
-        return
-      }
-      // The backend: the deploy the sidebar's Deploy makes (fast when the
-      // frame can take one); its set_scenes row is then the newest, and the
-      // preview is gone from the frame.
-      const frameLogicInstance = frameLogic({ frameId: props.frameId })
-      framesModel.actions.deployFrame(
-        props.frameId,
-        frameCanUseFastDeploy(values.frame, frameLogicInstance.values.requiresRecompilation),
-        { title }
-      )
+    discardPreview: async () => {
+      const name = values.frame?.scene_preview?.name || 'the preview'
+      const title = 'Discarding the preview'
+      // The scene exists only on the frame (and in the plane's newest push):
+      // once the saved list is pushed over it, there is no getting it back.
+      await confirmDialog({
+        title: 'Discard the preview?',
+        message: `"${name}" leaves the frame and is kept nowhere. The frame goes back to its saved scenes.\n\nInstall it first if you want to keep it.`,
+        confirmLabel: 'Discard',
+        busyLabel: 'Discarding',
+        danger: true,
+        onConfirm: async () => {
+          if (isCloudMode()) {
+            // The assigned list again, every row as the frame holds it: the
+            // route queues a set_scenes, which is then the newest push.
+            try {
+              await pushCloudFrameSceneList(props.frameId)
+              reportTaskOutcome('success', {
+                frameId: props.frameId,
+                kind: 'deploy',
+                title,
+                detail: 'The frame shows its saved scenes again as soon as it syncs.',
+              })
+            } catch (error) {
+              reportTaskOutcome('error', {
+                frameId: props.frameId,
+                kind: 'deploy',
+                title,
+                detail: error instanceof Error && error.message ? error.message : 'Failed to discard the preview',
+              })
+            }
+            return
+          }
+          // The backend: the deploy the sidebar's Deploy makes (fast when the
+          // frame can take one); its set_scenes row is then the newest, and
+          // the preview is gone from the frame.
+          const frameLogicInstance = frameLogic({ frameId: props.frameId })
+          framesModel.actions.deployFrame(
+            props.frameId,
+            frameCanUseFastDeploy(values.frame, frameLogicInstance.values.requiresRecompilation),
+            { title }
+          )
+        },
+      })
     },
     previewScene: async ({ sceneId, state, scenes }) => {
       // An explicit `scenes` list lets callers preview scenes that aren't

@@ -192,7 +192,7 @@ function SceneSelector({
   const { navigateToScene, navigateToSceneFrame, openTemplateDrawer } = useActions(workspaceLogic)
   const { linkedActiveSceneId, undeployedSceneIds, unsavedSceneIds, sceneUpdateVersions, sceneAccessFlagsById } =
     useValues(scenesLogic({ frameId: frame.id }))
-  const { pushSavedScenes, installPreviewScene } = useActions(scenesLogic({ frameId: frame.id }))
+  const { discardPreview, installPreviewScene } = useActions(scenesLogic({ frameId: frame.id }))
   // A scene the frame shows for now without holding it in its list (the
   // editor's "Preview on frame", the voice chat's picture): drawn as a row of
   // its own, since no saved scene is it. docs/voice-chat.md `show_image`.
@@ -365,11 +365,11 @@ function SceneSelector({
                   ) : null}
                   <button
                     type="button"
-                    onClick={() => pushSavedScenes()}
-                    title="Push the saved scene list to the frame; the preview goes."
+                    onClick={() => discardPreview()}
+                    title="Take the preview off the frame: it goes back to its saved scenes. Asks first."
                     className="frameos-secondary-button rounded-lg px-2 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                   >
-                    Push scenes
+                    Discard
                   </button>
                 </div>
               </div>

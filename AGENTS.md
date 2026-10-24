@@ -104,7 +104,8 @@
   list (the editor's "Preview on frame", an ad-hoc `set_scenes` push) is
   reported by both planes as `scene_preview` on the frame while that push is
   the newest scene set, and the scene list draws it as a preview row with
-  "Install" and "Push scenes". Each plane keeps ONE scene bundle per frame
+  "Install" and "Discard" (confirmed: a replaced preview is gone for good).
+  Each plane keeps ONE scene bundle per frame
   (the backend empties older `_preview.scenes`, the cloud spends `scenes` on
   ack); the preview's name, source and shown scene outlive the bundle. A new
   pusher sets `source` and goes through the same two routes, never a store
