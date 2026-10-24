@@ -46,6 +46,10 @@ type
     # --- the platform's own
     requestSelect*: proc (sceneId: string): bool
       ## Make `sceneId` the current scene, now or soon. False: no such scene.
+    sceneOrder*: proc (): seq[SceneId]
+      ## The frame's scene list in the control plane's order, for a
+      ## `setCurrentScene {direction}` (docs/events.md, "Event map"). nil:
+      ## no such switch here.
     runtimeCommand*: proc (command: RuntimeCommand, payload: JsonNode)
     logEntry*: proc (entry: JsonNode)     ## a frame log line
     note*: proc (message: string)         ## a line for whoever is watching the console
@@ -240,6 +244,7 @@ proc start*(host: SingleSceneHost) =
       runEvent(scene, ExecutionContext(scene: scene, event: event, payload: payload,
         loopIndex: 0, loopKey: ".")),
     sceneListens: proc (scene: FrameScene, event: string): bool = sceneListensTo(scene, event),
+    sceneOrder: host.sceneOrder,
     log: proc (entry: JsonNode) =
       if not host.logEntry.isNil:
         host.logEntry(entry),

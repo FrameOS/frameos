@@ -277,7 +277,21 @@ static fos_event_result_t set_current_scene(fos_event_origin_t origin, const cha
     char scene_id[FOS_EVENT_SCENE_ID_LEN];
     if (!copy_string_value(top_level_value(payload, "sceneId"), scene_id, sizeof(scene_id)) &&
         !copy_string_value(top_level_value(payload, "scene_id"), scene_id, sizeof(scene_id))) {
-        return FOS_EVENT_FAILED;
+        /* No id but a `direction` (`next` / `prev`, docs/events.md): which
+         * scene that is depends on the scene list's order, which the Nim
+         * dispatcher resolves (its host's sceneOrder: the catalog) before it
+         * asks for the switch through the scene-select hook — the same
+         * fos_scenes_select as below, so the choice is persisted the same
+         * way. Nothing to do here but hand it over and wake the render task,
+         * which applies the queued selection. */
+        char direction[16];
+        if (!copy_string_value(top_level_value(payload, "direction"), direction, sizeof(direction)) ||
+            !frameos_nim_available()) {
+            return FOS_EVENT_FAILED;
+        }
+        if (!frameos_nim_send_event(origin, FOS_EVENT_SET_CURRENT_SCENE, payload)) return FOS_EVENT_FAILED;
+        fos_client_render_now();
+        return FOS_EVENT_DONE;
     }
     if (fos_scenes_select(scene_id) != ESP_OK) return FOS_EVENT_FAILED;
 

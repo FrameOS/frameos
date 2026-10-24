@@ -290,6 +290,30 @@ static void test_set_current_scene(void)
     reset();
     CHECK(fos_events_dispatch(FOS_ORIGIN_CLOUD, "setCurrentScene", big) == FOS_EVENT_FAILED);
     CHECK(n.selects == 0);
+
+    /* `direction` instead of an id (docs/events.md): the Nim dispatcher
+     * resolves which scene is next from the scene order and queues the
+     * switch itself through the select hook — the firmware selects nothing
+     * here, hands the whole event over as it came, and wakes the render
+     * task that applies the queued selection. */
+    reset();
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "setCurrentScene", "{\"direction\":\"next\"}") == FOS_EVENT_DONE);
+    CHECK(n.selects == 0 && n.renders == 1);
+    CHECK(n.nim_sends == 1 && n.nim_origin == FOS_ORIGIN_HTTP_WRITE && n.nim_timeout == -1);
+    CHECK(strcmp(n.nim_event, "setCurrentScene") == 0 && strcmp(n.nim_payload, "{\"direction\":\"next\"}") == 0);
+    /* A direction the runtime refuses, or no runtime at all: nothing switches. */
+    reset();
+    n.nim_result = false;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "setCurrentScene", "{\"direction\":\"sideways\"}") == FOS_EVENT_FAILED);
+    CHECK(n.selects == 0 && n.renders == 0);
+    reset();
+    n.nim_available = false;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_SCHEDULE, "setCurrentScene", "{\"direction\":\"prev\"}") == FOS_EVENT_FAILED);
+    CHECK(n.nim_sends == 0 && n.selects == 0);
+    /* A direction that is not a string is no direction. */
+    reset();
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "setCurrentScene", "{\"direction\":1}") == FOS_EVENT_FAILED);
+    CHECK(n.nim_sends == 0);
 }
 
 static void test_restart(void)
