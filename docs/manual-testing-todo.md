@@ -5,6 +5,58 @@ boxes only, grouped by bench — when a box passes, delete it (what was seen
 goes in the PR or commit that closes it); delete the file when it is empty.
 Every box below needs hardware that was not to hand.
 
+### reTerminal E1002 bench (voice chat, `docs/voice-chat.md`)
+
+Bench 2026-10-24 (E1002 over USB, a backend running the branch): `mic 2` read
+peak 5162; "Switch to the calendar." was transcribed, answered and applied
+(`commands:sync received 1`, Calendar rendered); the keys' `up` edges
+logged `claimed:true`. "Write Hello World on the board" ran `activate_scene`
+then `set_scene_state`, and without the render hold the switch's render
+(45 s on this panel) showed the notice over the old text, the state a second
+refresh later — the hold (`docs/voice-chat.md` "The notice") is the fix to
+confirm. Still open:
+
+- [ ] **Hold REFRESH on a cloud-managed frame** ends the same way (the
+  cloud route is integration-tested only): `voice:reply` with the transcript,
+  the switch delivered over the socket.
+- [ ] **By ear**: the sparkle at 1 s in place of the first hold "dun", no
+  further duns and no release click on the key, every two seconds after the
+  release a tiny high tick while the
+  upload finishes and a quiet low bop while the answer is awaited (none
+  while listening),
+  three rising notes when the chat switched a scene, two when it
+  only answered, one low note for nothing heard, two low notes on an error,
+  the dull pair for a hold while a session still answers. The sparkle must
+  not show up in the transcript (the first 300 ms are dropped).
+- [ ] **By eye**: the notice box across the bottom of the panel — the
+  sentence in quotes and the reply — on ONE render that carries both the
+  switch and the state ("Write Hello World on the board" from another scene:
+  the Message board with "Hello World" and the notice in the same refresh,
+  `voice:shown` right before `render:done`, no second `render:scene`), and as
+  a repaint of the last image when the chat only answered ("What's on the
+  frame?": the photo stays, no `render:scene` at all); the next render takes
+  it off. An error shows its sentence ("I didn't catch that…" for silence).
+- [ ] **"Show me a banana"** pushes a preview scene (`Voice: a banana`, an
+  Unsplash photo; "generate a banana" → OpenAI art when the project has an
+  `openAI.apiKey`) next to the saved scenes and shows it in the one render
+  with the notice; "switch to the calendar" afterwards still works. On a
+  cloud frame the sources are the groups granted to its scenes only.
+- [ ] **"Rotate 90 degrees"**: the answer reaches the panel (un-rotated, with
+  the notice), THEN the frame restarts and comes back rotated; "every ten
+  minutes" changes the interval without a restart.
+- [ ] **Early release** (REFRESH up before 1 s) is an ordinary press (a
+  refresh, as before); a second hold while the first is still answering gets
+  the dull pair.
+- [ ] **The binding moves**: Settings → Button actions → REFRESH long press
+  set to Refresh and LEFT long press to Voice chat (`event_map` in the
+  settings change log): LEFT held now talks, REFRESH held refreshes, nothing
+  else changes; the row offers Voice chat for long presses only.
+- [ ] **Wake from deep sleep with REFRESH held** records at once and
+  uploads once Wi-Fi is up (`voice:sent` after `wifi` connected); an E1002
+  with `voice_chat 0` gives the dull pair at the hold and nothing else.
+- [ ] **Settings** → GPIO buttons → "Voice chat" off/on reaches the frame
+  live on both planes (`voice_chat` in the settings change log).
+
 ### HyperPixel 4.0 bench
 
 One display path on every board (`driver:hyperPixel4` logs `"path":"kms"`):

@@ -151,6 +151,10 @@ export type ToolContext = {
   // Tools beyond this file's own: the cloud MCP server's, run in-process for
   // the signed-in user (mcp-tools.ts, docs/ai-chat.md).
   extraTools?: ExtraTools | undefined;
+  // False for a turn that gets ONLY its extraTools: the voice chat
+  // (voice.ts), whose caller is a frame's own credential and must not reach
+  // the editor's or the store's tools, not even by naming one.
+  baseTools?: boolean | undefined;
 };
 
 // A second set of tools the loop offers next to toolDefinitions.
@@ -1793,6 +1797,14 @@ async function renderSceneForModel(ctx: ToolContext, args: JsonObject): Promise<
 // The loop's entry point: every tool answers text, and render_scene also
 // shows the model the frame it drew.
 export async function runTool(name: string, args: JsonObject, ctx: ToolContext): Promise<ToolOutput> {
+  if (ctx.baseTools === false) {
+    // The extra tools are all there is: a model naming one of this file's
+    // tools gets an error, not the tool.
+    if (ctx.extraTools && ctx.extraTools.labels[name] !== undefined) {
+      return ctx.extraTools.call(name, args);
+    }
+    throw new Error(`Unknown tool: ${name}`);
+  }
   if (name === "render_scene") {
     return renderSceneForModel(ctx, args);
   }

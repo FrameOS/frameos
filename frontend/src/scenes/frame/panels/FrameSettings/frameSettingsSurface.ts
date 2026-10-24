@@ -366,7 +366,8 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     title: 'GPIO buttons',
     anchor: 'frame-settings-gpio',
     surfaces: ['backend', 'frameAdmin'],
-    conditions: 'The button beep GPIO under the buttons shows for real ESP32 boards only (not virtual, not Pico).',
+    conditions:
+      'The button rows; a second box, "Buzzer and microphone" (the beep GPIO and tone, the voice chat switch), follows for real ESP32 boards only (not virtual, not Pico) and has no nav entry of its own.',
   },
   {
     key: 'button-actions',
@@ -374,14 +375,15 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     anchor: 'frame-settings-button-actions',
     surfaces: ['backend', 'frameAdmin', 'cloudLinux', 'cloudEsp32'],
     conditions:
-      "The frame's event map (docs/events.md \"Event map\"): what a press does whatever scene shows. A cloud frame needs 2026.10.20 or newer on either profile, older ones render disabled with a note; one that reported its board preset's map and was never pushed one shows it read-only until Edit actions.",
+      "The frame's event map (docs/events.md \"Event map\"): what a press does whatever scene shows. A cloud frame needs 2026.10.20 or newer on either profile, older ones render disabled with a note; one that reported its board preset's map and was never pushed one shows it read-only until Edit actions. The actions on offer follow the frame (frameActionKindsFor): Display on / off only where the driver powers the panel (displayPowerDevices), Voice chat only on a frame with a microphone and then for a long press alone.",
   },
   {
     key: 'input',
     title: 'Input',
     anchor: 'frame-settings-input',
     surfaces: ['backend', 'frameAdmin', 'cloudLinux'],
-    conditions: 'A full host OS only: no ESP32 board in the tree has a keyboard or a pointer (docs/events.md).',
+    conditions:
+      'A full host OS only: no ESP32 board in the tree has a keyboard or a pointer (docs/events.md). On the backend the section and its nav link go for embedded-mode frames (ESP32, Pico, virtual) too: InputSettingsSection returns null there, embeddedModeHiddenFrameSettingsSections drops the link.',
   },
 ]
 

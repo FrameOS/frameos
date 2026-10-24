@@ -433,8 +433,24 @@ export const esp32BuzzerFrameSettingsMinVersion = "2026.10.12";
 export const esp32BuzzerFrameSettingKeys = new Set(contractSettingKeysSince("esp32", esp32BuzzerFrameSettingsMinVersion));
 
 // 2026.10.20: `event_map`, the frame's button actions (the same floor as the
-// Linux runtime's: eventMapFrameSettingsMinVersion). Live, no reboot.
-export const esp32EventMapFrameSettingKeys = new Set(contractSettingKeysSince("esp32", eventMapFrameSettingsMinVersion));
+// Linux runtime's: eventMapFrameSettingsMinVersion), and `voice_chat`, the
+// microphone switch of the voice chat (docs/voice-chat.md; which key talks is
+// a rule of `event_map`). Both live, no reboot. One firmware floor, two
+// features: each set names its own key, so a caller gating on one does not
+// carry the other.
+export const esp32EventMapFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("esp32", eventMapFrameSettingsMinVersion)].filter((key) => key === "event_map"),
+);
+export const esp32VoiceChatFrameSettingsMinVersion = "2026.10.20";
+export const esp32VoiceChatFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("esp32", esp32VoiceChatFrameSettingsMinVersion)].filter((key) => key === "voice_chat"),
+);
+// The microphone's pins (`mic_clk_pin`, `mic_data_pin`, `mic_pwr_pin`, -1 =
+// none), on the same floor: the firmware reads them at every voice session's
+// start, so live, no reboot.
+export const esp32MicrophoneFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("esp32", esp32VoiceChatFrameSettingsMinVersion)].filter((key) => key.startsWith("mic_")),
+);
 
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata

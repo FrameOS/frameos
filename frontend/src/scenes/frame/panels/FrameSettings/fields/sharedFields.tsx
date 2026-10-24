@@ -92,21 +92,30 @@ export function PaletteField(): JSX.Element {
   )
 }
 
+/**
+ * One button per row: pin, label and role side by side from @md up (the
+ * three are short, and a row a screen wide of one number each is hard to
+ * read as a list of buttons), stacked below it. The editable rows use the
+ * same columns, plus Remove.
+ */
+const GPIO_BUTTON_ROW = 'grid grid-cols-1 gap-2 @md:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1.5fr)]'
+const GPIO_BUTTON_EDIT_ROW = 'grid grid-cols-1 gap-2 @md:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1.5fr)_auto] @md:items-end'
+
 function ReadOnlyGpioButtons({ buttons }: { buttons: GPIOButton[] }): JSX.Element {
   return (
     <div className="space-y-2">
       {buttons.map((button) => (
-        <div key={`${button.pin}-${button.label}`} className="grid grid-cols-1 gap-2 @md:grid-cols-3">
-          <div className="space-y-1 @md:flex @md:gap-2">
-            <Label className="@md:w-1/3">Pin</Label>
+        <div key={`${button.pin}-${button.label}`} className={GPIO_BUTTON_ROW}>
+          <div className="space-y-1">
+            <Label>Pin</Label>
             <TextInput value={String(button.pin)} readOnly className="cursor-default opacity-70" />
           </div>
-          <div className="space-y-1 @md:flex @md:gap-2">
-            <Label className="@md:w-1/3">Label</Label>
+          <div className="space-y-1">
+            <Label>Label</Label>
             <TextInput value={button.label} readOnly className="cursor-default opacity-70" />
           </div>
-          <div className="space-y-1 @md:flex @md:gap-2">
-            <Label className="@md:w-1/3">Role</Label>
+          <div className="space-y-1">
+            <Label>Role</Label>
             <TextInput
               value={buttonRoleByLabel[button.label.trim().toUpperCase()] ?? ''}
               placeholder="none"
@@ -127,7 +136,8 @@ function ReadOnlyGpioButtons({ buttons }: { buttons: GPIOButton[] }): JSX.Elemen
  * (the save then pushes it); everything else is the editable list.
  */
 export function GpioButtonsSection(): JSX.Element {
-  const { configuredGpioButtons, reportedGpioButtons, frameForm, setFrameFormValues } = useFrameSettings()
+  const { configuredGpioButtons, reportedGpioButtons, frameForm, setFrameFormValues, buttonBeep, voiceChat } =
+    useFrameSettings()
   // The cloud form carries `gpio_buttons` only once a push set it; until
   // then the frame runs the map its board preset (or a console `set`) gave
   // it, which is the one the report shows.
@@ -190,60 +200,77 @@ export function GpioButtonsSection(): JSX.Element {
         ) : (
           frameForm.gpio_buttons?.map((_, index) => (
             <Group key={index} name={`gpio_buttons.${index}`}>
-              <div>
-                <Field
-                  name="pin"
-                  label="Pin"
-                  labelRight={
-                    <Button
-                      color="secondary"
-                      size="small"
-                      className="flex items-center gap-1"
-                      onClick={() =>
-                        setFrameFormValues({
-                          gpio_buttons: frameForm.gpio_buttons?.filter((_button, i) => i !== index),
-                        })
+              <div className={GPIO_BUTTON_EDIT_ROW}>
+                <div className="space-y-1">
+                  <Label>Pin</Label>
+                  <Field name="pin">
+                    <TextInput name="pin" placeholder="5" />
+                  </Field>
+                </div>
+                <div className="space-y-1">
+                  <Label>Label</Label>
+                  <Field name="label">
+                    <TextInput name="label" placeholder="A" />
+                  </Field>
+                </div>
+                <div className="space-y-1">
+                  <Label>
+                    Role
+                    <Tooltip
+                      title={
+                        <>
+                          What the button means to a scene: a store scene listens for <code>button</code> with a{' '}
+                          <code>role</code> filter (<code>next</code>, <code>back</code>, …) instead of the label
+                          printed on this board. Leave it empty for the default the label carries (A = primary, B =
+                          next, C = prev, D = back, …).
+                        </>
                       }
-                    >
-                      <TrashIcon className="w-4 h-4" />
-                      Remove
-                    </Button>
+                    />
+                  </Label>
+                  <Field name="role">
+                    <Select
+                      name="role"
+                      options={[
+                        {
+                          value: '',
+                          label: `Default for the label${roleDefaultLabel(frameForm.gpio_buttons?.[index]?.label)}`,
+                        },
+                        ...buttonRoles.map((role) => ({ value: role, label: role })),
+                      ]}
+                    />
+                  </Field>
+                </div>
+                <Button
+                  color="secondary"
+                  size="small"
+                  className="flex items-center gap-1"
+                  onClick={() =>
+                    setFrameFormValues({
+                      gpio_buttons: frameForm.gpio_buttons?.filter((_button, i) => i !== index),
+                    })
                   }
                 >
-                  <TextInput name="pin" placeholder="5" />
-                </Field>
-                <Field name="label" label="Label">
-                  <TextInput name="label" placeholder="A" />
-                </Field>
-                <Field
-                  name="role"
-                  label="Role"
-                  tooltip={
-                    <>
-                      What the button means to a scene: a store scene listens for <code>button</code> with a{' '}
-                      <code>role</code> filter (<code>next</code>, <code>back</code>, …) instead of the label printed on
-                      this board. Leave it empty for the default the label carries (A = primary, B = next, C = prev, D =
-                      back, …).
-                    </>
-                  }
-                >
-                  <Select
-                    name="role"
-                    options={[
-                      {
-                        value: '',
-                        label: `Default for the label${roleDefaultLabel(frameForm.gpio_buttons?.[index]?.label)}`,
-                      },
-                      ...buttonRoles.map((role) => ({ value: role, label: role })),
-                    ]}
-                  />
-                </Field>
+                  <TrashIcon className="w-4 h-4" />
+                  Remove
+                </Button>
               </div>
             </Group>
           ))
         )}
-        <ButtonBeepField />
       </div>
+      {buttonBeep || voiceChat ? (
+        <>
+          {/* The board's buzzer and microphone: their own box under the
+              buttons they answer for, so the button rows stay a list of
+              buttons. No nav entry of its own; GPIO's link lands above it. */}
+          <H6 id="frame-settings-gpio-extras">Buzzer and microphone</H6>
+          <div className="pl-2 @md:pl-8 space-y-2">
+            <ButtonBeepField />
+            <MicrophoneField />
+            <VoiceChatField />
+          </div>
+        </>
+      ) : null}
     </>
   )
 }
@@ -313,6 +340,115 @@ function ButtonBeepField(): JSX.Element | null {
             value={toneHz}
             onChange={(value) => setButtonBeep({ toneHz: value })}
             placeholder={tonePlaceholder}
+          />
+        </div>
+      </div>
+    </fieldset>
+  )
+}
+
+/**
+ * The PDM microphone's pins (docs/voice-chat.md; fos_mic.c), one row: the
+ * clock, the data line and the GPIO that powers the microphone for a
+ * session. Empty leaves the board's own (the reTerminal E1001/E1002: 42, 41
+ * and 38; the E1004 has none, and a PDM mic on its J2 header is 42/41 with
+ * no power pin), -1 = no microphone (power: -1 = always powered). Read at
+ * every session's start, so a change applies live.
+ */
+function MicrophoneField(): JSX.Element | null {
+  const { microphone, setMicrophonePins } = useFrameSettings()
+  if (!microphone) {
+    return null
+  }
+  const { clkPin, dataPin, pwrPin, reportedClkPin, reportedDataPin, reportedPwrPin, disabledReason } = microphone
+  const placeholder = (reported: number | undefined, none: string): string =>
+    reported === undefined ? 'Board default, -1 = none' : reported < 0 ? none : `${reported} on the frame`
+  const pins: { name: string; value: number | undefined; reported: number | undefined; none: string; patch: (v: number | undefined) => void }[] = [
+    { name: 'Clock', value: clkPin, reported: reportedClkPin, none: 'None on the frame', patch: (v) => setMicrophonePins({ clkPin: v }) },
+    { name: 'Data', value: dataPin, reported: reportedDataPin, none: 'None on the frame', patch: (v) => setMicrophonePins({ dataPin: v }) },
+    { name: 'Power switch', value: pwrPin, reported: reportedPwrPin, none: 'Always powered', patch: (v) => setMicrophonePins({ pwrPin: v }) },
+  ]
+  return (
+    <fieldset disabled={disabledReason !== undefined} className="min-w-0 space-y-2">
+      <div className="space-y-1 @md:flex @md:gap-2">
+        <Label className="@md:w-1/3">
+          Microphone GPIO
+          <Tooltip
+            title={
+              disabledReason ?? (
+                <>
+                  The PDM microphone the voice chat records from: its clock and data GPIO, and the GPIO that powers it
+                  for a session (-1 = always powered). The Seeed reTerminal E1001 and E1002 have one on 42, 41 and 38,
+                  which the preset fills in; the E1004 has none, and a PDM microphone on its J2 header is 42 and 41
+                  with no power pin. Leave a field empty for the board&apos;s own, or set the clock or data to -1 for no
+                  microphone. Read when a recording starts, so a change applies without a restart.
+                </>
+              )
+            }
+          />
+        </Label>
+        <div className="grid w-full grid-cols-3 gap-2">
+          {pins.map((pin) => (
+            <div key={pin.name} className="space-y-1">
+              <span className="frameos-muted text-xs">{pin.name}</span>
+              <NumberTextInput value={pin.value} onChange={pin.patch} placeholder={placeholder(pin.reported, pin.none)} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </fieldset>
+  )
+}
+
+/**
+ * Voice chat (docs/voice-chat.md), under the buttons it answers to: the key
+ * a Button actions row binds to it (REFRESH held, on the reTerminal presets)
+ * opens the board's microphone and streams what is said to this control
+ * plane for the AI chat. A switch, on by default on a board with a
+ * microphone (ESP32 only); off keeps the microphone shut whatever the
+ * buttons are bound to. Which key, and that it is held, is the row's to say.
+ */
+function VoiceChatField(): JSX.Element | null {
+  const { voiceChat, setVoiceChat } = useFrameSettings()
+  if (!voiceChat) {
+    return null
+  }
+  const { enabled, reported, microphone, disabledReason } = voiceChat
+  const value = enabled ?? reported ?? true
+  return (
+    <fieldset disabled={disabledReason !== undefined} className="min-w-0 space-y-2">
+      <div className="space-y-1 @md:flex @md:gap-2">
+        <Label className="@md:w-1/3">
+          Voice chat
+          <Tooltip
+            title={
+              disabledReason ?? (
+                <>
+                  Talk to the frame: set a button action below to &quot;Voice chat&quot; (the reTerminal presets bind
+                  REFRESH held). It goes on a long press because the hold is the recording: once the key has been held
+                  for a second the frame plays a short sparkle and listens, and letting go ends the sentence and sends
+                  it to this control plane. The AI chat transcribes it and acts on it with the frame in its context
+                  (switch to a scene by name, set a field of the scene showing, redraw, show a picture); the reply
+                  lands in the frame&apos;s chat and its log, and the buzzer sounds the outcome. Needs a board with a
+                  microphone: the Seeed reTerminal E1001 and E1002 have one (the E1004 does not). Off keeps the
+                  microphone shut whatever the buttons are bound to.
+                  {microphone === false ? ' This frame reports no microphone.' : ''}
+                </>
+              )
+            }
+          />
+        </Label>
+        <div className="w-full">
+          <Switch
+            value={value}
+            onChange={(next) => setVoiceChat(next)}
+            label={
+              value
+                ? microphone === false
+                  ? 'On, but this frame reports no microphone'
+                  : 'On: a button action below set to Voice chat opens the microphone'
+                : 'Off: the microphone stays shut'
+            }
           />
         </div>
       </div>
@@ -670,7 +806,15 @@ function roleDefaultLabel(label: string | undefined): string {
  * keyboard layout the runtime maps key codes through, and whether it grabs
  * keyboards away from the console. Linux frames only.
  */
-export function InputSettingsSection(): JSX.Element {
+export function InputSettingsSection(): JSX.Element | null {
+  const { isEmbeddedMode } = useFrameSettings()
+  // The evdev translator is the Linux runtime's: an ESP32 or Pico board has
+  // no keyboard to map and the virtual frame's keys come from the browser
+  // already mapped. The nav link goes with it (workspaceSurfaces.ts,
+  // embeddedModeHiddenFrameSettingsSections).
+  if (isEmbeddedMode) {
+    return null
+  }
   return (
     <>
       <H6 id="frame-settings-input">Input</H6>

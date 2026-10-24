@@ -826,6 +826,52 @@ export const cloudFramesContract = {
           "since": "2026.10.12"
         }
       }
+    },
+    "voice_chat": {
+      "rule": {
+        "type": "bool"
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.10.20"
+        }
+      }
+    },
+    "mic_clk_pin": {
+      "rule": {
+        "type": "int",
+        "min": -1,
+        "max": 48
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.10.20"
+        }
+      }
+    },
+    "mic_data_pin": {
+      "rule": {
+        "type": "int",
+        "min": -1,
+        "max": 48
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.10.20"
+        }
+      }
+    },
+    "mic_pwr_pin": {
+      "rule": {
+        "type": "int",
+        "min": -1,
+        "max": 48
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.10.20"
+        }
+      }
     }
   },
   "formats": {

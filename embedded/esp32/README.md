@@ -874,6 +874,63 @@ every plane: the backend's settings pull carries `buzzerPin` /
 `buzzer_tone_hz` (firmware 2026.10.12+), and both show them as "Button beep
 GPIO" and "Button beep tone" under the frame's GPIO buttons.
 
+### Voice chat
+
+Hold the voice key — the key whose long press the frame's event map binds
+to `voiceChat`, REFRESH on the E1001/E1002 presets (`fos_board.c`) — for a
+second and the frame listens (`docs/voice-chat.md` is the contract). The
+button task reads the binding off `config->event_map` (`fos_voice_binding.c`,
+cJSON, host tested by `main/tests/test_fos_voice_binding.c`; read again
+whenever the map changes) and runs the key's hold (`fos_voice_hold.c`, pure,
+`main/tests/test_fos_voice_hold.c`) before its per-key loop: the dispatcher
+would make the `longPress` only at the release, too late to hear a sentence,
+so this is the one map rule the firmware carries out itself. From the start
+until the key is up it is *claimed*: no hold sound, no release click, and its
+`up` edge carries `claimed: true`, which the Nim dispatcher takes as "deliver
+the edge, make no `button` of the press". The buzzer plays a rising sparkle
+(`fos_buzzer_voice_listening`), the microphone opens (`fos_mic.c`: I2S0 in
+PDM RX mode with the hardware PDM-to-PCM filter, 16 kHz 16-bit mono, driven
+on the HAL's register layer plus the GDMA driver the SPI already links —
+ESP-IDF's I2S driver would cost ~14 KB of flash for one fixed clock) and
+`fos_voice.c` runs the session on two tasks of its own: a capture
+task drains the DMA into a PSRAM buffer (30 s at most, 960 KB), a relay task
+POSTs it a second at a time to the frame's control plane —
+`{backend}/api/frames/{id}/embedded/voice/{session}?seq=N&done=0|1` with the
+frame's `server_api_key`, or `{cloud}/api/frames/{id}/voice/{session}` with
+the enrollment token — on one kept-alive connection, and on the release
+sends the rest with `done=1` and waits for the transcript and the reply (the
+plane's chat turn with six frame-scoped tools: switch a scene, set its state,
+redraw, show a picture as a preview scene, rotate or re-time the frame —
+`docs/voice-chat.md`; a spoken rotation's restart waits for the answer to
+reach the panel, `fos_settings.c`). The answer is logged (`voice:reply`, next to `voice:listening`, `voice:sent`,
+`voice:error`), sounded (every two seconds from the release until the answer
+a tiny high tick while uploading, then a low bop while the plane thinks; then three
+rising notes when a tool ran, two when the chat only answered, one low note
+for nothing heard, two low for an error)
+and **drawn on the panel**: `fos_client_show_notice` queues the transcript
+and the reply (or the error in a sentence), and the render task draws them
+as a word-wrapped box across the bottom of the next render
+(`fos_panel_draw.c`'s notice box, `voice:shown` in the log). The panel
+holds still for the session (`fos_client_hold_render`): the chat's switch
+and the state for the new scene are applied as they arrive but drawn by the
+one render after the release, with the notice — else the switch alone
+started a 45 s render that the state waited out. An answer that changed
+nothing is drawn over a copy of the last image, no scene render. Shown
+once, restored before the snapshot like the local-network-access code box.
+The first 300 ms are dropped so the sparkle is not in the recording; deep
+sleep is held off for the session.
+
+The microphone is `mic_pins` (`clk=42,data=41,pwr=38` on the reTerminal
+E1001/E1002, the MSM261 behind a TPS22916 load switch; NVS `mic_pins`, no
+stored value → the board's own, `fos_board_mic_pins`), and the feature
+`voice_chat` (default on; NVS `voice`; the backend settings pull's
+`voiceChat`, the cloud's `set_settings` `voice_chat`, firmware 2026.10.20+).
+The E1004 has **no** microphone — its schematic has none, and GPIO41/42 are
+its J2 header UART — so its preset sets none; a PDM microphone on J2 works
+with `set mic_pins clk=42,data=41,pwr=-1`. Console: `mic [seconds]` records
+and prints the peak and mean level (a flat 0 is a microphone that is not wired or
+not powered), `status` shows the pins and the switch.
+
 ## Scene storage and memory (2026.8.13)
 
 Scenes arrive as one combined `scenes.json` — from the USB upload, the

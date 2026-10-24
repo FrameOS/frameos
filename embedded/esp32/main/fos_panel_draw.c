@@ -249,3 +249,115 @@ void fos_panel_draw_code(const fos_panel_surface_t *s, const fos_panel_code_box_
     const int cw = fos_panel_text_width(code, box->digit_scale);
     fos_panel_draw_text(s, code, box->x + (box->w - cw) / 2, y, box->digit_scale);
 }
+
+/* ------------------------------------------------------------- the notice */
+
+/* Break `text` into lines of at most `max_chars` glyphs at the spaces (a
+ * word longer than a line is cut), `\n` forcing a break. Returns the line
+ * count; `starts` / `lens` (max_lines each) get each line's slice. */
+static int wrap_text(const char *text, int max_chars, int max_lines, const char **starts, int *lens)
+{
+    int lines = 0;
+    const char *p = text;
+    while (*p && lines < max_lines) {
+        while (*p == ' ') p++;
+        if (*p == '\n') {
+            starts[lines] = p;
+            lens[lines] = 0;
+            lines++;
+            p++;
+            continue;
+        }
+        if (!*p) break;
+        const char *start = p;
+        const char *last_space = NULL;
+        int n = 0;
+        while (p[n] && p[n] != '\n' && n < max_chars) {
+            if (p[n] == ' ') last_space = p + n;
+            n++;
+        }
+        int len = n;
+        if (p[n] && p[n] != '\n' && last_space != NULL) len = (int)(last_space - start);
+        starts[lines] = start;
+        lens[lines] = len;
+        lines++;
+        p = start + len;
+        if (*p == '\n') p++;
+    }
+    return lines;
+}
+
+bool fos_panel_notice_box(const fos_panel_surface_t *s, const char *text, int scale, int max_lines,
+                          fos_panel_code_box_t *box)
+{
+    if (s == NULL || box == NULL || text == NULL || !text[0] || bits_per_pixel(s->format) == 0) {
+        return false;
+    }
+    memset(box, 0, sizeof(*box));
+    const int sw = fos_panel_scene_width(s);
+    const int sh = fos_panel_scene_height(s);
+    if (max_lines > FOS_PANEL_NOTICE_MAX_LINES) max_lines = FOS_PANEL_NOTICE_MAX_LINES;
+    const char *starts[FOS_PANEL_NOTICE_MAX_LINES];
+    int lens[FOS_PANEL_NOTICE_MAX_LINES];
+    /* The largest scale at which the whole text fits the allowed lines and
+     * the box fits the scene; a text too long for every scale is cut at
+     * the last line (wrap_text stops at max_lines). */
+    for (int sc = max_int(1, scale); sc >= 1; sc--) {
+        const int pad = 3 * sc;
+        const int margin = 2 * sc;
+        const int inner_w = sw - 2 * margin - 2 * pad;
+        const int max_chars = (inner_w + sc) / (6 * sc);
+        if (max_chars < 4) continue;
+        int lines = wrap_text(text, max_chars, max_lines, starts, lens);
+        if (lines == 0) return false;
+        const char *rest = starts[lines - 1] + lens[lines - 1];
+        while (*rest == ' ' || *rest == '\n') rest++;
+        if (*rest && sc > 1) continue; /* did not fit: smaller glyphs */
+        const int line_h = 9 * sc; /* 7 px of glyph, 2 of leading */
+        box->pad = pad;
+        box->gap = margin;
+        box->title_scale = sc;
+        box->digit_scale = lines;
+        box->w = sw - 2 * margin;
+        box->h = lines * line_h - 2 * sc + 2 * pad;
+        if (box->h > sh - 2 * margin) continue;
+        box->x = margin;
+        box->y = sh - margin - box->h;
+        int ax, ay, bx, by;
+        scene_to_panel(s, box->x, box->y, &ax, &ay);
+        scene_to_panel(s, box->x + box->w - 1, box->y + box->h - 1, &bx, &by);
+        box->px = min_int(ax, bx);
+        box->py = min_int(ay, by);
+        box->pw = max_int(ax, bx) - box->px + 1;
+        box->ph = max_int(ay, by) - box->py + 1;
+        return true;
+    }
+    return false;
+}
+
+void fos_panel_draw_notice(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
+                           const char *text)
+{
+    if (s == NULL || box == NULL || text == NULL || box->title_scale <= 0) return;
+    const int sc = box->title_scale;
+    fos_panel_fill_rect(s, box->x, box->y, box->w, box->h, false);
+    const int t = max_int(1, sc / 2 + 1);
+    fos_panel_fill_rect(s, box->x, box->y, box->w, t, true);
+    fos_panel_fill_rect(s, box->x, box->y + box->h - t, box->w, t, true);
+    fos_panel_fill_rect(s, box->x, box->y, t, box->h, true);
+    fos_panel_fill_rect(s, box->x + box->w - t, box->y, t, box->h, true);
+
+    const int max_chars = (box->w - 2 * box->pad + sc) / (6 * sc);
+    const char *starts[FOS_PANEL_NOTICE_MAX_LINES];
+    int lens[FOS_PANEL_NOTICE_MAX_LINES];
+    int lines = wrap_text(text, max_chars, box->digit_scale, starts, lens);
+    int y = box->y + box->pad;
+    for (int i = 0; i < lines; i++) {
+        char line[160];
+        int len = lens[i] < (int)sizeof(line) - 1 ? lens[i] : (int)sizeof(line) - 1;
+        memcpy(line, starts[i], (size_t)len);
+        line[len] = '\0';
+        fos_panel_draw_text(s, line, box->x + box->pad, y, sc);
+        y += 9 * sc;
+    }
+}

@@ -51,6 +51,9 @@ static const char *TAG = "fos_client";
 #define RENDER_NOW_BIT BIT0
 #define INPUT_EVENTS_BIT BIT1
 #define COMMANDS_BIT BIT2
+/* A voice session ended (fos_client_release_render): its answer goes on the
+ * panel now, with the render its tools asked for when there is one. */
+#define RELEASE_BIT BIT3
 #define START_RENDER_LOOP_BIT BIT1
 #define CLIENT_TASK_STACK_BYTES 40960
 
@@ -1183,6 +1186,114 @@ static void lan_overlay_end(lan_overlay_t *ov)
     ov->drawn = false;
 }
 
+/* ------------------------------------------------------------- the notice */
+
+/* The voice chat's answer (fos_voice.c), for the panel (docs/voice-chat.md).
+ * Written by any task under s_notice_lock, read by the render task. */
+#define NOTICE_TEXT_LEN 640
+static portMUX_TYPE s_notice_lock = portMUX_INITIALIZER_UNLOCKED;
+static char s_notice_text[NOTICE_TEXT_LEN];
+static volatile bool s_notice_pending = false;
+/* The hold (fos_client_hold_render): no render starts while it is on. The
+ * chat's tools arrive one by one — a scene switch, then the state for the
+ * new scene — and the first used to start a 45 s render on the E1002 that
+ * the second then waited out, so the answer went on the panel in two
+ * refreshes, the first with the old text. Deadline 0 = no hold. */
+static int64_t s_render_hold_until_us = 0;
+/* A render asked for during the hold, for the release. Render task only. */
+static bool s_render_owed = false;
+/* A notice is on the panel since this moment (0 = none): it comes off after
+ * NOTICE_SHOWN_MS, or with the next render if that is sooner — the next
+ * render used to be the scene's own interval, an hour for a photo scene,
+ * and the answer sat there all that time. Render task only. */
+#define NOTICE_SHOWN_MS 30000
+static int64_t s_notice_shown_us = 0;
+
+void fos_client_show_notice(const char *text)
+{
+    if (!text || !text[0]) return;
+    portENTER_CRITICAL(&s_notice_lock);
+    strlcpy(s_notice_text, text, sizeof(s_notice_text));
+    s_notice_pending = true;
+    portEXIT_CRITICAL(&s_notice_lock);
+    fos_client_keep_awake_ms(60000);
+}
+
+void fos_client_hold_render(uint32_t ms)
+{
+    int64_t until_us = esp_timer_get_time() + (int64_t)ms * 1000;
+    portENTER_CRITICAL(&s_notice_lock);
+    s_render_hold_until_us = until_us;
+    portEXIT_CRITICAL(&s_notice_lock);
+}
+
+void fos_client_release_render(void)
+{
+    portENTER_CRITICAL(&s_notice_lock);
+    s_render_hold_until_us = 0;
+    portEXIT_CRITICAL(&s_notice_lock);
+    if (s_events) xEventGroupSetBits(s_events, RELEASE_BIT);
+}
+
+static bool render_held(void)
+{
+    int64_t until_us;
+    portENTER_CRITICAL(&s_notice_lock);
+    until_us = s_render_hold_until_us;
+    portEXIT_CRITICAL(&s_notice_lock);
+    return until_us != 0 && esp_timer_get_time() < until_us;
+}
+
+typedef struct {
+    bool drawn;
+    fos_panel_surface_t surface;
+    fos_panel_code_box_t box;
+    uint8_t *saved;
+} notice_overlay_t;
+
+/* Draw the pending notice over a finished render, for the panel only, like
+ * the code box: restored before anything reads the buffer as an image. */
+static void notice_overlay_begin(notice_overlay_t *ov, uint8_t *buf, int width, int height,
+                                 fos_pixel_format_t format)
+{
+    memset(ov, 0, sizeof(*ov));
+    if (!s_notice_pending) return;
+    char text[NOTICE_TEXT_LEN];
+    portENTER_CRITICAL(&s_notice_lock);
+    strlcpy(text, s_notice_text, sizeof(text));
+    s_notice_pending = false;
+    portEXIT_CRITICAL(&s_notice_lock);
+    if (s_last_frame == buf) return; /* see lan_overlay_begin */
+    ov->surface = (fos_panel_surface_t){
+        .buf = buf, .width = width, .height = height, .format = format,
+        .rotate = fos_config()->rotate,
+    };
+    /* Glyphs 3 px per font pixel on a big panel (an 800 px line takes ~44
+     * characters), smaller where the text would not fit in six lines. */
+    if (!fos_panel_notice_box(&ov->surface, text, width >= 600 ? 3 : 2, 6, &ov->box)) return;
+    size_t bytes = fos_panel_box_copy(&ov->surface, &ov->box, NULL, false);
+    ov->saved = bytes ? fos_big_malloc(bytes) : NULL;
+    if (ov->saved) fos_panel_box_copy(&ov->surface, &ov->box, ov->saved, false);
+    fos_panel_draw_notice(&ov->surface, &ov->box, text);
+    ov->drawn = true;
+    s_notice_shown_us = esp_timer_get_time();
+    /* The bench's proof that the panel got it: the snapshot never does. */
+    frameos_nim_log_hook("{\"event\":\"voice:shown\",\"source\":\"esp32\"}");
+}
+
+static void notice_overlay_end(notice_overlay_t *ov)
+{
+    if (!ov->drawn) return;
+    if (ov->saved) {
+        fos_panel_box_copy(&ov->surface, &ov->box, ov->saved, true);
+    } else {
+        fos_panel_fill_rect(&ov->surface, ov->box.x, ov->box.y, ov->box.w, ov->box.h, false);
+    }
+    free(ov->saved);
+    ov->saved = NULL;
+    ov->drawn = false;
+}
+
 /* The panel shows something no stored hash describes (the render plus a
  * code): the next render must refresh even when the scene did not change,
  * here and after a reboot. */
@@ -1194,6 +1305,60 @@ static void forget_display_state(void)
     if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
     if (nvs_erase_key(nvs, "display_state") == ESP_OK) nvs_commit(nvs);
     nvs_close(nvs);
+}
+
+/* The last image again, on a copy of the stored snapshot — no scene render,
+ * so a photo scene keeps its photo and the panel refreshes once. With the
+ * pending notice over it (an answer that changed nothing), or plain (the
+ * notice's time is up: the snapshot never carried it). Render task. False
+ * when there is no stored image (kept as a hash only when PSRAM was short)
+ * or no copy fits: the caller renders instead. */
+static bool repaint_snapshot(bool with_notice)
+{
+    if ((with_notice && !s_notice_pending) || !fos_display_present() || !s_snapshot_lock) return false;
+    xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
+    size_t len = s_last_frame ? s_last_frame_len : 0;
+    int width = s_last_frame_width, height = s_last_frame_height;
+    fos_pixel_format_t format = s_last_frame_format;
+    uint8_t *copy = len ? fos_big_malloc(len) : NULL;
+    if (copy) memcpy(copy, s_last_frame, len);
+    xSemaphoreGive(s_snapshot_lock);
+    if (!copy) return false;
+    notice_overlay_t notice = {0};
+    if (with_notice) {
+        notice_overlay_begin(&notice, copy, width, height, format);
+        if (!notice.drawn) {
+            free(copy);
+            return false;
+        }
+        ESP_LOGI(TAG, "repainting the last image with the notice");
+        fos_display_blit(copy, len);
+        s_last_refresh_skipped = false;
+        forget_display_state();
+        notice_overlay_end(&notice);
+    } else {
+        ESP_LOGI(TAG, "repainting the last image without the notice");
+        esp_err_t err = fos_display_blit(copy, len);
+        s_last_refresh_skipped = false;
+        /* The panel shows exactly the snapshot again: its hash is good for
+         * the "unchanged, skip the refresh" check once more. */
+        fos_display_state_t state;
+        if (err == ESP_OK && display_state_for_buffer(copy, len, width, height, format, &state)) {
+            s_display_state = state;
+            s_display_state_valid = true;
+            save_display_state(&state);
+        }
+        s_notice_shown_us = 0;
+    }
+    free(copy);
+    return true;
+}
+
+/* The notice has been on the panel long enough. Render task. */
+static bool notice_expired(void)
+{
+    return s_notice_shown_us != 0 && fos_display_present() &&
+           esp_timer_get_time() - s_notice_shown_us >= (int64_t)NOTICE_SHOWN_MS * 1000;
 }
 
 static esp_err_t render_once(void)
@@ -1273,12 +1438,15 @@ static esp_err_t render_once(void)
     /* After the hash (which describes the render, not the code) and only for
      * the panel: see lan_overlay_begin. */
     lan_overlay_t lan_overlay = {0};
+    notice_overlay_t notice = {0};
     if (err == ESP_OK && fos_display_present()) {
         lan_overlay_begin(&lan_overlay, buf, width, height, format);
+        notice_overlay_begin(&notice, buf, width, height, format);
     }
+    bool overlay_drawn = lan_overlay.drawn || notice.drawn;
     if (err == ESP_OK && fos_display_present()) {
         load_display_state();
-        if (!lan_overlay.drawn && rendered_state_valid && s_display_state_valid &&
+        if (!overlay_drawn && rendered_state_valid && s_display_state_valid &&
             display_state_matches(&rendered_state, &s_display_state)) {
             skipped_refresh = true;
             s_last_refresh_skipped = true;
@@ -1300,8 +1468,9 @@ static esp_err_t render_once(void)
             frameos_nim_flush_logs();
             err = fos_display_blit(buf, buf_len);
             refresh = err == ESP_OK ? "updated" : "failed";
-            if (lan_overlay.drawn) {
+            if (overlay_drawn) {
                 lan_overlay_end(&lan_overlay);
+                notice_overlay_end(&notice);
                 s_last_refresh_skipped = false;
                 forget_display_state();
             } else if (err == ESP_OK && rendered_state_valid) {
@@ -1316,6 +1485,7 @@ static esp_err_t render_once(void)
         refresh = "none";
     }
     lan_overlay_end(&lan_overlay); /* already out on every path; never into the snapshot */
+    notice_overlay_end(&notice);
     if (err == ESP_OK) {
         if (skipped_refresh && rendered_state_valid) {
             s_display_state = rendered_state;
@@ -1323,6 +1493,8 @@ static esp_err_t render_once(void)
         }
         s_render_count++;
         s_last_render_ms = (esp_timer_get_time() - start) / 1000;
+        /* A render without the notice took it off the panel. */
+        if (!notice.drawn && !skipped_refresh) s_notice_shown_us = 0;
         store_snapshot(buf, buf_len, width, height, format, s_render_count, s_last_render_ms);
         ESP_LOGI(TAG, "render #%lu done in %lld ms",
                  (unsigned long)s_render_count, s_last_render_ms);
@@ -1882,7 +2054,7 @@ static void client_task(void *arg)
         bool button_pending = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available() &&
                               fos_buttons_pending();
         if (deep_sleep_now && fos_display_present() && config->render_mode == FOS_RENDER_LOCAL &&
-            frameos_nim_available() &&
+            frameos_nim_available() && !render_held() &&
             (fos_scenes_work_pending() || fos_events_deferred_pending() || button_pending)) {
             /* A scene payload or a scene switch arrived while this pass was
              * rendering (the cloud delivers them the moment the session is
@@ -2029,25 +2201,25 @@ static void client_task(void *arg)
             uint32_t max_slice = fos_buttons_busy() ? 50 : 1000;
             uint32_t slice = remaining_ms > max_slice ? max_slice : remaining_ms;
             int64_t slice_start_us = esp_timer_get_time();
-            EventBits_t bits = xEventGroupWaitBits(s_events,
-                                                   RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT,
-                                                   pdTRUE, pdFALSE, pdMS_TO_TICKS(slice));
-            if (bits & RENDER_NOW_BIT) {
-                force_render = true;
-                break;
-            }
+            EventBits_t bits = xEventGroupWaitBits(
+                s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT,
+                pdTRUE, pdFALSE, pdMS_TO_TICKS(slice));
+            bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
+            /* Somebody wants a render. Decided below: now, or — while a voice
+             * session holds the panel — when it releases, in one pass. */
+            bool want_render = (bits & RENDER_NOW_BIT) != 0;
             if (bits & COMMANDS_BIT) {
                 /* The backend nudged: it just queued something for an awake
                  * frame. Pull now; whatever the commands asked for (a render,
-                 * a switch) is picked up by the checks below. */
-                if (fos_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
-                    frameos_nim_available()) {
+                 * a switch) is picked up by the checks below. Before the
+                 * release bit: the voice relay asks for this pull, then
+                 * releases, so the pulled state is in this pass's render. */
+                if (fos_commands_sync() && nim) {
                     fos_scenes_apply_pending_selection();
                 }
                 if (fos_client_render_pending()) {
                     xEventGroupClearBits(s_events, RENDER_NOW_BIT);
-                    force_render = true;
-                    break;
+                    want_render = true;
                 }
             }
             /* INPUT_EVENTS_BIT ends the slice early and nothing more: the
@@ -2056,26 +2228,57 @@ static void client_task(void *arg)
              * actually passed comes off the wait. */
             uint32_t waited_ms = (uint32_t)((esp_timer_get_time() - slice_start_us) / 1000);
             if (waited_ms < slice) slice = waited_ms;
-            if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
+            if (nim) {
                 fos_buttons_process_events();
                 /* Wall-clock schedule (setCurrentScene at 07:00 etc.) —
                  * evaluated on the render task, like every Nim call. */
-                if (fos_schedule_tick()) {
-                    force_render = true;
-                    break;
-                }
-            }
-            if (frameos_nim_render_requested()) {
-                force_render = true;
-                break;
+                if (fos_schedule_tick()) want_render = true;
+                if (frameos_nim_render_requested()) want_render = true;
             }
             /* A code started (the verb wakes this wait), answered, replaced
              * or expired: within a second, whatever the interval. */
-            if (lan_access_panel_changed()) {
+            if (lan_access_panel_changed()) want_render = true;
+            remaining_ms -= slice;
+            if (remaining_ms == 0 && render_held()) {
+                /* The interval ran out under the hold: that render is owed
+                 * to the release too. */
+                s_render_owed = true;
+                remaining_ms = 1000;
+            }
+            if (bits & RELEASE_BIT) {
+                /* The voice session is over and its answer is pending. A
+                 * render owed from the hold (the chat's switch, its state, an
+                 * interval that ran out) carries the notice; with none, the
+                 * last image is repainted with it (repaint_with_notice). */
+                if (want_render || s_render_owed || (s_notice_pending && !repaint_snapshot(true))) {
+                    want_render = true;
+                }
+                s_render_owed = false;
+            }
+            /* The answer has been read: the panel goes back to the image
+             * alone, unless a render is about to do that anyway. */
+            if (!want_render && notice_expired() && !render_held() && !repaint_snapshot(false)) {
+                s_notice_shown_us = 0; /* no snapshot to repaint from; the next render clears it */
+            }
+            if (want_render) {
+                if (render_held()) {
+                    /* A voice session is in flight: the chat's switch takes
+                     * effect now (its state, the next command, goes to the
+                     * new scene) and the render waits for the answer. */
+                    s_render_owed = true;
+                    if (nim) fos_scenes_apply_pending_selection();
+                } else {
+                    s_render_owed = false;
+                    force_render = true;
+                    break;
+                }
+            } else if (s_render_owed && !render_held()) {
+                /* The hold ran out without a release (the relay task is
+                 * gone): render what it held back. */
+                s_render_owed = false;
                 force_render = true;
                 break;
             }
-            remaining_ms -= slice;
         }
     }
 }

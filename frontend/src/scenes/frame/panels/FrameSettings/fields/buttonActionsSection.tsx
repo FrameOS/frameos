@@ -7,12 +7,15 @@ import type { EventMapRule } from '../../../../../types'
 import { cloudFrameSupportsEventMap, eventMapCloudFrameSettingsMinVersion } from '../../../../../utils/cloudFrameSettings'
 import {
   type ButtonBinding,
+  type FrameActionOffer,
   bindingConflicts,
-  frameActionKinds,
+  frameActionKindsFor,
   frameActionTitle,
+  frameActionUnavailableReason,
   frameActionValue,
   frameBindings,
   frameEventMapRules,
+  gestureCanVoiceChat,
   parseFrameActionValue,
   reportedEventMapOf,
 } from '../../../../../utils/frameEventMap'
@@ -23,6 +26,7 @@ import {
   gestureValue,
   parseGestureValue,
 } from '../../../../../utils/sceneEventMap'
+import { deviceSupportsDisplayPower, frameDisplayDevice } from '../../../../workspace/workspaceSurfaces'
 import { useFrameSettings } from '../frameSettingsContext'
 
 /**
@@ -34,7 +38,7 @@ import { useFrameSettings } from '../frameSettingsContext'
  * actions" seeding the editable list; everything else is the editable list.
  */
 export function ButtonActionsSection(): JSX.Element {
-  const { frame, frameForm, setFrameFormValues, surface } = useFrameSettings()
+  const { frame, frameForm, setFrameFormValues, surface, voiceChat } = useFrameSettings()
   const cloudProfile = surface === 'cloudLinux' || surface === 'cloudEsp32'
   const supported = !cloudProfile || cloudFrameSupportsEventMap(frame.frameos_version)
   const buttons = frameButtons(frame, frameForm)
@@ -44,7 +48,14 @@ export function ButtonActionsSection(): JSX.Element {
   const showReported = frameForm.event_map === undefined && reported !== null
   const rules: EventMapRule[] = frameForm.event_map ?? (cloudProfile ? [] : frame.event_map ?? [])
   const { bindings, others } = frameBindings(rules)
-  const conflicts = bindingConflicts(bindings)
+  // What this frame can do with a press: Display on / off only where the
+  // driver powers the panel (not e-paper, not an ESP32), Voice chat only on a
+  // frame with a microphone, and then for a long press alone.
+  const offer: FrameActionOffer = {
+    voiceChat: voiceChat !== null,
+    displayPower: deviceSupportsDisplayPower(frameForm.device ?? frameDisplayDevice(frame)),
+  }
+  const conflicts = bindingConflicts(bindings, offer)
 
   const write = (next: readonly ButtonBinding[]): void => {
     setFrameFormValues({ event_map: frameEventMapRules(next, others) })
@@ -72,8 +83,26 @@ export function ButtonActionsSection(): JSX.Element {
       : [{ value: gestureValue(binding.gesture), label: `${gestureTitle(binding.gesture)} (not on this frame)` }]
     return [...stale, ...Array.from(byButton, ([label, options]) => ({ label, options }))]
   }
-  const actionOptions: SelectOptionEntry[] = [
-    ...frameActionKinds.map((kind) => ({ value: frameActionValue({ kind }), label: frameActionTitle({ kind }) })),
+  const actionOptions = (binding: ButtonBinding): SelectOptionEntry[] => [
+    // A saved action the row would not offer stays selectable, named with
+    // why, so the row shows what is saved instead of picking the first entry.
+    ...(frameActionUnavailableReason(binding, offer)
+      ? [
+          {
+            value: frameActionValue(binding.action),
+            label: `${frameActionTitle(binding.action)} (${frameActionUnavailableReason(binding, offer)})`,
+          },
+        ]
+      : []),
+    ...frameActionKindsFor(binding.gesture, offer).map((kind) => ({
+      value: frameActionValue({ kind }),
+      label: frameActionTitle({ kind }),
+    })),
+    // On a frame with voice chat, a press or a double press shows why it
+    // cannot carry it rather than leaving the entry out.
+    ...(offer.voiceChat && !gestureCanVoiceChat(binding.gesture) && binding.action.kind !== 'voiceChat'
+      ? [{ value: frameActionValue({ kind: 'voiceChat' }), label: 'Voice chat (long press only)', disabled: true }]
+      : []),
     ...(scenes.length > 0
       ? [
           {
@@ -130,6 +159,9 @@ export function ButtonActionsSection(): JSX.Element {
         <p className="frameos-muted text-xs">
           What a press does on this frame, whatever scene is showing. A press bound here never reaches the scene;
           a scene&apos;s own buttons are mapped from its menu, under Map buttons.
+          {offer.voiceChat
+            ? ' Voice chat goes on a long press: the frame listens while the key is held and stops when it is let go, so a press or a double press has no end to it.'
+            : ''}
         </p>
         {showReported ? (
           reported.length > 0 ? (
@@ -177,7 +209,7 @@ export function ButtonActionsSection(): JSX.Element {
                 <Select
                   name={`event_map.${index}.action`}
                   value={frameActionValue(binding.action)}
-                  options={actionOptions}
+                  options={actionOptions(binding)}
                   disabled={!supported}
                   onChange={(value) => {
                     const action = parseFrameActionValue(value)

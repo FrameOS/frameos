@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -23,6 +24,9 @@
 #include "fos_config.h"
 #include "fos_events.h"
 #include "fos_events_gen.h"
+#include "fos_voice.h"
+#include "fos_voice_binding.h"
+#include "fos_voice_hold.h"
 #include "fos_wake.h"
 #include "frameos_nim.h"
 
@@ -42,6 +46,9 @@ typedef struct {
     uint8_t index; /* into config->gpio_buttons, which only a restart rebinds */
     uint8_t level; /* 0: pressed (the line is pulled up), 1: released */
     bool wake;     /* the down that woke the chip from deep sleep, stamped at boot */
+    /* An `up` of a key a voice hold took (docs/voice-chat.md): the
+     * dispatcher delivers the edge and makes no `button` of the press. */
+    bool claimed;
     /* When this task saw the edge, ms since boot (esp_timer), low 32 bits:
      * the dispatcher measures the hold and the double-press window from it,
      * not from when the render task got round to the queue. Widened back to
@@ -75,6 +82,65 @@ static click_t s_clicked[FOS_GPIO_BUTTONS_MAX];
 static volatile bool s_busy[FOS_GPIO_BUTTONS_MAX];
 #define BUTTON_BUSY_SLACK_MS 100
 static bool s_enabled[FOS_GPIO_BUTTONS_MAX];
+/* The voice keys (docs/voice-chat.md): the keys whose long press the frame's
+ * event map binds to `voiceChat` (fos_voice_binding.c; REFRESH on the
+ * E1001/E1002 presets), each with its hold. The map is read again whenever
+ * the config's copy changes (a settings pull, a cloud push, the console), so
+ * a new binding holds from the next press. While a hold claims a key its up
+ * clicks nothing and carries `claimed`. */
+static bool s_voice_key[FOS_GPIO_BUTTONS_MAX];
+static fos_voice_hold_t s_hold[FOS_GPIO_BUTTONS_MAX];
+static char s_bound_map[FOS_EVENT_MAP_LEN];
+static bool s_bound_once = false;
+
+static void refresh_voice_keys(const fos_config_t *config)
+{
+    if (s_bound_once && strcmp(s_bound_map, config->event_map) == 0) return;
+    s_bound_once = true;
+    strlcpy(s_bound_map, config->event_map, sizeof(s_bound_map));
+    char labels[FOS_GPIO_BUTTONS_MAX][FOS_VOICE_BINDING_LABEL_LEN];
+    size_t bound = fos_voice_binding_labels(config->event_map, labels, FOS_GPIO_BUTTONS_MAX);
+    for (size_t i = 0; i < config->gpio_button_count; i++) {
+        bool voice = false;
+        for (size_t j = 0; s_enabled[i] && j < bound && !voice; j++) {
+            voice = strcasecmp(config->gpio_buttons[i].label, labels[j]) == 0;
+        }
+        if (voice != s_voice_key[i]) {
+            ESP_LOGI(TAG, "GPIO %d (%s) held %s", config->gpio_buttons[i].pin, config->gpio_buttons[i].label,
+                     voice ? "starts the voice chat" : "is the scene's again");
+        }
+        s_voice_key[i] = voice;
+    }
+}
+
+static bool key_claimed(size_t index)
+{
+    return fos_voice_hold_claimed(&s_hold[index]);
+}
+
+/* Before the per-key loop, on the levels the last poll accepted: a voice key
+ * down a long press starts a session, its release after that ends it. A
+ * refused start (no microphone, voice chat off, a session still answering)
+ * sounds the dull pair, so the hold is known to have been seen and declined;
+ * the key stays claimed until it is let go either way, so the hold makes no
+ * `longPress` the map would send round again. A key the map stops binding
+ * mid-hold keeps its claim to the release. */
+static void voice_keys_sample(const fos_config_t *config, int64_t now)
+{
+    for (size_t i = 0; i < config->gpio_button_count; i++) {
+        if (!s_voice_key[i] && !s_hold[i].active) continue;
+        switch (fos_voice_hold_sample(&s_hold[i], s_timing[i].down, now)) {
+        case FOS_VOICE_HOLD_START:
+            if (!fos_voice_begin()) fos_buzzer_reject_down();
+            break;
+        case FOS_VOICE_HOLD_END:
+            fos_voice_end();
+            break;
+        default:
+            break;
+        }
+    }
+}
 
 static void json_escape(const char *src, char *dst, size_t dst_len)
 {
@@ -114,6 +180,7 @@ static bool enqueue_event(size_t index, int level, bool wake, int64_t at_ms)
         .index = (uint8_t)index,
         .level = (uint8_t)(level != 0),
         .wake = wake,
+        .claimed = level != 0 && key_claimed(index),
         .at_ms = (uint32_t)at_ms,
     };
     if (xQueueSend(s_queue, &event, 0) != pdTRUE) {
@@ -184,15 +251,25 @@ static void hold_sounds(size_t index, int64_t now_ms)
 {
     if (!fos_button_timing_hold_tick(&s_timing[index], now_ms)) return;
     if (s_clicked[index] != CLICK_PRESS) return;
+    /* A key a voice hold claims counts no seconds: the frame is listening,
+     * and the buzzer sits next to the microphone. */
+    if (key_claimed(index)) return;
     fos_buzzer_long_press();
 }
 
 static void release_edge(size_t index, int64_t at_ms)
 {
     fos_button_timing_release(&s_timing[index], at_ms, NULL);
+    /* A voice key lets go silently: the session's own sounds say what
+     * happened, and the up edge carries `claimed` (enqueue_event). The claim
+     * holds from the hold's start to this release (fos_voice_hold_sample
+     * runs on the previous poll's levels, so it still holds here); the next
+     * poll's voice_keys_sample ends the session. */
+    bool claimed = key_claimed(index);
     click_t clicked = s_clicked[index];
+    if (claimed) clicked = CLICK_NONE;
     /* Only a press the dispatcher heard as one can start a double press:
-     * not a refused one, not a key down since boot. The wake press is one. */
+     * not a refused one, not a key down since boot, not one a voice hold took. The wake press is one. */
     if (clicked != CLICK_PRESS && clicked != CLICK_DOUBLE) {
         s_timing[index].tap_ended = false;
     }
@@ -245,8 +322,15 @@ static void buttons_task(void *arg)
         }
     }
 
+    for (size_t i = 0; i < config->gpio_button_count; i++) fos_voice_hold_init(&s_hold[i]);
+
     while (true) {
         int64_t now = now_ms();
+        /* The voice keys first, on the levels the last poll accepted: a
+         * release seen this poll is queued claimed, and the next poll ends
+         * the session. */
+        refresh_voice_keys(config);
+        voice_keys_sample(config, now);
         for (size_t i = 0; i < config->gpio_button_count; i++) {
             if (!s_enabled[i]) continue;
             const fos_gpio_button_t *button = &config->gpio_buttons[i];
@@ -376,12 +460,15 @@ void fos_buttons_process_events(void)
          * too). The role, the `up`'s `durationMs` and the `button` the edges
          * add up to (`press`, `doublePress`, `longPress`) are the Nim
          * dispatcher's (input_state.nim), timed from `atMs`. */
-        char payload[224];
+        char payload[240];
         snprintf(payload, sizeof(payload),
-                 "{\"pin\":%d,\"label\":\"%s\",\"level\":%d,\"action\":\"%s\"%s,\"atMs\":%lld}",
+                 "{\"pin\":%d,\"label\":\"%s\",\"level\":%d,\"action\":\"%s\"%s%s,\"atMs\":%lld}",
                  button->pin, label, event.level,
                  event.level == 0 ? FOS_GPIO_ACTION_DOWN : FOS_GPIO_ACTION_UP,
                  event.wake ? ",\"wake\":true" : "",
+                 /* A voice hold took this press: the dispatcher makes no
+                  * `button` of it (docs/voice-chat.md). */
+                 event.claimed ? ",\"claimed\":true" : "",
                  (long long)fos_wake_edge_at_ms(event.at_ms, now_ms()));
         /* `driver`: a press is hardware talking, and the contract lets it say
          * input and nothing else. fos_events.c hands it to the scene and asks

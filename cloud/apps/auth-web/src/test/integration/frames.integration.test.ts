@@ -2398,6 +2398,10 @@ describe("frame management API", () => {
         "battery_enable_pin",
         "buzzer_pin",
         "buzzer_tone_hz",
+        "voice_chat",
+        "mic_clk_pin",
+        "mic_data_pin",
+        "mic_pwr_pin",
       ].sort(),
     );
     // The ESP32 profile: exactly what ws_handle_set_settings applies.
@@ -2422,6 +2426,10 @@ describe("frame management API", () => {
         "timezone",
         "colors",
         "palette",
+        "voice_chat",
+        "mic_clk_pin",
+        "mic_data_pin",
+        "mic_pwr_pin",
       ].sort(),
     );
     for (const key of esp32SettableKeys) {

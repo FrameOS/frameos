@@ -273,10 +273,16 @@ const WAVESHARE_PHOTOPAINTER_PINS: NonNullable<NonNullable<NewFrameFormType['dev
 }
 // The reTerminal E-series' arrows held walk the scene list (docs/events.md
 // "Event map"), by label — the E1004's pins are swapped, its labels are not.
-// Mirrors EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP (backend) and fos_board.c.
+// On the E1001/E1002, the two with a microphone, REFRESH held talks to the
+// frame (docs/voice-chat.md). Mirrors EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP /
+// _VOICE_EVENT_MAP (backend) and fos_board.c.
 const SEEED_RETERMINAL_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'LEFT', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
   { event: 'button', match: { label: 'RIGHT', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
+]
+const SEEED_RETERMINAL_VOICE_EVENT_MAP: EventMapRule[] = [
+  ...SEEED_RETERMINAL_EVENT_MAP,
+  { event: 'button', match: { label: 'REFRESH', action: 'longPress' }, emit: 'voiceChat', as: {} },
 ]
 const WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS: GPIOButton[] = [
   { pin: 0, label: 'BOOT' },
@@ -528,7 +534,7 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
       { pin: 4, label: 'LEFT' },
       { pin: 5, label: 'RIGHT' },
     ],
-    eventMap: SEEED_RETERMINAL_EVENT_MAP,
+    eventMap: SEEED_RETERMINAL_VOICE_EVENT_MAP,
   },
   seeed_reterminal_e1002: {
     label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',
@@ -542,7 +548,7 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
       { pin: 4, label: 'LEFT' },
       { pin: 5, label: 'RIGHT' },
     ],
-    eventMap: SEEED_RETERMINAL_EVENT_MAP,
+    eventMap: SEEED_RETERMINAL_VOICE_EVENT_MAP,
   },
   seeed_reterminal_e1004: {
     label: 'Seeed reTerminal E1004 (13.3" color ESP32-S3)',

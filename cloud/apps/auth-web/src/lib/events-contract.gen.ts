@@ -3,7 +3,7 @@
 export const customEventMaxNameLength = 63;
 
 /** Every built-in event name. Any other name is a custom scene event. */
-export const contractEventNames: readonly string[] = ["init", "render", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "wheel", "turnOn", "turnOff", "gpio", "button", "setSceneState", "setCurrentScene", "metrics", "reload", "restart", "reboot", "uploadScenes"];
+export const contractEventNames: readonly string[] = ["init", "render", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "wheel", "turnOn", "turnOff", "gpio", "button", "setSceneState", "setCurrentScene", "metrics", "reload", "restart", "reboot", "uploadScenes", "voiceChat"];
 
 export type CloudEventRoute = {
   verb: string;
@@ -66,4 +66,4 @@ export const cloudCustomEventRoute: CloudEventRoute = {
 export const customEventDeclarableOrigins: readonly string[] = ["schedule", "cloud"];
 
 /** Contract events a schedule entry may not fire: the device refuses them. */
-export const scheduleRefusedEvents: readonly string[] = ["init", "open", "close", "uploadScenes"];
+export const scheduleRefusedEvents: readonly string[] = ["init", "open", "close", "uploadScenes", "voiceChat"];

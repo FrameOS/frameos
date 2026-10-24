@@ -297,6 +297,30 @@
       "rule": {"type": "int", "min": 100, "max": 10000},
       "profiles": {"esp32": {"since": "2026.10.12"}},
       "parity": {"only": "esp32", "why": "The pitch of buzzer_pin's tone, which only the ESP32 firmware's button task sounds (fos_buzzer.c)."}
+    },
+    "voice_chat": {
+      "$comment": "Voice chat (docs/voice-chat.md): holding the voice key — the key whose long press `event_map` binds to `voiceChat`, REFRESH on the reTerminal E1001/E1002 presets — opens the board's microphone and streams what is said to the frame's control plane for the AI chat. Default on where the board has a microphone; off keeps the microphone shut whatever the map binds. Applied live (the hold asks on every press).",
+      "rule": {"type": "bool"},
+      "profiles": {"esp32": {"since": "2026.10.20"}},
+      "parity": {"only": "esp32", "why": "The key hold, the PDM microphone and the relay live in the ESP32 firmware (fos_voice.c); no Pi frame has a microphone path."}
+    },
+    "mic_clk_pin": {
+      "$comment": "The PDM microphone's clock GPIO (reTerminal E1001/E1002: 42; the E1004 has no microphone, and a PDM mic on its J2 header is the pins named here), with mic_data_pin and mic_pwr_pin; -1 = no microphone. The firmware opens the microphone at every voice session (docs/voice-chat.md, fos_mic.c), so the three apply live; no stored value leaves the board preset's own. Same reserved-pin refusal as battery_pin. Reported as hardware.micClkPin.",
+      "rule": {"type": "int", "min": -1, "max": 48},
+      "profiles": {"esp32": {"since": "2026.10.20"}},
+      "parity": {"only": "esp32", "why": "The PDM microphone and the voice relay live in the ESP32 firmware (fos_mic.c, fos_voice.c); no Pi frame has a microphone path."}
+    },
+    "mic_data_pin": {
+      "$comment": "The PDM microphone's data GPIO (reTerminal E1001/E1002: 41); -1 = no microphone. See mic_clk_pin. Reported as hardware.micDataPin.",
+      "rule": {"type": "int", "min": -1, "max": 48},
+      "profiles": {"esp32": {"since": "2026.10.20"}},
+      "parity": {"only": "esp32", "why": "The PDM microphone and the voice relay live in the ESP32 firmware (fos_mic.c, fos_voice.c); no Pi frame has a microphone path."}
+    },
+    "mic_pwr_pin": {
+      "$comment": "The GPIO that powers the microphone for a session (reTerminal E1001/E1002: 38, a TPS22916 load switch); -1 = always powered. See mic_clk_pin. Reported as hardware.micPwrPin.",
+      "rule": {"type": "int", "min": -1, "max": 48},
+      "profiles": {"esp32": {"since": "2026.10.20"}},
+      "parity": {"only": "esp32", "why": "The PDM microphone and the voice relay live in the ESP32 firmware (fos_mic.c, fos_voice.c); no Pi frame has a microphone path."}
     }
   },
   "formats": {

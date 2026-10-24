@@ -40,6 +40,7 @@ type
     rcRestart = "restart"
     rcReboot = "reboot"
     rcUploadScenes = "uploadScenes"
+    rcVoiceChat = "voiceChat"
   EventPolicy* = object
     ## No strings and no refs: a policy is read on every thread that sends or
     ## drains events, once per event.
@@ -105,8 +106,9 @@ const
   evRestart* = "restart"
   evReboot* = "reboot"
   evUploadScenes* = "uploadScenes"
+  evVoiceChat* = "voiceChat"
 
-  ContractEventNames*: array[30, string] = [
+  ContractEventNames*: array[31, string] = [
     evInit,
     evRender,
     evOpen,
@@ -137,9 +139,10 @@ const
     evRestart,
     evReboot,
     evUploadScenes,
+    evVoiceChat,
   ]
 
-  ContractEventPolicies*: array[30, EventPolicy] = [
+  ContractEventPolicies*: array[31, EventPolicy] = [
     EventPolicy( # init
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
@@ -327,6 +330,12 @@ const
       renderAfter: raNever, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: false),
+    EventPolicy( # voiceChat
+      class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
+      origins: {eoEventMap},
+      renderAfter: raNever, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
+      linux: false, esp32: true, wasm: false),
   ]
 
   CustomEventPolicy* = EventPolicy(
@@ -373,6 +382,7 @@ proc contractEventIndex*(name: string): int =
   of evRestart: 27
   of evReboot: 28
   of evUploadScenes: 29
+  of evVoiceChat: 30
   else: -1
 
 proc eventAliasCount*(name: string): int =
@@ -420,7 +430,7 @@ proc eventPayloadKeyCount*(name: string): int =
   of evLongPress: 5
   of evSwipe: 7
   of evWheel: 4
-  of evGpio: 8
+  of evGpio: 9
   of evButton: 7
   of evSetSceneState: 2
   of evSetCurrentScene: 3
@@ -552,8 +562,9 @@ proc eventPayloadKey*(name: string, index: int): string =
     of 3: "action"
     of 4: "durationMs"
     of 5: "wake"
-    of 6: "atMs"
-    of 7: "level"
+    of 6: "claimed"
+    of 7: "atMs"
+    of 8: "level"
     else: ""
   of evButton:
     case index

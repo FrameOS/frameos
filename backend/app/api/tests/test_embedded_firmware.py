@@ -735,6 +735,14 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
         {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
         {"event": "button", "match": {"label": "RIGHT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
     ]
+    # The E1001/E1002 have a microphone: REFRESH held talks to the frame
+    # (docs/voice-chat.md), the arrows as above. The E1004 has none.
+    talking = Frame(id=11, embedded={"hardwarePreset": "seeed_reterminal_e1002"})
+    ensure_embedded_frame_defaults(talking)
+    assert talking.event_map[:2] == frame.event_map
+    assert talking.event_map[2:] == [
+        {"event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+    ]
     cleared = Frame(id=10, embedded={"hardwarePreset": "seeed_reterminal_e1002"}, event_map=[])
     ensure_embedded_frame_defaults(cleared)
     assert cleared.event_map == []

@@ -806,6 +806,12 @@ def embedded_frame_settings(frame: Frame) -> dict:
             ("batteryEnablePin", ("batteryEnablePin", "battery_enable_pin"), "int"),
             ("buzzerPin", ("buzzerPin", "buzzer_pin"), "int"),
             ("buzzerToneHz", ("buzzerToneHz", "buzzer_tone_hz"), "int"),
+            # Voice chat (docs/voice-chat.md): the microphone switch, and the
+            # PDM microphone's pins (-1 = none; unset = the board's own).
+            ("voiceChat", ("voiceChat", "voice_chat"), "bool"),
+            ("micClkPin", ("micClkPin", "mic_clk_pin"), "int"),
+            ("micDataPin", ("micDataPin", "mic_data_pin"), "int"),
+            ("micPwrPin", ("micPwrPin", "mic_pwr_pin"), "int"),
         ):
             for key in keys:
                 value = device_config.get(key)

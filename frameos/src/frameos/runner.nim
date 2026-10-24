@@ -854,6 +854,10 @@ proc runtimeCommand(self: RunnerThread, command: RuntimeCommand, payload: JsonNo
     # init takes it down, so the log line gets out first.
     self.logger.log(%*{"event": "reboot", "message": "Rebooting the device"})
     rebootSystemDetached()
+  of rcVoiceChat:
+    # The ESP32 firmware's (docs/voice-chat.md): a Pi frame has no
+    # microphone path, and `hosts.linux` says so in the contract.
+    self.logger.log(%*{"event": "voiceChat:unsupported", "message": "Voice chat is not on this frame"})
   of rcUploadScenes:
     let (mainSceneId, sceneIds) = updateUploadedScenesFromPayload(payload)
     if mainSceneId.isNone:

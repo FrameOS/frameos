@@ -271,6 +271,22 @@ const CloudContractSettings* = @[
     Rule(kind: rkInt, hasMin: true, min: 100.0, hasMax: true, max: 10000.0),
   profiles: @[
     ProfileSpec(profile: "esp32", since: "2026.10.12")]),
+  SettingSpec(key: "voice_chat", rule:
+    Rule(kind: rkBool),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.10.20")]),
+  SettingSpec(key: "mic_clk_pin", rule:
+    Rule(kind: rkInt, hasMin: true, min: -1.0, hasMax: true, max: 48.0),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.10.20")]),
+  SettingSpec(key: "mic_data_pin", rule:
+    Rule(kind: rkInt, hasMin: true, min: -1.0, hasMax: true, max: 48.0),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.10.20")]),
+  SettingSpec(key: "mic_pwr_pin", rule:
+    Rule(kind: rkInt, hasMin: true, min: -1.0, hasMax: true, max: 48.0),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.10.20")]),
 ]
 
 const CloudContractVerbs* = @[

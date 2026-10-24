@@ -290,11 +290,76 @@ static void test_text_metrics(void)
           "white fills");
 }
 
+/* The voice chat's notice (docs/voice-chat.md): wrapped text in a box across
+ * the bottom of the scene, restored byte for byte like the code box. */
+static void test_notice_box(void)
+{
+    const int width = 800, height = 480, rotate = 90;
+    const fos_pixel_format_t format = FOS_PIXEL_4BPP_SPECTRA6;
+    const size_t len = buffer_len(width, height, format);
+    uint8_t *buf = malloc(len);
+    uint8_t *original = malloc(len);
+    for (size_t i = 0; i < len; i++) original[i] = next_byte();
+    memcpy(buf, original, len);
+    fos_panel_surface_t s = {buf, width, height, format, rotate};
+    const int sw = fos_panel_scene_width(&s);
+    const int sh = fos_panel_scene_height(&s);
+
+    fos_panel_code_box_t box;
+    const char *text = "\"Switch to the calendar.\"\nSwitched to Calendar.";
+    CHECK(fos_panel_notice_box(&s, text, 3, 6, &box), "a two-line notice fits a 480x800 scene");
+    CHECK(box.digit_scale == 2, "two lines, got %d", box.digit_scale);
+    CHECK(box.title_scale >= 2, "readable glyphs (scale %d)", box.title_scale);
+    CHECK(box.x >= 0 && box.x + box.w <= sw && box.y + box.h == sh - box.gap,
+          "across the bottom: %d,%d %dx%d on %dx%d", box.x, box.y, box.w, box.h, sw, sh);
+    CHECK(box.pw * box.ph == box.w * box.h, "panel box has the scene box's area");
+
+    const size_t saved_len = fos_panel_box_copy(&s, &box, NULL, false);
+    uint8_t *saved = malloc(saved_len ? saved_len : 1);
+    fos_panel_box_copy(&s, &box, saved, false);
+    fos_panel_draw_notice(&s, &box, text);
+    int black = 0, white = 0, moved_outside = 0;
+    const int white_index = white_of(format);
+    fos_panel_surface_t before = {original, width, height, format, rotate};
+    for (int py = 0; py < height; py++) {
+        for (int px = 0; px < width; px++) {
+            int now = panel_index(&s, px, py);
+            if (in_panel_box(&box, px, py)) {
+                if (now == 0) black++;
+                else if (now == white_index) white++;
+            } else if (now != panel_index(&before, px, py)) {
+                moved_outside++;
+            }
+        }
+    }
+    CHECK(black > 0 && white > black, "%d black, %d white", black, white);
+    CHECK(moved_outside == 0, "%d pixels outside the notice changed", moved_outside);
+    fos_panel_box_copy(&s, &box, saved, true);
+    CHECK(memcmp(buf, original, len) == 0, "restore is not exact");
+
+    /* A long answer wraps onto more lines at a smaller scale, and never past
+     * six lines; a tiny panel has no room for words at all. */
+    const char *essay =
+        "\"What is on the frame right now?\"\nThe frame shows the Calendar scene, with this week's events "
+        "from the shared family calendar; the Message board and the Counter are the other two scenes "
+        "installed, and I can switch to either of them if you ask.";
+    CHECK(fos_panel_notice_box(&s, essay, 3, 6, &box), "a long notice still fits");
+    CHECK(box.digit_scale <= 6 && box.digit_scale >= 4, "wrapped to %d lines", box.digit_scale);
+    CHECK(box.title_scale <= 2, "smaller glyphs for the long text (scale %d)", box.title_scale);
+    uint8_t tiny_buf[16 * 16];
+    fos_panel_surface_t tiny = {tiny_buf, 16, 16, FOS_PIXEL_1BPP, 0};
+    CHECK(!fos_panel_notice_box(&tiny, text, 3, 6, &box), "16x16 has no room for a notice");
+    free(saved);
+    free(buf);
+    free(original);
+}
+
 int main(void)
 {
     test_text_metrics();
     test_small_and_odd();
     test_every_format_size_and_rotation();
+    test_notice_box();
     printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

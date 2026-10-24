@@ -392,7 +392,12 @@ double-press window then. A second tap made and let go entirely during the
 boot is not seen. `level` is the line on an edge (0 down: the line is pulled
 up). A key is its `pin` and its `label`: on a frame a pin's label never
 changes, and the preview's buttons, which have no pin (-1), are held, timed
-and double-pressed each on its own.
+and double-pressed each on its own. `claimed: true` on an `up` is a key the
+frame took for a gesture of its own — LEFT and RIGHT held together half a
+second start the voice chat on an ESP32 (`docs/voice-chat.md`) — and the
+button layer makes nothing of that press: the `down` and the `up` were
+delivered as every edge is, but no `press` or `longPress` follows and no
+double-press window opens.
 
 **Privacy.** Key events are logged by name only (`log: name-only`), never with
 what was typed; pointer events not at all.
@@ -518,11 +523,22 @@ came. A rule does one of two things:
   its whole payload, from the origin `eventMap`, and the matched event goes no
   further — the scene never hears the press, not even a `button` listener
   with no filter. That is how "Button actions" binds a key to the frame
-  (`setCurrentScene {direction}`, `render`, `turnOn`, `turnOff`,
+  (`setCurrentScene {direction}`, `render`, `turnOn`, `turnOff` — offered
+  only where the display's driver powers the panel, see the host table below —
   `setSceneState`), and an installed scene's rule may do the same (a double
   press of REFRESH is this scene's page 2). The emitted event is a normal
   envelope: the allow-list is asked of `eventMap` like any origin, and what the
   map emits is never mapped again, so a rule cannot feed itself.
+
+**`voiceChat`** (`docs/voice-chat.md`) is the one emit that is not the
+dispatcher's to carry out: a `button` rule emitting it on a key's `longPress`
+makes that key the frame's voice key, and the ESP32 firmware reads the binding
+off the map and opens the microphone while the key is held — a `longPress`
+exists only at the release, and a sentence has to be heard before that. The
+press is claimed (`gpio.claimed`), so the rule never fires for it; a
+`voiceChat` that does reach a dispatcher (a `button` said over HTTP, a Pi) is
+a device command its host logs as unsupported. Only the `eventMap` origin may
+emit it, and only the ESP32 host has it.
 
 `gpio` edges are not touched by a `button` rule (a long press cannot be known
 at its `down`); a scene that wants them mapped gets its own `gpio` rules. A

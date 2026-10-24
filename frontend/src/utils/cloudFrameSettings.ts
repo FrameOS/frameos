@@ -135,9 +135,11 @@ export const eventMapCloudFrameSettingsMinVersion = '2026.10.20'
  * device refuses the whole push on the key.
  */
 export const eventMapCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(eventMapCloudFrameSettingsMinVersion)
+// `voice_chat` shares the floor (docs/voice-chat.md, its own gate below): this
+// list is the event map's key alone.
 export const esp32EventMapCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
   eventMapCloudFrameSettingsMinVersion
-)
+).filter((key) => key === 'event_map')
 
 export function cloudFrameSupportsEventMap(frameosVersion: string | null | undefined): boolean {
   return cloudFrameSupportsSettingsFrom(eventMapCloudFrameSettingsMinVersion, frameosVersion)
@@ -242,6 +244,27 @@ export const esp32BuzzerCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSi
 export function cloudFrameSupportsEsp32Buzzer(frameosVersion: string | null | undefined): boolean {
   return cloudFrameSupportsSettingsFrom(esp32BuzzerCloudFrameSettingsMinVersion, frameosVersion)
 }
+
+/**
+ * 2026.10.20: voice chat, the key hold that opens the board's microphone
+ * (docs/voice-chat.md). A switch, applied live; older firmware
+ * refuses the whole push on it, so the field renders disabled below it.
+ */
+export const esp32VoiceChatCloudFrameSettingsMinVersion = '2026.10.20'
+
+export function cloudFrameSupportsEsp32VoiceChat(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32VoiceChatCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/**
+ * The PDM microphone's pins (`mic_clk_pin`, `mic_data_pin`, `mic_pwr_pin`;
+ * -1 = none), on the voice chat floor: the firmware reads them at every
+ * session's start, so live. One floor, two tails: each list names its own
+ * keys, so a caller gating on one does not carry the other.
+ */
+export const esp32MicrophoneCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  esp32VoiceChatCloudFrameSettingsMinVersion
+).filter((key) => key.startsWith('mic_'))
 
 /**
  * What every ESP32 firmware with the cloud link applies: four of the base
@@ -434,6 +457,9 @@ export const numericCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = [
   'battery_enable_pin',
   'buzzer_pin',
   'buzzer_tone_hz',
+  'mic_clk_pin',
+  'mic_data_pin',
+  'mic_pwr_pin',
   'metrics_interval',
   'max_http_response_bytes',
 ]

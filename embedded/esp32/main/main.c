@@ -31,6 +31,7 @@
 #include "fos_events.h"
 #include "fos_buttons.h"
 #include "fos_buzzer.h"
+#include "fos_voice.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
@@ -162,6 +163,9 @@ void app_main(void)
 
     /* Before the wake check below: a button wake clicks the buzzer. */
     fos_buzzer_init();
+    /* Before the buttons: a voice key held at the first look starts a
+     * voice session (docs/voice-chat.md). */
+    fos_voice_init();
     /* Before anything else reads the wake status: was this a button press? */
     fos_buttons_wake_boot();
     /* Buttons this early so the press that woke the chip is followed while

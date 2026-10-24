@@ -234,6 +234,16 @@ static bool run_runtime_command(fos_event_origin_t origin, const char *command,
         fos_client_render_now();
         return true;
     }
+    if (strcmp(command, FOS_EVENT_VOICE_CHAT) == 0) {
+        /* The one emit the button task acts on BEFORE the dispatcher could: a
+         * key whose long press the frame's map binds to `voiceChat` starts
+         * listening at the hold and is claimed, so its press never becomes
+         * the `longPress` that would land here (fos_voice_binding.c). What
+         * does land here is a rule on some other match (a role, a double
+         * press): a session needs a held key to end on, so there is none. */
+        log_event_line("event:unsupported", origin, command, "voice chat starts from a bound key held");
+        return false;
+    }
     /* `metrics` (hosts.esp32: false): this firmware samples on its own clock
      * and ships the result with the logs; there is nothing to trigger. Also
      * where a device command a newer contract adds lands until it is written. */

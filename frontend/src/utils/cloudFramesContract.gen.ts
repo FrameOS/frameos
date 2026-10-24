@@ -141,6 +141,18 @@ export const cloudFramesContractSettings = {
     },
     "buzzer_tone_hz": {
       "since": "2026.10.12"
+    },
+    "voice_chat": {
+      "since": "2026.10.20"
+    },
+    "mic_clk_pin": {
+      "since": "2026.10.20"
+    },
+    "mic_data_pin": {
+      "since": "2026.10.20"
+    },
+    "mic_pwr_pin": {
+      "since": "2026.10.20"
     }
   }
 } as const
