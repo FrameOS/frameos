@@ -299,6 +299,15 @@ frame went dark on the next push, and it becomes explicit the next time the owne
 saves the scene list. A frame running a clock scene never sees the account's
 OpenAI key, and neither does a weather scene the owner did not grant it to.
 
+The frame's own **event map** — what its buttons do whatever scene shows, a
+long press of a reTerminal's LEFT being the previous scene — is a
+`set_settings` key, `event_map` (`docs/events.md`, "Event map"; the rule
+list `[{event, match, as, emit}]`, the whole list replaced, `[]` clears it),
+on both profiles from 2026.10.20. It is not seeded by the cloud: the firmware
+applies its board preset's map and reports what it runs with in the hello's
+`hardware.eventMap`, which the Settings panel's "Button actions" shows as
+"on the frame" until the owner pushes a list of their own.
+
 A third per-install column, `event_maps` (migration 0067), is the owner's
 **button map** for the scene on this frame (`docs/events.md`, "Event map"):
 `{ [runtime scene id]: [{event, match, as}, …] }`, written onto each pushed

@@ -341,7 +341,16 @@
      "expect": {"linux": "setting_not_allowed", "esp32": "invalid_settings"}},
     {"name": "deep_sleep is a bool",
      "settings": {"deep_sleep": 1},
-     "expect": {"linux": "setting_not_allowed", "esp32": "invalid_settings"}}
+     "expect": {"linux": "setting_not_allowed", "esp32": "invalid_settings"}},
+    {"name": "event_map: the reTerminal's arrows held walk the scenes, both planes", "settings": {"event_map": [{"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}}, {"event": "button", "match": {"label": "RIGHT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}}]}, "expect": {"linux": "ok", "esp32": "ok"}},
+    {"name": "event_map: a rewrite rule and a bare emit", "settings": {"event_map": [{"event": "button", "match": {"label": "REFRESH", "action": "press"}, "as": {"label": "A", "role": "primary"}}, {"event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "render"}]}, "expect": {"linux": "ok", "esp32": "ok"}},
+    {"name": "event_map: an empty list clears the bindings", "settings": {"event_map": []}, "expect": {"linux": "ok", "esp32": "ok"}},
+    {"name": "event_map: a rule names its event", "settings": {"event_map": [{"match": {"label": "LEFT"}, "as": {"label": "A"}}]}, "expect": {"linux": "invalid_settings", "esp32": "invalid_settings"}},
+    {"name": "event_map: emit is a scene command the eventMap origin may say", "settings": {"event_map": [{"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "reboot"}]}, "expect": {"linux": "invalid_settings", "esp32": "invalid_settings"}},
+    {"name": "event_map: match and as are objects", "settings": {"event_map": [{"event": "button", "match": "LEFT", "as": {"label": "A"}}]}, "expect": {"linux": "invalid_settings", "esp32": "invalid_settings"}},
+    {"name": "event_map: no keys of its own beyond the rule's", "settings": {"event_map": [{"event": "button", "as": {"label": "A"}, "then": "render"}]}, "expect": {"linux": "invalid_settings", "esp32": "invalid_settings"}},
+    {"name": "event_map: the chip's slot takes eight rules", "settings": {"event_map": [{"event": "button", "match": {"pin": 0}, "as": {"label": "A"}}, {"event": "button", "match": {"pin": 1}, "as": {"label": "A"}}, {"event": "button", "match": {"pin": 2}, "as": {"label": "A"}}, {"event": "button", "match": {"pin": 3}, "as": {"label": "A"}}, {"event": "button", "match": {"pin": 4}, "as": {"label": "A"}}, {"event": "button", "match": {"pin": 5}, "as": {"label": "A"}}, {"event": "button", "match": {"pin": 6}, "as": {"label": "A"}}, {"event": "button", "match": {"pin": 7}, "as": {"label": "A"}}, {"event": "button", "match": {"pin": 8}, "as": {"label": "A"}}]}, "expect": {"linux": "ok", "esp32": "invalid_settings"}},
+    {"name": "event_map: not a list", "settings": {"event_map": {"event": "button", "as": {"label": "A"}}}, "expect": {"linux": "invalid_settings", "esp32": "invalid_settings"}}
   ],
   "verbs": [
     {"name": "shell is not a verb", "type": "shell", "expect": "unknown_verb"},
