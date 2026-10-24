@@ -118,6 +118,11 @@ export interface FrameType {
      * role), from 2026.10.7 firmware and the Linux runtime of the same
      * release. Absent on older firmware; `[]` is a frame with no buttons. */
     gpioButtons?: { pin: number; label: string }[] | null
+    /** The frame's event map the device runs with (its board preset's, or
+     * the last one pushed; docs/events.md "Event map"), from 2026.10.20
+     * firmware and the Linux runtime of the same release. Absent on older
+     * firmware; `[]` is a frame with no button actions. */
+    eventMap?: EventMapRule[] | null
     /** ESP32 only: the buzzer a button press chirps, -1 = none (2026.10.12+). */
     buzzerPin?: number | null
     /** ESP32 only: the pitch of that tone in Hz (2026.10.12+). */
@@ -393,6 +398,10 @@ export interface FrameType {
   }
   schedule?: FrameSchedule
   gpio_buttons?: GPIOButton[]
+  /** The frame's event map (docs/events.md "Event map"): what its buttons do
+   * whatever scene shows, "Button actions" in Settings. Undefined: never set
+   * (a cloud frame runs its board preset's, `hardware.eventMap`). */
+  event_map?: EventMapRule[]
   input_settings?: InputSettings
   /** Cloud frames: whether scenes may reach private/local addresses. Read-only
    * here: it changes on the device (a code shown on the panel to turn it on)
@@ -531,6 +540,7 @@ export interface NewFrameFormType {
   ssh_pass?: string | null
   ssh_keys?: string[]
   gpio_buttons?: GPIOButton[]
+  event_map?: EventMapRule[]
   platform?: string | null
   agent?: {
     agentEnabled?: boolean
@@ -1156,15 +1166,22 @@ export interface SceneOrigin {
 export type EventMapValue = string | number | boolean
 
 /**
- * One rule of an installed scene's event map (docs/events.md, "Event map"):
- * an event of this name whose payload carries every `match` value reaches the
- * scene with `as` written over its payload. "Map buttons" writes them
- * (utils/sceneEventMap.ts); the device's dispatcher applies them.
+ * One rule of an event map (docs/events.md, "Event map"): an event of this
+ * name whose payload carries every `match` value is either delivered with
+ * `as` written over its payload (no `emit`) or replaced by the event `emit`
+ * names, carrying `as` as its payload, and the scene never hears it. The
+ * frame has a map (`event_map`, "Button actions", utils/frameEventMap.ts)
+ * and so does each installed scene (`eventMap` beside `nodes`, "Map
+ * buttons", utils/sceneEventMap.ts); the device's dispatcher applies both.
  */
 export interface EventMapRule {
   event: string
   match?: Record<string, EventMapValue>
+  /** The device also takes nested objects here (a `setSceneState` emit's
+   * `state`); the SPA writes flat values only and keeps such rules as it
+   * finds them. */
   as: Record<string, EventMapValue>
+  emit?: string
 }
 
 export interface FrameScene {

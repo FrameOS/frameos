@@ -80,6 +80,12 @@ static const fos_rule_t k_fos_rules[] = {
     {FOS_RULE_OBJECT, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 29, 2, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 48.0f},
     {FOS_RULE_STRING, 3, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
+    {FOS_RULE_ARRAY, 0, 0, 0, 0, 0, -1, -1, 8, -1, -1, 0, 0, 0, 0, 6, 1, 0.0f, 0.0f},
+    {FOS_RULE_OBJECT, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 31, 4, 0, 0, 0.0f, 0.0f},
+    {FOS_RULE_STRING, 0, 0, 0, 0, 0, 1, 63, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
+    {FOS_RULE_OBJECT, 0, 0, 0, 1, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
+    {FOS_RULE_OBJECT, 0, 0, 0, 1, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
+    {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 7, 5, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 86400.0f},
@@ -121,10 +127,14 @@ static const fos_rule_key_t k_fos_rule_keys[] = {
     {"global", 18, 0},
     {"pin", 46, 1},
     {"label", 47, 1},
+    {"event", 50, 1},
+    {"match", 51, 0},
+    {"as", 52, 0},
+    {"emit", 53, 0},
 };
-static const int16_t k_fos_rule_children[] = {6, 7, 13, 15, 40, 45, };
+static const int16_t k_fos_rule_children[] = {6, 7, 13, 15, 40, 45, 49, };
 static const int32_t k_fos_rule_int_enums[] = {0, 90, 180, 270, };
-static const char *const k_fos_rule_str_enums[] = {"contain", "cover", "stretch", "center", "default", "on", "off", };
+static const char *const k_fos_rule_str_enums[] = {"contain", "cover", "stretch", "center", "default", "on", "off", "render", "setCurrentScene", "setSceneState", "turnOn", "turnOff", };
 
 static const fos_contract_setting_t k_fos_contract_settings[] = {
     {"name", 0, 0, NULL},
@@ -138,16 +148,17 @@ static const fos_contract_setting_t k_fos_contract_settings[] = {
     {"palette", 10, 0, NULL},
     {"colors", 16, 0, NULL},
     {"gpio_buttons", 44, 1, NULL},
-    {"deep_sleep", 48, 0, NULL},
-    {"deep_sleep_on_battery", 49, 0, NULL},
-    {"wake_check_seconds", 50, 0, NULL},
-    {"battery_pin", 51, 1, NULL},
-    {"battery_divider", 52, 1, NULL},
-    {"battery_enable_pin", 53, 1, NULL},
-    {"buzzer_pin", 54, 0, NULL},
-    {"buzzer_tone_hz", 55, 0, NULL},
+    {"event_map", 48, 0, NULL},
+    {"deep_sleep", 54, 0, NULL},
+    {"deep_sleep_on_battery", 55, 0, NULL},
+    {"wake_check_seconds", 56, 0, NULL},
+    {"battery_pin", 57, 1, NULL},
+    {"battery_divider", 58, 1, NULL},
+    {"battery_enable_pin", 59, 1, NULL},
+    {"buzzer_pin", 60, 0, NULL},
+    {"buzzer_tone_hz", 61, 0, NULL},
 };
-#define FOS_CONTRACT_SETTINGS_COUNT 19
+#define FOS_CONTRACT_SETTINGS_COUNT 20
 
 /* Every verb in the contract, with the scope it requires (NULL = none) and
  * whether it is a content verb (refused `backend_managed` when a backend owns the frame). */

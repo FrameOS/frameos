@@ -607,6 +607,86 @@ export const cloudFramesContract = {
         "no pin appears twice"
       ]
     },
+    "event_map": {
+      "rule": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "keys": {
+            "event": {
+              "type": "string",
+              "minLen": 1,
+              "maxLen": 63
+            },
+            "match": {
+              "type": "object",
+              "open": true
+            },
+            "as": {
+              "type": "object",
+              "open": true
+            },
+            "emit": {
+              "type": "string",
+              "enum": [
+                "render",
+                "setCurrentScene",
+                "setSceneState",
+                "turnOn",
+                "turnOff"
+              ]
+            }
+          },
+          "required": [
+            "event"
+          ]
+        },
+        "maxItems": 32
+      },
+      "profiles": {
+        "linux": {
+          "since": "2026.10.20"
+        },
+        "esp32": {
+          "since": "2026.10.20",
+          "rule": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "keys": {
+                "event": {
+                  "type": "string",
+                  "minLen": 1,
+                  "maxLen": 63
+                },
+                "match": {
+                  "type": "object",
+                  "open": true
+                },
+                "as": {
+                  "type": "object",
+                  "open": true
+                },
+                "emit": {
+                  "type": "string",
+                  "enum": [
+                    "render",
+                    "setCurrentScene",
+                    "setSceneState",
+                    "turnOn",
+                    "turnOff"
+                  ]
+                }
+              },
+              "required": [
+                "event"
+              ]
+            },
+            "maxItems": 8
+          }
+        }
+      }
+    },
     "device": {
       "rule": {
         "type": "string",
