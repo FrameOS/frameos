@@ -94,3 +94,31 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     int index = buzzer_index(hardware_preset);
     return index < 0 ? 0 : k_buzzers[index].tone_hz;
 }
+
+/* The reTerminal E-series front panel: a refresh key between two arrows.
+ * Held, the arrows walk the frame's scene list (a short press stays the
+ * scene's to hear). The E1004 wires GPIO3 and GPIO5 the other way round from
+ * the E1001/E1002, which is why the rules name labels, never pins. */
+#define RETERMINAL_EVENT_MAP \
+    "[{\"event\":\"button\",\"match\":{\"label\":\"LEFT\",\"action\":\"longPress\"}," \
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"RIGHT\",\"action\":\"longPress\"}," \
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}]"
+
+static const struct {
+    const char *preset;
+    const char *event_map;
+} k_event_maps[] = {
+    {"seeed_reterminal_e1001", RETERMINAL_EVENT_MAP},
+    {"seeed_reterminal_e1002", RETERMINAL_EVENT_MAP},
+    {"seeed_reterminal_e1004", RETERMINAL_EVENT_MAP},
+};
+
+const char *fos_board_event_map(const char *hardware_preset)
+{
+    if (!hardware_preset || !hardware_preset[0]) return "";
+    for (size_t i = 0; i < sizeof(k_event_maps) / sizeof(k_event_maps[0]); i++) {
+        if (strcmp(hardware_preset, k_event_maps[i].preset) == 0) return k_event_maps[i].event_map;
+    }
+    return "";
+}

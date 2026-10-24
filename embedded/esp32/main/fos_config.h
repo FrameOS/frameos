@@ -36,6 +36,12 @@
  * built-in palette. The names the cloud and backend store with it never
  * reach the device: nothing here reads them. */
 #define FOS_PALETTE_LEN 192
+/* frame.json's `eventMap` as compact JSON (docs/events.md, "Event map"): what
+ * the frame's buttons do whatever scene shows, the rule list a control plane
+ * writes (`[{event, match, as, emit}, …]`, ~110 bytes a rule; the esp32
+ * profile takes eight). "" = none. The board preset's own map is the default
+ * when NVS holds no key (fos_board_event_map). */
+#define FOS_EVENT_MAP_LEN 1024
 
 typedef enum {
     FOS_RENDER_LOCAL = 0,  /* render scenes on-device with the Nim runtime */
@@ -103,6 +109,9 @@ typedef struct {
     char palette[FOS_PALETTE_LEN]; /* `["#rrggbb", …]` the panel dithers to, "" = the
                                     * driver's own table; pushed every pass like colors,
                                     * so it applies on the next render */
+    char event_map[FOS_EVENT_MAP_LEN]; /* the frame's event map, compact JSON, "" = none;
+                                        * pushed every pass like colors, applies to the
+                                        * next press (fos_nim_set_event_map_impl) */
     uint32_t max_http_response_bytes;
     uint32_t http_spill_force_bytes; /* debug: HTTP bodies over this many buffered
                                       * bytes spill to storage even with PSRAM

@@ -479,6 +479,15 @@ static void add_hardware_json(cJSON *parent)
             cJSON_AddItemToArray(buttons, button);
         }
     }
+    /* The frame's event map (docs/events.md "Event map"): the board preset's
+     * bindings when no push set them, which the Settings panel's "Button
+     * actions" shows as "on the frame"; [] once the owner cleared them. */
+    cJSON *event_map = config->event_map[0] ? cJSON_Parse(config->event_map) : NULL;
+    if (event_map == NULL || !cJSON_IsArray(event_map)) {
+        cJSON_Delete(event_map);
+        event_map = cJSON_CreateArray();
+    }
+    if (event_map) cJSON_AddItemToObject(hw, "eventMap", event_map);
     /* The buzzer a button press sounds (-1 = none) and its pitch: the
      * preset's and the default when no push set them, which the Settings
      * panel shows as "on the frame". */
@@ -2412,6 +2421,22 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
             return;
         }
         strlcpy(config->palette, next, sizeof(config->palette));
+    }
+    const cJSON *event_map = cJSON_GetObjectItem(settings, "event_map");
+    if (event_map != NULL) {
+        /* The frame's button bindings (docs/events.md "Event map"): the
+         * contract validated the rules; what is left is the slot. Compact
+         * JSON, pushed into the Nim runtime by fos_client on the next pass
+         * like `colors` — no reboot; an empty list clears the bindings. */
+        char *printed = cJSON_GetArraySize(event_map) > 0 ? cJSON_PrintUnformatted(event_map) : NULL;
+        const char *next = printed != NULL ? printed : "";
+        if (strlen(next) >= sizeof(config->event_map)) {
+            free(printed);
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        strlcpy(config->event_map, next, sizeof(config->event_map));
+        free(printed);
     }
     const cJSON *timezone = cJSON_GetObjectItem(settings, "timezone");
     const cJSON *timezone_data = cJSON_GetObjectItem(settings, "timezone_data");
