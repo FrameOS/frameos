@@ -5,6 +5,7 @@ import { asc } from "drizzle-orm";
 import { AdminNav } from "../../../../src/components/AdminNav";
 import { AppShell } from "../../../../src/components/AppShell";
 import { BillingNav } from "../../../../src/components/BillingNav";
+import { SortableTable } from "../../../../src/components/SortableTable";
 import { JournalEntryActions } from "../../../../src/components/JournalEntryActions";
 import { JournalPostForm } from "../../../../src/components/JournalPostForm";
 import { requireSuperadmin } from "../../../../src/lib/admin-page";
@@ -123,76 +124,79 @@ export default async function AdminBillingJournalPage({ searchParams }: PageProp
             </p>
           </section>
         ) : (
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Entry</th>
-                  <th>Legs</th>
-                  <th>Source</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((entry) => (
-                  <tr key={entry.id}>
-                    <td className="copy">{formatDateTime(entry.occurredAt)}</td>
-                    <td>
+          <SortableTable
+            columns={[
+              { key: "when", label: "When" },
+              { key: "entry", label: "Entry" },
+              { key: "legs", label: "Legs" },
+              { key: "source", label: "Source" },
+              { key: "actions", label: "Actions", sortable: false },
+            ]}
+            rows={entries.map((entry) => ({
+              cells: [
+                <span className="copy">{formatDateTime(entry.occurredAt)}</span>,
+                <>
+                  <Link
+                    href={`/admin/billing/journal?type=${encodeURIComponent(entry.entryType)}`}
+                  >
+                    {entry.entryType}
+                  </Link>
+                  <div className="copy">{entry.description}</div>
+                  {entry.externalRef ? (
+                    <div className="copy">ref {entry.externalRef}</div>
+                  ) : null}
+                </>,
+                <>
+                  {entry.postings.map((posting, index) => (
+                    <div key={`${entry.id}:${index}`}>
+                      {posting.direction === "debit" ? "Dr" : "Cr"}{" "}
                       <Link
-                        href={`/admin/billing/journal?type=${encodeURIComponent(entry.entryType)}`}
+                        href={`/admin/billing/journal?account=${encodeURIComponent(posting.accountCode)}`}
                       >
-                        {entry.entryType}
-                      </Link>
-                      <div className="copy">{entry.description}</div>
-                      {entry.externalRef ? (
-                        <div className="copy">ref {entry.externalRef}</div>
-                      ) : null}
-                    </td>
-                    <td>
-                      {entry.postings.map((posting, index) => (
-                        <div key={`${entry.id}:${index}`}>
-                          {posting.direction === "debit" ? "Dr" : "Cr"}{" "}
-                          <Link
-                            href={`/admin/billing/journal?account=${encodeURIComponent(posting.accountCode)}`}
-                          >
-                            {posting.accountCode}
-                          </Link>{" "}
-                          {formatMicrosUsd(posting.amountMicros)}
-                        </div>
-                      ))}
-                    </td>
-                    <td className="copy">
-                      <Link href={`/admin/billing/journal?event=${entry.eventId}`}>
-                        {entry.eventType}
-                      </Link>
-                      <div>{entry.eventIdempotencyKey}</div>
-                      <div>
-                        via {entry.eventSource}, rule v{entry.ruleVersion}
-                      </div>
-                      {Object.keys(entry.metadata).length > 0 ? (
-                        <details>
-                          <summary>Pricing snapshot</summary>
-                          <pre>{JSON.stringify(entry.metadata, null, 2)}</pre>
-                        </details>
-                      ) : null}
-                    </td>
-                    <td>
-                      <JournalEntryActions
-                        accountId={
-                          entry.postings.find((posting) => posting.ownerAccountId)
-                            ?.ownerAccountId ?? null
-                        }
-                        entryId={entry.id}
-                        reversedByEntryId={entry.reversedByEntryId}
-                        reversesEntryId={entry.reversesEntryId}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                        {posting.accountCode}
+                      </Link>{" "}
+                      {formatMicrosUsd(posting.amountMicros)}
+                    </div>
+                  ))}
+                </>,
+                <span className="copy">
+                  <Link href={`/admin/billing/journal?event=${entry.eventId}`}>
+                    {entry.eventType}
+                  </Link>
+                  <div>{entry.eventIdempotencyKey}</div>
+                  <div>
+                    via {entry.eventSource}, rule v{entry.ruleVersion}
+                  </div>
+                  {Object.keys(entry.metadata).length > 0 ? (
+                    <details>
+                      <summary>Pricing snapshot</summary>
+                      <pre>{JSON.stringify(entry.metadata, null, 2)}</pre>
+                    </details>
+                  ) : null}
+                </span>,
+                <JournalEntryActions
+                  accountId={
+                    entry.postings.find((posting) => posting.ownerAccountId)
+                      ?.ownerAccountId ?? null
+                  }
+                  entryId={entry.id}
+                  reversedByEntryId={entry.reversedByEntryId}
+                  reversesEntryId={entry.reversesEntryId}
+                />,
+              ],
+              key: entry.id,
+              sort: [
+                entry.occurredAt.getTime(),
+                entry.entryType,
+                // An entry's size: the debit side of it.
+                entry.postings
+                  .filter((posting) => posting.direction === "debit")
+                  .reduce((sum, posting) => sum + Number(posting.amountMicros), 0),
+                entry.eventType,
+                null,
+              ],
+            }))}
+          />
         )}
       </section>
 

@@ -4310,3 +4310,32 @@ html.theme-dark .action-card__ghost {
   cursor: pointer;
   text-decoration: underline;
 }
+
+/* Admin tables sort on a header click (SortableTable). The button is the
+   header text itself: same colour and size, nothing to find. */
+.table th .table-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.table th .table-sort:hover,
+.table th .table-sort--active {
+  color: var(--text);
+}
+
+.table th .table-sort__mark {
+  font-size: 10px;
+  opacity: 0.45;
+}
+
+.table th .table-sort--active .table-sort__mark {
+  opacity: 1;
+}

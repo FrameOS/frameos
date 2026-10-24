@@ -8,12 +8,12 @@ import {
   readBillingSettings,
   readRawBillingSettings,
   trialBalance,
-  type TrialBalanceRow,
 } from "@frameos-cloud/ledger";
 import { AdminNav } from "../../../src/components/AdminNav";
 import { AppShell } from "../../../src/components/AppShell";
 import { BillingNav } from "../../../src/components/BillingNav";
 import { BillingSettingsForm } from "../../../src/components/BillingSettingsForm";
+import { SortableTable } from "../../../src/components/SortableTable";
 import { requireSuperadmin } from "../../../src/lib/admin-page";
 import {
   describeCustomer,
@@ -61,12 +61,6 @@ export default async function AdminBillingPage() {
     aiUsageSummary(db, window),
   ]);
   const listCostTotal = usage.reduce((sum, row) => sum + row.listCostMicros, 0n);
-
-  const groups = new Map<string, TrialBalanceRow[]>();
-  for (const row of balance.rows) {
-    const key = row.groupName ?? "Ungrouped";
-    groups.set(key, [...(groups.get(key) ?? []), row]);
-  }
 
   return (
     // noCapture: customer subaccount codes carry account uuids.
@@ -157,50 +151,18 @@ export default async function AdminBillingPage() {
             <p>No AI usage metered in the window.</p>
           </section>
         ) : (
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Paid by</th>
-                  <th>Surface</th>
-                  <th>Mode</th>
-                  <th style={{ textAlign: "right" }}>Turns</th>
-                  <th style={{ textAlign: "right" }}>Tokens (in / cached / out)</th>
-                  <th style={{ textAlign: "right" }}>At list prices</th>
-                  <th style={{ textAlign: "right" }}>Our cost</th>
-                  <th style={{ textAlign: "right" }}>Priced to customers</th>
-                </tr>
-              </thead>
-              <tbody>
-                {usage.map((row) => (
-                  <tr key={`${row.credentialSource}:${row.meteringMode}:${row.surface ?? ""}`}>
-                    <td>
-                      {row.credentialSource === "account"
-                        ? "the customer (own key)"
-                        : row.credentialSource === "shared"
-                          ? "us (operator key)"
-                          : "us (platform key, billable)"}
-                    </td>
-                    <td className="copy">
-                      {row.surface ?? "—"}
-                      {row.surface && absorbedSurfaces.includes(row.surface) ? " (absorbed)" : ""}
-                    </td>
-                    <td>
-                      <span className="pill">{row.meteringMode}</span>
-                    </td>
-                    <td style={{ textAlign: "right" }}>{row.turns.toString()}</td>
-                    <td className="copy" style={{ textAlign: "right" }}>
-                      {row.inputTokens.toString()} / {row.cachedInputTokens.toString()} /{" "}
-                      {row.outputTokens.toString()}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {formatMicrosUsd(row.listCostMicros)}
-                    </td>
-                    <td style={{ textAlign: "right" }}>{formatMicrosUsd(row.costMicros)}</td>
-                    <td style={{ textAlign: "right" }}>{formatMicrosUsd(row.priceMicros)}</td>
-                  </tr>
-                ))}
-              </tbody>
+          <SortableTable
+            columns={[
+              { key: "paidBy", label: "Paid by" },
+              { key: "surface", label: "Surface" },
+              { key: "mode", label: "Mode" },
+              { align: "right", key: "turns", label: "Turns" },
+              { align: "right", key: "tokens", label: "Tokens (in / cached / out)" },
+              { align: "right", key: "list", label: "At list prices" },
+              { align: "right", key: "cost", label: "Our cost" },
+              { align: "right", key: "price", label: "Priced to customers" },
+            ]}
+            foot={
               <tfoot>
                 <tr>
                   <th colSpan={5}>Total at list prices</th>
@@ -208,8 +170,45 @@ export default async function AdminBillingPage() {
                   <th colSpan={2} />
                 </tr>
               </tfoot>
-            </table>
-          </div>
+            }
+            rows={usage.map((row) => {
+              const paidBy =
+                row.credentialSource === "account"
+                  ? "the customer (own key)"
+                  : row.credentialSource === "shared"
+                    ? "us (operator key)"
+                    : "us (platform key, billable)";
+              return {
+                cells: [
+                  paidBy,
+                  <span className="copy">
+                    {row.surface ?? "—"}
+                    {row.surface && absorbedSurfaces.includes(row.surface) ? " (absorbed)" : ""}
+                  </span>,
+                  <span className="pill">{row.meteringMode}</span>,
+                  row.turns.toString(),
+                  <span className="copy">
+                    {row.inputTokens.toString()} / {row.cachedInputTokens.toString()} /{" "}
+                    {row.outputTokens.toString()}
+                  </span>,
+                  formatMicrosUsd(row.listCostMicros),
+                  formatMicrosUsd(row.costMicros),
+                  formatMicrosUsd(row.priceMicros),
+                ],
+                key: `${row.credentialSource}:${row.meteringMode}:${row.surface ?? ""}`,
+                sort: [
+                  paidBy,
+                  row.surface,
+                  row.meteringMode,
+                  Number(row.turns),
+                  Number(row.inputTokens + row.cachedInputTokens + row.outputTokens),
+                  Number(row.listCostMicros),
+                  Number(row.costMicros),
+                  Number(row.priceMicros),
+                ],
+              };
+            })}
+          />
         )}
       </section>
 
@@ -249,55 +248,15 @@ export default async function AdminBillingPage() {
             ? "Metering is in shadow mode: turns are measured and priced, and nothing is posted."
             : "Metering is live: every billable turn posts to the journal."}
         </p>
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Account</th>
-                <th>Type</th>
-                <th style={{ textAlign: "right" }}>Debits</th>
-                <th style={{ textAlign: "right" }}>Credits</th>
-                <th style={{ textAlign: "right" }}>Balance</th>
-              </tr>
-            </thead>
-            {[...groups.entries()].map(([groupName, rows]) => (
-              <tbody key={groupName}>
-                <tr>
-                  <th colSpan={5}>{groupName}</th>
-                </tr>
-                {rows.map((row) => {
-                  const owner = ownerOfAccountCode(row.accountCode);
-                  return (
-                    <tr key={row.ledgerAccountId}>
-                      <td>
-                        <Link
-                          href={
-                            owner
-                              ? `/admin/billing/customers?account=${owner}`
-                              : `/admin/billing/journal?account=${encodeURIComponent(row.accountCode)}`
-                          }
-                        >
-                          {row.accountCode}
-                        </Link>
-                        {row.cachedBalanceMicros === row.balanceMicros ? null : (
-                          <span className="risk-badge">cache disagrees</span>
-                        )}
-                      </td>
-                      <td className="copy">{row.type}</td>
-                      <td style={{ textAlign: "right" }}>
-                        {formatMicrosUsd(row.debitMicros)}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        {formatMicrosUsd(row.creditMicros)}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        {formatMicrosUsd(row.balanceMicros)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            ))}
+        <SortableTable
+          columns={[
+            { key: "account", label: "Account" },
+            { key: "type", label: "Type" },
+            { align: "right", key: "debits", label: "Debits" },
+            { align: "right", key: "credits", label: "Credits" },
+            { align: "right", key: "balance", label: "Balance" },
+          ]}
+          foot={
             <tfoot>
               <tr>
                 <th colSpan={2}>
@@ -317,8 +276,42 @@ export default async function AdminBillingPage() {
                 <th />
               </tr>
             </tfoot>
-          </table>
-        </div>
+          }
+          rows={balance.rows.map((row) => {
+            const owner = ownerOfAccountCode(row.accountCode);
+            return {
+              cells: [
+                <>
+                  <Link
+                    href={
+                      owner
+                        ? `/admin/billing/customers?account=${owner}`
+                        : `/admin/billing/journal?account=${encodeURIComponent(row.accountCode)}`
+                    }
+                  >
+                    {row.accountCode}
+                  </Link>
+                  {row.cachedBalanceMicros === row.balanceMicros ? null : (
+                    <span className="risk-badge">cache disagrees</span>
+                  )}
+                </>,
+                <span className="copy">{row.type}</span>,
+                formatMicrosUsd(row.debitMicros),
+                formatMicrosUsd(row.creditMicros),
+                formatMicrosUsd(row.balanceMicros),
+              ],
+              group: row.groupName ?? "Ungrouped",
+              key: row.ledgerAccountId,
+              sort: [
+                row.accountCode,
+                row.type,
+                Number(row.debitMicros),
+                Number(row.creditMicros),
+                Number(row.balanceMicros),
+              ],
+            };
+          })}
+        />
       </section>
 
       <section className="section-block">

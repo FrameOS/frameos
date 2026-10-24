@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createDb } from "@frameos-cloud/db";
 import { AdminNav } from "../../../src/components/AdminNav";
 import { AppShell } from "../../../src/components/AppShell";
+import { SortableTable } from "../../../src/components/SortableTable";
 import { listFramesForAdmin } from "../../../src/lib/admin";
 import { requireSuperadmin, searchQueryOf } from "../../../src/lib/admin-page";
 import { formatDate, formatDateTime } from "../../../src/lib/format";
@@ -75,66 +76,65 @@ export default async function AdminFramesPage({
             <p>No matching frames.</p>
           </section>
         ) : (
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Frame</th>
-                  <th>Owner</th>
-                  <th>Status</th>
-                  <th>Hardware</th>
-                  <th>Version</th>
-                  <th>Last seen</th>
-                  <th>Enrolled</th>
-                </tr>
-              </thead>
-              <tbody>
-                {frames.map((frame) => (
-                  <tr
-                    className={frame.status === "revoked" ? "row-muted" : undefined}
-                    key={frame.id}
-                  >
-                    <td>
-                      <div>{frame.name}</div>
-                      <div className="copy">
-                        <code>{frame.id.slice(0, 8)}</code>
-                      </div>
-                    </td>
-                    <td>
-                      <div>{frame.ownerName ?? "—"}</div>
-                      <div className="copy">
-                        <Link
-                          href={`/admin/users?q=${encodeURIComponent(frame.ownerEmail ?? "")}`}
-                        >
-                          {frame.ownerEmail ?? "no email"}
-                        </Link>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="inline-actions">
-                        {frame.status === "active" ? (
-                          <span className="pill pill-ok">Active</span>
-                        ) : frame.status === "pending" ? (
-                          <span className="pill">Pending</span>
-                        ) : (
-                          <span className="pill pill-warning">{frame.status}</span>
-                        )}
-                        {frame.connected ? (
-                          <span className="pill pill-ok">Online</span>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td>{hardwareLabel(frame.hardware)}</td>
-                    <td className="cell-nowrap">{frame.frameosVersion ?? "—"}</td>
-                    <td className="cell-nowrap">
-                      {frame.lastSeenAt ? formatDateTime(frame.lastSeenAt) : "never"}
-                    </td>
-                    <td className="cell-nowrap">{formatDate(frame.createdAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <SortableTable
+            columns={[
+              { key: "frame", label: "Frame" },
+              { key: "owner", label: "Owner" },
+              { key: "status", label: "Status" },
+              { key: "hardware", label: "Hardware" },
+              { key: "version", label: "Version" },
+              { key: "lastSeen", label: "Last seen" },
+              { key: "enrolled", label: "Enrolled" },
+            ]}
+            rows={frames.map((frame) => ({
+              cells: [
+                <>
+                  <div>{frame.name}</div>
+                  <div className="copy">
+                    <code>{frame.id.slice(0, 8)}</code>
+                  </div>
+                </>,
+                <>
+                  <div>{frame.ownerName ?? "—"}</div>
+                  <div className="copy">
+                    <Link
+                      href={`/admin/users?q=${encodeURIComponent(frame.ownerEmail ?? "")}`}
+                    >
+                      {frame.ownerEmail ?? "no email"}
+                    </Link>
+                  </div>
+                </>,
+                <div className="inline-actions">
+                  {frame.status === "active" ? (
+                    <span className="pill pill-ok">Active</span>
+                  ) : frame.status === "pending" ? (
+                    <span className="pill">Pending</span>
+                  ) : (
+                    <span className="pill pill-warning">{frame.status}</span>
+                  )}
+                  {frame.connected ? <span className="pill pill-ok">Online</span> : null}
+                </div>,
+                hardwareLabel(frame.hardware),
+                <span className="cell-nowrap">{frame.frameosVersion ?? "—"}</span>,
+                <span className="cell-nowrap">
+                  {frame.lastSeenAt ? formatDateTime(frame.lastSeenAt) : "never"}
+                </span>,
+                <span className="cell-nowrap">{formatDate(frame.createdAt)}</span>,
+              ],
+              className: frame.status === "revoked" ? "row-muted" : undefined,
+              key: frame.id,
+              sort: [
+                frame.name,
+                frame.ownerEmail ?? frame.ownerName,
+                // Online first, then active, pending, and the rest.
+                frame.connected ? 0 : frame.status === "active" ? 1 : frame.status === "pending" ? 2 : 3,
+                hardwareLabel(frame.hardware) === "—" ? null : hardwareLabel(frame.hardware),
+                frame.frameosVersion,
+                frame.lastSeenAt?.getTime() ?? null,
+                frame.createdAt.getTime(),
+              ],
+            }))}
+          />
         )}
       </section>
     </AppShell>

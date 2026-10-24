@@ -84,3 +84,33 @@ export function describeCustomer(label: CustomerLabel | undefined, accountId: st
   }
   return label.email ?? label.name ?? accountId;
 }
+
+// The AI usage report rolled up to the three money columns and a turn count,
+// for the overview's spend tiles: what the provider charged us (zero for a
+// turn on the customer's own key), what every turn would have cost at list
+// prices whoever paid, and what customers were priced.
+export type AiSpendTotals = {
+  costMicros: bigint;
+  listCostMicros: bigint;
+  priceMicros: bigint;
+  turns: bigint;
+};
+
+export function sumAiUsage(
+  rows: {
+    costMicros: bigint;
+    listCostMicros: bigint;
+    priceMicros: bigint;
+    turns: bigint;
+  }[],
+): AiSpendTotals {
+  return rows.reduce<AiSpendTotals>(
+    (totals, row) => ({
+      costMicros: totals.costMicros + row.costMicros,
+      listCostMicros: totals.listCostMicros + row.listCostMicros,
+      priceMicros: totals.priceMicros + row.priceMicros,
+      turns: totals.turns + row.turns,
+    }),
+    { costMicros: 0n, listCostMicros: 0n, priceMicros: 0n, turns: 0n },
+  );
+}

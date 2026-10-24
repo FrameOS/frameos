@@ -6,6 +6,7 @@ import { formatBytes, formatDate } from "../lib/format";
 import { redirectToReauthIfRequired } from "../lib/reauth-client";
 import { Ratio } from "./Ratio";
 import { RowMenu } from "./RowMenu";
+import { SortableTable } from "./SortableTable";
 
 export type AdminUser = {
   activeSessions: number;
@@ -131,110 +132,102 @@ export function AdminUsersTable({
           <p>No matching users.</p>
         </section>
       ) : (
-        <div className="table-scroll">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>User</th>
-              <th>Sign-in methods</th>
-              <th title="Linked, not revoked / all linked">Backends</th>
-              <th title="Enrolled / all frames">Frames</th>
-              <th title="Public / all store scenes">Scenes</th>
-              <th>Backups</th>
-              <th>Sessions</th>
-              <th>Created</th>
-              <th>Role</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((user) => {
-              const isSelf = user.id === selfAccountId;
-              const busy = busyId === user.id;
-              return (
-                <tr key={user.id}>
-                  <td>
-                    <div>{user.displayName ?? "—"}</div>
-                    <div className="copy">{user.primaryEmail ?? "no email"}</div>
-                  </td>
-                  <td>
-                    {user.identities.length > 0 ? (
-                      <div className="inline-actions">
-                        {user.identities.map((identity, index) => (
-                          <span
-                            className={
-                              identity.providerKey === "password" &&
-                              !identity.emailVerified
-                                ? "pill pill-warning"
-                                : "pill"
-                            }
-                            key={`${identity.providerKey}-${index}`}
-                          >
-                            {identity.providerKey}
-                            {identity.providerKey === "password"
-                              ? identity.emailVerified
-                                ? " · verified"
-                                : " · unverified"
-                              : null}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      "none"
-                    )}
-                  </td>
-                  <td>
-                    <Ratio
-                      active={user.backends.active}
-                      title={`${user.backends.active} linked of ${user.backends.total} (the rest revoked)`}
-                      total={user.backends.total}
-                    />
-                  </td>
-                  <td>
-                    <Ratio
-                      active={user.frames.active}
-                      title={`${user.frames.active} enrolled of ${user.frames.total} · ${user.frames.connected} online now`}
-                      total={user.frames.total}
-                    />
-                  </td>
-                  <td>
-                    <Ratio
-                      active={user.storeScenes.public}
-                      title={`${user.storeScenes.public} public of ${user.storeScenes.total} store scenes`}
-                      total={user.storeScenes.total}
-                    />
-                  </td>
-                  <td>
-                    {user.backupCount > 0
-                      ? `${user.backupCount} · ${formatBytes(user.backupBytes)}`
-                      : "0"}
-                  </td>
-                  <td>{user.activeSessions}</td>
-                  <td>{formatDate(new Date(user.createdAt))}</td>
-                  <td>
-                    <span
-                      className={user.isSuperadmin ? "pill pill-warning" : "pill"}
-                    >
-                      {user.isSuperadmin ? "Superadmin" : "User"}
-                    </span>
-                    {isSelf ? <span className="pill pill-ok">You</span> : null}
-                  </td>
-                  <td>
-                    <AdminUserRowMenu
-                      busy={busy}
-                      isSelf={isSelf}
-                      onDelete={() => void deleteUser(user)}
-                      onRevokeSessions={() => void revokeSessions(user)}
-                      onToggleSuperadmin={() => void toggleSuperadmin(user)}
-                      user={user}
-                    />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        </div>
+        <SortableTable
+          columns={[
+            { key: "user", label: "User" },
+            { key: "methods", label: "Sign-in methods" },
+            { key: "backends", label: "Backends", title: "Linked, not revoked / all linked" },
+            { key: "frames", label: "Frames", title: "Enrolled / all frames" },
+            { key: "scenes", label: "Scenes", title: "Public / all store scenes" },
+            { key: "backups", label: "Backups" },
+            { key: "sessions", label: "Sessions" },
+            { key: "created", label: "Created" },
+            { key: "role", label: "Role" },
+            { key: "actions", label: "Actions", sortable: false },
+          ]}
+          rows={users.map((user) => {
+            const isSelf = user.id === selfAccountId;
+            const busy = busyId === user.id;
+            return {
+              cells: [
+                <>
+                  <div>{user.displayName ?? "—"}</div>
+                  <div className="copy">{user.primaryEmail ?? "no email"}</div>
+                </>,
+                user.identities.length > 0 ? (
+                  <div className="inline-actions">
+                    {user.identities.map((identity, index) => (
+                      <span
+                        className={
+                          identity.providerKey === "password" && !identity.emailVerified
+                            ? "pill pill-warning"
+                            : "pill"
+                        }
+                        key={`${identity.providerKey}-${index}`}
+                      >
+                        {identity.providerKey}
+                        {identity.providerKey === "password"
+                          ? identity.emailVerified
+                            ? " · verified"
+                            : " · unverified"
+                          : null}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  "none"
+                ),
+                <Ratio
+                  active={user.backends.active}
+                  title={`${user.backends.active} linked of ${user.backends.total} (the rest revoked)`}
+                  total={user.backends.total}
+                />,
+                <Ratio
+                  active={user.frames.active}
+                  title={`${user.frames.active} enrolled of ${user.frames.total} · ${user.frames.connected} online now`}
+                  total={user.frames.total}
+                />,
+                <Ratio
+                  active={user.storeScenes.public}
+                  title={`${user.storeScenes.public} public of ${user.storeScenes.total} store scenes`}
+                  total={user.storeScenes.total}
+                />,
+                user.backupCount > 0
+                  ? `${user.backupCount} · ${formatBytes(user.backupBytes)}`
+                  : "0",
+                user.activeSessions,
+                formatDate(new Date(user.createdAt)),
+                <>
+                  <span className={user.isSuperadmin ? "pill pill-warning" : "pill"}>
+                    {user.isSuperadmin ? "Superadmin" : "User"}
+                  </span>
+                  {isSelf ? <span className="pill pill-ok">You</span> : null}
+                </>,
+                <AdminUserRowMenu
+                  busy={busy}
+                  isSelf={isSelf}
+                  onDelete={() => void deleteUser(user)}
+                  onRevokeSessions={() => void revokeSessions(user)}
+                  onToggleSuperadmin={() => void toggleSuperadmin(user)}
+                  user={user}
+                />,
+              ],
+              key: user.id,
+              sort: [
+                user.primaryEmail ?? user.displayName,
+                user.identities.map((identity) => identity.providerKey).sort().join(", ") || null,
+                user.backends.active,
+                user.frames.active,
+                user.storeScenes.public,
+                user.backupBytes,
+                user.activeSessions,
+                new Date(user.createdAt).getTime(),
+                user.isSuperadmin,
+                null,
+              ],
+            };
+          })}
+        />
       )}
     </>
   );

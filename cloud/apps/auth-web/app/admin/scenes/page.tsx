@@ -7,6 +7,7 @@ import { AdminSceneActions } from "../../../src/components/AdminSceneActions";
 import { AdminSceneCategorySelect } from "../../../src/components/AdminSceneCategorySelect";
 import { AdminNav } from "../../../src/components/AdminNav";
 import { AppShell } from "../../../src/components/AppShell";
+import { SortableTable } from "../../../src/components/SortableTable";
 import { listScenesForAdmin } from "../../../src/lib/admin";
 import { requireSuperadmin, searchQueryOf } from "../../../src/lib/admin-page";
 import { formatDate } from "../../../src/lib/format";
@@ -62,117 +63,115 @@ export default async function AdminScenesPage({
             <p>No matching scenes.</p>
           </section>
         ) : (
-          <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Scene</th>
-                <th>Owner</th>
-                <th>Category</th>
-                <th>Visibility</th>
-                <th>Status</th>
-                <th>Downloads</th>
-                <th>Updated</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {scenes.map((scene) => (
-                <tr key={scene.id}>
-                  <td>
-                    <div>
-                      <Link href={`/s/${scene.slug}`}>{scene.name}</Link>
-                      {scene.riskFlags.includes("shell") ? (
-                        <span
-                          className="risk-badge"
-                          title="Configures apps or code that run shell commands"
-                        >
-                          shell
-                        </span>
-                      ) : null}
-                      {scene.openReports > 0 ? (
-                        <span className="risk-badge">
-                          {scene.openReports} open report
-                          {scene.openReports === 1 ? "" : "s"}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="copy">
-                      {scene.slug} · v{scene.latestVersion}
-                    </div>
-                  </td>
-                  <td>
-                    <div>
-                      {scene.ownerName ?? "—"}
-                      {scene.ownerVerifiedAt ? (
-                        <span className="pill pill-ok">verified</span>
-                      ) : null}
-                      {scene.ownerBannedAt ? (
-                        <span className="risk-badge">banned</span>
-                      ) : null}
-                    </div>
-                    <div className="copy">{scene.ownerEmail ?? "no email"}</div>
-                  </td>
-                  <td>
-                    <AdminSceneCategorySelect
-                      category={scene.category}
-                      sceneId={scene.id}
-                    />
-                  </td>
-                  <td>
-                    <span
-                      className={
-                        scene.visibility === "public" ? "pill pill-ok" : "pill"
-                      }
-                    >
-                      {scene.visibility}
-                    </span>
-                  </td>
-                  <td>
-                    {scene.status === "pulled" ? (
+          <SortableTable
+            columns={[
+              { key: "scene", label: "Scene" },
+              { key: "owner", label: "Owner" },
+              { key: "category", label: "Category" },
+              { key: "visibility", label: "Visibility" },
+              { key: "status", label: "Status" },
+              { key: "downloads", label: "Downloads" },
+              { key: "updated", label: "Updated" },
+              { key: "actions", label: "Actions", sortable: false },
+            ]}
+            rows={scenes.map((scene) => ({
+              cells: [
+                <>
+                  <div>
+                    <Link href={`/s/${scene.slug}`}>{scene.name}</Link>
+                    {scene.riskFlags.includes("shell") ? (
                       <span
-                        className="pill pill-warning"
-                        title={scene.pulledReason ?? undefined}
+                        className="risk-badge"
+                        title="Configures apps or code that run shell commands"
                       >
-                        Pulled
+                        shell
                       </span>
-                    ) : scene.featuredAt ? (
-                      <span className="pill pill-ok">Featured</span>
-                    ) : (
-                      <span className="pill">Active</span>
-                    )}
-                  </td>
-                  <td>{scene.downloadCount}</td>
-                  <td>{formatDate(scene.updatedAt)}</td>
-                  <td>
-                    <div className="inline-actions">
-                      <AdminSceneActions
-                        featured={scene.featuredAt !== null}
-                        name={scene.name}
-                        sceneId={scene.id}
-                        status={scene.status}
-                      />
-                      <AdminPublisherVerifyButton
-                        accountId={scene.ownerId}
-                        ownerLabel={
-                          scene.ownerName ?? scene.ownerEmail ?? "this account"
-                        }
-                        verified={scene.ownerVerifiedAt !== null}
-                      />
-                      <AdminPublisherBanButton
-                        accountId={scene.ownerId}
-                        banned={scene.ownerBannedAt !== null}
-                        ownerLabel={
-                          scene.ownerName ?? scene.ownerEmail ?? "this account"
-                        }
-                      />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
+                    ) : null}
+                    {scene.openReports > 0 ? (
+                      <span className="risk-badge">
+                        {scene.openReports} open report
+                        {scene.openReports === 1 ? "" : "s"}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="copy">
+                    {scene.slug} · v{scene.latestVersion}
+                  </div>
+                </>,
+                <>
+                  <div>
+                    {scene.ownerName ?? "—"}
+                    {scene.ownerVerifiedAt ? (
+                      <span className="pill pill-ok">verified</span>
+                    ) : null}
+                    {scene.ownerBannedAt ? (
+                      <span className="risk-badge">banned</span>
+                    ) : null}
+                  </div>
+                  <div className="copy">{scene.ownerEmail ?? "no email"}</div>
+                </>,
+                <AdminSceneCategorySelect
+                  category={scene.category}
+                  sceneId={scene.id}
+                />,
+                <span
+                  className={
+                    scene.visibility === "public" ? "pill pill-ok" : "pill"
+                  }
+                >
+                  {scene.visibility}
+                </span>,
+                scene.status === "pulled" ? (
+                  <span
+                    className="pill pill-warning"
+                    title={scene.pulledReason ?? undefined}
+                  >
+                    Pulled
+                  </span>
+                ) : scene.featuredAt ? (
+                  <span className="pill pill-ok">Featured</span>
+                ) : (
+                  <span className="pill">Active</span>
+                ),
+                scene.downloadCount,
+                formatDate(scene.updatedAt),
+                <div className="inline-actions">
+                  <AdminSceneActions
+                    featured={scene.featuredAt !== null}
+                    name={scene.name}
+                    sceneId={scene.id}
+                    status={scene.status}
+                  />
+                  <AdminPublisherVerifyButton
+                    accountId={scene.ownerId}
+                    ownerLabel={
+                      scene.ownerName ?? scene.ownerEmail ?? "this account"
+                    }
+                    verified={scene.ownerVerifiedAt !== null}
+                  />
+                  <AdminPublisherBanButton
+                    accountId={scene.ownerId}
+                    banned={scene.ownerBannedAt !== null}
+                    ownerLabel={
+                      scene.ownerName ?? scene.ownerEmail ?? "this account"
+                    }
+                  />
+                </div>,
+              ],
+              key: scene.id,
+              sort: [
+                scene.name,
+                scene.ownerEmail ?? scene.ownerName,
+                scene.category,
+                scene.visibility,
+                // Featured, then active, then pulled.
+                scene.status === "pulled" ? 2 : scene.featuredAt ? 0 : 1,
+                scene.downloadCount,
+                scene.updatedAt.getTime(),
+                null,
+              ],
+            }))}
+          />
         )}
       </section>
     </AppShell>

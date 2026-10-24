@@ -1,6 +1,7 @@
 import { createDb } from "@frameos-cloud/db";
 import { AdminNav } from "../../../src/components/AdminNav";
 import { AppShell } from "../../../src/components/AppShell";
+import { SortableTable } from "../../../src/components/SortableTable";
 import { listPhotoScanHitsForAdmin } from "../../../src/lib/admin";
 import { requireSuperadmin } from "../../../src/lib/admin-page";
 import { formatDateTime } from "../../../src/lib/format";
@@ -44,38 +45,38 @@ export default async function AdminPhotosPage() {
             <p>No scan matches.</p>
           </section>
         ) : (
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Account</th>
-                  <th>Scanner</th>
-                  <th>SHA-256</th>
-                  <th>Address</th>
-                </tr>
-              </thead>
-              <tbody>
-                {hits.map((hit) => (
-                  <tr key={hit.id}>
-                    <td>{formatDateTime(hit.createdAt)}</td>
-                    <td className="copy">
-                      {hit.currentEmail ?? hit.accountEmail ?? "unknown"}
-                      {hit.accountId ? null : <span className="risk-badge">deleted</span>}
-                      {hit.photosSuspendedAt ? (
-                        <span className="risk-badge">suspended</span>
-                      ) : null}
-                    </td>
-                    <td>{scannerLabels[hit.scanner] ?? hit.scanner}</td>
-                    <td>
-                      <code>{hit.sha256}</code>
-                    </td>
-                    <td className="copy">{hit.clientIp ?? "unknown"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <SortableTable
+            columns={[
+              { key: "time", label: "Time" },
+              { key: "account", label: "Account" },
+              { key: "scanner", label: "Scanner" },
+              { key: "sha", label: "SHA-256" },
+              { key: "address", label: "Address" },
+            ]}
+            rows={hits.map((hit) => ({
+              cells: [
+                formatDateTime(hit.createdAt),
+                <span className="copy">
+                  {hit.currentEmail ?? hit.accountEmail ?? "unknown"}
+                  {hit.accountId ? null : <span className="risk-badge">deleted</span>}
+                  {hit.photosSuspendedAt ? (
+                    <span className="risk-badge">suspended</span>
+                  ) : null}
+                </span>,
+                scannerLabels[hit.scanner] ?? hit.scanner,
+                <code>{hit.sha256}</code>,
+                <span className="copy">{hit.clientIp ?? "unknown"}</span>,
+              ],
+              key: hit.id,
+              sort: [
+                hit.createdAt.getTime(),
+                hit.currentEmail ?? hit.accountEmail,
+                scannerLabels[hit.scanner] ?? hit.scanner,
+                hit.sha256,
+                hit.clientIp,
+              ],
+            }))}
+          />
         )}
       </section>
     </AppShell>

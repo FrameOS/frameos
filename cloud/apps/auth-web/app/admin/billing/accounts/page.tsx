@@ -5,6 +5,7 @@ import { asc, isNull } from "drizzle-orm";
 import { AdminNav } from "../../../../src/components/AdminNav";
 import { AppShell } from "../../../../src/components/AppShell";
 import { BillingNav } from "../../../../src/components/BillingNav";
+import { SortableTable } from "../../../../src/components/SortableTable";
 import {
   CreateLedgerGroupForm,
   LedgerAccountGroupSelect,
@@ -52,42 +53,40 @@ export default async function AdminBillingAccountsPage() {
       <BillingNav />
 
       <section className="section-block">
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Type</th>
-                <th>Normal side</th>
-                <th>Reporting group</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map((account) => (
-                <tr key={account.id}>
-                  <td>
-                    <Link
-                      href={`/admin/billing/journal?account=${encodeURIComponent(account.code)}`}
-                    >
-                      {account.code}
-                    </Link>
-                  </td>
-                  <td className="copy">{account.type}</td>
-                  <td className="copy">{account.normalSide}</td>
-                  <td>
-                    <LedgerAccountGroupSelect
-                      groupId={account.groupId}
-                      groups={groupOptions}
-                      ledgerAccountId={account.id}
-                    />
-                  </td>
-                  <td className="copy">{formatDate(account.createdAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <SortableTable
+          columns={[
+            { key: "code", label: "Code" },
+            { key: "type", label: "Type" },
+            { key: "side", label: "Normal side" },
+            { key: "group", label: "Reporting group" },
+            { key: "created", label: "Created" },
+          ]}
+          rows={accounts.map((account) => ({
+            cells: [
+              <Link
+                href={`/admin/billing/journal?account=${encodeURIComponent(account.code)}`}
+              >
+                {account.code}
+              </Link>,
+              <span className="copy">{account.type}</span>,
+              <span className="copy">{account.normalSide}</span>,
+              <LedgerAccountGroupSelect
+                groupId={account.groupId}
+                groups={groupOptions}
+                ledgerAccountId={account.id}
+              />,
+              <span className="copy">{formatDate(account.createdAt)}</span>,
+            ],
+            key: account.id,
+            sort: [
+              account.code,
+              account.type,
+              account.normalSide,
+              groups.find((group) => group.id === account.groupId)?.name ?? null,
+              account.createdAt.getTime(),
+            ],
+          }))}
+        />
       </section>
 
       <section className="section-block">

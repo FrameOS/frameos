@@ -12,6 +12,7 @@ import { desc, eq, isNotNull } from "drizzle-orm";
 import { AdminNav } from "../../../../src/components/AdminNav";
 import { AppShell } from "../../../../src/components/AppShell";
 import { BillingNav } from "../../../../src/components/BillingNav";
+import { SortableTable } from "../../../../src/components/SortableTable";
 import {
   CustomerAiSwitch,
   CustomerPlanForm,
@@ -160,36 +161,35 @@ export default async function AdminBillingCustomersPage({ searchParams }: PagePr
                     <p>Nothing has ever posted to this account.</p>
                   </section>
                 ) : (
-                  <div className="table-scroll">
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th>When</th>
-                          <th>Entry</th>
-                          <th style={{ textAlign: "right" }}>Change</th>
-                          <th style={{ textAlign: "right" }}>Balance</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {statement.lines.map((line, index) => (
-                          <tr key={`${line.entryId}:${index}`}>
-                            <td className="copy">{formatDateTime(line.occurredAt)}</td>
-                            <td>
-                              {line.entryType}
-                              <div className="copy">{line.description}</div>
-                            </td>
-                            <td style={{ textAlign: "right" }}>
-                              {line.direction === "credit" ? "+" : "−"}
-                              {formatMicrosUsd(line.amountMicros)}
-                            </td>
-                            <td style={{ textAlign: "right" }}>
-                              {formatMicrosUsd(line.balanceMicros)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <SortableTable
+                    columns={[
+                      { key: "when", label: "When" },
+                      { key: "entry", label: "Entry" },
+                      { align: "right", key: "change", label: "Change" },
+                      { align: "right", key: "balance", label: "Balance" },
+                    ]}
+                    rows={statement.lines.map((line, index) => ({
+                      cells: [
+                        <span className="copy">{formatDateTime(line.occurredAt)}</span>,
+                        <>
+                          {line.entryType}
+                          <div className="copy">{line.description}</div>
+                        </>,
+                        <>
+                          {line.direction === "credit" ? "+" : "−"}
+                          {formatMicrosUsd(line.amountMicros)}
+                        </>,
+                        formatMicrosUsd(line.balanceMicros),
+                      ],
+                      key: `${line.entryId}:${index}`,
+                      sort: [
+                        line.occurredAt.getTime(),
+                        line.entryType,
+                        Number(line.amountMicros) * (line.direction === "credit" ? 1 : -1),
+                        Number(line.balanceMicros),
+                      ],
+                    }))}
+                  />
                 )}
               </div>
             ))}
@@ -254,51 +254,52 @@ export default async function AdminBillingCustomersPage({ searchParams }: PagePr
                 <p>No AI usage recorded for this account.</p>
               </section>
             ) : (
-              <div className="table-scroll">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>When</th>
-                      <th>Surface</th>
-                      <th>Model</th>
-                      <th>Key</th>
-                      <th>Tokens (in / cached / out)</th>
-                      <th style={{ textAlign: "right" }}>Cost</th>
-                      <th style={{ textAlign: "right" }}>Price</th>
-                      <th>Posted</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {usage.map((record) => (
-                      <tr key={record.id}>
-                        <td className="copy">{formatDateTime(record.occurredAt)}</td>
-                        <td className="copy">{record.surface ?? "—"}</td>
-                        <td className="copy">{record.model}</td>
-                        <td className="copy">{record.credentialSource}</td>
-                        <td className="copy">
-                          {record.inputTokens} / {record.cachedInputTokens} /{" "}
-                          {record.outputTokens}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {formatMicrosUsd(record.costMicros)}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {formatMicrosUsd(record.priceMicros)}
-                        </td>
-                        <td>
-                          {record.eventId ? (
-                            <Link href={`/admin/billing/journal?event=${record.eventId}`}>
-                              entries
-                            </Link>
-                          ) : (
-                            <span className="pill">{record.meteringMode}</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <SortableTable
+                columns={[
+                  { key: "when", label: "When" },
+                  { key: "surface", label: "Surface" },
+                  { key: "model", label: "Model" },
+                  { key: "key", label: "Key" },
+                  { key: "tokens", label: "Tokens (in / cached / out)" },
+                  { align: "right", key: "cost", label: "Cost" },
+                  { align: "right", key: "price", label: "Price" },
+                  { key: "posted", label: "Posted" },
+                ]}
+                rows={usage.map((record) => ({
+                  cells: [
+                    <span className="copy">{formatDateTime(record.occurredAt)}</span>,
+                    <span className="copy">{record.surface ?? "—"}</span>,
+                    <span className="copy">{record.model}</span>,
+                    <span className="copy">{record.credentialSource}</span>,
+                    <span className="copy">
+                      {record.inputTokens} / {record.cachedInputTokens} /{" "}
+                      {record.outputTokens}
+                    </span>,
+                    formatMicrosUsd(record.costMicros),
+                    formatMicrosUsd(record.priceMicros),
+                    record.eventId ? (
+                      <Link href={`/admin/billing/journal?event=${record.eventId}`}>
+                        entries
+                      </Link>
+                    ) : (
+                      <span className="pill">{record.meteringMode}</span>
+                    ),
+                  ],
+                  key: record.id,
+                  sort: [
+                    record.occurredAt.getTime(),
+                    record.surface,
+                    record.model,
+                    record.credentialSource,
+                    Number(record.inputTokens) +
+                      Number(record.cachedInputTokens) +
+                      Number(record.outputTokens),
+                    Number(record.costMicros),
+                    Number(record.priceMicros),
+                    record.eventId ? "posted" : record.meteringMode,
+                  ],
+                }))}
+              />
             )}
           </section>
         </>

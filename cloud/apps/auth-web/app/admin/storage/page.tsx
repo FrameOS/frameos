@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { AdminNav } from "../../../src/components/AdminNav";
 import { AdminStorageRefreshButton } from "../../../src/components/AdminStorageRefreshButton";
 import { AppShell } from "../../../src/components/AppShell";
+import { SortableTable } from "../../../src/components/SortableTable";
 import { requireSuperadmin, searchQueryOf } from "../../../src/lib/admin-page";
 import { formatBytes, formatDateTime } from "../../../src/lib/format";
 import {
@@ -150,81 +151,78 @@ export default async function AdminStoragePage({
             <p>No matching users.</p>
           </section>
         ) : (
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>Total</th>
-                  <th title="Counts against the account's scene quota">
-                    Scenes (private)
-                  </th>
-                  <th title="Published scenes are free, but still occupy disk">
-                    Scenes (public)
-                  </th>
-                  <th>Backups</th>
-                  <th>Frame logs</th>
-                  <th title="Retained metrics samples — no quota measures these">
-                    Metrics
-                  </th>
-                  <th title="Cached device files — no quota measures these">
-                    Asset cache
-                  </th>
-                  <th title="The photo library, against its own quota">Photos</th>
-                  <th>Measured</th>
-                </tr>
-              </thead>
-              <tbody>
-                {overview.rows.map((row) => (
-                  <tr
-                    className={row.computedAt ? undefined : "row-muted"}
-                    key={row.accountId}
-                  >
-                    <td>
-                      <div>{row.displayName ?? "—"}</div>
-                      <div className="copy">{row.primaryEmail ?? "no email"}</div>
-                    </td>
-                    <td>
-                      <strong>
-                        <Bytes bytes={row.totalBytes} />
-                      </strong>
-                    </td>
-                    <td>
-                      <Bytes bytes={row.privateSceneBytes} />
-                    </td>
-                    <td>
-                      <Bytes bytes={row.publicSceneBytes} />
-                    </td>
-                    <td>
-                      <Bytes bytes={row.backupBytes} />
-                      {row.backupCount > 0 ? (
-                        <div className="copy">
-                          {row.backupCount} file{row.backupCount === 1 ? "" : "s"}
-                        </div>
-                      ) : null}
-                    </td>
-                    <td>
-                      <Bytes bytes={row.frameLogBytes} />
-                    </td>
-                    <td>
-                      <Bytes bytes={row.frameMetricsBytes} />
-                    </td>
-                    <td>
-                      <Bytes bytes={row.frameAssetBytes} />
-                    </td>
-                    <td>
-                      <Bytes bytes={row.photoBytes} />
-                    </td>
-                    <td className="cell-nowrap copy">
-                      {row.computedAt
-                        ? formatDateTime(row.computedAt)
-                        : "not measured"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <SortableTable
+            columns={[
+              { key: "user", label: "User" },
+              { key: "total", label: "Total" },
+              {
+                key: "privateScenes",
+                label: "Scenes (private)",
+                title: "Counts against the account's scene quota",
+              },
+              {
+                key: "publicScenes",
+                label: "Scenes (public)",
+                title: "Published scenes are free, but still occupy disk",
+              },
+              { key: "backups", label: "Backups" },
+              { key: "frameLogs", label: "Frame logs" },
+              {
+                key: "metrics",
+                label: "Metrics",
+                title: "Retained metrics samples — no quota measures these",
+              },
+              {
+                key: "assetCache",
+                label: "Asset cache",
+                title: "Cached device files — no quota measures these",
+              },
+              { key: "photos", label: "Photos", title: "The photo library, against its own quota" },
+              { key: "measured", label: "Measured" },
+            ]}
+            rows={overview.rows.map((row) => ({
+              cells: [
+                <>
+                  <div>{row.displayName ?? "—"}</div>
+                  <div className="copy">{row.primaryEmail ?? "no email"}</div>
+                </>,
+                <strong>
+                  <Bytes bytes={row.totalBytes} />
+                </strong>,
+                <Bytes bytes={row.privateSceneBytes} />,
+                <Bytes bytes={row.publicSceneBytes} />,
+                <>
+                  <Bytes bytes={row.backupBytes} />
+                  {row.backupCount > 0 ? (
+                    <div className="copy">
+                      {row.backupCount} file{row.backupCount === 1 ? "" : "s"}
+                    </div>
+                  ) : null}
+                </>,
+                <Bytes bytes={row.frameLogBytes} />,
+                <Bytes bytes={row.frameMetricsBytes} />,
+                <Bytes bytes={row.frameAssetBytes} />,
+                <Bytes bytes={row.photoBytes} />,
+                <span className="cell-nowrap copy">
+                  {row.computedAt ? formatDateTime(row.computedAt) : "not measured"}
+                </span>,
+              ],
+              className: row.computedAt ? undefined : "row-muted",
+              key: row.accountId,
+              sort: [
+                row.primaryEmail ?? row.displayName,
+                row.totalBytes,
+                row.privateSceneBytes,
+                row.publicSceneBytes,
+                row.backupBytes,
+                row.frameLogBytes,
+                row.frameMetricsBytes,
+                row.frameAssetBytes,
+                row.photoBytes,
+                row.computedAt?.getTime() ?? null,
+              ],
+            }))}
+          />
         )}
       </section>
     </AppShell>
