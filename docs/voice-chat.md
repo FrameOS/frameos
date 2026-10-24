@@ -82,7 +82,10 @@ microphone path (yet).
   (PLL 160 MHz / (19 + 17/32) = 8.192 MHz mclk, bclk div 8, DSR 8 →
   16 kHz). The S3 only: a C3 has no PDM-to-PCM filter and no board with a
   microphone.
-- **The session** (`fos_voice.c`): two tasks live only while a session runs. A
+- **The session** (`fos_voice.c`): two tasks live only while a session runs,
+  both above the render task's priority — below it the answer sat unread
+  while a render and its e-paper refresh ran, the progress bop going the
+  whole time. A
   capture task reads the I2S DMA into a PSRAM buffer (`fos_big_malloc`,
   `FOS_VOICE_MAX_SECONDS` = 30 of audio, 960 KB; a smaller buffer when PSRAM
   is short). The relay task uploads what the capture task has written, a

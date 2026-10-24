@@ -83,16 +83,29 @@ typedef enum { TICK_OFF = 0, TICK_UPLOADING, TICK_THINKING } tick_phase_t;
 static esp_timer_handle_t s_tick_timer = NULL;
 static volatile tick_phase_t s_tick_phase = TICK_OFF;
 
+/* Ticks left before the timer gives up on its own: the wait for an answer
+ * is bounded (VOICE_DONE_TIMEOUT_MS), and a relay task that never came back
+ * to stop the ticks must not leave a frame bopping forever. */
+static volatile int s_ticks_left = 0;
+
 static void tick(void *arg)
 {
     (void)arg;
     tick_phase_t phase = s_tick_phase;
-    if (phase != TICK_OFF) fos_buzzer_voice_tick(phase == TICK_THINKING);
+    if (phase == TICK_OFF) return;
+    if (s_ticks_left <= 0) {
+        s_tick_phase = TICK_OFF;
+        if (s_tick_timer) esp_timer_stop(s_tick_timer);
+        return;
+    }
+    s_ticks_left--;
+    fos_buzzer_voice_tick(phase == TICK_THINKING);
 }
 
 static void ticks_start(void)
 {
     s_tick_phase = TICK_UPLOADING;
+    s_ticks_left = (VOICE_DONE_TIMEOUT_MS + VOICE_CHUNK_TIMEOUT_MS) / VOICE_TICK_MS;
     if (s_tick_timer) esp_timer_start_periodic(s_tick_timer, (uint64_t)VOICE_TICK_MS * 1000);
 }
 
@@ -609,8 +622,13 @@ bool fos_voice_begin(void)
         s_state = VOICE_LISTENING;
         s_end_requested = false;
         /* Internal stack: the relay runs TLS, which mbedTLS wants off a
-         * PSRAM stack. Created per session, so it costs nothing between. */
-        if (xTaskCreate(relay_task, "fos_voice", 8192, NULL, 3, NULL) == pdPASS) {
+         * PSRAM stack. Created per session, so it costs nothing between.
+         * Above the render task (5) and the button task (4), level with the
+         * capture task: below the render task's priority the answer sat
+         * unread while a render and its e-paper refresh ran (24 s on the
+         * E1002), the progress bop going the whole time, and the notice
+         * missed that refresh. */
+        if (xTaskCreate(relay_task, "fos_voice", 8192, NULL, 6, NULL) == pdPASS) {
             started = true;
         } else {
             s_state = VOICE_IDLE;
