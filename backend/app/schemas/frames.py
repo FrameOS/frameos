@@ -130,6 +130,11 @@ class FrameBase(BaseModel):
     # vocabulary of docs/deploy-progress-contract.json: the workspace's bar.
     deploy_progress: Optional[Dict[str, Any]] = None
     pending_command_types: Optional[List[str]] = None
+    # The scene the frame shows for now without holding it in its saved list
+    # ({scene_id, name, source: editor|voice, at}; frame_commands
+    # .scene_preview_info): the editor's "Preview on frame", the voice chat's
+    # picture. The workspace's preview row.
+    scene_preview: Optional[Dict[str, Any]] = None
     log_to_file: Optional[str]
     assets_path: Optional[str]
     save_assets: Any

@@ -50,7 +50,8 @@ from app.utils.tz_slice import tz_slice
 from app.utils.retired_apps import frame_runtime_version, scenes_for_embedded_runtime
 from app.database import get_db
 from app.drivers.devices import device_dimensions
-from app.models.frame import Frame, get_frame_json, normalize_frame_admin_auth, normalize_https_proxy
+from app.models.frame import Frame, get_frame_json, normalize_frame_admin_auth, normalize_https_proxy, shipped_frame_settings
+from app.models.settings import get_settings_dict
 from app.redis import get_redis
 from app.utils.embedded_render import RenderQueueFull, render_scene_rgba_and_state
 from app.utils.frame_commands import previewed_scenes
@@ -683,6 +684,21 @@ def embedded_settings_payload(db: Session, frame: Frame) -> dict:
     newly granted group never reached an ESP32; the granted set is the one
     source now. Groups without a configured value are left out."""
     frame_settings = get_frame_json(db, frame).get("settings") or {}
+    # A preview in place of the saved scenes (the editor's, the voice chat's
+    # show_image): what ITS apps declare rides along too, else the device
+    # draws "please provide an API key" for a scene the owner just asked for.
+    # Owner-authored, so declared is granted, as for the saved scenes.
+    preview = previewed_scenes(db, frame)
+    if preview and isinstance(frame_settings, dict):
+        from types import SimpleNamespace
+        from typing import cast
+
+        # Only the two attributes shipped_frame_settings reads; typed as a
+        # Frame for its signature.
+        stand_in = cast(Frame, SimpleNamespace(scenes=[s for s in preview if isinstance(s, dict)],
+                                               service_setting_groups=frame.service_setting_groups))
+        for key, value in shipped_frame_settings(stand_in, get_settings_dict(db, project_id=frame.project_id)).items():
+            frame_settings.setdefault(key, value)
     payload: dict = {}
     if not isinstance(frame_settings, dict):
         return payload

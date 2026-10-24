@@ -67,6 +67,14 @@ export interface CloudSceneSource {
   granted_settings_groups?: string[]
 }
 
+export interface ScenePreviewInfo {
+  /** The previewed scene's RUNTIME id (null when the push named none). */
+  scene_id: string | null
+  name: string
+  source: 'editor' | 'voice'
+  at: string
+}
+
 export interface FrameType {
   id: FrameId
   project_id: number
@@ -352,6 +360,11 @@ export interface FrameType {
    * (utils/frameSecrets.ts). */
   secret_fingerprints?: Record<string, string>
   active_scene_id?: string
+  /** The scene the frame shows for now without holding it in its saved list:
+   * the editor's "Preview on frame" (docs/scene-previews.md). Both planes
+   * report the newest scene push when it was a preview; null once a push of
+   * the saved list is newer. The scene list draws it as a preview row. */
+  scene_preview?: ScenePreviewInfo | null
   /** Cloud only: the device-reported state the hub mirrors onto the frame row (e.g. active_scene). */
   last_state?: Record<string, any>
   /** Cloud only: the checksum of the scene payload the CONTROL PLANE has
