@@ -1,7 +1,10 @@
 import { get } from './app'
 
-const draw = (config: Record<string, unknown>, context = makeContext()) =>
-  get(makeApp({ config, frame: { width: 400, height: 200 } }), context)
+// The app first: makeContext() gives it the canvas of the app made last.
+const draw = (config: Record<string, unknown>, context?: FrameOSContext) => {
+  const app = makeApp({ config, frame: { width: 400, height: 200 } })
+  return get(app, context ?? makeContext())
+}
 
 describe('chart', () => {
   it('draws a line for a list of numbers, with grid, axis labels and a title', () => {
@@ -46,5 +49,9 @@ describe('chart', () => {
     expect(fixed.svg).toContain('>0</text>')
     const dot = draw({ data: [null, 4, null], chartType: 'line' })
     expect(dot.svg).toContain('<circle')
+  })
+
+  it('needs the canvas: it never sizes by the panel', () => {
+    expect(() => draw({ data: [1, 2] }, makeContext({ hasImage: false }))).toThrow('No canvas to draw on')
   })
 })

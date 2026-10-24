@@ -380,7 +380,20 @@
     currentApp = app;
     return app;
   };
-  const makeContext = (context) => ({ event: "render", payload: {}, ...(context || {}) });
+  // A render context. It carries the canvas the runtime would hand the app: the
+  // frame's size, turned with it (a render always has one). Give imageWidth /
+  // imageHeight for a cell, or hasImage: false for a run that has no canvas.
+  const makeContext = (context) => {
+    const given = context || {};
+    const base = { event: "render", payload: {}, hasImage: true };
+    if (given.hasImage !== false && !("imageWidth" in given)) {
+      const f = (currentApp || makeApp()).frame;
+      const turned = f.rotate === 90 || f.rotate === 270;
+      base.imageWidth = turned ? f.height : f.width;
+      base.imageHeight = turned ? f.width : f.height;
+    }
+    return { ...base, ...given };
+  };
 
   // ------------------------------------------------------------ running
   const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());

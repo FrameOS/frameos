@@ -314,7 +314,9 @@ describe('weather', () => {
   given. It is also where the app's side effects land: `frameos.setState`
   writes `app.state`, `remember` / `recall` use `app.memory`, `setNextSleep`
   sets `app.nextSleep`, `getSetting` reads `app.settings`. `makeContext()` is
-  a render context.
+  a render context carrying the canvas the runtime would: `app.frame`'s size
+  turned with it; give `imageWidth` / `imageHeight` for a cell, or
+  `hasImage: false` for a run with no canvas.
 - Everything that would leave the interpreter (`httpRequest`, `fetchText`,
   `fetchJson`, `fetchImage`, assets, streams) throws until the test mocks
   it, so a test never touches the network: `mock.httpRequest(impl)`,

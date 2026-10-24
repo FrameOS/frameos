@@ -43,8 +43,11 @@ const weather = {
   },
 }
 
-const panel = (config: Record<string, unknown>, context = makeContext()) =>
-  get(makeApp({ config: { weather, icons, ...config }, frame: { width: 600, height: 400 } }), context)
+// The app first: makeContext() gives it the canvas of the app made last.
+const panel = (config: Record<string, unknown>, context?: FrameOSContext) => {
+  const app = makeApp({ config: { weather, icons, ...config }, frame: { width: 600, height: 400 } })
+  return get(app, context ?? makeContext())
+}
 
 describe('weatherPanel', () => {
   it('draws the current weather over a sky gradient, with the location and the icon', () => {
@@ -86,5 +89,10 @@ describe('weatherPanel', () => {
     expect(() => panel({ weather: null })).toThrow('Weather unavailable: no data')
     expect(() => panel({ weather: { location: 'x', error: 'No matching locations found.' } })).toThrow('No matching locations found.')
     expect(() => panel({ weather: { date: 'x' } })).toThrow('no forecast')
+  })
+
+  it('needs the canvas when it has no size of its own: it never sizes by the panel', () => {
+    expect(() => panel({ mode: 'current' }, makeContext({ hasImage: false }))).toThrow('No canvas to draw on')
+    expect(panel({ mode: 'current', width: 300, height: 200 }, makeContext({ hasImage: false })).svg).toContain('viewBox="0 0 300 200"')
   })
 })

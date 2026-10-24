@@ -231,16 +231,18 @@ suite "openaiImage code app":
     # No size in the config is the field's default, "best for orientation".
     check h.requestedSize(%*{"prompt": "x", "model": "dall-e-3"}, 300, 200) == "1792x1024"
 
-  test "with no image flowing in, orientation is the frame as rendered":
+  test "orientation is the canvas's, which a turned frame hands over turned; no canvas means the default size":
     for (rotate, expected) in [(0, "1536x1024"), (90, "1024x1536"), (180, "1536x1024"), (270, "1024x1536")]:
       let h = newHarness(width = 800, height = 480, rotate = rotate)
-      replyCode = 400
-      replyBody = "{}"
-      check h.threw(%*{"prompt": "x", "model": "gpt-image-1"}, withImage = false) == "Error making request 400: {}"
-      check lastBody()["size"].getStr() == expected
+      let config = h.owner.frameConfig
+      check h.requestedSize(%*{"prompt": "x", "model": "gpt-image-1"}, config.renderWidth(), config.renderHeight()) == expected
     let square = newHarness(width = 480, height = 480, rotate = 90)
+    check square.requestedSize(%*{"prompt": "x", "model": "gpt-image-1"}, 480, 480) == "1024x1024"
+    check not appSource.contains("rotate")
+    let blind = newHarness(width = 800, height = 480)
     replyCode = 400
-    discard square.threw(%*{"prompt": "x", "model": "gpt-image-1"}, withImage = false)
+    replyBody = "{}"
+    check blind.threw(%*{"prompt": "x", "model": "gpt-image-1"}, withImage = false) == "Error making request 400: {}"
     check lastBody()["size"].getStr() == "1024x1024"
 
   test "an explicit size must be one the model offers":

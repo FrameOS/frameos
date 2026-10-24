@@ -118,4 +118,10 @@ describe('photoAlbum', () => {
     }
     expect(error).toHaveBeenCalledTimes(2)
   })
+
+  it('needs the canvas: it never sizes by the panel', () => {
+    expect(() => get(makeApp({ config: { album: link } }), makeContext({ hasImage: false }))).toThrow(
+      'No canvas to draw on'
+    )
+  })
 })

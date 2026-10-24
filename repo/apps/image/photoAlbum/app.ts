@@ -75,8 +75,11 @@ export function panel(width: number, height: number, message: string): string {
 }
 
 export function get(app: FrameOSApp, context: FrameOSContext): unknown {
-  const width = context.imageWidth || app.frame.width
-  const height = context.imageHeight || app.frame.height
+  // The size the photo is drawn at: the box it feeds, else the canvas. Both
+  // are in scene pixels, already turned with the frame.
+  const width = context.targetWidth || context.imageWidth || 0
+  const height = context.targetHeight || context.imageHeight || 0
+  if (!(width > 0 && height > 0)) throw new Error('No canvas to draw on: this app runs on render.')
   const show = (message: string): unknown => frameos.svg(panel(width, height, message), { width, height })
   const fail = (message: string): unknown => {
     frameos.error(message)

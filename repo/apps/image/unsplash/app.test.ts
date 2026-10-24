@@ -68,4 +68,8 @@ describe('unsplash', () => {
     mock.fetchImage(() => ({ image: null, error: 'decode failed' }))
     expect(() => get(makeApp({ settings }), makeContext())).toThrow('decode failed')
   })
+
+  it('needs the canvas: it never sizes by the panel', () => {
+    expect(() => get(makeApp({ settings }), makeContext({ hasImage: false }))).toThrow('No canvas to draw on')
+  })
 })

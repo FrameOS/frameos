@@ -32,7 +32,7 @@ describe('frameOSGallery', () => {
 
   it('asks for the original when the run has no canvas to size by', () => {
     const fetchImage = mock.fetchImage(() => mock.image())
-    get(makeApp({ config: { category: 'landscapes' } }), makeContext())
+    get(makeApp({ config: { category: 'landscapes' } }), makeContext({ hasImage: false }))
     expect(fetchImage.calls[0][0]).toBe(base)
   })
 

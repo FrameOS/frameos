@@ -82,9 +82,11 @@ function yRange(series, minY, maxY, includeZero) {
 
 export function get(app, context) {
   const c = app.config
-  const f = app.frame
-  const W = Math.round(context.imageWidth || (f.rotate % 180 ? f.height : f.width))
-  const H = Math.round(context.imageHeight || (f.rotate % 180 ? f.width : f.height))
+  // The size the chart is drawn at: the box it feeds, else the canvas. Both
+  // are in scene pixels, already turned with the frame.
+  const W = Math.round(context.targetWidth || context.imageWidth || 0)
+  const H = Math.round(context.targetHeight || context.imageHeight || 0)
+  if (!(W > 0 && H > 0)) throw new Error('No canvas to draw on: this app runs on render.')
   const unit = Math.min(W, H)
   const size = (value, auto) => (Number(value) > 0 ? Number(value) : auto)
   const fontSize = size(c.fontSize, Math.max(10, Math.round(unit / 28)))

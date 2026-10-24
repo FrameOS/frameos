@@ -78,4 +78,10 @@ describe('wikicommons', () => {
     mock.fetchImage(() => ({ image: null, error: 'huge' }))
     expect(() => get(makeApp({ config: { mode: 'pictureOfTheDay' } }), makeContext())).toThrow('Error fetching image from Wikimedia Commons: huge')
   })
+
+  it('needs the canvas: it never sizes by the panel', () => {
+    expect(() => get(makeApp({ config: { mode: 'random' } }), makeContext({ hasImage: false }))).toThrow(
+      'No canvas to draw on'
+    )
+  })
 })
