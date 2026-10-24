@@ -77,9 +77,14 @@ dashed **preview** row above the saved scenes: the name, where it came from,
   this very scene after the push), saves and pushes — on the cloud the save
   mints the private store scene (`persistAndPushCloudFrameScenes`), on the
   backend the deploy pushes the saved list;
-- **Push scenes** (`scenesLogic.pushSavedScenes`): the saved list again,
-  which replaces the preview on the frame — the backend's deploy, the cloud's
-  assigned list re-pushed as it stands (`pushCloudFrameSceneList`).
+- **Discard** (`scenesLogic.discardPreview`): takes the preview off the
+  frame by pushing the saved list again as it stands — the backend's deploy,
+  the cloud's assigned list re-pushed (`pushCloudFrameSceneList`). Behind a
+  confirmation (`confirmDialog`, danger): a preview is held nowhere but on
+  the frame and in the plane's newest push, so one that took some prompting
+  to get is gone for good once it is replaced. The row never offers a plain
+  "push the list" — the sidebar's Deploy does that, and replaces the preview
+  as any push does.
 
 ## Tests
 
