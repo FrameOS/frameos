@@ -47,7 +47,13 @@ microphone path (yet).
   backend's `EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP`, the SPA's preset
   table); the E1004, without a microphone, ships the arrows alone. In Settings
   → Button actions "Voice chat" is offered for a long press on a frame that
-  has voice chat at all. A `voiceChat` that does reach a dispatcher (a long
+  has voice chat at all, and for a long press only: a press or a double press
+  is over before the frame hears of it and has no release to end a sentence
+  on (a press-to-start, press-to-stop toggle would leave the microphone open
+  until the 30 s cap on a stray press, and start only after the double-press
+  window; hold-and-speak is the pattern people know). A saved rule on another
+  press is shown with "long press only" and does nothing on the device. A
+  `voiceChat` that does reach a dispatcher (a long
   press the firmware did not take, a `button` said over HTTP, a Pi) is a
   device command the host logs as unsupported: a session needs a held key to
   end on.

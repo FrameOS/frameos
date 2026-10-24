@@ -17,9 +17,11 @@ import {
   frameActionKinds,
   frameActionKindsFor,
   frameActionTitle,
+  frameActionUnavailableReason,
   frameActionValue,
   frameBindings,
   frameEventMapRules,
+  gestureCanVoiceChat,
   parseFrameActionValue,
   reportedEventMapOf,
 } from "../../../../../../frontend/src/utils/frameEventMap";
@@ -59,11 +61,36 @@ describe("bindings and rules", () => {
     // The contract lets the map emit it, so a push carries it.
     expect(eventMapEmits).toContain("voiceChat");
     expect(isEventMapRule(rule)).toBe(true);
-    // Offered for a long press when the frame has voice chat, never for a press or a double press.
-    expect(frameActionKindsFor(refreshHeld, true)).toEqual([...frameActionKinds, "voiceChat"]);
-    expect(frameActionKindsFor(refreshHeld, false)).toEqual(frameActionKinds);
-    expect(frameActionKindsFor({ label: "REFRESH", action: "doublePress" }, true)).toEqual(frameActionKinds);
+    // Offered for a long press when the frame has voice chat, never for a press
+    // or a double press: the release is what ends a sentence.
+    const doublePress = { label: "REFRESH", action: "doublePress" };
+    expect(frameActionKindsFor(refreshHeld, { voiceChat: true, displayPower: true })).toEqual([...frameActionKinds, "voiceChat"]);
+    expect(frameActionKindsFor(refreshHeld, { voiceChat: false, displayPower: true })).toEqual(frameActionKinds);
+    expect(frameActionKindsFor(doublePress, { voiceChat: true, displayPower: true })).toEqual(frameActionKinds);
+    expect(gestureCanVoiceChat(refreshHeld)).toBe(true);
+    expect(gestureCanVoiceChat(doublePress)).toBe(false);
     expect(frameActionKinds).not.toContain("voiceChat");
+    // A saved rule on another press is shown with why, and named as doing nothing.
+    const onDouble = { gesture: doublePress, action: { kind: "voiceChat" as const } };
+    expect(frameActionUnavailableReason(onDouble, { voiceChat: true, displayPower: true })).toBe("long press only");
+    expect(frameActionUnavailableReason({ gesture: refreshHeld, action: { kind: "voiceChat" } }, { voiceChat: true, displayPower: true })).toBeNull();
+    expect(bindingConflicts([onDouble])).toEqual([
+      "REFRESH · double press is bound to Voice chat, which only a long press starts: the frame listens while the key is held and stops when it is let go, so this press does nothing",
+    ]);
+  });
+
+  it("offers the display switches only where the driver powers the panel", () => {
+    // docs/events.md, the host table: e-paper and every ESP32 board switch nothing on turnOn / turnOff.
+    const offer = { voiceChat: false, displayPower: false };
+    expect(frameActionKindsFor(leftHeld, offer)).toEqual(["nextScene", "prevScene", "render"]);
+    const off = { gesture: leftHeld, action: { kind: "turnOff" as const } };
+    expect(frameActionUnavailableReason(off, offer)).toBe("not on this display");
+    expect(frameActionUnavailableReason(off, { ...offer, displayPower: true })).toBeNull();
+    expect(bindingConflicts([off], offer)).toEqual([
+      "LEFT · long press is bound to Display off, but this display cannot be switched off and on; only the scene hears it",
+    ]);
+    expect(bindingConflicts([off])).toEqual([]);
+    expect(bindingConflicts([off], { ...offer, displayPower: true })).toEqual([]);
   });
 
   it("reads its own rules back and keeps what it did not write", () => {

@@ -928,6 +928,11 @@ const embeddedModeHiddenFrameSettingsSections: readonly string[] = [
   'frame-settings-assets',
   'frame-settings-logs',
   'frame-settings-reboot',
+  // The keyboard layout and the keyboard grab are the Linux evdev
+  // translator's (docs/events.md "Input"): no ESP32 or Pico board has a
+  // keyboard, and the virtual frame's keys arrive from the browser already
+  // mapped. InputSettingsSection returns null for the same frames.
+  'frame-settings-input',
 ]
 
 /**

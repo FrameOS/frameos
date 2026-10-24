@@ -523,7 +523,8 @@ came. A rule does one of two things:
   its whole payload, from the origin `eventMap`, and the matched event goes no
   further — the scene never hears the press, not even a `button` listener
   with no filter. That is how "Button actions" binds a key to the frame
-  (`setCurrentScene {direction}`, `render`, `turnOn`, `turnOff`,
+  (`setCurrentScene {direction}`, `render`, `turnOn`, `turnOff` — offered
+  only where the display's driver powers the panel, see the host table below —
   `setSceneState`), and an installed scene's rule may do the same (a double
   press of REFRESH is this scene's page 2). The emitted event is a normal
   envelope: the allow-list is asked of `eventMap` like any origin, and what the

@@ -92,21 +92,30 @@ export function PaletteField(): JSX.Element {
   )
 }
 
+/**
+ * One button per row: pin, label and role side by side from @md up (the
+ * three are short, and a row a screen wide of one number each is hard to
+ * read as a list of buttons), stacked below it. The editable rows use the
+ * same columns, plus Remove.
+ */
+const GPIO_BUTTON_ROW = 'grid grid-cols-1 gap-2 @md:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1.5fr)]'
+const GPIO_BUTTON_EDIT_ROW = 'grid grid-cols-1 gap-2 @md:grid-cols-[7rem_minmax(0,1fr)_minmax(0,1.5fr)_auto] @md:items-end'
+
 function ReadOnlyGpioButtons({ buttons }: { buttons: GPIOButton[] }): JSX.Element {
   return (
     <div className="space-y-2">
       {buttons.map((button) => (
-        <div key={`${button.pin}-${button.label}`} className="grid grid-cols-1 gap-2 @md:grid-cols-3">
-          <div className="space-y-1 @md:flex @md:gap-2">
-            <Label className="@md:w-1/3">Pin</Label>
+        <div key={`${button.pin}-${button.label}`} className={GPIO_BUTTON_ROW}>
+          <div className="space-y-1">
+            <Label>Pin</Label>
             <TextInput value={String(button.pin)} readOnly className="cursor-default opacity-70" />
           </div>
-          <div className="space-y-1 @md:flex @md:gap-2">
-            <Label className="@md:w-1/3">Label</Label>
+          <div className="space-y-1">
+            <Label>Label</Label>
             <TextInput value={button.label} readOnly className="cursor-default opacity-70" />
           </div>
-          <div className="space-y-1 @md:flex @md:gap-2">
-            <Label className="@md:w-1/3">Role</Label>
+          <div className="space-y-1">
+            <Label>Role</Label>
             <TextInput
               value={buttonRoleByLabel[button.label.trim().toUpperCase()] ?? ''}
               placeholder="none"
@@ -190,54 +199,59 @@ export function GpioButtonsSection(): JSX.Element {
         ) : (
           frameForm.gpio_buttons?.map((_, index) => (
             <Group key={index} name={`gpio_buttons.${index}`}>
-              <div>
-                <Field
-                  name="pin"
-                  label="Pin"
-                  labelRight={
-                    <Button
-                      color="secondary"
-                      size="small"
-                      className="flex items-center gap-1"
-                      onClick={() =>
-                        setFrameFormValues({
-                          gpio_buttons: frameForm.gpio_buttons?.filter((_button, i) => i !== index),
-                        })
+              <div className={GPIO_BUTTON_EDIT_ROW}>
+                <div className="space-y-1">
+                  <Label>Pin</Label>
+                  <Field name="pin">
+                    <TextInput name="pin" placeholder="5" />
+                  </Field>
+                </div>
+                <div className="space-y-1">
+                  <Label>Label</Label>
+                  <Field name="label">
+                    <TextInput name="label" placeholder="A" />
+                  </Field>
+                </div>
+                <div className="space-y-1">
+                  <Label>
+                    Role
+                    <Tooltip
+                      title={
+                        <>
+                          What the button means to a scene: a store scene listens for <code>button</code> with a{' '}
+                          <code>role</code> filter (<code>next</code>, <code>back</code>, …) instead of the label
+                          printed on this board. Leave it empty for the default the label carries (A = primary, B =
+                          next, C = prev, D = back, …).
+                        </>
                       }
-                    >
-                      <TrashIcon className="w-4 h-4" />
-                      Remove
-                    </Button>
+                    />
+                  </Label>
+                  <Field name="role">
+                    <Select
+                      name="role"
+                      options={[
+                        {
+                          value: '',
+                          label: `Default for the label${roleDefaultLabel(frameForm.gpio_buttons?.[index]?.label)}`,
+                        },
+                        ...buttonRoles.map((role) => ({ value: role, label: role })),
+                      ]}
+                    />
+                  </Field>
+                </div>
+                <Button
+                  color="secondary"
+                  size="small"
+                  className="flex items-center gap-1"
+                  onClick={() =>
+                    setFrameFormValues({
+                      gpio_buttons: frameForm.gpio_buttons?.filter((_button, i) => i !== index),
+                    })
                   }
                 >
-                  <TextInput name="pin" placeholder="5" />
-                </Field>
-                <Field name="label" label="Label">
-                  <TextInput name="label" placeholder="A" />
-                </Field>
-                <Field
-                  name="role"
-                  label="Role"
-                  tooltip={
-                    <>
-                      What the button means to a scene: a store scene listens for <code>button</code> with a{' '}
-                      <code>role</code> filter (<code>next</code>, <code>back</code>, …) instead of the label printed on
-                      this board. Leave it empty for the default the label carries (A = primary, B = next, C = prev, D =
-                      back, …).
-                    </>
-                  }
-                >
-                  <Select
-                    name="role"
-                    options={[
-                      {
-                        value: '',
-                        label: `Default for the label${roleDefaultLabel(frameForm.gpio_buttons?.[index]?.label)}`,
-                      },
-                      ...buttonRoles.map((role) => ({ value: role, label: role })),
-                    ]}
-                  />
-                </Field>
+                  <TrashIcon className="w-4 h-4" />
+                  Remove
+                </Button>
               </div>
             </Group>
           ))
@@ -322,12 +336,12 @@ function ButtonBeepField(): JSX.Element | null {
 }
 
 /**
- * Voice chat (docs/voice-chat.md), under the buttons it answers to: holding
- * the key Button actions binds to it (REFRESH on the reTerminal presets)
+ * Voice chat (docs/voice-chat.md), under the buttons it answers to: the key
+ * a Button actions row binds to it (REFRESH held, on the reTerminal presets)
  * opens the board's microphone and streams what is said to this control
  * plane for the AI chat. A switch, on by default on a board with a
  * microphone (ESP32 only); off keeps the microphone shut whatever the
- * buttons are bound to.
+ * buttons are bound to. Which key, and that it is held, is the row's to say.
  */
 function VoiceChatField(): JSX.Element | null {
   const { voiceChat, setVoiceChat } = useFrameSettings()
@@ -345,13 +359,14 @@ function VoiceChatField(): JSX.Element | null {
             title={
               disabledReason ?? (
                 <>
-                  Hold the voice key for a second (REFRESH on the reTerminal presets; Button actions below binds a
-                  key&apos;s long press to &quot;Voice chat&quot;): the frame plays a short sparkle, listens until you
-                  let go, and sends what you said to this control plane. The AI chat transcribes it and acts on it with
-                  the frame in its context (switch to a scene by name, set a field of the scene showing, redraw, show a
-                  picture); the reply lands in the frame&apos;s chat and its log, and the buzzer sounds the outcome.
-                  Needs a board with a microphone: the Seeed reTerminal E1001 and E1002 have one (the E1004 does not).
-                  Off keeps the microphone shut whatever the buttons are bound to.
+                  Talk to the frame: set a button action below to &quot;Voice chat&quot; (the reTerminal presets bind
+                  REFRESH held). It goes on a long press because the hold is the recording: once the key has been held
+                  for a second the frame plays a short sparkle and listens, and letting go ends the sentence and sends
+                  it to this control plane. The AI chat transcribes it and acts on it with the frame in its context
+                  (switch to a scene by name, set a field of the scene showing, redraw, show a picture); the reply
+                  lands in the frame&apos;s chat and its log, and the buzzer sounds the outcome. Needs a board with a
+                  microphone: the Seeed reTerminal E1001 and E1002 have one (the E1004 does not). Off keeps the
+                  microphone shut whatever the buttons are bound to.
                   {microphone === false ? ' This frame reports no microphone.' : ''}
                 </>
               )
@@ -366,7 +381,7 @@ function VoiceChatField(): JSX.Element | null {
               value
                 ? microphone === false
                   ? 'On, but this frame reports no microphone'
-                  : 'On: hold the voice key to talk to the frame'
+                  : 'On: a button action below set to Voice chat opens the microphone'
                 : 'Off: the microphone stays shut'
             }
           />
@@ -726,7 +741,15 @@ function roleDefaultLabel(label: string | undefined): string {
  * keyboard layout the runtime maps key codes through, and whether it grabs
  * keyboards away from the console. Linux frames only.
  */
-export function InputSettingsSection(): JSX.Element {
+export function InputSettingsSection(): JSX.Element | null {
+  const { isEmbeddedMode } = useFrameSettings()
+  // The evdev translator is the Linux runtime's: an ESP32 or Pico board has
+  // no keyboard to map and the virtual frame's keys come from the browser
+  // already mapped. The nav link goes with it (workspaceSurfaces.ts,
+  // embeddedModeHiddenFrameSettingsSections).
+  if (isEmbeddedMode) {
+    return null
+  }
   return (
     <>
       <H6 id="frame-settings-input">Input</H6>
