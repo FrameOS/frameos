@@ -41,6 +41,7 @@ type RecordingHost = ref object
   logger: Logger
   scenes: Table[SceneId, FrameScene]
   current: SceneId
+  order: seq[SceneId] ## the case's scene list, in its order (`setCurrentScene {direction}`)
   trace: seq[string]
   pinned: seq[string] ## `run` lines the step pins with their payload
   loop: EventLoop
@@ -84,6 +85,7 @@ proc newRecordingHost(sceneId: SceneId, logs: ref seq[JsonNode]): RecordingHost 
     # Input reaches a scene only under the names it listens for (runner.nim and
     # single_scene_host.nim answer the same way): a `run` line is a listener.
     sceneListens: proc (scene: FrameScene, event: string): bool = sceneListensTo(scene, event),
+    sceneOrder: proc (): seq[SceneId] = host.order,
     log: proc (entry: JsonNode) =
       if entry{"event"}.getStr() == "event:refused":
         host.trace.add("refused " & entry["name"].getStr() & " " & entry["origin"].getStr() & " " &
@@ -110,6 +112,8 @@ block dispatcher:
     let name = c["name"].getStr()
     let logs = new(seq[JsonNode])
     let host = newRecordingHost(c["scene"].getStr().SceneId, logs)
+    for scene in c["scenes"]:
+      host.order.add(scene["id"].getStr().SceneId)
     discard host.sceneInstance(host.current)
     discard host.loop.drain() # what `init` dispatched is not this case's subject
     for index, step in c["steps"].getElems():

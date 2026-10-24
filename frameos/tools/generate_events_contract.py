@@ -271,6 +271,7 @@ def unit_options(doc):
         "gpio-action": doc["buttons"]["edges"],
         "swipe-direction": doc["gestures"]["directions"],
         "pointer-type": doc["pointer"]["types"],
+        "scene-direction": doc["scenes"]["directions"],
     }
 
 

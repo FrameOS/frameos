@@ -9,7 +9,7 @@
 # emscripten JS-library hooks (log + event notifications go out through
 # postMessage, HTTP comes in through synchronous XHR).
 
-import std/[json, locks, math, monotimes, options, strformat, strutils, tables, times]
+import std/[json, locks, math, monotimes, options, sequtils, strformat, strutils, tables, times]
 import pixie
 
 import frameos/types
@@ -41,6 +41,8 @@ var
   logger: Logger
   defaultSceneId: Option[SceneId] = none(SceneId)
   scenesLoadedCount = 0
+  # The loaded payload's scene order, for `setCurrentScene {direction}`.
+  loadedSceneOrder: seq[SceneId] = @[]
   # The scene's lifetime, its lifecycle events and the dispatcher's EventHost:
   # shared with the ESP32 runtime (frameos/single_scene_host).
   host = SingleSceneHost()
@@ -183,6 +185,9 @@ proc frameos_wasm_init(width, height: cint, name: cstring,
     host.logEntry = proc (entry: JsonNode) = jsLogHook(($entry).cstring)
     # Nobody else owns a switch here: the preview just does it.
     host.requestSelect = proc (sceneId: string): bool = selectSceneById(sceneId)
+    # The loaded payload's order, for `setCurrentScene {direction}`; a preview
+    # of one scene switches nowhere.
+    host.sceneOrder = proc (): seq[SceneId] = loadedSceneOrder
     host.runtimeCommand = proc (command: RuntimeCommand, payload: JsonNode) =
       log("runtime command ignored in the preview: " & $command)
     # Backend-persisted state, seeded by frameos_wasm_set_scene_state.
@@ -213,6 +218,7 @@ proc frameos_wasm_load_scenes(payload: cstring): cint {.exportc, cdecl.} =
     host.dropScene()
     replaceInterpretedScenesCache(newScenes)
     scenesLoadedCount = newScenes.len
+    loadedSceneOrder = inputs.mapIt(it.id).filterIt(newScenes.hasKey(it))
 
     if host.sceneId.isSome and not newScenes.hasKey(host.sceneId.get()):
       host.sceneId = none(SceneId)

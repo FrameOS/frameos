@@ -420,7 +420,7 @@ proc eventPayloadKeyCount*(name: string): int =
   of evGpio: 8
   of evButton: 7
   of evSetSceneState: 2
-  of evSetCurrentScene: 2
+  of evSetCurrentScene: 3
   of evUploadScenes: 3
   else: 0
 
@@ -570,7 +570,8 @@ proc eventPayloadKey*(name: string, index: int): string =
   of evSetCurrentScene:
     case index
     of 0: "sceneId"
-    of 1: "state"
+    of 1: "direction"
+    of 2: "state"
     else: ""
   of evUploadScenes:
     case index

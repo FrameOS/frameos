@@ -514,6 +514,7 @@ proc updateUploadedScenesFromPayload*(
   withLock sceneRegistryLock:
     oldUploaded = uploadedScenes
   updateUploadedScenes(newScenes)
+  setUploadedSceneOrder(sceneInputs.mapIt(it.id))
   setUploadedScenePayload(payloadString)
   setUploadedScenesSource(payloadSource)
   # The LAN-deny policy keys on the recorded source; recompute it now rather

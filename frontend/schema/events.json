@@ -740,14 +740,24 @@
   },
   {
     "name": "setCurrentScene",
-    "description": "Switch the frame to another scene. An optional `state` object is applied to that scene's public state.",
+    "description": "Switch the frame to another scene: the one `sceneId` names, or with `direction` the `next` / `prev` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). An optional `state` object is applied to that scene's public state.",
     "canDispatch": true,
     "fields": [
       {
         "name": "sceneId",
         "label": "Scene",
         "type": "scene",
-        "required": true
+        "required": false
+      },
+      {
+        "name": "direction",
+        "label": "Direction",
+        "type": "string",
+        "required": false,
+        "options": [
+          "next",
+          "prev"
+        ]
       }
     ]
   }
