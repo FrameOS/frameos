@@ -367,7 +367,7 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     anchor: 'frame-settings-gpio',
     surfaces: ['backend', 'frameAdmin'],
     conditions:
-      'The button rows; a second box, "Buzzer and microphone" (the beep GPIO and tone, the voice chat switch), follows for real ESP32 boards only (not virtual, not Pico) and has no nav entry of its own.',
+      'The button rows; a second box, "Buzzer, LED and microphone" (the beep GPIO and tone, the status LED GPIO and type, the microphone pins, the voice chat switch), follows for real ESP32 boards only (not virtual, not Pico) and has no nav entry of its own.',
   },
   {
     key: 'button-actions',

@@ -100,8 +100,10 @@ describe("settings parity between the device planes", () => {
     // buzzer. 10 since `voice_chat` (2026.10.20): the LEFT+RIGHT microphone
     // chord lives in the ESP32 firmware (docs/voice-chat.md); no Pi frame
     // has a microphone path. 13 with that microphone's three pins
-    // (`mic_clk_pin`, `mic_data_pin`, `mic_pwr_pin`, the same release).
-    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(13);
+    // (`mic_clk_pin`, `mic_data_pin`, `mic_pwr_pin`, the same release). 15
+    // with the status LED (`led_pin`, `led_type`: the board LED that follows
+    // the ESP32 buzzer's notes, fos_led.c; no Pi preset has one).
+    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(15);
   });
 });
 

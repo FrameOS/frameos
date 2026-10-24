@@ -66,6 +66,13 @@ microphone path (yet).
   happened, as every edge is. The contract is `docs/events-contract.json`
   (`gpio.payload.claimed`); the cases are in `docs/event-fixtures.json`
   (`inputState`, and the `dispatcher` case for a `voiceChat` emit).
+- **The LED** (`fos_led.c`, `led_pin` / `led_type`): the board's status LED
+  follows every note below — lit while one sounds, dark for a rest and after
+  the last — so a frame whose buzzer is off (`buzzer_pin -1`), or a board
+  without one, shows the listening sparkle, the wait and the answer in light.
+  A microphone and an LED are a complete set of cues; the LED never ends up in
+  the recording. The reTerminal E1001/E1002 have one on GPIO6, the E1004 on
+  GPIO48, lit low.
 - **Sounds** (`fos_buzzer.c`, all relative to `buzzer_tone_hz`):
   listening = four rising notes and a held top (the "sparkle", about 300 ms);
   sent = two quick rising notes; then, every two seconds until the answer, a
@@ -141,7 +148,7 @@ microphone path (yet).
   `micDataPin` / `micPwrPin` in `device_config` (the E1001/E1002 presets seed
   42/41/38, a USB provisioning writes them as one `mic_pins` line), the cloud
   pushes them with `set_settings` and shows what the frame reports
-  (`hardware.micClkPin` …). Settings → "Buzzer and microphone" has the three
+  (`hardware.micClkPin` …). Settings → "Buzzer, LED and microphone" has the three
   fields next to the voice chat switch and, under it, the four switches for
   what the voice chat may do ("What the voice chat may do" below) — those are
   the control plane's, never a device setting.

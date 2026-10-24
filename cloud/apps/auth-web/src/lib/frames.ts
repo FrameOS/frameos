@@ -452,6 +452,12 @@ export const esp32VoiceChatFrameSettingKeys = new Set<string>(
 export const esp32MicrophoneFrameSettingKeys = new Set<string>(
   [...contractSettingKeysSince("esp32", esp32VoiceChatFrameSettingsMinVersion)].filter((key) => key.startsWith("mic_")),
 );
+// The status LED (`led_pin`, -1 = none; `led_type`: gpio, gpio_inverted,
+// ws2812), the same floor again: it follows the buzzer's notes (fos_led.c),
+// read at every note, so live, no reboot.
+export const esp32LedFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("esp32", esp32VoiceChatFrameSettingsMinVersion)].filter((key) => key.startsWith("led_")),
+);
 
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata

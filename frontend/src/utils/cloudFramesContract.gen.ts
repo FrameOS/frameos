@@ -153,6 +153,12 @@ export const cloudFramesContractSettings = {
     },
     "mic_pwr_pin": {
       "since": "2026.10.20"
+    },
+    "led_pin": {
+      "since": "2026.10.20"
+    },
+    "led_type": {
+      "since": "2026.10.20"
     }
   }
 } as const

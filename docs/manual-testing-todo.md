@@ -73,6 +73,45 @@ confirm. Still open:
 - [ ] **Settings** → GPIO buttons → "Voice chat" off/on reaches the frame
   live on both planes (`voice_chat` in the settings change log).
 
+### reTerminal E-series peripherals bench (the SD slot, the LED, the clock, the charger)
+
+Built against Seeed's E1002 V1.2 and E1004 V1.0 schematics, compiled and
+host-tested, not yet booted on a board. The console says most of it:
+`status` (the `assets:`, `led:`, `i2c:`, `rtc:` and `charger:` lines), `sd
+status`, `led blink`, `i2c`, `beep`.
+
+- [ ] **The SD card on the panel's bus (E1002 or E1004):** with a FAT32 card
+  seated, the boot log says `SD assets mounted at /srv/assets (... on the
+  panel's SPI bus)`, `assets_list` over the cloud lists the card, an upload
+  lands on it, and a render right after a card read still refreshes cleanly
+  (the panel holds the bus; the card waits). An empty slot logs `SD slot
+  empty (card-detect GPIO 15 high)` and `sd remount` after seating a card
+  mounts it. The 13.3" refresh with its 30 s busy wait must not break an SD
+  read in flight — read a file during a refresh once.
+- [ ] **A board provisioned before this firmware** (NVS without `sd_pwr`,
+  pins all -1, `assets_sd 0`) comes up with the socket on after the OTA; a
+  board whose owner set SD pins keeps them.
+- [ ] **The LED:** `led blink` flashes the green LED; a press lights it with
+  the two clicks, a hold with each tick; `set buzzer_pin -1` and the LED
+  still shows the press and the voice chat's sparkle, ticks and answer;
+  Settings → "Buzzer, LED and microphone" shows `6 on the frame` (48 on the
+  E1004) and `GPIO, lit low`, and setting -1 darkens it without a restart.
+  The E1004's GPIO48 is the Sticky's buzzer pin: `set hardware
+  seeed_reterminal_sticky` on an E1004 must not light anything odd.
+- [ ] **The I2C chips:** `i2c` lists `sda19/scl20: pcf8563 sht4x` and (E1002)
+  `sda39/scl40: sy6974b`, (E1004) the charger on the 19/20 bus. With USB in,
+  `charger: usb_power=1`; unplugged, `usb_power=0` and the `power` log line
+  says `onBattery:true` only then. `deep_sleep_on_battery 1` on a desk-bound
+  frame with USB in stays awake; unplugged it sleeps between renders.
+- [ ] **The clock:** power the board off at the rear switch for a minute and
+  on again (no Wi-Fi): the boot log says `rtc: clock set from the PCF8563`
+  with the right time and `clock from the RTC`, the schedule runs before the
+  first SNTP answer; `i2c` prints the RTC within a second of the system
+  clock after a sync. A board that never synced says `rtc: clock not set
+  (integrity flag)` and waits for SNTP as before.
+- [ ] **The WS2812 kind** (no board with one is to hand): `set led_type
+  ws2812` on a pin with a pixel lights it soft white per note.
+
 ### HyperPixel 4.0 bench
 
 One display path on every board (`driver:hyperPixel4` logs `"path":"kms"`):

@@ -591,6 +591,8 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   mic_clk_pin: 'Microphone clock GPIO',
   mic_data_pin: 'Microphone data GPIO',
   mic_pwr_pin: 'Microphone power GPIO',
+  led_pin: 'Status LED GPIO',
+  led_type: 'Status LED type',
   network: 'Network settings',
   agent: 'Remote settings',
   mountpoints: 'Mountpoints',

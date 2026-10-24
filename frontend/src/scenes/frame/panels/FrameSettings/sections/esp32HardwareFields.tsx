@@ -21,6 +21,7 @@ import {
   esp32RecommendedPinLayout,
   esp32SdCardPinsForPreset,
   esp32SdCardPresetValue,
+  isSeeedReterminalSdCardPreset,
   normalizeEsp32HardwarePreset,
   normalizeEsp32PinLayout,
   normalizeEsp32PinNumber,
@@ -183,7 +184,12 @@ export function Esp32HardwareFields(): JSX.Element {
           >
             {({ value, onChange }) => {
               const sdCardAssets = normalizeEsp32SdCardAssets(value as Esp32SdCardAssets | undefined)
-              const preset = esp32SdCardPresetValue(sdCardAssets)
+              // The three reTerminal E-series share one socket: offer it once,
+              // under the frame's own preset name when it is one of them.
+              const seeedSdPreset = isSeeedReterminalSdCardPreset(embeddedHardwarePreset)
+                ? embeddedHardwarePreset
+                : 'seeed_reterminal_e1002'
+              const preset = esp32SdCardPresetValue(sdCardAssets, seeedSdPreset)
               const updateSdCardAssets = (nextValues: Partial<Esp32SdCardAssets>) => {
                 onChange({
                   ...sdCardAssets,
@@ -223,6 +229,10 @@ export function Esp32HardwareFields(): JSX.Element {
                           {
                             value: ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET,
                             label: 'Waveshare ESP32-S3 ePaper 13.3E6',
+                          },
+                          {
+                            value: seeedSdPreset,
+                            label: 'Seeed reTerminal E1001 / E1002 / E1004 (on the panel bus)',
                           },
                         ]}
                         onChange={(nextPreset) => {

@@ -122,6 +122,11 @@ const OPTIONAL_ON_OLDER_FIRMWARE: ReadonlySet<EmbeddedUsbConfigKey> = new Set<Em
   // spec; they ride the settings pull too, and the reTerminal presets carry
   // their own.
   'mic_pins',
+  // 2026.10.20: the status LED that follows the buzzer (fos_led.c). Both
+  // ride the settings pull (`ledPin`, `ledType`), and the reTerminal presets
+  // carry their own.
+  'led_pin',
+  'led_type',
 ])
 
 export interface ProvisionOverUsbResult {
