@@ -691,9 +691,12 @@ def embedded_settings_payload(db: Session, frame: Frame) -> dict:
     preview = previewed_scenes(db, frame)
     if preview and isinstance(frame_settings, dict):
         from types import SimpleNamespace
+        from typing import cast
 
-        stand_in = SimpleNamespace(scenes=[s for s in preview if isinstance(s, dict)],
-                                   service_setting_groups=frame.service_setting_groups)
+        # Only the two attributes shipped_frame_settings reads; typed as a
+        # Frame for its signature.
+        stand_in = cast(Frame, SimpleNamespace(scenes=[s for s in preview if isinstance(s, dict)],
+                                               service_setting_groups=frame.service_setting_groups))
         for key, value in shipped_frame_settings(stand_in, get_settings_dict(db, project_id=frame.project_id)).items():
             frame_settings.setdefault(key, value)
     payload: dict = {}

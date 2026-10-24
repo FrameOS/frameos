@@ -540,10 +540,11 @@ export const scenesLogic = kea<scenesLogicType>([
     toggleSceneSelection: (sceneId: string) => ({ sceneId }),
     setSelectedSceneIds: (sceneIds: string[]) => ({ sceneIds }),
     toggleMissingActiveExpanded: true,
-    // docs/ui-vocabulary.md "Discard": takes the preview (frame.scene_preview:
-    // the editor's "Preview on frame", the voice chat's picture) off the frame
-    // by pushing the saved scene list as it stands. Behind a confirmation: a
-    // preview is held nowhere else, so what goes is gone.
+    // docs/ui-vocabulary.md "Discard": ends the preview (frame.scene_preview:
+    // the editor's "Preview on frame", the voice chat's picture) and pushes
+    // the saved scene list as it stands. A push alone would not do: it
+    // carries the preview along (docs/scene-previews.md "A preview rides
+    // along"). Behind a confirmation: a preview is held nowhere else.
     discardPreview: true,
     // docs/ui-vocabulary.md "Install": the previewed scene onto the frame's
     // scene list, saved and pushed, so it stays.
@@ -1196,6 +1197,21 @@ export const scenesLogic = kea<scenesLogicType>([
         busyLabel: 'Discarding',
         danger: true,
         onConfirm: async () => {
+          // First the plane: the preview is over, so the push below carries
+          // nothing (any scene push otherwise brings the preview along).
+          const ended = await apiFetch(
+            `/api/frames/${props.frameId}/${isCloudMode() ? 'scene-preview' : 'scene_preview'}`,
+            { method: 'DELETE' }
+          )
+          if (!ended.ok && ended.status !== 404) {
+            reportTaskOutcome('error', {
+              frameId: props.frameId,
+              kind: 'deploy',
+              title,
+              detail: 'Failed to discard the preview',
+            })
+            return
+          }
           if (isCloudMode()) {
             // The assigned list again, every row as the frame holds it: the
             // route queues a set_scenes, which is then the newest push.

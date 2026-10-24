@@ -220,13 +220,21 @@ async def test_a_preview_is_pulled_like_a_deploy_and_holds_until_the_next_one(as
     )
     assert again.status_code == 304
 
-    # A deploy is a newer scene set: the saved scenes again.
+    # A deploy is a newer scene set, and it carries the preview along: the
+    # saved scenes with the previewed one after them (the frame keeps showing
+    # the id it holds). Discard, and the saved scenes alone are served again.
     enqueue_frame_command(db, frame, 'set_scenes', {'_deploy': {'id': 'd1', 'snapshot': {}}}, detail='1 scene')
     deployed = await no_auth_client.get(
         f'/api/frames/{frame.id}/embedded/scenes', headers={**headers, 'If-None-Match': preview_etag}
     )
     assert deployed.status_code == 200
-    assert deployed.headers['etag'] == saved_etag
+    assert deployed.headers['etag'] not in (saved_etag, preview_etag)
+    assert deployed.json() == [*saved.json(), preview]
+    assert (await async_client.delete(f'/api/frames/{frame.id}/scene_preview')).status_code == 200
+    discarded = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/scenes', headers={**headers, 'If-None-Match': preview_etag}
+    )
+    assert discarded.headers['etag'] == saved_etag
 
 
 @pytest.mark.asyncio
@@ -396,12 +404,79 @@ async def test_a_preview_shows_in_the_workspace_and_can_be_installed(async_clien
     assert [s['name'] for s in pushes[1].payload['_preview']['scenes']] == ['Apple']
     assert (await async_client.get(f'/api/frames/{frame.id}/scene_preview')).json()['scene']['name'] == 'Apple'
 
-    # A deploy's set_scenes row is the newest: no preview any more.
+    # A deploy's set_scenes row is the newest, and it carries the preview
+    # along (the next test): the preview row stays, the older bundle is spent.
     enqueue_frame_command(db, frame, 'set_scenes', {'_deploy': {'id': 'd1'}})
-    assert (await async_client.get(f'/api/frames/{frame.id}')).json()['frame']['scene_preview'] is None
-    assert (await async_client.get(f'/api/frames/{frame.id}/scene_preview')).status_code == 404
+    assert (await async_client.get(f'/api/frames/{frame.id}')).json()['frame']['scene_preview']['name'] == 'Apple'
+    assert (await async_client.get(f'/api/frames/{frame.id}/scene_preview')).json()['scene']['name'] == 'Apple'
     db.expire_all()
     assert pushes[1].payload['_preview']['scenes'] == []
+
+
+@pytest.mark.asyncio
+async def test_a_preview_rides_along_until_it_is_installed_or_discarded(async_client, db):
+    """docs/scene-previews.md "A preview rides along": a deploy or a push of
+    the saved list keeps the previewed scene on the frame (the device keeps
+    showing the id it holds), a push that holds a scene of that id replaces
+    it, and Discard ends it."""
+    from app.api.embedded_device import embedded_scenes_payload
+    from app.utils.frame_commands import enqueue_frame_command
+
+    frame = await _embedded_frame(async_client, db)
+    saved_ids = [s['id'] for s in frame.scenes]
+    assert saved_ids
+    banana = {'id': 'banana', 'name': 'Banana', 'nodes': [], 'edges': []}
+    with _no_nudge():
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/uploadScenes', json={'scenes': [*frame.scenes, banana], 'sceneId': 'banana'}
+        )
+        assert response.status_code == 200, response.text
+
+    # The deploy: the device's pull serves the saved list plus the banana,
+    # and the preview is still reported, from the editor, by its name.
+    deploy = enqueue_frame_command(db, frame, 'set_scenes', {'_deploy': {'id': 'd1', 'snapshot': {}}})
+    assert deploy.payload['_preview'] == {
+        'scenes': [banana], 'scene_id': 'banana', 'name': 'Banana', 'source': 'editor', 'carried': True,
+    }
+    served = json.loads(embedded_scenes_payload(db, frame))
+    assert [s['id'] for s in served] == [*saved_ids, 'banana']
+    shown = (await async_client.get(f'/api/frames/{frame.id}')).json()['frame']['scene_preview']
+    assert shown['scene_id'] == 'banana' and shown['source'] == 'editor'
+    assert (await async_client.get(f'/api/frames/{frame.id}/scene_preview')).json()['scene'] == banana
+
+    # A second deploy carries it again (the carry is from the standing row,
+    # whose bundle is the one kept), and the first deploy's bundle is spent.
+    again = enqueue_frame_command(db, frame, 'set_scenes', {'_deploy': {'id': 'd2', 'snapshot': {}}})
+    assert again.payload['_preview']['scenes'] == [banana]
+    db.expire_all()
+    assert deploy.payload['_preview']['scenes'] == [] and deploy.payload['_preview']['spent'] is True
+
+    # Installed: the saved list holds the id, so the next deploy carries
+    # nothing and the preview is over; the pull serves the saved list.
+    frame.scenes = [*frame.scenes, {**banana, 'name': 'Banana (saved)'}]
+    db.commit()
+    installed = enqueue_frame_command(db, frame, 'set_scenes', {'_deploy': {'id': 'd3', 'snapshot': {}}})
+    assert '_preview' not in installed.payload
+    assert (await async_client.get(f'/api/frames/{frame.id}')).json()['frame']['scene_preview'] is None
+    assert [s['name'] for s in json.loads(embedded_scenes_payload(db, frame))][-1] == 'Banana (saved)'
+
+    # A new preview, then Discard: the preview is gone from the workspace at
+    # once, the pull serves the saved list, and the deploy after it is bare.
+    frame.scenes = [s for s in frame.scenes if s['id'] != 'banana']
+    db.commit()
+    with _no_nudge():
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/uploadScenes', json={'scenes': [*frame.scenes, banana], 'sceneId': 'banana'}
+        )
+        assert response.status_code == 200, response.text
+    assert (await async_client.get(f'/api/frames/{frame.id}')).json()['frame']['scene_preview']['name'] == 'Banana'
+    assert (await async_client.delete(f'/api/frames/{frame.id}/scene_preview')).status_code == 200
+    assert (await async_client.get(f'/api/frames/{frame.id}')).json()['frame']['scene_preview'] is None
+    assert (await async_client.get(f'/api/frames/{frame.id}/scene_preview')).status_code == 404
+    assert (await async_client.delete(f'/api/frames/{frame.id}/scene_preview')).status_code == 404
+    assert [s['id'] for s in json.loads(embedded_scenes_payload(db, frame))] == saved_ids
+    bare = enqueue_frame_command(db, frame, 'set_scenes', {'_deploy': {'id': 'd4', 'snapshot': {}}})
+    assert '_preview' not in bare.payload
 
 
 @pytest.mark.asyncio

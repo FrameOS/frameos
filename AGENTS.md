@@ -104,12 +104,16 @@
   list (the editor's "Preview on frame", an ad-hoc `set_scenes` push) is
   reported by both planes as `scene_preview` on the frame while that push is
   the newest scene set, and the scene list draws it as a preview row with
-  "Install" and "Discard" (confirmed: a replaced preview is gone for good).
-  Each plane keeps ONE scene bundle per frame
-  (the backend empties older `_preview.scenes`, the cloud spends `scenes` on
-  ack); the preview's name, source and shown scene outlive the bundle. A new
-  pusher sets `source` and goes through the same two routes, never a store
-  of its own.
+  "Install" and "Discard" (confirmed: a discarded preview is gone for good).
+  **A preview rides along**: a scene push without a preview of its own (a
+  deploy, the list pushed again) carries the standing preview's scene with
+  it, so the frame keeps showing it through pushes and reboots; only a push
+  that holds a scene of that id (Install), or a Discard (`DELETE
+  …/scene_preview` / `/scene-preview`), ends it. Each plane keeps ONE scene
+  bundle per frame (the backend empties older `_preview.scenes`, the cloud
+  spends `scenes` on ack); the preview's name, source and shown scene outlive
+  the bundle. A new pusher sets `source` and goes through the same two
+  routes, never a store of its own.
 
 ## Voice chat: `docs/voice-chat.md` is the contract
 

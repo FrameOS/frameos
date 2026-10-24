@@ -2425,6 +2425,23 @@ async def api_frame_scene_preview(id: int, db: Session = Depends(get_db)):
     return {"preview": info, "scene": scene}
 
 
+@api_project.delete("/frames/{id:int}/scene_preview")
+async def api_frame_discard_scene_preview(id: int, db: Session = Depends(get_db), redis: Redis = Depends(get_redis)):
+    """The preview row's "Discard": the preview is over, so the next scene
+    push (the workspace deploys right after) carries nothing and the frame
+    goes back to its saved scenes. 404 when the frame shows no preview. The
+    same route exists on the cloud (DELETE /api/frames/{id}/scene-preview)."""
+    frame = _project_frame(db, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    from app.utils.frame_commands import discard_scene_preview
+
+    if not discard_scene_preview(db, frame):
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="The frame shows no preview")
+    await log(db, redis, int(frame.id), "stdinfo", "Discarded the previewed scene; the saved scenes are pushed next")
+    return {"ok": True}
+
+
 @api_project.get("/frames/{id:int}/scene_preview_settings")
 async def api_frame_scene_preview_settings(
     id: int,
