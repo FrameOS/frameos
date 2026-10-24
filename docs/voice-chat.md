@@ -134,7 +134,15 @@ microphone path (yet).
   owner turns off to keep the microphone shut whatever the map binds) and the
   frame's `event_map` for which key (above). Console: `set mic_pins …`, `set
   voice_chat 0|1`, `mic [seconds]` records and prints the level (the bench
-  check that the microphone is wired), `status` shows both.
+  check that the microphone is wired), `status` shows both. From both control
+  planes the pins are three contract settings, `mic_clk_pin` / `mic_data_pin`
+  / `mic_pwr_pin` (-1 = none; the power pin -1 = always powered), read at
+  every session's start so applied live: the backend keeps `micClkPin` /
+  `micDataPin` / `micPwrPin` in `device_config` (the E1001/E1002 presets seed
+  42/41/38, a USB provisioning writes them as one `mic_pins` line), the cloud
+  pushes them with `set_settings` and shows what the frame reports
+  (`hardware.micClkPin` …). Settings → "Buzzer and microphone" has the three
+  fields next to the voice chat switch.
 
 ## The upload (one HTTP contract, both planes)
 

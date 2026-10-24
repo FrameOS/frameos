@@ -266,6 +266,7 @@ export function GpioButtonsSection(): JSX.Element {
           <H6 id="frame-settings-gpio-extras">Buzzer and microphone</H6>
           <div className="pl-2 @md:pl-8 space-y-2">
             <ButtonBeepField />
+            <MicrophoneField />
             <VoiceChatField />
           </div>
         </>
@@ -340,6 +341,59 @@ function ButtonBeepField(): JSX.Element | null {
             onChange={(value) => setButtonBeep({ toneHz: value })}
             placeholder={tonePlaceholder}
           />
+        </div>
+      </div>
+    </fieldset>
+  )
+}
+
+/**
+ * The PDM microphone's pins (docs/voice-chat.md; fos_mic.c), one row: the
+ * clock, the data line and the GPIO that powers the microphone for a
+ * session. Empty leaves the board's own (the reTerminal E1001/E1002: 42, 41
+ * and 38; the E1004 has none, and a PDM mic on its J2 header is 42/41 with
+ * no power pin), -1 = no microphone (power: -1 = always powered). Read at
+ * every session's start, so a change applies live.
+ */
+function MicrophoneField(): JSX.Element | null {
+  const { microphone, setMicrophonePins } = useFrameSettings()
+  if (!microphone) {
+    return null
+  }
+  const { clkPin, dataPin, pwrPin, reportedClkPin, reportedDataPin, reportedPwrPin, disabledReason } = microphone
+  const placeholder = (reported: number | undefined, none: string): string =>
+    reported === undefined ? 'Board default, -1 = none' : reported < 0 ? none : `${reported} on the frame`
+  const pins: { name: string; value: number | undefined; reported: number | undefined; none: string; patch: (v: number | undefined) => void }[] = [
+    { name: 'Clock', value: clkPin, reported: reportedClkPin, none: 'None on the frame', patch: (v) => setMicrophonePins({ clkPin: v }) },
+    { name: 'Data', value: dataPin, reported: reportedDataPin, none: 'None on the frame', patch: (v) => setMicrophonePins({ dataPin: v }) },
+    { name: 'Power switch', value: pwrPin, reported: reportedPwrPin, none: 'Always powered', patch: (v) => setMicrophonePins({ pwrPin: v }) },
+  ]
+  return (
+    <fieldset disabled={disabledReason !== undefined} className="min-w-0 space-y-2">
+      <div className="space-y-1 @md:flex @md:gap-2">
+        <Label className="@md:w-1/3">
+          Microphone GPIO
+          <Tooltip
+            title={
+              disabledReason ?? (
+                <>
+                  The PDM microphone the voice chat records from: its clock and data GPIO, and the GPIO that powers it
+                  for a session (-1 = always powered). The Seeed reTerminal E1001 and E1002 have one on 42, 41 and 38,
+                  which the preset fills in; the E1004 has none, and a PDM microphone on its J2 header is 42 and 41
+                  with no power pin. Leave a field empty for the board&apos;s own, or set the clock or data to -1 for no
+                  microphone. Read when a recording starts, so a change applies without a restart.
+                </>
+              )
+            }
+          />
+        </Label>
+        <div className="grid w-full grid-cols-3 gap-2">
+          {pins.map((pin) => (
+            <div key={pin.name} className="space-y-1">
+              <span className="frameos-muted text-xs">{pin.name}</span>
+              <NumberTextInput value={pin.value} onChange={pin.patch} placeholder={placeholder(pin.reported, pin.none)} />
+            </div>
+          ))}
         </div>
       </div>
     </fieldset>

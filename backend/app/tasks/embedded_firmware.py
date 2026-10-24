@@ -326,6 +326,14 @@ EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER = {
     "buzzerPin": 45,
     "buzzerToneHz": 2000,
 }
+# The PDM microphone of the E1001/E1002 (docs/voice-chat.md): clock GPIO42,
+# data GPIO41, powered through a TPS22916 load switch on GPIO38. The E1004
+# has none. fos_board.c's k_mics table is the device copy.
+EMBEDDED_SEEED_RETERMINAL_MIC = {
+    "micClkPin": 42,
+    "micDataPin": 41,
+    "micPwrPin": 38,
+}
 # Seeed reTerminal E1004 (ESP32-S3, 32MB flash, 8MB PSRAM): 13.3" 1200x1600
 # Spectra 6 (T133A01) on the E-series SPI bus — SCK7/MOSI9, CS10, DC11,
 # BUSY13 as the E1001/E1002 — but with the panel's second chip-select on
@@ -491,6 +499,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         # per Seeed schematic, hardware-unverified on E1001/E1002.
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER,
+        **EMBEDDED_SEEED_RETERMINAL_MIC,
     },
     "seeed_reterminal_e1002": {
         "device": "waveshare.EPD_7in3e",
@@ -503,6 +512,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         # per Seeed schematic, hardware-unverified on E1001/E1002.
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER,
+        **EMBEDDED_SEEED_RETERMINAL_MIC,
     },
     "seeed_reterminal_e1004": {
         # 1200x1600 on an 8MB module: the 16-bit render canvas is what makes
@@ -972,6 +982,9 @@ EMBEDDED_PRESET_SEED_ONLY_KEYS = (
     ("buzzerPin", "buzzer_pin"),
     ("buzzerToneHz", "buzzer_tone_hz"),
     ("voiceChat", "voice_chat"),
+    ("micClkPin", "mic_clk_pin"),
+    ("micDataPin", "mic_data_pin"),
+    ("micPwrPin", "mic_pwr_pin"),
     ("deepSleepOnBattery", "deep_sleep_on_battery"),
     ("wakeCheckSeconds", "wake_check_seconds"),
 )
@@ -1583,6 +1596,20 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     buzzer_tone_hz = _embedded_device_config_value(frame, "buzzerToneHz", "buzzer_tone_hz")
     if isinstance(buzzer_tone_hz, int) and not isinstance(buzzer_tone_hz, bool):
         settings.append(_provisioning_setting("buzzer_tone_hz", buzzer_tone_hz))
+    # The PDM microphone's pins travel as the console's one `mic_pins` spec
+    # (docs/voice-chat.md); the parser keeps a pin the spec leaves out, so
+    # only the pins the backend holds are named.
+    mic_spec = ",".join(
+        f"{name}={value}"
+        for name, value in (
+            ("clk", _embedded_device_config_value(frame, "micClkPin", "mic_clk_pin")),
+            ("data", _embedded_device_config_value(frame, "micDataPin", "mic_data_pin")),
+            ("pwr", _embedded_device_config_value(frame, "micPwrPin", "mic_pwr_pin")),
+        )
+        if isinstance(value, int) and not isinstance(value, bool)
+    )
+    if mic_spec:
+        settings.append(_provisioning_setting("mic_pins", mic_spec))
 
     # The frame's own certificate is not a console value: it rides the first
     # settings pull once the board is on Wi-Fi and talking to this backend.

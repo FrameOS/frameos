@@ -445,6 +445,12 @@ export const esp32VoiceChatFrameSettingsMinVersion = "2026.10.20";
 export const esp32VoiceChatFrameSettingKeys = new Set<string>(
   [...contractSettingKeysSince("esp32", esp32VoiceChatFrameSettingsMinVersion)].filter((key) => key === "voice_chat"),
 );
+// The microphone's pins (`mic_clk_pin`, `mic_data_pin`, `mic_pwr_pin`, -1 =
+// none), on the same floor: the firmware reads them at every voice session's
+// start, so live, no reboot.
+export const esp32MicrophoneFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("esp32", esp32VoiceChatFrameSettingsMinVersion)].filter((key) => key.startsWith("mic_")),
+);
 
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata

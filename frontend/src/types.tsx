@@ -135,6 +135,10 @@ export interface FrameType {
     buzzerPin?: number | null
     /** ESP32 only: the pitch of that tone in Hz (2026.10.12+). */
     buzzerToneHz?: number | null
+    /** ESP32 only: the PDM microphone's clock, data and power GPIO, -1 = none (2026.10.20+). */
+    micClkPin?: number | null
+    micDataPin?: number | null
+    micPwrPin?: number | null
     /** ESP32 only: the board has a PDM microphone the voice key's hold opens
      * (docs/voice-chat.md), and whether voice chat is on (2026.10.20+). */
     microphone?: boolean | null
@@ -284,6 +288,13 @@ export interface FrameType {
     /** Pitch of that tone in Hz (default 2000 on the device). */
     buzzerToneHz?: number
     buzzer_tone_hz?: number
+    /** The PDM microphone's clock, data and power GPIO (docs/voice-chat.md); -1 = none, unset = the board's own. */
+    micClkPin?: number
+    mic_clk_pin?: number
+    micDataPin?: number
+    mic_data_pin?: number
+    micPwrPin?: number
+    mic_pwr_pin?: number
     /** Voice chat: holding the voice key opens the microphone (docs/voice-chat.md). Default on. */
     voiceChat?: boolean
     voice_chat?: boolean
@@ -344,6 +355,10 @@ export interface FrameType {
   buzzer_tone_hz?: number
   /** ESP32: voice chat, the microphone switch of the voice key's hold (docs/voice-chat.md). */
   voice_chat?: boolean
+  /** ESP32: the PDM microphone's clock, data and power GPIO; -1 = none. */
+  mic_clk_pin?: number
+  mic_data_pin?: number
+  mic_pwr_pin?: number
   flip?: 'horizontal' | 'vertical' | 'both' | ''
   background_color: string // deprecated, serves as fallback for scenes
   scenes?: FrameScene[]

@@ -493,9 +493,13 @@ static void add_hardware_json(cJSON *parent)
      * panel shows as "on the frame". */
     cJSON_AddNumberToObject(hw, "buzzerPin", config->buzzer_pin);
     cJSON_AddNumberToObject(hw, "buzzerToneHz", config->buzzer_tone_hz);
-    /* Whether this board has a microphone to talk into, and whether the
-     * owner lets it listen (docs/voice-chat.md). */
+    /* Whether this board has a microphone to talk into, its pins (the
+     * preset's when no push set them; -1 = none) and whether the owner lets
+     * it listen (docs/voice-chat.md). */
     cJSON_AddBoolToObject(hw, "microphone", config->mic_pins.clk >= 0 && config->mic_pins.data >= 0);
+    cJSON_AddNumberToObject(hw, "micClkPin", config->mic_pins.clk);
+    cJSON_AddNumberToObject(hw, "micDataPin", config->mic_pins.data);
+    cJSON_AddNumberToObject(hw, "micPwrPin", config->mic_pins.pwr);
     cJSON_AddBoolToObject(hw, "voiceChat", config->voice_chat);
     /* Local network access (docs/lan-access.md): the cloud has no column of
      * its own and shows what the frame reports here, on every hello and
@@ -2288,7 +2292,8 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * verb stays atomic. Returns the offending pin, or -1 when all are fine. */
 static int set_settings_reserved_pin(const cJSON *settings, const char **key, const char **why)
 {
-    static const char *const pin_keys[] = {"battery_pin", "battery_enable_pin", "buzzer_pin"};
+    static const char *const pin_keys[] = {"battery_pin", "battery_enable_pin", "buzzer_pin",
+                                           "mic_clk_pin", "mic_data_pin", "mic_pwr_pin"};
     for (size_t i = 0; i < sizeof(pin_keys) / sizeof(pin_keys[0]); i++) {
         const cJSON *value = cJSON_GetObjectItem(settings, pin_keys[i]);
         if (!cJSON_IsNumber(value)) continue;
@@ -2516,6 +2521,20 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     const cJSON *voice_chat = cJSON_GetObjectItem(settings, "voice_chat");
     if (voice_chat != NULL) {
         config->voice_chat = cJSON_IsTrue(voice_chat);
+    }
+    /* The PDM microphone's pins (-1 = none): read at every voice session's
+     * start (fos_voice.c), so live. */
+    const cJSON *mic_clk_pin = cJSON_GetObjectItem(settings, "mic_clk_pin");
+    if (mic_clk_pin != NULL) {
+        config->mic_pins.clk = (int8_t)mic_clk_pin->valuedouble;
+    }
+    const cJSON *mic_data_pin = cJSON_GetObjectItem(settings, "mic_data_pin");
+    if (mic_data_pin != NULL) {
+        config->mic_pins.data = (int8_t)mic_data_pin->valuedouble;
+    }
+    const cJSON *mic_pwr_pin = cJSON_GetObjectItem(settings, "mic_pwr_pin");
+    if (mic_pwr_pin != NULL) {
+        config->mic_pins.pwr = (int8_t)mic_pwr_pin->valuedouble;
     }
     /* Debug logging: the render loop pushes config->debug_logging into the
      * Nim runtime every pass (fos_client.c), so this applies live. */

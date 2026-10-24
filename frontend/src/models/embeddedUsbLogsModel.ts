@@ -1343,6 +1343,7 @@ export type EmbeddedUsbConfigKey =
   | 'battery_enable_pin'
   | 'buzzer_pin'
   | 'buzzer_tone_hz'
+  | 'mic_pins'
   | 'pins'
   | 'gpio_buttons'
 

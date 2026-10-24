@@ -143,6 +143,25 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
   } | null
   setButtonBeep: (patch: { pin?: number; toneHz?: number }) => void
   /**
+   * ESP32 only, null elsewhere: the PDM microphone's clock, data and power
+   * GPIO (docs/voice-chat.md; fos_mic.c), -1 = none, undefined = the board's
+   * own. The cloud pushes `mic_clk_pin` / `mic_data_pin` / `mic_pwr_pin`; the
+   * backend keeps `micClkPin` / `micDataPin` / `micPwrPin` in device_config
+   * for the device's settings poll. `reported*` is what a cloud frame said
+   * it runs with (`hardware.micClkPin` …); `disabledReason` the cloud
+   * firmware floor (the voice chat's).
+   */
+  microphone: {
+    clkPin: number | undefined
+    dataPin: number | undefined
+    pwrPin: number | undefined
+    reportedClkPin: number | undefined
+    reportedDataPin: number | undefined
+    reportedPwrPin: number | undefined
+    disabledReason: string | undefined
+  } | null
+  setMicrophonePins: (patch: { clkPin?: number; dataPin?: number; pwrPin?: number }) => void
+  /**
    * ESP32 only, null elsewhere: voice chat, the key hold that opens the
    * board's microphone (docs/voice-chat.md; which key is Button actions').
    * `enabled` is the form's
@@ -543,6 +562,72 @@ export function FrameSettingsProvider({
     setFrameFormValues({ device_config: next })
   }
 
+  // The PDM microphone's pins (docs/voice-chat.md), on the same two routes as
+  // the beep; the cloud floor is the voice chat's (one release). Real ESP32
+  // boards only.
+  const reportedPin = (value: unknown): number | undefined => (typeof value === 'number' ? value : undefined)
+  const microphoneDisabledReason = cloudFrameSupportsEsp32VoiceChat(frame.frameos_version)
+    ? undefined
+    : frame.frameos_version
+    ? `The microphone pins need FrameOS ${esp32VoiceChatCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set them here.`
+    : `The microphone pins need FrameOS ${esp32VoiceChatCloudFrameSettingsMinVersion} or newer on the frame. They unlock once the frame connects and reports its version.`
+  const microphone: FrameSettingsContextValue['microphone'] = esp32CloudProfile
+    ? {
+        clkPin: frameForm.mic_clk_pin,
+        dataPin: frameForm.mic_data_pin,
+        pwrPin: frameForm.mic_pwr_pin,
+        reportedClkPin: reportedPin(frame.hardware?.micClkPin),
+        reportedDataPin: reportedPin(frame.hardware?.micDataPin),
+        reportedPwrPin: reportedPin(frame.hardware?.micPwrPin),
+        disabledReason: microphoneDisabledReason,
+      }
+    : !cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform
+    ? {
+        clkPin: powerDeviceConfig.micClkPin ?? powerDeviceConfig.mic_clk_pin,
+        dataPin: powerDeviceConfig.micDataPin ?? powerDeviceConfig.mic_data_pin,
+        pwrPin: powerDeviceConfig.micPwrPin ?? powerDeviceConfig.mic_pwr_pin,
+        reportedClkPin: undefined,
+        reportedDataPin: undefined,
+        reportedPwrPin: undefined,
+        disabledReason: undefined,
+      }
+    : null
+  const setMicrophonePins = (patch: { clkPin?: number; dataPin?: number; pwrPin?: number }): void => {
+    if (esp32CloudProfile) {
+      setFrameFormValues({
+        ...('clkPin' in patch ? { mic_clk_pin: patch.clkPin } : {}),
+        ...('dataPin' in patch ? { mic_data_pin: patch.dataPin } : {}),
+        ...('pwrPin' in patch ? { mic_pwr_pin: patch.pwrPin } : {}),
+      })
+      return
+    }
+    // Same rule as the beep: the camelCase key wins, so drop the snake_case
+    // copy a USB-console provisioning may have left behind.
+    const next: NonNullable<FrameType['device_config']> = { ...powerDeviceConfig }
+    const write = (
+      key: 'micClkPin' | 'micDataPin' | 'micPwrPin',
+      snakeKey: 'mic_clk_pin' | 'mic_data_pin' | 'mic_pwr_pin',
+      value: number | undefined
+    ): void => {
+      delete next[snakeKey]
+      if (value === undefined) {
+        delete next[key]
+      } else {
+        next[key] = value
+      }
+    }
+    if ('clkPin' in patch) {
+      write('micClkPin', 'mic_clk_pin', patch.clkPin)
+    }
+    if ('dataPin' in patch) {
+      write('micDataPin', 'mic_data_pin', patch.dataPin)
+    }
+    if ('pwrPin' in patch) {
+      write('micPwrPin', 'mic_pwr_pin', patch.pwrPin)
+    }
+    setFrameFormValues({ device_config: next })
+  }
+
   // Voice chat (docs/voice-chat.md), on the same two routes as the beep: the
   // cloud pushes `voice_chat`, the backend keeps `voiceChat` in device_config
   // for the device's settings poll. Real ESP32 boards only.
@@ -663,6 +748,8 @@ export function FrameSettingsProvider({
     reportedGpioButtons: cloudProfile ? reportedGpioButtonsOf(frame.hardware?.gpioButtons) : null,
     buttonBeep,
     setButtonBeep,
+    microphone,
+    setMicrophonePins,
     voiceChat,
     setVoiceChat,
 

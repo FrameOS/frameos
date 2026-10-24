@@ -1211,6 +1211,34 @@ async def test_settings_carry_the_buzzer_pin_only_when_set(async_client, no_auth
 
 
 @pytest.mark.asyncio
+async def test_settings_carry_the_microphone_pins_only_when_set(async_client, no_auth_client, db):
+    """The PDM microphone's pins (docs/voice-chat.md) are present-only like
+    the buzzer: a board whose preset gave it 42/41/38 keeps them until the
+    backend holds a value, each pin on its own, and -1 travels as -1."""
+    frame = await device_frame(async_client, db)
+    mic_keys = ('micClkPin', 'mic_clk_pin', 'micDataPin', 'mic_data_pin', 'micPwrPin', 'mic_pwr_pin')
+    base_config = {key: value for key, value in (frame.device_config or {}).items() if key not in mic_keys}
+    frame.device_config = base_config
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    for key in ('micClkPin', 'micDataPin', 'micPwrPin'):
+        assert key not in response.json()['frame']
+
+    # Either spelling, each pin on its own.
+    frame.device_config = {**base_config, 'micClkPin': 42, 'mic_data_pin': 41, 'micPwrPin': -1}
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['frame']['micClkPin'] == 42
+    assert response.json()['frame']['micDataPin'] == 41
+    assert response.json()['frame']['micPwrPin'] == -1
+
+
+@pytest.mark.asyncio
 async def test_settings_carry_what_a_console_line_cannot(async_client, no_auth_client, db):
     """The three settings a stock release image can only learn from this poll:
     the HTTP response cap (kilobyte-scale integer, but read once at boot), the

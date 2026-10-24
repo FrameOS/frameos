@@ -257,6 +257,16 @@ export function cloudFrameSupportsEsp32VoiceChat(frameosVersion: string | null |
 }
 
 /**
+ * The PDM microphone's pins (`mic_clk_pin`, `mic_data_pin`, `mic_pwr_pin`;
+ * -1 = none), on the voice chat floor: the firmware reads them at every
+ * session's start, so live. One floor, two tails: each list names its own
+ * keys, so a caller gating on one does not carry the other.
+ */
+export const esp32MicrophoneCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  esp32VoiceChatCloudFrameSettingsMinVersion
+).filter((key) => key.startsWith('mic_'))
+
+/**
  * What every ESP32 firmware with the cloud link applies: four of the base
  * six (no timezone before 2026.8.34, no debug before 2026.8.31) plus the
  * ungated power keys.
@@ -447,6 +457,9 @@ export const numericCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = [
   'battery_enable_pin',
   'buzzer_pin',
   'buzzer_tone_hz',
+  'mic_clk_pin',
+  'mic_data_pin',
+  'mic_pwr_pin',
   'metrics_interval',
   'max_http_response_bytes',
 ]

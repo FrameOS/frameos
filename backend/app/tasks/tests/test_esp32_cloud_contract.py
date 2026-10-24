@@ -102,5 +102,6 @@ def test_single_plane_settings_carry_a_parity_reason():
     # the ESP32 button task's; no Pi preset has a buzzer); 10 since
     # `voice_chat` (2026.10.20: the microphone switch of the voice chat, whose
     # key hold lives in the ESP32 firmware, docs/voice-chat.md; no Pi frame
-    # has a microphone path).
-    assert by_plane.get("esp32", 0) <= 10, by_plane
+    # has a microphone path); 13 with that microphone's three pins
+    # (`mic_clk_pin`, `mic_data_pin`, `mic_pwr_pin`, the same release).
+    assert by_plane.get("esp32", 0) <= 13, by_plane

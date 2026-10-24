@@ -1,5 +1,6 @@
 #include "fos_settings.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -573,6 +574,29 @@ static bool apply_frame_settings(const cJSON *frame)
         config->voice_chat = cJSON_IsTrue(voice_chat);
         changed = true;
     }
+    /* The PDM microphone's pins (docs/voice-chat.md): clock, data and the
+     * power switch, -1 = none. Read at every voice session's start
+     * (fos_voice.c), so live; a session already recording keeps its pins. */
+    {
+        static const struct {
+            const char *key;
+            size_t offset;
+        } mic_keys[] = {
+            {"micClkPin", offsetof(fos_mic_pins_t, clk)},
+            {"micDataPin", offsetof(fos_mic_pins_t, data)},
+            {"micPwrPin", offsetof(fos_mic_pins_t, pwr)},
+        };
+        for (size_t i = 0; i < sizeof(mic_keys) / sizeof(mic_keys[0]); i++) {
+            const cJSON *value = cJSON_GetObjectItem(frame, mic_keys[i].key);
+            int8_t *slot = (int8_t *)((char *)&config->mic_pins + mic_keys[i].offset);
+            if (cJSON_IsNumber(value) && value->valuedouble >= -1 && value->valuedouble <= 48 &&
+                *slot != (int8_t)value->valuedouble &&
+                settings_pin_usable(mic_keys[i].key, (int)value->valuedouble)) {
+                *slot = (int8_t)value->valuedouble;
+                changed = true;
+            }
+        }
+    }
 
     /* GPIO buttons: [{pin, label}], the whole list replaced — the cloud's
      * set_settings shape (fos_cloud.c), through the console's spec parser so
@@ -888,6 +912,15 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (before->voice_chat != after->voice_chat) {
         change_append(out, out_len, "voice_chat", after->voice_chat ? "true" : "false");
+    }
+    if (before->mic_pins.clk != after->mic_pins.clk) {
+        change_append_int(out, out_len, "mic_clk_pin", (long)after->mic_pins.clk);
+    }
+    if (before->mic_pins.data != after->mic_pins.data) {
+        change_append_int(out, out_len, "mic_data_pin", (long)after->mic_pins.data);
+    }
+    if (before->mic_pins.pwr != after->mic_pins.pwr) {
+        change_append_int(out, out_len, "mic_pwr_pin", (long)after->mic_pins.pwr);
     }
     if (before->debug_logging != after->debug_logging) {
         change_append(out, out_len, "debug", after->debug_logging ? "true" : "false");
