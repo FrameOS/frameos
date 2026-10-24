@@ -2709,7 +2709,7 @@
    },
    {
     "name": "an installed scene's event map rewrites what a button says before the scene hears it",
-    "why": "The map is the installed copy's (`eventMap` beside `nodes`, written by the control plane, kept across scene updates), applied by the dispatcher on every host before the scene is asked. A frame with a REFRESH key and a scene written for A and B: a press of REFRESH is the scene's A, a long press its B `press` (the rule writes `as` over the payload, action included), and the scene's own REFRESH listener never hears a mapped press. What no rule matches is delivered as it came, and a mapped `button` is logged as `event:mapped` with the rule's `as`, never the payload.",
+    "why": "The map is the installed copy's (`eventMap` beside `nodes`, written by the control plane, kept across scene updates), applied by the dispatcher on every host before the scene is asked. A frame with a REFRESH key and a scene written for A and B: a press of REFRESH is the scene's A, a long press its B `press` (the rule writes `as` over the payload, action included), and the scene's own REFRESH listener never hears a mapped press. What no rule matches is delivered as it came, and a mapped `button` is logged as `event:mapped` with the rule's `as`, never the payload. Every rewrite is one `event:mapped` line (`scope: scene`).",
     "scenes": [
      {
       "id": "fixtures/dispatcher/eventMap",
@@ -2861,6 +2861,7 @@
        }
       ],
       "trace": [
+       "mapped scene button",
        "run eventMap button",
        "render"
       ],
@@ -2883,6 +2884,7 @@
        }
       ],
       "trace": [
+       "mapped scene button",
        "run eventMap button",
        "render"
       ],
@@ -2916,16 +2918,359 @@
         "origin": "http:write",
         "event": "button",
         "payload": {
-         "pin": "17",
+         "pin": 17,
          "label": "KEY1"
         }
        }
       ],
       "trace": [
-       "run eventMap button"
+       "mapped scene button",
+       "run eventMap button {\"pin\":17,\"label\":\"A\",\"role\":\"next\",\"action\":\"press\"}"
       ],
       "state": {
        "heardA": true
+      }
+     }
+    ]
+   },
+   {
+    "name": "the frame's event map binds a press to the frame, whatever scene is showing",
+    "why": "frame.json `eventMap` is the control plane's \"Button actions\" (a reTerminal's LEFT and RIGHT held are the previous and the next scene, on every preset). The dispatcher applies it first, scene or no scene: a matching rule with `emit` replaces the press with the event it names (origin `eventMap`, `as` its payload) and the scene never hears the press \u2014 not even a listener with no filter; a rule without `emit` rewrites the payload for every scene. `setCurrentScene {direction}` walks the host's scene order (the control plane's list) and wraps; a direction that is not `next` or `prev` is refused. An installed scene's own rule may emit too (a double press of REFRESH is this scene's page 2). What the map emits is never mapped again.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/frameMapA",
+      "name": "frameMapA",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardButton",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "xe1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     },
+     {
+      "id": "fixtures/dispatcher/frameMapB",
+      "name": "frameMapB",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "eventMap": [
+       {
+        "event": "button",
+        "match": {
+         "label": "REFRESH",
+         "action": "doublePress"
+        },
+        "emit": "setSceneState",
+        "as": {
+         "state": {
+          "page": 2
+         }
+        }
+       }
+      ],
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardButton",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "xe1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": [
+       {
+        "name": "page",
+        "label": "Page",
+        "type": "integer",
+        "value": "1",
+        "access": "public",
+        "persist": "memory"
+       }
+      ]
+     },
+     {
+      "id": "fixtures/dispatcher/frameMapC",
+      "name": "frameMapC",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardButton",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "xe1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "frameEventMap": [
+     {
+      "event": "button",
+      "match": {
+       "label": "LEFT",
+       "action": "longPress"
+      },
+      "emit": "setCurrentScene",
+      "as": {
+       "direction": "prev"
+      }
+     },
+     {
+      "event": "button",
+      "match": {
+       "label": "RIGHT",
+       "action": "longPress"
+      },
+      "emit": "setCurrentScene",
+      "as": {
+       "direction": "next"
+      }
+     },
+     {
+      "event": "button",
+      "match": {
+       "label": "REFRESH",
+       "action": "longPress"
+      },
+      "emit": "render"
+     },
+     {
+      "event": "button",
+      "match": {
+       "label": "REFRESH",
+       "action": "press"
+      },
+      "as": {
+       "label": "A"
+      }
+     }
+    ],
+    "scene": "fixtures/dispatcher/frameMapA",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "LEFT",
+         "action": "press"
+        }
+       }
+      ],
+      "trace": [
+       "run frameMapA button",
+       "render"
+      ],
+      "state": {
+       "heardButton": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "LEFT",
+         "action": "longPress",
+         "durationMs": 1500
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame button -> setCurrentScene",
+       "select fixtures/dispatcher/frameMapC",
+       "run frameMapA close",
+       "run frameMapC open",
+       "render"
+      ],
+      "handled": 2,
+      "current": "fixtures/dispatcher/frameMapC",
+      "state": {
+       "heardButton": null
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "RIGHT",
+         "action": "longPress",
+         "durationMs": 1500
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame button -> setCurrentScene",
+       "select fixtures/dispatcher/frameMapA",
+       "run frameMapC close",
+       "run frameMapA open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/frameMapA"
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "REFRESH",
+         "action": "longPress",
+         "durationMs": 1500
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame button -> render",
+       "render"
+      ],
+      "handled": 2
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "REFRESH",
+         "action": "press"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame button",
+       "run frameMapA button {\"pin\":-1,\"label\":\"A\",\"role\":\"refresh\",\"action\":\"press\"}"
+      ]
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "setCurrentScene",
+        "payload": {
+         "direction": "next"
+        }
+       }
+      ],
+      "trace": [
+       "select fixtures/dispatcher/frameMapB",
+       "run frameMapA close",
+       "run frameMapB open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/frameMapB"
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "setCurrentScene",
+        "payload": {
+         "direction": "sideways"
+        }
+       }
+      ],
+      "trace": [
+       "refused setCurrentScene http:write direction"
+      ],
+      "current": "fixtures/dispatcher/frameMapB"
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "REFRESH",
+         "action": "doublePress"
+        }
+       }
+      ],
+      "trace": [
+       "mapped scene button -> setSceneState",
+       "run frameMapB setSceneState",
+       "render"
+      ],
+      "state": {
+       "page": 2,
+       "heardButton": null
       }
      }
     ]
@@ -3001,21 +3346,6 @@
       ],
       "trace": [],
       "handled": 1,
-      "current": "fixtures/dispatcher/lonely"
-     },
-     {
-      "send": [
-       {
-        "origin": "http:write",
-        "event": "setCurrentScene",
-        "payload": {
-         "direction": "sideways"
-        }
-       }
-      ],
-      "trace": [
-       "refused setCurrentScene http:write direction"
-      ],
       "current": "fixtures/dispatcher/lonely"
      }
     ]

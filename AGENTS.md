@@ -98,15 +98,23 @@
   report. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
   evdev translator's `test_translate.nim` are where a rule gets its test.
 
-- **An installed scene's button map is the install's, never the scene's**
-  (`docs/events.md` "Event map"). `eventMap` sits beside `nodes` on the
-  installed copy: the backend keeps it on the `frame.scenes` entry (the MCP
+- **Two event maps, one rule shape** (`docs/events.md` "Event map";
+  `event_map.nim`, applied by `event_loop.nim` on every host). The
+  **frame's** (frame.json `eventMap`; `event_map` as a frame column, a cloud
+  `set_settings` key and an ESP32 NVS slot; "Button actions" in Settings,
+  `utils/frameEventMap.ts`) binds a key to the frame whatever scene shows —
+  a rule with `emit` replaces the press (origin `eventMap`), the scene never
+  hears it; every reTerminal preset ships LEFT/RIGHT held = previous/next
+  scene (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset table:
+  keep the three alike). `setCurrentScene {direction}` is resolved by the
+  dispatcher from the host's `sceneOrder`, never by a host. **An installed
+  scene's** map is the install's, never the scene's: `eventMap` beside
+  `nodes`, the backend keeps it on the `frame.scenes` entry (the MCP
   `frame_scene_update` carries it over), the cloud on the assignment row
   (`event_maps`, by runtime scene id; `scene-event-map.ts` stamps it into
   the push), the SPA strips it with `origin` before any publish
-  (`cloudFrameScenesSave.ts`) and templates never carry it. The dispatcher
-  applies it (`event_map.nim`, from `event_loop.nim`) on every host; the
-  dialog is "Map buttons" in the scene menu (`buttonMapLogic.ts`,
+  (`cloudFrameScenesSave.ts`) and templates never carry it; the dialog is
+  "Map buttons" in the scene menu (`buttonMapLogic.ts`,
   `utils/sceneEventMap.ts`). A scene update must keep it on both planes.
 
 ## Deploy progress: the contract is `docs/deploy-progress-contract.json`
