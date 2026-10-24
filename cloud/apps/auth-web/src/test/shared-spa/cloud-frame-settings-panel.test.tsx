@@ -255,8 +255,9 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
     const flip = document.querySelector<HTMLSelectElement>('select[name="flip"]');
     expect(flip?.matches(":disabled")).toBe(true);
     // Every gated batch says so — the extended one, the hardware one, the
-    // display driver, the input batch and the colours batch.
-    expect(screen.getAllByText(/once the frame connects and reports its version/i).length).toBe(5);
+    // display driver, the input batch, the colours batch and the button
+    // actions (the frame's event map).
+    expect(screen.getAllByText(/once the frame connects and reports its version/i).length).toBe(6);
   });
 
   it("offers the display driver on firmware that takes it, showing the one the frame reports", () => {

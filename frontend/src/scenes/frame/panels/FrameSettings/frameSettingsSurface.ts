@@ -369,6 +369,14 @@ export const frameSettingsSections: readonly FrameSettingsSectionSpec[] = [
     conditions: 'The button beep GPIO under the buttons shows for real ESP32 boards only (not virtual, not Pico).',
   },
   {
+    key: 'button-actions',
+    title: 'Button actions',
+    anchor: 'frame-settings-button-actions',
+    surfaces: ['backend', 'frameAdmin', 'cloudLinux', 'cloudEsp32'],
+    conditions:
+      "The frame's event map (docs/events.md \"Event map\"): what a press does whatever scene shows. A cloud frame needs 2026.10.20 or newer on either profile, older ones render disabled with a note; one that reported its board preset's map and was never pushed one shows it read-only until Edit actions.",
+  },
+  {
     key: 'input',
     title: 'Input',
     anchor: 'frame-settings-input',
