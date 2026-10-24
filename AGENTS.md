@@ -110,6 +110,25 @@
   pusher sets `source` and goes through the same two routes, never a store
   of its own.
 
+## Voice chat: `docs/voice-chat.md` is the contract
+
+- Holding LEFT+RIGHT on a reTerminal E1001/E1002 (PDM microphone; the E1004
+  has none) streams speech to the frame's control plane and runs ONE turn of
+  the AI chat with the frame in context and only six frame-scoped tools
+  (`list_scenes`, `activate_scene`, `set_scene_state`, `render_now`,
+  `show_image` — a one-picture Unsplash/OpenAI preview scene, from the keys
+  the frame already has — and `rotate_frame`),
+  never the MCP tools: a frame's token is not the owner's. The upload route, the
+  caps, the prompt and the tool definitions are the same on both planes
+  (`backend/app/api/embedded_voice.py` + `app/utils/voice_chat.py`;
+  `cloud/.../frames/[frameId]/voice/[sessionId]/route.ts` + `src/lib/ai/voice.ts`);
+  the backend's test reads the cloud's `voice.ts` and the cloud's unit test
+  reads the backend's `voice_chat.py`, so change both or neither.
+- On the device the chord is `fos_voice_chord.c` (pure, host-tested), the
+  session `fos_voice.c`, the microphone `fos_mic.c`. A chord key's `up`
+  carries `claimed: true` (`docs/events-contract.json` `gpio`): the dispatcher
+  makes no `button` of it. `voice_chat` is an esp32-only contract setting.
+
 ## Deploy progress: the contract is `docs/deploy-progress-contract.json`
 
 - Every deploy, update, restart and reboot of a frame, on every frame type and

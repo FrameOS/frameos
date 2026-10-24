@@ -130,6 +130,10 @@ export interface FrameType {
     buzzerPin?: number | null
     /** ESP32 only: the pitch of that tone in Hz (2026.10.12+). */
     buzzerToneHz?: number | null
+    /** ESP32 only: the board has a PDM microphone the LEFT+RIGHT chord opens
+     * (docs/voice-chat.md), and whether voice chat is on (2026.10.20+). */
+    microphone?: boolean | null
+    voiceChat?: boolean | null
     mac?: string | null
     /** major*100 + minor, as esp_chip_info reports it */
     chipRevision?: number | null
@@ -275,6 +279,9 @@ export interface FrameType {
     /** Pitch of that tone in Hz (default 2000 on the device). */
     buzzerToneHz?: number
     buzzer_tone_hz?: number
+    /** Voice chat: holding LEFT+RIGHT opens the microphone (docs/voice-chat.md). Default on. */
+    voiceChat?: boolean
+    voice_chat?: boolean
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
     hardwarePreset?: FrameEmbeddedHardwarePreset
     /** Virtual frames only: how the backend quantizes the rendered image.
@@ -330,6 +337,8 @@ export interface FrameType {
   buzzer_pin?: number
   /** ESP32: pitch of the button beep in Hz. */
   buzzer_tone_hz?: number
+  /** ESP32: voice chat, the LEFT+RIGHT microphone chord (docs/voice-chat.md). */
+  voice_chat?: boolean
   flip?: 'horizontal' | 'vertical' | 'both' | ''
   background_color: string // deprecated, serves as fallback for scenes
   scenes?: FrameScene[]
@@ -361,9 +370,10 @@ export interface FrameType {
   secret_fingerprints?: Record<string, string>
   active_scene_id?: string
   /** The scene the frame shows for now without holding it in its saved list:
-   * the editor's "Preview on frame" (docs/scene-previews.md). Both planes
-   * report the newest scene push when it was a preview; null once a push of
-   * the saved list is newer. The scene list draws it as a preview row. */
+   * the editor's "Preview on frame" (docs/scene-previews.md) or the voice
+   * chat's picture (docs/voice-chat.md `show_image`). Both planes report the
+   * newest scene push when it was a preview; null once a push of the saved
+   * list is newer. The scene list draws it as a preview row. */
   scene_preview?: ScenePreviewInfo | null
   /** Cloud only: the device-reported state the hub mirrors onto the frame row (e.g. active_scene). */
   last_state?: Record<string, any>

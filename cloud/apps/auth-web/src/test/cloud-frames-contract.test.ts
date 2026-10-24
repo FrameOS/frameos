@@ -97,8 +97,10 @@ describe("settings parity between the device planes", () => {
     expect(counts.linux ?? 0).toBeLessThanOrEqual(10);
     // esp32 9 since `buzzer_pin` + `buzzer_tone_hz` (2026.10.12): the
     // button-press tone lives in the ESP32 button task, and no Pi preset has a
-    // buzzer.
-    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(9);
+    // buzzer. 10 since `voice_chat` (2026.10.20): the LEFT+RIGHT microphone
+    // chord lives in the ESP32 firmware (docs/voice-chat.md); no Pi frame
+    // has a microphone path.
+    expect(counts.esp32 ?? 0).toBeLessThanOrEqual(10);
   });
 });
 

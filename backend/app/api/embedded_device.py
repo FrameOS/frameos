@@ -796,6 +796,8 @@ def embedded_frame_settings(frame: Frame) -> dict:
             ("batteryEnablePin", ("batteryEnablePin", "battery_enable_pin"), "int"),
             ("buzzerPin", ("buzzerPin", "buzzer_pin"), "int"),
             ("buzzerToneHz", ("buzzerToneHz", "buzzer_tone_hz"), "int"),
+            # Voice chat (docs/voice-chat.md): the LEFT+RIGHT chord's switch.
+            ("voiceChat", ("voiceChat", "voice_chat"), "bool"),
         ):
             for key in keys:
                 value = device_config.get(key)

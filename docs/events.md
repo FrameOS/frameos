@@ -386,7 +386,12 @@ double-press window then. A second tap made and let go entirely during the
 boot is not seen. `level` is the line on an edge (0 down: the line is pulled
 up). A key is its `pin` and its `label`: on a frame a pin's label never
 changes, and the preview's buttons, which have no pin (-1), are held, timed
-and double-pressed each on its own.
+and double-pressed each on its own. `claimed: true` on an `up` is a key the
+frame took for a gesture of its own — LEFT and RIGHT held together half a
+second start the voice chat on an ESP32 (`docs/voice-chat.md`) — and the
+button layer makes nothing of that press: the `down` and the `up` were
+delivered as every edge is, but no `press` or `longPress` follows and no
+double-press window opens.
 
 **Privacy.** Key events are logged by name only (`log: name-only`), never with
 what was typed; pointer events not at all.

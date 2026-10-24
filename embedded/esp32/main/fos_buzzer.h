@@ -33,6 +33,7 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -58,12 +59,32 @@ void fos_buzzer_reject_up(void);
  * sounds replaces it. */
 void fos_buzzer_tone(uint32_t freq_hz, uint32_t duration_ms);
 
+/* The voice chat's four outcomes (docs/voice-chat.md), pitched from the
+ * press pitch like the clicks. Listening: four rising notes and a held top,
+ * ~305 ms (the recording drops that long, so the microphone does not hear
+ * it). Sent: two quick rising notes on the release, then a tick or a low bop
+ * every two seconds until the answer. Ok: three rising notes when the answer came. Error: two
+ * low notes. */
+void fos_buzzer_voice_listening(void);
+void fos_buzzer_voice_sent(void);
+/* One tick of the wait after the release, every two seconds (fos_voice.c): a tiny
+ * high tick while the recording still uploads, a low monotone bop while the
+ * plane transcribes and answers. */
+void fos_buzzer_voice_tick(bool thinking);
+/* The chat did something to the frame (switched a scene, set a field). */
+void fos_buzzer_voice_ok(void);
+/* The chat only answered: two notes, the up-click's pitches. */
+void fos_buzzer_voice_said(void);
+/* Nothing was heard: one low note. */
+void fos_buzzer_voice_nothing(void);
+void fos_buzzer_voice_error(void);
+
 /* One note of a sequence: `freq_hz` 0 is a rest. */
 typedef struct {
     uint32_t freq_hz;
     uint32_t duration_ms;
 } fos_buzzer_note_t;
-#define FOS_BUZZER_NOTES_MAX 4
+#define FOS_BUZZER_NOTES_MAX 8
 /* Notes back to back (at most FOS_BUZZER_NOTES_MAX), stepped by the stop
  * timer; returns at once. Like a tone, a sequence replaces whatever sounds. */
 void fos_buzzer_play(const fos_buzzer_note_t *notes, size_t count);

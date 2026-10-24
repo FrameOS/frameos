@@ -746,6 +746,16 @@ export const cloudFramesContract = {
           "since": "2026.10.12"
         }
       }
+    },
+    "voice_chat": {
+      "rule": {
+        "type": "bool"
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.10.20"
+        }
+      }
     }
   },
   "formats": {

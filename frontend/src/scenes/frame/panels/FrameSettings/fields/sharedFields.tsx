@@ -243,6 +243,7 @@ export function GpioButtonsSection(): JSX.Element {
           ))
         )}
         <ButtonBeepField />
+        <VoiceChatField />
       </div>
     </>
   )
@@ -313,6 +314,59 @@ function ButtonBeepField(): JSX.Element | null {
             value={toneHz}
             onChange={(value) => setButtonBeep({ toneHz: value })}
             placeholder={tonePlaceholder}
+          />
+        </div>
+      </div>
+    </fieldset>
+  )
+}
+
+/**
+ * Voice chat (docs/voice-chat.md), under the buttons it answers to: holding
+ * LEFT and RIGHT together half a second opens the board's microphone and
+ * streams what is said to this control plane for the AI chat. A switch, on
+ * by default on a board with a microphone (ESP32 only); off keeps the
+ * microphone shut whatever the buttons do.
+ */
+function VoiceChatField(): JSX.Element | null {
+  const { voiceChat, setVoiceChat } = useFrameSettings()
+  if (!voiceChat) {
+    return null
+  }
+  const { enabled, reported, microphone, disabledReason } = voiceChat
+  const value = enabled ?? reported ?? true
+  return (
+    <fieldset disabled={disabledReason !== undefined} className="min-w-0 space-y-2">
+      <div className="space-y-1 @md:flex @md:gap-2">
+        <Label className="@md:w-1/3">
+          Voice chat
+          <Tooltip
+            title={
+              disabledReason ?? (
+                <>
+                  Hold the LEFT and RIGHT buttons together for half a second: the frame plays a short sparkle, listens
+                  until you let go, and sends what you said to this control plane. The AI chat transcribes it and acts
+                  on it with the frame in its context (switch to a scene by name, set a field of the scene showing,
+                  redraw); the reply lands in the frame&apos;s chat and its log, and the buzzer sounds the outcome.
+                  Needs a board with a microphone: the Seeed reTerminal E1001 and E1002 have one (the E1004 does not).
+                  Off keeps the microphone shut whatever the buttons do.
+                  {microphone === false ? ' This frame reports no microphone.' : ''}
+                </>
+              )
+            }
+          />
+        </Label>
+        <div className="w-full">
+          <Switch
+            value={value}
+            onChange={(next) => setVoiceChat(next)}
+            label={
+              value
+                ? microphone === false
+                  ? 'On, but this frame reports no microphone'
+                  : 'On: hold LEFT + RIGHT to talk to the frame'
+                : 'Off: the microphone stays shut'
+            }
           />
         </div>
       </div>

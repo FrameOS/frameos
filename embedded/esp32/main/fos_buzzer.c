@@ -251,6 +251,76 @@ void fos_buzzer_long_press(void)
 }
 
 
+/* The voice chat's sounds (docs/voice-chat.md). Arpeggios, not chords: the
+ * LEDC channel plays one pitch at a time, so "sparkle" is a quick run up
+ * the scale ending on a held top note. Fifths and octaves of the press
+ * pitch, so they sit with the clicks whatever a frame is tuned to. */
+void fos_buzzer_voice_listening(void)
+{
+    const fos_buzzer_note_t notes[] = {
+        {tone_hz(), 40},
+        {scaled_hz(5, 4), 40},
+        {scaled_hz(3, 2), 40},
+        {scaled_hz(2, 1), 50},
+        {0, 15},
+        {scaled_hz(3, 1), 120},
+    };
+    fos_buzzer_play(notes, sizeof(notes) / sizeof(notes[0]));
+}
+
+void fos_buzzer_voice_sent(void)
+{
+    const fos_buzzer_note_t notes[] = {
+        {scaled_hz(3, 2), 35},
+        {scaled_hz(2, 1), 60},
+    };
+    fos_buzzer_play(notes, sizeof(notes) / sizeof(notes[0]));
+}
+
+void fos_buzzer_voice_tick(bool thinking)
+{
+    /* The quietest things the piezo says. Uploading: a 5 ms tick an octave
+     * up. Thinking: a low bop, an octave down for 20 ms — a piezo is far
+     * quieter there than at its resonance, which is what a wait should
+     * sound like (the fifth-up chirp this was first was "way too loud"). */
+    if (thinking) fos_buzzer_tone(scaled_hz(1, 2), 20);
+    else fos_buzzer_tone(scaled_hz(2, 1), 5);
+}
+
+void fos_buzzer_voice_ok(void)
+{
+    const fos_buzzer_note_t notes[] = {
+        {tone_hz(), 50},
+        {scaled_hz(3, 2), 50},
+        {scaled_hz(2, 1), 110},
+    };
+    fos_buzzer_play(notes, sizeof(notes) / sizeof(notes[0]));
+}
+
+void fos_buzzer_voice_said(void)
+{
+    const fos_buzzer_note_t notes[] = {
+        {tone_hz(), 50},
+        {scaled_hz(3, 2), 90},
+    };
+    fos_buzzer_play(notes, sizeof(notes) / sizeof(notes[0]));
+}
+
+void fos_buzzer_voice_nothing(void)
+{
+    fos_buzzer_tone(scaled_hz(1, 2), 160);
+}
+
+void fos_buzzer_voice_error(void)
+{
+    const fos_buzzer_note_t notes[] = {
+        {scaled_hz(3, 8), 120},
+        {0, 40},
+        {scaled_hz(3, 8), 160},
+    };
+    fos_buzzer_play(notes, sizeof(notes) / sizeof(notes[0]));
+}
+
 void fos_buzzer_reject_down(void)
 {
     fos_buzzer_tone(REJECT_DOWN_HZ, CLICK_MS);

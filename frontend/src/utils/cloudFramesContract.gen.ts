@@ -135,6 +135,9 @@ export const cloudFramesContractSettings = {
     },
     "buzzer_tone_hz": {
       "since": "2026.10.12"
+    },
+    "voice_chat": {
+      "since": "2026.10.20"
     }
   }
 } as const

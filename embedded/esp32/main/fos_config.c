@@ -75,6 +75,10 @@ static void load_defaults(void)
     s_config.battery_enable_pin = FRAMEOS_DEFAULT_BATTERY_ENABLE_PIN;
     s_config.buzzer_pin = FRAMEOS_DEFAULT_BUZZER_PIN;
     s_config.buzzer_tone_hz = FRAMEOS_DEFAULT_BUZZER_TONE_HZ;
+    s_config.mic_pins.clk = -1;
+    s_config.mic_pins.data = -1;
+    s_config.mic_pins.pwr = -1;
+    s_config.voice_chat = true;
     fos_config_parse_gpio_buttons(FRAMEOS_DEFAULT_GPIO_BUTTONS, &s_config);
     s_config.pins.rst = FRAMEOS_DEFAULT_PIN_RST;
     s_config.pins.dc = FRAMEOS_DEFAULT_PIN_DC;
@@ -235,6 +239,21 @@ esp_err_t fos_config_init(void)
     } else if (board_tone_hz > 0) {
         s_config.buzzer_tone_hz = (uint16_t)board_tone_hz;
     }
+    /* The microphone the same way: stored, else the board's own, so an
+     * E1001/E1002 provisioned before the key existed can talk after the
+     * update (docs/voice-chat.md). */
+    char mic_pins[FOS_STR_LEN] = "";
+    nvs_get_string(nvs, "mic_pins", mic_pins, sizeof(mic_pins));
+    if (mic_pins[0]) {
+        fos_config_parse_mic_pins(mic_pins, &s_config.mic_pins);
+    } else {
+        int clk, data, pwr;
+        fos_board_mic_pins(s_config.hardware_preset, &clk, &data, &pwr);
+        s_config.mic_pins.clk = (int8_t)clk;
+        s_config.mic_pins.data = (int8_t)data;
+        s_config.mic_pins.pwr = (int8_t)pwr;
+    }
+    if (nvs_get_u8(nvs, "voice", &u8) == ESP_OK) s_config.voice_chat = u8 != 0;
     char pins[FOS_STR_LEN] = "";
     nvs_get_string(nvs, "pins", pins, sizeof(pins));
     if (pins[0]) fos_config_parse_pins(pins, &s_config.pins);
@@ -336,6 +355,10 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_i8(nvs, "batt_en", s_config.battery_enable_pin), "batt_en");
     FOS_NVS_SET(nvs_set_i8(nvs, "buzzer", s_config.buzzer_pin), "buzzer");
     FOS_NVS_SET(nvs_set_u16(nvs, "buzzer_hz", s_config.buzzer_tone_hz), "buzzer_hz");
+    char mic_pins[FOS_STR_LEN];
+    fos_config_format_mic_pins(&s_config.mic_pins, mic_pins, sizeof(mic_pins));
+    FOS_NVS_SET(nvs_set_str(nvs, "mic_pins", mic_pins), "mic_pins");
+    FOS_NVS_SET(nvs_set_u8(nvs, "voice", s_config.voice_chat ? 1 : 0), "voice");
     char gpio_buttons[FOS_GPIO_BUTTONS_SPEC_LEN];
     fos_config_format_gpio_buttons(&s_config, gpio_buttons, sizeof(gpio_buttons));
     FOS_NVS_SET(nvs_set_str(nvs, "gpio_buttons", gpio_buttons), "gpio_buttons");

@@ -94,3 +94,34 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     int index = buzzer_index(hardware_preset);
     return index < 0 ? 0 : k_buzzers[index].tone_hz;
 }
+
+/* Boards with a PDM microphone: the reTerminal E1001/E1002 (and the E1003,
+ * no preset yet) share one MEMSensing MSM261 on PDM clock GPIO42, data
+ * GPIO41, powered through a TPS22916 load switch on GPIO38 (Seeed's
+ * schematics and MicRecordToSD.ino). The E1004 has no microphone: its
+ * schematic has none, and 41/42 are its J2 header's UART. */
+static const struct {
+    const char *preset;
+    int clk;
+    int data;
+    int pwr;
+} k_mics[] = {
+    {"seeed_reterminal_e1001", 42, 41, 38},
+    {"seeed_reterminal_e1002", 42, 41, 38},
+};
+
+bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *pwr)
+{
+    if (clk) *clk = -1;
+    if (data) *data = -1;
+    if (pwr) *pwr = -1;
+    if (!hardware_preset || !hardware_preset[0]) return false;
+    for (size_t i = 0; i < sizeof(k_mics) / sizeof(k_mics[0]); i++) {
+        if (strcmp(hardware_preset, k_mics[i].preset) != 0) continue;
+        if (clk) *clk = k_mics[i].clk;
+        if (data) *data = k_mics[i].data;
+        if (pwr) *pwr = k_mics[i].pwr;
+        return true;
+    }
+    return false;
+}

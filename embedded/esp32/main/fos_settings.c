@@ -22,6 +22,7 @@
 #include "fos_mem.h"
 #include "fos_schedule.h"
 #include "fos_tz.h"
+#include "fos_voice.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
 
@@ -154,6 +155,14 @@ static void settings_restart_task(void *arg)
 {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(750)); /* let the applied-settings log flush */
+    /* A rotation spoken to the frame (docs/voice-chat.md rotate_frame)
+     * arrives mid-session: the answer still has to come back and go on the
+     * panel, so the restart waits for the session, the render that follows
+     * it and the refresh — bounded, the restart is owed either way. */
+    int64_t deadline = esp_timer_get_time() + 180 * 1000000LL;
+    while (fos_voice_busy() && esp_timer_get_time() < deadline) vTaskDelay(pdMS_TO_TICKS(250));
+    vTaskDelay(pdMS_TO_TICKS(2000)); /* the release's render starts within this */
+    while (fos_client_render_in_flight() && esp_timer_get_time() < deadline) vTaskDelay(pdMS_TO_TICKS(250));
     esp_restart();
 }
 
@@ -557,6 +566,13 @@ static bool apply_frame_settings(const cJSON *frame)
         config->buzzer_tone_hz = (uint16_t)buzzer_tone_hz->valuedouble;
         changed = true;
     }
+    /* Voice chat (docs/voice-chat.md): the LEFT+RIGHT chord opens the
+     * microphone. Live: the chord asks on every press. */
+    const cJSON *voice_chat = cJSON_GetObjectItem(frame, "voiceChat");
+    if (cJSON_IsBool(voice_chat) && config->voice_chat != cJSON_IsTrue(voice_chat)) {
+        config->voice_chat = cJSON_IsTrue(voice_chat);
+        changed = true;
+    }
 
     /* GPIO buttons: [{pin, label}], the whole list replaced — the cloud's
      * set_settings shape (fos_cloud.c), through the console's spec parser so
@@ -847,6 +863,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (before->buzzer_tone_hz != after->buzzer_tone_hz) {
         change_append_int(out, out_len, "buzzer_tone_hz", (long)after->buzzer_tone_hz);
+    }
+    if (before->voice_chat != after->voice_chat) {
+        change_append(out, out_len, "voice_chat", after->voice_chat ? "true" : "false");
     }
     if (before->debug_logging != after->debug_logging) {
         change_append(out, out_len, "debug", after->debug_logging ? "true" : "false");

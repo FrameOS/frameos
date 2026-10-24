@@ -56,6 +56,10 @@ export const fallbackModelPrices: Record<
   { cached: number; input: number; output: number }
 > = {
   "gpt-4o-mini": { cached: 0.075, input: 0.15, output: 0.6 },
+  // The voice chat's transcription (docs/voice-chat.md): its input tokens
+  // are almost all audio tokens ($3/M; text input is $1.25/M), so the audio
+  // rate is the honest single number.
+  "gpt-4o-mini-transcribe": { cached: 3, input: 3, output: 5 },
   "gpt-5.5": { cached: 0.5, input: 5, output: 30 },
   "gpt-5.6-luna": { cached: 0.02, input: 0.2, output: 1.2 },
   "gpt-5.6-sol": { cached: 0.4, input: 4, output: 20 },

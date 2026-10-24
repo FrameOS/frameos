@@ -1,8 +1,7 @@
-import { and, asc, eq, or } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import {
   accounts,
   createDb,
-  frameSceneAssignments,
   storeScenes,
 } from "@frameos-cloud/db";
 import { NextRequest } from "next/server";
@@ -50,7 +49,6 @@ import {
   readJsonObject,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
-import { frameForAccount } from "../../../../src/lib/frames";
 import {
   maxRenderDimension,
   maxRenderPixels,
@@ -68,7 +66,7 @@ import { internalOrigin } from "../../../../src/lib/internal-origin";
 import { sessionCookieName } from "../../../../src/lib/session-cookie";
 import { guardedFetch } from "../../../../src/lib/ssrf";
 import { connectChatMcpTools } from "../../../../src/lib/ai/mcp-tools";
-import { frameRenderDevice, type RenderDevice } from "../../../../src/lib/ai/render-device";
+import { frameContextBlock } from "../../../../src/lib/ai/frame-context";
 import { accountInstallMemoryCheck } from "../../../../src/lib/ai/install-memory-check";
 
 export const runtime = "nodejs";
@@ -127,74 +125,6 @@ function timeZoneFrom(value: unknown): string | null {
   } catch {
     return null;
   }
-}
-
-async function frameContextBlock(
-  db: ReturnType<typeof createDb>,
-  accountId: string,
-  frameId: string | null,
-): Promise<{
-  block: string;
-  frameId: string | null;
-  renderDevice?: RenderDevice | null;
-  resolution?: { width: number; height: number } | null;
-}> {
-  if (!frameId) {
-    return { block: "", frameId: null };
-  }
-  const frame = await frameForAccount(db, accountId, frameId);
-  if (!frame) {
-    return { block: "", frameId: null };
-  }
-  const hardware = objectOrNull(frame.hardware) ?? {};
-  const lines: string[] = ["The user is working with this frame:"];
-  lines.push(`- Frame id: ${frame.id}`);
-  if (frame.name) {
-    lines.push(`- Name: ${frame.name}`);
-  }
-  const width = hardware.width;
-  const height = hardware.height;
-  if (typeof width === "number" && typeof height === "number" && width > 0 && height > 0) {
-    lines.push(`- Resolution: ${width}x${height}`);
-  }
-  if (typeof hardware.device === "string" && hardware.device) {
-    lines.push(`- Device: ${hardware.device}`);
-  }
-  if (typeof hardware.color === "string" && hardware.color) {
-    lines.push(`- Color mode: ${hardware.color}`);
-  }
-  const renderDevice = frameRenderDevice(frame);
-  if (renderDevice) {
-    lines.push(
-      `- Memory: ${renderDevice.label}. A scene that needs more aborts on the frame; render_scene renders in the same memory.`,
-    );
-  }
-  lines.push(`- Connected: ${frame.connected ? "yes" : "no"} (status: ${frame.status})`);
-  const assignments = await db
-    .select({ name: storeScenes.name, sceneId: frameSceneAssignments.sceneId })
-    .from(frameSceneAssignments)
-    .innerJoin(storeScenes, eq(storeScenes.id, frameSceneAssignments.sceneId))
-    .where(eq(frameSceneAssignments.frameId, frame.id))
-    .orderBy(asc(frameSceneAssignments.position));
-  if (assignments.length > 0) {
-    // Scene names are publisher-authored text; they enter the context only
-    // inside the untrusted frame the tool results use.
-    lines.push(
-      "- Assigned scenes: " +
-        untrustedResult(
-          "assigned_scene_names",
-          assignments.map((row) => `${row.name} (${row.sceneId})`).join(", "),
-        ),
-    );
-  } else {
-    lines.push("- No scenes assigned yet.");
-  }
-  return {
-    block: lines.join("\n"),
-    frameId: frame.id,
-    renderDevice,
-    resolution: renderSizeFrom({ height, width }),
-  };
 }
 
 // The store scene the chat was opened on (scenes.frameos.net). Same access

@@ -35,6 +35,8 @@
 #include "fos_framebuffer.h"
 #include "fos_http.h"
 #include "fos_mem.h"
+#include "fos_mic.h"
+#include "fos_voice.h"
 #include "fos_upload_limits.h"
 #include "fos_ota.h"
 #include "fos_scenes.h"
@@ -266,6 +268,12 @@ static int cmd_status(int argc, char **argv)
         printf("buzzer:      GPIO %d, %u Hz\n", (int)config->buzzer_pin, (unsigned)config->buzzer_tone_hz);
     }
     else printf("buzzer:      none\n");
+    if (config->mic_pins.clk >= 0 && config->mic_pins.data >= 0) {
+        printf("microphone:  PDM clk GPIO %d, data GPIO %d, power GPIO %d; voice chat %s%s\n",
+               (int)config->mic_pins.clk, (int)config->mic_pins.data, (int)config->mic_pins.pwr,
+               config->voice_chat ? "on" : "off", fos_voice_busy() ? " (session running)" : "");
+    }
+    else printf("microphone:  none (set mic_pins clk=42,data=41,pwr=38)\n");
     printf("nim:         %s\n", frameos_nim_info());
     printf("renders:     %lu (last %lld ms)\n",
            (unsigned long)fos_client_render_count(), fos_client_last_render_ms());
@@ -452,7 +460,8 @@ static int cmd_set(int argc, char **argv)
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|wake_schedule|"
-               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|pins|gpio_buttons|ap_psk> "
+               "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|mic_pins|voice_chat|"
+               "pins|gpio_buttons|ap_psk> "
                "<value...>\n");
         return 1;
     }
@@ -684,6 +693,14 @@ static int cmd_set(int argc, char **argv)
             if (fos_board_buzzer_tone_hz(presets[i].name) > 0) {
                 config->buzzer_tone_hz = (uint16_t)fos_board_buzzer_tone_hz(presets[i].name);
             }
+            /* The board's microphone, or none: a preset switch from an E1002
+             * to an E1004 must not leave a PDM clock on the E1004's panel
+             * reset (docs/voice-chat.md). */
+            int mic_clk, mic_data, mic_pwr;
+            fos_board_mic_pins(presets[i].name, &mic_clk, &mic_data, &mic_pwr);
+            config->mic_pins.clk = (int8_t)mic_clk;
+            config->mic_pins.data = (int8_t)mic_data;
+            config->mic_pins.pwr = (int8_t)mic_pwr;
             if (presets[i].deep_sleep_on_battery) {
                 config->deep_sleep_on_battery = true;
                 config->wake_check_sec = presets[i].wake_check_sec;
@@ -826,6 +843,28 @@ static int cmd_set(int argc, char **argv)
         }
         config->buzzer_tone_hz = (uint16_t)hz;
     }
+    /* The PDM microphone (docs/voice-chat.md): `clk=42,data=41,pwr=38`, or
+     * `none`. The reserved-pad check as for a button: a PDM clock on a flash
+     * pad is a boot loop. */
+    else if (strcmp(key, "mic_pins") == 0) {
+        fos_mic_pins_t pins = config->mic_pins;
+        if (strcmp(value, "none") == 0 || strcmp(value, "-1") == 0) {
+            pins.clk = pins.data = pins.pwr = -1;
+        } else if (fos_config_parse_mic_pins(value, &pins) != ESP_OK) {
+            printf("usage: set mic_pins clk=<gpio>,data=<gpio>[,pwr=<gpio|-1>] | none\n");
+            return 1;
+        }
+        const int candidates[] = {pins.clk, pins.data, pins.pwr};
+        for (size_t i = 0; i < 3; i++) {
+            const char *why = candidates[i] >= 0 ? fos_config_gpio_pin_reserved(candidates[i]) : NULL;
+            if (why != NULL) {
+                printf("refusing mic GPIO %d: %s\n", candidates[i], why);
+                return 1;
+            }
+        }
+        config->mic_pins = pins;
+    }
+    else if (strcmp(key, "voice_chat") == 0) config->voice_chat = atoi(value) != 0;
     else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
     else if (strcmp(key, "pins") == 0) {
         if (fos_config_parse_pins(value, &config->pins) != ESP_OK) {
@@ -1643,6 +1682,58 @@ static int cmd_beep(int argc, char **argv)
     return 0;
 }
 
+/* `mic [seconds]`: record from the microphone and print how loud it was,
+ * the bench check that the PDM pins are wired (docs/voice-chat.md). A
+ * silent room reads a peak in the tens, a voice at arm's length in the
+ * thousands, a flat 0 is a microphone that is not there or not powered. */
+static int cmd_mic(int argc, char **argv)
+{
+    fos_config_t *config = fos_config();
+    if (config->mic_pins.clk < 0 || config->mic_pins.data < 0) {
+        printf("no mic_pins set (set mic_pins clk=42,data=41,pwr=38)\n");
+        return 1;
+    }
+    if (fos_voice_busy()) {
+        printf("a voice session is running\n");
+        return 1;
+    }
+    long seconds = argc > 1 ? strtol(argv[1], NULL, 10) : 2;
+    if (seconds < 1 || seconds > 10) {
+        printf("usage: mic [seconds 1-10]\n");
+        return 1;
+    }
+    esp_err_t err = fos_mic_start(config->mic_pins.clk, config->mic_pins.data, config->mic_pins.pwr);
+    if (err != ESP_OK) {
+        printf("microphone failed to start: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+    printf("recording %ld s...\n", seconds);
+    int16_t block[512];
+    size_t total = 0;
+    size_t want = (size_t)seconds * FOS_MIC_BYTES_PER_SECOND;
+    int peak = 0;
+    uint64_t sum_abs = 0;
+    size_t samples = 0;
+    while (total < want) {
+        size_t got = 0;
+        if (fos_mic_read(block, sizeof(block), &got, 500) != ESP_OK || got == 0) break;
+        total += got;
+        for (size_t i = 0; i < got / 2; i++) {
+            int s = block[i] < 0 ? -block[i] : block[i];
+            if (s > peak) peak = s;
+            sum_abs += (uint64_t)s;
+            samples++;
+        }
+    }
+    fos_mic_stop();
+    /* Mean absolute level, not RMS: integers only, and as good a "is it
+     * wired" answer. */
+    unsigned level = samples ? (unsigned)(sum_abs / samples) : 0;
+    printf("microphone: %u bytes, peak %d, level %u%s\n", (unsigned)total, peak, level,
+           total == 0 ? " - nothing came from the I2S DMA" : peak == 0 ? " - flat: no signal" : "");
+    return total > 0 ? 0 : 1;
+}
+
 static esp_err_t register_frameos_console_commands(void)
 {
     const esp_console_cmd_t commands[] = {
@@ -1650,6 +1741,7 @@ static esp_err_t register_frameos_console_commands(void)
         {.command = "heapinfo", .help = "Per-region heap breakdown (internal + PSRAM)", .func = cmd_heapinfo},
         {.command = "buttons", .help = "buttons [watch [seconds]] — configured buttons, or find which GPIO a press moves", .func = cmd_buttons},
         {.command = "beep", .help = "beep [hz] [ms] — sound the buzzer", .func = cmd_beep},
+        {.command = "mic", .help = "mic [seconds] — record from the microphone and print the level", .func = cmd_mic},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},
         {.command = "wifi-scan", .help = "Scan visible Wi-Fi networks", .func = cmd_wifi_scan},

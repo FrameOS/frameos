@@ -5,6 +5,9 @@ idf_component_register(
         "fos_buttons.c"
         "fos_button_timing.c"
         "fos_buzzer.c"
+        "fos_voice_chord.c"
+        "fos_mic.c"
+        "fos_voice.c"
         "fos_wake.c"
         "fos_power.c"
         "fos_config.c"
@@ -55,6 +58,9 @@ idf_component_register(
         mbedtls
         console
         driver
+        esp_hw_support
+        hal
+        soc
         spiffs
         fatfs
         sdmmc
