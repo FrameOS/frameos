@@ -98,6 +98,17 @@
   report. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
   evdev translator's `test_translate.nim` are where a rule gets its test.
 
+- **An installed scene's button map is the install's, never the scene's**
+  (`docs/events.md` "Event map"). `eventMap` sits beside `nodes` on the
+  installed copy: the backend keeps it on the `frame.scenes` entry (the MCP
+  `frame_scene_update` carries it over), the cloud on the assignment row
+  (`event_maps`, by runtime scene id; `scene-event-map.ts` stamps it into
+  the push), the SPA strips it with `origin` before any publish
+  (`cloudFrameScenesSave.ts`) and templates never carry it. The dispatcher
+  applies it (`event_map.nim`, from `event_loop.nim`) on every host; the
+  dialog is "Map buttons" in the scene menu (`buttonMapLogic.ts`,
+  `utils/sceneEventMap.ts`). A scene update must keep it on both planes.
+
 ## Deploy progress: the contract is `docs/deploy-progress-contract.json`
 
 - Every deploy, update, restart and reboot of a frame, on every frame type and

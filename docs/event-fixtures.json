@@ -2706,6 +2706,229 @@
       "pending": 1
      }
     ]
+   },
+   {
+    "name": "an installed scene's event map rewrites what a button says before the scene hears it",
+    "why": "The map is the installed copy's (`eventMap` beside `nodes`, written by the control plane, kept across scene updates), applied by the dispatcher on every host before the scene is asked. A frame with a REFRESH key and a scene written for A and B: a press of REFRESH is the scene's A, a long press its B `press` (the rule writes `as` over the payload, action included), and the scene's own REFRESH listener never hears a mapped press. What no rule matches is delivered as it came, and a mapped `button` is logged as `event:mapped` with the rule's `as`, never the payload.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/eventMap",
+      "name": "eventMap",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "eventMap": [
+       {
+        "event": "button",
+        "match": {
+         "label": "REFRESH",
+         "action": "press"
+        },
+        "as": {
+         "label": "A",
+         "role": "primary"
+        }
+       },
+       {
+        "event": "button",
+        "match": {
+         "label": "REFRESH",
+         "action": "longPress"
+        },
+        "as": {
+         "label": "B",
+         "role": "next",
+         "action": "press"
+        }
+       },
+       {
+        "event": "button",
+        "match": {
+         "pin": 17
+        },
+        "as": {
+         "label": "A"
+        }
+       },
+       {
+        "event": "button",
+        "as": "not a rule"
+       }
+      ],
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button",
+         "config": {
+          "label": "A"
+         }
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardA",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "e2",
+        "type": "event",
+        "data": {
+         "keyword": "button",
+         "config": {
+          "label": "B",
+          "action": "press"
+         }
+        }
+       },
+       {
+        "id": "a2",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardB",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "e3",
+        "type": "event",
+        "data": {
+         "keyword": "button",
+         "config": {
+          "label": "REFRESH"
+         }
+        }
+       },
+       {
+        "id": "a3",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardRefresh",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "xe1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "xe2",
+        "source": "e2",
+        "sourceHandle": "next",
+        "target": "a2",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "xe3",
+        "source": "e3",
+        "sourceHandle": "next",
+        "target": "a3",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/eventMap",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "REFRESH"
+        }
+       }
+      ],
+      "trace": [
+       "run eventMap button",
+       "render"
+      ],
+      "state": {
+       "heardA": true,
+       "heardB": null,
+       "heardRefresh": null
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "REFRESH",
+         "action": "longPress",
+         "durationMs": 1200
+        }
+       }
+      ],
+      "trace": [
+       "run eventMap button",
+       "render"
+      ],
+      "state": {
+       "heardB": true,
+       "heardRefresh": null
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "REFRESH",
+         "action": "doublePress"
+        }
+       }
+      ],
+      "trace": [
+       "run eventMap button",
+       "render"
+      ],
+      "state": {
+       "heardRefresh": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "pin": "17",
+         "label": "KEY1"
+        }
+       }
+      ],
+      "trace": [
+       "run eventMap button"
+      ],
+      "state": {
+       "heardA": true
+      }
+     }
+    ]
    }
   ]
  },

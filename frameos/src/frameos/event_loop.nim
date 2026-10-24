@@ -30,6 +30,7 @@ import ./event_log
 import ./types
 import ./driver_abi
 import ./input_state
+import ./event_map
 import ./scene_rhythm
 
 export events
@@ -253,6 +254,20 @@ proc runOnScene(loop: EventLoop, scene: FrameScene, name: string, payload: JsonN
       loop.renderWanted = true
   of raNever: discard
 
+proc mapped(loop: EventLoop, scene: FrameScene, name: string, payload: JsonNode): JsonNode =
+  ## The payload after the installed scene's event map (event_map.nim): what
+  ## came, or the first matching rule's rewrite. A rewrite is logged with the
+  ## rule's own `as` — never the payload, which for a key event is what was
+  ## typed.
+  if scene.eventMap.len == 0:
+    return payload
+  let index = matchingEventMapRule(scene.eventMap, name, payload)
+  if index < 0:
+    return payload
+  loop.log(%*{"event": "event:mapped", "name": name, "sceneId": scene.id.string,
+    "rule": index, "as": scene.eventMap[index].write})
+  applyEventMapRule(scene.eventMap[index], payload)
+
 proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): bool =
   let scene = loop.host.sceneFor(envelope.target)
   if scene.isNil:
@@ -261,7 +276,8 @@ proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): boo
     loop.log(%*{"event": "event:refused", "name": envelope.name, "origin": $envelope.origin,
       "sceneId": scene.id.string, "reason": "undeclared"})
     return false
-  loop.runOnScene(scene, envelope.name, envelope.payload, policy, envelope.fromRender)
+  loop.runOnScene(scene, envelope.name, loop.mapped(scene, envelope.name, envelope.payload), policy,
+    envelope.fromRender)
   true
 
 proc listens(loop: EventLoop, scene: FrameScene, name: string): bool =
@@ -287,8 +303,11 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
   let scene = loop.host.sceneFor(target)
   if scene.isNil:
     return false
+  # The installed scene's event map first: a frame's REFRESH long press is the
+  # scene's B, whoever listens.
+  let payload = loop.mapped(scene, delivery.name, delivery.payload)
   if loop.listens(scene, delivery.name):
-    loop.runOnScene(scene, delivery.name, delivery.payload, eventPolicy(delivery.name), fromRender)
+    loop.runOnScene(scene, delivery.name, payload, eventPolicy(delivery.name), fromRender)
     result = true
   # The old names are pointer events' (docs/events-contract.json `aliasOf`),
   # and the ESP32 has no pointer: leaving this out there leaves the generated
@@ -297,7 +316,7 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
     for index in 0 ..< eventAliasCount(delivery.name):
       let alias = eventAlias(delivery.name, index)
       if loop.listens(scene, alias):
-        loop.runOnScene(scene, alias, aliasPayload(alias, delivery.payload), eventPolicy(alias), fromRender)
+        loop.runOnScene(scene, alias, aliasPayload(alias, payload), eventPolicy(alias), fromRender)
         result = true
 
 proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
