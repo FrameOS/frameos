@@ -144,6 +144,7 @@ class FrameBase(BaseModel):
     scenes: Optional[List[Dict[str, Any]]]
     schedule: Optional[Dict[str, Any]]
     gpio_buttons: Optional[List[Dict[str, Any]]]
+    event_map: Optional[List[Dict[str, Any]]] = None
     network: Optional[Dict[str, Any]]
     agent: Optional[Dict[str, Any]]
     mountpoints: Optional[Dict[str, Any]]
@@ -196,6 +197,7 @@ class FrameCreateRequest(BaseModel):
     platform: Optional[str] = None
     network: Optional[Dict[str, Any]] = None
     gpio_buttons: Optional[List[Dict[str, Any]]] = None
+    event_map: Optional[List[Dict[str, Any]]] = None
     agent: Optional[Dict[str, Any]] = None
     embedded: Optional[Dict[str, Any]] = None
     timezone: Optional[str] = None
@@ -248,6 +250,7 @@ class FrameUpdateRequest(BaseModel):
     control_code: Any = None
     schedule: Optional[Dict[str, Any]] = None
     gpio_buttons: Optional[List[Dict[str, Any]]] = None
+    event_map: Optional[List[Dict[str, Any]]] = None
     network: Optional[Dict[str, Any]] = None
     agent: Optional[Dict[str, Any]] = None
     mountpoints: Optional[Dict[str, Any]] = None

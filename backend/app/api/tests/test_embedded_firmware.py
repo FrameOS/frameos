@@ -728,6 +728,17 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     # A passive buzzer on GPIO45 chirps when a button press registers.
     assert frame.device_config["buzzerPin"] == 45
     assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
+    # The arrows held walk the scene list (docs/events.md "Event map"), by
+    # label — this board's pins are swapped, the rules are not. Seeded once:
+    # a frame whose owner cleared the map keeps it cleared.
+    assert frame.event_map == [
+        {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+        {"event": "button", "match": {"label": "RIGHT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+    ]
+    cleared = Frame(id=10, embedded={"hardwarePreset": "seeed_reterminal_e1002"}, event_map=[])
+    ensure_embedded_frame_defaults(cleared)
+    assert cleared.event_map == []
+    assert cleared.gpio_buttons == [{"pin": 3, "label": "REFRESH"}, {"pin": 4, "label": "LEFT"}, {"pin": 5, "label": "RIGHT"}]
     plan = embedded_provisioning_plan(frame)
     settings = _provisioned(plan)
     assert plan["settings"][0]["key"] == "hardware"

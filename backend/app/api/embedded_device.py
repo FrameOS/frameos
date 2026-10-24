@@ -50,7 +50,14 @@ from app.utils.tz_slice import tz_slice
 from app.utils.retired_apps import frame_runtime_version, scenes_for_embedded_runtime
 from app.database import get_db
 from app.drivers.devices import device_dimensions
-from app.models.frame import Frame, get_frame_json, normalize_frame_admin_auth, normalize_https_proxy, shipped_frame_settings
+from app.models.frame import (
+    Frame,
+    get_frame_json,
+    normalize_event_map,
+    normalize_frame_admin_auth,
+    normalize_https_proxy,
+    shipped_frame_settings,
+)
 from app.models.settings import get_settings_dict
 from app.redis import get_redis
 from app.utils.embedded_render import RenderQueueFull, render_scene_rgba_and_state
@@ -823,6 +830,15 @@ def embedded_frame_settings(frame: Frame) -> dict:
         **(
             {"gpioButtons": [dict(button) for button in frame.gpio_buttons if isinstance(button, dict)]}
             if isinstance(frame.gpio_buttons, list)
+            else {}
+        ),
+        # The frame's event map (docs/events.md "Event map"): what its buttons
+        # do whatever scene shows. Like gpioButtons, present only when the
+        # backend holds one — the board's own preset applies otherwise. Kept
+        # as compact JSON on the device and applied live, no restart.
+        **(
+            {"eventMap": normalize_event_map(frame.event_map)}
+            if isinstance(getattr(frame, "event_map", None), list)
             else {}
         ),
         # 0/90/180/270 — the firmware restarts itself to re-init the renderer
