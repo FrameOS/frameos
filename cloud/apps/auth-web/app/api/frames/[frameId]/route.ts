@@ -17,6 +17,7 @@ import {
   linkedClientForFrame,
   pendingCommandTypesByFrame,
   revokeFrame,
+  scenePreviewsByFrame,
   supersedePendingCommands,
 } from "../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
@@ -52,13 +53,19 @@ export async function GET(
   if (!frame) {
     return jsonError("invalid_frame", 404);
   }
-  const pendingTypes = await pendingCommandTypesByFrame(db, [frame.id]);
+  const [pendingTypes, previews] = await Promise.all([
+    pendingCommandTypesByFrame(db, [frame.id]),
+    scenePreviewsByFrame(db, [frame.id]),
+  ]);
   return NextResponse.json({
     frame: {
       ...frameSummary(frame, await linkedClientForFrame(db, frame)),
       last_metrics: frame.lastMetrics,
       last_state: frame.lastState,
       pending_command_types: pendingTypes.get(frame.id) ?? [],
+      // The scene shown for now without being assigned (the editor's preview,
+      // the voice chat's picture): the workspace's preview row.
+      scene_preview: previews.get(frame.id) ?? null,
     },
   });
 }

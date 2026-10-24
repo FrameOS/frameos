@@ -335,11 +335,73 @@ async def test_event_route_queues_for_an_embedded_frame(async_client, db):
         ('set_scenes', 'pending'),
         ('set_current_scene', 'pending'),
     ]
-    assert rows[4].payload == {'_preview': {'scenes': [preview], 'scene_id': 'p'}}
+    # The name and the source outlive the bundle (spend_older_scene_pushes):
+    # the workspace's preview row reads them.
+    assert rows[4].payload == {'_preview': {'scenes': [preview], 'scene_id': 'p', 'name': 'Preview me', 'source': 'editor'}}
     assert rows[5].payload == {'scene_id': 'p'}
     assert rows[0].payload == {'scene_id': 'clock', 'state': {'size': 2}}
     assert rows[1].payload == {'name': 'setSceneState', 'payload': {'state': {'size': 4}, 'render': True}}
     assert rows[2].payload == {'name': 'nextPage', 'payload': {}}
+
+
+@pytest.mark.asyncio
+async def test_a_preview_shows_in_the_workspace_and_can_be_installed(async_client, db):
+    """docs/scene-previews.md: the frame reports the scene it shows for now,
+    the previewed scene is there to install, a newer push spends the older
+    bundle, and a deploy row takes the preview off."""
+    from app.api.embedded_device import embedded_settings_payload
+    from app.utils.frame_commands import enqueue_frame_command
+
+    frame = await _embedded_frame(async_client, db)
+    assert (await async_client.get(f'/api/frames/{frame.id}')).json()['frame']['scene_preview'] is None
+    assert (await async_client.get(f'/api/frames/{frame.id}/scene_preview')).status_code == 404
+
+    banana = {
+        'id': 'banana',
+        'name': 'Banana',
+        'nodes': [{'id': 'n1', 'type': 'app', 'data': {'keyword': 'unsplash', 'config': {'search': 'banana'}}}],
+        'edges': [],
+    }
+    with _no_nudge():
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/uploadScenes', json={'scenes': [banana], 'sceneId': 'banana'}
+        )
+        assert response.status_code == 200, response.text
+
+    shown = (await async_client.get(f'/api/frames/{frame.id}')).json()['frame']['scene_preview']
+    assert shown['scene_id'] == 'banana' and shown['name'] == 'Banana' and shown['source'] == 'editor' and shown['at']
+    listed = (await async_client.get('/api/frames')).json()['frames']
+    assert next(f for f in listed if f['id'] == frame.id)['scene_preview']['name'] == 'Banana'
+    kept = (await async_client.get(f'/api/frames/{frame.id}/scene_preview')).json()
+    assert kept['preview']['name'] == 'Banana' and kept['scene'] == banana
+    # The previewed scene's apps declare what the device's settings pull
+    # carries, though the saved scenes declare nothing (the stand-in walk).
+    assert 'unsplash' in embedded_settings_payload(db, frame) or embedded_settings_payload(db, frame) == {}
+
+    # A second preview: the first row keeps its name and loses its bundle.
+    with _no_nudge():
+        response = await async_client.post(
+            f'/api/frames/{frame.id}/event/uploadScenes',
+            json={'scenes': [{**banana, 'id': 'apple', 'name': 'Apple'}], 'sceneId': 'apple'},
+        )
+        assert response.status_code == 200, response.text
+    pushes = (
+        db.query(FrameCommand)
+        .filter_by(frame_id=frame.id, type='set_scenes')
+        .order_by(FrameCommand.created_at)
+        .all()
+    )
+    assert pushes[0].payload['_preview']['scenes'] == [] and pushes[0].payload['_preview']['spent'] is True
+    assert pushes[0].payload['_preview']['name'] == 'Banana'
+    assert [s['name'] for s in pushes[1].payload['_preview']['scenes']] == ['Apple']
+    assert (await async_client.get(f'/api/frames/{frame.id}/scene_preview')).json()['scene']['name'] == 'Apple'
+
+    # A deploy's set_scenes row is the newest: no preview any more.
+    enqueue_frame_command(db, frame, 'set_scenes', {'_deploy': {'id': 'd1'}})
+    assert (await async_client.get(f'/api/frames/{frame.id}')).json()['frame']['scene_preview'] is None
+    assert (await async_client.get(f'/api/frames/{frame.id}/scene_preview')).status_code == 404
+    db.expire_all()
+    assert pushes[1].payload['_preview']['scenes'] == []
 
 
 @pytest.mark.asyncio

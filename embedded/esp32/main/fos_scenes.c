@@ -1444,6 +1444,15 @@ esp_err_t fos_scenes_sync(bool force)
          * "backend" in the index. */
         s_pending_source = FOS_SCENES_SOURCE_BACKEND;
         persist_scene_source(FOS_SCENES_SOURCE_BACKEND);
+        /* The per-scene index the boot split wrote describes the PREVIOUS
+         * payload. With it in place a selection went through the slots: a
+         * scene new in this payload was "not found" (the voice chat's
+         * show_image, E1002 2026-10-24: apply-failed with four scenes live)
+         * and a known id reloaded its stale slot file. The runtime holds the
+         * whole new payload from here; the next apply splits it again. */
+        unlink(SCENES_INDEX_PATH);
+        s_slot_count = 0;
+        s_resident_scene_id[0] = '\0';
         ESP_LOGI(TAG, "scenes updated from backend (%u bytes, etag %s)",
                  (unsigned)total, response_etag[0] ? response_etag : "none");
         log_scene_event("scenes:sync", "updated", "backend", "", "stored",

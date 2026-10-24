@@ -98,6 +98,18 @@
   report. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
   evdev translator's `test_translate.nim` are where a rule gets its test.
 
+## Scene previews on a frame: `docs/scene-previews.md`
+
+- A scene a frame shows for now without holding it in its saved or assigned
+  list (the editor's "Preview on frame", an ad-hoc `set_scenes` push) is
+  reported by both planes as `scene_preview` on the frame while that push is
+  the newest scene set, and the scene list draws it as a preview row with
+  "Install" and "Push scenes". Each plane keeps ONE scene bundle per frame
+  (the backend empties older `_preview.scenes`, the cloud spends `scenes` on
+  ack); the preview's name, source and shown scene outlive the bundle. A new
+  pusher sets `source` and goes through the same two routes, never a store
+  of its own.
+
 ## Deploy progress: the contract is `docs/deploy-progress-contract.json`
 
 - Every deploy, update, restart and reboot of a frame, on every frame type and

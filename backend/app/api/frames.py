@@ -1335,13 +1335,14 @@ async def api_frames_list(
     )
     # Local import: the mypy baseline pins a frames.py message by line
     # number (tools/mypy_gate.py), so nothing new goes above it.
-    from app.utils.frame_commands import pending_command_types_by_frame
+    from app.utils.frame_commands import pending_command_types_by_frame, scene_preview_info
 
     pending_types = pending_command_types_by_frame(db, project_id)
     frame_items = []
     for f in frames:
         data = await _frame_to_api_response_dict(f, redis, latest_logs.get(f.id))
         data["pending_command_types"] = pending_types.get(int(f.id), [])
+        data["scene_preview"] = scene_preview_info(db, f)
         data["active_scene_id"] = await _active_scene_id_from_cache(redis, f.id)
         data["active_connections"] = await number_of_connections_for_frame(redis, f.id)
         frame_items.append(data)
@@ -2391,14 +2392,37 @@ async def api_frame_get(
         .filter(_frame_activity_log_filter())
         .scalar()
     )
-    from app.utils.frame_commands import pending_command_types
+    from app.utils.frame_commands import pending_command_types, scene_preview_info
 
     data = await _frame_to_api_response_dict(frame, redis, latest_log_at)
     data["pending_command_types"] = pending_command_types(db, frame)
+    # The scene the frame shows for now without holding it in its saved list
+    # (the editor's "Preview on frame", the voice chat's picture): the
+    # workspace draws it as a preview row, the one place it is otherwise
+    # invisible.
+    data["scene_preview"] = scene_preview_info(db, frame)
     active = await redis.get(f"frame:{frame.id}:active_connections")
     data["active_connections"] = int(active or 0)
     data["active_scene_id"] = await _active_scene_id_from_cache(redis, frame.id)
     return {"frame": data}
+
+
+@api_project.get("/frames/{id:int}/scene_preview")
+async def api_frame_scene_preview(id: int, db: Session = Depends(get_db)):
+    """The scene the frame shows for now (frame.scene_preview), with its JSON,
+    for the preview row's "Install": the workspace adds it to the saved list
+    and pushes, so it stays. 404 when the frame shows no preview. The same
+    route exists on the cloud (/api/frames/{id}/scene-preview)."""
+    frame = _project_frame(db, id)
+    if frame is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Frame not found")
+    from app.utils.frame_commands import scene_preview_info, scene_preview_scene
+
+    info = scene_preview_info(db, frame)
+    scene = scene_preview_scene(db, frame)
+    if info is None or scene is None:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="The frame shows no preview")
+    return {"preview": info, "scene": scene}
 
 
 @api_project.get("/frames/{id:int}/scene_preview_settings")

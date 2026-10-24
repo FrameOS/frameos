@@ -258,9 +258,38 @@ def enqueue_frame_command(
         expires_at=command_ttl_for_frame(frame, base_ttl, now),
     )
     db.add(command)
+    if command_type == "set_scenes":
+        db.flush()
+        spend_older_scene_pushes(db, frame, command)
     db.commit()
     db.refresh(command)
     return command
+
+
+def spend_older_scene_pushes(db: Session, frame: Frame, newest: FrameCommand) -> int:
+    """Drop the scene bundle from every older set_scenes row of this frame
+    that carries one (a preview's `_preview.scenes`; tens of KB each): only
+    the newest row is ever served (`previewed_scenes`), the rest is history
+    for the queue view, and a frame spoken to all day (the voice chat's
+    show_image is a preview) would otherwise stack hundreds of bundles. The
+    deploy snapshot a deploy row carries is not touched. Does not commit."""
+    count = 0
+    rows = (
+        db.query(FrameCommand)
+        .filter(FrameCommand.frame_id == int(frame.id), FrameCommand.type == "set_scenes", FrameCommand.id != newest.id)
+        .all()
+    )
+    for row in rows:
+        payload = row.payload if isinstance(row.payload, dict) else None
+        preview = payload.get("_preview") if payload else None
+        if not isinstance(preview, dict) or not preview.get("scenes"):
+            continue
+        # A new dict: the JSON column only notices a reassignment.
+        row.payload = {**payload, "_preview": {**preview, "scenes": [], "spent": True}}
+        count += 1
+    if count:
+        db.flush()
+    return count
 
 
 def expire_stale_commands(db: Session, frame: Frame, now: datetime | None = None) -> int:
@@ -472,6 +501,27 @@ def deploy_snapshot_for(db: Session, frame: Frame, deploy_id: str) -> Optional[d
     return None
 
 
+def _newest_scene_push(db: Session, frame: Frame) -> FrameCommand | None:
+    """The newest set_scenes row still standing (a cancelled or superseded one
+    is not): what the frame holds, or will hold."""
+    return (
+        db.query(FrameCommand)
+        .filter(
+            FrameCommand.frame_id == int(frame.id),
+            FrameCommand.type == "set_scenes",
+            FrameCommand.status.in_(("pending", "sent", "acked")),
+        )
+        .order_by(FrameCommand.created_at.desc(), FrameCommand.id.desc())
+        .first()
+    )
+
+
+def _preview_of(row: FrameCommand | None) -> dict[str, Any] | None:
+    payload = row.payload if row is not None and isinstance(row.payload, dict) else {}
+    preview = payload.get("_preview")
+    return preview if isinstance(preview, dict) else None
+
+
 def previewed_scenes(db: Session, frame: Frame) -> list[Any] | None:
     """The scenes a "Preview on frame" sent, while the preview is the newest
     scene set this frame was sent; None when it is not.
@@ -483,20 +533,50 @@ def previewed_scenes(db: Session, frame: Frame) -> list[Any] | None:
     set_scenes row: the rule a preview pushed straight to an awake frame
     already follows (its "local" store, fos_scenes.c). A cancelled or
     superseded preview is not served."""
-    row = (
-        db.query(FrameCommand)
-        .filter(
-            FrameCommand.frame_id == int(frame.id),
-            FrameCommand.type == "set_scenes",
-            FrameCommand.status.in_(("pending", "sent", "acked")),
-        )
-        .order_by(FrameCommand.created_at.desc(), FrameCommand.id.desc())
-        .first()
-    )
-    payload = row.payload if row is not None and isinstance(row.payload, dict) else {}
-    preview = payload.get("_preview")
-    scenes = preview.get("scenes") if isinstance(preview, dict) else None
+    preview = _preview_of(_newest_scene_push(db, frame))
+    scenes = preview.get("scenes") if preview else None
     return scenes if isinstance(scenes, list) else None
+
+
+def scene_preview_info(db: Session, frame: Frame) -> dict[str, Any] | None:
+    """The preview the frame shows for now, for the workspace: the scene it
+    put on screen, its name, where it came from (`editor`: the scene editor's
+    "Preview on frame"; `voice`: the voice chat's show_image) and when. None
+    once a deploy or a scene push is the newest set — the preview is gone from
+    the frame then. The same shape as the cloud's `scene_preview`
+    (frames.ts scenePreviewsByFrame)."""
+    row = _newest_scene_push(db, frame)
+    preview = _preview_of(row)
+    if row is None or preview is None:
+        return None
+    scene_id = preview.get("scene_id") if isinstance(preview.get("scene_id"), str) else None
+    name = preview.get("name") if isinstance(preview.get("name"), str) else None
+    if not name:
+        scenes = preview.get("scenes") if isinstance(preview.get("scenes"), list) else []
+        shown = next((s for s in scenes if isinstance(s, dict) and s.get("id") == scene_id), None)
+        if shown is None and scenes and isinstance(scenes[0], dict):
+            shown = scenes[0]
+        name = str(shown.get("name") or "") if shown else ""
+    return {
+        "scene_id": scene_id,
+        "name": name or "Preview",
+        "source": preview.get("source") if preview.get("source") in ("editor", "voice") else "editor",
+        "at": _iso(row.created_at),
+    }
+
+
+def scene_preview_scene(db: Session, frame: Frame) -> dict[str, Any] | None:
+    """The previewed scene itself (its JSON, app bundle included), for the
+    workspace's "Install" on the preview row: the scene the newest preview
+    push put on screen, from the bundle only the newest row keeps. None
+    without a preview, or when the push named no scene."""
+    preview = _preview_of(_newest_scene_push(db, frame))
+    if not preview:
+        return None
+    scenes = preview.get("scenes") if isinstance(preview.get("scenes"), list) else []
+    scene_id = preview.get("scene_id")
+    shown = next((s for s in scenes if isinstance(s, dict) and s.get("id") == scene_id), None)
+    return dict(shown) if isinstance(shown, dict) else None
 
 
 def _deploy_of(command: FrameCommand) -> dict[str, Any] | None:

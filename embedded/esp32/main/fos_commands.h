@@ -27,8 +27,12 @@
 
 #include <stdbool.h>
 
-/* Pull and run whatever the backend queued. Render task only. True when at
- * least one command ran — the caller then applies a pending scene selection
- * before rendering. False (quietly) without a backend, Wi-Fi, or anything
- * queued. */
+/* Pull and run whatever the backend queued. Render task only. A pull the
+ * backend marks `sync` fetches the scenes and settings it holds for this
+ * frame BEFORE the commands run (a switch queued behind a scenes push names
+ * a scene from that push), and a scene switch takes effect before the
+ * command after it runs (a state for the new scene reaches it). True when
+ * at least one command ran — the caller then
+ * applies a pending scene selection before rendering. False (quietly)
+ * without a backend, Wi-Fi, or anything queued. */
 bool fos_commands_sync(void);

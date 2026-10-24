@@ -192,6 +192,12 @@ function SceneSelector({
   const { navigateToScene, navigateToSceneFrame, openTemplateDrawer } = useActions(workspaceLogic)
   const { linkedActiveSceneId, undeployedSceneIds, unsavedSceneIds, sceneUpdateVersions, sceneAccessFlagsById } =
     useValues(scenesLogic({ frameId: frame.id }))
+  const { pushSavedScenes, installPreviewScene } = useActions(scenesLogic({ frameId: frame.id }))
+  // A scene the frame shows for now without holding it in its list (the
+  // editor's "Preview on frame", the voice chat's picture): drawn as a row of
+  // its own, since no saved scene is it. docs/voice-chat.md `show_image`.
+  const scenePreview = frame.scene_preview ?? null
+  const previewActive = !!scenePreview && !!scenePreview.scene_id && scenePreview.scene_id === linkedActiveSceneId
   const frameGroups = groupFramesByStatus(frames)
   const inFrameAdminMode = isInFrameAdminMode()
 
@@ -298,6 +304,76 @@ function SceneSelector({
           </div>
         ) : (
           <div className="space-y-1">
+            {scenePreview ? (
+              <div
+                className="frameos-frame-row group flex items-center gap-1.5 rounded-xl border border-dashed border-amber-300/80 text-slate-700 transition"
+                title={
+                  scenePreview.source === 'voice'
+                    ? 'A picture the voice chat put on the frame for now. It is not in the scene list; pushing the scenes takes it off.'
+                    : 'A scene previewed on the frame for now. It is not in the scene list; pushing the scenes takes it off.'
+                }
+              >
+                <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2 text-left">
+                  <span className="frameos-card-media relative flex h-10 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/70 bg-amber-50 shadow-sm">
+                    <PlayIcon className="h-5 w-5 text-amber-500" />
+                    <span
+                      title={previewActive ? 'Active scene' : 'Inactive scene'}
+                      aria-label={previewActive ? 'Active scene' : 'Inactive scene'}
+                      className={clsx(
+                        'absolute bottom-1 right-1 h-2.5 w-2.5 rounded-full shadow-sm ring-2',
+                        previewActive ? 'bg-emerald-500 ring-white' : 'bg-white ring-slate-300/80'
+                      )}
+                    />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="frameos-strong block truncate text-sm font-semibold text-slate-700">
+                      {scenePreview.name || 'Preview'}
+                    </span>
+                    <span className="frameos-muted mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-slate-400">
+                      <span className="truncate">
+                        {scenePreview.source === 'voice' ? 'from the voice chat' : 'from the editor'} · not in the list
+                      </span>
+                      <Tag
+                        color="yellow"
+                        title="Shown for now, not saved"
+                        className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
+                      >
+                        preview
+                      </Tag>
+                      {previewActive ? (
+                        <Tag
+                          color="teal"
+                          title="Active scene"
+                          className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
+                        >
+                          active
+                        </Tag>
+                      ) : null}
+                    </span>
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 pr-2">
+                  {scenePreview.scene_id ? (
+                    <button
+                      type="button"
+                      onClick={() => installPreviewScene()}
+                      title="Add the previewed scene to the frame's scene list and push it, so it stays."
+                      className="frameos-secondary-button rounded-lg px-2 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    >
+                      Install
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => pushSavedScenes()}
+                    title="Push the saved scene list to the frame; the preview goes."
+                    className="frameos-secondary-button rounded-lg px-2 py-1 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                  >
+                    Push scenes
+                  </button>
+                </div>
+              </div>
+            ) : null}
             {scenes.map((scene) => {
               const selected = scene.id === selectedSceneId
               const active = scene.id === linkedActiveSceneId

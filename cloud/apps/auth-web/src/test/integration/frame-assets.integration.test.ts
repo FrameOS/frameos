@@ -24,6 +24,7 @@ import { GET as getFrameAssets } from "../../../app/api/frames/[frameId]/assets/
 import { GET as getFrameAsset } from "../../../app/api/frames/[frameId]/asset/route";
 import { POST as sendCommand } from "../../../app/api/frames/[frameId]/command/route";
 import { DELETE as deleteFrame } from "../../../app/api/frames/[frameId]/route";
+import { scenePreviewScene, scenePreviewsByFrame } from "../../lib/frames";
 import { POST as postFrameEvent } from "../../../app/api/frames/[frameId]/event/[eventName]/route";
 import { POST as uploadFrameAsset } from "../../../app/api/frames/[frameId]/assets/upload/route";
 import {
@@ -425,6 +426,15 @@ describe("POST /api/frames/{id}/event/{event}", () => {
     );
     // Preview pushes wait for sleeping battery frames like assignment pushes.
     expect(commands[0]!.expiresAt).toBeNull();
+    // What the workspace's preview row reads, on the row (it outlives the
+    // bundle) and on the frame: the shown scene, named, from the editor.
+    expect(payload.preview).toEqual({ name: "Two", scene: scenes[1], scene_id: "scene2", source: "editor" });
+    expect((await scenePreviewScene(db, frame.id))?.scene).toEqual(scenes[1]);
+    expect((await scenePreviewsByFrame(db, [frame.id])).get(frame.id)).toMatchObject({
+      name: "Two",
+      scene_id: "scene2",
+      source: "editor",
+    });
 
     // A newer push supersedes the older one.
     await postFrameEvent(
@@ -438,6 +448,17 @@ describe("POST /api/frames/{id}/event/{event}", () => {
     expect(after[0]!.status).toBe("expired");
     expect(after[0]!.error).toBe("superseded");
     expect(after[1]!.status).toBe("pending");
+    // The superseded row lost its bundle but kept what it previewed; the
+    // frame's preview is the newest push's.
+    expect((after[0]!.payload as Record<string, unknown>).scenes).toBeUndefined();
+    // ...and its kept scene (the "Install" body): only the newest push has one.
+    expect((after[0]!.payload as Record<string, unknown>).preview).toEqual({
+      name: "Two",
+      scene_id: "scene2",
+      source: "editor",
+    });
+    expect((await scenePreviewsByFrame(db, [frame.id])).get(frame.id)?.name).toBe("One");
+    expect((await scenePreviewScene(db, frame.id))?.scene).toEqual(scenes[0]);
   });
 
   it("refuses shell and legacy compiled scenes on uploadScenes like an assignment would", async () => {

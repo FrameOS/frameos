@@ -18,6 +18,7 @@ import { frameEditorsLogic } from '../../frameEditorsLogic'
 import { ACTIVATION_QUEUED_DETAIL, activationWasQueued, controlLogic } from './controlLogic'
 import { collectSecretSettingsFromScenes } from '../secretSettings'
 import { apiFetch } from '../../../../utils/apiFetch'
+import { pushCloudFrameSceneList } from '../../../../utils/cloudFrameApi'
 import { isCloudMode } from '../../../../utils/cloudMode'
 import { isInFrameAdminMode } from '../../../../utils/frameAdmin'
 import { frameAssetsApiPath } from '../../../../utils/frameAssetsApi'
@@ -378,6 +379,12 @@ export interface scenesLogicActions {
   toggleMissingActiveExpanded: () => {
     value: true
   }
+  pushSavedScenes: () => {
+    value: true
+  }
+  installPreviewScene: () => {
+    value: true
+  }
   toggleSceneSelection: (sceneId: string) => {
     sceneId: string
   }
@@ -532,6 +539,13 @@ export const scenesLogic = kea<scenesLogicType>([
     toggleSceneSelection: (sceneId: string) => ({ sceneId }),
     setSelectedSceneIds: (sceneIds: string[]) => ({ sceneIds }),
     toggleMissingActiveExpanded: true,
+    // docs/ui-vocabulary.md "Push": the frame's saved scene list, as it
+    // stands. What takes a preview (frame.scene_preview: the editor's
+    // "Preview on frame", the voice chat's picture) off the frame.
+    pushSavedScenes: true,
+    // docs/ui-vocabulary.md "Install": the previewed scene onto the frame's
+    // scene list, saved and pushed, so it stays.
+    installPreviewScene: true,
     uploadImage: (file: File) => ({ file }),
     uploadImageSuccess: true,
     uploadImageFailure: true,
@@ -1119,6 +1133,87 @@ export const scenesLogic = kea<scenesLogicType>([
         })
         actions.uploadImageFailure()
       }
+    },
+    installPreviewScene: async () => {
+      const title = 'Installing the previewed scene'
+      const frameLogicInstance = frameLogic({ frameId: props.frameId })
+      try {
+        // The scene the frame shows for now, with its JSON: the plane keeps
+        // it on the newest preview push (backend /scene_preview, cloud
+        // /scene-preview).
+        const response = await apiFetch(
+          `/api/frames/${props.frameId}/${isCloudMode() ? 'scene-preview' : 'scene_preview'}`
+        )
+        if (!response.ok) {
+          throw new Error(response.status === 404 ? 'The frame shows no preview any more' : 'Failed to load the preview')
+        }
+        const { scene } = (await response.json()) as { scene: FrameScene }
+        if (!scene?.id) {
+          throw new Error('The preview carries no scene')
+        }
+        if (!values.rawScenes.some((candidate) => candidate.id === scene.id)) {
+          // Onto the form with its id kept, so the device's active scene is
+          // this very scene after the push.
+          await frameLogicInstance.asyncActions.applyTemplate({ scenes: [scene], name: scene.name }, false, true)
+        }
+        // Saved (the cloud mints the private store scene and pushes); on the
+        // backend the deploy pushes the saved list, which now holds it.
+        await frameLogicInstance.asyncActions.saveScenes([scene.id], scene.id)
+        if (isCloudMode()) {
+          reportTaskOutcome('success', {
+            frameId: props.frameId,
+            kind: 'deploy',
+            title,
+            detail: `${scene.name || 'The scene'} is on the frame's list now.`,
+          })
+        } else {
+          framesModel.actions.deployFrame(
+            props.frameId,
+            frameCanUseFastDeploy(values.frame, frameLogicInstance.values.requiresRecompilation),
+            { title }
+          )
+        }
+      } catch (error) {
+        reportTaskOutcome('error', {
+          frameId: props.frameId,
+          kind: 'deploy',
+          title,
+          detail: error instanceof Error && error.message ? error.message : 'Failed to install the previewed scene',
+        })
+      }
+    },
+    pushSavedScenes: async () => {
+      const title = 'Pushing scenes'
+      if (isCloudMode()) {
+        // The assigned list again, every row as the frame holds it: the
+        // route queues a set_scenes, which is then the newest push.
+        try {
+          await pushCloudFrameSceneList(props.frameId)
+          reportTaskOutcome('success', {
+            frameId: props.frameId,
+            kind: 'deploy',
+            title,
+            detail: 'Pushed. The frame has it as soon as it syncs.',
+          })
+        } catch (error) {
+          reportTaskOutcome('error', {
+            frameId: props.frameId,
+            kind: 'deploy',
+            title,
+            detail: error instanceof Error && error.message ? error.message : 'Failed to push the scenes',
+          })
+        }
+        return
+      }
+      // The backend: the deploy the sidebar's Deploy makes (fast when the
+      // frame can take one); its set_scenes row is then the newest, and the
+      // preview is gone from the frame.
+      const frameLogicInstance = frameLogic({ frameId: props.frameId })
+      framesModel.actions.deployFrame(
+        props.frameId,
+        frameCanUseFastDeploy(values.frame, frameLogicInstance.values.requiresRecompilation),
+        { title }
+      )
     },
     previewScene: async ({ sceneId, state, scenes }) => {
       // An explicit `scenes` list lets callers preview scenes that aren't
