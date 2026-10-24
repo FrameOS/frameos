@@ -1679,6 +1679,9 @@ static void client_task(void *arg)
          * same contract, the Nim side re-parses only when the text changed. */
         frameos_nim_set_colors(config->colors);
         frameos_nim_set_palette(config->palette);
+        /* The frame's button bindings (docs/events.md "Event map"), the same
+         * way: the dispatcher reads them off its config on the next press. */
+        frameos_nim_set_event_map(config->event_map);
         /* Same contract for the zone name: live, one string per pass. */
         frameos_nim_set_time_zone(config->time_zone);
 

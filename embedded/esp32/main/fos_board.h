@@ -34,4 +34,14 @@ int fos_board_buzzer_pin(const char *hardware_preset);
  * no buzzer (the caller keeps its default). Same table, same two users. */
 int fos_board_buzzer_tone_hz(const char *hardware_preset);
 
+/* The frame's event map a hardware preset ships with (docs/events.md, "Event
+ * map"): what the board's buttons do whatever scene shows, as the compact
+ * JSON rule list frame.json `eventMap` holds — a reTerminal's LEFT and RIGHT
+ * held are the previous and the next scene. "" for a board without one (or
+ * no preset at all). The console's `set hardware` applies it, and it is the
+ * stored-config default when NVS has no `event_map` key. Keep in step with
+ * `eventMap` in EMBEDDED_HARDWARE_PRESETS (backend/app/tasks/embedded_firmware.py)
+ * and the SPA's preset table. */
+const char *fos_board_event_map(const char *hardware_preset);
+
 #endif /* FOS_BOARD_H */
