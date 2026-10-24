@@ -319,6 +319,16 @@ type
     ownedForCache*: bool
 
   # Runtime state while running the scene (for compiled frames)
+  EventMapRule* = object
+    ## One rule of an installed scene's event map (docs/events.md, "Event
+    ## map"): an event of this name whose payload carries every `match` value
+    ## is delivered with `write` written over its payload. The map is the
+    ## installed copy's, beside the scene (`eventMap` next to `nodes`), never
+    ## part of it: a scene update keeps it.
+    event*: string
+    match*: seq[(string, string)] ## payload key -> the value, in its string form
+    write*: JsonNode              ## the fields to set, a JObject
+
   FrameScene* = ref object of RootObj
     id*: SceneId
     isRendering*: bool
@@ -339,6 +349,8 @@ type
     ## Custom event name -> the origins its declaration opts into, on top of
     ## what every custom event gets (docs/events.md, "Custom events").
     customEventOrigins*: Table[string, set[EventOrigin]]
+    ## The installed copy's event map (event_map.nim); empty for most scenes.
+    eventMap*: seq[EventMapRule]
     ## When this scene renders next, if it is drawn through a scene node
     ## (frameos/scene_rhythm.nim); nil until the first such render.
     rhythm*: SceneRhythm
@@ -416,6 +428,7 @@ type
     apps*: JsonNode
     stateFields*: seq[StateField] # all state fields, including private ones
     customEventOrigins*: Table[string, set[EventOrigin]] ## see FrameScene.customEventOrigins
+    eventMap*: seq[EventMapRule] ## see FrameScene.eventMap
     refreshFollowsChildren*: bool ## see FrameScene.refreshFollowsChildren
 
   # Imported node from scenes.json
@@ -459,6 +472,9 @@ type
     origin*: JsonNode
     ## The scene's custom event declarations ([{name, origins?, …}]); nil when absent.
     customEvents*: JsonNode
+    ## The installed copy's event map ([{event, match, as}], docs/events.md
+    ## "Event map"), written by the control plane beside the scene; nil when absent.
+    eventMap*: JsonNode
 
   # Runtime state while running the scene (for interpreted frames), adds cached nodes/edges
   InterpretedFrameScene* = ref object of FrameScene
