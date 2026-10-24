@@ -124,6 +124,8 @@ export default tseslint.config(
       // Mounts sceneUpdatesLogic (→ frameLogic); out of the tsconfig too.
       "**/src/test/shared-spa/scene-update-available.test.ts",
       "**/src/test/shared-spa/scene-update-banner.test.tsx",
+      // Mounts buttonMapLogic (→ frameLogic); out of the tsconfig too.
+      "**/src/test/shared-spa/button-map-modal.test.tsx",
       // Mounts templatesLogic (→ frameLogic); out of the tsconfig too.
       "**/src/test/shared-spa/template-install-feedback.test.ts",
       // Mounts eventsLogic (→ frameLogic); out of the tsconfig too.

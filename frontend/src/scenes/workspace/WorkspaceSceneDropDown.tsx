@@ -7,6 +7,7 @@ import {
   ClipboardDocumentIcon,
   CloudArrowDownIcon,
   CloudArrowUpIcon,
+  CursorArrowRippleIcon,
   DocumentDuplicateIcon,
   DocumentMagnifyingGlassIcon,
   FolderPlusIcon,
@@ -19,6 +20,8 @@ import { Modal } from '../../components/Modal'
 import { TextInput } from '../../components/TextInput'
 import type { FrameScene, FrameType } from '../../types'
 import { frameLogic } from '../frame/frameLogic'
+import { ButtonMapModal } from '../frame/panels/Scenes/ButtonMapModal'
+import { buttonMapLogic } from '../frame/panels/Scenes/buttonMapLogic'
 import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
 import { findConnectedScenes } from '../frame/panels/Scenes/utils'
 import { EditTemplateModal } from '../frame/panels/Templates/EditTemplateModal'
@@ -57,6 +60,8 @@ export function WorkspaceSceneDropDown({
   const { sceneUpdateVersions } = useValues(sceneUpdatesLogic({ frameId: frame.id }))
   const { confirmSceneUpdate } = useActions(sceneUpdatesLogic({ frameId: frame.id }))
   const { navigateToScene, openScenePreview } = useActions(workspaceLogic)
+  const { isOpen: buttonMapOpen } = useValues(buttonMapLogic({ frameId: frame.id, sceneId: scene.id }))
+  const { openButtonMap } = useActions(buttonMapLogic({ frameId: frame.id, sceneId: scene.id }))
   const { saveAsTemplate, saveAsZip, saveAsCloudTemplate } = useActions(templatesLogic({ frameId: frame.id }))
   const { apps } = useValues(appsModel)
   const { hasDriveScope } = useValues(cloudDriveLogic)
@@ -112,6 +117,13 @@ export function WorkspaceSceneDropDown({
             label: 'Edit scene JSON',
             onClick: () => openWorkspaceSceneUtility(frame.id, scene.id, 'json'),
             icon: <DocumentMagnifyingGlassIcon className="h-5 w-5" />,
+          },
+          {
+            // The install's button map (docs/events.md "Event map"): which
+            // press of which of this frame's buttons each listener answers to.
+            label: 'Map buttons',
+            onClick: () => openButtonMap(),
+            icon: <CursorArrowRippleIcon className="h-5 w-5" />,
           },
           {
             label: 'Copy scene JSON',
@@ -241,6 +253,7 @@ export function WorkspaceSceneDropDown({
           </form>
         </Modal>
       ) : null}
+      {buttonMapOpen ? <ButtonMapModal frameId={frame.id} sceneId={scene.id} /> : null}
       {templateModalMounted ? (
         <BindLogic logic={frameLogic} props={{ frameId: frame.id }}>
           <EditTemplateModal />

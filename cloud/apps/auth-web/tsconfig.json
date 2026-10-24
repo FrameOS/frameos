@@ -175,6 +175,9 @@
     // still runs it; only tsc leaves it out.
     "src/test/shared-spa/scene-update-available.test.ts",
     "src/test/shared-spa/scene-update-banner.test.tsx",
+    // Mounts buttonMapLogic (→ frameLogic, framesModel) and renders the
+    // "Map buttons" dialog, same reason.
+    "src/test/shared-spa/button-map-modal.test.tsx",
     // Mounts templatesLogic (→ frameLogic), same reason.
     "src/test/shared-spa/template-install-feedback.test.ts",
     // Mounts eventsLogic (→ frameLogic), same reason.

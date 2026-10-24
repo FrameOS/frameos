@@ -60,47 +60,15 @@ export const ESP32_WAVESHARE_13IN3E6_DEVICE = 'waveshare.EPD_13in3e'
 export const ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET: FrameEmbeddedHardwarePreset =
   'waveshare_esp32_s3_photopainter'
 export const ESP32_WAVESHARE_PHOTOPAINTER_DEVICE = 'waveshare.EPD_7in3e'
-export const INKY_GPIO_BUTTONS: GPIOButton[] = [
-  { pin: 5, label: 'A' },
-  { pin: 6, label: 'B' },
-  { pin: 16, label: 'C' },
-  { pin: 24, label: 'D' },
-]
-export const INKY_13_GPIO_BUTTONS: GPIOButton[] = [
-  { pin: 5, label: 'A' },
-  { pin: 6, label: 'B' },
-  { pin: 25, label: 'C' },
-  { pin: 24, label: 'D' },
-]
-export const INKY_AUTO_BUTTON_DEVICES = new Set([
-  'pimoroni.inky_impression',
-  'pimoroni.inky_impression_7_3',
-  'pimoroni.inky_impression_7_color',
-  'pimoroni.inky_impression_5_7',
-  'pimoroni.inky_impression_5_7_color',
-  'pimoroni.inky_impression_4_7_color',
-  'pimoroni.inky_impression_4',
-  'pimoroni.inky_impression_4_2025',
-  'pimoroni.inky_impression_4_spectra6',
-  'pimoroni.inky_impression_7',
-  'pimoroni.inky_impression_7_2025',
-  'pimoroni.inky_impression_13',
-  'pimoroni.inky_impression_13_2025',
-])
-export const INKY_13_AUTO_BUTTON_DEVICES = new Set(['pimoroni.inky_impression_13', 'pimoroni.inky_impression_13_2025'])
-
-export function configuredGpioButtonsForDevice(device?: string | null): GPIOButton[] | null {
-  if (!device) {
-    return null
-  }
-  if (INKY_13_AUTO_BUTTON_DEVICES.has(device)) {
-    return INKY_13_GPIO_BUTTONS
-  }
-  if (INKY_AUTO_BUTTON_DEVICES.has(device)) {
-    return INKY_GPIO_BUTTONS
-  }
-  return null
-}
+// The Inky button tables live in utils/deviceGpioButtons.ts (import-light for
+// the cloud typecheck); re-exported for the settings panel's callers.
+export {
+  INKY_13_AUTO_BUTTON_DEVICES,
+  INKY_13_GPIO_BUTTONS,
+  INKY_AUTO_BUTTON_DEVICES,
+  INKY_GPIO_BUTTONS,
+  configuredGpioButtonsForDevice,
+} from '../../../../utils/deviceGpioButtons'
 
 export const ESP32_XIAO_PIN_LAYOUT: Esp32PinLayout = {
   rst: 5,
