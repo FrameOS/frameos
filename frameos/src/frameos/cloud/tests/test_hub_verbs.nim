@@ -380,6 +380,8 @@ suite "cloud hub verb dispatcher":
       "palette": {"colors": ["#ffffff", "#000000"]},
       "device_config": {"partial": true},
       "gpio_buttons": [{"pin": 5, "label": "A"}],
+      "event_map": [{"event": "button", "match": {"label": "LEFT", "action": "longPress"},
+                     "emit": "setCurrentScene", "as": {"direction": "prev"}}],
       "device": "pimoroni.hyperpixel4sq_touch",
       "input_settings": {"keyboardLayout": "de", "grabKeyboard": true},
       "colors": {"autoFit": "on", "global": {"exposure": 0.5}},

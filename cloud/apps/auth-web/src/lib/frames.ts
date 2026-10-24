@@ -223,6 +223,18 @@ export function frameSupportsInputSettings(
 export const colorsFrameSettingsMinVersion = "2026.10.2";
 export const colorsFrameSettingKeys = new Set(contractSettingKeysSince("linux", colorsFrameSettingsMinVersion));
 
+// The 2026.10.20 event map: `event_map`, what the frame's buttons do whatever
+// scene shows (docs/events.md "Event map"; "Button actions" in Settings),
+// applied live. Both profiles learned it in the same release.
+export const eventMapFrameSettingsMinVersion = "2026.10.20";
+export const eventMapFrameSettingKeys = new Set(contractSettingKeysSince("linux", eventMapFrameSettingsMinVersion));
+
+export function frameSupportsEventMapSettings(
+  frameosVersion: string | null | undefined,
+): boolean {
+  return frameSupportsSettingsFrom(eventMapFrameSettingsMinVersion, frameosVersion);
+}
+
 export function frameSupportsColorsSettings(
   frameosVersion: string | null | undefined,
 ): boolean {
@@ -419,6 +431,10 @@ export const esp32BatteryEnablePinFrameSettingKeys = new Set(
 // silent), and `buzzer_tone_hz`, its pitch. Live, no reboot.
 export const esp32BuzzerFrameSettingsMinVersion = "2026.10.12";
 export const esp32BuzzerFrameSettingKeys = new Set(contractSettingKeysSince("esp32", esp32BuzzerFrameSettingsMinVersion));
+
+// 2026.10.20: `event_map`, the frame's button actions (the same floor as the
+// Linux runtime's: eventMapFrameSettingsMinVersion). Live, no reboot.
+export const esp32EventMapFrameSettingKeys = new Set(contractSettingKeysSince("esp32", eventMapFrameSettingsMinVersion));
 
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata
