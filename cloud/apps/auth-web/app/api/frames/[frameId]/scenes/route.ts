@@ -25,6 +25,7 @@ import {
   readServiceSettingGroups,
 } from "../../../../../src/lib/frames";
 import { rateLimitResponse } from "../../../../../src/lib/rate-limit";
+import { readEventMapsField, sceneEventMapsOf } from "../../../../../src/lib/scene-event-map";
 import { readSession } from "../../../../../src/lib/session";
 
 export const runtime = "nodejs";
@@ -56,6 +57,7 @@ export async function GET(
   const rows = await db
     .select({
       declaredSettingsGroups: frameSceneAssignments.declaredSettingsGroups,
+      eventMaps: frameSceneAssignments.eventMaps,
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
       latestVersion: storeScenes.latestVersion,
       position: frameSceneAssignments.position,
@@ -113,6 +115,10 @@ export async function GET(
         declared_settings_groups:
           readServiceSettingGroups(row.declaredSettingsGroups) ?? [],
         granted_settings_groups: grantedSettingsGroupsForAssignment(row),
+        // The owner's button maps for this install, by runtime scene id
+        // (docs/events.md "Event map"); the workspace hydrates each scene's
+        // `eventMap` from it. Absent when there is none.
+        ...(sceneEventMapsOf(row.eventMaps) ? { event_maps: sceneEventMapsOf(row.eventMaps) } : {}),
         slug: row.sceneSlug,
         // POST /scenes/update takes the frame there.
         update_available:
@@ -224,11 +230,18 @@ export async function POST(
     if (settingsGroups === false) {
       return jsonError("invalid_scenes", 400);
     }
+    // Per-install button maps, by runtime scene id: omitted keeps the
+    // assignment's, null (or an empty object) clears them.
+    const eventMaps = readEventMapsField((entry as Record<string, unknown>).event_maps);
+    if (eventMaps === false) {
+      return jsonError("invalid_scenes", 400);
+    }
     requested.push({
       sceneId,
       sceneVersion: typeof sceneVersion === "number" ? sceneVersion : null,
       ...(latest === true ? { latest } : {}),
       ...(settingsGroups ? { settingsGroups } : {}),
+      ...(eventMaps !== undefined ? { eventMaps } : {}),
     });
   }
 
