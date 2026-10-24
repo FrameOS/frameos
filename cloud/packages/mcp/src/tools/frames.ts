@@ -37,6 +37,29 @@ const settingsGroups = z
     "Service-settings groups to GRANT this scene (e.g. [\"unsplash\", \"openAI\"]). Only groups the scene declares take effect. Omit to keep an installed scene's grant, or to grant a new one nothing.",
   );
 
+// The owner's per-install button maps (docs/events.md "Event map"): runtime
+// scene id → rules. The server validates the shape; the runtime gives it
+// meaning.
+const eventMapValue = z.union([z.string().max(256), z.number(), z.boolean()]);
+const eventMaps = z
+  .record(
+    z.string().min(1).max(256),
+    z
+      .array(
+        z.object({
+          event: z.string().min(1).max(63),
+          match: z.record(z.string().regex(/^[A-Za-z0-9_]{1,64}$/), eventMapValue).optional(),
+          as: z.record(z.string().regex(/^[A-Za-z0-9_]{1,64}$/), eventMapValue),
+        }),
+      )
+      .max(64),
+  )
+  .nullable()
+  .optional()
+  .describe(
+    "Per-install button maps, { [runtime scene id]: [{event, match, as}] }: an event of that name whose payload has every `match` value reaches the scene with `as` written over it, e.g. [{\"event\": \"button\", \"match\": {\"label\": \"REFRESH\", \"action\": \"longPress\"}, \"as\": {\"label\": \"B\", \"role\": \"next\", \"action\": \"press\"}}]. Kept across scene updates. Omit to keep the installed scene's maps; null clears them.",
+  );
+
 function compactFrame(frame: FrameSummary) {
   return {
     connected: frame.connected ?? false,
@@ -304,6 +327,7 @@ export function registerFrameTools(server: McpServer, ctx: ToolContext) {
                   "Move this unpinned scene to the newest published version on this push. Omitted: it stays at the version the frame holds.",
                 ),
               settings_groups: settingsGroups,
+              event_maps: eventMaps,
             }),
           )
           .max(20),

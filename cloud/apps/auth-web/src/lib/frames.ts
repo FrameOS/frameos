@@ -33,6 +33,7 @@ import { deployProgressKindForCommand, startDeployProgress } from "./deploy-prog
 import { requiredSettingsForScenes } from "./preview-settings";
 import { scenesForEmbeddedRuntime, scenesForRuntime } from "./retired-apps";
 import { withStoreSceneOrigin } from "./scene-origin";
+import { sceneEventMapsOf, withSceneEventMaps } from "./scene-event-map";
 import { compiledSceneNames } from "./store";
 import { maxSceneZipUncompressedBytes } from "./store";
 import { unzipBounded } from "./zip-bounded";
@@ -1716,6 +1717,7 @@ export async function buildScenesPayloadForFrame(
   }
   const assignments = await db
     .select({
+      eventMaps: frameSceneAssignments.eventMaps,
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
       id: frameSceneAssignments.id,
       sceneAccountId: storeScenes.accountId,
@@ -1834,15 +1836,21 @@ export async function buildScenesPayloadForFrame(
     // APP_PERMISSIONS_FROM changes the payload, which is what makes the hub
     // send the lists the moment the frame starts enforcing them.
     const targetVersion = runtimeVersion !== undefined ? runtimeVersion : frameRow.frameosVersion;
+    // ...and with the owner's button maps for THIS install written on as
+    // `eventMap` (scene-event-map.ts): the installed copy's, kept on the
+    // assignment row across versions, never part of the published bytes.
     const stamped = (frameHardwareIsEsp32(frameRow) ? scenesForEmbeddedRuntime : scenesForRuntime)(
-      withStoreSceneOrigin(
-        extracted.scenes,
-        {
-          id: assignment.sceneId,
-          slug: assignment.sceneSlug,
-          version: versionRow.version,
-        },
-        { appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, targetVersion) },
+      withSceneEventMaps(
+        withStoreSceneOrigin(
+          extracted.scenes,
+          {
+            id: assignment.sceneId,
+            slug: assignment.sceneSlug,
+            version: versionRow.version,
+          },
+          { appPermissions: frameSupportsSettingsFrom(APP_PERMISSIONS_FROM, targetVersion) },
+        ),
+        sceneEventMapsOf(assignment.eventMaps),
       ),
       targetVersion,
     );

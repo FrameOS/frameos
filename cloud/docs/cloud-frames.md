@@ -298,6 +298,20 @@ a row from before the column existed: it reads as "granted = declared" so no
 frame went dark on the next push, and it becomes explicit the next time the owner
 saves the scene list. A frame running a clock scene never sees the account's
 OpenAI key, and neither does a weather scene the owner did not grant it to.
+
+A third per-install column, `event_maps` (migration 0067), is the owner's
+**button map** for the scene on this frame (`docs/events.md`, "Event map"):
+`{ [runtime scene id]: [{event, match, as}, …] }`, written onto each pushed
+scene as `eventMap` beside `nodes` by `buildScenesPayloadForFrame`
+(`scene-event-map.ts`). A frame with LEFT, RIGHT and REFRESH keys runs a
+store scene written for A, B, C and D because the install says a press of
+REFRESH is A and a long press B. It is the install's, never the published
+bytes': an `eventMap` inside a version's scenes.json is dropped, a save that
+omits `event_maps` keeps the row's (scene updates, reorders and grants never
+touch it), `null` clears it, and the workspace posts the current maps with
+every save. The GET lists it as `event_maps`; the workspace hydrates each
+runtime scene's `eventMap` from it, and "Map buttons" in the scene's menu
+edits it.
 The response also lists the granted groups that are *not* configured, so the
 UI can say "this frame needs an Unsplash key" — and so the device knows those
 six groups are cloud-owned: a group absent from `settings` is deleted
