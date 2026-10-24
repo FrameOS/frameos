@@ -226,6 +226,21 @@ async def test_frames_tools_against_the_real_routes(async_client, db: Session, r
     assert skipped.get("isError") is True
     assert "already on the frame" in result_text(skipped)
 
+    # The installed copy's button map (docs/events.md "Event map") is beside
+    # the scene, so replacing the scene keeps it, and the summary shows it.
+    event_map = [{"event": "button", "match": {"label": "REFRESH"}, "as": {"label": "A"}}]
+    frame_row(db, frame.id).scenes = [{**SCENE, "eventMap": event_map}, frame_row(db, frame.id).scenes[1]]
+    db.commit()
+    replaced = result_json(await call(async_client, "frame_scene_update", {
+        "confirm": True, "frame_id": frame.id, "scene": {**SCENE, "name": "Hello v2"}, "deploy": "none",
+    }))
+    assert replaced["updated"]["name"] == "Hello v2"
+    db.expire_all()
+    assert frame_row(db, frame.id).scenes[0]["eventMap"] == event_map
+    scenes = result_json(await call(async_client, "frame_scenes_list", {"frame_id": frame.id}))
+    assert scenes["scenes"][0]["eventMap"] == event_map
+    assert "eventMap" not in scenes["scenes"][1]
+
     removed = result_json(await call(async_client, "frame_scene_remove", {
         "confirm": True, "frame_id": frame.id, "scene_id": new_id, "deploy": "none",
     }))

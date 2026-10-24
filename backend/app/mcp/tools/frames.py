@@ -141,6 +141,7 @@ def compact_scene(scene: dict[str, Any]) -> dict[str, Any]:
         "fields": fields,
         "settings": scene.get("settings") or {},
         "origin": scene.get("origin"),
+        **({"eventMap": scene["eventMap"]} if scene.get("eventMap") else {}),
     }
 
 
@@ -592,6 +593,10 @@ def register_frame_tools(server: McpServer, ctx: ToolContext) -> None:
                 raise McpInputError(f"Scene {new_scene.get('id')} is not on frame {frame_id}; frame_scene_install adds new ones.")
             if "default" not in new_scene and scenes[index].get("default"):
                 new_scene["default"] = True
+            # The button map is the installed copy's, not the scene's
+            # (docs/events.md "Event map"): a new version keeps it.
+            if "eventMap" not in new_scene and scenes[index].get("eventMap"):
+                new_scene["eventMap"] = scenes[index]["eventMap"]
             scenes[index] = new_scene
             await save_scenes(frame_id, scenes, project_id)
             return text({"updated": {"id": new_scene.get("id"), "name": new_scene.get("name")}, **(await deploy_after(frame_id, deploy, project_id))})
