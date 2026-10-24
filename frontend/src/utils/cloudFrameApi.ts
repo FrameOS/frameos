@@ -1,4 +1,4 @@
-import type { FrameSchedule, FrameScene, FrameType } from '../types'
+import type { EventMapRule, FrameScene, FrameSchedule, FrameType } from '../types'
 import { apiFetch } from './apiFetch'
 import type { CloudDeviceScenes, CloudDeviceScenesImportResult } from './cloudDeviceScenes'
 import type { CloudFrameSceneRow } from './cloudFrameScenes'
@@ -368,6 +368,12 @@ export interface CloudSceneAssignmentInput {
   scene_version?: number | null
   settings_groups?: string[] | undefined
   /**
+   * The owner's button maps for this install, by RUNTIME scene id
+   * (docs/events.md "Event map"). Omitted keeps the assignment's; null
+   * clears them. The workspace save posts the current maps every time.
+   */
+  event_maps?: Record<string, EventMapRule[]> | null | undefined
+  /**
    * Move this UNPINNED scene to the store's newest version on this push.
    * Without it a scene the frame already has is pushed again at the version
    * the frame holds: replacing the list never updates a scene as a side
@@ -382,6 +388,7 @@ function cloudSceneAssignmentEntry(scene: CloudSceneAssignmentInput): Record<str
     ...(scene.scene_version ? { scene_version: scene.scene_version } : {}),
     ...(scene.latest ? { latest: true } : {}),
     ...(scene.settings_groups ? { settings_groups: scene.settings_groups } : {}),
+    ...(scene.event_maps !== undefined ? { event_maps: scene.event_maps } : {}),
   }
 }
 

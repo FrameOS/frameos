@@ -1,4 +1,4 @@
-import type { CloudSceneSource, FrameScene } from '../types'
+import type { CloudSceneSource, EventMapRule, FrameScene } from '../types'
 import { cloudSceneHeldVersion, type CloudFrameSceneRow } from './cloudFrameScenes'
 import {
   cloudDeployActiveSceneId,
@@ -102,6 +102,29 @@ interface AssignmentPlan {
   latest?: boolean | undefined
   /** The grant this save posts for the scene; omitted = keep as is. */
   settings_groups?: string[] | undefined
+  /** The install's button maps by runtime scene id; omitted = keep, null = none. */
+  event_maps?: Record<string, EventMapRule[]> | null | undefined
+}
+
+// The button maps the form holds for one pack's runtime scenes: what this
+// save posts for the assignment. The map is the install's (never scene
+// content), so it is read here and stripped below before any publish. Posted
+// only when there is something to say: the form's maps, or null to clear the
+// ones the row had; a frame without any keeps its payload as it was.
+function formEventMaps(
+  formScenes: readonly Partial<FrameScene>[],
+  row?: Pick<CloudFrameSceneRow, 'event_maps'>
+): Record<string, EventMapRule[]> | null | undefined {
+  const maps: Record<string, EventMapRule[]> = {}
+  for (const scene of formScenes) {
+    if (scene?.id && Array.isArray(scene.eventMap) && scene.eventMap.length > 0) {
+      maps[scene.id] = scene.eventMap
+    }
+  }
+  if (Object.keys(maps).length > 0) {
+    return maps
+  }
+  return row?.event_maps && Object.keys(row.event_maps).length > 0 ? null : undefined
 }
 
 // Every save re-posts each kept assignment's grant explicitly, so a row
@@ -131,12 +154,18 @@ function rawSceneUnchanged(stored: FrameScene, form: FrameScene): boolean {
   return JSON.stringify(stored) === JSON.stringify(form)
 }
 
-/** The scene without the client-side install bookkeeping (`origin`). */
+/**
+ * The scene without the install's bookkeeping: `origin` (where it came from)
+ * and `eventMap` (the owner's button map, docs/events.md "Event map"). Both
+ * belong to the installed copy and never to a published version: an
+ * `eventMap` inside scene content would be an edit on every save and would
+ * remap every other install of the scene.
+ */
 export function withoutSceneOrigin<T extends Partial<FrameScene>>(scene: T): T {
-  if (!scene || !('origin' in scene)) {
+  if (!scene || (!('origin' in scene) && !('eventMap' in scene))) {
     return scene
   }
-  const { origin: _origin, ...rest } = scene as T & { origin?: unknown }
+  const { origin: _origin, eventMap: _eventMap, ...rest } = scene as T & { origin?: unknown; eventMap?: unknown }
   return rest as T
 }
 
@@ -239,11 +268,18 @@ async function persistAndPushCloudFrameScenesNow(
       const form = updated[index]
       return !!form && form !== scene && !sceneUnchanged(withoutSceneOrigin(scene), form)
     })
+    // The button maps this save posts: the form's, for the runtime scenes of
+    // this pack (null when there are none, which clears a removed map).
+    const event_maps = formEventMaps(
+      presentIds.map((id) => formById.get(id)!),
+      row
+    )
     if (!edited) {
       assignments.push({
         scene_id: row.scene_id,
         scene_version: row.scene_version ?? null,
         settings_groups: keptGrant(row),
+        event_maps,
       })
       continue
     }
@@ -259,6 +295,7 @@ async function persistAndPushCloudFrameScenesNow(
         scene_version: row.scene_version ? (version ?? null) : null,
         latest: true,
         settings_groups: keptGrant(row),
+        event_maps,
       })
     } catch (error) {
       // Not ours to edit (public install), name clash, moderation… — fork the
@@ -269,7 +306,11 @@ async function persistAndPushCloudFrameScenesNow(
         changedStoreSceneIds.push(newSceneId)
         // The fork inherits what the original was granted, narrowed to what
         // the edited copy still declares (the server intersects).
-        assignments.push({ scene_id: newSceneId, settings_groups: keptGrant(row) ?? grantForNew(updated) })
+        assignments.push({
+          scene_id: newSceneId,
+          settings_groups: keptGrant(row) ?? grantForNew(updated),
+          event_maps,
+        })
         notes.push(`Saved the edited "${name}" as a new private cloud scene`)
       } catch (forkError) {
         const message = forkError instanceof Error ? forkError.message : String(forkError)
@@ -278,6 +319,7 @@ async function persistAndPushCloudFrameScenesNow(
           scene_id: row.scene_id,
           scene_version: row.scene_version ?? null,
           settings_groups: keptGrant(row),
+          event_maps,
         })
       }
     }
@@ -298,13 +340,13 @@ async function persistAndPushCloudFrameScenesNow(
     changedStoreSceneIds.push(newSceneId)
     // A scene the owner built here is granted what its apps declare — that
     // is the owner choosing it, the same consent as picking a template.
-    assignments.push({ scene_id: newSceneId, settings_groups: grantForNew([scene]) })
+    assignments.push({
+      scene_id: newSceneId,
+      settings_groups: grantForNew([scene]),
+      event_maps: formEventMaps([scene]),
+    })
   }
 
-  await setCloudFrameScenes(
-    frameId,
-    assignments,
-    cloudDeployActiveSceneId(activeSceneId, formScenes) ?? undefined
-  )
+  await setCloudFrameScenes(frameId, assignments, cloudDeployActiveSceneId(activeSceneId, formScenes) ?? undefined)
   return { changedStoreSceneIds, notes }
 }
