@@ -432,8 +432,8 @@ proc getUploadedInterpretedScenes*(): Table[SceneId, ExportedInterpretedScene] =
 # The scene list's ORDER, which the tables above lose: what `setCurrentScene
 # {direction}` walks (docs/events.md, "Event map"). The deployed order is the
 # scenes.json array as last read; the uploaded order the pushed payload's.
-var deployedSceneOrder = newSeq[SceneId]()
-var uploadedSceneOrder = newSeq[SceneId]()
+var deployedSceneOrder: seq[SceneId]
+var uploadedSceneOrder: seq[SceneId]
 
 proc setUploadedSceneOrder*(order: seq[SceneId]) =
   uploadedSceneOrder = order

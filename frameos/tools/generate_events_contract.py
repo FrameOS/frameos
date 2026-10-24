@@ -387,6 +387,8 @@ def gen_nim(doc):
         f"  ButtonLongPressMs* = {int(doc['buttons']['longPressMs'])}",
         f"  ButtonRoles*: array[{len(doc['buttons']['roles'])}, string] = [{', '.join(nim_str(r) for r in doc['buttons']['roles'])}]",
         f"  PointerTypes*: array[{len(doc['pointer']['types'])}, string] = [{', '.join(nim_str(t) for t in doc['pointer']['types'])}]",
+        "  ## `setCurrentScene {direction}`: the ways through the frame's scene list (docs/events.md).",
+        f"  SceneDirections*: array[{len(doc['scenes']['directions'])}, string] = [{', '.join(nim_str(d) for d in doc['scenes']['directions'])}]",
         "  ## Origins a scene opts into per custom event (`origins` on its declaration).",
         f"  CustomEventDeclarableOrigins*: set[EventOrigin] = {{{', '.join(nim_origin(o) for o in doc['customEvents'].get('declarableOrigins', []))}}}",
         "",

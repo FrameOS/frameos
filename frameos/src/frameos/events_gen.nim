@@ -69,6 +69,8 @@ const
   ButtonLongPressMs* = 1000
   ButtonRoles*: array[9, string] = ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]
   PointerTypes*: array[3, string] = ["mouse", "touch", "pen"]
+  ## `setCurrentScene {direction}`: the ways through the frame's scene list (docs/events.md).
+  SceneDirections*: array[2, string] = ["next", "prev"]
   ## Origins a scene opts into per custom event (`origins` on its declaration).
   CustomEventDeclarableOrigins*: set[EventOrigin] = {eoSchedule, eoCloud}
 
