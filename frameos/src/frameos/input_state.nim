@@ -155,7 +155,8 @@ proc buttonRole*(state: InputState, pin: int, label: string): string =
   buttonRoleForLabel(label.strip().toUpperAscii())
 
 proc addButton(output: var seq[InputDelivery], name: string, origin: EventOrigin, pin: int,
-               label, role, action: string, atMs = -1, durationMs = -1, level = -1, wake = false) =
+               label, role, action: string, atMs = -1, durationMs = -1, level = -1, wake = false,
+               claimed = false) =
   ## One `gpio` (an edge) or `button` (a press) event for the scene. Every one
   ## is built here, so the ESP32 carries this code once: the four fields each
   ## has, then the optional ones when set.
@@ -164,6 +165,8 @@ proc addButton(output: var seq[InputDelivery], name: string, origin: EventOrigin
     payload["level"] = %level
   if wake:
     payload["wake"] = %true
+  if claimed:
+    payload["claimed"] = %true
   if atMs >= 0:
     payload["atMs"] = %atMs
   if durationMs >= 0:
@@ -215,6 +218,11 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
   ## moment before the edge applies (a `press` whose window closed before
   ## this down comes first). A host must therefore not tick to now on an
   ## event's way in: a tick is time passing between events.
+  ##
+  ## An `up` with `claimed` is a key the frame took for a gesture of its own
+  ## (the ESP32's LEFT+RIGHT voice chord, docs/voice-chat.md): the edge is
+  ## delivered as the line it is, and the button layer makes nothing of the
+  ## press — no `press`, no `longPress`, and no double-press window opens.
   let pin = payload{"pin"}.getInt(-1)
   let label = payload{"label"}.getStr()
   var role = payload{"role"}.getStr()
@@ -224,6 +232,7 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
   let atMs = payload{"atMs"}.getInt(-1)
   let given = payload{"durationMs"}.getInt(-1)
   let wake = payload{"wake"}.getBool()
+  let claimed = payload{"claimed"}.getBool()
   let hasLevel = payload.isInt("level")
   if not (hasLevel or action in ["down", "up"]):
     if name == evButton:
@@ -252,12 +261,16 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
   elif index < 0 or not state.buttons[index].down:
     # No down to measure from (a key held since before the driver started):
     # the host's own count if it gave one.
-    output.addButton(evGpio, origin, pin, label, role, "up", atMs, max(given, 0), level = 1)
+    output.addButton(evGpio, origin, pin, label, role, "up", atMs, max(given, 0), level = 1, claimed = claimed)
   else:
     let key = state.buttons[index]
     let duration = msSince(at, key.downAt)
-    output.addButton(evGpio, origin, pin, label, role, "up", atMs, duration, level = 1)
-    if not key.twice and duration < ButtonLongPressMs:
+    output.addButton(evGpio, origin, pin, label, role, "up", atMs, duration, level = 1, claimed = claimed)
+    if claimed:
+      # The frame's own gesture took this press: the key is done, and the
+      # scene hears no press of it.
+      state.buttons.delete(index)
+    elif not key.twice and duration < ButtonLongPressMs:
       # A short press: it waits out its window before it is a `press`.
       state.buttons[index].down = false
       state.buttons[index].releasedAt = at

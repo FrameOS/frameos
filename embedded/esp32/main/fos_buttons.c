@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -23,6 +24,8 @@
 #include "fos_config.h"
 #include "fos_events.h"
 #include "fos_events_gen.h"
+#include "fos_voice.h"
+#include "fos_voice_chord.h"
 #include "fos_wake.h"
 #include "frameos_nim.h"
 
@@ -42,6 +45,9 @@ typedef struct {
     uint8_t index; /* into config->gpio_buttons, which only a restart rebinds */
     uint8_t level; /* 0: pressed (the line is pulled up), 1: released */
     bool wake;     /* the down that woke the chip from deep sleep, stamped at boot */
+    /* An `up` of a key the voice chord took (docs/voice-chat.md): the
+     * dispatcher delivers the edge and makes no `button` of the press. */
+    bool claimed;
     /* When this task saw the edge, ms since boot (esp_timer), low 32 bits:
      * the dispatcher measures the hold and the double-press window from it,
      * not from when the render task got round to the queue. Widened back to
@@ -75,6 +81,54 @@ static click_t s_clicked[FOS_GPIO_BUTTONS_MAX];
 static volatile bool s_busy[FOS_GPIO_BUTTONS_MAX];
 #define BUTTON_BUSY_SLACK_MS 100
 static bool s_enabled[FOS_GPIO_BUTTONS_MAX];
+/* The voice chord (docs/voice-chat.md): the LEFT and RIGHT keys, found by
+ * label at start (-1: the board has no such pair, no chord), and its timing.
+ * While the chord holds the keys their ups click nothing and carry
+ * `claimed`. */
+static int s_chord_left = -1;
+static int s_chord_right = -1;
+static fos_voice_chord_t s_chord;
+
+static bool label_is(const char *label, const char *a, const char *b)
+{
+    return strcasecmp(label, a) == 0 || strcasecmp(label, b) == 0;
+}
+
+static void find_chord_keys(const fos_config_t *config)
+{
+    s_chord_left = s_chord_right = -1;
+    for (size_t i = 0; i < config->gpio_button_count; i++) {
+        if (!s_enabled[i]) continue;
+        const char *label = config->gpio_buttons[i].label;
+        if (s_chord_left < 0 && label_is(label, "LEFT", "PREV")) s_chord_left = (int)i;
+        else if (s_chord_right < 0 && label_is(label, "RIGHT", "NEXT")) s_chord_right = (int)i;
+    }
+    if (s_chord_left < 0 || s_chord_right < 0) s_chord_left = s_chord_right = -1;
+}
+
+static bool key_claimed(size_t index)
+{
+    return ((int)index == s_chord_left || (int)index == s_chord_right) && fos_voice_chord_claimed(&s_chord);
+}
+
+/* After the per-key loop: both chord keys down half a second start a voice
+ * session, a release after that ends it. A refused start (no microphone,
+ * voice chat off, a session still answering) sounds the dull pair, so the
+ * hold is known to have been seen and declined. */
+static void chord_sample(int64_t now)
+{
+    if (s_chord_left < 0) return;
+    switch (fos_voice_chord_sample(&s_chord, s_timing[s_chord_left].down, s_timing[s_chord_right].down, now)) {
+    case FOS_VOICE_CHORD_START:
+        if (!fos_voice_begin()) fos_buzzer_reject_down();
+        break;
+    case FOS_VOICE_CHORD_END:
+        fos_voice_end();
+        break;
+    default:
+        break;
+    }
+}
 
 static void json_escape(const char *src, char *dst, size_t dst_len)
 {
@@ -114,6 +168,7 @@ static bool enqueue_event(size_t index, int level, bool wake, int64_t at_ms)
         .index = (uint8_t)index,
         .level = (uint8_t)(level != 0),
         .wake = wake,
+        .claimed = level != 0 && key_claimed(index),
         .at_ms = (uint32_t)at_ms,
     };
     if (xQueueSend(s_queue, &event, 0) != pdTRUE) {
@@ -184,15 +239,25 @@ static void hold_sounds(size_t index, int64_t now_ms)
 {
     if (!fos_button_timing_hold_tick(&s_timing[index], now_ms)) return;
     if (s_clicked[index] != CLICK_PRESS) return;
+    /* A key the voice chord holds counts no seconds: the frame is
+     * listening, and the buzzer sits next to the microphone. */
+    if (key_claimed(index)) return;
     fos_buzzer_long_press();
 }
 
 static void release_edge(size_t index, int64_t at_ms)
 {
     fos_button_timing_release(&s_timing[index], at_ms, NULL);
+    /* A chord key lets go silently: the session's own sounds say what
+     * happened, and the up edge carries `claimed` (enqueue_event). The
+     * claim holds from the chord's start until both keys are up
+     * (fos_voice_chord_sample), so the first release and the second are
+     * both claimed; the next poll's chord_sample ends the session. */
+    bool claimed = key_claimed(index);
     click_t clicked = s_clicked[index];
+    if (claimed) clicked = CLICK_NONE;
     /* Only a press the dispatcher heard as one can start a double press:
-     * not a refused one, not a key down since boot. The wake press is one. */
+     * not a refused one, not a key down since boot, not one the chord took. The wake press is one. */
     if (clicked != CLICK_PRESS && clicked != CLICK_DOUBLE) {
         s_timing[index].tap_ended = false;
     }
@@ -245,8 +310,15 @@ static void buttons_task(void *arg)
         }
     }
 
+    find_chord_keys(config);
+    fos_voice_chord_init(&s_chord);
+
     while (true) {
         int64_t now = now_ms();
+        /* The chord first, on the levels the last poll accepted: a release
+         * seen this poll then ends the session before its edge is queued,
+         * so the edge goes out claimed. */
+        chord_sample(now);
         for (size_t i = 0; i < config->gpio_button_count; i++) {
             if (!s_enabled[i]) continue;
             const fos_gpio_button_t *button = &config->gpio_buttons[i];
@@ -376,12 +448,15 @@ void fos_buttons_process_events(void)
          * too). The role, the `up`'s `durationMs` and the `button` the edges
          * add up to (`press`, `doublePress`, `longPress`) are the Nim
          * dispatcher's (input_state.nim), timed from `atMs`. */
-        char payload[224];
+        char payload[240];
         snprintf(payload, sizeof(payload),
-                 "{\"pin\":%d,\"label\":\"%s\",\"level\":%d,\"action\":\"%s\"%s,\"atMs\":%lld}",
+                 "{\"pin\":%d,\"label\":\"%s\",\"level\":%d,\"action\":\"%s\"%s%s,\"atMs\":%lld}",
                  button->pin, label, event.level,
                  event.level == 0 ? FOS_GPIO_ACTION_DOWN : FOS_GPIO_ACTION_UP,
                  event.wake ? ",\"wake\":true" : "",
+                 /* The voice chord took this press: the dispatcher makes no
+                  * `button` of it (docs/voice-chat.md). */
+                 event.claimed ? ",\"claimed\":true" : "",
                  (long long)fos_wake_edge_at_ms(event.at_ms, now_ms()));
         /* `driver`: a press is hardware talking, and the contract lets it say
          * input and nothing else. fos_events.c hands it to the scene and asks

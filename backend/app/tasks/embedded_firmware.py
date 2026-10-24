@@ -952,6 +952,7 @@ EMBEDDED_PRESET_SEED_ONLY_KEYS = (
     ("batteryEnablePin", "battery_enable_pin"),
     ("buzzerPin", "buzzer_pin"),
     ("buzzerToneHz", "buzzer_tone_hz"),
+    ("voiceChat", "voice_chat"),
     ("deepSleepOnBattery", "deep_sleep_on_battery"),
     ("wakeCheckSeconds", "wake_check_seconds"),
 )
@@ -1539,6 +1540,9 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     wake_schedule = _embedded_device_config_value(frame, "wakeSchedule", "wake_schedule")
     if isinstance(wake_schedule, bool):
         settings.append(_provisioning_setting("wake_schedule", 1 if wake_schedule else 0))
+    voice_chat = _embedded_device_config_value(frame, "voiceChat", "voice_chat")
+    if isinstance(voice_chat, bool):
+        settings.append(_provisioning_setting("voice_chat", 1 if voice_chat else 0))
     wake_check_seconds = _embedded_device_config_value(frame, "wakeCheckSeconds", "wake_check_seconds")
     if isinstance(wake_check_seconds, int) and not isinstance(wake_check_seconds, bool):
         settings.append(_provisioning_setting("wake_check", max(0, wake_check_seconds)))

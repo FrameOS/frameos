@@ -419,6 +419,13 @@ export const esp32BatteryEnablePinFrameSettingKeys = new Set(
 export const esp32BuzzerFrameSettingsMinVersion = "2026.10.12";
 export const esp32BuzzerFrameSettingKeys = new Set(contractSettingKeysSince("esp32", esp32BuzzerFrameSettingsMinVersion));
 
+// 2026.10.20: `voice_chat`, the LEFT+RIGHT chord that opens the board's
+// microphone (docs/voice-chat.md). Live, no reboot.
+export const esp32VoiceChatFrameSettingsMinVersion = "2026.10.20";
+export const esp32VoiceChatFrameSettingKeys = new Set(
+  contractSettingKeysSince("esp32", esp32VoiceChatFrameSettingsMinVersion),
+);
+
 // An IANA zone name as the device console and fos_tz accept it
 // ("Europe/Brussels", "UTC", "America/Argentina/Buenos_Aires"); the tzdata
 // slice lookup is what rejects unknown-but-well-formed names later.

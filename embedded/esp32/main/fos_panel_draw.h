@@ -74,6 +74,18 @@ size_t fos_panel_box_copy(const fos_panel_surface_t *s, const fos_panel_code_box
 void fos_panel_draw_code(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
                          const char *title, const char *code);
 
+/* A notice: a few lines of text in a white box with a black border across
+ * the bottom of the scene (the voice chat's transcript and reply,
+ * docs/voice-chat.md). `text` is word-wrapped at the largest scale (at most
+ * `scale`, at least 1) that fits `max_lines` lines; a `\n` starts a new line.
+ * The same box struct and fos_panel_box_copy as the code box: `title_scale`
+ * is the text scale, `digit_scale` the line count. False when nothing fits. */
+#define FOS_PANEL_NOTICE_MAX_LINES 8
+bool fos_panel_notice_box(const fos_panel_surface_t *s, const char *text, int scale, int max_lines,
+                          fos_panel_code_box_t *box);
+void fos_panel_draw_notice(const fos_panel_surface_t *s, const fos_panel_code_box_t *box,
+                           const char *text);
+
 #ifdef __cplusplus
 }
 #endif

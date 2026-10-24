@@ -41,6 +41,7 @@ import {
   esp32BuzzerCloudFrameSettingKeys,
   esp32BuzzerCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Buzzer,
+  cloudFrameSupportsEsp32VoiceChat,
   esp32PowerSettingKeys,
   extendedCloudFrameSettingKeys,
   extendedCloudFrameSettingsMinVersion,
@@ -54,6 +55,8 @@ import {
   esp32BatteryEnablePinFrameSettingsMinVersion,
   esp32BuzzerFrameSettingKeys,
   esp32BuzzerFrameSettingsMinVersion,
+  esp32VoiceChatFrameSettingKeys,
+  esp32VoiceChatFrameSettingsMinVersion,
   esp32ExtendedFrameSettingKeys,
   esp32ExtendedFrameSettingsMinVersion,
   esp32OnlySettableKeys,
@@ -137,7 +140,8 @@ describe("cloud settings push", () => {
         !esp32BatteryEnablePinFrameSettingKeys.has(key) &&
         !esp32ColorsFrameSettingKeys.has(key) &&
         !esp32PaletteFrameSettingKeys.has(key) &&
-        !esp32BuzzerFrameSettingKeys.has(key),
+        !esp32BuzzerFrameSettingKeys.has(key) &&
+        !esp32VoiceChatFrameSettingKeys.has(key),
     );
     expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
     expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);
@@ -250,6 +254,26 @@ describe("cloud settings push", () => {
     expect(
       cloudFrameSettingsPayload({ buzzer_pin: "45", buzzer_tone_hz: "2700" }, ["buzzer_pin", "buzzer_tone_hz"]),
     ).toEqual({ buzzer_pin: 45, buzzer_tone_hz: 2700 });
+  });
+
+  it("gates the ESP32 voice chat switch on its own floor", () => {
+    // 2026.10.20: holding LEFT+RIGHT opens the microphone (docs/voice-chat.md).
+    // A chip key that never rides a push to older firmware.
+    expect(esp32OnlySettableKeys.has("voice_chat")).toBe(true);
+    expect([...esp32VoiceChatFrameSettingKeys]).toEqual(["voice_chat"]);
+    expect(esp32VoiceChatFrameSettingsMinVersion).toBe("2026.10.20");
+    expect(cloudFrameSupportsEsp32VoiceChat("2026.10.19")).toBe(false);
+    expect(cloudFrameSupportsEsp32VoiceChat("2026.10.20")).toBe(true);
+    expect(esp32CloudFrameSettingKeysForVersion("2026.10.19")).not.toContain("voice_chat");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.10.20")).toContain("voice_chat");
+    const check = allowedFrameSettings.get("voice_chat");
+    for (const value of [true, false]) {
+      expect(check?.(value), String(value)).toBe(true);
+    }
+    for (const value of [1, "true", null, "off"]) {
+      expect(check?.(value), JSON.stringify(value)).toBe(false);
+    }
+    expect(cloudFrameSettingsPayload({ voice_chat: false }, ["voice_chat"])).toEqual({ voice_chat: false });
   });
 
   it("validates the battery enable pin like the battery pin: a GPIO or -1", () => {

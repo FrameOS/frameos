@@ -168,6 +168,17 @@ export function cloudFrameSupportsEsp32Buzzer(frameosVersion: string | null | un
 }
 
 /**
+ * 2026.10.20: voice chat, the LEFT+RIGHT chord that opens the board's
+ * microphone (docs/voice-chat.md). A switch, applied live; older firmware
+ * refuses the whole push on it, so the field renders disabled below it.
+ */
+export const esp32VoiceChatCloudFrameSettingsMinVersion = '2026.10.20'
+
+export function cloudFrameSupportsEsp32VoiceChat(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32VoiceChatCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/**
  * What every ESP32 firmware with the cloud link applies: four of the base
  * six (no timezone before 2026.8.34, no debug before 2026.8.31) plus the
  * ungated power keys.

@@ -10,6 +10,7 @@ import { paletteDeviceOf } from '../../../../utils/assetColors/devicePalette'
 import {
   cloudFrameSupportsEsp32BatteryEnablePin,
   cloudFrameSupportsEsp32Buzzer,
+  cloudFrameSupportsEsp32VoiceChat,
   cloudFrameSupportsEsp32ExtendedSettings,
   cloudFrameSupportsEsp32TimeZone,
   cloudFrameSupportsExtendedSettings,
@@ -17,6 +18,7 @@ import {
   cloudFrameSupportsDisplayDriverSetting,
   esp32BatteryEnablePinCloudFrameSettingsMinVersion,
   esp32BuzzerCloudFrameSettingsMinVersion,
+  esp32VoiceChatCloudFrameSettingsMinVersion,
 } from '../../../../utils/cloudFrameApi'
 import { appsLogic } from '../Apps/appsLogic'
 import { logsLogic } from '../Logs/logsLogic'
@@ -140,6 +142,20 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
     disabledReason: string | undefined
   } | null
   setButtonBeep: (patch: { pin?: number; toneHz?: number }) => void
+  /**
+   * ESP32 only, null elsewhere: voice chat, the LEFT+RIGHT chord that opens
+   * the board's microphone (docs/voice-chat.md). `enabled` is the form's
+   * value (undefined = the frame's default, on); `reported` and `microphone`
+   * what a cloud frame said in its hello (`hardware.voiceChat`,
+   * `hardware.microphone`); `disabledReason` the cloud firmware floor.
+   */
+  voiceChat: {
+    enabled: boolean | undefined
+    reported: boolean | undefined
+    microphone: boolean | undefined
+    disabledReason: string | undefined
+  } | null
+  setVoiceChat: (enabled: boolean) => void
 
   appsWithSaveAssets: Record<string, string>
   logs: unknown[]
@@ -526,6 +542,39 @@ export function FrameSettingsProvider({
     setFrameFormValues({ device_config: next })
   }
 
+  // Voice chat (docs/voice-chat.md), on the same two routes as the beep: the
+  // cloud pushes `voice_chat`, the backend keeps `voiceChat` in device_config
+  // for the device's settings poll. Real ESP32 boards only.
+  const voiceChat: FrameSettingsContextValue['voiceChat'] = esp32CloudProfile
+    ? {
+        enabled: frameForm.voice_chat,
+        reported: typeof frame.hardware?.voiceChat === 'boolean' ? frame.hardware.voiceChat : undefined,
+        microphone: typeof frame.hardware?.microphone === 'boolean' ? frame.hardware.microphone : undefined,
+        disabledReason: cloudFrameSupportsEsp32VoiceChat(frame.frameos_version)
+          ? undefined
+          : frame.frameos_version
+          ? `Voice chat needs FrameOS ${esp32VoiceChatCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+          : `Voice chat needs FrameOS ${esp32VoiceChatCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`,
+      }
+    : !cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform
+    ? {
+        enabled: powerDeviceConfig.voiceChat ?? powerDeviceConfig.voice_chat,
+        reported: undefined,
+        microphone: undefined,
+        disabledReason: undefined,
+      }
+    : null
+  const setVoiceChat = (enabled: boolean): void => {
+    if (esp32CloudProfile) {
+      setFrameFormValues({ voice_chat: enabled })
+      return
+    }
+    const next: NonNullable<FrameType['device_config']> = { ...powerDeviceConfig }
+    delete next.voice_chat
+    next.voiceChat = enabled
+    setFrameFormValues({ device_config: next })
+  }
+
   const selectedTimezone = frameForm.timezone ?? frame.timezone ?? ''
   const timezoneUpdater = frameForm.timezone_updater ?? {}
   const setTimezoneUpdaterValue = (patch: Partial<NonNullable<FrameType['timezone_updater']>>): void => {
@@ -613,6 +662,8 @@ export function FrameSettingsProvider({
     reportedGpioButtons: cloudProfile ? reportedGpioButtonsOf(frame.hardware?.gpioButtons) : null,
     buttonBeep,
     setButtonBeep,
+    voiceChat,
+    setVoiceChat,
 
     appsWithSaveAssets,
     logs,
