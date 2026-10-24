@@ -292,6 +292,15 @@ EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS = [
     {"pin": 4, "label": "LEFT"},
     {"pin": 5, "label": "REFRESH"},
 ]
+# What the reTerminal's keys do whatever scene shows (frame.json `eventMap`,
+# docs/events.md "Event map"): the arrows held are the previous and the next
+# scene. Seeded onto a new frame like the buttons; the owner edits it under
+# Settings → Button actions. Keep in step with the firmware's board table
+# (embedded/esp32/main/fos_board.c) and the SPA's preset table (NewFrame.tsx).
+EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP = [
+    {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+    {"event": "button", "match": {"label": "RIGHT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+]
 # Battery through a 2:1 divider on GPIO1 (ADC1_CH0), switched on by GPIO21
 # (Seeed's ESPHome cookbook: adc GPIO1, multiply 2.0, output GPIO21 "battery
 # enable"; trmnl-firmware PIN_BATTERY 1 / PIN_VBAT_SWITCH 21 for the
@@ -470,6 +479,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E10XX_PINS,
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
+        "eventMap": EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP,
         # Same switched 2:1 divider as the E1004 (GPIO1 ADC, GPIO21 enable),
         # per Seeed schematic, hardware-unverified on E1001/E1002.
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
@@ -481,6 +491,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E10XX_PINS,
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
+        "eventMap": EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP,
         # Same switched 2:1 divider as the E1004 (GPIO1 ADC, GPIO21 enable),
         # per Seeed schematic, hardware-unverified on E1001/E1002.
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
@@ -494,6 +505,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E1004_PINS,
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS,
+        "eventMap": EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP,
         # 5000 mAh cell through the E-series divider (verified on hardware).
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER,
@@ -967,6 +979,9 @@ def apply_embedded_hardware_preset(frame: Frame) -> str:
     preset_gpio_buttons = preset.get("gpioButtons")
     if frame.gpio_buttons is None and isinstance(preset_gpio_buttons, list):
         frame.gpio_buttons = [dict(button) for button in preset_gpio_buttons]
+    preset_event_map = preset.get("eventMap")
+    if frame.event_map is None and isinstance(preset_event_map, list):
+        frame.event_map = json.loads(json.dumps(preset_event_map))
 
     embedded = dict(frame.embedded or {})
     embedded["hardwarePreset"] = preset_key

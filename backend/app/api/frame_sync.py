@@ -25,6 +25,7 @@ from app.models.frame import (
     new_frame,
     normalize_frame_admin_auth,
     normalize_error_behavior,
+    normalize_event_map,
     normalize_input_settings,
     normalize_https_proxy,
     refresh_tls_certificate_validity_dates,
@@ -241,6 +242,7 @@ FRAME_SYNC_LABELS = {
     "upload_fonts": "Upload fonts",
     "control_code": "Control code",
     "gpio_buttons": "GPIO buttons",
+    "event_map": "Button actions",
     "error_behavior": "Error behavior",
     "input_settings": "Input",
 }
@@ -428,6 +430,8 @@ def _sync_frame_value(key: str, value: Any) -> Any:
         return _sync_schedule(value)
     if key == "gpio_buttons":
         return _sync_gpio_buttons(value)
+    if key == "event_map":
+        return normalize_event_map(value) or None
     if key == "mountpoints":
         return _sync_mountpoints(value)
     if key == "error_behavior":
@@ -1451,7 +1455,7 @@ def _sync_frame_push_off_value(key: str, value: Any) -> Any:
     on-device admin page's Save sends for the same edits."""
     if key == "schedule":
         return {"events": []}
-    if key == "gpio_buttons":
+    if key in ("gpio_buttons", "event_map"):
         return []
     if key in ("reboot", "control_code", "mountpoints"):
         return {"enabled": False}
