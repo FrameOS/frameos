@@ -909,7 +909,7 @@ export const defaultKeyboardLayout = 'us'
 
 /** `context` keys per JavaScript sandbox. */
 export const codeContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "imageWidth", "imageHeight"]
-export const appContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "nextSleep", "image", "imageWidth", "imageHeight"]
+export const appContextKeys: readonly string[] = ["event", "payload", "loopIndex", "loopKey", "hasImage", "nextSleep", "image", "imageWidth", "imageHeight", "targetWidth", "targetHeight", "targetFit"]
 
 /** Ambient declarations for the Monaco editors: event names and payloads. */
 export const eventTypeDeclarations = `/** What each built-in scene event carries in \`context.payload\` (docs/events.md). */
@@ -1003,4 +1003,10 @@ export const appContextMembers = `  /** The name of the event this run is handli
   imageWidth?: number;
   /** Height of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none. */
   imageHeight?: number;
+  /** Width the image this app returns will be drawn at, in scene pixels: the decode target the interpreter addressed to this node (the frame, a split cell, or the bounds of a consumer that cannot draw it straight in). Absent when nothing is addressed to the node. An app that fetches a picture asks its source for this size, not app.frame's (2026.10.24+). */
+  targetWidth?: number;
+  /** Height of that target, in scene pixels; absent with targetWidth (2026.10.24+). */
+  targetHeight?: number;
+  /** How the consumer places the image into that target: its placement (cover, contain, stretch, center, ...). Absent with targetWidth, and when the consumer's bounds rather than a target were addressed (2026.10.24+). */
+  targetFit?: string;
 `
