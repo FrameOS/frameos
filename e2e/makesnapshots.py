@@ -15,6 +15,9 @@ import threading
 DEFAULT_DIFF_THRESHOLD = float(os.environ.get("SNAPSHOT_DIFF_THRESHOLD", "0.01"))
 RESAMPLE_FILTER = getattr(Image, "Resampling", Image).LANCZOS
 UPLOAD_TIMEOUT_SECONDS = float(os.environ.get("FRAMEOS_E2E_UPLOAD_TIMEOUT", "10"))
+# After a scene's `e2eEvents`: how long with no further upload before the last
+# one is taken as what the scene shows once it heard them all.
+EVENT_SETTLE_SECONDS = float(os.environ.get("FRAMEOS_E2E_EVENT_SETTLE", "3"))
 FRAMEOS_PROCESS_LOG = Path(os.environ.get("FRAMEOS_E2E_PROCESS_LOG", "./tmp/frameos-process.log"))
 FIXTURE_PORT = int(os.environ.get("FRAMEOS_E2E_FIXTURE_PORT", "0"))
 FRAME_PORT = int(os.environ.get("FRAMEOS_E2E_FRAME_PORT", "8787"))
@@ -162,6 +165,20 @@ class UploadReceiver:
                 self.condition.wait(remaining)
             return self.uploads.pop(0)
 
+    def wait_for_last_upload(self, settle_seconds=EVENT_SETTLE_SECONDS):
+        """The last upload of a burst: one with the ordinary timeout, then
+        every one that follows within `settle_seconds` of the previous. A
+        scene's events are sent in one go and a slow machine renders between
+        them; the snapshot is what the scene shows after all of them, not the
+        first render that happened to land ("H_" and "1 keys" for a scene that
+        was sent four keys)."""
+        upload = self.wait_for_upload()
+        while True:
+            try:
+                upload = self.wait_for_upload(timeout=settle_seconds)
+            except TimeoutError:
+                return upload
+
 def snapshot_reset_scene(scene_id):
     base_scene_id = scene_id.removesuffix("_interpreted")
     return "black" if base_scene_id == "blue" else "blue"
@@ -241,7 +258,7 @@ def set_scene_and_wait_for_upload(port, receiver, scene_id):
         receiver.clear()
         for event in events:
             send_event(port, event["event"], event.get("payload") or {})
-        upload = receiver.wait_for_upload()
+        upload = receiver.wait_for_last_upload()
         if not upload["body"]:
             raise RuntimeError(f"Received empty HTTP upload for scene {scene_id} after its events")
     return upload
@@ -328,12 +345,16 @@ def main():
 
                 reset_scene_id = snapshot_reset_scene(scene_id)
                 try:
+                    # The reset scene's render must be seen before the scene
+                    # is set: one that arrives later would be taken for the
+                    # scene's own (a plain blue snapshot). It always renders,
+                    # so the ordinary timeout applies; a miss is only logged.
                     receiver.clear()
                     set_scene(port, reset_scene_id)
                     try:
-                        receiver.wait_for_upload(timeout=2)
+                        receiver.wait_for_upload()
                     except TimeoutError:
-                        pass
+                        print(f"No upload from the reset scene {reset_scene_id} before {scene_id}")
                     upload = set_scene_and_wait_for_upload(port, receiver, scene_id)
                 except (requests.RequestException, RuntimeError, TimeoutError) as error:
                     ensure_frameos_running(process)
