@@ -463,8 +463,11 @@ function daily(p) {
 
 export function get(app, context) {
   const c = app.config
-  const W = c.width > 0 ? c.width : context.imageWidth || app.frame.width
-  const H = c.height > 0 ? c.height : context.imageHeight || app.frame.height
+  // The size the panel is drawn at: its own fields, else the box it feeds,
+  // else the canvas. The last two are in scene pixels, already turned with the frame.
+  const W = c.width > 0 ? c.width : context.targetWidth || context.imageWidth || 0
+  const H = c.height > 0 ? c.height : context.targetHeight || context.imageHeight || 0
+  if (!(W > 0 && H > 0)) throw new Error('No canvas to draw on: this app runs on render.')
   const weather = c.weather
   if (!weather || weather.error || !weather.forecast) {
     throw new Error('Weather unavailable: ' + (weather ? weather.error || 'no forecast' : 'no data'))

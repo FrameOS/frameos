@@ -56,10 +56,13 @@ export function get(app, context) {
   const url = c.shareUrl.trim()
   const counterKey = c.counterStateKey.trim()
   const metaKey = c.metadataStateKey.trim()
-  const width = context.imageWidth || (f.rotate % 180 ? f.height : f.width)
-  const height = context.imageHeight || (f.rotate % 180 ? f.width : f.height)
+  // The size the photo is drawn at: the box it feeds, else the canvas. Both
+  // are in scene pixels, already turned with the frame.
+  const width = context.targetWidth || context.imageWidth || 0
+  const height = context.targetHeight || context.imageHeight || 0
   if (!url) throw new Error('Please provide a Google Photos shared album link.')
   if (!/^https?:\/\//.test(url)) throw new Error(`Invalid shared album link: ${url}`)
+  if (!(width > 0 && height > 0)) throw new Error('No canvas to draw on: this app runs on render.')
 
   let album = frameos.recall('album')
   if (album?.url !== url || Date.now() / 1000 - album.at >= (c.cacheAlbumSeconds > 0 ? c.cacheAlbumSeconds : 3600)) {

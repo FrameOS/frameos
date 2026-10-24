@@ -43,6 +43,9 @@ describe('openaiImage', () => {
     expect(requestBody(http, 4).size).toBe('512x512')
     get(makeApp({ settings, config: { ...base, size: '999x999' } }), makeContext())
     expect(requestBody(http, 5).size).toBe('1024x1024')
+    // No canvas, no orientation: the model's default size.
+    get(makeApp({ settings, config: base }), makeContext({ hasImage: false }))
+    expect(requestBody(http, 6).size).toBe('1024x1024')
   })
 
   it('asks an ESP32 for a small jpeg and decodes base64 data', () => {

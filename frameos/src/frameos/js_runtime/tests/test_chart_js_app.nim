@@ -60,9 +60,10 @@ suite "Chart app":
     check markup.startsWith("""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 120" width="200" height="120">""")
     check markup.endsWith("</svg>")
 
-  test "outside a render it takes the frame's size":
-    let markup = svg(%*{"data": [1, 3, 2]}, width = 0, height = 0)
-    check markup.contains("""viewBox="0 0 400 240"""")
+  test "without a canvas it fails rather than guess the panel's size":
+    expect JsAppError:
+      discard svg(%*{"data": [1, 3, 2]}, width = 0, height = 0)
+    check not appSource.contains("rotate")
 
   test "a line chart: one stroked path, axes, grid and the range labels":
     let markup = svg(%*{"data": [1, 3, 2], "chartType": "line"})

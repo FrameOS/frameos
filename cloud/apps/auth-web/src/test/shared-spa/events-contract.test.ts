@@ -155,13 +155,15 @@ describe("the JavaScript `context`", () => {
   });
 
   it("is what the runtime hands a code node and an app", () => {
+    // The keys of a getter's top-level `case`: one `of "a":` or several, `of "a", "b":`.
+    const caseKeys = (getter: string): string[] =>
+      [...getter.matchAll(/^ {2}of ((?:"\w+", )*"\w+"):/gm)].flatMap((m) => (m[1] ?? "").match(/\w+/g) ?? []);
     const codeRuntime = repoFile("frameos/src/frameos/js_runtime/runtime.nim");
     const getter = codeRuntime.slice(codeRuntime.indexOf("proc jsGetContext"), codeRuntime.indexOf("# Chrono proxies"));
-    expect([...getter.matchAll(/^ {2}of "(\w+)":/gm)].map((m) => m[1]).sort()).toEqual([...codeContextKeys].sort());
+    expect(caseKeys(getter).sort()).toEqual([...codeContextKeys].sort());
     const appRuntime = repoFile("frameos/src/frameos/js_runtime/app_runtime.nim");
     const appGetter = appRuntime.slice(appRuntime.indexOf("proc jsGetAppContext"));
-    const appKeys = [...appGetter.slice(0, appGetter.indexOf("\nproc ", 10)).matchAll(/^ {2}of "(\w+)":/gm)].map((m) => m[1]);
-    expect(appKeys.sort()).toEqual([...appContextKeys].sort());
+    expect(caseKeys(appGetter.slice(0, appGetter.indexOf("\nproc ", 10))).sort()).toEqual([...appContextKeys].sort());
   });
 
   it("is spelled with at least the code-node keys wherever prose repeats it", () => {

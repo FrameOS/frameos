@@ -262,7 +262,12 @@ calls, and it calls no other:
 - `app.nodeId`, `app.nodeName`.
 - `context`: this run: `event`, `payload`, and when an image is flowing
   through, `imageWidth` / `imageHeight`. That is the area being drawn into (a
-  split cell, say), which can be smaller than `app.frame`.
+  split cell, say), in scene pixels and already turned with the frame, so an
+  app never reads `app.frame.rotate` to size anything. An app that returns an
+  image also gets `targetWidth` / `targetHeight`, the size that image will be
+  drawn at (an image node's box), and `targetFit`, the consumer's placement:
+  ask a picture source for that size, else the canvas's (the gallery app
+  does), never for `app.frame`'s.
 - `frameos`: everything the app can do: fetch (`fetchJson`, `fetchText`,
   `httpRequest`, `fetchImage`), make images (`svg`, `image`), log (`log`,
   `error`), keep values (`setState`, `remember`, `recall`), read the account's
@@ -395,10 +400,10 @@ provided"): `svg` (with a `viewBox`), `g`, `path`, `rect`, `circle`,
 ## Layout and color
 
 - The same scene is installed on 800×480, 480×800, 1200×825 and 1600×1200
-  panels. Work out every coordinate, size and font size from the frame (in a
-  JS app `app.frame.width` / `height`, or `context.imageWidth` / `imageHeight`
-  when drawing into a cell; in a code node `context.imageWidth` /
-  `imageHeight`), for example `unit = Math.min(W, H) / 100`, and emit
+  panels. Work out every coordinate, size and font size from the canvas
+  (`context.imageWidth` / `imageHeight` in a JS app and in a code node: the
+  area being drawn into, already turned with the frame, a cell's when drawing
+  into a cell), for example `unit = Math.min(W, H) / 100`, and emit
   `<svg viewBox="0 0 W H" width="W" height="H">` with those numbers. Never
   hard-code 800×600, and never add width or height fields "just in case".
 - Branch on orientation: when `H > W`, stack columns vertically.
@@ -629,6 +634,12 @@ interface FrameOSContext {
   imageWidth?: number;
   /** Height of the canvas. In scene pixels, of the canvas this run draws on (a cell's inside render/split); absent when the run has none. */
   imageHeight?: number;
+  /** Width the image this app returns will be drawn at, in scene pixels: the decode target the interpreter addressed to this node (the frame, a split cell, or the bounds of a consumer that cannot draw it straight in). Absent when nothing is addressed to the node. An app that fetches a picture asks its source for this size, not app.frame's (2026.10.24+). */
+  targetWidth?: number;
+  /** Height of that target, in scene pixels; absent with targetWidth (2026.10.24+). */
+  targetHeight?: number;
+  /** How the consumer places the image into that target: its placement (cover, contain, stretch, center, ...). Absent with targetWidth, and when the consumer's bounds rather than a target were addressed (2026.10.24+). */
+  targetFit?: string;
   [key: string]: any;
 }
 

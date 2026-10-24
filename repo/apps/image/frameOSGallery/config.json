@@ -2,7 +2,7 @@
   "name": "FrameOS Gallery",
   "description": "Random image from the FrameOS gallery",
   "category": "data",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "fields": [
     { "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries." },
     {
@@ -29,6 +29,25 @@
       "required": false,
       "label": "Category (if other)",
       "showIf": [{ "field": "category", "operator": "eq", "value": "other" }]
+    },
+    {
+      "name": "format",
+      "type": "select",
+      "options": ["jpg", "png", "original"],
+      "value": "jpg",
+      "required": false,
+      "label": "Image format",
+      "hint": "jpg: the gallery scales the image to the area it is drawn in and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame."
+    },
+    {
+      "name": "fit",
+      "type": "select",
+      "options": ["auto", "cover", "contain"],
+      "value": "auto",
+      "required": false,
+      "label": "Scale to the target",
+      "hint": "The gallery scales the image to the area it will be drawn in (the frame, or a split cell). auto follows the image node's placement; cover fills the area and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.",
+      "showIf": [{ "field": "format", "operator": "ne", "value": "original" }]
     }
   ],
   "output": [{ "name": "image", "type": "image" }],

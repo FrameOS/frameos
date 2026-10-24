@@ -78,4 +78,8 @@ describe('googlePhotos', () => {
     mock.fetchImage(() => ({ image: null, error: 'no' }))
     expect(() => get(makeApp({ config }), makeContext())).toThrow('Error fetching image from Google Photos: no')
   })
+
+  it('needs the canvas: it never sizes by the panel', () => {
+    expect(() => get(makeApp({ config }), makeContext({ hasImage: false }))).toThrow('No canvas to draw on')
+  })
 })

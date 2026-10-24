@@ -309,9 +309,10 @@ suite "unsplash code app":
       "/img/photo-abc123?ixid=xyz&w=120&h=200&fit=crop&crop=faces,edges",
     ]
 
-  test "without a context image the rotated frame decides the size":
+  test "a turned frame hands the app a turned canvas; the app reads no rotation itself":
     let h = newHarness(width = 200, height = 120, rotate = 90)
-    check h.render(%*{"metadataStateKey": "photo"}, hasImage = false).kind == fkImage
+    check h.render(%*{"metadataStateKey": "photo"}, width = 120, height = 200).kind == fkImage
+    check not appSource.contains("rotate")
     check apiCalls[0].url == expectedApiUrl("portrait", "nature")
     check imageRequests() == @["/img/photo-abc123?ixid=xyz&w=120&h=200&fit=crop&crop=faces,edges"]
     check h.scene.state["photo"]["orientation"].getStr() == "portrait"

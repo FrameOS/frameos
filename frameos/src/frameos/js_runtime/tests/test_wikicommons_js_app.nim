@@ -335,10 +335,11 @@ suite "wikicommons code app":
     check h.errors().len == 0
     check h.runtime.images.len == 0
 
-  test "the thumbnail width is the longer side of the context, or of the rotated frame":
+  test "the thumbnail width is the longer side of the canvas, which a turned frame hands over turned":
     let h = newHarness(width = 200, height = 120, rotate = 90)
     check h.render(%*{}, width = 120, height = 300).kind == fkImage
-    check h.render(%*{}, hasImage = false).kind == fkImage
+    check h.render(%*{}, width = 120, height = 200).kind == fkImage
+    check not appSource.contains("rotate")
     check apiCalls.len == 2
     check apiCalls[0].param("iiurlwidth") == "300"
     check apiCalls[1].param("iiurlwidth") == "200"

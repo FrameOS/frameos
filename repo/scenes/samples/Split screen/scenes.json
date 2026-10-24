@@ -100,7 +100,7 @@
         "name": "FrameOS Gallery",
         "description": "Random image from the FrameOS gallery",
         "category": "data",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "fields": [
           {
             "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries."
@@ -135,6 +135,39 @@
                 "value": "other"
               }
             ]
+          },
+          {
+            "name": "format",
+            "type": "select",
+            "options": [
+              "jpg",
+              "png",
+              "original"
+            ],
+            "value": "jpg",
+            "required": false,
+            "label": "Image format",
+            "hint": "jpg: the gallery scales the image to the area it is drawn in and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame."
+          },
+          {
+            "name": "fit",
+            "type": "select",
+            "options": [
+              "auto",
+              "cover",
+              "contain"
+            ],
+            "value": "auto",
+            "required": false,
+            "label": "Scale to the target",
+            "hint": "The gallery scales the image to the area it will be drawn in (the frame, or a split cell). auto follows the image node's placement; cover fills the area and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.",
+            "showIf": [
+              {
+                "field": "format",
+                "operator": "ne",
+                "value": "original"
+              }
+            ]
           }
         ],
         "output": [
@@ -151,8 +184,8 @@
         },
         "origin": "repo/apps/image/frameOSGallery",
         "sources": {
-          "app.ts": "export function get(app: FrameOSApp) {\n  const { category, categoryOther } = app.config\n  const name = category === 'other' ? categoryOther.trim() : category\n  if (!name) throw new Error('Please enter the name of a gallery under \"Category (if other)\".')\n  frameos.log(`FrameOS Gallery category: ${name}`)\n  const photo = frameos.fetchImage(`https://gallery.frameos.net/image?category=${encodeURIComponent(name)}`)\n  if (!photo.image)\n    throw new Error(`An error occurred while downloading the gallery image. ${photo.error ?? 'unknown error'}`)\n  return photo.image\n}\n",
-          "config.json": "{\n  \"name\": \"FrameOS Gallery\",\n  \"description\": \"Random image from the FrameOS gallery\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    { \"markdown\": \"[Click here](https://gallery.frameos.net/) to see all the galleries.\" },\n    {\n      \"name\": \"category\",\n      \"type\": \"select\",\n      \"options\": [\n        \"building-art-styles\",\n        \"cute\",\n        \"cyberpunk-europe\",\n        \"low-poly-animals\",\n        \"masterpieces\",\n        \"space-gallery\",\n        \"space-odyssey\",\n        \"other\"\n      ],\n      \"value\": \"cute\",\n      \"required\": false,\n      \"label\": \"Category\"\n    },\n    {\n      \"name\": \"categoryOther\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Category (if other)\",\n      \"showIf\": [{ \"field\": \"category\", \"operator\": \"eq\", \"value\": \"other\" }]\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
+          "app.ts": "// A random image from a FrameOS gallery, scaled on the gallery server to the\n// size it will be drawn at: the frame then downloads and decodes only the\n// pixels it shows (an 800x480 JPEG is ~125 KB where the original PNG is 1.5 to\n// 4.7 MB), which on a battery-powered ESP32 is most of what a render costs.\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const { category, categoryOther, format, fit } = app.config\n  const name = category === 'other' ? categoryOther.trim() : category\n  if (!name) throw new Error('Please enter the name of a gallery under \"Category (if other)\".')\n  let url = `https://gallery.frameos.net/image?category=${encodeURIComponent(name)}`\n  if (format !== 'original') {\n    // The size the image will be drawn at: the target the interpreter\n    // addressed to this node (an image node's box, a split cell), else the\n    // canvas this run draws on. Both are in scene pixels, already turned with\n    // the frame; the app never looks at the panel itself.\n    const width = context.targetWidth || context.imageWidth || 0\n    const height = context.targetHeight || context.imageHeight || 0\n    if (width > 0 && height > 0) {\n      // \"auto\" follows the consumer's placement: only contain keeps the\n      // whole picture; cover, stretch, center and the rest want it filled.\n      const placement = fit === 'auto' || !fit ? context.targetFit : fit\n      const encoding = format === 'png' ? 'png' : 'jpg'\n      url += `&width=${width}&height=${height}&fit=${placement === 'contain' ? 'contain' : 'cover'}&format=${encoding}`\n    }\n  }\n  frameos.log(`FrameOS Gallery category: ${name}`)\n  const photo = frameos.fetchImage(url)\n  if (!photo.image)\n    throw new Error(`An error occurred while downloading the gallery image. ${photo.error ?? 'unknown error'}`)\n  return photo.image\n}\n",
+          "config.json": "{\n  \"name\": \"FrameOS Gallery\",\n  \"description\": \"Random image from the FrameOS gallery\",\n  \"category\": \"data\",\n  \"version\": \"1.1.0\",\n  \"fields\": [\n    { \"markdown\": \"[Click here](https://gallery.frameos.net/) to see all the galleries.\" },\n    {\n      \"name\": \"category\",\n      \"type\": \"select\",\n      \"options\": [\n        \"building-art-styles\",\n        \"cute\",\n        \"cyberpunk-europe\",\n        \"low-poly-animals\",\n        \"masterpieces\",\n        \"space-gallery\",\n        \"space-odyssey\",\n        \"other\"\n      ],\n      \"value\": \"cute\",\n      \"required\": false,\n      \"label\": \"Category\"\n    },\n    {\n      \"name\": \"categoryOther\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Category (if other)\",\n      \"showIf\": [{ \"field\": \"category\", \"operator\": \"eq\", \"value\": \"other\" }]\n    },\n    {\n      \"name\": \"format\",\n      \"type\": \"select\",\n      \"options\": [\"jpg\", \"png\", \"original\"],\n      \"value\": \"jpg\",\n      \"required\": false,\n      \"label\": \"Image format\",\n      \"hint\": \"jpg: the gallery scales the image to the area it is drawn in and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame.\"\n    },\n    {\n      \"name\": \"fit\",\n      \"type\": \"select\",\n      \"options\": [\"auto\", \"cover\", \"contain\"],\n      \"value\": \"auto\",\n      \"required\": false,\n      \"label\": \"Scale to the target\",\n      \"hint\": \"The gallery scales the image to the area it will be drawn in (the frame, or a split cell). auto follows the image node's placement; cover fills the area and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.\",\n      \"showIf\": [{ \"field\": \"format\", \"operator\": \"ne\", \"value\": \"original\" }]\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
         }
       }
     }
@@ -258,7 +291,7 @@
         "name": "FrameOS Gallery",
         "description": "Random image from the FrameOS gallery",
         "category": "data",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "fields": [
           {
             "markdown": "[Click here](https://gallery.frameos.net/) to see all the galleries."
@@ -293,6 +326,39 @@
                 "value": "other"
               }
             ]
+          },
+          {
+            "name": "format",
+            "type": "select",
+            "options": [
+              "jpg",
+              "png",
+              "original"
+            ],
+            "value": "jpg",
+            "required": false,
+            "label": "Image format",
+            "hint": "jpg: the gallery scales the image to the area it is drawn in and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame."
+          },
+          {
+            "name": "fit",
+            "type": "select",
+            "options": [
+              "auto",
+              "cover",
+              "contain"
+            ],
+            "value": "auto",
+            "required": false,
+            "label": "Scale to the target",
+            "hint": "The gallery scales the image to the area it will be drawn in (the frame, or a split cell). auto follows the image node's placement; cover fills the area and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.",
+            "showIf": [
+              {
+                "field": "format",
+                "operator": "ne",
+                "value": "original"
+              }
+            ]
           }
         ],
         "output": [
@@ -309,8 +375,8 @@
         },
         "origin": "repo/apps/image/frameOSGallery",
         "sources": {
-          "app.ts": "export function get(app: FrameOSApp) {\n  const { category, categoryOther } = app.config\n  const name = category === 'other' ? categoryOther.trim() : category\n  if (!name) throw new Error('Please enter the name of a gallery under \"Category (if other)\".')\n  frameos.log(`FrameOS Gallery category: ${name}`)\n  const photo = frameos.fetchImage(`https://gallery.frameos.net/image?category=${encodeURIComponent(name)}`)\n  if (!photo.image)\n    throw new Error(`An error occurred while downloading the gallery image. ${photo.error ?? 'unknown error'}`)\n  return photo.image\n}\n",
-          "config.json": "{\n  \"name\": \"FrameOS Gallery\",\n  \"description\": \"Random image from the FrameOS gallery\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    { \"markdown\": \"[Click here](https://gallery.frameos.net/) to see all the galleries.\" },\n    {\n      \"name\": \"category\",\n      \"type\": \"select\",\n      \"options\": [\n        \"building-art-styles\",\n        \"cute\",\n        \"cyberpunk-europe\",\n        \"low-poly-animals\",\n        \"masterpieces\",\n        \"space-gallery\",\n        \"space-odyssey\",\n        \"other\"\n      ],\n      \"value\": \"cute\",\n      \"required\": false,\n      \"label\": \"Category\"\n    },\n    {\n      \"name\": \"categoryOther\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Category (if other)\",\n      \"showIf\": [{ \"field\": \"category\", \"operator\": \"eq\", \"value\": \"other\" }]\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
+          "app.ts": "// A random image from a FrameOS gallery, scaled on the gallery server to the\n// size it will be drawn at: the frame then downloads and decodes only the\n// pixels it shows (an 800x480 JPEG is ~125 KB where the original PNG is 1.5 to\n// 4.7 MB), which on a battery-powered ESP32 is most of what a render costs.\nexport function get(app: FrameOSApp, context: FrameOSContext) {\n  const { category, categoryOther, format, fit } = app.config\n  const name = category === 'other' ? categoryOther.trim() : category\n  if (!name) throw new Error('Please enter the name of a gallery under \"Category (if other)\".')\n  let url = `https://gallery.frameos.net/image?category=${encodeURIComponent(name)}`\n  if (format !== 'original') {\n    // The size the image will be drawn at: the target the interpreter\n    // addressed to this node (an image node's box, a split cell), else the\n    // canvas this run draws on. Both are in scene pixels, already turned with\n    // the frame; the app never looks at the panel itself.\n    const width = context.targetWidth || context.imageWidth || 0\n    const height = context.targetHeight || context.imageHeight || 0\n    if (width > 0 && height > 0) {\n      // \"auto\" follows the consumer's placement: only contain keeps the\n      // whole picture; cover, stretch, center and the rest want it filled.\n      const placement = fit === 'auto' || !fit ? context.targetFit : fit\n      const encoding = format === 'png' ? 'png' : 'jpg'\n      url += `&width=${width}&height=${height}&fit=${placement === 'contain' ? 'contain' : 'cover'}&format=${encoding}`\n    }\n  }\n  frameos.log(`FrameOS Gallery category: ${name}`)\n  const photo = frameos.fetchImage(url)\n  if (!photo.image)\n    throw new Error(`An error occurred while downloading the gallery image. ${photo.error ?? 'unknown error'}`)\n  return photo.image\n}\n",
+          "config.json": "{\n  \"name\": \"FrameOS Gallery\",\n  \"description\": \"Random image from the FrameOS gallery\",\n  \"category\": \"data\",\n  \"version\": \"1.1.0\",\n  \"fields\": [\n    { \"markdown\": \"[Click here](https://gallery.frameos.net/) to see all the galleries.\" },\n    {\n      \"name\": \"category\",\n      \"type\": \"select\",\n      \"options\": [\n        \"building-art-styles\",\n        \"cute\",\n        \"cyberpunk-europe\",\n        \"low-poly-animals\",\n        \"masterpieces\",\n        \"space-gallery\",\n        \"space-odyssey\",\n        \"other\"\n      ],\n      \"value\": \"cute\",\n      \"required\": false,\n      \"label\": \"Category\"\n    },\n    {\n      \"name\": \"categoryOther\",\n      \"type\": \"string\",\n      \"value\": \"\",\n      \"required\": false,\n      \"label\": \"Category (if other)\",\n      \"showIf\": [{ \"field\": \"category\", \"operator\": \"eq\", \"value\": \"other\" }]\n    },\n    {\n      \"name\": \"format\",\n      \"type\": \"select\",\n      \"options\": [\"jpg\", \"png\", \"original\"],\n      \"value\": \"jpg\",\n      \"required\": false,\n      \"label\": \"Image format\",\n      \"hint\": \"jpg: the gallery scales the image to the area it is drawn in and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame.\"\n    },\n    {\n      \"name\": \"fit\",\n      \"type\": \"select\",\n      \"options\": [\"auto\", \"cover\", \"contain\"],\n      \"value\": \"auto\",\n      \"required\": false,\n      \"label\": \"Scale to the target\",\n      \"hint\": \"The gallery scales the image to the area it will be drawn in (the frame, or a split cell). auto follows the image node's placement; cover fills the area and crops the rest, contain keeps the whole image inside it. Neither upscales a small image.\",\n      \"showIf\": [{ \"field\": \"format\", \"operator\": \"ne\", \"value\": \"original\" }]\n    }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"cache\": { \"enabled\": true, \"inputEnabled\": true, \"durationEnabled\": true, \"duration\": \"900\" }\n}\n"
         }
       }
     }

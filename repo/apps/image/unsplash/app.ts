@@ -7,9 +7,11 @@ const str = (v, d = '') => (typeof v === 'string' ? v : d)
 
 export function get(app, context) {
   const { config: c, frame: f } = app
-  const turned = f.rotate === 90 || f.rotate === 270
-  const w = context.imageWidth || (turned ? f.height : f.width)
-  const h = context.imageHeight || (turned ? f.width : f.height)
+  // The size the photo is drawn at: the box it feeds, else the canvas. Both
+  // are in scene pixels, already turned with the frame.
+  const w = context.targetWidth || context.imageWidth || 0
+  const h = context.targetHeight || context.imageHeight || 0
+  if (!(w > 0 && h > 0)) throw new Error('No canvas to draw on: this app runs on render.')
   const search = c.search.trim()
   const stateKey = c.metadataStateKey.trim()
   const fail = (m) => {

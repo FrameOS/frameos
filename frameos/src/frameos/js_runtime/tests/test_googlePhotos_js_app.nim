@@ -346,14 +346,15 @@ suite "Google Photos code app":
     check third.render(config).isPhoto()
     check imageRequests[^1] == sized(baseA)
 
-  test "contain asks Google for the whole photo; no context image means the rotated frame size":
+  test "contain asks Google for the whole photo; a turned frame hands over a turned canvas":
     let h = newHarness()
     check h.render(%*{"shareUrl": shareUrl, "mode": "sequential", "fitMode": "contain"}, width = 320, height = 200).isPhoto()
     check imageRequests[^1] == sized(baseA, 320, 200, "-no")
 
     let rotated = newHarness(rotate = 90)
-    check rotated.render(%*{"shareUrl": shareUrl, "mode": "sequential"}, hasImage = false).isPhoto()
+    check rotated.render(%*{"shareUrl": shareUrl, "mode": "sequential"}, width = 120, height = 200).isPhoto()
     check imageRequests[^1] == sized(baseA, 120, 200)
+    check not appSource.contains("rotate")
 
   test "missing share url fails the node without fetching":
     let h = newHarness(nodeId = 4)

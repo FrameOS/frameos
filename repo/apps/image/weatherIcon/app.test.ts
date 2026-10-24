@@ -47,4 +47,10 @@ describe('weatherIcon', () => {
   it('refuses to run without an icon set', () => {
     expect(() => get(makeApp({ config: { icons: null } }), makeContext())).toThrow('missing icon set')
   })
+
+  it('needs the canvas when it has no size of its own: it never sizes by the panel', () => {
+    expect(() => get(makeApp({ config: { icons, weathercode: 3 } }), makeContext({ hasImage: false }))).toThrow(
+      'No canvas to draw on'
+    )
+  })
 })

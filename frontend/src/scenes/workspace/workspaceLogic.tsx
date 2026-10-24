@@ -1964,7 +1964,18 @@ export const workspaceLogic = kea<workspaceLogicType>([
         applyFrameosTheme(values.theme)
       },
       focusFrame: ({ frameId }) => {
+        // One pending scroll at a time, and none after unmount: the retry
+        // timer used to outlive the logic (and, in tests, the document).
+        if (cache.focusFrameAnimationFrame) {
+          window.cancelAnimationFrame(cache.focusFrameAnimationFrame)
+          cache.focusFrameAnimationFrame = null
+        }
+        if (cache.focusFrameRetryTimer) {
+          window.clearTimeout(cache.focusFrameRetryTimer)
+          cache.focusFrameRetryTimer = null
+        }
         const scrollToFrame = (attempt = 0) => {
+          cache.focusFrameRetryTimer = null
           const frameElement = document.getElementById(`workspace-frame-${frameId}`)
           if (frameElement) {
             if (isMobileWorkspaceViewport()) {
@@ -1983,10 +1994,13 @@ export const workspaceLogic = kea<workspaceLogicType>([
             return
           }
           if (attempt < 20) {
-            window.setTimeout(() => scrollToFrame(attempt + 1), 50)
+            cache.focusFrameRetryTimer = window.setTimeout(() => scrollToFrame(attempt + 1), 50)
           }
         }
-        window.requestAnimationFrame(() => scrollToFrame())
+        cache.focusFrameAnimationFrame = window.requestAnimationFrame(() => {
+          cache.focusFrameAnimationFrame = null
+          scrollToFrame()
+        })
       },
       navigateToFrame: ({ frameId }) => {
         actions.selectFrame(frameId)
@@ -2430,6 +2444,12 @@ export const workspaceLogic = kea<workspaceLogicType>([
         }
         if (cache.sceneTileScrollRetryTimer) {
           window.clearTimeout(cache.sceneTileScrollRetryTimer)
+        }
+        if (cache.focusFrameAnimationFrame) {
+          window.cancelAnimationFrame(cache.focusFrameAnimationFrame)
+        }
+        if (cache.focusFrameRetryTimer) {
+          window.clearTimeout(cache.focusFrameRetryTimer)
         }
       }
       applyWorkspaceScrollGuard(false)

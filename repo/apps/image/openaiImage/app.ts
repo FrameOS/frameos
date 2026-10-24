@@ -15,9 +15,10 @@ export function get(app, context) {
   const apiKey = frameos.getSetting('openAI', 'apiKey')
   if (!apiKey) throw new Error('Please provide an OpenAI API key in the settings.')
 
-  const { width, height, rotate, embedded } = app.frame
-  let wide = (width - height) * (rotate % 180 ? -1 : 1)
-  if (context.imageWidth) wide = context.imageWidth - context.imageHeight
+  const { embedded } = app.frame
+  // The orientation of the box the image feeds, else of the canvas: both are
+  // in scene pixels, already turned with the frame. Neither means the default size.
+  const wide = (context.targetWidth || context.imageWidth || 0) - (context.targetHeight || context.imageHeight || 0)
   const sizes = SIZES[model] ?? []
   const i = model === 'gpt-image-2' && embedded ? 3 : 1
   let size = D
