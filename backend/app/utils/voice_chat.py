@@ -33,8 +33,6 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 import httpx
-from arq import ArqRedis as Redis
-from sqlalchemy.orm import Session
 
 from app.models.frame import Frame
 from app.utils.ai_chat_agent import OpenAiRequestError, ToolBox, ToolOutput, build_initial_input, run_agent_loop
@@ -433,11 +431,11 @@ def build_image_scene(*, source: str, query: str) -> JsonObject:
 def image_sources_for_settings(settings: dict[str, Any]) -> list[str]:
     """Which show_image sources this project's keys allow, photo first."""
     sources = []
-    unsplash = settings.get("unsplash") if isinstance(settings.get("unsplash"), dict) else {}
-    if str(unsplash.get("accessKey") or "").strip():
+    unsplash: dict[str, Any] = settings.get("unsplash") or {}
+    if isinstance(unsplash, dict) and str(unsplash.get("accessKey") or "").strip():
         sources.append("photo")
-    openai_settings = settings.get("openAI") if isinstance(settings.get("openAI"), dict) else {}
-    if str(openai_settings.get("apiKey") or "").strip():
+    openai_settings: dict[str, Any] = settings.get("openAI") or {}
+    if isinstance(openai_settings, dict) and str(openai_settings.get("apiKey") or "").strip():
         sources.append("generated")
     return sources
 
