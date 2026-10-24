@@ -52,6 +52,7 @@ import std/atomics
 import std/httpclient
 
 import frameos/types
+import frameos/event_map
 import frameos/upgrade
 from frameos/config import getConfigFilename
 from frameos/local_access import lanAccessEnabled
@@ -179,6 +180,11 @@ proc hardwarePayload*(frameConfig: FrameConfig): JsonNode =
       if button != nil:
         buttons.add(%*{"pin": button.pin, "label": button.label})
   result["gpioButtons"] = buttons
+  # The frame's event map (frame.json eventMap, docs/events.md "Event map"):
+  # what its buttons do whatever scene is showing, for a provider that has
+  # not pushed one. The firmware of an ESP32 reports its board's default the
+  # same way.
+  result["eventMap"] = eventMapJson(if frameConfig != nil: frameConfig.eventMap else: @[])
   # The frame's local network access (docs/lan-access.md). A provider keeps no
   # copy of its own: it shows this, and moves it only through the lan_access
   # verbs.

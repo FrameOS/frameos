@@ -1558,6 +1558,13 @@ proc copyHubConfigValues(target: FrameConfig) =
       let button {.cursor.} = live.gpioButtons[i]
       if button != nil:
         target.gpioButtons.add(GPIOButton(pin: button.pin, label: button.label, role: button.role))
+    # The hello's hardware report (enrollment.nim) reads the event map: a
+    # copy per rule, its `as` JsonNode deep-copied, never the runner's ref.
+    target.eventMap.setLen(0)
+    for i in 0 ..< live.eventMap.len:
+      let rule {.cursor.} = live.eventMap[i]
+      target.eventMap.add(EventMapRule(event: rule.event, match: rule.match, emit: rule.emit,
+        write: (if rule.write.isNil: newJObject() else: copy(rule.write))))
 
 proc hubFrameConfig(): FrameConfig =
   ## This thread's copy, one object for the thread's life (the session's verb

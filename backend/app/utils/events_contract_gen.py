@@ -13,6 +13,7 @@ REFUSED_BY_ORIGIN: dict[str, frozenset[str]] = {
     "http:admin": frozenset({}),
     "cloud": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "wheel", "gpio", "reload"}),
     "system": frozenset({}),
+    "eventMap": frozenset({"init", "open", "close", "keyDown", "keyUp", "textInput", "pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "wheel", "gpio", "button", "metrics", "reload", "restart", "reboot", "uploadScenes"}),
 }
 
 # Origins a scene opts into per custom event: `origins` on its declaration.

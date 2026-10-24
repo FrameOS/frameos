@@ -5,6 +5,7 @@ import drivers/drivers as drivers
 import frameos/apps
 import frameos/config
 import frameos/display_detect
+import frameos/event_map
 import frameos/input_sources
 import frameos/logger
 import frameos/metrics
@@ -296,6 +297,7 @@ proc start*(self: FrameOS) {.async.} =
       "url": self.frameConfig.timeZoneUpdates.url,
     },
     "gpioButtons": self.frameConfig.gpioButtons,
+    "eventMap": eventMapJson(self.frameConfig.eventMap),
     "inputSettings": self.frameConfig.inputSettings,
     "errorBehavior": {
       "mode": self.frameConfig.errorBehavior.mode,
