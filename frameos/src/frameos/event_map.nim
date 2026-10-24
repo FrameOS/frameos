@@ -22,14 +22,14 @@
 import std/json
 import frameos/values
 
-proc isEventMapRule*(rule: JsonNode): bool =
-  ## An object with an event name and an `as` object.
-  not rule.isNil and rule.kind == JObject and rule{"event"}.getStr().len > 0 and
-    rule{"as"}.kind == JObject
+# Written with the `{}` accessors throughout: on a JsonNode every `[]` is a
+# raise site of its own, and this runs on a 3 MB firmware.
 
 proc eventMapRuleMatches*(rule: JsonNode, name: string, payload: JsonNode): bool =
-  ## A rule of `name` whose every `match` value the payload carries.
-  if not rule.isEventMapRule() or rule["event"].getStr() != name:
+  ## A rule (an object with an event name and an `as` object) of `name`
+  ## whose every `match` value the payload carries.
+  if rule.isNil or rule.kind != JObject or rule{"event"}.getStr() != name or
+      rule{"as"}.kind != JObject:
     return false
   let match = rule{"match"}
   if match.isNil:
@@ -41,18 +41,21 @@ proc eventMapRuleMatches*(rule: JsonNode, name: string, payload: JsonNode): bool
       return false
   true
 
-proc matchingEventMapRule*(rules: JsonNode, name: string, payload: JsonNode): int =
-  ## The index of the first rule that matches, -1 when none does (or there
-  ## is no map).
+proc matchingEventMapRule*(rules: JsonNode, name: string, payload: JsonNode,
+                           index: var int): JsonNode =
+  ## The first rule that matches and its position, or nil when none does (or
+  ## there is no map).
   if rules.isNil or rules.kind != JArray:
-    return -1
-  for index, rule in rules.elems:
+    return nil
+  index = 0
+  for rule in rules.elems:
     if rule.eventMapRuleMatches(name, payload):
-      return index
-  -1
+      return rule
+    inc index
+  nil
 
 proc applyEventMapRule*(rule: JsonNode, payload: JsonNode): JsonNode =
   ## The payload the scene gets: a copy with the rule's `as` written over it.
   result = if payload.isNil or payload.kind != JObject: newJObject() else: copy(payload)
-  for key, value in rule["as"].pairs:
+  for key, value in rule{"as"}.pairs:
     result[key] = copy(value)

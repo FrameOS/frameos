@@ -261,12 +261,12 @@ proc mapped(loop: EventLoop, scene: FrameScene, name: string, payload: JsonNode)
   ## typed.
   if scene.eventMap.isNil:
     return payload
-  let index = matchingEventMapRule(scene.eventMap, name, payload)
-  if index < 0:
+  var index = 0
+  let rule = matchingEventMapRule(scene.eventMap, name, payload, index)
+  if rule.isNil:
     return payload
-  let rule = scene.eventMap[index]
   loop.log(%*{"event": "event:mapped", "name": name, "sceneId": scene.id.string,
-    "rule": index, "as": rule["as"]})
+    "rule": index, "as": rule{"as"}})
   applyEventMapRule(rule, payload)
 
 proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): bool =
