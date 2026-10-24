@@ -1527,6 +1527,93 @@ describe("frame management API", () => {
     expect(invisible.status).toBe(400);
   });
 
+  it("keeps an install's button map beside the scene: in the payload, across a save that omits it, gone on null", async () => {
+    // docs/events.md "Event map": the owner's remap of a frame's keys onto
+    // the scene's is the INSTALL's, not the scene's. It rides the assignment
+    // row, is written onto the pushed scene as `eventMap`, and a replace of
+    // the list that says nothing about it (a reorder, a grant, a scene
+    // update) leaves it alone.
+    const { accountId, frame_id } = await enrolledFrame();
+    await confirmFrame(
+      postJson(`/api/frames/${frame_id}/confirm`, {}, { origin: baseUrl }),
+      routeParams(frame_id),
+    );
+    const scene = await createStoreScene(accountId, { name: "Buttons" });
+    const rule = {
+      event: "button",
+      match: { label: "REFRESH", action: "longPress" },
+      as: { label: "B", role: "next", action: "press" },
+    };
+    const assign = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id, event_maps: { [scene.id]: [rule] } }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(assign.status).toBe(200);
+    const pushedScenes = async () => {
+      const [command] = await db
+        .select()
+        .from(frameCommands)
+        .where(eq(frameCommands.frameId, frame_id))
+        .orderBy(desc(frameCommands.createdAt))
+        .limit(1);
+      return (command?.payload as { scenes: Record<string, unknown>[] }).scenes;
+    };
+    const listedMaps = async () => {
+      const listed = await getFrameScenes(
+        getRequest(`/api/frames/${frame_id}/scenes`),
+        routeParams(frame_id),
+      );
+      const { scenes } = (await listed.json()) as { scenes: { event_maps?: unknown }[] };
+      return scenes[0]?.event_maps;
+    };
+    // The runtime scene of this store scene is `scene.id` (sceneZip), so the
+    // map lands on it by id; it is the scene's only non-content key.
+    expect((await pushedScenes())[0]?.eventMap).toEqual([rule]);
+    expect(await listedMaps()).toEqual({ [scene.id]: [rule] });
+
+    // A save that omits event_maps keeps them — what a scene update and a
+    // reorder do — and the next push carries them again.
+    const kept = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id, settings_groups: [] }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(kept.status).toBe(200);
+    expect((await pushedScenes())[0]?.eventMap).toEqual([rule]);
+    expect(await listedMaps()).toEqual({ [scene.id]: [rule] });
+
+    // Malformed maps are refused before anything is written.
+    const refused = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id, event_maps: { [scene.id]: [{ event: "button" }] } }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(refused.status).toBe(400);
+
+    // null clears them, and the pushed scene loses the key.
+    const cleared = await assignFrameScenes(
+      postJson(
+        `/api/frames/${frame_id}/scenes`,
+        { scenes: [{ scene_id: scene.id, event_maps: null }] },
+        { origin: baseUrl },
+      ),
+      routeParams(frame_id),
+    );
+    expect(cleared.status).toBe(200);
+    expect((await pushedScenes())[0]).not.toHaveProperty("eventMap");
+    expect(await listedMaps()).toBeUndefined();
+  });
+
   it("gates on the PINNED version's risk flags, not the latest version's", async () => {
     // Publish shell-flagged v1, publish clean v2 (which overwrites
     // store_scenes.risk_flags), then pin v1: the old gate read the scene row

@@ -36,6 +36,7 @@ import {
   type CloudEventRouting,
 } from "./frame-events";
 import { copySceneCoversIntoFrameCache } from "./scene-images";
+import { sceneEventMapsOf, type SceneEventMaps } from "./scene-event-map";
 import { reportError } from "./log";
 
 export const maxScenesPerFrame = 20;
@@ -58,6 +59,11 @@ export type RequestedScene = {
   // anything else updates every scene whenever one of them changes. A scene
   // new to the frame starts at the newest version either way.
   latest?: boolean | undefined;
+  // The owner's button maps for this scene on this frame, by runtime scene
+  // id (scene-event-map.ts; docs/events.md "Event map"). Omitted: an already
+  // assigned scene keeps its maps (a scene update, a reorder, a grant never
+  // touch them); null clears them.
+  eventMaps?: SceneEventMaps | null | undefined;
 };
 
 // The most groups one assignment may name. Six are deliverable today; the
@@ -193,6 +199,7 @@ export async function currentSceneAssignments(
   const rows = await db
     .select({
       declaredSettingsGroups: frameSceneAssignments.declaredSettingsGroups,
+      eventMaps: frameSceneAssignments.eventMaps,
       grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
       sceneId: frameSceneAssignments.sceneId,
       sceneVersion: frameSceneAssignments.sceneVersion,
@@ -203,6 +210,10 @@ export async function currentSceneAssignments(
   return rows.map((row) => ({
     sceneId: row.sceneId,
     sceneVersion: row.sceneVersion,
+    // The owner's button maps travel with the list too (a provisioning copy
+    // onto another frame keeps them); an assignment without any stays
+    // "omitted", which re-assignment keeps as-is.
+    ...(row.eventMaps === null ? {} : { eventMaps: sceneEventMapsOf(row.eventMaps) }),
     // The effective grant, so a caller that feeds this list back in (the
     // add route, a provisioning copy onto another frame) carries it. A row
     // from before grants existed with nothing computed yet stays "omitted",
@@ -394,6 +405,7 @@ export async function assignScenesToFrame(
       // caller that omits settings_groups for a scene keeps them.
       const existingRows = await tx
         .select({
+          eventMaps: frameSceneAssignments.eventMaps,
           grantedSettingsGroups: frameSceneAssignments.grantedSettingsGroups,
           sceneId: frameSceneAssignments.sceneId,
         })
@@ -412,6 +424,14 @@ export async function assignScenesToFrame(
             position,
             sceneId: entry.sceneId,
             sceneVersion: entry.sceneVersion,
+            // The owner's button maps: the caller's, else what this scene
+            // had here (a scene update, a reorder or a grant never drops
+            // them), else none. Written before the payload is built, which
+            // reads them back onto each scene.
+            eventMaps:
+              entry.eventMaps !== undefined
+                ? entry.eventMaps
+                : sceneEventMapsOf(existingByScene.get(entry.sceneId)?.eventMaps),
           })),
         );
       }
