@@ -329,11 +329,14 @@ describe("the esp32 cloud device profile", () => {
     // Palette (the colour list, 2026.10.4) — the sections CloudEsp32Sections
     // renders under their own heading.
     // Local network access too: the switch is a device verb, not a pushed setting.
+    // Button actions (the frame's event map, 2026.10.20) renders on every
+    // surface from the shared list below the cloud blocks.
     const esp32Sections = [
       "frame-settings-power",
       "frame-settings-palette",
       "frame-settings-colors",
       "frame-settings-lan-access",
+      "frame-settings-button-actions",
     ];
     for (const section of esp32Sections) {
       expect(frameSettingsSectionIsAllowed("cloud", section, esp32Frame), section).toBe(true);
