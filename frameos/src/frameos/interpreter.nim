@@ -429,6 +429,24 @@ proc setUploadedInterpretedScenes*(scenes: Table[SceneId, ExportedInterpretedSce
 proc getUploadedInterpretedScenes*(): Table[SceneId, ExportedInterpretedScene] =
   uploadedScenes
 
+# The scene list's ORDER, which the tables above lose: what `setCurrentScene
+# {direction}` walks (docs/events.md, "Event map"). The deployed order is the
+# scenes.json array as last read; the uploaded order the pushed payload's.
+var deployedSceneOrder: seq[SceneId]
+var uploadedSceneOrder: seq[SceneId]
+
+proc setUploadedSceneOrder*(order: seq[SceneId]) =
+  uploadedSceneOrder = order
+
+proc sceneOrderSnapshot*(): seq[SceneId] =
+  ## The frame's scene list in the control plane's order: a pushed set first,
+  ## then the deployed scenes it does not name (the same two tables
+  ## scenes.nim merges, in order).
+  result = uploadedSceneOrder
+  for sceneId in deployedSceneOrder:
+    if sceneId notin result:
+      result.add(sceneId)
+
 # -------------------------
 # Forward decl
 # -------------------------
@@ -1952,13 +1970,16 @@ proc buildInterpretedScenes*(scenes: seq[FrameSceneInput]): Table[SceneId, Expor
     result[scene.id] = buildInterpretedSceneExport(scene)
 
 proc parseInterpretedScenes*(data: string): Table[SceneId, ExportedInterpretedScene] =
+  ## The deployed scenes (scenes.json), and their order (sceneOrderSnapshot).
   result = initTable[SceneId, ExportedInterpretedScene]()
   let scenes = parseInterpretedSceneInputs(data)
+  deployedSceneOrder = @[]
   if scenes.len == 0:
     return
   for scene in scenes:
     try:
       result[scene.id] = buildInterpretedSceneExport(scene)
+      deployedSceneOrder.add(scene.id)
     except Exception as e:
       echo "Warning: Failed to load interpreted scene: ", e.msg
 

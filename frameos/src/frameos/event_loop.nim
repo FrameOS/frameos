@@ -79,6 +79,10 @@ type
       ## Whether the scene has a listener for `event`. Input is delivered only
       ## then — its payload is built at delivery, and a scene with no pointer
       ## listeners should cost nothing per motion report. nil: always deliver.
+    sceneOrder*: proc (): seq[SceneId]
+      ## The frame's scene list in the control plane's order, for a
+      ## `setCurrentScene` that says `direction` (`next` / `prev`) instead of
+      ## a `sceneId`. nil, or an empty list: no such switch is possible here.
     log*: proc (entry: JsonNode)
 
   EventLoop* = ref object of RootObj
@@ -269,17 +273,50 @@ proc mapped(loop: EventLoop, scene: FrameScene, name: string, payload: JsonNode)
     "rule": index, "as": rule{"as"}})
   applyEventMapRule(rule, payload)
 
+proc refused(loop: EventLoop, envelope: EventEnvelope, reason: string, sceneId = ""): bool =
+  ## Logs `event:refused` (docs/events.md) and is false, so a caller can
+  ## `return loop.refused(...)`. One proc: every `%*` call site is its own
+  ## copy of the object-building code.
+  var entry = %*{"event": "event:refused", "name": envelope.name, "origin": $envelope.origin}
+  if sceneId.len > 0:
+    entry["sceneId"] = %sceneId
+  entry["reason"] = %reason
+  loop.log(entry)
+  false
+
 proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): bool =
   let scene = loop.host.sceneFor(envelope.target)
   if scene.isNil:
     return false
   if not originMayEmit(envelope.origin, envelope.name, scene.customEventOrigins.getOrDefault(envelope.name)):
-    loop.log(%*{"event": "event:refused", "name": envelope.name, "origin": $envelope.origin,
-      "sceneId": scene.id.string, "reason": "undeclared"})
-    return false
+    return loop.refused(envelope, "undeclared", scene.id.string)
   loop.runOnScene(scene, envelope.name, loop.mapped(scene, envelope.name, envelope.payload), policy,
     envelope.fromRender)
   true
+
+proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
+  ## `setCurrentScene`: by `sceneId`, or by `direction` through the host's
+  ## scene order (`next` / `prev` of the scene showing, wrapping around; the
+  ## list's first or last when nothing is). False when nothing could switch:
+  ## a direction the contract does not know, or a frame with no scene list.
+  var payload = envelope.payload
+  if payload{"sceneId"}.getStr().len == 0:
+    let direction = payload{"direction"}.getStr()
+    if direction.len > 0:
+      if direction notin SceneDirections:
+        return loop.refused(envelope, "direction")
+      let order = if loop.host.sceneOrder.isNil: newSeq[SceneId]() else: loop.host.sceneOrder()
+      if order.len == 0:
+        return loop.refused(envelope, "noSceneOrder")
+      let current = loop.host.sceneFor(none(SceneId))
+      var index = if current.isNil: -1 else: order.find(current.id)
+      if direction == "next":
+        index = if index < 0: 0 else: (index + 1) mod order.len
+      else:
+        index = if index < 0: order.len - 1 else: (index + order.len - 1) mod order.len
+      payload = if payload.isNil or payload.kind != JObject: newJObject() else: copy(payload)
+      payload["sceneId"] = %order[index].string
+  loop.host.selectScene(payload)
 
 proc listens(loop: EventLoop, scene: FrameScene, name: string): bool =
   loop.host.sceneListens.isNil or loop.host.sceneListens(scene, name)
@@ -342,9 +379,7 @@ proc process(loop: EventLoop, envelope: EventEnvelope): bool =
   let policy = eventPolicy(envelope.name)
   # A custom event's allow-list depends on the scene it reaches; `deliver` asks.
   if policy.class != ecCustom and not originMayEmit(envelope.origin, envelope.name):
-    loop.log(%*{"event": "event:refused", "name": envelope.name, "origin": $envelope.origin,
-      "reason": "origin"})
-    return false
+    return loop.refused(envelope, "origin")
   if policy.class == ecInput:
     # Logged per delivered event, in deliverInput: a key is one line by name,
     # a motion report none.
@@ -368,7 +403,7 @@ proc process(loop: EventLoop, envelope: EventEnvelope): bool =
     loop.renderWanted = true
     result = true
   of evSetCurrentScene:
-    result = loop.host.selectScene(envelope.payload)
+    result = loop.selectScene(envelope)
     if result:
       loop.renderWanted = true
   of evTurnOn, evTurnOff:

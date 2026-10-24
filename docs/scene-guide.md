@@ -488,7 +488,7 @@ schedule or the cloud may send one only when its declaration lists them in
 | `gpio` | yes |  | `pin` integer, `label` string, `role` string, `action` string, `durationMs`? integer, `wake`? boolean, `atMs`? integer, `level`? integer | all | A GPIO button going `down` or `up`, the moment it happens. |
 | `button` | yes |  | `pin` integer, `label` string, `role` string, `action` string, `durationMs`? integer, `wake`? boolean, `atMs`? integer | all | A GPIO button pressed: a `press`, a `doublePress` or a `longPress`, one event per press. |
 | `setSceneState` |  | yes | `state`? json, `render`? boolean | all | Set the scene's public state. |
-| `setCurrentScene` |  | yes | `sceneId` scene, `state`? json | all | Switch the frame to another scene. |
+| `setCurrentScene` |  | yes | `sceneId`? scene, `direction`? string, `state`? json | all | Switch the frame to another scene: the one `sceneId` names, or with `direction` the `next` / `prev` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). |
 <!-- END GENERATED: events -->
 
 ## JS API reference
@@ -611,8 +611,8 @@ interface FrameOSEventPayloads {
   button: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; atMs?: number };
   /** Set the scene's public state. This is not used for private state changes. */
   setSceneState: { state?: any; render?: boolean };
-  /** Switch the frame to another scene. An optional `state` object is applied to that scene's public state. */
-  setCurrentScene: { sceneId: string; state?: any };
+  /** Switch the frame to another scene: the one `sceneId` names, or with `direction` the `next` / `prev` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). An optional `state` object is applied to that scene's public state. */
+  setCurrentScene: { sceneId?: string; direction?: string; state?: any };
 }
 
 interface FrameOSContext {

@@ -957,8 +957,8 @@ interface FrameOSEventPayloads {
   button: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; atMs?: number };
   /** Set the scene's public state. This is not used for private state changes. */
   setSceneState: { state?: any; render?: boolean };
-  /** Switch the frame to another scene. An optional \`state\` object is applied to that scene's public state. */
-  setCurrentScene: { sceneId: string; state?: any };
+  /** Switch the frame to another scene: the one \`sceneId\` names, or with \`direction\` the \`next\` / \`prev\` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). An optional \`state\` object is applied to that scene's public state. */
+  setCurrentScene: { sceneId?: string; direction?: string; state?: any };
 }
 `
 

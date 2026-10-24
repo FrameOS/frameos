@@ -2935,6 +2935,96 @@
       }
      }
     ]
+   },
+   {
+    "name": "a frame with one scene has no next scene",
+    "why": "`setCurrentScene {direction}` on a list of one resolves to the scene showing, and a switch to the scene showing without `state` changes nothing: no close, no open, no render. The preview is such a frame.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/lonely",
+      "name": "lonely",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardButton",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "xe1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/lonely",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "setCurrentScene",
+        "payload": {
+         "direction": "next"
+        }
+       }
+      ],
+      "trace": [],
+      "handled": 1,
+      "current": "fixtures/dispatcher/lonely"
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "setCurrentScene",
+        "payload": {
+         "direction": "prev"
+        }
+       }
+      ],
+      "trace": [],
+      "handled": 1,
+      "current": "fixtures/dispatcher/lonely"
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "setCurrentScene",
+        "payload": {
+         "direction": "sideways"
+        }
+       }
+      ],
+      "trace": [
+       "refused setCurrentScene http:write direction"
+      ],
+      "current": "fixtures/dispatcher/lonely"
+     }
+    ]
    }
   ]
  },

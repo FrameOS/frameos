@@ -69,6 +69,8 @@ const
   ButtonLongPressMs* = 1000
   ButtonRoles*: array[9, string] = ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]
   PointerTypes*: array[3, string] = ["mouse", "touch", "pen"]
+  ## `setCurrentScene {direction}`: the ways through the frame's scene list (docs/events.md).
+  SceneDirections*: array[2, string] = ["next", "prev"]
   ## Origins a scene opts into per custom event (`origins` on its declaration).
   CustomEventDeclarableOrigins*: set[EventOrigin] = {eoSchedule, eoCloud}
 
@@ -420,7 +422,7 @@ proc eventPayloadKeyCount*(name: string): int =
   of evGpio: 8
   of evButton: 7
   of evSetSceneState: 2
-  of evSetCurrentScene: 2
+  of evSetCurrentScene: 3
   of evUploadScenes: 3
   else: 0
 
@@ -570,7 +572,8 @@ proc eventPayloadKey*(name: string, index: int): string =
   of evSetCurrentScene:
     case index
     of 0: "sceneId"
-    of 1: "state"
+    of 1: "direction"
+    of 2: "state"
     else: ""
   of evUploadScenes:
     case index

@@ -54,6 +54,9 @@ var
   logger: Logger
   defaultSceneId: Option[SceneId] = none(SceneId)
   scenesLoadedCount = 0
+  # The legacy single-payload path's scene order (the lazy path's is the
+  # catalog), for `setCurrentScene {direction}`.
+  loadedSceneOrder: seq[SceneId]
   # The scene's lifetime, its lifecycle events and the dispatcher's EventHost:
   # shared with the wasm preview (frameos/single_scene_host). Allocated here so
   # the status procs below can be asked before initRuntime.
@@ -480,6 +483,13 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
   # The firmware owns a switch (the scene may have to come off flash, and the
   # choice is persisted): it is queued there, and comes back as selectScene.
   host.requestSelect = proc (sceneId: string): bool = requestSceneSelect(sceneId.cstring)
+  # The scene list in scenes.json order, for `setCurrentScene {direction}`:
+  # the catalog's on the lazy path, the parsed payload's on the legacy one.
+  host.sceneOrder = proc (): seq[SceneId] =
+    if sceneCatalog.len == 0:
+      return loadedSceneOrder
+    for entry in sceneCatalog:
+      result.add(SceneId(entry.id))
   host.runtimeCommand = proc (command: RuntimeCommand, payload: JsonNode) =
     let name = $command
     let payloadText = $payload
@@ -517,6 +527,10 @@ proc loadScenes*(payload: string): int =
   replaceInterpretedScenesCache(newScenes)
   when defined(memProbe): memProbe("  loadScene: scenes cache replaced")
   scenesLoadedCount = newScenes.len
+  loadedSceneOrder = @[]
+  for input in inputs:
+    if newScenes.hasKey(input.id):
+      loadedSceneOrder.add(input.id)
 
   # Keep the current scene across updates when it still exists; otherwise
   # fall back to the first scene in the payload.
