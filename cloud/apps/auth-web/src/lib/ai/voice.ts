@@ -1,5 +1,5 @@
 // Voice chat for cloud-managed ESP32 frames (docs/voice-chat.md): the frame
-// streams what its user says while they hold LEFT+RIGHT, this transcribes it
+// streams what its user says while they hold the voice key, this transcribes it
 // and runs one turn of the AI chat about that frame with a small
 // frame-scoped toolset.
 //

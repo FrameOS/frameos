@@ -1,5 +1,5 @@
 """`POST /api/frames/{id}/embedded/voice/{session}?seq=N&done=0|1`: an ESP32
-frame streams what its user says while they hold LEFT+RIGHT, this answers
+frame streams what its user says while they hold the voice key, this answers
 with the AI chat (docs/voice-chat.md).
 
 Every chunk is raw 16 kHz 16-bit mono PCM; `seq` counts them from 0 and the

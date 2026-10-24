@@ -39,7 +39,8 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset);
 /* The frame's event map a hardware preset ships with (docs/events.md, "Event
  * map"): what the board's buttons do whatever scene shows, as the compact
  * JSON rule list frame.json `eventMap` holds — a reTerminal's LEFT and RIGHT
- * held are the previous and the next scene. "" for a board without one (or
+ * held are the previous and the next scene, and on the E1001/E1002 REFRESH
+ * held is the voice chat. "" for a board without one (or
  * no preset at all). The console's `set hardware` applies it, and it is the
  * stored-config default when NVS has no `event_map` key. Keep in step with
  * `eventMap` in EMBEDDED_HARDWARE_PRESETS (backend/app/tasks/embedded_firmware.py)

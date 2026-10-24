@@ -16,7 +16,7 @@ import type { EventMapRule, FrameScene } from '../types'
 import { isEventMapRule } from './cloudFrameSettings'
 import { type ButtonGesture, gestureTitle } from './sceneEventMap'
 
-export type FrameActionKind = 'nextScene' | 'prevScene' | 'showScene' | 'render' | 'turnOn' | 'turnOff'
+export type FrameActionKind = 'nextScene' | 'prevScene' | 'showScene' | 'render' | 'turnOn' | 'turnOff' | 'voiceChat'
 
 /** What a bound press does. `sceneId` for `showScene` alone. */
 export interface FrameAction {
@@ -37,10 +37,22 @@ const ACTION_TITLES: Record<FrameActionKind, string> = {
   render: 'Refresh',
   turnOn: 'Display on',
   turnOff: 'Display off',
+  voiceChat: 'Voice chat',
 }
 
 /** The actions a row may pick, scene-less first; `showScene` needs a scene. */
 export const frameActionKinds: readonly FrameActionKind[] = ['nextScene', 'prevScene', 'render', 'turnOn', 'turnOff']
+
+/**
+ * Voice chat (docs/voice-chat.md) is an action of a key's LONG press only,
+ * on a frame with a microphone: the firmware opens the microphone while the
+ * key is held and closes it at the release, so no other press can carry it.
+ * The section offers it for those rows when the frame has voice chat at all
+ * (`useFrameSettings().voiceChat`, ESP32 only), and shows a saved one either way.
+ */
+export function frameActionKindsFor(gesture: ButtonGesture, voiceChat: boolean): readonly FrameActionKind[] {
+  return voiceChat && gesture.action === 'longPress' ? [...frameActionKinds, 'voiceChat'] : frameActionKinds
+}
 
 const SHOW_SCENE_PREFIX = 'showScene:'
 
@@ -54,7 +66,9 @@ export function parseFrameActionValue(value: string): FrameAction | null {
     const sceneId = value.slice(SHOW_SCENE_PREFIX.length)
     return sceneId ? { kind: 'showScene', sceneId } : null
   }
-  return (frameActionKinds as readonly string[]).includes(value) ? { kind: value as FrameActionKind } : null
+  return (frameActionKinds as readonly string[]).includes(value) || value === 'voiceChat'
+    ? { kind: value as FrameActionKind }
+    : null
 }
 
 export function frameActionTitle(
@@ -81,6 +95,7 @@ export function bindingRule(binding: ButtonBinding): EventMapRule {
     case 'render':
     case 'turnOn':
     case 'turnOff':
+    case 'voiceChat':
       return { event: 'button', match, emit: binding.action.kind, as: {} }
   }
 }
@@ -114,7 +129,10 @@ export function bindingOfRule(rule: EventMapRule): ButtonBinding | null {
     }
     return null
   }
-  if ((rule.emit === 'render' || rule.emit === 'turnOn' || rule.emit === 'turnOff') && keys.length === 0) {
+  if (
+    (rule.emit === 'render' || rule.emit === 'turnOn' || rule.emit === 'turnOff' || rule.emit === 'voiceChat') &&
+    keys.length === 0
+  ) {
     return { gesture, action: { kind: rule.emit } }
   }
   return null

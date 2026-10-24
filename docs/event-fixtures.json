@@ -3282,6 +3282,117 @@
     ]
    },
    {
+    "name": "a long press bound to voiceChat is the host's device command, not the scene's press",
+    "why": "`voiceChat` (docs/voice-chat.md) is a device command only the frame's event map may emit, and only a key's long press makes sense of it. On the frame the firmware reads the binding off the map and opens the microphone while the key is held, claiming the press, so the rule never fires there; a long press the firmware did not take (a `button` said over HTTP, the preview, a Pi) runs through the dispatcher like any mapped press: replaced by `voiceChat` from origin `eventMap`, handed to the host as a device command, never to the scene, with no render. A short press of the same key is still the scene's. Said outright (`POST /event/voiceChat`), it is refused: the map is its only origin.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/voiceKey",
+      "name": "voiceKey",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardButton",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "xe1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/voiceKey",
+    "frameEventMap": [
+     {
+      "event": "button",
+      "match": {
+       "label": "REFRESH",
+       "action": "longPress"
+      },
+      "emit": "voiceChat",
+      "as": {}
+     }
+    ],
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "REFRESH",
+         "action": "longPress",
+         "durationMs": 1500
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame button -> voiceChat",
+       "command voiceChat"
+      ],
+      "handled": 2,
+      "state": {
+       "heardButton": null
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "REFRESH",
+         "action": "press"
+        }
+       }
+      ],
+      "trace": [
+       "run voiceKey button",
+       "render"
+      ],
+      "state": {
+       "heardButton": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "voiceChat",
+        "payload": {}
+       }
+      ],
+      "trace": [
+       "refused voiceChat http:write origin"
+      ],
+      "handled": 1
+     }
+    ]
+   },
+   {
     "name": "a frame with one scene has no next scene",
     "why": "`setCurrentScene {direction}` on a list of one resolves to the scene showing, and a switch to the scene showing without `state` changes nothing: no close, no open, no render. The preview is such a frame.",
     "scenes": [
@@ -5515,7 +5626,7 @@
    },
    {
     "name": "a press the frame claimed makes no button",
-    "why": "LEFT and RIGHT held together half a second start the voice chat (docs/voice-chat.md): the frame took the presses, so their `up` edges say `claimed` and the button layer makes no `longPress` of a hold that was a sentence, nor a `press` of a short one. The edges themselves are delivered, as every edge is.",
+    "why": "A key whose long press the frame's event map binds to `voiceChat` (REFRESH on a reTerminal E1001/E1002) starts the voice chat at the hold, docs/voice-chat.md: the frame took the press, so its `up` edge says `claimed` and the button layer makes no `longPress` of a hold that was a sentence, nor a `press` of a short one. The edges themselves are delivered, as every edge is. (The case holds two keys at once, as the chord that came before the binding did; one claimed key is the same rule once.)",
     "steps": [
      {
       "at": 1000,
@@ -5640,7 +5751,7 @@
    },
    {
     "name": "a short claimed press makes no press either",
-    "why": "A chord key that let go early still answers to the frame when the chord already started: `claimed` on its `up` ends the key without a `press`, so the scene does not flip a page because the frame started listening.",
+    "why": "A claimed key that let go early still answers to the frame (the firmware claims a voice key from the hold's start, whatever the key then does): `claimed` on its `up` ends the key without a `press`, so the scene does not flip a page because the frame started listening.",
     "steps": [
      {
       "at": 1000,

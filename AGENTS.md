@@ -105,7 +105,8 @@
   `utils/frameEventMap.ts`) binds a key to the frame whatever scene shows —
   a rule with `emit` replaces the press (origin `eventMap`), the scene never
   hears it; every reTerminal preset ships LEFT/RIGHT held = previous/next
-  scene (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset table:
+  scene, and the E1001/E1002 (microphone) REFRESH held = `voiceChat`
+  (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset table:
   keep the three alike). `setCurrentScene {direction}` is resolved by the
   dispatcher from the host's `sceneOrder`, never by a host. **An installed
   scene's** map is the install's, never the scene's: `eventMap` beside
@@ -136,8 +137,10 @@
 
 ## Voice chat: `docs/voice-chat.md` is the contract
 
-- Holding LEFT+RIGHT on a reTerminal E1001/E1002 (PDM microphone; the E1004
-  has none) streams speech to the frame's control plane and runs ONE turn of
+- Holding the voice key — the key whose long press the frame's event map
+  binds to `voiceChat`, REFRESH on the reTerminal E1001/E1002 presets (PDM
+  microphone; the E1004 has none) — streams speech to the frame's control
+  plane and runs ONE turn of
   the AI chat with the frame in context and only six frame-scoped tools
   (`list_scenes`, `activate_scene`, `set_scene_state`, `render_now`,
   `show_image` — a one-picture Unsplash/OpenAI preview scene, from the keys
@@ -148,10 +151,14 @@
   `cloud/.../frames/[frameId]/voice/[sessionId]/route.ts` + `src/lib/ai/voice.ts`);
   the backend's test reads the cloud's `voice.ts` and the cloud's unit test
   reads the backend's `voice_chat.py`, so change both or neither.
-- On the device the chord is `fos_voice_chord.c` (pure, host-tested), the
-  session `fos_voice.c`, the microphone `fos_mic.c`. A chord key's `up`
-  carries `claimed: true` (`docs/events-contract.json` `gpio`): the dispatcher
-  makes no `button` of it. `voice_chat` is an esp32-only contract setting.
+- On the device the binding is read off the map by `fos_voice_binding.c`
+  (cJSON, host-tested) and the hold run by `fos_voice_hold.c` (pure,
+  host-tested) in the button task — `voiceChat` is the one emit acted on
+  while the key is still held, since a `longPress` exists only at the
+  release; the session is `fos_voice.c`, the microphone `fos_mic.c`. A
+  voice key's `up` carries `claimed: true` (`docs/events-contract.json`
+  `gpio`): the dispatcher makes no `button` of it. `voice_chat` (the
+  microphone switch) is an esp32-only contract setting.
 
 ## Deploy progress: the contract is `docs/deploy-progress-contract.json`
 

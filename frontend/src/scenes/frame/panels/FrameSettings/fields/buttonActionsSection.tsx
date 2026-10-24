@@ -8,7 +8,7 @@ import { cloudFrameSupportsEventMap, eventMapCloudFrameSettingsMinVersion } from
 import {
   type ButtonBinding,
   bindingConflicts,
-  frameActionKinds,
+  frameActionKindsFor,
   frameActionTitle,
   frameActionValue,
   frameBindings,
@@ -34,7 +34,7 @@ import { useFrameSettings } from '../frameSettingsContext'
  * actions" seeding the editable list; everything else is the editable list.
  */
 export function ButtonActionsSection(): JSX.Element {
-  const { frame, frameForm, setFrameFormValues, surface } = useFrameSettings()
+  const { frame, frameForm, setFrameFormValues, surface, voiceChat } = useFrameSettings()
   const cloudProfile = surface === 'cloudLinux' || surface === 'cloudEsp32'
   const supported = !cloudProfile || cloudFrameSupportsEventMap(frame.frameos_version)
   const buttons = frameButtons(frame, frameForm)
@@ -72,8 +72,13 @@ export function ButtonActionsSection(): JSX.Element {
       : [{ value: gestureValue(binding.gesture), label: `${gestureTitle(binding.gesture)} (not on this frame)` }]
     return [...stale, ...Array.from(byButton, ([label, options]) => ({ label, options }))]
   }
-  const actionOptions: SelectOptionEntry[] = [
-    ...frameActionKinds.map((kind) => ({ value: frameActionValue({ kind }), label: frameActionTitle({ kind }) })),
+  const actionOptions = (binding: ButtonBinding): SelectOptionEntry[] => [
+    // Voice chat is a long press's alone, on a frame with a microphone; a
+    // saved binding stays selectable so the row shows what is saved.
+    ...frameActionKindsFor(binding.gesture, voiceChat !== null || binding.action.kind === 'voiceChat').map((kind) => ({
+      value: frameActionValue({ kind }),
+      label: frameActionTitle({ kind }),
+    })),
     ...(scenes.length > 0
       ? [
           {
@@ -177,7 +182,7 @@ export function ButtonActionsSection(): JSX.Element {
                 <Select
                   name={`event_map.${index}.action`}
                   value={frameActionValue(binding.action)}
-                  options={actionOptions}
+                  options={actionOptions(binding)}
                   disabled={!supported}
                   onChange={(value) => {
                     const action = parseFrameActionValue(value)

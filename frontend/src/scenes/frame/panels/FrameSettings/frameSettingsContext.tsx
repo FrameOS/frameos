@@ -143,8 +143,9 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
   } | null
   setButtonBeep: (patch: { pin?: number; toneHz?: number }) => void
   /**
-   * ESP32 only, null elsewhere: voice chat, the LEFT+RIGHT chord that opens
-   * the board's microphone (docs/voice-chat.md). `enabled` is the form's
+   * ESP32 only, null elsewhere: voice chat, the key hold that opens the
+   * board's microphone (docs/voice-chat.md; which key is Button actions').
+   * `enabled` is the form's
    * value (undefined = the frame's default, on); `reported` and `microphone`
    * what a cloud frame said in its hello (`hardware.voiceChat`,
    * `hardware.microphone`); `disabledReason` the cloud firmware floor.

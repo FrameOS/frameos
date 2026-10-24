@@ -175,9 +175,11 @@ typedef struct {
     fos_mic_pins_t mic_pins;       /* the PDM microphone (Seeed reTerminal
                                     * E1001/E1002: clk 42, data 41, pwr 38);
                                     * clk/data -1 = none */
-    bool voice_chat;               /* holding LEFT+RIGHT talks to the AI chat
-                                    * (docs/voice-chat.md); off keeps the
-                                    * microphone shut. Default on. */
+    bool voice_chat;               /* holding the key the event map binds to
+                                    * voiceChat (REFRESH on the E1001/E1002)
+                                    * talks to the AI chat (docs/voice-chat.md);
+                                    * off keeps the microphone shut whatever
+                                    * the map says. Default on. */
     size_t gpio_button_count;
     fos_gpio_button_t gpio_buttons[FOS_GPIO_BUTTONS_MAX];
     fos_pins_t pins;

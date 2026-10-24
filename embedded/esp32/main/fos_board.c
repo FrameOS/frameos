@@ -97,20 +97,28 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
 
 /* The reTerminal E-series front panel: a refresh key between two arrows.
  * Held, the arrows walk the frame's scene list (a short press stays the
- * scene's to hear). The E1004 wires GPIO3 and GPIO5 the other way round from
- * the E1001/E1002, which is why the rules name labels, never pins. */
-#define RETERMINAL_EVENT_MAP \
-    "[{\"event\":\"button\",\"match\":{\"label\":\"LEFT\",\"action\":\"longPress\"}," \
+ * scene's to hear), and on the two models with a microphone the refresh key
+ * held talks to the frame (docs/voice-chat.md: `voiceChat` is the emit the
+ * button task reads off the map, fos_voice_binding.c). The E1004 wires GPIO3
+ * and GPIO5 the other way round from the E1001/E1002, which is why the rules
+ * name labels, never pins. */
+#define RETERMINAL_ARROWS \
+    "{\"event\":\"button\",\"match\":{\"label\":\"LEFT\",\"action\":\"longPress\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"RIGHT\",\"action\":\"longPress\"}," \
-    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}]"
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}"
+#define RETERMINAL_VOICE \
+    "{\"event\":\"button\",\"match\":{\"label\":\"REFRESH\",\"action\":\"longPress\"}," \
+    "\"emit\":\"voiceChat\",\"as\":{}}"
+#define RETERMINAL_EVENT_MAP "[" RETERMINAL_ARROWS "]"
+#define RETERMINAL_VOICE_EVENT_MAP "[" RETERMINAL_ARROWS "," RETERMINAL_VOICE "]"
 
 static const struct {
     const char *preset;
     const char *event_map;
 } k_event_maps[] = {
-    {"seeed_reterminal_e1001", RETERMINAL_EVENT_MAP},
-    {"seeed_reterminal_e1002", RETERMINAL_EVENT_MAP},
+    {"seeed_reterminal_e1001", RETERMINAL_VOICE_EVENT_MAP},
+    {"seeed_reterminal_e1002", RETERMINAL_VOICE_EVENT_MAP},
     {"seeed_reterminal_e1004", RETERMINAL_EVENT_MAP},
 };
 
@@ -121,6 +129,7 @@ const char *fos_board_event_map(const char *hardware_preset)
         if (strcmp(hardware_preset, k_event_maps[i].preset) == 0) return k_event_maps[i].event_map;
     }
     return "";
+}
 
 /* Boards with a PDM microphone: the reTerminal E1001/E1002 (and the E1003,
  * no preset yet) share one MEMSensing MSM261 on PDM clock GPIO42, data

@@ -323,10 +323,11 @@ function ButtonBeepField(): JSX.Element | null {
 
 /**
  * Voice chat (docs/voice-chat.md), under the buttons it answers to: holding
- * LEFT and RIGHT together half a second opens the board's microphone and
- * streams what is said to this control plane for the AI chat. A switch, on
- * by default on a board with a microphone (ESP32 only); off keeps the
- * microphone shut whatever the buttons do.
+ * the key Button actions binds to it (REFRESH on the reTerminal presets)
+ * opens the board's microphone and streams what is said to this control
+ * plane for the AI chat. A switch, on by default on a board with a
+ * microphone (ESP32 only); off keeps the microphone shut whatever the
+ * buttons are bound to.
  */
 function VoiceChatField(): JSX.Element | null {
   const { voiceChat, setVoiceChat } = useFrameSettings()
@@ -344,12 +345,13 @@ function VoiceChatField(): JSX.Element | null {
             title={
               disabledReason ?? (
                 <>
-                  Hold the LEFT and RIGHT buttons together for half a second: the frame plays a short sparkle, listens
-                  until you let go, and sends what you said to this control plane. The AI chat transcribes it and acts
-                  on it with the frame in its context (switch to a scene by name, set a field of the scene showing,
-                  redraw); the reply lands in the frame&apos;s chat and its log, and the buzzer sounds the outcome.
+                  Hold the voice key for a second (REFRESH on the reTerminal presets; Button actions below binds a
+                  key&apos;s long press to &quot;Voice chat&quot;): the frame plays a short sparkle, listens until you
+                  let go, and sends what you said to this control plane. The AI chat transcribes it and acts on it with
+                  the frame in its context (switch to a scene by name, set a field of the scene showing, redraw, show a
+                  picture); the reply lands in the frame&apos;s chat and its log, and the buzzer sounds the outcome.
                   Needs a board with a microphone: the Seeed reTerminal E1001 and E1002 have one (the E1004 does not).
-                  Off keeps the microphone shut whatever the buttons do.
+                  Off keeps the microphone shut whatever the buttons are bound to.
                   {microphone === false ? ' This frame reports no microphone.' : ''}
                 </>
               )
@@ -364,7 +366,7 @@ function VoiceChatField(): JSX.Element | null {
               value
                 ? microphone === false
                   ? 'On, but this frame reports no microphone'
-                  : 'On: hold LEFT + RIGHT to talk to the frame'
+                  : 'On: hold the voice key to talk to the frame'
                 : 'Off: the microphone stays shut'
             }
           />

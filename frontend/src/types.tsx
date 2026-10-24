@@ -135,7 +135,7 @@ export interface FrameType {
     buzzerPin?: number | null
     /** ESP32 only: the pitch of that tone in Hz (2026.10.12+). */
     buzzerToneHz?: number | null
-    /** ESP32 only: the board has a PDM microphone the LEFT+RIGHT chord opens
+    /** ESP32 only: the board has a PDM microphone the voice key's hold opens
      * (docs/voice-chat.md), and whether voice chat is on (2026.10.20+). */
     microphone?: boolean | null
     voiceChat?: boolean | null
@@ -284,7 +284,7 @@ export interface FrameType {
     /** Pitch of that tone in Hz (default 2000 on the device). */
     buzzerToneHz?: number
     buzzer_tone_hz?: number
-    /** Voice chat: holding LEFT+RIGHT opens the microphone (docs/voice-chat.md). Default on. */
+    /** Voice chat: holding the voice key opens the microphone (docs/voice-chat.md). Default on. */
     voiceChat?: boolean
     voice_chat?: boolean
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
@@ -342,7 +342,7 @@ export interface FrameType {
   buzzer_pin?: number
   /** ESP32: pitch of the button beep in Hz. */
   buzzer_tone_hz?: number
-  /** ESP32: voice chat, the LEFT+RIGHT microphone chord (docs/voice-chat.md). */
+  /** ESP32: voice chat, the microphone switch of the voice key's hold (docs/voice-chat.md). */
   voice_chat?: boolean
   flip?: 'horizontal' | 'vertical' | 'both' | ''
   background_color: string // deprecated, serves as fallback for scenes

@@ -299,10 +299,10 @@
       "parity": {"only": "esp32", "why": "The pitch of buzzer_pin's tone, which only the ESP32 firmware's button task sounds (fos_buzzer.c)."}
     },
     "voice_chat": {
-      "$comment": "Voice chat (docs/voice-chat.md): holding the LEFT and RIGHT buttons together half a second opens the board's microphone and streams what is said to the frame's control plane for the AI chat. Default on where the board has a microphone (reTerminal E1001/E1002); off keeps the microphone shut whatever the buttons do. Applied live (the chord asks on every press).",
+      "$comment": "Voice chat (docs/voice-chat.md): holding the voice key — the key whose long press `event_map` binds to `voiceChat`, REFRESH on the reTerminal E1001/E1002 presets — opens the board's microphone and streams what is said to the frame's control plane for the AI chat. Default on where the board has a microphone; off keeps the microphone shut whatever the map binds. Applied live (the hold asks on every press).",
       "rule": {"type": "bool"},
       "profiles": {"esp32": {"since": "2026.10.20"}},
-      "parity": {"only": "esp32", "why": "The chord, the PDM microphone and the relay live in the ESP32 firmware (fos_voice.c); no Pi frame has a microphone path."}
+      "parity": {"only": "esp32", "why": "The key hold, the PDM microphone and the relay live in the ESP32 firmware (fos_voice.c); no Pi frame has a microphone path."}
     }
   },
   "formats": {

@@ -529,6 +529,16 @@ came. A rule does one of two things:
   envelope: the allow-list is asked of `eventMap` like any origin, and what the
   map emits is never mapped again, so a rule cannot feed itself.
 
+**`voiceChat`** (`docs/voice-chat.md`) is the one emit that is not the
+dispatcher's to carry out: a `button` rule emitting it on a key's `longPress`
+makes that key the frame's voice key, and the ESP32 firmware reads the binding
+off the map and opens the microphone while the key is held — a `longPress`
+exists only at the release, and a sentence has to be heard before that. The
+press is claimed (`gpio.claimed`), so the rule never fires for it; a
+`voiceChat` that does reach a dispatcher (a `button` said over HTTP, a Pi) is
+a device command its host logs as unsupported. Only the `eventMap` origin may
+emit it, and only the ESP32 host has it.
+
 `gpio` edges are not touched by a `button` rule (a long press cannot be known
 at its `down`); a scene that wants them mapped gets its own `gpio` rules. A
 rule firing is logged as `event:mapped` with its `scope` (`frame` or `scene`),

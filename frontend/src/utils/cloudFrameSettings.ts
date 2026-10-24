@@ -135,9 +135,11 @@ export const eventMapCloudFrameSettingsMinVersion = '2026.10.20'
  * device refuses the whole push on the key.
  */
 export const eventMapCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(eventMapCloudFrameSettingsMinVersion)
+// `voice_chat` shares the floor (docs/voice-chat.md, its own gate below): this
+// list is the event map's key alone.
 export const esp32EventMapCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
   eventMapCloudFrameSettingsMinVersion
-)
+).filter((key) => key === 'event_map')
 
 export function cloudFrameSupportsEventMap(frameosVersion: string | null | undefined): boolean {
   return cloudFrameSupportsSettingsFrom(eventMapCloudFrameSettingsMinVersion, frameosVersion)
@@ -244,8 +246,8 @@ export function cloudFrameSupportsEsp32Buzzer(frameosVersion: string | null | un
 }
 
 /**
- * 2026.10.20: voice chat, the LEFT+RIGHT chord that opens the board's
- * microphone (docs/voice-chat.md). A switch, applied live; older firmware
+ * 2026.10.20: voice chat, the key hold that opens the board's microphone
+ * (docs/voice-chat.md). A switch, applied live; older firmware
  * refuses the whole push on it, so the field renders disabled below it.
  */
 export const esp32VoiceChatCloudFrameSettingsMinVersion = '2026.10.20'

@@ -2511,8 +2511,8 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     if (buzzer_tone_hz != NULL) {
         config->buzzer_tone_hz = (uint16_t)buzzer_tone_hz->valuedouble;
     }
-    /* Voice chat (docs/voice-chat.md): whether the LEFT+RIGHT chord opens
-     * the microphone. Live: the chord asks on every press. */
+    /* Voice chat (docs/voice-chat.md): whether the voice key's hold opens
+     * the microphone. Live: the hold asks on every press. */
     const cJSON *voice_chat = cJSON_GetObjectItem(settings, "voice_chat");
     if (voice_chat != NULL) {
         config->voice_chat = cJSON_IsTrue(voice_chat);

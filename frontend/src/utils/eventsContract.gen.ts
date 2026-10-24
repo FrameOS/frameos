@@ -43,6 +43,7 @@ export type ContractEventName =
   | 'restart'
   | 'reboot'
   | 'uploadScenes'
+  | 'voiceChat'
 
 export interface ContractEventSpec {
   class: EventClass
@@ -810,6 +811,23 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "cloud": {
       "verb": "set_scenes"
     }
+  },
+  "voiceChat": {
+    "class": "device-command",
+    "listen": false,
+    "dispatch": false,
+    "origins": [
+      "eventMap"
+    ],
+    "renderAfter": "never",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": false,
+      "esp32": true,
+      "wasm": false
+    },
+    "since": "2026.10.20"
   }
 }
 

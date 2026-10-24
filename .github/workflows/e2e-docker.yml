@@ -170,6 +170,14 @@ jobs:
                 embedded/esp32/main/fos_cloud_contract.c embedded/esp32/main/tests/test_fos_cloud_contract.c \
                 -lm -o /tmp/test_fos_cloud_contract
               /tmp/test_fos_cloud_contract /fixtures/cloud-frames-fixtures.json
+              # Which keys the event map of a frame makes voice keys
+              # (docs/voice-chat.md): pure cJSON as well. No apostrophes in
+              # here: this whole script is one single-quoted bash -lc string.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                -I"$IDF_PATH/components/json/cJSON" "$IDF_PATH/components/json/cJSON/cJSON.c" \
+                embedded/esp32/main/fos_voice_binding.c embedded/esp32/main/tests/test_fos_voice_binding.c \
+                -lm -o /tmp/test_fos_voice_binding
+              /tmp/test_fos_voice_binding
               # The JSON depth pre-scan that guards the 8-10 KB parser tasks.
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
                 embedded/esp32/main/fos_json_guard.c embedded/esp32/main/tests/test_fos_json_guard.c \
@@ -214,6 +222,11 @@ jobs:
                 embedded/esp32/main/tests/test_fos_console_line.c \
                 -o /tmp/test_fos_console_line
               /tmp/test_fos_console_line
+              # The hold of a voice key (docs/voice-chat.md), pure.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/fos_voice_hold.c embedded/esp32/main/tests/test_fos_voice_hold.c \
+                -o /tmp/test_fos_voice_hold
+              /tmp/test_fos_voice_hold
               ccache --show-stats || true
             '
           # The container writes as root; actions/cache runs as the runner user.

@@ -14,6 +14,8 @@ import {
   bindingConflicts,
   bindingOfRule,
   bindingRule,
+  frameActionKinds,
+  frameActionKindsFor,
   frameActionTitle,
   frameActionValue,
   frameBindings,
@@ -43,6 +45,25 @@ describe("bindings and rules", () => {
     });
     expect(bindingRule({ gesture: press, action: { kind: "render" } })).toEqual({ event: "button", match: press, emit: "render", as: {} });
     expect(bindingRule({ gesture: press, action: { kind: "turnOff" } }).emit).toBe("turnOff");
+  });
+
+  it("binds a long press to the voice chat, and offers that to long presses on a frame with a microphone", () => {
+    // docs/voice-chat.md: the firmware reads this rule off the map and opens the
+    // microphone while the key is held; the reTerminal E1001/E1002 presets ship it.
+    const refreshHeld = { label: "REFRESH", action: "longPress" };
+    const rule: EventMapRule = { event: "button", match: refreshHeld, emit: "voiceChat", as: {} };
+    expect(bindingRule({ gesture: refreshHeld, action: { kind: "voiceChat" } })).toEqual(rule);
+    expect(bindingOfRule(rule)).toEqual({ gesture: refreshHeld, action: { kind: "voiceChat" } });
+    expect(frameActionTitle({ kind: "voiceChat" })).toBe("Voice chat");
+    expect(parseFrameActionValue(frameActionValue({ kind: "voiceChat" }))).toEqual({ kind: "voiceChat" });
+    // The contract lets the map emit it, so a push carries it.
+    expect(eventMapEmits).toContain("voiceChat");
+    expect(isEventMapRule(rule)).toBe(true);
+    // Offered for a long press when the frame has voice chat, never for a press or a double press.
+    expect(frameActionKindsFor(refreshHeld, true)).toEqual([...frameActionKinds, "voiceChat"]);
+    expect(frameActionKindsFor(refreshHeld, false)).toEqual(frameActionKinds);
+    expect(frameActionKindsFor({ label: "REFRESH", action: "doublePress" }, true)).toEqual(frameActionKinds);
+    expect(frameActionKinds).not.toContain("voiceChat");
   });
 
   it("reads its own rules back and keeps what it did not write", () => {
@@ -94,7 +115,7 @@ describe("the rules a device or a push carries", () => {
     expect(isEventMapRule({ event: "button", emit: "reboot" })).toBe(false);
     expect(isEventMapRule("nonsense")).toBe(false);
     // The emits are the contract's: what the eventMap origin may say.
-    expect([...eventMapEmits].sort()).toEqual(["render", "setCurrentScene", "setSceneState", "turnOff", "turnOn"]);
+    expect([...eventMapEmits].sort()).toEqual(["render", "setCurrentScene", "setSceneState", "turnOff", "turnOn", "voiceChat"]);
   });
 
   it("builds a push the contract accepts, non-rules dropped and `as` always an object", () => {

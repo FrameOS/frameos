@@ -35,7 +35,7 @@ static const char *TAG = "fos_voice";
  * (fos_buzzer_voice_listening, ~305 ms) plays while the microphone opens,
  * and a buzzer a few centimetres from a microphone is loud. */
 #define VOICE_DISCARD_MS 300
-/* The relay waits this long for Wi-Fi before giving up: a chord on a frame
+/* The relay waits this long for Wi-Fi before giving up: a hold on a frame
  * that just woke from deep sleep records at once and uploads once online. */
 #define VOICE_WIFI_WAIT_MS 20000
 /* A chunk's HTTP round trip; the last chunk waits for the transcription and
@@ -531,7 +531,7 @@ static void relay_task(void *arg)
             ticks_start();
             avail = s_written - sent;
             /* The answer may take the transcription and a few model rounds:
-             * deep sleep waits for it from here, not from the chord. */
+             * deep sleep waits for it from here, not from the hold. */
             fos_client_keep_awake_ms(VOICE_KEEP_AWAKE_MS);
         }
         size_t take = avail > VOICE_CHUNK_MAX_BYTES ? VOICE_CHUNK_MAX_BYTES : avail;

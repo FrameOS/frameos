@@ -294,12 +294,19 @@ EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS = [
 ]
 # What the reTerminal's keys do whatever scene shows (frame.json `eventMap`,
 # docs/events.md "Event map"): the arrows held are the previous and the next
-# scene. Seeded onto a new frame like the buttons; the owner edits it under
-# Settings → Button actions. Keep in step with the firmware's board table
-# (embedded/esp32/main/fos_board.c) and the SPA's preset table (NewFrame.tsx).
+# scene, and on the two models with a microphone the refresh key held talks
+# to the frame (docs/voice-chat.md; `voiceChat` is the emit the firmware's
+# button task reads off the map). Seeded onto a new frame like the buttons;
+# the owner edits it under Settings → Button actions. Keep in step with the
+# firmware's board table (embedded/esp32/main/fos_board.c) and the SPA's
+# preset table (NewFrame.tsx).
 EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP = [
     {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
     {"event": "button", "match": {"label": "RIGHT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+]
+EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP = [
+    *EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP,
+    {"event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "voiceChat", "as": {}},
 ]
 # Battery through a 2:1 divider on GPIO1 (ADC1_CH0), switched on by GPIO21
 # (Seeed's ESPHome cookbook: adc GPIO1, multiply 2.0, output GPIO21 "battery
@@ -479,7 +486,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E10XX_PINS,
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP,
+        "eventMap": EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP,
         # Same switched 2:1 divider as the E1004 (GPIO1 ADC, GPIO21 enable),
         # per Seeed schematic, hardware-unverified on E1001/E1002.
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
@@ -491,7 +498,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E10XX_PINS,
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP,
+        "eventMap": EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP,
         # Same switched 2:1 divider as the E1004 (GPIO1 ADC, GPIO21 enable),
         # per Seeed schematic, hardware-unverified on E1001/E1002.
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,

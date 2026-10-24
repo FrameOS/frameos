@@ -9,23 +9,24 @@ Every box below needs hardware that was not to hand.
 
 Bench 2026-10-24 (E1002 over USB, a backend running the branch): `mic 2` read
 peak 5162; "Switch to the calendar." was transcribed, answered and applied
-(`commands:sync received 1`, Calendar rendered); both chord keys' `up` edges
+(`commands:sync received 1`, Calendar rendered); the keys' `up` edges
 logged `claimed:true`. "Write Hello World on the board" ran `activate_scene`
 then `set_scene_state`, and without the render hold the switch's render
 (45 s on this panel) showed the notice over the old text, the state a second
 refresh later — the hold (`docs/voice-chat.md` "The notice") is the fix to
 confirm. Still open:
 
-- [ ] **Hold LEFT + RIGHT on a cloud-managed frame** ends the same way (the
+- [ ] **Hold REFRESH on a cloud-managed frame** ends the same way (the
   cloud route is integration-tested only): `voice:reply` with the transcript,
   the switch delivered over the socket.
-- [ ] **By ear**: the sparkle at ~0.5 s, no hold "duns" and no release click on
-  the two keys, every two seconds after the release a tiny high tick while the
+- [ ] **By ear**: the sparkle at 1 s in place of the first hold "dun", no
+  further duns and no release click on the key, every two seconds after the
+  release a tiny high tick while the
   upload finishes and a quiet low bop while the answer is awaited (none
   while listening),
   three rising notes when the chat switched a scene, two when it
   only answered, one low note for nothing heard, two low notes on an error,
-  the dull pair for a chord while a session still answers. The sparkle must
+  the dull pair for a hold while a session still answers. The sparkle must
   not show up in the transcript (the first 300 ms are dropped).
 - [ ] **By eye**: the notice box across the bottom of the panel — the
   sentence in quotes and the reply — on ONE render that carries both the
@@ -43,11 +44,16 @@ confirm. Still open:
 - [ ] **"Rotate 90 degrees"**: the answer reaches the panel (un-rotated, with
   the notice), THEN the frame restarts and comes back rotated; "every ten
   minutes" changes the interval without a restart.
-- [ ] **Early release** (both keys up before 0.5 s) is two ordinary presses;
-  a second chord while the first is still answering gets the dull pair.
-- [ ] **Wake from deep sleep with both keys held** records at once and
+- [ ] **Early release** (REFRESH up before 1 s) is an ordinary press (a
+  refresh, as before); a second hold while the first is still answering gets
+  the dull pair.
+- [ ] **The binding moves**: Settings → Button actions → REFRESH long press
+  set to Refresh and LEFT long press to Voice chat (`event_map` in the
+  settings change log): LEFT held now talks, REFRESH held refreshes, nothing
+  else changes; the row offers Voice chat for long presses only.
+- [ ] **Wake from deep sleep with REFRESH held** records at once and
   uploads once Wi-Fi is up (`voice:sent` after `wifi` connected); an E1002
-  with `voice_chat 0` ignores the chord entirely.
+  with `voice_chat 0` gives the dull pair at the hold and nothing else.
 - [ ] **Settings** → GPIO buttons → "Voice chat" off/on reaches the frame
   live on both planes (`voice_chat` in the settings change log).
 

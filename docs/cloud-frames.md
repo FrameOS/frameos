@@ -1186,7 +1186,7 @@ GET  {provider}/api/frames/{id}/commands       # what is still QUEUED for this f
 DELETE {provider}/api/frames/{id}/commands/{command_id}  # cancel one, while it is still undelivered
 GET  {provider}/api/frames/{id}/service-settings          # DEVICE-authed, not session: see "Service settings"
 POST {provider}/api/frames/{id}/service-settings/enabled  # {"enabled": bool} → grants/revokes settings:services, nudges on enable
-POST {provider}/api/frames/{id}/voice/{session}?seq=N&done=0|1  # DEVICE-authed: raw 16 kHz PCM chunks of what was said while LEFT+RIGHT were held; the done chunk answers with the transcript, the AI chat's reply and the tools it ran (docs/voice-chat.md)
+POST {provider}/api/frames/{id}/voice/{session}?seq=N&done=0|1  # DEVICE-authed: raw 16 kHz PCM chunks of what was said while the voice key was held; the done chunk answers with the transcript, the AI chat's reply and the tools it ran (docs/voice-chat.md)
 POST {provider}/api/frames/{id}/telemetry/enabled         # {"enabled": bool} → grants/revokes telemetry:logs + telemetry:metrics, restart_runtime on change
 WS   {provider}/api/frames/{id}/updates        # browser socket: update_frame / new_log / new_metrics / frame_activity events
 WS   {provider}/api/frames/updates             # browser socket, all the account's frames (fleet view)

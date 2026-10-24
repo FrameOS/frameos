@@ -1,10 +1,11 @@
 /*
- * Voice chat sessions (docs/voice-chat.md): the frame listens while the LEFT
- * and RIGHT buttons are held, streams what it hears to its control plane as
- * it is said, and sounds the answer.
+ * Voice chat sessions (docs/voice-chat.md): the frame listens while a voice
+ * key is held (the key whose long press the frame's event map binds to
+ * `voiceChat`: REFRESH on the reTerminal E1001/E1002), streams what it hears
+ * to its control plane as it is said, and sounds the answer.
  *
  * The button task starts and ends a session (fos_voice_begin / fos_voice_end,
- * on the chord in fos_voice_chord.c); everything else happens on two tasks
+ * on the hold in fos_voice_hold.c); everything else happens on two tasks
  * that exist only while a session runs: a capture task that drains the I2S
  * DMA into a PSRAM buffer (fos_mic.c) and a relay task that uploads the
  * buffer a chunk at a time to
@@ -26,15 +27,15 @@
 /* The most audio one session carries, and the PSRAM it costs (960 KB). */
 #define FOS_VOICE_MAX_SECONDS 30
 
-/* Once at boot, after the config and the buzzer: nothing runs until a chord. */
+/* Once at boot, after the config and the buzzer: nothing runs until a hold. */
 void fos_voice_init(void);
 /* This frame can take a session: voice chat on, microphone pins set, a
  * control plane to send to, and no session running. */
 bool fos_voice_available(void);
-/* The chord held: start listening. False when fos_voice_available() is
+/* The voice key held: start listening. False when fos_voice_available() is
  * false (the caller sounds the refusal). Returns at once. */
 bool fos_voice_begin(void);
-/* A key let go: stop listening, send what is left, wait for the answer.
+/* The key let go: stop listening, send what is left, wait for the answer.
  * Returns at once; no-op without a session. */
 void fos_voice_end(void);
 /* A session is listening or waiting for its answer. */

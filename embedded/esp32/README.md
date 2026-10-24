@@ -876,13 +876,18 @@ GPIO" and "Button beep tone" under the frame's GPIO buttons.
 
 ### Voice chat
 
-Hold LEFT and RIGHT together for half a second and the frame listens
-(`docs/voice-chat.md` is the contract). The chord is `fos_voice_chord.c`
-(pure, host tested by `main/tests/test_fos_voice_chord.c`), sampled by the
-button task before its per-key loop; from the start until both keys are up
-the two keys are *claimed*: no hold sound, no release click, and their `up`
-edges carry `claimed: true`, which the Nim dispatcher takes as "deliver the
-edge, make no `button` of the press". The buzzer plays a rising sparkle
+Hold the voice key — the key whose long press the frame's event map binds
+to `voiceChat`, REFRESH on the E1001/E1002 presets (`fos_board.c`) — for a
+second and the frame listens (`docs/voice-chat.md` is the contract). The
+button task reads the binding off `config->event_map` (`fos_voice_binding.c`,
+cJSON, host tested by `main/tests/test_fos_voice_binding.c`; read again
+whenever the map changes) and runs the key's hold (`fos_voice_hold.c`, pure,
+`main/tests/test_fos_voice_hold.c`) before its per-key loop: the dispatcher
+would make the `longPress` only at the release, too late to hear a sentence,
+so this is the one map rule the firmware carries out itself. From the start
+until the key is up it is *claimed*: no hold sound, no release click, and its
+`up` edge carries `claimed: true`, which the Nim dispatcher takes as "deliver
+the edge, make no `button` of the press". The buzzer plays a rising sparkle
 (`fos_buzzer_voice_listening`), the microphone opens (`fos_mic.c`: I2S0 in
 PDM RX mode with the hardware PDM-to-PCM filter, 16 kHz 16-bit mono, driven
 on the HAL's register layer plus the GDMA driver the SPI already links —

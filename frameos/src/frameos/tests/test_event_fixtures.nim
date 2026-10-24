@@ -46,9 +46,12 @@ proc refusedEvents(origin: EventOrigin): seq[string] =
       result.add(name)
 
 block refused_lists_are_derived:
-  doAssert refusedEvents(eoSchedule) == @["init", "open", "close", "uploadScenes"]
-  doAssert refusedEvents(eoHttpAdmin).len == 0
-  doAssert refusedEvents(eoSystem).len == 0
+  # `voiceChat` is the frame's event map's alone (docs/voice-chat.md): a
+  # session needs a key held to end on, so no edge can say it — not even the
+  # admin API or the system.
+  doAssert refusedEvents(eoSchedule) == @["init", "open", "close", "uploadScenes", "voiceChat"]
+  doAssert refusedEvents(eoHttpAdmin) == @["voiceChat"]
+  doAssert refusedEvents(eoSystem) == @["voiceChat"]
   # A scene is refused the device commands, and the lifecycle events — those
   # are the host's to say, at the moment they are true.
   for name in refusedEvents(eoScene):

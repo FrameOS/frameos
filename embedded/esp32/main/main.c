@@ -163,7 +163,7 @@ void app_main(void)
 
     /* Before the wake check below: a button wake clicks the buzzer. */
     fos_buzzer_init();
-    /* Before the buttons: holding LEFT+RIGHT at the first look starts a
+    /* Before the buttons: a voice key held at the first look starts a
      * voice session (docs/voice-chat.md). */
     fos_voice_init();
     /* Before anything else reads the wake status: was this a button press? */

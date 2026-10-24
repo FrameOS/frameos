@@ -122,8 +122,8 @@ static void test_event_maps(void)
     /* Every reTerminal E-series model: the arrows held walk the scene list
      * (docs/events.md "Event map"), by label — the E1004's pins are swapped. */
     const char *e1004 = fos_board_event_map("seeed_reterminal_e1004");
-    CHECK(strcmp(fos_board_event_map("seeed_reterminal_e1001"), e1004) == 0, "e1001 event map");
-    CHECK(strcmp(fos_board_event_map("seeed_reterminal_e1002"), e1004) == 0, "e1002 event map");
+    const char *e1001 = fos_board_event_map("seeed_reterminal_e1001");
+    CHECK(strcmp(e1001, fos_board_event_map("seeed_reterminal_e1002")) == 0, "e1001 = e1002 event map");
     CHECK(strstr(e1004, "\"label\":\"LEFT\",\"action\":\"longPress\"") != NULL, "LEFT held");
     CHECK(strstr(e1004, "\"direction\":\"prev\"") != NULL, "LEFT is prev");
     CHECK(strstr(e1004, "\"label\":\"RIGHT\",\"action\":\"longPress\"") != NULL, "RIGHT held");
@@ -131,6 +131,13 @@ static void test_event_maps(void)
     CHECK(strstr(e1004, "\"pin\"") == NULL, "rules name labels, never pins");
     CHECK(e1004[0] == '[' && e1004[strlen(e1004) - 1] == ']', "a JSON list");
     CHECK(strlen(e1004) < 1024, "fits the config slot");
+    /* The two with a microphone also talk: REFRESH held is the voice chat
+     * (docs/voice-chat.md); the E1004 has no microphone and no such rule. */
+    CHECK(strncmp(e1001, e1004, strlen(e1004) - 1) == 0, "e1001 starts with the arrows");
+    CHECK(strstr(e1001, "\"label\":\"REFRESH\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL,
+          "REFRESH held talks on the e1001");
+    CHECK(strstr(e1004, "voiceChat") == NULL, "the e1004 has no voice key");
+    CHECK(strlen(e1001) < 1024, "fits the config slot");
     /* A board without bindings, and no board at all: none. */
     CHECK(strcmp(fos_board_event_map("seeed_reterminal_sticky"), "") == 0, "sticky has no map");
     CHECK(strcmp(fos_board_event_map("trmnl_og"), "") == 0, "trmnl has no map");

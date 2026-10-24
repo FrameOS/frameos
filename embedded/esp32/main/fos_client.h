@@ -40,7 +40,7 @@ void fos_client_wake_for_events(void);
 /* Keep Wi-Fi/HTTP available briefly after a control request on deep-sleep frames. */
 void fos_client_keep_awake_ms(uint32_t ms);
 /* The voice session's hold on the panel (docs/voice-chat.md): from the
- * chord until the answer, no render starts. What arrives meanwhile — the
+ * hold until the answer, no render starts. What arrives meanwhile — the
  * chat's scene switch, then the state for the new scene — is applied as it
  * comes, and ONE render after the release shows it all, with the notice.
  * The hold ends at the release or after `ms`, whichever is first. */

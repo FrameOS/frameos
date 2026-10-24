@@ -220,7 +220,7 @@ proc button(state: var InputState, name: string, payload: JsonNode, origin: Even
   ## event's way in: a tick is time passing between events.
   ##
   ## An `up` with `claimed` is a key the frame took for a gesture of its own
-  ## (the ESP32's LEFT+RIGHT voice chord, docs/voice-chat.md): the edge is
+  ## (the ESP32's voice key held, docs/voice-chat.md): the edge is
   ## delivered as the line it is, and the button layer makes nothing of the
   ## press — no `press`, no `longPress`, and no double-press window opens.
   let pin = payload{"pin"}.getInt(-1)

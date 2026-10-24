@@ -1,8 +1,10 @@
 # Voice chat: talk to a frame
 
-Hold a frame's **LEFT** and **RIGHT** buttons together for half a second: the
-buzzer plays a short rising sparkle, the microphone opens, and the frame
-listens until either button is let go. What was said goes to the frame's
+Hold a frame's **voice key** — the key whose long press the frame's event map
+binds to `voiceChat` (`docs/events.md` "Event map"; **REFRESH** on the
+reTerminal E1001/E1002 presets, and Settings → Button actions moves it) for a
+second: the buzzer plays a short rising sparkle, the microphone opens, and the
+frame listens until the key is let go. What was said goes to the frame's
 control plane (the self-hosted backend or FrameOS Cloud) **while it is being
 said**, is transcribed there, and is answered by the AI chat with that frame in
 its context, through a small set of tools that act on the frame: switch to a
@@ -17,28 +19,47 @@ microphone (MEMSensing MSM261DHP006: clock GPIO42, data GPIO41, power enable
 GPIO38 through a TPS22916 load switch). The **E1004 has no microphone** (its
 schematic has none; GPIO41/42 are the J2 header's UART there), but a PDM
 microphone on J2 pins 41/42 works with the same driver once `mic_pins` names
-it. Only the ESP32 runtime has this: a Pi frame has no button chord and no
+it. Only the ESP32 runtime has this: a Pi frame has no key hold and no
 microphone path (yet).
 
 ## On the frame (`embedded/esp32/main`)
 
-- **The chord** (`fos_voice_chord.c`, pure, host-tested by
-  `tests/test_fos_voice_chord.c` through
-  `backend/app/tasks/tests/test_esp32_voice_chord.py`). The button task feeds
-  it the two keys' levels every poll: both down for
-  `FOS_VOICE_CHORD_HOLD_MS` (500) starts a session; either key up before that
-  is nothing (two ordinary presses, as they always were); either key up after
-  the start ends the session. The keys are the buttons labelled `LEFT` and
-  `RIGHT` (`PREV` / `NEXT` count too, case-insensitive); a board with only one
-  of them has no chord.
-- **Claimed presses.** Once the chord starts, both keys belong to it: no hold
-  sound counts their seconds, no click on their release, and the `gpio` `up`
-  edge each produces carries `claimed: true` — the dispatcher
+- **The voice key** is the frame's event map's to name: a rule
+  `{"event":"button","match":{"label":"REFRESH","action":"longPress"},"emit":"voiceChat"}`
+  makes REFRESH it. `voiceChat` is a device command of the contract that only
+  the `eventMap` origin may emit, and the one emit the firmware acts on
+  **before** the dispatcher could: the dispatcher makes a `longPress` at the
+  release, and a session has to be listening long before that. So the button
+  task reads the bindings off the map (`fos_voice_binding.c`, pure cJSON,
+  host-tested by `tests/test_fos_voice_binding.c` through
+  `backend/app/tasks/tests/test_esp32_voice_binding.py`; read again whenever
+  the config's map changes, so a push or a console `set` holds from the next
+  press) and runs each voice key's hold itself (`fos_voice_hold.c`, pure,
+  `tests/test_fos_voice_hold.c` through `test_esp32_voice_hold.py`): the key
+  down for `FOS_VOICE_HOLD_MS` — the contract's `longPressMs`, 1000, so "long
+  press" means one thing on the frame and in Settings — starts a session; up
+  before that is an ordinary press, as it always was; up after the start ends
+  the session. Within the map the first rule matching a label's long press
+  wins, as the dispatcher's own walk has it, so a rule that sends REFRESH held
+  somewhere else first keeps it from being a voice key; a rule matching by
+  `role` is not read (the firmware knows its keys by label). The E1001/E1002
+  presets ship the REFRESH rule next to the arrows' (`fos_board.c`, the
+  backend's `EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP`, the SPA's preset
+  table); the E1004, without a microphone, ships the arrows alone. In Settings
+  → Button actions "Voice chat" is offered for a long press on a frame that
+  has voice chat at all. A `voiceChat` that does reach a dispatcher (a long
+  press the firmware did not take, a `button` said over HTTP, a Pi) is a
+  device command the host logs as unsupported: a session needs a held key to
+  end on.
+- **Claimed presses.** Once the hold starts, the key belongs to it: no hold
+  sound counts its seconds, no click on its release, and the `gpio` `up`
+  edge it produces carries `claimed: true` — the dispatcher
   (`frameos/input_state.nim`) delivers that edge as the line it is and makes
-  **no** `button` out of the press (no `press`, no `longPress`). The two
-  `down` edges were delivered when they happened, as every edge is. The
-  contract is `docs/events-contract.json` (`gpio.payload.claimed`); the case is
-  in `docs/event-fixtures.json` (`inputState`).
+  **no** `button` out of the press (no `press`, no `longPress`, so the
+  map's rule never fires for it). The `down` edge was delivered when it
+  happened, as every edge is. The contract is `docs/events-contract.json`
+  (`gpio.payload.claimed`); the cases are in `docs/event-fixtures.json`
+  (`inputState`, and the `dispatcher` case for a `voiceChat` emit).
 - **Sounds** (`fos_buzzer.c`, all relative to `buzzer_tone_hz`):
   listening = four rising notes and a held top (the "sparkle", about 300 ms);
   sent = two quick rising notes; then, every two seconds until the answer, a
@@ -49,15 +70,16 @@ microphone path (yet).
   microphone would hear it);
   the chat did something (a tool ran) = three rising notes; the chat only
   answered = two notes; nothing heard = one low note; error = two low notes;
-  busy (a chord while a session is in flight, or no microphone / no control
-  plane) = the refused press's dull pair.
+  busy (a hold while a session is in flight, or no microphone / no control
+  plane, or voice chat off) = the refused press's dull pair at the hold, and
+  the key stays claimed to its release, so nothing else comes of the press.
 - **The notice** (`fos_client_show_notice`, drawn by the render task in
   `fos_panel_draw.c`'s notice box): the transcript in quotes and the reply,
   or the error in a sentence (`I didn't catch that…`, `Voice chat: no
   Wi-Fi.`, the plane's own `detail` for an OpenAI refusal), word-wrapped
   across the bottom of the panel in the 5x7 font (3 px per font pixel on a
   panel 600 px or wider, 2 below; curly quotes and dashes folded to ASCII).
-  **The panel holds still from the chord until the answer**
+  **The panel holds still from the hold until the answer**
   (`fos_client_hold_render` / `fos_client_release_render`): the chat's tools
   arrive one by one — `activate_scene`, then `set_scene_state` for the new
   scene — and each is applied to the scene as it comes (a pulled switch takes
@@ -92,7 +114,7 @@ microphone path (yet).
   chunk at a time, while the user is still talking, and on the release sends
   the rest with `done=1` and waits for the answer. The first 300 ms after the
   sparkle starts are dropped, so the buzzer is not in the recording. Deep
-  sleep is held off for the session (`fos_client_keep_awake_ms`). A chord on
+  sleep is held off for the session (`fos_client_keep_awake_ms`). A hold on
   a frame that just woke records at once and uploads when Wi-Fi is up (20 s
   at most). After a reply the frame asks for a commands sync, so a scene
   switch the chat queued on the backend applies now; the cloud delivers its
@@ -102,10 +124,11 @@ microphone path (yet).
   {transcript, reply, tools}`, `voice:error {error}`.
 - **Config:** `mic_pins` (`clk=42,data=41,pwr=38`; NVS `mic_pins`; no stored
   value → the board's own, `fos_board_mic_pins`, so an E1001/E1002 gets its
-  microphone with the update) and `voice_chat` (bool, default on; the
-  switch an owner turns off to keep the microphone shut). Console: `set
-  mic_pins …`, `set voice_chat 0|1`, `mic [seconds]` records and prints the
-  level (the bench check that the microphone is wired), `status` shows both.
+  microphone with the update), `voice_chat` (bool, default on; the switch an
+  owner turns off to keep the microphone shut whatever the map binds) and the
+  frame's `event_map` for which key (above). Console: `set mic_pins …`, `set
+  voice_chat 0|1`, `mic [seconds]` records and prints the level (the bench
+  check that the microphone is wired), `status` shows both.
 
 ## The upload (one HTTP contract, both planes)
 
@@ -193,4 +216,5 @@ transcription's audio tokens as a second record on its own model).
   speaker behind an ES8311 codec (`embedded/esp32/README.md`); with an I2S
   playback path the reply could be read out. On a fast LCD the reply could be
   drawn as an overlay (the local-network-access code box is the pattern).
-- **Pi frames.** No chord in the Linux gpioButton driver, no ALSA capture.
+- **Pi frames.** No key hold in the Linux gpioButton driver (the `voiceChat`
+  command is logged as unsupported there), no ALSA capture.
