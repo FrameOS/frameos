@@ -555,11 +555,12 @@
     {
       "name": "setCurrentScene",
       "class": "scene-command",
-      "description": "Switch the frame to another scene. An optional `state` object is applied to that scene's public state.",
+      "description": "Switch the frame to another scene: the one `sceneId` names, or with `direction` the `next` / `prev` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). An optional `state` object is applied to that scene's public state.",
       "listen": false,
       "dispatch": true,
       "payload": [
-        {"name": "sceneId", "label": "Scene", "type": "scene", "required": true},
+        {"name": "sceneId", "label": "Scene", "type": "scene", "required": false},
+        {"name": "direction", "label": "Direction", "type": "string", "required": false, "unit": "scene-direction"},
         {"name": "state", "label": "State", "type": "json", "required": false, "catalog": false}
       ],
       "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system"],
@@ -646,6 +647,10 @@
       "hosts": {"linux": true, "esp32": true, "wasm": false}
     }
   ],
+  "scenes": {
+    "$comment": "`setCurrentScene` with a `direction` instead of a `sceneId`: the frame's scene list is the control plane's order (scenes.json; a pushed set first, then the deployed scenes it does not name), `next` and `prev` wrap around, and a frame with one scene switches nowhere. The dispatcher resolves it on every host from the host's `sceneOrder`.",
+    "directions": ["next", "prev"]
+  },
   "gestures": {
     "$comment": "How the dispatcher makes tap, doubleTap, longPress and swipe out of pointerDown / pointerUp, in scene pixels and milliseconds. The same numbers on every host.",
     "tapSlopPx": 16,

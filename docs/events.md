@@ -208,8 +208,13 @@ no filter on a field hears every value of it.
 - `setSceneState {state, render}` — `state` is applied to the scene's public
   state; `render: true` asks for a render afterwards. In the editor its
   dispatch form is the scene's own fields (`sceneState: "payload"`).
-- `setCurrentScene {sceneId, state}` — one that names the scene already
-  showing applies `state` and renders, without a switch.
+- `setCurrentScene {sceneId, direction, state}` — one that names the scene
+  already showing applies `state` and renders, without a switch. `direction`
+  (`next` / `prev`) instead of a `sceneId` walks the frame's scene list in the
+  control plane's order (a pushed set first, then the deployed scenes it does
+  not name), wrapping around; the dispatcher resolves it from the host's
+  `sceneOrder` on every host, so a frame with one scene switches nowhere and
+  anything else is refused (`reason: "direction"`).
 - The input payloads are under [Input](#input).
 
 ### Input
