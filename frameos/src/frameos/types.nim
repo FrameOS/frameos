@@ -62,6 +62,11 @@ type
     timeZoneUpdates*: TimeZoneUpdatesConfig
     schedule*: FrameSchedule
     gpioButtons*: seq[GPIOButton]
+    ## The frame's event map (frame.json `eventMap`, docs/events.md "Event
+    ## map"): what a button does on this frame whatever scene is showing (a
+    ## long press of LEFT is the previous scene). The dispatcher applies it
+    ## before any scene is asked.
+    eventMap*: JsonNode
     inputSettings*: InputSettingsConfig
     controlCode*: ControlCode
     network*: NetworkConfig

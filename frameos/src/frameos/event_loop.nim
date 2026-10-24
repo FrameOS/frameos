@@ -258,20 +258,49 @@ proc runOnScene(loop: EventLoop, scene: FrameScene, name: string, payload: JsonN
       loop.renderWanted = true
   of raNever: discard
 
-proc mapped(loop: EventLoop, scene: FrameScene, name: string, payload: JsonNode): JsonNode =
-  ## The payload after the installed scene's event map (event_map.nim): what
-  ## came, or the first matching rule's rewrite. A rewrite is logged with the
+proc mapped(loop: EventLoop, rules: JsonNode, scope: string, sceneId: string,
+            name: string, payload: var JsonNode): bool =
+  ## One event map (event_map.nim) applied to an event on its way to a
+  ## scene: the frame's (`scope` "frame") or the installed scene's. False
+  ## when the event goes no further: the first matching rule had an `emit`,
+  ## and the event it names is now queued in its place (origin `eventMap`,
+  ## which no map touches, so a rule can never feed itself). Otherwise the
+  ## payload is what came, or the matching rule's rewrite. Logged with the
   ## rule's own `as` — never the payload, which for a key event is what was
   ## typed.
-  if scene.eventMap.isNil:
-    return payload
+  if rules.isNil:
+    return true
   var index = 0
-  let rule = matchingEventMapRule(scene.eventMap, name, payload, index)
+  let rule = matchingEventMapRule(rules, name, payload, index)
   if rule.isNil:
-    return payload
-  loop.log(%*{"event": "event:mapped", "name": name, "sceneId": scene.id.string,
-    "rule": index, "as": rule{"as"}})
-  applyEventMapRule(rule, payload)
+    return true
+  let write = rule.eventMapRuleWrites()
+  var entry = %*{"event": "event:mapped", "name": name, "scope": scope, "rule": index, "as": write}
+  if sceneId.len > 0:
+    entry["sceneId"] = %sceneId
+  let emit = rule.eventMapRuleEmits()
+  if emit.len > 0:
+    entry["emit"] = %emit
+    loop.log(entry)
+    loop.enqueue(eoEventMap, emit, copy(write))
+    return false
+  loop.log(entry)
+  payload = applyEventMapRule(rule, payload)
+  true
+
+proc frameMapped(loop: EventLoop, origin: EventOrigin, name: string, payload: var JsonNode): bool =
+  ## The frame's event map, first and without a scene: a press bound here is
+  ## the frame's whatever is showing. What the map itself emitted is exempt.
+  if origin == eoEventMap or loop.frameConfig.isNil:
+    return true
+  loop.mapped(loop.frameConfig.eventMap, "frame", "", name, payload)
+
+proc sceneMapped(loop: EventLoop, origin: EventOrigin, scene: FrameScene, name: string,
+                 payload: var JsonNode): bool =
+  ## The installed scene's event map, after the frame's.
+  if origin == eoEventMap:
+    return true
+  loop.mapped(scene.eventMap, "scene", scene.id.string, name, payload)
 
 proc refused(loop: EventLoop, envelope: EventEnvelope, reason: string, sceneId = ""): bool =
   ## Logs `event:refused` (docs/events.md) and is false, so a caller can
@@ -285,13 +314,17 @@ proc refused(loop: EventLoop, envelope: EventEnvelope, reason: string, sceneId =
   false
 
 proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): bool =
+  var payload = envelope.payload
+  if not loop.frameMapped(envelope.origin, envelope.name, payload):
+    return true
   let scene = loop.host.sceneFor(envelope.target)
   if scene.isNil:
     return false
   if not originMayEmit(envelope.origin, envelope.name, scene.customEventOrigins.getOrDefault(envelope.name)):
     return loop.refused(envelope, "undeclared", scene.id.string)
-  loop.runOnScene(scene, envelope.name, loop.mapped(scene, envelope.name, envelope.payload), policy,
-    envelope.fromRender)
+  if not loop.sceneMapped(envelope.origin, scene, envelope.name, payload):
+    return true
+  loop.runOnScene(scene, envelope.name, payload, policy, envelope.fromRender)
   true
 
 proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
@@ -338,12 +371,18 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
   if eventIsLogged(delivery.name):
     loop.log(withEventPayload(%*{"event": "event:" & delivery.name, "origin": $delivery.origin},
       delivery.name, delivery.payload))
+  var payload = delivery.payload
+  # The frame's event map first, scene or no scene: a long press of LEFT is
+  # the previous scene, and the scene never hears that press.
+  if not loop.frameMapped(delivery.origin, delivery.name, payload):
+    return true
   let scene = loop.host.sceneFor(target)
   if scene.isNil:
     return false
-  # The installed scene's event map first: a frame's REFRESH long press is the
-  # scene's B, whoever listens.
-  let payload = loop.mapped(scene, delivery.name, delivery.payload)
+  # Then the installed scene's: a frame's REFRESH long press is the scene's
+  # B, whoever listens.
+  if not loop.sceneMapped(delivery.origin, scene, delivery.name, payload):
+    return true
   if loop.listens(scene, delivery.name):
     loop.runOnScene(scene, delivery.name, payload, eventPolicy(delivery.name), fromRender)
     result = true

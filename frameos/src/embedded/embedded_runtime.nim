@@ -334,6 +334,35 @@ proc fos_nim_set_colors_impl(json: cstring) {.exportc, cdecl.} =
   except CatchableError as e:
     log("colors: ignored, does not parse: " & e.msg)
 
+var lastEventMapJson: string
+
+proc fos_nim_set_event_map_impl(json: cstring) {.exportc, cdecl.} =
+  ## frame.json's `eventMap` (docs/events.md, "Event map"): what the frame's
+  ## buttons do whatever scene is showing, as the firmware keeps it — the
+  ## rule list as compact JSON, "" for none. fos_client pushes the stored
+  ## text every render pass like `colors`; it is parsed only when it changed,
+  ## and the dispatcher reads it off the FrameConfig it already holds, so a
+  ## push applies to the next press. A list that does not parse keeps the
+  ## previous one.
+  if json == nil:
+    return
+  let text = $json
+  if text == lastEventMapJson:
+    return
+  try:
+    var rules: JsonNode = nil
+    if text.len > 0:
+      rules = parseJson(text)
+      if rules.kind != JArray:
+        log("eventMap: ignored, not a list")
+        return
+    if not frameConfig.isNil:
+      frameConfig.eventMap = rules
+    lastEventMapJson = text
+    log(&"eventMap: {(if rules.isNil: 0 else: rules.len)} rule(s)")
+  except CatchableError as e:
+    log("eventMap: ignored, does not parse: " & e.msg)
+
 var lastPaletteJson: string
 
 proc fos_nim_set_palette_impl(json: cstring) {.exportc, cdecl.} =
