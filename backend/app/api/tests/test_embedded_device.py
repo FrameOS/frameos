@@ -1621,3 +1621,32 @@ async def test_settings_carry_the_gpio_button_map_when_the_backend_holds_one(asy
         {'pin': 4, 'label': 'LEFT'},
         {'pin': 5, 'label': 'REFRESH'},
     ]
+
+
+@pytest.mark.asyncio
+async def test_settings_carry_the_event_map_when_the_backend_holds_one(async_client, no_auth_client, db):
+    """The frame's event map (docs/events.md "Event map") rides the pull as
+    `eventMap`, like the buttons: only when the backend holds one, so a board
+    running its preset's own map keeps it until the owner edits it; an empty
+    list clears the board's."""
+    frame = await device_frame(async_client, db)
+    frame.event_map = None
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert 'eventMap' not in response.json()['frame']
+
+    rule = {'event': 'button', 'match': {'label': 'LEFT', 'action': 'longPress'}, 'emit': 'setCurrentScene', 'as': {'direction': 'prev'}}
+    frame.event_map = [rule, {'event': 'button', 'as': 'not a rule'}]
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert response.json()['frame']['eventMap'] == [rule]
+
+    frame.event_map = []
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['frame']['eventMap'] == []
