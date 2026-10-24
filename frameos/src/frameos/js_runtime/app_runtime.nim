@@ -1023,7 +1023,8 @@ proc jsGetAppContext(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   if e == nil:
     return jsUndefSentinel(ctx)
 
-  case toNimString(ctx, key)
+  let keyStr = toNimString(ctx, key)
+  case keyStr
   of "event":
     return nimStringToJS(ctx, e.context.event)
   of "hasImage":
@@ -1052,20 +1053,15 @@ proc jsGetAppContext(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     if e.context.hasImage and not e.context.image.isNil:
       return nimIntToJS(ctx, e.context.image.height.int32)
     return jsUndefSentinel(ctx)
-  of "targetWidth":
-    let (width, _) = e.owner.addressedTargetSize(e.context)
-    if width > 0:
-      return nimIntToJS(ctx, width.int32)
-    return jsUndefSentinel(ctx)
-  of "targetHeight":
-    let (_, height) = e.owner.addressedTargetSize(e.context)
-    if height > 0:
-      return nimIntToJS(ctx, height.int32)
-    return jsUndefSentinel(ctx)
-  of "targetFit":
-    let fit = e.owner.addressedTargetFit(e.context)
-    if fit.len > 0:
-      return nimStringToJS(ctx, fit)
+  of "targetWidth", "targetHeight", "targetFit":
+    let target = e.owner.addressedTarget(e.context)
+    if target.width > 0:
+      case keyStr
+      of "targetWidth": return nimIntToJS(ctx, target.width.int32)
+      of "targetHeight": return nimIntToJS(ctx, target.height.int32)
+      else:
+        if target.fit.len > 0:
+          return nimStringToJS(ctx, target.fit)
     return jsUndefSentinel(ctx)
   else:
     return jsUndefSentinel(ctx)
@@ -1095,10 +1091,11 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
       keys.add("image")
       keys.add("imageWidth")
       keys.add("imageHeight")
-    if e.owner.addressedTargetSize(e.context).width > 0:
+    let target = e.owner.addressedTarget(e.context)
+    if target.width > 0:
       keys.add("targetWidth")
       keys.add("targetHeight")
-      if e.owner.addressedTargetFit(e.context).len > 0:
+      if target.fit.len > 0:
         keys.add("targetFit")
   else:
     discard
