@@ -242,6 +242,11 @@ def enqueue_frame_command(
     if payload is not None and not isinstance(payload, dict):
         raise ValueError("A frame command payload must be an object")
     now = now or utcnow()
+    if command_type == "set_scenes" and not (payload and "_preview" in payload):
+        # Before the supersede: the preview to carry is on the row still standing.
+        carried = carried_preview(db, frame)
+        if carried is not None:
+            payload = {**(payload or {}), "_preview": carried}
     if command_type in SUPERSEDED_TYPES:
         supersede_pending_commands(db, frame, command_type, now)
     base_ttl = base_ttl_seconds(command_type)
@@ -280,8 +285,8 @@ def spend_older_scene_pushes(db: Session, frame: Frame, newest: FrameCommand) ->
         .all()
     )
     for row in rows:
-        payload = row.payload if isinstance(row.payload, dict) else None
-        preview = payload.get("_preview") if payload else None
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        preview = payload.get("_preview")
         if not isinstance(preview, dict) or not preview.get("scenes"):
             continue
         # A new dict: the JSON column only notices a reassignment.
@@ -516,43 +521,106 @@ def _newest_scene_push(db: Session, frame: Frame) -> FrameCommand | None:
     )
 
 
+def _preview_scenes(preview: dict[str, Any]) -> list[Any]:
+    scenes = preview.get("scenes")
+    return scenes if isinstance(scenes, list) else []
+
+
 def _preview_of(row: FrameCommand | None) -> dict[str, Any] | None:
     payload = row.payload if row is not None and isinstance(row.payload, dict) else {}
     preview = payload.get("_preview")
     return preview if isinstance(preview, dict) else None
 
 
-def previewed_scenes(db: Session, frame: Frame) -> list[Any] | None:
-    """The scenes a "Preview on frame" sent, while the preview is the newest
-    scene set this frame was sent; None when it is not.
+def _standing_preview(db: Session, frame: Frame) -> tuple[FrameCommand | None, dict[str, Any] | None]:
+    """The newest standing scene push and its `_preview`, unless the owner
+    discarded that preview (the row then stands, the preview is over)."""
+    row = _newest_scene_push(db, frame)
+    preview = _preview_of(row)
+    if preview is None or preview.get("discarded"):
+        return row, None
+    return row, preview
 
-    A preview is a set_scenes row carrying `_preview` (the editor's unsaved
-    scenes, app/utils/embedded_commands.py queue_embedded_scene_preview).
-    `/embedded/scenes` serves it in place of the saved scenes, so the frame
-    pulls it like a deploy, and it holds until a deploy queues a newer
-    set_scenes row: the rule a preview pushed straight to an awake frame
-    already follows (its "local" store, fos_scenes.c). A cancelled or
-    superseded preview is not served."""
-    preview = _preview_of(_newest_scene_push(db, frame))
-    scenes = preview.get("scenes") if preview else None
-    return scenes if isinstance(scenes, list) else None
+
+def carried_preview(db: Session, frame: Frame) -> dict[str, Any] | None:
+    """The `_preview` a scene push without one gets, so the frame keeps the
+    scene it shows (docs/scene-previews.md "A preview rides along"): the
+    standing preview's shown scene, when the saved list does not hold a scene
+    of that id. None when there is nothing to carry — no preview, a
+    discarded one, or one the saved list now holds (installed, or a saved
+    scene pushed over its preview), which is what ends a preview.
+
+    Call it BEFORE the new row supersedes the preview's."""
+    _row, preview = _standing_preview(db, frame)
+    if preview is None:
+        return None
+    scene_id = preview.get("scene_id")
+    shown = next((s for s in _preview_scenes(preview) if isinstance(s, dict) and s.get("id") == scene_id), None)
+    if shown is None:
+        return None
+    saved_ids = {s.get("id") for s in (frame.scenes or []) if isinstance(s, dict)}
+    if scene_id in saved_ids:
+        return None
+    return {
+        "scenes": [shown],
+        "scene_id": scene_id,
+        "name": preview.get("name") or shown.get("name") or scene_id,
+        "source": preview.get("source") if preview.get("source") in ("editor", "voice") else "editor",
+        "carried": True,
+    }
+
+
+def discard_scene_preview(db: Session, frame: Frame) -> bool:
+    """The preview row's "Discard": the standing preview is over, so the next
+    scene push carries nothing and `/embedded/scenes` serves the saved list
+    again. The row keeps its name for the queue view. False when the frame
+    shows no preview. Commits."""
+    row, preview = _standing_preview(db, frame)
+    if row is None or preview is None:
+        return False
+    payload = row.payload if isinstance(row.payload, dict) else {}
+    # A new dict: the JSON column only notices a reassignment.
+    row.payload = {**payload, "_preview": {**preview, "scenes": [], "spent": True, "discarded": True}}
+    db.commit()
+    return True
+
+
+def previewed_scenes(db: Session, frame: Frame) -> list[Any] | None:
+    """The scenes the frame's `/embedded/scenes` pull serves in place of the
+    saved list while a preview stands; None when none does.
+
+    A preview is a set_scenes row carrying `_preview`: the editor's bundle
+    (its saved and unsaved scenes, app/utils/embedded_commands.py
+    queue_embedded_scene_preview), served as it is; or a push that carried
+    the previous preview along (`carried_preview`), served as the saved list
+    plus the carried scenes the list does not hold. The frame pulls either
+    like a deploy. A cancelled, superseded or discarded preview is not
+    served."""
+    _row, preview = _standing_preview(db, frame)
+    if preview is None or not isinstance(preview.get("scenes"), list):
+        return None
+    scenes = _preview_scenes(preview)
+    if not preview.get("carried"):
+        return scenes
+    saved = [s for s in (frame.scenes or []) if isinstance(s, dict)]
+    saved_ids = {s.get("id") for s in saved}
+    return saved + [s for s in scenes if isinstance(s, dict) and s.get("id") not in saved_ids]
 
 
 def scene_preview_info(db: Session, frame: Frame) -> dict[str, Any] | None:
     """The preview the frame shows for now, for the workspace: the scene it
     put on screen, its name, where it came from (`editor`: the scene editor's
-    "Preview on frame"; `voice`: the voice chat's show_image) and when. None
-    once a deploy or a scene push is the newest set — the preview is gone from
-    the frame then. The same shape as the cloud's `scene_preview`
-    (frames.ts scenePreviewsByFrame)."""
-    row = _newest_scene_push(db, frame)
-    preview = _preview_of(row)
+    "Preview on frame"; `voice`: the voice chat's show_image) and when. A
+    deploy or a scene push carries it along (`carried_preview`); it ends
+    with "Install" (the saved list holds it) or "Discard". The same shape as
+    the cloud's `scene_preview` (frames.ts scenePreviewsByFrame)."""
+    row, preview = _standing_preview(db, frame)
     if row is None or preview is None:
         return None
     scene_id = preview.get("scene_id") if isinstance(preview.get("scene_id"), str) else None
     name = preview.get("name") if isinstance(preview.get("name"), str) else None
     if not name:
-        scenes = preview.get("scenes") if isinstance(preview.get("scenes"), list) else []
+        scenes = _preview_scenes(preview)
         shown = next((s for s in scenes if isinstance(s, dict) and s.get("id") == scene_id), None)
         if shown is None and scenes and isinstance(scenes[0], dict):
             shown = scenes[0]
@@ -570,12 +638,11 @@ def scene_preview_scene(db: Session, frame: Frame) -> dict[str, Any] | None:
     workspace's "Install" on the preview row: the scene the newest preview
     push put on screen, from the bundle only the newest row keeps. None
     without a preview, or when the push named no scene."""
-    preview = _preview_of(_newest_scene_push(db, frame))
+    _row, preview = _standing_preview(db, frame)
     if not preview:
         return None
-    scenes = preview.get("scenes") if isinstance(preview.get("scenes"), list) else []
     scene_id = preview.get("scene_id")
-    shown = next((s for s in scenes if isinstance(s, dict) and s.get("id") == scene_id), None)
+    shown = next((s for s in _preview_scenes(preview) if isinstance(s, dict) and s.get("id") == scene_id), None)
     return dict(shown) if isinstance(shown, dict) else None
 
 

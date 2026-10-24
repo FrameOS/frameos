@@ -21,8 +21,39 @@ the cloud it is the event route's `uploadScenes`: a checksummed `set_scenes`
 the hub delivers over the socket, deliberately not an assignment
 (`app/api/frames/[frameId]/event/[eventName]/route.ts`).
 
-The device holds the preview until the next scene push. On an ESP32 two
-rules make that true for a push from the backend (both found on an E1002,
+## A preview rides along
+
+A preview outlives the pushes that follow it. A scene push without a preview
+of its own — a deploy, the saved or assigned list pushed again, a new
+assignment — **carries the standing preview along**: the previewed scene is
+appended to what the frame receives, and the plane keeps reporting the
+preview (backend `frame_commands.carried_preview`, called by
+`enqueue_frame_command` before the new row supersedes the preview's; cloud
+`carriedScenePreview`, called by `enqueueFrameCommand`). The device keeps the
+last shown scene's id in NVS and restores it after any load while the id is
+in the payload (`fos_scenes.c` `activate_from_index`, `restore_last_scene`),
+so a frame that shows a preview still shows it after a deploy, after its
+list is pushed, and after a reboot — a scene that took some prompting to get
+is not lost to a click elsewhere in the workspace (the owner's rule,
+2026-10-24).
+
+Two things end a preview:
+
+- a push that **holds a scene of the preview's id** — "Install" (the saved
+  list holds it now), or a saved scene pushed over its own edited preview —
+  replaces it, and nothing is carried;
+- **Discard**: `DELETE /api/frames/{id}/scene_preview` (backend) /
+  `/scene-preview` (cloud) marks the standing preview `discarded` (the row
+  keeps its name for the queue view and loses the kept scene; the backend
+  serves the saved list at once), and the push that follows carries nothing.
+
+A new preview replaces the old one: there is one preview per frame, the
+newest. A carried preview is served by the backend as the saved list plus the
+carried scenes the list does not hold (`previewed_scenes`); the editor's own
+preview bundle is served as it is.
+
+The device holds whatever scene set it was sent last. On an ESP32 two rules
+make that true for a push from the backend (both found on an E1002,
 2026-10-24):
 
 - a commands pull the backend marks `sync` fetches the pushed scenes and
@@ -77,14 +108,13 @@ dashed **preview** row above the saved scenes: the name, where it came from,
   this very scene after the push), saves and pushes — on the cloud the save
   mints the private store scene (`persistAndPushCloudFrameScenes`), on the
   backend the deploy pushes the saved list;
-- **Discard** (`scenesLogic.discardPreview`): takes the preview off the
-  frame by pushing the saved list again as it stands — the backend's deploy,
-  the cloud's assigned list re-pushed (`pushCloudFrameSceneList`). Behind a
-  confirmation (`confirmDialog`, danger): a preview is held nowhere but on
-  the frame and in the plane's newest push, so one that took some prompting
-  to get is gone for good once it is replaced. The row never offers a plain
-  "push the list" — the sidebar's Deploy does that, and replaces the preview
-  as any push does.
+- **Discard** (`scenesLogic.discardPreview`): the DELETE above, then the
+  saved list pushed again as it stands — the backend's deploy, the cloud's
+  assigned list re-pushed (`pushCloudFrameSceneList`). Behind a confirmation
+  (`confirmDialog`, danger): a preview is held nowhere but on the frame and
+  in the plane's newest push, so one that took some prompting to get is gone
+  for good. The row never offers a plain "push the list": a push alone
+  carries the preview along, so it would change nothing.
 
 ## Tests
 

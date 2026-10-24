@@ -24,7 +24,13 @@ import { GET as getFrameAssets } from "../../../app/api/frames/[frameId]/assets/
 import { GET as getFrameAsset } from "../../../app/api/frames/[frameId]/asset/route";
 import { POST as sendCommand } from "../../../app/api/frames/[frameId]/command/route";
 import { DELETE as deleteFrame } from "../../../app/api/frames/[frameId]/route";
-import { scenePreviewScene, scenePreviewsByFrame } from "../../lib/frames";
+import {
+  enqueueFrameCommand,
+  scenePreviewScene,
+  scenePreviewsByFrame,
+  supersedePendingCommands,
+} from "../../lib/frames";
+import { DELETE as discardScenePreview } from "../../../app/api/frames/[frameId]/scene-preview/route";
 import { POST as postFrameEvent } from "../../../app/api/frames/[frameId]/event/[eventName]/route";
 import { POST as uploadFrameAsset } from "../../../app/api/frames/[frameId]/assets/upload/route";
 import {
@@ -459,6 +465,65 @@ describe("POST /api/frames/{id}/event/{event}", () => {
     });
     expect((await scenePreviewsByFrame(db, [frame.id])).get(frame.id)?.name).toBe("One");
     expect((await scenePreviewScene(db, frame.id))?.scene).toEqual(scenes[0]);
+
+    // docs/scene-previews.md "A preview rides along": an assignment-shaped
+    // push without a preview of its own (the list pushed again, an
+    // assignment) carries the preview — the previewed scene joins its bundle
+    // so the frame keeps showing the id it holds, and the frame still reports
+    // the preview. The route-level callers supersede first, as here.
+    const assigned = [{ edges: [], id: "assigned", name: "Assigned", nodes: [] }];
+    await supersedePendingCommands(db, frame.id, "set_scenes");
+    const carried = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "c1", scenes: assigned },
+      type: "set_scenes",
+    });
+    const carriedPayload = carried!.payload as Record<string, unknown>;
+    expect(carriedPayload.scenes).toEqual([...assigned, scenes[0]]);
+    expect(carriedPayload.preview).toEqual({
+      carried: true,
+      name: "One",
+      scene: scenes[0],
+      scene_id: "scene1",
+      source: "editor",
+    });
+    expect((await scenePreviewsByFrame(db, [frame.id])).get(frame.id)?.name).toBe("One");
+    expect((await scenePreviewScene(db, frame.id))?.scene).toEqual(scenes[0]);
+
+    // A push that holds a scene of that id (Install) ends the preview.
+    await supersedePendingCommands(db, frame.id, "set_scenes");
+    const installed = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "c2", scenes: [...assigned, scenes[0]] },
+      type: "set_scenes",
+    });
+    expect((installed!.payload as Record<string, unknown>).preview).toBeUndefined();
+    expect((await scenePreviewsByFrame(db, [frame.id])).get(frame.id)).toBeUndefined();
+
+    // A new preview, then Discard: gone from the frame at once, 404 the
+    // second time, and the push after it is bare.
+    await postFrameEvent(
+      postJson(`/api/frames/${frame.id}/event/uploadScenes`, { sceneId: "scene2", scenes: [scenes[1]] }),
+      eventParams(frame.id, "uploadScenes"),
+    );
+    expect((await scenePreviewsByFrame(db, [frame.id])).get(frame.id)?.name).toBe("Two");
+    const discardRequest = () =>
+      new NextRequest(new URL(`/api/frames/${frame.id}/scene-preview`, baseUrl), {
+        headers: { origin: baseUrl },
+        method: "DELETE",
+      });
+    expect((await discardScenePreview(discardRequest(), assetsParams(frame.id))).status).toBe(200);
+    expect((await scenePreviewsByFrame(db, [frame.id])).get(frame.id)).toBeUndefined();
+    expect(await scenePreviewScene(db, frame.id)).toBeNull();
+    expect((await discardScenePreview(discardRequest(), assetsParams(frame.id))).status).toBe(404);
+    await supersedePendingCommands(db, frame.id, "set_scenes");
+    const bare = await enqueueFrameCommand(db, {
+      frameId: frame.id,
+      payload: { checksum: "c3", scenes: assigned },
+      type: "set_scenes",
+    });
+    expect((bare!.payload as Record<string, unknown>).preview).toBeUndefined();
+    expect((bare!.payload as Record<string, unknown>).scenes).toEqual(assigned);
   });
 
   it("refuses shell and legacy compiled scenes on uploadScenes like an assignment would", async () => {

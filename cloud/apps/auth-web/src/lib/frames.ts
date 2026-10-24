@@ -4,7 +4,7 @@
 // (apps/frame-hub) can share the pure helpers via direct source import.
 
 import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import {
   createDb,
   frameAssetFiles,
@@ -886,13 +886,26 @@ export async function enqueueFrameCommand(
         commandTtlForFrame({ nextWakeAt: row?.nextWakeAt ?? null }, input.ttlMs, now.getTime()),
     );
   }
+  let payload = input.payload;
+  // A scene push without a preview of its own carries the frame's standing
+  // preview along (docs/scene-previews.md "A preview rides along"): the
+  // previewed scene joins the bundle, so the frame keeps showing the id it
+  // holds through an assignment, a push of the list, a reboot. The push
+  // that holds a scene of that id (Install, a saved scene pushed over its
+  // preview), or a Discard before it, ends the preview instead.
+  if (input.type === "set_scenes" && isSceneBundlePayload(payload) && payload.preview === undefined) {
+    const carried = await carriedScenePreview(db, input.frameId, payload.scenes);
+    if (carried) {
+      payload = { ...payload, preview: carried.preview, scenes: [...payload.scenes, carried.scene] };
+    }
+  }
   const [command] = await db
     .insert(frameCommands)
     .values({
       createdByAccountId: input.createdByAccountId ?? null,
       expiresAt,
       frameId: input.frameId,
-      payload: input.payload ?? null,
+      payload: payload ?? null,
       type: input.type,
     })
     .returning();
@@ -1097,6 +1110,104 @@ export async function scenePreviewScene(
   return { preview, scene: scene as Record<string, unknown> };
 }
 
+function isSceneBundlePayload(
+  payload: unknown,
+): payload is Record<string, unknown> & { scenes: Record<string, unknown>[] } {
+  return (
+    !!payload &&
+    typeof payload === "object" &&
+    !Array.isArray(payload) &&
+    Array.isArray((payload as Record<string, unknown>).scenes)
+  );
+}
+
+/** The preview the next scene push carries, with the scene to append to its
+ * bundle: the newest scene push's kept preview scene (the row may already be
+ * superseded by the caller's push — only a cancelled or failed one is not
+ * looked at), unless it was discarded or `scenes` already holds that id.
+ * The backend's twin is frame_commands.carried_preview. */
+export async function carriedScenePreview(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+  scenes: Record<string, unknown>[],
+): Promise<{ preview: Record<string, unknown>; scene: Record<string, unknown> } | null> {
+  const [row] = await db
+    .select({ payload: frameCommands.payload })
+    .from(frameCommands)
+    .where(
+      and(
+        eq(frameCommands.frameId, frameId),
+        eq(frameCommands.type, "set_scenes"),
+        notInArray(frameCommands.status, ["cancelled", "failed"]),
+      ),
+    )
+    .orderBy(desc(frameCommands.createdAt), desc(frameCommands.id))
+    .limit(1);
+  const payload = row?.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const meta = (payload as Record<string, unknown>).preview;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
+    return null;
+  }
+  const record = meta as Record<string, unknown>;
+  const scene = record.scene;
+  if (record.discarded === true || !scene || typeof scene !== "object" || Array.isArray(scene)) {
+    return null;
+  }
+  const sceneId = (scene as Record<string, unknown>).id;
+  if (typeof sceneId !== "string" || !sceneId || scenes.some((candidate) => candidate.id === sceneId)) {
+    return null;
+  }
+  return {
+    preview: {
+      carried: true,
+      name: typeof record.name === "string" && record.name ? record.name : "Preview",
+      scene,
+      scene_id: sceneId,
+      source: record.source === "voice" ? "voice" : "editor",
+    },
+    scene: scene as Record<string, unknown>,
+  };
+}
+
+/** The preview row's "Discard": marks the frame's standing preview over, so
+ * the next scene push (the workspace pushes the list right after) carries
+ * nothing. The row keeps the preview's name for the queue view and loses the
+ * kept scene. False when the frame shows no preview. */
+export async function discardScenePreview(
+  db: ReturnType<typeof createDb>,
+  frameId: string,
+): Promise<boolean> {
+  const preview = (await scenePreviewsByFrame(db, [frameId])).get(frameId);
+  if (!preview) {
+    return false;
+  }
+  const [row] = await db
+    .select({ id: frameCommands.id })
+    .from(frameCommands)
+    .where(
+      and(
+        eq(frameCommands.frameId, frameId),
+        eq(frameCommands.type, "set_scenes"),
+        inArray(frameCommands.status, ["pending", "sent", "acked"]),
+      ),
+    )
+    .orderBy(desc(frameCommands.createdAt), desc(frameCommands.id))
+    .limit(1);
+  if (!row) {
+    return false;
+  }
+  await db
+    .update(frameCommands)
+    .set({
+      payload: sql`jsonb_set(${frameCommands.payload} #- '{preview,scene}', '{preview,discarded}', 'true'::jsonb)`,
+    })
+    .where(eq(frameCommands.id, row.id));
+  return true;
+}
+
 export async function scenePreviewsByFrame(
   db: ReturnType<typeof createDb>,
   frameIds: string[],
@@ -1132,6 +1243,10 @@ export async function scenePreviewsByFrame(
       continue;
     }
     const record = preview as Record<string, unknown>;
+    if (record.discarded === true) {
+      // The owner's Discard: the row stands, the preview is over.
+      continue;
+    }
     byFrame.set(row.frameId, {
       at: row.createdAt.toISOString(),
       name: typeof record.name === "string" && record.name ? record.name : "Preview",
