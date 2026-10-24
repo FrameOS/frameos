@@ -339,6 +339,9 @@ type
     ## Custom event name -> the origins its declaration opts into, on top of
     ## what every custom event gets (docs/events.md, "Custom events").
     customEventOrigins*: Table[string, set[EventOrigin]]
+    ## The installed copy's event map (event_map.nim): the rule list as the
+    ## control plane wrote it (`[{event, match, as}]`), nil for most scenes.
+    eventMap*: JsonNode
     ## When this scene renders next, if it is drawn through a scene node
     ## (frameos/scene_rhythm.nim); nil until the first such render.
     rhythm*: SceneRhythm
@@ -416,6 +419,7 @@ type
     apps*: JsonNode
     stateFields*: seq[StateField] # all state fields, including private ones
     customEventOrigins*: Table[string, set[EventOrigin]] ## see FrameScene.customEventOrigins
+    eventMap*: JsonNode ## see FrameScene.eventMap
     refreshFollowsChildren*: bool ## see FrameScene.refreshFollowsChildren
 
   # Imported node from scenes.json
@@ -459,6 +463,9 @@ type
     origin*: JsonNode
     ## The scene's custom event declarations ([{name, origins?, …}]); nil when absent.
     customEvents*: JsonNode
+    ## The installed copy's event map ([{event, match, as}], docs/events.md
+    ## "Event map"), written by the control plane beside the scene; nil when absent.
+    eventMap*: JsonNode
 
   # Runtime state while running the scene (for interpreted frames), adds cached nodes/edges
   InterpretedFrameScene* = ref object of FrameScene

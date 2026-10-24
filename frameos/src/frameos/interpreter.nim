@@ -1329,6 +1329,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     edges: @[],
     apps: exportedScene.apps,
     customEventOrigins: exportedScene.customEventOrigins,
+    eventMap: exportedScene.eventMap,
     refreshFollowsChildren: exportedScene.refreshFollowsChildren,
     followInterval: -1,
     nextNodeIds: initTable[NodeId, NodeId](),
@@ -1611,25 +1612,6 @@ proc applyPublicStateFromPayload(scene: InterpretedFrameScene, payload: JsonNode
           discard
       if value != scene.state{key}:
         scene.state[key] = value
-
-proc eventFilterValue(value: JsonNode): string =
-  if value.isNil:
-    return ""
-  case value.kind
-  of JString:
-    return strip(value.getStr())
-  of JInt:
-    return $value.getInt()
-  of JFloat:
-    return $value.getFloat()
-  of JBool:
-    if value.getBool():
-      return "true"
-    return "false"
-  of JNull:
-    return "null"
-  else:
-    return $value
 
 proc eventNodeMatchesPayload(node: DiagramNode, payload: JsonNode): bool =
   # Every filter the listener sets must match; a field it leaves empty matches
@@ -1937,6 +1919,10 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     apps: if scene.apps.isNil: %*{} else: scene.apps,
     stateFields: refresh.fields,
     customEventOrigins: declaredCustomEventOrigins(scene.customEvents),
+    # The installed copy's rules as they came; nil when there are none, so
+    # the dispatcher's check per event is one nil test (event_map.nim).
+    eventMap: if scene.eventMap.isNil or scene.eventMap.kind != JArray or
+      scene.eventMap.len == 0: nil else: scene.eventMap,
     # A scene the split drawer generated draws nothing of its own that
     # changes: it waits for its panels, but never renders more often than
     # its own interval (scene_rhythm.nim).
