@@ -13,71 +13,46 @@
 ##   {"event": "button", "match": {"label": "REFRESH", "action": "longPress"},
 ##    "as": {"label": "B", "role": "next", "action": "press"}}
 ##
+## The map is kept as the JSON it arrived in (an ESP32 holds eight rules at
+## most, and a press is rare: a type of its own would cost more flash than
+## the walk costs time). What is not a rule — no `event` name, no `as` object
+## — never matches, and is never fatal: a scene with an odd map still renders.
 ## Values are compared in their string form (`"17"` matches the pin 17), the
-## way an event node's filters are (interpreter.nim, eventFilterValue).
-import std/[json, strutils]
-import frameos/types
+## way an event node's filters are (values.nim, eventPayloadValueMatches).
+import std/json
+import frameos/values
 
-export EventMapRule
+proc isEventMapRule*(rule: JsonNode): bool =
+  ## An object with an event name and an `as` object.
+  not rule.isNil and rule.kind == JObject and rule{"event"}.getStr().len > 0 and
+    rule{"as"}.kind == JObject
 
-proc eventMapValue*(value: JsonNode): string =
-  ## A payload or rule value as the string an event node's filter would see.
-  if value.isNil:
-    return ""
-  case value.kind
-  of JString: value.getStr().strip()
-  of JInt: $value.getInt()
-  of JFloat: $value.getFloat()
-  of JBool: (if value.getBool(): "true" else: "false")
-  of JNull: "null"
-  else: $value
-
-proc parseEventMap*(map: JsonNode): seq[EventMapRule] =
-  ## The rules a control plane wrote, in order. What is not a rule — no event
-  ## name, no `as` object, a `match` that is not an object — is skipped, never
-  ## fatal: a scene with an odd map still renders.
-  if map.isNil or map.kind != JArray:
-    return @[]
-  for item in map:
-    if item.kind != JObject:
-      continue
-    let event = item{"event"}.getStr().strip()
-    let write = item{"as"}
-    if event.len == 0 or write.isNil or write.kind != JObject:
-      continue
-    var rule = EventMapRule(event: event, write: write)
-    let match = item{"match"}
-    if not match.isNil:
-      if match.kind != JObject:
-        continue
-      for key, value in match.pairs:
-        rule.match.add((key, eventMapValue(value)))
-    result.add(rule)
-
-proc eventMapRuleMatches*(rule: EventMapRule, name: string, payload: JsonNode): bool =
-  if rule.event != name:
+proc eventMapRuleMatches*(rule: JsonNode, name: string, payload: JsonNode): bool =
+  ## A rule of `name` whose every `match` value the payload carries.
+  if not rule.isEventMapRule() or rule["event"].getStr() != name:
     return false
-  for (key, expected) in rule.match:
-    let actual = if payload.isNil or payload.kind != JObject: nil else: payload{key}
-    if eventMapValue(actual) != expected:
+  let match = rule{"match"}
+  if match.isNil:
+    return true
+  if match.kind != JObject:
+    return false
+  for key, expected in match.pairs:
+    if not eventPayloadValueMatches(payload, key, eventFilterValue(expected)):
       return false
   true
 
-proc matchingEventMapRule*(rules: seq[EventMapRule], name: string, payload: JsonNode): int =
-  ## The index of the first rule that matches, -1 when none does.
-  for index, rule in rules:
+proc matchingEventMapRule*(rules: JsonNode, name: string, payload: JsonNode): int =
+  ## The index of the first rule that matches, -1 when none does (or there
+  ## is no map).
+  if rules.isNil or rules.kind != JArray:
+    return -1
+  for index, rule in rules.elems:
     if rule.eventMapRuleMatches(name, payload):
       return index
   -1
 
-proc applyEventMapRule*(rule: EventMapRule, payload: JsonNode): JsonNode =
+proc applyEventMapRule*(rule: JsonNode, payload: JsonNode): JsonNode =
   ## The payload the scene gets: a copy with the rule's `as` written over it.
   result = if payload.isNil or payload.kind != JObject: newJObject() else: copy(payload)
-  for key, value in rule.write.pairs:
+  for key, value in rule["as"].pairs:
     result[key] = copy(value)
-
-proc applyEventMap*(rules: seq[EventMapRule], name: string, payload: JsonNode): JsonNode =
-  ## The first matching rule applied, or nil when no rule matches (deliver
-  ## what came).
-  let index = matchingEventMapRule(rules, name, payload)
-  if index < 0: nil else: applyEventMapRule(rules[index], payload)

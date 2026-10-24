@@ -285,6 +285,28 @@ proc logCodeNodeOutput*[T](scene: FrameScene; nodeId: NodeId; rawValue: T) =
     let value: Value = rawValue
     logCodeNodeOutput(scene, nodeId, value)
 
+proc eventFilterValue*(value: JsonNode): string =
+  ## A listener filter's (or an event map rule's) value as the string the
+  ## payload is compared with: "" for nothing, numbers and booleans spelled
+  ## out, strings trimmed.
+  if value.isNil:
+    return ""
+  case value.kind
+  of JString:
+    return strip(value.getStr())
+  of JInt:
+    return $value.getInt()
+  of JFloat:
+    return $value.getFloat()
+  of JBool:
+    if value.getBool():
+      return "true"
+    return "false"
+  of JNull:
+    return "null"
+  else:
+    return $value
+
 proc eventPayloadValueMatches*(payload: JsonNode, key: string, expected: string): bool =
   ## Event listener filters: does the payload's value for key match the
   ## configured filter string? Empty filters match anything. Shared by the

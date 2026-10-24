@@ -259,14 +259,15 @@ proc mapped(loop: EventLoop, scene: FrameScene, name: string, payload: JsonNode)
   ## came, or the first matching rule's rewrite. A rewrite is logged with the
   ## rule's own `as` — never the payload, which for a key event is what was
   ## typed.
-  if scene.eventMap.len == 0:
+  if scene.eventMap.isNil:
     return payload
   let index = matchingEventMapRule(scene.eventMap, name, payload)
   if index < 0:
     return payload
+  let rule = scene.eventMap[index]
   loop.log(%*{"event": "event:mapped", "name": name, "sceneId": scene.id.string,
-    "rule": index, "as": scene.eventMap[index].write})
-  applyEventMapRule(scene.eventMap[index], payload)
+    "rule": index, "as": rule["as"]})
+  applyEventMapRule(rule, payload)
 
 proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): bool =
   let scene = loop.host.sceneFor(envelope.target)
