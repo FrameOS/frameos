@@ -32,6 +32,7 @@ import {
   FrameInstallMethod,
   FrameOSSettings,
   FrameVirtualColorMode,
+  EventMapRule,
   GPIOButton,
   NewFrameFormType,
 } from '../../types'
@@ -270,6 +271,13 @@ const WAVESHARE_PHOTOPAINTER_PINS: NonNullable<NonNullable<NewFrameFormType['dev
   mosi: 11,
   pwr: -1,
 }
+// The reTerminal E-series' arrows held walk the scene list (docs/events.md
+// "Event map"), by label — the E1004's pins are swapped, its labels are not.
+// Mirrors EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP (backend) and fos_board.c.
+const SEEED_RETERMINAL_EVENT_MAP: EventMapRule[] = [
+  { event: 'button', match: { label: 'LEFT', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
+  { event: 'button', match: { label: 'RIGHT', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
+]
 const WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS: GPIOButton[] = [
   { pin: 0, label: 'BOOT' },
   { pin: 4, label: 'KEY1' },
@@ -412,6 +420,8 @@ interface EmbeddedHardwarePresetConfig {
   psramMB: number
   pins: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']>
   gpioButtons: GPIOButton[]
+  /** What the board's buttons do whatever scene shows (docs/events.md "Event map"), seeded onto the frame. */
+  eventMap?: EventMapRule[]
   sdCardAssets?: NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']>
 }
 
@@ -518,6 +528,7 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
       { pin: 4, label: 'LEFT' },
       { pin: 5, label: 'RIGHT' },
     ],
+    eventMap: SEEED_RETERMINAL_EVENT_MAP,
   },
   seeed_reterminal_e1002: {
     label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',
@@ -531,6 +542,7 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
       { pin: 4, label: 'LEFT' },
       { pin: 5, label: 'RIGHT' },
     ],
+    eventMap: SEEED_RETERMINAL_EVENT_MAP,
   },
   seeed_reterminal_e1004: {
     label: 'Seeed reTerminal E1004 (13.3" color ESP32-S3)',
@@ -539,14 +551,16 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '32MB',
     psramMB: 8,
     pins: SEEED_RETERMINAL_E1004_PINS,
-    // The E1004's front panel is wired like the E1001/E1002's (the backend's
-    // EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS); an empty list here used
-    // to reach the backend as `[]`, which its seed-only preset rule keeps.
+    // GPIO3 and GPIO5 the other way round from the E1001/E1002: GPIO3 is the
+    // right arrow, GPIO5 refresh (the backend's
+    // EMBEDDED_SEEED_RETERMINAL_E1004_GPIO_BUTTONS, #527). This list reaches
+    // the backend with the frame, and its seed-only preset rule keeps it.
     gpioButtons: [
-      { pin: 3, label: 'REFRESH' },
+      { pin: 3, label: 'RIGHT' },
       { pin: 4, label: 'LEFT' },
-      { pin: 5, label: 'RIGHT' },
+      { pin: 5, label: 'REFRESH' },
     ],
+    eventMap: SEEED_RETERMINAL_EVENT_MAP,
   },
   elecrow_crowpanel_5in79: {
     label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
@@ -901,6 +915,7 @@ export function NewFrame({ headerAction }: { headerAction?: JSX.Element }): JSX.
         sdCardAssets: presetConfig.sdCardAssets,
       },
       gpio_buttons: presetConfig.gpioButtons.map((button) => ({ ...button })),
+      event_map: presetConfig.eventMap?.map((rule) => ({ ...rule, match: { ...rule.match }, as: { ...rule.as } })),
     })
   }
 
