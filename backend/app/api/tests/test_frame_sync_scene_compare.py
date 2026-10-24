@@ -17,3 +17,12 @@ def test_compiled_is_still_a_real_difference():
         {"settings": {"execution": "compiled", "refreshInterval": 60}},
         {"settings": {"refreshInterval": 60, "execution": "compiled"}},
     )
+
+
+def test_the_installed_copys_event_map_is_part_of_the_scene_on_the_device():
+    # docs/events.md "Event map": the map travels beside the scene, so a frame
+    # whose scenes.json predates a remap is out of sync until the next push.
+    device_copy = {"id": "s1", "name": "Scene", "nodes": [], "edges": []}
+    mapped = {**device_copy, "eventMap": [{"event": "button", "match": {"label": "REFRESH"}, "as": {"label": "A"}}]}
+    assert not _scene_sync_values_equal(device_copy, mapped)
+    assert _scene_sync_values_equal({**device_copy, "eventMap": []}, device_copy)
