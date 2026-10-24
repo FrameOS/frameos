@@ -24,7 +24,11 @@ interpreter only (its code nodes are JavaScript with no Nim twin, so there is
 no compiled half to compare; the snapshot is `<id>.png` straight away), and a
 fixture's `e2eEvents` list is POSTed to the frame's `/event/<name>` after the
 first render, so an input scene (`inputTouch`, `inputKeyboard`) is snapshotted
-showing what it heard.
+showing what it heard: the last upload of the burst, taken once nothing more
+arrives for `FRAMEOS_E2E_EVENT_SETTLE` seconds (3), never the first render,
+which on a slow runner shows the first key alone. The reset scene drawn
+between two fixtures is waited for as well, so its late upload is never
+mistaken for the next scene's.
 
 `./run` hands off to the `Makefile`: `makescenes.py` compiles the fixture
 scenes in `scenes/` into `generated/`, a copy of `frameos/` is built with
