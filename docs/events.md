@@ -461,6 +461,43 @@ event never empties the queue, so one drain delivers at most 32 events and
 hands back with the rest still queued: the render loop (or the host's one task)
 gets its turn, and nothing is dropped.
 
+### Event map: an installed scene's buttons
+
+A frame has the keys it has (a reTerminal's LEFT, RIGHT and REFRESH) and a
+scene listens for the ones its author had (`label: "A"`, `role: "next"`). The
+**event map** is how one installed copy of a scene is told that a press of
+REFRESH is its A. It belongs to the installed scene, not to the scene: the
+control plane keeps it beside the scene (`eventMap` next to `nodes` in what a
+frame receives; the backend on the installed entry of `frame.scenes`, the
+cloud on the assignment row), the editor never writes it, and an update of the
+scene to a newer version leaves it alone. "Map buttons" in an installed scene's
+menu writes it; the rule shape is one list for every event:
+
+```json
+"eventMap": [
+  {"event": "button", "match": {"label": "REFRESH", "action": "press"},
+   "as": {"label": "A", "role": "primary"}},
+  {"event": "button", "match": {"label": "REFRESH", "action": "longPress"},
+   "as": {"label": "B", "role": "next", "action": "press"}}
+]
+```
+
+The dispatcher applies it on every host (`frameos/src/frameos/event_map.nim`,
+from `event_loop.nim`), right before the scene is asked whether it listens, so
+it holds for a key the driver saw, a `button` said over HTTP or by the cloud,
+and the preview alike. An event of the rule's `event` whose payload carries
+every `match` value (compared in string form, as an event node's filters are)
+is delivered with `as` written over its payload, action included when the rule
+names one; the first matching rule wins, a payload no rule matches is delivered
+as it came, and a rule never changes the event's name. Only what `as` names
+changes: a rule that sets `label` and not `role` leaves the key's role in the
+payload, so "Map buttons" writes every field the target listener filters on.
+`gpio` edges are not touched by a `button` rule (a long press cannot be known
+at its `down`); a scene that wants them mapped gets its own `gpio` rules. A
+rewrite is logged as `event:mapped` with the rule's index and its `as`, never
+the payload. What is not a rule (no `event`, no `as` object) is skipped. The
+dispatcher corpus has the case ("an installed scene's event map…").
+
 ### `context` in JavaScript
 
 `context.event` is the event's name and `context.payload` its payload. The
