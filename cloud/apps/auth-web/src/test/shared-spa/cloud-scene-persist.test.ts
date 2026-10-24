@@ -255,6 +255,48 @@ describe("cloud scene persistence", () => {
     ]);
   });
 
+  it("posts the install's button map beside the scene and never as scene content", async () => {
+    // docs/events.md "Event map": the map is the install's, so a form scene
+    // that only gained one is not an edit (no new version, no fork), the
+    // push carries it as the assignment's event_maps, and taking it away
+    // posts null so the row is cleared. A frame with none says nothing.
+    const store = fakeStore();
+    store.scenes.set("public-1", { scenes: [storedScene("rt-1", "Abstract Architecture")], owned: false, version: 3 });
+    store.scenes.set("mine-1", { scenes: [storedScene("rt-2", "Clock")], owned: true, version: 1 });
+    store.assignments = [{ scene_id: "public-1" }, { scene_id: "mine-1" }];
+    installFetch(store);
+    const rule = { event: "button", match: { label: "REFRESH", action: "press" }, as: { label: "A" } };
+
+    const mapped = { ...sanitizedCopy(storedScene("rt-1", "Abstract Architecture")), eventMap: [rule] };
+    await persistAndPushCloudFrameScenes(frameId, [mapped, sanitizedCopy(storedScene("rt-2", "Clock"))], null, {
+      sceneUnchanged: workspaceEquality,
+    });
+    expect(store.created).toEqual([]);
+    expect(store.updated).toEqual([]);
+    expect((store.pushes.at(-1) as { scenes: unknown[] }).scenes).toEqual([
+      { scene_id: "public-1", event_maps: { "rt-1": [rule] } },
+      { scene_id: "mine-1" },
+    ]);
+
+    // The row now holds a map; a form without one clears it. An edit to the
+    // owned scene publishes without the map inside the content.
+    store.assignments = [{ scene_id: "public-1", event_maps: { "rt-1": [rule] } } as never, { scene_id: "mine-1" }];
+    const editedMine = { ...sanitizedCopy(storedScene("rt-2", "Clock")), eventMap: [rule] };
+    editedMine.nodes = [];
+    await persistAndPushCloudFrameScenes(
+      frameId,
+      [sanitizedCopy(storedScene("rt-1", "Abstract Architecture")), editedMine],
+      null,
+      { sceneUnchanged: workspaceEquality },
+    );
+    expect(store.updated).toEqual(["mine-1"]);
+    expect(store.scenes.get("mine-1")?.scenes[0]).not.toHaveProperty("eventMap");
+    expect((store.pushes.at(-1) as { scenes: unknown[] }).scenes).toEqual([
+      { scene_id: "public-1", event_maps: null },
+      { latest: true, scene_id: "mine-1", event_maps: { "rt-2": [rule] } },
+    ]);
+  });
+
   it("keeps a pack claimed when its scenes.json cannot be re-read (rate limit, blip)", async () => {
     const store = fakeStore();
     store.scenes.set("public-1", { scenes: [storedScene("rt-1", "Abstract Architecture")], owned: false, version: 3 });
