@@ -136,7 +136,8 @@ function ReadOnlyGpioButtons({ buttons }: { buttons: GPIOButton[] }): JSX.Elemen
  * (the save then pushes it); everything else is the editable list.
  */
 export function GpioButtonsSection(): JSX.Element {
-  const { configuredGpioButtons, reportedGpioButtons, frameForm, setFrameFormValues } = useFrameSettings()
+  const { configuredGpioButtons, reportedGpioButtons, frameForm, setFrameFormValues, buttonBeep, voiceChat } =
+    useFrameSettings()
   // The cloud form carries `gpio_buttons` only once a push set it; until
   // then the frame runs the map its board preset (or a console `set`) gave
   // it, which is the one the report shows.
@@ -256,9 +257,19 @@ export function GpioButtonsSection(): JSX.Element {
             </Group>
           ))
         )}
-        <ButtonBeepField />
-        <VoiceChatField />
       </div>
+      {buttonBeep || voiceChat ? (
+        <>
+          {/* The board's buzzer and microphone: their own box under the
+              buttons they answer for, so the button rows stay a list of
+              buttons. No nav entry of its own; GPIO's link lands above it. */}
+          <H6 id="frame-settings-gpio-extras">Buzzer and microphone</H6>
+          <div className="pl-2 @md:pl-8 space-y-2">
+            <ButtonBeepField />
+            <VoiceChatField />
+          </div>
+        </>
+      ) : null}
     </>
   )
 }
