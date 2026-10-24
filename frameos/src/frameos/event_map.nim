@@ -23,13 +23,16 @@ import std/json
 import frameos/values
 
 # Written with the `{}` accessors throughout: on a JsonNode every `[]` is a
-# raise site of its own, and this runs on a 3 MB firmware.
+# raise site of its own, and this runs on a 3 MB firmware. `{}` is nil for a
+# key that is not there, and nil has no `kind`: hence isObject.
+
+proc isObject(node: JsonNode): bool {.inline.} =
+  not node.isNil and node.kind == JObject
 
 proc eventMapRuleMatches*(rule: JsonNode, name: string, payload: JsonNode): bool =
   ## A rule (an object with an event name and an `as` object) of `name`
   ## whose every `match` value the payload carries.
-  if rule.isNil or rule.kind != JObject or rule{"event"}.getStr() != name or
-      rule{"as"}.kind != JObject:
+  if not rule.isObject or rule{"event"}.getStr() != name or not rule{"as"}.isObject:
     return false
   let match = rule{"match"}
   if match.isNil:

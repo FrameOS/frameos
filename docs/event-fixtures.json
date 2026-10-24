@@ -2722,6 +2722,12 @@
        {
         "event": "button",
         "match": {
+         "label": "REFRESH"
+        }
+       },
+       {
+        "event": "button",
+        "match": {
          "label": "REFRESH",
          "action": "press"
         },
