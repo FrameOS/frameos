@@ -888,6 +888,7 @@ proc sceneEvents*(self: RunnerThread): EventLoop =
       runScene: proc (scene: FrameScene, event: string, payload: JsonNode) =
         self.runSceneEvent(scene, event, payload),
       sceneListens: proc (scene: FrameScene, event: string): bool = sceneListensTo(scene, event),
+      sceneOrder: proc (): seq[SceneId] = sceneOrderSnapshot(),
       log: proc (entry: JsonNode) = self.logSignal(entry),
     ), self.frameConfig)
     # On this thread an event goes straight into the queue (channels.nim).

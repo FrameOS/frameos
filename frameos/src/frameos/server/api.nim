@@ -325,6 +325,7 @@ const frameApiKeyMap* = [
   ("timezone_updater", "timeZoneUpdates"),
   ("schedule", "schedule"),
   ("gpio_buttons", "gpioButtons"),
+  ("event_map", "eventMap"),
   ("input_settings", "inputSettings"),
   ("control_code", "controlCode"),
   ("network", "network"),

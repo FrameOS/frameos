@@ -1,6 +1,7 @@
 import std/[json, options, os, strutils, tables]
 import ../channels
 import ../event_loop
+import ../event_map
 import ../interpreter
 import ../types
 
@@ -41,6 +42,7 @@ type RecordingHost = ref object
   logger: Logger
   scenes: Table[SceneId, FrameScene]
   current: SceneId
+  order: seq[SceneId] ## the case's scene list, in its order (`setCurrentScene {direction}`)
   trace: seq[string]
   pinned: seq[string] ## `run` lines the step pins with their payload
   loop: EventLoop
@@ -84,10 +86,17 @@ proc newRecordingHost(sceneId: SceneId, logs: ref seq[JsonNode]): RecordingHost 
     # Input reaches a scene only under the names it listens for (runner.nim and
     # single_scene_host.nim answer the same way): a `run` line is a listener.
     sceneListens: proc (scene: FrameScene, event: string): bool = sceneListensTo(scene, event),
+    sceneOrder: proc (): seq[SceneId] = host.order,
     log: proc (entry: JsonNode) =
       if entry{"event"}.getStr() == "event:refused":
         host.trace.add("refused " & entry["name"].getStr() & " " & entry["origin"].getStr() & " " &
-          entry["reason"].getStr()),
+          entry["reason"].getStr())
+      elif entry{"event"}.getStr() == "event:mapped":
+        # "mapped frame button -> setCurrentScene", "mapped scene button"
+        var line = "mapped " & entry["scope"].getStr() & " " & entry["name"].getStr()
+        if entry.hasKey("emit"):
+          line.add(" -> " & entry["emit"].getStr())
+        host.trace.add(line),
   ), host.config)
   # On the thread that owns a dispatcher, a scene's dispatch goes straight into
   # its queue (channels.nim) — as on the runner thread.
@@ -110,6 +119,10 @@ block dispatcher:
     let name = c["name"].getStr()
     let logs = new(seq[JsonNode])
     let host = newRecordingHost(c["scene"].getStr().SceneId, logs)
+    for scene in c["scenes"]:
+      host.order.add(scene["id"].getStr().SceneId)
+    # The frame's own event map (frame.json `eventMap`), when the case has one.
+    host.config.eventMap = parseEventMap(c{"frameEventMap"})
     discard host.sceneInstance(host.current)
     discard host.loop.drain() # what `init` dispatched is not this case's subject
     for index, step in c["steps"].getElems():

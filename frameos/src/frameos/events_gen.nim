@@ -12,6 +12,7 @@ type
     eoHttpAdmin = "http:admin"
     eoCloud = "cloud"
     eoSystem = "system"
+    eoEventMap = "eventMap"
   EventClass* = enum
     ecLifecycle = "lifecycle"
     ecInput = "input"
@@ -145,7 +146,7 @@ const
       linux: true, esp32: true, wasm: true),
     EventPolicy( # render
       class: ecLifecycle, device: edNone, listen: true, dispatch: true,
-      origins: {eoSystem, eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud},
+      origins: {eoSystem, eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoEventMap},
       renderAfter: raAlways, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
@@ -258,13 +259,13 @@ const
       linux: true, esp32: false, wasm: true),
     EventPolicy( # turnOn
       class: ecSceneCommand, device: edNone, listen: true, dispatch: true,
-      origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
+      origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # turnOff
       class: ecSceneCommand, device: edNone, listen: true, dispatch: true,
-      origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
+      origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
@@ -282,13 +283,13 @@ const
       linux: true, esp32: true, wasm: true),
     EventPolicy( # setSceneState
       class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
-      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
+      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
     EventPolicy( # setCurrentScene
       class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
-      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
+      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap},
       renderAfter: raAlways, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
@@ -420,7 +421,7 @@ proc eventPayloadKeyCount*(name: string): int =
   of evGpio: 8
   of evButton: 7
   of evSetSceneState: 2
-  of evSetCurrentScene: 2
+  of evSetCurrentScene: 3
   of evUploadScenes: 3
   else: 0
 
@@ -570,7 +571,8 @@ proc eventPayloadKey*(name: string, index: int): string =
   of evSetCurrentScene:
     case index
     of 0: "sceneId"
-    of 1: "state"
+    of 1: "direction"
+    of 2: "state"
     else: ""
   of evUploadScenes:
     case index

@@ -341,6 +341,28 @@ async def test_get_frame_json_gpio_buttons_carry_a_known_role_only(_mock_publish
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_event_map_carries_rules_only(_mock_publish, db, redis):
+    # docs/events.md "Event map": the frame's own map rides frame.json as
+    # `eventMap`, rules in order; what is not a rule is dropped, never fatal.
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    assert get_frame_json(db, frame)["eventMap"] == []
+    frame.event_map = [
+        {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+        {"event": "button", "match": {"label": "REFRESH", "action": "press"}, "as": {"label": "A"}},
+        {"event": "button", "match": {"label": "RIGHT", "action": "longPress"}, "emit": "render"},
+        {"event": "button", "as": "not a rule"},
+        {"match": {"label": "A"}, "as": {"label": "B"}},
+        "nonsense",
+    ]
+    assert get_frame_json(db, frame)["eventMap"] == [
+        {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+        {"event": "button", "match": {"label": "REFRESH", "action": "press"}, "as": {"label": "A"}},
+        {"event": "button", "match": {"label": "RIGHT", "action": "longPress"}, "emit": "render", "as": {}},
+    ]
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_keeps_sync_internals_out_of_home_assistant_settings(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
     db.add(

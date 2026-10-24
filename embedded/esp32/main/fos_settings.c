@@ -678,6 +678,25 @@ static bool apply_frame_settings(const cJSON *frame)
         }
     }
 
+    /* `eventMap` (docs/events.md "Event map"): the frame's button bindings,
+     * kept as compact JSON and pushed into the Nim runtime every pass like
+     * `colors`, so the next press sees it. Present only when the backend
+     * holds a map (the board preset's own applies otherwise); an empty list
+     * clears it; a list too big for the slot is ignored, not truncated. */
+    const cJSON *event_map = cJSON_GetObjectItem(frame, "eventMap");
+    if (cJSON_IsArray(event_map)) {
+        char *printed = cJSON_GetArraySize(event_map) > 0 ? cJSON_PrintUnformatted(event_map) : NULL;
+        const char *next = printed != NULL ? printed : "";
+        if (strlen(next) < sizeof(config->event_map) && strcmp(config->event_map, next) != 0) {
+            strlcpy(config->event_map, next, sizeof(config->event_map));
+            changed = true;
+        } else if (strlen(next) >= sizeof(config->event_map)) {
+            ESP_LOGW(TAG, "settings: eventMap ignored (%u bytes, slot holds %u)",
+                     (unsigned)strlen(next), (unsigned)sizeof(config->event_map));
+        }
+        free(printed);
+    }
+
     const cJSON *max_http = cJSON_GetObjectItem(frame, "maxHttpResponseBytes");
     if (cJSON_IsNumber(max_http) && max_http->valuedouble >= 1024 &&
         max_http->valuedouble <= 512.0 * 1024 * 1024 &&
@@ -814,6 +833,9 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (strcmp(before->palette, after->palette) != 0) {
         change_append(out, out_len, "palette", after->palette[0] ? "set" : "default");
+    }
+    if (strcmp(before->event_map, after->event_map) != 0) {
+        change_append(out, out_len, "event_map", after->event_map[0] ? "set" : "none");
     }
     if (strcmp(before->time_zone, after->time_zone) != 0) {
         change_append(out, out_len, "timezone", after->time_zone);

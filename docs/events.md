@@ -141,6 +141,7 @@ event. A new origin starts with nothing.
 | `http:admin` | The frame's HTTP API with an admin session or the `serverApiKey` — the backend |
 | `cloud` | FrameOS Cloud, through a hub verb (`cloud.verb` names it) |
 | `system` | The runtime itself |
+| `eventMap` | The frame's or an installed scene's [event map](#event-map-what-a-button-does) replacing an event it matched: the owner's configuration, never a key or a request itself |
 
 The allow-list is asked by the dispatcher, of every envelope, whatever its
 origin. An edge that can answer sooner asks the same question for a better
@@ -208,8 +209,13 @@ no filter on a field hears every value of it.
 - `setSceneState {state, render}` — `state` is applied to the scene's public
   state; `render: true` asks for a render afterwards. In the editor its
   dispatch form is the scene's own fields (`sceneState: "payload"`).
-- `setCurrentScene {sceneId, state}` — one that names the scene already
-  showing applies `state` and renders, without a switch.
+- `setCurrentScene {sceneId, direction, state}` — one that names the scene
+  already showing applies `state` and renders, without a switch. `direction`
+  (`next` / `prev`) instead of a `sceneId` walks the frame's scene list in the
+  control plane's order (a pushed set first, then the deployed scenes it does
+  not name), wrapping around; the dispatcher resolves it from the host's
+  `sceneOrder` on every host, so a frame with one scene switches nowhere and
+  anything else is refused (`reason: "direction"`).
 - The input payloads are under [Input](#input).
 
 ### Input
@@ -461,42 +467,70 @@ event never empties the queue, so one drain delivers at most 32 events and
 hands back with the rest still queued: the render loop (or the host's one task)
 gets its turn, and nothing is dropped.
 
-### Event map: an installed scene's buttons
+### Event map: what a button does
 
 A frame has the keys it has (a reTerminal's LEFT, RIGHT and REFRESH) and a
-scene listens for the ones its author had (`label: "A"`, `role: "next"`). The
-**event map** is how one installed copy of a scene is told that a press of
-REFRESH is its A. It belongs to the installed scene, not to the scene: the
-control plane keeps it beside the scene (`eventMap` next to `nodes` in what a
-frame receives; the backend on the installed entry of `frame.scenes`, the
-cloud on the assignment row), the editor never writes it, and an update of the
-scene to a newer version leaves it alone. "Map buttons" in an installed scene's
-menu writes it; the rule shape is one list for every event:
+scene listens for the ones its author had (`label: "A"`, `role: "next"`). An
+**event map** is a list of rules the control plane writes and the dispatcher
+applies on every host (`frameos/src/frameos/event_map.nim`, from
+`event_loop.nim`), right before a scene is asked whether it listens, so it
+holds for a key the driver saw, a `button` said over HTTP or by the cloud, and
+the preview alike. There are two, applied in this order:
+
+- **The frame's** (frame.json `eventMap`; `event_map` on the wire, the
+  backend's frame column and the cloud's `set_settings` key; the Settings
+  panel's "Button actions"): what a button does on this frame, whatever scene
+  is showing. A long press of LEFT is the previous scene and of RIGHT the next
+  on every reTerminal preset (the backend's `EMBEDDED_HARDWARE_PRESETS`, the
+  firmware's board table), and the owner may add, change or clear it. It needs
+  no scene: it is checked before the scene is looked up.
+- **The installed scene's** (`eventMap` next to `nodes` in what a frame
+  receives; the backend keeps it on the installed entry of `frame.scenes`, the
+  cloud on the assignment row): how one installed copy of a scene is told that
+  a press of REFRESH is its A. It belongs to the installed scene, not to the
+  scene: the editor never writes it, and an update of the scene to a newer
+  version leaves it alone. "Map buttons" in an installed scene's menu writes
+  it.
+
+The rule shape is one, for every event:
 
 ```json
 "eventMap": [
   {"event": "button", "match": {"label": "REFRESH", "action": "press"},
    "as": {"label": "A", "role": "primary"}},
-  {"event": "button", "match": {"label": "REFRESH", "action": "longPress"},
-   "as": {"label": "B", "role": "next", "action": "press"}}
+  {"event": "button", "match": {"label": "LEFT", "action": "longPress"},
+   "emit": "setCurrentScene", "as": {"direction": "prev"}}
 ]
 ```
 
-The dispatcher applies it on every host (`frameos/src/frameos/event_map.nim`,
-from `event_loop.nim`), right before the scene is asked whether it listens, so
-it holds for a key the driver saw, a `button` said over HTTP or by the cloud,
-and the preview alike. An event of the rule's `event` whose payload carries
-every `match` value (compared in string form, as an event node's filters are)
-is delivered with `as` written over its payload, action included when the rule
-names one; the first matching rule wins, a payload no rule matches is delivered
-as it came, and a rule never changes the event's name. Only what `as` names
-changes: a rule that sets `label` and not `role` leaves the key's role in the
-payload, so "Map buttons" writes every field the target listener filters on.
+An event of the rule's `event` whose payload carries every `match` value
+(compared in string form, as an event node's filters are) matches; within a
+map the first matching rule wins, and a payload no rule matches goes on as it
+came. A rule does one of two things:
+
+- **Without `emit` it rewrites**: the event is delivered under its own name
+  with `as` written over its payload, action included when the rule names
+  one. Only what `as` names changes: a rule that sets `label` and not `role`
+  leaves the key's role in the payload, so "Map buttons" writes every field
+  the target listener filters on. A frame-level rewrite holds for every scene
+  (and the scene's own map still applies after it).
+- **With `emit` it replaces**: the event `emit` names is queued with `as` as
+  its whole payload, from the origin `eventMap`, and the matched event goes no
+  further — the scene never hears the press, not even a `button` listener
+  with no filter. That is how "Button actions" binds a key to the frame
+  (`setCurrentScene {direction}`, `render`, `turnOn`, `turnOff`,
+  `setSceneState`), and an installed scene's rule may do the same (a double
+  press of REFRESH is this scene's page 2). The emitted event is a normal
+  envelope: the allow-list is asked of `eventMap` like any origin, and what the
+  map emits is never mapped again, so a rule cannot feed itself.
+
 `gpio` edges are not touched by a `button` rule (a long press cannot be known
 at its `down`); a scene that wants them mapped gets its own `gpio` rules. A
-rewrite is logged as `event:mapped` with the rule's index and its `as`, never
-the payload. What is not a rule (no `event`, no `as` object) is skipped. The
-dispatcher corpus has the case ("an installed scene's event map…").
+rule firing is logged as `event:mapped` with its `scope` (`frame` or `scene`),
+the rule's index, its `as` and, for a replacement, its `emit` — never the
+payload. What is not a rule (no `event`; neither an `as` object nor an `emit`)
+is skipped. The dispatcher corpus has the cases ("an installed scene's event
+map…", "the frame's event map…", "a frame with one scene…").
 
 ### `context` in JavaScript
 

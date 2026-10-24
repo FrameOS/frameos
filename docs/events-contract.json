@@ -10,7 +10,8 @@
     "http:write": "The frame's HTTP API with the frame access key (or `public` access): POST /event/<name>.",
     "http:admin": "The frame's HTTP API with an admin session or the serverApiKey bearer — the self-hosted backend.",
     "cloud": "FrameOS Cloud, through a hub verb.",
-    "system": "The runtime itself: boot, the portal, settings apply, device flow."
+    "system": "The runtime itself: boot, the portal, settings apply, device flow.",
+    "eventMap": "The frame's or an installed scene's event map (docs/events.md, \"Event map\") replacing an event it matched with the one its rule names: the owner's configuration speaking, never a key or a request itself. What it emits is never mapped again."
   },
   "classes": {
     "lifecycle": "Sent by the host to a scene as it is loaded, shown, rendered and left.",
@@ -89,7 +90,7 @@
       "dispatch": true,
       "payload": [],
       "sceneState": "read",
-      "origins": ["system", "driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud"],
+      "origins": ["system", "driver", "preview", "scene", "schedule", "http:write", "http:admin", "cloud", "eventMap"],
       "cloud": {"verb": "render"},
       "renderAfter": "always",
       "coalesce": "none",
@@ -441,7 +442,7 @@
       "listen": true,
       "dispatch": true,
       "payload": [],
-      "origins": ["scene", "schedule", "http:write", "http:admin", "cloud", "system"],
+      "origins": ["scene", "schedule", "http:write", "http:admin", "cloud", "system", "eventMap"],
       "cloud": {"verb": "set_display_power", "profiles": ["linux"]},
       "renderAfter": "if-state-changed",
       "coalesce": "none",
@@ -455,7 +456,7 @@
       "listen": true,
       "dispatch": true,
       "payload": [],
-      "origins": ["scene", "schedule", "http:write", "http:admin", "cloud", "system"],
+      "origins": ["scene", "schedule", "http:write", "http:admin", "cloud", "system", "eventMap"],
       "cloud": {"verb": "set_display_power", "profiles": ["linux"]},
       "renderAfter": "if-state-changed",
       "coalesce": "none",
@@ -520,7 +521,7 @@
         {"name": "render", "label": "Render", "type": "boolean", "required": false, "catalog": false}
       ],
       "sceneState": "payload",
-      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system"],
+      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system", "eventMap"],
       "cloud": {
         "verb": "scene_event",
         "since": "2026.9.21",
@@ -534,14 +535,15 @@
     {
       "name": "setCurrentScene",
       "class": "scene-command",
-      "description": "Switch the frame to another scene. An optional `state` object is applied to that scene's public state.",
+      "description": "Switch the frame to another scene: the one `sceneId` names, or with `direction` the `next` / `prev` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). An optional `state` object is applied to that scene's public state.",
       "listen": false,
       "dispatch": true,
       "payload": [
-        {"name": "sceneId", "label": "Scene", "type": "scene", "required": true},
+        {"name": "sceneId", "label": "Scene", "type": "scene", "required": false},
+        {"name": "direction", "label": "Direction", "type": "string", "required": false, "unit": "scene-direction"},
         {"name": "state", "label": "State", "type": "json", "required": false, "catalog": false}
       ],
-      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system"],
+      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "cloud", "system", "eventMap"],
       "cloud": {"verb": "set_current_scene"},
       "schedule": {"label": "Show a scene"},
       "renderAfter": "always",
@@ -625,6 +627,10 @@
       "hosts": {"linux": true, "esp32": true, "wasm": false}
     }
   ],
+  "scenes": {
+    "$comment": "`setCurrentScene` with a `direction` instead of a `sceneId`: the frame's scene list is the control plane's order (scenes.json; a pushed set first, then the deployed scenes it does not name), `next` and `prev` wrap around, and a frame with one scene switches nowhere. The dispatcher resolves it on every host from the host's `sceneOrder`.",
+    "directions": ["next", "prev"]
+  },
   "gestures": {
     "$comment": "How the dispatcher makes tap, doubleTap, longPress and swipe out of pointerDown / pointerUp, in scene pixels and milliseconds. The same numbers on every host.",
     "tapSlopPx": 16,

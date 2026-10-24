@@ -29,6 +29,7 @@ import frameos/hal/files
 import frameos/hotspot_credentials
 import frameos/local_access
 import frameos/types
+import frameos/event_map
 import frameos/utils/font
 import frameos/utils/image
 import lib/tz
@@ -255,6 +256,14 @@ proc newHook*(v: var InputSettingsConfig) =
   ## Keyboards are grabbed by default: the runtime is the only thing on the
   ## frame that should hear them (docs/events.md).
   v = InputSettingsConfig(keyboardLayout: "us", grabKeyboard: true)
+
+proc parseHook*(s: string, i: var int, v: var seq[EventMapRule]) =
+  ## frame.json `eventMap`: the rule list as a control plane writes it,
+  ## through event_map.parseEventMap (what is not a rule is skipped, never
+  ## fatal). Not an array at all: no rules.
+  var data: JsonNode
+  parseHook(s, i, data)
+  v = parseEventMap(data)
 
 proc newHook*(v: var ErrorBehaviorConfig) =
   v = ErrorBehaviorConfig(mode: "show_error_retry", retrySeconds: 60, silentRetrySeconds: 60,

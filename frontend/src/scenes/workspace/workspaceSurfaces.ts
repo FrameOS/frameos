@@ -264,6 +264,7 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-qr',
     'frame-settings-assets',
     'frame-settings-gpio',
+    'frame-settings-button-actions',
     'frame-settings-input',
     'frame-settings-logs',
     'frame-settings-reboot',
@@ -294,6 +295,7 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     'frame-settings-qr',
     'frame-settings-assets',
     'frame-settings-gpio',
+    'frame-settings-button-actions',
     'frame-settings-input',
     'frame-settings-logs',
   ],
@@ -323,6 +325,9 @@ export const allowedFrameSettingsSections: Record<WorkspaceMode, readonly string
     // Colors (automatic fit, frame-wide correction): Linux frames on
     // 2026.10.2 or newer, disabled with a note below that.
     'frame-settings-colors',
+    // Button actions (the frame's event map): both profiles on 2026.10.20 or
+    // newer, disabled with a note below that.
+    'frame-settings-button-actions',
     // Palette: the ESP32 profile only (esp32CloudOnlyFrameSettingsSections);
     // a cloud Pi edits its palette inside the unlinked Panel fieldset.
     'frame-settings-palette',
@@ -876,6 +881,7 @@ const esp32CloudFrameSettingsSections: readonly string[] = [
   'frame-settings-power',
   'frame-settings-palette',
   'frame-settings-colors',
+  'frame-settings-button-actions',
   'frame-settings-lan-access',
 ]
 

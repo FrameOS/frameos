@@ -62,6 +62,11 @@ type
     timeZoneUpdates*: TimeZoneUpdatesConfig
     schedule*: FrameSchedule
     gpioButtons*: seq[GPIOButton]
+    ## The frame's event map (frame.json `eventMap`, docs/events.md "Event
+    ## map"): what a button does on this frame whatever scene is showing (a
+    ## long press of LEFT is the previous scene). The dispatcher applies it
+    ## before any scene is asked.
+    eventMap*: seq[EventMapRule]
     inputSettings*: InputSettingsConfig
     controlCode*: ControlCode
     network*: NetworkConfig
@@ -320,14 +325,18 @@ type
 
   # Runtime state while running the scene (for compiled frames)
   EventMapRule* = object
-    ## One rule of an installed scene's event map (docs/events.md, "Event
-    ## map"): an event of this name whose payload carries every `match` value
-    ## is delivered with `write` written over its payload. The map is the
-    ## installed copy's, beside the scene (`eventMap` next to `nodes`), never
-    ## part of it: a scene update keeps it.
+    ## One rule of an event map (docs/events.md, "Event map"): an event of
+    ## this name whose payload carries every `match` value is either
+    ## delivered with `write` written over its payload (no `emit`), or
+    ## replaced by the event `emit` names, carrying `write` as its payload
+    ## (origin `eventMap`, never mapped again). The frame has a map
+    ## (frame.json `eventMap`, applied first, so a bound press never reaches
+    ## the scene) and so does each installed scene (`eventMap` beside
+    ## `nodes`, the installed copy's, kept across scene updates).
     event*: string
     match*: seq[(string, string)] ## payload key -> the value, in its string form
-    write*: JsonNode              ## the fields to set, a JObject
+    write*: JsonNode              ## the fields to set (or the payload to emit), a JObject
+    emit*: string                 ## the event to emit instead; "" rewrites
 
   FrameScene* = ref object of RootObj
     id*: SceneId

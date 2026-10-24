@@ -6,7 +6,7 @@ export const EVENTS_CONTRACT_VERSION = 1
 export const POINTER_WIRE_MAX = 32767
 export const CUSTOM_EVENT_MAX_NAME_LENGTH = 63
 
-export type EventOrigin = 'driver' | 'preview' | 'scene' | 'schedule' | 'http:write' | 'http:admin' | 'cloud' | 'system'
+export type EventOrigin = 'driver' | 'preview' | 'scene' | 'schedule' | 'http:write' | 'http:admin' | 'cloud' | 'system' | 'eventMap'
 export type EventClass = 'lifecycle' | 'input' | 'scene-command' | 'device-command'
 export type EventDevice = 'keyboard' | 'pointer' | 'button'
 export type EventRenderAfter = 'never' | 'always' | 'if-state-changed'
@@ -105,7 +105,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "schedule",
       "http:write",
       "http:admin",
-      "cloud"
+      "cloud",
+      "eventMap"
     ],
     "renderAfter": "always",
     "coalesce": "none",
@@ -528,7 +529,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "http:write",
       "http:admin",
       "cloud",
-      "system"
+      "system",
+      "eventMap"
     ],
     "renderAfter": "if-state-changed",
     "coalesce": "none",
@@ -555,7 +557,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "http:write",
       "http:admin",
       "cloud",
-      "system"
+      "system",
+      "eventMap"
     ],
     "renderAfter": "if-state-changed",
     "coalesce": "none",
@@ -636,7 +639,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "http:write",
       "http:admin",
       "cloud",
-      "system"
+      "system",
+      "eventMap"
     ],
     "renderAfter": "if-state-changed",
     "coalesce": "none",
@@ -668,7 +672,8 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "http:write",
       "http:admin",
       "cloud",
-      "system"
+      "system",
+      "eventMap"
     ],
     "renderAfter": "always",
     "coalesce": "none",
@@ -957,8 +962,8 @@ interface FrameOSEventPayloads {
   button: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; atMs?: number };
   /** Set the scene's public state. This is not used for private state changes. */
   setSceneState: { state?: any; render?: boolean };
-  /** Switch the frame to another scene. An optional \`state\` object is applied to that scene's public state. */
-  setCurrentScene: { sceneId: string; state?: any };
+  /** Switch the frame to another scene: the one \`sceneId\` names, or with \`direction\` the \`next\` / \`prev\` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). An optional \`state\` object is applied to that scene's public state. */
+  setCurrentScene: { sceneId?: string; direction?: string; state?: any };
 }
 `
 

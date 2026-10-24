@@ -117,6 +117,27 @@ static void test_reservation_policy(void)
           "a headless board has no panel buffer to reserve");
 }
 
+static void test_event_maps(void)
+{
+    /* Every reTerminal E-series model: the arrows held walk the scene list
+     * (docs/events.md "Event map"), by label — the E1004's pins are swapped. */
+    const char *e1004 = fos_board_event_map("seeed_reterminal_e1004");
+    CHECK(strcmp(fos_board_event_map("seeed_reterminal_e1001"), e1004) == 0, "e1001 event map");
+    CHECK(strcmp(fos_board_event_map("seeed_reterminal_e1002"), e1004) == 0, "e1002 event map");
+    CHECK(strstr(e1004, "\"label\":\"LEFT\",\"action\":\"longPress\"") != NULL, "LEFT held");
+    CHECK(strstr(e1004, "\"direction\":\"prev\"") != NULL, "LEFT is prev");
+    CHECK(strstr(e1004, "\"label\":\"RIGHT\",\"action\":\"longPress\"") != NULL, "RIGHT held");
+    CHECK(strstr(e1004, "\"direction\":\"next\"") != NULL, "RIGHT is next");
+    CHECK(strstr(e1004, "\"pin\"") == NULL, "rules name labels, never pins");
+    CHECK(e1004[0] == '[' && e1004[strlen(e1004) - 1] == ']', "a JSON list");
+    CHECK(strlen(e1004) < 1024, "fits the config slot");
+    /* A board without bindings, and no board at all: none. */
+    CHECK(strcmp(fos_board_event_map("seeed_reterminal_sticky"), "") == 0, "sticky has no map");
+    CHECK(strcmp(fos_board_event_map("trmnl_og"), "") == 0, "trmnl has no map");
+    CHECK(strcmp(fos_board_event_map(""), "") == 0, "no preset");
+    CHECK(strcmp(fos_board_event_map(NULL), "") == 0, "NULL preset");
+}
+
 static void test_buzzer_pins(void)
 {
     /* Every reTerminal E-series model has the buzzer on GPIO45. */
@@ -143,6 +164,7 @@ int main(void)
     test_module_label();
     test_reservation_policy();
     test_buzzer_pins();
+    test_event_maps();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok",
            g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

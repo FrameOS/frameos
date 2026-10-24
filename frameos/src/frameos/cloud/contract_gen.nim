@@ -203,6 +203,30 @@ const CloudContractSettings* = @[
             Rule(kind: rkInt, hasMin: true, min: 0.0, hasMax: true, max: 48.0)),
           KeyRule(name: "label", rule:
             Rule(kind: rkString, format: sfGpioLabel))])]))]),
+  SettingSpec(key: "event_map", rule:
+    Rule(kind: rkArray, maxItems: 32, children: @[
+      Rule(kind: rkObject, required: @["event"], keys: @[
+        KeyRule(name: "event", rule:
+          Rule(kind: rkString, minLen: 1, maxLen: 63)),
+        KeyRule(name: "match", rule:
+          Rule(kind: rkObject, open: true)),
+        KeyRule(name: "as", rule:
+          Rule(kind: rkObject, open: true)),
+        KeyRule(name: "emit", rule:
+          Rule(kind: rkString, strEnum: @["render", "setCurrentScene", "setSceneState", "turnOn", "turnOff"]))])]),
+  profiles: @[
+    ProfileSpec(profile: "linux", since: "2026.10.20"),
+    ProfileSpec(profile: "esp32", since: "2026.10.20", hasRule: true, rule:
+      Rule(kind: rkArray, maxItems: 8, children: @[
+        Rule(kind: rkObject, required: @["event"], keys: @[
+          KeyRule(name: "event", rule:
+            Rule(kind: rkString, minLen: 1, maxLen: 63)),
+          KeyRule(name: "match", rule:
+            Rule(kind: rkObject, open: true)),
+          KeyRule(name: "as", rule:
+            Rule(kind: rkObject, open: true)),
+          KeyRule(name: "emit", rule:
+            Rule(kind: rkString, strEnum: @["render", "setCurrentScene", "setSceneState", "turnOn", "turnOff"]))])]))]),
   SettingSpec(key: "device", rule:
     Rule(kind: rkString, minLen: 1, maxLen: 64, format: sfDriverKey),
   profiles: @[
