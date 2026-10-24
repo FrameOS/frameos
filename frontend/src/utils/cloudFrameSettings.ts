@@ -8,8 +8,9 @@
 // tests run this in node, and the SPA's type barrel drags in reactflow and
 // the whole device catalogue. The events table supplies the button roles and
 // keyboard layouts (docs/events-contract.json) so no list of them lives here.
+import type { EventMapRule } from '../types'
 import { cloudFramesContractSettings } from './cloudFramesContract.gen'
-import { buttonRoles, defaultKeyboardLayout, keyboardLayouts } from './eventsContract.gen'
+import { buttonRoles, contractEventSpecs, defaultKeyboardLayout, keyboardLayouts } from './eventsContract.gen'
 
 // The keys a client may SEND: companion keys (the ESP32's tzdata slice) are
 // attached by the cloud and never bound by the form, so they are not part of
@@ -121,6 +122,81 @@ export const colorsCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(c
 
 export function cloudFrameSupportsColors(frameosVersion: string | null | undefined): boolean {
   return cloudFrameSupportsSettingsFrom(colorsCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/** Firmware from here on takes the frame's event map, on both profiles. */
+export const eventMapCloudFrameSettingsMinVersion = '2026.10.20'
+
+/**
+ * `event_map` (docs/events.md "Event map"; "Button actions" in Settings):
+ * what the frame's buttons do whatever scene shows, `[{event, match, as,
+ * emit}]`, the whole list replaced, `[]` clears it. Applied live on both
+ * planes. Callers gate on cloudFrameSupportsEventMap; below the floor the
+ * device refuses the whole push on the key.
+ */
+export const eventMapCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(eventMapCloudFrameSettingsMinVersion)
+export const esp32EventMapCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  eventMapCloudFrameSettingsMinVersion
+)
+
+export function cloudFrameSupportsEventMap(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(eventMapCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/**
+ * The events a rule may `emit`: the contract's, those the `eventMap` origin
+ * is allowed to say (docs/events-contract.json `origins`), the same list the
+ * cloud contract's rule enumerates.
+ */
+export const eventMapEmits: readonly string[] = Object.entries(contractEventSpecs)
+  .filter(([, spec]) => spec.origins.includes('eventMap'))
+  .map(([name]) => name)
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+/**
+ * One rule as the device reads it: an event name, `match` and `as` objects
+ * when present, an `emit` the eventMap origin may say, and at least one of
+ * `as` or `emit`. What fails this is not a rule (the runtime skips it, the
+ * cloud contract refuses the push), so a payload leaves it out.
+ */
+export function isEventMapRule(value: unknown): value is EventMapRule {
+  if (!isPlainObject(value)) {
+    return false
+  }
+  const { event, match, as, emit } = value
+  if (typeof event !== 'string' || event.trim().length === 0) {
+    return false
+  }
+  if (match !== undefined && !isPlainObject(match)) {
+    return false
+  }
+  if (as !== undefined && !isPlainObject(as)) {
+    return false
+  }
+  if (emit !== undefined && (typeof emit !== 'string' || !eventMapEmits.includes(emit))) {
+    return false
+  }
+  return as !== undefined || emit !== undefined
+}
+
+/**
+ * event_map: the rule list with every non-rule dropped and `as` always an
+ * object, so the device's walker and the cloud contract accept what is sent.
+ * Undefined when the form holds no list at all (the key is then left out).
+ */
+export function cloudEventMapPayload(value: unknown): EventMapRule[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined
+  }
+  return value.filter(isEventMapRule).map((rule) => ({
+    event: rule.event,
+    ...(rule.match && Object.keys(rule.match).length > 0 ? { match: { ...rule.match } } : {}),
+    ...(rule.emit ? { emit: rule.emit } : {}),
+    as: { ...(rule.as ?? {}) },
+  }))
 }
 
 /** The layout ids a cloud push may name (docs/events-contract.json `keyboard.layouts`). */
@@ -253,6 +329,8 @@ export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.f
     ...displayDriverCloudFrameSettingKeys,
     ...inputCloudFrameSettingKeys,
     ...colorsCloudFrameSettingKeys,
+    ...eventMapCloudFrameSettingKeys,
+    ...esp32EventMapCloudFrameSettingKeys,
     ...esp32PowerSettingKeys,
   ])
 )
@@ -654,6 +732,9 @@ export function cloudFrameSettingsPayload(
         break
       case 'gpio_buttons':
         converted = cloudGpioButtonsPayload(value, { roles })
+        break
+      case 'event_map':
+        converted = cloudEventMapPayload(value)
         break
       default:
         // The form keeps numbers as strings; the control plane type-checks them.

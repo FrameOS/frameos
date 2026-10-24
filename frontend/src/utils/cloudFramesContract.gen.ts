@@ -62,6 +62,9 @@ export const cloudFramesContractSettings = {
       "since": "2026.8.31",
       "restart": true
     },
+    "event_map": {
+      "since": "2026.10.20"
+    },
     "device": {
       "since": "2026.9.22",
       "restart": true
@@ -108,6 +111,9 @@ export const cloudFramesContractSettings = {
     "gpio_buttons": {
       "since": "2026.8.31",
       "restart": true
+    },
+    "event_map": {
+      "since": "2026.10.20"
     },
     "deep_sleep": {
       "since": null

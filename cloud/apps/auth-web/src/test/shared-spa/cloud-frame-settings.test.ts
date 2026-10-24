@@ -14,6 +14,10 @@ import {
   cloudFrameSupportsInputSettings,
   inputCloudFrameSettingKeys,
   cloudFrameSupportsColors,
+  cloudFrameSupportsEventMap,
+  eventMapCloudFrameSettingKeys,
+  eventMapCloudFrameSettingsMinVersion,
+  esp32EventMapCloudFrameSettingKeys,
   colorsCloudFrameSettingKeys,
   colorsCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Colors,
@@ -76,6 +80,10 @@ import {
   colorsFrameSettingsMinVersion,
   frameSupportsColorsSettings,
   esp32ColorsFrameSettingKeys,
+  esp32EventMapFrameSettingKeys,
+  eventMapFrameSettingKeys,
+  eventMapFrameSettingsMinVersion,
+  frameSupportsEventMapSettings,
   esp32PaletteFrameSettingKeys,
   esp32PaletteFrameSettingsMinVersion,
   esp32ColorsFrameSettingsMinVersion,
@@ -136,6 +144,7 @@ describe("cloud settings push", () => {
         !esp32TimeZoneFrameSettingKeys.has(key) &&
         !esp32BatteryEnablePinFrameSettingKeys.has(key) &&
         !esp32ColorsFrameSettingKeys.has(key) &&
+        !esp32EventMapFrameSettingKeys.has(key) &&
         !esp32PaletteFrameSettingKeys.has(key) &&
         !esp32BuzzerFrameSettingKeys.has(key),
     );
@@ -452,6 +461,39 @@ describe("cloud settings push", () => {
     expect(allowedFrameSettings.get("colors")?.({ autoFit: "off", global: { whites: -20 } })).toBe(true);
     expect(allowedFrameSettings.get("colors")?.({ autoFit: "sometimes" })).toBe(false);
     expect(allowedFrameSettings.get("colors")?.({ global: { hues: { red: { hue: 400 } } } })).toBe(false);
+  });
+
+  it("gates the frame's event map on its floor, both profiles", () => {
+    // 2026.10.20: `event_map`, what the frame's buttons do whatever scene
+    // shows (docs/events.md "Event map"). One floor for the Pi runtime and
+    // the ESP32 firmware; both apply it live.
+    expect([...eventMapCloudFrameSettingKeys]).toEqual(["event_map"]);
+    expect(new Set(eventMapCloudFrameSettingKeys)).toEqual(eventMapFrameSettingKeys);
+    expect(eventMapCloudFrameSettingsMinVersion).toBe("2026.10.20");
+    expect(eventMapFrameSettingsMinVersion).toBe(eventMapCloudFrameSettingsMinVersion);
+    expect(esp32SettableKeys.has("event_map")).toBe(true);
+    expect([...esp32EventMapCloudFrameSettingKeys]).toEqual(["event_map"]);
+    expect(new Set(esp32EventMapCloudFrameSettingKeys)).toEqual(esp32EventMapFrameSettingKeys);
+    for (const version of ["2026.10.19", "2026.10.20", "2026.11.0", "unknown", null, ""]) {
+      expect(cloudFrameSupportsEventMap(version), `${version}`).toBe(frameSupportsEventMapSettings(version));
+    }
+    expect(cloudFrameSettingKeysForVersion("2026.10.19")).not.toContain("event_map");
+    expect(cloudFrameSettingKeysForVersion("2026.10.20")).toContain("event_map");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.10.19")).not.toContain("event_map");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.10.20")).toContain("event_map");
+    // The rules go as rules, non-rules dropped; the device validates the rest.
+    const prev = { event: "button", match: { label: "LEFT", action: "longPress" }, emit: "setCurrentScene", as: { direction: "prev" } };
+    const payload = cloudFrameSettingsPayload(
+      { event_map: [prev, { event: "button" }] } as never,
+      cloudFrameSettingKeysForVersion("2026.10.20"),
+    );
+    expect(payload.event_map).toEqual([prev]);
+    expect(allowedFrameSettings.get("event_map")?.([prev])).toBe(true);
+    expect(allowedFrameSettings.get("event_map")?.([])).toBe(true);
+    expect(allowedFrameSettings.get("event_map")?.([{ event: "button", emit: "reboot" }])).toBe(false);
+    expect(allowedFrameSettings.get("event_map")?.({ event: "button" })).toBe(false);
+    // An empty list is a value (it clears the bindings), not "unset".
+    expect(cloudFrameSettingsPayload({ event_map: [] } as never, cloudFrameSettingKeysForVersion("2026.10.20")).event_map).toEqual([]);
   });
 
   it("gates the input batch and button roles on their floor, Pi/Linux only", () => {

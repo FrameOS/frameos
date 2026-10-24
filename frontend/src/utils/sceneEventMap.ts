@@ -250,9 +250,11 @@ export function buttonMapChoices(
       Object.keys(match).length === 2
         ? { label: match.label, action: match.action }
         : null
-    const listener = gesture
-      ? listeners.find((candidate) => !choices[candidate.key] && sameValues(rule.as, listenerAs(candidate)))
-      : undefined
+    // A rule that emits is not a remap of a listener: the dialog keeps it.
+    const listener =
+      gesture && !rule.emit
+        ? listeners.find((candidate) => !choices[candidate.key] && sameValues(rule.as, listenerAs(candidate)))
+        : undefined
     if (gesture && listener) {
       choices[listener.key] = gestureValue(gesture)
     } else {

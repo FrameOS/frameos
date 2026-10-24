@@ -218,6 +218,22 @@
         }}
       }
     },
+    "event_map": {
+      "$comment": "frame.json `eventMap` (docs/events.md, \"Event map\"): what the frame's buttons do whatever scene shows, as a rule list `[{event, match?, as?, emit?}]` \u2014 the whole list, replaced; an empty list clears it. A rule whose `match` values the event's payload carries either rewrites the payload with `as` (no `emit`) or replaces the event with `emit` carrying `as` (a long press of LEFT is `setCurrentScene {direction: prev}`); the scene never hears a replaced press. `emit` is one of the scene commands the dispatcher takes from the `eventMap` origin. Applied live on both planes (the Pi reloads its config, the chip hands the text to its runtime every pass). Both planes seed a board preset's own map (the reTerminals' arrows held walk the scenes) until the owner pushes one. The chip keeps the compact text in a 1 KB slot, so its rule takes eight rules; a list that does not fit is refused (invalid_settings) rather than truncated.",
+      "rule": {
+        "type": "array",
+        "items": {"type": "object", "keys": {"event": {"type": "string", "minLen": 1, "maxLen": 63}, "match": {"type": "object", "open": true}, "as": {"type": "object", "open": true}, "emit": {"type": "string", "enum": ["render", "setCurrentScene", "setSceneState", "turnOn", "turnOff"]}}, "required": ["event"]},
+        "maxItems": 32
+      },
+      "profiles": {
+        "linux": {"since": "2026.10.20"},
+        "esp32": {"since": "2026.10.20", "rule": {
+          "type": "array",
+          "items": {"type": "object", "keys": {"event": {"type": "string", "minLen": 1, "maxLen": 63}, "match": {"type": "object", "open": true}, "as": {"type": "object", "open": true}, "emit": {"type": "string", "enum": ["render", "setCurrentScene", "setSceneState", "turnOn", "turnOff"]}}, "required": ["event"]},
+          "maxItems": 8
+        }}
+      }
+    },
     "device": {
       "$comment": "The display driver key (frame.json `device`, e.g. `pimoroni.hyperpixel4sq_touch`): release images ship every driver as a shared library, so switching one is a frame.json edit plus driver setup, which may rewrite /boot/config.txt and REBOOT the frame. Width/height follow from the driver at init. Only the key moves: pins, VCOM and upload URLs stay the device's (device_config above).",
       "rule": {"type": "string", "minLen": 1, "maxLen": 64, "format": "driver_key"},
