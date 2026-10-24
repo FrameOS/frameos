@@ -320,6 +320,33 @@ def normalize_input_settings(input_settings: Any) -> dict:
     }
 
 
+def normalize_event_map(value: Any) -> list[dict]:
+    """The frame's event map (frame.json `eventMap`, docs/events.md "Event
+    map"): the rules a control plane wrote, in order, as the runtime reads them
+    — `{event, match?, as?, emit?}`; what is not a rule (no event name, neither
+    an `as` object nor an `emit` name) is dropped, never fatal."""
+    rules: list[dict] = []
+    if not isinstance(value, list):
+        return rules
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        event = str(item.get("event") or "").strip()
+        emit = str(item.get("emit") or "").strip()
+        write = item.get("as")
+        if not event or (not isinstance(write, dict) and not emit):
+            continue
+        rule: dict[str, Any] = {"event": event}
+        match = item.get("match")
+        if isinstance(match, dict) and match:
+            rule["match"] = dict(match)
+        if emit:
+            rule["emit"] = emit
+        rule["as"] = dict(write) if isinstance(write, dict) else {}
+        rules.append(rule)
+    return rules
+
+
 def frame_json_gpio_button(button: dict) -> dict:
     """One `gpioButtons[]` entry of frame.json: pin, label and, when the frame
     assigns one, the button's `role` (docs/events-contract.json buttons.roles;
@@ -458,6 +485,10 @@ class Frame(Base):
     last_cloud_backup_deploy_at = mapped_column(DateTime, nullable=True)
     schedule = mapped_column(JSON, nullable=True)
     gpio_buttons = mapped_column(JSON, nullable=True)
+    # The frame's event map (frame.json `eventMap`, docs/events.md "Event
+    # map"): what its buttons do whatever scene shows. None = never set (an
+    # embedded preset may seed it), [] = the owner cleared it.
+    event_map = mapped_column(JSON, nullable=True)
     network = mapped_column(JSON, nullable=True)
     agent = mapped_column(JSON, nullable=True)
     mountpoints = mapped_column(JSON, nullable=True)
@@ -545,6 +576,7 @@ class Frame(Base):
             'control_code': self.control_code,
             'schedule': self.schedule,
             'gpio_buttons': device_gpio_button_defaults(self.device) or self.gpio_buttons,
+            'event_map': self.event_map,
             'network': self.network,
             'agent': self.agent,
             'mountpoints': normalize_mountpoints(self.mountpoints),
@@ -1020,6 +1052,7 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             for button in gpio_buttons
             if int(button.get("pin", 0)) > 0
         ],
+        "eventMap": normalize_event_map(getattr(frame, "event_map", None)),
         "palette": frame.palette or {},
         "colors": frame.colors or {},
         # "nix": frame.nix or {}, # We don't need this in the json. It's only used for building the system.

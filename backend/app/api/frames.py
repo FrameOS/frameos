@@ -4860,6 +4860,8 @@ async def api_frame_new(
             frame.embedded = dict(data.embedded)
         if data.gpio_buttons is not None:
             frame.gpio_buttons = list(data.gpio_buttons)
+        if data.event_map is not None:
+            frame.event_map = list(data.event_map)
         if data.input_settings is not None:
             frame.input_settings = normalize_input_settings(data.input_settings)
         apply_device_config_defaults(frame)
