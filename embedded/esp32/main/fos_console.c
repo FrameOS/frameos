@@ -684,6 +684,9 @@ static int cmd_set(int argc, char **argv)
             if (fos_board_buzzer_tone_hz(presets[i].name) > 0) {
                 config->buzzer_tone_hz = (uint16_t)fos_board_buzzer_tone_hz(presets[i].name);
             }
+            /* What the board's buttons do whatever scene shows (a reTerminal's
+             * arrows held walk the scenes); a control plane's push replaces it. */
+            strlcpy(config->event_map, fos_board_event_map(presets[i].name), sizeof(config->event_map));
             if (presets[i].deep_sleep_on_battery) {
                 config->deep_sleep_on_battery = true;
                 config->wake_check_sec = presets[i].wake_check_sec;
