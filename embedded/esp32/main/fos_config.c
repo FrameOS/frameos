@@ -66,6 +66,8 @@ static void load_defaults(void)
     s_config.assets_sd.sck = FRAMEOS_DEFAULT_ASSETS_SD_PIN_SCK;
     s_config.assets_sd.miso = FRAMEOS_DEFAULT_ASSETS_SD_PIN_MISO;
     s_config.assets_sd.mosi = FRAMEOS_DEFAULT_ASSETS_SD_PIN_MOSI;
+    s_config.assets_sd.pwr = -1;
+    s_config.assets_sd.det = -1;
     s_config.assets_sd.max_freq_khz = FRAMEOS_DEFAULT_ASSETS_SD_MAX_FREQ_KHZ;
     s_config.deep_sleep = FRAMEOS_DEFAULT_DEEP_SLEEP;
     s_config.deep_sleep_on_battery = FRAMEOS_DEFAULT_DEEP_SLEEP_ON_BATTERY;
@@ -80,6 +82,9 @@ static void load_defaults(void)
     s_config.mic_pins.data = -1;
     s_config.mic_pins.pwr = -1;
     s_config.voice_chat = true;
+    s_config.led_pin = -1;
+    s_config.led_type = FOS_LED_GPIO;
+    s_config.i2c_bus_count = 0;
     fos_config_parse_gpio_buttons(FRAMEOS_DEFAULT_GPIO_BUTTONS, &s_config);
     s_config.pins.rst = FRAMEOS_DEFAULT_PIN_RST;
     s_config.pins.dc = FRAMEOS_DEFAULT_PIN_DC;
@@ -227,6 +232,21 @@ esp_err_t fos_config_init(void)
     if (nvs_get_i8(nvs, "sd_miso", &i8) == ESP_OK) s_config.assets_sd.miso = i8;
     if (nvs_get_i8(nvs, "sd_mosi", &i8) == ESP_OK) s_config.assets_sd.mosi = i8;
     if (nvs_get_u32(nvs, "sd_freq", &u32) == ESP_OK) s_config.assets_sd.max_freq_khz = u32;
+    /* The slot's power and detect pins arrived with the reTerminal E-series
+     * slots (2026.10.20). No `sd_pwr` key means this firmware's first boot on
+     * a board provisioned before then: if nobody ever named an SD pin on it
+     * (all four -1, the socket off), the board's own slot applies, the way a
+     * fresh `set hardware` would have — so an E1002 flashed last month gets
+     * its card with the update. A board whose pins were set stays as set. */
+    if (nvs_get_i8(nvs, "sd_pwr", &i8) == ESP_OK) {
+        s_config.assets_sd.pwr = i8;
+        if (nvs_get_i8(nvs, "sd_det", &i8) == ESP_OK) s_config.assets_sd.det = i8;
+    } else if (s_config.assets_sd.cs < 0 && s_config.assets_sd.sck < 0 &&
+               s_config.assets_sd.miso < 0 && s_config.assets_sd.mosi < 0 &&
+               fos_board_sd_pins(s_config.hardware_preset)[0]) {
+        fos_config_parse_assets_sd_pins(fos_board_sd_pins(s_config.hardware_preset), &s_config.assets_sd);
+        s_config.assets_sd.enabled = true;
+    }
     if (nvs_get_u8(nvs, "deep_sleep", &u8) == ESP_OK) s_config.deep_sleep = u8 != 0;
     if (nvs_get_u8(nvs, "sleep_batt", &u8) == ESP_OK) s_config.deep_sleep_on_battery = u8 != 0;
     if (nvs_get_u8(nvs, "wake_sched", &u8) == ESP_OK) s_config.wake_schedule = u8 != 0;
@@ -264,6 +284,26 @@ esp_err_t fos_config_init(void)
         s_config.mic_pins.pwr = (int8_t)pwr;
     }
     if (nvs_get_u8(nvs, "voice", &u8) == ESP_OK) s_config.voice_chat = u8 != 0;
+    /* The status LED the same way: stored, else the board's own (fos_led.c). */
+    if (nvs_get_i8(nvs, "led", &i8) == ESP_OK) {
+        s_config.led_pin = i8;
+        if (nvs_get_u8(nvs, "led_type", &u8) == ESP_OK && u8 <= FOS_LED_WS2812) s_config.led_type = u8;
+    } else {
+        int led_pin, led_type;
+        fos_board_led(s_config.hardware_preset, &led_pin, &led_type);
+        s_config.led_pin = (int8_t)led_pin;
+        s_config.led_type = (uint8_t)led_type;
+    }
+    /* And the I2C peripheral buses (fos_i2c.c): the clock, the charger and
+     * the sensor a provisioned reTerminal gets with the update. */
+    char i2c_buses[FOS_STR_LEN] = "";
+    size_t i2c_buses_len = sizeof(i2c_buses);
+    if (nvs_get_str(nvs, "i2c_buses", i2c_buses, &i2c_buses_len) != ESP_OK) {
+        strlcpy(i2c_buses, fos_board_i2c_buses(s_config.hardware_preset), sizeof(i2c_buses));
+    }
+    if (fos_config_parse_i2c_buses(i2c_buses, s_config.i2c_buses, &s_config.i2c_bus_count) != ESP_OK) {
+        s_config.i2c_bus_count = 0;
+    }
     char pins[FOS_STR_LEN] = "";
     nvs_get_string(nvs, "pins", pins, sizeof(pins));
     if (pins[0]) fos_config_parse_pins(pins, &s_config.pins);
@@ -357,6 +397,8 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_i8(nvs, "sd_miso", s_config.assets_sd.miso), "sd_miso");
     FOS_NVS_SET(nvs_set_i8(nvs, "sd_mosi", s_config.assets_sd.mosi), "sd_mosi");
     FOS_NVS_SET(nvs_set_u32(nvs, "sd_freq", s_config.assets_sd.max_freq_khz), "sd_freq");
+    FOS_NVS_SET(nvs_set_i8(nvs, "sd_pwr", s_config.assets_sd.pwr), "sd_pwr");
+    FOS_NVS_SET(nvs_set_i8(nvs, "sd_det", s_config.assets_sd.det), "sd_det");
     FOS_NVS_SET(nvs_set_u8(nvs, "deep_sleep", s_config.deep_sleep ? 1 : 0), "deep_sleep");
     FOS_NVS_SET(nvs_set_u8(nvs, "sleep_batt", s_config.deep_sleep_on_battery ? 1 : 0), "sleep_batt");
     FOS_NVS_SET(nvs_set_u8(nvs, "wake_sched", s_config.wake_schedule ? 1 : 0), "wake_sched");
@@ -370,6 +412,11 @@ esp_err_t fos_config_save(void)
     fos_config_format_mic_pins(&s_config.mic_pins, mic_pins, sizeof(mic_pins));
     FOS_NVS_SET(nvs_set_str(nvs, "mic_pins", mic_pins), "mic_pins");
     FOS_NVS_SET(nvs_set_u8(nvs, "voice", s_config.voice_chat ? 1 : 0), "voice");
+    FOS_NVS_SET(nvs_set_i8(nvs, "led", s_config.led_pin), "led");
+    FOS_NVS_SET(nvs_set_u8(nvs, "led_type", s_config.led_type), "led_type");
+    char i2c_buses[FOS_STR_LEN];
+    fos_config_format_i2c_buses(s_config.i2c_buses, s_config.i2c_bus_count, i2c_buses, sizeof(i2c_buses));
+    FOS_NVS_SET(nvs_set_str(nvs, "i2c_buses", i2c_buses), "i2c_buses");
     char gpio_buttons[FOS_GPIO_BUTTONS_SPEC_LEN];
     fos_config_format_gpio_buttons(&s_config, gpio_buttons, sizeof(gpio_buttons));
     FOS_NVS_SET(nvs_set_str(nvs, "gpio_buttons", gpio_buttons), "gpio_buttons");

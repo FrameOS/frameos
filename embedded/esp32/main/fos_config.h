@@ -84,8 +84,36 @@ typedef struct {
     int8_t sck;
     int8_t miso;
     int8_t mosi;
+    /* The slot's power switch (driven high before the mount; the Seeed
+     * reTerminal E-series gates its TF socket through a TPS22916 on GPIO16)
+     * and its card-detect contact (low = a card is seated, GPIO15 there);
+     * -1 = not wired. When sck/mosi are the panel's, the card shares the
+     * display's SPI bus (fos_assets_sd.c). */
+    int8_t pwr;
+    int8_t det;
     uint32_t max_freq_khz;
 } fos_assets_sd_config_t;
+
+/* The board's status LED (fos_led.c): one GPIO, lit high or low, or one
+ * WS2812-class addressable pixel. It follows the buzzer: lit while a note
+ * sounds, so a board without a buzzer (or with it silenced) still shows the
+ * press, the hold and the voice chat's cues. */
+typedef enum {
+    FOS_LED_GPIO = 0,          /* lit when the pin is high */
+    FOS_LED_GPIO_INVERTED = 1, /* lit when the pin is low (reTerminal E-series) */
+    FOS_LED_WS2812 = 2,        /* one addressable RGB pixel, data on the pin */
+} fos_led_type_t;
+
+/* The board's I2C peripheral buses (fos_i2c.c): the firmware probes each for
+ * the chips it knows (a PCF8563 clock, a SHT4x climate sensor, a SY6974B
+ * charger) and uses what answers. The reTerminal E1001/E1002 carry two
+ * (19/20 with the clock and the sensor, 39/40 with the charger), the E1004
+ * one (19/20, all three). */
+#define FOS_I2C_BUSES_MAX 2
+typedef struct {
+    int8_t sda;
+    int8_t scl;
+} fos_i2c_bus_t;
 
 typedef struct {
     char wifi_ssid[FOS_STR_LEN];
@@ -172,6 +200,10 @@ typedef struct {
                                     * button press is held. -1 = none / silent */
     uint16_t buzzer_tone_hz;       /* pitch of that tone (default 2000); a refused
                                     * press buzzes a quarter of it */
+    int8_t led_pin;                /* the board's status LED, -1 = none (fos_led.c) */
+    uint8_t led_type;              /* fos_led_type_t */
+    fos_i2c_bus_t i2c_buses[FOS_I2C_BUSES_MAX]; /* peripheral I2C buses, probed at boot (fos_i2c.c) */
+    uint8_t i2c_bus_count;
     fos_mic_pins_t mic_pins;       /* the PDM microphone (Seeed reTerminal
                                     * E1001/E1002: clk 42, data 41, pwr 38);
                                     * clk/data -1 = none */
@@ -214,6 +246,13 @@ void fos_config_format_assets_sd_pins(const fos_assets_sd_config_t *assets_sd, c
 /* "clk=42,data=41,pwr=38" (any subset; pwr -1 = always powered) */
 esp_err_t fos_config_parse_mic_pins(const char *spec, fos_mic_pins_t *mic_pins);
 void fos_config_format_mic_pins(const fos_mic_pins_t *mic_pins, char *out, size_t out_len);
+/* `sda=19,scl=20;sda=39,scl=40`: up to FOS_I2C_BUSES_MAX buses, `;`-separated,
+ * each with both pins; "" = none. Replaces the list. */
+esp_err_t fos_config_parse_i2c_buses(const char *spec, fos_i2c_bus_t *buses, uint8_t *count);
+void fos_config_format_i2c_buses(const fos_i2c_bus_t *buses, uint8_t count, char *out, size_t out_len);
+/* `gpio` | `gpio_inverted` | `ws2812` (the contract's `led_type` enum). */
+bool fos_config_parse_led_type(const char *name, uint8_t *type);
+const char *fos_config_led_type_name(uint8_t type);
 /* Pins the firmware refuses to hand to a button, the battery ADC read or the
  * divider's enable switch: outside the chip's GPIO range, an SPI flash /
  * PSRAM pad (an input pull-up or an output level on one of those wedges the

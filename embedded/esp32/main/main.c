@@ -31,6 +31,9 @@
 #include "fos_events.h"
 #include "fos_buttons.h"
 #include "fos_buzzer.h"
+#include "fos_i2c.h"
+#include "fos_led.h"
+#include "fos_rtc.h"
 #include "fos_voice.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
@@ -161,7 +164,9 @@ void app_main(void)
     ESP_ERROR_CHECK(fos_config_init());
     fos_config_t *config = fos_config();
 
-    /* Before the wake check below: a button wake clicks the buzzer. */
+    /* Before the wake check below: a button wake clicks the buzzer, and the
+     * status LED that follows it (fos_led.c) lights with it. */
+    fos_led_init();
     fos_buzzer_init();
     /* Before the buttons: a voice key held at the first look starts a
      * voice session (docs/voice-chat.md). */
@@ -177,6 +182,12 @@ void app_main(void)
         ESP_LOGW(TAG, "GPIO buttons unavailable");
     }
 
+    /* The I2C peripherals (fos_i2c.c): the charger the power decision asks
+     * about USB, the clock that knows the time before Wi-Fi (not after a deep
+     * sleep: the chip kept it), the climate sensor. A few milliseconds. */
+    fos_i2c_init();
+    if (esp_reset_reason() != ESP_RST_DEEPSLEEP) fos_rtc_load_time();
+
     fos_battery_init(config->battery_pin, config->battery_divider, config->battery_enable_pin);
     if (fos_battery_present()) {
         int battery_mv = 0, battery_pct = -1;
@@ -187,7 +198,8 @@ void app_main(void)
     /* Not when the battery divider's enable switch sits on the LED pin: the
      * reTerminal E10xx boards switch their divider through GPIO21, and a
      * blinking enable line reads as an empty cell (0 mV, seen on the E1004). */
-    if (HEARTBEAT_GPIO >= 0 && config->battery_enable_pin != HEARTBEAT_GPIO) {
+    if (HEARTBEAT_GPIO >= 0 && config->battery_enable_pin != HEARTBEAT_GPIO &&
+        config->led_pin != HEARTBEAT_GPIO) {
         xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
     }
 

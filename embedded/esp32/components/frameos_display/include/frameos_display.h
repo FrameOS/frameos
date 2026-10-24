@@ -76,6 +76,12 @@ size_t fos_display_canvas_bytes(void);
  * the Nim heap and QuickJS interpreter. 0 when headless. Used to refuse panels
  * that won't fit the module's PSRAM (they'd OOM mid-render). */
 size_t fos_display_render_psram_bytes(void);
+/* An SD card on the panel's SPI bus (same SCK/MOSI; the Seeed reTerminal
+ * E-series): bring the bus up with the card's MISO and hand back the host the
+ * card's sdspi device joins. The panel then holds the bus for each refresh.
+ * ESP_ERR_INVALID_STATE when the panel is an I2C one or the bus is already up
+ * without that MISO (a restart fixes the second). */
+esp_err_t fos_display_spi_bus_share(int miso_pin, int *host);
 /* Full update: init panel, push buffer, refresh, put panel to deep sleep.
  * Blocks for the refresh (seconds on e-ink). */
 esp_err_t fos_display_blit(const uint8_t *buf, size_t len);

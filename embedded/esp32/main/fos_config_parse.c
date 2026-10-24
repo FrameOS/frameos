@@ -106,6 +106,10 @@ esp_err_t fos_config_parse_assets_sd_pins(const char *spec, fos_assets_sd_config
         else if (strcmp(tok, "sck") == 0) assets_sd->sck = value;
         else if (strcmp(tok, "miso") == 0) assets_sd->miso = value;
         else if (strcmp(tok, "mosi") == 0) assets_sd->mosi = value;
+        /* The slot's power switch and card-detect contact (2026.10.20); a
+         * spec without them leaves both as they were. */
+        else if (strcmp(tok, "pwr") == 0) assets_sd->pwr = value;
+        else if (strcmp(tok, "det") == 0) assets_sd->det = value;
         else return ESP_ERR_INVALID_ARG;
     }
     return ESP_OK;
@@ -113,8 +117,19 @@ esp_err_t fos_config_parse_assets_sd_pins(const char *spec, fos_assets_sd_config
 
 void fos_config_format_assets_sd_pins(const fos_assets_sd_config_t *assets_sd, char *out, size_t out_len)
 {
-    snprintf(out, out_len, "cs=%d,sck=%d,miso=%d,mosi=%d",
-             assets_sd->cs, assets_sd->sck, assets_sd->miso, assets_sd->mosi);
+    /* The four bus pins always; the slot's power and detect pins only when
+     * wired, so a board without them prints the spec it always did. */
+    int used = snprintf(out, out_len, "cs=%d,sck=%d,miso=%d,mosi=%d",
+                        assets_sd->cs, assets_sd->sck, assets_sd->miso, assets_sd->mosi);
+    if (used < 0 || (size_t)used >= out_len) return;
+    if (assets_sd->pwr >= 0) {
+        int more = snprintf(out + used, out_len - (size_t)used, ",pwr=%d", assets_sd->pwr);
+        if (more < 0 || (size_t)more >= out_len - (size_t)used) return;
+        used += more;
+    }
+    if (assets_sd->det >= 0) {
+        snprintf(out + used, out_len - (size_t)used, ",det=%d", assets_sd->det);
+    }
 }
 
 esp_err_t fos_config_parse_mic_pins(const char *spec, fos_mic_pins_t *mic_pins)
@@ -139,6 +154,73 @@ esp_err_t fos_config_parse_mic_pins(const char *spec, fos_mic_pins_t *mic_pins)
 void fos_config_format_mic_pins(const fos_mic_pins_t *mic_pins, char *out, size_t out_len)
 {
     snprintf(out, out_len, "clk=%d,data=%d,pwr=%d", mic_pins->clk, mic_pins->data, mic_pins->pwr);
+}
+
+esp_err_t fos_config_parse_i2c_buses(const char *spec, fos_i2c_bus_t *buses, uint8_t *count)
+{
+    char buf[FOS_STR_LEN];
+    copy_bounded_cfg(buf, spec, sizeof(buf));
+    fos_i2c_bus_t parsed[FOS_I2C_BUSES_MAX];
+    uint8_t n = 0;
+    char *save_bus = NULL;
+    for (char *bus = strtok_r(buf, ";", &save_bus); bus; bus = strtok_r(NULL, ";", &save_bus)) {
+        while (*bus == ' ') bus++;
+        if (!*bus) continue;
+        if (n >= FOS_I2C_BUSES_MAX) return ESP_ERR_INVALID_ARG;
+        int sda = -1, scl = -1;
+        char *save_pin = NULL;
+        for (char *tok = strtok_r(bus, ", ", &save_pin); tok; tok = strtok_r(NULL, ", ", &save_pin)) {
+            char *eq = strchr(tok, '=');
+            if (!eq) return ESP_ERR_INVALID_ARG;
+            *eq = '\0';
+            int value = atoi(eq + 1);
+            if (value < 0 || value > 48) return ESP_ERR_INVALID_ARG;
+            if (strcmp(tok, "sda") == 0) sda = value;
+            else if (strcmp(tok, "scl") == 0) scl = value;
+            else return ESP_ERR_INVALID_ARG;
+        }
+        /* A bus is two pins, and not the same one twice. */
+        if (sda < 0 || scl < 0 || sda == scl) return ESP_ERR_INVALID_ARG;
+        parsed[n].sda = (int8_t)sda;
+        parsed[n].scl = (int8_t)scl;
+        n++;
+    }
+    memcpy(buses, parsed, sizeof(parsed[0]) * n);
+    *count = n;
+    return ESP_OK;
+}
+
+void fos_config_format_i2c_buses(const fos_i2c_bus_t *buses, uint8_t count, char *out, size_t out_len)
+{
+    if (out_len == 0) return;
+    out[0] = '\0';
+    size_t used = 0;
+    for (uint8_t i = 0; i < count && i < FOS_I2C_BUSES_MAX; i++) {
+        int n = snprintf(out + used, out_len - used, "%ssda=%d,scl=%d", i ? ";" : "",
+                         buses[i].sda, buses[i].scl);
+        if (n < 0 || (size_t)n >= out_len - used) return;
+        used += (size_t)n;
+    }
+}
+
+static const char *const k_led_type_names[] = {"gpio", "gpio_inverted", "ws2812"};
+
+bool fos_config_parse_led_type(const char *name, uint8_t *type)
+{
+    if (!name) return false;
+    for (size_t i = 0; i < sizeof(k_led_type_names) / sizeof(k_led_type_names[0]); i++) {
+        if (strcasecmp(name, k_led_type_names[i]) == 0) {
+            *type = (uint8_t)i;
+            return true;
+        }
+    }
+    return false;
+}
+
+const char *fos_config_led_type_name(uint8_t type)
+{
+    if (type >= sizeof(k_led_type_names) / sizeof(k_led_type_names[0])) return k_led_type_names[0];
+    return k_led_type_names[type];
 }
 
 esp_err_t fos_config_parse_gpio_buttons(const char *spec, fos_config_t *config)

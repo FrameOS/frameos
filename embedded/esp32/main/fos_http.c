@@ -33,7 +33,10 @@
 #include "fos_upload_limits.h"
 #include "fos_battery.h"
 #include "fos_board.h"
+#include "fos_charger.h"
 #include "fos_client.h"
+#include "fos_i2c.h"
+#include "fos_rtc.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_framebuffer.h"
@@ -801,6 +804,12 @@ char *fos_http_status_json(void)
     int battery_mv = 0, battery_pct = -1; /* one sample for both fields */
     bool battery_present = fos_battery_present();
     if (battery_present) fos_battery_read(&battery_mv, &battery_pct);
+    /* The charger's word on the input, when the board has one to ask. */
+    fos_charger_status_t charger = {0};
+    bool charger_present = fos_charger_present() && fos_charger_read(&charger) == ESP_OK;
+    char i2c_summary[128];
+    fos_i2c_summary(i2c_summary, sizeof(i2c_summary));
+    char *i2c_json = json_escape_dup(i2c_summary);
     fos_storage_info_t storage;
     fos_http_collect_storage_info(&storage);
 
@@ -833,7 +842,7 @@ char *fos_http_status_json(void)
         !sd_error || !cloud_url || !cloud_frame_id || !cloud_error) {
         free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
         free(panel); free(hardware_preset); free(board_module);
-        free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
+        free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info); free(i2c_json);
         free(sd_error);
         free(cloud_url); free(cloud_frame_id); free(cloud_error);
         return NULL;
@@ -856,6 +865,9 @@ char *fos_http_status_json(void)
         "\"wifi\":{\"state\":%d,\"ip\":\"%s\",\"rssi\":%d,\"timeSynced\":%s},"
         "\"battery\":{\"present\":%s,\"millivolts\":%d,\"percent\":%d,"
         "\"pin\":%d,\"divider\":%.3f,\"enablePin\":%d},"
+        "\"charger\":{\"present\":%s,\"usbPower\":%s,\"charging\":%s,\"chargeDone\":%s},"
+        "\"led\":{\"pin\":%d,\"type\":\"%s\"},"
+        "\"i2c\":{\"buses\":\"%s\",\"rtc\":%s,\"rtcTimeLoaded\":%s,\"climateSensor\":%s},"
         "\"render\":{\"count\":%lu,\"lastMs\":%lld,\"previewReady\":%s,\"previewRenderCount\":%lu,"
         "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u,"
         "\"lastRefreshSkipped\":%s,\"snapshotMode\":\"%s\","
@@ -892,6 +904,11 @@ char *fos_http_status_json(void)
         battery_present ? "true" : "false", battery_mv, battery_pct,
         (int)config->battery_pin, (double)config->battery_divider,
         (int)config->battery_enable_pin,
+        charger_present ? "true" : "false", charger.usb_power ? "true" : "false",
+        charger.charging ? "true" : "false", charger.charge_done ? "true" : "false",
+        (int)config->led_pin, fos_config_led_type_name(config->led_type),
+        i2c_json ? i2c_json : "", fos_rtc_present() ? "true" : "false",
+        fos_rtc_time_loaded() ? "true" : "false", fos_i2c_present(FOS_I2C_SHT4X) ? "true" : "false",
         (unsigned long)render_count, render_ms, preview_ready ? "true" : "false",
         (unsigned long)preview_render_count,
         preview_width, preview_height, (int)preview_format, (unsigned)preview_len,
@@ -913,7 +930,7 @@ char *fos_http_status_json(void)
         pins_json, backend, ssid);
     free(app_name); free(app_version); free(idf_version); free(partition); free(ip);
     free(panel); free(hardware_preset); free(board_module);
-    free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info);
+    free(pins_json); free(sd_pins_json); free(assets_path); free(backend); free(ssid); free(nim_info); free(i2c_json);
     free(sd_error);
     free(cloud_url); free(cloud_frame_id); free(cloud_error);
     if (len < 0 || !json) {

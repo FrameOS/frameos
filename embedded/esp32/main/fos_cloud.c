@@ -34,7 +34,10 @@
 
 #include "fos_assets.h"
 #include "fos_assets_sd.h"
+#include "fos_charger.h"
 #include "fos_client.h"
+#include "fos_i2c.h"
+#include "fos_rtc.h"
 #include "fos_config.h"
 #include "fos_events.h"
 #include "fos_mem.h"
@@ -501,6 +504,18 @@ static void add_hardware_json(cJSON *parent)
     cJSON_AddNumberToObject(hw, "micDataPin", config->mic_pins.data);
     cJSON_AddNumberToObject(hw, "micPwrPin", config->mic_pins.pwr);
     cJSON_AddBoolToObject(hw, "voiceChat", config->voice_chat);
+    /* The status LED the buzzer's notes light (fos_led.c; -1 = none) and how
+     * it is lit, the preset's when no push set them. */
+    cJSON_AddNumberToObject(hw, "ledPin", config->led_pin);
+    cJSON_AddStringToObject(hw, "ledType", fos_config_led_type_name(config->led_type));
+    /* The I2C peripherals that answered at boot (fos_i2c.c): a clock that
+     * keeps the time through a power cut, a charger that says whether USB is
+     * in (metrics `usbPower`), a climate sensor. */
+    cJSON_AddBoolToObject(hw, "rtc", fos_rtc_present());
+    cJSON_AddBoolToObject(hw, "charger", fos_charger_present());
+    cJSON_AddBoolToObject(hw, "climateSensor", fos_i2c_present(FOS_I2C_SHT4X));
+    /* The SD card: mounted, or why not (the status page's wording). */
+    cJSON_AddBoolToObject(hw, "sdCard", fos_assets_sd_mounted());
     /* Local network access (docs/lan-access.md): the cloud has no column of
      * its own and shows what the frame reports here, on every hello and
      * every `state` (one follows each lan_access_set). */
@@ -2283,7 +2298,8 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * by the render loop's next pass) and `battery_pin` / `battery_divider` /
  * `battery_enable_pin` (deferred reboot: the ADC is set up once at boot) —
  * and `buzzer_pin` / `buzzer_tone_hz` (live, the next button tone uses them)
- * round out the profile.
+ * and `led_pin` / `led_type` (live, the next note lights it) round out the
+ * profile.
  * Any other key refuses the WHOLE verb with setting_not_allowed, mirroring
  * the Nim runtime, so the provider never half-applies a settings push. */
 /* The contract's pin ranges (-1..48) are chip-agnostic; whether a pin is an
@@ -2293,7 +2309,7 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
 static int set_settings_reserved_pin(const cJSON *settings, const char **key, const char **why)
 {
     static const char *const pin_keys[] = {"battery_pin", "battery_enable_pin", "buzzer_pin",
-                                           "mic_clk_pin", "mic_data_pin", "mic_pwr_pin"};
+                                           "mic_clk_pin", "mic_data_pin", "mic_pwr_pin", "led_pin"};
     for (size_t i = 0; i < sizeof(pin_keys) / sizeof(pin_keys[0]); i++) {
         const cJSON *value = cJSON_GetObjectItem(settings, pin_keys[i]);
         if (!cJSON_IsNumber(value)) continue;
@@ -2515,6 +2531,17 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     const cJSON *buzzer_tone_hz = cJSON_GetObjectItem(settings, "buzzer_tone_hz");
     if (buzzer_tone_hz != NULL) {
         config->buzzer_tone_hz = (uint16_t)buzzer_tone_hz->valuedouble;
+    }
+    /* The status LED (-1 = none) and how it is lit: live, the next note
+     * reads both (fos_led.c). The contract pins `led_type` to its enum. */
+    const cJSON *led_pin = cJSON_GetObjectItem(settings, "led_pin");
+    if (led_pin != NULL) {
+        config->led_pin = (int8_t)led_pin->valuedouble;
+    }
+    const cJSON *led_type = cJSON_GetObjectItem(settings, "led_type");
+    if (cJSON_IsString(led_type)) {
+        uint8_t type = config->led_type;
+        if (fos_config_parse_led_type(led_type->valuestring, &type)) config->led_type = type;
     }
     /* Voice chat (docs/voice-chat.md): whether the voice key's hold opens
      * the microphone. Live: the hold asks on every press. */

@@ -183,6 +183,62 @@ static void test_mic_pins(void)
     CHECK(fos_board_buzzer_tone_hz(NULL) == 0, "NULL preset, no tone");
 }
 
+static void test_leds(void)
+{
+    /* The E-series' green LED: GPIO6 on the E1001/E1002, GPIO48 on the E1004,
+     * lit low on all three (Seeed's schematics; the Arduino cookbook's
+     * "inverted logic"). */
+    int pin = 0, type = 0;
+    CHECK(fos_board_led("seeed_reterminal_e1001", &pin, &type), "e1001 has an LED");
+    CHECK(pin == 6 && type == 1, "e1001 LED %d/%d", pin, type);
+    CHECK(fos_board_led("seeed_reterminal_e1002", &pin, &type), "e1002 has an LED");
+    CHECK(pin == 6 && type == 1, "e1002 LED %d/%d", pin, type);
+    CHECK(fos_board_led("seeed_reterminal_e1004", &pin, &type), "e1004 has an LED");
+    CHECK(pin == 48 && type == 1, "e1004 LED %d/%d", pin, type);
+    /* The Sticky's GPIO48 is its buzzer; a board without a known LED gets
+     * none, or the buzzer would be lit. */
+    CHECK(!fos_board_led("seeed_reterminal_sticky", &pin, &type), "sticky: no LED");
+    CHECK(pin == -1 && type == 0, "no LED is -1 / gpio");
+    CHECK(!fos_board_led("", &pin, &type), "no preset, no LED");
+    CHECK(!fos_board_led(NULL, NULL, NULL), "NULLs are fine");
+}
+
+static void test_i2c_buses(void)
+{
+    /* The clock and the sensor on 19/20 everywhere; the charger on 39/40 on
+     * the E1001/E1002 (E1002 V1.2 schematic) and on 19/20 on the E1004
+     * (V1.0 schematic: SY_SDA/SY_SCL are the I2C0 nets), whose 39/40 is the
+     * J2 header and is left alone. */
+    CHECK(strcmp(fos_board_i2c_buses("seeed_reterminal_e1001"), "sda=19,scl=20;sda=39,scl=40") == 0, "e1001 buses");
+    CHECK(strcmp(fos_board_i2c_buses("seeed_reterminal_e1002"), "sda=19,scl=20;sda=39,scl=40") == 0, "e1002 buses");
+    CHECK(strcmp(fos_board_i2c_buses("seeed_reterminal_e1004"), "sda=19,scl=20") == 0, "e1004 bus");
+    CHECK(strcmp(fos_board_i2c_buses("waveshare_esp32_s3_photopainter"), "") == 0,
+          "the PhotoPainter's PMIC bus is its driver's, not a peripheral bus");
+    CHECK(strcmp(fos_board_i2c_buses(""), "") == 0, "no preset");
+    CHECK(strcmp(fos_board_i2c_buses(NULL), "") == 0, "NULL preset");
+}
+
+static void test_sd_pins(void)
+{
+    /* The Waveshare boards' own SPI3 sockets, as the console preset table
+     * always had them. */
+    CHECK(strcmp(fos_board_sd_pins("waveshare_esp32_s3_photopainter"), "cs=38,sck=39,miso=40,mosi=41") == 0,
+          "photopainter TF");
+    CHECK(strcmp(fos_board_sd_pins("waveshare_esp32_s3_epaper_13_3e6"), "cs=15,sck=6,miso=5,mosi=7") == 0,
+          "13.3E6 TF");
+    /* The E-series socket on the panel's bus: SCK7/MOSI9 are the panel's
+     * (fos_assets_sd.c shares the bus on that match), MISO8, CS14, the
+     * card-detect on 15 and the power switch on 16. */
+    const char *e = "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15";
+    CHECK(strcmp(fos_board_sd_pins("seeed_reterminal_e1001"), e) == 0, "e1001 TF");
+    CHECK(strcmp(fos_board_sd_pins("seeed_reterminal_e1002"), e) == 0, "e1002 TF");
+    CHECK(strcmp(fos_board_sd_pins("seeed_reterminal_e1004"), e) == 0, "e1004 TF");
+    /* The X4 shares its bus too but its CS is unpublished: none, as before. */
+    CHECK(strcmp(fos_board_sd_pins("xteink_x4"), "") == 0, "x4: none");
+    CHECK(strcmp(fos_board_sd_pins("trmnl_og"), "") == 0, "trmnl: none");
+    CHECK(strcmp(fos_board_sd_pins(NULL), "") == 0, "NULL preset");
+}
+
 int main(void)
 {
     test_target_names();
@@ -191,6 +247,9 @@ int main(void)
     test_buzzer_pins();
     test_event_maps();
     test_mic_pins();
+    test_leds();
+    test_i2c_buses();
+    test_sd_pins();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok",
            g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

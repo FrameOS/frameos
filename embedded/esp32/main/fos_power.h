@@ -25,11 +25,11 @@
 #include <stdint.h>
 
 /* A cell reading at least this many mV counts as "running on battery" for
- * deep_sleep_on_battery. It is the best power-source signal we have: no
- * supported board wires VBUS to a readable pin (the PhotoPainter's AXP2101
- * could tell, but nothing reads its status registers yet). A plugged-in,
- * charging frame passes this too — acceptable, deep sleeping while charging
- * costs nothing. */
+ * deep_sleep_on_battery. Without a charger to ask it is the best power-source
+ * signal we have (a plugged-in, charging frame passes it too, and deep
+ * sleeps). A board whose charger answers over I2C (the reTerminal E-series'
+ * SY6974B, fos_charger.c) hands in `usb_power` instead, and the cell test
+ * only decides whether there is a cell to run down. */
 #define FOS_POWER_PRESENT_MV 2500
 /* Below this the cell is nearly empty (about 3 % on fos_battery.c's
  * discharge curve): skip the render + panel refresh and sleep long, so a low
@@ -56,11 +56,17 @@ typedef struct {
     int mv;                       /* this pass's reading; 0 = no reading */
     bool deep_sleep;              /* config: always deep sleep */
     bool deep_sleep_on_battery;   /* config: deep sleep while a cell is present */
+    /* The charger's word on the input: -1 = no charger to ask (the cell
+     * test decides), 0 = no USB / adapter power (running on the cell, even
+     * without a battery reading), 1 = powered from the input (never "on
+     * battery", never critical: the cell is charging). */
+    int usb_power;
 } fos_power_input_t;
 
 typedef struct {
     int mv_used;        /* the millivolts the decision believed */
-    bool on_battery;    /* a cell is present (deep_sleep_on_battery's test) */
+    bool on_battery;    /* running on the cell (deep_sleep_on_battery's test):
+                         * the charger says no input, or without one, a cell is present */
     bool critical;      /* skip the render, sleep FOS_BATTERY_CRITICAL_SLEEP_SEC */
     bool deep_sleep;    /* this pass ends in esp_deep_sleep */
     bool suspect;       /* the reading was overridden or is awaiting confirmation */

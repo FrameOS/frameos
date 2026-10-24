@@ -10,6 +10,7 @@
 #include "driver/spi_common.h"
 #include "soc/soc_caps.h"
 #include "esp_heap_caps.h"
+#include "esp_rom_sys.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
@@ -17,12 +18,21 @@
 #include "sdmmc_cmd.h"
 
 #include "fos_sd_probe.h"
+#include "frameos_display.h"
 #include "frameos_nim.h"
 
 static const char *TAG = "fos_assets_sd";
 
 static bool s_mounted = false;
 static sdmmc_card_t *s_card = NULL;
+/* The SPI host the card sits on: the firmware's own SPI3, or the panel's bus
+ * when the card shares it (fos_display_spi_bus_share) — then the bus is the
+ * panel's to keep and is never freed here. */
+static int s_host = -1;
+static bool s_shared_bus = false;
+/* What the card-detect contact said at the last mount attempt: -1 = no
+ * contact wired, 0 = no card, 1 = a card is seated. */
+static int s_card_detected = -1;
 static char s_last_error[FOS_ASSETS_SD_ERROR_LEN] = "";
 /* Stable machine code for the same failure (string literal, never freed). */
 static const char *s_last_error_code = "";
@@ -76,8 +86,9 @@ static sd_reason_t mount_reason(esp_err_t err)
         case ESP_ERR_INVALID_RESPONSE:
         case ESP_ERR_NOT_FOUND:
             return (sd_reason_t){"no_card",
-                "no card detected: nothing answered on the SD bus. Check that a card is "
-                "seated in the slot and that the CS/SCK/MISO/MOSI pins match the wiring"};
+                "no card detected: nothing answered on the SD bus (or the slot's card-detect "
+                "contact says it is empty). Check that a card is seated in the slot and that "
+                "the CS/SCK/MISO/MOSI pins match the wiring"};
         case ESP_ERR_INVALID_CRC:
             return (sd_reason_t){"io_error",
                 "card is present but the SD bus is corrupting data: wiring is too long "
@@ -111,9 +122,23 @@ static void set_last_error(esp_err_t err)
              esp_err_to_name(err), reason.code, reason.detail);
 }
 
+/* The bus the card gets to itself when it does not share the panel's: SPI3
+ * on the S3; a C3 has no third host, so there the card must share. */
 #if SOC_SPI_PERIPH_NUM >= 3
+#define SD_OWN_HOST SPI3_HOST
+#else
+#define SD_OWN_HOST (-1)
+#endif
 
 static char s_mount_point[FOS_ASSETS_PATH_LEN] = "";
+
+static bool shares_display_bus(const fos_config_t *config)
+{
+    /* The panel's SCK and MOSI, and a panel to share them with: headless, the
+     * display never routed its pins and the card takes a bus of its own. */
+    return fos_display_present() && config->assets_sd.sck == config->pins.sck &&
+           config->assets_sd.mosi == config->pins.mosi;
+}
 
 static bool valid_pin(int8_t pin)
 {
@@ -265,9 +290,36 @@ static void sd_unmount(void)
 {
     if (!s_mounted) return;
     esp_vfs_fat_sdcard_unmount(s_mount_point, s_card);
-    spi_bus_free(SPI3_HOST);
+    if (!s_shared_bus && s_host >= 0) spi_bus_free((spi_host_device_t)s_host);
     s_mounted = false;
     s_card = NULL;
+    s_host = -1;
+}
+
+/* The slot's power switch and card-detect contact (reTerminal E-series:
+ * GPIO16 high powers the socket, GPIO15 low means a card is seated). Powers
+ * the slot up and reads the contact; false when the contact says the slot
+ * is empty, so the mount can say so without a bus probe. */
+static bool slot_power_and_detect(const fos_config_t *config)
+{
+    if (config->assets_sd.pwr >= 0) {
+        gpio_reset_pin((gpio_num_t)config->assets_sd.pwr);
+        gpio_set_direction((gpio_num_t)config->assets_sd.pwr, GPIO_MODE_OUTPUT);
+        gpio_set_level((gpio_num_t)config->assets_sd.pwr, 1);
+        /* The TPS22916's rise plus the card's own power-up (the SD spec's
+         * 1 ms minimum before the first command). */
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    s_card_detected = -1;
+    if (config->assets_sd.det >= 0) {
+        gpio_reset_pin((gpio_num_t)config->assets_sd.det);
+        gpio_set_direction((gpio_num_t)config->assets_sd.det, GPIO_MODE_INPUT);
+        gpio_set_pull_mode((gpio_num_t)config->assets_sd.det, GPIO_PULLUP_ONLY);
+        esp_rom_delay_us(50);
+        s_card_detected = gpio_get_level((gpio_num_t)config->assets_sd.det) == 0 ? 1 : 0;
+        return s_card_detected == 1;
+    }
+    return true;
 }
 
 /* Mount the card at config->assets_path.
@@ -287,32 +339,63 @@ static esp_err_t sd_mount(const fos_config_t *config, bool allow_format, const c
     }
     strlcpy(s_mount_point, config->assets_path, sizeof(s_mount_point));
 
-    enable_pullup(config->assets_sd.cs);
-    enable_pullup(config->assets_sd.sck);
-    enable_pullup(config->assets_sd.miso);
-    enable_pullup(config->assets_sd.mosi);
+    bool shared = shares_display_bus(config);
+    if (!slot_power_and_detect(config)) {
+        ESP_LOGW(TAG, "SD slot empty (card-detect GPIO %d high)", (int)config->assets_sd.det);
+        set_last_error(ESP_ERR_NOT_FOUND);
+        log_mount_outcome(action, false, ESP_ERR_NOT_FOUND, pins, 0, 0, 0, "");
+        return ESP_ERR_NOT_FOUND;
+    }
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = SPI3_HOST;
     if (config->assets_sd.max_freq_khz > 0) {
         host.max_freq_khz = config->assets_sd.max_freq_khz;
     }
-
-    spi_bus_config_t bus_cfg = {
-        .mosi_io_num = config->assets_sd.mosi,
-        .miso_io_num = config->assets_sd.miso,
-        .sclk_io_num = config->assets_sd.sck,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = 4096,
-    };
-    esp_err_t err = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "SD SPI bus init failed on SPI3 (%s): %s", pins, esp_err_to_name(err));
-        set_last_error(err);
-        log_mount_outcome(action, false, err, pins, host.max_freq_khz, 0, 0, "");
-        return err;
+    /* The card's chip-select is the one line that is its own either way; on a
+     * shared bus SCK and MOSI are the panel's and are left exactly as routed. */
+    enable_pullup(config->assets_sd.cs);
+    enable_pullup(config->assets_sd.miso);
+    if (shared) {
+        int host_id = -1;
+        esp_err_t share_err = fos_display_spi_bus_share(config->assets_sd.miso, &host_id);
+        if (share_err != ESP_OK) {
+            ESP_LOGW(TAG, "SD card shares the panel's SPI bus but it could not be shared (%s): %s",
+                     pins, esp_err_to_name(share_err));
+            set_last_error(share_err);
+            log_mount_outcome(action, false, share_err, pins, host.max_freq_khz, 0, 0, "");
+            return share_err;
+        }
+        host.slot = (spi_host_device_t)host_id;
+    } else {
+        if (SD_OWN_HOST < 0) {
+            /* A C3: one general SPI host, and the card is not on the panel's. */
+            ESP_LOGW(TAG, "SD assets need a second SPI host or the panel's pins; not available on this chip");
+            set_last_error(ESP_ERR_NOT_SUPPORTED);
+            log_mount_outcome(action, false, ESP_ERR_NOT_SUPPORTED, pins, 0, 0, 0, "");
+            return ESP_ERR_NOT_SUPPORTED;
+        }
+        host.slot = (spi_host_device_t)SD_OWN_HOST;
+        enable_pullup(config->assets_sd.sck);
+        enable_pullup(config->assets_sd.mosi);
+        spi_bus_config_t bus_cfg = {
+            .mosi_io_num = config->assets_sd.mosi,
+            .miso_io_num = config->assets_sd.miso,
+            .sclk_io_num = config->assets_sd.sck,
+            .quadwp_io_num = -1,
+            .quadhd_io_num = -1,
+            .max_transfer_sz = 4096,
+        };
+        esp_err_t err = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "SD SPI bus init failed on SPI3 (%s): %s", pins, esp_err_to_name(err));
+            set_last_error(err);
+            log_mount_outcome(action, false, err, pins, host.max_freq_khz, 0, 0, "");
+            return err;
+        }
     }
+    s_host = (int)host.slot;
+    s_shared_bus = shared;
+    esp_err_t err = ESP_OK;
 
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_config.host_id = host.slot;
@@ -397,7 +480,8 @@ static esp_err_t sd_mount(const fos_config_t *config, bool allow_format, const c
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "SD assets unavailable [%s] — %s",
                  mount_reason(err).code, mount_reason(err).detail);
-        spi_bus_free(host.slot);
+        if (!shared) spi_bus_free(host.slot);
+        s_host = -1;
         s_card = NULL;
         set_last_error(err);
         log_mount_outcome(action, false, err, pins, host.max_freq_khz, attempts, 0, probe);
@@ -408,41 +492,29 @@ static esp_err_t sd_mount(const fos_config_t *config, bool allow_format, const c
     set_last_error(ESP_OK);
     uint64_t capacity = fos_assets_sd_capacity_bytes();
     /* LOG_DEFAULT_LEVEL is WARN on the 32MB profile: ESP_LOGI would vanish. */
-    ESP_LOGW(TAG, "SD assets mounted at %s (%llu MB, pins=%s, %lu kHz)",
+    ESP_LOGW(TAG, "SD assets mounted at %s (%llu MB, pins=%s, %lu kHz%s)",
              s_mount_point,
              (unsigned long long)(capacity / (1024ULL * 1024ULL)),
              pins,
-             (unsigned long)host.max_freq_khz);
+             (unsigned long)host.max_freq_khz,
+             shared ? ", on the panel's SPI bus" : "");
     log_mount_outcome(action, true, ESP_OK, pins, host.max_freq_khz, attempts, capacity, probe);
     return ESP_OK;
 }
-
-#endif /* SOC_SPI_PERIPH_NUM >= 3 */
 
 esp_err_t fos_assets_sd_mount(const fos_config_t *config)
 {
     if (s_mounted) return ESP_OK;
     if (!config || !config->assets_sd.enabled) return ESP_OK;
-
-#if SOC_SPI_PERIPH_NUM < 3
-    /* SD assets ride a dedicated SPI3 bus so they never contend with the
-     * display on SPI2. Chips with a single general-purpose SPI host (the
-     * ESP32-C3) have no free bus for it — every C3 preset ships with SD
-     * assets off, so only a hand-enabled config can get here. */
-    ESP_LOGW(TAG, "SD assets need a second SPI host; not available on this chip");
-    set_last_error(ESP_ERR_NOT_SUPPORTED);
-    return ESP_ERR_NOT_SUPPORTED;
-#else
+    /* A card of its own rides SPI3, away from the panel on SPI2; one wired to
+     * the panel's SCK/MOSI (the reTerminal E-series, the XTEINK X4) shares
+     * that bus and takes turns with the panel. A C3 has no SPI3, so there
+     * only the shared kind mounts; sd_mount says so for the other. */
     return sd_mount(config, false, "mount");
-#endif
 }
 
 esp_err_t fos_assets_sd_remount(void)
 {
-#if SOC_SPI_PERIPH_NUM < 3
-    set_last_error(ESP_ERR_NOT_SUPPORTED);
-    return ESP_ERR_NOT_SUPPORTED;
-#else
     const fos_config_t *config = fos_config();
     if (!config || !config->assets_sd.enabled) {
         set_last_error(ESP_ERR_INVALID_STATE);
@@ -450,15 +522,15 @@ esp_err_t fos_assets_sd_remount(void)
     }
     sd_unmount();
     return sd_mount(config, false, "remount");
-#endif
+}
+
+int fos_assets_sd_card_detected(void)
+{
+    return s_card_detected;
 }
 
 esp_err_t fos_assets_sd_format(void)
 {
-#if SOC_SPI_PERIPH_NUM < 3
-    set_last_error(ESP_ERR_NOT_SUPPORTED);
-    return ESP_ERR_NOT_SUPPORTED;
-#else
     const fos_config_t *config = fos_config();
     if (!config || !config->assets_sd.enabled) {
         set_last_error(ESP_ERR_INVALID_STATE);
@@ -477,7 +549,6 @@ esp_err_t fos_assets_sd_format(void)
     sd_unmount();
     ESP_LOGW(TAG, "explicit SD format requested — this erases an unreadable card");
     return sd_mount(config, true, "format");
-#endif
 }
 
 bool fos_assets_sd_mounted(void)

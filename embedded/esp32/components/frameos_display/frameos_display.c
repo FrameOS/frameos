@@ -219,6 +219,15 @@ static esp_err_t ensure_module(void)
     return ESP_OK;
 }
 
+esp_err_t fos_display_spi_bus_share(int miso_pin, int *host)
+{
+    if (s_panel && s_panel->bus == 1) return ESP_ERR_INVALID_STATE;
+    int shared = DEV_SPI_Bus_Share(miso_pin);
+    if (shared < 0) return ESP_ERR_INVALID_STATE;
+    if (host) *host = shared;
+    return ESP_OK;
+}
+
 esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
 {
     if (!s_panel) return ESP_ERR_INVALID_STATE;
@@ -227,12 +236,17 @@ esp_err_t fos_display_blit(const uint8_t *buf, size_t len)
     if (err != ESP_OK) return err;
 
     int64_t start = esp_timer_get_time();
+    /* The whole sequence under one bus hold: the drivers toggle CS by hand,
+     * so a shared card may not get a word in until the panel sleeps. */
+    DEV_SPI_Acquire();
     if (s_panel->driver_init() != 0) {
+        DEV_SPI_Release();
         ESP_LOGE(TAG, "panel init failed");
         return ESP_FAIL;
     }
     s_panel->display((uint8_t *)buf);
     s_panel->sleep();
+    DEV_SPI_Release();
     ESP_LOGI(TAG, "blit + refresh took %lld ms", (esp_timer_get_time() - start) / 1000);
     return ESP_OK;
 }
@@ -242,8 +256,13 @@ esp_err_t fos_display_clear(void)
     if (!s_panel) return ESP_ERR_INVALID_STATE;
     esp_err_t err = ensure_module();
     if (err != ESP_OK) return err;
-    if (s_panel->driver_init() != 0) return ESP_FAIL;
+    DEV_SPI_Acquire();
+    if (s_panel->driver_init() != 0) {
+        DEV_SPI_Release();
+        return ESP_FAIL;
+    }
     s_panel->clear();
     s_panel->sleep();
+    DEV_SPI_Release();
     return ESP_OK;
 }

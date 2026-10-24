@@ -26,6 +26,7 @@
 #include "fos_backend_http.h"
 #include "fos_battery.h"
 #include "fos_buttons.h"
+#include "fos_charger.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_events.h"
@@ -270,18 +271,27 @@ static void log_metrics_sample(void)
         fos_wifi_rssi(), (unsigned long)s_render_count, s_last_render_ms,
         fos_scenes_loaded(),
         (unsigned long)(fos_http_connect_retries() + fos_nim_http_connect_retries()));
+    /* The charger's word, where the board has one: USB in or not, charging
+     * or not. It also decides onBattery below, as it does the deep sleep. */
+    fos_charger_status_t charger;
+    bool charger_known = fos_charger_present() && fos_charger_read(&charger) == ESP_OK;
     if (battery_pct >= 0 && used < sizeof(json) - 128) {
-        /* onBattery is the same "cell present" test the deep-sleep decision
-         * uses, so a provider can tell whether deep_sleep_on_battery is in
-         * force right now instead of guessing from the percentage. */
+        /* onBattery is the same test the deep-sleep decision uses — the
+         * charger's "no input", or without one, "a cell is present" — so a
+         * provider can tell whether deep_sleep_on_battery is in force right
+         * now instead of guessing from the percentage. */
+        bool on_battery = charger_known ? !charger.usb_power : battery_mv >= FOS_POWER_PRESENT_MV;
         used += (size_t)snprintf(json + used, sizeof(json) - used,
                                  ",\"batteryPercent\":%d,\"batteryMillivolts\":%d,\"onBattery\":%s",
-                                 battery_pct, battery_mv,
-                                 battery_mv >= FOS_POWER_PRESENT_MV ? "true" : "false");
+                                 battery_pct, battery_mv, on_battery ? "true" : "false");
         if (battery_raw_mv != battery_mv && used < sizeof(json) - 40) {
             used += (size_t)snprintf(json + used, sizeof(json) - used,
                                      ",\"batteryRawMillivolts\":%d", battery_raw_mv);
         }
+    }
+    if (charger_known && used < sizeof(json) - 48) {
+        used += (size_t)snprintf(json + used, sizeof(json) - used, ",\"usbPower\":%s,\"charging\":%s",
+                                 charger.usb_power ? "true" : "false", charger.charging ? "true" : "false");
     }
     uint32_t wifi_drops = 0, wifi_down_ms = 0;
     uint8_t wifi_drop_reason = 0;
@@ -1875,10 +1885,15 @@ static void client_task(void *arg)
                 battery_pct = again_pct;
             }
         }
+        /* The charger, where the board has one (fos_charger.c): USB in means
+         * not on battery, whatever the divider reads of a charging cell. */
+        fos_charger_status_t charger;
+        bool charger_known = fos_charger_present() && fos_charger_read(&charger) == ESP_OK;
         fos_power_input_t power_in = {
             .mv = battery_mv,
             .deep_sleep = config->deep_sleep,
             .deep_sleep_on_battery = config->deep_sleep_on_battery,
+            .usb_power = charger_known ? (charger.usb_power ? 1 : 0) : -1,
         };
         fos_power_decision_t power;
         fos_power_decide(&power_in, &s_power_state, &power);
@@ -1910,6 +1925,11 @@ static void client_task(void *arg)
             }
             if (power.suspect && used < sizeof(line) - 24) {
                 used += (size_t)snprintf(line + used, sizeof(line) - used, ",\"suspect\":true");
+            }
+            if (charger_known && used < sizeof(line) - 40) {
+                used += (size_t)snprintf(line + used, sizeof(line) - used, ",\"usbPower\":%s,\"charging\":%s",
+                                         charger.usb_power ? "true" : "false",
+                                         charger.charging ? "true" : "false");
             }
             if (used < sizeof(line) - 2) {
                 snprintf(line + used, sizeof(line) - used, "}");

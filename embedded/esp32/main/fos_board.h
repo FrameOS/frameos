@@ -56,4 +56,28 @@ const char *fos_board_event_map(const char *hardware_preset);
  * board has one. */
 bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *pwr);
 
+/* The board's status LED for a hardware preset key: its GPIO and how it is
+ * lit (fos_led_type_t: 0 high, 1 low, 2 a WS2812 pixel), -1 / 0 for a board
+ * without one. The reTerminal E1001/E1002 have a green LED on GPIO6, the
+ * E1004 on GPIO48, all lit low (Seeed's schematics and Arduino cookbook).
+ * Same role as fos_board_buzzer_pin: `set hardware` applies it and it is the
+ * stored-config default when NVS has no `led` key. Keep in step with
+ * `ledPin` / `ledType` in EMBEDDED_HARDWARE_PRESETS. */
+bool fos_board_led(const char *hardware_preset, int *pin, int *type);
+
+/* The board's I2C peripheral buses as the `i2c_buses` spec
+ * (`sda=19,scl=20;sda=39,scl=40`), "" for a board without any. The reTerminal
+ * E1001/E1002 carry their PCF8563 clock and SHT40 sensor on 19/20 and their
+ * SY6974B charger on 39/40; the E1004 has all three on 19/20 (its 39/40 is
+ * the J2 header). fos_i2c.c probes what is there. */
+const char *fos_board_i2c_buses(const char *hardware_preset);
+
+/* The board's TF socket as the `assets_sd_pins` spec, "" for a board with no
+ * usable one. The reTerminal E-series share the panel's SPI bus (SCK7/MOSI9)
+ * with MISO on GPIO8, CS on GPIO14, a card-detect contact on GPIO15 and a
+ * TPS22916 power switch on GPIO16 — one table for the console's `set
+ * hardware` and the stored-config default. Keep in step with
+ * EMBEDDED_SD_CARD_ASSETS_PRESET_PINS. */
+const char *fos_board_sd_pins(const char *hardware_preset);
+
 #endif /* FOS_BOARD_H */

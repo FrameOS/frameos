@@ -205,10 +205,30 @@ for the two Spectra boards most of the bench work runs on:
   key (the console's empty-value convention covers it now).
 - **PhotoPainter 7.3"** — 8 MB PSRAM, PMIC power-up, TF socket, and a KEY
   button next to BOOT (`0:BOOT`, `4:KEY1` in the preset's `gpio_buttons`).
+- **Seeed reTerminal E-series (E1001/E1002/E1004)** — the TF socket shares
+  the panel's SPI bus: `assets_sd_pins` names the panel's SCK7/MOSI9, so
+  `fos_assets_sd.c` joins the display's bus instead of opening SPI3
+  (`fos_display_spi_bus_share`), the panel holds the bus for each refresh
+  (`DEV_SPI_Acquire`) and the sdspi driver takes its turns between. The
+  socket is powered through GPIO16 and has a card-detect contact on GPIO15
+  (`pwr=16,det=15` in the spec; an empty slot is reported without a bus
+  probe). The green status LED (`led_pin 6`, `led_pin 48` on the E1004,
+  `led_type gpio_inverted`; `fos_led.c`) follows the buzzer's notes, so a
+  frame with `buzzer_pin -1` still shows its presses and the voice chat's
+  cues in light. `i2c_buses` (`fos_i2c.c`, probed at boot and by the console's
+  `i2c`) finds the PCF8563 clock (`fos_rtc.c`: the system time is set from it
+  on a cold boot, before Wi-Fi, and written back at every SNTP sync), the
+  SY6974B charger (`fos_charger.c`: whether USB is in and the cell charging,
+  which the power decision takes over the divider's cell test — a frame on
+  its desk with USB in no longer deep-sleeps "on battery" — and the metrics
+  carry as `usbPower` / `charging`) and the SHT40 climate sensor (reported
+  as present, not yet read). A board provisioned before these keys existed
+  gets all of them on its first boot of this firmware, as `set hardware`
+  would give them.
 | `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" | reTerminal Sticky, 32MB flash |
-| `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash; battery GPIO1 ÷2, switch GPIO21 |
-| `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash; battery GPIO1 ÷2, switch GPIO21 |
-| `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas |
+| `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash; battery GPIO1 ÷2, switch GPIO21; TF socket on the panel bus (MISO8, CS14, detect 15, power 16); green LED GPIO6 (lit low); I2C 19/20 (PCF8563 clock, SHT40) + 39/40 (SY6974B charger); PDM mic 42/41/38 |
+| `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash; the same peripherals as the E1001 |
+| `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas; TF socket as the E1001/E1002; green LED GPIO48 (lit low); I2C 19/20 carries the clock, the sensor AND the charger (39/40 is its J2 header); no microphone |
 | `elecrow_crowpanel_5in79` | S3 | EPD_5in79 5.79" 4-gray | CrowPanel, dual SSD1683 |
 
 The TRMNL X (10.3" 1872×1404 parallel e-ink over EPDIY/FastEPD) is not yet

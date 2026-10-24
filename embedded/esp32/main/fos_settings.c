@@ -567,6 +567,23 @@ static bool apply_frame_settings(const cJSON *frame)
         config->buzzer_tone_hz = (uint16_t)buzzer_tone_hz->valuedouble;
         changed = true;
     }
+    /* The status LED the notes light (fos_led.c) and how it is lit; -1 =
+     * none. Live: the next note reads both. */
+    const cJSON *led_pin = cJSON_GetObjectItem(frame, "ledPin");
+    if (cJSON_IsNumber(led_pin) && led_pin->valuedouble >= -1 && led_pin->valuedouble <= 48 &&
+        config->led_pin != (int8_t)led_pin->valuedouble &&
+        settings_pin_usable("ledPin", (int)led_pin->valuedouble)) {
+        config->led_pin = (int8_t)led_pin->valuedouble;
+        changed = true;
+    }
+    const cJSON *led_type = cJSON_GetObjectItem(frame, "ledType");
+    if (cJSON_IsString(led_type)) {
+        uint8_t type = config->led_type;
+        if (fos_config_parse_led_type(led_type->valuestring, &type) && type != config->led_type) {
+            config->led_type = type;
+            changed = true;
+        }
+    }
     /* Voice chat (docs/voice-chat.md): whether the voice key's hold opens
      * the microphone. Live: the hold asks on every press. */
     const cJSON *voice_chat = cJSON_GetObjectItem(frame, "voiceChat");
@@ -921,6 +938,12 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (before->mic_pins.pwr != after->mic_pins.pwr) {
         change_append_int(out, out_len, "mic_pwr_pin", (long)after->mic_pins.pwr);
+    }
+    if (before->led_pin != after->led_pin) {
+        change_append_int(out, out_len, "led_pin", (long)after->led_pin);
+    }
+    if (before->led_type != after->led_type) {
+        change_append(out, out_len, "led_type", fos_config_led_type_name(after->led_type));
     }
     if (before->debug_logging != after->debug_logging) {
         change_append(out, out_len, "debug", after->debug_logging ? "true" : "false");

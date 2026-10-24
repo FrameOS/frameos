@@ -30,6 +30,11 @@
  * The pin is the live config's `buzzer_pin` (-1 = none) and the pitch its
  * `buzzer_tone_hz`, both read again on every tone: a settings push moves,
  * retunes or silences the buzzer without a reboot.
+ *
+ * The board's status LED (fos_led.h) follows every note: lit while one
+ * sounds, dark for a rest and after the last. A frame with an LED and no
+ * buzzer (none, or `buzzer_pin -1`) shows the same clicks, ticks and voice
+ * cues in light, which is what a microphone next to a buzzer wants.
  */
 #pragma once
 

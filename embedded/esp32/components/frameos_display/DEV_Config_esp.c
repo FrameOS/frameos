@@ -35,6 +35,61 @@ int EPD_SCLK_PIN = 7;
 
 static spi_device_handle_t s_spi = NULL;
 static bool s_initialized = false;
+/* The SPI bus under the panel. Brought up once, by whoever asks first: the
+ * panel (no MISO: every EPD is write-only) or an SD card that shares the
+ * bus (the Seeed reTerminal E-series hang their TF socket off the panel's
+ * SCK/MOSI with their own MISO and CS) — then the bus stays up for both and
+ * the panel takes it for the whole of a refresh (DEV_SPI_Acquire). */
+static bool s_bus_ready = false;
+static bool s_bus_shared = false;
+static int s_bus_miso = -1;
+
+int DEV_SPI_Bus_Init(int miso_pin)
+{
+    if (s_bus_ready) {
+        if (miso_pin >= 0 && s_bus_miso != miso_pin) {
+            /* The panel came first and routed no MISO: the card cannot read
+             * on this bus. Boot mounts the card before the first refresh, so
+             * this is a remount after a pin change: a restart fixes it. */
+            ESP_LOGW(TAG, "SPI bus is up without MISO %d; restart to share it", miso_pin);
+            return 1;
+        }
+        return 0;
+    }
+    spi_bus_config_t bus_config = {
+        .mosi_io_num = EPD_MOSI_PIN,
+        .miso_io_num = miso_pin,
+        .sclk_io_num = EPD_SCLK_PIN,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = EPD_SPI_MAX_TRANSFER,
+    };
+    esp_err_t err = spi_bus_initialize(EPD_SPI_HOST, &bus_config, SPI_DMA_CH_AUTO);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "spi_bus_initialize failed: %s", esp_err_to_name(err));
+        return 1;
+    }
+    s_bus_ready = true;
+    s_bus_miso = miso_pin;
+    return 0;
+}
+
+int DEV_SPI_Bus_Share(int miso_pin)
+{
+    if (DEV_SPI_Bus_Init(miso_pin) != 0) return -1;
+    s_bus_shared = true;
+    return (int)EPD_SPI_HOST;
+}
+
+void DEV_SPI_Acquire(void)
+{
+    if (s_bus_shared && s_spi) spi_device_acquire_bus(s_spi, portMAX_DELAY);
+}
+
+void DEV_SPI_Release(void)
+{
+    if (s_bus_shared && s_spi) spi_device_release_bus(s_spi);
+}
 
 void DEV_SetPinConfig(int rst, int dc, int cs, int cs2, int busy, int sclk, int mosi, int pwr)
 {
@@ -210,17 +265,7 @@ UBYTE DEV_Module_Init(void)
      * loops fall through instead of spinning to their 120s timeout. */
     gpio_set_pull_mode(EPD_BUSY_PIN, GPIO_PULLUP_ONLY);
 
-    spi_bus_config_t bus_config = {
-        .mosi_io_num = EPD_MOSI_PIN,
-        .miso_io_num = -1,
-        .sclk_io_num = EPD_SCLK_PIN,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
-        .max_transfer_sz = EPD_SPI_MAX_TRANSFER,
-    };
-    esp_err_t err = spi_bus_initialize(EPD_SPI_HOST, &bus_config, SPI_DMA_CH_AUTO);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "spi_bus_initialize failed: %s", esp_err_to_name(err));
+    if (DEV_SPI_Bus_Init(-1) != 0) {
         return 1;
     }
     spi_device_interface_config_t dev_config = {
@@ -229,10 +274,13 @@ UBYTE DEV_Module_Init(void)
         .spics_io_num = -1, /* vendor drivers toggle CS manually */
         .queue_size = 4,
     };
-    err = spi_bus_add_device(EPD_SPI_HOST, &dev_config, &s_spi);
+    esp_err_t err = spi_bus_add_device(EPD_SPI_HOST, &dev_config, &s_spi);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "spi_bus_add_device failed: %s", esp_err_to_name(err));
-        spi_bus_free(EPD_SPI_HOST);
+        if (!s_bus_shared) {
+            spi_bus_free(EPD_SPI_HOST);
+            s_bus_ready = false;
+        }
         return 1;
     }
     s_initialized = true;
@@ -246,7 +294,10 @@ void DEV_Module_Exit(void)
         spi_bus_remove_device(s_spi);
         s_spi = NULL;
     }
-    spi_bus_free(EPD_SPI_HOST);
+    if (!s_bus_shared) {
+        spi_bus_free(EPD_SPI_HOST);
+        s_bus_ready = false;
+    }
     DEV_Digital_Write(EPD_CS_PIN, 0);
     if (EPD_CS_S_PIN >= 0) DEV_Digital_Write(EPD_CS_S_PIN, 0);
     if (EPD_PWR_PIN >= 0) DEV_Digital_Write(EPD_PWR_PIN, 0);

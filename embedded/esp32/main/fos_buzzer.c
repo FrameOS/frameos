@@ -11,6 +11,7 @@
 #include "esp_timer.h"
 
 #include "fos_config.h"
+#include "fos_led.h"
 
 /* Nothing else in the firmware uses LEDC. Take the last timer and channel
  * (the C3 has six channels, the S3 eight) so a future user counting from 0
@@ -76,9 +77,18 @@ static bool pin_in_use(const fos_config_t *config, int pin)
     for (size_t i = 0; i < config->gpio_button_count; i++) {
         if (config->gpio_buttons[i].pin == pin) return true;
     }
-    return config->assets_sd.enabled &&
-           (pin == config->assets_sd.cs || pin == config->assets_sd.sck ||
-            pin == config->assets_sd.miso || pin == config->assets_sd.mosi);
+    if (config->assets_sd.enabled &&
+        (pin == config->assets_sd.cs || pin == config->assets_sd.sck ||
+         pin == config->assets_sd.miso || pin == config->assets_sd.mosi ||
+         pin == config->assets_sd.pwr || pin == config->assets_sd.det)) {
+        return true;
+    }
+    if (pin == config->led_pin) return true;
+    if (pin == config->mic_pins.clk || pin == config->mic_pins.data || pin == config->mic_pins.pwr) return true;
+    for (size_t i = 0; i < config->i2c_bus_count; i++) {
+        if (pin == config->i2c_buses[i].sda || pin == config->i2c_buses[i].scl) return true;
+    }
+    return false;
 }
 
 /* Point the channel at `pin`, letting go of the previous one. Under s_lock.
@@ -138,16 +148,29 @@ static bool attach(int pin)
  * Caller holds s_lock and has attached the pin. */
 static void start_note_locked(const fos_buzzer_note_t *note)
 {
-    if (note->freq_hz == 0) {
-        ledc_stop(BUZZER_MODE, BUZZER_CHANNEL, 0);
-    } else {
-        if (note->freq_hz != s_freq_hz && ledc_set_freq(BUZZER_MODE, BUZZER_TIMER, note->freq_hz) == ESP_OK) {
-            s_freq_hz = note->freq_hz;
+    /* The status LED follows every note (fos_led.h): lit while one sounds,
+     * dark for a rest — with the buzzer, or instead of it. */
+    fos_led_set(note->freq_hz != 0);
+    if (s_pin >= 0) {
+        if (note->freq_hz == 0) {
+            ledc_stop(BUZZER_MODE, BUZZER_CHANNEL, 0);
+        } else {
+            if (note->freq_hz != s_freq_hz && ledc_set_freq(BUZZER_MODE, BUZZER_TIMER, note->freq_hz) == ESP_OK) {
+                s_freq_hz = note->freq_hz;
+            }
+            ledc_set_duty(BUZZER_MODE, BUZZER_CHANNEL, BUZZER_HALF_DUTY);
+            ledc_update_duty(BUZZER_MODE, BUZZER_CHANNEL);
         }
-        ledc_set_duty(BUZZER_MODE, BUZZER_CHANNEL, BUZZER_HALF_DUTY);
-        ledc_update_duty(BUZZER_MODE, BUZZER_CHANNEL);
     }
     esp_timer_start_once(s_stop_timer, (uint64_t)note->duration_ms * 1000);
+}
+
+/* Quiet and dark: the end of a sequence. Under s_lock. */
+static void stop_all_locked(void)
+{
+    if (s_pin >= 0) ledc_stop(BUZZER_MODE, BUZZER_CHANNEL, 0);
+    fos_led_set(false);
+    s_note_count = s_note_next = 0;
 }
 
 static void stop_tone(void *arg)
@@ -156,12 +179,11 @@ static void stop_tone(void *arg)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     /* Active again: a new sound restarted the timer while this callback
      * waited for the lock, and it is not over yet. */
-    if (s_pin >= 0 && !esp_timer_is_active(s_stop_timer)) {
+    if (!esp_timer_is_active(s_stop_timer)) {
         if (s_note_next < s_note_count) {
             start_note_locked(&s_notes[s_note_next++]);
         } else {
-            ledc_stop(BUZZER_MODE, BUZZER_CHANNEL, 0);
-            s_note_count = s_note_next = 0;
+            stop_all_locked();
         }
     }
     xSemaphoreGive(s_lock);
@@ -188,7 +210,10 @@ void fos_buzzer_play(const fos_buzzer_note_t *notes, size_t count)
     if (count > FOS_BUZZER_NOTES_MAX) count = FOS_BUZZER_NOTES_MAX;
     int pin = fos_config()->buzzer_pin;
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (attach(pin)) {
+    /* The sequence runs for the buzzer, for the LED that follows it, or for
+     * both; with neither there is nothing to time. */
+    bool buzzer = attach(pin);
+    if (buzzer || fos_led_present()) {
         esp_timer_stop(s_stop_timer); /* a sound already playing: start over */
         s_note_count = 0;
         for (size_t i = 0; i < count; i++) {
@@ -197,6 +222,7 @@ void fos_buzzer_play(const fos_buzzer_note_t *notes, size_t count)
         }
         s_note_next = 0;
         if (s_note_count > 0) start_note_locked(&s_notes[s_note_next++]);
+        else stop_all_locked();
     }
     xSemaphoreGive(s_lock);
 }
