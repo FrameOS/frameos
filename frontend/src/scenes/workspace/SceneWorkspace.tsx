@@ -306,14 +306,16 @@ function SceneSelector({
           <div className="space-y-1">
             {scenePreview ? (
               <div
-                className="frameos-frame-row group flex items-center gap-1.5 rounded-xl border border-dashed border-amber-300/80 text-slate-700 transition"
+                className="frameos-frame-row group rounded-xl border border-dashed border-amber-300/80 text-slate-700 transition"
                 title={
                   scenePreview.source === 'voice'
-                    ? 'A picture the voice chat put on the frame for now. It is not in the scene list; pushing the scenes takes it off.'
-                    : 'A scene previewed on the frame for now. It is not in the scene list; pushing the scenes takes it off.'
+                    ? 'A picture the voice chat put on the frame for now. It is not in the scene list, and stays on the frame until it is installed or discarded.'
+                    : 'A scene previewed on the frame for now. It is not in the scene list, and stays on the frame until it is installed or discarded.'
                 }
               >
-                <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2 text-left">
+                {/* Two lines, like a saved row, then the tags and the two buttons on a
+                    line of their own: side by side they do not fit the sidebar. */}
+                <div className="flex min-w-0 items-center gap-2 px-3 pt-2 text-left">
                   <span className="frameos-card-media relative flex h-10 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/70 bg-amber-50 shadow-sm">
                     <PlayIcon className="h-5 w-5 text-amber-500" />
                     <span
@@ -329,30 +331,29 @@ function SceneSelector({
                     <span className="frameos-strong block truncate text-sm font-semibold text-slate-700">
                       {scenePreview.name || 'Preview'}
                     </span>
-                    <span className="frameos-muted mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-slate-400">
-                      <span className="truncate">
-                        {scenePreview.source === 'voice' ? 'from the voice chat' : 'from the editor'} · not in the list
-                      </span>
-                      <Tag
-                        color="yellow"
-                        title="Shown for now, not saved"
-                        className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
-                      >
-                        preview
-                      </Tag>
-                      {previewActive ? (
-                        <Tag
-                          color="teal"
-                          title="Active scene"
-                          className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
-                        >
-                          active
-                        </Tag>
-                      ) : null}
+                    <span className="frameos-muted mt-0.5 block truncate text-xs text-slate-400">
+                      {scenePreview.source === 'voice' ? 'from the voice chat' : 'from the editor'} · not in the list
                     </span>
                   </span>
                 </div>
-                <div className="flex items-center gap-1 pr-2">
+                <div className="flex items-center gap-1.5 px-3 pb-2 pt-1.5">
+                  <Tag
+                    color="yellow"
+                    title="Shown for now, not saved"
+                    className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
+                  >
+                    preview
+                  </Tag>
+                  {previewActive ? (
+                    <Tag
+                      color="teal"
+                      title="Active scene"
+                      className="shrink-0 px-1.5 py-0 text-[10px] font-semibold normal-case"
+                    >
+                      active
+                    </Tag>
+                  ) : null}
+                  <span className="flex-1" />
                   {scenePreview.scene_id ? (
                     <button
                       type="button"

@@ -4,6 +4,8 @@ import {
   chooseAssetColorsAdjustments,
   mockAssetColorsEditor,
   mockCloudBackupsApi,
+  mockScenePreviewOnFrame,
+  openDiscardPreviewDialog,
   waitForAssetColorsPreview,
 } from './visual-helpers'
 
@@ -351,6 +353,20 @@ export const visualCases: VisualCase[] = [
       { id: 'events-drawer', prepare: openSceneWorkspaceEventsDrawer },
       { id: 'json-drawer', prepare: openSceneWorkspaceJsonDrawer },
     ],
+  },
+  {
+    // A scene the frame shows for now without holding it in its list
+    // (docs/scene-previews.md): the scene workspace's sidebar list draws it
+    // as a dashed preview row with Install and Discard above the saved
+    // scenes, and Discard asks first. The sidebar is only open at full
+    // width; the narrower layouts fold it away.
+    id: 'scene-workspace-preview',
+    title: 'Scene workspace preview row',
+    path: '/scenes/1/scene-dashboard',
+    fullPage: true,
+    viewports: ['full'],
+    setup: mockScenePreviewOnFrame,
+    variants: [{ id: 'row' }, { id: 'discard', prepare: openDiscardPreviewDialog }],
   },
   {
     id: 'apps-workspace-root',

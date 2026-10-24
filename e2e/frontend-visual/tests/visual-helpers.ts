@@ -324,6 +324,66 @@ export async function prepareStablePage(page: Page, theme: 'light' | 'dark'): Pr
   })
 }
 
+/** The scene preview the frame-scenes case shows: frame 1 as the backend
+ * seeds it, plus a `scene_preview` (docs/scene-previews.md) that is also the
+ * active scene, so the row draws its "active" tag. The list and the single
+ * frame route are patched the same way: the workspace reads whichever loaded
+ * last. The preview is active through the states route, where controlLogic
+ * reads the active scene id. */
+export const scenePreviewFixture = {
+  scene_id: 'scene-preview-banana',
+  name: 'A banana on a kitchen table',
+  source: 'editor' as const,
+  at: '2026-05-23T11:57:00Z',
+}
+
+export async function mockScenePreviewOnFrame(page: Page): Promise<void> {
+  const withPreview = (frame: Record<string, unknown>): Record<string, unknown> =>
+    Number(frame?.id) === 1
+      ? { ...frame, scene_preview: scenePreviewFixture, active_scene_id: scenePreviewFixture.scene_id }
+      : frame
+
+  await page.route(projectApiPathPattern('/frames'), async (route) => {
+    const response = await page.request.get(route.request().url())
+    const payload = withoutE2EInstallFrames(await response.json())
+    await route.fulfill({
+      response,
+      json: Array.isArray(payload?.frames) ? { ...payload, frames: payload.frames.map(withPreview) } : payload,
+    })
+  })
+  await page.route(projectApiPathPattern('/frames/1'), async (route) => {
+    const response = await page.request.get(route.request().url())
+    const payload = await response.json()
+    await route.fulfill({
+      response,
+      json: payload?.frame ? { ...payload, frame: withPreview(payload.frame) } : payload,
+    })
+  })
+  await page.route(
+    projectApiPathPattern('/frames/1/states'),
+    fulfillJson({
+      sceneId: scenePreviewFixture.scene_id,
+      states: {
+        'scene-dashboard': { headline: 'Morning', accent: '#6f42c1' },
+        'scene-gradient': {},
+        [scenePreviewFixture.scene_id]: {},
+      },
+    })
+  )
+  await page.route(
+    projectApiPathPattern('/frames/1/state'),
+    fulfillJson({ sceneId: scenePreviewFixture.scene_id, state: {} })
+  )
+}
+
+/** Clicks the preview row's Discard and waits for its confirmation. */
+export async function openDiscardPreviewDialog(page: Page): Promise<void> {
+  const row = page.locator('.frameos-frame-row').filter({ hasText: scenePreviewFixture.name }).first()
+  await row.scrollIntoViewIfNeeded()
+  await row.getByRole('button', { name: 'Discard', exact: true }).click()
+  await page.getByRole('heading', { name: 'Discard the preview?' }).waitFor()
+}
+
 /** A connected FrameOS Cloud link with both backup switches on, as returned
  * by /api/cloud/status. The real backend is never linked during visual runs,
  * so the cloud endpoints are mocked at the network layer. */
