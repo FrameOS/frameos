@@ -386,6 +386,26 @@ function cloudSceneAssignmentEntry(scene: CloudSceneAssignmentInput): Record<str
 }
 
 /**
+ * Push the frame's assigned scene list again as it stands — every row at the
+ * version the frame holds, with its grant. What takes a preview (the editor's
+ * "Preview on frame", the voice chat's picture; `scene_preview` on the frame)
+ * off the device: a set_scenes of the assigned list is then the newest push.
+ * `activeSceneId` (a RUNTIME scene id) picks the scene to show.
+ */
+export async function pushCloudFrameSceneList(frameId: FrameId, activeSceneId?: string): Promise<void> {
+  const existing = await listCloudFrameScenes(frameId)
+  await setCloudFrameScenes(
+    frameId,
+    existing.map((scene) => ({
+      scene_id: scene.scene_id,
+      scene_version: scene.scene_version ?? null,
+      settings_groups: scene.granted_settings_groups,
+    })),
+    activeSceneId
+  )
+}
+
+/**
  * Allow one assigned scene the given service-key groups on a cloud frame
  * (the scene drawer's "Allow" for a scene that asks for a key it was never
  * granted). Read-modify-write like the install: every other row keeps its

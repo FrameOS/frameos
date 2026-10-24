@@ -306,8 +306,20 @@ export async function POST(
       if (sceneId && sceneId.length > maxSceneIdChars) {
         return jsonError("invalid_scene_id", 400);
       }
+      // What the workspace's preview row says about this push once the
+      // bundle is spent (scenePreviewsByFrame): the shown scene's name.
+      const shownScene = (scenes as { id: string; name?: unknown }[]).find((scene) => scene.id === sceneId) ??
+        (scenes as { id: string; name?: unknown }[])[0];
       payload = {
         checksum,
+        preview: {
+          name: typeof shownScene?.name === "string" && shownScene.name ? shownScene.name : "Preview",
+          // The shown scene itself, for the preview row's "Install"; only the
+          // newest push keeps it (enqueueFrameCommand trims the rest).
+          scene: shownScene ?? null,
+          scene_id: sceneId ?? shownScene?.id ?? null,
+          source: "editor",
+        },
         scenes: delivered,
         ...(sceneId ? { scene_id: sceneId } : {}),
         ...(state ? { state } : {}),

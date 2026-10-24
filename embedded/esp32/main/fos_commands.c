@@ -153,11 +153,26 @@ static bool sync_pass(bool after_forced_pull)
      * ETags with one more pull so the backend can record it on this wake. */
     bool sync_now = cJSON_IsTrue(cJSON_GetObjectItem(root, "sync")) && !after_forced_pull;
     int count = cJSON_IsArray(commands) ? cJSON_GetArraySize(commands) : 0;
+    if (sync_now) {
+        /* BEFORE the commands: a switch queued behind a scenes push (the
+         * editor's preview, the voice chat's show_image) names a scene this
+         * frame does not hold until the pull below — run first, it failed
+         * with apply-failed and the old scene rendered (E1002, 2026-10-24). */
+        fos_client_keep_awake_ms(FOS_COMMANDS_KEEP_AWAKE_MS);
+        fos_scenes_sync(true);
+        fos_scenes_apply_pending();
+        fos_settings_sync(true);
+    }
     int applied = 0;
     if (count > 0) {
         cJSON *command = NULL;
         cJSON_ArrayForEach(command, commands) {
             if (cJSON_IsObject(command) && run_command(command)) applied++;
+            /* A switch takes effect before the next command: a state for
+             * the new scene (the voice chat's activate_scene, then
+             * set_scene_state) reaches that scene, not the one before. On
+             * the render task, so the load may run here. */
+            if (frameos_nim_available()) fos_scenes_apply_pending_selection();
         }
         char line[128];
         snprintf(line, sizeof(line),
@@ -166,12 +181,8 @@ static bool sync_pass(bool after_forced_pull)
         frameos_nim_log_hook(line);
     }
     cJSON_Delete(root);
-    if (sync_now) {
-        fos_client_keep_awake_ms(FOS_COMMANDS_KEEP_AWAKE_MS);
-        fos_scenes_sync(true);
-        fos_scenes_apply_pending();
-        fos_settings_sync(true);
-        if (sync_pass(true)) applied++;
-    }
+    /* The ETags of what was just fetched go back with one more pull, so the
+     * backend records the deploy on this wake. */
+    if (sync_now && sync_pass(true)) applied++;
     return applied > 0;
 }

@@ -757,7 +757,7 @@ def refresh_tls_certificate_validity_dates(frame: Frame):
 
 
 async def update_frame(db: Session, redis: Redis, frame: Frame):
-    from app.utils.frame_commands import pending_command_types
+    from app.utils.frame_commands import pending_command_types, scene_preview_info
 
     db.add(frame)
     db.commit()
@@ -767,8 +767,10 @@ async def update_frame(db: Session, redis: Redis, frame: Frame):
     payload = websocket_frame_payload(frame.to_dict())
     # Not a column: what the frame's command queue still holds, as the list
     # and detail routes report it, so a tab learns that the queued firmware
-    # update was taken (or that one is waiting) without a reload.
+    # update was taken (or that one is waiting) without a reload. Same for
+    # the preview the frame shows for now (the voice chat's picture).
     payload["pending_command_types"] = pending_command_types(db, frame)
+    payload["scene_preview"] = scene_preview_info(db, frame)
     await publish_message(redis, "update_frame", payload)
 
 
