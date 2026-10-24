@@ -296,6 +296,7 @@ proc start*(self: FrameOS) {.async.} =
       "url": self.frameConfig.timeZoneUpdates.url,
     },
     "gpioButtons": self.frameConfig.gpioButtons,
+    "eventMap": (if self.frameConfig.eventMap.isNil: newJArray() else: self.frameConfig.eventMap),
     "inputSettings": self.frameConfig.inputSettings,
     "errorBehavior": {
       "mode": self.frameConfig.errorBehavior.mode,

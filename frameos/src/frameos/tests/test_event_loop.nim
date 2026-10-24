@@ -89,7 +89,13 @@ proc newRecordingHost(sceneId: SceneId, logs: ref seq[JsonNode]): RecordingHost 
     log: proc (entry: JsonNode) =
       if entry{"event"}.getStr() == "event:refused":
         host.trace.add("refused " & entry["name"].getStr() & " " & entry["origin"].getStr() & " " &
-          entry["reason"].getStr()),
+          entry["reason"].getStr())
+      elif entry{"event"}.getStr() == "event:mapped":
+        # "mapped frame button -> setCurrentScene", "mapped scene button"
+        var line = "mapped " & entry["scope"].getStr() & " " & entry["name"].getStr()
+        if entry.hasKey("emit"):
+          line.add(" -> " & entry["emit"].getStr())
+        host.trace.add(line),
   ), host.config)
   # On the thread that owns a dispatcher, a scene's dispatch goes straight into
   # its queue (channels.nim) — as on the runner thread.
@@ -114,6 +120,8 @@ block dispatcher:
     let host = newRecordingHost(c["scene"].getStr().SceneId, logs)
     for scene in c["scenes"]:
       host.order.add(scene["id"].getStr().SceneId)
+    # The frame's own event map (frame.json `eventMap`), when the case has one.
+    host.config.eventMap = c{"frameEventMap"}
     discard host.sceneInstance(host.current)
     discard host.loop.drain() # what `init` dispatched is not this case's subject
     for index, step in c["steps"].getElems():
