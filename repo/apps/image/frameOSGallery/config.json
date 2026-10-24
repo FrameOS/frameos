@@ -37,7 +37,7 @@
       "value": "jpg",
       "required": false,
       "label": "Image format",
-      "hint": "jpg: the gallery scales the image to this frame's panel and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame."
+      "hint": "jpg: the gallery scales the image to the area it is drawn in and sends a JPEG, a fraction of the bytes and the decoding of the original (recommended, every color kept). png: the same, lossless, about five times the bytes. original: the file as uploaded, scaled on the frame."
     },
     {
       "name": "fit",

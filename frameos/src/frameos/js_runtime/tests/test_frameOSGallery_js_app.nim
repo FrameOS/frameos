@@ -6,6 +6,7 @@
 import std/[json, os, strutils, tables, unittest]
 import pixie
 
+import frameos/apps
 import frameos/js_runtime/app_runtime
 import frameos/types
 import frameos/utils/app_images
@@ -61,8 +62,10 @@ proc render(h: Harness, config: JsonNode, target: tuple[width, height: int, fit:
   var full = %*{"category": "cute", "categoryOther": "", "format": "jpg", "fit": "auto"}
   for key, value in config.pairs:
     full[key] = value
+  # The canvas as the interpreter makes it: in scene pixels, turned with the frame.
+  let frameConfig = h.owner.frameConfig
   let context = ExecutionContext(scene: h.scene, event: "render", payload: %*{}, hasImage: true,
-    image: newImage(200, 120), loopIndex: 0, loopKey: ".", nextSleep: -1)
+    image: newImage(frameConfig.renderWidth(), frameConfig.renderHeight()), loopIndex: 0, loopKey: ".", nextSleep: -1)
   if target.width > 0:
     context.decodeTargetWidth = target.width
     context.decodeTargetHeight = target.height
@@ -82,8 +85,8 @@ proc errorLogged(h: Harness, needle: string): bool =
       return true
   false
 
-# The gallery scales the image to the panel: the app asks for the frame's size
-# (turned with the frame) as a baseline JPEG, see repo/apps/image/frameOSGallery.
+# The gallery scales the image to the size it will be drawn at: the app asks for
+# the canvas's size as a baseline JPEG, see repo/apps/image/frameOSGallery.
 const Scaled = "&width=200&height=120&fit=cover&format=jpg"
 
 suite "FrameOS Gallery code app":
@@ -115,10 +118,11 @@ suite "FrameOS Gallery code app":
       "https://gallery.frameos.net/image?category=cute&width=100&height=60&fit=contain&format=jpg",
       "https://gallery.frameos.net/image?category=cute" & Scaled]
 
-  test "a turned frame asks for its sides swapped":
+  test "a turned frame hands the app a turned canvas; the app reads no rotation itself":
     let h = newHarness(rotate = 90)
     check h.render(%*{}).kind == fkImage
     check requestedUrls == @["https://gallery.frameos.net/image?category=cute&width=120&height=200&fit=cover&format=jpg"]
+    check not appSource.contains("rotate")
 
   test "format and fit pick a lossless PNG inside the panel, or the original file":
     let h = newHarness()
