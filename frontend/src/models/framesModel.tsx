@@ -229,7 +229,13 @@ async function fetchCloudFrameScenes(frameId: FrameId): Promise<{
         // a transient error heals on the next hydration pass.
       }
     }
-    const rowScenes = sceneJson ?? [cloudSceneStub(row)]
+    // The install's button map rides the assignment row, not the store's
+    // scenes.json (cached above, so never written into): each runtime scene
+    // gets its own as `eventMap`, which is what the device is sent too.
+    const rowScenes = (sceneJson ?? [cloudSceneStub(row)]).map((scene) => {
+      const eventMap = row.event_maps?.[scene.id]
+      return eventMap && eventMap.length > 0 ? { ...scene, eventMap } : scene
+    })
     for (const scene of rowScenes) {
       sources[scene.id] = {
         scene_id: row.scene_id,

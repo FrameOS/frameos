@@ -1153,6 +1153,20 @@ export interface SceneOrigin {
   version?: string
 }
 
+export type EventMapValue = string | number | boolean
+
+/**
+ * One rule of an installed scene's event map (docs/events.md, "Event map"):
+ * an event of this name whose payload carries every `match` value reaches the
+ * scene with `as` written over its payload. "Map buttons" writes them
+ * (utils/sceneEventMap.ts); the device's dispatcher applies them.
+ */
+export interface EventMapRule {
+  event: string
+  match?: Record<string, EventMapValue>
+  as: Record<string, EventMapValue>
+}
+
 export interface FrameScene {
   id: string
   name: string
@@ -1164,6 +1178,13 @@ export interface FrameScene {
   default?: boolean
   settings?: FrameSceneSettings
   origin?: SceneOrigin
+  /**
+   * The INSTALLED copy's button map, beside the scene and never part of it:
+   * a scene update keeps it, and templates, zips and store versions never
+   * carry it. The backend stores it on the installed entry, the cloud on the
+   * assignment row (`event_maps`, hydrated in here per runtime scene).
+   */
+  eventMap?: EventMapRule[]
 }
 
 export interface FrameSceneIndexed {

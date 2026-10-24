@@ -1,4 +1,4 @@
-import type { FrameScene } from '../types'
+import type { EventMapRule, FrameScene } from '../types'
 
 // The cloud control plane stores a frame's scene list as store-scene
 // assignments (frame_scene_assignments rows), not as scene JSON on the frame
@@ -40,6 +40,9 @@ export interface CloudFrameSceneRow {
   /** The groups the owner GRANTED this scene on this frame: what the device
    * is actually served. Always ⊆ declared. */
   granted_settings_groups?: string[]
+  /** The owner's button maps for this install, by RUNTIME scene id
+   * (docs/events.md "Event map"); each becomes that scene's `eventMap`. */
+  event_maps?: Record<string, EventMapRule[]>
 }
 
 /**
