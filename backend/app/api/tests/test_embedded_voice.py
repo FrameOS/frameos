@@ -273,10 +273,14 @@ async def test_show_image_previews_a_picture_scene_next_to_the_saved_ones(async_
     # The settings pull follows the newest preview: the apple scene declares
     # openAI, and the banana scene (unsplash) is no longer on the frame.
     assert set(embedded_settings_payload(db, frame)) == {"openAI"}
-    # Nothing to install once the saved list is pushed again (a deploy row is the newest).
+    # The saved list pushed again carries the picture along (docs/scene-previews.md
+    # "A preview rides along"); Discard ends it, and there is nothing to install then.
     from app.utils.frame_commands import enqueue_frame_command
 
-    enqueue_frame_command(db, frame, "set_scenes", {"checksum": "deploy"})
+    deploy = enqueue_frame_command(db, frame, "set_scenes", {"checksum": "deploy"})
+    assert deploy.payload["_preview"]["carried"] is True and deploy.payload["_preview"]["source"] == "voice"
+    assert (await async_client.get(f"/api/frames/{frame.id}/scene_preview")).json()["scene"]["name"] == "Voice: an apple"
+    assert (await async_client.delete(f"/api/frames/{frame.id}/scene_preview")).status_code == 200
     assert (await async_client.get(f"/api/frames/{frame.id}/scene_preview")).status_code == 404
     assert (await async_client.get(f"/api/frames/{frame.id}")).json()["frame"]["scene_preview"] is None
 

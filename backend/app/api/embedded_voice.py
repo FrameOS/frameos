@@ -170,7 +170,8 @@ async def api_embedded_device_voice(
     async def preview_scenes(scenes: list[dict[str, Any]], scene_id: str) -> dict[str, Any]:
         # The editor's "Preview on frame": the frame's saved scenes plus the
         # new one, with the new one showing, so the others stay selectable.
-        # It holds until the next deploy (frame_commands.previewed_scenes).
+        # It holds through later pushes (frame_commands.previewed_scenes,
+        # carried_preview) until it is installed or discarded.
         saved = [scene for scene in (frame.scenes or []) if isinstance(scene, dict)]
         await new_log(db, redis, int(frame.id), "stdinfo", f"Voice chat previews {scenes[0].get('name')}")
         outcome = await queue_embedded_scene_preview(

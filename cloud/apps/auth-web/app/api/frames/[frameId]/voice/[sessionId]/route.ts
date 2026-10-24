@@ -328,9 +328,10 @@ export async function POST(
   const imageSources = imageSourcesForSettings(buildServiceSettingsPayload(grantedGroups, stored).settings);
 
   // The editor's "Preview on frame" (the event route's uploadScenes): a
-  // set_scenes push the device holds until the next scene push. A later
-  // activate_scene finds the assigned scenes gone from the device and
-  // re-pushes them, as the queue above does.
+  // set_scenes push of the picture alone. A later activate_scene finds the
+  // assigned scenes gone from the device and re-pushes them, as the queue
+  // above does — and that push carries the picture along, so it stays
+  // selectable until installed or discarded (docs/scene-previews.md).
   const previewScenes: VoicePreview = async (previewed, sceneId) => {
     const delivered = scenesForRuntime(previewed, frame.frameosVersion);
     const checksum = createHash("sha256").update(JSON.stringify(delivered)).digest("hex");
