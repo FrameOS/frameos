@@ -117,6 +117,30 @@ void fos_config_format_assets_sd_pins(const fos_assets_sd_config_t *assets_sd, c
              assets_sd->cs, assets_sd->sck, assets_sd->miso, assets_sd->mosi);
 }
 
+esp_err_t fos_config_parse_mic_pins(const char *spec, fos_mic_pins_t *mic_pins)
+{
+    char buf[FOS_STR_LEN];
+    copy_bounded_cfg(buf, spec, sizeof(buf));
+    char *save = NULL;
+    for (char *tok = strtok_r(buf, ", ", &save); tok; tok = strtok_r(NULL, ", ", &save)) {
+        char *eq = strchr(tok, '=');
+        if (!eq) return ESP_ERR_INVALID_ARG;
+        *eq = '\0';
+        int value = atoi(eq + 1);
+        if (value < -1 || value > 48) return ESP_ERR_INVALID_ARG;
+        if (strcmp(tok, "clk") == 0) mic_pins->clk = value;
+        else if (strcmp(tok, "data") == 0) mic_pins->data = value;
+        else if (strcmp(tok, "pwr") == 0) mic_pins->pwr = value;
+        else return ESP_ERR_INVALID_ARG;
+    }
+    return ESP_OK;
+}
+
+void fos_config_format_mic_pins(const fos_mic_pins_t *mic_pins, char *out, size_t out_len)
+{
+    snprintf(out, out_len, "clk=%d,data=%d,pwr=%d", mic_pins->clk, mic_pins->data, mic_pins->pwr);
+}
+
 esp_err_t fos_config_parse_gpio_buttons(const char *spec, fos_config_t *config)
 {
     if (!spec || !spec[0]) {

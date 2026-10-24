@@ -1,6 +1,8 @@
 #ifndef FOS_BOARD_H
 #define FOS_BOARD_H
 
+#include <stdbool.h>
+
 /* What chip and board this firmware is actually running on.
  *
  * The status JSON used to hardcode `"target":"esp32-s3"` and
@@ -43,5 +45,14 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset);
  * `eventMap` in EMBEDDED_HARDWARE_PRESETS (backend/app/tasks/embedded_firmware.py)
  * and the SPA's preset table. */
 const char *fos_board_event_map(const char *hardware_preset);
+
+/* The board's PDM microphone for a hardware preset key: clock, data and the
+ * power-enable GPIO (-1 each when the preset names a board without one, or no
+ * preset at all). The Seeed reTerminal E1001/E1002 carry an MSM261 on
+ * 42/41/38; the E1004 has none (docs/voice-chat.md). Same role as
+ * fos_board_buzzer_pin: the console's `set hardware` applies it and it is the
+ * stored-config default when NVS has no `mic_pins`. Returns true when the
+ * board has one. */
+bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *pwr);
 
 #endif /* FOS_BOARD_H */

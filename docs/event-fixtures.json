@@ -5512,6 +5512,199 @@
       "delivered": []
      }
     ]
+   },
+   {
+    "name": "a press the frame claimed makes no button",
+    "why": "LEFT and RIGHT held together half a second start the voice chat (docs/voice-chat.md): the frame took the presses, so their `up` edges say `claimed` and the button layer makes no `longPress` of a hold that was a sentence, nor a `press` of a short one. The edges themselves are delivered, as every edge is.",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "LEFT",
+        "level": 0,
+        "action": "down",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "prev",
+         "action": "down",
+         "level": 0,
+         "atMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 1040,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 3,
+        "label": "RIGHT",
+        "level": 0,
+        "action": "down",
+        "atMs": 1040
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "role": "next",
+         "action": "down",
+         "level": 0,
+         "atMs": 1040
+        }
+       }
+      ]
+     },
+     {
+      "at": 4000,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "LEFT",
+        "level": 1,
+        "action": "up",
+        "claimed": true,
+        "atMs": 4000
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "prev",
+         "action": "up",
+         "level": 1,
+         "claimed": true,
+         "atMs": 4000,
+         "durationMs": 3000
+        }
+       }
+      ]
+     },
+     {
+      "at": 4100,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 3,
+        "label": "RIGHT",
+        "level": 1,
+        "action": "up",
+        "claimed": true,
+        "atMs": 4100
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 3,
+         "label": "RIGHT",
+         "role": "next",
+         "action": "up",
+         "level": 1,
+         "claimed": true,
+         "atMs": 4100,
+         "durationMs": 3060
+        }
+       }
+      ]
+     },
+     {
+      "at": 5000,
+      "tick": true,
+      "delivered": []
+     }
+    ]
+   },
+   {
+    "name": "a short claimed press makes no press either",
+    "why": "A chord key that let go early still answers to the frame when the chord already started: `claimed` on its `up` ends the key without a `press`, so the scene does not flip a page because the frame started listening.",
+    "steps": [
+     {
+      "at": 1000,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "LEFT",
+        "level": 0,
+        "action": "down",
+        "atMs": 1000
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "prev",
+         "action": "down",
+         "level": 0,
+         "atMs": 1000
+        }
+       }
+      ]
+     },
+     {
+      "at": 1600,
+      "send": {
+       "origin": "driver",
+       "event": "gpio",
+       "payload": {
+        "pin": 4,
+        "label": "LEFT",
+        "level": 1,
+        "action": "up",
+        "claimed": true,
+        "atMs": 1600
+       }
+      },
+      "delivered": [
+       {
+        "event": "gpio",
+        "payload": {
+         "pin": 4,
+         "label": "LEFT",
+         "role": "prev",
+         "action": "up",
+         "level": 1,
+         "claimed": true,
+         "atMs": 1600,
+         "durationMs": 600
+        }
+       }
+      ]
+     },
+     {
+      "at": 2500,
+      "tick": true,
+      "delivered": []
+     }
+    ]
    }
   ]
  }

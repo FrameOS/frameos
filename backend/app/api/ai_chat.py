@@ -47,7 +47,7 @@ from app.utils.repo_apps import repo_app_configs
 from app.utils.request_ip import client_ip_for_request
 from . import api_project
 
-__all__ = ["ai_chat_turn"]
+__all__ = ["ai_chat_turn", "frame_context_block"]
 
 MAX_PROMPT_CHARS = 20_000
 MAX_SCENE_CONTEXT_CHARS = 300_000
@@ -76,7 +76,9 @@ class AiChatRequest(BaseModel):
     editor: Optional[bool] = None
 
 
-def _frame_context(frame: Frame) -> str:
+def frame_context_block(frame: Frame) -> str:
+    """The frame the chat is about, for the model's first message. The voice
+    chat (app/api/embedded_voice.py) sends the same block."""
     lines = ["The user is working with this frame:", f"- Frame id: {frame.id}", f"- Name: {frame.name}"]
     if frame.width and frame.height:
         lines.append(f"- Resolution: {frame.width}x{frame.height}" + (f", rotated {frame.rotate}°" if frame.rotate else ""))
@@ -209,7 +211,7 @@ async def ai_chat_turn(data: AiChatRequest, request: Request, db: Session = Depe
 
     context_parts = []
     if frame is not None:
-        context_parts.append(_frame_context(frame))
+        context_parts.append(frame_context_block(frame))
     else:
         context_parts.append(
             "The user opened this chat from the frames overview, not from one frame, and has no scene editor open. "

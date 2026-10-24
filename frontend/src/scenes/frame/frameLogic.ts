@@ -484,6 +484,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   input_settings: '2026.9.23',
   colors: '2026.10.2',
   event_map: '2026.10.20',
+  voice_chat: '2026.10.20',
 }
 
 // These fields are edited through text inputs, so frameForm may hold strings like
@@ -581,6 +582,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   battery_enable_pin: 'Battery enable GPIO',
   buzzer_pin: 'Button beep GPIO',
   buzzer_tone_hz: 'Button beep tone',
+  voice_chat: 'Voice chat',
   network: 'Network settings',
   agent: 'Remote settings',
   mountpoints: 'Mountpoints',

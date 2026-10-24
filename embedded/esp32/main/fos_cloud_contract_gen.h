@@ -94,6 +94,7 @@ static const fos_rule_t k_fos_rules[] = {
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 100.0f, 10000.0f},
+    {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
 };
 static const fos_rule_key_t k_fos_rule_keys[] = {
     {"name", 11, 0},
@@ -157,8 +158,9 @@ static const fos_contract_setting_t k_fos_contract_settings[] = {
     {"battery_enable_pin", 59, 1, NULL},
     {"buzzer_pin", 60, 0, NULL},
     {"buzzer_tone_hz", 61, 0, NULL},
+    {"voice_chat", 62, 0, NULL},
 };
-#define FOS_CONTRACT_SETTINGS_COUNT 20
+#define FOS_CONTRACT_SETTINGS_COUNT 21
 
 /* Every verb in the contract, with the scope it requires (NULL = none) and
  * whether it is a content verb (refused `backend_managed` when a backend owns the frame). */

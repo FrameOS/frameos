@@ -184,6 +184,8 @@ export async function runAgentLoop({
   signal,
   onRound,
   onToolArgumentError,
+  instructions = buildSystemPrompt(),
+  maxRounds = MAX_TOOL_ROUNDS,
 }: {
   apiKey: string;
   model: string;
@@ -194,8 +196,11 @@ export async function runAgentLoop({
   signal?: AbortSignal;
   onRound?: (report: RoundReport) => void;
   onToolArgumentError?: (report: ToolArgumentErrorReport) => void;
+  // The chat's prompt unless a caller brings its own (the voice chat's,
+  // voice.ts: no editor, four tools, one-sentence answers).
+  instructions?: string;
+  maxRounds?: number;
 }): Promise<AgentLoopResult> {
-  const instructions = buildSystemPrompt();
   // A Photos share link is a credential for a whole album, and album scenes
   // carry one (share-links-in-scenes.ts). The model sees a placeholder in its
   // place, in the context, the history and every tool result; the tool calls
@@ -210,15 +215,17 @@ export async function runAgentLoop({
   if (photoLinksNoted) {
     input.splice(Math.max(0, input.length - 1), 0, userMessage(photoLinkNote));
   }
-  // This file's tools plus the MCP server's (toolContext.extraTools).
-  const tools = [...toolDefinitions, ...(toolContext.extraTools?.definitions ?? [])];
+  // This file's tools plus the MCP server's (toolContext.extraTools), or the
+  // extra tools alone (baseTools: false).
+  const extraDefinitions = toolContext.extraTools?.definitions ?? [];
+  const tools = toolContext.baseTools === false ? extraDefinitions : [...toolDefinitions, ...extraDefinitions];
   const labelFor = (name: string) => toolLabels[name] ?? toolContext.extraTools?.labels[name] ?? name;
   let reply = "";
   let usage: ResponseUsage = emptyUsage();
   let rounds = 0;
   const toolCalls: string[] = [];
 
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+  for (let round = 0; round < maxRounds; round += 1) {
     rounds += 1;
     const startedAt = Date.now();
     const replyBefore = reply.length;

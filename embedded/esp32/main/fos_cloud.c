@@ -493,6 +493,10 @@ static void add_hardware_json(cJSON *parent)
      * panel shows as "on the frame". */
     cJSON_AddNumberToObject(hw, "buzzerPin", config->buzzer_pin);
     cJSON_AddNumberToObject(hw, "buzzerToneHz", config->buzzer_tone_hz);
+    /* Whether this board has a microphone to talk into, and whether the
+     * owner lets it listen (docs/voice-chat.md). */
+    cJSON_AddBoolToObject(hw, "microphone", config->mic_pins.clk >= 0 && config->mic_pins.data >= 0);
+    cJSON_AddBoolToObject(hw, "voiceChat", config->voice_chat);
     /* Local network access (docs/lan-access.md): the cloud has no column of
      * its own and shows what the frame reports here, on every hello and
      * every `state` (one follows each lan_access_set). */
@@ -2506,6 +2510,12 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
     const cJSON *buzzer_tone_hz = cJSON_GetObjectItem(settings, "buzzer_tone_hz");
     if (buzzer_tone_hz != NULL) {
         config->buzzer_tone_hz = (uint16_t)buzzer_tone_hz->valuedouble;
+    }
+    /* Voice chat (docs/voice-chat.md): whether the LEFT+RIGHT chord opens
+     * the microphone. Live: the chord asks on every press. */
+    const cJSON *voice_chat = cJSON_GetObjectItem(settings, "voice_chat");
+    if (voice_chat != NULL) {
+        config->voice_chat = cJSON_IsTrue(voice_chat);
     }
     /* Debug logging: the render loop pushes config->debug_logging into the
      * Nim runtime every pass (fos_client.c), so this applies live. */

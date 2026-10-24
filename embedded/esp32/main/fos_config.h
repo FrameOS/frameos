@@ -59,6 +59,14 @@ typedef struct {
     int8_t pwr; /* -1 = not wired */
 } fos_pins_t;
 
+/* The PDM microphone (docs/voice-chat.md): clock out, data in, and the GPIO
+ * that powers it (-1 = always on). clk or data -1 = no microphone. */
+typedef struct {
+    int8_t clk;
+    int8_t data;
+    int8_t pwr;
+} fos_mic_pins_t;
+
 typedef struct {
     int8_t pin;
     char label[FOS_GPIO_BUTTON_LABEL_LEN];
@@ -164,6 +172,12 @@ typedef struct {
                                     * button press is held. -1 = none / silent */
     uint16_t buzzer_tone_hz;       /* pitch of that tone (default 2000); a refused
                                     * press buzzes a quarter of it */
+    fos_mic_pins_t mic_pins;       /* the PDM microphone (Seeed reTerminal
+                                    * E1001/E1002: clk 42, data 41, pwr 38);
+                                    * clk/data -1 = none */
+    bool voice_chat;               /* holding LEFT+RIGHT talks to the AI chat
+                                    * (docs/voice-chat.md); off keeps the
+                                    * microphone shut. Default on. */
     size_t gpio_button_count;
     fos_gpio_button_t gpio_buttons[FOS_GPIO_BUTTONS_MAX];
     fos_pins_t pins;
@@ -195,6 +209,9 @@ void fos_config_format_pins(const fos_pins_t *pins, char *out, size_t out_len);
 /* "cs=38,sck=39,miso=40,mosi=41" (any subset) */
 esp_err_t fos_config_parse_assets_sd_pins(const char *spec, fos_assets_sd_config_t *assets_sd);
 void fos_config_format_assets_sd_pins(const fos_assets_sd_config_t *assets_sd, char *out, size_t out_len);
+/* "clk=42,data=41,pwr=38" (any subset; pwr -1 = always powered) */
+esp_err_t fos_config_parse_mic_pins(const char *spec, fos_mic_pins_t *mic_pins);
+void fos_config_format_mic_pins(const fos_mic_pins_t *mic_pins, char *out, size_t out_len);
 /* Pins the firmware refuses to hand to a button, the battery ADC read or the
  * divider's enable switch: outside the chip's GPIO range, an SPI flash /
  * PSRAM pad (an input pull-up or an output level on one of those wedges the

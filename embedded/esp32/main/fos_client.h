@@ -39,6 +39,21 @@ void fos_client_request_commands_sync(void);
 void fos_client_wake_for_events(void);
 /* Keep Wi-Fi/HTTP available briefly after a control request on deep-sleep frames. */
 void fos_client_keep_awake_ms(uint32_t ms);
+/* The voice session's hold on the panel (docs/voice-chat.md): from the
+ * chord until the answer, no render starts. What arrives meanwhile — the
+ * chat's scene switch, then the state for the new scene — is applied as it
+ * comes, and ONE render after the release shows it all, with the notice.
+ * The hold ends at the release or after `ms`, whichever is first. */
+void fos_client_hold_render(uint32_t ms);
+/* End the hold and put the pending notice on the panel: with the render the
+ * hold kept back when there is one, else drawn over the last image without
+ * rendering the scene again. Any task. */
+void fos_client_release_render(void);
+/* Queue `text` for the panel: a notice box across the bottom of the image
+ * (docs/voice-chat.md, the voice chat's transcript and reply), drawn at the
+ * release. Shown once: the render after that takes it off. Any task; the
+ * text is copied. */
+void fos_client_show_notice(const char *text);
 /* Stats for /status & console. */
 uint32_t fos_client_render_count(void);
 int64_t fos_client_last_render_ms(void);
