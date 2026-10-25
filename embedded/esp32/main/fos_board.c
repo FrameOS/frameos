@@ -163,9 +163,12 @@ bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *p
 }
 
 /* Boards with a status LED FrameOS can light. Seeed's reTerminal E1001 and
- * E1002 have a green one on GPIO6, the E1004 on GPIO48 (ESP_IO48/LED in its
- * schematic), all three lit by pulling the pin LOW (the Arduino cookbook's
- * "inverted logic"). The red charge LED next to it belongs to the charger. */
+ * E1002 have a green one on GPIO6, lit by pulling the pin LOW (the Arduino
+ * cookbook's "inverted logic"); the E1004's is on GPIO48 behind an NPN
+ * transistor (ESP_IO48/LED, Q4 in its schematic) and lit HIGH — the
+ * cookbook says inverted for it too, the board says otherwise (idled lit
+ * and blinked dark on the bench, 2026-10-25). The red charge LED next to it
+ * belongs to the charger. */
 static const struct {
     const char *preset;
     int pin;
@@ -173,7 +176,7 @@ static const struct {
 } k_leds[] = {
     {"seeed_reterminal_e1001", 6, 1},
     {"seeed_reterminal_e1002", 6, 1},
-    {"seeed_reterminal_e1004", 48, 1},
+    {"seeed_reterminal_e1004", 48, 0},
 };
 
 bool fos_board_led(const char *hardware_preset, int *pin, int *type)

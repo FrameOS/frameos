@@ -185,16 +185,17 @@ static void test_mic_pins(void)
 
 static void test_leds(void)
 {
-    /* The E-series' green LED: GPIO6 on the E1001/E1002, GPIO48 on the E1004,
-     * lit low on all three (Seeed's schematics; the Arduino cookbook's
-     * "inverted logic"). */
+    /* The E-series' green LED: GPIO6 on the E1001/E1002, lit low (Seeed's
+     * schematics; the Arduino cookbook's "inverted logic"); GPIO48 on the
+     * E1004 behind a transistor, lit HIGH (the bench: typed as inverted it
+     * idled lit and blinked dark). */
     int pin = 0, type = 0;
     CHECK(fos_board_led("seeed_reterminal_e1001", &pin, &type), "e1001 has an LED");
     CHECK(pin == 6 && type == 1, "e1001 LED %d/%d", pin, type);
     CHECK(fos_board_led("seeed_reterminal_e1002", &pin, &type), "e1002 has an LED");
     CHECK(pin == 6 && type == 1, "e1002 LED %d/%d", pin, type);
     CHECK(fos_board_led("seeed_reterminal_e1004", &pin, &type), "e1004 has an LED");
-    CHECK(pin == 48 && type == 1, "e1004 LED %d/%d", pin, type);
+    CHECK(pin == 48 && type == 0, "e1004 LED %d/%d", pin, type);
     /* The Sticky's GPIO48 is its buzzer; a board without a known LED gets
      * none, or the buzzer would be lit. */
     CHECK(!fos_board_led("seeed_reterminal_sticky", &pin, &type), "sticky: no LED");

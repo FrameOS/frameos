@@ -324,7 +324,7 @@ export interface FrameType {
     /** The status LED that follows the buzzer's notes (fos_led.c); -1 = none, unset = the board's own. */
     ledPin?: number
     led_pin?: number
-    /** How that LED is lit: gpio (high), gpio_inverted (low; the reTerminal E-series), ws2812 (one pixel). */
+    /** How that LED is lit: gpio (high; the reTerminal E1004), gpio_inverted (low; the E1001/E1002), ws2812 (one pixel). */
     ledType?: 'gpio' | 'gpio_inverted' | 'ws2812'
     led_type?: 'gpio' | 'gpio_inverted' | 'ws2812'
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'

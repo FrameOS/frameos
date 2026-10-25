@@ -212,8 +212,9 @@ for the two Spectra boards most of the bench work runs on:
   (`DEV_SPI_Acquire`) and the sdspi driver takes its turns between. The
   socket is powered through GPIO16 and has a card-detect contact on GPIO15
   (`pwr=16,det=15` in the spec; an empty slot is reported without a bus
-  probe). The green status LED (`led_pin 6`, `led_pin 48` on the E1004,
-  `led_type gpio_inverted`; `fos_led.c`) follows the buzzer's notes, so a
+  probe). The green status LED (`led_pin 6` with `led_type gpio_inverted`;
+  `led_pin 48` with `led_type gpio` on the E1004, whose LED sits behind a
+  transistor; `fos_led.c`) follows the buzzer's notes, so a
   frame with `buzzer_pin -1` still shows its presses and the voice chat's
   cues in light. `i2c_buses` (`fos_i2c.c`, probed at boot and by the console's
   `i2c`) finds the PCF8563 clock (`fos_rtc.c`: the system time is set from it
@@ -235,7 +236,7 @@ for the two Spectra boards most of the bench work runs on:
 | `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" | reTerminal Sticky, 32MB flash |
 | `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash; battery GPIO1 ÷2, switch GPIO21; TF socket on the panel bus (MISO8, CS14, detect 15, power 16); green LED GPIO6 (lit low); I2C 19/20 (PCF8563 clock, SHT40) + 39/40 (SY6974B charger); PDM mic 42/41/38 |
 | `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash; the same peripherals as the E1001 |
-| `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas; TF socket as the E1001/E1002; green LED GPIO48 (lit low); I2C 19/20 carries the clock, the sensor AND the charger (39/40 is its J2 header); no microphone |
+| `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas; TF socket as the E1001/E1002; green LED GPIO48 (lit high); I2C 19/20 carries the clock, the sensor AND the charger (39/40 is its J2 header); no microphone |
 | `elecrow_crowpanel_5in79` | S3 | EPD_5in79 5.79" 4-gray | CrowPanel, dual SSD1683 |
 
 The TRMNL X (10.3" 1872×1404 parallel e-ink over EPDIY/FastEPD) is not yet

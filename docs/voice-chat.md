@@ -74,7 +74,7 @@ microphone path (yet).
   release (or the full buffer), so a glance says the frame is listening; then
   it goes back to following the notes. A microphone and an LED are a complete
   set of cues; the LED never ends up in the recording. The reTerminal
-  E1001/E1002 have one on GPIO6, the E1004 on GPIO48, lit low.
+  E1001/E1002 have one on GPIO6 (lit low), the E1004 on GPIO48 (lit high).
 - **Sounds** (`fos_buzzer.c`, all relative to `buzzer_tone_hz`):
   listening = four rising notes and a held top (the "sparkle", about 300 ms);
   sent = two quick rising notes; then, every two seconds until the answer, a

@@ -362,8 +362,9 @@ EMBEDDED_SEEED_RETERMINAL_MIC = {
     "micDataPin": 41,
     "micPwrPin": 38,
 }
-# The E-series' green status LED, lit low (Seeed's schematics: ESP_IO6/LED on
-# the E1001/E1002, ESP_IO48/LED on the E1004). It follows the buzzer's notes
+# The E-series' green status LED: ESP_IO6/LED on the E1001/E1002, lit low;
+# ESP_IO48/LED on the E1004 behind a transistor, lit high (the bench board
+# idled lit when typed as inverted). It follows the buzzer's notes
 # (fos_led.c), so a frame with the buzzer silenced still shows its presses
 # and the voice chat's cues. fos_board.c's k_leds is the device copy.
 # The I2C peripheral buses the firmware probes at boot (fos_i2c.c): the
@@ -382,7 +383,7 @@ EMBEDDED_SEEED_RETERMINAL_E10XX_LED = {
 }
 EMBEDDED_SEEED_RETERMINAL_E1004_LED = {
     "ledPin": 48,
-    "ledType": "gpio_inverted",
+    "ledType": "gpio",
 }
 
 

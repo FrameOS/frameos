@@ -59,7 +59,8 @@ bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *p
 /* The board's status LED for a hardware preset key: its GPIO and how it is
  * lit (fos_led_type_t: 0 high, 1 low, 2 a WS2812 pixel), -1 / 0 for a board
  * without one. The reTerminal E1001/E1002 have a green LED on GPIO6, the
- * E1004 on GPIO48, all lit low (Seeed's schematics and Arduino cookbook).
+ * E1004 on GPIO48; the first two lit low, the E1004's lit high (Seeed's
+ * schematics, and the E1004 on the bench).
  * Same role as fos_board_buzzer_pin: `set hardware` applies it and it is the
  * stored-config default when NVS has no `led` key. Keep in step with
  * `ledPin` / `ledType` in EMBEDDED_HARDWARE_PRESETS. */

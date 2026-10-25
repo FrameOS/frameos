@@ -750,7 +750,7 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
         "maxFrequencyKHz": 20000,
     }
     assert frame.device_config["ledPin"] == 48
-    assert frame.device_config["ledType"] == "gpio_inverted"
+    assert frame.device_config["ledType"] == "gpio"
     # The arrows held walk the scene list (docs/events.md "Event map"), by
     # label — this board's pins are swapped, the rules are not. Seeded once:
     # a frame whose owner cleared the map keeps it cleared.
@@ -777,11 +777,12 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     assert settings["panel"] == "EPD_13in3e"
     assert settings["pins"] == "rst=38,dc=11,cs=10,cs2=2,busy=13,sck=7,mosi=9,pwr=12"
     assert settings["render_mode"] == "local"
-    # The same TF socket as the E1001/E1002, the LED on GPIO48.
+    # The same TF socket as the E1001/E1002, the LED on GPIO48 (lit high, not
+    # low like the E1001/E1002's).
     assert settings["assets_sd_pins"] == "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"
     assert settings["assets_sd"] == "1"
     assert settings["led_pin"] == "48"
-    assert settings["led_type"] == "gpio_inverted"
+    assert settings["led_type"] == "gpio"
     # The console has a `set` key for every battery/power value the image
     # would bake in, so the generic-image path provisions the same frame.
     assert settings["battery_pin"] == "1"

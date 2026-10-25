@@ -323,13 +323,13 @@
       "parity": {"only": "esp32", "why": "The PDM microphone and the voice relay live in the ESP32 firmware (fos_mic.c, fos_voice.c); no Pi frame has a microphone path."}
     },
     "led_pin": {
-      "$comment": "The board's status LED (reTerminal E1001/E1002: 6, E1004: 48, all lit low: led_type gpio_inverted). It follows the buzzer: lit for every note the button task and the voice chat sound, dark for a rest and after the last, so a frame without a buzzer (or with buzzer_pin -1) still shows a press, a hold and the voice chat's cues; a microphone next to an LED needs no buzzer. -1 = none. Applied live (the next note reads it). Same reserved-pin refusal as battery_pin; the firmware also leaves a pin alone that another peripheral owns. Reported as hardware.ledPin / hardware.ledType.",
+      "$comment": "The board's status LED (reTerminal E1001/E1002: 6, lit low: led_type gpio_inverted; E1004: 48, lit high: gpio). It follows the buzzer: lit for every note the button task and the voice chat sound, dark for a rest and after the last, so a frame without a buzzer (or with buzzer_pin -1) still shows a press, a hold and the voice chat's cues; a microphone next to an LED needs no buzzer. -1 = none. Applied live (the next note reads it). Same reserved-pin refusal as battery_pin; the firmware also leaves a pin alone that another peripheral owns. Reported as hardware.ledPin / hardware.ledType.",
       "rule": {"type": "int", "min": -1, "max": 48},
       "profiles": {"esp32": {"since": "2026.10.20"}},
       "parity": {"only": "esp32", "why": "The LED follows the ESP32 firmware's buzzer notes (fos_led.c, fos_buzzer.c); no Pi frame preset has a status LED and the Linux runtime drives no GPIO outputs."}
     },
     "led_type": {
-      "$comment": "How led_pin is lit: `gpio` (lit high), `gpio_inverted` (lit low; the reTerminal E-series), `ws2812` (one addressable RGB pixel fed from the pin, shown as a soft white). Applied live with led_pin.",
+      "$comment": "How led_pin is lit: `gpio` (lit high), `gpio_inverted` (lit low; the reTerminal E1001/E1002), `ws2812` (one addressable RGB pixel fed from the pin, shown as a soft white). Applied live with led_pin.",
       "rule": {"type": "string", "enum": ["gpio", "gpio_inverted", "ws2812"]},
       "profiles": {"esp32": {"since": "2026.10.20"}},
       "parity": {"only": "esp32", "why": "The polarity and kind of led_pin, which only the ESP32 firmware lights (fos_led.c)."}

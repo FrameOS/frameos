@@ -364,7 +364,7 @@ function ButtonBeepField(): JSX.Element | null {
  * the buzzer: lit for every note a press, a hold or the voice chat sounds,
  * dark in between — so a frame with the beep off, or a board without a
  * buzzer, still shows what the frame heard. Empty leaves the board's own
- * (the reTerminal E1001/E1002: 6, the E1004: 48, lit low), -1 = no LED.
+ * (the reTerminal E1001/E1002: 6 lit low, the E1004: 48 lit high), -1 = no LED.
  * Applied live.
  */
 function StatusLedField(): JSX.Element | null {
@@ -376,8 +376,8 @@ function StatusLedField(): JSX.Element | null {
   const pinPlaceholder =
     reportedPin === undefined ? 'Board default, -1 = none' : reportedPin < 0 ? 'None on the frame' : `${reportedPin} on the frame`
   const typeLabels: Record<StatusLedType, string> = {
-    gpio: 'GPIO, lit high',
-    gpio_inverted: 'GPIO, lit low (reTerminal E-series)',
+    gpio: 'GPIO, lit high (reTerminal E1004)',
+    gpio_inverted: 'GPIO, lit low (reTerminal E1001/E1002)',
     ws2812: 'WS2812 addressable pixel',
   }
   const typePlaceholder = reportedType ? `${typeLabels[reportedType]} on the frame` : 'Board default'
@@ -392,8 +392,8 @@ function StatusLedField(): JSX.Element | null {
                 <>
                   The board&apos;s status LED lights with every beep: a press, each second of a hold, and the voice
                   chat&apos;s listening, waiting and answer cues. With the button beep set to -1 it is the only cue, which
-                  suits a frame you talk to. GPIO 6 on the Seeed reTerminal E1001 and E1002, 48 on the E1004, all lit
-                  low. Set -1 for no LED. Applies without a restart.
+                  suits a frame you talk to. GPIO 6 on the Seeed reTerminal E1001 and E1002 (lit low), 48 on the E1004 (lit
+                  high). Set -1 for no LED. Applies without a restart.
                 </>
               )
             }
