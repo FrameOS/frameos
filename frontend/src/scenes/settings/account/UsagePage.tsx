@@ -104,8 +104,8 @@ const planBaseFeatures: Record<string, string[]> = {
     'The scene store and AI scene chat',
     'Photo albums and backups',
   ],
-  plus: ['Everything in Free'],
-  business: ['Everything in Plus'],
+  private: ['Everything in Free'],
+  business: ['Everything in Private'],
 }
 
 // A price list rolls over to GB at 1000 MB, so ten times 100 MB reads "1.0 GB".
@@ -403,8 +403,8 @@ function PricingCard({ ai }: { ai: AiUsage }): JSX.Element {
   return (
     <Box className="space-y-3 p-4 text-sm leading-relaxed">
       <p>
-        FrameOS Cloud is in beta. While it is, everything is free: storage, frames and AI usage. Nothing is charged, and
-        you will be told before that changes.
+        FrameOS Cloud is in beta. The Free plan costs nothing, and while the beta lasts neither does AI usage. The paid
+        plans above are activated by support for now, and you will be told before anything is charged.
       </p>
       <p>
         Once billing starts, AI usage will be priced per request: what the model provider charges for the tokens it
@@ -439,32 +439,14 @@ function PricingCard({ ai }: { ai: AiUsage }): JSX.Element {
 // works. Every number comes from the same accountUsage() the quota refusals
 // read.
 export function UsagePage(): JSX.Element {
-  const { usage, usageLoading, ai, aiLoading, contactEmail } = useValues(usageLogic)
+  const { usage, usageLoading, ai, aiLoading } = useValues(usageLogic)
   return (
     <div className="space-y-8">
       <AccountPageHeader page="usage" />
       <AccountSection title="Storage and frames">
         <Box className="p-4">{usage ? <StorageMeters usage={usage} /> : usageLoading ? <Spinner /> : null}</Box>
       </AccountSection>
-      <AccountSection
-        title="Need more?"
-        description={
-          <>
-            Plus and Business grow with the slider. Each dollar a month adds one person, one virtual frame, and another
-            free plan's worth of frames and storage.
-            {contactEmail ? (
-              <>
-                {' '}
-                Questions? Write to{' '}
-                <a className="frameos-link hover:underline" href={`mailto:${contactEmail}`}>
-                  {contactEmail}
-                </a>
-                .
-              </>
-            ) : null}
-          </>
-        }
-      >
+      <AccountSection title="Need more?">
         <PlanCards />
       </AccountSection>
       <AccountSection title="AI usage">{ai ? <AiUsageCard ai={ai} /> : aiLoading ? <Spinner /> : null}</AccountSection>

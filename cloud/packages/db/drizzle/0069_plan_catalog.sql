@@ -1,5 +1,5 @@
 -- The plan catalog (cloud/docs/accounting-todo.md §0.1, revised 2026-10-25):
--- Free, Plus ($2 to $49 a month) and Business ($10 to $499). The paid tiers
+-- Free, Private ($2 to $29 a month) and Business ($49 to $499). The paid tiers
 -- are a price list in apps/auth-web/src/lib/plan-catalog.ts and get their
 -- billing_plans rows when the first one is activated.
 --

@@ -71,12 +71,12 @@ export const maxFramesPerAccount = (() => {
   const parsed = raw ? Number(raw) : Number.NaN;
   if (raw && (!Number.isInteger(parsed) || parsed < 1)) {
     logWarn("usage.invalid_limit_env", {
-      fallback: 50,
+      fallback: 20,
       name: "FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT",
       value: raw,
     });
   }
-  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 50;
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 20;
 })();
 
 // Boards below the capability line — no PSRAM, so no on-device renderer:
@@ -525,7 +525,7 @@ export async function accountUsage(
       bytes: Math.round(photos),
       max_bytes: photoQuota,
     },
-    // Which plan these limits came from, so a UI can say "on the Plus plan"
+    // Which plan these limits came from, so a UI can say "on the Private plan"
     // beside the numbers rather than presenting them as laws of nature.
     plan: {
       code: limits.plan.code,

@@ -607,7 +607,7 @@ the complete app on one localhost port exactly as before.
 Per-account limits for cloud-managed frames, all optional:
 
 ```text
-FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT=50       # enrolled frames
+FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT=20       # enrolled frames
 FRAMEOS_CLOUD_MAX_CLAIM_TOKENS_PER_ACCOUNT=50 # outstanding unused claim codes
 FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS=24        # how long a claim code lives
 ```

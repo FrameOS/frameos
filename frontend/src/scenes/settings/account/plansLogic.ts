@@ -4,7 +4,7 @@ import { loaders } from 'kea-loaders'
 import { apiFetch } from '../../../utils/apiFetch'
 import { usageLogic } from './usageLogic'
 
-// The Usage page's plan cards: Free, Plus and Business from GET
+// The Usage page's plan cards: Free, Private and Business from GET
 // /api/account/plan (the cloud's plan-catalog.ts), and where each card's
 // price slider sits. Only Free can be chosen here; the others are activated
 // by support, so their button writes to the support address.
@@ -45,7 +45,7 @@ export interface PlanCard {
   /** The slider's ends. */
   fromPriceMicros: string
   toPriceMicros: string
-  /** What this stop has that the group before it does not ("Everything in Plus", then these). */
+  /** What this stop has that the group before it does not ("Everything in Private", then these). */
   features: string[]
   group: PlanGroup
   /** Features a higher stop of this group adds, with the first price that has them. */

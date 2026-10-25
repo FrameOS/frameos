@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(
     {
       cancel_at: current.cancelAt?.toISOString() ?? null,
-      // Free, Plus and Business as the usage page draws them (plan-catalog.ts).
+      // Free, Private and Business as the usage page draws them (plan-catalog.ts).
       // `plans` below is the billing_plans rows, which a paid stop joins once
       // support activates it.
       catalog: planCatalog(limitsForPlan(free), current.plan.code),

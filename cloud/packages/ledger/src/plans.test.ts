@@ -12,7 +12,7 @@ describe("the free plan fallback", () => {
       backupBytes: 100 * 1024 * 1024,
       cloudRenderedFrames: 0,
       frameLogBytes: 100 * 1024 * 1024,
-      frames: 50,
+      frames: 20,
       photoBytes: null,
       privateSceneBytes: 100 * 1024 * 1024,
     });

@@ -322,7 +322,7 @@ describe("account storage usage and quotas", () => {
 
   // The plan cards on the usage page: Free is the account's own limits, the
   // paid stops multiply them, and only Free can be chosen.
-  it("offers Free, Plus and Business built from the free plan's own numbers", async () => {
+  it("offers Free, Private and Business built from the free plan's own numbers", async () => {
     const accountId = await signIn();
     const usage = await accountUsage(db, accountId);
     expect(usage.plan.name).toBe("Free");
@@ -333,7 +333,7 @@ describe("account storage usage and quotas", () => {
     const { catalog } = (await response.json()) as { catalog: PlanCatalog };
     expect(catalog.groups.map((group) => [group.key, group.available])).toEqual([
       ["free", true],
-      ["plus", false],
+      ["private", false],
       ["business", false],
     ]);
     const free = catalog.groups[0]?.stops[0];
@@ -347,11 +347,11 @@ describe("account storage usage and quotas", () => {
       photo_bytes: usage.photos.max_bytes,
       private_scene_bytes: usage.scenes.private_max_bytes,
     });
-    const plus = catalog.groups[1]?.stops[0];
-    expect(plus).toMatchObject({ code: "plus-2", current: false, price_micros: "2000000" });
-    expect(plus?.limits).toMatchObject({
+    const privatePlan = catalog.groups[1]?.stops[0];
+    expect(privatePlan).toMatchObject({ code: "private-2", current: false, price_micros: "2000000" });
+    expect(privatePlan?.limits).toMatchObject({
       cloud_rendered_frames: 2,
-      frames: 2 * usage.frames.max_count,
+      frames: 40,
       people: 2,
       photo_bytes: 2 * usage.photos.max_bytes,
     });

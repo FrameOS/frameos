@@ -1,8 +1,9 @@
 // The plans the usage page offers (cloud/docs/accounting-todo.md §0.1):
-// Free, Plus and Business. One rule sets every number: a paid plan at $N a
-// month is N people, N virtual frames, and N times the free plan's frames
-// and storage. Business has the same numbers at the same price and adds its
-// own features, so the higher tiers buy capacity, never features.
+// Free, Private and Business. A paid plan at $N a month is N people, N
+// virtual frames and N times the free plan's storage. Frames grow slower,
+// by a count each stop names: 40 at $2 but 199 at $49, not 980. Business
+// follows the same rules from $49 up and adds its own features, so the
+// higher tiers buy capacity, never features.
 //
 // Only Free is live. Support activates a paid tier by giving the account a
 // billing_plans row with the stop's code and these limits as entitlements
@@ -19,7 +20,15 @@ export type PlanFeature =
   | "priority_support"
   | "dedicated_support";
 
-export type PlanGroupKey = "free" | "plus" | "business";
+export type PlanGroupKey = "free" | "private" | "business";
+
+export interface PlanStopDefinition {
+  // Frames of your own hardware. Free has none of its own: it is the
+  // deployment's number, and no paid stop shows less than that.
+  frames?: number;
+  // Whole dollars a month.
+  usd: number;
+}
 
 interface PlanGroupDefinition {
   // Features every stop of the group has.
@@ -28,24 +37,33 @@ interface PlanGroupDefinition {
   featuresFrom?: { feature: PlanFeature; usd: number }[];
   key: PlanGroupKey;
   name: string;
-  // The slider's stops, in whole dollars a month.
-  pricesUsd: number[];
+  // The slider's stops, cheapest first.
+  stops: PlanStopDefinition[];
 }
 
 export const planGroups: PlanGroupDefinition[] = [
-  { features: [], key: "free", name: "Free", pricesUsd: [0] },
+  { features: [], key: "free", name: "Free", stops: [{ usd: 0 }] },
   {
     features: ["share_frames", "virtual_frames"],
-    key: "plus",
-    name: "Plus",
-    pricesUsd: [2, 3, 5, 10, 20, 49],
+    key: "private",
+    name: "Private",
+    stops: [
+      { frames: 40, usd: 2 },
+      { frames: 80, usd: 9 },
+      { frames: 160, usd: 29 },
+    ],
   },
   {
     features: ["share_frames", "virtual_frames", "sso", "priority_support"],
     featuresFrom: [{ feature: "dedicated_support", usd: 499 }],
     key: "business",
     name: "Business",
-    pricesUsd: [10, 25, 49, 99, 199, 499],
+    stops: [
+      { frames: 199, usd: 49 },
+      { frames: 299, usd: 99 },
+      { frames: 499, usd: 199 },
+      { frames: 999, usd: 499 },
+    ],
   },
 ];
 
@@ -53,8 +71,8 @@ export interface CatalogLimits extends PlanLimits {
   people: number;
 }
 
-/** The numbers a plan at `usd` a month comes with, from the free plan's. */
-export function catalogLimits(free: PlanLimits, usd: number): CatalogLimits {
+/** The numbers a stop comes with, from the free plan's. */
+export function catalogLimits(free: PlanLimits, { frames, usd }: PlanStopDefinition): CatalogLimits {
   if (usd <= 0) {
     return { ...free, people: 1 };
   }
@@ -62,7 +80,7 @@ export function catalogLimits(free: PlanLimits, usd: number): CatalogLimits {
     backupBytes: free.backupBytes * usd,
     cloudRenderedFrames: usd,
     frameLogBytes: free.frameLogBytes * usd,
-    frames: free.frames * usd,
+    frames: Math.max(free.frames, frames ?? 0),
     people: usd,
     photoBytes: free.photoBytes * usd,
     privateSceneBytes: free.privateSceneBytes * usd,
@@ -85,9 +103,10 @@ export function planCatalog(free: PlanLimits, currentPlanCode: string) {
       available: group.key === "free",
       key: group.key,
       name: group.name,
-      stops: group.pricesUsd.map((usd) => {
+      stops: group.stops.map((stop) => {
+        const { usd } = stop;
         const code = catalogPlanCode(group.key, usd);
-        const limits = catalogLimits(free, usd);
+        const limits = catalogLimits(free, stop);
         return {
           code,
           current: code === currentPlanCode,
