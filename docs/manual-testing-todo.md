@@ -170,9 +170,14 @@ Still open:
   -1 darkens it live.
 - [ ] **`deep_sleep_on_battery 1` with USB in** stays awake, and sleeps
   between renders once unplugged (the switch is off on the bench frame).
-- [ ] **A real power cut** (the rear switch, a minute, no Wi-Fi): the boot
-  log says `rtc: clock set from the PCF8563` with the right time and the
-  schedule runs before SNTP (the reset-button path passed).
+- [ ] **The RTC through a real power cut.** Twice on the bench E1002 the rear
+  switch (30-60 s off) came back with `{"event":"rtc","action":"boot",
+  "loaded":false,"reason":"not_set"}`: the PCF8563 raised its integrity flag,
+  so it lost power with the board; the firmware waited for SNTP and wrote it
+  back, as designed. A reset that keeps power (`esptool`, the reset button)
+  loads the clock from the chip every time. Check the CR1220 holder on that
+  board (the E1002 V1.2 schematic feeds RTC_VDD from the cell through a
+  diode); with a cell in, the cold boot should say `loaded:true`.
 - [ ] **The E1004**: the LED on GPIO48 (the Sticky's buzzer pin: `set
   hardware seeed_reterminal_sticky` on an E1004 must light nothing odd), the
   charger on the 19/20 bus, the 13.3" 30 s refresh with an SD read in flight.
