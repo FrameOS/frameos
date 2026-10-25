@@ -113,3 +113,10 @@ CONFIG_FATFS_MAX_LFN=255
 # resolved: lwIP asks this hook before every DNS query, and the task holding a
 # pin gets the checked address back instead of a second (rebindable) answer.
 CONFIG_LWIP_HOOK_NETCONN_EXT_RESOLVE_CUSTOM=y
+
+# The RGB LCD of the SenseCAP Indicator (lcd_st7701s_rgb.c): restart the
+# scan-out DMA at every vertical blank, so a frame the DMA could not feed in
+# time (a flash write holds its fill interrupt) is one disturbed frame, not a
+# picture that creeps down the glass until the next reboot. No effect on
+# chips without the RGB LCD peripheral.
+CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
