@@ -1042,6 +1042,8 @@ proc jsGetAppContext(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   of "image":
     if e.context.hasImage and not e.context.image.isNil:
       if e.contextImageJson.isNil:
+        # The app may read or draw on the canvas: it holds the background.
+        paintPendingBackground(e.context)
         e.contextImageJson = e.runtime.storeTransientImageJson(e.context.image)
       return jsonToJS(ctx, e.contextImageJson)
     return jsUndefSentinel(ctx)

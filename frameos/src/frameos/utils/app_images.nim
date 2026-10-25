@@ -11,6 +11,27 @@ proc contextImage*(context: ExecutionContext): Image {.inline.} =
     return context.image
   nil
 
+proc paintPendingBackground*(context: ExecutionContext) =
+  ## The scene's background, owed since the render began
+  ## (ExecutionContext.backgroundPending): painted now, before anything is
+  ## drawn over it.
+  if context.isNil or not context.backgroundPending:
+    return
+  context.backgroundPending = false
+  if context.hasImage and not context.image.isNil:
+    payBackground(context.image, context.backgroundColor)
+
+proc takeOwedBackground*(context: ExecutionContext, target: Image): Option[Color] =
+  ## For a producer that took the live canvas with `deferBackground`: the
+  ## scene background it now owes `target` — to paint before its first paint,
+  ## or to waive when that paint covers every pixel opaquely. The debt moves
+  ## from the context to the caller. none() when nothing is owed there.
+  if context.isNil or not context.backgroundPending or target.isNil or context.image.isNil or
+      cast[pointer](target) != cast[pointer](context.image):
+    return none(Color)
+  context.backgroundPending = false
+  some(context.backgroundColor)
+
 proc contextImageWidth*(self: AppRoot, context: ExecutionContext): int {.inline.} =
   let image = context.contextImage()
   if not image.isNil:
@@ -27,6 +48,9 @@ proc contextImageTarget*(self: AppRoot, context: ExecutionContext,
     fallbackWidth = 0, fallbackHeight = 0): Image =
   let image = context.contextImage()
   if not image.isNil:
+    # The caller draws into the live canvas: the background still owed goes
+    # down first.
+    paintPendingBackground(context)
     return image
   let width =
     if fallbackWidth > 0: fallbackWidth
@@ -44,6 +68,9 @@ proc renderErrorForContext*(self: AppRoot, context: ExecutionContext, message: s
   when defined(frameosEmbedded):
     let target = context.contextImage()
     if not target.isNil:
+      # Painted before the error, or the consumer would pay the owed
+      # background over it afterwards.
+      paintPendingBackground(context)
       renderErrorInto(target, target.width, target.height, message)
       return target
   renderError(self.contextImageWidth(context), self.contextImageHeight(context), message)
@@ -92,27 +119,6 @@ proc addressedTarget*(self: AppRoot, context: ExecutionContext):
       (self.isNil or self.nodeId != context.decodeBoundsNodeId):
     return (0, 0, "")
   return (context.decodeBoundsWidth, context.decodeBoundsHeight, "")
-
-proc paintPendingBackground*(context: ExecutionContext) =
-  ## The scene's background, owed since the render began
-  ## (ExecutionContext.backgroundPending): painted now, before anything is
-  ## drawn over it.
-  if context.isNil or not context.backgroundPending:
-    return
-  context.backgroundPending = false
-  if context.hasImage and not context.image.isNil:
-    payBackground(context.image, context.backgroundColor)
-
-proc takeOwedBackground*(context: ExecutionContext, target: Image): Option[Color] =
-  ## For a producer that took the live canvas with `deferBackground`: the
-  ## scene background it now owes `target` — to paint before its first paint,
-  ## or to waive when that paint covers every pixel opaquely. The debt moves
-  ## from the context to the caller. none() when nothing is owed there.
-  if context.isNil or not context.backgroundPending or target.isNil or context.image.isNil or
-      cast[pointer](target) != cast[pointer](context.image):
-    return none(Color)
-  context.backgroundPending = false
-  some(context.backgroundColor)
 
 proc takeDecodeTarget*(self: AppRoot, context: ExecutionContext, deferBackground = false):
     tuple[image: Image, scalingMode: string] =
