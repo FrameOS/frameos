@@ -195,7 +195,14 @@ file has always had both run over it whatever it was called. Code nodes and
 inline expressions always get both (`runtime.snippetEvalFlags`).
 
 The JSX factory is the FrameOS classic runtime the prelude defines:
-`__frameosJsx(type, props, ...children)` and `__frameosFragment`.
+`__frameosJsx(type, props, ...children)` and `__frameosFragment`. It makes
+plain `{type, props}` objects and calls a function component on the spot, so
+a tree an app returns holds only elements. When `get()` returns one as an
+image, `jsx.nim` reads it straight off the JS objects into pixie's
+`SvgNode`s (no JSON, no markup) and `app_runtime.imageFromJsx` draws an
+`<svg>` as it is or lays any other element out as a UI first
+(`frameos/ui/layout.nim`, `docs/jsx-ui.md`). `<image>` stays the plain
+canvas spec.
 
 ## Source Locations
 
@@ -215,6 +222,7 @@ Focused tests for this directory live in:
 - `src/frameos/js_runtime/tests/test_scene_runtime_cleanup.nim`
 - `src/frameos/js_runtime/tests/test_source_map_lines.nim`
 - `src/frameos/js_runtime/tests/test_js_app_tests.nim` (the test harness, and every repo app's own tests)
+- `src/frameos/js_runtime/tests/test_jsx_ui.nim` (JSX returned as an image: `<svg>` and UIs)
 
 TypeScript and JSX parsing itself is tested in the quickts repository
 (`make test-quickts` there). Add a case there when a construct fails to parse.

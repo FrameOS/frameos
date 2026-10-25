@@ -275,6 +275,23 @@
   on Linux and in the preview, `fos_events.c` on the ESP32. Keep the two
   rules alike.
 
+## JSX from JS apps: `docs/jsx-ui.md`
+
+- A `.tsx` app's `get()` may return JSX as its image. `js_runtime/jsx.nim`
+  reads the tree straight off the JS objects into pixie's `SvgNode`s (no
+  JSON, no markup); an `<svg>` is drawn as it is, anything else is a UI that
+  `ui/layout.nim` lays out (block, flex, grid, absolute; Tailwind classes read
+  by `ui/tailwind.nim`) and **emits as SVG nodes**. There is one rasterizer:
+  never paint a UI some other way, or it loses the damage repaint and the
+  background waiver (`utils/svg_frames.nim`). pixie's SVG input is the
+  `SvgNode` tree, markup included (`parseSvgNodes`).
+- Flash is the budget: the layer cost +36.6 KB on the ESP32-S3 image. A new
+  class or element goes in `tailwind.nim` / `layout.nim`, `docs/jsx-ui.md`
+  and the scene guide's JSX section, and the PR says what it cost (the
+  firmware-size comment). Keep the reader allocation-free (classes read in
+  place against packed word lists, `boundChecks`/`raises` pushed off): the
+  first straightforward version was twice the size.
+
 ## Real-time rendering: `docs/realtime-rendering.md`
 
 - A scene below a one-second `refreshInterval`, on an LCD, **animates** on the
