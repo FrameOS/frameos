@@ -227,12 +227,18 @@ jobs:
                 embedded/esp32/main/fos_voice_hold.c embedded/esp32/main/tests/test_fos_voice_hold.c \
                 -o /tmp/test_fos_voice_hold
               /tmp/test_fos_voice_hold
-              # The charger register decode, the RTC conversions and the fuel gauge decode, pure.
+              # The charger register decode, the RTC conversions, the fuel gauge decode
+              # and the climate sensor decode, pure.
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
                 embedded/esp32/main/fos_charger.c embedded/esp32/main/fos_rtc.c embedded/esp32/main/fos_gauge.c \
-                embedded/esp32/main/tests/test_fos_i2c_devices.c \
+                embedded/esp32/main/fos_climate.c embedded/esp32/main/tests/test_fos_i2c_devices.c \
                 -o /tmp/test_fos_i2c_devices
               /tmp/test_fos_i2c_devices
+              # The IT8951 panel rows (the reTerminal E1003, the Waveshare 10.3 inch HAT), pure.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/components/frameos_display/include \
+                embedded/esp32/components/frameos_display/it8951.c embedded/esp32/main/tests/test_fos_it8951.c \
+                -o /tmp/test_fos_it8951
+              /tmp/test_fos_it8951
               # The touch panel report decode and wire scaling, pure.
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
                 embedded/esp32/main/fos_touch.c embedded/esp32/main/tests/test_fos_touch.c \
