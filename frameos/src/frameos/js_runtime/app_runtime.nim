@@ -1749,10 +1749,18 @@ proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: string
       if not target.isNil and renderSvgIntoTarget(svg, target):
         return target
     return nil
-  let (target, _) = owner.takeDecodeTarget(context)
+  # The live canvas may still owe the scene's background: an SVG that begins
+  # with a full-canvas opaque rect waives it (a whole pass over the canvas
+  # saved), any other pays it first (renderSvgIntoTarget).
+  let (target, _) = owner.takeDecodeTarget(context, deferBackground = true)
   if target.isNil:
     return nil
-  if renderSvgIntoTargetWithDegrade(svg, target):
+  var owed = takeOwedBackground(context, target)
+  let rendered = renderSvgIntoTargetWithDegrade(svg, target, owed)
+  if owed.isSome:
+    # Nothing could be drawn: the consumer paints over a background.
+    payBackground(target, owed.get())
+  if rendered:
     return target
   nil
 

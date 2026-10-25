@@ -1,3 +1,4 @@
+import std/options
 import pixie
 
 import frameos/apps
@@ -92,7 +93,28 @@ proc addressedTarget*(self: AppRoot, context: ExecutionContext):
     return (0, 0, "")
   return (context.decodeBoundsWidth, context.decodeBoundsHeight, "")
 
-proc takeDecodeTarget*(self: AppRoot, context: ExecutionContext):
+proc paintPendingBackground*(context: ExecutionContext) =
+  ## The scene's background, owed since the render began
+  ## (ExecutionContext.backgroundPending): painted now, before anything is
+  ## drawn over it.
+  if context.isNil or not context.backgroundPending:
+    return
+  context.backgroundPending = false
+  if context.hasImage and not context.image.isNil:
+    payBackground(context.image, context.backgroundColor)
+
+proc takeOwedBackground*(context: ExecutionContext, target: Image): Option[Color] =
+  ## For a producer that took the live canvas with `deferBackground`: the
+  ## scene background it now owes `target` — to paint before its first paint,
+  ## or to waive when that paint covers every pixel opaquely. The debt moves
+  ## from the context to the caller. none() when nothing is owed there.
+  if context.isNil or not context.backgroundPending or target.isNil or context.image.isNil or
+      cast[pointer](target) != cast[pointer](context.image):
+    return none(Color)
+  context.backgroundPending = false
+  some(context.backgroundColor)
+
+proc takeDecodeTarget*(self: AppRoot, context: ExecutionContext, deferBackground = false):
     tuple[image: Image, scalingMode: string] =
   ## The producer's half of the `intoTarget` handshake: consumes the target the
   ## planner addressed to this node, in either form — the live canvas
@@ -119,6 +141,11 @@ proc takeDecodeTarget*(self: AppRoot, context: ExecutionContext):
     return (nil, "")
   if not self.isNil:
     context.decodeTargetClaimedBy = self.nodeId
+  # The live canvas still owes the scene's background: painted before the
+  # producer draws into it, unless the producer settles it itself
+  # (`deferBackground` + takeOwedBackground).
+  if not deferBackground and not context.decodeTargetImage.isNil:
+    paintPendingBackground(context)
   context.decodeTargetImage = nil
   context.decodeTargetScalingMode = ""
   context.decodeTargetWidth = 0

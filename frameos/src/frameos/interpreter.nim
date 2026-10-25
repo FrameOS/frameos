@@ -18,6 +18,7 @@ import frameos/planner
 import frameos/refresh_interval
 import frameos/runtime_diagnostics
 import frameos/scene_rhythm
+from frameos/utils/app_images import paintPendingBackground
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times, math
 import apps/apps
 
@@ -588,6 +589,14 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     if TRACING:
       self.logger.log(%*{"event": "interpreter:runNode", "sceneId": self.id, "nodeId": currentNodeId.int,
         "nodeType": nodeType})
+    # A node in the flow may draw on the canvas: the background still owed
+    # goes down first. A data node draws there only through a decode target,
+    # which pays it on the way (takeDecodeTarget); the consumer of an image
+    # fusion holds it until its producer has had the chance to waive it, and
+    # pays it after its inputs (below).
+    if not asDataNode and context.backgroundPending and
+        not (nodeType == "app" and self.imageFusionPlans.hasKey(currentNodeId)):
+      paintPendingBackground(context)
     case nodeType:
     of "app":
       let keyword = currentNode.data{"keyword"}.getStr()
@@ -758,6 +767,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                   if context.hasImage and not context.image.isNil:
                     setInterpretedAppField(keyword, app, inputName,
                       Value(kind: fkImage, img: context.image))
+                    paintPendingBackground(context)
                     renderErrorInto(context.image, context.image.width,
                       context.image.height, $e.msg)
                   else:
@@ -807,6 +817,9 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         context.decodeTargetNodeId = 0.NodeId
         context.decodeTargetOwned = false
         context.inPlaceImageNodes = @[]
+      # Whatever the producer did not settle, this node draws over.
+      if not asDataNode:
+        paintPendingBackground(context)
       if setDecodeBoundsHint:
         context.decodeBoundsWidth = 0
         context.decodeBoundsHeight = 0
@@ -1685,7 +1698,11 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
         of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
         else: newImage(self.frameConfig.width, self.frameConfig.height)
       context.hasImage = true
-    context.image.fill(scene.backgroundColor)
+    # Owed, not painted: whatever draws first pays it, and a first paint
+    # that covers the canvas opaquely waives it (ExecutionContext's
+    # backgroundPending). Paid below when nothing draws.
+    context.backgroundColor = scene.backgroundColor
+    context.backgroundPending = true
   else:
     discard
 
@@ -1739,6 +1756,8 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
         "error": "\"" & context.event & "\" reached the scene but every listener filtered it out" &
           (if expectedFilters.len > 0: " (nodes want " & expectedFilters.join(", ") & ")" else: "")
       }, context.event, context.payload))
+  # A render in which nothing drew still shows the background.
+  paintPendingBackground(context)
 
 proc resolvedRenderDeadlineMs(frameConfig: FrameConfig): int =
   if frameConfig != nil and frameConfig.js != nil and frameConfig.js.renderDeadlineMs >= 0:
