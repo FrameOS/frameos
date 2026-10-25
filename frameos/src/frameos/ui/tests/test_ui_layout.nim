@@ -103,6 +103,12 @@ suite "ui layout":
     check g[0].geom == (0, 0, 80, 100)
     check g[1].geom == (80, 0, 120, 100)
 
+  test "flex-1 in a column with no height of its own is its content's size":
+    let r = layoutUi(el("div", "", el("div", "flex flex-col gap-2",
+      el("div", "flex-1 h-6 bg-red-500"), el("div", "flex-1 bg-red-500", el("div", "h-4")))), 200, 100).rects
+    check r[0].geom == (0, 0, 200, 24)
+    check r[1].geom == (0, 32, 200, 16)
+
   test "a block stacks and stretches; padding is inside the size":
     let r = layoutUi(el("div", "w-20 p-2 bg-black",
       el("div", "h-4 bg-red-500"),
@@ -130,12 +136,28 @@ suite "ui layout":
     check r[2].geom == (16, 80, 168, 16)
     check r[3].geom == (176, 8, 16, 16)
 
-  test "flex-wrap breaks lines":
-    let r = layoutUi(el("div", "flex flex-wrap gap-2 w-[100px]",
-      el("div", "w-10 h-4 bg-red-500"),
-      el("div", "w-10 h-4 bg-red-500"),
-      el("div", "w-10 h-4 bg-red-500")), 200, 100).rects
-    check r[2].geom == (0, 24, 40, 16)
+  test "a grid sized to its content is as wide as its columns need":
+    let r = layoutUi(el("div", "flex items-start",
+      el("div", "grid grid-cols-3 gap-2 bg-black",
+        el("div", "w-6 h-6 bg-red-500"), el("div", "w-4 h-4 bg-red-500"), el("div", "w-4 h-4 bg-red-500"))), 400, 100).rects
+    check r[0].geom == (0, 0, 3 * 24 + 2 * 8, 24)
+    # with more cells than one row: rows of three, whatever the room
+    var cells: seq[SvgNode]
+    for i in 0 ..< 7:
+      cells.add el("div", "w-6 h-6 bg-red-500")
+    let grid = el("div", "grid grid-cols-3 gap-2 bg-black")
+    grid.children = cells
+    check layoutUi(el("div", "flex items-start", grid), 400, 200).rects[0].geom ==
+      (0, 0, 3 * 24 + 2 * 8, 3 * 24 + 2 * 8)
+
+  test "flex-wrap breaks lines, and a set height spreads them":
+    proc third(height: string): (int, int, int, int) =
+      layoutUi(el("div", "", el("div", "flex flex-wrap gap-2 w-[100px] " & height,
+        el("div", "w-10 h-4 bg-red-500"),
+        el("div", "w-10 h-4 bg-red-500"),
+        el("div", "w-10 h-4 bg-red-500"))), 200, 100).rects[2].geom
+    check third("") == (0, 24, 40, 16)
+    check third("h-[80px]") == (0, 44, 40, 16) # two lines of (80 - 8) / 2
 
   test "text is measured, wrapped, aligned and clamped":
     let one = layoutUi(el("div", "flex items-start",
@@ -159,6 +181,13 @@ suite "ui layout":
     for node in svg.children:
       if node.tag == "path": fills.add node.attr("fill")
     check fills == @["#000000", "#ff0000".replace("ff0000", "ef4444"), "#000000"]
+
+  test "a gradient fades to transparent":
+    let svg = layoutUi(el("div", "bg-white", el("div", "h-full bg-gradient-to-b from-black to-transparent")), 20, 100)
+    let image = newImage(parseSvg(svg, 20, 100))
+    check image[10, 1].r < 10        # black at the top
+    check image[10, 50].r in 100'u8 .. 160'u8
+    check image[10, 98].r > 245      # the white under it at the bottom
 
   test "it draws":
     let svg = layoutUi(el("div", "flex items-center justify-center bg-slate-900",

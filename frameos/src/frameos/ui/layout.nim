@@ -304,8 +304,21 @@ proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
   let
     grid = b.display == diGrid
     cols = max(1, b.cols)
-    colW = (innerW - b.gapX * float32(cols - 1)) / cols.float32
+  var colW = (innerW - b.gapX * float32(cols - 1)) / cols.float32
+  if grid and not defW:
+    # A grid sized to its content: columns as wide as its widest item.
+    var widest = 0'f32
+    for c in n.children:
+      if c.inFlow and c.box.span <= 1:
+        let own = c.box.w.resolve(-1)
+        widest = max(widest,
+          if own >= 0: own else: c.layout(max(colW, 0), Unbounded, false, false).x)
+    colW = min(colW, widest)
+  let
     row = grid or (b.display == diFlex and not b.col)
+    # A block stacks its children at their own heights: nothing grows or
+    # shrinks, and a child's height is only definite when it is set.
+    flexing = b.display != diBlock
     gapMain = if row: b.gapX else: b.gapY
     gapCross = if row: b.gapY else: b.gapX
     mainAvail = if row: innerW else: innerH
@@ -316,7 +329,7 @@ proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
     (ms, me, cs, ce) = if row: (3, 1, 0, 2) else: (0, 2, 3, 1)
   var lines: seq[(int, int)]
   var used = 0'f32
-  var first = -1
+  var first, column = -1
   # Each item's margins and base size, and where the lines break.
   for i in 0 ..< n.children.len:
     template c: untyped = n.children[i]
@@ -335,9 +348,9 @@ proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
     if c.fixedMain >= 0:
       c.fixedMain = c.fixedMain.clampTo(if row: cb.minW else: cb.minH,
         if row: cb.maxW else: cb.maxH, mainAvail)
+    let span = clamp(cb.span, 1, cols)
     if grid:
-      let span = clamp(cb.span, 1, cols).float32
-      c.fixedMain = max(colW * span + b.gapX * (span - 1), 0)
+      c.fixedMain = max(colW * span.float32 + b.gapX * float32(span - 1), 0)
     var basis = if grid: -1'f32 else: cb.basis.resolve(if mainDef: mainAvail else: -1)
     if basis < 0:
       basis = c.fixedMain
@@ -357,15 +370,22 @@ proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
         basis = c.layout(c.cross, Unbounded, true, false).y
     c.main = basis
     let size = basis + c.margins[ms] + c.margins[me]
+    # A grid row ends after its columns; a wrapping line where room ends.
+    let breaks =
+      if grid: column + span > cols
+      else: b.wrap and used + gapMain + size > mainAvail + 0.01
     if first < 0:
       first = i
       used = size
-    elif (b.wrap or grid) and used + gapMain + size > mainAvail + 0.01:
+      column = span
+    elif breaks:
       lines.add((first, i))
       first = i
       used = size
+      column = span
     else:
       used += gapMain + size
+      column += span
   if first < 0:
     return vec2(0, 0)
   lines.add((first, n.children.len))
@@ -390,7 +410,9 @@ proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
       if not c.inFlow:
         continue
       template cb: untyped = c.box
-      if free > 0 and grow > 0:
+      if not flexing:
+        discard
+      elif free > 0 and grow > 0:
         c.main += free * cb.grow / grow
       elif free < 0 and shrink > 0 and c.fixedMain < 0:
         # A set size is also the item's least size (CSS's automatic minimum).
@@ -405,6 +427,14 @@ proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
     # The line's cross size: the container's when it has one and this is its
     # only line, else its tallest item's.
     lineCross[li] = if lines.len == 1 and crossDef: crossAvail else: tallest
+  if lines.len > 1 and crossDef:
+    # Wrapped lines and grid rows share out a set height (align-content's
+    # default, stretch).
+    var taken = gapCross * float32(lines.len - 1)
+    for size in lineCross: taken += size
+    if crossAvail > taken:
+      for li in 0 ..< lineCross.len:
+        lineCross[li] += (crossAvail - taken) / lineCross.len.float32
   # Place the items, from the content box's corner.
   let
     originX = b.border[3] + b.pad[3]
@@ -461,7 +491,7 @@ proc layoutFlex(n: UiNode, innerW, innerH: float32, defW, defH: bool): Vec2 =
         c.cross = max(lineCross[li] - crossMargin, 0)
       let size =
         if row: c.layout(c.main, c.cross, true, true)
-        else: c.layout(c.cross, c.main, true, true)
+        else: c.layout(c.cross, c.main, true, flexing or c.fixedMain >= 0)
       c.size = size
       pos += c.margins[ms] + (if ms in c.autos: autoShare else: 0)
       let
@@ -583,9 +613,11 @@ proc hex(c: ColorRGBA): string =
     result[2 + i * 2] = digits[int(v) and 15]
 
 proc paint(node: SvgNode, c: ColorRGBA, opacity: float32, attr = "fill") =
+  ## `attr` is fill, stroke or stop-color, with its alpha as fill-opacity,
+  ## stroke-opacity or stop-opacity.
   node.attrs.add((attr, c.hex))
   if c.a < 255:
-    node.attrs.add((attr & "-opacity", num(c.a.float32 / 255)))
+    node.attrs.add((attr.split('-')[0] & "-opacity", num(c.a.float32 / 255)))
   if opacity < 1 and attr == "fill":
     node.attrs.add(("opacity", num(opacity)))
 

@@ -374,7 +374,9 @@ proc applyClass(box: var Box, text: var Text, s: string, a, b: int, neg: bool) =
       of 1, 9: box.col = true
       of 2: box.wrap = true
       of 3: box.wrap = false
-      of 4: box.grow = 1; box.shrink = 1; box.basis = px(0)
+      # flex-1 is `1 1 0%`: a percentage, so content-sized where the
+      # container's size along the axis is not known.
+      of 4: box.grow = 1; box.shrink = 1; box.basis = Len(kind: lkPct, v: 0)
       of 5: box.grow = 1; box.shrink = 1; box.basis = Len()
       of 6: box.grow = 0; box.shrink = 1
       of 7: box.grow = 0; box.shrink = 0
