@@ -101,18 +101,37 @@ export const NO_MICROPHONE_PINS: MicrophonePins = { clk: -1, data: -1, pwr: -1 }
 
 /**
  * Boards whose preset carries a PDM microphone (docs/voice-chat.md "Boards"):
- * the reTerminal E1001 and E1002 (clock GPIO42, data GPIO41, power GPIO38).
- * Mirrors the backend's EMBEDDED_SEEED_RETERMINAL_MIC and fos_board.c's
- * k_mics table; the E1004 and every other preset have none.
+ * the reTerminal E1001 and E1002 (clock GPIO42, data GPIO41, power GPIO38)
+ * and the reTerminal Sticky (clock GPIO19, data GPIO20, power GPIO38).
+ * Mirrors the backend's EMBEDDED_SEEED_RETERMINAL_MIC / _STICKY_MIC and
+ * fos_board.c's k_mics table; the E1004 and every other preset have none.
  */
 export const EMBEDDED_PRESET_MICROPHONE_PINS: Partial<Record<FrameEmbeddedHardwarePreset, MicrophonePins>> = {
+  seeed_reterminal_sticky: { clk: 19, data: 20, pwr: 38 },
   seeed_reterminal_e1001: { clk: 42, data: 41, pwr: 38 },
   seeed_reterminal_e1002: { clk: 42, data: 41, pwr: 38 },
 }
 
-export const EMBEDDED_PRESETS_WITH_MICROPHONE: readonly FrameEmbeddedHardwarePreset[] = Object.keys(
-  EMBEDDED_PRESET_MICROPHONE_PINS
-) as FrameEmbeddedHardwarePreset[]
+/**
+ * Boards whose microphone is an I2S codec's, not PDM pins (fos_codec.c): the
+ * Waveshare PhotoPainter and 13.3E6 carry an ES7210 ADC (and an ES8311 DAC
+ * for a speaker). Their pins are `codecPins` on the preset and nothing the
+ * owner edits; a frame with one has a microphone whatever its mic pins say.
+ */
+export const EMBEDDED_PRESETS_WITH_CODEC_MICROPHONE: readonly FrameEmbeddedHardwarePreset[] = [
+  'waveshare_esp32_s3_photopainter',
+  'waveshare_esp32_s3_epaper_13_3e6',
+]
+
+export const EMBEDDED_PRESETS_WITH_MICROPHONE: readonly FrameEmbeddedHardwarePreset[] = [
+  ...(Object.keys(EMBEDDED_PRESET_MICROPHONE_PINS) as FrameEmbeddedHardwarePreset[]),
+  ...EMBEDDED_PRESETS_WITH_CODEC_MICROPHONE,
+]
+
+/** The preset's microphone is its codec's: no pins to show, nothing to configure. */
+export function presetHasCodecMicrophone(hardwarePreset: string | null | undefined): boolean {
+  return EMBEDDED_PRESETS_WITH_CODEC_MICROPHONE.includes((hardwarePreset ?? '') as FrameEmbeddedHardwarePreset)
+}
 
 /** The preset's microphone pins, -1 everywhere for a preset without one (or no preset). */
 export function presetMicrophonePins(hardwarePreset: string | null | undefined): MicrophonePins {
@@ -186,8 +205,11 @@ export function backendFrameHasMicrophone(
   deviceConfig: DeviceConfig | null | undefined,
   hardwarePreset: FrameEmbeddedHardwarePreset | string | null | undefined
 ): boolean {
-  return microphonePinsNameOne(
-    effectiveMicrophonePins(configuredMicrophonePinsOf(deviceConfig), boardMicrophonePins({ hardwarePreset }))
+  return (
+    presetHasCodecMicrophone(hardwarePreset) ||
+    microphonePinsNameOne(
+      effectiveMicrophonePins(configuredMicrophonePinsOf(deviceConfig), boardMicrophonePins({ hardwarePreset }))
+    )
   )
 }
 
@@ -199,6 +221,11 @@ export function cloudFrameHasMicrophone(
   hardware: FrameType['hardware'] | null | undefined,
   form: { mic_clk_pin?: number; mic_data_pin?: number; mic_pwr_pin?: number }
 ): boolean {
+  // A codec microphone is reported as `microphone: true` with no pins; the
+  // preset's table covers a frame that has not said hello since the update.
+  if (presetHasCodecMicrophone(hardware?.hardwarePreset)) {
+    return true
+  }
   return microphonePinsNameOne(
     effectiveMicrophonePins(
       { clk: form.mic_clk_pin, data: form.mic_data_pin, pwr: form.mic_pwr_pin },

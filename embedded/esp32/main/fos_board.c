@@ -112,11 +112,28 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     "\"emit\":\"voiceChat\",\"as\":{}}"
 #define RETERMINAL_EVENT_MAP "[" RETERMINAL_ARROWS "]"
 #define RETERMINAL_VOICE_EVENT_MAP "[" RETERMINAL_ARROWS "," RETERMINAL_VOICE "]"
+/* The reTerminal Sticky's three keys: UP and DOWN held walk the scene list,
+ * the AI key (Seeed's "AI/Power", GPIO4) held talks to the frame. */
+#define STICKY_EVENT_MAP \
+    "[{\"event\":\"button\",\"match\":{\"label\":\"UP\",\"action\":\"longPress\"}," \
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"DOWN\",\"action\":\"longPress\"}," \
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"AI\",\"action\":\"longPress\"}," \
+    "\"emit\":\"voiceChat\",\"as\":{}}]"
+/* The Waveshare boards with a codec microphone (fos_codec.c): the one user
+ * key each has, held, talks — KEY1 on the PhotoPainter, BOOT on the 13.3E6. */
+#define ONE_KEY_VOICE_EVENT_MAP(label) \
+    "[{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"longPress\"}," \
+    "\"emit\":\"voiceChat\",\"as\":{}}]"
 
 static const struct {
     const char *preset;
     const char *event_map;
 } k_event_maps[] = {
+    {"waveshare_esp32_s3_photopainter", ONE_KEY_VOICE_EVENT_MAP("KEY1")},
+    {"waveshare_esp32_s3_epaper_13_3e6", ONE_KEY_VOICE_EVENT_MAP("BOOT")},
+    {"seeed_reterminal_sticky", STICKY_EVENT_MAP},
     {"seeed_reterminal_e1001", RETERMINAL_VOICE_EVENT_MAP},
     {"seeed_reterminal_e1002", RETERMINAL_VOICE_EVENT_MAP},
     {"seeed_reterminal_e1004", RETERMINAL_EVENT_MAP},
@@ -135,13 +152,19 @@ const char *fos_board_event_map(const char *hardware_preset)
  * no preset yet) share one MEMSensing MSM261 on PDM clock GPIO42, data
  * GPIO41, powered through a TPS22916 load switch on GPIO38 (Seeed's
  * schematics and MicRecordToSD.ino). The E1004 has no microphone: its
- * schematic has none, and 41/42 are its J2 header's UART. */
+ * schematic has none, and 41/42 are its J2 header's UART. The reTerminal
+ * Sticky's MSM261 is on PDM_CLK GPIO19 / PDM_DATA GPIO20 — the S3's native
+ * USB pads, which its CH343 UART bridge leaves free (fos_mic.c detaches the
+ * USB PHY from them) — powered through PDM_EN GPIO38 (Seeed's porting
+ * specification). The Waveshare boards' microphones are their codec's
+ * (k_codecs), not PDM pins. */
 static const struct {
     const char *preset;
     int clk;
     int data;
     int pwr;
 } k_mics[] = {
+    {"seeed_reterminal_sticky", 19, 20, 38},
     {"seeed_reterminal_e1001", 42, 41, 38},
     {"seeed_reterminal_e1002", 42, 41, 38},
 };
@@ -203,6 +226,17 @@ static const struct {
     const char *preset;
     const char *buses;
 } k_i2c_buses[] = {
+    /* The Waveshare boards' codec chips (fos_codec.c): the ES8311 and the
+     * ES7210 on SDA47/SCL48 on the PhotoPainter — the bus its AXP2101 PMIC
+     * is on too (components/frameos_display/photo_painter_pmic.c shares the
+     * port) — and on SDA41/SCL42 on the 13.3E6 (Waveshare's examples). */
+    {"waveshare_esp32_s3_photopainter", "sda=47,scl=48"},
+    {"waveshare_esp32_s3_epaper_13_3e6", "sda=41,scl=42"},
+    /* The reTerminal Sticky's MISC/BFG bus (Seeed's porting specification):
+     * SDA GPIO1 / SCL GPIO0 with the PCF8563 clock, the SHT40 sensor, the
+     * LSM6DS3TR-C IMU (0x6a) and the BQ27220 fuel gauge (0x55). GPIO0 is a
+     * strapping pin; the bus's pull-ups keep it high through a reset. */
+    {"seeed_reterminal_sticky", "sda=1,scl=0"},
     {"seeed_reterminal_e1001", "sda=19,scl=20;sda=39,scl=40"},
     {"seeed_reterminal_e1002", "sda=19,scl=20;sda=39,scl=40"},
     {"seeed_reterminal_e1004", "sda=19,scl=20"},
@@ -229,6 +263,11 @@ static const struct {
 } k_sd_pins[] = {
     {"waveshare_esp32_s3_photopainter", "cs=38,sck=39,miso=40,mosi=41"},
     {"waveshare_esp32_s3_epaper_13_3e6", "cs=15,sck=6,miso=5,mosi=7"},
+    /* The reTerminal Sticky's socket on its panel's SCK13/MOSI14 with MISO
+     * on GPIO12 and CS on GPIO8, a TPS22916 switch on GPIO10 and the detect
+     * contact on GPIO11 (Seeed's porting specification; SPI mode only, D1/D2
+     * are not wired). */
+    {"seeed_reterminal_sticky", "cs=8,sck=13,miso=12,mosi=14,pwr=10,det=11"},
     {"seeed_reterminal_e1001", "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"},
     {"seeed_reterminal_e1002", "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"},
     {"seeed_reterminal_e1004", "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"},
@@ -239,6 +278,50 @@ const char *fos_board_sd_pins(const char *hardware_preset)
     if (!hardware_preset || !hardware_preset[0]) return "";
     for (size_t i = 0; i < sizeof(k_sd_pins) / sizeof(k_sd_pins[0]); i++) {
         if (strcmp(hardware_preset, k_sd_pins[i].preset) == 0) return k_sd_pins[i].pins;
+    }
+    return "";
+}
+
+/* Touch panels. The reTerminal Sticky's Goodix GT911 (0x5d or 0x14, chosen
+ * by the reset sequence) on its own bus — TP_I2C_SDA GPIO3 / TP_I2C_SCL
+ * GPIO2 — with TP_INT GPIO21 (an RTC IO: a touch can wake the chip), TP_RSTn
+ * GPIO41 and the TPS22916 load switch TP_PWR_EN GPIO42 (Seeed's porting
+ * specification). No other preset has one. */
+static const struct {
+    const char *preset;
+    const char *pins;
+} k_touch_pins[] = {
+    {"seeed_reterminal_sticky", "sda=3,scl=2,int=21,rst=41,en=42"},
+};
+
+const char *fos_board_touch_pins(const char *hardware_preset)
+{
+    if (!hardware_preset || !hardware_preset[0]) return "";
+    for (size_t i = 0; i < sizeof(k_touch_pins) / sizeof(k_touch_pins[0]); i++) {
+        if (strcmp(hardware_preset, k_touch_pins[i].preset) == 0) return k_touch_pins[i].pins;
+    }
+    return "";
+}
+
+/* Audio codecs: an ES8311 DAC behind a power amplifier and an ES7210 ADC
+ * for the microphones, on one I2S bus. The PhotoPainter: MCLK14, BCLK15,
+ * WS16, the ADC's data on GPIO18, the DAC's on GPIO17, the amplifier on
+ * GPIO7 (Waveshare's xiaozhi board config). The 13.3E6: MCLK14, BCLK21,
+ * WS47, ADC data GPIO48, DAC data GPIO45, amplifier GPIO13 (Waveshare's
+ * 02_Audio_out example and the codec_board table). */
+static const struct {
+    const char *preset;
+    const char *pins;
+} k_codec_pins[] = {
+    {"waveshare_esp32_s3_photopainter", "mclk=14,bclk=15,ws=16,din=18,dout=17,pa=7"},
+    {"waveshare_esp32_s3_epaper_13_3e6", "mclk=14,bclk=21,ws=47,din=48,dout=45,pa=13"},
+};
+
+const char *fos_board_codec_pins(const char *hardware_preset)
+{
+    if (!hardware_preset || !hardware_preset[0]) return "";
+    for (size_t i = 0; i < sizeof(k_codec_pins) / sizeof(k_codec_pins[0]); i++) {
+        if (strcmp(hardware_preset, k_codec_pins[i].preset) == 0) return k_codec_pins[i].pins;
     }
     return "";
 }

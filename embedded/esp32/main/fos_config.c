@@ -81,6 +81,8 @@ static void load_defaults(void)
     s_config.mic_pins.clk = -1;
     s_config.mic_pins.data = -1;
     s_config.mic_pins.pwr = -1;
+    memset(&s_config.touch_pins, -1, sizeof(s_config.touch_pins));
+    memset(&s_config.codec_pins, -1, sizeof(s_config.codec_pins));
     s_config.voice_chat = true;
     s_config.led_pin = -1;
     s_config.led_type = FOS_LED_GPIO;
@@ -284,6 +286,18 @@ esp_err_t fos_config_init(void)
         s_config.mic_pins.pwr = (int8_t)pwr;
     }
     if (nvs_get_u8(nvs, "voice", &u8) == ESP_OK) s_config.voice_chat = u8 != 0;
+    /* The touch panel and the audio codec the same way: stored, else the
+     * board's own (fos_board_touch_pins / fos_board_codec_pins), so a Sticky
+     * or a PhotoPainter provisioned before the keys existed gets them with
+     * the update. */
+    char touch_pins[FOS_STR_LEN] = "";
+    nvs_get_string(nvs, "touch_pins", touch_pins, sizeof(touch_pins));
+    fos_config_parse_touch_pins(touch_pins[0] ? touch_pins : fos_board_touch_pins(s_config.hardware_preset),
+                                &s_config.touch_pins);
+    char codec_pins[FOS_STR_LEN] = "";
+    nvs_get_string(nvs, "codec_pins", codec_pins, sizeof(codec_pins));
+    fos_config_parse_codec_pins(codec_pins[0] ? codec_pins : fos_board_codec_pins(s_config.hardware_preset),
+                                &s_config.codec_pins);
     /* The status LED the same way: stored, else the board's own (fos_led.c). */
     if (nvs_get_i8(nvs, "led", &i8) == ESP_OK) {
         s_config.led_pin = i8;
@@ -412,6 +426,12 @@ esp_err_t fos_config_save(void)
     fos_config_format_mic_pins(&s_config.mic_pins, mic_pins, sizeof(mic_pins));
     FOS_NVS_SET(nvs_set_str(nvs, "mic_pins", mic_pins), "mic_pins");
     FOS_NVS_SET(nvs_set_u8(nvs, "voice", s_config.voice_chat ? 1 : 0), "voice");
+    char touch_pins[FOS_STR_LEN];
+    fos_config_format_touch_pins(&s_config.touch_pins, touch_pins, sizeof(touch_pins));
+    FOS_NVS_SET(nvs_set_str(nvs, "touch_pins", touch_pins), "touch_pins");
+    char codec_pins[FOS_STR_LEN];
+    fos_config_format_codec_pins(&s_config.codec_pins, codec_pins, sizeof(codec_pins));
+    FOS_NVS_SET(nvs_set_str(nvs, "codec_pins", codec_pins), "codec_pins");
     FOS_NVS_SET(nvs_set_i8(nvs, "led", s_config.led_pin), "led");
     FOS_NVS_SET(nvs_set_u8(nvs, "led_type", s_config.led_type), "led_type");
     char i2c_buses[FOS_STR_LEN];

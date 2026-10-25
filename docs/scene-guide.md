@@ -471,17 +471,17 @@ schedule or the cloud may send one only when its declaration lists them in
 | `keyDown` | yes |  | `code` string, `key` string, `repeat` boolean, `shift` boolean, `ctrl` boolean, `alt` boolean, `meta` boolean, `linuxCode`? integer | Pi, preview | When a key is pressed on a keyboard (or held: `repeat`). |
 | `keyUp` | yes |  | `code` string, `key` string, `shift` boolean, `ctrl` boolean, `alt` boolean, `meta` boolean, `linuxCode`? integer | Pi, preview | When a key is released on a keyboard |
 | `textInput` | yes |  | `text` string | Pi, preview | Text a key press produced under the frame's keyboard layout, one event per printable key (Ctrl/Alt/Meta chords produce none). |
-| `pointerMove` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string, `buttons` integer | Pi, preview | When a pointer (a finger, a mouse, a pen) moves |
-| `pointerDown` | yes |  | `x` integer, `y` integer, `button` integer, `buttons` integer, `pointerId` integer, `pointerType` string | Pi, preview | When a pointer button is pressed or a finger touches the panel. |
-| `pointerUp` | yes |  | `x` integer, `y` integer, `button` integer, `buttons` integer, `pointerId` integer, `pointerType` string | Pi, preview | When a pointer button is released or a finger lifts |
-| `pointerCancel` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | Pi, preview | When a pointer that was down is lost without a release: the queue overflowed, the device went away. |
+| `pointerMove` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string, `buttons` integer | all | When a pointer (a finger, a mouse, a pen) moves |
+| `pointerDown` | yes |  | `x` integer, `y` integer, `button` integer, `buttons` integer, `pointerId` integer, `pointerType` string | all | When a pointer button is pressed or a finger touches the panel. |
+| `pointerUp` | yes |  | `x` integer, `y` integer, `button` integer, `buttons` integer, `pointerId` integer, `pointerType` string | all | When a pointer button is released or a finger lifts |
+| `pointerCancel` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | all | When a pointer that was down is lost without a release: the queue overflowed, the device went away. |
 | `mouseMove` | yes |  | `x` integer, `y` integer | Pi, preview | When a mouse moves. |
 | `mouseDown` | yes |  | `button` integer | Pi, preview | When a mouse button is pressed. |
 | `mouseUp` | yes |  | `button` integer | Pi, preview | When a mouse button is released. |
-| `tap` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | Pi, preview | A press and release in one place, within `gestures.tapMs`. |
-| `doubleTap` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | Pi, preview | A second `tap` in the same place within `gestures.doubleTapMs` of the first. |
-| `longPress` | yes |  | `x` integer, `y` integer, `durationMs` integer, `pointerId` integer, `pointerType` string | Pi, preview | A pointer held in one place for `gestures.longPressMs`. |
-| `swipe` | yes |  | `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | Pi, preview | A press and a release at least `gestures.swipeMinPx` apart, in one of four directions. |
+| `tap` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | all | A press and release in one place, within `gestures.tapMs`. |
+| `doubleTap` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | all | A second `tap` in the same place within `gestures.doubleTapMs` of the first. |
+| `longPress` | yes |  | `x` integer, `y` integer, `durationMs` integer, `pointerId` integer, `pointerType` string | all | A pointer held in one place for `gestures.longPressMs`. |
+| `swipe` | yes |  | `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | A press and a release at least `gestures.swipeMinPx` apart, in one of four directions. |
 | `wheel` | yes |  | `deltaX` integer, `deltaY` integer, `x` integer, `y` integer | Pi, preview | When a mouse wheel is scrolled. |
 | `turnOn` | yes | yes |  | all | Turn the screen on |
 | `turnOff` | yes | yes |  | all | Turn the screen off |

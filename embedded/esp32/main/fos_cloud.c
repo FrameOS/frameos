@@ -35,6 +35,9 @@
 #include "fos_assets.h"
 #include "fos_assets_sd.h"
 #include "fos_charger.h"
+#include "fos_codec.h"
+#include "fos_gauge.h"
+#include "fos_touch.h"
 #include "fos_client.h"
 #include "fos_i2c.h"
 #include "fos_rtc.h"
@@ -499,7 +502,8 @@ static void add_hardware_json(cJSON *parent)
     /* Whether this board has a microphone to talk into, its pins (the
      * preset's when no push set them; -1 = none) and whether the owner lets
      * it listen (docs/voice-chat.md). */
-    cJSON_AddBoolToObject(hw, "microphone", config->mic_pins.clk >= 0 && config->mic_pins.data >= 0);
+    cJSON_AddBoolToObject(hw, "microphone",
+                          (config->mic_pins.clk >= 0 && config->mic_pins.data >= 0) || fos_codec_has_mic());
     cJSON_AddNumberToObject(hw, "micClkPin", config->mic_pins.clk);
     cJSON_AddNumberToObject(hw, "micDataPin", config->mic_pins.data);
     cJSON_AddNumberToObject(hw, "micPwrPin", config->mic_pins.pwr);
@@ -514,6 +518,12 @@ static void add_hardware_json(cJSON *parent)
     cJSON_AddBoolToObject(hw, "rtc", fos_rtc_present());
     cJSON_AddBoolToObject(hw, "charger", fos_charger_present());
     cJSON_AddBoolToObject(hw, "climateSensor", fos_i2c_present(FOS_I2C_SHT4X));
+    /* The fuel gauge (the cell's own numbers, fos_gauge.c), the touch panel
+     * (a finger is a pointer to the scene, fos_touch.c) and the codec's
+     * speaker (the buzzer's notes play there, fos_codec.c). */
+    cJSON_AddBoolToObject(hw, "gauge", fos_gauge_present());
+    cJSON_AddBoolToObject(hw, "touch", fos_touch_present());
+    cJSON_AddBoolToObject(hw, "speaker", fos_codec_has_speaker());
     /* The SD card: mounted, or why not (the status page's wording). */
     cJSON_AddBoolToObject(hw, "sdCard", fos_assets_sd_mounted());
     /* Local network access (docs/lan-access.md): the cloud has no column of

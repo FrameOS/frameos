@@ -1,13 +1,13 @@
 /*
- * Host tests for the pure halves of the two I2C chip drivers: the charger's
- * register decode (fos_charger.c) and the clock's BCD conversions
- * (fos_rtc.c). No IDF: both files keep their arithmetic above the
- * ESP_PLATFORM guard.
+ * Host tests for the pure halves of the I2C chip drivers: the charger's
+ * register decode (fos_charger.c), the clock's BCD conversions (fos_rtc.c)
+ * and the fuel gauge's word decode (fos_gauge.c). No IDF: the files keep
+ * their arithmetic above the ESP_PLATFORM guard.
  *
  * Build and run (from embedded/esp32/):
  *
  *   cc -std=c11 -Wall -Wextra -Werror -O2 -Imain \
- *      main/fos_charger.c main/fos_rtc.c main/tests/test_fos_i2c_devices.c \
+ *      main/fos_charger.c main/fos_rtc.c main/fos_gauge.c main/tests/test_fos_i2c_devices.c \
  *      -o /tmp/test_fos_i2c_devices && /tmp/test_fos_i2c_devices
  *
  * (backend/app/tasks/tests/test_esp32_i2c_devices.py does exactly that in CI.)
@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "fos_charger.h"
+#include "fos_gauge.h"
 #include "fos_rtc.h"
 
 static int g_failures = 0;
@@ -99,10 +100,35 @@ static void test_rtc_decode_and_encode(void)
     CHECK((back[5] & 0x80) == 0, "century bit clear on write");
 }
 
+static void test_gauge_decode(void)
+{
+    fos_gauge_status_t g;
+    /* On the desk, USB in, the cell taking 180 mA: not discharging. */
+    fos_gauge_decode(4050, 82, 180, FOS_GAUGE_STATUS_BATTPRES, &g);
+    CHECK(g.present && g.mv == 4050 && g.pct == 82, "cell %d mV %d%%", g.mv, g.pct);
+    CHECK(!g.discharging && g.charging && !g.full, "charging on USB");
+    /* Unplugged, the frame awake on the cell. */
+    fos_gauge_decode(3900, 61, -120, FOS_GAUGE_STATUS_BATTPRES | FOS_GAUGE_STATUS_DSG, &g);
+    CHECK(g.discharging && !g.charging && g.current_ma == -120, "discharging %d mA", g.current_ma);
+    /* Full on USB: neither charging nor discharging, and not "on battery". */
+    fos_gauge_decode(4190, 100, 0, FOS_GAUGE_STATUS_BATTPRES | FOS_GAUGE_STATUS_FC, &g);
+    CHECK(!g.discharging && !g.charging && g.full, "full on USB");
+    /* No cell connected: the board reads like one without a battery. */
+    fos_gauge_decode(3300, 50, 0, 0, &g);
+    CHECK(!g.present && g.mv == 0 && g.pct == -1, "no cell is no battery: %d mV %d%%", g.mv, g.pct);
+    CHECK(!g.discharging && !g.charging, "no cell, no flags");
+    /* A gauge that has not read the cell yet (0 V), or a soc past 100. */
+    fos_gauge_decode(0, 0, 0, FOS_GAUGE_STATUS_BATTPRES, &g);
+    CHECK(g.pct == -1, "0 V is no reading");
+    fos_gauge_decode(3700, 200, 0, FOS_GAUGE_STATUS_BATTPRES, &g);
+    CHECK(g.pct == -1, "soc 200 is no reading");
+}
+
 int main(void)
 {
     test_charger_decode();
     test_rtc_decode_and_encode();
+    test_gauge_decode();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

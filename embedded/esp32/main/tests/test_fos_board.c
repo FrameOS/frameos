@@ -138,9 +138,26 @@ static void test_event_maps(void)
           "REFRESH held talks on the e1001");
     CHECK(strstr(e1004, "voiceChat") == NULL, "the e1004 has no voice key");
     CHECK(strlen(e1001) < 1024, "fits the config slot");
+    /* The Sticky: UP and DOWN held walk the scenes, the AI key held talks. */
+    const char *sticky = fos_board_event_map("seeed_reterminal_sticky");
+    CHECK(strstr(sticky, "\"label\":\"UP\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}") != NULL,
+          "UP held is prev");
+    CHECK(strstr(sticky, "\"label\":\"DOWN\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}") != NULL,
+          "DOWN held is next");
+    CHECK(strstr(sticky, "\"label\":\"AI\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL, "AI held talks");
+    CHECK(sticky[0] == '[' && sticky[strlen(sticky) - 1] == ']' && strlen(sticky) < 1024, "a JSON list that fits");
+    /* The Waveshare codec boards: their one user key held talks. */
+    CHECK(strstr(fos_board_event_map("waveshare_esp32_s3_photopainter"),
+                 "\"label\":\"KEY1\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL,
+          "PhotoPainter KEY1 held talks");
+    CHECK(strstr(fos_board_event_map("waveshare_esp32_s3_epaper_13_3e6"),
+                 "\"label\":\"BOOT\",\"action\":\"longPress\"},\"emit\":\"voiceChat\"") != NULL,
+          "13.3E6 BOOT held talks");
+    CHECK(strstr(fos_board_event_map("waveshare_esp32_s3_photopainter"), "setCurrentScene") == NULL,
+          "one key: no scene walking");
     /* A board without bindings, and no board at all: none. */
-    CHECK(strcmp(fos_board_event_map("seeed_reterminal_sticky"), "") == 0, "sticky has no map");
     CHECK(strcmp(fos_board_event_map("trmnl_og"), "") == 0, "trmnl has no map");
+    CHECK(strcmp(fos_board_event_map("elecrow_crowpanel_5in79"), "") == 0, "crowpanel has no map");
     CHECK(strcmp(fos_board_event_map(""), "") == 0, "no preset");
     CHECK(strcmp(fos_board_event_map(NULL), "") == 0, "NULL preset");
 }
@@ -177,6 +194,13 @@ static void test_mic_pins(void)
      * reset would be a very bad surprise. */
     CHECK(!fos_board_mic_pins("seeed_reterminal_e1004", &clk, &data, &pwr), "e1004 has no microphone");
     CHECK(clk == -1 && data == -1 && pwr == -1, "no microphone is -1 everywhere");
+    /* The Sticky's MSM261 on the S3's USB pads, powered through GPIO38. */
+    CHECK(fos_board_mic_pins("seeed_reterminal_sticky", &clk, &data, &pwr), "sticky has a microphone");
+    CHECK(clk == 19 && data == 20 && pwr == 38, "sticky mic pins %d/%d/%d", clk, data, pwr);
+    /* The Waveshare boards' microphones are their codec's, not PDM pins:
+     * a PDM clock on the PhotoPainter's I2S MCLK would be a mess. */
+    CHECK(!fos_board_mic_pins("waveshare_esp32_s3_photopainter", &clk, &data, &pwr), "photopainter: no PDM mic");
+    CHECK(!fos_board_mic_pins("waveshare_esp32_s3_epaper_13_3e6", &clk, &data, &pwr), "13.3E6: no PDM mic");
     CHECK(!fos_board_mic_pins("", &clk, &data, &pwr), "no preset, no microphone");
     CHECK(!fos_board_mic_pins(NULL, NULL, NULL, NULL), "NULLs are fine");
     CHECK(fos_board_buzzer_pin(NULL) == -1, "NULL preset, no buzzer");
@@ -213,8 +237,13 @@ static void test_i2c_buses(void)
     CHECK(strcmp(fos_board_i2c_buses("seeed_reterminal_e1001"), "sda=19,scl=20;sda=39,scl=40") == 0, "e1001 buses");
     CHECK(strcmp(fos_board_i2c_buses("seeed_reterminal_e1002"), "sda=19,scl=20;sda=39,scl=40") == 0, "e1002 buses");
     CHECK(strcmp(fos_board_i2c_buses("seeed_reterminal_e1004"), "sda=19,scl=20") == 0, "e1004 bus");
-    CHECK(strcmp(fos_board_i2c_buses("waveshare_esp32_s3_photopainter"), "") == 0,
-          "the PhotoPainter's PMIC bus is its driver's, not a peripheral bus");
+    /* The Waveshare boards' codec chips: the PhotoPainter's on the PMIC's
+     * 47/48 (the PMIC driver shares the port), the 13.3E6's on 41/42. */
+    CHECK(strcmp(fos_board_i2c_buses("waveshare_esp32_s3_photopainter"), "sda=47,scl=48") == 0, "photopainter bus");
+    CHECK(strcmp(fos_board_i2c_buses("waveshare_esp32_s3_epaper_13_3e6"), "sda=41,scl=42") == 0, "13.3E6 bus");
+    /* The Sticky's sensor bus: SCL on the GPIO0 strapping pin, SDA GPIO1. */
+    CHECK(strcmp(fos_board_i2c_buses("seeed_reterminal_sticky"), "sda=1,scl=0") == 0, "sticky bus");
+    CHECK(strcmp(fos_board_i2c_buses("elecrow_crowpanel_5in79"), "") == 0, "crowpanel: none");
     CHECK(strcmp(fos_board_i2c_buses(""), "") == 0, "no preset");
     CHECK(strcmp(fos_board_i2c_buses(NULL), "") == 0, "NULL preset");
 }
@@ -234,14 +263,46 @@ static void test_sd_pins(void)
     CHECK(strcmp(fos_board_sd_pins("seeed_reterminal_e1001"), e) == 0, "e1001 TF");
     CHECK(strcmp(fos_board_sd_pins("seeed_reterminal_e1002"), e) == 0, "e1002 TF");
     CHECK(strcmp(fos_board_sd_pins("seeed_reterminal_e1004"), e) == 0, "e1004 TF");
+    /* The Sticky's, on its panel's SCK13/MOSI14 with its own switch and detect. */
+    CHECK(strcmp(fos_board_sd_pins("seeed_reterminal_sticky"), "cs=8,sck=13,miso=12,mosi=14,pwr=10,det=11") == 0,
+          "sticky TF");
     /* The X4 shares its bus too but its CS is unpublished: none, as before. */
     CHECK(strcmp(fos_board_sd_pins("xteink_x4"), "") == 0, "x4: none");
     CHECK(strcmp(fos_board_sd_pins("trmnl_og"), "") == 0, "trmnl: none");
     CHECK(strcmp(fos_board_sd_pins(NULL), "") == 0, "NULL preset");
 }
 
+static void test_touch_pins(void)
+{
+    /* The Sticky's GT911 on its own bus, with its interrupt on an RTC IO. */
+    CHECK(strcmp(fos_board_touch_pins("seeed_reterminal_sticky"), "sda=3,scl=2,int=21,rst=41,en=42") == 0,
+          "sticky touch");
+    /* No other board has a glass: a touch bus on the E1004's panel pins
+     * would be a very bad surprise. */
+    CHECK(strcmp(fos_board_touch_pins("seeed_reterminal_e1004"), "") == 0, "e1004: no touch");
+    CHECK(strcmp(fos_board_touch_pins("waveshare_esp32_s3_photopainter"), "") == 0, "photopainter: no touch");
+    CHECK(strcmp(fos_board_touch_pins(""), "") == 0, "no preset");
+    CHECK(strcmp(fos_board_touch_pins(NULL), "") == 0, "NULL preset");
+}
+
+static void test_codec_pins(void)
+{
+    /* The PhotoPainter's and the 13.3E6's ES8311 + ES7210 on one I2S bus. */
+    CHECK(strcmp(fos_board_codec_pins("waveshare_esp32_s3_photopainter"), "mclk=14,bclk=15,ws=16,din=18,dout=17,pa=7") == 0,
+          "photopainter codec");
+    CHECK(strcmp(fos_board_codec_pins("waveshare_esp32_s3_epaper_13_3e6"), "mclk=14,bclk=21,ws=47,din=48,dout=45,pa=13") == 0,
+          "13.3E6 codec");
+    /* The Seeed boards have a buzzer and a PDM microphone, no codec. */
+    CHECK(strcmp(fos_board_codec_pins("seeed_reterminal_sticky"), "") == 0, "sticky: no codec");
+    CHECK(strcmp(fos_board_codec_pins("seeed_reterminal_e1002"), "") == 0, "e1002: no codec");
+    CHECK(strcmp(fos_board_codec_pins(""), "") == 0, "no preset");
+    CHECK(strcmp(fos_board_codec_pins(NULL), "") == 0, "NULL preset");
+}
+
 int main(void)
 {
+    test_touch_pins();
+    test_codec_pins();
     test_target_names();
     test_module_label();
     test_reservation_policy();

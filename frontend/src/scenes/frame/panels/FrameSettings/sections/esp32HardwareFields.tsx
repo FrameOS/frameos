@@ -185,10 +185,13 @@ export function Esp32HardwareFields(): JSX.Element {
             {({ value, onChange }) => {
               const sdCardAssets = normalizeEsp32SdCardAssets(value as Esp32SdCardAssets | undefined)
               // The three reTerminal E-series share one socket: offer it once,
-              // under the frame's own preset name when it is one of them.
-              const seeedSdPreset = isSeeedReterminalSdCardPreset(embeddedHardwarePreset)
-                ? embeddedHardwarePreset
-                : 'seeed_reterminal_e1002'
+              // under the frame's own preset name when it is one of them. The
+              // Sticky's socket is its own entry.
+              const seeedSdPreset =
+                isSeeedReterminalSdCardPreset(embeddedHardwarePreset) &&
+                embeddedHardwarePreset !== 'seeed_reterminal_sticky'
+                  ? embeddedHardwarePreset
+                  : 'seeed_reterminal_e1002'
               const preset = esp32SdCardPresetValue(sdCardAssets, seeedSdPreset)
               const updateSdCardAssets = (nextValues: Partial<Esp32SdCardAssets>) => {
                 onChange({
@@ -233,6 +236,10 @@ export function Esp32HardwareFields(): JSX.Element {
                           {
                             value: seeedSdPreset,
                             label: 'Seeed reTerminal E1001 / E1002 / E1004 (on the panel bus)',
+                          },
+                          {
+                            value: 'seeed_reterminal_sticky',
+                            label: 'Seeed reTerminal Sticky (on the panel bus)',
                           },
                         ]}
                         onChange={(nextPreset) => {

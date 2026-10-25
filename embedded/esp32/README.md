@@ -180,8 +180,8 @@ or the preset dropdown in the frontends — the authoritative table is
 
 | Preset | Chip | Panel | Notes |
 | --- | --- | --- | --- |
-| `waveshare_esp32_s3_photopainter` | S3 | EPD_7in3e 7.3" Spectra | PMIC power-up, TF socket |
-| `waveshare_esp32_s3_epaper_13_3e6` | S3 | EPD_13in3e 13.3" Spectra | dual CS, TF socket |
+| `waveshare_esp32_s3_photopainter` | S3 | EPD_7in3e 7.3" Spectra | PMIC power-up, TF socket; ES8311 speaker + ES7210 microphone on I2S (`codec_pins`, I2C 47/48); KEY1 held talks |
+| `waveshare_esp32_s3_epaper_13_3e6` | S3 | EPD_13in3e 13.3" Spectra | dual CS, TF socket; ES8311 speaker + ES7210 microphone on I2S (`codec_pins`, I2C 41/42); BOOT held talks |
 | `trmnl_og` | C3 | EPD_7in5_V2 7.5" mono | TRMNL OG; battery GPIO3 ÷2 |
 | `trmnl_bwry` | C3 | EPD_7in5yr 7.5" BWRY | TRMNL BWRY; battery GPIO3 ÷2 |
 | `esp32_c3_042_oled` | C3 | OLED_SSD1306_72x40 0.42" OLED (I2C) | HW-675 / 01Space C3 dev board; SDA5/SCL6 as mosi/sck, BOOT GPIO9; thin client, 4 MB |
@@ -233,11 +233,55 @@ for the two Spectra boards most of the bench work runs on:
   detaches the PHY (`usb_serial_jtag_ll_phy_enable_pad(false)`) when a bus
   uses 19 or 20, and the console then skips its USB-Serial/JTAG channel —
   the E-series' USB is a CH340 on UART0 anyway.
-| `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" | reTerminal Sticky, 32MB flash |
+| `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" four-grey | reTerminal Sticky, 32MB flash, 8MB PSRAM (renders on-device); panel power GPIO47; keys AI (GPIO4), UP (5), DOWN (6): UP/DOWN held walk the scenes, AI held talks; 4 kHz buzzer GPIO48; PDM mic 19/20/38; GT911 touch panel (`touch_pins`); I2C 1/0 with the PCF8563 clock, SHT40, LSM6DS3TR-C IMU and the BQ27220 fuel gauge (no battery divider); TF socket on the panel bus (CS8, MISO12, power 10, detect 11); deep-sleeps on battery |
 | `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash; battery GPIO1 ÷2, switch GPIO21; TF socket on the panel bus (MISO8, CS14, detect 15, power 16); green LED GPIO6 (lit low); I2C 19/20 (PCF8563 clock, SHT40) + 39/40 (SY6974B charger); PDM mic 42/41/38 |
 | `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash; the same peripherals as the E1001 |
 | `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas; TF socket as the E1001/E1002; green LED GPIO48 (lit high); I2C 19/20 carries the clock, the sensor AND the charger (39/40 is its J2 header); no microphone |
 | `elecrow_crowpanel_5in79` | S3 | EPD_5in79 5.79" 4-gray | CrowPanel, dual SSD1683 |
+
+- **Seeed reTerminal Sticky** — an ESP32-S3R8 (8 MB PSRAM, 32 MB flash), so
+  it renders on-device like the E-series; every pin below is from Seeed's
+  hardware specification for porting and **none of it has met a board yet**.
+  The glass is a Goodix GT911 on its own I2C bus (`touch_pins
+  sda=3,scl=2,int=21,rst=41,en=42`; `fos_touch.c`): a finger is `pointerDown`
+  / `pointerMove` / `pointerUp` to the scene on the contract's wire, and the
+  Nim dispatcher makes the taps, long presses and swipes of it exactly as on
+  a Pi (`docs/events.md` "Input"). The controller reports in its own
+  resolution; when its axes run across the panel's (a portrait glass on a
+  landscape panel) the driver swaps them (`touch:ready` says `swapped`). A
+  touch wakes a deep-sleeping frame through ext0 on TP_INT (GPIO21, an RTC
+  IO); the controller is held powered through the sleep for it (a few mA).
+  The PDM microphone sits on GPIO19/20, the S3's native USB pads: the board's
+  USB is a CH343 on UART0, so `fos_mic.c` detaches the USB-Serial/JTAG PHY
+  from them when it opens the microphone (the console loses nothing). The
+  cell has no divider: the BQ27220 fuel gauge (0x55 on the sensor bus)
+  answers `fos_battery_read` with its own voltage and state of charge, and
+  its discharge flag is the power decision's "on battery" (`fos_gauge.c`),
+  so the frame deep-sleeps on the cell and stays awake on USB like the
+  E-series with their charger. The LSM6DS3TR-C IMU (0x6a) and the SHT40 are
+  found and reported, not read. The sensor bus's SCL is GPIO0, a strapping
+  pin: the bus's pull-ups keep it high across a reset. Seeed notes the SD
+  card brings up most reliably when mounted before the shared e-paper SPI
+  path; the firmware mounts it after the display, as on the E-series — the
+  first bench says whether that matters.
+- **Waveshare PhotoPainter and 13.3E6: speaker and microphone** — both carry
+  an Everest ES8311 DAC (the speaker, behind a power amplifier) and an ES7210
+  ADC (the microphones) as slaves on one I2S bus (`codec_pins`; the chips on
+  the board's I2C bus, `i2c_buses`). `fos_codec.c` clocks I2S0 at 16 kHz
+  (MCLK 4.096 MHz on the MCLK pin, BCLK 512 kHz, TX and RX sharing the bit
+  and word clocks) on the HAL's register layer like the PDM microphone, and
+  writes the chips the register sequences of Espressif's reference drivers
+  (esp-bsp's es8311 and es7210 components) for exactly that clock. The
+  microphone is the voice chat's: `fos_mic.c` takes the ADC's left slot as
+  16-bit mono when a board has no PDM pins, and the one user key each board
+  has (KEY1 on the PhotoPainter, BOOT on the 13.3E6 — a GPIO0 key once
+  booted) held is the voice key. The speaker plays the buzzer's notes
+  (`fos_buzzer.c` hands every note to `fos_codec_tone`): a press's two
+  clicks, the hold's seconds, the voice chat's cues, from a 32 ms DMA ring
+  the CPU writes once per note (frequencies land on 31.25 Hz steps; the
+  amplifier is enabled for the note). Neither board has been on a bench
+  with this yet. `status` shows `codec:` and the microphone's source;
+  `mic 2` and `beep` are the bench checks.
 
 The TRMNL X (10.3" 1872×1404 parallel e-ink over EPDIY/FastEPD) is not yet
 supported — it needs a parallel display driver class this component does not
@@ -949,8 +993,11 @@ The first 300 ms are dropped so the sparkle is not in the recording; deep
 sleep is held off for the session.
 
 The microphone is `mic_pins` (`clk=42,data=41,pwr=38` on the reTerminal
-E1001/E1002, the MSM261 behind a TPS22916 load switch; NVS `mic_pins`, no
-stored value → the board's own, `fos_board_mic_pins`), and the feature
+E1001/E1002, the MSM261 behind a TPS22916 load switch; `clk=19,data=20,pwr=38`
+on the reTerminal Sticky, whose AI key held talks; NVS `mic_pins`, no
+stored value → the board's own, `fos_board_mic_pins`) — or, on a board
+without PDM pins, the I2S codec's ADC (`codec_pins`, the Waveshare
+PhotoPainter and 13.3E6; `fos_codec.c`) — and the feature
 `voice_chat` (default on; NVS `voice`; the backend settings pull's
 `voiceChat`, the cloud's `set_settings` `voice_chat`, firmware 2026.10.20+).
 The E1004 has **no** microphone — its schematic has none, and GPIO41/42 are

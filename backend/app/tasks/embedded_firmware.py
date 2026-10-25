@@ -202,6 +202,7 @@ EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     "seeed_reterminal_e1001": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
     "seeed_reterminal_e1002": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
     "seeed_reterminal_e1004": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
+    # The Sticky's pins are defined further down; filled in after the table.
 }
 EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ = 20_000
 # TRMNL OG/BWRY (ESP32-C3): EPD on SCK7/MOSI8, wake button GPIO2, battery ADC
@@ -275,11 +276,15 @@ EMBEDDED_XIAO_EPAPER_DRIVER_BOARD_PINS = {
     "mosi": 9,
     "pwr": -1,
 }
-# Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash): 3.97" 800x480 e-paper on
-# SCK13/MOSI14, CS15, DC16, RST17, BUSY18; power button GPIO4. A 4 kHz
-# electromagnetic buzzer (FUET-5018) on GPIO48 through a MOSFET (Seeed's
-# hardware overview "Buzzer | PWM: GPIO48" and schematic; Seeed's demo drives
-# it at 4000 Hz).
+# Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash, 8MB PSRAM): 3.97" 800x480
+# four-grey e-paper on SCK13/MOSI14, CS15, DC16, RST17, BUSY18, powered
+# through EP_PWR_EN GPIO47 (Seeed's hardware specification for porting). Keys:
+# the AI/Power key GPIO4, UP GPIO5, DOWN GPIO6. A 4 kHz electromagnetic
+# buzzer (FUET-5018) on GPIO48 through a MOSFET (Seeed's demo drives it at
+# 4000 Hz). The rest of the board — the PDM microphone on 19/20/38, the GT911
+# touch panel, the sensor bus with the BQ27220 fuel gauge, the TF socket on the
+# panel bus — is in the tables below. No battery divider: the gauge reads the
+# 750 mAh cell (fos_gauge.c), so no batteryPin.
 EMBEDDED_SEEED_STICKY_PINS = {
     "rst": 17,
     "dc": 16,
@@ -288,8 +293,69 @@ EMBEDDED_SEEED_STICKY_PINS = {
     "busy": 18,
     "sck": 13,
     "mosi": 14,
-    "pwr": -1,
+    "pwr": 47,
 }
+EMBEDDED_SEEED_STICKY_GPIO_BUTTONS = [
+    {"pin": 4, "label": "AI"},
+    {"pin": 5, "label": "UP"},
+    {"pin": 6, "label": "DOWN"},
+]
+# UP and DOWN held walk the scene list; the AI key held talks to the frame
+# (docs/voice-chat.md). fos_board.c's STICKY_EVENT_MAP is the device copy.
+EMBEDDED_SEEED_STICKY_EVENT_MAP = [
+    {"event": "button", "match": {"label": "UP", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+    {"event": "button", "match": {"label": "DOWN", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+    {"event": "button", "match": {"label": "AI", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+]
+# The Sticky's MSM261 PDM microphone: PDM_CLK GPIO19, PDM_DATA GPIO20 (the
+# S3's native USB pads; its USB is a CH343 on UART0, and fos_mic.c detaches
+# the USB PHY), powered through PDM_EN GPIO38.
+EMBEDDED_SEEED_STICKY_MIC = {
+    "micClkPin": 19,
+    "micDataPin": 20,
+    "micPwrPin": 38,
+}
+# The Sticky's MISC/BFG I2C bus (SDA GPIO1 / SCL GPIO0): the PCF8563 clock,
+# the SHT40 sensor, the LSM6DS3TR-C IMU and the BQ27220 fuel gauge. Parity
+# with fos_board.c's k_i2c_buses, nothing provisions it.
+EMBEDDED_SEEED_STICKY_I2C = {"i2cBuses": "sda=1,scl=0"}
+# The Sticky's Goodix GT911 touch panel on its own bus (TP_I2C_SDA GPIO3 /
+# TP_I2C_SCL GPIO2), TP_INT GPIO21, TP_RSTn GPIO41, TP_PWR_EN GPIO42: a
+# finger is a pointer to the scene (docs/events.md "Input"; fos_touch.c).
+# Parity with fos_board.c's k_touch_pins, nothing provisions it.
+EMBEDDED_SEEED_STICKY_TOUCH = {"touchPins": "sda=3,scl=2,int=21,rst=41,en=42"}
+# The Sticky's TF socket on the panel's SCK13/MOSI14: MISO GPIO12, CS GPIO8,
+# a TPS22916 switch on GPIO10, the detect contact on GPIO11 (SPI mode only).
+EMBEDDED_SEEED_STICKY_SD_CARD_PINS = {
+    "cs": 8,
+    "sck": 13,
+    "miso": 12,
+    "mosi": 14,
+    "pwr": 10,
+    "det": 11,
+}
+EMBEDDED_SD_CARD_ASSETS_PRESET_PINS["seeed_reterminal_sticky"] = EMBEDDED_SEEED_STICKY_SD_CARD_PINS
+# The Waveshare boards' I2S audio codec (fos_codec.c): an ES8311 DAC (the
+# speaker, behind a power amplifier) and an ES7210 ADC (the microphones) on
+# one I2S bus, the chips on the board's I2C bus. The PhotoPainter: MCLK14,
+# BCLK15, WS16, ADC data GPIO18, DAC data GPIO17, amplifier GPIO7, I2C 47/48
+# (Waveshare's xiaozhi board config; the AXP2101 PMIC shares that bus). The
+# 13.3E6: MCLK14, BCLK21, WS47, ADC data GPIO48, DAC data GPIO45, amplifier
+# GPIO13, I2C 41/42 (Waveshare's 02_Audio_out example). Parity with
+# fos_board.c's k_codec_pins / k_i2c_buses, nothing provisions them. With a
+# codec microphone the one user key held talks (docs/voice-chat.md).
+EMBEDDED_WAVESHARE_PHOTOPAINTER_CODEC = {
+    "codecPins": "mclk=14,bclk=15,ws=16,din=18,dout=17,pa=7",
+    "i2cBuses": "sda=47,scl=48",
+}
+EMBEDDED_WAVESHARE_13IN3E6_CODEC = {
+    "codecPins": "mclk=14,bclk=21,ws=47,din=48,dout=45,pa=13",
+    "i2cBuses": "sda=41,scl=42",
+}
+
+
+def _one_key_voice_event_map(label: str) -> list[dict[str, Any]]:
+    return [{"event": "button", "match": {"label": label, "action": "longPress"}, "emit": "voiceChat", "as": {}}]
 # Seeed reTerminal E1001/E1002 (ESP32-S3, 32MB flash, 8MB PSRAM): same EPD
 # wiring on both — SCK7/MOSI9, CS10, DC11, RST12, BUSY13 (Zephyr board DTS
 # and the open usetrmnl/trmnl-firmware agree). Buttons: GPIO3 refresh (green),
@@ -468,6 +534,8 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_WAVESHARE_PHOTOPAINTER_PINS,
         "gpioButtons": EMBEDDED_WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS,
+        "eventMap": _one_key_voice_event_map("KEY1"),
+        **EMBEDDED_WAVESHARE_PHOTOPAINTER_CODEC,
         "sdCardAssets": {
             "enabled": True,
             "preset": "waveshare_esp32_s3_photopainter",
@@ -486,6 +554,11 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         # multiply the calibrated pin voltage by 3.
         "batteryPin": 8,
         "batteryDivider": 3.0,
+        # BOOT and Reset only: BOOT (GPIO0) is a key once booted, and held it
+        # talks into the codec microphone.
+        "gpioButtons": [{"pin": 0, "label": "BOOT"}],
+        "eventMap": _one_key_voice_event_map("BOOT"),
+        **EMBEDDED_WAVESHARE_13IN3E6_CODEC,
         "sdCardAssets": {
             "enabled": True,
             "preset": "waveshare_esp32_s3_epaper_13_3e6",
@@ -550,9 +623,24 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "flashSize": "32MB",
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_STICKY_PINS,
-        "gpioButtons": [{"pin": 4, "label": "POWER"}],
+        "gpioButtons": EMBEDDED_SEEED_STICKY_GPIO_BUTTONS,
+        "eventMap": EMBEDDED_SEEED_STICKY_EVENT_MAP,
         "buzzerPin": 48,
         "buzzerToneHz": 4000,
+        **EMBEDDED_SEEED_STICKY_MIC,
+        **EMBEDDED_SEEED_STICKY_I2C,
+        **EMBEDDED_SEEED_STICKY_TOUCH,
+        "sdCardAssets": {
+            "enabled": True,
+            "preset": "seeed_reterminal_sticky",
+            "mountPath": "/srv/assets",
+            "pins": EMBEDDED_SEEED_STICKY_SD_CARD_PINS,
+            "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
+        },
+        # A 750 mAh cell: deep sleep between renders while on battery, waking
+        # every 15 min for commands; the fuel gauge says when USB is in.
+        "deepSleepOnBattery": True,
+        "wakeCheckSeconds": 900,
     },
     "seeed_reterminal_e1001": {
         "device": "waveshare.EPD_7in5_V2",

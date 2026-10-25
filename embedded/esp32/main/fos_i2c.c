@@ -37,6 +37,10 @@ static const struct {
     [FOS_I2C_PCF8563] = {"pcf8563", 0x51},
     [FOS_I2C_SHT4X] = {"sht4x", 0x44},
     [FOS_I2C_SY6974B] = {"sy6974b", 0x6b},
+    [FOS_I2C_BQ27220] = {"bq27220", 0x55},
+    [FOS_I2C_LSM6DS3] = {"lsm6ds3", 0x6a},
+    [FOS_I2C_ES8311] = {"es8311", 0x18},
+    [FOS_I2C_ES7210] = {"es7210", 0x40},
 };
 
 static SemaphoreHandle_t s_lock = NULL;
@@ -144,7 +148,7 @@ esp_err_t fos_i2c_init(void)
     }
     xSemaphoreGive(s_lock);
     if (config->i2c_bus_count > 0) {
-        char summary[128];
+        char summary[160];
         fos_i2c_summary(summary, sizeof(summary));
         /* printf: WARN-only builds show it on the console too. */
         printf("i2c: %s\n", summary);

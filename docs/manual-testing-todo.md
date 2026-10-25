@@ -5,6 +5,48 @@ boxes only, grouped by bench — when a box passes, delete it (what was seen
 goes in the PR or commit that closes it); delete the file when it is empty.
 Every box below needs hardware that was not to hand.
 
+### reTerminal Sticky bench (everything: no board has run this yet)
+
+Every pin is from Seeed's hardware specification for porting; the firmware
+has never seen a Sticky. In order of what breaks the most:
+
+- [ ] **It boots and renders** on `set hardware seeed_reterminal_sticky`:
+  the panel behind EP_PWR_EN GPIO47 refreshes (`display_test bands`), the
+  console on the CH343 keeps working after the microphone takes GPIO19/20.
+- [ ] **The keys**: `buttons watch` names GPIO4 AI, GPIO5 UP, GPIO6 DOWN;
+  UP/DOWN held switch scenes; a press clicks the 4 kHz buzzer.
+- [ ] **The glass** (`touch`): `touch:ready` in the boot log with the
+  GT911's address and range; `swapped` matches the panel (a tap at the top
+  left of the picture lands at the top left: the "Button tester" store scene
+  shows `tap` coordinates). A drag is one `pointerMove` per report, a swipe
+  arrives as `swipe`. A touch made during a refresh arrives as a tap after it.
+- [ ] **Voice**: `mic 2` reads a peak in the thousands when spoken to (0 =
+  the USB PHY is still on the pads, or PDM_EN GPIO38 is not the power pin);
+  AI held talks.
+- [ ] **The sensor bus** (`i2c`): pcf8563, sht4x, lsm6ds3 and bq27220 all
+  answer on sda1/scl0; `status` prints the gauge's mV / % / mA; `gauge`
+  current is positive on USB and negative unplugged, and the power line says
+  `onBattery:false` on USB.
+- [ ] **Deep sleep on battery**: unplugged, the frame sleeps between renders
+  and a tap or a key wakes it (`wake` cause `touch` / `button`); the GT911
+  stays powered through the sleep (sleep current to note).
+- [ ] **The TF socket** mounts on the shared bus (CS8, MISO12, power 10,
+  detect 11); if not, try mounting before the display init (Seeed's note).
+
+### Waveshare PhotoPainter / 13.3E6 bench (the codec, `fos_codec.c`)
+
+- [ ] **The chips answer**: `i2c` lists es8311 and es7210 on the board's bus
+  (47/48 on the PhotoPainter, 41/42 on the 13.3E6); `status` prints `codec:`.
+- [ ] **The speaker**: `beep` and a press's clicks come out of the speaker
+  at a sensible volume (ES8311 volume 0xBF, amplifier on for the note); no
+  pop or hiss between notes (the amplifier is switched off at the rest).
+- [ ] **The microphone**: `mic 2` reads a peak in the thousands; KEY1
+  (PhotoPainter) / BOOT (13.3E6) held talks and the transcript is right
+  (the left ADC slot is the one taken: if it is silence, the microphones
+  are on the right slot or need the TDM mode).
+- [ ] **The PhotoPainter's PMIC** still powers the panel with the codec on
+  its I2C port (the two share port 0).
+
 ### reTerminal E1002 bench (voice chat, `docs/voice-chat.md`)
 
 Bench 2026-10-24 (E1002 over USB, a backend running the branch): `mic 2` read

@@ -95,7 +95,10 @@
   the keyboard layout, the gestures, the button holds — and reaches a scene only
   under the names it listens for, old names (`mouseMove`) included as contract
   aliases; the driver side is a struct (`driver_abi.nim`), never JSON per motion
-  report. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
+  report. The ESP32 compiles the pointer and gesture half too (the reTerminal
+  Sticky's GT911 glass, `embedded/esp32/main/fos_touch.c`, queues
+  `pointerDown` / `pointerMove` / `pointerUp` on the wire and the render task
+  delivers them), not the keyboard half and not the old-name aliases. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
   evdev translator's `test_translate.nim` are where a rule gets its test.
 
 - **Two event maps, one rule shape** (`docs/events.md` "Event map";
@@ -138,8 +141,11 @@
 ## Voice chat: `docs/voice-chat.md` is the contract
 
 - Holding the voice key — the key whose long press the frame's event map
-  binds to `voiceChat`, REFRESH on the reTerminal E1001/E1002 presets (PDM
-  microphone; the E1004 has none) — streams speech to the frame's control
+  binds to `voiceChat`: REFRESH on the reTerminal E1001/E1002 presets (PDM
+  microphone; the E1004 has none), AI on the reTerminal Sticky (PDM
+  microphone on the S3's USB pads), KEY1 / BOOT on the Waveshare PhotoPainter
+  / 13.3E6 (an ES7210 codec microphone, `fos_codec.c`, whose ES8311 speaker
+  plays the buzzer's notes) — streams speech to the frame's control
   plane and runs one turn of the AI chat with the frame in context and only
   the frame-scoped voice tools (`list_scenes`, `activate_scene`,
   `set_scene_state`, `render_now`, `show_image` — a one-picture

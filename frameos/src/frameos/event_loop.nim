@@ -151,28 +151,25 @@ proc laneFull(loop: EventLoop, envelope: EventEnvelope, lane: var Deque[EventEnv
   ## pointer's life: a `pointerUp` or `pointerCancel` evicts the newest queued
   ## move to make room, and when there is none to evict, what is down gets a
   ## `pointerCancel` at the next drain, so a scene is never stuck "pressed".
-  when defined(frameosEmbedded):
-    inc loop.dropped
-  else:
-    if envelope.name == evPointerUp or envelope.name == evMouseUp or envelope.name == evPointerCancel:
-      var evicted = false
-      var kept: seq[EventEnvelope]
-      while lane.len > 0:
-        let last = lane.popLast()
-        if last.isPointerMoveEnvelope:
-          evicted = true
-          break
-        kept.add(last)
-      for index in countdown(kept.len - 1, 0):
-        lane.addLast(kept[index])
-      if evicted:
-        lane.addLast(envelope)
-        inc loop.dropped
-        return
-      loop.inputState.pointerInputLost = true
-    elif policy.device == edPointer:
-      loop.inputState.pointerInputLost = true
-    inc loop.dropped
+  if envelope.name == evPointerUp or envelope.name == evMouseUp or envelope.name == evPointerCancel:
+    var evicted = false
+    var kept: seq[EventEnvelope]
+    while lane.len > 0:
+      let last = lane.popLast()
+      if last.isPointerMoveEnvelope:
+        evicted = true
+        break
+      kept.add(last)
+    for index in countdown(kept.len - 1, 0):
+      lane.addLast(kept[index])
+    if evicted:
+      lane.addLast(envelope)
+      inc loop.dropped
+      return
+    loop.inputState.pointerInputLost = true
+  elif policy.device == edPointer:
+    loop.inputState.pointerInputLost = true
+  inc loop.dropped
 
 proc enqueue*(loop: EventLoop, origin: EventOrigin, name: string, payload: JsonNode,
               target = none(SceneId)) =
@@ -386,9 +383,10 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
   if loop.listens(scene, delivery.name):
     loop.runOnScene(scene, delivery.name, payload, eventPolicy(delivery.name), fromRender)
     result = true
-  # The old names are pointer events' (docs/events-contract.json `aliasOf`),
-  # and the ESP32 has no pointer: leaving this out there leaves the generated
-  # alias and payload-key tables out of its image too.
+  # The old names are pointer events' (docs/events-contract.json `aliasOf`).
+  # The ESP32 delivers the new names only (docs/events.md "Known host
+  # differences"): leaving this out there leaves the generated alias and
+  # payload-key tables out of its image.
   when not defined(frameosEmbedded):
     for index in 0 ..< eventAliasCount(delivery.name):
       let alias = eventAlias(delivery.name, index)
@@ -463,14 +461,13 @@ proc drain*(loop: EventLoop, budget = DefaultDrainBudget): int =
     return 0
   loop.draining = true
   try:
-    when not defined(frameosEmbedded):
-      if loop.inputState.pointerInputLost:
-        # The lane dropped pointer input: whatever is down lets go, ahead of
-        # everything else, so a drag does not resume from a position it never had.
-        var cancels: seq[InputDelivery]
-        loop.inputState.cancelPointers(eoDriver, cancels)
-        for cancel in cancels:
-          discard loop.deliverInput(none(SceneId), cancel, false)
+    if loop.inputState.pointerInputLost:
+      # The lane dropped pointer input: whatever is down lets go, ahead of
+      # everything else, so a drag does not resume from a position it never had.
+      var cancels: seq[InputDelivery]
+      loop.inputState.cancelPointers(eoDriver, cancels)
+      for cancel in cancels:
+        discard loop.deliverInput(none(SceneId), cancel, false)
     while result < budget and loop.pending > 0:
       let envelope = if loop.main.len > 0: loop.main.popFirst() else: loop.input.popFirst()
       inc result

@@ -153,6 +153,12 @@ export interface FrameType {
     rtc?: boolean | null
     charger?: boolean | null
     climateSensor?: boolean | null
+    /** A fuel gauge reads the cell (the reTerminal Sticky's BQ27220). */
+    gauge?: boolean | null
+    /** A touch panel answered at boot: fingers reach scenes as pointer events. */
+    touch?: boolean | null
+    /** The buzzer's notes play on a codec speaker (the Waveshare boards' ES8311). */
+    speaker?: boolean | null
     sdCard?: boolean | null
     mac?: string | null
     /** major*100 + minor, as esp_chip_info reports it */
@@ -361,6 +367,7 @@ export interface FrameType {
         | 'seeed_reterminal_e1001'
         | 'seeed_reterminal_e1002'
         | 'seeed_reterminal_e1004'
+        | 'seeed_reterminal_sticky'
       pins?: {
         cs?: number
         sck?: number

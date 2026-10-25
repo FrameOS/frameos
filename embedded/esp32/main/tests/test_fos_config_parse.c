@@ -340,12 +340,52 @@ static void test_format_gpio_buttons_is_bounded(void)
     CHECK(empty[0] == '\0', "no buttons formatted as \"%s\"", empty);
 }
 
+static void test_parse_touch_and_codec_pins(void)
+{
+    /* The Sticky's touch panel, as fos_board.c spells it; a subset keeps the
+     * pins it leaves out; a wrong name or a value off the chip refuses the
+     * whole spec and leaves the struct alone. */
+    fos_touch_pins_t touch;
+    memset(&touch, -1, sizeof(touch));
+    CHECK(fos_config_parse_touch_pins("sda=3,scl=2,int=21,rst=41,en=42", &touch) == ESP_OK, "touch spec");
+    CHECK(touch.sda == 3 && touch.scl == 2 && touch.irq == 21 && touch.rst == 41 && touch.en == 42,
+          "touch %d/%d/%d/%d/%d", touch.sda, touch.scl, touch.irq, touch.rst, touch.en);
+    CHECK(fos_config_parse_touch_pins("en=-1", &touch) == ESP_OK && touch.en == -1 && touch.sda == 3, "subset");
+    CHECK(fos_config_parse_touch_pins("sda=3,scl=2,irq=21", &touch) == ESP_ERR_INVALID_ARG, "irq is not a key");
+    CHECK(fos_config_parse_touch_pins("sda=49", &touch) == ESP_ERR_INVALID_ARG && touch.sda == 3, "off the chip");
+    CHECK(fos_config_parse_touch_pins("sda", &touch) == ESP_ERR_INVALID_ARG, "no value");
+    char out[FOS_STR_LEN];
+    fos_config_format_touch_pins(&touch, out, sizeof(out));
+    CHECK(strcmp(out, "sda=3,scl=2,int=21,rst=41,en=-1") == 0, "formatted \"%s\"", out);
+    fos_touch_pins_t again;
+    memset(&again, -1, sizeof(again));
+    CHECK(fos_config_parse_touch_pins(out, &again) == ESP_OK && memcmp(&again, &touch, sizeof(again)) == 0,
+          "round trip");
+    /* "" is a no-op: the board default when NVS has nothing. */
+    CHECK(fos_config_parse_touch_pins("", &touch) == ESP_OK && touch.sda == 3, "empty spec keeps the pins");
+
+    /* The PhotoPainter's codec. */
+    fos_codec_pins_t codec;
+    memset(&codec, -1, sizeof(codec));
+    CHECK(fos_config_parse_codec_pins("mclk=14,bclk=15,ws=16,din=18,dout=17,pa=7", &codec) == ESP_OK, "codec spec");
+    CHECK(codec.mclk == 14 && codec.bclk == 15 && codec.ws == 16 && codec.din == 18 && codec.dout == 17 &&
+              codec.pa == 7,
+          "codec %d/%d/%d/%d/%d/%d", codec.mclk, codec.bclk, codec.ws, codec.din, codec.dout, codec.pa);
+    fos_config_format_codec_pins(&codec, out, sizeof(out));
+    CHECK(strcmp(out, "mclk=14,bclk=15,ws=16,din=18,dout=17,pa=7") == 0, "formatted \"%s\"", out);
+    CHECK(fos_config_parse_codec_pins("sck=14", &codec) == ESP_ERR_INVALID_ARG && codec.mclk == 14, "sck is not a key");
+    char small[12];
+    fos_config_format_codec_pins(&codec, small, sizeof(small));
+    CHECK(strlen(small) < sizeof(small), "bounded");
+}
+
 int main(void)
 {
     test_parse_pins_full_and_subset();
     test_parse_pins_refusals();
     test_parse_assets_sd_pins();
     test_parse_i2c_buses();
+    test_parse_touch_and_codec_pins();
     test_led_type_names();
     test_normalize_rotate();
     test_normalize_scaling_mode();

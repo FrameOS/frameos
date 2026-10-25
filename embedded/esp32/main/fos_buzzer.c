@@ -10,6 +10,7 @@
 #include "driver/ledc.h"
 #include "esp_timer.h"
 
+#include "fos_codec.h"
 #include "fos_config.h"
 #include "fos_led.h"
 
@@ -151,6 +152,9 @@ static void start_note_locked(const fos_buzzer_note_t *note)
     /* The status LED follows every note (fos_led.h): lit while one sounds,
      * dark for a rest — with the buzzer, or instead of it. */
     fos_led_set(note->freq_hz != 0);
+    /* A board with a speaker instead of a buzzer (the Waveshare codec
+     * boards, fos_codec.c) plays the same note there. */
+    fos_codec_tone(note->freq_hz);
     if (s_pin >= 0) {
         if (note->freq_hz == 0) {
             ledc_stop(BUZZER_MODE, BUZZER_CHANNEL, 0);
@@ -169,6 +173,7 @@ static void start_note_locked(const fos_buzzer_note_t *note)
 static void stop_all_locked(void)
 {
     if (s_pin >= 0) ledc_stop(BUZZER_MODE, BUZZER_CHANNEL, 0);
+    fos_codec_tone(0);
     fos_led_set(false);
     s_note_count = s_note_next = 0;
 }
@@ -210,10 +215,11 @@ void fos_buzzer_play(const fos_buzzer_note_t *notes, size_t count)
     if (count > FOS_BUZZER_NOTES_MAX) count = FOS_BUZZER_NOTES_MAX;
     int pin = fos_config()->buzzer_pin;
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    /* The sequence runs for the buzzer, for the LED that follows it, or for
-     * both; with neither there is nothing to time. */
+    /* The sequence runs for the buzzer, for the speaker that stands in for
+     * one, for the LED that follows it, or for all; with none there is
+     * nothing to time. */
     bool buzzer = attach(pin);
-    if (buzzer || fos_led_present()) {
+    if (buzzer || fos_codec_has_speaker() || fos_led_present()) {
         esp_timer_stop(s_stop_timer); /* a sound already playing: start over */
         s_note_count = 0;
         for (size_t i = 0; i < count; i++) {

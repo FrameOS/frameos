@@ -28,6 +28,9 @@
 #include "fos_buttons.h"
 #include "fos_buzzer.h"
 #include "fos_charger.h"
+#include "fos_codec.h"
+#include "fos_gauge.h"
+#include "fos_touch.h"
 #include "fos_client.h"
 #include "fos_i2c.h"
 #include "fos_led.h"
@@ -290,13 +293,31 @@ static int cmd_status(int argc, char **argv)
                    (int)charger.usb_power, (int)charger.charging, (int)charger.charge_done,
                    (unsigned)charger.vbus_stat, (unsigned)charger.chrg_stat);
         }
+        fos_gauge_status_t gauge;
+        if (fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK) {
+            printf("gauge:       bq27220, %d mV %d%% %d mA%s%s%s\n", gauge.mv, gauge.pct, gauge.current_ma,
+                   gauge.present ? "" : " (no cell)", gauge.discharging ? " discharging" : "",
+                   gauge.charging ? " charging" : gauge.full ? " full" : "");
+        }
     }
     if (config->mic_pins.clk >= 0 && config->mic_pins.data >= 0) {
         printf("microphone:  PDM clk GPIO %d, data GPIO %d, power GPIO %d; voice chat %s%s\n",
                (int)config->mic_pins.clk, (int)config->mic_pins.data, (int)config->mic_pins.pwr,
                config->voice_chat ? "on" : "off", fos_voice_busy() ? " (session running)" : "");
     }
+    else if (fos_codec_has_mic()) {
+        printf("microphone:  es7210 codec (codec_pins); voice chat %s%s\n", config->voice_chat ? "on" : "off",
+               fos_voice_busy() ? " (session running)" : "");
+    }
     else printf("microphone:  none (set mic_pins clk=42,data=41,pwr=38)\n");
+    if (config->codec_pins.bclk >= 0 && config->codec_pins.ws >= 0) {
+        char codec[FOS_STR_LEN];
+        fos_config_format_codec_pins(&config->codec_pins, codec, sizeof(codec));
+        printf("codec:       %s%s%s (%s)\n", fos_codec_has_speaker() ? "es8311 speaker" : "",
+               fos_codec_has_speaker() && fos_codec_has_mic() ? " + " : "",
+               fos_codec_has_mic() ? "es7210 microphone" : (fos_codec_has_speaker() ? "" : "no chip answered"), codec);
+    }
+    fos_touch_print_status();
     printf("nim:         %s\n", frameos_nim_info());
     printf("renders:     %lu (last %lld ms)\n",
            (unsigned long)fos_client_render_count(), fos_client_last_render_ms());
@@ -484,7 +505,7 @@ static int cmd_set(int argc, char **argv)
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|wake_schedule|"
                "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|mic_pins|voice_chat|"
-               "led_pin|led_type|i2c_buses|"
+               "led_pin|led_type|i2c_buses|touch_pins|codec_pins|"
                "pins|gpio_buttons|ap_psk> "
                "<value...>\n");
         return 1;
@@ -614,9 +635,11 @@ static int cmd_set(int argc, char **argv)
               "rst=12,dc=8,cs=9,cs2=-1,busy=13,sck=10,mosi=11,pwr=-1",
               "0:BOOT\n4:KEY1",
               -1, 2.0f, -1, 0, 0 },
+            /* The 13.3E6 has BOOT and Reset only; BOOT is a GPIO0 key once
+             * booted, and held it talks (fos_board_event_map, fos_codec.c). */
             { "waveshare_esp32_s3_epaper_13_3e6", "EPD_13in3e",
               "rst=2,dc=11,cs=10,cs2=3,busy=12,sck=9,mosi=46,pwr=1",
-              "",
+              "0:BOOT",
               8, 3.0f, -1, 0, 0 },
             /* TRMNL OG / BWRY (ESP32-C3 firmware). Battery: VBAT through a
              * 2:1 divider on GPIO3 (ADC1_CH3) — usetrmnl/trmnl-firmware
@@ -655,12 +678,18 @@ static int cmd_set(int argc, char **argv)
               "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=6,mosi=5,pwr=-1",
               "9:BOOT",
               -1, 2.0f, -1, 0, 0 },
-            /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash). Its 4 kHz
-             * buzzer on GPIO48 comes from fos_board_buzzer_pin/_tone_hz. */
+            /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash): the panel on
+             * SCK13/MOSI14 with EP_PWR_EN GPIO47, the AI/Power key GPIO4 and
+             * UP/DOWN GPIO5/6 (Seeed's porting specification). The buzzer
+             * (GPIO48, 4 kHz), the PDM microphone (19/20/38), the GT911
+             * touch panel, the sensor bus with the BQ27220 fuel gauge and
+             * the TF socket on the panel bus all come from fos_board.c. No
+             * battery divider: the gauge reads the 750 mAh cell, and the
+             * frame deep-sleeps on it, waking every 15 min for commands. */
             { "seeed_reterminal_sticky", "EPD_3in97",
-              "rst=17,dc=16,cs=15,cs2=-1,busy=18,sck=13,mosi=14,pwr=-1",
-              "4:POWER",
-              -1, 2.0f, -1, 0, 0 },
+              "rst=17,dc=16,cs=15,cs2=-1,busy=18,sck=13,mosi=14,pwr=47",
+              "4:AI\n5:UP\n6:DOWN",
+              -1, 2.0f, -1, 1, 900 },
             /* Seeed reTerminal E1001 (7.5" mono) / E1002 (7.3" Spectra 6):
              * same EPD wiring on both. The TF socket shares the panel's bus
              * (fos_board_sd_pins), the green LED is GPIO6 (fos_board_led),
@@ -743,6 +772,12 @@ static int cmd_set(int argc, char **argv)
             config->mic_pins.clk = (int8_t)mic_clk;
             config->mic_pins.data = (int8_t)mic_data;
             config->mic_pins.pwr = (int8_t)mic_pwr;
+            /* The touch panel and the audio codec the same way: the board's
+             * or none (fos_touch.c, fos_codec.c). */
+            memset(&config->touch_pins, -1, sizeof(config->touch_pins));
+            fos_config_parse_touch_pins(fos_board_touch_pins(presets[i].name), &config->touch_pins);
+            memset(&config->codec_pins, -1, sizeof(config->codec_pins));
+            fos_config_parse_codec_pins(fos_board_codec_pins(presets[i].name), &config->codec_pins);
             if (presets[i].deep_sleep_on_battery) {
                 config->deep_sleep_on_battery = true;
                 config->wake_check_sec = presets[i].wake_check_sec;
@@ -924,6 +959,35 @@ static int cmd_set(int argc, char **argv)
             }
         }
         config->mic_pins = pins;
+    }
+    /* The touch panel's and the codec's pins (fos_touch.c, fos_codec.c),
+     * the same shape and the same reserved-pad check; both take effect at
+     * the next boot (the controller is reset and probed once). */
+    else if (strcmp(key, "touch_pins") == 0 || strcmp(key, "codec_pins") == 0) {
+        bool touch = key[0] == 't';
+        fos_touch_pins_t touch_pins = config->touch_pins;
+        fos_codec_pins_t codec_pins = config->codec_pins;
+        if (strcmp(value, "none") == 0 || strcmp(value, "-1") == 0) {
+            memset(&touch_pins, -1, sizeof(touch_pins));
+            memset(&codec_pins, -1, sizeof(codec_pins));
+        } else if ((touch ? fos_config_parse_touch_pins(value, &touch_pins)
+                          : fos_config_parse_codec_pins(value, &codec_pins)) != ESP_OK) {
+            printf(touch ? "usage: set touch_pins sda=<gpio>,scl=<gpio>,int=<gpio>[,rst=<gpio>][,en=<gpio>] | none\n"
+                         : "usage: set codec_pins bclk=<gpio>,ws=<gpio>[,mclk=<gpio>][,din=<gpio>][,dout=<gpio>][,pa=<gpio>] | none\n");
+            return 1;
+        }
+        const int8_t *candidates = touch ? (const int8_t *)&touch_pins : (const int8_t *)&codec_pins;
+        size_t count = touch ? sizeof(touch_pins) : sizeof(codec_pins);
+        for (size_t i = 0; i < count; i++) {
+            const char *why = candidates[i] >= 0 ? fos_config_gpio_pin_reserved(candidates[i]) : NULL;
+            if (why != NULL) {
+                printf("refusing %s GPIO %d: %s\n", key, candidates[i], why);
+                return 1;
+            }
+        }
+        if (touch) config->touch_pins = touch_pins;
+        else config->codec_pins = codec_pins;
+        printf("%s saved; takes effect at the next boot\n", key);
     }
     else if (strcmp(key, "voice_chat") == 0) config->voice_chat = atoi(value) != 0;
     else if (strcmp(key, "battery_divider") == 0) config->battery_divider = (float)atof(value);
@@ -1823,6 +1887,22 @@ static int cmd_i2c(int argc, char **argv)
                (int)charger.usb_power, (int)charger.charging, (int)charger.charge_done,
                (unsigned)charger.vbus_stat, (unsigned)charger.chrg_stat);
     }
+    fos_gauge_status_t gauge;
+    if (fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK) {
+        printf("gauge: %d mV soc=%d%% current=%d mA present=%d discharging=%d charging=%d full=%d\n", gauge.mv,
+               gauge.pct, gauge.current_ma, (int)gauge.present, (int)gauge.discharging, (int)gauge.charging,
+               (int)gauge.full);
+    }
+    return 0;
+}
+
+/* `touch`: the touch panel's controller and the last point it reported, the
+ * bench check that the GT911 is wired and which way its axes run. */
+static int cmd_touch(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    fos_touch_print_status();
     return 0;
 }
 
@@ -1886,7 +1966,8 @@ static esp_err_t register_frameos_console_commands(void)
         {.command = "buttons", .help = "buttons [watch [seconds]] — configured buttons, or find which GPIO a press moves", .func = cmd_buttons},
         {.command = "beep", .help = "beep [hz] [ms] — sound the buzzer", .func = cmd_beep},
         {.command = "led", .help = "led [on|off|blink] — the status LED", .func = cmd_led},
-        {.command = "i2c", .help = "i2c [sync] — probe the I2C buses again; the clock and the charger; sync writes the clock", .func = cmd_i2c},
+        {.command = "i2c", .help = "i2c [sync] — probe the I2C buses again; the clock, the charger, the gauge; sync writes the clock", .func = cmd_i2c},
+        {.command = "touch", .help = "touch — the touch panel's controller and its last point", .func = cmd_touch},
         {.command = "mic", .help = "mic [seconds] — record from the microphone and print the level", .func = cmd_mic},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},

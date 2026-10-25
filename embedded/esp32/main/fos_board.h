@@ -81,4 +81,17 @@ const char *fos_board_i2c_buses(const char *hardware_preset);
  * EMBEDDED_SD_CARD_ASSETS_PRESET_PINS. */
 const char *fos_board_sd_pins(const char *hardware_preset);
 
+/* The board's capacitive touch panel as the `touch_pins` spec
+ * (`sda=3,scl=2,int=21,rst=41,en=42`), "" for a board without one. The Seeed
+ * reTerminal Sticky carries a Goodix GT911 on its own I2C bus (fos_touch.c).
+ * Keep in step with `touchPins` in EMBEDDED_HARDWARE_PRESETS. */
+const char *fos_board_touch_pins(const char *hardware_preset);
+
+/* The board's I2S audio codec as the `codec_pins` spec
+ * (`mclk=14,bclk=15,ws=16,din=18,dout=17,pa=7`), "" for a board without one.
+ * The Waveshare PhotoPainter and 13.3E6 carry an ES8311 (the speaker) and an
+ * ES7210 (the microphones) on one I2S bus, the chips on an `i2c_buses` bus
+ * (fos_codec.c). Keep in step with `codecPins` in EMBEDDED_HARDWARE_PRESETS. */
+const char *fos_board_codec_pins(const char *hardware_preset);
+
 #endif /* FOS_BOARD_H */

@@ -72,6 +72,32 @@ typedef struct {
     char label[FOS_GPIO_BUTTON_LABEL_LEN];
 } fos_gpio_button_t;
 
+/* The capacitive touch panel (fos_touch.c; docs/events.md "Input"): a GT911
+ * on its own I2C bus, its interrupt line, its reset and the load switch that
+ * powers it (-1 = always on). sda or scl -1 = no touch panel. The Seeed
+ * reTerminal Sticky: sda 3, scl 2, int 21, rst 41, en 42. */
+typedef struct {
+    int8_t sda;
+    int8_t scl;
+    int8_t irq;
+    int8_t rst;
+    int8_t en;
+} fos_touch_pins_t;
+
+/* An I2S audio codec (fos_codec.c): the Waveshare PhotoPainter and 13.3E6
+ * carry an ES8311 DAC (the speaker, behind a power amplifier on `pa`) and an
+ * ES7210 ADC (the microphones) on one I2S bus; the chips themselves sit on
+ * one of `i2c_buses`. `din` is data INTO the chip (the ADC's out), `dout`
+ * data out of it (the DAC's in). bclk or ws -1 = no codec. */
+typedef struct {
+    int8_t mclk;
+    int8_t bclk;
+    int8_t ws;
+    int8_t din;
+    int8_t dout;
+    int8_t pa;
+} fos_codec_pins_t;
+
 typedef struct {
     bool enabled;
     /* Format a card at boot when — and only when — the probe in fos_sd_probe.c
@@ -207,6 +233,12 @@ typedef struct {
     fos_mic_pins_t mic_pins;       /* the PDM microphone (Seeed reTerminal
                                     * E1001/E1002: clk 42, data 41, pwr 38);
                                     * clk/data -1 = none */
+    fos_touch_pins_t touch_pins;   /* the touch panel (reTerminal Sticky: a GT911
+                                    * on sda 3 / scl 2, int 21, rst 41, en 42);
+                                    * sda/scl -1 = none */
+    fos_codec_pins_t codec_pins;   /* the I2S audio codec (Waveshare PhotoPainter,
+                                    * 13.3E6): the speaker and the microphones;
+                                    * bclk/ws -1 = none */
     bool voice_chat;               /* holding the key the event map binds to
                                     * voiceChat (REFRESH on the E1001/E1002)
                                     * talks to the AI chat (docs/voice-chat.md);
@@ -246,6 +278,12 @@ void fos_config_format_assets_sd_pins(const fos_assets_sd_config_t *assets_sd, c
 /* "clk=42,data=41,pwr=38" (any subset; pwr -1 = always powered) */
 esp_err_t fos_config_parse_mic_pins(const char *spec, fos_mic_pins_t *mic_pins);
 void fos_config_format_mic_pins(const fos_mic_pins_t *mic_pins, char *out, size_t out_len);
+/* "sda=3,scl=2,int=21,rst=41,en=42" (any subset; rst / en -1 = not wired) */
+esp_err_t fos_config_parse_touch_pins(const char *spec, fos_touch_pins_t *touch_pins);
+void fos_config_format_touch_pins(const fos_touch_pins_t *touch_pins, char *out, size_t out_len);
+/* "mclk=14,bclk=15,ws=16,din=18,dout=17,pa=7" (any subset; mclk / pa -1 = not wired) */
+esp_err_t fos_config_parse_codec_pins(const char *spec, fos_codec_pins_t *codec_pins);
+void fos_config_format_codec_pins(const fos_codec_pins_t *codec_pins, char *out, size_t out_len);
 /* `sda=19,scl=20;sda=39,scl=40`: up to FOS_I2C_BUSES_MAX buses, `;`-separated,
  * each with both pins; "" = none. Replaces the list. */
 esp_err_t fos_config_parse_i2c_buses(const char *spec, fos_i2c_bus_t *buses, uint8_t *count);
