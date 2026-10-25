@@ -1887,6 +1887,10 @@ static uint32_t compute_sleep_seconds(uint32_t interval, int64_t cycle_start_us)
 static fos_animation_t s_anim;
 static esp_timer_handle_t s_frame_timer = NULL;
 static bool s_quiet = false;
+/* Somebody asked for a render while an animation ran (a cloud or HTTP
+ * render, a scene switch): that frame logs in full, so its render:done and
+ * the cloud's render announce do not wait for the next ten seconds. */
+static bool s_loud_next = false;
 /* The pass-start power decision, kept between the once-a-second passes that
  * make it while animating. */
 static bool s_pass_battery_critical = false;
@@ -1938,20 +1942,25 @@ static void log_animation(const char *status, bool logged_frame)
 
 /* The wait between two frames of an animation. What arrives meanwhile is
  * served the way the ordinary wait below serves it: a press or a touch goes
- * to the scene, a command pull runs, the schedule ticks. A voice session's
- * hold keeps the panel until its release (whose render carries the notice).
- * Returns when the next frame is due. */
+ * to the scene, a command pull runs, the schedule ticks, and a render asked
+ * for makes the next frame one that logs in full. A frame slower than the
+ * interval waits for nothing, but the signals are read all the same. A voice
+ * session's hold keeps the panel until its release (whose render carries the
+ * notice). Returns when the next frame is due. */
 static void animation_wait(fos_config_t *config, int64_t wait_us)
 {
-    if (wait_us <= 0 || !s_frame_timer) return;
-    esp_timer_stop(s_frame_timer);
-    xEventGroupClearBits(s_events, FRAME_DUE_BIT);
-    if (esp_timer_start_once(s_frame_timer, (uint64_t)wait_us) != ESP_OK) return;
-    bool due = false;
-    while (!due) {
-        EventBits_t bits = xEventGroupWaitBits(
-            s_events, FRAME_DUE_BIT | RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT,
-            pdTRUE, pdFALSE, pdMS_TO_TICKS(1000));
+    const EventBits_t signals = RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT;
+    bool armed = false;
+    if (wait_us > 0 && s_frame_timer) {
+        esp_timer_stop(s_frame_timer);
+        xEventGroupClearBits(s_events, FRAME_DUE_BIT);
+        armed = esp_timer_start_once(s_frame_timer, (uint64_t)wait_us) == ESP_OK;
+    }
+    while (true) {
+        EventBits_t bits = armed || render_held()
+            ? xEventGroupWaitBits(s_events, signals | FRAME_DUE_BIT, pdTRUE, pdFALSE,
+                                  pdMS_TO_TICKS(armed ? 1000 : 100))
+            : xEventGroupClearBits(s_events, signals); /* the bits before the clear */
         bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
         if ((bits & COMMANDS_BIT) && fos_commands_sync() && nim) {
             fos_scenes_apply_pending_selection();
@@ -1961,12 +1970,13 @@ static void animation_wait(fos_config_t *config, int64_t wait_us)
             fos_touch_process_events();
             fos_schedule_tick();
         }
-        due = (bits & (FRAME_DUE_BIT | RENDER_NOW_BIT)) != 0 ||
-              (nim && frameos_nim_render_requested()) ||
-              fos_animation_wait_us(&s_anim, esp_timer_get_time()) == 0;
-        if (render_held()) due = false;
+        if (bits & RENDER_NOW_BIT) s_loud_next = true;
+        bool due = !armed || (bits & (FRAME_DUE_BIT | RENDER_NOW_BIT)) != 0 ||
+                   (nim && frameos_nim_render_requested()) ||
+                   fos_animation_wait_us(&s_anim, esp_timer_get_time()) == 0;
+        if (due && !render_held()) break;
     }
-    esp_timer_stop(s_frame_timer);
+    if (armed) esp_timer_stop(s_frame_timer);
 }
 
 static void client_task(void *arg)
@@ -2233,6 +2243,7 @@ static void client_task(void *arg)
                             /* a due date past the longest allowed interval is
                              * garbage (clock jump, stale RTC) — render */
                             s_next_render_due < wall_now + 7 * 86400 + 3600;
+        if (force_render) s_loud_next = true;
         force_render = false;
         bool rendered = false;
         if (s_render_paused_for_memory) {
@@ -2258,7 +2269,8 @@ static void client_task(void *arg)
             } else {
                 /* An animation logs one frame in full every so often, with
                  * the summary of the quiet ones before it. */
-                bool quiet = fos_animation_frame_quiet(&s_anim, esp_timer_get_time());
+                bool quiet = !s_loud_next && fos_animation_frame_quiet(&s_anim, esp_timer_get_time());
+                s_loud_next = false;
                 if (s_anim.active && !quiet) log_animation("running", true);
                 set_quiet(quiet);
                 s_render_in_flight = true;
