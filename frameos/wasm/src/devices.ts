@@ -59,7 +59,8 @@ export interface DevicePreset {
 /** FOS_NIM_EMERGENCY_RESERVE_BYTES: armed at boot, outside the render budget. */
 const ESP32_EMERGENCY_RESERVE_BYTES = 1024 * 1024
 /** FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE (frameos_display.h): the canvas is
- * RGBX only while two of it fit the PSRAM heap; past that it is RGB565. */
+ * RGBX only while two of it fit the PSRAM heap; past that it is one byte of
+ * luma on a grey panel, RGB565 on any other. */
 const ESP32_RGBX_MAX_PSRAM_SHARE = 2
 /** What the boards report as `hardware.memory.psramBytes`. Both are the whole
  * chip: a 16 MB module registers all of it with the heap. */
@@ -122,14 +123,26 @@ export function devicePresetFor(key: string | null | undefined): DevicePreset | 
  * beyond — which is where a 13.3" panel on an 8 MB board lands, and a 16 MB
  * board does not (verified against a live 16 MB frame: 6,537 KB free PSRAM
  * mid-scene at 1200x1600 is exactly an RGBX canvas plus the panel buffer and
- * the reserve). */
+ * the reserve) — or one byte of luma beyond on a grey panel (the 10.3"
+ * reTerminal E1003). */
 export function esp32CanvasBytesPerPixel(
   width: number,
   height: number,
-  psramBytes: number = ESP32_PSRAM_BYTES
+  psramBytes: number = ESP32_PSRAM_BYTES,
+  greyPanel: boolean = false
 ): number {
   const pixels = Math.max(1, width) * Math.max(1, height)
-  return pixels * 4 * ESP32_RGBX_MAX_PSRAM_SHARE <= psramBytes ? 4 : 2
+  if (pixels * 4 * ESP32_RGBX_MAX_PSRAM_SHARE <= psramBytes) {
+    return 4
+  }
+  return greyPanel ? 1 : 2
+}
+
+/** The panel formats a luma canvas serves (fos_pixel_format_t, the firmware's
+ * `fos_pixel_format_is_grey`): 1 black and white, 4 and 8 four and sixteen
+ * greys. */
+export function esp32PixelFormatIsGrey(pixelFormat: unknown): boolean {
+  return pixelFormat === 1 || pixelFormat === 4 || pixelFormat === 8
 }
 
 /** The heap an ESP32-S3 frame really has for rendering: PSRAM, less the packed
@@ -146,15 +159,17 @@ export function esp32DeviceHeapBytes(
 }
 
 /** What the preview spends on the canvas that the device does not: a frame
- * that keeps its canvas in RGB565 needs that term doubled here, because the
- * preview runtime keeps every image in RGBX. Zero wherever the two agree. */
+ * that keeps its canvas in RGB565 needs that term doubled here (in luma,
+ * quadrupled), because the preview runtime keeps every image in RGBX. Zero
+ * wherever the two agree. */
 export function esp32PreviewOverheadBytes(
   width: number,
   height: number,
-  psramBytes: number = ESP32_PSRAM_BYTES
+  psramBytes: number = ESP32_PSRAM_BYTES,
+  greyPanel: boolean = false
 ): number {
   const pixels = Math.max(1, width) * Math.max(1, height)
-  return pixels * 4 - pixels * esp32CanvasBytesPerPixel(width, height, psramBytes)
+  return pixels * 4 - pixels * esp32CanvasBytesPerPixel(width, height, psramBytes, greyPanel)
 }
 
 /** The ceiling to give the preview so it has the same room the device does:
@@ -166,11 +181,12 @@ export function esp32PreviewOverheadBytes(
 export function esp32PreviewMemoryBytes(
   width: number,
   height: number,
-  psramBytes: number = ESP32_PSRAM_BYTES
+  psramBytes: number = ESP32_PSRAM_BYTES,
+  greyPanel: boolean = false
 ): number {
   return (
     esp32DeviceHeapBytes(width, height, psramBytes) +
-    esp32PreviewOverheadBytes(width, height, psramBytes)
+    esp32PreviewOverheadBytes(width, height, psramBytes, greyPanel)
   )
 }
 
@@ -199,21 +215,24 @@ export function describeDeviceLimits(limits: DeviceLimits): string {
 }
 
 /** The limits an ESP32 frame renders under: its PSRAM (what it reports as
- * `hardware.memory.psramBytes`) at its panel size, running as an ESP32. */
+ * `hardware.memory.psramBytes`) at its panel size, running as an ESP32, with
+ * the luma canvas a grey panel gets past RGBX (`greyPanel`; the frame reports
+ * its panel's `hardware.pixelFormat`, see esp32PixelFormatIsGrey). */
 export function esp32DeviceLimits(
   width: number,
   height: number,
-  psramBytes: number = ESP32_PSRAM_BYTES
+  psramBytes: number = ESP32_PSRAM_BYTES,
+  greyPanel: boolean = false
 ): DeviceLimits {
   return {
-    memoryBytes: esp32PreviewMemoryBytes(width, height, psramBytes),
+    memoryBytes: esp32PreviewMemoryBytes(width, height, psramBytes, greyPanel),
     // The firmware's separate PSRAM safety margin is deliberately not
     // simulated: subtracting it here shrank the planning budget enough that
     // the interpreter declined to fuse a panel into the canvas and allocated
     // a standalone image instead — the opposite of what the device does, and
     // a worse prediction of it. A Pi has no such cliff, so it keeps its.
     memoryReserveBytes: 0,
-    previewOverheadBytes: esp32PreviewOverheadBytes(width, height, psramBytes),
+    previewOverheadBytes: esp32PreviewOverheadBytes(width, height, psramBytes, greyPanel),
     jsMemoryLimitMb: ESP32_JS_MEMORY_LIMIT_MB,
     jsMaxStackKb: ESP32_JS_MAX_STACK_KB,
     maxHttpResponseBytes: ESP32_MAX_HTTP_RESPONSE_BYTES,

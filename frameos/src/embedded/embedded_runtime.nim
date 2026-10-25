@@ -731,17 +731,21 @@ proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
 # Two decisions live here. The format, decided per board by the firmware
 # (`fos_render_canvas_bytes_per_pixel`, components/frameos_display): RGBX
 # when a full canvas takes at most half the module's PSRAM, else pixie's
-# 16-bit RGB 5/6/5 surface. The 800x480 boards and a 1200x1600 panel on a
-# 16 MB module render in full colour; 1200x1600 on an 8 MB module is the
-# one that needs 565 — RGBA is 7.3 MiB and does not fit, 565 is 3.7 MiB and
-# does. A 565 canvas costs colour even though the dither keeps its error
+# 8-bit luma surface for a greyscale panel and its 16-bit RGB 5/6/5 surface
+# for a colour one. The 800x480 boards and a 1200x1600 panel on a 16 MB
+# module render in full colour; 1200x1600 Spectra 6 on an 8 MB module needs
+# 565 — RGBA is 7.3 MiB and does not fit, 565 is 3.7 MiB and does — and the
+# 1872x1404 sixteen-grey reTerminal E1003 draws in grey, 2.5 MiB where 565
+# was 5.0 and left the render reserve almost alone in the module. A grey
+# canvas loses nothing a grey panel shows: blending is per channel, so the
+# luma of a composite is the composite of the lumas. A 565 canvas costs colour even though the dither keeps its error
 # rows at full precision: rounding every stored pixel to 5/6 bits turns a
 # smooth gradient into plateaus (a 480-row sky keeps 11 blue levels of 90),
 # and the diffusion pass prints the plateau edges as bands — seen on the
 # 7.3" weather scene. So a 565 canvas stores with pixie's per-pixel dither
 # (`ditherStores`), which brings the gradient back at no memory cost, and
 # RGBX is used wherever it fits. `-d:frameosCanvasRgbx` / `-d:frameosCanvas565`
-# force a format for A/B measurement; the Pi runtime and the wasm preview are
+# / `-d:frameosCanvasGray8` force a format for A/B measurement; the Pi runtime and the wasm preview are
 # untouched either way and keep full RGBA.
 #
 # The lifetime: the memory comes from one PSRAM block the firmware claims at
@@ -761,8 +765,12 @@ var sceneCanvas: Image
 proc sceneCanvasFormat*(): PixelFormat =
   when defined(frameosCanvasRgbx): pfRgbx
   elif defined(frameosCanvas565): pfRgb565
+  elif defined(frameosCanvasGray8): pfGray8
   else:
-    if canvasBytesPerPixel() == 4: pfRgbx else: pfRgb565
+    case canvasBytesPerPixel()
+    of 4: pfRgbx
+    of 1: pfGray8
+    else: pfRgb565
 
 proc sceneCanvasWidth*(): int =
   if frameConfig.isNil: 0
@@ -784,22 +792,35 @@ proc renderCanvas*(): Image =
   if not sceneCanvas.isNil and sceneCanvas.width == width and
       sceneCanvas.height == height and sceneCanvas.format == format:
     return sceneCanvas
-  let bytesPerPixel = if format == pfRgb565: 2 else: 4
+  let bytesPerPixel =
+    case format
+    of pfRgb565: 2
+    of pfGray8: 1
+    of pfRgbx: 4
   let buffer = canvasBuffer(csize_t(width * height * bytesPerPixel))
   if buffer != nil:
     sceneCanvas =
-      if format == pfRgb565: newImage565Over(width, height, buffer)
-      else: newImageOver(width, height, buffer)
+      case format
+      of pfRgb565: newImage565Over(width, height, buffer)
+      of pfGray8: newImageGray8Over(width, height, buffer)
+      of pfRgbx: newImageOver(width, height, buffer)
   else:
     # No firmware block (a host build, or the reservation failed): the Nim
     # heap is PSRAM too, so this is the same memory without the guarantee.
     log(&"canvas: no reserved block for {width}x{height}, allocating from the heap")
     sceneCanvas =
-      if format == pfRgb565: newImage565(width, height)
-      else: newImage(width, height)
+      case format
+      of pfRgb565: newImage565(width, height)
+      of pfGray8: newImageGray8(width, height)
+      of pfRgbx: newImage(width, height)
   if format == pfRgb565:
     sceneCanvas.ditherStores = true
-  log(&"canvas: {width}x{height} " & (if format == pfRgb565: "rgb565 (dithered stores)" else: "rgbx"))
+  let described =
+    case format
+    of pfRgb565: "rgb565 (dithered stores)"
+    of pfGray8: "gray8"
+    of pfRgbx: "rgbx"
+  log(&"canvas: {width}x{height} {described}")
   sceneCanvas
 
 proc sceneRefreshSeconds*(): float =

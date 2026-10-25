@@ -13,7 +13,7 @@ FIXTURES = json.loads((Path(__file__).resolve().parents[4] / "docs" / "device-li
 def test_ceiling_matches_the_preview_package(case):
     # The same numbers esp32DeviceLimits gives in frameos/wasm/src/devices.ts
     # (device-limits.test.ts replays this file there).
-    limits = esp32_device_limits(case["width"], case["height"], case["psramBytes"])
+    limits = esp32_device_limits(case["width"], case["height"], case["psramBytes"], case.get("greyPanel", False))
     assert limits["memoryBytes"] == case["memoryBytes"]
     assert limits["previewOverheadBytes"] == case["previewOverheadBytes"]
     assert limits["memoryReserveBytes"] == 0
@@ -29,6 +29,14 @@ def test_an_esp32_that_renders_on_the_device_renders_in_its_psram():
 
     sixteen = Frame(id=2, mode="embedded", embedded={"platform": "esp32-s3", "psramMB": 16})
     assert frame_render_device(sixteen).label == "ESP32 with 16 MB PSRAM"
+
+    # The E1003's sixteen greys: past RGBX its canvas is luma, so the frame
+    # has 2.5 MB more to render in than a 565 canvas would leave it.
+    e1003 = Frame(id=3, mode="embedded", device="waveshare.EPD_10in3", embedded={"hardwarePreset": "seeed_reterminal_e1003"})
+    device = frame_render_device(e1003)
+    assert device is not None and device.grey_panel is True
+    assert device.limits(1872, 1404)["memoryBytes"] == 13_910_752
+    assert frame_render_device(e1004).grey_panel is False
 
 
 def test_frames_that_do_not_render_in_a_few_megabytes_render_unlimited():

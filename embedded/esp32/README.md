@@ -237,7 +237,7 @@ for the two Spectra boards most of the bench work runs on:
 | `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" four-grey | reTerminal Sticky, 32MB flash, 8MB PSRAM (renders on-device); panel power GPIO47; keys AI (GPIO4), UP (5), DOWN (6): UP/DOWN held walk the scenes, AI held talks; 4 kHz buzzer GPIO48; PDM mic 19/20/38; GT911 touch panel (`touch_pins`); I2C 1/0 with the PCF8563 clock, SHT40, LSM6DS3TR-C IMU and the BQ27220 fuel gauge (no battery divider); TF socket on the panel bus (CS8, MISO12, power 10, detect 11); deep-sleeps on battery |
 | `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash; battery GPIO1 ÷2, switch GPIO21; TF socket on the panel bus (MISO8, CS14, detect 15, power 16); green LED GPIO6 (lit low); I2C 19/20 (PCF8563 clock, SHT40) + 39/40 (SY6974B charger); PDM mic 42/41/38 |
 | `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash; the same peripherals as the E1001 |
-| `seeed_reterminal_e1003` | S3 | EPD_10in3 10.3" sixteen greys (IT8951, E1003 tuning) | reTerminal E1003, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas, with the least headroom of any board; the IT8951 answers on MISO GPIO8 (`dc` slot), panel power GPIO11 (`pwr`), controller power GPIO21 (`cs2`); battery GPIO1 ÷2, switch GPIO40; TF socket on the panel bus (power 39); green LED GPIO16 (lit low); I2C 19/20 with the clock, the SHT40, the charger and the GT911 touch panel (INT 2, reset 48); PDM mic 42/41/38; deep-sleeps on battery |
+| `seeed_reterminal_e1003` | S3 | EPD_10in3 10.3" sixteen greys (IT8951, E1003 tuning) | reTerminal E1003, 32MB flash, 8MB PSRAM — renders on-device on an 8-bit luma canvas (2.5 MiB); the IT8951 answers on MISO GPIO8 (`dc` slot), panel power GPIO11 (`pwr`), controller power GPIO21 (`cs2`); battery GPIO1 ÷2, switch GPIO40; TF socket on the panel bus (power 39); green LED GPIO16 (lit low); I2C 19/20 with the clock, the SHT40, the charger and the GT911 touch panel (INT 2, reset 48); PDM mic 42/41/38; deep-sleeps on battery |
 | `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas; TF socket as the E1001/E1002; green LED GPIO48 (lit high); I2C 19/20 carries the clock, the sensor AND the charger (39/40 is its J2 header); no microphone |
 | `elecrow_crowpanel_5in79` | S3 | EPD_5in79 5.79" 4-gray | CrowPanel, dual SSD1683 |
 
@@ -318,13 +318,19 @@ for the two Spectra boards most of the bench work runs on:
   without one — taken from the board's SHT40 (`fos_climate.c`, 16 °C without
   a reading). The HAT's variant: VCOM -1.50 V, the Pi driver's default.
   `it8951:` on the console at the first refresh prints the controller's
-  firmware, LUT, VCOM and the temperature it got. The E1003's GT911 touch
+  firmware, LUT and VCOM; each refresh's line carries the temperature it
+  was told. The E1003's GT911 touch
   panel shares the clock's I2C bus (19/20): `fos_i2c.c` lends `fos_touch.c`
   that bus instead of the touch driver opening a second one on the same pins,
   and a lent bus survives the console's `i2c` rescan. The 8 MB module renders
-  on-device on the 16-bit canvas — 5.0 MiB of canvas and 1.25 MiB of packed
-  panel buffer beside the 1.5 MiB render reserve, the tightest fit of any
-  board; the boot check falls back to thin-client mode if it does not fit.
+  on-device in pixie's **8-bit luma canvas** (`pfGray8`; any grey or black-
+  and-white panel too big for an RGBX canvas gets one, a colour panel gets
+  565): 2.5 MiB of canvas and 1.25 MiB of packed panel buffer beside the
+  1.5 MiB render reserve, about 2.5 MiB more for scenes and apps than a 565
+  canvas (5.0 MiB) would leave. A grey panel loses nothing to it: blending
+  is per channel, so the luma of a composite is the composite of the lumas,
+  and 256 levels feed at most 16. The boot log says `canvas: 1872x1404
+  gray8`.
   **None of this has met an E1003 yet.**
 
 The TRMNL X (10.3" 1872×1404 parallel e-ink over EPDIY/FastEPD) is not yet

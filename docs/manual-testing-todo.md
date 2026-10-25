@@ -60,9 +60,10 @@ most:
   afterwards (standby keeps the controller's memory; if the unchanged part
   turns to noise, it does not, and every refresh must send the whole frame).
   The same picture twice logs `no row changed, refresh skipped`.
-- [ ] **It renders on-device**: a photo and a text-heavy scene render
-  without `OOM` (5.0 MiB canvas + 1.25 MiB buffer + the 1.5 MiB reserve on
-  8 MB — the tightest board); note the `freePsramKB` after the first render.
+- [ ] **It renders on-device in grey**: the boot log says `canvas: 1872x1404
+  gray8`; a photo and a text-heavy scene render without `OOM` and look like
+  their RGBA preview in grey (2.5 MiB canvas + 1.25 MiB buffer + the 1.5 MiB
+  reserve on 8 MB); note the `freePsramKB` after the first render.
 - [ ] **The glass** (`touch`): `touch:ready` on sda19/scl20 at 0x5d with the
   GT911's range; a tap at the top left lands at the top left (the "Button
   tester" store scene); `i2c` still lists pcf8563, sht4x and sy6974b, and an

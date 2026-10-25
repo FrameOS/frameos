@@ -198,6 +198,7 @@ const deviceLimitsFixtures = JSON.parse(
   readFileSync(fileURLToPath(new URL("../../../../../docs/device-limits-fixtures.json", import.meta.url)), "utf8"),
 ) as {
   cases: {
+    greyPanel?: boolean;
     height: number;
     memoryBytes: number;
     name: string;
@@ -209,7 +210,7 @@ const deviceLimitsFixtures = JSON.parse(
 
 describe("esp32DeviceLimits", () => {
   it.each(deviceLimitsFixtures.cases.map((entry) => [entry.name, entry] as const))("%s", (_name, entry) => {
-    const limits = esp32DeviceLimits(entry.width, entry.height, entry.psramBytes);
+    const limits = esp32DeviceLimits(entry.width, entry.height, entry.psramBytes, entry.greyPanel ?? false);
     expect(limits.memoryBytes).toBe(entry.memoryBytes);
     expect(limits.previewOverheadBytes).toBe(entry.previewOverheadBytes);
     expect(limits.memoryReserveBytes).toBe(0);

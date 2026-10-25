@@ -267,7 +267,9 @@ template forEachPaletteDithered*(
       defer:
         when defined(frameosEmbedded):
           if rowsInternal != nil: fosNimInternalFree(rowsInternal)
-      let is565 = image.isRgb565
+      let
+        is565 = image.isRgb565
+        isGray = image.isGray8
       template loadRow(row: ptr UncheckedArray[uint8], ry: int) =
         # Rows are contiguous within themselves for owners and views alike
         # (`dataIndex` = origin + stride * y + x), so one base index per row
@@ -280,6 +282,13 @@ template forEachPaletteDithered*(
             row[rx * 3 + 0] = p.r
             row[rx * 3 + 1] = p.g
             row[rx * 3 + 2] = p.b
+        elif isGray:
+          let src = image.data8
+          for rx in 0 ..< ditherWidth:
+            let luma = src[rowStart + rx]
+            row[rx * 3 + 0] = luma
+            row[rx * 3 + 1] = luma
+            row[rx * 3 + 2] = luma
         else:
           let src = image.data
           for rx in 0 ..< ditherWidth:

@@ -21,6 +21,7 @@ export {
   esp32DeviceHeapBytes,
   esp32DeviceLimits,
   esp32PreviewMemoryBytes,
+  esp32PixelFormatIsGrey,
   esp32PreviewOverheadBytes,
   piDeviceHeapBytes,
   type DeviceLimits,

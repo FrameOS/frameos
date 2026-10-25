@@ -337,6 +337,13 @@ def test_embedded_render_canvas_bytes_per_pixel():
     assert embedded_render_canvas_bytes_per_pixel(1200, 1600, 16 * mb) == 4   # 7.3 MB of 16
     assert embedded_render_canvas_bytes_per_pixel(1200, 1600, 8 * mb) == 2    # 7.3 MB of 8
     assert embedded_render_canvas_bytes_per_pixel(0, 0, 8 * mb) == 0
+    # A grey panel that does not fit RGBX draws in luma (the reTerminal
+    # E1003: 2.5 MB where 565 was 5.0); a colour one stays 565, and a grey
+    # one that fits RGBX keeps it.
+    assert embedded_render_canvas_bytes_per_pixel(1872, 1404, 8 * mb, FOS_PIXEL_4BPP_GRAY) == 1
+    assert embedded_render_canvas_bytes_per_pixel(1872, 1404, 8 * mb, FOS_PIXEL_4BPP_SPECTRA6) == 2
+    assert embedded_render_canvas_bytes_per_pixel(800, 480, 8 * mb, FOS_PIXEL_4BPP_GRAY) == 4
+    assert embedded_render_canvas_bytes_per_pixel(1200, 1600, 8 * mb, FOS_PIXEL_1BPP) == 1
 
 
 def test_embedded_render_psram_estimate():
@@ -362,8 +369,12 @@ def test_panel_fits_default_8mb_module():
 
 
 def test_panel_too_large_for_small_psram_is_rejected():
+    # 800x480 black and white draws in a luma canvas past RGBX: 0.4 MB of
+    # canvas, the packed buffer and the 1.5 MB reserve fit 2 MB, not 1.
     frame = Frame(device="waveshare.EPD_7in5_V2", device_config={"psramMB": 2})
-    assert embedded_module_psram_bytes(frame) == 2 * 1024 * 1024
+    check_embedded_panel_fits_memory(frame)  # must not raise
+    frame.device_config = {"psramMB": 1}
+    assert embedded_module_psram_bytes(frame) == 1 * 1024 * 1024
     with pytest.raises(ValueError) as exc:
         check_embedded_panel_fits_memory(frame)
     assert "PSRAM" in str(exc.value)

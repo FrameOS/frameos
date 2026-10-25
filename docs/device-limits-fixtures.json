@@ -1,5 +1,5 @@
 {
-  "description": "esp32DeviceLimits (frameos/wasm/src/devices.ts, its copy frontend/src/utils/deviceLimits.ts) and esp32_device_limits (backend/app/utils/device_limits.py): the wasm renderer ceiling for an ESP32 frame. Replayed by cloud/apps/auth-web/src/lib/device-limits.test.ts and backend/app/utils/tests/test_device_limits.py.",
+  "description": "esp32DeviceLimits (frameos/wasm/src/devices.ts, its copy frontend/src/utils/deviceLimits.ts) and esp32_device_limits (backend/app/utils/device_limits.py): the wasm renderer ceiling for an ESP32 frame. `greyPanel` (default false): the panel is greyscale, so past RGBX its canvas is one byte of luma. Replayed by cloud/apps/auth-web/src/lib/device-limits.test.ts and backend/app/utils/tests/test_device_limits.py.",
   "cases": [
     {
       "name": "7.3 inch on an 8 MB board: RGBX canvas",
@@ -16,6 +16,23 @@
       "psramBytes": 8388608,
       "memoryBytes": 10220032,
       "previewOverheadBytes": 3840000
+    },
+    {
+      "name": "10.3 inch sixteen greys on an 8 MB board (the E1003): luma canvas",
+      "width": 1872,
+      "height": 1404,
+      "psramBytes": 8388608,
+      "greyPanel": true,
+      "memoryBytes": 13910752,
+      "previewOverheadBytes": 7884864
+    },
+    {
+      "name": "the same panel size in colour: RGB565 canvas",
+      "width": 1872,
+      "height": 1404,
+      "psramBytes": 8388608,
+      "memoryBytes": 11282464,
+      "previewOverheadBytes": 5256576
     },
     {
       "name": "13.3 inch on a 16 MB board: RGBX canvas",

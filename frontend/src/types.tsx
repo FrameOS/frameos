@@ -162,6 +162,9 @@ export interface FrameType {
     speaker?: boolean | null
     sdCard?: boolean | null
     mac?: string | null
+    /** ESP32 only: the panel's packed format (fos_pixel_format_t: 1 black and
+     * white, 4 and 8 greys, ...). A grey panel past RGBX draws in a luma canvas. */
+    pixelFormat?: number | null
     /** major*100 + minor, as esp_chip_info reports it */
     chipRevision?: number | null
     chipCores?: number | null

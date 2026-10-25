@@ -721,9 +721,9 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         **_seeed_reterminal_sd_card_assets("seeed_reterminal_e1002"),
     },
     "seeed_reterminal_e1003": {
-        # 1872x1404 on an 8MB module: the 16-bit canvas (5.0 MiB) plus the
-        # packed 4-bit buffer (1.25 MiB) leaves the render reserve and little
-        # more; the boot check falls back to thin-client mode if it cannot.
+        # 1872x1404 on an 8MB module: a luma canvas (2.5 MiB; 565 would be
+        # 5.0 and leave the render reserve almost alone in the module) and the
+        # packed 4-bit buffer (1.25 MiB), about 2.5 MiB free beyond the reserve.
         "device": "waveshare.EPD_10in3",
         "flashSize": "32MB",
         "psramMB": 8,
@@ -828,6 +828,8 @@ FOS_PIXEL_2BPP_BWYR = 5
 FOS_PIXEL_4BPP_7COLOR = 6
 FOS_PIXEL_4BPP_SPECTRA6 = 7
 FOS_PIXEL_4BPP_GRAY = 8
+# The formats a luma canvas serves: black and white, four and sixteen greys.
+EMBEDDED_GREY_PIXEL_FORMATS = frozenset({FOS_PIXEL_1BPP, FOS_PIXEL_2BPP_GRAY, FOS_PIXEL_4BPP_GRAY})
 EMBEDDED_PIXEL_FORMAT_BY_COLOR = {
     "Black": FOS_PIXEL_1BPP,
     "BlackWhiteRed": FOS_PIXEL_DUAL_1BPP_RED,
@@ -1001,9 +1003,11 @@ def embedded_release_firmware_for_frame(
 # (frameos/src/embedded/embedded_runtime.nim `renderCanvas`), packs it to the
 # selected panel format, and needs headroom for the Nim heap + QuickJS. The
 # canvas is RGBX (4 B/px) when a full canvas takes at most half the module's
-# PSRAM, else 16-bit RGB 5/6/5 (2 B/px) — the 800x480 boards and a 1200x1600
-# panel on a 16 MB module render in full colour, 1200x1600 on 8 MB is the one
-# that needs 565. Keep the rule and the reserve in sync with
+# PSRAM, else 8-bit luma (1 B/px) for a greyscale or black-and-white panel
+# and 16-bit RGB 5/6/5 (2 B/px) for a colour one — the 800x480 boards and a
+# 1200x1600 panel on a 16 MB module render in full colour, 1200x1600 Spectra 6
+# on 8 MB needs 565, and the 1872x1404 sixteen-grey reTerminal E1003 draws in
+# grey. Keep the rule and the reserve in sync with
 # fos_render_canvas_bytes_per_pixel / FOS_RENDER_PSRAM_RESERVE in
 # components/frameos_display (the firmware's boot-time fit check),
 # sceneCanvasFormat in embedded_runtime.nim, and EmbeddedReserveBytes in
@@ -1389,15 +1393,23 @@ def embedded_buffer_size(width: int, height: int, pixel_format: int) -> int:
     raise ValueError(f"Unsupported embedded pixel format: {pixel_format}")
 
 
-def embedded_render_canvas_bytes_per_pixel(width: int, height: int, psram_bytes: int) -> int:
+def embedded_pixel_format_is_grey(pixel_format: int | None) -> bool:
+    """The panel formats a luma canvas serves (fos_pixel_format_is_grey)."""
+    return pixel_format in EMBEDDED_GREY_PIXEL_FORMATS
+
+
+def embedded_render_canvas_bytes_per_pixel(
+    width: int, height: int, psram_bytes: int, pixel_format: int | None = None
+) -> int:
     """Bytes per pixel of the scene canvas on a module with ``psram_bytes`` of PSRAM:
-    4 (RGBX) when a full canvas takes at most half of it, else 2 (RGB 5/6/5)."""
+    4 (RGBX) when a full canvas takes at most half of it, else 1 (luma) for a
+    grey panel format and 2 (RGB 5/6/5) for any other."""
     if width <= 0 or height <= 0:
         return 0
     rgbx = width * height * 4
     if psram_bytes > 0 and rgbx * EMBEDDED_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE <= psram_bytes:
         return 4
-    return 2
+    return 1 if embedded_pixel_format_is_grey(pixel_format) else 2
 
 
 def embedded_render_psram_bytes(
@@ -1405,7 +1417,7 @@ def embedded_render_psram_bytes(
 ) -> int:
     """PSRAM the on-device renderer needs for a width×height panel on a module with
     ``psram_bytes`` of PSRAM (the canvas format depends on it)."""
-    canvas = width * height * embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes)
+    canvas = width * height * embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
     packed = embedded_buffer_size(width, height, pixel_format)
     return canvas + packed + EMBEDDED_RENDER_PSRAM_RESERVE_BYTES
 
@@ -1518,7 +1530,7 @@ def embedded_firmware_layout_for_frame(frame: Frame) -> dict[str, Any]:
     width, height = dims
     pixel_format = embedded_pixel_format_for_panel(panel)
     psram_bytes = embedded_module_psram_bytes(frame)
-    canvas_bytes_per_pixel = embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes)
+    canvas_bytes_per_pixel = embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
     canvas_bytes = width * height * canvas_bytes_per_pixel
     packed_bytes = embedded_buffer_size(width, height, pixel_format) if width > 0 and height > 0 else 0
     render_mode = embedded_render_mode_for_frame(frame)
@@ -1545,7 +1557,7 @@ def embedded_firmware_layout_for_frame(frame: Frame) -> dict[str, Any]:
             "pixelFormat": pixel_format,
             "pixelFormatName": _pixel_format_name(pixel_format),
             "renderMode": "local" if render_mode == EMBEDDED_RENDER_LOCAL else "remote",
-            # Historical key name: the canvas is RGBX or 16-bit RGB, never RGBA.
+            # Historical key name: the canvas is RGBX, 16-bit RGB or luma, never RGBA.
             "rgbaBufferBytes": canvas_bytes,
             "canvasBufferBytes": canvas_bytes,
             "canvasBytesPerPixel": canvas_bytes_per_pixel,
