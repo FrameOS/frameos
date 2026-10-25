@@ -386,6 +386,8 @@ def gen_nim(doc):
         f"  ButtonDoublePressMs* = {int(doc['buttons']['doublePressMs'])}",
         f"  ButtonLongPressMs* = {int(doc['buttons']['longPressMs'])}",
         f"  ButtonRoles*: array[{len(doc['buttons']['roles'])}, string] = [{', '.join(nim_str(r) for r in doc['buttons']['roles'])}]",
+        "  ## The presses a `button` event carries as its `action` (`buttons.actions`).",
+        f"  ButtonActions*: array[{len(doc['buttons']['actions'])}, string] = [{', '.join(nim_str(a) for a in doc['buttons']['actions'])}]",
         f"  PointerTypes*: array[{len(doc['pointer']['types'])}, string] = [{', '.join(nim_str(t) for t in doc['pointer']['types'])}]",
         "  ## `setCurrentScene {direction}`: the ways through the frame's scene list (docs/events.md).",
         f"  SceneDirections*: array[{len(doc['scenes']['directions'])}, string] = [{', '.join(nim_str(d) for d in doc['scenes']['directions'])}]",

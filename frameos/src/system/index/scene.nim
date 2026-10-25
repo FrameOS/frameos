@@ -10,6 +10,8 @@ from frameos/cloud/device_flow import activeLinkCode
 import frameos/values
 import frameos/types
 import frameos/channels
+import frameos/event_map
+import frameos/events_gen
 import frameos/cloud/link_state
 import frameos/utils/qr
 import frameos/utils/url
@@ -240,27 +242,82 @@ proc adminApiOnlyControl*(frameConfig: FrameConfig): bool =
     frameConfig.mode == "buildroot"
 
 proc inputsLine*(frameConfig: FrameConfig, sources: seq[string]): string =
-  ## What can drive this frame from the room it stands in. The pins come from
-  ## frame.json rather than from the driver, because the config is what
-  ## whoever wired the frame up needs to check their wiring against; the rest
-  ## is whatever input drivers this build actually carries
-  ## (frameos/input_sources, registered once the drivers are up).
+  ## What else can drive this frame from the room it stands in: whatever
+  ## input drivers this build actually carries (frameos/input_sources,
+  ## registered once the drivers are up). The GPIO buttons have a row of
+  ## their own (buttonsLine), so the gpioButton driver adds nothing here: a
+  ## build that carries it with no buttons wired up used to print "GPIO
+  ## buttons (none configured)" on every frame that never had any.
   var parts: seq[string] = @[]
-  var pins: seq[string] = @[]
-  for button in frameConfig.gpioButtons:
-    if button.isNil or button.pin < 0:
-      continue
-    pins.add(if button.label.len > 0: &"{button.pin} ({button.label})" else: $button.pin)
-  if pins.len > 0:
-    parts.add("GPIO " & pins.join(", "))
-  # A build that carries the gpioButton driver but has no buttons wired up used
-  # to print "GPIO buttons (none configured)" on every frame that never had
-  # any. Nothing to say, so say nothing.
   if "evdev" in sources:
     parts.add("evdev (keyboard, mouse, touch)")
   for source in sources:
     if source notin ["gpioButton", "evdev"]:
       parts.add(source)
+  parts.join(" · ")
+
+proc pressWords(action: string): string =
+  case action
+  of "doublePress": "double press"
+  of "longPress": "long press"
+  else: action
+
+proc frameActionWords(rule: JsonNode, scenes: seq[(string, string)]): string =
+  ## What a rule that replaces a press does, in the words of the Settings
+  ## panel's "Button actions" (frontend/src/utils/frameEventMap.ts); an emit
+  ## it has no words for is named as it is.
+  let emit = rule.eventMapRuleEmits()
+  let writes = rule.eventMapRuleWrites()
+  case emit
+  of evSetCurrentScene:
+    let direction = writes{"direction"}.getStr("")
+    if direction == "next":
+      return "next scene"
+    if direction == "prev":
+      return "previous scene"
+    let sceneId = writes{"sceneId"}.getStr("")
+    for (id, name) in scenes:
+      if id == sceneId:
+        return "show " & name
+    if sceneId.len > 0: "show " & sceneId else: emit
+  of evRender: "refresh"
+  of evTurnOn: "display on"
+  of evTurnOff: "display off"
+  of evVoiceChat: "voice chat"
+  else: emit
+
+proc buttonsLine*(frameConfig: FrameConfig, scenes: seq[(string, string)] = @[]): string =
+  ## The GPIO buttons from frame.json (the config is what whoever wired the
+  ## frame up checks their wiring against) and what the frame's event map
+  ## does with each press of them whatever scene shows: "LEFT (GPIO 5) long
+  ## press: previous scene · REFRESH (GPIO 3)". Every press is put to the
+  ## dispatcher's own matcher as the payload the button layer sends
+  ## (input_state.nim), so the first matching rule wins here as it does
+  ## there, and a rewrite (no `emit`) is the scene's to hear, not an action.
+  ## Empty when no button is wired.
+  var parts: seq[string] = @[]
+  for button in frameConfig.gpioButtons:
+    if button.isNil or button.pin < 0:
+      continue
+    let name = if button.label.len > 0: &"{button.label} (GPIO {button.pin})" else: &"GPIO {button.pin}"
+    let role =
+      if button.role.len > 0: button.role
+      else: buttonRoleForLabel(button.label.strip().toUpperAscii())
+    var bound: seq[tuple[press: string, rule: int, does: string]] = @[]
+    for action in ButtonActions:
+      let payload = %*{"pin": button.pin, "label": button.label, "role": role, "action": action}
+      var index = -1
+      let rule = matchingEventMapRule(frameConfig.eventMap, evButton, payload, index)
+      if rule.isNil or rule.eventMapRuleEmits().len == 0:
+        continue
+      bound.add((pressWords(action), index, frameActionWords(rule, scenes)))
+    # One rule with no `action` in its match takes every press of the key.
+    let actions =
+      if bound.len == ButtonActions.len and bound.allIt(it.rule == bound[0].rule):
+        @["any press: " & bound[0].does]
+      else:
+        bound.mapIt(it.press & ": " & it.does)
+    parts.add(if actions.len > 0: name & " " & actions.join(", ") else: name)
   parts.join(" · ")
 
 proc managementLine*(frameConfig: FrameConfig, state: JsonNode = nil): string =
@@ -477,6 +534,7 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
           self.linkQrKey = ""
       result.aside.qr = self.linkQr
   let inputs = inputsLine(frameConfig, inputSourceNames())
+  let buttons = buttonsLine(frameConfig, entries)
   result.rows = @[
     ("Name", deviceName),
     ("Device", deviceLine),
@@ -493,7 +551,9 @@ proc buildStatusScreen*(self: Scene, epoch = epochTime()): StatusScreen =
     ("Remote control", remoteLine),
   ]
   # Nothing can drive this frame from the room it stands in: an "Inputs: none"
-  # row is a line of screen spent saying so.
+  # row is a line of screen spent saying so. The same for buttons.
+  if buttons.len > 0:
+    result.rows.insert(("Buttons", buttons), 2)
   if inputs.len > 0:
     result.rows.insert(("Inputs", inputs), 2)
   let version = publishedFrameOSVersion(compiledFrameOSVersion())
