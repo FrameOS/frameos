@@ -17,6 +17,7 @@ export {
   deviceLimitsFor,
   devicePresetFor,
   devicePresets,
+  ESP32_PIXEL_RGB565,
   esp32CanvasBytesPerPixel,
   esp32DeviceHeapBytes,
   esp32DeviceLimits,

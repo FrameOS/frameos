@@ -1,4 +1,4 @@
-import { esp32DeviceLimits, esp32PixelFormatIsGrey, type DeviceLimits } from './deviceLimits'
+import { esp32DeviceLimits, type DeviceLimits } from './deviceLimits'
 import { isEsp32Frame } from '../scenes/workspace/workspaceSurfaces'
 import type { FrameType } from '../types'
 
@@ -22,8 +22,8 @@ export interface FrameRenderDevice {
  * The backend derives the PSRAM and the panel's pixel format from the board
  * (`embedded.layout.ram`); a cloud frame reports them
  * (`hardware.memory.psramBytes`, `hardware.pixelFormat`: a grey panel draws
- * in a one-byte luma canvas past RGBX). A frame that reports nothing is taken
- * to be an 8 MB board with a colour canvas.
+ * in a one-byte luma canvas, an RGB565 LCD in 565). A frame that reports
+ * nothing is taken to be an 8 MB board with a colour canvas.
  */
 export function frameRenderDevice(frame: Partial<FrameType> | null | undefined): FrameRenderDevice | null {
   if (!frame || !isEsp32Frame(frame)) {
@@ -39,10 +39,11 @@ export function frameRenderDevice(frame: Partial<FrameType> | null | undefined):
   if (psramBytes <= 0 || width <= 0 || height <= 0) {
     return null
   }
-  const greyPanel = esp32PixelFormatIsGrey(ram?.pixelFormat ?? frame.hardware?.pixelFormat)
+  const reportedFormat = ram?.pixelFormat ?? frame.hardware?.pixelFormat
+  const pixelFormat = typeof reportedFormat === 'number' ? reportedFormat : null
   const megabytes = Math.round((psramBytes / (1024 * 1024)) * 10) / 10
   return {
     label: `ESP32 with ${megabytes} MB PSRAM at ${width}x${height}`,
-    limits: esp32DeviceLimits(width, height, psramBytes, greyPanel),
+    limits: esp32DeviceLimits(width, height, psramBytes, pixelFormat),
   }
 }

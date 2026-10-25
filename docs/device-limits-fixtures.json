@@ -1,5 +1,5 @@
 {
-  "description": "esp32DeviceLimits (frameos/wasm/src/devices.ts, its copy frontend/src/utils/deviceLimits.ts) and esp32_device_limits (backend/app/utils/device_limits.py): the wasm renderer ceiling for an ESP32 frame. `greyPanel` (default false): the panel is greyscale, so past RGBX its canvas is one byte of luma. Replayed by cloud/apps/auth-web/src/lib/device-limits.test.ts and backend/app/utils/tests/test_device_limits.py.",
+  "description": "esp32DeviceLimits (frameos/wasm/src/devices.ts, its copy frontend/src/utils/deviceLimits.ts) and esp32_device_limits (backend/app/utils/device_limits.py): the wasm renderer ceiling for an ESP32 frame. `pixelFormat` (fos_pixel_format_t, default unknown): the panel's format, which decides its canvas \u2014 one byte of luma on a grey or black-and-white panel (1, 4, 8) and RGB565 on an RGB565 LCD (9) whatever the PSRAM, RGBX while two of it fit PSRAM on any other. Replayed by cloud/apps/auth-web/src/lib/device-limits.test.ts and backend/app/utils/tests/test_device_limits.py.",
   "cases": [
     {
       "name": "7.3 inch on an 8 MB board: RGBX canvas",
@@ -8,6 +8,15 @@
       "psramBytes": 8388608,
       "memoryBytes": 7148032,
       "previewOverheadBytes": 0
+    },
+    {
+      "name": "7.5 inch black and white on an 8 MB board: luma canvas, though RGBX fits",
+      "width": 800,
+      "height": 480,
+      "psramBytes": 8388608,
+      "pixelFormat": 1,
+      "memoryBytes": 8300032,
+      "previewOverheadBytes": 1152000
     },
     {
       "name": "13.3 inch on an 8 MB board (the E1004): RGB565 canvas",
@@ -22,7 +31,7 @@
       "width": 1872,
       "height": 1404,
       "psramBytes": 8388608,
-      "greyPanel": true,
+      "pixelFormat": 8,
       "memoryBytes": 13910752,
       "previewOverheadBytes": 7884864
     },
@@ -49,6 +58,15 @@
       "psramBytes": 2097152,
       "memoryBytes": 1624576,
       "previewOverheadBytes": 768000
+    },
+    {
+      "name": "the SenseCAP Indicator's 480x480 RGB565 LCD: a 565 canvas that is its own frame buffer",
+      "width": 480,
+      "height": 480,
+      "psramBytes": 8388608,
+      "pixelFormat": 9,
+      "memoryBytes": 6418432,
+      "previewOverheadBytes": 460800
     }
   ]
 }

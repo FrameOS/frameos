@@ -247,11 +247,13 @@ size_t fos_render_canvas_bytes_per_pixel(int width, int height, size_t psram_tot
                                          fos_pixel_format_t format)
 {
     if (width <= 0 || height <= 0) return 0;
+    if (fos_pixel_format_is_grey(format)) return 1;
+    if (format == FOS_PIXEL_RGB565) return 2;
     size_t rgbx = (size_t)width * (size_t)height * 4u;
     if (psram_total_bytes > 0 && rgbx * FOS_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE <= psram_total_bytes) {
         return 4;
     }
-    return fos_pixel_format_is_grey(format) ? 1 : 2;
+    return 2;
 }
 
 size_t fos_display_canvas_bytes_per_pixel(void)

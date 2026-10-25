@@ -1445,15 +1445,21 @@ def embedded_pixel_format_is_grey(pixel_format: int | None) -> bool:
 def embedded_render_canvas_bytes_per_pixel(
     width: int, height: int, psram_bytes: int, pixel_format: int | None = None
 ) -> int:
-    """Bytes per pixel of the scene canvas on a module with ``psram_bytes`` of PSRAM:
-    4 (RGBX) when a full canvas takes at most half of it, else 1 (luma) for a
-    grey panel format and 2 (RGB 5/6/5) for any other."""
+    """Bytes per pixel of the scene canvas (fos_render_canvas_bytes_per_pixel):
+    1 (luma) for a grey or black-and-white panel format and 2 (RGB 5/6/5) for
+    an RGB565 LCD, whose canvas is its own frame buffer, whatever the PSRAM;
+    for a colour e-paper panel 4 (RGBX) when a full canvas takes at most half
+    of ``psram_bytes``, else 2."""
     if width <= 0 or height <= 0:
         return 0
+    if embedded_pixel_format_is_grey(pixel_format):
+        return 1
+    if pixel_format == FOS_PIXEL_RGB565:
+        return 2
     rgbx = width * height * 4
     if psram_bytes > 0 and rgbx * EMBEDDED_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE <= psram_bytes:
         return 4
-    return 1 if embedded_pixel_format_is_grey(pixel_format) else 2
+    return 2
 
 
 def embedded_render_psram_bytes(

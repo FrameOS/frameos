@@ -7,6 +7,7 @@ import {
   deviceLimitsFor,
   devicePresetFor,
   devicePresets,
+  ESP32_PIXEL_RGB565,
   esp32CanvasBytesPerPixel,
   esp32DeviceHeapBytes,
   esp32DeviceLimits,
@@ -61,6 +62,21 @@ describe("the ESP32 canvas format", () => {
   it("defaults to the 8 MB board", () => {
     expect(esp32CanvasBytesPerPixel(1200, 1600)).toBe(
       esp32CanvasBytesPerPixel(1200, 1600, PSRAM_8MB),
+    );
+  });
+
+  it("is one byte of luma on a grey or black-and-white panel, whatever fits", () => {
+    expect(esp32CanvasBytesPerPixel(800, 480, PSRAM_8MB, 1)).toBe(1);
+    expect(esp32CanvasBytesPerPixel(800, 480, PSRAM_8MB, 4)).toBe(1);
+    expect(esp32CanvasBytesPerPixel(1872, 1404, PSRAM_8MB, 8)).toBe(1);
+    // A two-colour panel with red or yellow needs its colour.
+    expect(esp32CanvasBytesPerPixel(800, 480, PSRAM_8MB, 2)).toBe(4);
+  });
+
+  it("is RGB565 on an RGB565 LCD, whose canvas is its own frame buffer", () => {
+    expect(esp32CanvasBytesPerPixel(480, 480, PSRAM_8MB, ESP32_PIXEL_RGB565)).toBe(2);
+    expect(esp32DeviceHeapBytes(480, 480, PSRAM_8MB, ESP32_PIXEL_RGB565)).toBe(
+      PSRAM_8MB - 3 * 480 * 480 * 2 - 1024 * 1024,
     );
   });
 });
@@ -198,10 +214,10 @@ const deviceLimitsFixtures = JSON.parse(
   readFileSync(fileURLToPath(new URL("../../../../../docs/device-limits-fixtures.json", import.meta.url)), "utf8"),
 ) as {
   cases: {
-    greyPanel?: boolean;
     height: number;
     memoryBytes: number;
     name: string;
+    pixelFormat?: number;
     previewOverheadBytes: number;
     psramBytes: number;
     width: number;
@@ -210,7 +226,7 @@ const deviceLimitsFixtures = JSON.parse(
 
 describe("esp32DeviceLimits", () => {
   it.each(deviceLimitsFixtures.cases.map((entry) => [entry.name, entry] as const))("%s", (_name, entry) => {
-    const limits = esp32DeviceLimits(entry.width, entry.height, entry.psramBytes, entry.greyPanel ?? false);
+    const limits = esp32DeviceLimits(entry.width, entry.height, entry.psramBytes, entry.pixelFormat ?? null);
     expect(limits.memoryBytes).toBe(entry.memoryBytes);
     expect(limits.previewOverheadBytes).toBe(entry.previewOverheadBytes);
     expect(limits.memoryReserveBytes).toBe(0);
