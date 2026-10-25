@@ -13,6 +13,7 @@
 
 #include "fos_config.h"
 #include "fos_i2c.h"
+#include "fos_i2s.h"
 
 static const char *TAG = "fos_codec";
 
@@ -65,48 +66,46 @@ static esp_err_t w8(fos_i2c_chip_t chip, uint8_t reg, uint8_t value)
     return fos_i2c_write(chip, reg, &value, 1);
 }
 
-/* Read-modify-write, for the ES8311 registers whose other bits are the
- * chip's own. */
-static esp_err_t rmw8(fos_i2c_chip_t chip, uint8_t reg, uint8_t keep_mask, uint8_t set)
-{
-    uint8_t value = 0;
-    esp_err_t err = fos_i2c_read(chip, reg, &value, 1);
-    if (err != ESP_OK) return err;
-    return w8(chip, reg, (uint8_t)((value & keep_mask) | set));
-}
-
 /* The ES8311 as esp-bsp's es8311_init + es8311_sample_frequency_config set it
  * for 16 kHz with a 4.096 MHz MCLK on the MCLK pin, I2S slave, 16-bit both
  * ways (coefficient row {4096000, 16000}: pre_div 1, mult 0, adc/dac div 1,
- * fs_mode 0, lrck 0x00ff, bclk_div 4, osr 0x10). */
+ * fs_mode 0, lrck 0x00ff, bclk_div 4, osr 0x10). A row with a `keep` mask
+ * is a read-modify-write: the chip's other bits in that register are its own. */
 static esp_err_t es8311_setup(void)
 {
-    esp_err_t err;
-    if ((err = w8(FOS_I2C_ES8311, 0x00, 0x1F)) != ESP_OK) return err; /* reset */
+    static const struct {
+        uint8_t reg, keep, set;
+    } sequence[] = {
+        {0x00, 0x00, 0x00}, {0x00, 0x00, 0x80}, /* out of reset, power on */
+        {0x01, 0x00, 0x3F},                     /* all clocks on, MCLK from the pin */
+        {0x06, 0xDF, 0x00},                     /* SCLK not inverted */
+        {0x02, 0x07, 0x00},                     /* pre_div 1, no multiplier */
+        {0x03, 0x00, 0x10}, {0x04, 0x00, 0x10}, /* single speed; ADC and DAC osr */
+        {0x05, 0x00, 0x00},                     /* ADC and DAC dividers 1 */
+        {0x06, 0xE0, 0x03},                     /* bclk div 4 */
+        {0x07, 0xC0, 0x00}, {0x08, 0x00, 0xFF}, /* lrck divider */
+        {0x00, 0xBF, 0x00},                     /* I2S slave */
+        {0x09, 0x00, 0x0C}, {0x0A, 0x00, 0x0C}, /* SDP in / out: 16-bit I2S */
+        {0x0D, 0x00, 0x01}, {0x0E, 0x00, 0x02}, /* analog power; PGA, ADC modulator */
+        {0x12, 0x00, 0x00}, {0x13, 0x00, 0x10}, /* DAC power up; output to the HP drive */
+        {0x1C, 0x00, 0x6A}, {0x37, 0x00, 0x08}, /* equalizer bypasses */
+        {0x32, 0x00, 0xBF},                     /* volume: es8311_voice_volume_set(75) */
+    };
+    esp_err_t err = w8(FOS_I2C_ES8311, 0x00, 0x1F); /* reset */
+    if (err != ESP_OK) return err;
     vTaskDelay(pdMS_TO_TICKS(20));
-    if ((err = w8(FOS_I2C_ES8311, 0x00, 0x00)) != ESP_OK) return err;
-    if ((err = w8(FOS_I2C_ES8311, 0x00, 0x80)) != ESP_OK) return err; /* power on */
-    if ((err = w8(FOS_I2C_ES8311, 0x01, 0x3F)) != ESP_OK) return err; /* all clocks on, MCLK from the pin */
-    if ((err = rmw8(FOS_I2C_ES8311, 0x06, (uint8_t)~0x20, 0x00)) != ESP_OK) return err; /* SCLK not inverted */
-    if ((err = rmw8(FOS_I2C_ES8311, 0x02, 0x07, 0x00)) != ESP_OK) return err; /* pre_div 1, no multiplier */
-    if ((err = w8(FOS_I2C_ES8311, 0x03, 0x10)) != ESP_OK) return err;           /* single speed, ADC osr */
-    if ((err = w8(FOS_I2C_ES8311, 0x04, 0x10)) != ESP_OK) return err;           /* DAC osr */
-    if ((err = w8(FOS_I2C_ES8311, 0x05, 0x00)) != ESP_OK) return err;           /* ADC and DAC dividers 1 */
-    if ((err = rmw8(FOS_I2C_ES8311, 0x06, 0xE0, 0x03)) != ESP_OK) return err;   /* bclk div 4 */
-    if ((err = rmw8(FOS_I2C_ES8311, 0x07, 0xC0, 0x00)) != ESP_OK) return err;   /* lrck high */
-    if ((err = w8(FOS_I2C_ES8311, 0x08, 0xFF)) != ESP_OK) return err;           /* lrck low */
-    if ((err = rmw8(FOS_I2C_ES8311, 0x00, 0xBF, 0x00)) != ESP_OK) return err;   /* I2S slave */
-    if ((err = w8(FOS_I2C_ES8311, 0x09, 0x0C)) != ESP_OK) return err;           /* SDP in: 16-bit I2S */
-    if ((err = w8(FOS_I2C_ES8311, 0x0A, 0x0C)) != ESP_OK) return err;           /* SDP out: 16-bit I2S */
-    if ((err = w8(FOS_I2C_ES8311, 0x0D, 0x01)) != ESP_OK) return err;           /* analog power up */
-    if ((err = w8(FOS_I2C_ES8311, 0x0E, 0x02)) != ESP_OK) return err;           /* PGA, ADC modulator */
-    if ((err = w8(FOS_I2C_ES8311, 0x12, 0x00)) != ESP_OK) return err;           /* DAC power up */
-    if ((err = w8(FOS_I2C_ES8311, 0x13, 0x10)) != ESP_OK) return err;           /* output to the HP drive */
-    if ((err = w8(FOS_I2C_ES8311, 0x1C, 0x6A)) != ESP_OK) return err;           /* ADC equalizer bypass */
-    if ((err = w8(FOS_I2C_ES8311, 0x37, 0x08)) != ESP_OK) return err;           /* DAC equalizer bypass */
-    /* Volume: 0xBF of 0xFF, es8311_voice_volume_set(75). The amplifier's
-     * gain is the board's (6 dB on both). */
-    return w8(FOS_I2C_ES8311, 0x32, 0xBF);
+    for (size_t i = 0; i < sizeof(sequence) / sizeof(sequence[0]); i++) {
+        uint8_t value = sequence[i].set;
+        if (sequence[i].keep) {
+            uint8_t current = 0;
+            err = fos_i2c_read(FOS_I2C_ES8311, sequence[i].reg, &current, 1);
+            if (err != ESP_OK) return err;
+            value |= (uint8_t)(current & sequence[i].keep);
+        }
+        err = w8(FOS_I2C_ES8311, sequence[i].reg, value);
+        if (err != ESP_OK) return err;
+    }
+    return ESP_OK;
 }
 
 /* The ES7210 as esp-bsp's es7210_config_codec sets it: I2S slave, 16-bit,
@@ -142,16 +141,14 @@ static esp_err_t es7210_setup(void)
 static void i2s_setup(const fos_codec_pins_t *pins)
 {
     i2s_dev_t *hw = CODEC_HW;
-    PERIPH_RCC_ATOMIC() {
-        i2s_ll_enable_bus_clock(CODEC_I2S_PORT, true);
-        i2s_ll_reset_register(CODEC_I2S_PORT);
-        i2s_ll_enable_core_clock(hw, true);
-    }
     const hal_utils_clk_div_t mclk_div = {
         .integer = CODEC_MCLK_DIV_INT,
         .denominator = CODEC_MCLK_DIV_DEN,
         .numerator = CODEC_MCLK_DIV_NUM,
     };
+    /* The controller's clocks and the receiver's 16-bit mono samples and
+     * clock dividers, the way the PDM microphone has them (fos_mic.c). */
+    fos_i2s_rx_prepare(&mclk_div, CODEC_BCLK_DIV, true);
     /* The transmitter (i2s_hal_std_set_tx_slot, HW version 2): master,
      * 16-bit slots, Philips (one bit shift), mono copied into both slots. */
     i2s_ll_tx_reset(hw);
@@ -167,16 +164,11 @@ static void i2s_setup(const fos_codec_pins_t *pins)
     i2s_ll_tx_set_bit_order(hw, false);
     i2s_ll_tx_enable_left_align(hw, false);
     i2s_ll_tx_enable_big_endian(hw, false);
-    /* The receiver (i2s_hal_std_set_rx_slot): the left slot alone as mono
-     * 16-bit samples, the shape fos_voice.c wants. */
-    i2s_ll_rx_reset(hw);
-    i2s_ll_rx_set_slave_mod(hw, false);
-    i2s_ll_rx_set_sample_bit(hw, 16, 16);
-    i2s_ll_rx_enable_mono_mode(hw, true);
+    /* The receiver's slot format (i2s_hal_std_set_rx_slot): the left slot
+     * alone, the shape fos_voice.c wants. */
     i2s_ll_rx_enable_msb_shift(hw, true);
     i2s_ll_rx_set_ws_width(hw, 16);
     i2s_ll_rx_select_std_slot(hw, I2S_STD_SLOT_LEFT);
-    i2s_ll_rx_set_half_sample_bit(hw, 16);
     i2s_ll_rx_set_ws_idle_pol(hw, false);
     i2s_ll_rx_set_bit_order(hw, false);
     i2s_ll_rx_enable_left_align(hw, false);
@@ -188,13 +180,9 @@ static void i2s_setup(const fos_codec_pins_t *pins)
         i2s_ll_tx_enable_clock(hw);
         i2s_ll_mclk_bind_to_tx_clk(hw);
         i2s_ll_tx_clk_set_src(hw, I2S_CLK_SRC_PLL_160M);
-        i2s_ll_rx_enable_clock(hw);
-        i2s_ll_rx_clk_set_src(hw, I2S_CLK_SRC_PLL_160M);
     }
     i2s_ll_tx_set_mclk(hw, &mclk_div);
     i2s_ll_tx_set_bck_div_num(hw, CODEC_BCLK_DIV);
-    i2s_ll_rx_set_mclk(hw, &mclk_div);
-    i2s_ll_rx_set_bck_div_num(hw, CODEC_BCLK_DIV);
     i2s_ll_share_bck_ws(hw, true);
     i2s_ll_tx_enable_std(hw);
     i2s_ll_rx_enable_std(hw);
@@ -333,10 +321,7 @@ bool fos_codec_init(void)
     s_ready = s_has_mic || s_has_speaker;
     /* printf: INFO is compiled out, and this is the line that says what the
      * board has. */
-    printf("codec: %s%s%s (mclk %d, bclk %d, ws %d, din %d, dout %d, pa %d)\n",
-           s_has_speaker ? "es8311 speaker" : "", s_has_speaker && s_has_mic ? " + " : "",
-           s_has_mic ? "es7210 microphone" : "", (int)pins->mclk, (int)pins->bclk, (int)pins->ws,
-           (int)pins->din, (int)pins->dout, (int)pins->pa);
+    printf("codec: speaker=%d microphone=%d\n", (int)s_has_speaker, (int)s_has_mic);
     return s_ready;
 #endif
 }

@@ -13,6 +13,7 @@
 
 #include "fos_codec.h"
 #include "fos_config.h"
+#include "fos_i2s.h"
 #if CONFIG_IDF_TARGET_ESP32S3
 #include "hal/usb_serial_jtag_ll.h"
 #endif
@@ -164,7 +165,7 @@ static esp_err_t setup_dma(void)
     return gdma_register_rx_event_callbacks(s_dma, &callbacks, NULL);
 }
 
-static void setup_i2s(int clk_pin, int data_pin)
+void fos_i2s_rx_prepare(const hal_utils_clk_div_t *mclk_div, int bclk_div, bool mono)
 {
     i2s_dev_t *hw = MIC_HW;
     PERIPH_RCC_ATOMIC() {
@@ -172,28 +173,37 @@ static void setup_i2s(int clk_pin, int data_pin)
         i2s_ll_reset_register(MIC_I2S_PORT);
         i2s_ll_enable_core_clock(hw, true);
     }
-    /* The slot: one 16-bit PCM sample per frame from the left PDM slot
-     * (i2s_hal_pdm_set_rx_slot for HW version 2, mono). */
+    /* The receiver: 16-bit samples (i2s_hal_*_set_rx_slot, HW version 2). */
     i2s_ll_rx_reset(hw);
     i2s_ll_rx_set_slave_mod(hw, false);
     i2s_ll_rx_set_sample_bit(hw, 16, 16);
     i2s_ll_rx_set_half_sample_bit(hw, 16);
-    i2s_ll_rx_enable_mono_mode(hw, false);
-    i2s_ll_rx_set_active_chan_mask(hw, I2S_PDM_SLOT_LEFT);
-    i2s_ll_share_bck_ws(hw, false);
-    /* The clock (i2s_hal_set_rx_clock), fixed at 16 kHz. */
+    i2s_ll_rx_enable_mono_mode(hw, mono);
+    /* Its clock (i2s_hal_set_rx_clock) from the 160 MHz PLL. */
     PERIPH_RCC_ATOMIC() {
         i2s_ll_rx_enable_clock(hw);
-        i2s_ll_mclk_bind_to_rx_clk(hw);
         i2s_ll_rx_clk_set_src(hw, I2S_CLK_SRC_PLL_160M);
     }
+    i2s_ll_rx_set_mclk(hw, mclk_div);
+    i2s_ll_rx_set_bck_div_num(hw, (uint32_t)bclk_div);
+}
+
+static void setup_i2s(int clk_pin, int data_pin)
+{
+    i2s_dev_t *hw = MIC_HW;
+    /* The clock, fixed at 16 kHz; the slot: one 16-bit PCM sample per frame
+     * from the left PDM slot (i2s_hal_pdm_set_rx_slot, stereo frame). */
     const hal_utils_clk_div_t mclk_div = {
         .integer = MIC_MCLK_DIV_INT,
         .denominator = MIC_MCLK_DIV_DEN,
         .numerator = MIC_MCLK_DIV_NUM,
     };
-    i2s_ll_rx_set_mclk(hw, &mclk_div);
-    i2s_ll_rx_set_bck_div_num(hw, MIC_BCLK_DIV);
+    fos_i2s_rx_prepare(&mclk_div, MIC_BCLK_DIV, false);
+    i2s_ll_rx_set_active_chan_mask(hw, I2S_PDM_SLOT_LEFT);
+    i2s_ll_share_bck_ws(hw, false);
+    PERIPH_RCC_ATOMIC() {
+        i2s_ll_mclk_bind_to_rx_clk(hw);
+    }
     i2s_ll_rx_set_pdm_dsr(hw, I2S_PDM_DSR_8S);
     i2s_ll_rx_enable_pdm(hw, true);
     /* One DMA buffer per EOF. */

@@ -83,13 +83,15 @@ type
     panelWidth, panelHeight, rotate: int
     flip: string
     cursorX*, cursorY*: int        ## pointer 0: the one cursor every mouse moves
-    cursorMovedAt: MonoTime
-    cursorEverMoved: bool
-    cursorShown: bool
-    cursorDirty*: bool             ## the host should draw (or clear) the cursor
     pointers: Table[int, PointerRecord]
     pointerInputLost*: bool        ## a queue dropped pointer input: what is down gets a cancel
     when not defined(frameosEmbedded):
+      # A relative mouse (its drawn cursor, the wheel) and a keyboard: Linux
+      # and the preview have them, no ESP32 board does.
+      cursorMovedAt: MonoTime
+      cursorEverMoved: bool
+      cursorShown: bool
+      cursorDirty*: bool             ## the host should draw (or clear) the cursor
       keyboardLayout: string
       shift, ctrl, altLeft, altRight, meta, capsLock: bool
 
@@ -335,11 +337,12 @@ proc pointer(state: var InputState, id: int, pointerType: string, origin: EventO
 proc pointerPayload(rec: PointerRecord, id: int): JsonNode =
   %*{"x": rec.x, "y": rec.y, "pointerId": id, "pointerType": rec.pointerType, "buttons": rec.buttons}
 
-proc moveCursorTo(state: var InputState, x, y: int, now: MonoTime) =
-  state.cursorX = state.clampX(x)
-  state.cursorY = state.clampY(y)
-  state.cursorMovedAt = now
-  state.cursorEverMoved = true
+when not defined(frameosEmbedded):
+  proc moveCursorTo(state: var InputState, x, y: int, now: MonoTime) =
+    state.cursorX = state.clampX(x)
+    state.cursorY = state.clampY(y)
+    state.cursorMovedAt = now
+    state.cursorEverMoved = true
 
 proc place(state: var InputState, rec: ptr PointerRecord, x, y: int) =
   ## The pointer is here now — from a move, or the position a press or a
@@ -362,14 +365,15 @@ proc pointerMoved(state: var InputState, id: int, pointerType: string, x, y: int
   state.place(rec, x, y)
   output.add(InputDelivery(name: evPointerMove, payload: pointerPayload(rec[], id), origin: origin))
 
-proc cursorMovedBy(state: var InputState, dx, dy: int, origin: EventOrigin, now: MonoTime,
-                   output: var seq[InputDelivery]) =
-  ## A relative mouse: the host owns the position. One count is one scene pixel.
-  state.moveCursorTo(state.cursorX + dx, state.cursorY + dy, now)
-  if not state.cursorShown:
-    state.cursorShown = true
-  state.cursorDirty = true
-  state.pointerMoved(0, "mouse", state.cursorX, state.cursorY, origin, now, output)
+when not defined(frameosEmbedded):
+  proc cursorMovedBy(state: var InputState, dx, dy: int, origin: EventOrigin, now: MonoTime,
+                     output: var seq[InputDelivery]) =
+    ## A relative mouse: the host owns the position. One count is one scene pixel.
+    state.moveCursorTo(state.cursorX + dx, state.cursorY + dy, now)
+    if not state.cursorShown:
+      state.cursorShown = true
+    state.cursorDirty = true
+    state.pointerMoved(0, "mouse", state.cursorX, state.cursorY, origin, now, output)
 
 proc pointerDown(state: var InputState, id: int, pointerType: string, button: int,
                  origin: EventOrigin, now: MonoTime, output: var seq[InputDelivery]) =
@@ -469,10 +473,11 @@ proc cancelPointers*(state: var InputState, origin: EventOrigin, output: var seq
   if deviceId < 0:
     state.pointerInputLost = false
 
-proc wheel(state: var InputState, deltaX, deltaY: int, origin: EventOrigin, output: var seq[InputDelivery]) =
-  let rec = state.pointer(0, "", origin)
-  output.add(InputDelivery(name: evWheel, origin: origin,
-    payload: %*{"deltaX": deltaX, "deltaY": deltaY, "x": rec.x, "y": rec.y}))
+when not defined(frameosEmbedded):
+  proc wheel(state: var InputState, deltaX, deltaY: int, origin: EventOrigin, output: var seq[InputDelivery]) =
+    let rec = state.pointer(0, "", origin)
+    output.add(InputDelivery(name: evWheel, origin: origin,
+      payload: %*{"deltaX": deltaX, "deltaY": deltaY, "x": rec.x, "y": rec.y}))
 
 when not defined(frameosEmbedded):
   # ------------------------------------------------------------------ keyboard
@@ -642,9 +647,12 @@ proc applyNamedPointerOrKey(state: var InputState, name: string, payload: JsonNo
     discard state.pointer(id, payload{"pointerType"}.getStr(), origin)
     state.pointerCancel(id, origin, output)
   of evWheel:
-    if payload.isInt("x") and payload.isInt("y"):
-      discard state.pointerFromPayload(payload, origin)
-    state.wheel(payload{"deltaX"}.getInt(), payload{"deltaY"}.getInt(), origin, output)
+    when defined(frameosEmbedded):
+      return false
+    else:
+      if payload.isInt("x") and payload.isInt("y"):
+        discard state.pointerFromPayload(payload, origin)
+      state.wheel(payload{"deltaX"}.getInt(), payload{"deltaY"}.getInt(), origin, output)
   of evTap, evDoubleTap, evLongPress, evSwipe:
     # Injected, not made here: the position is converted, the rest passes.
     let (id, pointerType) = state.pointerFromPayload(payload, origin)
@@ -674,17 +682,22 @@ proc tickPointers(state: var InputState, now: MonoTime, output: var seq[InputDel
       var press = gesture(rec, id, evLongPress, rec.origin)
       press.payload["durationMs"] = %msSince(now, rec.downAt)
       output.add(press)
-  if state.cursorShown and msSince(now, state.cursorMovedAt) >= CursorHideMs:
-    state.cursorShown = false
-    state.cursorDirty = true
+  when not defined(frameosEmbedded):
+    if state.cursorShown and msSince(now, state.cursorMovedAt) >= CursorHideMs:
+      state.cursorShown = false
+      state.cursorDirty = true
 
-proc cursorVisible*(state: InputState): bool =
-  ## Whether the host should draw the cursor: a relative mouse moved it lately.
-  state.cursorShown
+when defined(frameosEmbedded):
+  proc cursorVisible*(state: InputState): bool = false
+  proc takeCursorDirty*(state: var InputState): bool = false
+else:
+  proc cursorVisible*(state: InputState): bool =
+    ## Whether the host should draw the cursor: a relative mouse moved it lately.
+    state.cursorShown
 
-proc takeCursorDirty*(state: var InputState): bool =
-  result = state.cursorDirty
-  state.cursorDirty = false
+  proc takeCursorDirty*(state: var InputState): bool =
+    result = state.cursorDirty
+    state.cursorDirty = false
 
 proc pointersDown*(state: InputState): int =
   ## How many pointers are held: what a host asks to know whether to tick.
