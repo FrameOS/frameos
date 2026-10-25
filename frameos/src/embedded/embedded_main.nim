@@ -271,6 +271,30 @@ proc packImageRgb565(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int):
     log(&"pack rgb565: buffer mismatch, want {frameWidth * frameHeight * 2} bytes, got {bufLen}")
     return false
   let amp = if ditherJitterAmp > 0: 4 else: 0
+  if frameRotate == 0 and width == frameWidth and height == frameHeight and image.format == pfRgbx:
+    # The unrotated canvas, straight through: rows of RGBX in, words out,
+    # the same rounding and jitter as the general loop below (panel index ==
+    # canvas index here). The general loop's per-pixel accessor, coordinate
+    # mapping and byte stores took 730 ms on the SenseCAP Indicator.
+    let
+      src = cast[ptr UncheckedArray[ColorRGBX]](image.bufferPointer)
+      dst = cast[ptr UncheckedArray[uint16]](buf)
+    for y in 0 ..< height:
+      let srcRow = image.dataIndex(0, y)
+      let dstRow = y * frameWidth
+      for x in 0 ..< width:
+        let
+          p = src[srcRow + x]
+          index = dstRow + x
+          j = if amp > 0: ditherJitterFor(index, amp) else: 0
+          rv = p.r.int + j
+          gv = p.g.int + (j div 2)
+          bv = p.b.int + j
+          r = (if rv < 0: 0 elif rv > 255: 255 else: rv) shr 3
+          g = (if gv < 0: 0 elif gv > 255: 255 else: gv) shr 2
+          b = (if bv < 0: 0 elif bv > 255: 255 else: bv) shr 3
+        dst[index] = (r.uint16 shl 11) or (g.uint16 shl 5) or b.uint16
+    return true
   template clip(value: int): int =
     (if value < 0: 0 elif value > 255: 255 else: value)
   for y in 0 ..< height:
