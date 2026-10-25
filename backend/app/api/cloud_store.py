@@ -148,10 +148,21 @@ async def cloud_store_drive(
 
     # Preview images of private scenes need the link token, which the browser
     # does not have — point them at our authenticated proxy below instead.
+    #
+    # The listing's absolute URLs are on the cloud's scenes host
+    # (scenes.frameos.net), not on the provider host the account linked to
+    # (cloud.frameos.net), and the link token goes to the provider host alone
+    # (cloud_headers_for_url). The same deployment serves /api/store/* on
+    # both, so the zip is re-addressed to the provider host here: that is
+    # what makes a private scene's install (POST /api/templates {url}) carry
+    # the token, without the token ever going to a host the user did not link.
+    provider = link.provider_url.rstrip("/")
     for template in payload.get("templates", []):
         scene_id = template.get("sceneId")
         if scene_id and template.get("image"):
             template["image"] = f"/api/cloud/store/drive/image/{scene_id}"
+        if scene_id and template.get("zip"):
+            template["zip"] = f"{provider}/api/store/scenes/{scene_id}/download"
     return payload
 
 

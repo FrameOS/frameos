@@ -2,6 +2,7 @@ import io
 import json
 import zipfile
 
+import httpx
 from fastapi import HTTPException
 
 import pytest
@@ -101,14 +102,21 @@ def test_frameos_zip_url_from_html():
     assert frameos_zip_url_from_html(b"<html><head></head></html>", page) is None
 
 
-def fake_http_client(routes: dict, chunk_size: int = 64 * 1024, content_length: bool = True):
+def fake_http_client(
+    routes: dict, chunk_size: int = 64 * 1024, content_length: bool = True, statuses: dict | None = None
+):
     """A stand-in for httpx.AsyncClient whose `.stream("GET", url)` serves
     `routes[url]` (bytes, or an iterable of byte chunks for a body that
-    keeps coming) the way the template route reads it."""
+    keeps coming) the way the template route reads it. A route whose value
+    is an exception raises it from `.stream()` (a transport failure); a URL
+    in `statuses` answers that HTTP status and `raise_for_status()` raises
+    for it like httpx does."""
 
     class FakeStream:
-        def __init__(self, body):
+        def __init__(self, url, body):
+            self.url = url
             self.body = body
+            self.status_code = (statuses or {}).get(url, 200)
             self.headers = {}
             if isinstance(body, bytes) and content_length:
                 self.headers["content-length"] = str(len(body))
@@ -120,6 +128,13 @@ def fake_http_client(routes: dict, chunk_size: int = 64 * 1024, content_length: 
             return None
 
         def raise_for_status(self):
+            if self.status_code >= 400:
+                request = httpx.Request("GET", self.url)
+                raise httpx.HTTPStatusError(
+                    f"Client error '{self.status_code}' for url '{self.url}'",
+                    request=request,
+                    response=httpx.Response(self.status_code, request=request),
+                )
             return None
 
         async def aiter_bytes(self):
@@ -141,9 +156,76 @@ def fake_http_client(routes: dict, chunk_size: int = 64 * 1024, content_length: 
             assert method == "GET"
             if url not in routes:
                 raise AssertionError(f"unexpected URL fetched: {url}")
-            return FakeStream(routes[url])
+            if isinstance(routes[url], Exception):
+                raise routes[url]
+            return FakeStream(url, routes[url])
 
     return lambda **kwargs: FakeClient()
+
+
+def _resolve_public(monkeypatch):
+    from app.utils import network
+
+    async def resolve_public(host):
+        return [__import__("ipaddress").ip_address("93.184.216.34")]
+
+    monkeypatch.setattr(network, "resolve_target", resolve_public)
+
+
+@pytest.mark.asyncio
+async def test_create_template_from_private_store_url_is_a_readable_404(async_client, db, monkeypatch):
+    """A private FrameOS Cloud scene fetched without its owner's link token:
+    the store answers 404 (the scene's existence stays private), and so does
+    this route, with a detail the drawer shows — the "install it from Private
+    scenes" hint — rather than a 500 wrapping httpx's own message. The URL's
+    query string (a sharing link's token) stays out of the message."""
+    import app.api.templates as templates_module
+
+    url = "https://scenes.example.com/api/store/scenes/c3638bc6-1d70-4c95-a5c3-94ab64878974/download?share=sekrit"
+    _resolve_public(monkeypatch)
+    monkeypatch.setattr(templates_module.httpx, "AsyncClient", fake_http_client({url: b""}, statuses={url: 404}))
+
+    response = await async_client.post("/api/templates", json={"url": url})
+    assert response.status_code == 404, response.text
+    detail = response.json()["detail"]
+    assert "HTTP 404" in detail
+    assert "Private scenes" in detail
+    assert "sekrit" not in detail
+    assert "scenes.example.com/api/store/scenes/c3638bc6" in detail
+
+
+@pytest.mark.asyncio
+async def test_create_template_from_url_maps_upstream_statuses(async_client, db, monkeypatch):
+    """A refused download keeps its meaning: 410 (pulled) stays 410, 401/403
+    become 403, a server error upstream is our 502."""
+    import app.api.templates as templates_module
+
+    _resolve_public(monkeypatch)
+    for upstream, expected in ((410, 410), (401, 403), (403, 403), (500, 502)):
+        url = f"https://repo.example.com/{upstream}.zip"
+        monkeypatch.setattr(
+            templates_module.httpx, "AsyncClient", fake_http_client({url: b""}, statuses={url: upstream})
+        )
+        response = await async_client.post("/api/templates", json={"url": url})
+        assert response.status_code == expected, (upstream, response.text)
+        assert f"HTTP {upstream}" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_create_template_from_unreachable_url_is_502(async_client, db, monkeypatch):
+    import app.api.templates as templates_module
+
+    url = "https://repo.example.com/down.zip"
+    _resolve_public(monkeypatch)
+    monkeypatch.setattr(
+        templates_module.httpx,
+        "AsyncClient",
+        fake_http_client({url: httpx.ConnectError("connection refused", request=httpx.Request("GET", url))}),
+    )
+
+    response = await async_client.post("/api/templates", json={"url": url})
+    assert response.status_code == 502, response.text
+    assert "Could not download the template from https://repo.example.com/down.zip" in response.json()["detail"]
 
 
 @pytest.mark.asyncio

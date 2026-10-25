@@ -41,6 +41,21 @@ export interface TemplateLogicProps {
   frameId: FrameId
 }
 
+/** The `detail` of a failed response, so the drawer's toast says what went
+ * wrong (a private cloud scene without its owner's link, an unreachable
+ * repository) instead of only that something did. */
+async function failedResponseMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const detail = (await response.json())?.detail
+    if (typeof detail === 'string' && detail) {
+      return detail
+    }
+  } catch {
+    // not a JSON body
+  }
+  return `${fallback} (HTTP ${response.status})`
+}
+
 /** Repository listings only carry template metadata; fetch the scenes separately when needed. */
 export async function fetchTemplateScenes(template: TemplateType): Promise<FrameScene[]> {
   if (template.scenes?.length) {
@@ -51,7 +66,7 @@ export async function fetchTemplateScenes(template: TemplateType): Promise<Frame
   }
   const response = await apiFetch(template.scenesUrl)
   if (!response.ok) {
-    throw new Error('Failed to load template scenes')
+    throw new Error(await failedResponseMessage(response, 'Failed to load template scenes'))
   }
   return await response.json()
 }
@@ -81,7 +96,7 @@ export async function loadRepositoryTemplateScenes(
     body: JSON.stringify({ format: 'scenes', url: zipPath }),
   })
   if (!response.ok) {
-    throw new Error('Failed to load template scenes')
+    throw new Error(await failedResponseMessage(response, 'Failed to load template scenes'))
   }
   return await response.json()
 }

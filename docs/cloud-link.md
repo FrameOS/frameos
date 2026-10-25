@@ -484,6 +484,15 @@ proxies the listing and preview images for the browser
 (`GET /api/cloud/store/drive`, `GET /api/cloud/store/drive/image/{sceneId}`)
 and attaches the token when fetching template zips from the provider host
 (and only from the provider host — it never leaks to other repositories).
+The listing's absolute URLs are on the cloud's scenes host
+(`scenes.frameos.net`), which is not the host the account linked to, so the
+proxied listing re-addresses each entry's `zip` to
+`{provider}/api/store/scenes/{sceneId}/download` (the same deployment serves
+`/api/store/*` on both hosts): that is what lets a private scene install
+with the token, without the token going to a host the user did not link. A
+download the store refuses (a private scene without the owner's link, a
+pulled scene) comes back from `POST /api/templates` as a 4xx with a readable
+`detail`, never a 500.
 
 Publishing carries the link's Bearer token and the `store:publish` scope:
 

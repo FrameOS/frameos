@@ -88,6 +88,39 @@ def strip_scene_prompts(scenes):
     return scenes
 
 
+def _url_for_messages(url: str) -> str:
+    """The URL as an error message names it: without its query string, which
+    is where a store sharing link (`?share=...`) keeps its token."""
+    return url.split("?", 1)[0]
+
+
+def template_download_error(exc: httpx.HTTPError, url: str) -> HTTPException:
+    """A failed template download as the 4xx/502 the Templates drawer shows.
+
+    Before this, an upstream 404 surfaced as a 500 wrapping httpx's own text.
+    The common case is a private FrameOS Cloud scene fetched without its
+    owner's link token: the store answers 404 so the scene's existence stays
+    private, and the hint says what does make the install work."""
+    shown = _url_for_messages(url)
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        detail = f"Could not download the template from {shown}: the server answered HTTP {status}."
+        if status in (401, 403, 404):
+            detail += (
+                " If this is a private FrameOS Cloud scene, install it from the Private scenes page"
+                " of a backend linked to the account that owns it, or use the scene's sharing link."
+            )
+        if status in (404, 410):
+            return HTTPException(status_code=status, detail=detail)
+        if status in (401, 403):
+            return HTTPException(status_code=403, detail=detail)
+        return HTTPException(status_code=502, detail=detail)
+    return HTTPException(
+        status_code=502,
+        detail=f"Could not download the template from {shown}: {exc.__class__.__name__}.",
+    )
+
+
 def template_zip_bytes(template: Template) -> bytes:
     """The template interchange zip: {name}/template.json + scenes.json + image.jpg.
     Also the payload format for cloud template backups."""
@@ -240,25 +273,32 @@ async def create_template(
         from app.utils.cloud_backup import cloud_headers_for_url
 
         await assert_url_target_allowed(url, what="Template URL")
-        async with httpx.AsyncClient(timeout=30, transport=guarded_transport()) as client:
-            content = await fetch_body_limited(
-                client, url, MAX_TEMPLATE_ZIP_BYTES, headers=cloud_headers_for_url(db, url)
-            )
-            if not zipfile.is_zipfile(io.BytesIO(content)):
-                # Not a zip: maybe a scene page (e.g. a FrameOS Cloud store
-                # page) that advertises its zip in a <meta name="frameos:zip">
-                # tag — so pasting the page URL installs the scene.
-                zip_url = frameos_zip_url_from_html(content, url)
-                if not zip_url:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="URL is neither a template .zip nor a page with a frameos:zip meta tag",
-                    )
-                # The page chose this URL, not the user: same guard again.
-                await assert_url_target_allowed(zip_url, what="Template zip URL")
+        fetching = url
+        try:
+            async with httpx.AsyncClient(timeout=30, transport=guarded_transport()) as client:
                 content = await fetch_body_limited(
-                    client, zip_url, MAX_TEMPLATE_ZIP_BYTES, headers=cloud_headers_for_url(db, zip_url)
+                    client, url, MAX_TEMPLATE_ZIP_BYTES, headers=cloud_headers_for_url(db, url)
                 )
+                if not zipfile.is_zipfile(io.BytesIO(content)):
+                    # Not a zip: maybe a scene page (e.g. a FrameOS Cloud store
+                    # page) that advertises its zip in a <meta name="frameos:zip">
+                    # tag — so pasting the page URL installs the scene.
+                    zip_url = frameos_zip_url_from_html(content, url)
+                    if not zip_url:
+                        raise HTTPException(
+                            status_code=422,
+                            detail="URL is neither a template .zip nor a page with a frameos:zip meta tag",
+                        )
+                    # The page chose this URL, not the user: same guard again.
+                    await assert_url_target_allowed(zip_url, what="Template zip URL")
+                    fetching = zip_url
+                    content = await fetch_body_limited(
+                        client, zip_url, MAX_TEMPLATE_ZIP_BYTES, headers=cloud_headers_for_url(db, zip_url)
+                    )
+        except httpx.HTTPError as exc:
+            # The store's 404 for a private scene, a 410 for a pulled one, a
+            # host that is down: a readable 4xx/502, not a 500.
+            raise template_download_error(exc, fetching) from exc
         zip_file = open_template_zip(content)
 
     data = {
