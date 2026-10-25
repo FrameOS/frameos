@@ -178,9 +178,17 @@ Still open:
   loads the clock from the chip every time. Check the CR1220 holder on that
   board (the E1002 V1.2 schematic feeds RTC_VDD from the cell through a
   diode); with a cell in, the cold boot should say `loaded:true`.
-- [ ] **The E1004**: the LED on GPIO48 (the Sticky's buzzer pin: `set
-  hardware seeed_reterminal_sticky` on an E1004 must light nothing odd), the
-  charger on the 19/20 bus, the 13.3" 30 s refresh with an SD read in flight.
+- [ ] **The E1004** (bench 2026-10-25, frame 70 on the self-hosted backend, the
+  32 MB image in both slots): the boot found `sda19/scl20: pcf8563 sht4x
+  sy6974b` (the charger on the clock's bus, as its schematic says), mounted
+  the preinstalled 16 GB card on the panel bus through the migration path,
+  wrote the clock after SNTP (the chip had never been set) and decided
+  `deepSleep: off, onBattery: false, usbPower: true` with
+  `deep_sleep_on_battery 1` — the desk-bound E1004 stays awake on USB now.
+  Its USB bridge dropped off the host three minutes in and did not return
+  during the session; still to see: the LED on GPIO48 (the Sticky's buzzer
+  pin: `set hardware seeed_reterminal_sticky` on an E1004 must light nothing
+  odd), the 13.3" 30 s refresh with an SD read right after, `i2c sync`.
 - [ ] **The WS2812 kind** (no board with one is to hand): `set led_type
   ws2812` on a pin with a pixel lights it soft white per note.
 
