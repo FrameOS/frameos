@@ -95,10 +95,13 @@ void fos_rtc_encode(time_t now, uint8_t regs[FOS_RTC_TIME_LEN])
 #include "esp_log.h"
 
 #include "fos_i2c.h"
+#include "frameos_nim.h"
 
 static const char *TAG = "fos_rtc";
 static bool s_loaded = false;
 static uint8_t s_store_pending = 0; /* failed writes left to retry */
+/* The boot's outcome, replayed by fos_rtc_log_status once upload is on. */
+static char s_boot_line[160] = "";
 
 bool fos_rtc_present(void)
 {
@@ -116,6 +119,8 @@ bool fos_rtc_load_time(void)
     time_t now;
     if (!fos_rtc_decode(regs, &now)) {
         printf("rtc: clock not set (integrity flag), waiting for SNTP\n");
+        snprintf(s_boot_line, sizeof(s_boot_line),
+                 "{\"event\":\"rtc\",\"source\":\"esp32\",\"action\":\"boot\",\"loaded\":false,\"reason\":\"not_set\"}");
         return false;
     }
     struct timeval tv = {.tv_sec = now, .tv_usec = 0};
@@ -125,12 +130,21 @@ bool fos_rtc_load_time(void)
     gmtime_r(&now, &tm_utc);
     printf("rtc: clock set from the PCF8563: %04d-%02d-%02d %02d:%02d:%02d UTC\n", tm_utc.tm_year + 1900,
            tm_utc.tm_mon + 1, tm_utc.tm_mday, tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec);
+    snprintf(s_boot_line, sizeof(s_boot_line),
+             "{\"event\":\"rtc\",\"source\":\"esp32\",\"action\":\"boot\",\"loaded\":true,"
+             "\"time\":\"%04d-%02d-%02dT%02d:%02d:%02dZ\"}",
+             tm_utc.tm_year + 1900, tm_utc.tm_mon + 1, tm_utc.tm_mday, tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec);
     return true;
 }
 
 bool fos_rtc_time_loaded(void)
 {
     return s_loaded;
+}
+
+void fos_rtc_log_status(void)
+{
+    if (s_boot_line[0]) frameos_nim_log_hook(s_boot_line);
 }
 
 esp_err_t fos_rtc_store_time(void)

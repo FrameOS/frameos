@@ -428,6 +428,7 @@ void app_main(void)
     if (online) {
         frameos_nim_set_log_upload_enabled(true);
         if (config->assets_sd.enabled) fos_assets_sd_log_status();
+        if (fos_rtc_present()) fos_rtc_log_status();
         log_bootup_event(true);
         fos_http_start(false);
         fos_ota_start_periodic_task(24);

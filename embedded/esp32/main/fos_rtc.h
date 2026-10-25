@@ -37,6 +37,10 @@ bool fos_rtc_present(void);
 bool fos_rtc_load_time(void);
 /* Whether fos_rtc_load_time set the clock this boot. */
 bool fos_rtc_time_loaded(void);
+/* Re-emit the boot's outcome as a `{"event":"rtc", …}` line into the log
+ * ring once log upload is on (the boot read happens before Wi-Fi), so the
+ * control plane's log says whether the clock came from the chip. */
+void fos_rtc_log_status(void);
 /* Write the system time to the clock now (the console's `i2c sync`, the
  * render pass). A write the chip NACKs is kept pending for the next pass. */
 esp_err_t fos_rtc_store_time(void);
