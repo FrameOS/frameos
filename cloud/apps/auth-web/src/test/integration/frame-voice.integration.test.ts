@@ -82,6 +82,13 @@ vi.mock("../../lib/ai/openai", async (importOriginal) => {
   };
 });
 
+// The scene builder's render check needs the wasm renderer; this suite has
+// the scene AI scripted and checks the plumbing around it, not a render.
+vi.mock("../../lib/scene-render", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/scene-render")>();
+  return { ...actual, rendererAvailable: () => false };
+});
+
 import { POST as mintClaimToken } from "../../../app/api/frames/claim-tokens/route";
 import { POST as enrollFrame } from "../../../app/api/frames/enroll/route";
 import { POST as confirmFrame } from "../../../app/api/frames/[frameId]/confirm/route";
@@ -92,6 +99,8 @@ import { POST as assignFrameScenes } from "../../../app/api/frames/[frameId]/sce
 import { POST as voiceRoute } from "../../../app/api/frames/[frameId]/voice/[sessionId]/route";
 import { POST as saveAccountSettings } from "../../../app/api/settings/route";
 import { TRANSCRIPTION_URL, voiceChatId } from "../../lib/ai/voice";
+import { buildSystemPrompt } from "../../lib/ai/prompts";
+import { GET as getScenePreview } from "../../../app/api/frames/[frameId]/scene-preview/route";
 import { waitForPendingAiMetering } from "../../lib/billing";
 import { resetRateLimitForTests } from "../../lib/rate-limit";
 import { createSession, sessionCookieName } from "../../lib/session";
@@ -330,7 +339,7 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
     // No service-setting group granted to this frame's scenes: no picture source.
     expect(context).toContain("- Picture sources for show_image: none");
     expect(context).toContain("- Voice chat may: change the frame's settings (rotate_frame); use the installed scenes");
-    expect(context).toContain("- Voice chat may not: put new scenes on the frame (show_image)");
+    expect(context).toContain("- Voice chat may not: put new scenes on the frame (show_image, create_scene, change_scene)");
     expect(context).toContain(`Calendar (${calendar.id})`);
     expect(context).toContain("spoke this into the frame's microphone");
     const outputs = Object.fromEntries(
@@ -352,10 +361,19 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
     expect(chats).toHaveLength(1);
     expect(chats[0]).toMatchObject({ frameId: frame.frame_id, id: voiceChatId(frame.frame_id) });
     const messages = await db.select().from(aiChatMessages).where(eq(aiChatMessages.chatId, chats[0]!.id));
-    expect(messages.map((message) => [message.role, message.content, message.tool])).toEqual([
-      ["user", "switch to the calendar please", "voice"],
-      ["assistant", "Switched to Calendar.", "voice"],
+    // Three rows: what was heard, the log of what was done (a `log` row, the
+    // workspace's log bubble), the reply.
+    expect(messages.map((message) => [message.role, message.tool])).toEqual([
+      ["user", "voice"],
+      ["assistant", "log"],
+      ["assistant", "voice"],
     ]);
+    expect(messages[0]!.content).toBe("switch to the calendar please");
+    expect(messages[1]!.content.split("\n").slice(1)).toEqual([
+      'list_scenes {} -> {"scenes":"2 listed"}',
+      `activate_scene {"scene_id":"${calendar.id}"} -> {"ok":true,"scene":"Calendar","type":"set_scenes"}`,
+    ]);
+    expect(messages[2]!.content).toBe("Switched to Calendar.");
 
     // A second sentence has the first as history.
     script.rounds.length = 0;
@@ -366,7 +384,14 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
     const texts = script.requests[3]!.input
       .filter((item) => Array.isArray(item.content))
       .map((item) => (item.content as { text: string }[])[0]!.text);
-    expect(texts.slice(1)).toEqual(["switch to the calendar please", "Switched to Calendar.", "and back"]);
+    // The reply carries how long ago the exchange was and what was done,
+    // so "and back" has the switch to refer to.
+    expect(texts[1]).toBe("switch to the calendar please");
+    expect(texts[2]).toBe(
+      "Switched to Calendar.\n\n[just now. Actions: list_scenes {} -> {\"scenes\":\"2 listed\"}; " +
+        `activate_scene {"scene_id":"${calendar.id}"} -> {"ok":true,"scene":"Calendar","type":"set_scenes"}]`,
+    );
+    expect(texts[3]).toBe("and back");
   });
 
   it("offers the model only what the owner's switches allow, and refuses the rest", async () => {
@@ -407,12 +432,16 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
     expect(first.tools.map((tool) => tool.name)).toEqual([
       "list_scenes",
       "show_image",
+      "create_scene",
+      "change_scene",
       "rotate_frame",
       "list_albums",
       "show_album",
     ]);
     const context = (first.input[0]!.content as { text: string }[])[0]!.text;
-    expect(context).toContain("- Voice chat may: change the frame's settings (rotate_frame); put new scenes on the frame (show_image)");
+    expect(context).toContain(
+      "- Voice chat may: change the frame's settings (rotate_frame); put new scenes on the frame (show_image, create_scene, change_scene)",
+    );
     expect(context).toContain("- Voice chat may not: use the installed scenes");
     const output = script.requests[1]!.input.find((item) => item.type === "function_call_output");
     expect(JSON.parse((output as { output: string }).output)).toMatchObject({ error: "not_allowed", ok: false });
@@ -489,6 +518,159 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
     const refused = script.requests[4]!.input.find((item) => item.type === "function_call_output");
     expect(JSON.parse((refused as { output: string }).output)).toMatchObject({ error: "album_unavailable", ok: false });
     expect(await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.frame_id))).toHaveLength(1);
+  });
+
+  it("builds a scene by voice with the scene AI as a sub-turn and previews it; the next turn remembers", async () => {
+    const frame = await activeFrame();
+    await saveOpenAiKey();
+    const clock = await createStoreScene(frame.accountId, "Clock", "11111111-1111-4111-8111-111111111111");
+    await assignScenes(frame.frame_id, [clock.id]);
+    await db.delete(frameCommands).where(eq(frameCommands.frameId, frame.frame_id));
+    const allowed = await setVoicePermissions(
+      postJson(`/api/frames/${frame.frame_id}/voice/permissions`, { create_scenes: true }, { origin: baseUrl }),
+      routeParams(frame.frame_id),
+    );
+    expect(allowed.status).toBe(200);
+    const built = {
+      edges: [{ id: "e", source: "render", sourceHandle: "next", target: "t", targetHandle: "prev" }],
+      id: "22222222-2222-4222-8222-222222222222",
+      name: "Big clock",
+      nodes: [
+        { data: { keyword: "render" }, id: "render", type: "event" },
+        { data: { config: { text: "12:00" }, keyword: "render/text" }, id: "t", type: "app" },
+      ],
+      settings: { execution: "interpreted" },
+    };
+    heard.text = "make me a clock with big digits";
+    script.rounds.push(
+      // The voice turn asks for a scene...
+      { calls: [{ arguments: { name: "Big clock", request: "a clock with big digits" }, call_id: "v1", name: "create_scene" }], text: "" },
+      // ...the scene AI looks an app up, delivers and is done...
+      { calls: [{ arguments: { query: "text" }, call_id: "s1", name: "search_apps" }], text: "" },
+      { calls: [{ arguments: { scenes: [built], title: "Clock" }, call_id: "s2", name: "create_scenes" }], text: "" },
+      { calls: [], text: "A clock with the time in big digits." },
+      // ...and the voice turn answers.
+      { calls: [], text: "Built a big clock and put it on the frame." },
+    );
+    const response = await chunk(frame.frame_id, frame.access_token, "sess-0020", 0, true, SECOND);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      reply: "Built a big clock and put it on the frame.",
+      tools: ["create_scene"],
+      transcript: "make me a clock with big digits",
+    });
+    // The sub-turn: the chat's own prompt, the editor and catalog tools and
+    // nothing of the account's (no store, no frames, no save), the frame and
+    // the spoken request in its context.
+    const sub = script.requests[1]!;
+    expect(sub.instructions).toBe(buildSystemPrompt());
+    expect(sub.tools.map((tool) => tool.name)).toEqual([
+      "search_apps",
+      "get_app",
+      "search_examples",
+      "get_example",
+      "search_docs",
+      "read_doc",
+      "create_scenes",
+      "update_scene",
+      "patch_scene",
+      "edit_app_source",
+      "render_scene",
+    ]);
+    const subContext = (sub.input[0]!.content as { text: string }[])[0]!.text;
+    expect(subContext).toContain("The spoken request: a clock with big digits");
+    expect(subContext).toContain("Name the scene: Big clock");
+    expect(subContext).toContain("Resolution: 800x480");
+    const delivered = script.requests[3]!.input.find(
+      (item) => item.type === "function_call_output" && item.call_id === "s2",
+    ) as { output: string };
+    expect(JSON.parse(delivered.output), delivered.output).toMatchObject({ delivered: true, ok: true });
+    const outcome = script.requests[4]!.input.find(
+      (item) => item.type === "function_call_output" && item.call_id === "v1",
+    ) as { output: string };
+    expect(JSON.parse(outcome.output)).toMatchObject({
+      ok: true,
+      preview: true,
+      scene: "Big clock",
+      scene_id: built.id,
+      summary: "A clock with the time in big digits.",
+      type: "set_scenes",
+    });
+    // Pushed as the voice preview: the workspace sees it and can install it.
+    const pushes = await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.frame_id));
+    expect(pushes.map((row) => row.type)).toEqual(["set_scenes"]);
+    expect(pushes[0]!.payload).toMatchObject({ preview: { name: "Big clock", scene_id: built.id, source: "voice" }, scene_id: built.id });
+    const shown = await getFrame(new NextRequest(new URL(`/api/frames/${frame.frame_id}`, baseUrl)), routeParams(frame.frame_id));
+    expect(((await shown.json()) as { frame: { scene_preview: unknown } }).frame.scene_preview).toMatchObject({
+      name: "Big clock",
+      source: "voice",
+    });
+    const kept = await getScenePreview(
+      new NextRequest(new URL(`/api/frames/${frame.frame_id}/scene-preview`, baseUrl)),
+      routeParams(frame.frame_id),
+    );
+    expect(kept.status).toBe(200);
+    expect(((await kept.json()) as { scene: { id: string } }).scene.id).toBe(built.id);
+
+    // The exchange is three rows of the frame's voice chat: heard, the log
+    // of what was done, the reply.
+    const rows = await db
+      .select()
+      .from(aiChatMessages)
+      .where(eq(aiChatMessages.chatId, voiceChatId(frame.frame_id)))
+      .orderBy(aiChatMessages.id);
+    expect(rows.map((row) => [row.role, row.tool])).toEqual([["user", "voice"], ["assistant", "log"], ["assistant", "voice"]]);
+    const log = rows[1]!.content.split("\n");
+    expect(log[0]).toMatch(/^Voice chat turn at 20\d\d-\d\d-\d\d \d\d:\d\d:\d\d UTC, session sess-0020, \d+\.\d s$/);
+    expect(log[1]).toContain(`create_scene {"name":"Big clock","request":"a clock with big digits"} -> {"ok":true,"scene":"Big clock","scene_id":"${built.id}"`);
+
+    // The next sentence has the exchange as history, with its age and its
+    // actions, and the preview in its context: change_scene edits that scene.
+    script.requests.length = 0;
+    script.rounds.length = 0;
+    heard.text = "make the digits red";
+    script.rounds.push(
+      { calls: [{ arguments: { request: "make the digits red" }, call_id: "v1", name: "change_scene" }], text: "" },
+      {
+        calls: [
+          {
+            arguments: {
+              set_nodes: [{ data: { config: { text: "12:00", fontColor: "#ff0000" }, keyword: "render/text" }, id: "t", type: "app" }],
+            },
+            call_id: "s1",
+            name: "patch_scene",
+          },
+        ],
+        text: "",
+      },
+      { calls: [], text: "Red digits." },
+      { calls: [], text: "The digits are red now." },
+    );
+    const second = await chunk(frame.frame_id, frame.access_token, "sess-0021", 0, true, SECOND);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({ ok: true, tools: ["change_scene"] });
+    const texts = script.requests[0]!.input
+      .filter((item) => "content" in item)
+      .map((item) => ((item as { content: { text: string }[] }).content[0]!).text);
+    expect(texts[0]).toContain("- Preview on the frame (shown for now, not installed");
+    expect(texts[0]).toContain(`{"id":"${built.id}","name":"Big clock"}`);
+    expect(texts[1]).toBe("make me a clock with big digits");
+    expect(texts[2]).toContain("Built a big clock and put it on the frame.\n\n[just now. Actions: create_scene ");
+    expect(texts[3]).toBe("make the digits red");
+    const changeContext = (script.requests[1]!.input[0]!.content as { text: string }[])[0]!.text;
+    expect(changeContext).toContain("The user asked, by voice, for a change to the scene the frame shows.");
+    expect(changeContext).toContain('"name":"Big clock"');
+    const changed = script.requests[3]!.input.find(
+      (item) => item.type === "function_call_output" && item.call_id === "v1",
+    ) as { output: string };
+    expect(JSON.parse(changed.output)).toMatchObject({ changed_from: "Big clock", ok: true, scene_id: built.id });
+    const newest = (await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.frame_id))).sort(
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+    );
+    expect(newest.map((row) => row.type)).toEqual(["set_scenes", "set_scenes"]);
+    const scene = ((newest[1]!.payload as { preview: { scene: { nodes: { data: { config: Record<string, string> } }[] } } }).preview.scene);
+    expect(scene.nodes[1]!.data.config.fontColor).toBe("#ff0000");
   });
 
   it("refuses another frame's token, a gap in the chunks and an oversized chunk", async () => {

@@ -138,7 +138,7 @@ async def test_a_spoken_scene_switch_is_transcribed_answered_and_queued(async_cl
     assert "Calendar (cal-2)" in context and "ESP32 Frame" in context
     assert "spoke this into the frame's microphone" in context
     assert "- Voice chat may: change the frame's settings (rotate_frame); use the installed scenes" in context
-    assert "- Voice chat may not: put new scenes on the frame (show_image)" in context
+    assert "- Voice chat may not: put new scenes on the frame (show_image, create_scene, change_scene)" in context
     # No Unsplash or OpenAI image key in this project: the model is told so.
     assert "- Picture sources for show_image: none" in context
     assert first["input"][-1]["content"][0]["text"] == "switch to the calendar please"
@@ -150,23 +150,33 @@ async def test_a_spoken_scene_switch_is_transcribed_answered_and_queued(async_cl
     commands = db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).all()
     assert [(c.type, c.payload) for c in commands] == [("set_current_scene", {"scene_id": "cal-2"})]
 
-    # The exchange is the frame's voice chat: one per frame, under the frame.
+    # The exchange is the frame's voice chat: one per frame, under the frame,
+    # three rows: what was heard, the log of what was done (a `log` row, the
+    # workspace's log bubble), the reply.
     chat = db.query(Chat).filter(Chat.project_id == frame.project_id).one()
     assert chat.frame_id == frame.id
     messages = db.query(ChatMessage).filter(ChatMessage.chat_id == chat.id).order_by(ChatMessage.created_at).all()
-    assert [(m.role, m.content, m.tool) for m in messages] == [
-        ("user", "switch to the calendar please", "voice"),
-        ("assistant", "Switched to Calendar.", "voice"),
-    ]
+    assert [(m.role, m.tool) for m in messages] == [("user", "voice"), ("assistant", "log"), ("assistant", "voice")]
+    assert messages[0].content == "switch to the calendar please"
+    assert messages[2].content == "Switched to Calendar."
+    log_lines = messages[1].content.split("\n")
+    assert log_lines[0].startswith("Voice chat turn at 20") and f"session {SESSION}" in log_lines[0]
+    assert log_lines[1] == 'list_scenes {} -> {"scenes": "2 listed"}'
+    assert log_lines[2].startswith('activate_scene {"scene_id": "cal-2"} -> {"ok": true, "scene": "Calendar"')
 
-    # A second session has the first as history.
+    # A second session has the first as history: the transcript, and the
+    # reply with how long ago it was and what was done, so "and back" has
+    # the switch to refer to.
     openai2 = ScriptedOpenAi([("Back on the Clock.", [])])
     monkeypatch.setattr(ai_chat_agent, "stream_response", openai2)
     heard["text"]["value"] = "and back"
     response = await no_auth_client.post(url(frame, 0, done=1, session="second-session"), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
     assert response.status_code == 200, response.text
     texts = [item["content"][0]["text"] for item in openai2.requests[0]["input"] if "content" in item]
-    assert texts[1:] == ["switch to the calendar please", "Switched to Calendar.", "and back"]
+    assert texts[1] == "switch to the calendar please"
+    assert texts[2].startswith('Switched to Calendar.\n\n[just now. Actions: list_scenes {} -> {"scenes": "2 listed"}; ')
+    assert 'activate_scene {"scene_id": "cal-2"} -> {"ok": true, "scene": "Calendar"' in texts[2]
+    assert texts[3] == "and back"
     assert db.query(Chat).filter(Chat.project_id == frame.project_id).count() == 1
 
 
@@ -369,9 +379,11 @@ async def test_the_owners_switches_narrow_the_tools(async_client, no_auth_client
     # picture and the albums (on by default); the snake_case spelling of a
     # switch counts like the camelCase.
     first = openai.requests[0]
-    assert [tool["name"] for tool in first["tools"]] == ["list_scenes", "show_image", "list_albums", "show_album"]
+    assert [tool["name"] for tool in first["tools"]] == [
+        "list_scenes", "show_image", "create_scene", "change_scene", "list_albums", "show_album",
+    ]
     context = first["input"][0]["content"][0]["text"]
-    assert "- Voice chat may: put new scenes on the frame (show_image)" in context
+    assert "- Voice chat may: put new scenes on the frame (show_image, create_scene, change_scene)" in context
     assert (
         "- Voice chat may not: change the frame's settings (rotate_frame); use the installed scenes: switch between "
         "them, set their fields, redraw (activate_scene, set_scene_state, render_now)"
@@ -527,7 +539,7 @@ async def test_show_album_installs_the_album_scene_on_the_frame(async_client, no
         "list_scenes", "activate_scene", "set_scene_state", "render_now", "rotate_frame",
     ]
     context = openai3.requests[0]["input"][0]["content"][0]["text"]
-    assert "- Voice chat may not: put new scenes on the frame (show_image); play the photo albums: list them, show one on the frame (list_albums, show_album)" in context
+    assert "- Voice chat may not: put new scenes on the frame (show_image, create_scene, change_scene); play the photo albums: list them, show one on the frame (list_albums, show_album)" in context
     assert json.loads(tool_outputs(openai3.requests[1])["c1"])["error"] == "not_allowed"
 
 
@@ -620,6 +632,277 @@ def test_pcm_becomes_a_16khz_mono_wav():
     assert (channels, rate, byte_rate, block_align, bits) == (1, 16000, 32000, 2, 16)
     assert wav[36:40] == b"data" and struct.unpack("<I", wav[40:44])[0] == 4
     assert wav[44:] == b"\x01\x02\x03\x04"
+
+
+CLOCK_SCENE = {
+    "id": "clock-by-voice",
+    "name": "Big clock",
+    "nodes": [
+        {"id": "render", "type": "event", "data": {"keyword": "render"}},
+        {"id": "t", "type": "app", "data": {"keyword": "render/text", "config": {"text": "12:00"}}},
+    ],
+    "edges": [{"id": "e", "source": "render", "target": "t", "sourceHandle": "next", "targetHandle": "prev"}],
+}
+
+
+@pytest.fixture
+def scripted_renderer(monkeypatch):
+    """The scene builder's render check: each call answers the next scripted
+    outcome ("ok", or a list of error lines); records what it rendered."""
+    from app.utils import voice_scene_builder
+    from app.utils.ai_chat_tools import RenderedScene
+
+    outcomes: list = []
+    calls: list[dict] = []
+
+    def backend_renderer(frame):
+        async def render(scenes, scene_id, width, height):
+            calls.append({"scene_ids": [s.get("id") for s in scenes], "scene_id": scene_id, "size": (width, height)})
+            outcome = outcomes.pop(0) if outcomes else "ok"
+            if outcome == "ok":
+                return RenderedScene(b"png", None, "the frame's memory: ESP32 with 8 MB PSRAM", logs=["[scene] fine"])
+            if outcome == "oom":
+                return RenderedScene(None, "Out of memory: the device refused 7,680,004 bytes", "the frame's memory", out_of_memory=True)
+            return RenderedScene(b"png", None, "the frame's memory", logs=list(outcome))
+
+        return render
+
+    monkeypatch.setattr(voice_scene_builder, "backend_renderer", backend_renderer)
+    return {"outcomes": outcomes, "calls": calls}
+
+
+@pytest.mark.asyncio
+async def test_create_scene_runs_the_scene_ai_and_previews_what_passes_the_render_check(
+    async_client, no_auth_client, db, redis, heard, monkeypatch, scripted_renderer
+):
+    """docs/voice-chat.md "The chat turn", create_scene: the tool hands the
+    request to the scene AI as a sub-turn with the editor tools alone, renders
+    what it delivered in the frame's memory, sends the errors back once as the
+    browser's automatic render check would, and pushes the scene that draws
+    as the voice preview."""
+    from app.utils.ai_chat_prompt import build_chat_system_prompt
+
+    frame = await voice_frame(async_client, db, permissions={"voiceCreateScenes": True})
+    broken = {**CLOCK_SCENE, "name": "Broken clock"}
+    openai = ScriptedOpenAi([
+        # The voice turn asks for a scene...
+        ("", [call("create_scene", {"request": "a clock with big digits", "name": "Big clock"}, "v1")]),
+        # ...the scene AI looks an app up, delivers, and is done...
+        ("", [call("apps_list", {"search": "text"}, "s1")]),
+        ("", [call("create_scenes", {"title": "Clock", "scenes": [broken]}, "s2")]),
+        ("A clock with the time in big digits.", []),
+        # ...the render check fails once, the scene AI fixes it...
+        ("", [call("update_scene", {"scene": CLOCK_SCENE, "rewrite": True}, "s3")]),
+        ("Fixed: the clock renders now.", []),
+        # ...and the voice turn answers.
+        ("Built a big clock and put it on the frame.", []),
+    ])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    scripted_renderer["outcomes"].extend([['{"error": "TypeError: cannot read x"}'], "ok"])
+    heard["text"]["value"] = "make me a clock with big digits"
+
+    response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "ok": True,
+        "transcript": "make me a clock with big digits",
+        "reply": "Built a big clock and put it on the frame.",
+        "tools": ["create_scene"],
+    }
+    # The voice turn offered create_scene and change_scene (the owner opted in).
+    assert "create_scene" in [t["name"] for t in openai.requests[0]["tools"]]
+    assert "change_scene" in [t["name"] for t in openai.requests[0]["tools"]]
+
+    # The sub-turn: the chat's own prompt, the editor and catalog tools and no
+    # MCP tool (a frame's credential is not the owner's), the frame and the
+    # spoken request in its context.
+    sub = openai.requests[1]
+    assert sub["instructions"] == build_chat_system_prompt()
+    assert [t["name"] for t in sub["tools"]] == [
+        "create_scenes", "update_scene", "patch_scene", "edit_app_source", "render_scene", "apps_list", "app_source_get",
+    ]
+    sub_context = sub["input"][0]["content"][0]["text"]
+    assert "ESP32 Frame" in sub_context and "The spoken request: a clock with big digits" in sub_context
+    assert "Name the scene: Big clock" in sub_context
+    assert sub["input"][-1]["content"][0]["text"] == "a clock with big digits"
+    # apps_list answered from the catalog, in-process.
+    listing = json.loads(tool_outputs(openai.requests[2])["s1"])
+    assert any(app["keyword"] == "render/text" for app in listing["apps"])
+    delivered = json.loads(tool_outputs(openai.requests[3])["s2"])
+    assert delivered["ok"] is True and delivered["delivered"] is True
+
+    # The render check: the delivered scene rendered at the frame's size; the
+    # errors went back to the scene AI as the browser's automatic check does.
+    assert scripted_renderer["calls"][0]["scene_id"] == "clock-by-voice"
+    check = openai.requests[4]["input"][-1]["content"][0]["text"]
+    assert check.startswith("[Automatic render check] The scene was rendered on the frame's runtime")
+    assert "TypeError: cannot read x" in check
+    # The fixed scene passed and was handed back to the voice turn...
+    assert len(scripted_renderer["calls"]) == 2
+    built = json.loads(tool_outputs(openai.requests[6])["v1"])
+    assert built["ok"] is True and built["scene"] == "Big clock" and built["scene_id"] == "clock-by-voice"
+    assert built["preview"] is True and built["summary"] == "Fixed: the clock renders now."
+    # ...and pushed as the voice preview next to the saved scenes, like a picture.
+    commands = db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).order_by(FrameCommand.created_at).all()
+    assert [c.type for c in commands] == ["set_scenes", "set_current_scene"]
+    preview = commands[0].payload["_preview"]
+    assert [scene["name"] for scene in preview["scenes"]] == ["Clock", "Calendar", "Big clock"]
+    assert preview["source"] == "voice" and preview["scene_id"] == "clock-by-voice"
+    shown = (await async_client.get(f"/api/frames/{frame.id}")).json()["frame"]["scene_preview"]
+    assert shown["name"] == "Big clock" and shown["source"] == "voice"
+    # The saved scenes are untouched: a preview is installed in the workspace.
+    db.expire_all()
+    assert [s["name"] for s in frame.scenes] == ["Clock", "Calendar"]
+    # The log row carries the sub-turn's outcome for the next exchange.
+    log = db.query(ChatMessage).filter(ChatMessage.tool == "log").one().content
+    assert 'create_scene {"request": "a clock with big digits", "name": "Big clock"} -> {"ok": true, "scene": "Big clock", "scene_id": "clock-by-voice"' in log
+
+
+@pytest.mark.asyncio
+async def test_change_scene_edits_the_showing_scene_into_a_preview(
+    async_client, no_auth_client, db, redis, heard, monkeypatch, scripted_renderer
+):
+    """A spoken change to the scene showing: the scene AI gets the scene (a
+    copy with a new id) and the request, and what it delivers is the preview;
+    the installed scene is never overwritten. A follow-up on the voice
+    preview edits the preview itself."""
+    frame = await voice_frame(async_client, db, permissions={"voiceCreateScenes": True})
+    # A Calendar that validates once patched (the fixture's scenes have no nodes).
+    frame.scenes = [frame.scenes[0], {**CLOCK_SCENE, "id": "cal-2", "name": "Calendar"}]
+    db.add(frame)
+    db.commit()
+    await redis.set(f"frame:{frame.id}:active_scene", "cal-2")
+    openai = ScriptedOpenAi([
+        ("", [call("change_scene", {"request": "make the text bigger"}, "v1")]),
+        ("", [call("patch_scene", {"set_nodes": [{"id": "big", "type": "app", "data": {"keyword": "render/text", "config": {"text": "BIG", "fontSize": "96"}}}]}, "s1")]),
+        ("Bigger text.", []),
+        ("Made the text bigger; it is on the frame as a preview.", []),
+    ])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    heard["text"]["value"] = "make the text bigger"
+    response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    assert response.json()["tools"] == ["change_scene"]
+
+    # The sub-turn saw the Calendar as the scene to change, under a new id.
+    sub_context = openai.requests[1]["input"][0]["content"][0]["text"]
+    assert "The user asked, by voice, for a change to the scene the frame shows." in sub_context
+    assert '"name": "Calendar"' in sub_context and '"id": "cal-2"' not in sub_context
+    changed = json.loads(tool_outputs(openai.requests[3])["v1"])
+    assert changed["ok"] is True and changed["changed_from"] == "Calendar" and changed["scene_id"] != "cal-2"
+    commands = db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).order_by(FrameCommand.created_at).all()
+    preview = commands[0].payload["_preview"]
+    assert [scene["name"] for scene in preview["scenes"]] == ["Clock", "Calendar", "Calendar"]
+    assert preview["scene_id"] == changed["scene_id"]
+    assert any(node["id"] == "big" for node in preview["scenes"][-1]["nodes"])
+    db.expire_all()
+    assert [s["id"] for s in frame.scenes] == ["clock-1", "cal-2"]
+
+    # The next sentence, once the device has pulled the push and reported
+    # the preview as what it shows (its pull writes the active-scene cache):
+    # the context says so, and change_scene edits the preview itself.
+    await redis.set(f"frame:{frame.id}:active_scene", changed["scene_id"])
+    openai2 = ScriptedOpenAi([
+        ("", [call("change_scene", {"request": "and red"}, "v1")]),
+        ("", [call("patch_scene", {"set_nodes": [{"id": "big", "type": "app", "data": {"keyword": "render/text", "config": {"text": "BIG", "fontSize": "96", "fontColor": "#ff0000"}}}]}, "s1")]),
+        ("Red now.", []),
+        ("The text is red.", []),
+    ])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai2)
+    heard["text"]["value"] = "and red"
+    response = await no_auth_client.post(url(frame, 0, done=1, session="second-session"), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    context = openai2.requests[0]["input"][0]["content"][0]["text"]
+    assert "- Preview on the frame (shown for now, not installed" in context and "from the voice chat, just now" in context
+    assert f'"id": "{changed["scene_id"]}"' in context
+    history = [item["content"][0]["text"] for item in openai2.requests[0]["input"] if "content" in item]
+    assert "[just now. Actions: change_scene" in history[2]
+    sub_context = openai2.requests[1]["input"][0]["content"][0]["text"]
+    assert '"fontColor"' not in sub_context and '"id": "big"' in sub_context
+    pushes = db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id, FrameCommand.type == "set_scenes").order_by(FrameCommand.created_at).all()
+    assert len(pushes) == 2
+    newest = pushes[-1].payload["_preview"]
+    assert [s["name"] for s in newest["scenes"]] == ["Clock", "Calendar", "Calendar"]
+    assert newest["scenes"][-1]["nodes"][-1]["data"]["config"]["fontColor"] == "#ff0000"
+    # The preview was replaced in place: same id, the first push's bundle spent.
+    assert newest["scene_id"] == changed["scene_id"]
+    assert json.loads(tool_outputs(openai2.requests[3])["v1"])["scene_id"] == changed["scene_id"]
+    assert pushes[0].payload["_preview"]["scenes"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_scene_that_never_draws_is_not_put_on_the_frame(
+    async_client, no_auth_client, db, redis, heard, monkeypatch, scripted_renderer
+):
+    """Two render checks, then the scene AI's work is reported, not pushed: a
+    scene that runs the frame out of memory would abort every render."""
+    frame = await voice_frame(async_client, db, permissions={"voiceCreateScenes": True})
+    openai = ScriptedOpenAi([
+        ("", [call("create_scene", {"request": "a huge collage"}, "v1")]),
+        ("", [call("create_scenes", {"title": "Collage", "scenes": [CLOCK_SCENE]}, "s1")]),
+        ("A collage.", []),
+        ("", [call("update_scene", {"scene": CLOCK_SCENE, "rewrite": True}, "s2")]),
+        ("Smaller.", []),
+        ("", [call("update_scene", {"scene": CLOCK_SCENE, "rewrite": True}, "s3")]),
+        ("Smaller still.", []),
+        ("That scene needs more memory than the frame has; I could not put it on.", []),
+    ])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    scripted_renderer["outcomes"].extend(["oom", "oom", "oom"])
+    heard["text"]["value"] = "make a huge collage"
+    response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    assert response.json()["tools"] == ["create_scene"]
+    outcome = json.loads(tool_outputs(openai.requests[-1])["v1"])
+    assert outcome["ok"] is False and outcome["error"] == "render_out_of_memory"
+    assert "refused 7,680,004 bytes" in outcome["detail"]
+    assert len(scripted_renderer["calls"]) == 3
+    assert openai.requests[3]["input"][-1]["content"][0]["text"].startswith("[Automatic render check] The scene was rendered in the frame's memory and ran out")
+    assert db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).count() == 0
+
+
+def test_voice_history_folds_each_exchange_with_its_age_and_actions():
+    """voice_history_for_model: the chat's rows become user/assistant pairs,
+    the reply carrying how long ago and the log row's actions; the window is
+    counted in exchanges; the workspace's own rows pass through as text."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.utils.voice_chat import VoiceAction, describe_age, voice_history_for_model, voice_turn_log
+
+    now = datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc)
+    at = now - timedelta(minutes=3)
+    log = voice_turn_log(
+        [VoiceAction("list_scenes", {}, "<untrusted_data>...</untrusted_data>"),
+         VoiceAction("show_image", {"query": "a banana"}, {"ok": True, "scene": "Voice: a banana", "scene_id": "p1", "source": "photo", "status": "queued", "scenes": ["noise"]})],
+        session_id="abc", seconds=4.25, at=at.replace(tzinfo=None),
+    )
+    assert log.split("\n")[0] == "Voice chat turn at 2026-10-25 11:57:00 UTC, session abc, 4.2 s"
+    rows = [
+        {"role": "user", "content": "hello from the workspace", "tool": None, "created_at": now - timedelta(days=2)},
+        {"role": "assistant", "content": "Hi.", "tool": None, "created_at": now - timedelta(days=2)},
+        {"role": "user", "content": "show me a banana", "tool": "voice", "created_at": at},
+        {"role": "assistant", "content": log, "tool": "log", "created_at": at},
+        {"role": "assistant", "content": "Here is a banana.", "tool": "voice", "created_at": at},
+        {"role": "user", "content": "nothing came of this", "tool": "voice", "created_at": now - timedelta(seconds=10)},
+        {"role": "assistant", "content": "Transcription failed", "tool": "error", "created_at": now - timedelta(seconds=10)},
+    ]
+    history = voice_history_for_model(rows, now=now)
+    assert history == [
+        {"role": "user", "content": "hello from the workspace"},
+        {"role": "assistant", "content": "Hi.\n\n[2 days ago]"},
+        {"role": "user", "content": "show me a banana"},
+        {"role": "assistant", "content": (
+            "Here is a banana.\n\n[3 minutes ago. Actions: list_scenes {} -> <untrusted_data>...</untrusted_data>; "
+            'show_image {"query": "a banana"} -> {"ok": true, "scene": "Voice: a banana", "scene_id": "p1", "source": "photo", "status": "queued"}]'
+        )},
+        {"role": "user", "content": "nothing came of this"},
+        {"role": "assistant", "content": "[just now]"},
+    ]
+    # The window: the newest exchanges stay.
+    assert voice_history_for_model(rows, now=now, max_turns=1) == history[-2:]
+    assert [describe_age(timedelta(seconds=s)) for s in (5, 60, 3599, 3600, 90000, 200000)] == [
+        "just now", "1 minute ago", "59 minutes ago", "1 hour ago", "1 day ago", "2 days ago",
+    ]
 
 
 def test_the_voice_tools_match_the_cloud():

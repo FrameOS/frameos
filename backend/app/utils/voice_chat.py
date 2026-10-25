@@ -11,13 +11,18 @@ Three parts, each small:
 - the transcription: OpenAI's /v1/audio/transcriptions on the PCM wrapped as
   a WAV, the frame's scene names as the prompt;
 - the turn: the chat's own agent loop (app/utils/ai_chat_agent.py) with the
-  voice system prompt, the frame's context block, and VoiceTools — the six
-  tools a frame's own token may drive (list scenes, activate one, set the
-  showing scene's state, redraw, show a picture, rotate) plus the two album
-  tools (list the photo albums, show one), narrowed by the owner's four
+  voice system prompt, the frame's context block, the earlier exchanges with
+  their actions (voice_history_for_model) and VoiceTools — the tools a
+  frame's own token may drive (list scenes, activate one, set the showing
+  scene's state, redraw, show a picture, build or change a scene with the
+  scene AI as a sub-turn (voice_scene_builder.py), rotate) plus the two
+  album tools (list the photo albums, show one), narrowed by the owner's four
   permission switches (VoicePermissions: change settings, use the installed
   scenes, put new scenes on the frame, play the photo albums). Not the MCP
-  server's tools: a frame's credential is not the owner's.
+  server's tools: a frame's credential is not the owner's;
+- the log: every exchange is three rows of the frame's voice chat (what was
+  heard, a `log` row of the tools that ran, the reply); the next turn reads
+  them (voice_turn_log, voice_history_for_model).
 
 The cloud's copy is cloud/apps/auth-web/src/lib/ai/voice.ts: the prompt, the
 tool definitions and the permission table are kept the same there."""
@@ -33,6 +38,7 @@ import time
 import uuid
 from array import array
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -52,7 +58,11 @@ __all__ = [
     "VoiceSessionStore",
     "VoiceTools",
     "VoiceTurnResult",
+    "VoiceAction",
     "build_voice_system_prompt",
+    "describe_age",
+    "voice_history_for_model",
+    "voice_turn_log",
     "pcm_peak",
     "pcm_to_wav",
     "run_voice_turn",
@@ -76,7 +86,6 @@ TRANSCRIPTION_URL = "https://api.openai.com/v1/audio/transcriptions"
 TRANSCRIPTION_TIMEOUT_SECONDS = 60.0
 MAX_TRANSCRIPT_CHARS = 4000
 MAX_VOICE_ROUNDS = 6
-MAX_VOICE_HISTORY = 8
 
 
 def voice_chat_id(frame_id: int) -> str:
@@ -106,8 +115,9 @@ VOICE_PERMISSION_DEVICE_CONFIG_KEYS = {
 }
 # Which switch each tool answers to. A tool not listed (list_scenes) is
 # always offered: it reads, and it is what the model names when it must
-# decline. show_image puts a scene the frame did not hold on the frame, so it
-# is a new scene, not a use of an installed one. The album tools are the
+# decline. show_image, create_scene and change_scene put a scene the frame did
+# not hold on the frame, so they are new scenes, not a use of an installed one
+# (change_scene's result is a preview copy; the installed scene stays). The album tools are the
 # photo library's (docs/photos.md): listing it and playing a folder on the
 # frame are one switch, since the listing is what names the folder.
 VOICE_TOOL_PERMISSIONS = {
@@ -115,6 +125,8 @@ VOICE_TOOL_PERMISSIONS = {
     "set_scene_state": "use_scenes",
     "render_now": "use_scenes",
     "show_image": "create_scenes",
+    "create_scene": "create_scenes",
+    "change_scene": "create_scenes",
     "rotate_frame": "change_settings",
     "list_albums": "use_albums",
     "show_album": "use_albums",
@@ -123,7 +135,7 @@ VOICE_TOOL_PERMISSIONS = {
 VOICE_PERMISSION_DESCRIPTIONS = {
     "change_settings": "change the frame's settings (rotate_frame)",
     "use_scenes": "use the installed scenes: switch between them, set their fields, redraw (activate_scene, set_scene_state, render_now)",
-    "create_scenes": "put new scenes on the frame (show_image)",
+    "create_scenes": "put new scenes on the frame (show_image, create_scene, change_scene)",
     "use_albums": "play the photo albums: list them, show one on the frame (list_albums, show_album)",
 }
 
@@ -330,28 +342,40 @@ def build_voice_system_prompt() -> str:
     """Byte-stable (prompt caching); the frame goes in the input. The same
     text as the cloud's buildVoiceSystemPrompt (src/lib/ai/voice.ts)."""
     return """
-You are the FrameOS voice assistant for one smart frame. The user held two buttons on the frame and spoke; their
+You are the FrameOS voice assistant for one smart frame. The user held the frame's voice key and spoke; their
 message is a transcript of what they said. Transcripts carry recognition errors: read for the likely intent ("the
 bird journal" is the scene called Bird Field Journal). Scene names in the frame's context are the ones to match.
 
-Act, then answer in one short sentence. The reply is not shown on the frame and is read nowhere aloud: it lands in
-the frame's chat log. Never ask for confirmation and never ask a question back: the spoken request is the
-confirmation, and nobody is there to answer. Do the most likely thing; when nothing matches, say so and name what
-the frame has (its scenes, from list_scenes). When the transcript is empty or not a request for the frame, say
-briefly that you did not catch a request.
+This is a conversation, not a row of one-off commands. The earlier exchanges are above, each with how long ago it
+was and what you did then. A follow-up ("make the text bigger", "no, the other one", "a dog instead", "undo that")
+refers to the latest exchange and to the scene it left on the frame; a request that stands on its own starts a new
+topic. Exchanges from hours or days ago are background, not the thing being talked about now.
+
+Act, then answer in one short sentence. The reply is drawn across the bottom of the frame for half a minute and
+lands, with a log of what you did, in the frame's chat in the workspace. Never ask for confirmation and never ask a
+question back: the spoken request is the confirmation, and the user can only speak again. Do the most likely thing;
+when nothing matches, say so and name what the frame has (its scenes, from list_scenes). When the transcript is
+empty or not a request for the frame, say briefly that you did not catch a request.
 
 Tools: list_scenes (what the frame holds and which scene shows), activate_scene (switch to a scene by its id),
 set_scene_state (set the showing scene's public fields, such as a message board's text), render_now (redraw the
 frame), show_image (put a picture on the frame: a photo found for a search, or an image generated from a
-description; the frame's context says which sources it has), rotate_frame (turn the display to 0, 90, 180 or 270
-degrees; "another 90" is the rotation in the context plus 90), list_albums (the photo albums in the owner's library,
-by path), show_album (play an album on the frame: it makes a scene for the album, installs it next to the frame's
-scenes and shows it). The owner chooses which of these the voice chat may use: the context's "Voice chat may" and
-"may not" lines say which, and a tool you were not given is one the owner switched off, so when asked for it say so
-in a sentence (it is a switch in the frame's settings) and do nothing else. "Next" and "previous" mean the scene after
-or before the one showing, in list order, wrapping around. "Show me X" with no scene of that name is show_album when
-an album is called that (list_albums tells), else show_image. These are the only things you can do; anything else
-(editing scenes, timing, other frames, the account) is for the workspace, and you say so in a sentence.
+description; the frame's context says which sources it has), create_scene (have the scene AI build a new scene from
+a description: a clock, a weather board, a quote of the day, a countdown, anything a frame can show; it is checked
+in the frame's own memory and shown on the frame as a preview the owner installs or discards in the workspace; it
+takes a while, so say what you asked for), change_scene (have the scene AI change the scene the frame shows as
+asked: bigger text, another color, one more line; the changed scene is shown as a preview the same way, and an
+installed scene is never overwritten), rotate_frame (turn the display to 0, 90, 180 or 270 degrees; "another 90" is
+the rotation in the context plus 90), list_albums (the photo albums in the owner's library, by path), show_album
+(play an album on the frame: it makes a scene for the album, installs it next to the frame's scenes and shows it).
+The owner chooses which of these the voice chat may use: the context's "Voice chat may" and "may not" lines say
+which, and a tool you were not given is one the owner switched off, so when asked for it say so in a sentence (it is
+a switch in the frame's settings) and do nothing else. "Next" and "previous" mean the scene after or before the one
+showing, in list order, wrapping around. "Show me X" with no scene of that name is show_album when an album is called
+that (list_albums tells), show_image when X is a picture, and create_scene when X is more than a picture (a clock, a
+counter, a dashboard, text that updates). Pass create_scene and change_scene the request in full, in your own clear
+words, with what the frame is (its size and colors are in the context). These are the only things you can do;
+anything else (timing, other frames, the account) is for the workspace, and you say so in a sentence.
 """.strip()
 
 
@@ -430,6 +454,46 @@ VOICE_TOOL_DEFINITIONS: list[JsonObject] = [
     },
     {
         "type": "function",
+        "name": "create_scene",
+        "description": (
+            "Build a new scene from a description with the scene AI (what the workspace's AI scene button does): "
+            "a clock, a weather board, a quote, a countdown, a dashboard. The scene is rendered in the frame's "
+            "memory first and, when it draws, pushed to the frame as a preview the owner installs or discards in "
+            "the workspace; the frame's other scenes stay. Takes up to a minute."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "request": {
+                    "type": "string",
+                    "description": "What the scene should show and look like, in full, in clear words.",
+                },
+                "name": {"type": "string", "description": "A short name for the scene. Omit to let the scene AI name it."},
+            },
+            "required": ["request"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "change_scene",
+        "description": (
+            "Change the scene the frame shows as asked, with the scene AI: bigger text, another color, one more "
+            "line, a different layout. The changed scene is rendered in the frame's memory and pushed as a "
+            "preview like create_scene's; an installed scene is never overwritten (its changed copy is the "
+            "preview, with a new id). Takes up to a minute."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "request": {"type": "string", "description": "The change, in full, in clear words."},
+            },
+            "required": ["request"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
         "name": "rotate_frame",
         "description": (
             "Turn the frame's display to an orientation: 0, 90, 180 or 270 degrees clockwise, absolute. "
@@ -481,6 +545,8 @@ VOICE_TOOL_LABELS = {
     "set_scene_state": "Set scene state",
     "render_now": "Render now",
     "show_image": "Show image",
+    "create_scene": "Create scene",
+    "change_scene": "Change scene",
     "rotate_frame": "Rotate frame",
     "list_albums": "List albums",
     "show_album": "Show album",
@@ -511,6 +577,12 @@ UpdateSettings = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 # scene saved next to the frame's scenes, the switch).
 ListAlbums = Callable[[], Awaitable[dict[str, Any]]]
 InstallAlbum = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+# The scene AI as a sub-turn (app/utils/voice_scene_builder.py), the route's
+# own: (request, the scene to change or None, a name or None) -> what came of
+# it: {"ok": True, "scene": {...}, "summary": "..."} or {"ok": False,
+# "error": ..., "detail": ...}. The tool pushes the scene as a preview.
+BuildScene = Callable[[str, JsonObject | None, str | None], Awaitable[dict[str, Any]]]
+MAX_SCENE_REQUEST_CHARS = 2000
 
 
 # ------------------------------------------------------------ image scene
@@ -602,9 +674,16 @@ class VoiceTools(ToolBox):
         permissions: VoicePermissions | None = None,
         list_albums: ListAlbums | None = None,
         install_album: InstallAlbum | None = None,
+        build_scene: BuildScene | None = None,
+        preview_scene: JsonObject | None = None,
     ) -> None:
         self._frame = frame
         self._active_scene_id = active_scene_id
+        self._build_scene = build_scene
+        # The scene the frame shows for now without holding it (the voice
+        # chat's or the editor's preview, docs/scene-previews.md): what
+        # change_scene edits when it is the one showing.
+        self._preview_scene = preview_scene
         self._queue = queue_command
         self._preview = preview_scenes
         self._update_settings = update_settings
@@ -613,6 +692,7 @@ class VoiceTools(ToolBox):
         self._install_album = install_album
         self.permissions = permissions or VoicePermissions()
         self.changed: list[str] = []
+        self.actions: list[VoiceAction] = []
 
     def definitions(self) -> list[JsonObject]:
         # A tool the owner switched off is not offered at all; `call` refuses
@@ -625,7 +705,23 @@ class VoiceTools(ToolBox):
     def scenes(self) -> list[JsonObject]:
         return [scene for scene in (self._frame.scenes or []) if isinstance(scene, dict) and scene.get("id")]
 
+    def showing_scene(self) -> JsonObject | None:
+        """The scene on the panel: the preview when it is the one showing (or
+        when the device reports no scene the saved list holds), else the saved
+        scene the device reports."""
+        preview = self._preview_scene
+        if preview is not None and (self._active_scene_id in (None, preview.get("id"))):
+            return preview
+        return next((s for s in self.scenes() if s.get("id") == self._active_scene_id), None)
+
     async def call(self, name: str, args: JsonObject) -> ToolOutput:
+        output = await self._call(name, args)
+        # Every call goes in the turn's log (voice_turn_log): the next
+        # exchange's history, and the owner's record in the workspace.
+        self.actions.append(VoiceAction(name=name, args=dict(args), result=action_result(output.text)))
+        return output
+
+    async def _call(self, name: str, args: JsonObject) -> ToolOutput:
         if name in VOICE_TOOL_PERMISSIONS and not self.permissions.allows(name):
             return ToolOutput(json.dumps({
                 "ok": False,
@@ -682,6 +778,43 @@ class VoiceTools(ToolBox):
             outcome = await self._preview([scene], str(scene["id"]))
             self.changed.append(name)
             return ToolOutput(json.dumps({"ok": outcome.get("status") != "failed", "source": source, "scene": scene["name"], **outcome}))
+        if name in ("create_scene", "change_scene"):
+            request = str(args.get("request") or "").strip()[:MAX_SCENE_REQUEST_CHARS]
+            if not request:
+                return ToolOutput(json.dumps({"ok": False, "error": "request must say what the scene should show"}))
+            if self._build_scene is None or self._preview is None:
+                return ToolOutput(json.dumps({"ok": False, "error": "scene_ai_unavailable",
+                                              "detail": "This frame's control plane cannot build scenes right now."}))
+            base: JsonObject | None = None
+            if name == "change_scene":
+                base = self.showing_scene()
+                if base is None:
+                    return ToolOutput(json.dumps({"ok": False, "error": "no_scene_showing",
+                                                  "detail": "The frame reports no scene to change; create_scene makes a new one."}))
+                if base is not self._preview_scene:
+                    # An installed scene is never overwritten: its changed copy
+                    # is the preview, under a new id (one a saved scene holds
+                    # would read as "installed", docs/scene-previews.md). The
+                    # preview itself is replaced in place.
+                    base = {key: value for key, value in base.items() if key != "default"}
+                    base["id"] = str(uuid.uuid4())
+            raw_name = args.get("name")
+            scene_name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else None
+            built = await self._build_scene(request, base, scene_name)
+            if not built.get("ok") or not isinstance(built.get("scene"), dict):
+                return ToolOutput(json.dumps({"ok": False, **{k: v for k, v in built.items() if k != "scene"}}))
+            scene = built["scene"]
+            outcome = await self._preview([scene], str(scene["id"]))
+            self.changed.append(name)
+            return ToolOutput(json.dumps({
+                "ok": outcome.get("status") != "failed",
+                "scene": scene.get("name"),
+                "scene_id": scene.get("id"),
+                **({"changed_from": base.get("name")} if base is not None else {}),
+                **({"summary": built["summary"]} if isinstance(built.get("summary"), str) and built["summary"] else {}),
+                "preview": True,
+                **outcome,
+            }))
         if name == "rotate_frame":
             settings, error = validate_voice_settings({"rotate": args.get("degrees")})
             if settings is None or self._update_settings is None:
@@ -721,6 +854,156 @@ class VoiceTools(ToolBox):
         return ToolOutput(json.dumps({"ok": False, "error": f"unknown tool {name}"}))
 
 
+# ------------------------------------------------------------ the chat log
+
+# How many earlier exchanges the model sees. Each is three rows in the chat
+# (what was heard, what was done, what was answered), so the window is
+# counted in turns, not rows.
+MAX_VOICE_HISTORY_TURNS = 6
+MAX_HISTORY_ACTION_CHARS = 400
+# The row the turn's actions are kept on (the workspace draws a `log` row as
+# a log bubble under the frame's chat, docs/ai-chat.md).
+VOICE_LOG_TOOL = "log"
+VOICE_TURN_TOOL = "voice"
+
+
+@dataclass
+class VoiceAction:
+    """One tool call of a turn, as the log keeps it: the name, the arguments
+    the model sent (cut), and what came of it (cut)."""
+
+    name: str
+    args: JsonObject
+    result: JsonObject | str
+
+    def line(self) -> str:
+        args = json.dumps(self.args, ensure_ascii=False)
+        if len(args) > MAX_HISTORY_ACTION_CHARS:
+            args = args[:MAX_HISTORY_ACTION_CHARS] + "…"
+        result = self.result if isinstance(self.result, str) else json.dumps(_action_outcome(self.result), ensure_ascii=False)
+        if len(result) > MAX_HISTORY_ACTION_CHARS:
+            result = result[:MAX_HISTORY_ACTION_CHARS] + "…"
+        return f"{self.name} {args} -> {result}"
+
+
+# What a tool result is worth remembering: the outcome, never the listing
+# (list_scenes' scenes, an album list) that the next turn gets fresh anyway.
+_ACTION_RESULT_KEYS = ("ok", "error", "detail", "scene", "scene_id", "source", "settings", "album", "summary", "preview", "changed_from", "status")
+
+
+def _action_outcome(result: JsonObject) -> JsonObject:
+    # An outcome ({"ok": ...}) keeps its telling keys; a listing's counts
+    # (action_result) are kept whole.
+    if "ok" not in result:
+        return result
+    return {key: result[key] for key in _ACTION_RESULT_KEYS if result.get(key) is not None}
+
+
+def action_result(text: str) -> JsonObject | str:
+    """A tool's output as the log keeps it: the outcome object as it is, a
+    listing (an untrusted_result wrapper around {"scenes": [...]}) as the
+    counts of what was listed — the next turn gets the frame's scenes fresh
+    in its context, and the notice is not worth a line per turn."""
+    body = text.strip()
+    if body.startswith("<untrusted_data"):
+        inner = body.split(">", 1)[1].rsplit("</untrusted_data>", 1)[0].strip()
+        # The wrapper is the notice, then the data on its own line.
+        data = inner.rsplit("\n", 1)[-1]
+        try:
+            listed = json.loads(data)
+        except ValueError:
+            return re.sub(r"\s+", " ", data)[:MAX_HISTORY_ACTION_CHARS]
+        if isinstance(listed, dict):
+            return {key: (f"{len(value)} listed" if isinstance(value, list) else value) for key, value in listed.items()}
+        return f"{len(listed)} listed" if isinstance(listed, list) else str(listed)[:MAX_HISTORY_ACTION_CHARS]
+    if body.startswith("{"):
+        try:
+            parsed = json.loads(body)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return parsed
+    return re.sub(r"\s+", " ", body)[:MAX_HISTORY_ACTION_CHARS]
+
+
+def voice_turn_log(actions: list[VoiceAction], *, session_id: str, seconds: float, at: datetime) -> str:
+    """The `log` row's text: one header line, then one line per tool call.
+    Readable in the workspace's chat, parsed back by voice_history_for_model."""
+    header = f"Voice chat turn at {at.strftime('%Y-%m-%d %H:%M:%S')} UTC, session {session_id}, {seconds:.1f} s"
+    lines = [action.line() for action in actions] or ["(no tools ran)"]
+    return "\n".join([header, *lines])
+
+
+def describe_age(delta: timedelta) -> str:
+    seconds = max(0, int(delta.total_seconds()))
+    if seconds < 60:
+        return "just now"
+    if seconds < 3600:
+        minutes = seconds // 60
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    if seconds < 86400:
+        hours = seconds // 3600
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = seconds // 86400
+    return f"{days} day{'s' if days != 1 else ''} ago"
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def voice_history_for_model(
+    rows: list[dict[str, Any]], *, now: datetime, max_turns: int = MAX_VOICE_HISTORY_TURNS
+) -> list[dict[str, str]]:
+    """The earlier exchanges as the model sees them, oldest first: each is the
+    user's transcript and the assistant's reply, the reply followed by a
+    bracketed note with how long ago the exchange was and the actions of the
+    turn (the `log` row's lines), so "make it bigger" has the scene the last
+    turn built to refer to. `rows` are the chat's messages, oldest first, as
+    {role, content, tool, created_at (datetime)}. Rows of the workspace's own
+    chat (no `voice` tool) are kept as plain text. The same shape as the
+    cloud's voiceHistoryForModel (voice.ts)."""
+    turns: list[dict[str, Any]] = []
+    for row in rows:
+        role = row.get("role")
+        tool = row.get("tool")
+        content = str(row.get("content") or "")
+        if role == "user":
+            turns.append({"user": content, "at": row.get("created_at"), "actions": None, "assistant": None})
+            continue
+        if not turns:
+            turns.append({"user": None, "at": row.get("created_at"), "actions": None, "assistant": None})
+        turn = turns[-1]
+        if tool == VOICE_LOG_TOOL:
+            turn["actions"] = content.split("\n")[1:]
+        elif role == "assistant" and content.strip() and tool != "error":
+            turn["assistant"] = content
+    out: list[dict[str, str]] = []
+    for turn in turns[-max_turns:]:
+        if turn["user"]:
+            out.append({"role": "user", "content": turn["user"]})
+        notes: list[str] = []
+        at = turn.get("at")
+        if isinstance(at, datetime):
+            when = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+            notes.append(describe_age(now - when))
+        actions = turn.get("actions")
+        if actions is not None:
+            notes.append("Actions: " + ("; ".join(a for a in actions if a) or "none"))
+        reply = turn["assistant"] or ""
+        if notes:
+            reply = f"{reply}\n\n[{'. '.join(notes)}]".strip()
+        if reply:
+            out.append({"role": "assistant", "content": reply})
+    return out
+
+
 # ------------------------------------------------------------------- turn
 
 
@@ -729,6 +1012,7 @@ class VoiceTurnResult:
     transcript: str
     reply: str
     tools: list[str]
+    actions: list[VoiceAction] = field(default_factory=list)
 
 
 def voice_frame_context(
@@ -737,18 +1021,33 @@ def voice_frame_context(
     frame_context: str,
     image_sources: list[str] | None = None,
     permissions: VoicePermissions | None = None,
+    preview: dict[str, Any] | None = None,
+    now: datetime | None = None,
 ) -> str:
     """The chat's frame context block, plus what the voice turn needs: which
-    scene shows, the rotation, which picture sources the frame has, what the
-    owner allowed the voice chat to do, and that the microphone brought the
-    message."""
+    scene shows, the preview standing on the frame (the scene it shows for
+    now without holding it: `frame_commands.scene_preview_info`, with the
+    `scene` the preview push kept), the rotation, which picture sources the
+    frame has, what the owner allowed the voice chat to do, and that the
+    microphone brought the message."""
     lines = [frame_context]
-    if active_scene_id:
-        name = next(
-            (s.get("name") for s in (frame.scenes or []) if isinstance(s, dict) and s.get("id") == active_scene_id),
-            None,
+    preview_id = preview.get("scene_id") if isinstance(preview, dict) else None
+    if isinstance(preview, dict) and preview_id:
+        at = _parse_iso(preview.get("at"))
+        ago = f", {describe_age((now or datetime.now(timezone.utc)) - at)}" if at else ""
+        source = "the voice chat" if preview.get("source") == "voice" else "the scene editor"
+        lines.append(
+            "- Preview on the frame (shown for now, not installed; change_scene edits it when it is the one showing): "
+            + untrusted_result("scene_preview", json.dumps({"id": preview_id, "name": preview.get("name")}))
+            + f" from {source}{ago}"
         )
-        lines.append(f"- Showing now: {untrusted_result('active_scene', json.dumps({'id': active_scene_id, 'name': name}))}")
+    showing_id = active_scene_id or (preview_id if preview_id else None)
+    if showing_id:
+        name = next(
+            (s.get("name") for s in (frame.scenes or []) if isinstance(s, dict) and s.get("id") == showing_id),
+            preview.get("name") if isinstance(preview, dict) and showing_id == preview_id else None,
+        )
+        lines.append(f"- Showing now: {untrusted_result('active_scene', json.dumps({'id': showing_id, 'name': name}))}")
     lines.append(f"- Rotation: {int(frame.rotate or 0)} degrees clockwise")
     lines.append(f"- Picture sources for show_image: {', '.join(image_sources) if image_sources else 'none'}")
     lines.extend((permissions or VoicePermissions()).context_lines())
@@ -778,13 +1077,15 @@ async def run_voice_turn(
         model=model,
         reasoning_effort=reasoning_effort,
         instructions=build_voice_system_prompt(),
-        input_items=build_initial_input(context_block, history[-MAX_VOICE_HISTORY:], transcript),
+        input_items=build_initial_input(context_block, history[-(2 * MAX_VOICE_HISTORY_TURNS):], transcript),
         tools=tools,
         emit=emit,
         http_client=http_client,
         max_rounds=MAX_VOICE_ROUNDS,
     )
-    return VoiceTurnResult(transcript=transcript, reply=result.reply.strip() or "Done.", tools=list(result.tool_calls))
+    return VoiceTurnResult(
+        transcript=transcript, reply=result.reply.strip() or "Done.", tools=list(result.tool_calls), actions=list(tools.actions)
+    )
 
 
 async def transcribe_and_answer(

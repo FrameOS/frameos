@@ -8,11 +8,15 @@ frame listens until the key is let go. What was said goes to the frame's
 control plane (the self-hosted backend or FrameOS Cloud) **while it is being
 said**, is transcribed there, and is answered by the AI chat with that frame in
 its context, through a small set of tools that act on the frame: switch to a
-scene by name, set a field of the scene it shows, redraw. The reply is spoken
+scene by name, set a field of the scene it shows, redraw, show a picture, have
+the scene AI build or change a scene. The reply is spoken
 nowhere (no board in the tree has a speaker FrameOS drives); it is **drawn on
 the panel** as a notice across the bottom (what was heard, in quotes, and the
 answer, or the error in plain words), it lands in the frame's chat in the
-workspace and in the frame's log, and the buzzer sounds the outcome.
+workspace and in the frame's log, and the buzzer sounds the outcome. The
+exchanges are **one conversation per frame** ("The conversation and its log"
+below): the next sentence has the earlier ones, with what was done, to refer
+to, so "make the text bigger" changes the scene the last sentence built.
 
 Boards: the Seeed reTerminal **E1001, E1002 and E1003**, which carry a PDM MEMS
 microphone (MEMSensing MSM261DHP006: clock GPIO42, data GPIO41, power enable
@@ -192,7 +196,10 @@ previous turn to refer to. The agent loop is the chat's
 (`cloud/apps/auth-web/src/lib/ai/loop.ts`, `backend/app/utils/ai_chat_agent.py`)
 with a **voice system prompt** instead of the editor's (short answers, act,
 never ask for confirmation: the spoken request is the confirmation; the
-transcript may carry recognition errors), the frame's context block, and
+transcript may carry recognition errors; this is a conversation, a follow-up
+refers to the latest exchange and the scene it left on the frame), the frame's
+context block (with the preview standing on the frame, when one does), the
+earlier exchanges with their actions ("The conversation and its log"), and
 **only the frame-scoped voice tools** the owner's switches allow ("What the
 voice chat may do" below), run in-process by the plane:
 
@@ -203,6 +210,8 @@ voice chat may do" below), run in-process by the plane:
 | `set_scene_state {state}` | queue `setSceneState` (a `scene_event` with `render: true`) for the scene showing |
 | `render_now` | queue `render` |
 | `show_image {query, source?}` | build a one-picture scene (`render` → `render/image` fed by `unsplash` with `search` = query, or `openaiImage` with `prompt` = query; the app bundled in, `refreshInterval` an hour for a photo, a day for a generated one) and push it as the editor's "Preview on frame": the backend sends the frame's saved scenes plus it (`queue_embedded_scene_preview`, and its settings pull now carries what the previewed apps declare), the cloud a `set_scenes` of it alone (the next `activate_scene` re-pushes the assigned set, as its event route does, and that push carries the picture along — `docs/scene-previews.md` "A preview rides along"). The workspace shows the preview for what it is: both planes report the newest scene push as `scene_preview` `{scene_id, name, source: editor|voice, at}` on the frame (backend `frame_commands.scene_preview_info`, cloud `scenePreviewsByFrame`; the push's `preview` metadata outlives its bundle) while a preview is the newest push, and the scene list draws a dashed "preview" row above the saved scenes — named, marked active when the device shows it, with an "Install" button that puts the previewed scene on the frame's saved list (`scenesLogic.installPreviewScene`: the scene JSON from `GET /api/frames/{id}/scene_preview` on the backend, `/scene-preview` on the cloud — the newest preview push keeps the shown scene, older ones lose it when a newer push is queued — added to the form with its id kept, saved and pushed; on the cloud the save mints the private store scene) and a "Discard" button (`scenesLogic.discardPreview`: a DELETE on the preview route, then the saved list pushed; confirmed first). A deploy or a push of the saved list does NOT remove the picture: a scene push carries the standing preview along, so the frame keeps showing what it was asked for until it is installed or discarded. Nothing accumulates: the frame holds its saved scenes plus ONE picture scene (the next `show_image` replaces it), and the control plane keeps one scene bundle per frame — a newer `set_scenes` row empties the older previews' bundles on the backend (`spend_older_scene_pushes`), the cloud drops a `set_scenes` row's `scenes` the moment the device answers it (`spentCommandPayload`). `source` is `photo` or `generated`; omitted, the first the frame has. Only the sources the context lists work: the backend's are the project's keys, the cloud's the service-setting groups the owner already granted this frame's scenes — the voice turn grants nothing |
+| `create_scene {request, name?}` | **the scene AI, by voice** (what the workspace's "AI scene" does): the request, in the voice model's own full words, goes to a **sub-turn** of the chat's scene-building loop — the chat's system prompt with the scene guide, the frame's context, and the editor and catalog tools alone (`create_scenes`, `update_scene`, `patch_scene`, `edit_app_source`, `render_scene`; the cloud's `search_apps` / `get_app` / `search_examples` / `get_example` / `search_docs` / `read_doc` through `ToolContext.allowedTools`, the backend's in-process `apps_list` / `app_source_get`): never a tool that saves, installs, reads the account or touches a frame, since the caller is the frame's credential (`cloud/apps/auth-web/src/lib/ai/voice-scene-builder.ts`, `backend/app/utils/voice_scene_builder.py`). What the model "delivers to the editor" is captured instead and **rendered once more at the frame's size in the frame's memory** (`docs/ai-chat.md` "Renders run in the frame's memory"); runtime errors or an out-of-memory go back to the sub-turn as the browser's `[Automatic render check]` would, twice at most, and only a scene that draws is pushed — as the voice preview, like `show_image`'s picture, with the frame's other scenes beside it, for the workspace's Install or Discard. A scene that never draws is reported (`render_failed` / `render_out_of_memory`, the runtime's words) and pushed nowhere. Without a renderer on the plane (no Node or wasm build on a backend) the check is skipped, as the chat's install check is. The sub-turn has 100 s and ten rounds; the frame waits three minutes for the answer (`VOICE_DONE_TIMEOUT_MS`), the buzzer bopping every two seconds meanwhile |
+| `change_scene {request}` | the same sub-turn on **the scene the frame shows**: the standing preview when it is the one showing (or when the device reports no scene of the saved list), else the installed scene the device reports. The preview is replaced in place (same id, the older push's bundle spent); an installed scene is **never overwritten** — its changed copy goes to the sub-turn under a new id (one a saved scene holds would read as installed, `docs/scene-previews.md`) and becomes the preview, installed or discarded in the workspace like any other. The sub-turn gets the scene JSON and is told to use the partial tools (`patch_scene`, `edit_app_source`) for small changes |
 | `rotate_frame {degrees}` | the Settings panel's push for `rotate` (0/90/180/270, absolute; the context carries the current rotation so "another 90" adds up): the backend writes the frame row AND queues a pull-backed `set_settings` row — the device fetches its settings only when its commands pull says a deploy waits, and the row is acked by the new ETag (without the row the second spoken rotation never reached the E1002); the cloud validates, mirrors into `frames.settings` and queues `set_settings`. A rotation restarts the device (`fos_settings.c`), which waits for the session, the answer's render and its refresh first. The frame's render interval is deliberately no voice tool: a frame sets its own, scenes have theirs, and a model given the key invented `interval: 1` next to a rotation |
 
 Not the MCP server's tools: a frame's own token is a frame's credential, not
@@ -216,7 +225,34 @@ tool definitions are kept the same on both
 The reply (and the transcript) are stored on the chat; the frame gets them
 in the `done` response and logs them. On the cloud the turn is metered like
 any chat turn (`meterAiUsageInBackground`, surface `voice_chat`, the
-transcription's audio tokens as a second record on its own model).
+transcription's audio tokens as a second record on its own model, and each
+scene-building sub-turn's rounds as records of their own).
+
+## The conversation and its log
+
+Every exchange is **three rows** of the frame's voice chat, on both planes
+(the backend's `chat_message`, the cloud's `ai_chat_messages`): what was
+heard (`user`, tool `voice`), **a `log` row** (`assistant`, tool `log`: one
+header line — `Voice chat turn at <UTC time>, session <id>, <seconds> s` —
+then one line per tool the turn ran, `name {arguments} -> {outcome}`, a
+listing kept as its counts, an outcome as its telling keys) and the reply
+(`assistant`, tool `voice`). The workspace's chat drawer lists the chat under
+the frame and draws the `log` row as a log bubble, so the owner can read what
+each sentence did (`voice_turn_log` / `voiceTurnLog`, `VoiceAction`).
+
+The next turn's model history is built from those rows
+(`voice_history_for_model` / `voiceHistoryForModel`): the last six exchanges
+(`MAX_VOICE_HISTORY_TURNS`), oldest first, each as the transcript and the
+reply, the reply followed by a bracketed note — `[3 minutes ago. Actions:
+show_image {"query": "a banana"} -> {"ok": true, "scene": "Voice: a banana",
+…}]` — so the model knows how long ago each exchange was and which scene it
+left on the frame, and the prompt tells it that a follow-up refers to the
+latest one while exchanges from hours ago are background. Rows the workspace's
+own chat wrote (no `voice` tool) pass through as plain text; a failed turn
+leaves no rows. The context block also names the **preview standing on the
+frame** (`- Preview on the frame … from the voice chat, 3 minutes ago`, from
+`scene_preview_info` / `scenePreviewsByFrame`) and takes it as the scene
+showing when the device reports none of the saved list.
 
 ## What the voice chat may do
 
@@ -227,7 +263,7 @@ Settings → "Buzzer and microphone" ("Voice chat may"):
 |---|---|---|
 | **Change settings** (`change_settings`) | on | `rotate_frame` |
 | **Use installed scenes** (`use_scenes`) | on | `activate_scene`, `set_scene_state`, `render_now` |
-| **Create new scenes** (`create_scenes`) | **off** (opted into) | `show_image`: a picture asked for by voice is a scene the frame did not hold, so it is a new scene, not a use of an installed one. A scene built to order ("What is not here yet") sits behind the same switch |
+| **Create new scenes** (`create_scenes`) | **off** (opted into) | `show_image`, `create_scene`, `change_scene`: a picture asked for by voice, a scene built to order and a changed copy of the scene showing are scenes the frame did not hold, so they are new scenes, not a use of an installed one. All three land as the frame's preview, never on its saved list |
 | **Access photo albums** (`use_albums`) | on | `list_albums` (the library's root folders, by path, with their photo counts, as `photos_list` shows them) and `show_album {path, seconds?, order?}` (what the MCP's `photo_album_install` does for this frame, `docs/photos.md` "Installing photo scenes": the frame's own share link to the folder, made now if it has none; the album scene saved next to the frame's scenes — on the cloud as a private scene of the account through the same save the workspace uses, moderation included, published by the frame's linked client; the push with it active — the backend's a fast deploy plus `set_current_scene`, the cloud's one `set_scenes`). The voice request stands for the `confirm` the MCP tool takes. One switch for both, since the listing is what names the folder |
 
 `list_scenes` answers to none of them: it reads, and it is what the model
@@ -270,13 +306,10 @@ appear, and Button actions offers "Voice chat" on the same rule.
 
 ## What is not here yet
 
-- **Scenes written by voice.** `show_image` builds one fixed scene; "make me
-  a scene with the weather and a quote" would run the scene AI
-  (`ai_scene_chat` on the cloud, the chat's editor tools on the backend) as a
-  sub-turn and preview the result, behind the **Create new scenes** switch
-  above. Half a minute of model time (the frame waits two minutes for the
-  answer, `VOICE_DONE_TIMEOUT_MS`), and the render-in-the-frame's-memory
-  check (`docs/ai-chat.md`) before the push.
+- **Editing an installed scene in place.** `change_scene` never writes a saved
+  scene: the changed copy is a preview the owner installs next to the
+  original. "Change the clock and keep it" is two steps, the second in the
+  workspace.
 - **Word-by-word transcription.** The audio streams up while the user talks,
   so the only wait after the release is the transcription and the turn
   itself; the transcription itself starts at the release. OpenAI's Realtime

@@ -218,7 +218,9 @@ export async function runAgentLoop({
   // This file's tools plus the MCP server's (toolContext.extraTools), or the
   // extra tools alone (baseTools: false).
   const extraDefinitions = toolContext.extraTools?.definitions ?? [];
-  const tools = toolContext.baseTools === false ? extraDefinitions : [...toolDefinitions, ...extraDefinitions];
+  const allowed = toolContext.allowedTools;
+  const baseDefinitions = allowed ? toolDefinitions.filter((tool) => allowed.has(tool.name)) : toolDefinitions;
+  const tools = toolContext.baseTools === false ? extraDefinitions : [...baseDefinitions, ...extraDefinitions];
   const labelFor = (name: string) => toolLabels[name] ?? toolContext.extraTools?.labels[name] ?? name;
   let reply = "";
   let usage: ResponseUsage = emptyUsage();

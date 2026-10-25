@@ -329,7 +329,10 @@ class BackendChatTools(ToolBox):
     def __init__(
         self,
         *,
-        mcp: McpServer,
+        # None for a turn without the MCP server's tools: the voice chat's
+        # scene builder (voice_scene_builder.py) runs on a frame's own
+        # credential and gets the editor tools alone.
+        mcp: McpServer | None,
         project_id: int,
         emit_scenes: Callable[[JsonObject], Awaitable[None]],
         known_keywords: set[str],
@@ -355,9 +358,9 @@ class BackendChatTools(ToolBox):
         self.split_state_nodes = split_state_nodes
         self._delivered_tool: str | None = None
         self.delivered_scenes: list[JsonObject] = []
-        self._mcp_tools = {
-            name: tool for name, tool in mcp.tools.items() if name not in EXCLUDED_MCP_TOOLS
-        }
+        self._mcp_tools = (
+            {name: tool for name, tool in mcp.tools.items() if name not in EXCLUDED_MCP_TOOLS} if mcp is not None else {}
+        )
 
     @property
     def delivered_tool(self) -> str | None:
@@ -400,7 +403,7 @@ class BackendChatTools(ToolBox):
             return ToolOutput(text=await self._edit_source(args))
         if name == "render_scene":
             return await self._render(args)
-        if name in self._mcp_tools:
+        if name in self._mcp_tools and self.mcp is not None:
             if self.check_install is not None and name in INSTALL_TOOLS:
                 refusal = await self.check_install(name, args)
                 if refusal is not None:

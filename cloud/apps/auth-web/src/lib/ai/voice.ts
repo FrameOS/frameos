@@ -10,14 +10,18 @@
 // - the transcription: OpenAI's /v1/audio/transcriptions on the PCM wrapped
 //   as a WAV, the frame's scene names as the prompt;
 // - the turn: the chat's own agent loop (loop.ts) with the voice system
-//   prompt, the frame's context block and voiceTools — the six tools a
-//   frame's own token may drive (list scenes, activate one, set the showing
-//   scene's state, redraw, show a picture as a preview scene from the keys
-//   the frame already has, rotate the frame) plus the two album tools (list
-//   the photo albums, show one), narrowed by the owner's four permission
-//   switches (voice-permissions.ts: change settings, use the installed
-//   scenes, put new scenes on the frame, play the photo albums). Not the MCP
-//   server's tools: a frame's credential is not the owner's.
+//   prompt, the frame's context block, the earlier exchanges with their
+//   actions (voiceHistoryForModel) and voiceTools — the tools a frame's own
+//   token may drive (list scenes, activate one, set the showing scene's
+//   state, redraw, show a picture as a preview scene from the keys the frame
+//   already has, build or change a scene with the scene AI as a sub-turn
+//   (voice-scene-builder.ts), rotate the frame) plus the two album tools
+//   (list the photo albums, show one), narrowed by the owner's four
+//   permission switches (voice-permissions.ts: change settings, use the
+//   installed scenes, put new scenes on the frame, play the photo albums).
+//   Not the MCP server's tools: a frame's credential is not the owner's.
+// - the log: every exchange is three rows of the frame's voice chat (heard,
+//   a `log` row of the tools that ran, the reply); the next turn reads them.
 //
 // The backend's copy is backend/app/utils/voice_chat.py: the prompt, the tool
 // definitions and the permission table are kept the same there (its test
@@ -64,7 +68,6 @@ export const TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe";
 export const TRANSCRIPTION_URL = "https://api.openai.com/v1/audio/transcriptions";
 export const MAX_TRANSCRIPT_CHARS = 4000;
 export const MAX_VOICE_ROUNDS = 6;
-export const MAX_VOICE_HISTORY = 8;
 
 // ------------------------------------------------------------- sessions
 
@@ -278,28 +281,40 @@ export async function transcribePcm(
  * as the backend's build_voice_system_prompt (app/utils/voice_chat.py). */
 export function buildVoiceSystemPrompt(): string {
   return `
-You are the FrameOS voice assistant for one smart frame. The user held two buttons on the frame and spoke; their
+You are the FrameOS voice assistant for one smart frame. The user held the frame's voice key and spoke; their
 message is a transcript of what they said. Transcripts carry recognition errors: read for the likely intent ("the
 bird journal" is the scene called Bird Field Journal). Scene names in the frame's context are the ones to match.
 
-Act, then answer in one short sentence. The reply is not shown on the frame and is read nowhere aloud: it lands in
-the frame's chat log. Never ask for confirmation and never ask a question back: the spoken request is the
-confirmation, and nobody is there to answer. Do the most likely thing; when nothing matches, say so and name what
-the frame has (its scenes, from list_scenes). When the transcript is empty or not a request for the frame, say
-briefly that you did not catch a request.
+This is a conversation, not a row of one-off commands. The earlier exchanges are above, each with how long ago it
+was and what you did then. A follow-up ("make the text bigger", "no, the other one", "a dog instead", "undo that")
+refers to the latest exchange and to the scene it left on the frame; a request that stands on its own starts a new
+topic. Exchanges from hours or days ago are background, not the thing being talked about now.
+
+Act, then answer in one short sentence. The reply is drawn across the bottom of the frame for half a minute and
+lands, with a log of what you did, in the frame's chat in the workspace. Never ask for confirmation and never ask a
+question back: the spoken request is the confirmation, and the user can only speak again. Do the most likely thing;
+when nothing matches, say so and name what the frame has (its scenes, from list_scenes). When the transcript is
+empty or not a request for the frame, say briefly that you did not catch a request.
 
 Tools: list_scenes (what the frame holds and which scene shows), activate_scene (switch to a scene by its id),
 set_scene_state (set the showing scene's public fields, such as a message board's text), render_now (redraw the
 frame), show_image (put a picture on the frame: a photo found for a search, or an image generated from a
-description; the frame's context says which sources it has), rotate_frame (turn the display to 0, 90, 180 or 270
-degrees; "another 90" is the rotation in the context plus 90), list_albums (the photo albums in the owner's library,
-by path), show_album (play an album on the frame: it makes a scene for the album, installs it next to the frame's
-scenes and shows it). The owner chooses which of these the voice chat may use: the context's "Voice chat may" and
-"may not" lines say which, and a tool you were not given is one the owner switched off, so when asked for it say so
-in a sentence (it is a switch in the frame's settings) and do nothing else. "Next" and "previous" mean the scene after
-or before the one showing, in list order, wrapping around. "Show me X" with no scene of that name is show_album when
-an album is called that (list_albums tells), else show_image. These are the only things you can do; anything else
-(editing scenes, timing, other frames, the account) is for the workspace, and you say so in a sentence.
+description; the frame's context says which sources it has), create_scene (have the scene AI build a new scene from
+a description: a clock, a weather board, a quote of the day, a countdown, anything a frame can show; it is checked
+in the frame's own memory and shown on the frame as a preview the owner installs or discards in the workspace; it
+takes a while, so say what you asked for), change_scene (have the scene AI change the scene the frame shows as
+asked: bigger text, another color, one more line; the changed scene is shown as a preview the same way, and an
+installed scene is never overwritten), rotate_frame (turn the display to 0, 90, 180 or 270 degrees; "another 90" is
+the rotation in the context plus 90), list_albums (the photo albums in the owner's library, by path), show_album
+(play an album on the frame: it makes a scene for the album, installs it next to the frame's scenes and shows it).
+The owner chooses which of these the voice chat may use: the context's "Voice chat may" and "may not" lines say
+which, and a tool you were not given is one the owner switched off, so when asked for it say so in a sentence (it is
+a switch in the frame's settings) and do nothing else. "Next" and "previous" mean the scene after or before the one
+showing, in list order, wrapping around. "Show me X" with no scene of that name is show_album when an album is called
+that (list_albums tells), show_image when X is a picture, and create_scene when X is more than a picture (a clock, a
+counter, a dashboard, text that updates). Pass create_scene and change_scene the request in full, in your own clear
+words, with what the frame is (its size and colors are in the context). These are the only things you can do;
+anything else (timing, other frames, the account) is for the workspace, and you say so in a sentence.
 `.trim();
 }
 
@@ -374,6 +389,44 @@ export const voiceToolDefinitions: ResponsesToolDefinition[] = [
   },
   {
     description:
+      "Build a new scene from a description with the scene AI (what the workspace's AI scene button does): " +
+      "a clock, a weather board, a quote, a countdown, a dashboard. The scene is rendered in the frame's " +
+      "memory first and, when it draws, pushed to the frame as a preview the owner installs or discards in " +
+      "the workspace; the frame's other scenes stay. Takes up to a minute.",
+    name: "create_scene",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        name: { description: "A short name for the scene. Omit to let the scene AI name it.", type: "string" },
+        request: {
+          description: "What the scene should show and look like, in full, in clear words.",
+          type: "string",
+        },
+      },
+      required: ["request"],
+      type: "object",
+    },
+    type: "function",
+  },
+  {
+    description:
+      "Change the scene the frame shows as asked, with the scene AI: bigger text, another color, one more " +
+      "line, a different layout. The changed scene is rendered in the frame's memory and pushed as a " +
+      "preview like create_scene's; an installed scene is never overwritten (its changed copy is the " +
+      "preview, with a new id). Takes up to a minute.",
+    name: "change_scene",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        request: { description: "The change, in full, in clear words.", type: "string" },
+      },
+      required: ["request"],
+      type: "object",
+    },
+    type: "function",
+  },
+  {
+    description:
       "Turn the frame's display to an orientation: 0, 90, 180 or 270 degrees clockwise, absolute. " +
       "The context says the current rotation; the frame restarts to apply a change.",
     name: "rotate_frame",
@@ -420,6 +473,8 @@ export const voiceToolDefinitions: ResponsesToolDefinition[] = [
 
 export const voiceToolLabels: Record<string, string> = {
   activate_scene: "Activate scene",
+  change_scene: "Change scene",
+  create_scene: "Create scene",
   list_albums: "List albums",
   list_scenes: "List scenes",
   render_now: "Render now",
@@ -431,6 +486,7 @@ export const voiceToolLabels: Record<string, string> = {
 
 const MAX_STATE_BYTES = 16 * 1024;
 const MAX_IMAGE_QUERY_CHARS = 400;
+const MAX_SCENE_REQUEST_CHARS = 2000;
 const MAX_ALBUM_PATH_CHARS = 1024;
 export const ALBUM_ORDERS = ["random", "sequential", "newest", "oldest"] as const;
 export type AlbumOrder = (typeof ALBUM_ORDERS)[number];
@@ -587,6 +643,17 @@ export type VoiceAlbums = {
   ) => Promise<VoiceQueueOutcome & { scene?: string | undefined; scene_id?: string | undefined; album?: string | undefined }>;
 };
 
+/** The scene AI as a sub-turn (voice-scene-builder.ts), the route's own:
+ * (the request, the scene to change or null, a name or null) -> what came of
+ * it. The tool pushes the scene as a preview. */
+export type VoiceSceneBuild =
+  | { ok: true; scene: JsonObject; summary?: string | undefined }
+  | { ok: false; error: string; detail?: string | undefined };
+export type VoiceBuildScene = (request: string, base: JsonObject | null, name: string | null) => Promise<VoiceSceneBuild>;
+
+/** One tool call of a turn, as the log keeps it (voiceTurnLog). */
+export type VoiceAction = { name: string; args: JsonObject; result: JsonObject | string };
+
 export function voiceTools({
   scenes,
   activeSceneId,
@@ -595,6 +662,9 @@ export function voiceTools({
   previewScenes,
   updateSettings,
   albums,
+  buildScene,
+  previewScene,
+  sceneContent,
   permissions = defaultVoicePermissions,
 }: {
   scenes: VoiceScene[];
@@ -604,16 +674,34 @@ export function voiceTools({
   previewScenes?: VoicePreview;
   updateSettings?: VoiceSettingsUpdate;
   albums?: VoiceAlbums;
+  buildScene?: VoiceBuildScene;
+  /** The scene the frame shows for now without holding it (the voice chat's
+   * or the editor's preview, docs/scene-previews.md), with its id: what
+   * change_scene edits when it is the one showing. */
+  previewScene?: JsonObject | null;
+  /** An installed scene's runtime JSON by its store id, for change_scene on
+   * a scene the frame holds; the route's own (the assigned bundle). */
+  sceneContent?: (sceneId: string) => Promise<JsonObject | null>;
   /** The owner's switches (docs/voice-chat.md "What the voice chat may do"):
    * a tool they turned off is not offered at all, and refused when named
    * anyway (a model's habit from an earlier turn). */
   permissions?: VoicePermissions;
-}): ExtraTools & { changed: string[] } {
+}): ExtraTools & { changed: string[]; actions: VoiceAction[] } {
   const changed: string[] = [];
+  const actions: VoiceAction[] = [];
   const text = (value: unknown): ToolOutput => ({ images: [], text: JSON.stringify(value) });
-  return {
-    changed,
-    async call(name: string, args: JsonObject): Promise<ToolOutput> {
+  const showingScene = async (): Promise<JsonObject | null> => {
+    // The preview when it is the one showing (or when the device reports no
+    // scene the assigned list holds), else the assigned scene reported.
+    if (previewScene && (!activeSceneId || previewScene.id === activeSceneId)) {
+      return previewScene;
+    }
+    if (activeSceneId && sceneContent) {
+      return sceneContent(activeSceneId);
+    }
+    return null;
+  };
+  const run = async (name: string, args: JsonObject): Promise<ToolOutput> => {
       const gate = voiceToolPermissions[name];
       if (gate !== undefined && !voicePermissionAllows(permissions, name)) {
         return text({
@@ -693,6 +781,55 @@ export function voiceTools({
           changed.push(name);
           return text({ scene: scene.name, source, ...outcome });
         }
+        case "create_scene":
+        case "change_scene": {
+          const request = typeof args.request === "string" ? args.request.trim().slice(0, MAX_SCENE_REQUEST_CHARS) : "";
+          if (!request) {
+            return text({ error: "request must say what the scene should show", ok: false });
+          }
+          if (!buildScene || !previewScenes) {
+            return text({
+              detail: "This frame's control plane cannot build scenes right now.",
+              error: "scene_ai_unavailable",
+              ok: false,
+            });
+          }
+          let base: JsonObject | null = null;
+          if (name === "change_scene") {
+            base = await showingScene();
+            if (!base) {
+              return text({
+                detail: "The frame reports no scene to change; create_scene makes a new one.",
+                error: "no_scene_showing",
+                ok: false,
+              });
+            }
+            if (base !== previewScene) {
+              // An installed scene is never overwritten: its changed copy is
+              // the preview, under a new id (one an assigned scene holds
+              // would read as "installed", docs/scene-previews.md). The
+              // preview itself is replaced in place.
+              const { default: _default, ...copy } = base;
+              base = { ...copy, id: randomUUID() };
+            }
+          }
+          const sceneName = typeof args.name === "string" && args.name.trim() ? args.name.trim() : null;
+          const built = await buildScene(request, base, sceneName);
+          if (!built.ok) {
+            return text(built);
+          }
+          const scene = built.scene;
+          const outcome = await previewScenes([scene], scene.id as string);
+          changed.push(name);
+          return text({
+            scene: scene.name,
+            scene_id: scene.id,
+            ...(base ? { changed_from: base.name } : {}),
+            ...(built.summary ? { summary: built.summary } : {}),
+            preview: true,
+            ...outcome,
+          });
+        }
         case "rotate_frame": {
           const validated = validateVoiceSettings({ rotate: args.degrees });
           if ("error" in validated || !updateSettings) {
@@ -750,10 +887,202 @@ export function voiceTools({
         default:
           return text({ error: `unknown tool ${name}`, ok: false });
       }
+  };
+  return {
+    actions,
+    changed,
+    async call(name: string, args: JsonObject): Promise<ToolOutput> {
+      const output = await run(name, args);
+      // Every call goes in the turn's log (voiceTurnLog): the next
+      // exchange's history, and the owner's record in the workspace.
+      actions.push({ args: { ...args }, name, result: actionResult(output.text) });
+      return output;
     },
     definitions: voiceToolDefinitions.filter((tool) => voicePermissionAllows(permissions, tool.name)),
     labels: voiceToolLabels,
   };
+}
+
+// ------------------------------------------------------------ the chat log
+
+// How many earlier exchanges the model sees. Each is three rows in the chat
+// (what was heard, what was done, what was answered), so the window is
+// counted in turns, not rows. The same as the backend's (voice_chat.py).
+export const MAX_VOICE_HISTORY_TURNS = 6;
+const MAX_HISTORY_ACTION_CHARS = 400;
+// The row the turn's actions are kept on (the workspace draws a `log` row as
+// a log bubble under the frame's chat, docs/ai-chat.md).
+export const VOICE_LOG_TOOL = "log";
+export const VOICE_TURN_TOOL = "voice";
+// What a tool result is worth remembering: the outcome, never the listing
+// (list_scenes' scenes, an album list) that the next turn gets fresh anyway.
+const ACTION_RESULT_KEYS = [
+  "ok",
+  "error",
+  "detail",
+  "scene",
+  "scene_id",
+  "source",
+  "settings",
+  "album",
+  "summary",
+  "preview",
+  "changed_from",
+  "status",
+  "type",
+];
+
+function cut(value: string): string {
+  return value.length > MAX_HISTORY_ACTION_CHARS ? `${value.slice(0, MAX_HISTORY_ACTION_CHARS)}…` : value;
+}
+
+/** A tool's output as the log keeps it: the outcome object as it is, a
+ * listing (an untrusted_result wrapper around {"scenes": [...]}) as the
+ * counts of what was listed — the next turn gets the frame's scenes fresh
+ * in its context, and the notice is not worth a line per turn. */
+export function actionResult(text: string): JsonObject | string {
+  const body = text.trim();
+  if (body.startsWith("<untrusted_data")) {
+    const inner = body.slice(body.indexOf(">") + 1).split("</untrusted_data>")[0]!.trim();
+    // The wrapper is the notice, then the data on its own line.
+    const data = inner.slice(inner.lastIndexOf("\n") + 1);
+    try {
+      const listed = JSON.parse(data) as unknown;
+      if (listed && typeof listed === "object" && !Array.isArray(listed)) {
+        return Object.fromEntries(
+          Object.entries(listed as JsonObject).map(([key, value]) => [
+            key,
+            Array.isArray(value) ? `${value.length} listed` : value,
+          ]),
+        ) as JsonObject;
+      }
+      return Array.isArray(listed) ? `${listed.length} listed` : cut(String(listed));
+    } catch {
+      return cut(data.replace(/\s+/g, " "));
+    }
+  }
+  if (body.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(body) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as JsonObject;
+      }
+    } catch {
+      // not JSON: kept as text below
+    }
+  }
+  return cut(body.replace(/\s+/g, " "));
+}
+
+function actionOutcome(result: JsonObject): JsonObject {
+  // An outcome ({ok: ...}) keeps its telling keys; a listing's counts
+  // (actionResult) are kept whole.
+  if (!("ok" in result)) {
+    return result;
+  }
+  return Object.fromEntries(
+    ACTION_RESULT_KEYS.filter((key) => result[key] !== undefined && result[key] !== null).map((key) => [key, result[key]]),
+  ) as JsonObject;
+}
+
+export function actionLine(action: VoiceAction): string {
+  const result = typeof action.result === "string" ? action.result : JSON.stringify(actionOutcome(action.result));
+  return `${action.name} ${cut(JSON.stringify(action.args))} -> ${cut(result)}`;
+}
+
+/** The `log` row's text: one header line, then one line per tool call.
+ * Readable in the workspace's chat, parsed back by voiceHistoryForModel. */
+export function voiceTurnLog(
+  actions: VoiceAction[],
+  { sessionId, seconds, at }: { sessionId: string; seconds: number; at: Date },
+): string {
+  const stamp = at.toISOString().slice(0, 19).replace("T", " ");
+  const header = `Voice chat turn at ${stamp} UTC, session ${sessionId}, ${seconds.toFixed(1)} s`;
+  const lines = actions.length > 0 ? actions.map(actionLine) : ["(no tools ran)"];
+  return [header, ...lines].join("\n");
+}
+
+export function describeAge(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) {
+    return "just now";
+  }
+  if (seconds < 3600) {
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  }
+  if (seconds < 86400) {
+    const hours = Math.floor(seconds / 3600);
+    return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  }
+  const days = Math.floor(seconds / 86400);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+export type VoiceHistoryRow = {
+  role: string;
+  content: string;
+  tool?: string | null | undefined;
+  createdAt?: Date | string | null | undefined;
+};
+
+/** The earlier exchanges as the model sees them, oldest first: each is the
+ * user's transcript and the assistant's reply, the reply followed by a
+ * bracketed note with how long ago the exchange was and the actions of the
+ * turn (the `log` row's lines), so "make it bigger" has the scene the last
+ * turn built to refer to. `rows` are the chat's messages, oldest first. Rows
+ * of the workspace's own chat (no `voice` tool) are kept as plain text. The
+ * same shape as the backend's voice_history_for_model (voice_chat.py). */
+export function voiceHistoryForModel(
+  rows: VoiceHistoryRow[],
+  { now, maxTurns = MAX_VOICE_HISTORY_TURNS }: { now: Date; maxTurns?: number },
+): { role: "user" | "assistant"; content: string }[] {
+  type Turn = { user: string | null; at: Date | null; actions: string[] | null; assistant: string | null };
+  const when = (value: VoiceHistoryRow["createdAt"]): Date | null => {
+    if (!value) {
+      return null;
+    }
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  };
+  const turns: Turn[] = [];
+  for (const row of rows) {
+    const content = row.content ?? "";
+    if (row.role === "user") {
+      turns.push({ actions: null, assistant: null, at: when(row.createdAt), user: content });
+      continue;
+    }
+    if (turns.length === 0) {
+      turns.push({ actions: null, assistant: null, at: when(row.createdAt), user: null });
+    }
+    const turn = turns[turns.length - 1]!;
+    if (row.tool === VOICE_LOG_TOOL) {
+      turn.actions = content.split("\n").slice(1);
+    } else if (row.role === "assistant" && content.trim() && row.tool !== "error") {
+      turn.assistant = content;
+    }
+  }
+  const out: { role: "user" | "assistant"; content: string }[] = [];
+  for (const turn of turns.slice(-maxTurns)) {
+    if (turn.user) {
+      out.push({ content: turn.user, role: "user" });
+    }
+    const notes: string[] = [];
+    if (turn.at) {
+      notes.push(describeAge(now.getTime() - turn.at.getTime()));
+    }
+    if (turn.actions !== null) {
+      notes.push(`Actions: ${turn.actions.filter((line) => line).join("; ") || "none"}`);
+    }
+    let reply = turn.assistant ?? "";
+    if (notes.length > 0) {
+      reply = `${reply}\n\n[${notes.join(". ")}]`.trim();
+    }
+    if (reply) {
+      out.push({ content: reply, role: "assistant" });
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- the chat
@@ -780,12 +1109,23 @@ export function voiceContextBlock(
   rotate = 0,
   imageSources: readonly string[] = [],
   permissions: VoicePermissions = defaultVoicePermissions,
+  preview?: { scene_id: string | null; name: string; source: string; at: string } | null,
+  now: Date = new Date(),
 ): string {
   const lines = [frameBlock];
-  if (showing) {
+  if (preview?.scene_id) {
+    const at = new Date(preview.at);
+    const ago = Number.isNaN(at.getTime()) ? "" : `, ${describeAge(now.getTime() - at.getTime())}`;
+    const source = preview.source === "voice" ? "the voice chat" : "the scene editor";
     lines.push(
-      `- Showing now: ${untrustedResult("active_scene", JSON.stringify({ id: showing.id, name: showing.name }))}`,
+      "- Preview on the frame (shown for now, not installed; change_scene edits it when it is the one showing): " +
+        untrustedResult("scene_preview", JSON.stringify({ id: preview.scene_id, name: preview.name })) +
+        ` from ${source}${ago}`,
     );
+  }
+  const shown = showing ?? (preview?.scene_id ? { id: preview.scene_id, name: preview.name } : null);
+  if (shown) {
+    lines.push(`- Showing now: ${untrustedResult("active_scene", JSON.stringify({ id: shown.id, name: shown.name }))}`);
   }
   lines.push(`- Rotation: ${rotate} degrees clockwise`);
   lines.push(`- Picture sources for show_image: ${imageSources.length > 0 ? imageSources.join(", ") : "none"}`);

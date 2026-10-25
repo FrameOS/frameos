@@ -140,12 +140,19 @@
 - Holding the voice key — the key whose long press the frame's event map
   binds to `voiceChat`, REFRESH on the reTerminal E1001/E1002 presets (PDM
   microphone; the E1004 has none) — streams speech to the frame's control
-  plane and runs ONE turn of
-  the AI chat with the frame in context and only six frame-scoped tools
-  (`list_scenes`, `activate_scene`, `set_scene_state`, `render_now`,
-  `show_image` — a one-picture Unsplash/OpenAI preview scene, from the keys
-  the frame already has — and `rotate_frame`),
-  never the MCP tools: a frame's token is not the owner's. **What the voice
+  plane and runs one turn of the AI chat with the frame in context and only
+  the frame-scoped voice tools (`list_scenes`, `activate_scene`,
+  `set_scene_state`, `render_now`, `show_image` — a one-picture
+  Unsplash/OpenAI preview scene, from the keys the frame already has —
+  `create_scene` / `change_scene` — the scene AI as a sub-turn with the
+  editor and catalog tools alone, `voice_scene_builder.py` /
+  `voice-scene-builder.ts`, its scene rendered in the frame's memory and
+  pushed as the preview — and `rotate_frame`), never the MCP tools: a
+  frame's token is not the owner's. The turns are ONE conversation per frame:
+  every exchange is three chat rows (heard, a `log` row of the tools that
+  ran, the reply) and the next turn gets the last six exchanges with their
+  age and actions (`voice_history_for_model` / `voiceHistoryForModel`), so a
+  follow-up has the scene the previous sentence built to refer to. **What the voice
   chat may do** is the owner's four switches per frame (change settings /
   use installed scenes / create new scenes / access photo albums — the third
   off by default and the home of `show_image`; the fourth gates

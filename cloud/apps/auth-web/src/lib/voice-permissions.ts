@@ -21,12 +21,15 @@ export const defaultVoicePermissions: VoicePermissions = {
 
 // Which switch each tool answers to. A tool not listed (list_scenes) is
 // always offered: it reads, and it is what the model names when it must
-// decline. show_image puts a scene the frame did not hold on the frame, so it
-// is a new scene, not a use of an installed one. The album tools are the
+// decline. show_image, create_scene and change_scene put a scene the frame did
+// not hold on the frame, so they are new scenes, not a use of an installed one
+// (change_scene's result is a preview copy; the installed scene stays). The album tools are the
 // photo library's (docs/photos.md): listing it and playing a folder on the
 // frame are one switch, since the listing is what names the folder.
 export const voiceToolPermissions: Record<string, VoicePermissionKey> = {
   activate_scene: "use_scenes",
+  change_scene: "create_scenes",
+  create_scene: "create_scenes",
   list_albums: "use_albums",
   render_now: "use_scenes",
   rotate_frame: "change_settings",
@@ -38,7 +41,7 @@ export const voiceToolPermissions: Record<string, VoicePermissionKey> = {
 // How the context names each switch to the model, on and off.
 export const voicePermissionDescriptions: Record<VoicePermissionKey, string> = {
   change_settings: "change the frame's settings (rotate_frame)",
-  create_scenes: "put new scenes on the frame (show_image)",
+  create_scenes: "put new scenes on the frame (show_image, create_scene, change_scene)",
   use_albums: "play the photo albums: list them, show one on the frame (list_albums, show_album)",
   use_scenes:
     "use the installed scenes: switch between them, set their fields, redraw (activate_scene, set_scene_state, render_now)",
