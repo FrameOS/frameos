@@ -314,6 +314,18 @@ const WAVESHARE_13IN3E6_SD_CARD_ASSETS: NonNullable<NonNullable<NewFrameFormType
   pins: { cs: 15, sck: 6, miso: 5, mosi: 7 },
   maxFrequencyKHz: 20000,
 }
+// The reTerminal E-series TF socket on the panel's SPI bus (SCK7/MOSI9 are
+// the panel's), MISO8, CS14, card-detect 15, power switch 16 — the same on
+// the E1001, E1002 and E1004 (EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS).
+const seeedReterminalSdCardAssets = (
+  preset: 'seeed_reterminal_e1001' | 'seeed_reterminal_e1002' | 'seeed_reterminal_e1004'
+): NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']> => ({
+  enabled: true,
+  preset,
+  mountPath: '/srv/assets',
+  pins: { cs: 14, sck: 7, miso: 8, mosi: 9, pwr: 16, det: 15 },
+  maxFrequencyKHz: 20000,
+})
 
 // Mirrors EMBEDDED_TRMNL_OG_PINS and friends in backend/app/tasks/embedded_firmware.py
 const TRMNL_OG_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
@@ -535,6 +547,7 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
       { pin: 5, label: 'RIGHT' },
     ],
     eventMap: SEEED_RETERMINAL_VOICE_EVENT_MAP,
+    sdCardAssets: seeedReterminalSdCardAssets('seeed_reterminal_e1001'),
   },
   seeed_reterminal_e1002: {
     label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',
@@ -549,6 +562,7 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
       { pin: 5, label: 'RIGHT' },
     ],
     eventMap: SEEED_RETERMINAL_VOICE_EVENT_MAP,
+    sdCardAssets: seeedReterminalSdCardAssets('seeed_reterminal_e1002'),
   },
   seeed_reterminal_e1004: {
     label: 'Seeed reTerminal E1004 (13.3" color ESP32-S3)',
@@ -567,6 +581,7 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
       { pin: 5, label: 'REFRESH' },
     ],
     eventMap: SEEED_RETERMINAL_EVENT_MAP,
+    sdCardAssets: seeedReterminalSdCardAssets('seeed_reterminal_e1004'),
   },
   elecrow_crowpanel_5in79: {
     label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',

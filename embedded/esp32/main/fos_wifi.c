@@ -18,6 +18,7 @@
 #include "lwip/sockets.h"
 
 #include "fos_config.h"
+#include "fos_rtc.h"
 #include "esp_timer.h"
 
 static const char *TAG = "fos_wifi";
@@ -553,6 +554,11 @@ static void on_sntp_synced(struct timeval *tv)
 {
     (void)tv;
     s_time_synced = true;
+    /* A board with a battery-backed clock (fos_rtc.c) gets the corrected time
+     * written back on the next render pass, so the next cold boot starts
+     * right. Not from here: this is lwIP's thread, and an I2C write on it
+     * froze the E1002 (2026-10-25). */
+    fos_rtc_mark_dirty();
 }
 
 esp_err_t fos_wifi_sync_time(uint32_t timeout_ms)
@@ -572,6 +578,13 @@ esp_err_t fos_wifi_sync_time(uint32_t timeout_ms)
     if (esp_reset_reason() == ESP_RST_DEEPSLEEP && kept > 1000000000) {
         s_time_synced = true;
         ESP_LOGI(TAG, "clock kept through deep sleep: %s", ctime(&kept));
+        return ESP_OK;
+    }
+    /* The same for a clock set from the board's RTC at boot (fos_rtc.c): the
+     * time is good to a second, so render now and let SNTP trim it behind. */
+    if (fos_rtc_time_loaded() && kept > 1000000000) {
+        s_time_synced = true;
+        ESP_LOGI(TAG, "clock from the RTC: %s", ctime(&kept));
         return ESP_OK;
     }
     err = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(timeout_ms));

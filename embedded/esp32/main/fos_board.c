@@ -161,3 +161,84 @@ bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *p
     }
     return false;
 }
+
+/* Boards with a status LED FrameOS can light. Seeed's reTerminal E1001 and
+ * E1002 have a green one on GPIO6, lit by pulling the pin LOW (the Arduino
+ * cookbook's "inverted logic"); the E1004's is on GPIO48 behind an NPN
+ * transistor (ESP_IO48/LED, Q4 in its schematic) and lit HIGH — the
+ * cookbook says inverted for it too, the board says otherwise (idled lit
+ * and blinked dark on the bench, 2026-10-25). The red charge LED next to it
+ * belongs to the charger. */
+static const struct {
+    const char *preset;
+    int pin;
+    int type;
+} k_leds[] = {
+    {"seeed_reterminal_e1001", 6, 1},
+    {"seeed_reterminal_e1002", 6, 1},
+    {"seeed_reterminal_e1004", 48, 0},
+};
+
+bool fos_board_led(const char *hardware_preset, int *pin, int *type)
+{
+    if (pin) *pin = -1;
+    if (type) *type = 0;
+    if (!hardware_preset || !hardware_preset[0]) return false;
+    for (size_t i = 0; i < sizeof(k_leds) / sizeof(k_leds[0]); i++) {
+        if (strcmp(hardware_preset, k_leds[i].preset) != 0) continue;
+        if (pin) *pin = k_leds[i].pin;
+        if (type) *type = k_leds[i].type;
+        return true;
+    }
+    return false;
+}
+
+/* The I2C peripherals, by board, from Seeed's schematics (E1002 V1.2, E1004
+ * V1.0): every E-series model has the PCF8563 clock (0x51) and the SHT40
+ * sensor (0x44) on I2C0 = SDA GPIO19 / SCL GPIO20, which is also the J2
+ * header's I2C on the E1001/E1002. The SY6974B charger (0x6b) sits on
+ * SDA GPIO39 / SCL GPIO40 on the E1001/E1002 and on the 19/20 bus on the
+ * E1004, whose 39/40 is its J2 header instead. */
+static const struct {
+    const char *preset;
+    const char *buses;
+} k_i2c_buses[] = {
+    {"seeed_reterminal_e1001", "sda=19,scl=20;sda=39,scl=40"},
+    {"seeed_reterminal_e1002", "sda=19,scl=20;sda=39,scl=40"},
+    {"seeed_reterminal_e1004", "sda=19,scl=20"},
+};
+
+const char *fos_board_i2c_buses(const char *hardware_preset)
+{
+    if (!hardware_preset || !hardware_preset[0]) return "";
+    for (size_t i = 0; i < sizeof(k_i2c_buses) / sizeof(k_i2c_buses[0]); i++) {
+        if (strcmp(hardware_preset, k_i2c_buses[i].preset) == 0) return k_i2c_buses[i].buses;
+    }
+    return "";
+}
+
+/* TF sockets. The Waveshare boards give the card a bus of its own (SPI3);
+ * the reTerminal E-series hang it off the panel's SCK7/MOSI9 with MISO on
+ * GPIO8 and CS on GPIO14, a card-detect contact on GPIO15 (low = seated) and
+ * a TPS22916 power switch on GPIO16 (Seeed's schematics; the same three on
+ * the E1001, E1002 and E1004). The XTEINK X4 shares its EPD bus too but has
+ * no preset entry yet: its CS/detect/power pins are unpublished. */
+static const struct {
+    const char *preset;
+    const char *pins;
+} k_sd_pins[] = {
+    {"waveshare_esp32_s3_photopainter", "cs=38,sck=39,miso=40,mosi=41"},
+    {"waveshare_esp32_s3_epaper_13_3e6", "cs=15,sck=6,miso=5,mosi=7"},
+    {"seeed_reterminal_e1001", "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"},
+    {"seeed_reterminal_e1002", "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"},
+    {"seeed_reterminal_e1004", "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"},
+};
+
+const char *fos_board_sd_pins(const char *hardware_preset)
+{
+    if (!hardware_preset || !hardware_preset[0]) return "";
+    for (size_t i = 0; i < sizeof(k_sd_pins) / sizeof(k_sd_pins[0]); i++) {
+        if (strcmp(hardware_preset, k_sd_pins[i].preset) == 0) return k_sd_pins[i].pins;
+    }
+    return "";
+}

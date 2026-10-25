@@ -1239,6 +1239,41 @@ async def test_settings_carry_the_microphone_pins_only_when_set(async_client, no
 
 
 @pytest.mark.asyncio
+async def test_settings_carry_the_status_led_only_when_set(async_client, no_auth_client, db):
+    """The status LED (fos_led.c) is present-only like the buzzer: the board
+    keeps its preset's LED until the backend holds a value; the type travels
+    only as one of the contract's three names."""
+    frame = await device_frame(async_client, db)
+    led_keys = ('ledPin', 'led_pin', 'ledType', 'led_type')
+    base_config = {key: value for key, value in (frame.device_config or {}).items() if key not in led_keys}
+    frame.device_config = base_config
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.status_code == 200, response.text
+    assert 'ledPin' not in response.json()['frame']
+    assert 'ledType' not in response.json()['frame']
+
+    frame.device_config = {**base_config, 'led_pin': 6, 'ledType': 'gpio_inverted'}
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['frame']['ledPin'] == 6
+    assert response.json()['frame']['ledType'] == 'gpio_inverted'
+
+    # A type outside the enum never reaches the board.
+    frame.device_config = {**base_config, 'ledPin': -1, 'ledType': 'rgb'}
+    db.add(frame)
+    db.commit()
+    response = await no_auth_client.get(
+        f'/api/frames/{frame.id}/embedded/settings', headers=auth(frame))
+    assert response.json()['frame']['ledPin'] == -1
+    assert 'ledType' not in response.json()['frame']
+
+
+@pytest.mark.asyncio
 async def test_settings_carry_what_a_console_line_cannot(async_client, no_auth_client, db):
     """The three settings a stock release image can only learn from this poll:
     the HTTP response cap (kilobyte-scale integer, but read once at boot), the

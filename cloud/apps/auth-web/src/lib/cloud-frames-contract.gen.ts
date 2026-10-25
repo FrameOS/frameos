@@ -872,6 +872,33 @@ export const cloudFramesContract = {
           "since": "2026.10.20"
         }
       }
+    },
+    "led_pin": {
+      "rule": {
+        "type": "int",
+        "min": -1,
+        "max": 48
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.10.20"
+        }
+      }
+    },
+    "led_type": {
+      "rule": {
+        "type": "string",
+        "enum": [
+          "gpio",
+          "gpio_inverted",
+          "ws2812"
+        ]
+      },
+      "profiles": {
+        "esp32": {
+          "since": "2026.10.20"
+        }
+      }
     }
   },
   "formats": {

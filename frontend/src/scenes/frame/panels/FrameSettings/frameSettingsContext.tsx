@@ -11,6 +11,7 @@ import {
   cloudFrameSupportsEsp32BatteryEnablePin,
   cloudFrameSupportsEsp32Buzzer,
   cloudFrameSupportsEsp32VoiceChat,
+  cloudFrameSupportsEsp32Led,
   cloudFrameSupportsEsp32ExtendedSettings,
   cloudFrameSupportsEsp32TimeZone,
   cloudFrameSupportsExtendedSettings,
@@ -19,6 +20,7 @@ import {
   esp32BatteryEnablePinCloudFrameSettingsMinVersion,
   esp32BuzzerCloudFrameSettingsMinVersion,
   esp32VoiceChatCloudFrameSettingsMinVersion,
+  esp32LedCloudFrameSettingsMinVersion,
 } from '../../../../utils/cloudFrameApi'
 import { appsLogic } from '../Apps/appsLogic'
 import { logsLogic } from '../Logs/logsLogic'
@@ -89,6 +91,9 @@ export interface FrameErrorBehaviorModeOption {
  * per-frame and per-firmware conditions a section still has to decide for
  * itself (which panel is attached, what version the device reported).
  */
+/** How a status LED is lit (the contract's `led_type` enum). */
+export type StatusLedType = 'gpio' | 'gpio_inverted' | 'ws2812'
+
 export interface FrameSettingsContextValue extends FrameSettingsProps {
   /** Which of the four surfaces this panel is being rendered on. */
   surface: FrameSettingsSurface
@@ -173,6 +178,25 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
     disabledReason: string | undefined
   } | null
   setMicrophonePins: (patch: { clkPin?: number; dataPin?: number; pwrPin?: number }) => void
+  /**
+   * ESP32 only, null elsewhere: the board's status LED (fos_led.c), which
+   * follows the buzzer's notes — lit for a press, a hold and the voice
+   * chat's cues, with or instead of the beep. `pin` -1 = none, undefined =
+   * the board's own; `type` how it is lit (gpio high, gpio_inverted low —
+   * the reTerminal E-series —, ws2812 one pixel). The cloud pushes
+   * `led_pin` / `led_type`; the backend keeps `ledPin` / `ledType` in
+   * device_config for the device's settings poll. `reported*` is what a
+   * cloud frame said it runs with (`hardware.ledPin` / `ledType`);
+   * `disabledReason` the cloud firmware floor.
+   */
+  statusLed: {
+    pin: number | undefined
+    type: StatusLedType | undefined
+    reportedPin: number | undefined
+    reportedType: StatusLedType | undefined
+    disabledReason: string | undefined
+  } | null
+  setStatusLed: (patch: { pin?: number; type?: StatusLedType }) => void
   /**
    * ESP32 with a microphone only, null elsewhere: voice chat, the key hold
    * that opens the board's microphone (docs/voice-chat.md; which key is
@@ -667,6 +691,62 @@ export function FrameSettingsProvider({
     setFrameFormValues({ device_config: next })
   }
 
+  // The status LED (fos_led.c), on the same two routes as the beep it
+  // follows; the cloud floor is the voice chat's release. Real ESP32 boards only.
+  const ledType = (value: unknown): StatusLedType | undefined =>
+    value === 'gpio' || value === 'gpio_inverted' || value === 'ws2812' ? value : undefined
+  const statusLedDisabledReason = cloudFrameSupportsEsp32Led(frame.frameos_version)
+    ? undefined
+    : frame.frameos_version
+    ? `The status LED needs FrameOS ${esp32LedCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+    : `The status LED needs FrameOS ${esp32LedCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+  const statusLed: FrameSettingsContextValue['statusLed'] = esp32CloudProfile
+    ? {
+        pin: frameForm.led_pin,
+        type: ledType(frameForm.led_type),
+        reportedPin: typeof frame.hardware?.ledPin === 'number' ? frame.hardware.ledPin : undefined,
+        reportedType: ledType(frame.hardware?.ledType),
+        disabledReason: statusLedDisabledReason,
+      }
+    : !cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform
+    ? {
+        pin: powerDeviceConfig.ledPin ?? powerDeviceConfig.led_pin,
+        type: ledType(powerDeviceConfig.ledType ?? powerDeviceConfig.led_type),
+        reportedPin: undefined,
+        reportedType: undefined,
+        disabledReason: undefined,
+      }
+    : null
+  const setStatusLed = (patch: { pin?: number; type?: StatusLedType }): void => {
+    if (esp32CloudProfile) {
+      setFrameFormValues({
+        ...('pin' in patch ? { led_pin: patch.pin } : {}),
+        ...('type' in patch ? { led_type: patch.type } : {}),
+      })
+      return
+    }
+    // Same rule as the beep: the camelCase key wins, so drop the snake_case
+    // copy a USB-console provisioning may have left behind.
+    const next: NonNullable<FrameType['device_config']> = { ...powerDeviceConfig }
+    if ('pin' in patch) {
+      delete next.led_pin
+      if (patch.pin === undefined) {
+        delete next.ledPin
+      } else {
+        next.ledPin = patch.pin
+      }
+    }
+    if ('type' in patch) {
+      delete next.led_type
+      if (patch.type === undefined) {
+        delete next.ledType
+      } else {
+        next.ledType = patch.type
+      }
+    }
+    setFrameFormValues({ device_config: next })
+  }
+
   // Voice chat (docs/voice-chat.md), on the same two routes as the beep: the
   // cloud pushes `voice_chat`, the backend keeps `voiceChat` in device_config
   // for the device's settings poll. Real ESP32 boards only, and only ones
@@ -815,6 +895,8 @@ export function FrameSettingsProvider({
     setButtonBeep,
     microphone,
     setMicrophonePins,
+    statusLed,
+    setStatusLed,
     voiceChat,
     setVoiceChat,
     voicePermissions,

@@ -109,8 +109,59 @@ static void test_parse_assets_sd_pins(void)
     CHECK(fos_config_parse_assets_sd_pins("cs=49", &sd) == ESP_ERR_INVALID_ARG, "pin 49 accepted");
     CHECK(fos_config_parse_assets_sd_pins("cs", &sd) == ESP_ERR_INVALID_ARG, "missing = accepted");
     char out[64];
+    sd.pwr = sd.det = -1;
     fos_config_format_assets_sd_pins(&sd, out, sizeof(out));
     CHECK(strcmp(out, "cs=38,sck=39,miso=40,mosi=41") == 0, "format: %s", out);
+    /* The slot's power switch and card-detect contact (the reTerminal
+     * E-series): parsed when named, printed only when wired, so a board
+     * without them keeps the spec it always had. */
+    CHECK(fos_config_parse_assets_sd_pins("cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15", &sd) == ESP_OK, "refused pwr/det");
+    CHECK(sd.cs == 14 && sd.sck == 7 && sd.miso == 8 && sd.mosi == 9 && sd.pwr == 16 && sd.det == 15, "misparsed pwr/det");
+    fos_config_format_assets_sd_pins(&sd, out, sizeof(out));
+    CHECK(strcmp(out, "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15") == 0, "format with pwr/det: %s", out);
+    CHECK(fos_config_parse_assets_sd_pins("det=-1", &sd) == ESP_OK && sd.det == -1 && sd.pwr == 16,
+          "a spec names only what it changes");
+    fos_config_format_assets_sd_pins(&sd, out, sizeof(out));
+    CHECK(strcmp(out, "cs=14,sck=7,miso=8,mosi=9,pwr=16") == 0, "format without det: %s", out);
+    char tiny[12];
+    fos_config_format_assets_sd_pins(&sd, tiny, sizeof(tiny));
+    CHECK(strlen(tiny) < sizeof(tiny), "overrun");
+}
+
+static void test_parse_i2c_buses(void)
+{
+    fos_i2c_bus_t buses[FOS_I2C_BUSES_MAX];
+    uint8_t count = 9;
+    CHECK(fos_config_parse_i2c_buses("sda=19,scl=20;sda=39,scl=40", buses, &count) == ESP_OK, "refused");
+    CHECK(count == 2, "count %u", (unsigned)count);
+    CHECK(buses[0].sda == 19 && buses[0].scl == 20 && buses[1].sda == 39 && buses[1].scl == 40, "misparsed");
+    char out[64];
+    fos_config_format_i2c_buses(buses, count, out, sizeof(out));
+    CHECK(strcmp(out, "sda=19,scl=20;sda=39,scl=40") == 0, "format: %s", out);
+    CHECK(fos_config_parse_i2c_buses("sda=19,scl=20", buses, &count) == ESP_OK && count == 1, "one bus");
+    CHECK(fos_config_parse_i2c_buses("", buses, &count) == ESP_OK && count == 0, "empty = none");
+    fos_config_format_i2c_buses(buses, count, out, sizeof(out));
+    CHECK(out[0] == '\0', "none formats as \"%s\"", out);
+    /* Refusals leave the list as it was. */
+    CHECK(fos_config_parse_i2c_buses("sda=19,scl=20;sda=39,scl=40;sda=1,scl=2", buses, &count) == ESP_ERR_INVALID_ARG,
+          "three buses accepted");
+    CHECK(fos_config_parse_i2c_buses("sda=19", buses, &count) == ESP_ERR_INVALID_ARG, "half a bus accepted");
+    CHECK(fos_config_parse_i2c_buses("sda=19,scl=19", buses, &count) == ESP_ERR_INVALID_ARG, "one pin twice accepted");
+    CHECK(fos_config_parse_i2c_buses("sda=-1,scl=20", buses, &count) == ESP_ERR_INVALID_ARG, "-1 accepted");
+    CHECK(fos_config_parse_i2c_buses("sck=19,scl=20", buses, &count) == ESP_ERR_INVALID_ARG, "foreign key accepted");
+    CHECK(count == 0, "a refusal touched the count");
+}
+
+static void test_led_type_names(void)
+{
+    uint8_t type = 7;
+    CHECK(fos_config_parse_led_type("gpio", &type) && type == FOS_LED_GPIO, "gpio");
+    CHECK(fos_config_parse_led_type("gpio_inverted", &type) && type == FOS_LED_GPIO_INVERTED, "gpio_inverted");
+    CHECK(fos_config_parse_led_type("WS2812", &type) && type == FOS_LED_WS2812, "ws2812, any case");
+    CHECK(!fos_config_parse_led_type("rgb", &type) && type == FOS_LED_WS2812, "unknown name refused, type kept");
+    CHECK(!fos_config_parse_led_type(NULL, &type), "NULL refused");
+    CHECK(strcmp(fos_config_led_type_name(FOS_LED_GPIO_INVERTED), "gpio_inverted") == 0, "name of 1");
+    CHECK(strcmp(fos_config_led_type_name(200), "gpio") == 0, "a stray stored value reads as gpio");
 }
 
 static void test_normalize_rotate(void)
@@ -294,6 +345,8 @@ int main(void)
     test_parse_pins_full_and_subset();
     test_parse_pins_refusals();
     test_parse_assets_sd_pins();
+    test_parse_i2c_buses();
+    test_led_type_names();
     test_normalize_rotate();
     test_normalize_scaling_mode();
     test_parse_gpio_buttons();

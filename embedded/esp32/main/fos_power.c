@@ -69,6 +69,19 @@ void fos_power_decide(const fos_power_input_t *in, fos_power_state_t *state,
         out->suspect = true; /* first critical read: render, but say so */
     }
 
+    /* The charger knows better than the divider. Input power present: the
+     * cell is charging, so the frame is not on battery and cannot be
+     * critical (the cell's streak keeps counting, for the day the plug comes
+     * out). No input: on battery whatever the ADC said, a board without a
+     * battery sense included — it is running, so it runs on the cell. */
+    if (in->usb_power > 0) {
+        out->on_battery = false;
+        out->critical = false;
+        if (critical_now) out->suspect = false;
+    } else if (in->usb_power == 0) {
+        out->on_battery = true;
+    }
+
     /* A critical cell is a battery by definition, so deep_sleep_on_battery
      * sleeps on it even when the presence test above was lost — the whole
      * point of the critical branch is to stop spending the cell. */

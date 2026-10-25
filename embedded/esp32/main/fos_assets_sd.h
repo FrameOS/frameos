@@ -33,6 +33,10 @@ esp_err_t fos_assets_sd_remount(void);
 esp_err_t fos_assets_sd_format(void);
 bool fos_assets_sd_mounted(void);
 uint64_t fos_assets_sd_capacity_bytes(void);
+/* The slot's card-detect contact at the last mount attempt: 1 = a card is
+ * seated, 0 = the slot is empty, -1 = no contact wired (fos_assets_sd_config_t
+ * `det`). */
+int fos_assets_sd_card_detected(void);
 /* "" when mounted, else "<ESP_ERR_NAME> (<reason code>): <explanation>", where
  * the reason code is one of no_card / unreadable_filesystem / io_error /
  * not_configured / unsupported. */

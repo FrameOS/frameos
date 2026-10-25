@@ -227,6 +227,12 @@ jobs:
                 embedded/esp32/main/fos_voice_hold.c embedded/esp32/main/tests/test_fos_voice_hold.c \
                 -o /tmp/test_fos_voice_hold
               /tmp/test_fos_voice_hold
+              # The charger register decode and the RTC conversions, pure.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/fos_charger.c embedded/esp32/main/fos_rtc.c \
+                embedded/esp32/main/tests/test_fos_i2c_devices.c \
+                -o /tmp/test_fos_i2c_devices
+              /tmp/test_fos_i2c_devices
               ccache --show-stats || true
             '
           # The container writes as root; actions/cache runs as the runner user.

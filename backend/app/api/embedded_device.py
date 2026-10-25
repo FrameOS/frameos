@@ -777,6 +777,7 @@ def embedded_frame_settings(frame: Frame) -> dict:
     changed nothing on a provisioned board.
     """
     from app.tasks.embedded_firmware import (
+        EMBEDDED_LED_TYPES,
         EMBEDDED_RENDER_REMOTE,
         embedded_device_config,
         embedded_render_mode_for_frame,
@@ -812,6 +813,9 @@ def embedded_frame_settings(frame: Frame) -> dict:
             ("micClkPin", ("micClkPin", "mic_clk_pin"), "int"),
             ("micDataPin", ("micDataPin", "mic_data_pin"), "int"),
             ("micPwrPin", ("micPwrPin", "mic_pwr_pin"), "int"),
+            # The status LED that follows the buzzer (fos_led.c): GPIO and kind.
+            ("ledPin", ("ledPin", "led_pin"), "int"),
+            ("ledType", ("ledType", "led_type"), "led_type"),
         ):
             for key in keys:
                 value = device_config.get(key)
@@ -823,6 +827,9 @@ def embedded_frame_settings(frame: Frame) -> dict:
                     break
                 if kind == "float" and isinstance(value, (int, float)) and not isinstance(value, bool):
                     extra[out_key] = float(value)
+                    break
+                if kind == "led_type" and isinstance(value, str) and value in EMBEDDED_LED_TYPES:
+                    extra[out_key] = value
                     break
         return extra
 

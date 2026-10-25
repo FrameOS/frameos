@@ -5,6 +5,10 @@ idf_component_register(
         "fos_buttons.c"
         "fos_button_timing.c"
         "fos_buzzer.c"
+        "fos_led.c"
+        "fos_i2c.c"
+        "fos_charger.c"
+        "fos_rtc.c"
         "fos_voice_binding.c"
         "fos_voice_hold.c"
         "fos_mic.c"
@@ -59,6 +63,8 @@ idf_component_register(
         mbedtls
         console
         driver
+        esp_driver_i2c
+        esp_driver_gpio
         esp_hw_support
         hal
         soc

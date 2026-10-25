@@ -448,7 +448,7 @@ def test_embedded_hardware_preset_for_waveshare_13in3e6():
         "enabled": True,
         "preset": "waveshare_esp32_s3_epaper_13_3e6",
         "mountPath": "/srv/assets",
-        "pins": {"cs": 15, "sck": 6, "miso": 5, "mosi": 7},
+        "pins": {"cs": 15, "sck": 6, "miso": 5, "mosi": 7, "pwr": -1, "det": -1},
         "maxFrequencyKHz": 20_000,
     }
     check_embedded_panel_fits_memory(frame)
@@ -503,7 +503,7 @@ def test_embedded_hardware_preset_for_waveshare_photopainter():
         "enabled": True,
         "preset": "waveshare_esp32_s3_photopainter",
         "mountPath": "/srv/assets",
-        "pins": {"cs": 38, "sck": 39, "miso": 40, "mosi": 41},
+        "pins": {"cs": 38, "sck": 39, "miso": 40, "mosi": 41, "pwr": -1, "det": -1},
         "maxFrequencyKHz": 20_000,
     }
     assert frame.gpio_buttons == [
@@ -675,6 +675,21 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e10xx():
             "rst": 12, "dc": 11, "cs": 10, "cs2": -1,
             "busy": 13, "sck": 7, "mosi": 9, "pwr": -1,
         }
+        # The E-series TF socket hangs off the panel's bus (SCK7/MOSI9 are the
+        # panel's): MISO8, CS14, card-detect 15, power switch 16, enabled by
+        # the preset; the console spec names the two slot pins since they are
+        # wired. The green LED on GPIO6, lit low.
+        sd_card_assets = embedded_sd_card_assets_for_frame(frame)
+        assert sd_card_assets["enabled"] is True
+        assert sd_card_assets["preset"] == preset
+        assert sd_card_assets["pins"] == {"cs": 14, "sck": 7, "miso": 8, "mosi": 9, "pwr": 16, "det": 15}
+        assert frame.device_config["ledPin"] == 6
+        assert frame.device_config["ledType"] == "gpio_inverted"
+        settings = _provisioned(embedded_provisioning_plan(frame))
+        assert settings["assets_sd_pins"] == "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"
+        assert settings["assets_sd"] == "1"
+        assert settings["led_pin"] == "6"
+        assert settings["led_type"] == "gpio_inverted"
         assert frame.gpio_buttons == [
             {"pin": 3, "label": "REFRESH"},
             {"pin": 4, "label": "LEFT"},
@@ -689,7 +704,6 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e10xx():
         assert frame.device_config["buzzerPin"] == 45
         assert "deepSleepOnBattery" not in frame.device_config
         assert "wakeCheckSeconds" not in frame.device_config
-        assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
 
 
 def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
@@ -727,7 +741,16 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     assert frame.device_config["wakeCheckSeconds"] == 900
     # A passive buzzer on GPIO45 chirps when a button press registers.
     assert frame.device_config["buzzerPin"] == 45
-    assert embedded_sd_card_assets_for_frame(frame)["enabled"] is False
+    # The E-series TF socket on the panel's bus, and the LED on GPIO48.
+    assert embedded_sd_card_assets_for_frame(frame) == {
+        "enabled": True,
+        "preset": "seeed_reterminal_e1004",
+        "mountPath": "/srv/assets",
+        "pins": {"cs": 14, "sck": 7, "miso": 8, "mosi": 9, "pwr": 16, "det": 15},
+        "maxFrequencyKHz": 20000,
+    }
+    assert frame.device_config["ledPin"] == 48
+    assert frame.device_config["ledType"] == "gpio"
     # The arrows held walk the scene list (docs/events.md "Event map"), by
     # label — this board's pins are swapped, the rules are not. Seeded once:
     # a frame whose owner cleared the map keeps it cleared.
@@ -754,6 +777,12 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     assert settings["panel"] == "EPD_13in3e"
     assert settings["pins"] == "rst=38,dc=11,cs=10,cs2=2,busy=13,sck=7,mosi=9,pwr=12"
     assert settings["render_mode"] == "local"
+    # The same TF socket as the E1001/E1002, the LED on GPIO48 (lit high, not
+    # low like the E1001/E1002's).
+    assert settings["assets_sd_pins"] == "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"
+    assert settings["assets_sd"] == "1"
+    assert settings["led_pin"] == "48"
+    assert settings["led_type"] == "gpio"
     # The console has a `set` key for every battery/power value the image
     # would bake in, so the generic-image path provisions the same frame.
     assert settings["battery_pin"] == "1"
@@ -903,6 +932,29 @@ def _board_buzzer_pins() -> dict[str, dict[str, str]]:
     }
 
 
+def _board_string_table(name: str) -> dict[str, str]:
+    """A fos_board.c `{preset, "spec"}` table (k_sd_pins, k_i2c_buses): the
+    console's `set hardware` and a board whose NVS predates the key both
+    read it, so the backend's preset must say the same."""
+    source = _FOS_BOARD_C.read_text(encoding="utf-8")
+    table = re.search(r"\} " + re.escape(name) + r"\[\] = \{(.*?)\n\};", source, re.DOTALL)
+    assert table, f"{name}[] table not found in fos_board.c"
+    return dict(re.findall(r'\{"([a-z0-9_]+)",\s*"([^"]*)"\}', table.group(1)))
+
+
+def _board_leds() -> dict[str, dict[str, str]]:
+    """fos_board.c's k_leds table: the status LED's pin and kind (0 gpio,
+    1 gpio_inverted, 2 ws2812) per board."""
+    source = _FOS_BOARD_C.read_text(encoding="utf-8")
+    table = re.search(r"\} k_leds\[\] = \{(.*?)\n\};", source, re.DOTALL)
+    assert table, "k_leds[] table not found in fos_board.c"
+    kinds = {"0": "gpio", "1": "gpio_inverted", "2": "ws2812"}
+    return {
+        preset: {"pin": pin, "type": kinds[kind]}
+        for preset, pin, kind in re.findall(r'\{"([a-z0-9_]+)",\s*(-?\d+),\s*(\d)\}', table.group(1))
+    }
+
+
 def _console_hardware_presets() -> dict[str, dict]:
     """The `set hardware` table in fos_console.c, parsed from source: the
     device applies it over USB when the cloud flasher provisions a board, so
@@ -913,7 +965,7 @@ def _console_hardware_presets() -> dict[str, dict]:
     body = re.sub(r"/\*.*?\*/", "", table.group(1), flags=re.DOTALL)
     entry = re.compile(
         r'\{\s*"(?P<name>[a-z0-9_]+)",\s*"(?P<panel>[A-Za-z0-9_]+)",\s*"(?P<pins>[^"]*)",'
-        r'\s*"(?P<buttons>[^"]*)",\s*"(?P<sd_pins>[^"]*)",'
+        r'\s*"(?P<buttons>[^"]*)",'
         r"\s*(?P<battery_pin>-?\d+),\s*(?P<battery_divider>[\d.]+)f,\s*(?P<battery_enable_pin>-?\d+),"
         r"\s*(?P<deep_sleep_on_battery>\d+),\s*(?P<wake_check>\d+)\s*\}"
     )
@@ -923,7 +975,6 @@ def _console_hardware_presets() -> dict[str, dict]:
             "panel": match.group("panel"),
             "pins": match.group("pins"),
             "gpio_buttons": match.group("buttons").replace("\\n", ","),
-            "assets_sd_pins": match.group("sd_pins"),
             "battery_pin": match.group("battery_pin"),
             "battery_divider": float(match.group("battery_divider")),
             "battery_enable_pin": match.group("battery_enable_pin"),
@@ -943,6 +994,12 @@ def test_console_hardware_preset_table_matches_backend_presets():
     console = _console_hardware_presets()
     buzzers = _board_buzzer_pins()
     assert buzzers, "no buzzer rows parsed from fos_board.c"
+    sd_pins = _board_string_table("k_sd_pins")
+    assert sd_pins, "no TF socket rows parsed from fos_board.c"
+    i2c_buses = _board_string_table("k_i2c_buses")
+    assert i2c_buses, "no I2C bus rows parsed from fos_board.c"
+    leds = _board_leds()
+    assert leds, "no LED rows parsed from fos_board.c"
     for preset_key, preset in embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS.items():
         platform = preset.get("platform", embedded_firmware_module.SUPPORTED_EMBEDDED_PLATFORM)
         if not str(platform).startswith("esp32"):
@@ -955,7 +1012,15 @@ def test_console_hardware_preset_table_matches_backend_presets():
         assert row["panel"] == settings["panel"], preset_key
         assert row["pins"] == settings["pins"], preset_key
         assert row["gpio_buttons"] == settings.get("gpio_buttons", ""), preset_key
-        assert row["assets_sd_pins"] == settings.get("assets_sd_pins", ""), preset_key
+        # The TF socket, the LED and the I2C buses live in fos_board.c: one
+        # table for `set hardware` and the stored-config default.
+        assert sd_pins.get(preset_key, "") == settings.get("assets_sd_pins", ""), preset_key
+        led = leds.get(preset_key)
+        assert (led["pin"] if led else "-1") == settings.get("led_pin", "-1"), preset_key
+        if led:
+            assert led["type"] == settings.get("led_type"), preset_key
+        preset_i2c = preset.get("i2cBuses", "")
+        assert i2c_buses.get(preset_key, "") == preset_i2c, preset_key
         assert row["battery_pin"] == settings.get("battery_pin", "-1"), preset_key
         assert row["battery_divider"] == float(settings.get("battery_divider", "2.0")), preset_key
         assert row["battery_enable_pin"] == settings.get("battery_enable_pin", "-1"), preset_key
@@ -1015,7 +1080,7 @@ def test_sd_card_assets_require_all_custom_pins():
 
     config = embedded_sd_card_assets_for_frame(frame)
     assert config["enabled"] is False
-    assert config["pins"] == {"cs": 10, "sck": 11, "miso": 12, "mosi": -1}
+    assert config["pins"] == {"cs": 10, "sck": 11, "miso": 12, "mosi": -1, "pwr": -1, "det": -1}
 
 
 def test_embedded_hostname_falls_back_for_ip_hosts():

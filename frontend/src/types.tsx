@@ -143,6 +143,17 @@ export interface FrameType {
      * (docs/voice-chat.md), and whether voice chat is on (2026.10.20+). */
     microphone?: boolean | null
     voiceChat?: boolean | null
+    /** ESP32 only: the status LED that follows the buzzer's notes (fos_led.c),
+     * -1 = none, and how it is lit (2026.10.20+). */
+    ledPin?: number | null
+    ledType?: 'gpio' | 'gpio_inverted' | 'ws2812' | null
+    /** ESP32 only: the I2C chips that answered at boot (fos_i2c.c) — a
+     * real-time clock, a battery charger (its word on USB power rides the
+     * metrics), a climate sensor — and whether the SD card mounted. */
+    rtc?: boolean | null
+    charger?: boolean | null
+    climateSensor?: boolean | null
+    sdCard?: boolean | null
     mac?: string | null
     /** major*100 + minor, as esp_chip_info reports it */
     chipRevision?: number | null
@@ -310,6 +321,12 @@ export interface FrameType {
     voice_create_scenes?: boolean
     voiceUseAlbums?: boolean
     voice_use_albums?: boolean
+    /** The status LED that follows the buzzer's notes (fos_led.c); -1 = none, unset = the board's own. */
+    ledPin?: number
+    led_pin?: number
+    /** How that LED is lit: gpio (high; the reTerminal E1004), gpio_inverted (low; the E1001/E1002), ws2812 (one pixel). */
+    ledType?: 'gpio' | 'gpio_inverted' | 'ws2812'
+    led_type?: 'gpio' | 'gpio_inverted' | 'ws2812'
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
     hardwarePreset?: FrameEmbeddedHardwarePreset
     /** Virtual frames only: how the backend quantizes the rendered image.
@@ -337,12 +354,22 @@ export interface FrameType {
     }
     sdCardAssets?: {
       enabled?: boolean
-      preset?: 'custom' | 'waveshare_esp32_s3_photopainter' | 'waveshare_esp32_s3_epaper_13_3e6'
+      preset?:
+        | 'custom'
+        | 'waveshare_esp32_s3_photopainter'
+        | 'waveshare_esp32_s3_epaper_13_3e6'
+        | 'seeed_reterminal_e1001'
+        | 'seeed_reterminal_e1002'
+        | 'seeed_reterminal_e1004'
       pins?: {
         cs?: number
         sck?: number
         miso?: number
         mosi?: number
+        /** The slot's power switch and card-detect contact (the reTerminal
+         * E-series: 16 and 15); -1 or unset = not wired. */
+        pwr?: number
+        det?: number
       }
       maxFrequencyKHz?: number
       mountPath?: string
@@ -371,6 +398,9 @@ export interface FrameType {
   mic_clk_pin?: number
   mic_data_pin?: number
   mic_pwr_pin?: number
+  /** ESP32: the status LED that follows the buzzer's notes; -1 = none, and how it is lit. */
+  led_pin?: number
+  led_type?: 'gpio' | 'gpio_inverted' | 'ws2812'
   flip?: 'horizontal' | 'vertical' | 'both' | ''
   background_color: string // deprecated, serves as fallback for scenes
   scenes?: FrameScene[]

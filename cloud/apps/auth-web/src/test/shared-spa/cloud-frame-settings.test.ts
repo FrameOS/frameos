@@ -44,6 +44,8 @@ import {
   cloudFrameSupportsEsp32BatteryEnablePin,
   esp32BuzzerCloudFrameSettingKeys,
   esp32MicrophoneCloudFrameSettingKeys,
+  esp32LedCloudFrameSettingKeys,
+  cloudFrameSupportsEsp32Led,
   esp32BuzzerCloudFrameSettingsMinVersion,
   cloudFrameSupportsEsp32Buzzer,
   cloudFrameSupportsEsp32VoiceChat,
@@ -62,6 +64,7 @@ import {
   esp32BuzzerFrameSettingsMinVersion,
   esp32VoiceChatFrameSettingKeys,
   esp32MicrophoneFrameSettingKeys,
+  esp32LedFrameSettingKeys,
   esp32VoiceChatFrameSettingsMinVersion,
   esp32ExtendedFrameSettingKeys,
   esp32ExtendedFrameSettingsMinVersion,
@@ -153,7 +156,8 @@ describe("cloud settings push", () => {
         !esp32PaletteFrameSettingKeys.has(key) &&
         !esp32BuzzerFrameSettingKeys.has(key) &&
         !esp32VoiceChatFrameSettingKeys.has(key) &&
-        !esp32MicrophoneFrameSettingKeys.has(key),
+        !esp32MicrophoneFrameSettingKeys.has(key) &&
+        !esp32LedFrameSettingKeys.has(key),
     );
     expect(new Set(esp32CloudFrameSettingKeys)).toEqual(new Set(ungated));
     expect(new Set(esp32ExtendedCloudFrameSettingKeys)).toEqual(esp32ExtendedFrameSettingKeys);
@@ -314,6 +318,44 @@ describe("cloud settings push", () => {
       mic_clk_pin: 42,
       mic_data_pin: 41,
       mic_pwr_pin: -1,
+    });
+  });
+
+  it("gates the ESP32 status LED on the voice chat floor, as its own list", () => {
+    // 2026.10.20: the board LED that follows the buzzer's notes (fos_led.c):
+    // its GPIO and how it is lit. Chip keys that never ride a push to older
+    // firmware; neither the voice chat's nor the microphone's list carries
+    // them.
+    expect([...esp32LedFrameSettingKeys].sort()).toEqual(["led_pin", "led_type"]);
+    expect([...esp32LedCloudFrameSettingKeys].sort()).toEqual(["led_pin", "led_type"]);
+    expect(cloudFrameSupportsEsp32Led("2026.10.19")).toBe(false);
+    expect(cloudFrameSupportsEsp32Led("2026.10.20")).toBe(true);
+    for (const key of ["led_pin", "led_type"]) {
+      expect(esp32OnlySettableKeys.has(key)).toBe(true);
+      expect((esp32PowerSettingKeys as readonly string[]).includes(key)).toBe(true);
+      expect(esp32VoiceChatFrameSettingKeys.has(key)).toBe(false);
+      expect(esp32MicrophoneFrameSettingKeys.has(key)).toBe(false);
+      expect(esp32CloudFrameSettingKeysForVersion("2026.10.19")).not.toContain(key);
+      expect(esp32CloudFrameSettingKeysForVersion("2026.10.20")).toContain(key);
+    }
+    const pin = allowedFrameSettings.get("led_pin");
+    for (const value of [-1, 0, 6, 48]) {
+      expect(pin?.(value), `led_pin ${value}`).toBe(true);
+    }
+    for (const value of [-2, 49, 1.5, "6", null, true]) {
+      expect(pin?.(value), `led_pin ${JSON.stringify(value)}`).toBe(false);
+    }
+    const type = allowedFrameSettings.get("led_type");
+    for (const value of ["gpio", "gpio_inverted", "ws2812"]) {
+      expect(type?.(value), `led_type ${value}`).toBe(true);
+    }
+    for (const value of ["rgb", "", 1, null, true]) {
+      expect(type?.(value), `led_type ${JSON.stringify(value)}`).toBe(false);
+    }
+    // The form keeps the pin as a string and the type as its enum value.
+    expect(cloudFrameSettingsPayload({ led_pin: "6", led_type: "gpio_inverted" }, ["led_pin", "led_type"])).toEqual({
+      led_pin: 6,
+      led_type: "gpio_inverted",
     });
   });
 

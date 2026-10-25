@@ -27,7 +27,11 @@
 #include "fos_board.h"
 #include "fos_buttons.h"
 #include "fos_buzzer.h"
+#include "fos_charger.h"
 #include "fos_client.h"
+#include "fos_i2c.h"
+#include "fos_led.h"
+#include "fos_rtc.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_console_line.h"
@@ -268,6 +272,25 @@ static int cmd_status(int argc, char **argv)
         printf("buzzer:      GPIO %d, %u Hz\n", (int)config->buzzer_pin, (unsigned)config->buzzer_tone_hz);
     }
     else printf("buzzer:      none\n");
+    if (config->led_pin >= 0) {
+        printf("led:         GPIO %d, %s%s\n", (int)config->led_pin, fos_config_led_type_name(config->led_type),
+               fos_led_present() ? "" : " (pin refused, see boot log)");
+    }
+    else printf("led:         none (set led_pin 6; set led_type gpio_inverted)\n");
+    {
+        char i2c[128];
+        fos_i2c_summary(i2c, sizeof(i2c));
+        printf("i2c:         %s\n", i2c);
+        if (fos_rtc_present()) {
+            printf("rtc:         pcf8563, %s\n", fos_rtc_time_loaded() ? "clock set from it at boot" : "not used for the clock this boot");
+        }
+        fos_charger_status_t charger;
+        if (fos_charger_present() && fos_charger_read(&charger) == ESP_OK) {
+            printf("charger:     sy6974b, usb_power=%d charging=%d charge_done=%d (vbus_stat %u, chrg_stat %u)\n",
+                   (int)charger.usb_power, (int)charger.charging, (int)charger.charge_done,
+                   (unsigned)charger.vbus_stat, (unsigned)charger.chrg_stat);
+        }
+    }
     if (config->mic_pins.clk >= 0 && config->mic_pins.data >= 0) {
         printf("microphone:  PDM clk GPIO %d, data GPIO %d, power GPIO %d; voice chat %s%s\n",
                (int)config->mic_pins.clk, (int)config->mic_pins.data, (int)config->mic_pins.pwr,
@@ -461,6 +484,7 @@ static int cmd_set(int argc, char **argv)
                "assets_sd_autoformat|"
                "deep_sleep|deep_sleep_on_battery|wake_check|wake_schedule|"
                "battery_pin|battery_divider|battery_enable_pin|buzzer_pin|buzzer_tone_hz|mic_pins|voice_chat|"
+               "led_pin|led_type|i2c_buses|"
                "pins|gpio_buttons|ap_psk> "
                "<value...>\n");
         return 1;
@@ -575,7 +599,6 @@ static int cmd_set(int argc, char **argv)
             const char *panel;
             const char *pins;
             const char *gpio_buttons;
-            const char *assets_sd_pins; /* empty = board has no usable TF socket */
             int8_t battery_pin;         /* ADC1 GPIO for battery sensing, -1 = none */
             float battery_divider;
             int8_t battery_enable_pin;  /* GPIO held high to switch the divider on, -1 = none */
@@ -585,25 +608,27 @@ static int cmd_set(int argc, char **argv)
             uint8_t deep_sleep_on_battery;
             uint32_t wake_check_sec;
         } presets[] = {
+            /* TF sockets come from fos_board_sd_pins (one table with the
+             * stored-config default). */
             { "waveshare_esp32_s3_photopainter", "EPD_7in3e",
               "rst=12,dc=8,cs=9,cs2=-1,busy=13,sck=10,mosi=11,pwr=-1",
               "0:BOOT\n4:KEY1",
-              "cs=38,sck=39,miso=40,mosi=41", -1, 2.0f, -1, 0, 0 },
+              -1, 2.0f, -1, 0, 0 },
             { "waveshare_esp32_s3_epaper_13_3e6", "EPD_13in3e",
               "rst=2,dc=11,cs=10,cs2=3,busy=12,sck=9,mosi=46,pwr=1",
               "",
-              "cs=15,sck=6,miso=5,mosi=7", 8, 3.0f, -1, 0, 0 },
+              8, 3.0f, -1, 0, 0 },
             /* TRMNL OG / BWRY (ESP32-C3 firmware). Battery: VBAT through a
              * 2:1 divider on GPIO3 (ADC1_CH3) — usetrmnl/trmnl-firmware
              * PIN_BATTERY 3, adc_battery.cpp multiplies the pin reading by 2. */
             { "trmnl_og", "EPD_7in5_V2",
               "rst=10,dc=5,cs=6,cs2=-1,busy=4,sck=7,mosi=8,pwr=-1",
               "2:BUTTON",
-              "", 3, 2.0f, -1, 0, 0 },
+              3, 2.0f, -1, 0, 0 },
             { "trmnl_bwry", "EPD_7in5yr",
               "rst=10,dc=5,cs=6,cs2=-1,busy=4,sck=7,mosi=8,pwr=-1",
               "2:BUTTON",
-              "", 3, 2.0f, -1, 0, 0 },
+              3, 2.0f, -1, 0, 0 },
             /* Seeed XIAO ePaper Driver Board (TRMNL DIY kits, XIAO ESP32-S3).
              * Battery: 2:1 divider on GPIO1 (ADC1_CH0) behind a load switch
              * on GPIO6, active high (trmnl-firmware PIN_BATTERY 1 /
@@ -611,33 +636,35 @@ static int cmd_set(int argc, char **argv)
             { "trmnl_og_diy_kit", "EPD_7in5_V2",
               "rst=38,dc=10,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=-1",
               "0:BOOT\n5:KEY3",
-              "", 1, 2.0f, 6, 0, 0 },
+              1, 2.0f, 6, 0, 0 },
             { "trmnl_4in26_diy_kit", "EPD_4in26",
               "rst=38,dc=10,cs=44,cs2=-1,busy=4,sck=7,mosi=9,pwr=-1",
               "0:BOOT\n2:KEY1",
-              "", 1, 2.0f, 6, 0, 0 },
+              1, 2.0f, 6, 0, 0 },
             /* XTEINK X4 (ESP32-C3 firmware). TF socket shares the EPD SPI bus,
              * so SD assets stay off. Battery: 2:1 divider on GPIO0 (ADC1_CH0),
              * trmnl-firmware PIN_BATTERY 0 for BOARD_XTEINK_X4. */
             { "xteink_x4", "EPD_4in26",
               "rst=5,dc=4,cs=21,cs2=-1,busy=6,sck=8,mosi=10,pwr=-1",
               "3:POWER",
-              "", 0, 2.0f, -1, 0, 0 },
+              0, 2.0f, -1, 0, 0 },
             /* ESP32-C3 dev board with the 0.42" SSD1306 OLED (HW-675 / 01Space):
              * I2C on SDA GPIO5 / SCL GPIO6 carried as mosi/sck, BOOT on GPIO9,
              * 4 MB flash, no PSRAM, no battery. */
             { "esp32_c3_042_oled", "OLED_SSD1306_72x40",
               "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=6,mosi=5,pwr=-1",
               "9:BOOT",
-              "", -1, 2.0f, -1, 0, 0 },
+              -1, 2.0f, -1, 0, 0 },
             /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash). Its 4 kHz
              * buzzer on GPIO48 comes from fos_board_buzzer_pin/_tone_hz. */
             { "seeed_reterminal_sticky", "EPD_3in97",
               "rst=17,dc=16,cs=15,cs2=-1,busy=18,sck=13,mosi=14,pwr=-1",
               "4:POWER",
-              "", -1, 2.0f, -1, 0, 0 },
+              -1, 2.0f, -1, 0, 0 },
             /* Seeed reTerminal E1001 (7.5" mono) / E1002 (7.3" Spectra 6):
-             * same EPD wiring on both. SD pins unconfirmed, assets off.
+             * same EPD wiring on both. The TF socket shares the panel's bus
+             * (fos_board_sd_pins), the green LED is GPIO6 (fos_board_led),
+             * the clock, sensor and charger are on I2C (fos_board_i2c_buses).
              * Battery: the E1004's switched 2:1 divider — GPIO1 (ADC1_CH0)
              * enabled by GPIO21 HIGH (trmnl-firmware PIN_BATTERY 1 /
              * PIN_VBAT_SWITCH 21 for both boards). Same heartbeat-LED clash
@@ -645,15 +672,15 @@ static int cmd_set(int argc, char **argv)
             { "seeed_reterminal_e1001", "EPD_7in5_V2",
               "rst=12,dc=11,cs=10,cs2=-1,busy=13,sck=7,mosi=9,pwr=-1",
               "3:REFRESH\n4:LEFT\n5:RIGHT",
-              "", 1, 2.0f, 21, 0, 0 },
+              1, 2.0f, 21, 0, 0 },
             { "seeed_reterminal_e1002", "EPD_7in3e",
               "rst=12,dc=11,cs=10,cs2=-1,busy=13,sck=7,mosi=9,pwr=-1",
               "3:REFRESH\n4:LEFT\n5:RIGHT",
-              "", 1, 2.0f, 21, 0, 0 },
+              1, 2.0f, 21, 0, 0 },
             /* Seeed reTerminal E1004: 13.3" 1200x1600 Spectra 6 (T133A01) on
              * the E-series bus, second CS on GPIO2, reset 38, panel power 12.
              * The display component selects the T133A01 init tuning from this
-             * preset name. Buttons/SD not published yet. */
+             * preset name. TF socket, LED (GPIO48) and I2C from fos_board. */
             /* Battery: cell through a 2:1 divider on GPIO1 (ADC1_CH0), switched
              * on by GPIO21 — Seeed's ESPHome cookbook for the E-series. */
             { "seeed_reterminal_e1004", "EPD_13in3e",
@@ -664,7 +691,7 @@ static int cmd_set(int argc, char **argv)
                * the 2026-10-12 revert to the E10XX order made a right-arrow
                * press on an E1004 read as REFRESH). */
               "3:RIGHT\n4:LEFT\n5:REFRESH",
-              "", 1, 2.0f, 21,
+              1, 2.0f, 21,
               /* A 5000 mAh frame: sleep between renders while on battery and
                * wake every 15 min for cloud commands (renders still follow the
                * scene's own interval). On USB power it stays connected. */
@@ -673,19 +700,30 @@ static int cmd_set(int argc, char **argv)
             { "elecrow_crowpanel_5in79", "EPD_5in79",
               "rst=47,dc=46,cs=45,cs2=-1,busy=48,sck=12,mosi=11,pwr=-1",
               "2:HOME\n1:EXIT\n4:NEXT\n5:OK\n6:PREV",
-              "", -1, 2.0f, -1, 0, 0 },
+              -1, 2.0f, -1, 0, 0 },
         };
         strlcpy(config->hardware_preset, value, sizeof(config->hardware_preset));
         for (size_t i = 0; i < sizeof(presets) / sizeof(presets[0]); i++) {
             if (strcmp(value, presets[i].name) != 0) continue;
             strlcpy(config->panel, presets[i].panel, sizeof(config->panel));
+            const char *sd_pins = fos_board_sd_pins(presets[i].name);
+            /* The board's socket, or none: a preset switch must not leave
+             * the old board's SD pins on a board without a slot. */
+            config->assets_sd.cs = config->assets_sd.sck = config->assets_sd.miso = -1;
+            config->assets_sd.mosi = config->assets_sd.pwr = config->assets_sd.det = -1;
             if (fos_config_parse_pins(presets[i].pins, &config->pins) != ESP_OK ||
                 fos_config_parse_gpio_buttons(presets[i].gpio_buttons, config) != ESP_OK ||
-                fos_config_parse_assets_sd_pins(presets[i].assets_sd_pins, &config->assets_sd) != ESP_OK) {
+                fos_config_parse_assets_sd_pins(sd_pins, &config->assets_sd) != ESP_OK ||
+                fos_config_parse_i2c_buses(fos_board_i2c_buses(presets[i].name), config->i2c_buses,
+                                           &config->i2c_bus_count) != ESP_OK) {
                 printf("internal error applying preset %s\n", presets[i].name);
                 return 1;
             }
-            config->assets_sd.enabled = presets[i].assets_sd_pins[0] != '\0';
+            config->assets_sd.enabled = sd_pins[0] != '\0';
+            int led_pin, led_type;
+            fos_board_led(presets[i].name, &led_pin, &led_type);
+            config->led_pin = (int8_t)led_pin;
+            config->led_type = (uint8_t)led_type;
             config->battery_pin = presets[i].battery_pin;
             config->battery_divider = presets[i].battery_divider;
             config->battery_enable_pin = presets[i].battery_enable_pin;
@@ -709,11 +747,12 @@ static int cmd_set(int argc, char **argv)
                 config->deep_sleep_on_battery = true;
                 config->wake_check_sec = presets[i].wake_check_sec;
             }
-            printf("applied %s: panel=%s pins=%s buttons=%u sd_pins=%s battery_pin=%d\n",
+            printf("applied %s: panel=%s pins=%s buttons=%u sd_pins=%s battery_pin=%d led=%d i2c=%s\n",
                    presets[i].name, presets[i].panel, presets[i].pins,
                    (unsigned)config->gpio_button_count,
-                   presets[i].assets_sd_pins[0] ? presets[i].assets_sd_pins : "(none)",
-                   (int)presets[i].battery_pin);
+                   sd_pins[0] ? sd_pins : "(none)",
+                   (int)presets[i].battery_pin, (int)config->led_pin,
+                   fos_board_i2c_buses(presets[i].name)[0] ? fos_board_i2c_buses(presets[i].name) : "(none)");
             break;
         }
     }
@@ -826,7 +865,7 @@ static int cmd_set(int argc, char **argv)
     }
     else if (strcmp(key, "wake_schedule") == 0) config->wake_schedule = atoi(value) != 0;
     else if (strcmp(key, "battery_pin") == 0 || strcmp(key, "battery_enable_pin") == 0 ||
-             strcmp(key, "buzzer_pin") == 0) {
+             strcmp(key, "buzzer_pin") == 0 || strcmp(key, "led_pin") == 0) {
         int pin = atoi(value);
         const char *why = pin >= 0 ? fos_config_gpio_pin_reserved(pin) : NULL;
         if (why != NULL) {
@@ -836,8 +875,26 @@ static int cmd_set(int argc, char **argv)
         if (pin < -1) pin = -1;
         if (strcmp(key, "battery_pin") == 0) config->battery_pin = (int8_t)pin;
         else if (strcmp(key, "battery_enable_pin") == 0) config->battery_enable_pin = (int8_t)pin;
-        /* Live: the next tone drives the new pin (fos_buzzer.c). */
-        else config->buzzer_pin = (int8_t)pin;
+        /* Live: the next tone drives the new pin (fos_buzzer.c), lights the
+         * new LED (fos_led.c). */
+        else if (strcmp(key, "buzzer_pin") == 0) config->buzzer_pin = (int8_t)pin;
+        else config->led_pin = (int8_t)pin;
+    }
+    else if (strcmp(key, "led_type") == 0) {
+        uint8_t type;
+        if (!fos_config_parse_led_type(value, &type)) {
+            printf("led_type must be gpio, gpio_inverted or ws2812\n");
+            return 1;
+        }
+        config->led_type = type;
+    }
+    /* The peripheral I2C buses, probed again at once (fos_i2c.c). */
+    else if (strcmp(key, "i2c_buses") == 0) {
+        if (fos_config_parse_i2c_buses(value, config->i2c_buses, &config->i2c_bus_count) != ESP_OK) {
+            printf("bad i2c spec, want e.g. sda=19,scl=20;sda=39,scl=40 (or \"\" for none)\n");
+            return 1;
+        }
+        fos_i2c_init();
     }
     else if (strcmp(key, "buzzer_tone_hz") == 0) {
         long hz = strtol(value, NULL, 10);
@@ -1686,6 +1743,89 @@ static int cmd_beep(int argc, char **argv)
     return 0;
 }
 
+/* `led [on|off|blink]`: the status LED on its own, to check the pin and the
+ * polarity without pressing a button. `blink` is three short flashes. */
+static int cmd_led(int argc, char **argv)
+{
+    fos_config_t *config = fos_config();
+    if (config->led_pin < 0) {
+        printf("no led_pin set (set led_pin 6; set led_type gpio_inverted)\n");
+        return 1;
+    }
+    if (!fos_led_present()) {
+        printf("led: GPIO %d refused, see the boot log\n", (int)config->led_pin);
+        return 1;
+    }
+    const char *what = argc > 1 ? argv[1] : "blink";
+    if (strcmp(what, "on") == 0) fos_led_set(true);
+    else if (strcmp(what, "off") == 0) fos_led_set(false);
+    else if (strcmp(what, "blink") == 0) {
+        for (int i = 0; i < 3; i++) {
+            fos_led_set(true);
+            vTaskDelay(pdMS_TO_TICKS(120));
+            fos_led_set(false);
+            vTaskDelay(pdMS_TO_TICKS(120));
+        }
+    } else {
+        printf("usage: led [on|off|blink]\n");
+        return 1;
+    }
+    return 0;
+}
+
+/* UTC, by hand: ctime() would pull newlib's asctime and with it the 9 KB
+ * integer printf this image otherwise does without. */
+static void print_utc(const char *label, time_t t)
+{
+    struct tm tm_utc;
+    gmtime_r(&t, &tm_utc);
+    printf("%s%04d-%02d-%02d %02d:%02d:%02d UTC", label, tm_utc.tm_year + 1900, tm_utc.tm_mon + 1,
+           tm_utc.tm_mday, tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec);
+}
+
+/* `i2c [sync]`: probe the configured buses again and say what answered,
+ * with the clock's and the charger's readings. `sync` writes the system
+ * time to the clock first (what an SNTP sync does) and says how it went. */
+static int cmd_i2c(int argc, char **argv)
+{
+    fos_config_t *config = fos_config();
+    if (config->i2c_bus_count == 0) {
+        printf("no i2c_buses set (set i2c_buses sda=19,scl=20;sda=39,scl=40)\n");
+        return 1;
+    }
+    if (argc > 1 && strcmp(argv[1], "sync") == 0) {
+        esp_err_t sync_err = fos_rtc_store_time();
+        printf("rtc sync: %s (0x%x)\n", sync_err == ESP_OK ? "written" : esp_err_to_name(sync_err),
+               (unsigned)sync_err);
+        print_utc("system clock: ", time(NULL));
+        printf("\n");
+    }
+    esp_err_t err = fos_i2c_init();
+    char summary[128];
+    fos_i2c_summary(summary, sizeof(summary));
+    printf("i2c: %s%s%s\n", summary, err != ESP_OK ? " - " : "", err != ESP_OK ? esp_err_to_name(err) : "");
+    if (fos_rtc_present()) {
+        uint8_t regs[FOS_RTC_TIME_LEN];
+        time_t rtc_time;
+        if (fos_i2c_read(FOS_I2C_PCF8563, FOS_RTC_REG_TIME, regs, sizeof(regs)) == ESP_OK) {
+            if (fos_rtc_decode(regs, &rtc_time)) {
+                time_t now = time(NULL);
+                print_utc("rtc:  ", rtc_time);
+                printf(" (system clock %+lld s)\n", (long long)(now - rtc_time));
+            } else {
+                printf("rtc:  not set (integrity flag)\n");
+            }
+        }
+    }
+    fos_charger_status_t charger;
+    if (fos_charger_present() && fos_charger_read(&charger) == ESP_OK) {
+        printf("charger: usb_power=%d charging=%d charge_done=%d vbus_stat=%u chrg_stat=%u\n",
+               (int)charger.usb_power, (int)charger.charging, (int)charger.charge_done,
+               (unsigned)charger.vbus_stat, (unsigned)charger.chrg_stat);
+    }
+    return 0;
+}
+
 /* `mic [seconds]`: record from the microphone and print how loud it was,
  * the bench check that the PDM pins are wired (docs/voice-chat.md). A
  * silent room reads a peak in the tens, a voice at arm's length in the
@@ -1745,6 +1885,8 @@ static esp_err_t register_frameos_console_commands(void)
         {.command = "heapinfo", .help = "Per-region heap breakdown (internal + PSRAM)", .func = cmd_heapinfo},
         {.command = "buttons", .help = "buttons [watch [seconds]] — configured buttons, or find which GPIO a press moves", .func = cmd_buttons},
         {.command = "beep", .help = "beep [hz] [ms] — sound the buzzer", .func = cmd_beep},
+        {.command = "led", .help = "led [on|off|blink] — the status LED", .func = cmd_led},
+        {.command = "i2c", .help = "i2c [sync] — probe the I2C buses again; the clock and the charger; sync writes the clock", .func = cmd_i2c},
         {.command = "mic", .help = "mic [seconds] — record from the microphone and print the level", .func = cmd_mic},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},
@@ -1862,6 +2004,10 @@ static void fos_console_task(void *arg)
              * queued is drained before the other channel gets its turn, so a
              * busy port never waits one timeout per byte. */
             uint8_t ch;
+#if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
+            /* No driver behind it on a board whose I2C owns the USB pads. */
+            if (states[i].channel == FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG && fos_i2c_owns_usb_pads()) continue;
+#endif
             int n = console_channel_read(states[i].channel, &ch, 1, pdMS_TO_TICKS(10));
             while (n > 0) {
                 console_feed_byte(&states[i], ch);
@@ -1936,10 +2082,16 @@ esp_err_t fos_console_start(void)
     fcntl(fileno(stdout), F_SETFL, 0);
 
 #if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
-    err = console_init_usb_serial_jtag();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "usb-serial-jtag console init failed: %s", esp_err_to_name(err));
-        return err;
+    /* No USB-Serial/JTAG channel on a board whose I2C runs on the USB pads
+     * (fos_i2c.c): the UART channel is the console there. */
+    if (fos_i2c_owns_usb_pads()) {
+        printf("console: GPIO19/20 are an I2C bus here, no usb-serial-jtag channel\n");
+    } else {
+        err = console_init_usb_serial_jtag();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "usb-serial-jtag console init failed: %s", esp_err_to_name(err));
+            return err;
+        }
     }
 #endif
 #if FOS_CONSOLE_HAS_UART

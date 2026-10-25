@@ -34,11 +34,11 @@ export type Esp32Pins = NonNullable<NonNullable<FrameType['device_config']>['pin
 export type Esp32PinKey = 'rst' | 'dc' | 'cs' | 'cs2' | 'busy' | 'sck' | 'mosi' | 'pwr'
 export type Esp32PinLayout = Record<Esp32PinKey, number>
 export type Esp32SdCardAssets = NonNullable<NonNullable<FrameType['device_config']>['sdCardAssets']>
-export type Esp32SdCardPinKey = 'cs' | 'sck' | 'miso' | 'mosi'
+export type Esp32SdCardPinKey = 'cs' | 'sck' | 'miso' | 'mosi' | 'pwr' | 'det'
 export type Esp32SdCardPinLayout = Record<Esp32SdCardPinKey, number>
 export type NormalizedEsp32SdCardAssets = {
   enabled: boolean
-  preset: 'custom' | 'waveshare_esp32_s3_photopainter' | 'waveshare_esp32_s3_epaper_13_3e6'
+  preset: NonNullable<Esp32SdCardAssets['preset']>
   pins: Esp32SdCardPinLayout
   maxFrequencyKHz: number
   mountPath: string
@@ -232,11 +232,16 @@ export const PIMORONI_INKY_FRAME_PIN_LAYOUT: Esp32PinLayout & InkyFrameExtraPins
   hold_vsys: 2,
 }
 
+// The four bus pins, then the slot's power switch and card-detect contact
+// (-1 = not wired; the firmware drives the switch high before the mount and
+// skips the probe when the contact says the slot is empty).
 export const ESP32_SD_CARD_PIN_FIELDS: { key: Esp32SdCardPinKey; label: string }[] = [
   { key: 'cs', label: 'CS' },
   { key: 'sck', label: 'SCK' },
   { key: 'miso', label: 'MISO' },
   { key: 'mosi', label: 'MOSI' },
+  { key: 'pwr', label: 'Power switch' },
+  { key: 'det', label: 'Card detect' },
 ]
 
 export const ESP32_SD_CARD_EMPTY_PIN_LAYOUT: Esp32SdCardPinLayout = {
@@ -244,6 +249,8 @@ export const ESP32_SD_CARD_EMPTY_PIN_LAYOUT: Esp32SdCardPinLayout = {
   sck: -1,
   miso: -1,
   mosi: -1,
+  pwr: -1,
+  det: -1,
 }
 
 export const ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
@@ -251,6 +258,8 @@ export const ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
   sck: 39,
   miso: 40,
   mosi: 41,
+  pwr: -1,
+  det: -1,
 }
 
 export const ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
@@ -258,6 +267,33 @@ export const ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = 
   sck: 6,
   miso: 5,
   mosi: 7,
+  pwr: -1,
+  det: -1,
+}
+
+// The Seeed reTerminal E1001/E1002/E1004 TF socket (the same on all three):
+// it hangs off the panel's SPI bus — SCK7 and MOSI9 are the panel's, which
+// is how the firmware knows to share the display bus — with MISO on GPIO8,
+// CS on GPIO14, a card-detect contact on GPIO15 and a power switch on
+// GPIO16. Mirrors EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS.
+export const ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
+  cs: 14,
+  sck: 7,
+  miso: 8,
+  mosi: 9,
+  pwr: 16,
+  det: 15,
+}
+
+export const ESP32_SEEED_RETERMINAL_SD_CARD_PRESETS = [
+  'seeed_reterminal_e1001',
+  'seeed_reterminal_e1002',
+  'seeed_reterminal_e1004',
+] as const
+export type Esp32SeeedReterminalSdCardPreset = (typeof ESP32_SEEED_RETERMINAL_SD_CARD_PRESETS)[number]
+
+export function isSeeedReterminalSdCardPreset(value: unknown): value is Esp32SeeedReterminalSdCardPreset {
+  return (ESP32_SEEED_RETERMINAL_SD_CARD_PRESETS as readonly unknown[]).includes(value)
 }
 
 export interface Esp32HardwarePresetConfig {
@@ -367,6 +403,13 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
     flashSize: '32MB',
     psramMB: 8,
     pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: 'seeed_reterminal_e1001',
+      pins: ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT,
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
   },
   seeed_reterminal_e1002: {
     label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',
@@ -375,6 +418,13 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
     flashSize: '32MB',
     psramMB: 8,
     pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: 'seeed_reterminal_e1002',
+      pins: ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT,
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
   },
   seeed_reterminal_e1004: {
     label: 'Seeed reTerminal E1004 (13.3" color ESP32-S3)',
@@ -383,6 +433,13 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
     flashSize: '32MB',
     psramMB: 8,
     pins: ESP32_SEEED_RETERMINAL_E1004_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: 'seeed_reterminal_e1004',
+      pins: ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT,
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
   },
   elecrow_crowpanel_5in79: {
     label: 'Elecrow CrowPanel 5.79" (ESP32-S3)',
@@ -504,20 +561,19 @@ export function normalizeEsp32SdCardPinLayout(
     sck: normalizeEsp32PinNumber(value?.sck, fallback.sck),
     miso: normalizeEsp32PinNumber(value?.miso, fallback.miso),
     mosi: normalizeEsp32PinNumber(value?.mosi, fallback.mosi),
+    pwr: normalizeEsp32PinNumber(value?.pwr, fallback.pwr),
+    det: normalizeEsp32PinNumber(value?.det, fallback.det),
   }
 }
 
 export function normalizeEsp32SdCardAssets(value: Esp32SdCardAssets | undefined): NormalizedEsp32SdCardAssets {
   const preset =
-    value?.preset === 'waveshare_esp32_s3_photopainter' || value?.preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
+    value?.preset === 'waveshare_esp32_s3_photopainter' ||
+    value?.preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET ||
+    isSeeedReterminalSdCardPreset(value?.preset)
       ? value.preset
       : 'custom'
-  const presetPins =
-    preset === 'waveshare_esp32_s3_photopainter'
-      ? ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT
-      : preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
-      ? ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT
-      : ESP32_SD_CARD_EMPTY_PIN_LAYOUT
+  const presetPins = esp32SdCardPinsForPreset(preset)
   return {
     enabled: value?.enabled === true,
     preset,
@@ -531,18 +587,34 @@ export function esp32SdCardPinLayoutsEqual(first: Esp32SdCardPinLayout, second: 
   return ESP32_SD_CARD_PIN_FIELDS.every(({ key }) => first[key] === second[key])
 }
 
-export function esp32SdCardPresetValue(config: NormalizedEsp32SdCardAssets): string {
+/**
+ * The SD preset select's value for a config: its stored preset when it is a
+ * known socket, else the socket whose pins it matches, else custom. The three
+ * reTerminal E-series share one socket, so pins matching it name
+ * `seeedPreset` (the frame's own E-series preset, when it is one) rather
+ * than a fixed member of the three.
+ */
+export function esp32SdCardPresetValue(
+  config: NormalizedEsp32SdCardAssets,
+  seeedPreset: Esp32SeeedReterminalSdCardPreset = 'seeed_reterminal_e1002'
+): string {
   if (config.preset === 'waveshare_esp32_s3_photopainter') {
     return 'waveshare_esp32_s3_photopainter'
   }
   if (config.preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
     return ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
   }
+  if (isSeeedReterminalSdCardPreset(config.preset)) {
+    return seeedPreset
+  }
   if (esp32SdCardPinLayoutsEqual(config.pins, ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT)) {
     return 'waveshare_esp32_s3_photopainter'
   }
   if (esp32SdCardPinLayoutsEqual(config.pins, ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT)) {
     return ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
+  }
+  if (esp32SdCardPinLayoutsEqual(config.pins, ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT)) {
+    return seeedPreset
   }
   return 'custom'
 }
@@ -553,6 +625,9 @@ export function esp32SdCardPinsForPreset(preset: string): Esp32SdCardPinLayout {
   }
   if (preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
     return { ...ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT }
+  }
+  if (isSeeedReterminalSdCardPreset(preset)) {
+    return { ...ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT }
   }
   return { ...ESP32_SD_CARD_EMPTY_PIN_LAYOUT }
 }

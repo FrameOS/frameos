@@ -15,6 +15,7 @@
 #include "esp_timer.h"
 
 #include "fos_buzzer.h"
+#include "fos_led.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
@@ -428,6 +429,9 @@ static void stop_capture(void)
     /* The capture task ends its current read (200 ms at most) and leaves. */
     for (int i = 0; i < 50 && !s_capture_done; i++) vTaskDelay(pdMS_TO_TICKS(10));
     fos_mic_stop();
+    /* The microphone is shut: the LED goes back to the notes (the sent
+     * chirp, the ticks, the answer). */
+    fos_led_hold(false);
 }
 
 static void relay_task(void *arg)
@@ -460,9 +464,13 @@ static void relay_task(void *arg)
         goto out;
     }
 
+    /* The LED stays lit for the whole recording (fos_led.h): the sparkle's
+     * rests do not blink it, and a glance says the frame is listening. */
+    fos_led_hold(true);
     fos_buzzer_voice_listening();
     esp_err_t err = fos_mic_start(config->mic_pins.clk, config->mic_pins.data, config->mic_pins.pwr);
     if (err != ESP_OK) {
+        fos_led_hold(false);
         voice_log_error("microphone", esp_err_to_name(err));
         goto out;
     }
@@ -472,6 +480,7 @@ static void relay_task(void *arg)
         s_capturing = false;
         s_capture_done = true;
         fos_mic_stop();
+        fos_led_hold(false);
         voice_log_error("no_memory", "capture task");
         goto out;
     }
@@ -580,6 +589,7 @@ out:
     }
     s_buf_cap = 0;
     ESP_LOGI(TAG, "session over after %lld ms", (long long)(now_ms() - started_ms));
+    fos_led_hold(false); /* whatever path led here */
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_state = VOICE_IDLE;
     s_end_requested = false;

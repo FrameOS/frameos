@@ -20,7 +20,7 @@ import {
 } from '../../../frameLogic'
 import type { GPIOButton, Palette } from '../../../../../types'
 import { buttonRoleByLabel, buttonRoles, keyboardLayouts } from '../../../../../utils/eventsContract.gen'
-import { useFrameSettings } from '../frameSettingsContext'
+import { useFrameSettings, type StatusLedType } from '../frameSettingsContext'
 import { microphonePinPlaceholder } from '../../../../../utils/voiceChat'
 
 /**
@@ -273,9 +273,10 @@ export function GpioButtonsSection(): JSX.Element {
               buttons. No nav entry of its own; GPIO's link lands above it.
               The pins field is on every ESP32 board; the voice chat switch
               and what it may do appear once the frame has a microphone. */}
-          <H6 id="frame-settings-gpio-extras">Buzzer and microphone</H6>
+          <H6 id="frame-settings-gpio-extras">Buzzer, LED and microphone</H6>
           <div className="pl-2 @md:pl-8 space-y-2">
             <ButtonBeepField />
+            <StatusLedField />
             <MicrophoneField />
             <VoiceChatField />
             <VoicePermissionsField />
@@ -351,6 +352,79 @@ function ButtonBeepField(): JSX.Element | null {
             value={toneHz}
             onChange={(value) => setButtonBeep({ toneHz: value })}
             placeholder={tonePlaceholder}
+          />
+        </div>
+      </div>
+    </fieldset>
+  )
+}
+
+/**
+ * The board's status LED (fos_led.c): the GPIO and how it is lit. It follows
+ * the buzzer: lit for every note a press, a hold or the voice chat sounds,
+ * dark in between — so a frame with the beep off, or a board without a
+ * buzzer, still shows what the frame heard. Empty leaves the board's own
+ * (the reTerminal E1001/E1002: 6 lit low, the E1004: 48 lit high), -1 = no LED.
+ * Applied live.
+ */
+function StatusLedField(): JSX.Element | null {
+  const { statusLed, setStatusLed } = useFrameSettings()
+  if (!statusLed) {
+    return null
+  }
+  const { pin, type, reportedPin, reportedType, disabledReason } = statusLed
+  const pinPlaceholder =
+    reportedPin === undefined ? 'Board default, -1 = none' : reportedPin < 0 ? 'None on the frame' : `${reportedPin} on the frame`
+  const typeLabels: Record<StatusLedType, string> = {
+    gpio: 'GPIO, lit high (reTerminal E1004)',
+    gpio_inverted: 'GPIO, lit low (reTerminal E1001/E1002)',
+    ws2812: 'WS2812 addressable pixel',
+  }
+  const typePlaceholder = reportedType ? `${typeLabels[reportedType]} on the frame` : 'Board default'
+  return (
+    <fieldset disabled={disabledReason !== undefined} className="min-w-0 space-y-2">
+      <div className="space-y-1 @md:flex @md:gap-2">
+        <Label className="@md:w-1/3">
+          Status LED GPIO
+          <Tooltip
+            title={
+              disabledReason ?? (
+                <>
+                  The board&apos;s status LED lights with every beep: a press, each second of a hold, and the voice
+                  chat&apos;s listening, waiting and answer cues. With the button beep set to -1 it is the only cue, which
+                  suits a frame you talk to. GPIO 6 on the Seeed reTerminal E1001 and E1002 (lit low), 48 on the E1004 (lit
+                  high). Set -1 for no LED. Applies without a restart.
+                </>
+              )
+            }
+          />
+        </Label>
+        <div className="w-full">
+          <NumberTextInput value={pin} onChange={(value) => setStatusLed({ pin: value })} placeholder={pinPlaceholder} />
+        </div>
+      </div>
+      <div className="space-y-1 @md:flex @md:gap-2">
+        <Label className="@md:w-1/3">
+          Status LED type
+          <Tooltip
+            title={
+              disabledReason ?? (
+                <>
+                  How the LED is wired: lit when the pin is high, lit when it is low (the reTerminal E-series), or one
+                  WS2812-style addressable RGB pixel fed from the pin, shown as a soft white.
+                </>
+              )
+            }
+          />
+        </Label>
+        <div className="w-full">
+          <Select
+            value={type ?? ''}
+            onChange={(value) => setStatusLed({ type: value === '' ? undefined : (value as StatusLedType) })}
+            options={[
+              { value: '', label: typePlaceholder },
+              ...(Object.keys(typeLabels) as StatusLedType[]).map((key) => ({ value: key, label: typeLabels[key] })),
+            ]}
           />
         </div>
       </div>

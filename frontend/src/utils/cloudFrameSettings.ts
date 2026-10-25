@@ -267,6 +267,22 @@ export const esp32MicrophoneCloudFrameSettingKeys: readonly Esp32Key[] = esp32Ke
 ).filter((key) => key.startsWith('mic_'))
 
 /**
+ * 2026.10.20: the board's status LED (`led_pin`, -1 = none; `led_type`:
+ * gpio, gpio_inverted, ws2812), which follows the buzzer's notes (fos_led.c)
+ * so a frame without a buzzer still shows its presses and the voice chat's
+ * cues. Applied live. The same firmware floor as the voice chat, its own
+ * key list.
+ */
+export const esp32LedCloudFrameSettingsMinVersion = esp32VoiceChatCloudFrameSettingsMinVersion
+export const esp32LedCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  esp32LedCloudFrameSettingsMinVersion
+).filter((key) => key.startsWith('led_'))
+
+export function cloudFrameSupportsEsp32Led(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(esp32LedCloudFrameSettingsMinVersion, frameosVersion)
+}
+
+/**
  * What every ESP32 firmware with the cloud link applies: four of the base
  * six (no timezone before 2026.8.34, no debug before 2026.8.31) plus the
  * ungated power keys.
@@ -462,6 +478,7 @@ export const numericCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = [
   'mic_clk_pin',
   'mic_data_pin',
   'mic_pwr_pin',
+  'led_pin',
   'metrics_interval',
   'max_http_response_bytes',
 ]

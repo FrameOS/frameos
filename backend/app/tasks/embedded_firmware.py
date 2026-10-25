@@ -148,12 +148,19 @@ EMBEDDED_WAVESHARE_13IN3E6_PINS = {
     "mosi": 46,
     "pwr": 1,
 }
-EMBEDDED_SD_CARD_ASSETS_PIN_KEYS = ("cs", "sck", "miso", "mosi")
+# The four bus pins every socket has, then the two a slot may add: a power
+# switch the firmware drives high before the mount and a card-detect contact
+# (low = a card is seated). -1 = not wired; the console spec names them only
+# when they are (fos_config_parse_assets_sd_pins).
+EMBEDDED_SD_CARD_ASSETS_PIN_KEYS = ("cs", "sck", "miso", "mosi", "pwr", "det")
+EMBEDDED_SD_CARD_ASSETS_BUS_PIN_KEYS = ("cs", "sck", "miso", "mosi")
 EMBEDDED_SD_CARD_ASSETS_DEFAULT_PINS = {
     "cs": -1,
     "sck": -1,
     "miso": -1,
     "mosi": -1,
+    "pwr": -1,
+    "det": -1,
 }
 # Waveshare ESP32-S3 PhotoPainter TF socket, from the vendor schematic:
 # TF pin 2 (DAT3/CS)=GPIO38, pin 5 (CLK)=GPIO39, pin 7 (DAT0/MISO)=GPIO40,
@@ -161,19 +168,40 @@ EMBEDDED_SD_CARD_ASSETS_DEFAULT_PINS = {
 # Waveshare ESP32-S3 ePaper 13.3E6 TF socket: SD_D1=GPIO4,
 # SD_MISO=GPIO5, SD_CLK=GPIO6, SD_MOSI=GPIO7, SD_CS=GPIO15,
 # SD_D2=GPIO16. FrameOS uses SPI mode.
+# Seeed reTerminal E1001/E1002/E1004 TF socket (Seeed's schematics, the same
+# on all three): it hangs off the panel's SPI bus — SCK GPIO7 and MOSI GPIO9
+# are the panel's — with MISO on GPIO8 and CS on GPIO14, a card-detect
+# contact on GPIO15 (low = seated) and a TPS22916 power switch on GPIO16.
+# The firmware sees the panel's SCK/MOSI and shares the display bus
+# (fos_assets_sd.c); fos_board.c's k_sd_pins is the device copy.
+EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS = {
+    "cs": 14,
+    "sck": 7,
+    "miso": 8,
+    "mosi": 9,
+    "pwr": 16,
+    "det": 15,
+}
 EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     "waveshare_esp32_s3_photopainter": {
         "cs": 38,
         "sck": 39,
         "miso": 40,
         "mosi": 41,
+        "pwr": -1,
+        "det": -1,
     },
     "waveshare_esp32_s3_epaper_13_3e6": {
         "cs": 15,
         "sck": 6,
         "miso": 5,
         "mosi": 7,
+        "pwr": -1,
+        "det": -1,
     },
+    "seeed_reterminal_e1001": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
+    "seeed_reterminal_e1002": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
+    "seeed_reterminal_e1004": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
 }
 EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ = 20_000
 # TRMNL OG/BWRY (ESP32-C3): EPD on SCK7/MOSI8, wake button GPIO2, battery ADC
@@ -334,6 +362,44 @@ EMBEDDED_SEEED_RETERMINAL_MIC = {
     "micDataPin": 41,
     "micPwrPin": 38,
 }
+# The E-series' green status LED: ESP_IO6/LED on the E1001/E1002, lit low;
+# ESP_IO48/LED on the E1004 behind a transistor, lit high (the bench board
+# idled lit when typed as inverted). It follows the buzzer's notes
+# (fos_led.c), so a frame with the buzzer silenced still shows its presses
+# and the voice chat's cues. fos_board.c's k_leds is the device copy.
+# The I2C peripheral buses the firmware probes at boot (fos_i2c.c): the
+# PCF8563 clock and SHT40 sensor on 19/20 on every E-series model, the
+# SY6974B charger on 39/40 on the E1001/E1002 and on 19/20 on the E1004
+# (Seeed's E1002 V1.2 and E1004 V1.0 schematics). Applied by the console's
+# `set hardware` from fos_board.c's k_i2c_buses; the backend's copy is for
+# the parity test and the documentation, nothing provisions it.
+EMBEDDED_SEEED_RETERMINAL_E10XX_I2C = {"i2cBuses": "sda=19,scl=20;sda=39,scl=40"}
+EMBEDDED_SEEED_RETERMINAL_E1004_I2C = {"i2cBuses": "sda=19,scl=20"}
+# The contract's `led_type` enum (docs/cloud-frames-contract.json).
+EMBEDDED_LED_TYPES = ("gpio", "gpio_inverted", "ws2812")
+EMBEDDED_SEEED_RETERMINAL_E10XX_LED = {
+    "ledPin": 6,
+    "ledType": "gpio_inverted",
+}
+EMBEDDED_SEEED_RETERMINAL_E1004_LED = {
+    "ledPin": 48,
+    "ledType": "gpio",
+}
+
+
+def _seeed_reterminal_sd_card_assets(preset: str) -> dict[str, Any]:
+    """The E-series TF socket as a preset's sdCardAssets block, named after
+    the board so the SPA's socket select shows the board, not "custom"."""
+    return {
+        "sdCardAssets": {
+            "enabled": True,
+            "preset": preset,
+            "mountPath": "/srv/assets",
+            "pins": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
+            "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
+        },
+    }
+
 # Seeed reTerminal E1004 (ESP32-S3, 32MB flash, 8MB PSRAM): 13.3" 1200x1600
 # Spectra 6 (T133A01) on the E-series SPI bus — SCK7/MOSI9, CS10, DC11,
 # BUSY13 as the E1001/E1002 — but with the panel's second chip-select on
@@ -500,6 +566,9 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER,
         **EMBEDDED_SEEED_RETERMINAL_MIC,
+        **EMBEDDED_SEEED_RETERMINAL_E10XX_LED,
+        **EMBEDDED_SEEED_RETERMINAL_E10XX_I2C,
+        **_seeed_reterminal_sd_card_assets("seeed_reterminal_e1001"),
     },
     "seeed_reterminal_e1002": {
         "device": "waveshare.EPD_7in3e",
@@ -513,6 +582,9 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER,
         **EMBEDDED_SEEED_RETERMINAL_MIC,
+        **EMBEDDED_SEEED_RETERMINAL_E10XX_LED,
+        **EMBEDDED_SEEED_RETERMINAL_E10XX_I2C,
+        **_seeed_reterminal_sd_card_assets("seeed_reterminal_e1002"),
     },
     "seeed_reterminal_e1004": {
         # 1200x1600 on an 8MB module: the 16-bit render canvas is what makes
@@ -526,6 +598,9 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         # 5000 mAh cell through the E-series divider (verified on hardware).
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BATTERY,
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER,
+        **EMBEDDED_SEEED_RETERMINAL_E1004_LED,
+        **EMBEDDED_SEEED_RETERMINAL_E1004_I2C,
+        **_seeed_reterminal_sd_card_assets("seeed_reterminal_e1004"),
         # A 5000 mAh frame: deep sleep between renders while on battery, waking
         # every 15 min for control-plane commands; stays connected on USB.
         "deepSleepOnBattery": True,
@@ -985,6 +1060,8 @@ EMBEDDED_PRESET_SEED_ONLY_KEYS = (
     ("micClkPin", "mic_clk_pin"),
     ("micDataPin", "mic_data_pin"),
     ("micPwrPin", "mic_pwr_pin"),
+    ("ledPin", "led_pin"),
+    ("ledType", "led_type"),
     ("deepSleepOnBattery", "deep_sleep_on_battery"),
     ("wakeCheckSeconds", "wake_check_seconds"),
 )
@@ -1125,7 +1202,7 @@ def embedded_sd_card_assets_for_frame(frame: Frame) -> dict[str, Any]:
         max_frequency_khz = int(max(400, min(40_000, raw_frequency)))
 
     enabled = raw.get("enabled") is True
-    if enabled and any(pins[key] < 0 for key in EMBEDDED_SD_CARD_ASSETS_PIN_KEYS):
+    if enabled and any(pins[key] < 0 for key in EMBEDDED_SD_CARD_ASSETS_BUS_PIN_KEYS):
         enabled = False
 
     return {
@@ -1557,9 +1634,16 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     sd_card_assets = embedded_sd_card_assets_for_frame(frame)
     if sd_card_assets["enabled"]:
         sd_pins = sd_card_assets["pins"]
+        # The slot's power and detect pins ride the spec only when wired, so a
+        # board without them provisions with the four-pin spec older firmware
+        # parses.
         settings.append(_provisioning_setting(
             "assets_sd_pins",
-            ",".join(f"{key}={sd_pins[key]}" for key in EMBEDDED_SD_CARD_ASSETS_PIN_KEYS),
+            ",".join(
+                f"{key}={sd_pins[key]}"
+                for key in EMBEDDED_SD_CARD_ASSETS_PIN_KEYS
+                if key in EMBEDDED_SD_CARD_ASSETS_BUS_PIN_KEYS or sd_pins[key] >= 0
+            ),
         ))
         settings.append(_provisioning_setting("assets_sd_freq", sd_card_assets["maxFrequencyKHz"]))
     # Sent either way: a hardware preset enables the socket it knows about, and
@@ -1596,6 +1680,13 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     buzzer_tone_hz = _embedded_device_config_value(frame, "buzzerToneHz", "buzzer_tone_hz")
     if isinstance(buzzer_tone_hz, int) and not isinstance(buzzer_tone_hz, bool):
         settings.append(_provisioning_setting("buzzer_tone_hz", buzzer_tone_hz))
+    # The status LED that follows the buzzer (fos_led.c): its GPIO and kind.
+    led_pin = _embedded_device_config_value(frame, "ledPin", "led_pin")
+    if isinstance(led_pin, int) and not isinstance(led_pin, bool):
+        settings.append(_provisioning_setting("led_pin", led_pin))
+    led_type = _embedded_device_config_value(frame, "ledType", "led_type")
+    if isinstance(led_type, str) and led_type in EMBEDDED_LED_TYPES:
+        settings.append(_provisioning_setting("led_type", led_type))
     # The PDM microphone's pins travel as the console's one `mic_pins` spec
     # (docs/voice-chat.md); the parser keeps a pin the spec leaves out, so
     # only the pins the backend holds are named.

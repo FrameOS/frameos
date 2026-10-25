@@ -36,13 +36,61 @@ static int g_checks = 0;
         }                                                                      \
     } while (0)
 
-static fos_power_decision_t decide(fos_power_state_t *state, int mv, bool on_battery_flag)
+static fos_power_decision_t decide_with_charger(fos_power_state_t *state, int mv, bool on_battery_flag,
+                                                int usb_power)
 {
     fos_power_input_t in = {.mv = mv, .deep_sleep = false,
-                            .deep_sleep_on_battery = on_battery_flag};
+                            .deep_sleep_on_battery = on_battery_flag, .usb_power = usb_power};
     fos_power_decision_t out;
     fos_power_decide(&in, state, &out);
     return out;
+}
+
+static fos_power_decision_t decide(fos_power_state_t *state, int mv, bool on_battery_flag)
+{
+    return decide_with_charger(state, mv, on_battery_flag, -1);
+}
+
+static void test_charger_decides_the_power_source(void)
+{
+    /* A reTerminal on its desk, USB in, cell at 4.1 V: without the charger
+     * the divider says "cell present" and the frame deep-sleeps between
+     * renders (the E1004 did, 2026-08-26). With it: not on battery, awake. */
+    fos_power_state_t state;
+    memset(&state, 0, sizeof(state));
+    fos_power_decision_t d = decide_with_charger(&state, 4100, true, 1);
+    CHECK(!d.on_battery, "USB in: not on battery");
+    CHECK(!d.deep_sleep, "...so deep_sleep_on_battery stays awake");
+    CHECK(d.mv_used == 4100 && state.last_good_mv == 4100, "the cell is still tracked");
+    /* The plug comes out: on battery at once, and the cell test agrees. */
+    d = decide_with_charger(&state, 4080, true, 0);
+    CHECK(d.on_battery && d.deep_sleep, "unplugged: on battery, sleeps");
+    /* A board with a charger but no battery divider configured: the charger
+     * alone says which way the frame runs. */
+    fos_power_state_t bare;
+    memset(&bare, 0, sizeof(bare));
+    d = decide_with_charger(&bare, 0, true, 0);
+    CHECK(d.on_battery && d.deep_sleep, "no reading, no USB: it runs on the cell");
+    d = decide_with_charger(&bare, 0, true, 1);
+    CHECK(!d.on_battery && !d.deep_sleep, "no reading, USB in: on the mains");
+    /* A flat cell on the charger is charging, not critical: render as usual. */
+    fos_power_state_t flat;
+    memset(&flat, 0, sizeof(flat));
+    decide_with_charger(&flat, 3100, true, 1);
+    d = decide_with_charger(&flat, 3050, true, 1);
+    CHECK(!d.critical && !d.suspect && !d.deep_sleep, "charging a flat cell: not critical");
+    /* Unplug it and the streak it kept counting bites at once. */
+    d = decide_with_charger(&flat, 3040, true, 0);
+    CHECK(d.critical && d.deep_sleep, "unplugged flat cell: critical");
+    /* -1 (no charger) is the old behaviour, untouched. */
+    fos_power_state_t plain;
+    memset(&plain, 0, sizeof(plain));
+    d = decide_with_charger(&plain, 4100, true, -1);
+    CHECK(d.on_battery && d.deep_sleep, "no charger: the cell test decides");
+    /* The always-on flag still sleeps a frame on USB. */
+    fos_power_input_t in = {.mv = 4100, .deep_sleep = true, .deep_sleep_on_battery = false, .usb_power = 1};
+    fos_power_decide(&in, &plain, &d);
+    CHECK(d.deep_sleep && !d.on_battery, "deep_sleep always: sleeps on USB too");
 }
 
 static void test_healthy_cell_sleeps_every_pass(void)
@@ -160,6 +208,7 @@ int main(void)
     test_never_seen_a_cell();
     test_critical_needs_two_passes_and_still_sleeps();
     test_big_drop_is_believed_on_repeat();
+    test_charger_decides_the_power_source();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok",
            g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

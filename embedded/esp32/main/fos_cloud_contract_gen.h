@@ -98,6 +98,8 @@ static const fos_rule_t k_fos_rules[] = {
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
+    {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
+    {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 12, 3, 0, 0, 0, 0, 0.0f, 0.0f},
 };
 static const fos_rule_key_t k_fos_rule_keys[] = {
     {"name", 11, 0},
@@ -138,7 +140,7 @@ static const fos_rule_key_t k_fos_rule_keys[] = {
 };
 static const int16_t k_fos_rule_children[] = {6, 7, 13, 15, 40, 45, 49, };
 static const int32_t k_fos_rule_int_enums[] = {0, 90, 180, 270, };
-static const char *const k_fos_rule_str_enums[] = {"contain", "cover", "stretch", "center", "default", "on", "off", "render", "setCurrentScene", "setSceneState", "turnOn", "turnOff", };
+static const char *const k_fos_rule_str_enums[] = {"contain", "cover", "stretch", "center", "default", "on", "off", "render", "setCurrentScene", "setSceneState", "turnOn", "turnOff", "gpio", "gpio_inverted", "ws2812", };
 
 static const fos_contract_setting_t k_fos_contract_settings[] = {
     {"name", 0, 0, NULL},
@@ -165,8 +167,10 @@ static const fos_contract_setting_t k_fos_contract_settings[] = {
     {"mic_clk_pin", 63, 0, NULL},
     {"mic_data_pin", 64, 0, NULL},
     {"mic_pwr_pin", 65, 0, NULL},
+    {"led_pin", 66, 0, NULL},
+    {"led_type", 67, 0, NULL},
 };
-#define FOS_CONTRACT_SETTINGS_COUNT 24
+#define FOS_CONTRACT_SETTINGS_COUNT 26
 
 /* Every verb in the contract, with the scope it requires (NULL = none) and
  * whether it is a content verb (refused `backend_managed` when a backend owns the frame). */

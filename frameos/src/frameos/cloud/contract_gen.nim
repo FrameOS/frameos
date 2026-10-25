@@ -287,6 +287,14 @@ const CloudContractSettings* = @[
     Rule(kind: rkInt, hasMin: true, min: -1.0, hasMax: true, max: 48.0),
   profiles: @[
     ProfileSpec(profile: "esp32", since: "2026.10.20")]),
+  SettingSpec(key: "led_pin", rule:
+    Rule(kind: rkInt, hasMin: true, min: -1.0, hasMax: true, max: 48.0),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.10.20")]),
+  SettingSpec(key: "led_type", rule:
+    Rule(kind: rkString, strEnum: @["gpio", "gpio_inverted", "ws2812"]),
+  profiles: @[
+    ProfileSpec(profile: "esp32", since: "2026.10.20")]),
 ]
 
 const CloudContractVerbs* = @[

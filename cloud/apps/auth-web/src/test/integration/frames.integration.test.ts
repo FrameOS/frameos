@@ -2402,6 +2402,8 @@ describe("frame management API", () => {
         "mic_clk_pin",
         "mic_data_pin",
         "mic_pwr_pin",
+        "led_pin",
+        "led_type",
       ].sort(),
     );
     // The ESP32 profile: exactly what ws_handle_set_settings applies.
@@ -2430,6 +2432,8 @@ describe("frame management API", () => {
         "mic_clk_pin",
         "mic_data_pin",
         "mic_pwr_pin",
+        "led_pin",
+        "led_type",
       ].sort(),
     );
     for (const key of esp32SettableKeys) {

@@ -62,6 +62,21 @@ UBYTE DEV_SPI_ReadData();
 UBYTE DEV_Module_Init(void);
 void DEV_Module_Exit(void);
 
+/* The panel's SPI bus, shared with an SD card on the same SCK/MOSI (the
+ * Seeed reTerminal E-series). DEV_SPI_Bus_Init brings the bus up once, with
+ * the card's MISO when it asks first (the panel never reads); 0 on success.
+ * DEV_SPI_Bus_Share does that and returns the spi_host_device_t the card's
+ * sdspi device joins (-1 when the bus cannot be shared), after which the
+ * panel holds the bus for the whole of each refresh (DEV_SPI_Acquire /
+ * DEV_SPI_Release around its init-display-sleep sequence), because the
+ * vendor drivers drive CS by hand and an SD transaction in between would
+ * clock the panel with its CS low. The sdspi driver acquires the bus per
+ * transaction of its own, so the two take turns. */
+int DEV_SPI_Bus_Init(int miso_pin);
+int DEV_SPI_Bus_Share(int miso_pin);
+void DEV_SPI_Acquire(void);
+void DEV_SPI_Release(void);
+
 /*
  * Structured debug logging for the panel drivers; same contract as the
  * Raspberry Pi DEV_Config.h (frameos/src/drivers/waveshare/ePaper). On

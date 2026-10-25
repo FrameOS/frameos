@@ -2500,7 +2500,7 @@ async def test_api_frame_new_embedded_waveshare_13in3e6_preset(async_client):
         'enabled': True,
         'preset': 'waveshare_esp32_s3_epaper_13_3e6',
         'mountPath': '/srv/assets',
-        'pins': {'cs': 15, 'sck': 6, 'miso': 5, 'mosi': 7},
+        'pins': {'cs': 15, 'sck': 6, 'miso': 5, 'mosi': 7, 'pwr': -1, 'det': -1},
         'maxFrequencyKHz': 20000,
     }
 
@@ -2542,7 +2542,7 @@ async def test_api_frame_new_embedded_waveshare_photopainter_preset(async_client
         'enabled': True,
         'preset': 'waveshare_esp32_s3_photopainter',
         'mountPath': '/srv/assets',
-        'pins': {'cs': 38, 'sck': 39, 'miso': 40, 'mosi': 41},
+        'pins': {'cs': 38, 'sck': 39, 'miso': 40, 'mosi': 41, 'pwr': -1, 'det': -1},
         'maxFrequencyKHz': 20000,
     }
 

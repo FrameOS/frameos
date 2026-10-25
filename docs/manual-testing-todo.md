@@ -73,6 +73,128 @@ confirm. Still open:
 - [ ] **Settings** → GPIO buttons → "Voice chat" off/on reaches the frame
   live on both planes (`voice_chat` in the settings change log).
 
+### reTerminal E-series peripherals bench (the SD slot, the LED, the clock, the charger)
+
+Bench 2026-10-25 (E1002 over USB, cloud-enrolled, a 64 GB FAT32 card seated,
+firmware from the branch flashed into both OTA slots of its 8 MB layout):
+the board provisioned before the keys existed came up with the slot on
+(`SD assets mounted at /srv/assets (60906 MB, … on the panel's SPI bus)`),
+`i2c` found `sda19/scl20: pcf8563 sht4x; sda39/scl40: sy6974b`, the charger
+read `usb_power=1 charging=1` and the metrics said `onBattery:false` with
+USB in (the old firmware said true), the first SNTP sync wrote the PCF8563
+and the next reset said `rtc: clock set from the PCF8563: 2026-10-25
+00:09:36 UTC` before Wi-Fi, `display_test bands` refreshed the panel on the
+shared bus (`ESP_OK`) and `usb_api list-assets` read the card right after,
+`led blink` / `beep` ran, the cloud hello carried `ledPin 6`, `ledType
+gpio_inverted`, `rtc`, `charger`, `climateSensor`, `sdCard`. Internal RAM
+idled at 80 KB free as before the branch. Two things found on the bench and
+fixed: the PCF8563 NACKed every write (I2C error 0x103) until the USB
+Serial/JTAG PHY was detached from GPIO19/20 (the S3's USB pads, which these
+boards use for I2C), and the SNTP callback wrote the clock on lwIP's thread,
+now a flag the render pass acts on. A frame with no scenes loaded logs
+"retrying in 10 s" and does not (the pass waits the whole interval; a
+manual `render` runs it); older than this branch, noted here. Unplugged for
+a few minutes, the metrics read `usbPower:false charging:false
+onBattery:true` (3902 mV) and flipped back on the replug. The LED blinks on
+`led blink` and is held lit through a voice recording (`fos_led_hold`).
+Still open:
+
+- [ ] **Hold REFRESH on a cloud-managed frame** ends the same way (the
+  cloud route is integration-tested only): `voice:reply` with the transcript,
+  the switch delivered over the socket.
+- [ ] **By ear**: the sparkle at 1 s in place of the first hold "dun", no
+  further duns and no release click on the key, every two seconds after the
+  release a tiny high tick while the
+  upload finishes and a quiet low bop while the answer is awaited (none
+  while listening),
+  three rising notes when the chat switched a scene, two when it
+  only answered, one low note for nothing heard, two low notes on an error,
+  the dull pair for a hold while a session still answers. The sparkle must
+  not show up in the transcript (the first 300 ms are dropped).
+- [ ] **By eye**: the notice box across the bottom of the panel — the
+  sentence in quotes and the reply — on ONE render that carries both the
+  switch and the state ("Write Hello World on the board" from another scene:
+  the Message board with "Hello World" and the notice in the same refresh,
+  `voice:shown` right before `render:done`, no second `render:scene`), and as
+  a repaint of the last image when the chat only answered ("What's on the
+  frame?": the photo stays, no `render:scene` at all); the next render takes
+  it off. An error shows its sentence ("I didn't catch that…" for silence).
+- [ ] **"Show me a banana"** pushes a preview scene (`Voice: a banana`, an
+  Unsplash photo; "generate a banana" → OpenAI art when the project has an
+  `openAI.apiKey`) next to the saved scenes and shows it in the one render
+  with the notice; "switch to the calendar" afterwards still works. On a
+  cloud frame the sources are the groups granted to its scenes only.
+- [ ] **"Rotate 90 degrees"**: the answer reaches the panel (un-rotated, with
+  the notice), THEN the frame restarts and comes back rotated; "every ten
+  minutes" changes the interval without a restart.
+- [ ] **Early release** (REFRESH up before 1 s) is an ordinary press (a
+  refresh, as before); a second hold while the first is still answering gets
+  the dull pair.
+- [ ] **The binding moves**: Settings → Button actions → REFRESH long press
+  set to Refresh and LEFT long press to Voice chat (`event_map` in the
+  settings change log): LEFT held now talks, REFRESH held refreshes, nothing
+  else changes; the row offers Voice chat for long presses only.
+- [ ] **Wake from deep sleep with REFRESH held** records at once and
+  uploads once Wi-Fi is up (`voice:sent` after `wifi` connected); an E1002
+  with `voice_chat 0` gives the dull pair at the hold and nothing else.
+- [ ] **Settings** → GPIO buttons → "Voice chat" off/on reaches the frame
+  live on both planes (`voice_chat` in the settings change log).
+
+### reTerminal E-series peripherals bench (the SD slot, the LED, the clock, the charger)
+
+Bench 2026-10-25 (E1002 over USB, cloud-enrolled, a 64 GB FAT32 card seated,
+firmware from the branch flashed into both OTA slots of its 8 MB layout):
+the board provisioned before the keys existed came up with the slot on
+(`SD assets mounted at /srv/assets (60906 MB, … on the panel's SPI bus)`),
+`i2c` found `sda19/scl20: pcf8563 sht4x; sda39/scl40: sy6974b`, the charger
+read `usb_power=1 charging=1` and the metrics said `onBattery:false` with
+USB in (the old firmware said true), the first SNTP sync wrote the PCF8563
+and the next reset said `rtc: clock set from the PCF8563: 2026-10-25
+00:09:36 UTC` before Wi-Fi, `display_test bands` refreshed the panel on the
+shared bus (`ESP_OK`) and `usb_api list-assets` read the card right after,
+`led blink` / `beep` ran, the cloud hello carried `ledPin 6`, `ledType
+gpio_inverted`, `rtc`, `charger`, `climateSensor`, `sdCard`. Internal RAM
+idled at 80 KB free as before the branch. Seen once and not reproduced: with
+`render` and two `usb_api list-assets` (a 33 KB JSON of a 300-entry card
+held in internal RAM) back to back, the console and the render task went
+silent while the cloud socket stayed up; a second identical run only showed
+`freeHeapMallocKB: 0` for the moment of the listing and recovered. Watch
+for it. Unplugged for a few minutes, the metrics read `usbPower:false
+charging:false onBattery:true` (3902 mV) and flipped back on the replug.
+Still open:
+
+- [ ] **By eye**: the LED with the two clicks of a press and each tick of a
+  hold, held lit for a whole REFRESH hold (the recording) and back to the
+  ticks and the answer after the release, with `set buzzer_pin -1` too;
+  Settings → "Buzzer, LED and microphone" shows `6 on the frame` and setting
+  -1 darkens it live.
+- [ ] **`deep_sleep_on_battery 1` with USB in** stays awake, and sleeps
+  between renders once unplugged (the switch is off on the bench frame).
+- [ ] **The RTC through a real power cut.** Twice on the bench E1002 the rear
+  switch (30-60 s off) came back with `{"event":"rtc","action":"boot",
+  "loaded":false,"reason":"not_set"}`: the PCF8563 raised its integrity flag,
+  so it lost power with the board; the firmware waited for SNTP and wrote it
+  back, as designed. A reset that keeps power (`esptool`, the reset button)
+  loads the clock from the chip every time. Check the CR1220 holder on that
+  board (the E1002 V1.2 schematic feeds RTC_VDD from the cell through a
+  diode); with a cell in, the cold boot should say `loaded:true`.
+- [x] **The E1004** (bench 2026-10-25, frame 70 on the self-hosted backend, the
+  32 MB image): the boot found `sda19/scl20: pcf8563 sht4x sy6974b` (the
+  charger on the clock's bus, as its schematic says), mounted the preinstalled
+  16 GB card on the panel bus through the migration path, kept its clock
+  through a reset, and decided `deepSleep: off, onBattery: false, usbPower:
+  true` with `deep_sleep_on_battery 1` — the desk-bound E1004 stays awake on
+  USB now. `display_test bands` (the 13.3" refresh, 1200x1600) came back
+  `ESP_OK` on the shared bus and `usb_api list-assets` read the card right
+  after; `i2c sync` wrote the clock first time. Its LED is lit HIGH (the
+  table said inverted and it idled lit, blinking dark on a press; fixed in the
+  table and the preset, `set led_type gpio` on a board whose NVS already
+  holds the earlier default). Seen by eye on the fixed polarity: dark at
+  rest, green on a press, and only a blink of green at reset now that the
+  pin is claimed dark at boot. Nothing left to see on this board.
+- [ ] **The WS2812 kind** (no board with one is to hand): `set led_type
+  ws2812` on a pin with a pixel lights it soft white per note.
+
 ### HyperPixel 4.0 bench
 
 One display path on every board (`driver:hyperPixel4` logs `"path":"kms"`):
