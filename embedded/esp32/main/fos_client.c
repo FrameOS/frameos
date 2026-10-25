@@ -455,11 +455,25 @@ static uint8_t white_fill_for_format(fos_pixel_format_t format)
     }
 }
 
+/* The stored hash is an e-paper fact: the glass keeps the picture through
+ * a reboot or a deep sleep, so an unchanged render need not refresh it. An
+ * LCD comes up blank (white) at every boot — a stored hash would skip the
+ * first render's blit and leave it white — and writing the hash after every
+ * render is a flash write, which holds off the LCD's scan-out refill (the
+ * cache is off) for a visibly jumped frame (the SenseCAP Indicator,
+ * 2026-10-25). So on an LCD the hash lives in RAM only: an unchanged render
+ * within one boot still skips its copy. */
+static bool display_state_persists(void)
+{
+    return !fos_display_is_lcd();
+}
+
 static void load_display_state(void)
 {
     if (s_display_state_loaded) return;
     s_display_state_loaded = true;
     s_display_state_valid = false;
+    if (!display_state_persists()) return;
     nvs_handle_t nvs;
     if (nvs_open("frameos", NVS_READONLY, &nvs) != ESP_OK) return;
     fos_display_state_t state;
@@ -475,6 +489,7 @@ static void load_display_state(void)
 static void save_display_state(const fos_display_state_t *state)
 {
     if (!state || state->magic != FOS_DISPLAY_STATE_MAGIC) return;
+    if (!display_state_persists()) return;
     nvs_handle_t nvs;
     esp_err_t err = nvs_open("frameos", NVS_READWRITE, &nvs);
     if (err != ESP_OK) {
@@ -1324,6 +1339,7 @@ static void forget_display_state(void)
 {
     s_display_state_loaded = true;
     s_display_state_valid = false;
+    if (!display_state_persists()) return;
     nvs_handle_t nvs;
     if (nvs_open("frameos", NVS_READWRITE, &nvs) != ESP_OK) return;
     if (nvs_erase_key(nvs, "display_state") == ESP_OK) nvs_commit(nvs);
@@ -2353,8 +2369,16 @@ void fos_client_start(void)
      * stack must stay in internal RAM because scene loading reads SPIFFS while
      * the flash cache may be disabled; reserve it early, then resume after
      * HTTP/HTTPS have started. */
-    BaseType_t created = xTaskCreate(client_task, "fos_client", CLIENT_TASK_STACK_BYTES,
-                                     NULL, 5, &s_client_task);
+    /* On an RGB LCD the render task shares core 1 with the panel's refill
+     * interrupt (lcd_st7701s_rgb.c): its bulk PSRAM copies pause while the
+     * refill runs. Every other board leaves it to the scheduler. */
+#if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
+    BaseType_t core = fos_display_is_lcd() ? 1 : tskNO_AFFINITY;
+#else
+    BaseType_t core = tskNO_AFFINITY;
+#endif
+    BaseType_t created = xTaskCreatePinnedToCore(client_task, "fos_client", CLIENT_TASK_STACK_BYTES,
+                                                 NULL, 5, &s_client_task, core);
     if (created != pdPASS) {
         ESP_LOGE(TAG, "render task start failed: internal=%u psram=%u",
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),

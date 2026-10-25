@@ -85,14 +85,16 @@ eyes and a finger:
   board, Seeed's demo does not — if it is mirrored, `rotate 180` is the
   quick fix and the init's 0x36 byte the real one); colours are not swapped
   (`display_test bands` draws black, red, green, blue, yellow, white left to
-  right); no flicker or drift while Wi-Fi is busy (a scene with a big
-  download) or when NVS is written (`set` anything) — if the picture tears
-  or shifts, `CONFIG_LCD_RGB_RESTART_IN_VSYNC` is the knob.
+  right). Steadiness was measured with `lcd` (no dropped frames or late
+  refills over renders, a moving finger, button presses); still to watch by
+  eye: a scene with a big download, a settings save (one disturbed frame
+  per flash write is expected), an OTA.
 - [ ] **A tap** lands where the finger is: the "Button tester" store scene
   shows `tap` coordinates; a drag is `pointerMove`s; `touch` on the console
   shows the last raw point.
-- [ ] **The top button** (GPIO38): `buttons watch` sees presses; held, the
-  next scene shows.
+- [ ] **The top button** (GPIO38) held shows the next scene (presses,
+  double presses and the long press reach the event map on the bench; a
+  second scene is needed to see the switch).
 - [ ] **Later batches** carry an HT8574 at 0x39 instead of the TCA9535 at
   0x20 (Seeed's BSP probes both): the driver's 8-bit path is untested.
 - [ ] **A D1L/D1Pro**: the LoRa radio's expander lines (P0..P3) are left as

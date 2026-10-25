@@ -31,6 +31,7 @@
 #include "fos_codec.h"
 #include "fos_gauge.h"
 #include "fos_touch.h"
+#include "lcd_st7701s_rgb.h"
 #include "fos_client.h"
 #include "fos_i2c.h"
 #include "fos_led.h"
@@ -1954,6 +1955,40 @@ static int cmd_touch(int argc, char **argv)
     return 0;
 }
 
+/* `lcd [reset | pclk <MHz>]`: how steadily an RGB LCD scans out (frames
+ * off schedule since the last reset, the worst one), and a pixel clock to
+ * try live — the bench's way to find the fastest clock the shared
+ * flash/PSRAM bus can feed on a board. Not stored. */
+static int cmd_lcd(int argc, char **argv)
+{
+    if (!fos_display_is_lcd()) {
+        printf("lcd: the panel is not an RGB LCD\n");
+        return 1;
+    }
+    if (argc >= 3 && strcmp(argv[1], "pclk") == 0) {
+        double mhz = atof(argv[2]);
+        esp_err_t err = fos_lcd_st7701s_set_pclk((uint32_t)(mhz * 1000000.0));
+        printf("lcd: pclk %.2f MHz: %s\n", mhz, err == ESP_OK ? "ok" : esp_err_to_name(err));
+        return err == ESP_OK ? 0 : 1;
+    }
+    bool reset = argc >= 2 && strcmp(argv[1], "reset") == 0;
+    fos_lcd_st7701s_stats_t st;
+    if (!fos_lcd_st7701s_stats(&st, reset)) {
+        printf("lcd: not running\n");
+        return 1;
+    }
+    printf("lcd: pclk %.2f MHz, frame %lu us (%.1f fps), %lu frames, %lu dropped, %lu late refills (slack %lu us), "
+           "worst %lu us%s\n",
+           st.pclk_hz / 1e6, (unsigned long)st.frame_us, st.frame_us ? 1e6 / st.frame_us : 0.0,
+           (unsigned long)st.frames, (unsigned long)st.glitches, (unsigned long)st.late_refills,
+           (unsigned long)st.slack_us, (unsigned long)st.max_deviation_us, reset ? " (reset)" : "");
+    for (int i = 0; i < st.recent_count; i++) {
+        printf("lcd:   late frame %lld ms ago, %lu us off\n", (long long)((st.now_us - st.recent[i].at_us) / 1000),
+               (unsigned long)st.recent[i].deviation_us);
+    }
+    return 0;
+}
+
 /* `mic [seconds]`: record from the microphone and print how loud it was,
  * the bench check that the PDM pins are wired (docs/voice-chat.md). A
  * silent room reads a peak in the tens, a voice at arm's length in the
@@ -2016,6 +2051,7 @@ static esp_err_t register_frameos_console_commands(void)
         {.command = "led", .help = "led [on|off|blink] — the status LED", .func = cmd_led},
         {.command = "i2c", .help = "i2c [sync] — probe the I2C buses again; the clock, the charger, the gauge; sync writes the clock", .func = cmd_i2c},
         {.command = "touch", .help = "touch — the touch panel's controller and its last point", .func = cmd_touch},
+        {.command = "lcd", .help = "lcd [reset|pclk <MHz>] — an RGB LCD's scan-out: frames off schedule, the pixel clock", .func = cmd_lcd},
         {.command = "mic", .help = "mic [seconds] — record from the microphone and print the level", .func = cmd_mic},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},

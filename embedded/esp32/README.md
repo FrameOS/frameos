@@ -337,9 +337,24 @@ for the two Spectra boards most of the bench work runs on:
   flash, 8 MB octal PSRAM) next to an RP2040. The 4" 480x480 ST7701S IPS
   glass hangs off the S3's parallel RGB interface: sixteen data lines
   (B0..B4 = GPIO15..11, G0..G5 = GPIO10..5, R0..R4 = GPIO4..0), HSYNC 16,
-  VSYNC 17, DE 18, PCLK 21 at 18 MHz, scanned continuously out of a PSRAM
-  frame buffer by the LCD peripheral — so GPIO21 is not a heartbeat LED
-  here, and a blit is a copy that shows within a frame. The controller's own
+  VSYNC 17, DE 18, PCLK 21 — so GPIO21 is not a heartbeat LED here. The
+  LCD peripheral scans continuously: two PSRAM frame buffers (a new picture
+  goes into the hidden one and is switched in at a frame boundary, so the
+  glass never shows half of each) feed two 20-line bounce buffers in
+  internal RAM that an interrupt refills. That refill is the fragile part:
+  PSRAM shares one bus with the program flash, and the generic image runs a
+  160 MHz CPU, DIO flash and 80 MHz PSRAM, so the pixel clock is 12 MHz
+  (42 fps; Seeed's 18 and ESPHome's 16 dropped frames on the bench while a
+  finger moved on the glass), the refill interrupt and the render task
+  share core 1 (the render's bulk copies pause while it runs), big heap
+  reallocs copy outside the heap's spinlock (`fos_heap_realloc`: the IDF
+  heap copies with interrupts off, which held the refill off for 1-2 ms),
+  `CONFIG_LCD_RGB_RESTART_IN_VSYNC` resyncs a frame that still starves, and
+  the "skip an unchanged picture" hash is not written to flash (a flash
+  write switches the cache off and stalls the refill; an LCD comes up blank
+  after a reboot anyway). Any other flash write (a settings save, a scene
+  download, an OTA) still costs one disturbed frame. `lcd` on the console
+  counts dropped frames and late refills and sets the pixel clock live. The controller's own
   setup goes over a 9-bit 3-wire SPI bit-banged on GPIO41 (clock) and GPIO48
   (data) with chip-select and reset on a TCA9535 IO expander at 0x20 (SDA39/
   SCL40; later batches carry an HT8574 at 0x39), the sequence Seeed's own

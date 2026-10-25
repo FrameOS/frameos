@@ -51,6 +51,11 @@ const char *frameos_nim_info(void);
  * at boot; the render task releases it through the same pair. */
 void frameos_nim_set_render_buffer_hooks(void *(*acquire)(size_t len),
                                          void (*release)(void *ptr));
+/* Grow big Nim and QuickJS heap blocks by malloc + copy + free, the copy
+ * with interrupts on, instead of the IDF heap's realloc that copies under
+ * its spinlock (fos_qjs_glue.h, fos_heap_realloc). main/ turns it on for an
+ * RGB LCD, whose scan-out refill interrupt cannot wait out the copy. */
+void frameos_nim_set_realloc_outside_lock(bool on);
 /* Scene-switch hook. A scene's own `setCurrentScene` dispatch reaches the Nim
  * runtime, but switching is the firmware's: the scene may have to be read off
  * flash and the choice is persisted. main/ installs fos_scenes_select, which
