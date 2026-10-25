@@ -1,3 +1,4 @@
+import std/json
 import pixie, options
 import frameos/apps
 import frameos/types
@@ -105,6 +106,10 @@ proc ensureLayout(self: App, maxWidth, maxHeight: int) =
 proc renderText*(self: App, context: ExecutionContext, image: Image, offsetX, offsetY: float): Image =
   let lay = self.layout.get()
   drawText(lay, image, offsetX = offsetX, offsetY = offsetY)
+  if self.frameConfig.debug and lay.borderTypeset.isSome and lastApproxStroke.path.len > 0:
+    self.log(%*{"event": "text:outline", "path": lastApproxStroke.path,
+                "scratchBytes": lastApproxStroke.scratchBytes,
+                "availableBytes": lastApproxStroke.availableBytes})
   image
 
 proc run*(self: App, context: ExecutionContext) =
