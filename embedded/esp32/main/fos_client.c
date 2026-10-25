@@ -27,6 +27,7 @@
 #include "fos_battery.h"
 #include "fos_buttons.h"
 #include "fos_charger.h"
+#include "fos_rtc.h"
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_events.h"
@@ -1885,6 +1886,8 @@ static void client_task(void *arg)
                 battery_pct = again_pct;
             }
         }
+        /* A clock write SNTP could not land yet (fos_rtc.c). */
+        fos_rtc_retry_pending();
         /* The charger, where the board has one (fos_charger.c): USB in means
          * not on battery, whatever the divider reads of a charging cell. */
         fos_charger_status_t charger;

@@ -98,6 +98,7 @@ void fos_rtc_encode(time_t now, uint8_t regs[FOS_RTC_TIME_LEN])
 
 static const char *TAG = "fos_rtc";
 static bool s_loaded = false;
+static uint8_t s_store_pending = 0; /* failed writes left to retry */
 
 bool fos_rtc_present(void)
 {
@@ -109,7 +110,7 @@ bool fos_rtc_load_time(void)
     uint8_t regs[FOS_RTC_TIME_LEN];
     esp_err_t err = fos_i2c_read(FOS_I2C_PCF8563, FOS_RTC_REG_TIME, regs, sizeof(regs));
     if (err != ESP_OK) {
-        if (err != ESP_ERR_NOT_FOUND) ESP_LOGW(TAG, "read failed: %s", esp_err_to_name(err));
+        if (err != ESP_ERR_NOT_FOUND) ESP_LOGW(TAG, "read failed: %s (0x%x)", esp_err_to_name(err), (unsigned)err);
         return false;
     }
     time_t now;
@@ -120,11 +121,10 @@ bool fos_rtc_load_time(void)
     struct timeval tv = {.tv_sec = now, .tv_usec = 0};
     settimeofday(&tv, NULL);
     s_loaded = true;
-    char when[32];
     struct tm tm_utc;
     gmtime_r(&now, &tm_utc);
-    strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S UTC", &tm_utc);
-    printf("rtc: clock set from the PCF8563: %s\n", when);
+    printf("rtc: clock set from the PCF8563: %04d-%02d-%02d %02d:%02d:%02d UTC\n", tm_utc.tm_year + 1900,
+           tm_utc.tm_mon + 1, tm_utc.tm_mday, tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec);
     return true;
 }
 
@@ -141,8 +141,27 @@ esp_err_t fos_rtc_store_time(void)
     uint8_t regs[FOS_RTC_TIME_LEN];
     fos_rtc_encode(now, regs);
     esp_err_t err = fos_i2c_write(FOS_I2C_PCF8563, FOS_RTC_REG_TIME, regs, sizeof(regs));
-    if (err != ESP_OK) ESP_LOGW(TAG, "write failed: %s", esp_err_to_name(err));
+    if (err != ESP_OK) {
+        /* The code as a number too: the WARN-only builds carry no error-name
+         * table. The write is tried again on the next passes. */
+        ESP_LOGW(TAG, "write failed (0x%x), retrying later", (unsigned)err);
+        s_store_pending = 3;
+    } else {
+        s_store_pending = 0;
+    }
     return err;
+}
+
+void fos_rtc_mark_dirty(void)
+{
+    if (fos_rtc_present() && s_store_pending == 0) s_store_pending = 3;
+}
+
+void fos_rtc_retry_pending(void)
+{
+    if (s_store_pending == 0) return;
+    s_store_pending--;
+    if (fos_rtc_store_time() == ESP_OK) printf("rtc: clock written\n");
 }
 
 #endif /* ESP_PLATFORM */

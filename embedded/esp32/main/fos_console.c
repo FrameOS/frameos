@@ -1773,16 +1773,32 @@ static int cmd_led(int argc, char **argv)
     return 0;
 }
 
-/* `i2c`: probe the configured buses again and say what answered, with the
- * clock's and the charger's readings. */
+/* UTC, by hand: ctime() would pull newlib's asctime and with it the 9 KB
+ * integer printf this image otherwise does without. */
+static void print_utc(const char *label, time_t t)
+{
+    struct tm tm_utc;
+    gmtime_r(&t, &tm_utc);
+    printf("%s%04d-%02d-%02d %02d:%02d:%02d UTC", label, tm_utc.tm_year + 1900, tm_utc.tm_mon + 1,
+           tm_utc.tm_mday, tm_utc.tm_hour, tm_utc.tm_min, tm_utc.tm_sec);
+}
+
+/* `i2c [sync]`: probe the configured buses again and say what answered,
+ * with the clock's and the charger's readings. `sync` writes the system
+ * time to the clock first (what an SNTP sync does) and says how it went. */
 static int cmd_i2c(int argc, char **argv)
 {
-    (void)argc;
-    (void)argv;
     fos_config_t *config = fos_config();
     if (config->i2c_bus_count == 0) {
         printf("no i2c_buses set (set i2c_buses sda=19,scl=20;sda=39,scl=40)\n");
         return 1;
+    }
+    if (argc > 1 && strcmp(argv[1], "sync") == 0) {
+        esp_err_t sync_err = fos_rtc_store_time();
+        printf("rtc sync: %s (0x%x)\n", sync_err == ESP_OK ? "written" : esp_err_to_name(sync_err),
+               (unsigned)sync_err);
+        print_utc("system clock: ", time(NULL));
+        printf("\n");
     }
     esp_err_t err = fos_i2c_init();
     char summary[128];
@@ -1794,7 +1810,8 @@ static int cmd_i2c(int argc, char **argv)
         if (fos_i2c_read(FOS_I2C_PCF8563, FOS_RTC_REG_TIME, regs, sizeof(regs)) == ESP_OK) {
             if (fos_rtc_decode(regs, &rtc_time)) {
                 time_t now = time(NULL);
-                printf("rtc:  %s (system clock %+lld s)\n", ctime(&rtc_time), (long long)(now - rtc_time));
+                print_utc("rtc:  ", rtc_time);
+                printf(" (system clock %+lld s)\n", (long long)(now - rtc_time));
             } else {
                 printf("rtc:  not set (integrity flag)\n");
             }
@@ -1869,7 +1886,7 @@ static esp_err_t register_frameos_console_commands(void)
         {.command = "buttons", .help = "buttons [watch [seconds]] — configured buttons, or find which GPIO a press moves", .func = cmd_buttons},
         {.command = "beep", .help = "beep [hz] [ms] — sound the buzzer", .func = cmd_beep},
         {.command = "led", .help = "led [on|off|blink] — the status LED", .func = cmd_led},
-        {.command = "i2c", .help = "i2c — probe the I2C buses again; the clock and the charger", .func = cmd_i2c},
+        {.command = "i2c", .help = "i2c [sync] — probe the I2C buses again; the clock and the charger; sync writes the clock", .func = cmd_i2c},
         {.command = "mic", .help = "mic [seconds] — record from the microphone and print the level", .func = cmd_mic},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},
@@ -1987,6 +2004,10 @@ static void fos_console_task(void *arg)
              * queued is drained before the other channel gets its turn, so a
              * busy port never waits one timeout per byte. */
             uint8_t ch;
+#if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
+            /* No driver behind it on a board whose I2C owns the USB pads. */
+            if (states[i].channel == FOS_CONSOLE_CHANNEL_USB_SERIAL_JTAG && fos_i2c_owns_usb_pads()) continue;
+#endif
             int n = console_channel_read(states[i].channel, &ch, 1, pdMS_TO_TICKS(10));
             while (n > 0) {
                 console_feed_byte(&states[i], ch);
@@ -2061,10 +2082,16 @@ esp_err_t fos_console_start(void)
     fcntl(fileno(stdout), F_SETFL, 0);
 
 #if FOS_CONSOLE_HAS_USB_SERIAL_JTAG
-    err = console_init_usb_serial_jtag();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "usb-serial-jtag console init failed: %s", esp_err_to_name(err));
-        return err;
+    /* No USB-Serial/JTAG channel on a board whose I2C runs on the USB pads
+     * (fos_i2c.c): the UART channel is the console there. */
+    if (fos_i2c_owns_usb_pads()) {
+        printf("console: GPIO19/20 are an I2C bus here, no usb-serial-jtag channel\n");
+    } else {
+        err = console_init_usb_serial_jtag();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "usb-serial-jtag console init failed: %s", esp_err_to_name(err));
+            return err;
+        }
     }
 #endif
 #if FOS_CONSOLE_HAS_UART

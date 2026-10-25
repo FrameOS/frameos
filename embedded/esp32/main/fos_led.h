@@ -9,6 +9,8 @@
  * with the buzzer, or instead of it on a board that has none or whose owner
  * silenced it (`buzzer_pin -1`). A microphone and an LED are a complete set
  * of cues for talking to a frame: the LED never ends up in the recording.
+ * While the microphone is open (fos_voice.c) the LED is HELD lit — the
+ * notes' rests do not darken it — so a glance says "it is listening".
  *
  * The pin and the type are the live config's `led_pin` / `led_type`, read
  * on every change of state, so a settings push moves or removes the LED
@@ -21,7 +23,11 @@
 
 /* Once, early in boot. Nothing lights until the first fos_led_set(true). */
 void fos_led_init(void);
-/* Light or darken the LED. Safe from any task; a no-op without one. */
+/* Light or darken the LED for a note. Safe from any task; a no-op without
+ * one. While a hold is on (below) the LED stays lit whatever this says. */
 void fos_led_set(bool on);
+/* Hold the LED lit (the voice chat's recording) or let it go back to the
+ * notes. Idempotent; safe from any task. */
+void fos_led_hold(bool held);
 /* True when the live config names an LED on a pin this firmware may drive. */
 bool fos_led_present(void);

@@ -64,7 +64,6 @@ idf_component_register(
         console
         driver
         esp_driver_i2c
-        esp_driver_rmt
         esp_driver_gpio
         esp_hw_support
         hal

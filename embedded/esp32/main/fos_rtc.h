@@ -37,6 +37,12 @@ bool fos_rtc_present(void);
 bool fos_rtc_load_time(void);
 /* Whether fos_rtc_load_time set the clock this boot. */
 bool fos_rtc_time_loaded(void);
-/* Write the system time to the clock (after an SNTP sync). */
+/* Write the system time to the clock now (the console's `i2c sync`, the
+ * render pass). A write the chip NACKs is kept pending for the next pass. */
 esp_err_t fos_rtc_store_time(void);
+/* An SNTP sync happened: write the clock on the next render pass. Called
+ * from the SNTP callback (lwIP's thread, a small stack) — no I2C there. */
+void fos_rtc_mark_dirty(void);
+/* A dirty or failed write, once per render pass (fos_client.c). */
+void fos_rtc_retry_pending(void);
 #endif

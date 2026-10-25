@@ -225,6 +225,13 @@ for the two Spectra boards most of the bench work runs on:
   as present, not yet read). A board provisioned before these keys existed
   gets all of them on its first boot of this firmware, as `set hardware`
   would give them.
+  **GPIO19/20 are the S3's native USB pads**, and the ROM leaves the
+  USB-Serial/JTAG PHY attached to them: with the PHY still on, the I2C bus on
+  those pins answered its first read and then NACKed every write (I2C error
+  `0x103`) until a bus re-init happened to win the pads back. `fos_i2c_init`
+  detaches the PHY (`usb_serial_jtag_ll_phy_enable_pad(false)`) when a bus
+  uses 19 or 20, and the console then skips its USB-Serial/JTAG channel —
+  the E-series' USB is a CH340 on UART0 anyway.
 | `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" | reTerminal Sticky, 32MB flash |
 | `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash; battery GPIO1 ÷2, switch GPIO21; TF socket on the panel bus (MISO8, CS14, detect 15, power 16); green LED GPIO6 (lit low); I2C 19/20 (PCF8563 clock, SHT40) + 39/40 (SY6974B charger); PDM mic 42/41/38 |
 | `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash; the same peripherals as the E1001 |

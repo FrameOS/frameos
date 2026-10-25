@@ -555,9 +555,10 @@ static void on_sntp_synced(struct timeval *tv)
     (void)tv;
     s_time_synced = true;
     /* A board with a battery-backed clock (fos_rtc.c) gets the corrected time
-     * written back, so the next cold boot starts right. A few bytes over
-     * I2C; nothing to do without the chip. */
-    fos_rtc_store_time();
+     * written back on the next render pass, so the next cold boot starts
+     * right. Not from here: this is lwIP's thread, and an I2C write on it
+     * froze the E1002 (2026-10-25). */
+    fos_rtc_mark_dirty();
 }
 
 esp_err_t fos_wifi_sync_time(uint32_t timeout_ms)

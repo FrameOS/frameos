@@ -34,6 +34,10 @@ bool fos_i2c_present(fos_i2c_chip_t chip);
 /* Register reads and writes: a one-byte register address, then `len` bytes. */
 esp_err_t fos_i2c_read(fos_i2c_chip_t chip, uint8_t reg, uint8_t *buf, size_t len);
 esp_err_t fos_i2c_write(fos_i2c_chip_t chip, uint8_t reg, const uint8_t *buf, size_t len);
+/* True when a configured bus runs on the chip's native USB pads (the
+ * ESP32-S3's GPIO19/20) and fos_i2c_init detached the USB PHY from them:
+ * the console then has no USB-Serial/JTAG channel to offer. */
+bool fos_i2c_owns_usb_pads(void);
 /* The chip's name as the console and the hardware report spell it. */
 const char *fos_i2c_chip_name(fos_i2c_chip_t chip);
 /* One line: `sda19/scl20: pcf8563 sht4x; sda39/scl40: sy6974b`, or "none". */
