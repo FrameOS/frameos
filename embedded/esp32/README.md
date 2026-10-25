@@ -56,6 +56,7 @@ main/                     boot orchestration + platform modules
   fos_buttons.c           GPIO button map → `gpio` edges (origin `driver`, via fos_events.c)
   fos_battery.c           battery ADC sampling; fos_battery_filter.c its outlier filter
   fos_power.c             deep sleep, wake-check render skip, VBUS truth
+  fos_animation.c         animation mode: a scene below a 1 s interval on an LCD, paced in µs (host-tested)
   fos_wake.c              wake scheduling (next render / schedule event)
   fos_tz.c                IANA zone → POSIX TZ rule
   fos_defaults.h          compile-time defaults of the generic image (NVS wins)
@@ -324,8 +325,8 @@ for the two Spectra boards most of the bench work runs on:
   panel shares the clock's I2C bus (19/20): `fos_i2c.c` lends `fos_touch.c`
   that bus instead of the touch driver opening a second one on the same pins,
   and a lent bus survives the console's `i2c` rescan. The 8 MB module renders
-  on-device in pixie's **8-bit luma canvas** (`pfGray8`; any grey or black-
-  and-white panel too big for an RGBX canvas gets one, a colour panel gets
+  on-device in pixie's **8-bit luma canvas** (`pfGray8`; every grey or black-
+  and-white panel gets one whatever fits, a colour panel too big for RGBX gets
   565): 2.5 MiB of canvas and 1.25 MiB of packed panel buffer beside the
   1.5 MiB render reserve, about 2.5 MiB more for scenes and apps than a 565
   canvas (5.0 MiB) would leave. A grey panel loses nothing to it: blending
@@ -356,19 +357,26 @@ for the two Spectra boards most of the bench work runs on:
   download, an OTA) still costs one disturbed frame. `lcd` on the console
   counts dropped frames and late refills and sets the pixel clock live.
   An LCD board runs its CPU at 240 MHz (the generic image boots at 160 for
-  the battery frames; `status` prints `cpu:`), and the demo scene renders,
-  packs and shows in ~0.77 s (3.8 s before the render work of 2026-10-25:
-  the text outline, the gradient fill and the RGB565 pack, which every
-  ESP32 board shares). The controller's own
+  the battery frames; `status` prints `cpu:`). The scene canvas is the
+  panel's own back frame buffer (`fos_display_render_target`, 565 whatever
+  the PSRAM): the scene draws straight into it, and the blit is a buffer
+  switch — no pack, no copy, no hash. A scene whose `refreshInterval` is
+  below a second **animates** (`main/fos_animation.c`): frames paced in
+  microseconds, the pulls and sensors once a second, one frame in ten logged
+  in full with a `render:animation` summary of the rest. DVD Logo Bounce
+  runs at 3.3 fps there (one frame per 300 s before, ~570 ms a frame when
+  forced); `docs/realtime-rendering.md` has the measurements and
+  `docs/realtime-todo.md` what is left. The controller's own
   setup goes over a 9-bit 3-wire SPI bit-banged on GPIO41 (clock) and GPIO48
   (data) with chip-select and reset on a TCA9535 IO expander at 0x20 (SDA39/
   SCL40; later batches carry an HT8574 at 0x39), the sequence Seeed's own
   firmware sends; the backlight is GPIO45. All of it is
   `components/frameos_display/lcd_st7701s_rgb.c`, a board table the preset
   selects, and the panel is `LCD_ST7701S_480x480` in a new pixel format,
-  `FOS_PIXEL_RGB565` (one little-endian 5/6/5 word per pixel; the Nim packer
-  rounds the canvas's 8-bit channels under the dither's threshold jitter, the
-  snapshot goes out as a 24-bit BMP). The FocalTech FT6336U touch controller
+  `FOS_PIXEL_RGB565` (one little-endian 5/6/5 word per pixel, pixie's
+  `pfRgb565` layout; the canvas stores with pixie's per-pixel dither so a
+  gradient does not step every eight levels, and the snapshot goes out as a
+  24-bit BMP). The FocalTech FT6336U touch controller
   (0x48) sits on the expander's bus with its interrupt and reset lines on the
   expander, unwired to the chip: `fos_touch.c` joins the display's bus
   (`fos_display_shared_i2c_bus`) and polls it every 30 ms. The top button is

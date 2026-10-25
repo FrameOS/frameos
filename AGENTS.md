@@ -275,6 +275,30 @@
   on Linux and in the preview, `fos_events.c` on the ESP32. Keep the two
   rules alike.
 
+## Real-time rendering: `docs/realtime-rendering.md`
+
+- A scene below a one-second `refreshInterval`, on an LCD, **animates** on the
+  ESP32 (`main/fos_animation.c`, host-tested): frames paced in microseconds,
+  the per-pass pulls, sensors and settings pushes once a second, one frame in
+  ten seconds logged in full — its `render:done` is what a deploy waits for —
+  with a `render:animation` summary of the quiet frames between. A new
+  per-pass step in `fos_client.c` goes inside the `housekeeping` block unless
+  it must run every frame, and a new per-frame log line costs frames: every
+  line also goes out on the 115200-baud console.
+- **The canvas is the panel where it can be.** An RGB565 LCD's canvas is its
+  back frame buffer (`fos_display_render_target`, `frameos_nim_render_panel`:
+  nothing packed, the blit a buffer switch); a grey or black-and-white panel
+  draws in pixie's luma surface. The canvas rule has five copies
+  (`frameos_display.h` lists them, `docs/device-limits-fixtures.json` pins
+  two): change them together.
+- **The background is owed, not painted** (`ExecutionContext.backgroundPending`).
+  Anything that draws into the canvas other than a flow node calls
+  `paintPendingBackground` first; a producer that takes the live canvas gets
+  it painted by `takeDecodeTarget`, unless it settles it itself
+  (`deferBackground` + `takeOwedBackground`, as the SVG path does with pixie's
+  `coversOpaque`). `test_background_deferral.nim` starts from a canvas holding
+  an old frame, so a debt nobody paid shows.
+
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 
 - A Nim app that gets a repo JavaScript replacement (`data/immich` →
