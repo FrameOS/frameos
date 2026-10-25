@@ -272,7 +272,9 @@ size_t fos_display_canvas_bytes(void)
 size_t fos_display_render_psram_bytes(void)
 {
     if (!s_panel) return 0;
-    return fos_display_canvas_bytes() + fos_display_buffer_size() + FOS_RENDER_PSRAM_RESERVE;
+    /* An RGB LCD scans two frame buffers of its own (lcd_st7701s_rgb.c). */
+    size_t lcd_fbs = s_panel->bus == FOS_PANEL_BUS_RGB ? 2u * fos_display_buffer_size() : 0u;
+    return fos_display_canvas_bytes() + fos_display_buffer_size() + lcd_fbs + FOS_RENDER_PSRAM_RESERVE;
 }
 
 static esp_err_t ensure_module(void)

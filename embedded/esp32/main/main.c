@@ -265,6 +265,10 @@ void app_main(void)
          * that fos_client.c already uses to hand it back after the blit. */
         frameos_nim_set_render_buffer_hooks((void *(*)(size_t))fos_framebuffer_acquire,
                                             (void (*)(void *))fos_framebuffer_release);
+        /* An RGB LCD's refill interrupt shares core 1 with the render task;
+         * a realloc copying under the heap's spinlock held it off for 1-2 ms
+         * mid-render (a band of stale lines, bench 2026-10-25). */
+        if (fos_display_is_lcd()) frameos_nim_set_realloc_outside_lock(true);
     }
 
     /* fos_assets_sd_mount emits its own structured "assets:sd" line into the

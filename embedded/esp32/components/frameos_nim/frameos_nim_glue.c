@@ -2,6 +2,7 @@
  * Owns NimMain() (one-shot Nim module init), the log hook, and the
  * outbound-HTTP hook the Nim http_client HAL calls into. */
 #include "frameos_nim.h"
+#include "fos_qjs_glue.h"
 
 #include "fos_log_backoff.h"
 #include "fos_netguard.h"
@@ -352,11 +353,16 @@ void *fos_nim_heap_calloc(size_t count, size_t size)
 void *fos_nim_heap_realloc(void *ptr, size_t size)
 {
     if (size == 0) size = 1;
-    void *next = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    void *next = fos_heap_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     /* Safe now that size is never 0: a failed heap_caps_realloc leaves the
      * original block untouched, so the fallback gets a live pointer. */
     if (next == NULL) next = realloc(ptr, size);
     return next;
+}
+
+void frameos_nim_set_realloc_outside_lock(bool on)
+{
+    fos_heap_realloc_outside_lock = on;
 }
 
 /* Live PSRAM headroom for the Nim side (frameos/utils/memory.nim), which
