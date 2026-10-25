@@ -80,32 +80,20 @@ initLock(sceneJsLock)
 
 const sceneJsPrelude* = compactJs("""
 const __frameosFragment = Symbol.for("frameos.fragment");
-const __frameosNormalizeChildren = (children) => {
-  if (children.length === 0) return undefined;
-  if (children.length === 1) return children[0];
-  return children;
-};
 const __frameosJsx = (type, props, ...children) => {
   const nextProps = props ? { ...props } : {};
-  const explicitChildren = __frameosNormalizeChildren(children);
-  const propChildren = Object.prototype.hasOwnProperty.call(nextProps, "children")
+  const normalized = children.length === 0
     ? nextProps.children
-    : undefined;
-
-  if (Object.prototype.hasOwnProperty.call(nextProps, "children")) {
-    delete nextProps.children;
-  }
-
-  const normalizedChildren = explicitChildren ?? propChildren;
+    : children.length === 1 ? children[0] : children;
+  delete nextProps.children;
   if (type === __frameosFragment) {
-    return normalizedChildren ?? null;
+    return normalized ?? null;
   }
-
-  if (normalizedChildren !== undefined) {
-    nextProps.children = normalizedChildren;
+  if (normalized !== undefined) {
+    nextProps.children = normalized;
   }
-
-  return { type, props: nextProps };
+  // A function component runs now: the tree an app returns is plain elements.
+  return typeof type === "function" ? type(nextProps) : { type, props: nextProps };
 };
 globalThis.__frameosFragment = __frameosFragment;
 globalThis.__frameosJsx = __frameosJsx;

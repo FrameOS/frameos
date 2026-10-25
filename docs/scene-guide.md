@@ -397,6 +397,54 @@ provided"): `svg` (with a `viewBox`), `g`, `path`, `rect`, `circle`,
   the default face. On an ESP32, SVG text always uses the built-in Ubuntu
   face, whatever `font-family` says.
 
+## UIs and SVG from JSX
+
+A JS app whose main file is `app.tsx` can return JSX from `get()` as its
+image (FrameOS 2026.10.21 and later; older frames draw nothing). An `<svg>`
+is drawn with the renderer above, its tags and rules, without markup: no
+string building and no escaping. React's names work (`strokeWidth`,
+`fillRule`), and function components, `.map()` and fragments too. Anything
+else is a UI laid out with Tailwind classes:
+
+```tsx
+export function get(app, context) {
+  return (
+    <div className="flex flex-col justify-between p-8 bg-slate-900 text-white">
+      <div className="text-7xl font-bold">{new Date().toTimeString().slice(0, 5)}</div>
+      <div className="grid grid-cols-3 gap-4">
+        {(app.state.rooms ?? []).map((room) => (
+          <div className="rounded-xl bg-white/10 p-4">
+            <div className="text-sm uppercase text-slate-400 truncate">{room.name}</div>
+            <div className="text-4xl font-semibold text-emerald-400">{room.temp}°</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+```
+
+- The outer element fills the image; lengths are pixels of it (`p-2` is
+  8 px), so scale with `text-[5vh]`, `w-[30vw]` and the `md:` / `lg:`
+  breakpoints (image width 768 / 1024 px) or `portrait:` / `landscape:`.
+- Layout: block (stacked), `flex` / `flex-col` with `gap`, `grow`, `flex-1`,
+  `justify-*`, `items-*`, `flex-wrap`; `grid grid-cols-N` with `col-span-N`;
+  `absolute` with `inset-*` / `top-*` (against the parent). Sizes `w-*`,
+  `h-*`, `size-*`, `max-w-*`, padding and margins (`mx-auto`).
+- Paint: `bg-*`, `text-*`, `border-*` from Tailwind's palette, `/50`
+  opacity, `bg-[#hex]`, `bg-gradient-to-r from-* via-* to-*`, `border`,
+  `rounded-*`, `opacity-*`.
+- Text: `text-xs` .. `text-9xl`, `font-bold` and the other weights,
+  `italic`, `underline`, `uppercase`, `text-center`, `leading-*`,
+  `truncate`, `line-clamp-N`. Lines wrap at the box's width by themselves.
+- `<img src={...}>` takes what `frameos.fetchImage` or
+  `frameos.loadAssetImage` returned, with `object-cover` or
+  `object-contain`; an `<svg viewBox>` inside a UI is an icon sized by its
+  classes, drawn in the text color where it says `currentColor`.
+- Not there: clipping (`overflow-hidden`), shadows, transforms, `z-*`,
+  `hover:` and other states, and handlers (`onClick`). `docs/jsx-ui.md` has
+  the full list.
+
 ## Layout and color
 
 - The same scene is installed on 800×480, 480×800, 1200×825 and 1600×1200
@@ -537,6 +585,26 @@ interface FrameOSColorRef {
   color: string;
 }
 interface FrameOSStreamRef { __frameosType: "streamRef"; id: number; }
+
+/**
+ * What JSX makes in an app (.tsx): get() can return it as its image. An <svg>
+ * is drawn as it is; any other element is a UI laid out with Tailwind classes
+ * (className="flex items-center gap-2 p-4 bg-slate-900 text-white") —
+ * docs/jsx-ui.md has what is supported. <img src={...}> takes the image
+ * frameos.fetchImage or frameos.loadAssetImage returned.
+ */
+interface FrameOSElement { type: string; props: Record<string, any>; }
+interface FrameOSElementProps {
+  className?: string;
+  children?: any;
+  src?: FrameOSImageRef | { image: FrameOSImageRef | null } | null;
+  [attribute: string]: any;
+}
+declare namespace JSX {
+  type Element = FrameOSElement;
+  interface ElementChildrenAttribute { children: {}; }
+  interface IntrinsicElements { [tag: string]: FrameOSElementProps; }
+}
 
 interface FrameOSApp {
   nodeId: number;

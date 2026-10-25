@@ -18,6 +18,8 @@ import frameos/utils/svg_frames
 import frameos/utils/paths
 import frameos/utils/system
 import frameos/js_runtime/burrito
+import frameos/js_runtime/jsx
+import frameos/ui/layout
 
 type
   JsAssetGrant* = enum
@@ -1941,6 +1943,33 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
   else:
     return nil
 
+proc imageFromJsx(owner: AppRoot, context: ExecutionContext, root: SvgNode): Image =
+  ## A JSX tree an app returned: an `<svg>` drawn as it is, anything else a
+  ## UI laid out at the size of the image asked for (ui/layout.nim) and drawn
+  ## as the SVG that makes. The same road as `frameos.svg` from there: into
+  ## the target the planner offered when there is one, repainting only what
+  ## changed on an LCD, else rasterized on its own.
+  let
+    requestedWidth = defaultImageWidth(owner, context, %*{})
+    requestedHeight = defaultImageHeight(owner, context, %*{})
+  var svg = root
+  if root.tag != "svg":
+    try:
+      svg = layoutUi(root, requestedWidth, requestedHeight)
+    except CatchableError as error:
+      frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
+      return nil
+  let intoTarget = svgIntoOfferedTarget(owner, context, svg, requestedWidth, requestedHeight)
+  if not intoTarget.isNil:
+    return intoTarget
+  let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
+  let image = decodeSvgWithFallback(svg, svgWidth, svgHeight)
+  if image.isSome:
+    return image.get()
+  frameos_apps.logError(owner, "JS app returned JSX that failed to render: " &
+    svgDecodeError(svg, svgWidth, svgHeight))
+  nil
+
 proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, payload: JsonNode, expectedType: string): Value =
   if payload.isNil or payload.kind == JNull:
     if expectedType.len > 0:
@@ -2059,6 +2088,14 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
     if expectedType.len > 0:
       return valueFromJsonByType(newJNull(), expectedType)
     return VNone()
+
+  if expectedType in ["image", ""] and jsIsObject(payload):
+    # JSX (`<svg>`, `<div className="flex">`) read straight off the objects
+    # the prelude's __frameosJsx made. `<image>` is the plain canvas spec it
+    # has always been.
+    let tag = jsxTag(ctx, payload)
+    if tag.len > 0 and tag != "image":
+      return VImage(imageFromJsx(owner, context, jsxNode(ctx, payload, addr runtime.images)))
 
   if expectedType == "image" or jsIsObject(payload) or JS_IsArray(ctx, payload) != 0:
     let svgSpec = svgImageSpecFromJs(ctx, payload)
