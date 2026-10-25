@@ -599,6 +599,47 @@ def test_embedded_panel_for_oled_device_without_preset():
     assert embedded_panel_for_frame(frame) == "OLED_SSD1306_72x40"
 
 
+def test_embedded_hardware_preset_for_seeed_sensecap_indicator():
+    frame = Frame(id=13, embedded={"hardwarePreset": "seeed_sensecap_indicator_d1"})
+    ensure_embedded_frame_defaults(frame)
+    # The 4" RGB LCD: 16-bit colour, rendered on-device on the 8 MB module.
+    assert frame.device == "lcd.st7701s_480x480"
+    assert embedded_panel_for_frame(frame) == "LCD_ST7701S_480x480"
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "8MB"
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    assert embedded_render_mode_for_frame(frame) != EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    assert embedded_pixel_format_for_panel("LCD_ST7701S_480x480") == embedded_firmware_module.FOS_PIXEL_RGB565
+    assert embedded_buffer_size(480, 480, embedded_firmware_module.FOS_PIXEL_RGB565) == 480 * 480 * 2
+    # The LCD's wiring is the firmware's own board table: no EPD pins.
+    assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
+    # The top button, held, walks to the next scene.
+    assert embedded_gpio_buttons_for_frame(frame) == [(38, "BUTTON")]
+    assert frame.event_map == [
+        {"event": "button", "match": {"label": "BUTTON", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+    ]
+    # No battery, no buzzer, no microphone, no TF socket the chip can reach
+    # (the card slot is the RP2040's).
+    assert "batteryPin" not in frame.device_config
+    assert "buzzerPin" not in frame.device_config
+    assert "micClkPin" not in frame.device_config
+    assert "sdCardAssets" not in frame.device_config or not frame.device_config["sdCardAssets"].get("enabled")
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert settings["panel"] == "LCD_ST7701S_480x480"
+    assert settings["gpio_buttons"] == "38:BUTTON"
+    # The FT6336U on the LCD's bus is the board's own (fos_board.c): a parity
+    # key, nothing provisions it.
+    preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["seeed_sensecap_indicator_d1"]
+    assert preset["touchPins"] == "sda=39,scl=40,int=-1,rst=-1,en=-1"
+    assert "touch_pins" not in settings
+
+
+def test_embedded_panel_for_lcd_device_without_preset():
+    frame = Frame(id=14, device="lcd.st7701s_480x480", embedded={"platform": "esp32-s3"})
+    assert embedded_panel_for_frame(frame) == "LCD_ST7701S_480x480"
+
+
 def test_embedded_hardware_preset_for_trmnl_bwry():
     frame = Frame(id=9, embedded={"hardwarePreset": "trmnl_bwry"})
     ensure_embedded_frame_defaults(frame)

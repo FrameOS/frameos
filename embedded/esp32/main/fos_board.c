@@ -127,6 +127,11 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
 #define ONE_KEY_VOICE_EVENT_MAP(label) \
     "[{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"longPress\"}," \
     "\"emit\":\"voiceChat\",\"as\":{}}]"
+/* A board with one key and no microphone (the SenseCAP Indicator's top
+ * button): held, it walks to the next scene; a press stays the scene's. */
+#define ONE_KEY_NEXT_SCENE_EVENT_MAP(label) \
+    "[{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"longPress\"}," \
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}]"
 
 static const struct {
     const char *preset;
@@ -139,6 +144,7 @@ static const struct {
     {"seeed_reterminal_e1002", RETERMINAL_VOICE_EVENT_MAP},
     {"seeed_reterminal_e1003", RETERMINAL_VOICE_EVENT_MAP},
     {"seeed_reterminal_e1004", RETERMINAL_EVENT_MAP},
+    {"seeed_sensecap_indicator_d1", ONE_KEY_NEXT_SCENE_EVENT_MAP("BUTTON")},
 };
 
 const char *fos_board_event_map(const char *hardware_preset)
@@ -303,13 +309,18 @@ const char *fos_board_sd_pins(const char *hardware_preset)
  * specification). The reTerminal E1003's GT911 sits on the I2C0 bus with the
  * clock (SDA19/SCL20, which fos_i2c.c lends it), INT GPIO2, reset GPIO48, no
  * load switch (Seeed's E1003_TouchDraw example and SenseCraft HMI config,
- * Zephyr's board file). */
+ * Zephyr's board file). The SenseCAP Indicator's FocalTech FT6336U (0x48)
+ * sits on the LCD's bus, SDA GPIO39 / SCL GPIO40, next to the IO expander
+ * that holds its reset; its interrupt line goes to that expander too,
+ * unwired to the chip, so the driver polls it (Seeed's BSP,
+ * sensecap_indicator_board.c). */
 static const struct {
     const char *preset;
     const char *pins;
 } k_touch_pins[] = {
     {"seeed_reterminal_sticky", "sda=3,scl=2,int=21,rst=41,en=42"},
     {"seeed_reterminal_e1003", "sda=19,scl=20,int=2,rst=48"},
+    {"seeed_sensecap_indicator_d1", "sda=39,scl=40,int=-1,rst=-1,en=-1"},
 };
 
 const char *fos_board_touch_pins(const char *hardware_preset)

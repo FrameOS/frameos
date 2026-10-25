@@ -20,6 +20,8 @@ static int bits_per_pixel(fos_pixel_format_t format)
         case FOS_PIXEL_4BPP_SPECTRA6:
         case FOS_PIXEL_4BPP_GRAY:
             return 4;
+        case FOS_PIXEL_RGB565:
+            return 16;
         default:
             return 0;
     }
@@ -64,6 +66,13 @@ static void put_panel(const fos_panel_surface_t *s, int px, int py, bool black)
     const int bpp = bits_per_pixel(s->format);
     if (bpp == 0) return;
     const size_t stride = row_bytes(s->width, bpp);
+    if (bpp == 16) {
+        /* One little-endian 5/6/5 word: black 0x0000, white 0xFFFF. */
+        uint8_t *at = s->buf + (size_t)py * stride + (size_t)px * 2u;
+        at[0] = black ? 0x00 : 0xFF;
+        at[1] = black ? 0x00 : 0xFF;
+        return;
+    }
     const size_t bit = (size_t)px * (size_t)bpp;
     const size_t index = (size_t)py * stride + bit / 8u;
     const unsigned shift = 8u - (unsigned)bpp - (unsigned)(bit % 8u);

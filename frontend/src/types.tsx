@@ -22,6 +22,7 @@ export type FrameEmbeddedHardwarePreset =
   | 'trmnl_4in26_diy_kit'
   | 'xteink_x4'
   | 'esp32_c3_042_oled'
+  | 'seeed_sensecap_indicator_d1'
   | 'seeed_reterminal_sticky'
   | 'seeed_reterminal_e1001'
   | 'seeed_reterminal_e1002'

@@ -232,10 +232,6 @@ void app_main(void)
         ESP_LOGI(TAG, "battery: %d mV (%d%%)", battery_mv, battery_pct);
     }
 
-    if (HEARTBEAT_GPIO >= 0 && heartbeat_pin_free(config)) {
-        xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
-    }
-
     fos_display_config_t display_config = {
         .panel = config->panel,
         .hardware_preset = config->hardware_preset,
@@ -249,6 +245,13 @@ void app_main(void)
         ESP_LOGW(TAG, "display init failed, continuing headless");
     }
     fos_display_set_temperature_hook(panel_temperature);
+
+    /* Not where the pin is wired to something else (heartbeat_pin_free), nor
+     * on an RGB LCD, whose pixel clock is GPIO21 (the SenseCAP Indicator):
+     * the panel is known only once the display is selected. */
+    if (HEARTBEAT_GPIO >= 0 && heartbeat_pin_free(config) && !fos_display_is_lcd()) {
+        xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
+    }
 
     /* Claim the panel buffer here — the panel size is known and Wi-Fi, lwIP,
      * httpd and SPIFFS have not yet carved up the internal heap. On a
