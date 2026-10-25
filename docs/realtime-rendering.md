@@ -249,11 +249,17 @@ both device-limits ports count three).
 
 The S3 fetches every instruction through a 16 KB cache, and in DIO mode a
 miss moves two bits a clock. The S3 image is built for QIO
-(`sdkconfig.defaults`): the header still says DIO, the bootloader switches
-the flash to quad itself and stays in DIO on a chip that refuses its QE bit.
-The bootloader is only replaced by a USB flash, so a frame updated over the
-air keeps its DIO bootloader and its speed; a DIO bootloader with a QIO app
-was measured to boot, render and write flash as before. The C3 overlay keeps
+(`sdkconfig.defaults`): the header still says DIO and the bootloader switches
+the flash to quad itself. A flash that refuses its QE bit does not fall back
+to DIO: the bootloader drops to slow reads, the app's flash init
+(`esp_flash_init_default_chip`) fails setting quad mode and startup asserts,
+so a board flashed over USB boot-loops, and an updated one rolls back to its
+previous app. QEMU's emulated flash is such a chip, which is why the boot
+smoke builds DIO (`sdkconfig.qemu.defaults`); a new S3 board gets a bench
+boot before it ships with this image. The bootloader is only replaced by a
+USB flash, so a frame updated over the air keeps its DIO bootloader and its
+speed; a DIO bootloader with a QIO app was measured to boot, render and
+write flash as before (on a flash whose QE bit was already set). The C3 overlay keeps
 DIO: measured on the S3 only, and a thin client is not fetch-bound.
 
 ### Metrics with the logged frame
