@@ -122,7 +122,12 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
 
     DEV_SetPinConfig(config->rst, config->dc, config->cs, config->cs2, config->busy,
                      config->sck, config->mosi, config->pwr);
-    if (entry->bus == FOS_PANEL_BUS_SPI_READ) DEV_SetReadPin(config->dc);
+    if (entry->bus == FOS_PANEL_BUS_SPI_READ) {
+        DEV_SetReadPin(config->dc);
+        DEV_SetSpiClock(FOS_IT8951_SPI_HZ);
+    } else {
+        DEV_SetSpiClock(0);
+    }
     s_panel = entry;
     ESP_LOGI(TAG, "panel %s (%dx%d, fmt=%d, %u byte buffer)", entry->name,
              fos_display_width(), fos_display_height(), (int)fos_display_format(),

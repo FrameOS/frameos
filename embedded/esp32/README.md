@@ -295,13 +295,22 @@ for the two Spectra boards most of the bench work runs on:
   the `dc` pin slot is its **MISO** (`FOS_PANEL_BUS_SPI_READ`; the E1003's
   is GPIO8, the TF socket's line), `pwr` the panel's power switch (GPIO11)
   and `cs2` the controller's (GPIO21, which keeps the S3 heartbeat LED off
-  it); HRDY is the busy pin. Each refresh resets the controller, reads its
-  info (a panel that is not 1872×1404 fails the init with the size it
-  reported), writes VCOM only when the controller holds another value (it
-  tries the setter Waveshare's examples use, then Seeed's, and reads back),
-  streams the frame as 8-bit big-endian pixels a row at a time from
-  internal RAM, runs one GC16 refresh and waits for `LUTAFSR` to clear
-  before it sleeps the controller (a clear is the INIT waveform). The
+  it); HRDY is the busy pin, and the bus runs at 20 MHz for this panel
+  (FastEPD's clock for the E1003; the write-only panels keep 8 MHz). The
+  first refresh of a boot resets the controller, reads its info (a panel
+  that is not 1872×1404 fails the init with the size it reported) and
+  writes VCOM only when the controller holds another value (it tries the
+  setter Waveshare's examples use, then Seeed's, and reads back). Between
+  refreshes the controller waits in **standby, which keeps its picture**,
+  so a refresh wakes it, sends only the rows whose 64-bit digest changed
+  (4-bit big-endian loads straight from the packed buffer, four rows to a
+  DMA transfer, runs of changed rows merged over gaps of two), runs GC16
+  over the band they span and waits for `LUTAFSR` to clear before standby;
+  a frame with no changed row is no refresh at all. A whole frame is 1.25 MiB
+  on the wire, about half a second; a clock's digits, a few milliseconds. A
+  failed step, a clear (the INIT waveform) or a boot sends the next picture
+  whole. The console prints `it8951: N of 1404 rows up in … ms, GC16 over
+  rows a-b in … ms` per refresh. The
   preset picks the E1003's variant: VCOM -1.40 V, columns that run right to
   left (rows go out mirrored, as Seeed's GxEPD2 and Gray16 examples, FastEPD
   and Zephyr's board file have it), and a temperature the controller must be

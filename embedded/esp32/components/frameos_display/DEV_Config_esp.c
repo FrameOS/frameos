@@ -37,6 +37,9 @@ int EPD_MISO_PIN = -1;
 
 static spi_device_handle_t s_spi = NULL;
 static bool s_initialized = false;
+/* The panel's SPI clock: EPD_SPI_HZ unless its driver asks for more
+ * (DEV_SetSpiClock; the IT8951 runs at 20 MHz). */
+static int s_spi_hz = EPD_SPI_HZ;
 /* The SPI bus under the panel. Brought up once, by whoever asks first: the
  * panel (no MISO: every EPD but the IT8951 is write-only) or an SD card that
  * shares the bus (the Seeed reTerminal E-series hang their TF socket off the
@@ -110,6 +113,14 @@ void DEV_SetPinConfig(int rst, int dc, int cs, int cs2, int busy, int sclk, int 
     if (sclk >= 0) EPD_SCLK_PIN = sclk;
     if (mosi >= 0) EPD_MOSI_PIN = mosi;
     EPD_PWR_PIN = pwr;
+}
+
+void DEV_SetSpiClock(int hz)
+{
+    if (s_initialized) {
+        ESP_LOGW(TAG, "SPI clock changed after init; call DEV_Module_Exit first");
+    }
+    s_spi_hz = hz > 0 ? hz : EPD_SPI_HZ;
 }
 
 void DEV_SetReadPin(int miso)
@@ -295,7 +306,7 @@ UBYTE DEV_Module_Init(void)
         return 1;
     }
     spi_device_interface_config_t dev_config = {
-        .clock_speed_hz = EPD_SPI_HZ,
+        .clock_speed_hz = s_spi_hz,
         .mode = 0,
         .spics_io_num = -1, /* vendor drivers toggle CS manually */
         .queue_size = 4,

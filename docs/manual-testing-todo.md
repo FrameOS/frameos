@@ -50,10 +50,16 @@ most:
   right (if it is mirrored, the E1003 variant's `mirror_x` is wrong); a
   1-pixel checkerboard or thin vertical lines show no pairs of swapped
   columns; the 16 grey bands of `display_test` are 16 distinct steps.
-- [ ] **It refreshes every time**: two renders in a row both flash (the
-  temperature command is what makes the E1003 run the waveform at all); a
-  refresh is a few seconds (2.6 MB at 8 MHz plus one GC16), and nothing is
-  cut short by the sleep.
+- [ ] **It refreshes every time**: two different renders in a row both
+  flash (the temperature command is what makes the E1003 run the waveform at
+  all); a whole frame's `it8951: 1404 of 1404 rows up in` is about 550 ms
+  (1.25 MiB at 20 MHz; if reads or the picture break at 20 MHz, try
+  `FOS_IT8951_SPI_HZ` 16 or 12 MHz), and nothing is cut short by standby.
+- [ ] **Only changed rows go up**: a clock scene's minute tick uploads tens
+  of rows and flashes only that band, and the rest of the picture is intact
+  afterwards (standby keeps the controller's memory; if the unchanged part
+  turns to noise, it does not, and every refresh must send the whole frame).
+  The same picture twice logs `no row changed, refresh skipped`.
 - [ ] **It renders on-device**: a photo and a text-heavy scene render
   without `OOM` (5.0 MiB canvas + 1.25 MiB buffer + the 1.5 MiB reserve on
   8 MB — the tightest board); note the `freePsramKB` after the first render.

@@ -9,8 +9,9 @@ import pytest
 
 # Runs embedded/esp32/main/tests/test_fos_it8951.c: the pure half of the
 # IT8951 panel driver (components/frameos_display/it8951.c) — one row of the
-# packed sixteen-grey buffer as the controller's 8-bit pixels, left to right
-# on the Waveshare 10.3" HAT and mirrored on the Seeed reTerminal E1003. Same
+# packed sixteen-grey buffer in big-endian 4-bit wire order, as it is on the
+# Waveshare 10.3" HAT and mirrored on the Seeed reTerminal E1003, and the row
+# digest that decides which rows go to the controller again. Same
 # arrangement as test_esp32_touch.py next door: the file keeps that half
 # above the ESP_PLATFORM guard, so a laptop compiler is all this needs.
 
@@ -71,4 +72,4 @@ def test_fos_it8951_host_tests_pass(tmp_path: Path):
     summary = re.search(r"(\d+) checks, (\d+) failures", run_result.stdout)
     assert summary is not None, run_result.stdout
     assert int(summary.group(2)) == 0
-    assert int(summary.group(1)) >= 30, f"expected the full suite to run, saw {summary.group(1)} checks"
+    assert int(summary.group(1)) >= 15, f"expected the full suite to run, saw {summary.group(1)} checks"

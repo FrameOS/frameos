@@ -51,6 +51,9 @@ void DEV_SetPinConfig(int rst, int dc, int cs, int cs2, int busy, int sclk, int 
  * the bus comes up with `miso` and the dc pin is left alone. Call after
  * DEV_SetPinConfig, before DEV_Module_Init. */
 void DEV_SetReadPin(int miso);
+/* The panel's SPI clock in Hz, when its controller takes more than the
+ * shared 8 MHz (the IT8951: 20 MHz). Before DEV_Module_Init; 0 = default. */
+void DEV_SetSpiClock(int hz);
 
 void DEV_Digital_Write(UWORD Pin, UBYTE Value);
 UBYTE DEV_Digital_Read(UWORD Pin);
