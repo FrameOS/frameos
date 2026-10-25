@@ -93,7 +93,7 @@ export interface UsageAccount {
 
 export interface UsageResponse {
   /** The signed-in account (the home page's greeting). */
-  account?: UsageAccount
+  account?: UsageAccount | undefined
   /** Where to ask for more; null when the deployment has no support address. */
   support_email: string | null
   usage: AccountUsage

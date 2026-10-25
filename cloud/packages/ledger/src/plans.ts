@@ -27,6 +27,9 @@ export interface PlanEntitlements {
   cloudRenderedFrames: number;
   frameLogBytes: number;
   frames: number;
+  // Null when the row does not name it: the free plan's photo storage is the
+  // deployment's FRAMEOS_CLOUD_MAX_PHOTO_MB, which only auth-web reads.
+  photoBytes: number | null;
   privateSceneBytes: number;
 }
 
@@ -55,7 +58,7 @@ export interface AccountPlan {
   nextPlanCode: string | null;
   plan: BillingPlan;
   // False when the account has no subscription row and is on the PAYG
-  // fallback — the page says "Pay as you go" either way, but "did somebody
+  // fallback — the page says "Free" either way, but "did somebody
   // choose this" is a different question from "what applies".
   subscribed: boolean;
   status: string;
@@ -69,17 +72,18 @@ export interface AccountPlan {
 export const fallbackPaygPlan: BillingPlan = {
   code: paygPlanCode,
   currency: "USD",
-  description: "AI when you want it, billed monthly for exactly what you used.",
+  description: "Your own frames, the scene store, photos and backups. AI is billed for what you use.",
   entitlements: {
     backupBytes: 100 * 1024 * 1024,
     cloudRenderedFrames: 0,
     frameLogBytes: 100 * 1024 * 1024,
     frames: 50,
+    photoBytes: null,
     privateSceneBytes: 100 * 1024 * 1024,
   },
   fromTable: false,
   marginBasisPoints: 10_000,
-  name: "Pay as you go",
+  name: "Free",
   period: "month",
   priceMicros: 0n,
   public: true,
@@ -88,7 +92,7 @@ export const fallbackPaygPlan: BillingPlan = {
 
 type PlanRow = typeof billingPlans.$inferSelect;
 
-function entitlementsFrom(value: unknown): PlanEntitlements {
+export function entitlementsFrom(value: unknown): PlanEntitlements {
   const raw =
     value && typeof value === "object" && !Array.isArray(value)
       ? (value as Record<string, unknown>)
@@ -108,6 +112,7 @@ function entitlementsFrom(value: unknown): PlanEntitlements {
     cloudRenderedFrames: number("cloud_rendered_frames", base.cloudRenderedFrames),
     frameLogBytes: number("frame_log_bytes", base.frameLogBytes),
     frames: number("frames", base.frames),
+    photoBytes: number("photo_bytes", 0) || null,
     privateSceneBytes: number("private_scene_bytes", base.privateSceneBytes),
   };
 }

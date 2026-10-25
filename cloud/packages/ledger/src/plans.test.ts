@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fallbackPaygPlan } from "./plans";
+import { entitlementsFrom, fallbackPaygPlan } from "./plans";
 import { addMonth, addMonths } from "./subscriptions";
 import { utcDayWindow, utcMonthWindow } from "./account-usage";
 
@@ -13,9 +13,18 @@ describe("the free plan fallback", () => {
       cloudRenderedFrames: 0,
       frameLogBytes: 100 * 1024 * 1024,
       frames: 50,
+      photoBytes: null,
       privateSceneBytes: 100 * 1024 * 1024,
     });
     expect(fallbackPaygPlan.priceMicros).toBe(0n);
+  });
+
+  // Photo storage is a plan number only when the row names it; otherwise it
+  // is the deployment's free-plan figure, which auth-web owns.
+  it("reads photo storage from a row that names it and leaves it to the deployment otherwise", () => {
+    expect(entitlementsFrom({ photo_bytes: 524_288_000 }).photoBytes).toBe(524_288_000);
+    expect(entitlementsFrom({ frames: 100 }).photoBytes).toBeNull();
+    expect(entitlementsFrom({ photo_bytes: "lots" }).photoBytes).toBeNull();
   });
 });
 

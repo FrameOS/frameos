@@ -80,7 +80,7 @@ export function BillingSettingsForm({
         />
         <p className="copy">
           Accounts price at their plan&apos;s margin — an account on no plan
-          is on Pay as you go and uses that row&apos;s rate. This number only
+          is on the Free plan and uses that row&apos;s rate. This number only
           applies on a deployment with no plan rows, or to a turn with no
           account behind it. Snapshotted into every record it prices, so
           changing it never re-prices the past.

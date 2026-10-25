@@ -858,7 +858,8 @@ Monetization).
 ## Monetization
 
 Free tier is the product's credibility; paid tiers are convenience and
-capacity, never security or lock-in:
+capacity, never security or lock-in. The plans themselves (Free, Plus,
+Business) are `docs/accounting-todo.md` §0.1.
 
 - **Free, forever**: account, enrolling and managing frames, installing
   public store scenes, basic status. Self-hosting everything remains free

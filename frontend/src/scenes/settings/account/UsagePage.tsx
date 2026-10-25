@@ -1,11 +1,14 @@
+import { CheckIcon } from '@heroicons/react/24/outline'
+import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 
 import { Box } from '../../../components/Box'
-import { Button } from '../../../components/Button'
+import { Button, buttonColor, buttonSize } from '../../../components/Button'
 import { Spinner } from '../../../components/Spinner'
 import { Tag } from '../../../components/Tag'
 import { AccountPageHeader, AccountSection, AccountTable } from './AccountPageHeader'
 import { dollars, formatBytes, formatDateTime, surfaceLabel } from './format'
+import { plansLogic, wholeDollars, type PlanCard, type PlanStopLimits } from './plansLogic'
 import { usageLogic, type AccountUsage, type AiUsage, type AiUsageMonth } from './usageLogic'
 
 interface Meter {
@@ -82,6 +85,161 @@ function StorageMeters({ usage }: { usage: AccountUsage }): JSX.Element {
           <span className="frameos-strong tabular-nums">{formatBytes(usage.scenes.public_bytes)} · free</span>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+const planFeatureLabels: Record<string, string> = {
+  share_frames: 'Share frames with the people on your plan',
+  virtual_frames: 'Virtual frames, and thin clients like the Inky Frame',
+  sso: 'Single sign-on with SAML',
+  priority_support: 'Priority support',
+  dedicated_support: 'Dedicated support',
+}
+
+// What each card adds to the one before it, in front of its own features.
+const planBaseFeatures: Record<string, string[]> = {
+  free: [
+    'Frames you own, from a Raspberry Pi to an ESP32',
+    'The scene store and AI scene chat',
+    'Photo albums and backups',
+  ],
+  plus: ['Everything in Free'],
+  business: ['Everything in Plus'],
+}
+
+// A price list rolls over to GB at 1000 MB, so ten times 100 MB reads "1.0 GB".
+function planBytes(bytes: number): string {
+  const gigabyte = 1024 * 1024 * 1024
+  return bytes >= 1000 * 1024 * 1024 && bytes < gigabyte ? `${(bytes / gigabyte).toFixed(1)} GB` : formatBytes(bytes)
+}
+
+function planLimitRows(limits: PlanStopLimits): [string, string][] {
+  const count = (value: number): string => value.toLocaleString('en-US')
+  return [
+    ['People', limits.people === 1 ? 'Just you' : count(limits.people)],
+    ['Frames', count(limits.frames)],
+    ['Virtual frames', limits.cloud_rendered_frames === 0 ? 'None' : count(limits.cloud_rendered_frames)],
+    ['Photos', planBytes(limits.photo_bytes)],
+    ['Private scenes', planBytes(limits.private_scene_bytes)],
+    ['Backups', planBytes(limits.backup_bytes)],
+    ['Frame logs', planBytes(limits.frame_log_bytes)],
+  ]
+}
+
+function PlanFeature({ label, muted }: { label: string; muted?: boolean }): JSX.Element {
+  return (
+    <li className={clsx('flex gap-2', muted && 'frameos-muted')}>
+      <CheckIcon className={clsx('mt-0.5 h-4 w-4 shrink-0', muted ? 'opacity-40' : 'text-[var(--frameos-primary)]')} />
+      <span>{label}</span>
+    </li>
+  )
+}
+
+function PlanCardBox({ card }: { card: PlanCard }): JSX.Element {
+  const { setStopIndex } = useActions(plansLogic)
+  const { group, stop, stopIndex } = card
+  const sliding = group.stops.length > 1
+  return (
+    <Box
+      className="flex flex-col gap-4 p-5"
+      // Inline: the card theme sets its own border color, which a class here would lose to.
+      style={card.current ? { borderColor: 'var(--frameos-primary)' } : undefined}
+      data-plan={group.key}
+    >
+      <div>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="frameos-strong text-lg font-semibold">{group.name}</h3>
+          {card.current ? <Tag color="teal">Current plan</Tag> : null}
+        </div>
+        <p className="frameos-muted text-sm">
+          {sliding ? `From ${wholeDollars(card.fromPriceMicros)}/month` : 'For the frames you own'}
+        </p>
+      </div>
+      <div>
+        <div className="flex items-baseline gap-1">
+          <span className="frameos-strong text-3xl font-bold tabular-nums">{wholeDollars(stop.price_micros)}</span>
+          <span className="frameos-muted text-sm">/month</span>
+        </div>
+        {sliding ? (
+          <div className="mt-2">
+            <input
+              type="range"
+              min={0}
+              max={group.stops.length - 1}
+              step={1}
+              value={stopIndex}
+              onChange={(event) => setStopIndex(group.key, Number(event.target.value))}
+              aria-label={`${group.name} price`}
+              aria-valuetext={`${wholeDollars(stop.price_micros)} a month`}
+              className="w-full accent-[var(--frameos-primary)]"
+            />
+            <div className="frameos-muted flex justify-between text-xs tabular-nums">
+              <span>{wholeDollars(card.fromPriceMicros)}</span>
+              <span>{wholeDollars(card.toPriceMicros)}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-2 h-10" aria-hidden="true" />
+        )}
+      </div>
+      <dl className="space-y-1.5 text-sm">
+        {planLimitRows(stop.limits).map(([label, value]) => (
+          <div key={label} className="flex justify-between gap-3">
+            <dt className="frameos-muted">{label}</dt>
+            <dd className="frameos-strong tabular-nums">{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <ul className="space-y-1.5 text-sm">
+        {(planBaseFeatures[group.key] ?? []).map((label) => (
+          <PlanFeature key={label} label={label} />
+        ))}
+        {card.features.map((feature) => (
+          <PlanFeature key={feature} label={planFeatureLabels[feature] ?? feature} />
+        ))}
+        {card.laterFeatures.map(({ feature, priceMicros }) => (
+          <PlanFeature
+            key={feature}
+            label={`${planFeatureLabels[feature] ?? feature} at ${wholeDollars(priceMicros)}/month`}
+            muted
+          />
+        ))}
+      </ul>
+      <div className="mt-auto pt-2">
+        {group.available ? (
+          card.current ? (
+            <Button color="secondary" full disabled>
+              Your plan
+            </Button>
+          ) : null
+        ) : card.contactHref ? (
+          <a className={clsx(buttonSize('normal'), buttonColor('primary'), 'block w-full')} href={card.contactHref}>
+            Contact support to activate
+          </a>
+        ) : (
+          <p className="frameos-muted text-center text-sm">Contact support to activate</p>
+        )}
+      </div>
+    </Box>
+  )
+}
+
+function PlanCards(): JSX.Element {
+  const { planCards, catalogLoading } = useValues(plansLogic)
+  if (planCards.length === 0) {
+    return catalogLoading ? <Spinner /> : <></>
+  }
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-4 lg:grid-cols-3">
+        {planCards.map((card) => (
+          <PlanCardBox key={card.group.key} card={card} />
+        ))}
+      </div>
+      <p className="frameos-muted text-sm leading-relaxed">
+        AI is priced per request and costs the same on every plan. See how pricing works below.
+      </p>
     </div>
   )
 }
@@ -288,22 +446,26 @@ export function UsagePage(): JSX.Element {
       <AccountSection title="Storage and frames">
         <Box className="p-4">{usage ? <StorageMeters usage={usage} /> : usageLoading ? <Spinner /> : null}</Box>
       </AccountSection>
-      <AccountSection title="Need more?">
-        <Box className="p-4 text-sm leading-relaxed">
-          More storage, more frames, or a bigger daily AI allowance: tell us what you are building and we will sort it
-          out.{' '}
-          {contactEmail ? (
-            <>
-              Write to{' '}
-              <a className="frameos-link hover:underline" href={`mailto:${contactEmail}`}>
-                {contactEmail}
-              </a>
-              .
-            </>
-          ) : (
-            'Contact us through the address in the footer.'
-          )}
-        </Box>
+      <AccountSection
+        title="Need more?"
+        description={
+          <>
+            Plus and Business grow with the slider. Each dollar a month adds one person, one virtual frame, and another
+            free plan's worth of frames and storage.
+            {contactEmail ? (
+              <>
+                {' '}
+                Questions? Write to{' '}
+                <a className="frameos-link hover:underline" href={`mailto:${contactEmail}`}>
+                  {contactEmail}
+                </a>
+                .
+              </>
+            ) : null}
+          </>
+        }
+      >
+        <PlanCards />
       </AccountSection>
       <AccountSection title="AI usage">{ai ? <AiUsageCard ai={ai} /> : aiLoading ? <Spinner /> : null}</AccountSection>
       {ai ? (
