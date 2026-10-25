@@ -1156,6 +1156,20 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
                                      &packed_len)) {
         return ESP_ERR_TIMEOUT;
     }
+    /* An LCD's snapshot is the frame buffer the panel scans, and the frames
+     * after it are drawn into the other one in turn: copy it out and let go,
+     * or a slow socket holds the next frame back for as long as it streams.
+     * (On e-paper the next render is minutes away; the stream keeps the lock
+     * and spares the PSRAM.) */
+    uint8_t *own = NULL;
+    if (fos_display_is_lcd()) {
+        own = fos_big_malloc(packed_len);
+        if (own) {
+            memcpy(own, packed, packed_len);
+            fos_client_snapshot_release();
+            packed = own;
+        }
+    }
 
     /* The packed snapshot is in PANEL orientation (the packers rotate while
      * packing); previews are served in SCENE orientation like the Pi's, so
@@ -1174,7 +1188,8 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
     size_t pixel_bytes = row_stride * (size_t)out_height;
     size_t palette_bytes = palette_entries * 4u;
     if (pixel_bytes > UINT32_MAX - 54u - palette_bytes) {
-        fos_client_snapshot_release();
+        if (own) free(own);
+        else fos_client_snapshot_release();
         return ESP_ERR_INVALID_SIZE;
     }
     size_t bmp_len = 54u + palette_bytes + pixel_bytes;
@@ -1211,7 +1226,8 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
 
     uint8_t *row = malloc(row_stride);
     if (!row) {
-        fos_client_snapshot_release();
+        if (own) free(own);
+        else fos_client_snapshot_release();
         return ESP_ERR_NO_MEM;
     }
     if (sink->begin) sink->begin(ctx, bmp_len);
@@ -1222,7 +1238,8 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
         ok = sink->write(ctx, row, row_stride);
     }
     free(row);
-    fos_client_snapshot_release();
+    if (own) free(own);
+    else fos_client_snapshot_release();
     return ok ? ESP_OK : ESP_FAIL;
 }
 

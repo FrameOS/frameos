@@ -521,7 +521,7 @@ proc renderErrorFallback(
     # the allocation an OOM-aborted render could not afford.
     let image = renderCanvas()
     image.renderErrorInto(image.width, image.height, message)
-    if not packImageForFormat(image, buf, bufLen, pixelFormat):
+    if not renderCanvasIsPanel(image) and not packImageForFormat(image, buf, bufLen, pixelFormat):
       return 1
     GC_fullCollect()
     0
@@ -549,7 +549,10 @@ proc fos_nim_render_impl(
     var image = rendered.image
     let source = rendered.source
     let renderedAt = getMonoTime()
-    if not packImageForFormat(image, buf, bufLen.int, pixelFormat.int):
+    # Drawn straight into the panel's buffer (fos_nim_render_panel_impl):
+    # already packed.
+    let inPlace = renderCanvasIsPanel(image)
+    if not inPlace and not packImageForFormat(image, buf, bufLen.int, pixelFormat.int):
       return 1
     # The image is the persistent canvas (or, for a scene that produced its
     # own, a one-off); dropping our reference and collecting frees the latter
@@ -559,8 +562,10 @@ proc fos_nim_render_impl(
     let packed = getMonoTime()
     inc renderCount
     lastRenderMs = ((packed - start).inMilliseconds).int
-    log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
-        &"dither+pack {(packed - renderedAt).inMilliseconds} ms")
+    if not quietRenders:
+      log(&"render #{renderCount} ({source}, fmt={pixelFormat}): render {(renderedAt - start).inMilliseconds} ms, " &
+          (if inPlace: &"in place, collect {(packed - renderedAt).inMilliseconds} ms"
+           else: &"dither+pack {(packed - renderedAt).inMilliseconds} ms"))
     recoverEmergencyReserve("render")
     # Many interpreted scene graphs dispatch "render" while responding to the
     # render event itself. On embedded that should not immediately replay the
@@ -670,6 +675,22 @@ proc fos_nim_render_alloc_impl(
     result = renderErrorFallbackAlloc(outBuf, outLen, pixelFormat.int, "Render failed: " & e.msg)
     recoverEmergencyReserve("render failure")
 
+proc fos_nim_render_panel_impl(
+    buf: ptr UncheckedArray[uint8];
+    bufLen: csize_t;
+    pixelFormat: cint
+  ): cint {.exportc, cdecl.} =
+  ## Render into the panel's own buffer — an LCD's back frame buffer, which
+  ## the firmware shows with a buffer switch and no copy. Where the canvas can
+  ## be that buffer (renderCanvas: a 565 panel, unrotated) the scene draws
+  ## straight into it and nothing is packed; otherwise the canvas is packed
+  ## into it as fos_nim_render_impl always does.
+  setPanelTarget(buf, bufLen.int)
+  try:
+    result = fos_nim_render_impl(buf, bufLen, pixelFormat)
+  finally:
+    setPanelTarget(nil, 0)
+
 proc fos_nim_render_1bpp_impl(buf: ptr UncheckedArray[uint8]; bufLen: csize_t): cint {.exportc, cdecl.} =
   fos_nim_render_impl(buf, bufLen, 1)
 
@@ -679,6 +700,9 @@ proc fos_nim_recover_oom_abort_impl(jsBytes: ptr csize_t; httpReleased: ptr cint
   ## the free memory the glue then weighs a restart on includes it; then the
   ## rest of what its skipped `finally`s owned (recoverAbortedRun). Returns
   ## how many JS interpreters were dropped, `jsBytes` what they still hold.
+  # A render into the panel's buffer that aborted never reached its
+  # `finally`: the next render must not find that buffer still lent.
+  setPanelTarget(nil, 0)
   try:
     let http = releaseStrandedHttp()
     let js = recoverFromOomAbort()

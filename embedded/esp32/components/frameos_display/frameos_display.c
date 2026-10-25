@@ -185,6 +185,25 @@ bool fos_display_is_lcd(void)
     return s_panel && s_panel->bus == FOS_PANEL_BUS_RGB;
 }
 
+uint8_t *fos_display_render_target(size_t *len)
+{
+    if (len) *len = 0;
+    if (!fos_display_is_lcd()) return NULL;
+    uint8_t *target = fos_lcd_st7701s_back_buffer();
+    if (target && len) *len = fos_display_buffer_size();
+    return target;
+}
+
+void fos_display_release_render_target(void)
+{
+    if (fos_display_is_lcd()) fos_lcd_st7701s_release_back_buffer();
+}
+
+void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf))
+{
+    fos_lcd_st7701s_set_before_write_hook(hook);
+}
+
 esp_err_t fos_display_shared_i2c_bus(int sda, int scl, void **bus)
 {
     if (bus) *bus = NULL;

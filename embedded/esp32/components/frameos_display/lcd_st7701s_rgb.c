@@ -114,10 +114,19 @@ static volatile uint32_t s_glitch_us = 0;
 static volatile uint32_t s_slack_us = 0;
 static volatile uint32_t s_late_refills = 0;
 /* Double buffering: a new picture goes into the buffer nobody scans, and the
- * driver switches to it at a frame boundary (on_frame_complete says when). */
+ * driver switches to it at a frame boundary (on_frame_complete says when).
+ * The switch is asked for at once and waited for by the next writer
+ * (settle_front): a render longer than a frame finds it done, a short one
+ * waits only for the rest of the frame. */
 static uint8_t *s_fbs[2] = {NULL, NULL};
 static int s_front = 0;
+static int s_pending_front = -1; /* handed to the driver, not yet scanned */
 static SemaphoreHandle_t s_frame_done = NULL;
+/* One writer at a time: the render task drawing a scene straight into the
+ * back buffer (fos_lcd_st7701s_back_buffer) holds it until display(), and a
+ * console `display_test` on another task waits for it. */
+static SemaphoreHandle_t s_write_lock = NULL;
+static void (*s_before_write)(const uint8_t *buf) = NULL;
 static volatile int64_t s_last_frame_at_us = 0;
 static volatile uint32_t s_frames = 0;
 static volatile uint32_t s_glitches = 0;
@@ -485,6 +494,8 @@ static esp_err_t rgb_init(void)
     }
     s_frame_done = xSemaphoreCreateBinary();
     if (!s_frame_done) return ESP_ERR_NO_MEM;
+    s_write_lock = xSemaphoreCreateMutex();
+    if (!s_write_lock) return ESP_ERR_NO_MEM;
     esp_lcd_rgb_panel_event_callbacks_t callbacks = {0};
     callbacks.on_frame_buf_complete = on_frame_complete;
     esp_lcd_rgb_panel_register_event_callbacks(s_panel, &callbacks, NULL);
@@ -507,19 +518,54 @@ static void backlight_set(bool on)
 
 #define LCD_FB_BYTES ((size_t)FOS_LCD_ST7701S_WIDTH * FOS_LCD_ST7701S_HEIGHT * 2u)
 
-/* Hand the back buffer to the driver and wait for the frame boundary at
- * which the refill starts reading it; it is the front buffer after that. */
+/* Hand the back buffer to the driver: the refill starts reading it at the
+ * next frame boundary, and it is the front buffer from then on. The wait for
+ * that boundary is settle_front's, at the next write. */
 static void present_back(void)
 {
     int back = 1 - s_front;
     esp_lcd_panel_draw_bitmap(s_panel, 0, 0, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, s_fbs[back]);
     /* A frame that ended before the call above may have given already:
-     * clear it, then wait for one that ends after it (a few frames at most;
-     * on a timeout the switch still happens, a frame later). */
+     * clear it, so the wait below is for one that ends after it. */
     xSemaphoreTake(s_frame_done, 0);
+    s_pending_front = back;
+}
+
+/* The buffer last presented is being scanned: wait for the frame boundary
+ * that switched to it (a few frames at most; on a timeout the switch still
+ * happens, a frame later), after which the other one is free to draw in. */
+static void settle_front(void)
+{
+    if (s_pending_front < 0) return;
     uint32_t wait_ms = (s_frame_us * 4u) / 1000u + 10u;
     xSemaphoreTake(s_frame_done, pdMS_TO_TICKS(wait_ms));
-    s_front = back;
+    s_front = s_pending_front;
+    s_pending_front = -1;
+}
+
+/* The writer's lock, taken once by the task that draws (it may already hold
+ * it from fos_lcd_st7701s_back_buffer). */
+static void hold_writer(void)
+{
+    if (xSemaphoreGetMutexHolder(s_write_lock) == xTaskGetCurrentTaskHandle()) return;
+    xSemaphoreTake(s_write_lock, portMAX_DELAY);
+}
+
+static void release_writer(void)
+{
+    if (xSemaphoreGetMutexHolder(s_write_lock) == xTaskGetCurrentTaskHandle()) {
+        xSemaphoreGive(s_write_lock);
+    }
+}
+
+/* The buffer about to be drawn in, and only it: whoever pointed at it as the
+ * last picture (fos_client.c's snapshot) lets go first. */
+static uint8_t *writable_back(void)
+{
+    settle_front();
+    uint8_t *back = s_fbs[1 - s_front];
+    if (s_before_write) s_before_write(back);
+    return back;
 }
 
 static void fill_buffer(uint8_t *fb, uint16_t color)
@@ -580,17 +626,45 @@ int fos_lcd_st7701s_init(void)
 void fos_lcd_st7701s_display(uint8_t *buf)
 {
     if (!s_ready || !buf) return;
+    hold_writer();
     /* Into the buffer nobody scans, then switched in whole at a frame
-     * boundary: the picture changes from one frame to the next. */
-    memcpy(s_fbs[1 - s_front], buf, LCD_FB_BYTES);
+     * boundary: the picture changes from one frame to the next. A picture
+     * drawn straight into that buffer (fos_lcd_st7701s_back_buffer) is
+     * already there. */
+    uint8_t *back = s_pending_front < 0 && buf == s_fbs[1 - s_front] ? buf : NULL;
+    if (!back) {
+        back = writable_back();
+        if (buf != back) memcpy(back, buf, LCD_FB_BYTES);
+    }
     present_back();
+    release_writer();
 }
 
 void fos_lcd_st7701s_clear(void)
 {
     if (!s_ready) return;
-    fill_buffer(s_fbs[1 - s_front], 0xFFFF);
+    hold_writer();
+    fill_buffer(writable_back(), 0xFFFF);
     present_back();
+    release_writer();
+}
+
+uint8_t *fos_lcd_st7701s_back_buffer(void)
+{
+    if (!s_ready) return NULL;
+    hold_writer();
+    return writable_back();
+}
+
+void fos_lcd_st7701s_release_back_buffer(void)
+{
+    if (!s_ready) return;
+    release_writer();
+}
+
+void fos_lcd_st7701s_set_before_write_hook(void (*hook)(const uint8_t *buf))
+{
+    s_before_write = hook;
 }
 
 void fos_lcd_st7701s_sleep(void)
@@ -669,6 +743,9 @@ int fos_lcd_st7701s_init(void)
 }
 void fos_lcd_st7701s_display(uint8_t *buf) { (void)buf; }
 void fos_lcd_st7701s_clear(void) {}
+uint8_t *fos_lcd_st7701s_back_buffer(void) { return NULL; }
+void fos_lcd_st7701s_release_back_buffer(void) {}
+void fos_lcd_st7701s_set_before_write_hook(void (*hook)(const uint8_t *buf)) { (void)hook; }
 void fos_lcd_st7701s_sleep(void) {}
 esp_err_t fos_lcd_st7701s_i2c_bus(int sda, int scl, void **bus)
 {

@@ -45,6 +45,11 @@ int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)
     return -1;
 }
 int frameos_nim_render_1bpp(uint8_t *buf, size_t len) { return frameos_nim_render(buf, len, 1); }
+int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format)
+{
+    return frameos_nim_render(buf, len, pixel_format);
+}
+void frameos_nim_set_quiet(bool quiet) { (void)quiet; }
 const char *frameos_nim_info(void) { return "nim runtime not compiled in"; }
 const char *frameos_nim_scene_info_json(void) { return "{\"loaded\":0,\"available\":0,\"hasScene\":false,\"scenes\":[]}"; }
 const char *frameos_nim_scene_state_json(void) { return "{}"; }

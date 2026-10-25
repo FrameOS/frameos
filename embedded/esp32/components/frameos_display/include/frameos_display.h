@@ -55,6 +55,17 @@ int fos_display_bus(void);
 /* True when the display refreshes on its own (an LCD scanned from a frame
  * buffer): a blit shows at once and costs no e-paper wait. */
 bool fos_display_is_lcd(void);
+/* An LCD's own buffer for the next picture, `*len` bytes in the panel's
+ * format (fos_display_buffer_size): the renderer draws there in place and
+ * fos_display_blit(that buffer) shows it without a copy. The panel stays
+ * this task's until then, or until fos_display_release_render_target() hands
+ * it back unshown. NULL (and `*len` 0) for every panel that is not an LCD,
+ * which renders into a canvas of its own and packs. */
+uint8_t *fos_display_render_target(size_t *len);
+void fos_display_release_render_target(void);
+/* Called with a panel buffer just before it is written to: a snapshot that
+ * points at the last picture shown lets go of it (fos_client.c). */
+void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf));
 /* The selected panel's own I2C bus when it runs one on exactly these pins
  * (the SenseCAP Indicator's LCD shares SDA39/SCL40 with its touch
  * controller): the handle (an `i2c_master_bus_handle_t`) for another device

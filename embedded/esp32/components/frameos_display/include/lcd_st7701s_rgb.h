@@ -7,8 +7,9 @@
  * sleep shape. Frames on this panel are 480x480 in FOS_PIXEL_RGB565, one
  * little-endian 5/6/5 word per pixel, which the LCD peripheral scans out
  * continuously from one of two PSRAM frame buffers through 20-line bounce
- * buffers in internal RAM: a blit is a copy into the hidden buffer, switched
- * in at the next frame boundary. Why the clock, the core and the heap policy
+ * buffers in internal RAM: a blit is a copy into the hidden buffer (or no
+ * copy, for a picture drawn there in place), switched in at the next frame
+ * boundary. Why the clock, the core and the heap policy
  * are what they are: embedded/esp32/README.md, "SenseCAP Indicator".
  *
  * The sixteen data lines, the sync pins and the pixel clock are the chip's
@@ -47,6 +48,19 @@ int fos_lcd_st7701s_init(void);
 void fos_lcd_st7701s_clear(void);
 void fos_lcd_st7701s_display(uint8_t *buf);
 void fos_lcd_st7701s_sleep(void);
+
+/* The buffer the next picture goes into, to draw it there in place (the Nim
+ * renderer's canvas is that buffer: no pack, no copy). Waits for the switch
+ * to the last picture to have happened, so nothing reads it any more, and
+ * holds the panel's writer lock until fos_lcd_st7701s_display(that buffer)
+ * presents it — a copy-free display — or
+ * fos_lcd_st7701s_release_back_buffer() gives it back unshown. NULL before
+ * init. */
+uint8_t *fos_lcd_st7701s_back_buffer(void);
+void fos_lcd_st7701s_release_back_buffer(void);
+/* Called with a buffer just before it is written to (drawn in, copied into,
+ * cleared): a snapshot that points at the last picture lets go of it. */
+void fos_lcd_st7701s_set_before_write_hook(void (*hook)(const uint8_t *buf));
 
 /* The expander's I2C bus when it runs on exactly these pins: `*bus` gets the
  * `i2c_master_bus_handle_t`; ESP_ERR_NOT_FOUND for other pins or before init,

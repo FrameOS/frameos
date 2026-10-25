@@ -24,6 +24,7 @@ idf_component_register(
         "fos_framebuffer.c"
         "fos_wifi.c"
         "fos_http.c"
+        "fos_animation.c"
         "fos_client.c"
         "fos_cloud.c"
         "fos_url_guard.c"

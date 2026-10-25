@@ -51,6 +51,8 @@ extern void NimMain(void);
 extern bool fos_nim_init_impl(int width, int height, const char *name, int max_http_response_bytes,
                               int rotate);
 extern int fos_nim_render_impl(uint8_t *buf, size_t len, int pixel_format);
+extern int fos_nim_render_panel_impl(uint8_t *buf, size_t len, int pixel_format);
+extern void fos_nim_set_quiet_impl(int quiet);
 extern int fos_nim_render_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
 extern const char *fos_nim_info_impl(void);
@@ -694,6 +696,32 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
     s_nim_oom_jmp_armed = false;
     nim_lock_give();
     return result;
+}
+
+int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format)
+{
+    if (!s_nim_ready || !buf) return -1;
+    if (!nim_lock_take()) return -1;
+    int result;
+    if (setjmp(s_nim_oom_jmp) == 0) {
+        s_nim_oom_jmp_armed = true;
+        result = fos_nim_render_panel_impl(buf, len, pixel_format);
+        if (result == 0) nim_note_healthy_render();
+    } else {
+        nim_oom_abort_note("render");
+        result = -1;
+    }
+    s_nim_oom_jmp_armed = false;
+    nim_lock_give();
+    return result;
+}
+
+void frameos_nim_set_quiet(bool quiet)
+{
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    fos_nim_set_quiet_impl(quiet ? 1 : 0);
+    nim_lock_give();
 }
 
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)

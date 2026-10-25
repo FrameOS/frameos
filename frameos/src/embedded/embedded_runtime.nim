@@ -427,6 +427,15 @@ proc fos_nim_load_tz_data_impl(sliceJson: cstring, timeZone: cstring): cstring {
     log("tz: load failed: " & e.msg)
   tzRuleBuffer.cstring
 
+var quietRenders* = false
+
+proc fos_nim_set_quiet_impl(quiet: cint) {.exportc, cdecl.} =
+  ## An animation's quiet frame (fos_animation.h): no `render #N` line and no
+  ## scene log lines until the next frame that logs in full.
+  quietRenders = quiet != 0
+  if not logger.isNil:
+    logger.enabled = not quietRenders
+
 proc fos_nim_set_debug_impl(enabled: cint) {.exportc, cdecl.} =
   ## Turns the interpreter's per-node memory profile on and off at runtime
   ## (`set debug 1` on the console). It logs a line per node per render — the
@@ -490,7 +499,11 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
     frameConfig: frameConfig,
     enabled: true,
     log: proc(payload: JsonNode) =
-      espLog(($payload).cstring)
+      # Off for an animation's quiet frames (setQuiet), like the Linux
+      # runner's fast-render log pause: the scene's own lines, not the
+      # runtime's.
+      if logger.enabled:
+        espLog(($payload).cstring)
   )
   initLock(logger.lock)
   channels.embeddedLogHook = proc(payload: JsonNode) {.gcsafe.} =
@@ -729,20 +742,24 @@ proc fos_nim_set_fusion_impl(enabled: cint) {.exportc, cdecl.} =
 # One scene canvas for the device's uptime, not one per render.
 #
 # Two decisions live here. The format, decided per board by the firmware
-# (`fos_render_canvas_bytes_per_pixel`, components/frameos_display): RGBX
-# when a full canvas takes at most half the module's PSRAM, else pixie's
-# 8-bit luma surface for a greyscale panel and its 16-bit RGB 5/6/5 surface
-# for a colour one. The 800x480 boards and a 1200x1600 panel on a 16 MB
-# module render in full colour; 1200x1600 Spectra 6 on an 8 MB module needs
-# 565 — RGBA is 7.3 MiB and does not fit, 565 is 3.7 MiB and does — and the
-# 1872x1404 sixteen-grey reTerminal E1003 draws in grey, 2.5 MiB where 565
-# was 5.0 and left the render reserve almost alone in the module. A grey
-# canvas loses nothing a grey panel shows: blending is per channel, so the
-# luma of a composite is the composite of the lumas. A 565 canvas costs colour even though the dither keeps its error
-# rows at full precision: rounding every stored pixel to 5/6 bits turns a
-# smooth gradient into plateaus (a 480-row sky keeps 11 blue levels of 90),
-# and the diffusion pass prints the plateau edges as bands — seen on the
-# 7.3" weather scene. So a 565 canvas stores with pixie's per-pixel dither
+# (`fos_render_canvas_bytes_per_pixel`, components/frameos_display), panel
+# first: pixie's 8-bit luma surface for a greyscale or black-and-white panel
+# and its 16-bit RGB 5/6/5 surface for an RGB565 LCD, whatever the PSRAM;
+# for a colour e-paper panel RGBX when a full canvas takes at most half the
+# module's PSRAM, else 565. A grey canvas loses nothing a grey panel shows —
+# blending is per channel, so the luma of a composite is the composite of
+# the lumas — and every pass over it (a fill, a blend, the dither) moves a
+# quarter of the bytes; the 1872x1404 sixteen-grey reTerminal E1003 needs it
+# to fit at all (2.5 MiB where 565 was 5.0). An LCD's 565 canvas is its own
+# back frame buffer (panelCanvas below): drawn in place, nothing to pack or
+# copy. The 800x480 colour boards and a 1200x1600 panel on a 16 MB module
+# render in full colour; 1200x1600 Spectra 6 on an 8 MB module needs 565 —
+# RGBA is 7.3 MiB and does not fit, 565 is 3.7 MiB and does. A 565 canvas
+# costs colour even though the dither keeps its error rows at full
+# precision: rounding every stored pixel to 5/6 bits turns a smooth gradient
+# into plateaus (a 480-row sky keeps 11 blue levels of 90), and the
+# diffusion pass prints the plateau edges as bands — seen on the 7.3"
+# weather scene. So a 565 canvas stores with pixie's per-pixel dither
 # (`ditherStores`), which brings the gradient back at no memory cost, and
 # RGBX is used wherever it fits. `-d:frameosCanvasRgbx` / `-d:frameosCanvas565`
 # / `-d:frameosCanvasGray8` force a format for A/B measurement; the Pi runtime and the wasm preview are
@@ -761,6 +778,20 @@ proc canvasBuffer(len: csize_t): pointer {.importc: "frameos_nim_canvas_buffer",
 proc canvasBytesPerPixel(): csize_t {.importc: "fos_display_canvas_bytes_per_pixel", cdecl.}
 
 var sceneCanvas: Image
+
+# The panel's own buffer for this render, when the firmware hands one in
+# (fos_nim_render_panel_impl: an LCD's back frame buffer). A canvas in the
+# panel's format and orientation IS that buffer: the scene draws straight
+# into what the panel scans next, and there is nothing to pack or copy. The
+# LCD has two such buffers, used in turn; their wrappers are kept.
+var panelTarget: pointer
+var panelTargetBytes: int
+var panelCanvases: array[2, Image]
+var nextPanelCanvas = 0
+
+proc setPanelTarget*(target: pointer, bytes: int) =
+  panelTarget = target
+  panelTargetBytes = bytes
 
 proc sceneCanvasFormat*(): PixelFormat =
   when defined(frameosCanvasRgbx): pfRgbx
@@ -782,13 +813,39 @@ proc sceneCanvasHeight*(): int =
   elif frameConfig.rotate in [90, 270]: frameConfig.width
   else: frameConfig.height
 
+proc panelCanvas(width, height: int, format: PixelFormat): Image =
+  ## The panel's buffer as the canvas, when it can be: a 565 canvas over a
+  ## 565 panel, unrotated (a rotated panel packs, which rotates). nil else.
+  if panelTarget.isNil or format != pfRgb565 or frameConfig.isNil or frameConfig.rotate != 0 or
+      width * height * 2 != panelTargetBytes:
+    return nil
+  for canvas in panelCanvases:
+    if not canvas.isNil and canvas.bufferPointer == panelTarget and canvas.width == width and
+        canvas.height == height:
+      return canvas
+  result = newImage565Over(width, height, panelTarget)
+  # The rounding the 565 pack used to do (half a step of per-pixel jitter),
+  # so a gradient on the glass does not step every eight levels.
+  result.ditherStores = true
+  panelCanvases[nextPanelCanvas] = result
+  nextPanelCanvas = 1 - nextPanelCanvas
+
+proc renderCanvasIsPanel*(image: Image): bool =
+  ## Whether `image` is the panel buffer handed in for this render: drawn
+  ## there, it is already packed.
+  not image.isNil and not panelTarget.isNil and image.bufferPointer == panelTarget
+
 proc renderCanvas*(): Image =
   ## The canvas the next render draws into, at the scene's (rotated)
-  ## dimensions. Made on first use, reused for every render after.
+  ## dimensions. Made on first use, reused for every render after. The
+  ## panel's own buffer when it can be (panelCanvas).
   let
     width = sceneCanvasWidth()
     height = sceneCanvasHeight()
     format = sceneCanvasFormat()
+  let direct = panelCanvas(width, height, format)
+  if not direct.isNil:
+    return direct
   if not sceneCanvas.isNil and sceneCanvas.width == width and
       sceneCanvas.height == height and sceneCanvas.format == format:
     return sceneCanvas
