@@ -178,7 +178,7 @@ Still open:
   loads the clock from the chip every time. Check the CR1220 holder on that
   board (the E1002 V1.2 schematic feeds RTC_VDD from the cell through a
   diode); with a cell in, the cold boot should say `loaded:true`.
-- [ ] **The E1004** (bench 2026-10-25, frame 70 on the self-hosted backend, the
+- [x] **The E1004** (bench 2026-10-25, frame 70 on the self-hosted backend, the
   32 MB image): the boot found `sda19/scl20: pcf8563 sht4x sy6974b` (the
   charger on the clock's bus, as its schematic says), mounted the preinstalled
   16 GB card on the panel bus through the migration path, kept its clock
@@ -189,8 +189,9 @@ Still open:
   after; `i2c sync` wrote the clock first time. Its LED is lit HIGH (the
   table said inverted and it idled lit, blinking dark on a press; fixed in the
   table and the preset, `set led_type gpio` on a board whose NVS already
-  holds the earlier default). Still to see by eye: dark at rest, green on a
-  press and through a hold, on the fixed polarity.
+  holds the earlier default). Seen by eye on the fixed polarity: dark at
+  rest, green on a press, and only a blink of green at reset now that the
+  pin is claimed dark at boot. Nothing left to see on this board.
 - [ ] **The WS2812 kind** (no board with one is to hand): `set led_type
   ws2812` on a pin with a pixel lights it soft white per note.
 
