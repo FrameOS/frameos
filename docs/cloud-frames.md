@@ -1116,7 +1116,10 @@ device key / access token) back. Enrollment state is surfaced as
 The ESP32 `hardware` object sends the chip as `platform` (`"esp32-s3"` or
 `"esp32-c3"`; older firmware sent the plain `"esp32"`, and consumers
 prefix-match) with the panel driver name as both `device` and `panel`, plus
-`width`/`height`. 2026.8+ firmware adds the board facts the USB console's
+`width`/`height` and (2026.10.21+) `pixelFormat`, the panel's packed format
+(`fos_pixel_format_t`: 1 black and white, 4 and 8 greys, …), from which the
+render check knows the canvas the frame draws in (a grey panel past RGBX
+draws in luma). 2026.8+ firmware adds the board facts the USB console's
 status JSON already reported, so the cloud deploy drawer can show them
 without a cable: `mac`, `chipRevision` (major×100+minor), `chipCores`,
 `memory` (`internalHeapBytes`, `psramBytes` — totals; free values travel as

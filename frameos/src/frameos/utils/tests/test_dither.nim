@@ -138,7 +138,7 @@ proc noisyImage(width, height: int, seed: uint32): Image =
       result.unsafe[x, y] = rgbx(r.uint8, g.uint8, b.uint8, 255)
 
 suite "row-streamed dither equals the in-place reference":
-  test "palette dither, every bit depth, RGBX and 565 canvases":
+  test "palette dither, every bit depth, RGBX, 565 and grey canvases":
     let palettes = @[
       @[(0, 0, 0), (255, 255, 255)],
       saturated4ColorPalette,
@@ -158,6 +158,11 @@ suite "row-streamed dither equals the in-place reference":
         let packed = image.toRgb565Image()
         check ditherPaletteIndexed(packed, palette) ==
           referencePaletteIndexed(packed.toRgbxImage(), palette)
+        # And a grey canvas like the RGBX image of its greys (the
+        # reTerminal E1003's: a grey panel past RGBX draws in luma).
+        let grey = image.toGray8Image()
+        check ditherPaletteIndexed(grey, palette) ==
+          referencePaletteIndexed(grey.toRgbxImage(), palette)
         # And a view dithers as the sub-image it addresses.
         if w >= 8 and h >= 4:
           let v = image.view(2, 1, w - 4, h - 2)
@@ -179,6 +184,16 @@ suite "row-streamed dither equals the in-place reference":
         for i in 0 ..< w * h:
           let reference = max(0, min(maxLevel, round(gray[i]).int))
           check streamed[i] == reference
+        # A grey canvas holds the luma of what an RGBX one would: it
+        # dithers like the RGBX image of those greys.
+        let grey = image.toGray8Image()
+        var fromGrey = newSeq[int](w * h)
+        grey.forEachGrayDithered(maxLevel, x, y, level):
+          fromGrey[y * w + x] = level
+        var fromRgbx = newSeq[int](w * h)
+        grey.toRgbxImage().forEachGrayDithered(maxLevel, x, y, level):
+          fromRgbx[y * w + x] = level
+        check fromGrey == fromRgbx
 
 suite "render palette override":
   test "activePalette is the default until a matching override is set":

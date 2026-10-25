@@ -97,9 +97,13 @@ def build_groups():
 # EMBEDDED_UNSUPPORTED_PANELS / EMBEDDED_PANEL_FORMATS in
 # app/tasks/embedded_firmware.py and generate_panel_table.py.
 ESP32_UNSUPPORTED = {
-    "EPD_10in3", "EPD_12in48", "EPD_12in48b", "EPD_12in48b_V2",
+    "EPD_12in48", "EPD_12in48b", "EPD_12in48b_V2",
     "EPD_7in5_V2_gray", "EPD_4in2b_V2_old", "EPD_7in5b_V2_old",
 }
+# Panels outside the ePaper folder the firmware still drives: the 13.3E6's
+# own folder, and the IT8951's 10.3" (its driver is the firmware's own,
+# components/frameos_display/it8951.c).
+ESP32_OTHER_FOLDER_PANELS = {"EPD_13in3e", "EPD_10in3"}
 
 
 # Panels that live in the Waveshare driver tree but are other vendors' glass.
@@ -117,7 +121,7 @@ def build_esp32_panels():
     for v in variants:
         if v.key in ESP32_UNSUPPORTED:
             continue
-        if not (get_variant_folder(v.key) == "ePaper" or v.key == "EPD_13in3e"):
+        if not (get_variant_folder(v.key) == "ePaper" or v.key in ESP32_OTHER_FOLDER_PANELS):
             continue
         color = {
             "Black": "Black/White",

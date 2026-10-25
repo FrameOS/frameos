@@ -73,9 +73,10 @@ typedef struct {
 } fos_gpio_button_t;
 
 /* The capacitive touch panel (fos_touch.c; docs/events.md "Input"): a GT911
- * on its own I2C bus, its interrupt line, its reset and the load switch that
+ * on its I2C bus, its interrupt line, its reset and the load switch that
  * powers it (-1 = always on). sda or scl -1 = no touch panel. The Seeed
- * reTerminal Sticky: sda 3, scl 2, int 21, rst 41, en 42. */
+ * reTerminal Sticky: sda 3, scl 2, int 21, rst 41, en 42; the E1003: sda 19,
+ * scl 20 (the clock's bus, shared), int 2, rst 48. */
 typedef struct {
     int8_t sda;
     int8_t scl;

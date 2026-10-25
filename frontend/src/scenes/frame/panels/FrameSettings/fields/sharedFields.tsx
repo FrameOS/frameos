@@ -318,8 +318,8 @@ function ButtonBeepField(): JSX.Element | null {
                   The frame beeps for as long as you hold a button it registered (up to a second), and briefly when a
                   press wakes it from deep sleep, so you know the press arrived before the screen changes. A press it
                   could not take, like the 33rd during one render, gets a lower buzz instead. This is the GPIO of the
-                  board's buzzer: GPIO 45 on the Seeed reTerminal E1001, E1002 and E1004, GPIO 48 on the reTerminal
-                  Sticky. Set -1 to turn the beep off. Applies without a restart.
+                  board's buzzer: GPIO 45 on the Seeed reTerminal E1001, E1002, E1003 and E1004, GPIO 48 on the
+                  reTerminal Sticky. Set -1 to turn the beep off. Applies without a restart.
                 </>
               )
             }
@@ -364,7 +364,8 @@ function ButtonBeepField(): JSX.Element | null {
  * the buzzer: lit for every note a press, a hold or the voice chat sounds,
  * dark in between — so a frame with the beep off, or a board without a
  * buzzer, still shows what the frame heard. Empty leaves the board's own
- * (the reTerminal E1001/E1002: 6 lit low, the E1004: 48 lit high), -1 = no LED.
+ * (the reTerminal E1001/E1002: 6 lit low, the E1003: 16 lit low, the E1004: 48
+ * lit high), -1 = no LED.
  * Applied live.
  */
 function StatusLedField(): JSX.Element | null {
@@ -377,7 +378,7 @@ function StatusLedField(): JSX.Element | null {
     reportedPin === undefined ? 'Board default, -1 = none' : reportedPin < 0 ? 'None on the frame' : `${reportedPin} on the frame`
   const typeLabels: Record<StatusLedType, string> = {
     gpio: 'GPIO, lit high (reTerminal E1004)',
-    gpio_inverted: 'GPIO, lit low (reTerminal E1001/E1002)',
+    gpio_inverted: 'GPIO, lit low (reTerminal E1001/E1002/E1003)',
     ws2812: 'WS2812 addressable pixel',
   }
   const typePlaceholder = reportedType ? `${typeLabels[reportedType]} on the frame` : 'Board default'
@@ -391,9 +392,9 @@ function StatusLedField(): JSX.Element | null {
               disabledReason ?? (
                 <>
                   The board&apos;s status LED lights with every beep: a press, each second of a hold, and the voice
-                  chat&apos;s listening, waiting and answer cues. With the button beep set to -1 it is the only cue, which
-                  suits a frame you talk to. GPIO 6 on the Seeed reTerminal E1001 and E1002 (lit low), 48 on the E1004 (lit
-                  high). Set -1 for no LED. Applies without a restart.
+                  chat&apos;s listening, waiting and answer cues. With the button beep set to -1 it is the only cue,
+                  which suits a frame you talk to. GPIO 6 on the Seeed reTerminal E1001 and E1002 (lit low), 16 on the
+                  E1003 (lit low), 48 on the E1004 (lit high). Set -1 for no LED. Applies without a restart.
                 </>
               )
             }
@@ -464,10 +465,10 @@ function MicrophoneField(): JSX.Element | null {
               disabledReason ?? (
                 <>
                   The PDM microphone the voice chat records from: its clock and data GPIO, and the GPIO that powers it
-                  for a session (-1 = always powered). The Seeed reTerminal E1001 and E1002 have one on 42, 41 and 38,
-                  which the preset fills in; the E1004 has none, and a PDM microphone on its J2 header is 42 and 41
-                  with no power pin. Leave a field empty for the board&apos;s own, or set the clock or data to -1 for no
-                  microphone. Read when a recording starts, so a change applies without a restart.
+                  for a session (-1 = always powered). The Seeed reTerminal E1001, E1002 and E1003 have one on 42, 41
+                  and 38, which the preset fills in; the E1004 has none, and a PDM microphone on its J2 header is 42 and
+                  41 with no power pin. Leave a field empty for the board&apos;s own, or set the clock or data to -1 for
+                  no microphone. Read when a recording starts, so a change applies without a restart.
                 </>
               )
             }
@@ -520,9 +521,9 @@ function VoiceChatField(): JSX.Element | null {
                   REFRESH held). It goes on a long press because the hold is the recording: once the key has been held
                   for a second the frame plays a short sparkle and listens, and letting go ends the sentence and sends
                   it to this control plane. The AI chat transcribes it and acts on it with the frame in its context
-                  (switch to a scene by name, set a field of the scene showing, redraw, show a picture); the reply
-                  lands in the frame&apos;s chat and its log, and the buzzer sounds the outcome. Needs a board with a
-                  microphone: the Seeed reTerminal E1001 and E1002 have one (the E1004 does not). Off keeps the
+                  (switch to a scene by name, set a field of the scene showing, redraw, show a picture); the reply lands
+                  in the frame&apos;s chat and its log, and the buzzer sounds the outcome. Needs a board with a
+                  microphone: the Seeed reTerminal E1001, E1002 and E1003 have one (the E1004 does not). Off keeps the
                   microphone shut whatever the buttons are bound to.
                   {microphone === false ? ' This frame reports no microphone.' : ''}
                 </>

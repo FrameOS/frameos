@@ -86,9 +86,11 @@ suite "Server state helpers":
     var done: Atomic[bool]
     var bad: Atomic[int]
     var reads: Atomic[int]
-    proc reader(args: tuple[done: ptr Atomic[bool], bad, reads: ptr Atomic[int],
+    var started: Atomic[int]
+    proc reader(args: tuple[done: ptr Atomic[bool], bad, reads, started: ptr Atomic[int],
                             keyA, keyB: string]) {.thread.} =
       {.cast(gcsafe).}:
+        discard args.started[].fetchAdd(1)
         while not args.done[].load:
           let key = liveConfigValue(frameAccessKey)
           let apiKey = liveConfigValue(serverApiKey)
@@ -102,18 +104,28 @@ suite "Server state helpers":
           let junk = parseJson("""{"a":[1,2,3],"b":{"c":"dddddddddddddddd"}}""")
           if junk{"a"}.len != 3:
             discard args.bad[].fetchAdd(1000)
-    var readers: array[4, Thread[tuple[done: ptr Atomic[bool], bad, reads: ptr Atomic[int],
+    var readers: array[4, Thread[tuple[done: ptr Atomic[bool], bad, reads, started: ptr Atomic[int],
                                        keyA, keyB: string]]]
-    for t in readers.mitems: createThread(t, reader, (addr done, addr bad, addr reads, keyA, keyB))
+    for t in readers.mitems:
+      createThread(t, reader, (addr done, addr bad, addr reads, addr started, keyA, keyB))
+    # The claim is about reads that overlap reloads. On a two-core CI runner
+    # 2000 reloads can finish before a new thread is scheduled at all (reads
+    # was 0 there once), so wait until every reader is in its loop, and keep
+    # reloading until the readers have read alongside.
+    while started.load < readers.len:
+      cpuRelax()
     let generationBefore = currentFrameConfigGeneration()
-    for i in 0 ..< 2000:
-      let even = i mod 2 == 0
+    let readsBefore = reads.load
+    var reloads = 0
+    while reloads < 2000 or reads.load - readsBefore < 2000:
+      let even = reloads mod 2 == 0
       updateFrameConfigFrom(globalFrameConfig, FrameConfig(frameAccess: "private",
         frameAccessKey: if even: keyB else: keyA, serverApiKey: if even: keyA else: keyB,
         assetsPath: "/srv/assets"))
+      inc reloads
     done.store(true)
     joinThreads(readers)
     check bad.load == 0
-    check reads.load > 0
-    check currentFrameConfigGeneration() - generationBefore == 2000
-    check liveConfigValue(frameAccessKey) == keyA
+    check currentFrameConfigGeneration() - generationBefore == reloads
+    # The last reload was number reloads - 1: an even one sets keyB.
+    check liveConfigValue(frameAccessKey) == (if (reloads - 1) mod 2 == 0: keyB else: keyA)

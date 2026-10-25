@@ -86,6 +86,11 @@ const boardChoices = [
     platform: genericPlatform,
   },
   {
+    label: 'Seeed reTerminal E1003 (10.3" grayscale ESP32-S3)',
+    value: 'hw:seeed_reterminal_e1003',
+    platform: genericPlatform,
+  },
+  {
     label: 'Seeed reTerminal E1004 (13.3" color ESP32-S3)',
     value: 'hw:seeed_reterminal_e1004',
     platform: genericPlatform,

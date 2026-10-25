@@ -25,6 +25,7 @@ export type FrameEmbeddedHardwarePreset =
   | 'seeed_reterminal_sticky'
   | 'seeed_reterminal_e1001'
   | 'seeed_reterminal_e1002'
+  | 'seeed_reterminal_e1003'
   | 'seeed_reterminal_e1004'
   | 'elecrow_crowpanel_5in79'
   | 'pimoroni_inky_frame_4'
@@ -161,6 +162,9 @@ export interface FrameType {
     speaker?: boolean | null
     sdCard?: boolean | null
     mac?: string | null
+    /** ESP32 only: the panel's packed format (fos_pixel_format_t: 1 black and
+     * white, 4 and 8 greys, ...). A grey panel past RGBX draws in a luma canvas. */
+    pixelFormat?: number | null
     /** major*100 + minor, as esp_chip_info reports it */
     chipRevision?: number | null
     chipCores?: number | null
@@ -366,6 +370,7 @@ export interface FrameType {
         | 'waveshare_esp32_s3_epaper_13_3e6'
         | 'seeed_reterminal_e1001'
         | 'seeed_reterminal_e1002'
+        | 'seeed_reterminal_e1003'
         | 'seeed_reterminal_e1004'
         | 'seeed_reterminal_sticky'
       pins?: {

@@ -1102,6 +1102,10 @@ export const esp32Panels: { key: string; label: string }[] = [
     "label": "Waveshare 10.2\" (B) 960x640 Black/White/Red"
   },
   {
+    "key": "EPD_10in3",
+    "label": "Waveshare 10.3\" 1872x1404 16 Grayscale"
+  },
+  {
     "key": "EPD_13in3b",
     "label": "Waveshare 13.3\" (B) 960x680 Black/White/Red"
   },

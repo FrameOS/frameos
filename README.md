@@ -56,6 +56,7 @@ Supported are all the most common e-ink displays out there, on a Raspberry Pi or
 FrameOS supports Seeed Studio's reTerminal ePaper displays out of the box. Each one has a hardware
 preset: pick it, flash the frame from the browser, and scenes render on the device itself.
 
+- reTerminal E1003 - 10.3" 16-level grayscale, touch ([Seeed wiki](https://wiki.seeedstudio.com/getting_started_with_reterminal_e1003/))
 - [reTerminal E1004](https://frameos.net/devices/seeed-reterminal-e1004) - 13.3" Spectra 6 color ([buy](https://www.seeedstudio.com/reTerminal-E1004-p-6692.html?sensecap_affiliate=NK0JMuC&referring_service=link))
 - [reTerminal E1002](https://frameos.net/devices/seeed-reterminal-e1002) - 7.3" Spectra 6 color ([buy](https://www.seeedstudio.com/reTerminal-E1002-p-6533.html?sensecap_affiliate=NK0JMuC&referring_service=link))
 - [reTerminal E1001](https://frameos.net/devices/seeed-reterminal-e1001) - 7.5" black/white ([buy](https://www.seeedstudio.com/reTerminal-E1001-p-6534.html?sensecap_affiliate=NK0JMuC&referring_service=link))

@@ -205,14 +205,15 @@ for the two Spectra boards most of the bench work runs on:
   key (the console's empty-value convention covers it now).
 - **PhotoPainter 7.3"** — 8 MB PSRAM, PMIC power-up, TF socket, and a KEY
   button next to BOOT (`0:BOOT`, `4:KEY1` in the preset's `gpio_buttons`).
-- **Seeed reTerminal E-series (E1001/E1002/E1004)** — the TF socket shares
+- **Seeed reTerminal E-series (E1001/E1002/E1003/E1004)** — the TF socket shares
   the panel's SPI bus: `assets_sd_pins` names the panel's SCK7/MOSI9, so
   `fos_assets_sd.c` joins the display's bus instead of opening SPI3
   (`fos_display_spi_bus_share`), the panel holds the bus for each refresh
   (`DEV_SPI_Acquire`) and the sdspi driver takes its turns between. The
-  socket is powered through GPIO16 and has a card-detect contact on GPIO15
-  (`pwr=16,det=15` in the spec; an empty slot is reported without a bus
-  probe). The green status LED (`led_pin 6` with `led_type gpio_inverted`;
+  socket is powered through GPIO16 (GPIO39 on the E1003) and has a
+  card-detect contact on GPIO15 (`pwr=16,det=15` in the spec; an empty slot
+  is reported without a bus probe). The green status LED (`led_pin 6` with
+  `led_type gpio_inverted`; `led_pin 16`, also lit low, on the E1003;
   `led_pin 48` with `led_type gpio` on the E1004, whose LED sits behind a
   transistor; `fos_led.c`) follows the buzzer's notes, so a
   frame with `buzzer_pin -1` still shows its presses and the voice chat's
@@ -223,9 +224,9 @@ for the two Spectra boards most of the bench work runs on:
   which the power decision takes over the divider's cell test — a frame on
   its desk with USB in no longer deep-sleeps "on battery" — and the metrics
   carry as `usbPower` / `charging`) and the SHT40 climate sensor (reported
-  as present, not yet read). A board provisioned before these keys existed
-  gets all of them on its first boot of this firmware, as `set hardware`
-  would give them.
+  as present; read only for the E1003's IT8951, below). A board provisioned
+  before these keys existed gets all of them on its first boot of this
+  firmware, as `set hardware` would give them.
   **GPIO19/20 are the S3's native USB pads**, and the ROM leaves the
   USB-Serial/JTAG PHY attached to them: with the PHY still on, the I2C bus on
   those pins answered its first read and then NACKed every write (I2C error
@@ -236,6 +237,7 @@ for the two Spectra boards most of the bench work runs on:
 | `seeed_reterminal_sticky` | S3 | EPD_3in97 3.97" four-grey | reTerminal Sticky, 32MB flash, 8MB PSRAM (renders on-device); panel power GPIO47; keys AI (GPIO4), UP (5), DOWN (6): UP/DOWN held walk the scenes, AI held talks; 4 kHz buzzer GPIO48; PDM mic 19/20/38; GT911 touch panel (`touch_pins`); I2C 1/0 with the PCF8563 clock, SHT40, LSM6DS3TR-C IMU and the BQ27220 fuel gauge (no battery divider); TF socket on the panel bus (CS8, MISO12, power 10, detect 11); deep-sleeps on battery |
 | `seeed_reterminal_e1001` | S3 | EPD_7in5_V2 7.5" mono | reTerminal E1001, 32MB flash; battery GPIO1 ÷2, switch GPIO21; TF socket on the panel bus (MISO8, CS14, detect 15, power 16); green LED GPIO6 (lit low); I2C 19/20 (PCF8563 clock, SHT40) + 39/40 (SY6974B charger); PDM mic 42/41/38 |
 | `seeed_reterminal_e1002` | S3 | EPD_7in3e 7.3" Spectra | reTerminal E1002, 32MB flash; the same peripherals as the E1001 |
+| `seeed_reterminal_e1003` | S3 | EPD_10in3 10.3" sixteen greys (IT8951, E1003 tuning) | reTerminal E1003, 32MB flash, 8MB PSRAM — renders on-device on an 8-bit luma canvas (2.5 MiB); the IT8951 answers on MISO GPIO8 (`dc` slot), panel power GPIO11 (`pwr`), controller power GPIO21 (`cs2`); battery GPIO1 ÷2, switch GPIO40; TF socket on the panel bus (power 39); green LED GPIO16 (lit low); I2C 19/20 with the clock, the SHT40, the charger and the GT911 touch panel (INT 2, reset 48); PDM mic 42/41/38; deep-sleeps on battery |
 | `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas; TF socket as the E1001/E1002; green LED GPIO48 (lit high); I2C 19/20 carries the clock, the sensor AND the charger (39/40 is its J2 header); no microphone |
 | `elecrow_crowpanel_5in79` | S3 | EPD_5in79 5.79" 4-gray | CrowPanel, dual SSD1683 |
 
@@ -283,9 +285,60 @@ for the two Spectra boards most of the bench work runs on:
   with this yet. `status` shows `codec:` and the microphone's source;
   `mic 2` and `beep` are the bench checks.
 
+- **Seeed reTerminal E1003, and the IT8951** — the E1003's 10.3" 1872×1404
+  sixteen-grey ED103TC2 sits behind an ITE IT8951 controller on the E-series
+  SPI bus, the same chip and glass as the Waveshare 10.3" HAT, so both are
+  panel `EPD_10in3` (`components/frameos_display/it8951.c`; any ESP32-S3
+  wired to the HAT works too). The IT8951 is the one panel that answers the
+  host — its panel size and image buffer address, the VCOM it holds, whether
+  its waveform engine still runs — and it has no D/C line, so for this panel
+  the `dc` pin slot is its **MISO** (`FOS_PANEL_BUS_SPI_READ`; the E1003's
+  is GPIO8, the TF socket's line), `pwr` the panel's power switch (GPIO11)
+  and `cs2` the controller's (GPIO21, which keeps the S3 heartbeat LED off
+  it); HRDY is the busy pin, and the bus runs at 20 MHz for this panel
+  (FastEPD's clock for the E1003; the write-only panels keep 8 MHz). The
+  first refresh of a boot resets the controller, reads its info (a panel
+  that is not 1872×1404 fails the init with the size it reported) and
+  writes VCOM only when the controller holds another value (it tries the
+  setter Waveshare's examples use, then Seeed's, and reads back). Between
+  refreshes the controller waits in **standby, which keeps its picture**,
+  so a refresh wakes it, sends only the rows whose 64-bit digest changed
+  (4-bit big-endian loads straight from the packed buffer, four rows to a
+  DMA transfer, runs of changed rows merged over gaps of two), runs GC16
+  over the band they span and waits for `LUTAFSR` to clear before standby;
+  a frame with no changed row is no refresh at all. A whole frame is 1.25 MiB
+  on the wire, about half a second; a clock's digits, a few milliseconds. A
+  failed step, a clear (the INIT waveform) or a boot sends the next picture
+  whole. The console prints `it8951: N of 1404 rows up in … ms, GC16 over
+  rows a-b in … ms` per refresh. The
+  preset picks the E1003's variant: VCOM -1.40 V, columns that run right to
+  left (rows go out mirrored, as Seeed's GxEPD2 and Gray16 examples, FastEPD
+  and Zephyr's board file have it), and a temperature the controller must be
+  told before every refresh — Seeed's driver says it skips the refresh
+  without one — taken from the board's SHT40 (`fos_climate.c`, 16 °C without
+  a reading). The HAT's variant: VCOM -1.50 V, the Pi driver's default.
+  `it8951:` on the console at the first refresh prints the controller's
+  firmware, LUT and VCOM; each refresh's line carries the temperature it
+  was told. The E1003's GT911 touch
+  panel shares the clock's I2C bus (19/20): `fos_i2c.c` lends `fos_touch.c`
+  that bus instead of the touch driver opening a second one on the same pins,
+  and a lent bus survives the console's `i2c` rescan. The 8 MB module renders
+  on-device in pixie's **8-bit luma canvas** (`pfGray8`; any grey or black-
+  and-white panel too big for an RGBX canvas gets one, a colour panel gets
+  565): 2.5 MiB of canvas and 1.25 MiB of packed panel buffer beside the
+  1.5 MiB render reserve, about 2.5 MiB more for scenes and apps than a 565
+  canvas (5.0 MiB) would leave. A grey panel loses nothing to it: blending
+  is per channel, so the luma of a composite is the composite of the lumas,
+  and 256 levels feed at most 16. The boot log says `canvas: 1872x1404
+  gray8`.
+  **None of this has met an E1003 yet.**
+
 The TRMNL X (10.3" 1872×1404 parallel e-ink over EPDIY/FastEPD) is not yet
 supported — it needs a parallel display driver class this component does not
-have.
+have. Of the boards TRMNL's firmware builds for the IT8951, the E1003
+(`TRMNL_X_E1003`) is the `seeed_reterminal_e1003` preset; the TRMNL X, the M5
+PaperS3, the LilyGO T5 Pro and the Sensoria boards drive their glass without a
+controller, as does the original M5Paper's ESP32 (not an S3) with an IT8951.
 
 ## First boot and provisioning
 
@@ -1261,8 +1314,10 @@ panel is picked at runtime from the configured panel name, so switching panels
 is `set panel EPD_13in3e` on the serial console (or the setup portal dropdown,
 which lists the whole table) followed by a restart — no rebuild. Panels whose
 symbols collide with a newer variant of the same family are excluded
-(`EPD_7in5_V2_gray`, `EPD_4in2b_V2_old`, `EPD_7in5b_V2_old`), as are the
-IT8951 and 12.48" controller stacks. `FRAMEOS_SELECTED_PANEL` (backend builds
+(`EPD_7in5_V2_gray`, `EPD_4in2b_V2_old`, `EPD_7in5b_V2_old`), as is the
+12.48" multi-controller stack; the IT8951's `EPD_10in3` and the SSD1306 OLED
+are hand-written drivers in the component (`EXTRA_PANELS` in the generator).
+`FRAMEOS_SELECTED_PANEL` (backend builds
 set it from the frame's device) only chooses the boot-time default panel.
 Published release images remain per flash-size profile, but one generic image
 now covers all panels.

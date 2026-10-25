@@ -28,6 +28,8 @@ int EPD_BUSY_PIN = 6;
 int EPD_PWR_PIN = -1;
 int EPD_MOSI_PIN = 9;
 int EPD_SCLK_PIN = 7;
+/* Only a controller that answers has one (the IT8951, DEV_SetReadPin). */
+int EPD_MISO_PIN = -1;
 
 #define EPD_SPI_HOST SPI2_HOST
 #define EPD_SPI_HZ (8 * 1000 * 1000)
@@ -35,11 +37,15 @@ int EPD_SCLK_PIN = 7;
 
 static spi_device_handle_t s_spi = NULL;
 static bool s_initialized = false;
+/* The panel's SPI clock: EPD_SPI_HZ unless its driver asks for more
+ * (DEV_SetSpiClock; the IT8951 runs at 20 MHz). */
+static int s_spi_hz = EPD_SPI_HZ;
 /* The SPI bus under the panel. Brought up once, by whoever asks first: the
- * panel (no MISO: every EPD is write-only) or an SD card that shares the
- * bus (the Seeed reTerminal E-series hang their TF socket off the panel's
- * SCK/MOSI with their own MISO and CS) — then the bus stays up for both and
- * the panel takes it for the whole of a refresh (DEV_SPI_Acquire). */
+ * panel (no MISO: every EPD but the IT8951 is write-only) or an SD card that
+ * shares the bus (the Seeed reTerminal E-series hang their TF socket off the
+ * panel's SCK/MOSI with their own MISO and CS; on the E1003 the IT8951
+ * answers on that same MISO) — then the bus stays up for both and the panel
+ * takes it for the whole of a refresh (DEV_SPI_Acquire). */
 static bool s_bus_ready = false;
 static bool s_bus_shared = false;
 static int s_bus_miso = -1;
@@ -109,6 +115,23 @@ void DEV_SetPinConfig(int rst, int dc, int cs, int cs2, int busy, int sclk, int 
     EPD_PWR_PIN = pwr;
 }
 
+void DEV_SetSpiClock(int hz)
+{
+    if (s_initialized) {
+        ESP_LOGW(TAG, "SPI clock changed after init; call DEV_Module_Exit first");
+    }
+    s_spi_hz = hz > 0 ? hz : EPD_SPI_HZ;
+}
+
+void DEV_SetReadPin(int miso)
+{
+    if (s_initialized) {
+        ESP_LOGW(TAG, "read pin changed after init; call DEV_Module_Exit first");
+    }
+    EPD_MISO_PIN = miso;
+    EPD_DC_PIN = -1;
+}
+
 static DEV_DebugLogFn s_debug_log = NULL;
 
 void DEV_SetDebugLog(DEV_DebugLogFn fn)
@@ -147,13 +170,16 @@ int DEV_TakeError(char *buf, size_t len)
     return 0;
 }
 
+/* A pin slot a panel does not use is -1, which reaches here as 0xFFFF. */
 void DEV_Digital_Write(UWORD Pin, UBYTE Value)
 {
+    if (Pin >= GPIO_NUM_MAX) return;
     gpio_set_level(Pin, Value);
 }
 
 UBYTE DEV_Digital_Read(UWORD Pin)
 {
+    if (Pin >= GPIO_NUM_MAX) return 0;
     return (UBYTE)gpio_get_level(Pin);
 }
 
@@ -190,6 +216,17 @@ void DEV_SPI_Write_nByte(uint8_t *pData, uint32_t Len)
         pData += chunk;
         Len -= chunk;
     }
+}
+
+UWORD DEV_SPI_Transfer16(UWORD Value)
+{
+    spi_transaction_t t = {
+        .flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA,
+        .length = 16,
+        .tx_data = {(uint8_t)(Value >> 8), (uint8_t)(Value & 0xFF)},
+    };
+    if (spi_device_polling_transmit(s_spi, &t) != ESP_OK) return 0;
+    return (UWORD)((t.rx_data[0] << 8) | t.rx_data[1]);
 }
 
 /* Software (bit-bang) SPI, used by a few panels for register reads. */
@@ -249,9 +286,9 @@ UBYTE DEV_Module_Init(void)
     if (s_initialized) {
         return 0;
     }
-    ESP_LOGI(TAG, "init: rst=%d dc=%d cs=%d cs2=%d busy=%d sck=%d mosi=%d pwr=%d",
+    ESP_LOGI(TAG, "init: rst=%d dc=%d cs=%d cs2=%d busy=%d sck=%d mosi=%d pwr=%d miso=%d",
              EPD_RST_PIN, EPD_DC_PIN, EPD_CS_PIN, EPD_CS_S_PIN, EPD_BUSY_PIN,
-             EPD_SCLK_PIN, EPD_MOSI_PIN, EPD_PWR_PIN);
+             EPD_SCLK_PIN, EPD_MOSI_PIN, EPD_PWR_PIN, EPD_MISO_PIN);
 
     configure_output(EPD_RST_PIN, 1);
     configure_output(EPD_DC_PIN, 0);
@@ -265,11 +302,11 @@ UBYTE DEV_Module_Init(void)
      * loops fall through instead of spinning to their 120s timeout. */
     gpio_set_pull_mode(EPD_BUSY_PIN, GPIO_PULLUP_ONLY);
 
-    if (DEV_SPI_Bus_Init(-1) != 0) {
+    if (DEV_SPI_Bus_Init(EPD_MISO_PIN) != 0) {
         return 1;
     }
     spi_device_interface_config_t dev_config = {
-        .clock_speed_hz = EPD_SPI_HZ,
+        .clock_speed_hz = s_spi_hz,
         .mode = 0,
         .spics_io_num = -1, /* vendor drivers toggle CS manually */
         .queue_size = 4,

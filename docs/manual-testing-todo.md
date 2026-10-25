@@ -33,6 +33,47 @@ has never seen a Sticky. In order of what breaks the most:
 - [ ] **The TF socket** mounts on the shared bus (CS8, MISO12, power 10,
   detect 11); if not, try mounting before the display init (Seeed's note).
 
+### reTerminal E1003 bench (everything: no board has run this yet)
+
+The IT8951 driver (`components/frameos_display/it8951.c`) and every pin are
+from Zephyr's board file, Seeed's E1003 examples and SenseCraft HMI config,
+and TRMNL's firmware; nothing has met an E1003. In order of what breaks the
+most:
+
+- [ ] **The controller answers**: after `set hardware seeed_reterminal_e1003`
+  and a restart, the first `display_test bands` prints `it8951: 1872x1404,
+  image buffer 0x…, firmware …, LUT …, VCOM -1400 mV, mirrored, temperature
+  NN C`. `IT8951 drives a 0x0 panel … (no answer on MISO)` = the read path
+  (MISO GPIO8, the controller power on GPIO21); `busy (HRDY low)` = the
+  controller is unpowered or held in reset.
+- [ ] **The picture is the right way round and sharp**: text reads left to
+  right (if it is mirrored, the E1003 variant's `mirror_x` is wrong); a
+  1-pixel checkerboard or thin vertical lines show no pairs of swapped
+  columns; the 16 grey bands of `display_test` are 16 distinct steps.
+- [ ] **It refreshes every time**: two different renders in a row both
+  flash (the temperature command is what makes the E1003 run the waveform at
+  all); a whole frame's `it8951: 1404 of 1404 rows up in` is about 550 ms
+  (1.25 MiB at 20 MHz; if reads or the picture break at 20 MHz, try
+  `FOS_IT8951_SPI_HZ` 16 or 12 MHz), and nothing is cut short by standby.
+- [ ] **Only changed rows go up**: a clock scene's minute tick uploads tens
+  of rows and flashes only that band, and the rest of the picture is intact
+  afterwards (standby keeps the controller's memory; if the unchanged part
+  turns to noise, it does not, and every refresh must send the whole frame).
+  The same picture twice logs `no row changed, refresh skipped`.
+- [ ] **It renders on-device in grey**: the boot log says `canvas: 1872x1404
+  gray8`; a photo and a text-heavy scene render without `OOM` and look like
+  their RGBA preview in grey (2.5 MiB canvas + 1.25 MiB buffer + the 1.5 MiB
+  reserve on 8 MB); note the `freePsramKB` after the first render.
+- [ ] **The glass** (`touch`): `touch:ready` on sda19/scl20 at 0x5d with the
+  GT911's range; a tap at the top left lands at the top left (the "Button
+  tester" store scene); `i2c` still lists pcf8563, sht4x and sy6974b, and an
+  `i2c` rescan keeps the touch panel working (the lent bus).
+- [ ] **The rest of the board**: keys GPIO3 REFRESH / 4 LEFT / 5 RIGHT
+  (`buttons watch`); the LED on GPIO16 lights with the buzzer's notes; the
+  TF socket mounts with its power on GPIO39; `battery` reads the cell through
+  GPIO1 with GPIO40 switching the divider; `mic 2` reads a peak; REFRESH
+  held talks.
+
 ### Waveshare PhotoPainter / 13.3E6 bench (the codec, `fos_codec.c`)
 
 - [ ] **The chips answer**: `i2c` lists es8311 and es7210 on the board's bus

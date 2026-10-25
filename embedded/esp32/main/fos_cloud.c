@@ -464,6 +464,10 @@ static void add_hardware_json(cJSON *parent)
     cJSON_AddStringToObject(hw, "panel", config->panel);
     cJSON_AddNumberToObject(hw, "width", fos_display_present() ? fos_display_width() : 0);
     cJSON_AddNumberToObject(hw, "height", fos_display_present() ? fos_display_height() : 0);
+    /* The panel's packed format (fos_pixel_format_t): what the control
+     * plane's render check needs to know the canvas this frame draws in (a
+     * grey panel past RGBX draws in luma; frontend/src/utils/deviceLimits.ts). */
+    if (fos_display_present()) cJSON_AddNumberToObject(hw, "pixelFormat", (int)fos_display_format());
 
     /* The board bundle `set hardware` applied (empty on a custom build) and
      * the GPIO button map the firmware runs with, in the status JSON's

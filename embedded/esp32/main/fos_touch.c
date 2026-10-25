@@ -56,6 +56,7 @@ bool fos_touch_axes_swapped(int touch_x_max, int touch_y_max, int panel_width, i
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_events.h"
+#include "fos_i2c.h"
 #include "fos_events_gen.h"
 #include "frameos_display.h"
 #include "frameos_nim.h"
@@ -84,6 +85,9 @@ typedef struct {
 
 static bool s_present = false;
 static i2c_master_bus_handle_t s_bus = NULL;
+/* False when the bus is fos_i2c.c's (the E1003's GT911 shares the clock's
+ * bus): the touch panel then adds its device but never deletes the bus. */
+static bool s_bus_owned = false;
 static i2c_master_dev_handle_t s_dev = NULL;
 static uint8_t s_addr = 0;
 static int s_x_max = 0, s_y_max = 0;
@@ -299,18 +303,26 @@ esp_err_t fos_touch_start(void)
         }
     }
     reset_controller(pins);
-    i2c_master_bus_config_t bus_config = {
-        .i2c_port = -1,
-        .sda_io_num = (gpio_num_t)pins->sda,
-        .scl_io_num = (gpio_num_t)pins->scl,
-        .clk_source = I2C_CLK_SRC_DEFAULT,
-        .glitch_ignore_cnt = 7,
-        .flags = {.enable_internal_pullup = true},
-    };
-    esp_err_t err = i2c_new_master_bus(&bus_config, &s_bus);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "touch bus sda%d/scl%d: %s", pins->sda, pins->scl, esp_err_to_name(err));
-        return err;
+    /* A controller on a bus fos_i2c.c already runs (the reTerminal E1003's,
+     * on the clock's 19/20) joins it: a second bus on the same pins would
+     * take them from the first. */
+    s_bus = fos_i2c_lend_bus(pins->sda, pins->scl);
+    s_bus_owned = s_bus == NULL;
+    if (s_bus_owned) {
+        i2c_master_bus_config_t bus_config = {
+            .i2c_port = -1,
+            .sda_io_num = (gpio_num_t)pins->sda,
+            .scl_io_num = (gpio_num_t)pins->scl,
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .glitch_ignore_cnt = 7,
+            .flags = {.enable_internal_pullup = true},
+        };
+        esp_err_t err = i2c_new_master_bus(&bus_config, &s_bus);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "touch bus sda%d/scl%d: %s", pins->sda, pins->scl, esp_err_to_name(err));
+            s_bus = NULL;
+            return err;
+        }
     }
     static const uint8_t addresses[] = {0x5d, 0x14};
     for (size_t i = 0; i < sizeof(addresses); i++) {
@@ -322,7 +334,7 @@ esp_err_t fos_touch_start(void)
     if (s_addr == 0) {
         log_line("{\"event\":\"touch:error\",\"source\":\"esp32\",\"error\":\"no controller answered at 0x5d or 0x14\"}");
         if (s_dev) i2c_master_bus_rm_device(s_dev);
-        i2c_del_master_bus(s_bus);
+        if (s_bus_owned) i2c_del_master_bus(s_bus);
         s_dev = NULL;
         s_bus = NULL;
         return ESP_ERR_NOT_FOUND;

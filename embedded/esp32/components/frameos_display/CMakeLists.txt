@@ -54,6 +54,7 @@ idf_component_register(
         "frameos_display.c"
         "photo_painter_pmic.c"
         "oled_ssd1306.c"
+        "it8951.c"
         "${FRAMEOS_GENERATED_DIR}/frameos_panel_table.c"
         ${vendor_srcs}
     INCLUDE_DIRS

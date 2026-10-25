@@ -182,6 +182,10 @@ EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS = {
     "pwr": 16,
     "det": 15,
 }
+# The E1003's socket is the same but for its power switch, GPIO39 (its GPIO16
+# is the status LED): Seeed's SenseCraft HMI board config, Zephyr's board
+# file. Its IT8951 answers on the card's MISO, GPIO8.
+EMBEDDED_SEEED_RETERMINAL_E1003_SD_CARD_PINS = {**EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS, "pwr": 39}
 EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     "waveshare_esp32_s3_photopainter": {
         "cs": 38,
@@ -201,6 +205,7 @@ EMBEDDED_SD_CARD_ASSETS_PRESET_PINS = {
     },
     "seeed_reterminal_e1001": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
     "seeed_reterminal_e1002": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
+    "seeed_reterminal_e1003": EMBEDDED_SEEED_RETERMINAL_E1003_SD_CARD_PINS,
     "seeed_reterminal_e1004": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
     # The Sticky's pins are defined further down; filled in after the table.
 }
@@ -420,9 +425,9 @@ EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER = {
     "buzzerPin": 45,
     "buzzerToneHz": 2000,
 }
-# The PDM microphone of the E1001/E1002 (docs/voice-chat.md): clock GPIO42,
-# data GPIO41, powered through a TPS22916 load switch on GPIO38. The E1004
-# has none. fos_board.c's k_mics table is the device copy.
+# The PDM microphone of the E1001/E1002/E1003 (docs/voice-chat.md): clock
+# GPIO42, data GPIO41, powered through a TPS22916 load switch on GPIO38. The
+# E1004 has none. fos_board.c's k_mics table is the device copy.
 EMBEDDED_SEEED_RETERMINAL_MIC = {
     "micClkPin": 42,
     "micDataPin": 41,
@@ -451,6 +456,47 @@ EMBEDDED_SEEED_RETERMINAL_E1004_LED = {
     "ledPin": 48,
     "ledType": "gpio",
 }
+# Seeed reTerminal E1003 (ESP32-S3, 32MB flash, 8MB PSRAM): 10.3" 1872x1404
+# sixteen greys, an ED103TC2 behind an ITE IT8951 on the E-series SPI bus —
+# SCK7/MOSI9, CS10, reset GPIO12, HRDY (busy) GPIO13 — with the controller
+# answering on MISO GPIO8 (the card's line), panel power on GPIO11 and the
+# controller's own power on GPIO21 (Zephyr's board file, Seeed's GxEPD2 and
+# Gray16 examples, usetrmnl/trmnl-firmware's BOARD_SEEED_RETERMINAL_E1003).
+# The IT8951 has no D/C line: for its panel (EPD_10in3) the `dc` slot carries
+# MISO, `pwr` the panel's switch and `cs2` the controller's
+# (components/frameos_display/it8951.c). The firmware selects the board's
+# VCOM (-1.40 V), its right-to-left columns and the temperature its
+# controller must be told from this preset name.
+EMBEDDED_SEEED_RETERMINAL_E1003_PINS = {
+    "rst": 12,
+    "dc": 8,
+    "cs": 10,
+    "cs2": 21,
+    "busy": 13,
+    "sck": 7,
+    "mosi": 9,
+    "pwr": 11,
+}
+# The E1003's divider is the E-series' 2:1 on GPIO1, switched by GPIO40
+# (Zephyr's vbatt node, Seeed's SenseCraft HMI POWER_EN, trmnl-firmware's
+# batt_en): GPIO21 is the IT8951's power on this board.
+EMBEDDED_SEEED_RETERMINAL_E1003_BATTERY = {
+    "batteryPin": 1,
+    "batteryDivider": 2.0,
+    "batteryEnablePin": 40,
+}
+# The green LED on GPIO16, lit low (Seeed's SenseCraft HMI config, Zephyr).
+EMBEDDED_SEEED_RETERMINAL_E1003_LED = {
+    "ledPin": 16,
+    "ledType": "gpio_inverted",
+}
+# The clock, the sensor and the charger on 19/20 as on the E1004, and the
+# GT911 touch panel on that same bus: INT GPIO2, reset GPIO48, no load
+# switch (Seeed's E1003_TouchDraw example, Zephyr's board file). The firmware
+# lends fos_i2c.c's bus to the touch driver; fos_board.c's k_i2c_buses and
+# k_touch_pins are the device copies, nothing provisions these two.
+EMBEDDED_SEEED_RETERMINAL_E1003_I2C = {"i2cBuses": "sda=19,scl=20"}
+EMBEDDED_SEEED_RETERMINAL_E1003_TOUCH = {"touchPins": "sda=19,scl=20,int=2,rst=48"}
 
 
 def _seeed_reterminal_sd_card_assets(preset: str) -> dict[str, Any]:
@@ -461,7 +507,7 @@ def _seeed_reterminal_sd_card_assets(preset: str) -> dict[str, Any]:
             "enabled": True,
             "preset": preset,
             "mountPath": "/srv/assets",
-            "pins": EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS,
+            "pins": EMBEDDED_SD_CARD_ASSETS_PRESET_PINS[preset],
             "maxFrequencyKHz": EMBEDDED_SD_CARD_ASSETS_DEFAULT_MAX_FREQUENCY_KHZ,
         },
     }
@@ -674,6 +720,28 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         **EMBEDDED_SEEED_RETERMINAL_E10XX_I2C,
         **_seeed_reterminal_sd_card_assets("seeed_reterminal_e1002"),
     },
+    "seeed_reterminal_e1003": {
+        # 1872x1404 on an 8MB module: a luma canvas (2.5 MiB; 565 would be
+        # 5.0 and leave the render reserve almost alone in the module) and the
+        # packed 4-bit buffer (1.25 MiB), about 2.5 MiB free beyond the reserve.
+        "device": "waveshare.EPD_10in3",
+        "flashSize": "32MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_RETERMINAL_E1003_PINS,
+        "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
+        "eventMap": EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP,
+        **EMBEDDED_SEEED_RETERMINAL_E1003_BATTERY,
+        **EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER,
+        **EMBEDDED_SEEED_RETERMINAL_MIC,
+        **EMBEDDED_SEEED_RETERMINAL_E1003_LED,
+        **EMBEDDED_SEEED_RETERMINAL_E1003_I2C,
+        **EMBEDDED_SEEED_RETERMINAL_E1003_TOUCH,
+        **_seeed_reterminal_sd_card_assets("seeed_reterminal_e1003"),
+        # A 3000 mAh frame: deep sleep between renders while on battery,
+        # waking every 15 min for commands; the charger says when USB is in.
+        "deepSleepOnBattery": True,
+        "wakeCheckSeconds": 900,
+    },
     "seeed_reterminal_e1004": {
         # 1200x1600 on an 8MB module: the 16-bit render canvas is what makes
         # this render on-device (3.7MB instead of 7.3MB RGBA).
@@ -760,6 +828,8 @@ FOS_PIXEL_2BPP_BWYR = 5
 FOS_PIXEL_4BPP_7COLOR = 6
 FOS_PIXEL_4BPP_SPECTRA6 = 7
 FOS_PIXEL_4BPP_GRAY = 8
+# The formats a luma canvas serves: black and white, four and sixteen greys.
+EMBEDDED_GREY_PIXEL_FORMATS = frozenset({FOS_PIXEL_1BPP, FOS_PIXEL_2BPP_GRAY, FOS_PIXEL_4BPP_GRAY})
 EMBEDDED_PIXEL_FORMAT_BY_COLOR = {
     "Black": FOS_PIXEL_1BPP,
     "BlackWhiteRed": FOS_PIXEL_DUAL_1BPP_RED,
@@ -771,11 +841,11 @@ EMBEDDED_PIXEL_FORMAT_BY_COLOR = {
     "SixteenGray": FOS_PIXEL_4BPP_GRAY,
 }
 # These Waveshare variants are in the Linux catalog but not the ESP32 e-paper
-# SPI component: IT8951 and the 12.48" family use different controller stacks,
-# and the *_old / *_gray legacy resync variants collide at link time with
-# their successors now that one firmware links every driver.
+# SPI component: the 12.48" family uses a different controller stack, and the
+# *_old / *_gray legacy resync variants collide at link time with their
+# successors now that one firmware links every driver. (The IT8951's
+# EPD_10in3 has a driver of its own, below.)
 EMBEDDED_UNSUPPORTED_PANELS = {
-    "EPD_10in3",
     "EPD_12in48",
     "EPD_12in48b",
     "EPD_12in48b_V2",
@@ -795,6 +865,9 @@ EMBEDDED_PANEL_FORMATS = {
 # EXTRA_PANELS in embedded/esp32/components/frameos_display/generate_panel_table.py.
 EMBEDDED_EXTRA_PANELS = {
     "OLED_SSD1306_72x40": FOS_PIXEL_1BPP,
+    # The IT8951 (components/frameos_display/it8951.c): the Waveshare 10.3"
+    # HAT and the reTerminal E1003. Its `dc` pin slot carries MISO.
+    "EPD_10in3": FOS_PIXEL_4BPP_GRAY,
 }
 EMBEDDED_PANEL_FORMATS.update(EMBEDDED_EXTRA_PANELS)
 # Device keys for those panels (the `waveshare.<key>` convention does not fit).
@@ -930,9 +1003,11 @@ def embedded_release_firmware_for_frame(
 # (frameos/src/embedded/embedded_runtime.nim `renderCanvas`), packs it to the
 # selected panel format, and needs headroom for the Nim heap + QuickJS. The
 # canvas is RGBX (4 B/px) when a full canvas takes at most half the module's
-# PSRAM, else 16-bit RGB 5/6/5 (2 B/px) — the 800x480 boards and a 1200x1600
-# panel on a 16 MB module render in full colour, 1200x1600 on 8 MB is the one
-# that needs 565. Keep the rule and the reserve in sync with
+# PSRAM, else 8-bit luma (1 B/px) for a greyscale or black-and-white panel
+# and 16-bit RGB 5/6/5 (2 B/px) for a colour one — the 800x480 boards and a
+# 1200x1600 panel on a 16 MB module render in full colour, 1200x1600 Spectra 6
+# on 8 MB needs 565, and the 1872x1404 sixteen-grey reTerminal E1003 draws in
+# grey. Keep the rule and the reserve in sync with
 # fos_render_canvas_bytes_per_pixel / FOS_RENDER_PSRAM_RESERVE in
 # components/frameos_display (the firmware's boot-time fit check),
 # sceneCanvasFormat in embedded_runtime.nim, and EmbeddedReserveBytes in
@@ -1318,15 +1393,23 @@ def embedded_buffer_size(width: int, height: int, pixel_format: int) -> int:
     raise ValueError(f"Unsupported embedded pixel format: {pixel_format}")
 
 
-def embedded_render_canvas_bytes_per_pixel(width: int, height: int, psram_bytes: int) -> int:
+def embedded_pixel_format_is_grey(pixel_format: int | None) -> bool:
+    """The panel formats a luma canvas serves (fos_pixel_format_is_grey)."""
+    return pixel_format in EMBEDDED_GREY_PIXEL_FORMATS
+
+
+def embedded_render_canvas_bytes_per_pixel(
+    width: int, height: int, psram_bytes: int, pixel_format: int | None = None
+) -> int:
     """Bytes per pixel of the scene canvas on a module with ``psram_bytes`` of PSRAM:
-    4 (RGBX) when a full canvas takes at most half of it, else 2 (RGB 5/6/5)."""
+    4 (RGBX) when a full canvas takes at most half of it, else 1 (luma) for a
+    grey panel format and 2 (RGB 5/6/5) for any other."""
     if width <= 0 or height <= 0:
         return 0
     rgbx = width * height * 4
     if psram_bytes > 0 and rgbx * EMBEDDED_RENDER_CANVAS_RGBX_MAX_PSRAM_SHARE <= psram_bytes:
         return 4
-    return 2
+    return 1 if embedded_pixel_format_is_grey(pixel_format) else 2
 
 
 def embedded_render_psram_bytes(
@@ -1334,7 +1417,7 @@ def embedded_render_psram_bytes(
 ) -> int:
     """PSRAM the on-device renderer needs for a width×height panel on a module with
     ``psram_bytes`` of PSRAM (the canvas format depends on it)."""
-    canvas = width * height * embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes)
+    canvas = width * height * embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
     packed = embedded_buffer_size(width, height, pixel_format)
     return canvas + packed + EMBEDDED_RENDER_PSRAM_RESERVE_BYTES
 
@@ -1447,7 +1530,7 @@ def embedded_firmware_layout_for_frame(frame: Frame) -> dict[str, Any]:
     width, height = dims
     pixel_format = embedded_pixel_format_for_panel(panel)
     psram_bytes = embedded_module_psram_bytes(frame)
-    canvas_bytes_per_pixel = embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes)
+    canvas_bytes_per_pixel = embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
     canvas_bytes = width * height * canvas_bytes_per_pixel
     packed_bytes = embedded_buffer_size(width, height, pixel_format) if width > 0 and height > 0 else 0
     render_mode = embedded_render_mode_for_frame(frame)
@@ -1474,7 +1557,7 @@ def embedded_firmware_layout_for_frame(frame: Frame) -> dict[str, Any]:
             "pixelFormat": pixel_format,
             "pixelFormatName": _pixel_format_name(pixel_format),
             "renderMode": "local" if render_mode == EMBEDDED_RENDER_LOCAL else "remote",
-            # Historical key name: the canvas is RGBX or 16-bit RGB, never RGBA.
+            # Historical key name: the canvas is RGBX, 16-bit RGB or luma, never RGBA.
             "rgbaBufferBytes": canvas_bytes,
             "canvasBufferBytes": canvas_bytes,
             "canvasBytesPerPixel": canvas_bytes_per_pixel,
