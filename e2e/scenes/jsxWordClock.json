@@ -1,0 +1,91 @@
+{
+  "id": "jsxWordClock",
+  "name": "JSX: word clock",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600,
+    "backgroundColor": "#0a0a0a"
+  },
+  "e2eFrame": {
+    "width": 800,
+    "height": 480
+  },
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: word clock",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: word clock\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// A word clock: the letters that tell the time lit, the rest faint.\nconst rows = ['ITLISASAMPM', 'ACQUARTERDC', 'TWENTYFIVEX', 'HALFSTENFTO', 'PASTERUNINE', 'ONESIXTHREE', 'FOURFIVETWO', 'EIGHTELEVEN', 'SEVENTWELVE', 'TENSEOCLOCK']\n// \"IT IS TWENTY TO THREE\": row, first letter, length\nconst lit = [[0, 0, 2], [0, 3, 2], [2, 0, 6], [3, 9, 2], [5, 6, 5]]\nconst on = (r, c) => lit.some(([row, start, n]) => row === r && c >= start && c < start + n)\n\nexport function get(app) {\n  return (\n    <div className=\"flex items-center justify-center bg-neutral-950\">\n      <div className=\"grid grid-cols-11 gap-x-3 gap-y-1 font-[Cascadia_Mono]\">\n        {rows.flatMap((row, r) => row.split('').map((ch, c) => (\n          <span className={`text-4xl text-center ${on(r, c) ? 'text-amber-200 font-bold' : 'text-neutral-800'}`}>{ch}</span>\n        )))}\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

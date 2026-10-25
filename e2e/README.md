@@ -30,6 +30,11 @@ which on a slow runner shows the first key alone. The reset scene drawn
 between two fixtures is waited for as well, so its late upload is never
 mistaken for the next scene's.
 
+Every fixture is drawn on `frame.json`'s 320x480 frame unless it says
+`"e2eFrame": {"width": 800, "height": 480}`: each size gets a frameos of its
+own, one after the other (the JSX interfaces, `scenes/jsx*.json`, are
+800x480, 480x800 and 480x480).
+
 `./run` hands off to the `Makefile`: `makescenes.py` compiles the fixture
 scenes in `scenes/` into `generated/`, a copy of `frameos/` is built with
 them (`make build` in `tmp/frameos`), then `makesnapshots.py` runs that

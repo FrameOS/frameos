@@ -83,6 +83,17 @@ Text is any string or number child; `null`, `undefined`, `true` and `false`
 draw nothing, and arrays (`items.map(...)`) and fragments are flattened, as
 in React. Function props (`onClick`) are ignored for now.
 
+**White space at the edges of JSX text is dropped** (quickts trims every
+text run, where Babel and TypeScript keep the spaces inside a line), so
+`{count} items` draws "42items" and `March <b>12</b>` "March12". Put the
+space inside an expression until quickts is fixed: `{`${count} items`}`,
+`{'March '}<b>12</b>`, or lay the two out with `gap`.
+
+`e2e/scenes/jsx*.json` are fifteen interfaces built this way (a dashboard,
+an agenda, a month, a departure board, a photo card, a forecast, a status
+board, an energy chart, a front page, a word clock, a recipe, a player,
+the DVD frame), snapshotted by CI like every scene fixture.
+
 In an `<svg>`, React's camelCase attribute names are read as SVG's
 (`strokeWidth` is `stroke-width`), except SVG's own camelCase ones
 (`viewBox`, `gradientUnits`, `gradientTransform`, `preserveAspectRatio`);

@@ -441,6 +441,8 @@ export function get(app, context) {
   `frameos.loadAssetImage` returned, with `object-cover` or
   `object-contain`; an `<svg viewBox>` inside a UI is an icon sized by its
   classes, drawn in the text color where it says `currentColor`.
+- White space at the edges of JSX text is dropped: `{count} items` draws
+  "42items". Write `{`${count} items`}`, or lay the parts out with `gap`.
 - Not there: clipping (`overflow-hidden`), shadows, transforms, `z-*`,
   `hover:` and other states, and handlers (`onClick`). `docs/jsx-ui.md` has
   the full list.

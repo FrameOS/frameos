@@ -1,0 +1,91 @@
+{
+  "id": "jsxMonth",
+  "name": "JSX: month calendar",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600,
+    "backgroundColor": "#ffffff"
+  },
+  "e2eFrame": {
+    "width": 800,
+    "height": 480
+  },
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: month calendar",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: month calendar\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// A month calendar: seven columns, today ringed, dots for busy days.\nconst busy = { 4: 1, 8: 2, 12: 3, 15: 1, 19: 2, 22: 1, 27: 2, 29: 1 }\n\nexport function get(app) {\n  const first = 4 // March 2024 starts on a Friday (Monday = 0)\n  const days = []\n  for (let i = 0; i < first; i++) days.push(null)\n  for (let d = 1; d <= 31; d++) days.push(d)\n  while (days.length % 7) days.push(null)\n  return (\n    <div className=\"flex flex-col p-6 gap-3 bg-white text-slate-800\">\n      <div className=\"flex items-end justify-between\">\n        <div className=\"flex items-end gap-3\">\n          <span className=\"text-4xl font-bold\">March</span>\n          <span className=\"text-4xl text-slate-400\">2024</span>\n        </div>\n        <span className=\"text-lg text-rose-500 font-semibold\">Spring starts on the 20th</span>\n      </div>\n      <div className=\"grid grid-cols-7 gap-1 text-center\">\n        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (\n          <span className=\"text-sm uppercase text-slate-400 font-semibold\">{d}</span>\n        ))}\n      </div>\n      <div className=\"flex-1 grid grid-cols-7 gap-1\">\n        {days.map((d, i) => d === null ? <div /> : (\n          <div className={`flex flex-col items-center justify-center gap-1 rounded-lg ${i % 7 >= 5 ? 'bg-slate-50' : ''}`}>\n            <span className={`text-xl w-10 h-10 flex items-center justify-center rounded-full ${d === 12 ? 'bg-rose-500 text-white font-bold' : ''}`}>{d}</span>\n            <div className=\"flex gap-1 h-2\">\n              {Array.from({ length: busy[d] || 0 }).map(() => <div className=\"w-2 h-2 rounded-full bg-sky-400\" />)}\n            </div>\n          </div>\n        ))}\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

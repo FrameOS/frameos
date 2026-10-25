@@ -25,6 +25,8 @@ FRAME_PORT = int(os.environ.get("FRAMEOS_E2E_FRAME_PORT", "8787"))
 def fixture_response(path):
     if path == "/fixtures/logo_in_ci_tests.png":
         return "image/png", Path("./assets/image.png").read_bytes()
+    if path == "/fixtures/bird.png":
+        return "image/png", Path("./assets/bird.png").read_bytes()
     if path == "/fixtures/ci_text_file":
         return "text/plain; charset=utf-8", b"FrameOS CI text fixture\n"
     return None
@@ -183,9 +185,11 @@ def snapshot_reset_scene(scene_id):
     base_scene_id = scene_id.removesuffix("_interpreted")
     return "black" if base_scene_id == "blue" else "blue"
 
-def write_runtime_frame_config(upload_url):
+def write_runtime_frame_config(upload_url, frame_size=None):
     frame_json = Path("./frame.json")
     contents = json.loads(frame_json.read_text())
+    if frame_size:
+        contents["width"], contents["height"] = frame_size
     contents["bindHost"] = "127.0.0.1"
     contents["framePort"] = FRAME_PORT
     contents["device"] = "http.upload"
@@ -237,6 +241,14 @@ def send_event(port, name, payload):
     if response.status_code != 200:
         raise RuntimeError(f"Failed to send {name}: HTTP {response.status_code}")
 
+def scene_frame_size(scene_file):
+    """A fixture's `e2eFrame` ({width, height}): the frame it is drawn on,
+    when not e2e/frame.json's 320x480. Each size gets a frameos of its own."""
+    frame = json.loads(scene_file.read_text()).get("e2eFrame")
+    if not frame:
+        return None
+    return (int(frame["width"]), int(frame["height"]))
+
 def scene_e2e_events(scene_id):
     """The `e2eEvents` of a scene fixture (e2e/scenes/<id>.json): events the
     harness sends after the first render, snapshotting the render they cause.
@@ -282,21 +294,14 @@ def wait_for_frameos_server(process, port, timeout=15):
             time.sleep(0.1)
     raise TimeoutError(f"Timed out waiting for frameos HTTP server on 127.0.0.1:{port}: {last_error}")
 
-def main():
-    # filter from env or argv (argv optional)
-    filter_str = os.environ.get("SCENE_FILTER") or (sys.argv[1] if len(sys.argv) > 1 else "")
-    filter_str = filter_str.strip().lower()
-    receiver = UploadReceiver()
-    upload_port = receiver.start(FIXTURE_PORT)
-    upload_url = f"http://127.0.0.1:{upload_port}/upload"
-    runtime_config_path = write_runtime_frame_config(upload_url)
+def start_frameos(upload_url, frame_size):
+    runtime_config_path = write_runtime_frame_config(upload_url, frame_size)
     env = os.environ.copy()
     env["FRAMEOS_SCENES_JSON"] = Path('./tmp/scenes.json').resolve().as_posix()
     env["FRAMEOS_CONFIG"] = runtime_config_path.resolve().as_posix()
     # Pin the wall clock (frameos/utils/frame_time.nim): the clock and
     # calendar fixtures render 2024-03-12 14:40:00 UTC, whatever day it is.
     env["FRAMEOS_E2E_FIXED_EPOCH"] = "1710254400"
-    print(f"Listening for FrameOS HTTP uploads on {upload_url}")
     # Start the frameos binary in the background
     FRAMEOS_PROCESS_LOG.parent.mkdir(exist_ok=True)
     process_log_file = FRAMEOS_PROCESS_LOG.open("w")
@@ -306,16 +311,110 @@ def main():
         stdout=process_log_file,
         stderr=subprocess.STDOUT,
     )
-    print(f"Started frameos with PID {process.pid}")
+    size = f"{frame_size[0]}x{frame_size[1]}" if frame_size else "the default size"
+    print(f"Started frameos with PID {process.pid} at {size}")
     print(f"FrameOS process output: {FRAMEOS_PROCESS_LOG}")
+    contents = json.loads(runtime_config_path.read_text())
+    return process, process_log_file, contents.get('framePort', 8787)
+
+def stop_frameos(process, process_log_file):
+    time.sleep(2)
+    if process.poll() is None:
+        os.kill(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+    process_log_file.close()
+    print(f"frameos process with PID {process.pid} has been terminated")
+
+def snapshot_scenes(files, process, port, receiver, snapshots_dir):
+    """Render each fixture in `files` on the running frameos; the number of
+    failures."""
+    failures = 0
+    for scene_file in files:
+        base_id = scene_file.stem
+        # A fixture that says `execution: "interpreted"` has no compiled
+        # twin (makescenes.py): one render, snapshotted under its own name.
+        interpreted_only = (json.loads(scene_file.read_text()).get('settings') or {}).get('execution') == 'interpreted'
+        variants = [(base_id + '_interpreted', base_id)] if interpreted_only else [
+            (base_id, base_id + '_compiled'),
+            (base_id + '_interpreted', base_id + '_interpreted'),
+        ]
+        for (scene_id, filename) in variants:
+            print(f"🍿 Processing scene: {scene_id}")
+            ensure_frameos_running(process)
+
+            reset_scene_id = snapshot_reset_scene(scene_id)
+            try:
+                # The reset scene's render must be seen before the scene
+                # is set: one that arrives later would be taken for the
+                # scene's own (a plain blue snapshot). It always renders,
+                # so the ordinary timeout applies; a miss is only logged.
+                receiver.clear()
+                set_scene(port, reset_scene_id)
+                try:
+                    receiver.wait_for_upload()
+                except TimeoutError:
+                    print(f"No upload from the reset scene {reset_scene_id} before {scene_id}")
+                upload = set_scene_and_wait_for_upload(port, receiver, scene_id)
+            except (requests.RequestException, RuntimeError, TimeoutError) as error:
+                ensure_frameos_running(process)
+                print(f"Failed to capture snapshot for scene {scene_id}: {error}")
+                failures += 1
+                continue
+
+            snapshot_path = snapshots_dir / f"{filename}.png"
+            snapshot_path.write_bytes(upload["body"])
+            headers = upload["headers"]
+            image_hash = headers.get("X-FrameOS-Image-Hash", "unknown")
+            image_size = headers.get("X-FrameOS-Image-Bytes", str(len(upload["body"])))
+            print(f"Snapshot captured from HTTP upload: {snapshot_path} ({image_size} bytes, hash {image_hash})")
+        if interpreted_only:
+            if (snapshots_dir / f"{base_id}.png").exists():
+                print(f"✅ Snapshot captured for interpreted-only scene {base_id}")
+            else:
+                print(f"❌ Missing snapshot for scene {base_id}")
+                failures += 1
+            continue
+        # compare files: base_id + '_compiled' and base_id + '_interpreted'
+        compiled_path = snapshots_dir / f"{base_id}_compiled.png"
+        interpreted_path = snapshots_dir / f"{base_id}_interpreted.png"
+        if compiled_path.exists() and interpreted_path.exists():
+            if is_similar_image(compiled_path, interpreted_path):
+                print(f"✅ Snapshots are similar for scene {base_id}")
+                # rename to base_id.png
+                final_path = snapshots_dir / f"{base_id}.png"
+                interpreted_path.unlink()
+                if final_path.exists():
+                    if is_similar_image(final_path, compiled_path):
+                        compiled_path.unlink()
+                    else:
+                        final_path.unlink()
+                        compiled_path.rename(final_path)
+                else:
+                    compiled_path.rename(final_path)
+            else:
+                print(f"❌ Snapshots differ for scene {base_id}")
+                failures += 1
+                final_path = snapshots_dir / f"{base_id}.png"
+                final_path.unlink(missing_ok=True)
+        else:
+            print(f"❌ Missing snapshots for scene {base_id}")
+            failures += 1
+    return failures
+
+def main():
+    # filter from env or argv (argv optional)
+    filter_str = os.environ.get("SCENE_FILTER") or (sys.argv[1] if len(sys.argv) > 1 else "")
+    filter_str = filter_str.strip().lower()
+    receiver = UploadReceiver()
+    upload_port = receiver.start(FIXTURE_PORT)
+    upload_url = f"http://127.0.0.1:{upload_port}/upload"
+    print(f"Listening for FrameOS HTTP uploads on {upload_url}")
 
     try:
-        time.sleep(2)
-
-        contents = json.loads(runtime_config_path.read_text())
-        port = contents.get('framePort', 8787)
-        wait_for_frameos_server(process, port)
-
         scenes_dir = Path('./scenes')
         snapshots_dir = Path('./snapshots')
         snapshots_dir.mkdir(exist_ok=True)
@@ -330,91 +429,23 @@ def main():
             print(f"No scenes matched filter: '{filter_str}'" if filter_str else "No scenes found.")
             return
 
+        # One frameos per frame size, the default size first.
+        groups = {}
         for scene_file in files:
-            base_id = scene_file.stem
-            # A fixture that says `execution: "interpreted"` has no compiled
-            # twin (makescenes.py): one render, snapshotted under its own name.
-            interpreted_only = (json.loads(scene_file.read_text()).get('settings') or {}).get('execution') == 'interpreted'
-            variants = [(base_id + '_interpreted', base_id)] if interpreted_only else [
-                (base_id, base_id + '_compiled'),
-                (base_id + '_interpreted', base_id + '_interpreted'),
-            ]
-            for (scene_id, filename) in variants:
-                print(f"🍿 Processing scene: {scene_id}")
-                ensure_frameos_running(process)
-
-                reset_scene_id = snapshot_reset_scene(scene_id)
-                try:
-                    # The reset scene's render must be seen before the scene
-                    # is set: one that arrives later would be taken for the
-                    # scene's own (a plain blue snapshot). It always renders,
-                    # so the ordinary timeout applies; a miss is only logged.
-                    receiver.clear()
-                    set_scene(port, reset_scene_id)
-                    try:
-                        receiver.wait_for_upload()
-                    except TimeoutError:
-                        print(f"No upload from the reset scene {reset_scene_id} before {scene_id}")
-                    upload = set_scene_and_wait_for_upload(port, receiver, scene_id)
-                except (requests.RequestException, RuntimeError, TimeoutError) as error:
-                    ensure_frameos_running(process)
-                    print(f"Failed to capture snapshot for scene {scene_id}: {error}")
-                    failures += 1
-                    continue
-
-                snapshot_path = snapshots_dir / f"{filename}.png"
-                snapshot_path.write_bytes(upload["body"])
-                headers = upload["headers"]
-                image_hash = headers.get("X-FrameOS-Image-Hash", "unknown")
-                image_size = headers.get("X-FrameOS-Image-Bytes", str(len(upload["body"])))
-                print(f"Snapshot captured from HTTP upload: {snapshot_path} ({image_size} bytes, hash {image_hash})")
-            if interpreted_only:
-                if (snapshots_dir / f"{base_id}.png").exists():
-                    print(f"✅ Snapshot captured for interpreted-only scene {base_id}")
-                else:
-                    print(f"❌ Missing snapshot for scene {base_id}")
-                    failures += 1
-                continue
-            # compare files: base_id + '_compiled' and base_id + '_interpreted'
-            compiled_path = snapshots_dir / f"{base_id}_compiled.png"
-            interpreted_path = snapshots_dir / f"{base_id}_interpreted.png"
-            if compiled_path.exists() and interpreted_path.exists():
-                if is_similar_image(compiled_path, interpreted_path):
-                    print(f"✅ Snapshots are similar for scene {base_id}")
-                    # rename to base_id.png
-                    final_path = snapshots_dir / f"{base_id}.png"
-                    interpreted_path.unlink()
-                    if final_path.exists():
-                        if is_similar_image(final_path, compiled_path):
-                            compiled_path.unlink()
-                        else:
-                            final_path.unlink()
-                            compiled_path.rename(final_path)
-                    else:
-                        compiled_path.rename(final_path)
-                else:
-                    print(f"❌ Snapshots differ for scene {base_id}")
-                    failures += 1
-                    final_path = snapshots_dir / f"{base_id}.png"
-                    final_path.unlink(missing_ok=True)
-            else:
-                print(f"❌ Missing snapshots for scene {base_id}")
-                failures += 1
+            groups.setdefault(scene_frame_size(scene_file), []).append(scene_file)
+        for frame_size in sorted(groups, key=lambda size: (size is not None, size or (0, 0))):
+            process, process_log_file, port = start_frameos(upload_url, frame_size)
+            try:
+                time.sleep(2)
+                wait_for_frameos_server(process, port)
+                failures += snapshot_scenes(groups[frame_size], process, port, receiver, snapshots_dir)
+            finally:
+                stop_frameos(process, process_log_file)
 
         if failures:
             raise SystemExit(f"{failures} snapshot failure(s)")
     finally:
-        time.sleep(2)
-        if process.poll() is None:
-            os.kill(process.pid, signal.SIGTERM)
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
-        process_log_file.close()
         receiver.stop()
-        print(f"frameos process with PID {process.pid} has been terminated")
 
 if __name__ == "__main__":
     main()
