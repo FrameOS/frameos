@@ -8,6 +8,7 @@ idf_component_register(
         "fos_led.c"
         "fos_i2c.c"
         "fos_charger.c"
+        "fos_climate.c"
         "fos_gauge.c"
         "fos_touch.c"
         "fos_codec.c"

@@ -55,6 +55,24 @@ export const ESP32_PIN_FIELDS: { key: Esp32PinKey; label: string }[] = [
   { key: 'pwr', label: 'PWR' },
 ]
 
+// The IT8951 (EPD_10in3: the Waveshare 10.3" HAT, the reTerminal E1003) has
+// no D/C line and answers the host: the firmware reads its dc slot as the
+// controller's MISO, cs2 as the controller's power switch and pwr as the
+// panel's (embedded/esp32/components/frameos_display/it8951.c).
+const ESP32_IT8951_PIN_LABELS: Partial<Record<Esp32PinKey, string>> = {
+  dc: 'MISO',
+  cs2: 'CTRL PWR',
+  pwr: 'PANEL PWR',
+}
+
+/** The pin editor's fields, named for what the panel's driver does with each. */
+export function esp32PinFields(device?: string): { key: Esp32PinKey; label: string }[] {
+  if (device !== 'waveshare.EPD_10in3') {
+    return ESP32_PIN_FIELDS
+  }
+  return ESP32_PIN_FIELDS.map((field) => ({ ...field, label: ESP32_IT8951_PIN_LABELS[field.key] ?? field.label }))
+}
+
 export const ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET: FrameEmbeddedHardwarePreset = 'waveshare_esp32_s3_epaper_13_3e6'
 export const ESP32_WAVESHARE_13IN3E6_DEVICE = 'waveshare.EPD_13in3e'
 export const ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET: FrameEmbeddedHardwarePreset =
@@ -174,6 +192,20 @@ export const ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT: Esp32PinLayout = {
   pwr: -1,
 }
 
+// The reTerminal E1003's IT8951 has no D/C line: for its panel (EPD_10in3)
+// the dc slot carries the controller's MISO (GPIO8, the TF socket's), pwr the
+// panel's power switch and cs2 the controller's (EMBEDDED_SEEED_RETERMINAL_E1003_PINS).
+export const ESP32_SEEED_RETERMINAL_E1003_PIN_LAYOUT: Esp32PinLayout = {
+  rst: 12,
+  dc: 8,
+  cs: 10,
+  cs2: 21,
+  busy: 13,
+  sck: 7,
+  mosi: 9,
+  pwr: 11,
+}
+
 export const ESP32_SEEED_RETERMINAL_E1004_PIN_LAYOUT: Esp32PinLayout = {
   rst: 38,
   dc: 11,
@@ -285,6 +317,12 @@ export const ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
   det: 15,
 }
 
+// The E1003's socket switches its power on GPIO39 (its GPIO16 is the LED).
+export const ESP32_SEEED_RETERMINAL_E1003_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
+  ...ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT,
+  pwr: 39,
+}
+
 // The reTerminal Sticky's socket, on its panel's SCK13/MOSI14 with MISO on
 // GPIO12, CS on GPIO8, a power switch on GPIO10 and the card-detect contact
 // on GPIO11 (SPI mode only). Mirrors EMBEDDED_SEEED_STICKY_SD_CARD_PINS.
@@ -301,6 +339,7 @@ export const ESP32_SEEED_RETERMINAL_SD_CARD_PRESETS = [
   'seeed_reterminal_sticky',
   'seeed_reterminal_e1001',
   'seeed_reterminal_e1002',
+  'seeed_reterminal_e1003',
   'seeed_reterminal_e1004',
 ] as const
 export type Esp32SeeedReterminalSdCardPreset = (typeof ESP32_SEEED_RETERMINAL_SD_CARD_PRESETS)[number]
@@ -442,6 +481,21 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
       enabled: true,
       preset: 'seeed_reterminal_e1002',
       pins: ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT,
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
+  },
+  seeed_reterminal_e1003: {
+    label: 'Seeed reTerminal E1003 (10.3" grayscale ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_10in3',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_RETERMINAL_E1003_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: 'seeed_reterminal_e1003',
+      pins: ESP32_SEEED_RETERMINAL_E1003_SD_CARD_PIN_LAYOUT,
       maxFrequencyKHz: 20000,
       mountPath: '/srv/assets',
     },
@@ -609,10 +663,11 @@ export function esp32SdCardPinLayoutsEqual(first: Esp32SdCardPinLayout, second: 
 
 /**
  * The SD preset select's value for a config: its stored preset when it is a
- * known socket, else the socket whose pins it matches, else custom. The three
+ * known socket, else the socket whose pins it matches, else custom. Three
  * reTerminal E-series share one socket, so pins matching it name
  * `seeedPreset` (the frame's own E-series preset, when it is one) rather
- * than a fixed member of the three.
+ * than a fixed member of the three. The Sticky's and the E1003's sockets are
+ * their own.
  */
 export function esp32SdCardPresetValue(
   config: NormalizedEsp32SdCardAssets,
@@ -624,11 +679,14 @@ export function esp32SdCardPresetValue(
   if (config.preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
     return ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
   }
-  // The Sticky's socket is its own; the three E-series share one.
-  if (config.preset === 'seeed_reterminal_sticky') {
-    return 'seeed_reterminal_sticky'
+  // The Sticky's and the E1003's sockets are their own; three E-series share one.
+  if (config.preset === 'seeed_reterminal_sticky' || config.preset === 'seeed_reterminal_e1003') {
+    return config.preset
   }
-  const eSeriesPreset = seeedPreset === 'seeed_reterminal_sticky' ? 'seeed_reterminal_e1002' : seeedPreset
+  const eSeriesPreset =
+    seeedPreset === 'seeed_reterminal_sticky' || seeedPreset === 'seeed_reterminal_e1003'
+      ? 'seeed_reterminal_e1002'
+      : seeedPreset
   if (isSeeedReterminalSdCardPreset(config.preset)) {
     return eSeriesPreset
   }
@@ -640,6 +698,9 @@ export function esp32SdCardPresetValue(
   }
   if (esp32SdCardPinLayoutsEqual(config.pins, ESP32_SEEED_STICKY_SD_CARD_PIN_LAYOUT)) {
     return 'seeed_reterminal_sticky'
+  }
+  if (esp32SdCardPinLayoutsEqual(config.pins, ESP32_SEEED_RETERMINAL_E1003_SD_CARD_PIN_LAYOUT)) {
+    return 'seeed_reterminal_e1003'
   }
   if (esp32SdCardPinLayoutsEqual(config.pins, ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT)) {
     return eSeriesPreset
@@ -656,6 +717,9 @@ export function esp32SdCardPinsForPreset(preset: string): Esp32SdCardPinLayout {
   }
   if (preset === 'seeed_reterminal_sticky') {
     return { ...ESP32_SEEED_STICKY_SD_CARD_PIN_LAYOUT }
+  }
+  if (preset === 'seeed_reterminal_e1003') {
+    return { ...ESP32_SEEED_RETERMINAL_E1003_SD_CARD_PIN_LAYOUT }
   }
   if (isSeeedReterminalSdCardPreset(preset)) {
     return { ...ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT }
@@ -737,6 +801,11 @@ export const ESP32_PIN_LAYOUT_PRESETS: { value: string; label: string; pins: Esp
     value: 'seeed-reterminal-e10xx',
     label: 'Seeed reTerminal E1001/E1002',
     pins: ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT,
+  },
+  {
+    value: 'seeed-reterminal-e1003',
+    label: 'Seeed reTerminal E1003 (10.3")',
+    pins: ESP32_SEEED_RETERMINAL_E1003_PIN_LAYOUT,
   },
   {
     value: 'seeed-reterminal-e1004',

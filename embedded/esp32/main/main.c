@@ -31,6 +31,7 @@
 #include "fos_events.h"
 #include "fos_buttons.h"
 #include "fos_buzzer.h"
+#include "fos_climate.h"
 #include "fos_i2c.h"
 #include "fos_led.h"
 #include "fos_rtc.h"
@@ -86,6 +87,36 @@ static void heartbeat_task(void *arg)
         gpio_set_level(HEARTBEAT_GPIO, on ? 0 : 1);
         vTaskDelay(pdMS_TO_TICKS(s_blink_period_ms / 2));
     }
+}
+
+/* The heartbeat's pin is the XIAO's LED; on other boards it may be wired to
+ * something that must not blink: the reTerminal E1001/E1002/E1004 switch
+ * their battery divider through GPIO21 (a blinking enable line reads as an
+ * empty cell, 0 mV on the E1004), the E1003 its IT8951 controller's power
+ * (pins.cs2) and the reTerminal Sticky's touch panel interrupts on it. */
+static bool heartbeat_pin_free(const fos_config_t *config)
+{
+    const int taken[] = {
+        config->battery_enable_pin, config->led_pin,
+        config->pins.rst, config->pins.dc, config->pins.cs, config->pins.cs2,
+        config->pins.busy, config->pins.sck, config->pins.mosi, config->pins.pwr,
+        config->touch_pins.sda, config->touch_pins.scl, config->touch_pins.irq,
+        config->touch_pins.rst, config->touch_pins.en,
+    };
+    for (size_t i = 0; i < sizeof(taken) / sizeof(taken[0]); i++) {
+        if (taken[i] == HEARTBEAT_GPIO) return false;
+    }
+    return true;
+}
+
+/* The panel temperature for a controller that has no sensor of its own (the
+ * reTerminal E1003's IT8951), from the board's SHT40. */
+static bool panel_temperature(int *celsius)
+{
+    int centi = 0;
+    if (fos_climate_read(&centi, NULL) != ESP_OK) return false;
+    *celsius = (centi + (centi >= 0 ? 50 : -50)) / 100;
+    return true;
 }
 
 static void action_ota_now(void)
@@ -201,11 +232,7 @@ void app_main(void)
         ESP_LOGI(TAG, "battery: %d mV (%d%%)", battery_mv, battery_pct);
     }
 
-    /* Not when the battery divider's enable switch sits on the LED pin: the
-     * reTerminal E10xx boards switch their divider through GPIO21, and a
-     * blinking enable line reads as an empty cell (0 mV, seen on the E1004). */
-    if (HEARTBEAT_GPIO >= 0 && config->battery_enable_pin != HEARTBEAT_GPIO &&
-        config->led_pin != HEARTBEAT_GPIO) {
+    if (HEARTBEAT_GPIO >= 0 && heartbeat_pin_free(config)) {
         xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
     }
 
@@ -221,6 +248,7 @@ void app_main(void)
     if (fos_display_init(&display_config) != ESP_OK) {
         ESP_LOGW(TAG, "display init failed, continuing headless");
     }
+    fos_display_set_temperature_hook(panel_temperature);
 
     /* Claim the panel buffer here — the panel size is known and Wi-Fi, lwIP,
      * httpd and SPIFFS have not yet carved up the internal heap. On a

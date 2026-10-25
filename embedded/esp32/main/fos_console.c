@@ -706,6 +706,21 @@ static int cmd_set(int argc, char **argv)
               "rst=12,dc=11,cs=10,cs2=-1,busy=13,sck=7,mosi=9,pwr=-1",
               "3:REFRESH\n4:LEFT\n5:RIGHT",
               1, 2.0f, 21, 0, 0 },
+            /* Seeed reTerminal E1003: 10.3" 1872x1404 sixteen greys, an
+             * ED103TC2 behind an IT8951 on the E-series bus — CS10, reset 12,
+             * HRDY 13 — answering on MISO GPIO8, which the dc slot carries
+             * (the controller has no D/C); panel power GPIO11 (pwr) and the
+             * controller's own GPIO21 (cs2), so main.c leaves its heartbeat
+             * off. The display component selects the E1003's VCOM, mirror and
+             * temperature from this preset name. Keys as the E1001/E1002;
+             * battery on GPIO1 ÷2 switched by GPIO40 (Zephyr's board file,
+             * Seeed's SenseCraft HMI config). TF socket (power GPIO39), LED
+             * (GPIO16), the touch panel and I2C come from fos_board. A
+             * 3000 mAh frame: sleeps on battery like the E1004. */
+            { "seeed_reterminal_e1003", "EPD_10in3",
+              "rst=12,dc=8,cs=10,cs2=21,busy=13,sck=7,mosi=9,pwr=11",
+              "3:REFRESH\n4:LEFT\n5:RIGHT",
+              1, 2.0f, 40, 1, 900 },
             /* Seeed reTerminal E1004: 13.3" 1200x1600 Spectra 6 (T133A01) on
              * the E-series bus, second CS on GPIO2, reset 38, panel power 12.
              * The display component selects the T133A01 init tuning from this

@@ -1,7 +1,9 @@
 /*
  * The capacitive touch panel: a Goodix GT911 on the Seeed reTerminal Sticky
- * (its own I2C bus, an interrupt line, a reset and a load switch;
- * `touch_pins`, docs/events.md "Input"). A finger is a pointer to the scene,
+ * (its own I2C bus, an interrupt line, a reset and a load switch) and the
+ * reTerminal E1003 (on the clock's bus, which fos_i2c.c lends it; an
+ * interrupt line and a reset). `touch_pins`, docs/events.md "Input". A
+ * finger is a pointer to the scene,
  * nothing more: the panel's reports become `pointerDown`, `pointerMove` and
  * `pointerUp` with the position on the contract's 0..32767 wire, and the
  * Nim dispatcher (frameos/input_state.nim, the same on every host) makes

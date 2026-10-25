@@ -70,6 +70,7 @@ static const struct {
 } k_buzzers[] = {
     {"seeed_reterminal_e1001", 45, 2000},
     {"seeed_reterminal_e1002", 45, 2000},
+    {"seeed_reterminal_e1003", 45, 2000},
     {"seeed_reterminal_e1004", 45, 2000},
     {"seeed_reterminal_sticky", 48, 4000},
 };
@@ -136,6 +137,7 @@ static const struct {
     {"seeed_reterminal_sticky", STICKY_EVENT_MAP},
     {"seeed_reterminal_e1001", RETERMINAL_VOICE_EVENT_MAP},
     {"seeed_reterminal_e1002", RETERMINAL_VOICE_EVENT_MAP},
+    {"seeed_reterminal_e1003", RETERMINAL_VOICE_EVENT_MAP},
     {"seeed_reterminal_e1004", RETERMINAL_EVENT_MAP},
 };
 
@@ -148,10 +150,11 @@ const char *fos_board_event_map(const char *hardware_preset)
     return "";
 }
 
-/* Boards with a PDM microphone: the reTerminal E1001/E1002 (and the E1003,
- * no preset yet) share one MEMSensing MSM261 on PDM clock GPIO42, data
- * GPIO41, powered through a TPS22916 load switch on GPIO38 (Seeed's
- * schematics and MicRecordToSD.ino). The E1004 has no microphone: its
+/* Boards with a PDM microphone: the reTerminal E1001/E1002/E1003 share one
+ * MEMSensing MSM261 on PDM clock GPIO42, data GPIO41, powered through a
+ * TPS22916 load switch on GPIO38 (Seeed's schematics and MicRecordToSD.ino;
+ * the E1003's board config in Seeed's SenseCraft HMI firmware has the same
+ * three). The E1004 has no microphone: its
  * schematic has none, and 41/42 are its J2 header's UART. The reTerminal
  * Sticky's MSM261 is on PDM_CLK GPIO19 / PDM_DATA GPIO20 — the S3's native
  * USB pads, which its CH343 UART bridge leaves free (fos_mic.c detaches the
@@ -167,6 +170,7 @@ static const struct {
     {"seeed_reterminal_sticky", 19, 20, 38},
     {"seeed_reterminal_e1001", 42, 41, 38},
     {"seeed_reterminal_e1002", 42, 41, 38},
+    {"seeed_reterminal_e1003", 42, 41, 38},
 };
 
 bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *pwr)
@@ -190,8 +194,10 @@ bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *p
  * cookbook's "inverted logic"); the E1004's is on GPIO48 behind an NPN
  * transistor (ESP_IO48/LED, Q4 in its schematic) and lit HIGH — the
  * cookbook says inverted for it too, the board says otherwise (idled lit
- * and blinked dark on the bench, 2026-10-25). The red charge LED next to it
- * belongs to the charger. */
+ * and blinked dark on the bench, 2026-10-25). The E1003's is on GPIO16, lit
+ * low (Seeed's SenseCraft HMI board config, Zephyr's board file; GPIO16 is
+ * the TF socket's power switch on the other three). The red charge LED next
+ * to it belongs to the charger. */
 static const struct {
     const char *preset;
     int pin;
@@ -199,6 +205,7 @@ static const struct {
 } k_leds[] = {
     {"seeed_reterminal_e1001", 6, 1},
     {"seeed_reterminal_e1002", 6, 1},
+    {"seeed_reterminal_e1003", 16, 1},
     {"seeed_reterminal_e1004", 48, 0},
 };
 
@@ -221,7 +228,9 @@ bool fos_board_led(const char *hardware_preset, int *pin, int *type)
  * sensor (0x44) on I2C0 = SDA GPIO19 / SCL GPIO20, which is also the J2
  * header's I2C on the E1001/E1002. The SY6974B charger (0x6b) sits on
  * SDA GPIO39 / SCL GPIO40 on the E1001/E1002 and on the 19/20 bus on the
- * E1004, whose 39/40 is its J2 header instead. */
+ * E1004, whose 39/40 is its J2 header instead. The E1003 has all three on
+ * 19/20 too, with its GT911 touch controller (0x5d) beside them
+ * (k_touch_pins; Zephyr's board file, Seeed's SenseCraft HMI config). */
 static const struct {
     const char *preset;
     const char *buses;
@@ -239,6 +248,7 @@ static const struct {
     {"seeed_reterminal_sticky", "sda=1,scl=0"},
     {"seeed_reterminal_e1001", "sda=19,scl=20;sda=39,scl=40"},
     {"seeed_reterminal_e1002", "sda=19,scl=20;sda=39,scl=40"},
+    {"seeed_reterminal_e1003", "sda=19,scl=20"},
     {"seeed_reterminal_e1004", "sda=19,scl=20"},
 };
 
@@ -255,8 +265,11 @@ const char *fos_board_i2c_buses(const char *hardware_preset)
  * the reTerminal E-series hang it off the panel's SCK7/MOSI9 with MISO on
  * GPIO8 and CS on GPIO14, a card-detect contact on GPIO15 (low = seated) and
  * a TPS22916 power switch on GPIO16 (Seeed's schematics; the same three on
- * the E1001, E1002 and E1004). The XTEINK X4 shares its EPD bus too but has
- * no preset entry yet: its CS/detect/power pins are unpublished. */
+ * the E1001, E1002 and E1004). The E1003's switch is GPIO39 instead (its
+ * GPIO16 is the LED), and its IT8951 answers on the card's MISO, GPIO8
+ * (Seeed's SenseCraft HMI config, Zephyr's board file). The XTEINK X4 shares
+ * its EPD bus too but has no preset entry yet: its CS/detect/power pins are
+ * unpublished. */
 static const struct {
     const char *preset;
     const char *pins;
@@ -270,6 +283,7 @@ static const struct {
     {"seeed_reterminal_sticky", "cs=8,sck=13,miso=12,mosi=14,pwr=10,det=11"},
     {"seeed_reterminal_e1001", "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"},
     {"seeed_reterminal_e1002", "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"},
+    {"seeed_reterminal_e1003", "cs=14,sck=7,miso=8,mosi=9,pwr=39,det=15"},
     {"seeed_reterminal_e1004", "cs=14,sck=7,miso=8,mosi=9,pwr=16,det=15"},
 };
 
@@ -286,12 +300,16 @@ const char *fos_board_sd_pins(const char *hardware_preset)
  * by the reset sequence) on its own bus — TP_I2C_SDA GPIO3 / TP_I2C_SCL
  * GPIO2 — with TP_INT GPIO21 (an RTC IO: a touch can wake the chip), TP_RSTn
  * GPIO41 and the TPS22916 load switch TP_PWR_EN GPIO42 (Seeed's porting
- * specification). No other preset has one. */
+ * specification). The reTerminal E1003's GT911 sits on the I2C0 bus with the
+ * clock (SDA19/SCL20, which fos_i2c.c lends it), INT GPIO2, reset GPIO48, no
+ * load switch (Seeed's E1003_TouchDraw example and SenseCraft HMI config,
+ * Zephyr's board file). */
 static const struct {
     const char *preset;
     const char *pins;
 } k_touch_pins[] = {
     {"seeed_reterminal_sticky", "sda=3,scl=2,int=21,rst=41,en=42"},
+    {"seeed_reterminal_e1003", "sda=19,scl=20,int=2,rst=48"},
 };
 
 const char *fos_board_touch_pins(const char *hardware_preset)

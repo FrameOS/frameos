@@ -52,8 +52,11 @@ touching vendor code, and a resync cannot undo it.
 | `EPD_13in3b.c/.h` | FrameOS partial refresh (`Display_Base`, `Display_PartialBase`, `Display_Partial`) |
 | `DEV_Config.c/.h`, `DEV_Debug.c`, `Debug.h` | FrameOS hardware layer (see above); not vendor code. `DEV_Debug.c` is platform-neutral (command/data/preview events, `DEV_Busy_Wait`) and is compiled on the Pi and the ESP32 alike |
 
-Other driver families: `it8951/` (10.3" IT8951 controller, native Nim, Pi
-only) and `epd12in48/` (12.48" multi-controller boards, C + bindings, Pi only).
+Other driver families: `it8951/` (10.3" IT8951 controller, native Nim, Pi;
+the ESP32 drives the same controller from its own C driver,
+`embedded/esp32/components/frameos_display/it8951.c`, for the Waveshare HAT
+and the Seeed reTerminal E1003) and `epd12in48/` (12.48" multi-controller
+boards, C + bindings, Pi only).
 
 The IT8951 port streams the pixel payload in 4 KB spidev transfers
 (`it8951/spiPacking.nim`) rather than the vendor's byte-at-a-time

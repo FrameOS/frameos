@@ -8,6 +8,7 @@
 
 #include "DEV_Config.h"
 #include "frameos_panel_table.h"
+#include "it8951.h"
 #include "photo_painter_pmic.h"
 
 static const char *TAG = "fos_display";
@@ -35,6 +36,16 @@ static bool is_reterminal_e1004_hardware(const fos_display_config_t *config)
 {
     return config && config->hardware_preset &&
            strcmp(config->hardware_preset, "seeed_reterminal_e1004") == 0;
+}
+
+/* Seeed reTerminal E1003: the Waveshare 10.3" HAT's ED103TC2 behind the same
+ * IT8951, panel key EPD_10in3, but a board of its own: its own VCOM, columns
+ * that run right to left and a controller that must be told the temperature
+ * (it8951.c). Selected by the preset, like the E1004's T133A01 tuning. */
+static bool is_reterminal_e1003_hardware(const fos_display_config_t *config)
+{
+    return config && config->hardware_preset &&
+           strcmp(config->hardware_preset, "seeed_reterminal_e1003") == 0;
 }
 
 static size_t panel_buffer_size(int width, int height, fos_pixel_format_t format)
@@ -84,6 +95,10 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
         ESP_LOGE(TAG, "panel %s requires pins.cs2 for the second chip-select", entry->name);
         return ESP_ERR_INVALID_ARG;
     }
+    if (entry->bus == FOS_PANEL_BUS_SPI_READ && config->dc < 0) {
+        ESP_LOGE(TAG, "panel %s answers on MISO: set pins.dc to the controller's MISO GPIO", entry->name);
+        return ESP_ERR_INVALID_ARG;
+    }
 
     bool photo_painter = is_photo_painter_hardware(config);
     if (EPD_7IN3E_SetPhotoPainterMode) {
@@ -94,6 +109,8 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
                                   ? FOS_EPD_13IN3E_VARIANT_T133A01
                                   : FOS_EPD_13IN3E_VARIANT_WAVESHARE);
     }
+    fos_it8951_set_variant(is_reterminal_e1003_hardware(config) ? FOS_IT8951_VARIANT_SEEED_E1003
+                                                                : FOS_IT8951_VARIANT_WAVESHARE);
 
     if (photo_painter) {
         esp_err_t pmic_err = fos_photo_painter_enable_epd_power();
@@ -105,11 +122,17 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
 
     DEV_SetPinConfig(config->rst, config->dc, config->cs, config->cs2, config->busy,
                      config->sck, config->mosi, config->pwr);
+    if (entry->bus == FOS_PANEL_BUS_SPI_READ) DEV_SetReadPin(config->dc);
     s_panel = entry;
     ESP_LOGI(TAG, "panel %s (%dx%d, fmt=%d, %u byte buffer)", entry->name,
              fos_display_width(), fos_display_height(), (int)fos_display_format(),
              (unsigned)fos_display_buffer_size());
     return ESP_OK;
+}
+
+void fos_display_set_temperature_hook(bool (*read_celsius)(int *celsius))
+{
+    fos_it8951_set_temperature_source(read_celsius);
 }
 
 bool fos_display_present(void) { return s_panel != NULL; }
@@ -208,7 +231,7 @@ static esp_err_t ensure_module(void)
     /* I2C panels (the SSD1306 OLED) own their bus and reuse the sck/mosi pins
      * as SCL/SDA; bringing up the EPD SPI module on the same GPIOs would take
      * them away. */
-    if (s_panel && s_panel->bus == 1) {
+    if (s_panel && s_panel->bus == FOS_PANEL_BUS_I2C) {
         s_module_ready = true;
         return ESP_OK;
     }
@@ -221,7 +244,7 @@ static esp_err_t ensure_module(void)
 
 esp_err_t fos_display_spi_bus_share(int miso_pin, int *host)
 {
-    if (s_panel && s_panel->bus == 1) return ESP_ERR_INVALID_STATE;
+    if (s_panel && s_panel->bus == FOS_PANEL_BUS_I2C) return ESP_ERR_INVALID_STATE;
     int shared = DEV_SPI_Bus_Share(miso_pin);
     if (shared < 0) return ESP_ERR_INVALID_STATE;
     if (host) *host = shared;

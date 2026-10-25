@@ -9,7 +9,7 @@ import { useFrameSettings } from '../frameSettingsContext'
 import {
   ESP32_FLASH_SIZE_OPTIONS,
   ESP32_HARDWARE_PRESET_OPTIONS,
-  ESP32_PIN_FIELDS,
+  esp32PinFields,
   ESP32_SD_CARD_PIN_FIELDS,
   ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET,
   ESP32_WAVESHARE_PHOTOPAINTER_HARDWARE_PRESET,
@@ -126,7 +126,7 @@ export function Esp32HardwareFields(): JSX.Element {
                     }}
                   />
                   <div className="grid grid-cols-2 gap-2 @lg:grid-cols-4">
-                    {ESP32_PIN_FIELDS.map(({ key, label }) => (
+                    {esp32PinFields(frameForm.device).map(({ key, label }) => (
                       <label key={key} className="space-y-1">
                         <span className="frame-tool-muted block text-xs font-semibold">{label}</span>
                         <NumberTextInput
@@ -184,12 +184,13 @@ export function Esp32HardwareFields(): JSX.Element {
           >
             {({ value, onChange }) => {
               const sdCardAssets = normalizeEsp32SdCardAssets(value as Esp32SdCardAssets | undefined)
-              // The three reTerminal E-series share one socket: offer it once,
+              // Three reTerminal E-series share one socket: offer it once,
               // under the frame's own preset name when it is one of them. The
-              // Sticky's socket is its own entry.
+              // Sticky's and the E1003's sockets are entries of their own.
               const seeedSdPreset =
                 isSeeedReterminalSdCardPreset(embeddedHardwarePreset) &&
-                embeddedHardwarePreset !== 'seeed_reterminal_sticky'
+                embeddedHardwarePreset !== 'seeed_reterminal_sticky' &&
+                embeddedHardwarePreset !== 'seeed_reterminal_e1003'
                   ? embeddedHardwarePreset
                   : 'seeed_reterminal_e1002'
               const preset = esp32SdCardPresetValue(sdCardAssets, seeedSdPreset)
@@ -236,6 +237,10 @@ export function Esp32HardwareFields(): JSX.Element {
                           {
                             value: seeedSdPreset,
                             label: 'Seeed reTerminal E1001 / E1002 / E1004 (on the panel bus)',
+                          },
+                          {
+                            value: 'seeed_reterminal_e1003',
+                            label: 'Seeed reTerminal E1003 (on the panel bus)',
                           },
                           {
                             value: 'seeed_reterminal_sticky',

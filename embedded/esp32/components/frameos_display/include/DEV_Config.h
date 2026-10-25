@@ -29,6 +29,7 @@ extern int EPD_BUSY_PIN;
 extern int EPD_PWR_PIN;
 extern int EPD_MOSI_PIN;
 extern int EPD_SCLK_PIN;
+extern int EPD_MISO_PIN;
 
 /* Upper bounds for busy-pin waits (see vendor EPD_WaitUntilIdle loops and
  * the Linux copy of this header, frameos/src/drivers/waveshare/ePaper/
@@ -46,12 +47,19 @@ int DEV_Busy_Budget_Exhausted(void);
 /* GPIO remap: call before DEV_Module_Init. -1 leaves a pin unchanged
  * (pwr may be -1 permanently = not wired). */
 void DEV_SetPinConfig(int rst, int dc, int cs, int cs2, int busy, int sclk, int mosi, int pwr);
+/* A controller that answers on MISO (the IT8951, which has no D/C line):
+ * the bus comes up with `miso` and the dc pin is left alone. Call after
+ * DEV_SetPinConfig, before DEV_Module_Init. */
+void DEV_SetReadPin(int miso);
 
 void DEV_Digital_Write(UWORD Pin, UBYTE Value);
 UBYTE DEV_Digital_Read(UWORD Pin);
 
 void DEV_SPI_WriteByte(UBYTE Value);
 void DEV_SPI_Write_nByte(uint8_t *pData, uint32_t Len);
+/* One 16-bit word out, most significant byte first, and the word clocked in
+ * on MISO meanwhile (the IT8951's bus protocol). */
+UWORD DEV_SPI_Transfer16(UWORD Value);
 void DEV_Delay_ms(UDOUBLE xms);
 UDOUBLE DEV_Millis(void);
 
@@ -64,7 +72,8 @@ void DEV_Module_Exit(void);
 
 /* The panel's SPI bus, shared with an SD card on the same SCK/MOSI (the
  * Seeed reTerminal E-series). DEV_SPI_Bus_Init brings the bus up once, with
- * the card's MISO when it asks first (the panel never reads); 0 on success.
+ * the card's MISO when it asks first (only the IT8951 reads, and on the
+ * E1003 it shares the card's line); 0 on success.
  * DEV_SPI_Bus_Share does that and returns the spi_host_device_t the card's
  * sdspi device joins (-1 when the bus cannot be shared), after which the
  * panel holds the bus for the whole of each refresh (DEV_SPI_Acquire /

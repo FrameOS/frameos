@@ -273,8 +273,8 @@ const WAVESHARE_PHOTOPAINTER_PINS: NonNullable<NonNullable<NewFrameFormType['dev
 }
 // The reTerminal E-series' arrows held walk the scene list (docs/events.md
 // "Event map"), by label — the E1004's pins are swapped, its labels are not.
-// On the E1001/E1002, the two with a microphone, REFRESH held talks to the
-// frame (docs/voice-chat.md). Mirrors EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP /
+// On the E1001/E1002/E1003, the three with a microphone, REFRESH held talks
+// to the frame (docs/voice-chat.md). Mirrors EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP /
 // _VOICE_EVENT_MAP (backend) and fos_board.c.
 const SEEED_RETERMINAL_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'LEFT', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
@@ -328,14 +328,15 @@ const WAVESHARE_13IN3E6_SD_CARD_ASSETS: NonNullable<NonNullable<NewFrameFormType
 }
 // The reTerminal E-series TF socket on the panel's SPI bus (SCK7/MOSI9 are
 // the panel's), MISO8, CS14, card-detect 15, power switch 16 — the same on
-// the E1001, E1002 and E1004 (EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS).
+// the E1001, E1002 and E1004 (EMBEDDED_SEEED_RETERMINAL_SD_CARD_PINS); the
+// E1003 switches it on GPIO39 (EMBEDDED_SEEED_RETERMINAL_E1003_SD_CARD_PINS).
 const seeedReterminalSdCardAssets = (
-  preset: 'seeed_reterminal_e1001' | 'seeed_reterminal_e1002' | 'seeed_reterminal_e1004'
+  preset: 'seeed_reterminal_e1001' | 'seeed_reterminal_e1002' | 'seeed_reterminal_e1003' | 'seeed_reterminal_e1004'
 ): NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']> => ({
   enabled: true,
   preset,
   mountPath: '/srv/assets',
-  pins: { cs: 14, sck: 7, miso: 8, mosi: 9, pwr: 16, det: 15 },
+  pins: { cs: 14, sck: 7, miso: 8, mosi: 9, pwr: preset === 'seeed_reterminal_e1003' ? 39 : 16, det: 15 },
   maxFrequencyKHz: 20000,
 })
 
@@ -407,6 +408,19 @@ const SEEED_RETERMINAL_E10XX_PINS: NonNullable<NonNullable<NewFrameFormType['dev
   sck: 7,
   mosi: 9,
   pwr: -1,
+}
+// reTerminal E1003: the E-series SPI bus with an IT8951 on it, which has no
+// D/C: its MISO (GPIO8) rides in the dc slot, its power switches in pwr (the
+// panel's) and cs2 (the controller's). EMBEDDED_SEEED_RETERMINAL_E1003_PINS.
+const SEEED_RETERMINAL_E1003_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: 12,
+  dc: 8,
+  cs: 10,
+  cs2: 21,
+  busy: 13,
+  sck: 7,
+  mosi: 9,
+  pwr: 11,
 }
 // reTerminal E1004: the E-series SPI bus with the 13.3" panel's second chip
 // select on GPIO2, reset on 38 and panel power on 12.
@@ -593,6 +607,21 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     eventMap: SEEED_RETERMINAL_VOICE_EVENT_MAP,
     sdCardAssets: seeedReterminalSdCardAssets('seeed_reterminal_e1002'),
   },
+  seeed_reterminal_e1003: {
+    label: 'Seeed reTerminal E1003 (10.3" grayscale ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'waveshare.EPD_10in3',
+    flashSize: '32MB',
+    psramMB: 8,
+    pins: SEEED_RETERMINAL_E1003_PINS,
+    gpioButtons: [
+      { pin: 3, label: 'REFRESH' },
+      { pin: 4, label: 'LEFT' },
+      { pin: 5, label: 'RIGHT' },
+    ],
+    eventMap: SEEED_RETERMINAL_VOICE_EVENT_MAP,
+    sdCardAssets: seeedReterminalSdCardAssets('seeed_reterminal_e1003'),
+  },
   seeed_reterminal_e1004: {
     label: 'Seeed reTerminal E1004 (13.3" color ESP32-S3)',
     platform: EMBEDDED_ESP32_S3,
@@ -712,7 +741,6 @@ function renderDeviceOptions(): JSX.Element[] {
 }
 
 const unsupportedEmbeddedWaveshareDevices = new Set([
-  'waveshare.EPD_10in3',
   'waveshare.EPD_12in48',
   'waveshare.EPD_12in48b',
   'waveshare.EPD_12in48b_V2',
@@ -799,7 +827,8 @@ function renderNewFrameDriverConfig(
     setNewFrameValue('device_config', nextDeviceConfig)
   }
 
-  if (newFrame.device === 'waveshare.EPD_10in3') {
+  // The Pi driver's VCOM; on an ESP32 the board's table carries it (it8951.c).
+  if (newFrame.device === 'waveshare.EPD_10in3' && newFrame.mode !== 'embedded') {
     return (
       <FormField label="VCOM">
         <input

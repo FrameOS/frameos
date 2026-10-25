@@ -138,6 +138,8 @@ static void test_event_maps(void)
           "REFRESH held talks on the e1001");
     CHECK(strstr(e1004, "voiceChat") == NULL, "the e1004 has no voice key");
     CHECK(strlen(e1001) < 1024, "fits the config slot");
+    /* The E1003 has the E1001's keys and microphone: the same map. */
+    CHECK(strcmp(fos_board_event_map("seeed_reterminal_e1003"), e1001) == 0, "e1003 = e1001 event map");
     /* The Sticky: UP and DOWN held walk the scenes, the AI key held talks. */
     const char *sticky = fos_board_event_map("seeed_reterminal_sticky");
     CHECK(strstr(sticky, "\"label\":\"UP\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}") != NULL,
@@ -167,6 +169,7 @@ static void test_buzzer_pins(void)
     /* Every reTerminal E-series model has the buzzer on GPIO45. */
     CHECK(fos_board_buzzer_pin("seeed_reterminal_e1001") == 45, "e1001 buzzer");
     CHECK(fos_board_buzzer_pin("seeed_reterminal_e1002") == 45, "e1002 buzzer");
+    CHECK(fos_board_buzzer_pin("seeed_reterminal_e1003") == 45, "e1003 buzzer");
     CHECK(fos_board_buzzer_pin("seeed_reterminal_e1004") == 45, "e1004 buzzer");
     CHECK(fos_board_buzzer_tone_hz("seeed_reterminal_e1004") == 2000, "e1004 tone");
     /* The Sticky's 4 kHz electromagnetic buzzer, on GPIO48. */
@@ -189,6 +192,8 @@ static void test_mic_pins(void)
     CHECK(clk == 42 && data == 41 && pwr == 38, "e1001 mic pins %d/%d/%d", clk, data, pwr);
     CHECK(fos_board_mic_pins("seeed_reterminal_e1002", &clk, &data, &pwr), "e1002 has a microphone");
     CHECK(clk == 42 && data == 41 && pwr == 38, "e1002 mic pins %d/%d/%d", clk, data, pwr);
+    CHECK(fos_board_mic_pins("seeed_reterminal_e1003", &clk, &data, &pwr), "e1003 has a microphone");
+    CHECK(clk == 42 && data == 41 && pwr == 38, "e1003 mic pins %d/%d/%d", clk, data, pwr);
     /* The E1004 has none: its schematic has no microphone, GPIO41/42 are its
      * J2 UART and GPIO38 its panel reset. Driving a PDM clock on the panel
      * reset would be a very bad surprise. */
@@ -218,6 +223,9 @@ static void test_leds(void)
     CHECK(pin == 6 && type == 1, "e1001 LED %d/%d", pin, type);
     CHECK(fos_board_led("seeed_reterminal_e1002", &pin, &type), "e1002 has an LED");
     CHECK(pin == 6 && type == 1, "e1002 LED %d/%d", pin, type);
+    /* The E1003's on GPIO16 (its TF power switch moved to 39), lit low. */
+    CHECK(fos_board_led("seeed_reterminal_e1003", &pin, &type), "e1003 has an LED");
+    CHECK(pin == 16 && type == 1, "e1003 LED %d/%d", pin, type);
     CHECK(fos_board_led("seeed_reterminal_e1004", &pin, &type), "e1004 has an LED");
     CHECK(pin == 48 && type == 0, "e1004 LED %d/%d", pin, type);
     /* The Sticky's GPIO48 is its buzzer; a board without a known LED gets
@@ -237,6 +245,8 @@ static void test_i2c_buses(void)
     CHECK(strcmp(fos_board_i2c_buses("seeed_reterminal_e1001"), "sda=19,scl=20;sda=39,scl=40") == 0, "e1001 buses");
     CHECK(strcmp(fos_board_i2c_buses("seeed_reterminal_e1002"), "sda=19,scl=20;sda=39,scl=40") == 0, "e1002 buses");
     CHECK(strcmp(fos_board_i2c_buses("seeed_reterminal_e1004"), "sda=19,scl=20") == 0, "e1004 bus");
+    /* The E1003: clock, sensor, charger and its touch controller, all on 19/20. */
+    CHECK(strcmp(fos_board_i2c_buses("seeed_reterminal_e1003"), "sda=19,scl=20") == 0, "e1003 bus");
     /* The Waveshare boards' codec chips: the PhotoPainter's on the PMIC's
      * 47/48 (the PMIC driver shares the port), the 13.3E6's on 41/42. */
     CHECK(strcmp(fos_board_i2c_buses("waveshare_esp32_s3_photopainter"), "sda=47,scl=48") == 0, "photopainter bus");
@@ -263,6 +273,9 @@ static void test_sd_pins(void)
     CHECK(strcmp(fos_board_sd_pins("seeed_reterminal_e1001"), e) == 0, "e1001 TF");
     CHECK(strcmp(fos_board_sd_pins("seeed_reterminal_e1002"), e) == 0, "e1002 TF");
     CHECK(strcmp(fos_board_sd_pins("seeed_reterminal_e1004"), e) == 0, "e1004 TF");
+    /* The E1003's switch is GPIO39: its GPIO16 is the LED. */
+    CHECK(strcmp(fos_board_sd_pins("seeed_reterminal_e1003"), "cs=14,sck=7,miso=8,mosi=9,pwr=39,det=15") == 0,
+          "e1003 TF");
     /* The Sticky's, on its panel's SCK13/MOSI14 with its own switch and detect. */
     CHECK(strcmp(fos_board_sd_pins("seeed_reterminal_sticky"), "cs=8,sck=13,miso=12,mosi=14,pwr=10,det=11") == 0,
           "sticky TF");
@@ -277,6 +290,10 @@ static void test_touch_pins(void)
     /* The Sticky's GT911 on its own bus, with its interrupt on an RTC IO. */
     CHECK(strcmp(fos_board_touch_pins("seeed_reterminal_sticky"), "sda=3,scl=2,int=21,rst=41,en=42") == 0,
           "sticky touch");
+    /* The E1003's GT911 on the clock's 19/20 (fos_i2c.c lends the bus), no
+     * load switch. */
+    CHECK(strcmp(fos_board_touch_pins("seeed_reterminal_e1003"), "sda=19,scl=20,int=2,rst=48") == 0,
+          "e1003 touch");
     /* No other board has a glass: a touch bus on the E1004's panel pins
      * would be a very bad surprise. */
     CHECK(strcmp(fos_board_touch_pins("seeed_reterminal_e1004"), "") == 0, "e1004: no touch");

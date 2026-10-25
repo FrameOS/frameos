@@ -2,7 +2,7 @@
 
 Hold a frame's **voice key** — the key whose long press the frame's event map
 binds to `voiceChat` (`docs/events.md` "Event map"; **REFRESH** on the
-reTerminal E1001/E1002 presets, and Settings → Button actions moves it) for a
+reTerminal E1001/E1002/E1003 presets, and Settings → Button actions moves it) for a
 second: the buzzer plays a short rising sparkle, the microphone opens, and the
 frame listens until the key is let go. What was said goes to the frame's
 control plane (the self-hosted backend or FrameOS Cloud) **while it is being
@@ -53,7 +53,7 @@ frame has no key hold and no microphone path (yet).
   the session. Within the map the first rule matching a label's long press
   wins, as the dispatcher's own walk has it, so a rule that sends REFRESH held
   somewhere else first keeps it from being a voice key; a rule matching by
-  `role` is not read (the firmware knows its keys by label). The E1001/E1002
+  `role` is not read (the firmware knows its keys by label). The E1001/E1002/E1003
   presets ship the REFRESH rule next to the arrows' (`fos_board.c`, the
   backend's `EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP`, the SPA's preset
   table); the E1004, without a microphone, ships the arrows alone. In Settings
@@ -85,7 +85,8 @@ frame has no key hold and no microphone path (yet).
   release (or the full buffer), so a glance says the frame is listening; then
   it goes back to following the notes. A microphone and an LED are a complete
   set of cues; the LED never ends up in the recording. The reTerminal
-  E1001/E1002 have one on GPIO6 (lit low), the E1004 on GPIO48 (lit high).
+  E1001/E1002 have one on GPIO6 (lit low), the E1003 on GPIO16 (lit low), the
+  E1004 on GPIO48 (lit high).
 - **Sounds** (`fos_buzzer.c`, all relative to `buzzer_tone_hz`):
   listening = four rising notes and a held top (the "sparkle", about 300 ms);
   sent = two quick rising notes; then, every two seconds until the answer, a
@@ -149,7 +150,7 @@ frame has no key hold and no microphone path (yet).
   them): `voice:listening`, `voice:sent {ms, bytes}`, `voice:reply
   {transcript, reply, tools}`, `voice:error {error}`.
 - **Config:** `mic_pins` (`clk=42,data=41,pwr=38`; NVS `mic_pins`; no stored
-  value → the board's own, `fos_board_mic_pins`, so an E1001/E1002 gets its
+  value → the board's own, `fos_board_mic_pins`, so an E1001/E1002/E1003 gets its
   microphone with the update), `voice_chat` (bool, default on; the switch an
   owner turns off to keep the microphone shut whatever the map binds) and the
   frame's `event_map` for which key (above). Console: `set mic_pins …`, `set
@@ -158,7 +159,7 @@ frame has no key hold and no microphone path (yet).
   planes the pins are three contract settings, `mic_clk_pin` / `mic_data_pin`
   / `mic_pwr_pin` (-1 = none; the power pin -1 = always powered), read at
   every session's start so applied live: the backend keeps `micClkPin` /
-  `micDataPin` / `micPwrPin` in `device_config` (the E1001/E1002 presets seed
+  `micDataPin` / `micPwrPin` in `device_config` (the E1001/E1002/E1003 presets seed
   42/41/38, a USB provisioning writes them as one `mic_pins` line), the cloud
   pushes them with `set_settings` and shows what the frame reports
   (`hardware.micClkPin` …). Settings → "Buzzer, LED and microphone" has the three
@@ -314,7 +315,7 @@ spellings is `frontend/src/utils/voiceChat.ts`.
 are drawn only on a frame with a microphone: a cloud frame that reports
 `hardware.microphone` (2026.10.20 firmware) or whose pins field names one, a
 backend frame whose `device_config` pins name one (either spelling) or, pins
-left to the board, whose preset carries one (E1001/E1002; the E1004 none).
+left to the board, whose preset carries one (E1001/E1002/E1003; the E1004 none).
 A clock or data pin of -1 is no microphone on either plane. The pins field
 itself stays on every real ESP32 board, because it is how a PDM microphone
 on a header is declared; once the clock and data pins are set the controls

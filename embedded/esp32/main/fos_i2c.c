@@ -5,6 +5,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "driver/i2c_master.h"
 #include "esp_log.h"
@@ -49,6 +50,9 @@ static fos_i2c_bus_t s_bus_pins[FOS_I2C_BUSES_MAX];
 static uint8_t s_bus_count = 0;
 static i2c_master_dev_handle_t s_devices[FOS_I2C_CHIP_COUNT];
 static int8_t s_device_bus[FOS_I2C_CHIP_COUNT]; /* which bus answered, -1 = absent */
+/* A bus another driver put a device of its own on (fos_i2c_lend_bus): the
+ * reTerminal E1003's touch controller shares the clock's bus. */
+static bool s_bus_lent[FOS_I2C_BUSES_MAX];
 static bool s_usb_pads_taken = false;
 
 /* GPIO19/20 are the ESP32-S3's USB D-/D+ pads, and the ROM leaves the
@@ -78,13 +82,53 @@ static void teardown_locked(void)
         }
         s_device_bus[c] = -1;
     }
+    /* A lent bus stays up, with its device: deleting it would pull the bus
+     * out from under the driver that borrowed it. It moves to the front, and
+     * the rescan finds it again by its pins. */
+    uint8_t kept = 0;
     for (size_t b = 0; b < s_bus_count; b++) {
-        if (s_buses[b]) {
+        if (!s_buses[b]) continue;
+        if (s_bus_lent[b]) {
+            s_buses[kept] = s_buses[b];
+            s_bus_pins[kept] = s_bus_pins[b];
+            s_bus_lent[kept] = true;
+            kept++;
+        } else {
             i2c_del_master_bus(s_buses[b]);
-            s_buses[b] = NULL;
         }
     }
-    s_bus_count = 0;
+    for (size_t b = kept; b < FOS_I2C_BUSES_MAX; b++) {
+        s_buses[b] = NULL;
+        s_bus_lent[b] = false;
+    }
+    s_bus_count = kept;
+}
+
+static int find_bus_locked(int sda, int scl, uint8_t below)
+{
+    for (uint8_t b = 0; b < below; b++) {
+        if (s_buses[b] && s_bus_pins[b].sda == sda && s_bus_pins[b].scl == scl) return b;
+    }
+    return -1;
+}
+
+/* Find the chips FrameOS knows on bus `index`. Under s_lock. */
+static void probe_bus_locked(i2c_master_bus_handle_t bus, uint8_t index)
+{
+    for (size_t c = 0; c < FOS_I2C_CHIP_COUNT; c++) {
+        if (s_devices[c]) continue; /* found on an earlier bus */
+        if (i2c_master_probe(bus, k_chips[c].address, I2C_PROBE_TIMEOUT_MS) != ESP_OK) continue;
+        i2c_device_config_t dev_config = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = k_chips[c].address,
+            .scl_speed_hz = I2C_SPEED_HZ,
+        };
+        if (i2c_master_bus_add_device(bus, &dev_config, &s_devices[c]) == ESP_OK) {
+            s_device_bus[c] = (int8_t)index;
+        } else {
+            s_devices[c] = NULL;
+        }
+    }
 }
 
 esp_err_t fos_i2c_init(void)
@@ -97,8 +141,14 @@ esp_err_t fos_i2c_init(void)
     const fos_config_t *config = fos_config();
     xSemaphoreTake(s_lock, portMAX_DELAY);
     teardown_locked();
+    const uint8_t lent_count = s_bus_count;
     esp_err_t first_err = ESP_OK;
     for (uint8_t i = 0; i < config->i2c_bus_count && i < FOS_I2C_BUSES_MAX; i++) {
+        int lent = find_bus_locked(config->i2c_buses[i].sda, config->i2c_buses[i].scl, lent_count);
+        if (lent >= 0) {
+            probe_bus_locked(s_buses[lent], (uint8_t)lent);
+            continue;
+        }
         if (s_bus_count >= SOC_I2C_NUM) {
             ESP_LOGW(TAG, "this chip has %d I2C port(s); bus sda%d/scl%d not opened",
                      (int)SOC_I2C_NUM, config->i2c_buses[i].sda, config->i2c_buses[i].scl);
@@ -130,20 +180,8 @@ esp_err_t fos_i2c_init(void)
         }
         s_buses[s_bus_count] = bus;
         s_bus_pins[s_bus_count] = config->i2c_buses[i];
-        for (size_t c = 0; c < FOS_I2C_CHIP_COUNT; c++) {
-            if (s_devices[c]) continue; /* found on an earlier bus */
-            if (i2c_master_probe(bus, k_chips[c].address, I2C_PROBE_TIMEOUT_MS) != ESP_OK) continue;
-            i2c_device_config_t dev_config = {
-                .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-                .device_address = k_chips[c].address,
-                .scl_speed_hz = I2C_SPEED_HZ,
-            };
-            if (i2c_master_bus_add_device(bus, &dev_config, &s_devices[c]) == ESP_OK) {
-                s_device_bus[c] = (int8_t)s_bus_count;
-            } else {
-                s_devices[c] = NULL;
-            }
-        }
+        s_bus_lent[s_bus_count] = false;
+        probe_bus_locked(bus, s_bus_count);
         s_bus_count++;
     }
     xSemaphoreGive(s_lock);
@@ -197,6 +235,33 @@ esp_err_t fos_i2c_write(fos_i2c_chip_t chip, uint8_t reg, const uint8_t *buf, si
     esp_err_t err = transact_locked(chip, true, frame, len + 1, NULL, 0);
     xSemaphoreGive(s_lock);
     return err;
+}
+
+esp_err_t fos_i2c_command_read(fos_i2c_chip_t chip, uint8_t command, uint32_t wait_ms, uint8_t *buf, size_t len)
+{
+    if (!s_lock || chip >= FOS_I2C_CHIP_COUNT || !buf || len == 0) return ESP_ERR_INVALID_ARG;
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(I2C_LOCK_TIMEOUT_MS)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    esp_err_t err = transact_locked(chip, true, &command, 1, NULL, 0);
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(wait_ms) > 0 ? pdMS_TO_TICKS(wait_ms) : 1);
+        err = i2c_master_receive(s_devices[chip], buf, len, I2C_XFER_TIMEOUT_MS);
+    }
+    xSemaphoreGive(s_lock);
+    return err;
+}
+
+i2c_master_bus_handle_t fos_i2c_lend_bus(int sda, int scl)
+{
+    if (!s_lock) return NULL;
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(I2C_LOCK_TIMEOUT_MS)) != pdTRUE) return NULL;
+    int b = find_bus_locked(sda, scl, s_bus_count);
+    i2c_master_bus_handle_t bus = NULL;
+    if (b >= 0) {
+        s_bus_lent[b] = true;
+        bus = s_buses[b];
+    }
+    xSemaphoreGive(s_lock);
+    return bus;
 }
 
 bool fos_i2c_owns_usb_pads(void)

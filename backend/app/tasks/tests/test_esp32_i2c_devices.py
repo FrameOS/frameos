@@ -10,15 +10,17 @@ import pytest
 # Runs embedded/esp32/main/tests/test_fos_i2c_devices.c: the pure halves of
 # the I2C chips — the reTerminal E-series' SY6974B charger's register decode
 # (fos_charger.c: is USB in, is the cell charging), the PCF8563 clock's BCD
-# conversions (fos_rtc.c) and the reTerminal Sticky's BQ27220 fuel gauge's
-# word decode (fos_gauge.c). Same arrangement as
+# conversions (fos_rtc.c), the reTerminal Sticky's BQ27220 fuel gauge's
+# word decode (fos_gauge.c) and the SHT4x climate sensor's measurement decode
+# (fos_climate.c: the reTerminal E1003's IT8951 refreshes by its temperature).
+# Same arrangement as
 # test_esp32_power.py next door: both files keep their arithmetic above the
 # ESP_PLATFORM guard, so a laptop compiler is all this needs.
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 ESP32_DIR = REPO_ROOT / "embedded" / "esp32"
 MAIN_DIR = ESP32_DIR / "main"
-SOURCES = [MAIN_DIR / "fos_charger.c", MAIN_DIR / "fos_rtc.c", MAIN_DIR / "fos_gauge.c"]
+SOURCES = [MAIN_DIR / "fos_charger.c", MAIN_DIR / "fos_rtc.c", MAIN_DIR / "fos_gauge.c", MAIN_DIR / "fos_climate.c"]
 TEST_SOURCE = MAIN_DIR / "tests" / "test_fos_i2c_devices.c"
 
 

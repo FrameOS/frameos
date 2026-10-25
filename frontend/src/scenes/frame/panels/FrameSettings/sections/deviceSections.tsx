@@ -253,7 +253,8 @@ export function DeviceSettingsSection(): JSX.Element {
             )}
           </Field>
         )}
-        {frameForm.device === 'waveshare.EPD_10in3' ? (
+        {/* The Pi driver's VCOM; on an ESP32 the board's table carries it (it8951.c). */}
+        {frameForm.device === 'waveshare.EPD_10in3' && !isEmbeddedMode ? (
           <Group name="device_config">
             <Field name="vcom" label="VCOM">
               <TextInput name="vcom" placeholder="-1.48" required />

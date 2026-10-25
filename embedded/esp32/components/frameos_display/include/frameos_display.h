@@ -31,8 +31,13 @@ typedef struct {
     int8_t rst, dc, cs, cs2, busy, sck, mosi, pwr;
 } fos_display_config_t;
 
-/* Select panel + pins. Does not touch hardware yet. */
+/* Select panel + pins. Does not touch hardware yet. A panel whose controller
+ * answers (EPD_10in3, the IT8951) reads `dc` as its MISO pin. */
 esp_err_t fos_display_init(const fos_display_config_t *config);
+/* Where a panel reads the temperature when its controller picks a waveform
+ * by it and has no sensor of its own (the reTerminal E1003's IT8951, from
+ * the board's SHT40): true with whole degrees Celsius, false when unknown. */
+void fos_display_set_temperature_hook(bool (*read_celsius)(int *celsius));
 bool fos_display_present(void);  /* false for panel "none" */
 /* The panel actually driving the display ("none" when headless). With the
  * whole panel table compiled in, fos_display_panel_name(0) is just the first

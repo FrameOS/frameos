@@ -39,8 +39,8 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset);
 /* The frame's event map a hardware preset ships with (docs/events.md, "Event
  * map"): what the board's buttons do whatever scene shows, as the compact
  * JSON rule list frame.json `eventMap` holds — a reTerminal's LEFT and RIGHT
- * held are the previous and the next scene, and on the E1001/E1002 REFRESH
- * held is the voice chat. "" for a board without one (or
+ * held are the previous and the next scene, and on the E1001/E1002/E1003
+ * REFRESH held is the voice chat. "" for a board without one (or
  * no preset at all). The console's `set hardware` applies it, and it is the
  * stored-config default when NVS has no `event_map` key. Keep in step with
  * `eventMap` in EMBEDDED_HARDWARE_PRESETS (backend/app/tasks/embedded_firmware.py)
@@ -49,7 +49,7 @@ const char *fos_board_event_map(const char *hardware_preset);
 
 /* The board's PDM microphone for a hardware preset key: clock, data and the
  * power-enable GPIO (-1 each when the preset names a board without one, or no
- * preset at all). The Seeed reTerminal E1001/E1002 carry an MSM261 on
+ * preset at all). The Seeed reTerminal E1001/E1002/E1003 carry an MSM261 on
  * 42/41/38; the E1004 has none (docs/voice-chat.md). Same role as
  * fos_board_buzzer_pin: the console's `set hardware` applies it and it is the
  * stored-config default when NVS has no `mic_pins`. Returns true when the
@@ -59,8 +59,8 @@ bool fos_board_mic_pins(const char *hardware_preset, int *clk, int *data, int *p
 /* The board's status LED for a hardware preset key: its GPIO and how it is
  * lit (fos_led_type_t: 0 high, 1 low, 2 a WS2812 pixel), -1 / 0 for a board
  * without one. The reTerminal E1001/E1002 have a green LED on GPIO6, the
- * E1004 on GPIO48; the first two lit low, the E1004's lit high (Seeed's
- * schematics, and the E1004 on the bench).
+ * E1003 on GPIO16, the E1004 on GPIO48; the first three lit low, the
+ * E1004's lit high (Seeed's schematics, and the E1004 on the bench).
  * Same role as fos_board_buzzer_pin: `set hardware` applies it and it is the
  * stored-config default when NVS has no `led` key. Keep in step with
  * `ledPin` / `ledType` in EMBEDDED_HARDWARE_PRESETS. */
@@ -69,21 +69,22 @@ bool fos_board_led(const char *hardware_preset, int *pin, int *type);
 /* The board's I2C peripheral buses as the `i2c_buses` spec
  * (`sda=19,scl=20;sda=39,scl=40`), "" for a board without any. The reTerminal
  * E1001/E1002 carry their PCF8563 clock and SHT40 sensor on 19/20 and their
- * SY6974B charger on 39/40; the E1004 has all three on 19/20 (its 39/40 is
- * the J2 header). fos_i2c.c probes what is there. */
+ * SY6974B charger on 39/40; the E1003 and E1004 have all three on 19/20
+ * (the E1004's 39/40 is the J2 header). fos_i2c.c probes what is there. */
 const char *fos_board_i2c_buses(const char *hardware_preset);
 
 /* The board's TF socket as the `assets_sd_pins` spec, "" for a board with no
  * usable one. The reTerminal E-series share the panel's SPI bus (SCK7/MOSI9)
  * with MISO on GPIO8, CS on GPIO14, a card-detect contact on GPIO15 and a
- * TPS22916 power switch on GPIO16 — one table for the console's `set
- * hardware` and the stored-config default. Keep in step with
+ * TPS22916 power switch on GPIO16 (GPIO39 on the E1003) — one table for the
+ * console's `set hardware` and the stored-config default. Keep in step with
  * EMBEDDED_SD_CARD_ASSETS_PRESET_PINS. */
 const char *fos_board_sd_pins(const char *hardware_preset);
 
 /* The board's capacitive touch panel as the `touch_pins` spec
  * (`sda=3,scl=2,int=21,rst=41,en=42`), "" for a board without one. The Seeed
- * reTerminal Sticky carries a Goodix GT911 on its own I2C bus (fos_touch.c).
+ * reTerminal Sticky carries a Goodix GT911 on its own I2C bus, the E1003 one
+ * on the clock's (fos_touch.c).
  * Keep in step with `touchPins` in EMBEDDED_HARDWARE_PRESETS. */
 const char *fos_board_touch_pins(const char *hardware_preset);
 

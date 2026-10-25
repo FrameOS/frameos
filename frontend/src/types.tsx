@@ -25,6 +25,7 @@ export type FrameEmbeddedHardwarePreset =
   | 'seeed_reterminal_sticky'
   | 'seeed_reterminal_e1001'
   | 'seeed_reterminal_e1002'
+  | 'seeed_reterminal_e1003'
   | 'seeed_reterminal_e1004'
   | 'elecrow_crowpanel_5in79'
   | 'pimoroni_inky_frame_4'
@@ -366,6 +367,7 @@ export interface FrameType {
         | 'waveshare_esp32_s3_epaper_13_3e6'
         | 'seeed_reterminal_e1001'
         | 'seeed_reterminal_e1002'
+        | 'seeed_reterminal_e1003'
         | 'seeed_reterminal_e1004'
         | 'seeed_reterminal_sticky'
       pins?: {

@@ -1,13 +1,15 @@
 /*
  * Host tests for the pure halves of the I2C chip drivers: the charger's
- * register decode (fos_charger.c), the clock's BCD conversions (fos_rtc.c)
- * and the fuel gauge's word decode (fos_gauge.c). No IDF: the files keep
- * their arithmetic above the ESP_PLATFORM guard.
+ * register decode (fos_charger.c), the clock's BCD conversions (fos_rtc.c),
+ * the fuel gauge's word decode (fos_gauge.c) and the climate sensor's
+ * measurement decode (fos_climate.c). No IDF: the files keep their
+ * arithmetic above the ESP_PLATFORM guard.
  *
  * Build and run (from embedded/esp32/):
  *
  *   cc -std=c11 -Wall -Wextra -Werror -O2 -Imain \
- *      main/fos_charger.c main/fos_rtc.c main/fos_gauge.c main/tests/test_fos_i2c_devices.c \
+ *      main/fos_charger.c main/fos_rtc.c main/fos_gauge.c main/fos_climate.c \
+ *      main/tests/test_fos_i2c_devices.c \
  *      -o /tmp/test_fos_i2c_devices && /tmp/test_fos_i2c_devices
  *
  * (backend/app/tasks/tests/test_esp32_i2c_devices.py does exactly that in CI.)
@@ -16,6 +18,7 @@
 #include <string.h>
 
 #include "fos_charger.h"
+#include "fos_climate.h"
 #include "fos_gauge.h"
 #include "fos_rtc.h"
 
@@ -124,11 +127,44 @@ static void test_gauge_decode(void)
     CHECK(g.pct == -1, "soc 200 is no reading");
 }
 
+static void test_climate_decode(void)
+{
+    /* Sensirion's own CRC example: 0xBEEF -> 0x92. */
+    const uint8_t beef[2] = {0xBE, 0xEF};
+    CHECK(fos_climate_crc8(beef, 2) == 0x92, "crc of 0xBEEF is 0x%02x", fos_climate_crc8(beef, 2));
+    /* 0x6666 is 25.00 C, 0x72B0 50.00 %RH (T = -45 + 175 t/65535,
+     * RH = -6 + 125 h/65535). */
+    const uint8_t room[6] = {0x66, 0x66, 0x93, 0x72, 0xB0, 0xDC};
+    int t = 0, rh = 0;
+    CHECK(fos_climate_decode(room, &t, &rh), "room reading decodes");
+    CHECK(t == 2500, "25.00 C, got %d", t);
+    CHECK(rh == 5000, "50.00 %%, got %d", rh);
+    /* The ends of the range: -45 C and humidity clamped to 0 %, +130 C and 100 %. */
+    const uint8_t low[6] = {0x00, 0x00, 0x81, 0x00, 0x00, 0x81};
+    CHECK(fos_climate_decode(low, &t, &rh) && t == -4500 && rh == 0, "low end %d / %d", t, rh);
+    const uint8_t high[6] = {0xFF, 0xFF, 0xAC, 0xFF, 0xFF, 0xAC};
+    CHECK(fos_climate_decode(high, &t, &rh) && t == 13000 && rh == 10000, "high end %d / %d", t, rh);
+    /* A garbled byte fails its CRC and changes nothing. */
+    uint8_t bad[6];
+    memcpy(bad, room, sizeof(bad));
+    bad[1] ^= 0x01;
+    t = rh = 7;
+    CHECK(!fos_climate_decode(bad, &t, &rh), "a bad temperature CRC is refused");
+    CHECK(t == 7 && rh == 7, "outputs untouched on a bad CRC");
+    memcpy(bad, room, sizeof(bad));
+    bad[5] ^= 0x80;
+    CHECK(!fos_climate_decode(bad, &t, &rh), "a bad humidity CRC is refused");
+    /* Either output may be left out. */
+    CHECK(fos_climate_decode(room, NULL, &rh) && rh == 5000, "temperature not wanted");
+    CHECK(fos_climate_decode(room, &t, NULL) && t == 2500, "humidity not wanted");
+}
+
 int main(void)
 {
     test_charger_decode();
     test_rtc_decode_and_encode();
     test_gauge_decode();
+    test_climate_decode();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

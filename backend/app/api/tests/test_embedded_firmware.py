@@ -14,6 +14,7 @@ from app.tasks.embedded_firmware import (
     EMBEDDED_SUPPORTED_PANELS,
     FOS_PIXEL_2BPP_GRAY,
     FOS_PIXEL_4BPP_7COLOR,
+    FOS_PIXEL_4BPP_GRAY,
     FOS_PIXEL_4BPP_SPECTRA6,
     FOS_PIXEL_DUAL_1BPP_RED,
     embedded_buffer_size,
@@ -311,8 +312,11 @@ def test_embedded_panel_matrix_includes_new_panels():
                   "EPD_5in65f", "EPD_7in3g", "EPD_10in2b"):
         assert panel in EMBEDDED_SUPPORTED_PANELS
         assert embedded_panel_for_frame(Frame(device=f"waveshare.{panel}")) == panel
+    # The IT8951's 10.3" has a driver of its own (components/frameos_display/
+    # it8951.c), sixteen greys.
+    assert embedded_panel_for_frame(Frame(device="waveshare.EPD_10in3")) == "EPD_10in3"
+    assert embedded_pixel_format_for_panel("EPD_10in3") == FOS_PIXEL_4BPP_GRAY
     # Unsupported non-generic buses fall back to headless rather than a bad build.
-    assert embedded_panel_for_frame(Frame(device="waveshare.EPD_10in3")) == "none"
     assert embedded_panel_for_frame(Frame(device="waveshare.EPD_12in48")) == "none"
 
 
@@ -840,6 +844,73 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1004():
     ensure_embedded_frame_defaults(frame)
     assert _provisioned(embedded_provisioning_plan(frame))["buzzer_tone_hz"] == "2700"
     assert embedded_flash_size_for_frame(frame) == "32MB"
+
+
+def test_embedded_hardware_preset_for_seeed_reterminal_e1003():
+    frame = Frame(id=9, embedded={"hardwarePreset": "seeed_reterminal_e1003"})
+
+    ensure_embedded_frame_defaults(frame)
+
+    # The 10.3" sixteen-grey ED103TC2 behind an IT8951: the Waveshare HAT's
+    # panel key, driven by components/frameos_display/it8951.c.
+    assert frame.device == "waveshare.EPD_10in3"
+    assert embedded_panel_for_frame(frame) == "EPD_10in3"
+    assert embedded_pixel_format_for_panel("EPD_10in3") == FOS_PIXEL_4BPP_GRAY
+    assert embedded_platform_for_frame(frame) == "esp32-s3"
+    assert embedded_flash_size_for_frame(frame) == "32MB"
+    # 8MB PSRAM: the 16-bit canvas and the packed buffer fit beside the
+    # render reserve, so it renders on-device.
+    assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
+    assert embedded_render_mode_for_frame(frame) != EMBEDDED_RENDER_REMOTE
+    check_embedded_panel_fits_memory(frame)
+    # The IT8951 has no D/C: `dc` carries its MISO (the TF socket's GPIO8),
+    # `pwr` the panel's power switch and `cs2` the controller's.
+    assert embedded_pins_for_frame(frame) == {
+        "rst": 12, "dc": 8, "cs": 10, "cs2": 21,
+        "busy": 13, "sck": 7, "mosi": 9, "pwr": 11,
+    }
+    # The E1001/E1002 key order (Zephyr's board file), and REFRESH held talks:
+    # the E1003 has their microphone.
+    assert frame.gpio_buttons == [
+        {"pin": 3, "label": "REFRESH"},
+        {"pin": 4, "label": "LEFT"},
+        {"pin": 5, "label": "RIGHT"},
+    ]
+    assert frame.event_map[2:] == [
+        {"event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+    ]
+    assert frame.device_config["micClkPin"] == 42
+    # The 2:1 divider on GPIO1, switched by GPIO40 (GPIO21 is the IT8951's
+    # power here), and the battery power policy of a 3000 mAh frame.
+    assert frame.device_config["batteryPin"] == 1
+    assert frame.device_config["batteryDivider"] == 2.0
+    assert frame.device_config["batteryEnablePin"] == 40
+    assert frame.device_config["deepSleepOnBattery"] is True
+    assert frame.device_config["wakeCheckSeconds"] == 900
+    assert frame.device_config["buzzerPin"] == 45
+    # The TF socket on the panel bus with its switch on GPIO39, the LED on
+    # GPIO16 lit low, the touch panel on the clock's bus.
+    assert embedded_sd_card_assets_for_frame(frame) == {
+        "enabled": True,
+        "preset": "seeed_reterminal_e1003",
+        "mountPath": "/srv/assets",
+        "pins": {"cs": 14, "sck": 7, "miso": 8, "mosi": 9, "pwr": 39, "det": 15},
+        "maxFrequencyKHz": 20000,
+    }
+    assert frame.device_config["ledPin"] == 16
+    assert frame.device_config["ledType"] == "gpio_inverted"
+    preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["seeed_reterminal_e1003"]
+    assert preset["touchPins"] == "sda=19,scl=20,int=2,rst=48"
+    assert preset["i2cBuses"] == "sda=19,scl=20"
+    settings = _provisioned(embedded_provisioning_plan(frame))
+    assert settings["hardware"] == "seeed_reterminal_e1003"
+    assert settings["panel"] == "EPD_10in3"
+    assert settings["pins"] == "rst=12,dc=8,cs=10,cs2=21,busy=13,sck=7,mosi=9,pwr=11"
+    assert settings["render_mode"] == "local"
+    assert settings["assets_sd_pins"] == "cs=14,sck=7,miso=8,mosi=9,pwr=39,det=15"
+    assert settings["battery_enable_pin"] == "40"
+    assert settings["led_pin"] == "16"
+    assert settings["led_type"] == "gpio_inverted"
 
 
 def test_embedded_hardware_preset_only_seeds_user_editable_power_settings():
