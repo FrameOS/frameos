@@ -60,9 +60,9 @@ measured.
 ## What it costs
 
 Flash on the generic ESP32-S3 image, measured against the build before it
-(2026-10-25): **+36.6 KB**, 322 KB left in the 3520 KB OTA slot. The layout
-and its SVG output are 19.2 KB (`ui/layout.nim`), the class reader with the
-palette 10.2 KB (`ui/tailwind.nim`), pixie's node input and `<image>` 2.9 KB,
+(2026-10-26): **+37.3 KB**, 321 KB left in the 3520 KB OTA slot. The layout
+and its SVG output are 19.9 KB (`ui/layout.nim`), the class reader with the
+palette 10.1 KB (`ui/tailwind.nim`), pixie's node input and `<image>` 2.9 KB,
 the JSX reader and its glue 3.6 KB. Both modules read classes and indexes in
 place, without copies and with Nim's run-time checks off, because the
 straightforward versions were twice the size; what would shrink it further

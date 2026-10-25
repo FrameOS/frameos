@@ -40,7 +40,7 @@ Spectra 6.
 
 - **No LVGL** (measured 2026-08-31: +112 KB flash trimmed to the bone, a
   second rasterizer and visual language). The whole JSX UI layer cost
-  +36.6 KB (2026-10-25).
+  +37.3 KB (2026-10-26).
 - **Tailwind classes, not style objects** (Marius, 2026-10-25: "tailwind
   inspired ... className='flex ... p-2' ... this seems the tightest"). One way
   to style; a class the reader does not know is ignored, as in a browser.

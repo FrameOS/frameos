@@ -285,7 +285,7 @@
   never paint a UI some other way, or it loses the damage repaint and the
   background waiver (`utils/svg_frames.nim`). pixie's SVG input is the
   `SvgNode` tree, markup included (`parseSvgNodes`).
-- Flash is the budget: the layer cost +36.6 KB on the ESP32-S3 image. A new
+- Flash is the budget: the layer cost +37.3 KB on the ESP32-S3 image. A new
   class or element goes in `tailwind.nim` / `layout.nim`, `docs/jsx-ui.md`
   and the scene guide's JSX section, and the PR says what it cost (the
   firmware-size comment). Keep the reader allocation-free (classes read in
