@@ -418,7 +418,7 @@ describe("browser event shaping", () => {
       status: "active",
       // The owner's voice chat switches (docs/voice-chat.md "What the voice
       // chat may do"), the defaults for a row that never set them.
-      voice_permissions: { change_settings: true, create_scenes: false, use_scenes: true },
+      voice_permissions: { change_settings: true, create_scenes: false, use_albums: true, use_scenes: true },
     });
   });
 

@@ -1188,7 +1188,7 @@ GET  {provider}/api/frames/{id}/service-settings          # DEVICE-authed, not s
 POST {provider}/api/frames/{id}/service-settings/enabled  # {"enabled": bool} → grants/revokes settings:services, nudges on enable
 POST {provider}/api/frames/{id}/voice/{session}?seq=N&done=0|1  # DEVICE-authed: raw 16 kHz PCM chunks of what was said while the voice key was held; the done chunk answers with the transcript, the AI chat's reply and the tools it ran (docs/voice-chat.md)
 POST {provider}/api/frames/{id}/telemetry/enabled         # {"enabled": bool} → grants/revokes telemetry:logs + telemetry:metrics, restart_runtime on change
-POST {provider}/api/frames/{id}/voice/permissions         # any of {"change_settings", "use_scenes", "create_scenes": bool} → what the voice chat may do on this frame (docs/voice-chat.md "What the voice chat may do"); plane-side, nothing queued; read back as voice_permissions on GET /api/frames/{id}
+POST {provider}/api/frames/{id}/voice/permissions         # any of {"change_settings", "use_scenes", "create_scenes", "use_albums": bool} → what the voice chat may do on this frame (docs/voice-chat.md "What the voice chat may do"); plane-side, nothing queued; read back as voice_permissions on GET /api/frames/{id}
 WS   {provider}/api/frames/{id}/updates        # browser socket: update_frame / new_log / new_metrics / frame_activity events
 WS   {provider}/api/frames/updates             # browser socket, all the account's frames (fleet view)
 ```

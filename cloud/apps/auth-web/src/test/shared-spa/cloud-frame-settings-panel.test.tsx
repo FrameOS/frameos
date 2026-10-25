@@ -409,12 +409,18 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
       microphone: true,
       voiceChat: true,
     });
-    renderPanel({ ...frame, voice_permissions: { change_settings: true, create_scenes: false, use_scenes: false } });
+    renderPanel({
+      ...frame,
+      voice_permissions: { change_settings: true, create_scenes: false, use_albums: true, use_scenes: false },
+    });
     expect(screen.getAllByText("Voice chat").length).toBeGreaterThan(0);
     expect(screen.getByText("Voice chat may")).toBeTruthy();
     expect(renderedFieldNames()).toEqual(
-      expect.arrayContaining(["voice_change_settings", "voice_use_scenes", "voice_create_scenes"]),
+      expect.arrayContaining(["voice_change_settings", "voice_use_scenes", "voice_create_scenes", "voice_use_albums"]),
     );
+    expect(
+      screen.getAllByText("On: a spoken request can list your photo albums and play one on the frame").length,
+    ).toBeGreaterThan(0);
     expect(screen.getAllByText("On: a spoken request can rotate the frame").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Off: the installed scenes are left alone").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Off: only the scenes already on the frame").length).toBeGreaterThan(0);
@@ -424,6 +430,7 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     expect(frameLogic({ frameId: frame.id }).values.frameForm.voice_permissions).toEqual({
       change_settings: true,
       create_scenes: true,
+      use_albums: true,
       use_scenes: false,
     });
   });

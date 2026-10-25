@@ -142,7 +142,7 @@ microphone path (yet).
   42/41/38, a USB provisioning writes them as one `mic_pins` line), the cloud
   pushes them with `set_settings` and shows what the frame reports
   (`hardware.micClkPin` …). Settings → "Buzzer and microphone" has the three
-  fields next to the voice chat switch and, under it, the three switches for
+  fields next to the voice chat switch and, under it, the four switches for
   what the voice chat may do ("What the voice chat may do" below) — those are
   the control plane's, never a device setting.
 
@@ -220,7 +220,7 @@ transcription's audio tokens as a second record on its own model).
 
 ## What the voice chat may do
 
-Three switches per frame, the owner's, under the voice chat switch in
+Four switches per frame, the owner's, under the voice chat switch in
 Settings → "Buzzer and microphone" ("Voice chat may"):
 
 | switch | default | tools |
@@ -228,6 +228,7 @@ Settings → "Buzzer and microphone" ("Voice chat may"):
 | **Change settings** (`change_settings`) | on | `rotate_frame` |
 | **Use installed scenes** (`use_scenes`) | on | `activate_scene`, `set_scene_state`, `render_now` |
 | **Create new scenes** (`create_scenes`) | **off** (opted into) | `show_image`: a picture asked for by voice is a scene the frame did not hold, so it is a new scene, not a use of an installed one. A scene built to order ("What is not here yet") sits behind the same switch |
+| **Access photo albums** (`use_albums`) | on | `list_albums` (the library's root folders, by path, with their photo counts, as `photos_list` shows them) and `show_album {path, seconds?, order?}` (what the MCP's `photo_album_install` does for this frame, `docs/photos.md` "Installing photo scenes": the frame's own share link to the folder, made now if it has none; the album scene saved next to the frame's scenes — on the cloud as a private scene of the account through the same save the workspace uses, moderation included, published by the frame's linked client; the push with it active — the backend's a fast deploy plus `set_current_scene`, the cloud's one `set_scenes`). The voice request stands for the `confirm` the MCP tool takes. One switch for both, since the listing is what names the folder |
 
 `list_scenes` answers to none of them: it reads, and it is what the model
 names when it has to decline.
@@ -242,11 +243,12 @@ tells the model that a tool it was not given is one the owner switched off,
 to be said in a sentence when asked for. Applied from the next spoken
 sentence on; nothing is queued to the device.
 
-Where they live: the backend keeps the three in `device_config` as
-`voiceChangeSettings` / `voiceUseScenes` / `voiceCreateScenes` (the
-snake_case twins are read too; saved with the frame like the other ESP32
-knobs; the device's settings poll never carries them), the cloud in
-`frames.voice_permissions` (`{change_settings, use_scenes, create_scenes}`,
+Where they live: the backend keeps the four in `device_config` as
+`voiceChangeSettings` / `voiceUseScenes` / `voiceCreateScenes` /
+`voiceUseAlbums` (the snake_case twins are read too; saved with the frame
+like the other ESP32 knobs; the device's settings poll never carries them),
+the cloud in `frames.voice_permissions` (`{change_settings, use_scenes,
+create_scenes, use_albums}`,
 written by `POST /api/frames/{id}/voice/permissions` with any subset of the
 keys, read back on `GET /api/frames/{id}` as `voice_permissions` with the
 defaults filled in; the SPA saves it with the form through its own route,
@@ -256,7 +258,7 @@ like the schedule). The table of which tool answers to which switch is
 pinned to each other by both planes' parity tests; the SPA's reader for both
 spellings is `frontend/src/utils/voiceChat.ts`.
 
-**No microphone, no controls.** The voice chat switch and the three switches
+**No microphone, no controls.** The voice chat switch and the four switches
 are drawn only on a frame with a microphone: a cloud frame that reports
 `hardware.microphone` (2026.10.20 firmware) or whose pins field names one, a
 backend frame whose `device_config` pins name one (either spelling) or, pins

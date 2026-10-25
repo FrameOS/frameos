@@ -2,6 +2,7 @@ import { frames } from "@frameos-cloud/db";
 import { eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { createAccountScene } from "../../../../../../src/lib/account-scene-create";
 import { storedAccountSettings } from "../../../../../../src/lib/account-settings";
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { resolveAiAccess } from "../../../../../../src/lib/ai/api-key";
@@ -31,6 +32,7 @@ import {
   voiceContextBlock,
   voiceSessions,
   voiceTools,
+  type VoiceAlbums,
   type VoicePreview,
   type VoiceQueue,
   type VoiceScene,
@@ -38,9 +40,11 @@ import {
 } from "../../../../../../src/lib/ai/voice";
 import { meterAiUsageInBackground } from "../../../../../../src/lib/billing";
 import { jsonError, requireDatabase } from "../../../../../../src/lib/device-flow";
+import { getPublicOrigin } from "../../../../../../src/lib/env";
 import { authenticateFrameDevice } from "../../../../../../src/lib/frame-device-auth";
 import { cloudEventRouting, reportedActiveSceneId, sceneStateEventCommand } from "../../../../../../src/lib/frame-events";
 import {
+  assignScenesToFrame,
   currentSceneAssignments,
   frameHoldsAssignedScenes,
   redeployAssignedScenesToFrame,
@@ -59,6 +63,15 @@ import {
   validateFrameSettings,
 } from "../../../../../../src/lib/frames";
 import { logInfo, logWarn, reportError } from "../../../../../../src/lib/log";
+import { buildPhotoAlbumScene, defaultPhotoAlbumSeconds, photoAlbumShapes } from "../../../../../../src/lib/photos/album-scene";
+import {
+  assertPhotosAvailable,
+  createPhotoShare,
+  listPhotoFolder,
+  PhotoError,
+  photoShareUrl,
+} from "../../../../../../src/lib/photos/library";
+import { photoBasename } from "../../../../../../src/lib/photos/paths";
 import { identityRateLimitResponse, rateLimitResponse } from "../../../../../../src/lib/rate-limit";
 import { scenesForRuntime } from "../../../../../../src/lib/retired-apps";
 import { deviceSceneIdForFrame, resolveStoreSceneForFrameScene } from "../../../../../../src/lib/scene-images";
@@ -398,9 +411,84 @@ export async function POST(
     return { command_id: command?.id, ok: true, type: "set_settings" };
   };
 
+  // The photo library (docs/photos.md), for the album tools: the albums at
+  // the root, and an install that does what the MCP's photo_album_install
+  // does for this frame — the frame's own share link to the folder (made now
+  // if it has none), the album scene saved as a private scene of the account
+  // (the same path as the workspace's save, moderation included) and
+  // assigned next to the frame's scenes, pushed with it active. The frame's
+  // linked client is the publishing actor: a frame's token is not the owner's.
+  const photoError = (error: unknown) =>
+    error instanceof PhotoError
+      ? { detail: error.message, error: error.code, ok: false as const }
+      : { detail: error instanceof Error ? error.message : String(error), error: "photos_unavailable", ok: false as const };
+  const albums: VoiceAlbums = {
+    async install(path, options) {
+      let share;
+      try {
+        await assertPhotosAvailable(db, accountId);
+        share = (await createPhotoShare(db, accountId, path, frame.id)).share;
+      } catch (error) {
+        return { ...photoError(error), error: "album_unavailable" };
+      }
+      const scene = buildPhotoAlbumScene({
+        albumUrl: photoShareUrl(getPublicOrigin(request), share.token),
+        fit: "cover",
+        name: photoBasename(share.path),
+        order: options.order ?? "random",
+        seconds: options.seconds ?? defaultPhotoAlbumSeconds,
+        shapes: photoAlbumShapes.map((shape) => shape.value),
+      });
+      const created = await createAccountScene(db, {
+        accountId,
+        actor: { linkedClientId: frame.linkedClientId },
+        name: typeof scene.name === "string" ? scene.name : photoBasename(share.path),
+        scenes: [scene],
+      });
+      const body = (await created.json().catch(() => ({}))) as { error?: string; scene?: { id?: string } };
+      if (!created.ok || typeof body.scene?.id !== "string") {
+        return { error: body.error ?? `save_failed_${created.status}`, ok: false };
+      }
+      const existing = await currentSceneAssignments(db, frame.id);
+      const outcome = await assignScenesToFrame(db, {
+        accountId,
+        activeSceneId: typeof scene.id === "string" ? scene.id : undefined,
+        actor: { accountId, frameId: frame.id, kind: "voice_chat" },
+        frame,
+        requested: [...existing, { latest: true, sceneId: body.scene.id, sceneVersion: null }],
+        via: "voice_chat",
+      });
+      if (!outcome.ok) {
+        return { error: outcome.failure.code, ok: false };
+      }
+      return {
+        album: share.path,
+        command_id: outcome.result.commandId,
+        ok: true,
+        scene: typeof scene.name === "string" ? scene.name : undefined,
+        scene_id: body.scene.id,
+        type: "set_scenes",
+      };
+    },
+    async list() {
+      try {
+        await assertPhotosAvailable(db, accountId);
+        const entries = await listPhotoFolder(db, accountId, "");
+        return {
+          albums: entries
+            .filter((entry) => entry.kind === "folder")
+            .map((entry) => ({ name: entry.name, path: entry.path, photos: entry.items ?? 0 })),
+        };
+      } catch (error) {
+        return photoError(error);
+      }
+    },
+  };
+
   const permissions = readVoicePermissions(frame.voicePermissions);
   const tools = voiceTools({
     activeSceneId: showing?.id,
+    albums,
     imageSources,
     permissions,
     previewScenes,

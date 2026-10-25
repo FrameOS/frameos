@@ -78,15 +78,20 @@ describe("POST /api/frames/[frameId]/voice/permissions", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       status: "updated",
-      voice_permissions: { change_settings: true, create_scenes: true, use_scenes: true },
+      voice_permissions: { change_settings: true, create_scenes: true, use_albums: true, use_scenes: true },
     });
     expect(updates).toHaveLength(1);
-    expect(updates[0]?.voicePermissions).toEqual({ change_settings: true, create_scenes: true, use_scenes: true });
+    expect(updates[0]?.voicePermissions).toEqual({
+      change_settings: true,
+      create_scenes: true,
+      use_albums: true,
+      use_scenes: true,
+    });
     expect(auditMock.mock.calls[0]?.[1]).toMatchObject({
       eventType: "frame.voice_permissions_changed",
       metadata: {
-        from: { change_settings: true, create_scenes: false, use_scenes: true },
-        to: { change_settings: true, create_scenes: true, use_scenes: true },
+        from: { change_settings: true, create_scenes: false, use_albums: true, use_scenes: true },
+        to: { change_settings: true, create_scenes: true, use_albums: true, use_scenes: true },
       },
       target: { frameId },
     });
@@ -97,7 +102,7 @@ describe("POST /api/frames/[frameId]/voice/permissions", () => {
     const same = await post({ use_scenes: false });
     await expect(same.json()).resolves.toEqual({
       status: "unchanged",
-      voice_permissions: { change_settings: true, create_scenes: true, use_scenes: false },
+      voice_permissions: { change_settings: true, create_scenes: true, use_albums: true, use_scenes: false },
     });
     expect(updates).toEqual([]);
     expect(auditMock).not.toHaveBeenCalled();
@@ -105,7 +110,7 @@ describe("POST /api/frames/[frameId]/voice/permissions", () => {
     const flipped = await post({ change_settings: false });
     await expect(flipped.json()).resolves.toMatchObject({
       status: "updated",
-      voice_permissions: { change_settings: false, create_scenes: true, use_scenes: false },
+      voice_permissions: { change_settings: false, create_scenes: true, use_albums: true, use_scenes: false },
     });
     expect(updates).toHaveLength(1);
   });

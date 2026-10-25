@@ -13,10 +13,11 @@ Three parts, each small:
 - the turn: the chat's own agent loop (app/utils/ai_chat_agent.py) with the
   voice system prompt, the frame's context block, and VoiceTools — the six
   tools a frame's own token may drive (list scenes, activate one, set the
-  showing scene's state, redraw, show a picture, rotate), narrowed by the
-  owner's three permission switches (VoicePermissions: change settings, use
-  the installed scenes, put new scenes on the frame). Not the MCP server's
-  tools: a frame's credential is not the owner's.
+  showing scene's state, redraw, show a picture, rotate) plus the two album
+  tools (list the photo albums, show one), narrowed by the owner's four
+  permission switches (VoicePermissions: change settings, use the installed
+  scenes, put new scenes on the frame, play the photo albums). Not the MCP
+  server's tools: a frame's credential is not the owner's.
 
 The cloud's copy is cloud/apps/auth-web/src/lib/ai/voice.ts: the prompt, the
 tool definitions and the permission table are kept the same there."""
@@ -88,35 +89,42 @@ def voice_chat_id(frame_id: int) -> str:
 # ---------------------------------------------------------- permissions
 
 # What the voice chat may do on this frame (docs/voice-chat.md "What the
-# voice chat may do"): the owner's three switches. Plane-side policy, never a
+# voice chat may do"): the owner's four switches. Plane-side policy, never a
 # firmware setting: the planes decide which tools the turn is offered. The
 # backend keeps them in device_config as `voiceChangeSettings` /
-# `voiceUseScenes` / `voiceCreateScenes` (the device's settings poll does not
-# carry them), the cloud in frames.voice_permissions. The cloud's copy is
-# voice.ts (voiceToolPermissions, defaultVoicePermissions): keep both alike.
-VOICE_PERMISSION_KEYS = ("change_settings", "use_scenes", "create_scenes")
-DEFAULT_VOICE_PERMISSIONS = {"change_settings": True, "use_scenes": True, "create_scenes": False}
+# `voiceUseScenes` / `voiceCreateScenes` / `voiceUseAlbums` (the device's
+# settings poll does not carry them), the cloud in frames.voice_permissions.
+# The cloud's copy is voice-permissions.ts (voiceToolPermissions,
+# defaultVoicePermissions): keep both alike.
+VOICE_PERMISSION_KEYS = ("change_settings", "use_scenes", "create_scenes", "use_albums")
+DEFAULT_VOICE_PERMISSIONS = {"change_settings": True, "use_scenes": True, "create_scenes": False, "use_albums": True}
 VOICE_PERMISSION_DEVICE_CONFIG_KEYS = {
     "change_settings": ("voiceChangeSettings", "voice_change_settings"),
     "use_scenes": ("voiceUseScenes", "voice_use_scenes"),
     "create_scenes": ("voiceCreateScenes", "voice_create_scenes"),
+    "use_albums": ("voiceUseAlbums", "voice_use_albums"),
 }
 # Which switch each tool answers to. A tool not listed (list_scenes) is
 # always offered: it reads, and it is what the model names when it must
 # decline. show_image puts a scene the frame did not hold on the frame, so it
-# is a new scene, not a use of an installed one.
+# is a new scene, not a use of an installed one. The album tools are the
+# photo library's (docs/photos.md): listing it and playing a folder on the
+# frame are one switch, since the listing is what names the folder.
 VOICE_TOOL_PERMISSIONS = {
     "activate_scene": "use_scenes",
     "set_scene_state": "use_scenes",
     "render_now": "use_scenes",
     "show_image": "create_scenes",
     "rotate_frame": "change_settings",
+    "list_albums": "use_albums",
+    "show_album": "use_albums",
 }
 # How the context names each switch to the model, on and off.
 VOICE_PERMISSION_DESCRIPTIONS = {
     "change_settings": "change the frame's settings (rotate_frame)",
     "use_scenes": "use the installed scenes: switch between them, set their fields, redraw (activate_scene, set_scene_state, render_now)",
     "create_scenes": "put new scenes on the frame (show_image)",
+    "use_albums": "play the photo albums: list them, show one on the frame (list_albums, show_album)",
 }
 
 
@@ -125,6 +133,7 @@ class VoicePermissions:
     change_settings: bool = True
     use_scenes: bool = True
     create_scenes: bool = False
+    use_albums: bool = True
 
     def allows(self, tool: str) -> bool:
         """Whether the turn may be offered (and may run) this tool."""
@@ -335,12 +344,14 @@ Tools: list_scenes (what the frame holds and which scene shows), activate_scene 
 set_scene_state (set the showing scene's public fields, such as a message board's text), render_now (redraw the
 frame), show_image (put a picture on the frame: a photo found for a search, or an image generated from a
 description; the frame's context says which sources it has), rotate_frame (turn the display to 0, 90, 180 or 270
-degrees; "another 90" is the rotation in the context plus 90). The owner chooses which of these the voice chat may
-use: the context's "Voice chat may" and "may not" lines say which, and a tool you were not given is one the owner
-switched off, so when asked for it say so in a sentence (it is a switch in the frame's settings) and do nothing else.
-"Next" and "previous" mean the scene after or before the one showing, in list order, wrapping around. "Show me X"
-with no scene of that name is show_image. These are the only things you can do; anything else (editing scenes,
-timing, other frames, the account) is for the workspace, and you say so in a sentence.
+degrees; "another 90" is the rotation in the context plus 90), list_albums (the photo albums in the owner's library,
+by path), show_album (play an album on the frame: it makes a scene for the album, installs it next to the frame's
+scenes and shows it). The owner chooses which of these the voice chat may use: the context's "Voice chat may" and
+"may not" lines say which, and a tool you were not given is one the owner switched off, so when asked for it say so
+in a sentence (it is a switch in the frame's settings) and do nothing else. "Next" and "previous" mean the scene after
+or before the one showing, in list order, wrapping around. "Show me X" with no scene of that name is show_album when
+an album is called that (list_albums tells), else show_image. These are the only things you can do; anything else
+(editing scenes, timing, other frames, the account) is for the workspace, and you say so in a sentence.
 """.strip()
 
 
@@ -433,6 +444,35 @@ VOICE_TOOL_DEFINITIONS: list[JsonObject] = [
             "additionalProperties": False,
         },
     },
+    {
+        "type": "function",
+        "name": "list_albums",
+        "description": "The photo albums in the owner's library (docs/photos.md), by path, with how many photos each holds.",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "type": "function",
+        "name": "show_album",
+        "description": (
+            "Play a photo album on the frame: makes a scene that shows one photo of the album at a time, installs "
+            "it next to the frame's scenes and shows it now (the same as Install photo scenes in the workspace). "
+            "The album is a path from list_albums."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "The album's path, from list_albums."},
+                "seconds": {"type": "number", "minimum": 1, "description": "How long each photo stays. Default 3600."},
+                "order": {
+                    "type": "string",
+                    "enum": ["random", "sequential", "newest", "oldest"],
+                    "description": "random (default) shows every photo once before any repeats.",
+                },
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+    },
 ]
 
 VOICE_TOOL_LABELS = {
@@ -442,7 +482,11 @@ VOICE_TOOL_LABELS = {
     "render_now": "Render now",
     "show_image": "Show image",
     "rotate_frame": "Rotate frame",
+    "list_albums": "List albums",
+    "show_album": "Show album",
 }
+MAX_ALBUM_PATH_CHARS = 1024
+ALBUM_ORDERS = ("random", "sequential", "newest", "oldest")
 
 MAX_STATE_BYTES = 16 * 1024
 MAX_IMAGE_QUERY_CHARS = 400
@@ -461,6 +505,12 @@ QueueCommand = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 # own, for the same reason.
 PreviewScenes = Callable[[list[JsonObject], str], Awaitable[dict[str, Any]]]
 UpdateSettings = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+# The photo library (docs/photos.md), the route's own too: the albums at the
+# root as {path, name, items}, and the install of one on this frame (the
+# work of the MCP's photo_album_install: the frame's share link, the album
+# scene saved next to the frame's scenes, the switch).
+ListAlbums = Callable[[], Awaitable[dict[str, Any]]]
+InstallAlbum = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
 
 # ------------------------------------------------------------ image scene
@@ -550,6 +600,8 @@ class VoiceTools(ToolBox):
         update_settings: UpdateSettings | None = None,
         image_sources: list[str] | None = None,
         permissions: VoicePermissions | None = None,
+        list_albums: ListAlbums | None = None,
+        install_album: InstallAlbum | None = None,
     ) -> None:
         self._frame = frame
         self._active_scene_id = active_scene_id
@@ -557,6 +609,8 @@ class VoiceTools(ToolBox):
         self._preview = preview_scenes
         self._update_settings = update_settings
         self._image_sources = list(image_sources or [])
+        self._list_albums = list_albums
+        self._install_album = install_album
         self.permissions = permissions or VoicePermissions()
         self.changed: list[str] = []
 
@@ -636,6 +690,34 @@ class VoiceTools(ToolBox):
             self.changed.append(name)
             return ToolOutput(json.dumps({"ok": True, "settings": settings,
                                           **({"restart": True} if "rotate" in settings else {}), **outcome}))
+        if name == "list_albums":
+            if self._list_albums is None:
+                return ToolOutput(json.dumps({"ok": False, "error": "photos_unavailable"}))
+            listing = await self._list_albums()
+            if not listing.get("ok", True):
+                return ToolOutput(json.dumps(listing))
+            return ToolOutput(untrusted_result("photo_albums", json.dumps(listing)))
+        if name == "show_album":
+            path = str(args.get("path") or "").strip().strip("/")[:MAX_ALBUM_PATH_CHARS]
+            if not path:
+                return ToolOutput(json.dumps({"ok": False, "error": "path must name an album from list_albums"}))
+            options: dict[str, Any] = {}
+            seconds = args.get("seconds")
+            if seconds is not None:
+                if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not seconds >= 1:
+                    return ToolOutput(json.dumps({"ok": False, "error": "seconds must be a number of at least 1"}))
+                options["seconds"] = seconds
+            order = args.get("order")
+            if order is not None:
+                if order not in ALBUM_ORDERS:
+                    return ToolOutput(json.dumps({"ok": False, "error": f"order must be one of {', '.join(ALBUM_ORDERS)}"}))
+                options["order"] = order
+            if self._install_album is None:
+                return ToolOutput(json.dumps({"ok": False, "error": "photos_unavailable"}))
+            outcome = await self._install_album(path, options)
+            if outcome.get("ok", True):
+                self.changed.append(name)
+            return ToolOutput(json.dumps({"ok": outcome.get("status") != "failed", **outcome}))
         return ToolOutput(json.dumps({"ok": False, "error": f"unknown tool {name}"}))
 
 

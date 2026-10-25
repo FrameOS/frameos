@@ -56,15 +56,25 @@ describe("which frames have a microphone", () => {
 });
 
 describe("the three switches", () => {
-  it("default to settings and installed scenes on, new scenes off, on both planes", () => {
-    expect(DEFAULT_VOICE_PERMISSIONS).toEqual({ change_settings: true, use_scenes: true, create_scenes: false });
+  it("default to settings, installed scenes and albums on, new scenes off, on both planes", () => {
+    expect(DEFAULT_VOICE_PERMISSIONS).toEqual({
+      change_settings: true,
+      use_scenes: true,
+      create_scenes: false,
+      use_albums: true,
+    });
     expect(defaultVoicePermissions).toEqual(DEFAULT_VOICE_PERMISSIONS);
     expect([...VOICE_PERMISSION_KEYS]).toEqual([...voicePermissionKeys]);
   });
 
   it("read the cloud's object with the defaults for what is missing", () => {
     expect(voicePermissionsOf(undefined)).toEqual(DEFAULT_VOICE_PERMISSIONS);
-    expect(voicePermissionsOf({ create_scenes: true })).toEqual({ change_settings: true, use_scenes: true, create_scenes: true });
+    expect(voicePermissionsOf({ create_scenes: true })).toEqual({
+      change_settings: true,
+      use_scenes: true,
+      create_scenes: true,
+      use_albums: true,
+    });
     expect(voicePermissionsOf({ use_scenes: "no" })).toEqual(DEFAULT_VOICE_PERMISSIONS);
     expect(readVoicePermissions({ create_scenes: true })).toEqual(voicePermissionsOf({ create_scenes: true }));
   });
@@ -75,7 +85,9 @@ describe("the three switches", () => {
       change_settings: true,
       use_scenes: false,
       create_scenes: true,
+      use_albums: true,
     });
+    expect(voicePermissionsFromDeviceConfig({ voice_use_albums: false }).use_albums).toBe(false);
     expect(voicePermissionsFromDeviceConfig({ voiceUseScenes: true, voice_use_scenes: false }).use_scenes).toBe(true);
   });
 
@@ -83,5 +95,6 @@ describe("the three switches", () => {
     const next = deviceConfigWithVoicePermission({ voice_create_scenes: false, buzzerPin: 45 }, "create_scenes", true);
     expect(next).toEqual({ buzzerPin: 45, voiceCreateScenes: true });
     expect(deviceConfigWithVoicePermission(undefined, "use_scenes", false)).toEqual({ voiceUseScenes: false });
+    expect(deviceConfigWithVoicePermission(undefined, "use_albums", false)).toEqual({ voiceUseAlbums: false });
   });
 });

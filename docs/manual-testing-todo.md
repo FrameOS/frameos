@@ -42,9 +42,12 @@ confirm. Still open:
   (`voice:reply` names no tool, `commands:sync received 0`); with **Create
   new scenes** left off (the default) "show me a banana" is declined the same
   way, and turned on it previews the picture; with **Change settings** off
-  "rotate the frame" leaves it unturned. Once on the backend and once on a
-  cloud-managed frame; the switches save with the frame's Settings and apply
-  to the next sentence without a push.
+  "rotate the frame" leaves it unturned; with **Access photo albums** off
+  "show the summer photos" is declined, and on (the default) it installs the
+  album scene next to the frame's scenes and shows it (`docs/photos.md`: the
+  frame's own share link, one photo a render). Once on the backend and once
+  on a cloud-managed frame; the switches save with the frame's Settings and
+  apply to the next sentence without a push.
 - [ ] **No microphone, no controls**: on the E1004 (no microphone reported)
   the Settings panel shows the Microphone GPIO pins and neither the Voice
   chat switch nor "Voice chat may"; setting clock 42 and data 41 makes them

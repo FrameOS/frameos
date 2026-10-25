@@ -4,28 +4,29 @@
 // The three permission switches are plane-side policy, never a firmware
 // setting: the cloud keeps them in the frame's `voice_permissions`
 // (POST /api/frames/{id}/voice/permissions), the backend in the frame's
-// device_config as voiceChangeSettings / voiceUseScenes / voiceCreateScenes
-// (the device's settings poll never carries them). The planes read them when
+// device_config as voiceChangeSettings / voiceUseScenes / voiceCreateScenes /
+// voiceUseAlbums (the device's settings poll never carries them). The planes read them when
 // they build a voice turn's tools; this module is the SPA's reader and
 // writer for both spellings. Keep the keys and defaults alike with
 // cloud/apps/auth-web/src/lib/voice-permissions.ts and
 // backend/app/utils/voice_chat.py.
 import type { FrameEmbeddedHardwarePreset, FrameType } from '../types'
 
-export const VOICE_PERMISSION_KEYS = ['change_settings', 'use_scenes', 'create_scenes'] as const
+export const VOICE_PERMISSION_KEYS = ['change_settings', 'use_scenes', 'create_scenes', 'use_albums'] as const
 export type VoicePermissionKey = (typeof VOICE_PERMISSION_KEYS)[number]
 export type VoicePermissions = Record<VoicePermissionKey, boolean>
 
-/** Settings and the installed scenes are allowed; new scenes on the frame are opted into. */
+/** Settings, the installed scenes and the photo albums are allowed; new scenes on the frame are opted into. */
 export const DEFAULT_VOICE_PERMISSIONS: VoicePermissions = {
   change_settings: true,
   use_scenes: true,
   create_scenes: false,
+  use_albums: true,
 }
 
 type VoicePermissionDeviceConfigKeys = {
-  camel: 'voiceChangeSettings' | 'voiceUseScenes' | 'voiceCreateScenes'
-  snake: 'voice_change_settings' | 'voice_use_scenes' | 'voice_create_scenes'
+  camel: 'voiceChangeSettings' | 'voiceUseScenes' | 'voiceCreateScenes' | 'voiceUseAlbums'
+  snake: 'voice_change_settings' | 'voice_use_scenes' | 'voice_create_scenes' | 'voice_use_albums'
 }
 
 /** The backend's spelling: camelCase first, the snake_case twin a USB provisioning might have left. */
@@ -33,6 +34,7 @@ export const VOICE_PERMISSION_DEVICE_CONFIG_KEYS: Record<VoicePermissionKey, Voi
   change_settings: { camel: 'voiceChangeSettings', snake: 'voice_change_settings' },
   use_scenes: { camel: 'voiceUseScenes', snake: 'voice_use_scenes' },
   create_scenes: { camel: 'voiceCreateScenes', snake: 'voice_create_scenes' },
+  use_albums: { camel: 'voiceUseAlbums', snake: 'voice_use_albums' },
 }
 
 /** The cloud's object (`voice_permissions`) as permissions: a key that is not a boolean keeps its default. */

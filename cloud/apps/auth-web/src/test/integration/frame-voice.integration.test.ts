@@ -15,6 +15,7 @@ import {
   aiChats,
   createDb,
   frameCommands,
+  photoShares,
   storeScenes,
   storeSceneVersions,
   upsertAccountFromIdentity,
@@ -85,6 +86,7 @@ import { POST as mintClaimToken } from "../../../app/api/frames/claim-tokens/rou
 import { POST as enrollFrame } from "../../../app/api/frames/enroll/route";
 import { POST as confirmFrame } from "../../../app/api/frames/[frameId]/confirm/route";
 import { GET as getFrame } from "../../../app/api/frames/[frameId]/route";
+import { POST as postFolders } from "../../../app/api/photos/folders/route";
 import { POST as setVoicePermissions } from "../../../app/api/frames/[frameId]/voice/permissions/route";
 import { POST as assignFrameScenes } from "../../../app/api/frames/[frameId]/scenes/route";
 import { POST as voiceRoute } from "../../../app/api/frames/[frameId]/voice/[sessionId]/route";
@@ -321,6 +323,8 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
       "set_scene_state",
       "render_now",
       "rotate_frame",
+      "list_albums",
+      "show_album",
     ]);
     const context = (first.input[0]!.content as { text: string }[])[0]!.text;
     // No service-setting group granted to this frame's scenes: no picture source.
@@ -381,12 +385,13 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
     expect(set.status).toBe(200);
     expect(await set.json()).toEqual({
       status: "updated",
-      voice_permissions: { change_settings: true, create_scenes: true, use_scenes: false },
+      voice_permissions: { change_settings: true, create_scenes: true, use_albums: true, use_scenes: false },
     });
     const shown = await getFrame(new NextRequest(new URL(`/api/frames/${frame.frame_id}`, baseUrl)), routeParams(frame.frame_id));
     expect(((await shown.json()) as { frame: { voice_permissions: unknown } }).frame.voice_permissions).toEqual({
       change_settings: true,
       create_scenes: true,
+      use_albums: true,
       use_scenes: false,
     });
 
@@ -399,7 +404,13 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, tools: ["activate_scene"] });
     const first = script.requests[0]!;
-    expect(first.tools.map((tool) => tool.name)).toEqual(["list_scenes", "show_image", "rotate_frame"]);
+    expect(first.tools.map((tool) => tool.name)).toEqual([
+      "list_scenes",
+      "show_image",
+      "rotate_frame",
+      "list_albums",
+      "show_album",
+    ]);
     const context = (first.input[0]!.content as { text: string }[])[0]!.text;
     expect(context).toContain("- Voice chat may: change the frame's settings (rotate_frame); put new scenes on the frame (show_image)");
     expect(context).toContain("- Voice chat may not: use the installed scenes");
@@ -414,6 +425,70 @@ describe("POST /api/frames/{id}/voice/{session}", () => {
       routeParams(frame.frame_id),
     );
     expect(anonymous.status).toBe(401);
+  });
+
+  it("lists the albums and plays one: the frame's share link, a private scene, the push with it active", async () => {
+    const frame = await activeFrame();
+    await saveOpenAiKey();
+    const clock = await createStoreScene(frame.accountId, "Clock", "clock-rt");
+    await assignScenes(frame.frame_id, [clock.id]);
+    for (const path of ["Summer 2026", "Winter"]) {
+      expect((await postFolders(postJson("/api/photos/folders", { path }, { origin: baseUrl }))).status).toBe(200);
+    }
+    await db.delete(frameCommands).where(eq(frameCommands.frameId, frame.frame_id));
+    script.rounds.push(
+      { calls: [{ arguments: {}, call_id: "c1", name: "list_albums" }], text: "" },
+      { calls: [{ arguments: { path: "Summer 2026", seconds: 600 }, call_id: "c2", name: "show_album" }], text: "" },
+      { calls: [], text: "Playing Summer 2026." },
+    );
+    heard.text = "show the summer photos";
+    const response = await chunk(frame.frame_id, frame.access_token, "sess-0011", 0, true, SECOND);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, tools: ["list_albums", "show_album"] });
+    const outputs = Object.fromEntries(
+      script.requests[2]!.input
+        .filter((item) => item.type === "function_call_output")
+        .map((item) => [item.call_id, item.output as string]),
+    );
+    expect(outputs.c1).toContain('<untrusted_data source="photo_albums">');
+    expect(outputs.c1).toContain('"path":"Summer 2026"');
+    expect(outputs.c1).toContain('"path":"Winter"');
+    const shown = JSON.parse(outputs.c2 as string) as { ok: boolean; scene: string; scene_id: string; album: string; type: string };
+    expect(shown).toMatchObject({ album: "Summer 2026", ok: true, scene: "Summer 2026", type: "set_scenes" });
+
+    // A private scene of the account playing the frame's own link to the folder...
+    const [saved] = await db.select().from(storeScenes).where(eq(storeScenes.id, shown.scene_id));
+    expect(saved).toMatchObject({ accountId: frame.accountId, name: "Summer 2026", visibility: "private" });
+    const shares = await db.select().from(photoShares).where(eq(photoShares.accountId, frame.accountId));
+    expect(shares.map((share) => [share.path, share.frameId])).toEqual([["Summer 2026", frame.frame_id]]);
+    // ...assigned next to the Clock and pushed with it active, at the spoken interval.
+    const commands = await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.frame_id));
+    expect(commands.map((command) => command.type)).toEqual(["set_scenes"]);
+    const payload = commands[0]!.payload as { scene_id: string; scenes: { name: string; id: string; settings: { refreshInterval: number }; nodes: { data: { keyword: string; config?: { album?: string } } }[] }[] };
+    expect(payload.scenes.map((scene) => scene.name)).toEqual(["Clock", "Summer 2026"]);
+    const album = payload.scenes[1]!;
+    expect(payload.scene_id).toBe(album.id);
+    expect(album.settings.refreshInterval).toBe(600);
+    const app = album.nodes.find((node) => node.data.keyword === "photoAlbum");
+    expect(app?.data.config?.album).toContain(`/api/photos/shared/${shares[0]!.token}`);
+
+    // An album that is not there: told, nothing installed. The script is
+    // indexed by the request count across turns, so the second turn's rounds
+    // sit after the first's three.
+    const pad = { calls: [], text: "" };
+    script.rounds.length = 0;
+    script.rounds.push(
+      pad,
+      pad,
+      pad,
+      { calls: [{ arguments: { path: "Nope" }, call_id: "c1", name: "show_album" }], text: "" },
+      { calls: [], text: "There is no album called Nope." },
+    );
+    const missing = await chunk(frame.frame_id, frame.access_token, "sess-0012", 0, true, SECOND);
+    expect(missing.status).toBe(200);
+    const refused = script.requests[4]!.input.find((item) => item.type === "function_call_output");
+    expect(JSON.parse((refused as { output: string }).output)).toMatchObject({ error: "album_unavailable", ok: false });
+    expect(await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.frame_id))).toHaveLength(1);
   });
 
   it("refuses another frame's token, a gap in the chunks and an oversized chunk", async () => {

@@ -146,11 +146,13 @@
   `show_image` — a one-picture Unsplash/OpenAI preview scene, from the keys
   the frame already has — and `rotate_frame`),
   never the MCP tools: a frame's token is not the owner's. **What the voice
-  chat may do** is the owner's three switches per frame (change settings /
-  use installed scenes / create new scenes — the last off by default and the
-  home of `show_image`): plane-side policy, never a firmware key (backend
-  `device_config` `voiceChangeSettings` / `voiceUseScenes` /
-  `voiceCreateScenes`; cloud `frames.voice_permissions` via
+  chat may do** is the owner's four switches per frame (change settings /
+  use installed scenes / create new scenes / access photo albums — the third
+  off by default and the home of `show_image`; the fourth gates
+  `list_albums` and `show_album`, the voice turn's `photo_album_install`):
+  plane-side policy, never a firmware key (backend `device_config`
+  `voiceChangeSettings` / `voiceUseScenes` / `voiceCreateScenes` /
+  `voiceUseAlbums`; cloud `frames.voice_permissions` via
   `POST …/voice/permissions`), enforced where the turn's tool list is built
   (`VOICE_TOOL_PERMISSIONS` / `voiceToolPermissions`), and the controls are
   drawn only on a frame with a microphone (`utils/voiceChat.ts`). The upload route, the
