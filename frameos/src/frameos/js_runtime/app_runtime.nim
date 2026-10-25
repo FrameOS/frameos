@@ -1,6 +1,7 @@
 import std/[algorithm, base64, json, options, os, streams, strformat, strutils, tables]
 import frameos/utils/memory
 import pixie
+import pixie/fileformats/svg
 
 import frameos/apps as frameos_apps
 import frameos/js_runtime/runtime
@@ -1766,7 +1767,7 @@ proc colorWithOpacity(spec: JsonNode): Color =
   color.a = opacity.float32
   return color
 
-proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: string,
+proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: SvgNode,
     requestedWidth, requestedHeight: int): Image =
   ## Rasterizes an SVG into the target the planner offered this node, when
   ## there is one of the size the scene asked for; nil when the caller should
@@ -1788,7 +1789,7 @@ proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: string
   ## raster, then half and a quarter of it, each stretched onto the target.
   ## Soft beats tiny, and the render:degraded line says which frames are soft.
   let (offeredWidth, offeredHeight) = owner.offeredDecodeTargetSize(context)
-  if offeredWidth <= 0 or offeredHeight <= 0:
+  if svg.isNil or offeredWidth <= 0 or offeredHeight <= 0:
     return nil
   if offeredWidth != requestedWidth or offeredHeight != requestedHeight:
     # An offer of some other size (a planner that scaled the cell): only a
@@ -1832,11 +1833,12 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     if data.startsWith("<svg") or data.startsWith("<?xml") or data.contains("<svg"):
       let requestedWidth = defaultImageWidth(owner, context, %*{})
       let requestedHeight = defaultImageHeight(owner, context, %*{})
-      let degraded = svgIntoOfferedTarget(owner, context, data, requestedWidth, requestedHeight)
+      let root = svgRoot(data)
+      let degraded = svgIntoOfferedTarget(owner, context, root, requestedWidth, requestedHeight)
       if not degraded.isNil:
         return degraded
       let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
-      let image = decodeSvgWithFallback(data, svgWidth, svgHeight)
+      let image = decodeSvgWithFallback(root, svgWidth, svgHeight)
       if image.isSome:
         return image.get()
       # Bounded by the SVG's declared size (decodeImageWithDisplayBounds
@@ -1886,16 +1888,13 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
       # call was to take the memory (docs/value-pipeline.md).
       # `.str`, not getStr: the markup is not copied on its way to the parser.
       let svgNode = spec["svg"]
-      let intoTarget =
-        if svgNode.kind == JString:
-          svgIntoOfferedTarget(owner, context, svgNode.str, requestedWidth, requestedHeight)
-        else:
-          nil
+      let root = if svgNode.kind == JString: svgRoot(svgNode.str) else: nil
+      let intoTarget = svgIntoOfferedTarget(owner, context, root, requestedWidth, requestedHeight)
       if not intoTarget.isNil:
         when defined(memProbe): memProbe("    svg decode AFTER (into target)")
         return intoTarget
       let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
-      let image = decodeSvgWithFallback(spec["svg"].getStr(), svgWidth, svgHeight)
+      let image = decodeSvgWithFallback(root, svgWidth, svgHeight)
       when defined(memProbe): memProbe("    svg decode AFTER")
       if image.isSome:
         return image.get()
