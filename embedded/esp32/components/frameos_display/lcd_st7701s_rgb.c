@@ -353,12 +353,18 @@ static esp_err_t rgb_init(void)
         .data_width = 16,
         .bits_per_pixel = 16,
         .num_fbs = 1,
-        /* The frame buffer lives in PSRAM and the DMA scans it from there,
-         * as Seeed's firmware does. Bounce buffers would read the frame
-         * buffer from an interrupt that a flash write (the cache off) turns
-         * into a crash (esp_lcd_panel_rgb.c says so); without them a flash
-         * write costs at most a disturbed frame. */
-        .bounce_buffer_size_px = 0,
+        /* The frame buffer lives in PSRAM; the DMA scans two ten-line
+         * bounce buffers in internal RAM that an interrupt refills from it.
+         * Scanning PSRAM directly under-ran on this board's 80 MHz octal
+         * PSRAM whenever the renderer or Wi-Fi had the bus (Seeed runs its
+         * PSRAM at 120 MHz): every frame restarted late and the picture
+         * crept down the glass (2026-10-25). The fill interrupt is not
+         * IRAM-safe on purpose — the driver notes a copy from a PSRAM frame
+         * buffer crashes while a flash write has the cache off — so a flash
+         * write (an NVS save) costs a disturbed frame, which
+         * CONFIG_LCD_RGB_RESTART_IN_VSYNC (sdkconfig.defaults) resyncs at
+         * the next vertical blank instead of letting it drift. */
+        .bounce_buffer_size_px = FOS_LCD_ST7701S_WIDTH * 10,
         .dma_burst_size = 64,
         .hsync_gpio_num = b->hsync,
         .vsync_gpio_num = b->vsync,
