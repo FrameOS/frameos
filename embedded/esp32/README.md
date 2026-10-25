@@ -354,7 +354,12 @@ for the two Spectra boards most of the bench work runs on:
   write switches the cache off and stalls the refill; an LCD comes up blank
   after a reboot anyway). Any other flash write (a settings save, a scene
   download, an OTA) still costs one disturbed frame. `lcd` on the console
-  counts dropped frames and late refills and sets the pixel clock live. The controller's own
+  counts dropped frames and late refills and sets the pixel clock live.
+  An LCD board runs its CPU at 240 MHz (the generic image boots at 160 for
+  the battery frames; `status` prints `cpu:`), and the demo scene renders,
+  packs and shows in ~0.77 s (3.8 s before the render work of 2026-10-25:
+  the text outline, the gradient fill and the RGB565 pack, which every
+  ESP32 board shares). The controller's own
   setup goes over a 9-bit 3-wire SPI bit-banged on GPIO41 (clock) and GPIO48
   (data) with chip-select and reset on a TCA9535 IO expander at 0x20 (SDA39/
   SCL40; later batches carry an HT8574 at 0x39), the sequence Seeed's own

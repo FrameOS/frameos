@@ -32,6 +32,7 @@
 #include "fos_gauge.h"
 #include "fos_touch.h"
 #include "lcd_st7701s_rgb.h"
+#include "esp_private/esp_clk.h"
 #include "fos_client.h"
 #include "fos_i2c.h"
 #include "fos_led.h"
@@ -319,6 +320,7 @@ static int cmd_status(int argc, char **argv)
                fos_codec_has_mic() ? "es7210 microphone" : (fos_codec_has_speaker() ? "" : "no chip answered"), codec);
     }
     fos_touch_print_status();
+    printf("cpu:         %lu MHz\n", (unsigned long)(esp_clk_cpu_freq() / 1000000));
     printf("nim:         %s\n", frameos_nim_info());
     printf("renders:     %lu (last %lld ms)\n",
            (unsigned long)fos_client_render_count(), fos_client_last_render_ms());
