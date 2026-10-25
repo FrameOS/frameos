@@ -257,6 +257,37 @@ proc packImagePalette(
 
   true
 
+proc packImageRgb565(image: Image; buf: ptr UncheckedArray[uint8]; bufLen: int): bool {.hotLoop.} =
+  ## 16-bit colour for an LCD (FOS_PIXEL_RGB565, the SenseCAP Indicator's
+  ## 480x480 glass): one little-endian 5/6/5 word per panel pixel, rotated
+  ## like the other packers. The 8-bit channels round to 5 and 6 bits under
+  ## the same per-pixel threshold jitter the palette dither uses (a half
+  ## step), so a smooth gradient keeps its smoothness instead of stepping
+  ## every eight levels; `ditherJitterAmp` 0 turns it off.
+  let
+    width = image.width
+    height = image.height
+  if frameWidth * frameHeight * 2 != bufLen:
+    log(&"pack rgb565: buffer mismatch, want {frameWidth * frameHeight * 2} bytes, got {bufLen}")
+    return false
+  let amp = if ditherJitterAmp > 0: 4 else: 0
+  template clip(value: int): int =
+    (if value < 0: 0 elif value > 255: 255 else: value)
+  for y in 0 ..< height:
+    for x in 0 ..< width:
+      let
+        p = image.unsafe[x, y]
+        (px, py) = panelCoords(x, y, width, height)
+        index = py * frameWidth + px
+        j = if amp > 0: ditherJitterFor(index, amp) else: 0
+        r = clip(p.r.int + j) shr 3
+        g = clip(p.g.int + (j div 2)) shr 2
+        b = clip(p.b.int + j) shr 3
+        word = (r.uint16 shl 11) or (g.uint16 shl 5) or b.uint16
+      buf[index * 2] = uint8(word and 0xFF)
+      buf[index * 2 + 1] = uint8(word shr 8)
+  true
+
 {.pop.}
 
 proc fos_nim_set_status_info_impl(infoJson: cstring) {.exportc, cdecl.} =
@@ -318,6 +349,8 @@ proc packImageForFormat(
     packImagePalette(image, buf, bufLen, activePalette(framePalette(spectra6ColorPalette)))
   of 8:
     packImageGray(image, buf, bufLen, 15)
+  of 9:
+    packImageRgb565(image, buf, bufLen)
   else:
     log(&"pack: unsupported pixel format {pixelFormat}")
     false
@@ -334,6 +367,8 @@ proc packedLenForFormat(width, height, pixelFormat: int): int =
     ((width + 3) div 4) * height
   of 5, 6, 7, 8:
     ((width + 1) div 2) * height
+  of 9:
+    width * height * 2
   else:
     0
 

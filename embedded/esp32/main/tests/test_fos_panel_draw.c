@@ -39,14 +39,14 @@ static int g_checks = 0;
 static const fos_pixel_format_t FORMATS[] = {
     FOS_PIXEL_1BPP,         FOS_PIXEL_DUAL_1BPP_RED, FOS_PIXEL_DUAL_1BPP_YELLOW,
     FOS_PIXEL_2BPP_GRAY,    FOS_PIXEL_2BPP_BWYR,     FOS_PIXEL_4BPP_7COLOR,
-    FOS_PIXEL_4BPP_SPECTRA6, FOS_PIXEL_4BPP_GRAY,
+    FOS_PIXEL_4BPP_SPECTRA6, FOS_PIXEL_4BPP_GRAY, FOS_PIXEL_RGB565,
 };
 static const int ROTATIONS[] = {0, 90, 180, 270};
 
 /* Panel geometries: an 800x480, the 13.3" portrait, odd widths that end
- * mid-byte, a 2.13" and the 72x40 OLED. */
+ * mid-byte, a 2.13", the 72x40 OLED and the 480x480 LCD. */
 static const int SIZES[][2] = {{800, 480}, {1200, 1600}, {250, 122}, {122, 250}, {203, 97},
-                               {72, 40}};
+                               {72, 40}, {480, 480}};
 
 static size_t row_bytes(int width, int bpp) { return ((size_t)width * (size_t)bpp + 7u) / 8u; }
 
@@ -58,6 +58,7 @@ static int bpp_of(fos_pixel_format_t format)
         case FOS_PIXEL_4BPP_7COLOR:
         case FOS_PIXEL_4BPP_SPECTRA6:
         case FOS_PIXEL_4BPP_GRAY: return 4;
+        case FOS_PIXEL_RGB565: return 16;
         default: return 1;
     }
 }
@@ -78,6 +79,12 @@ static int panel_index(const fos_panel_surface_t *s, int px, int py)
 {
     const int bpp = bpp_of(s->format);
     const size_t stride = row_bytes(s->width, bpp);
+    if (bpp == 16) {
+        /* A colour word: 0 black, 1 white, 2 anything else. */
+        const uint8_t *at = s->buf + (size_t)py * stride + (size_t)px * 2u;
+        const unsigned word = at[0] | (at[1] << 8);
+        return word == 0 ? 0 : word == 0xFFFF ? 1 : 2;
+    }
     const size_t bit = (size_t)px * (size_t)bpp;
     const size_t offset = (size_t)py * stride + bit / 8u;
     const unsigned shift = 8u - (unsigned)bpp - (unsigned)(bit % 8u);

@@ -63,6 +63,36 @@ static void test_decode(void)
     CHECK(fos_touch_decode(NULL, 0, points, 1) == -1, "NULL report");
 }
 
+static void test_decode_ft(void)
+{
+    fos_touch_point_t points[FOS_TOUCH_POINTS_MAX];
+    /* No finger: the count byte alone decides. */
+    uint8_t none[FOS_TOUCH_FT_REPORT_BYTES] = {0x00};
+    CHECK(fos_touch_decode_ft(none, sizeof(none), points, FOS_TOUCH_POINTS_MAX) == 0, "no finger");
+    /* One finger in contact (event 2), track id 0 at (0x1F4, 0x12C) = (500, 300). */
+    uint8_t one[FOS_TOUCH_FT_REPORT_BYTES] = {0x01, 0x81, 0xF4, 0x01, 0x2C, 0x10, 0x05};
+    CHECK(fos_touch_decode_ft(one, sizeof(one), points, FOS_TOUCH_POINTS_MAX) == 1, "one finger");
+    CHECK(points[0].id == 0 && points[0].x == 500 && points[0].y == 300, "point %u (%u,%u)", points[0].id,
+          points[0].x, points[0].y);
+    /* A press-down event (0) counts; a lift (1) does not; the second finger's
+     * id is the controller's. */
+    uint8_t two[FOS_TOUCH_FT_REPORT_BYTES] = {0x02, 0x00, 0x0A, 0x00, 0x14, 0x10, 0x05,
+                                              0x41, 0x90, 0x11, 0xDF, 0x10, 0x05};
+    CHECK(fos_touch_decode_ft(two, sizeof(two), points, FOS_TOUCH_POINTS_MAX) == 1, "a lifted finger is not down");
+    CHECK(points[0].id == 0 && points[0].x == 10 && points[0].y == 20, "first point (%u,%u)", points[0].x,
+          points[0].y);
+    two[7] = 0x81; /* the second finger in contact */
+    CHECK(fos_touch_decode_ft(two, sizeof(two), points, FOS_TOUCH_POINTS_MAX) == 2, "two fingers");
+    CHECK(points[1].id == 1 && points[1].x == 400 && points[1].y == 479, "second point id %u (%u,%u)",
+          points[1].id, points[1].x, points[1].y);
+    /* The caller's room caps the fingers; a short buffer and a wild count are refused. */
+    CHECK(fos_touch_decode_ft(two, sizeof(two), points, 1) == 1, "capped to the caller's room");
+    CHECK(fos_touch_decode_ft(two, 1 + FOS_TOUCH_FT_POINT_BYTES, points, FOS_TOUCH_POINTS_MAX) == -1, "short buffer");
+    uint8_t garbage[FOS_TOUCH_FT_REPORT_BYTES] = {0x0F};
+    CHECK(fos_touch_decode_ft(garbage, sizeof(garbage), points, FOS_TOUCH_POINTS_MAX) == -1, "count 15 refused");
+    CHECK(fos_touch_decode_ft(NULL, 0, points, 1) == -1, "NULL report");
+}
+
 static void test_wire(void)
 {
     /* The panel's two ends land on the wire's two ends, whatever the range. */
@@ -93,6 +123,7 @@ static void test_axes(void)
 int main(void)
 {
     test_decode();
+    test_decode_ft();
     test_wire();
     test_axes();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);

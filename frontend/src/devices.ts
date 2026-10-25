@@ -157,6 +157,12 @@ export const devices: OptionGroup<Option>[] = [
     label: 'OLED',
     options: [{ value: 'oled.ssd1306_72x40', label: 'SSD1306 0.42" OLED 72x40 (ESP32 I2C)' }],
   },
+  {
+    label: 'LCD',
+    options: [
+      { value: 'lcd.st7701s_480x480', label: 'ST7701S 4.0" IPS LCD 480x480 (ESP32 RGB, SenseCAP Indicator)' },
+    ],
+  },
 ]
 
 /**

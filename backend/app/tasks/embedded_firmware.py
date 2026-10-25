@@ -251,6 +251,36 @@ EMBEDDED_ESP32_C3_042_OLED_PINS = {
     "mosi": 5,
     "pwr": -1,
 }
+# Seeed SenseCAP Indicator D1 / D1S / D1L / D1Pro (ESP32-S3, 8 MB flash, 8 MB
+# octal PSRAM, plus an RP2040 co-processor): the 4" 480x480 ST7701S IPS glass
+# on the chip's parallel RGB interface. Its wiring — sixteen data lines, the
+# sync pins, the controller's 3-wire SPI on GPIO41/48 with chip-select and
+# reset on a TCA9535 IO expander, the backlight on GPIO45 — is the LCD
+# driver's own board table (embedded/esp32/components/frameos_display/
+# lcd_st7701s_rgb.c), so the EPD pin slots carry nothing. The top button is
+# GPIO38 (active low). The FT6336U touch controller shares the expander's I2C
+# bus, SDA39/SCL40, and has no interrupt line to the chip. The TF socket, the
+# buzzer and the CO2/VOC sensors hang off the RP2040 (Seeed's BSP, the
+# ESPHome board page), out of this firmware's reach: no sdCardAssets.
+EMBEDDED_SEEED_SENSECAP_INDICATOR_PINS = {
+    "rst": -1,
+    "dc": -1,
+    "cs": -1,
+    "cs2": -1,
+    "busy": -1,
+    "sck": -1,
+    "mosi": -1,
+    "pwr": -1,
+}
+EMBEDDED_SEEED_SENSECAP_INDICATOR_GPIO_BUTTONS = [{"pin": 38, "label": "BUTTON"}]
+# The one key held walks to the next scene; a press stays the scene's.
+# fos_board.c's ONE_KEY_NEXT_SCENE_EVENT_MAP("BUTTON") is the device copy.
+EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP = [
+    {"event": "button", "match": {"label": "BUTTON", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+]
+# Parity with fos_board.c's k_touch_pins, nothing provisions it: the FT6336U
+# on the LCD's bus, polled (no INT, no reset, no load switch at the chip).
+EMBEDDED_SEEED_SENSECAP_INDICATOR_TOUCH = {"touchPins": "sda=39,scl=40,int=-1,rst=-1,en=-1"}
 EMBEDDED_XTEINK_X4_BATTERY = {
     "batteryPin": 0,
     "batteryDivider": 2.0,
@@ -664,6 +694,15 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "pins": EMBEDDED_ESP32_C3_042_OLED_PINS,
         "gpioButtons": [{"pin": 9, "label": "BOOT"}],
     },
+    "seeed_sensecap_indicator_d1": {
+        "device": "lcd.st7701s_480x480",
+        "flashSize": "8MB",
+        "psramMB": 8,
+        "pins": EMBEDDED_SEEED_SENSECAP_INDICATOR_PINS,
+        "gpioButtons": EMBEDDED_SEEED_SENSECAP_INDICATOR_GPIO_BUTTONS,
+        "eventMap": EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP,
+        **EMBEDDED_SEEED_SENSECAP_INDICATOR_TOUCH,
+    },
     "seeed_reterminal_sticky": {
         "device": "waveshare.EPD_3in97",
         "flashSize": "32MB",
@@ -828,6 +867,7 @@ FOS_PIXEL_2BPP_BWYR = 5
 FOS_PIXEL_4BPP_7COLOR = 6
 FOS_PIXEL_4BPP_SPECTRA6 = 7
 FOS_PIXEL_4BPP_GRAY = 8
+FOS_PIXEL_RGB565 = 9  # 16-bit colour, one little-endian 5/6/5 word per pixel (an LCD)
 # The formats a luma canvas serves: black and white, four and sixteen greys.
 EMBEDDED_GREY_PIXEL_FORMATS = frozenset({FOS_PIXEL_1BPP, FOS_PIXEL_2BPP_GRAY, FOS_PIXEL_4BPP_GRAY})
 EMBEDDED_PIXEL_FORMAT_BY_COLOR = {
@@ -868,11 +908,13 @@ EMBEDDED_EXTRA_PANELS = {
     # The IT8951 (components/frameos_display/it8951.c): the Waveshare 10.3"
     # HAT and the reTerminal E1003. Its `dc` pin slot carries MISO.
     "EPD_10in3": FOS_PIXEL_4BPP_GRAY,
+    "LCD_ST7701S_480x480": FOS_PIXEL_RGB565,
 }
 EMBEDDED_PANEL_FORMATS.update(EMBEDDED_EXTRA_PANELS)
 # Device keys for those panels (the `waveshare.<key>` convention does not fit).
 EMBEDDED_DEVICE_PANELS = {
     "oled.ssd1306_72x40": "OLED_SSD1306_72x40",
+    "lcd.st7701s_480x480": "LCD_ST7701S_480x480",
 }
 EMBEDDED_SUPPORTED_PANELS = {"none", *EMBEDDED_PANEL_FORMATS.keys()}
 EMBEDDED_FLASH_OFFSET = "0x0"
@@ -1390,6 +1432,8 @@ def embedded_buffer_size(width: int, height: int, pixel_format: int) -> int:
         return ((width + 3) // 4) * height
     if pixel_format in (FOS_PIXEL_4BPP_7COLOR, FOS_PIXEL_4BPP_SPECTRA6, FOS_PIXEL_4BPP_GRAY):
         return ((width + 1) // 2) * height
+    if pixel_format == FOS_PIXEL_RGB565:
+        return width * height * 2
     raise ValueError(f"Unsupported embedded pixel format: {pixel_format}")
 
 

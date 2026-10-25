@@ -84,12 +84,16 @@ def build_groups():
     oled_devices = [
         {"value": "oled.ssd1306_72x40", "label": 'SSD1306 0.42" OLED 72x40 (ESP32 I2C)'},
     ]
+    lcd_devices = [
+        {"value": "lcd.st7701s_480x480", "label": 'ST7701S 4.0" IPS LCD 480x480 (ESP32 RGB, SenseCAP Indicator)'},
+    ]
 
     return [
         {"label": "Generic", "options": generic_devices},
         {"label": "Pimoroni", "options": pimoroni_devices},
         {"label": "Waveshare", "options": waveshare_devices},
         {"label": "OLED", "options": oled_devices},
+        {"label": "LCD", "options": lcd_devices},
     ]
 
 

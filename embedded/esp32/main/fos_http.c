@@ -1116,6 +1116,17 @@ static void preview_bmp_row(const uint8_t *packed, int width, int height,
             case 270: px = y; py = out_width - 1 - x; break;
             default: break;
         }
+        if (bit_count == 24) {
+            /* A 16-bit colour panel: the 5/6/5 word widened to BGR bytes,
+             * the low bits filled from the high ones so white stays white. */
+            const uint8_t *at = packed + ((size_t)py * (size_t)width + (size_t)px) * 2u;
+            uint16_t word = (uint16_t)(at[0] | (at[1] << 8));
+            uint8_t r5 = (word >> 11) & 0x1F, g6 = (word >> 5) & 0x3F, b5 = word & 0x1F;
+            row[(size_t)x * 3u] = (uint8_t)((b5 << 3) | (b5 >> 2));
+            row[(size_t)x * 3u + 1u] = (uint8_t)((g6 << 2) | (g6 >> 4));
+            row[(size_t)x * 3u + 2u] = (uint8_t)((r5 << 3) | (r5 >> 2));
+            continue;
+        }
         uint8_t index = preview_palette_index(packed, width, height, format, px, py);
         if (bit_count == 1) {
             if (index & 1u) row[(size_t)x >> 3] |= 0x80 >> (x & 7);
@@ -1153,8 +1164,11 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
     int out_width = (rotate == 90 || rotate == 270) ? height : width;
     int out_height = (rotate == 90 || rotate == 270) ? width : height;
 
-    uint16_t bit_count = format == FOS_PIXEL_1BPP ? 1 : 4;
-    size_t palette_entries = bit_count == 1 ? 2 : 16;
+    /* Palette-indexed BMPs for the e-paper formats; a colour LCD's 5/6/5
+     * snapshot goes out as 24-bit BGR, which every reader (the backend's
+     * Pillow, the browser the cloud hands it to) takes without a mask table. */
+    uint16_t bit_count = format == FOS_PIXEL_1BPP ? 1 : format == FOS_PIXEL_RGB565 ? 24 : 4;
+    size_t palette_entries = bit_count == 1 ? 2 : bit_count == 24 ? 0 : 16;
     size_t row_payload = (((size_t)out_width * bit_count) + 7u) / 8u;
     size_t row_stride = (row_payload + 3u) & ~3u;
     size_t pixel_bytes = row_stride * (size_t)out_height;
@@ -1182,7 +1196,7 @@ esp_err_t fos_http_preview_bmp_stream(const fos_preview_sink_t *sink, void *ctx,
     uint8_t *palette = header + 54u;
     memset(palette, 255, palette_bytes);
     size_t colors = 0;
-    const uint8_t *rgb = preview_palette(format, &colors);
+    const uint8_t *rgb = palette_entries ? preview_palette(format, &colors) : NULL;
     for (size_t i = 0; i < palette_entries; i++) {
         size_t src = i < colors ? i : 1;
         palette[i * 4u] = rgb[src * 3u + 2u];

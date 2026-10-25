@@ -159,6 +159,19 @@ export const ESP32_C3_042_OLED_PIN_LAYOUT: Esp32PinLayout = {
   mosi: 5,
   pwr: -1,
 }
+// The Seeed SenseCAP Indicator's LCD is wired by the firmware's own board
+// table (lcd_st7701s_rgb.c): the EPD pin slots carry nothing. Mirrors
+// EMBEDDED_SEEED_SENSECAP_INDICATOR_PINS.
+export const ESP32_SEEED_SENSECAP_INDICATOR_PIN_LAYOUT: Esp32PinLayout = {
+  rst: -1,
+  dc: -1,
+  cs: -1,
+  cs2: -1,
+  busy: -1,
+  sck: -1,
+  mosi: -1,
+  pwr: -1,
+}
 export const ESP32_XTEINK_X4_PIN_LAYOUT: Esp32PinLayout = {
   rst: 5,
   dc: 4,
@@ -439,6 +452,14 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
     flashSize: '4MB',
     psramMB: 0,
     pins: ESP32_C3_042_OLED_PIN_LAYOUT,
+  },
+  seeed_sensecap_indicator_d1: {
+    label: 'Seeed SenseCAP Indicator D1/D1S (4" LCD ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.st7701s_480x480',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: ESP32_SEEED_SENSECAP_INDICATOR_PIN_LAYOUT,
   },
   seeed_reterminal_sticky: {
     label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',

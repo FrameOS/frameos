@@ -678,6 +678,17 @@ static int cmd_set(int argc, char **argv)
               "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=6,mosi=5,pwr=-1",
               "9:BOOT",
               -1, 2.0f, -1, 0, 0 },
+            /* Seeed SenseCAP Indicator D1/D1S/D1L/D1Pro (ESP32-S3, 8 MB flash,
+             * 8 MB PSRAM): the 4" 480x480 ST7701S IPS glass on the chip's RGB
+             * interface, its wiring the LCD driver's own board table
+             * (lcd_st7701s_rgb.c), so no EPD pins; the top button on GPIO38;
+             * the FT6336U touch controller on the LCD's I2C bus
+             * (fos_board_touch_pins). The TF socket, the buzzer and the
+             * sensors hang off the RP2040 co-processor, out of reach. */
+            { "seeed_sensecap_indicator_d1", "LCD_ST7701S_480x480",
+              "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
+              "38:BUTTON",
+              -1, 2.0f, -1, 0, 0 },
             /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash): the panel on
              * SCK13/MOSI14 with EP_PWR_EN GPIO47, the AI/Power key GPIO4 and
              * UP/DOWN GPIO5/6 (Seeed's porting specification). The buzzer
@@ -1204,6 +1215,28 @@ static int cmd_display_test(int argc, char **argv)
             uint8_t color = display_test_color_4bpp(mode);
             uint8_t packed = (uint8_t)((color << 4) | color);
             memset(buf, packed, len);
+        }
+    } else if (format == FOS_PIXEL_RGB565) {
+        /* Colour bands on an LCD, or one named colour. */
+        static const struct { const char *name; uint16_t word; } named[] = {
+            {"black", 0x0000}, {"white", 0xFFFF}, {"red", 0xF800}, {"green", 0x07E0},
+            {"blue", 0x001F}, {"yellow", 0xFFE0},
+        };
+        static const uint16_t bands[] = {0x0000, 0xF800, 0x07E0, 0x001F, 0xFFE0, 0xFFFF};
+        uint16_t *pixels = (uint16_t *)buf;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                uint16_t word = 0xFFFF;
+                if (strcmp(mode, "bands") == 0) {
+                    int band = (x * 6) / width;
+                    word = bands[band < 0 ? 0 : band > 5 ? 5 : band];
+                } else {
+                    for (size_t i = 0; i < sizeof(named) / sizeof(named[0]); i++) {
+                        if (strcmp(mode, named[i].name) == 0) word = named[i].word;
+                    }
+                }
+                pixels[(size_t)y * (size_t)width + (size_t)x] = word;
+            }
         }
     } else {
         memset(buf, 0x00, len);

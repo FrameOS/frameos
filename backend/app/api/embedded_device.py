@@ -73,6 +73,7 @@ from app.tasks.embedded_firmware import (
     FOS_PIXEL_4BPP_SPECTRA6,
     FOS_PIXEL_DUAL_1BPP_RED,
     FOS_PIXEL_DUAL_1BPP_YELLOW,
+    FOS_PIXEL_RGB565,
     embedded_buffer_size,
     embedded_max_http_response_bytes_for_frame,
     embedded_panel_for_frame,
@@ -214,6 +215,20 @@ def _pack_4bpp_gray(image) -> bytes:
     return bytes(out)
 
 
+def _pack_rgb565(image) -> bytes:
+    """One little-endian 5/6/5 word per pixel, the LCD's own format; plain
+    rounding (the device's packer jitters the rounding, embedded_main.nim)."""
+    rgb = image.convert("RGB")
+    out = bytearray(rgb.width * rgb.height * 2)
+    i = 0
+    for r, g, b in rgb.getdata():
+        word = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+        out[i] = word & 0xFF
+        out[i + 1] = word >> 8
+        i += 2
+    return bytes(out)
+
+
 def _pack_palette(image, palette: list[tuple[int, int, int]], bits: int) -> bytes:
     # Spectra 6 leaves a hole at index 4: dither against the real colours only,
     # then map back to the wire indices the panel expects.
@@ -292,6 +307,8 @@ def pack_image_for_panel(image, pixel_format: int) -> bytes:
         return _pack_palette(image, SPECTRA6_PALETTE, 4)
     if pixel_format == FOS_PIXEL_4BPP_GRAY:
         return _pack_4bpp_gray(image)
+    if pixel_format == FOS_PIXEL_RGB565:
+        return _pack_rgb565(image)
     raise ValueError(f"Unsupported embedded pixel format: {pixel_format}")
 
 

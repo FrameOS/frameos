@@ -1624,6 +1624,23 @@ def test_packers_dither_a_flat_field(pixel_format, bits, fill):
     assert len(set(levels)) > 1, 'flat field quantized to a single level — dithering is gone'
 
 
+def test_rgb565_packer_writes_little_endian_words():
+    """The LCD's format is the colour itself: one 5/6/5 word per pixel, low
+    byte first, the way the ESP32's LCD peripheral scans its frame buffer."""
+    from PIL import Image
+
+    from app.api.embedded_device import pack_image_for_panel
+    from app.tasks.embedded_firmware import FOS_PIXEL_RGB565, embedded_buffer_size
+
+    image = Image.new('RGB', (3, 1))
+    image.putdata([(255, 0, 0), (0, 255, 0), (0, 0, 255)])
+    packed = pack_image_for_panel(image, FOS_PIXEL_RGB565)
+    assert len(packed) == embedded_buffer_size(3, 1, FOS_PIXEL_RGB565) == 6
+    assert packed == bytes([0x00, 0xF8, 0xE0, 0x07, 0x1F, 0x00])
+    white = pack_image_for_panel(Image.new('RGB', (2, 2), (255, 255, 255)), FOS_PIXEL_RGB565)
+    assert white == b'\xff' * 8
+
+
 def test_dual_1bpp_dithers_a_flat_field():
     from PIL import Image
 
