@@ -641,21 +641,64 @@ def test_embedded_hardware_preset_for_seeed_reterminal_sticky():
     assert embedded_platform_for_frame(frame) == "esp32-s3"
     assert embedded_flash_size_for_frame(frame) == "32MB"
     assert embedded_module_psram_bytes(frame) == 8 * 1024 * 1024
-    # PSRAM on board: local rendering stays available.
+    # PSRAM on board: local rendering stays available (the Sticky is an
+    # ESP32-S3R8, not a C3 thin client).
     assert embedded_render_mode_for_frame(frame) != EMBEDDED_RENDER_REMOTE
     check_embedded_panel_fits_memory(frame)
+    # The panel behind EP_PWR_EN GPIO47.
     assert embedded_pins_for_frame(frame) == {
         "rst": 17, "dc": 16, "cs": 15, "cs2": -1,
-        "busy": 18, "sck": 13, "mosi": 14, "pwr": -1,
+        "busy": 18, "sck": 13, "mosi": 14, "pwr": 47,
     }
+    # The AI/Power key and the two arrows; UP/DOWN held walk the scenes, AI
+    # held talks (docs/voice-chat.md).
+    assert embedded_gpio_buttons_for_frame(frame) == [(4, "AI"), (5, "UP"), (6, "DOWN")]
+    assert [rule["emit"] for rule in frame.event_map] == ["setCurrentScene", "setCurrentScene", "voiceChat"]
+    assert frame.event_map[2]["match"] == {"label": "AI", "action": "longPress"}
     # The 4 kHz electromagnetic buzzer on GPIO48, at its own pitch.
     assert frame.device_config["buzzerPin"] == 48
     assert frame.device_config["buzzerToneHz"] == 4000
+    # The PDM microphone on the S3's USB pads, powered through GPIO38.
+    assert (frame.device_config["micClkPin"], frame.device_config["micDataPin"], frame.device_config["micPwrPin"]) == (19, 20, 38)
+    # No battery divider: the BQ27220 fuel gauge reads the cell. Deep sleep
+    # on battery like the E1004.
+    assert "batteryPin" not in frame.device_config
+    assert frame.device_config["deepSleepOnBattery"] is True
+    assert frame.device_config["wakeCheckSeconds"] == 900
+    # The TF socket on the panel's bus, with its switch and detect contact.
+    assert frame.device_config["sdCardAssets"]["pins"] == {"cs": 8, "sck": 13, "miso": 12, "mosi": 14, "pwr": 10, "det": 11}
     settings = _provisioned(embedded_provisioning_plan(frame))
     assert settings["buzzer_pin"] == "48"
     assert settings["buzzer_tone_hz"] == "4000"
-    assert embedded_flash_size_for_frame(frame) == "32MB"
+    assert settings["mic_pins"] == "clk=19,data=20,pwr=38"
+    assert settings["gpio_buttons"] == "4:AI,5:UP,6:DOWN"
+    assert settings["assets_sd_pins"] == "cs=8,sck=13,miso=12,mosi=14,pwr=10,det=11"
+    assert settings["deep_sleep_on_battery"] == "1"
     assert embedded_firmware_module.embedded_platform_spec_for_frame(frame)["idfTarget"] == "esp32s3"
+    # The touch panel and the sensor bus are the board's own (fos_board.c):
+    # parity keys, nothing provisions them.
+    preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS["seeed_reterminal_sticky"]
+    assert preset["touchPins"] == "sda=3,scl=2,int=21,rst=41,en=42"
+    assert preset["i2cBuses"] == "sda=1,scl=0"
+    assert "touch_pins" not in settings and "i2c_buses" not in settings
+
+
+def test_waveshare_codec_boards_talk_through_their_codec():
+    """The PhotoPainter and the 13.3E6 have no PDM microphone and no buzzer:
+    their ES7210 is the microphone and their ES8311 the speaker (fos_codec.c),
+    and the one user key each has, held, is the voice key."""
+    for preset_key, label in (("waveshare_esp32_s3_photopainter", "KEY1"), ("waveshare_esp32_s3_epaper_13_3e6", "BOOT")):
+        preset = embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS[preset_key]
+        assert preset["codecPins"].startswith("mclk=14,"), preset_key
+        assert "micClkPin" not in preset and "buzzerPin" not in preset, preset_key
+        assert preset["eventMap"] == [
+            {"event": "button", "match": {"label": label, "action": "longPress"}, "emit": "voiceChat", "as": {}}
+        ], preset_key
+        frame = Frame(id=9, embedded={"hardwarePreset": preset_key})
+        ensure_embedded_frame_defaults(frame)
+        assert label in [button_label for _pin, button_label in embedded_gpio_buttons_for_frame(frame)], preset_key
+        settings = _provisioned(embedded_provisioning_plan(frame))
+        assert "codec_pins" not in settings and "mic_pins" not in settings, preset_key
 
 
 def test_embedded_hardware_preset_for_seeed_reterminal_e10xx():
@@ -942,6 +985,25 @@ def _board_string_table(name: str) -> dict[str, str]:
     return dict(re.findall(r'\{"([a-z0-9_]+)",\s*"([^"]*)"\}', table.group(1)))
 
 
+def _board_mics() -> dict[str, tuple[str, str, str]]:
+    """fos_board.c's k_mics table: a board's PDM microphone pins."""
+    source = _FOS_BOARD_C.read_text()
+    table = re.search(r"\} k_mics\[\] = \{(.*?)\n\};", source, re.DOTALL)
+    assert table, "k_mics[] table not found in fos_board.c"
+    return {
+        match.group(1): (match.group(2), match.group(3), match.group(4))
+        for match in re.finditer(r'\{"([a-z0-9_]+)",\s*(-?\d+),\s*(-?\d+),\s*(-?\d+)\}', table.group(1))
+    }
+
+
+def _board_event_map_presets() -> set[str]:
+    """The presets fos_board.c's k_event_maps table gives a frame event map."""
+    source = _FOS_BOARD_C.read_text()
+    table = re.search(r"\} k_event_maps\[\] = \{(.*?)\n\};", source, re.DOTALL)
+    assert table, "k_event_maps[] table not found in fos_board.c"
+    return set(re.findall(r'\{"([a-z0-9_]+)",', table.group(1)))
+
+
 def _board_leds() -> dict[str, dict[str, str]]:
     """fos_board.c's k_leds table: the status LED's pin and kind (0 gpio,
     1 gpio_inverted, 2 ws2812) per board."""
@@ -1000,6 +1062,14 @@ def test_console_hardware_preset_table_matches_backend_presets():
     assert i2c_buses, "no I2C bus rows parsed from fos_board.c"
     leds = _board_leds()
     assert leds, "no LED rows parsed from fos_board.c"
+    mics = _board_mics()
+    assert mics, "no microphone rows parsed from fos_board.c"
+    event_map_presets = _board_event_map_presets()
+    assert event_map_presets, "no event map rows parsed from fos_board.c"
+    touch_pins = _board_string_table("k_touch_pins")
+    assert touch_pins, "no touch panel rows parsed from fos_board.c"
+    codec_pins = _board_string_table("k_codec_pins")
+    assert codec_pins, "no codec rows parsed from fos_board.c"
     for preset_key, preset in embedded_firmware_module.EMBEDDED_HARDWARE_PRESETS.items():
         platform = preset.get("platform", embedded_firmware_module.SUPPORTED_EMBEDDED_PLATFORM)
         if not str(platform).startswith("esp32"):
@@ -1021,6 +1091,15 @@ def test_console_hardware_preset_table_matches_backend_presets():
             assert led["type"] == settings.get("led_type"), preset_key
         preset_i2c = preset.get("i2cBuses", "")
         assert i2c_buses.get(preset_key, "") == preset_i2c, preset_key
+        # The microphone, the touch panel, the codec and the frame event map:
+        # the same tables, one per board.
+        mic = mics.get(preset_key)
+        assert (mic[0] if mic else "-1") == str(preset.get("micClkPin", -1)), preset_key
+        if mic:
+            assert mic == (str(preset["micClkPin"]), str(preset["micDataPin"]), str(preset["micPwrPin"])), preset_key
+        assert touch_pins.get(preset_key, "") == preset.get("touchPins", ""), preset_key
+        assert codec_pins.get(preset_key, "") == preset.get("codecPins", ""), preset_key
+        assert (preset_key in event_map_presets) == bool(preset.get("eventMap")), preset_key
         assert row["battery_pin"] == settings.get("battery_pin", "-1"), preset_key
         assert row["battery_divider"] == float(settings.get("battery_divider", "2.0")), preset_key
         assert row["battery_enable_pin"] == settings.get("battery_enable_pin", "-1"), preset_key

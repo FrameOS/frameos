@@ -160,7 +160,7 @@ export const ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT: Esp32PinLayout = {
   busy: 18,
   sck: 13,
   mosi: 14,
-  pwr: -1,
+  pwr: 47,
 }
 
 export const ESP32_SEEED_RETERMINAL_E10XX_PIN_LAYOUT: Esp32PinLayout = {
@@ -285,7 +285,20 @@ export const ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
   det: 15,
 }
 
+// The reTerminal Sticky's socket, on its panel's SCK13/MOSI14 with MISO on
+// GPIO12, CS on GPIO8, a power switch on GPIO10 and the card-detect contact
+// on GPIO11 (SPI mode only). Mirrors EMBEDDED_SEEED_STICKY_SD_CARD_PINS.
+export const ESP32_SEEED_STICKY_SD_CARD_PIN_LAYOUT: Esp32SdCardPinLayout = {
+  cs: 8,
+  sck: 13,
+  miso: 12,
+  mosi: 14,
+  pwr: 10,
+  det: 11,
+}
+
 export const ESP32_SEEED_RETERMINAL_SD_CARD_PRESETS = [
+  'seeed_reterminal_sticky',
   'seeed_reterminal_e1001',
   'seeed_reterminal_e1002',
   'seeed_reterminal_e1004',
@@ -395,6 +408,13 @@ export const ESP32_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardware
     flashSize: '32MB',
     psramMB: 8,
     pins: ESP32_SEEED_RETERMINAL_STICKY_PIN_LAYOUT,
+    sdCardAssets: {
+      enabled: true,
+      preset: 'seeed_reterminal_sticky',
+      pins: ESP32_SEEED_STICKY_SD_CARD_PIN_LAYOUT,
+      maxFrequencyKHz: 20000,
+      mountPath: '/srv/assets',
+    },
   },
   seeed_reterminal_e1001: {
     label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)',
@@ -604,8 +624,13 @@ export function esp32SdCardPresetValue(
   if (config.preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
     return ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
   }
+  // The Sticky's socket is its own; the three E-series share one.
+  if (config.preset === 'seeed_reterminal_sticky') {
+    return 'seeed_reterminal_sticky'
+  }
+  const eSeriesPreset = seeedPreset === 'seeed_reterminal_sticky' ? 'seeed_reterminal_e1002' : seeedPreset
   if (isSeeedReterminalSdCardPreset(config.preset)) {
-    return seeedPreset
+    return eSeriesPreset
   }
   if (esp32SdCardPinLayoutsEqual(config.pins, ESP32_PHOTOPAINTER_SD_CARD_PIN_LAYOUT)) {
     return 'waveshare_esp32_s3_photopainter'
@@ -613,8 +638,11 @@ export function esp32SdCardPresetValue(
   if (esp32SdCardPinLayoutsEqual(config.pins, ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT)) {
     return ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET
   }
+  if (esp32SdCardPinLayoutsEqual(config.pins, ESP32_SEEED_STICKY_SD_CARD_PIN_LAYOUT)) {
+    return 'seeed_reterminal_sticky'
+  }
   if (esp32SdCardPinLayoutsEqual(config.pins, ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT)) {
-    return seeedPreset
+    return eSeriesPreset
   }
   return 'custom'
 }
@@ -625,6 +653,9 @@ export function esp32SdCardPinsForPreset(preset: string): Esp32SdCardPinLayout {
   }
   if (preset === ESP32_WAVESHARE_13IN3E6_HARDWARE_PRESET) {
     return { ...ESP32_WAVESHARE_13IN3E6_SD_CARD_PIN_LAYOUT }
+  }
+  if (preset === 'seeed_reterminal_sticky') {
+    return { ...ESP32_SEEED_STICKY_SD_CARD_PIN_LAYOUT }
   }
   if (isSeeedReterminalSdCardPreset(preset)) {
     return { ...ESP32_SEEED_RETERMINAL_SD_CARD_PIN_LAYOUT }

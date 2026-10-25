@@ -34,6 +34,9 @@
 #include "fos_battery.h"
 #include "fos_board.h"
 #include "fos_charger.h"
+#include "fos_codec.h"
+#include "fos_gauge.h"
+#include "fos_touch.h"
 #include "fos_client.h"
 #include "fos_i2c.h"
 #include "fos_rtc.h"
@@ -804,10 +807,18 @@ char *fos_http_status_json(void)
     int battery_mv = 0, battery_pct = -1; /* one sample for both fields */
     bool battery_present = fos_battery_present();
     if (battery_present) fos_battery_read(&battery_mv, &battery_pct);
-    /* The charger's word on the input, when the board has one to ask. */
+    /* The charger's word on the input, when the board has one to ask — or
+     * the fuel gauge's (fos_gauge.c). */
     fos_charger_status_t charger = {0};
     bool charger_present = fos_charger_present() && fos_charger_read(&charger) == ESP_OK;
-    char i2c_summary[128];
+    fos_gauge_status_t gauge;
+    if (!charger_present && fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK && gauge.present) {
+        charger.usb_power = !gauge.discharging;
+        charger.charging = gauge.charging;
+        charger.charge_done = gauge.full;
+        charger_present = true;
+    }
+    char i2c_summary[160];
     fos_i2c_summary(i2c_summary, sizeof(i2c_summary));
     char *i2c_json = json_escape_dup(i2c_summary);
     fos_storage_info_t storage;
@@ -867,7 +878,8 @@ char *fos_http_status_json(void)
         "\"pin\":%d,\"divider\":%.3f,\"enablePin\":%d},"
         "\"charger\":{\"present\":%s,\"usbPower\":%s,\"charging\":%s,\"chargeDone\":%s},"
         "\"led\":{\"pin\":%d,\"type\":\"%s\"},"
-        "\"i2c\":{\"buses\":\"%s\",\"rtc\":%s,\"rtcTimeLoaded\":%s,\"climateSensor\":%s},"
+        "\"i2c\":{\"buses\":\"%s\",\"rtc\":%s,\"rtcTimeLoaded\":%s,\"climateSensor\":%s,"
+        "\"gauge\":%s,\"touch\":%s,\"codecMic\":%s,\"codecSpeaker\":%s},"
         "\"render\":{\"count\":%lu,\"lastMs\":%lld,\"previewReady\":%s,\"previewRenderCount\":%lu,"
         "\"previewWidth\":%d,\"previewHeight\":%d,\"previewFormat\":%d,\"previewBytes\":%u,"
         "\"lastRefreshSkipped\":%s,\"snapshotMode\":\"%s\","
@@ -909,6 +921,8 @@ char *fos_http_status_json(void)
         (int)config->led_pin, fos_config_led_type_name(config->led_type),
         i2c_json ? i2c_json : "", fos_rtc_present() ? "true" : "false",
         fos_rtc_time_loaded() ? "true" : "false", fos_i2c_present(FOS_I2C_SHT4X) ? "true" : "false",
+        fos_gauge_present() ? "true" : "false", fos_touch_present() ? "true" : "false",
+        fos_codec_has_mic() ? "true" : "false", fos_codec_has_speaker() ? "true" : "false",
         (unsigned long)render_count, render_ms, preview_ready ? "true" : "false",
         (unsigned long)preview_render_count,
         preview_width, preview_height, (int)preview_format, (unsigned)preview_len,

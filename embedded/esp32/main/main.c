@@ -34,6 +34,8 @@
 #include "fos_i2c.h"
 #include "fos_led.h"
 #include "fos_rtc.h"
+#include "fos_codec.h"
+#include "fos_touch.h"
 #include "fos_voice.h"
 #include "fos_client.h"
 #include "fos_cloud.h"
@@ -187,6 +189,10 @@ void app_main(void)
      * sleep: the chip kept it), the climate sensor. A few milliseconds. */
     fos_i2c_init();
     if (esp_reset_reason() != ESP_RST_DEEPSLEEP) fos_rtc_load_time();
+    /* The audio codec of the Waveshare boards (fos_codec.c), once the chips
+     * have answered on the bus: the speaker the buzzer's notes play on and
+     * the microphone the voice chat listens with. */
+    fos_codec_init();
 
     fos_battery_init(config->battery_pin, config->battery_divider, config->battery_enable_pin);
     if (fos_battery_present()) {
@@ -236,6 +242,11 @@ void app_main(void)
      * my assets empty?" has no remote answer. */
     BOOTMEM("after-display");
     FOS_MEM_LOG_MILESTONE(TAG, "after-display");
+    /* The touch panel (fos_touch.c), after the display: the panel's size
+     * decides which way the controller's axes run. Absent on most boards. */
+    if (fos_touch_start() == ESP_ERR_NOT_FOUND && config->touch_pins.sda >= 0) {
+        ESP_LOGW(TAG, "touch panel configured but not found");
+    }
     if (fos_assets_sd_mount(config) != ESP_OK) {
         ESP_LOGW(TAG, "SD assets unavailable, continuing without %s: %s",
                  config->assets_path[0] ? config->assets_path : "/srv/assets",

@@ -26,6 +26,8 @@
 #include "fos_backend_http.h"
 #include "fos_battery.h"
 #include "fos_buttons.h"
+#include "fos_gauge.h"
+#include "fos_touch.h"
 #include "fos_charger.h"
 #include "fos_rtc.h"
 #include "fos_cloud.h"
@@ -276,6 +278,16 @@ static void log_metrics_sample(void)
      * or not. It also decides onBattery below, as it does the deep sleep. */
     fos_charger_status_t charger;
     bool charger_known = fos_charger_present() && fos_charger_read(&charger) == ESP_OK;
+    /* Or the fuel gauge's (the Sticky, fos_gauge.c): current flowing in is
+     * an input, discharging is the cell on its own. */
+    fos_gauge_status_t gauge;
+    if (!charger_known && fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK && gauge.present) {
+        memset(&charger, 0, sizeof(charger));
+        charger.usb_power = !gauge.discharging;
+        charger.charging = gauge.charging;
+        charger.charge_done = gauge.full;
+        charger_known = true;
+    }
     if (battery_pct >= 0 && used < sizeof(json) - 128) {
         /* onBattery is the same test the deep-sleep decision uses — the
          * charger's "no input", or without one, "a cell is present" — so a
@@ -1820,6 +1832,7 @@ static void client_task(void *arg)
             fos_scenes_apply_pending();
             fos_scenes_apply_pending_selection();
             fos_buttons_process_events();
+            fos_touch_process_events();
             /* A press that dispatched `setCurrentScene` (a scene's next/prev
              * button) only queued the switch. Apply it now, so this pass
              * renders the scene it asked for: after a button wake the frame
@@ -1892,6 +1905,14 @@ static void client_task(void *arg)
          * not on battery, whatever the divider reads of a charging cell. */
         fos_charger_status_t charger;
         bool charger_known = fos_charger_present() && fos_charger_read(&charger) == ESP_OK;
+        fos_gauge_status_t gauge;
+        if (!charger_known && fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK && gauge.present) {
+            memset(&charger, 0, sizeof(charger));
+            charger.usb_power = !gauge.discharging;
+            charger.charging = gauge.charging;
+            charger.charge_done = gauge.full;
+            charger_known = true;
+        }
         fos_power_input_t power_in = {
             .mv = battery_mv,
             .deep_sleep = config->deep_sleep,
@@ -2066,8 +2087,10 @@ static void client_task(void *arg)
             while (fos_buttons_busy() && esp_timer_get_time() - settle_start_us < 10 * 1000000LL) {
                 vTaskDelay(pdMS_TO_TICKS(20));
                 fos_buttons_process_events();
+                fos_touch_process_events();
             }
             fos_buttons_process_events();
+            fos_touch_process_events();
             if (frameos_nim_render_requested()) {
                 force_render = true;
                 continue;
@@ -2075,7 +2098,7 @@ static void client_task(void *arg)
         }
         uint32_t keep_awake_s = keep_awake_remaining_seconds();
         bool button_pending = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available() &&
-                              fos_buttons_pending();
+                              (fos_buttons_pending() || fos_touch_pending());
         if (deep_sleep_now && fos_display_present() && config->render_mode == FOS_RENDER_LOCAL &&
             frameos_nim_available() && !render_held() &&
             (fos_scenes_work_pending() || fos_events_deferred_pending() || button_pending)) {
@@ -2253,6 +2276,7 @@ static void client_task(void *arg)
             if (waited_ms < slice) slice = waited_ms;
             if (nim) {
                 fos_buttons_process_events();
+                fos_touch_process_events();
                 /* Wall-clock schedule (setCurrentScene at 07:00 etc.) —
                  * evaluated on the render task, like every Nim call. */
                 if (fos_schedule_tick()) want_render = true;

@@ -24,6 +24,7 @@
 #include "fos_config.h"
 #include "fos_events.h"
 #include "fos_events_gen.h"
+#include "fos_touch.h"
 #include "fos_voice.h"
 #include "fos_voice_binding.h"
 #include "fos_voice_hold.h"
@@ -546,6 +547,18 @@ void fos_buttons_wake_boot(void)
 #if SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP
     if (cause == ESP_SLEEP_WAKEUP_GPIO) status = esp_sleep_get_gpio_wakeup_status();
 #endif
+    /* The touch panel's line (fos_touch.c, an ext0 wake): a wake like a
+     * key's, so the first pass renders; the finger itself reaches the scene
+     * through the touch task once it has read the controller. */
+    if (status == 0 && fos_touch_woke_chip()) {
+        /* The touch task is not up yet (fos_touch_start runs after the
+         * display), so the pin is the config's, not the driver's. */
+        s_wake_pin = fos_config()->touch_pins.irq;
+        strlcpy(s_wake_label, "TOUCH", sizeof(s_wake_label));
+        s_wake_mask = s_wake_pin >= 0 ? 1ULL << s_wake_pin : 0;
+        printf("woke from deep sleep: touch (GPIO %d)\n", s_wake_pin);
+        return;
+    }
     if (status == 0) return;
     s_wake_mask = status;
 
@@ -601,6 +614,11 @@ bool fos_buttons_woke_by_button(int *pin, char *label, size_t label_len)
 esp_err_t fos_buttons_arm_wake(uint64_t *armed_mask)
 {
     if (armed_mask) *armed_mask = 0;
+    /* The touch panel first (its own ext0 line; ESP_OK without one), so a
+     * frame with a glass and no keys still wakes to a finger. */
+    if (fos_touch_arm_wake() == ESP_OK && fos_touch_wake_pin() >= 0 && armed_mask) {
+        *armed_mask |= 1ULL << fos_touch_wake_pin();
+    }
     fos_config_t *config = fos_config();
     int pins[FOS_GPIO_BUTTONS_MAX];
     size_t count = 0;
@@ -654,6 +672,6 @@ esp_err_t fos_buttons_arm_wake(uint64_t *armed_mask)
         ESP_LOGW(TAG, "arming button wake failed: %s", esp_err_to_name(err));
         return err;
     }
-    if (armed_mask) *armed_mask = mask;
+    if (armed_mask) *armed_mask |= mask;
     return ESP_OK;
 }

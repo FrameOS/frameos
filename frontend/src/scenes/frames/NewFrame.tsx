@@ -284,6 +284,18 @@ const SEEED_RETERMINAL_VOICE_EVENT_MAP: EventMapRule[] = [
   ...SEEED_RETERMINAL_EVENT_MAP,
   { event: 'button', match: { label: 'REFRESH', action: 'longPress' }, emit: 'voiceChat', as: {} },
 ]
+// The reTerminal Sticky's three keys: UP and DOWN held walk the scene list,
+// the AI key held talks. Mirrors EMBEDDED_SEEED_STICKY_EVENT_MAP and fos_board.c.
+const SEEED_STICKY_EVENT_MAP: EventMapRule[] = [
+  { event: 'button', match: { label: 'UP', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
+  { event: 'button', match: { label: 'DOWN', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
+  { event: 'button', match: { label: 'AI', action: 'longPress' }, emit: 'voiceChat', as: {} },
+]
+// The Waveshare boards with a codec microphone (fos_codec.c): their one user
+// key held talks. Mirrors the backend's _one_key_voice_event_map and fos_board.c.
+const oneKeyVoiceEventMap = (label: string): EventMapRule[] => [
+  { event: 'button', match: { label, action: 'longPress' }, emit: 'voiceChat', as: {} },
+]
 const WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS: GPIOButton[] = [
   { pin: 0, label: 'BOOT' },
   { pin: 4, label: 'KEY1' },
@@ -376,7 +388,15 @@ const SEEED_RETERMINAL_STICKY_PINS: NonNullable<NonNullable<NewFrameFormType['de
   busy: 18,
   sck: 13,
   mosi: 14,
-  pwr: -1,
+  pwr: 47,
+}
+// The Sticky's TF socket on the panel's bus (EMBEDDED_SEEED_STICKY_SD_CARD_PINS).
+const SEEED_STICKY_SD_CARD_ASSETS: NonNullable<NonNullable<NewFrameFormType['device_config']>['sdCardAssets']> = {
+  enabled: true,
+  preset: 'seeed_reterminal_sticky',
+  mountPath: '/srv/assets',
+  pins: { cs: 8, sck: 13, miso: 12, mosi: 14, pwr: 10, det: 11 },
+  maxFrequencyKHz: 20000,
 }
 const SEEED_RETERMINAL_E10XX_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: 12,
@@ -453,6 +473,7 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     psramMB: 8,
     pins: WAVESHARE_PHOTOPAINTER_PINS,
     gpioButtons: WAVESHARE_PHOTOPAINTER_GPIO_BUTTONS,
+    eventMap: oneKeyVoiceEventMap('KEY1'),
     sdCardAssets: WAVESHARE_PHOTOPAINTER_SD_CARD_ASSETS,
   },
   [WAVESHARE_13IN3E6_HARDWARE_PRESET]: {
@@ -462,7 +483,9 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '32MB',
     psramMB: 16,
     pins: WAVESHARE_13IN3E6_PINS,
-    gpioButtons: [],
+    // BOOT and Reset only: BOOT (GPIO0) is a key once booted.
+    gpioButtons: [{ pin: 0, label: 'BOOT' }],
+    eventMap: oneKeyVoiceEventMap('BOOT'),
     sdCardAssets: WAVESHARE_13IN3E6_SD_CARD_ASSETS,
   },
   trmnl_og: {
@@ -532,7 +555,13 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     flashSize: '32MB',
     psramMB: 8,
     pins: SEEED_RETERMINAL_STICKY_PINS,
-    gpioButtons: [{ pin: 4, label: 'POWER' }],
+    gpioButtons: [
+      { pin: 4, label: 'AI' },
+      { pin: 5, label: 'UP' },
+      { pin: 6, label: 'DOWN' },
+    ],
+    eventMap: SEEED_STICKY_EVENT_MAP,
+    sdCardAssets: SEEED_STICKY_SD_CARD_ASSETS,
   },
   seeed_reterminal_e1001: {
     label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)',

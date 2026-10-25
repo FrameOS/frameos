@@ -2,11 +2,13 @@
  * The board's I2C peripheral buses and the chips FrameOS knows on them.
  *
  * A board preset (or `set i2c_buses sda=19,scl=20;sda=39,scl=40`) names up to
- * two buses; at boot each is probed for the three chips the reTerminal
- * E-series carry — a PCF8563 real-time clock at 0x51 (fos_rtc.c), a
- * Sensirion SHT4x climate sensor at 0x44 and a Silergy SY6974B charger at
- * 0x6b (fos_charger.c, a BQ2560x-compatible register map) — and what answers
- * is used. The console's `i2c` command prints the result and probes again.
+ * two buses; at boot each is probed for the chips FrameOS knows — the
+ * reTerminal E-series' PCF8563 real-time clock at 0x51 (fos_rtc.c),
+ * Sensirion SHT4x climate sensor at 0x44 and Silergy SY6974B charger at 0x6b
+ * (fos_charger.c, a BQ2560x-compatible register map), the reTerminal
+ * Sticky's TI BQ27220 fuel gauge at 0x55 (fos_gauge.c) and LSM6DS3TR-C IMU
+ * at 0x6a, the Waveshare boards' ES8311 DAC at 0x18 and ES7210 ADC at 0x40
+ * (fos_codec.c) — and what answers is used. The console's `i2c` command prints the result and probes again.
  *
  * One mutex for every transaction: the render task (the power decision), the
  * HTTP server (/status), the console and the cloud client all read.
@@ -23,6 +25,10 @@ typedef enum {
     FOS_I2C_PCF8563 = 0, /* real-time clock, 0x51 */
     FOS_I2C_SHT4X = 1,   /* temperature / humidity, 0x44 */
     FOS_I2C_SY6974B = 2, /* battery charger, 0x6b */
+    FOS_I2C_BQ27220 = 3, /* battery fuel gauge, 0x55 (fos_gauge.c; the reTerminal Sticky) */
+    FOS_I2C_LSM6DS3 = 4, /* six-axis IMU, 0x6a (the Sticky; presence only) */
+    FOS_I2C_ES8311 = 5,  /* audio DAC, 0x18 (fos_codec.c; the Waveshare PhotoPainter and 13.3E6) */
+    FOS_I2C_ES7210 = 6,  /* audio ADC, 0x40 (fos_codec.c; the same two) */
     FOS_I2C_CHIP_COUNT
 } fos_i2c_chip_t;
 

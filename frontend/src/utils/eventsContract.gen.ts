@@ -247,7 +247,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "none",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     },
     "since": "2026.9.23"
@@ -271,7 +271,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "none",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     },
     "since": "2026.9.23"
@@ -295,7 +295,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "none",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     },
     "since": "2026.9.23"
@@ -319,7 +319,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "none",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     },
     "since": "2026.9.23"
@@ -416,7 +416,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "none",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     },
     "since": "2026.9.23"
@@ -441,7 +441,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "none",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     },
     "since": "2026.9.23"
@@ -466,7 +466,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "none",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     },
     "since": "2026.9.23"
@@ -491,7 +491,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "none",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     },
     "since": "2026.9.23"

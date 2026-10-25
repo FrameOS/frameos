@@ -17,6 +17,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <string.h>
 #include <strings.h>
 
@@ -154,6 +155,89 @@ esp_err_t fos_config_parse_mic_pins(const char *spec, fos_mic_pins_t *mic_pins)
 void fos_config_format_mic_pins(const fos_mic_pins_t *mic_pins, char *out, size_t out_len)
 {
     snprintf(out, out_len, "clk=%d,data=%d,pwr=%d", mic_pins->clk, mic_pins->data, mic_pins->pwr);
+}
+
+/* One `name=gpio,...` spec onto a struct of int8_t slots: the shape every
+ * peripheral spec here has (the touch panel, the codec). A name the table
+ * does not know, a missing `=` or a value outside -1..48 refuses the whole
+ * spec and leaves the struct untouched; a name left out keeps its slot. */
+typedef struct {
+    const char *name;
+    size_t offset;
+} fos_pin_slot_t;
+
+static esp_err_t parse_pin_slots(const char *spec, const fos_pin_slot_t *slots, size_t slot_count,
+                                 void *target, size_t target_len)
+{
+    char buf[FOS_STR_LEN];
+    copy_bounded_cfg(buf, spec, sizeof(buf));
+    uint8_t scratch[16];
+    if (target_len > sizeof(scratch)) return ESP_ERR_INVALID_ARG;
+    memcpy(scratch, target, target_len);
+    char *save = NULL;
+    for (char *tok = strtok_r(buf, ", ", &save); tok; tok = strtok_r(NULL, ", ", &save)) {
+        char *eq = strchr(tok, '=');
+        if (!eq) return ESP_ERR_INVALID_ARG;
+        *eq = '\0';
+        int value = atoi(eq + 1);
+        if (value < -1 || value > 48) return ESP_ERR_INVALID_ARG;
+        size_t i = 0;
+        for (; i < slot_count; i++) {
+            if (strcmp(tok, slots[i].name) == 0) break;
+        }
+        if (i == slot_count) return ESP_ERR_INVALID_ARG;
+        scratch[slots[i].offset] = (uint8_t)(int8_t)value;
+    }
+    memcpy(target, scratch, target_len);
+    return ESP_OK;
+}
+
+static void format_pin_slots(const fos_pin_slot_t *slots, size_t slot_count, const void *source,
+                             char *out, size_t out_len)
+{
+    if (out_len == 0) return;
+    out[0] = '\0';
+    size_t used = 0;
+    for (size_t i = 0; i < slot_count; i++) {
+        int value = (int8_t)((const uint8_t *)source)[slots[i].offset];
+        int n = snprintf(out + used, out_len - used, "%s%s=%d", i ? "," : "", slots[i].name, value);
+        if (n < 0 || (size_t)n >= out_len - used) return;
+        used += (size_t)n;
+    }
+}
+
+static const fos_pin_slot_t k_touch_slots[] = {
+    {"sda", offsetof(fos_touch_pins_t, sda)}, {"scl", offsetof(fos_touch_pins_t, scl)},
+    {"int", offsetof(fos_touch_pins_t, irq)}, {"rst", offsetof(fos_touch_pins_t, rst)},
+    {"en", offsetof(fos_touch_pins_t, en)},
+};
+
+esp_err_t fos_config_parse_touch_pins(const char *spec, fos_touch_pins_t *touch_pins)
+{
+    return parse_pin_slots(spec, k_touch_slots, sizeof(k_touch_slots) / sizeof(k_touch_slots[0]), touch_pins,
+                           sizeof(*touch_pins));
+}
+
+void fos_config_format_touch_pins(const fos_touch_pins_t *touch_pins, char *out, size_t out_len)
+{
+    format_pin_slots(k_touch_slots, sizeof(k_touch_slots) / sizeof(k_touch_slots[0]), touch_pins, out, out_len);
+}
+
+static const fos_pin_slot_t k_codec_slots[] = {
+    {"mclk", offsetof(fos_codec_pins_t, mclk)}, {"bclk", offsetof(fos_codec_pins_t, bclk)},
+    {"ws", offsetof(fos_codec_pins_t, ws)},     {"din", offsetof(fos_codec_pins_t, din)},
+    {"dout", offsetof(fos_codec_pins_t, dout)}, {"pa", offsetof(fos_codec_pins_t, pa)},
+};
+
+esp_err_t fos_config_parse_codec_pins(const char *spec, fos_codec_pins_t *codec_pins)
+{
+    return parse_pin_slots(spec, k_codec_slots, sizeof(k_codec_slots) / sizeof(k_codec_slots[0]), codec_pins,
+                           sizeof(*codec_pins));
+}
+
+void fos_config_format_codec_pins(const fos_codec_pins_t *codec_pins, char *out, size_t out_len)
+{
+    format_pin_slots(k_codec_slots, sizeof(k_codec_slots) / sizeof(k_codec_slots[0]), codec_pins, out, out_len);
 }
 
 esp_err_t fos_config_parse_i2c_buses(const char *spec, fos_i2c_bus_t *buses, uint8_t *count)

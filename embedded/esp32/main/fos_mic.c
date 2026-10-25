@@ -8,9 +8,14 @@
 
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 #include "soc/soc_caps.h"
 
+#include "fos_codec.h"
 #include "fos_config.h"
+#if CONFIG_IDF_TARGET_ESP32S3
+#include "hal/usb_serial_jtag_ll.h"
+#endif
 
 /* The S3's I2S0 decodes PDM into PCM in hardware (SOC_I2S_SUPPORTS_PDM2PCM).
  * ESP-IDF's I2S driver does the same job in ~14 KB of flash (i2s_common,
@@ -42,6 +47,9 @@ static const char *TAG = "fos_mic";
 
 static bool s_active = false;
 static int s_pwr_pin = -1;
+/* Which receiver this session runs on: the PDM one of the Seeed boards, or
+ * the Waveshare boards' codec (fos_codec.c), which owns the I2S clocks. */
+static bool s_codec = false;
 
 /* The load switch and the microphone's own start-up: the MSM261 is specified
  * to settle within tens of milliseconds of power and clock; the session
@@ -101,10 +109,15 @@ static void release_hw(void)
         gdma_del_channel(s_dma);
         s_dma = NULL;
     }
-    PERIPH_RCC_ATOMIC() {
-        i2s_ll_rx_disable_clock(MIC_HW);
-        i2s_ll_enable_core_clock(MIC_HW, false);
-        i2s_ll_enable_bus_clock(MIC_I2S_PORT, false);
+    if (s_codec) {
+        /* The codec's clocks are its own to keep (a tone may be playing). */
+        fos_codec_rx_end();
+    } else {
+        PERIPH_RCC_ATOMIC() {
+            i2s_ll_rx_disable_clock(MIC_HW);
+            i2s_ll_enable_core_clock(MIC_HW, false);
+            i2s_ll_enable_bus_clock(MIC_I2S_PORT, false);
+        }
     }
     if (s_clk_pin >= 0) {
         gpio_reset_pin((gpio_num_t)s_clk_pin);
@@ -186,7 +199,16 @@ static void setup_i2s(int clk_pin, int data_pin)
     /* One DMA buffer per EOF. */
     i2s_ll_rx_set_eof_num(hw, MIC_DMA_BUF_BYTES);
     /* The pins: the PDM clock is the RX word select, the data line the RX
-     * data in (i2s_pdm_rx_set_gpio / i2s_gpio_check_and_set). */
+     * data in (i2s_pdm_rx_set_gpio / i2s_gpio_check_and_set). GPIO19/20 are
+     * the S3's native USB pads — the reTerminal Sticky's PDM_CLK/PDM_DATA,
+     * its USB being a CH343 on UART0 — and the ROM leaves the USB-Serial/JTAG
+     * PHY on them; detach it first or the data line reads the PHY, not the
+     * microphone (the same cure as fos_i2c.c's for the E-series' bus). */
+#if CONFIG_IDF_TARGET_ESP32S3
+    if (clk_pin == 19 || clk_pin == 20 || data_pin == 19 || data_pin == 20) {
+        usb_serial_jtag_ll_phy_enable_pad(false);
+    }
+#endif
     gpio_func_sel((gpio_num_t)clk_pin, PIN_FUNC_GPIO);
     esp_rom_gpio_connect_out_signal(clk_pin, I2S0I_WS_OUT_IDX, false, false);
     gpio_func_sel((gpio_num_t)data_pin, PIN_FUNC_GPIO);
@@ -207,7 +229,28 @@ esp_err_t fos_mic_start(int clk_pin, int data_pin, int pwr_pin)
     return ESP_ERR_NOT_SUPPORTED;
 #else
     if (s_active) return ESP_ERR_INVALID_STATE;
-    if (clk_pin < 0 || data_pin < 0) return ESP_ERR_INVALID_ARG;
+    /* No PDM pins: the codec's microphone, when the board has one. */
+    if (clk_pin < 0 || data_pin < 0) {
+        if (!fos_codec_has_mic()) return ESP_ERR_INVALID_ARG;
+        s_codec = true;
+        s_pwr_pin = -1;
+        esp_err_t err = fos_codec_rx_begin(MIC_DMA_BUF_BYTES);
+        if (err == ESP_OK) err = setup_dma();
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "codec receiver: %s", esp_err_to_name(err));
+            release_hw();
+            s_codec = false;
+            return err;
+        }
+        i2s_ll_rx_reset(MIC_HW);
+        gdma_reset(s_dma);
+        i2s_ll_rx_reset_fifo(MIC_HW);
+        gdma_start(s_dma, (intptr_t)&s_desc[0]);
+        i2s_ll_rx_start(MIC_HW);
+        s_active = true;
+        return ESP_OK;
+    }
+    s_codec = false;
     const char *why = fos_config_gpio_pin_reserved(clk_pin);
     if (why == NULL) why = fos_config_gpio_pin_reserved(data_pin);
     if (why == NULL && pwr_pin >= 0) why = fos_config_gpio_pin_reserved(pwr_pin);
@@ -296,6 +339,7 @@ void fos_mic_stop(void)
         s_pwr_pin = -1;
     }
     s_active = false;
+    s_codec = false;
 }
 
 bool fos_mic_active(void)

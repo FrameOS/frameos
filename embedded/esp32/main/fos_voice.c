@@ -20,6 +20,7 @@
 #include "fos_cloud.h"
 #include "fos_config.h"
 #include "fos_mem.h"
+#include "fos_codec.h"
 #include "fos_mic.h"
 #include "fos_wifi.h"
 #include "frameos_nim.h"
@@ -611,7 +612,7 @@ void fos_voice_init(void)
 static bool mic_configured(void)
 {
     const fos_config_t *config = fos_config();
-    return config->mic_pins.clk >= 0 && config->mic_pins.data >= 0;
+    return (config->mic_pins.clk >= 0 && config->mic_pins.data >= 0) || fos_codec_has_mic();
 }
 
 bool fos_voice_available(void)

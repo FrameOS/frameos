@@ -60,11 +60,25 @@ describe("which frames have a microphone", () => {
     expect(microphonePinPlaceholder(-1)).toBe("-1");
   });
 
-  it("on a backend frame falls back to the preset: the E1001 and E1002 have one, the E1004 does not", () => {
-    expect([...EMBEDDED_PRESETS_WITH_MICROPHONE]).toEqual(["seeed_reterminal_e1001", "seeed_reterminal_e1002"]);
+  it("on a backend frame falls back to the preset: the Sticky, the E1001 and E1002 have one, the E1004 does not", () => {
+    expect([...EMBEDDED_PRESETS_WITH_MICROPHONE]).toEqual([
+      "seeed_reterminal_sticky",
+      "seeed_reterminal_e1001",
+      "seeed_reterminal_e1002",
+      "waveshare_esp32_s3_photopainter",
+      "waveshare_esp32_s3_epaper_13_3e6",
+    ]);
+    expect(boardMicrophonePins({ hardwarePreset: "seeed_reterminal_sticky" })).toEqual({ clk: 19, data: 20, pwr: 38 });
+    expect(backendFrameHasMicrophone({}, "seeed_reterminal_sticky")).toBe(true);
     expect(backendFrameHasMicrophone({}, "seeed_reterminal_e1001")).toBe(true);
     expect(backendFrameHasMicrophone({}, "seeed_reterminal_e1002")).toBe(true);
     expect(backendFrameHasMicrophone({}, "seeed_reterminal_e1004")).toBe(false);
+    // The Waveshare boards' microphone is their codec's: no PDM pins to
+    // show, and -1 pins do not switch it off.
+    expect(boardMicrophonePins({ hardwarePreset: "waveshare_esp32_s3_photopainter" })).toEqual({ clk: -1, data: -1, pwr: -1 });
+    expect(backendFrameHasMicrophone({}, "waveshare_esp32_s3_photopainter")).toBe(true);
+    expect(backendFrameHasMicrophone({ micClkPin: -1 }, "waveshare_esp32_s3_epaper_13_3e6")).toBe(true);
+    expect(cloudFrameHasMicrophone({ platform: "esp32-s3", hardwarePreset: "waveshare_esp32_s3_photopainter" }, {})).toBe(true);
     expect(backendFrameHasMicrophone(undefined, "custom")).toBe(false);
     // Pins configured on an E1004's J2 header (either spelling) make a microphone.
     expect(backendFrameHasMicrophone({ micClkPin: 42, micDataPin: 41 }, "seeed_reterminal_e1004")).toBe(true);

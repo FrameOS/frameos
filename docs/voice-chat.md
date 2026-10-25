@@ -10,21 +10,28 @@ said**, is transcribed there, and is answered by the AI chat with that frame in
 its context, through a small set of tools that act on the frame: switch to a
 scene by name, set a field of the scene it shows, redraw, show a picture, have
 the scene AI build or change a scene. The reply is spoken
-nowhere (no board in the tree has a speaker FrameOS drives); it is **drawn on
+nowhere (the codec speaker plays tones, not speech); it is **drawn on
 the panel** as a notice across the bottom (what was heard, in quotes, and the
 answer, or the error in plain words), it lands in the frame's chat in the
-workspace and in the frame's log, and the buzzer sounds the outcome. The
+workspace and in the frame's log, and the buzzer (or the Waveshare boards'
+codec speaker, which plays the same notes) sounds the outcome. The
 exchanges are **one conversation per frame** ("The conversation and its log"
 below): the next sentence has the earlier ones, with what was done, to refer
 to, so "make the text bigger" changes the scene the last sentence built.
 
 Boards: the Seeed reTerminal **E1001, E1002 and E1003**, which carry a PDM MEMS
 microphone (MEMSensing MSM261DHP006: clock GPIO42, data GPIO41, power enable
-GPIO38 through a TPS22916 load switch). The **E1004 has no microphone** (its
-schematic has none; GPIO41/42 are the J2 header's UART there), but a PDM
-microphone on J2 pins 41/42 works with the same driver once `mic_pins` names
-it. Only the ESP32 runtime has this: a Pi frame has no key hold and no
-microphone path (yet).
+GPIO38 through a TPS22916 load switch), and the Seeed **reTerminal Sticky**
+(an MSM261DDB020 on clock GPIO19, data GPIO20 — the S3's USB pads, which its
+CH343 UART bridge leaves free — power enable GPIO38; its voice key is the
+**AI** key, GPIO4). The **E1004 has no microphone** (its schematic has none;
+GPIO41/42 are the J2 header's UART there), but a PDM microphone on J2 pins
+41/42 works with the same driver once `mic_pins` names it. The Waveshare
+**PhotoPainter and 13.3E6** have no PDM microphone but an **ES7210 codec
+ADC** on I2S (`codec_pins`, `fos_codec.c`), which the same session reads;
+their voice key is the one user key each has (KEY1, BOOT), and their ES8311
+speaker plays the cues a buzzer would. Only the ESP32 runtime has this: a Pi
+frame has no key hold and no microphone path (yet).
 
 ## On the frame (`embedded/esp32/main`)
 

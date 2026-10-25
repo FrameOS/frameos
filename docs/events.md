@@ -240,7 +240,13 @@ forever: store scenes are versioned and immutable. The editor offers the new
 names.
 
 **Pointer.** `pointerMove {x, y, pointerId, pointerType, buttons}` on every
-motion report (`coalesce: latest`, per pointer). `pointerDown` / `pointerUp`
+motion report (`coalesce: latest`, per pointer). On an ESP32 the pointer is
+a touch panel (the reTerminal Sticky's GT911, `embedded/esp32/main/fos_touch.c`):
+the firmware queues the glass's reports as `pointerDown` / `pointerMove` /
+`pointerUp` on the wire (`pointerType: "touch"`, `pointerId` 1 + the
+controller's track id) and the render task hands them to this dispatcher
+between passes, so a touch made during a render arrives as a tap when the
+runtime is free. `pointerDown` / `pointerUp`
 add `button`: 0 left (and a touch, a pen tip), 1 right, 2 middle, 3 side,
 4 extra, 5 forward, 6 back, 7 task; `buttons` is the mask of what is held
 (`1 << button`). `pointerId` 0 is the one mouse cursor; a finger or a pen
@@ -574,6 +580,8 @@ an event means:
 | When a queued event is delivered | the runner thread's message loop | on the task that sent it, before `frameos_nim_send_event` returns; what a render dispatched, right after the render | before `frameos_wasm_event` returns; right after a render |
 | An event aimed at a scene that is not the current one (`target`) | delivered if that scene is in memory | dropped: one resident scene | dropped |
 | An event before the current scene is built | not a state the runner has: scenes are built when selected | the event builds it (`single_scene_host.send`), so a boot's replayed button press reaches the scene it woke; a scene switch is served without building the scene being left | same as the ESP32 |
+| Input devices | pointers and keyboards (evdev), GPIO buttons | GPIO buttons and a touch panel (`fos_touch.c`); no keyboard, so `keyDown` / `keyUp` / `textInput` / `wheel` have no producer and the keyboard tables are not compiled | the browser's pointer and keyboard |
+| The old pointer names (`mouseMove`, `mouseDown`, `mouseUp`) | delivered to a scene that listens for them | not delivered: the alias tables stay out of the image; a scene for a touch frame listens for `pointerDown` / `tap` | delivered |
 | `close` on `reload` / `uploadScenes` | not sent | not sent | — |
 
 A frame on firmware older than `cloud.since` does not know `scene_event`: the

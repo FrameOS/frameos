@@ -11,6 +11,10 @@
  *
  * An S3 only: the C3's I2S has no PDM-to-PCM filter, and no board with a
  * microphone runs the C3 image. There the calls answer ESP_ERR_NOT_SUPPORTED.
+ *
+ * With no PDM pins (clk / data -1) the session runs on the board's I2S codec
+ * microphone instead, when it has one (fos_codec.c: the ES7210 of the
+ * Waveshare PhotoPainter and 13.3E6): same DMA ring, same PCM out.
  */
 #pragma once
 

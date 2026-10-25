@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "fos_config.h"
+#include "fos_gauge.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -113,7 +114,10 @@ void fos_battery_init(int8_t gpio, float divider, int8_t enable_gpio)
              gpio, (int)s_channel, s_divider, s_cali ? "yes" : "no", (int)enable_gpio);
 }
 
-bool fos_battery_present(void) { return s_present; }
+/* A board whose cell has no divider but a fuel gauge (the reTerminal
+ * Sticky's BQ27220, fos_gauge.c) reads it from the gauge: the same two
+ * numbers, the gauge's own state of charge instead of the voltage curve. */
+bool fos_battery_present(void) { return s_present || fos_gauge_present(); }
 
 /* The believed raw ADC reading with the divider switched on; -1 when no
  * sample came back. Caller holds s_lock.
@@ -188,6 +192,14 @@ static int percent_from_millivolts(int mv)
 void fos_battery_read(int *millivolts, int *percent)
 {
     int mv = 0;
+    if (!s_present && fos_gauge_present()) {
+        fos_gauge_status_t gauge;
+        if (fos_gauge_read(&gauge) == ESP_OK && gauge.present) {
+            if (millivolts) *millivolts = gauge.mv;
+            if (percent) *percent = gauge.pct;
+            return;
+        }
+    }
     if (s_present && s_adc) {
         bool locked = s_lock != NULL && xSemaphoreTake(s_lock, portMAX_DELAY) == pdTRUE;
         mv = millivolts_from_raw(sample_raw_locked());
