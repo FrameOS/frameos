@@ -3,6 +3,7 @@ import { apiFetch } from './apiFetch'
 import type { CloudDeviceScenes, CloudDeviceScenesImportResult } from './cloudDeviceScenes'
 import type { CloudFrameSceneRow } from './cloudFrameScenes'
 import { storeSceneErrorMessage, type StoreErrorDetail } from './storeSceneErrors'
+import type { VoicePermissions } from './voiceChat'
 import {
   allCloudFrameSettingKeys,
   cloudFrameSettingKeys,
@@ -151,6 +152,22 @@ export async function pushCloudFrameSettings(frameId: FrameId, frame: Partial<Fr
     )
   }
   return true
+}
+
+/**
+ * The owner's switches for what the voice chat may do on this frame
+ * (docs/voice-chat.md "What the voice chat may do"). Its own route, like the
+ * schedule: plane-side policy the voice route reads at the next spoken
+ * sentence, so nothing is queued to the device. The whole set is sent; the
+ * route answers it with the defaults filled in.
+ */
+export async function pushCloudFrameVoicePermissions(frameId: FrameId, permissions: VoicePermissions): Promise<void> {
+  const response = await apiFetch(`/api/frames/${frameId}/voice/permissions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(permissions),
+  })
+  await assertOk(response, 'Failed to save what the voice chat may do on this frame')
 }
 
 /**

@@ -44,7 +44,12 @@ import { duplicateScenes } from '../../utils/duplicateScenes'
 import { apiFetch } from '../../utils/apiFetch'
 import { isCloudMode } from '../../utils/cloudMode'
 import { convertSceneWithFeedback, requestSceneConversion } from '../../utils/sceneConvert'
-import { pushCloudFrameSchedule, pushCloudFrameSettings } from '../../utils/cloudFrameApi'
+import {
+  pushCloudFrameSchedule,
+  pushCloudFrameSettings,
+  pushCloudFrameVoicePermissions,
+} from '../../utils/cloudFrameApi'
+import { voicePermissionsOf } from '../../utils/voiceChat'
 import {
   cloudFrameFormDiffKeys,
   esp32PowerSettingKeys,
@@ -2009,6 +2014,24 @@ function cloudScenePersistOptions(frameId: FrameId, fallbackFrame: Partial<Frame
   }
 }
 
+/**
+ * The voice chat's permission switches (docs/voice-chat.md "What the voice
+ * chat may do") ride their own route, like the schedule: pushed only when the
+ * form's set differs from server truth, so a name-only save sends nothing.
+ */
+async function pushCloudFrameVoicePermissionsIfChanged(frameId: FrameId, frame: Partial<FrameType>): Promise<boolean> {
+  const permissions = frame.voice_permissions
+  if (permissions === undefined) {
+    return false
+  }
+  const saved = framesModel.findMounted()?.values.frames?.[frameId]?.voice_permissions
+  if (equal(voicePermissionsOf(permissions), voicePermissionsOf(saved))) {
+    return false
+  }
+  await pushCloudFrameVoicePermissions(frameId, voicePermissionsOf(permissions))
+  return true
+}
+
 async function saveFrameForm(
   frame: Partial<FrameType>,
   frameId: FrameId,
@@ -2035,6 +2058,7 @@ async function saveFrameForm(
     if (schedulePushed && schedule) {
       await pushCloudFrameSchedule(frameId, schedule)
     }
+    const voicePermissionsPushed = await pushCloudFrameVoicePermissionsIfChanged(frameId, normalizedFrame)
     const scenes = normalizedFrame.scenes ?? []
     if (scenes.length > 0) {
       const outcome = await persistAndPushCloudFrameScenes(
@@ -2047,7 +2071,7 @@ async function saveFrameForm(
         clearCloudSceneJsonCache(storeSceneId)
       }
       framesModel.actions.hydrateCloudFrameScenes(frameId, true)
-    } else if (!settingsPushed && !schedulePushed) {
+    } else if (!settingsPushed && !schedulePushed && !voicePermissionsPushed) {
       throw new Error('Nothing in these settings can be pushed to a cloud-managed frame')
     }
     return null
@@ -3609,7 +3633,9 @@ export const frameLogic = kea<frameLogicType>([
     }
     const cloudSaveAndDeploy = async (): Promise<void> => {
       try {
-        await pushCloudFrameSettings(props.frameId, normalizeFrameForSubmit(values.frameForm))
+        const normalized = normalizeFrameForSubmit(values.frameForm)
+        await pushCloudFrameSettings(props.frameId, normalized)
+        await pushCloudFrameVoicePermissionsIfChanged(props.frameId, normalized)
         framesModel.actions.loadFrame(props.frameId)
       } catch (error) {
         // Same surfacing as submitFrameFormFailure: a silent failure looks

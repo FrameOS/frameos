@@ -51,6 +51,17 @@ import {
   type FrameSettingsSurface,
 } from './frameSettingsSurface'
 import { newMountpoint } from './frameSettingsHelpers'
+import {
+  boardMicrophonePins,
+  configuredMicrophonePinsOf,
+  deviceConfigWithVoicePermission,
+  effectiveMicrophonePins,
+  microphonePinsNameOne,
+  voicePermissionsFromDeviceConfig,
+  voicePermissionsOf,
+  type VoicePermissionKey,
+  type VoicePermissions,
+} from '../../../../utils/voiceChat'
 
 export interface FrameSettingsProps {
   className?: string
@@ -147,26 +158,29 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
    * GPIO (docs/voice-chat.md; fos_mic.c), -1 = none, undefined = the board's
    * own. The cloud pushes `mic_clk_pin` / `mic_data_pin` / `mic_pwr_pin`; the
    * backend keeps `micClkPin` / `micDataPin` / `micPwrPin` in device_config
-   * for the device's settings poll. `reported*` is what a cloud frame said
-   * it runs with (`hardware.micClkPin` …); `disabledReason` the cloud
-   * firmware floor (the voice chat's).
+   * for the device's settings poll. `board*` is the board's own pin, what an
+   * empty field means: a cloud frame's reported one (`hardware.micClkPin` …),
+   * else its preset's (E1001/E1002: 42, 41, 38), else -1 (none);
+   * `disabledReason` the cloud firmware floor (the voice chat's).
    */
   microphone: {
     clkPin: number | undefined
     dataPin: number | undefined
     pwrPin: number | undefined
-    reportedClkPin: number | undefined
-    reportedDataPin: number | undefined
-    reportedPwrPin: number | undefined
+    boardClkPin: number
+    boardDataPin: number
+    boardPwrPin: number
     disabledReason: string | undefined
   } | null
   setMicrophonePins: (patch: { clkPin?: number; dataPin?: number; pwrPin?: number }) => void
   /**
-   * ESP32 only, null elsewhere: voice chat, the key hold that opens the
-   * board's microphone (docs/voice-chat.md; which key is Button actions').
-   * `enabled` is the form's
-   * value (undefined = the frame's default, on); `reported` and `microphone`
-   * what a cloud frame said in its hello (`hardware.voiceChat`,
+   * ESP32 with a microphone only, null elsewhere: voice chat, the key hold
+   * that opens the board's microphone (docs/voice-chat.md; which key is
+   * Button actions'). Null on a frame without a microphone (a cloud frame
+   * that reported none and has no pins set, a backend frame whose pins and
+   * preset name none): nothing to switch, so nothing is drawn. `enabled` is
+   * the form's value (undefined = the frame's default, on); `reported` and
+   * `microphone` what a cloud frame said in its hello (`hardware.voiceChat`,
    * `hardware.microphone`); `disabledReason` the cloud firmware floor.
    */
   voiceChat: {
@@ -176,6 +190,16 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
     disabledReason: string | undefined
   } | null
   setVoiceChat: (enabled: boolean) => void
+  /**
+   * What the voice chat may do on this frame (docs/voice-chat.md "What the
+   * voice chat may do"): the owner's three switches, null wherever `voiceChat`
+   * is. Plane-side policy: the cloud form carries `voice_permissions` (its
+   * own route, like the schedule), the backend keeps `voiceChangeSettings` /
+   * `voiceUseScenes` / `voiceCreateScenes` in device_config; the device's
+   * settings poll never carries them.
+   */
+  voicePermissions: VoicePermissions | null
+  setVoicePermission: (key: VoicePermissionKey, enabled: boolean) => void
 
   appsWithSaveAssets: Record<string, string>
   logs: unknown[]
@@ -564,8 +588,23 @@ export function FrameSettingsProvider({
 
   // The PDM microphone's pins (docs/voice-chat.md), on the same two routes as
   // the beep; the cloud floor is the voice chat's (one release). Real ESP32
-  // boards only.
-  const reportedPin = (value: unknown): number | undefined => (typeof value === 'number' ? value : undefined)
+  // boards only. The board's own pins (what an empty field means) are the
+  // cloud frame's reported ones, else its preset's, else -1; a backend
+  // frame's are its preset's. The pins the frame runs with are the configured
+  // ones over those, and name a microphone when clock and data are GPIOs:
+  // one rule for the placeholders, the voice chat controls and the "Voice
+  // chat" button action, so an E1004 (no microphone) shows the pins field
+  // with "-1" and nothing else of the voice chat.
+  const boardMicPins = esp32CloudProfile
+    ? boardMicrophonePins({
+        hardwarePreset: frame.hardware?.hardwarePreset,
+        reported: { clk: frame.hardware?.micClkPin, data: frame.hardware?.micDataPin, pwr: frame.hardware?.micPwrPin },
+      })
+    : boardMicrophonePins({ hardwarePreset: embeddedHardwarePreset })
+  const configuredMicPins = esp32CloudProfile
+    ? { clk: frameForm.mic_clk_pin, data: frameForm.mic_data_pin, pwr: frameForm.mic_pwr_pin }
+    : configuredMicrophonePinsOf(powerDeviceConfig)
+  const hasMicrophone = microphonePinsNameOne(effectiveMicrophonePins(configuredMicPins, boardMicPins))
   const microphoneDisabledReason = cloudFrameSupportsEsp32VoiceChat(frame.frameos_version)
     ? undefined
     : frame.frameos_version
@@ -576,19 +615,19 @@ export function FrameSettingsProvider({
         clkPin: frameForm.mic_clk_pin,
         dataPin: frameForm.mic_data_pin,
         pwrPin: frameForm.mic_pwr_pin,
-        reportedClkPin: reportedPin(frame.hardware?.micClkPin),
-        reportedDataPin: reportedPin(frame.hardware?.micDataPin),
-        reportedPwrPin: reportedPin(frame.hardware?.micPwrPin),
+        boardClkPin: boardMicPins.clk,
+        boardDataPin: boardMicPins.data,
+        boardPwrPin: boardMicPins.pwr,
         disabledReason: microphoneDisabledReason,
       }
     : !cloudProfile && isEmbeddedMode && !isVirtualPlatform && !isPicoPlatform
     ? {
-        clkPin: powerDeviceConfig.micClkPin ?? powerDeviceConfig.mic_clk_pin,
-        dataPin: powerDeviceConfig.micDataPin ?? powerDeviceConfig.mic_data_pin,
-        pwrPin: powerDeviceConfig.micPwrPin ?? powerDeviceConfig.mic_pwr_pin,
-        reportedClkPin: undefined,
-        reportedDataPin: undefined,
-        reportedPwrPin: undefined,
+        clkPin: configuredMicPins.clk,
+        dataPin: configuredMicPins.data,
+        pwrPin: configuredMicPins.pwr,
+        boardClkPin: boardMicPins.clk,
+        boardDataPin: boardMicPins.data,
+        boardPwrPin: boardMicPins.pwr,
         disabledReason: undefined,
       }
     : null
@@ -630,8 +669,14 @@ export function FrameSettingsProvider({
 
   // Voice chat (docs/voice-chat.md), on the same two routes as the beep: the
   // cloud pushes `voice_chat`, the backend keeps `voiceChat` in device_config
-  // for the device's settings poll. Real ESP32 boards only.
-  const voiceChat: FrameSettingsContextValue['voiceChat'] = esp32CloudProfile
+  // for the device's settings poll. Real ESP32 boards only, and only ones
+  // whose effective microphone pins (above) name one; `voice_chat` itself
+  // defaulting to on changes nothing here. The pins field stays on every
+  // board: it is how a microphone on a J2 header is declared, and once it
+  // is, the controls below appear.
+  const voiceChat: FrameSettingsContextValue['voiceChat'] = !hasMicrophone
+    ? null
+    : esp32CloudProfile
     ? {
         enabled: frameForm.voice_chat,
         reported: typeof frame.hardware?.voiceChat === 'boolean' ? frame.hardware.voiceChat : undefined,
@@ -659,6 +704,26 @@ export function FrameSettingsProvider({
     delete next.voice_chat
     next.voiceChat = enabled
     setFrameFormValues({ device_config: next })
+  }
+  // What the voice chat may do (docs/voice-chat.md "What the voice chat may
+  // do"): the cloud form's `voice_permissions` object (saved through its own
+  // route, like the schedule), the backend's three device_config keys.
+  const voicePermissions: FrameSettingsContextValue['voicePermissions'] = !voiceChat
+    ? null
+    : esp32CloudProfile
+    ? voicePermissionsOf(frameForm.voice_permissions ?? frame.voice_permissions)
+    : voicePermissionsFromDeviceConfig(powerDeviceConfig)
+  const setVoicePermission = (key: VoicePermissionKey, enabled: boolean): void => {
+    if (esp32CloudProfile) {
+      setFrameFormValues({
+        voice_permissions: {
+          ...voicePermissionsOf(frameForm.voice_permissions ?? frame.voice_permissions),
+          [key]: enabled,
+        },
+      })
+      return
+    }
+    setFrameFormValues({ device_config: deviceConfigWithVoicePermission(powerDeviceConfig, key, enabled) })
   }
 
   const selectedTimezone = frameForm.timezone ?? frame.timezone ?? ''
@@ -752,6 +817,8 @@ export function FrameSettingsProvider({
     setMicrophonePins,
     voiceChat,
     setVoiceChat,
+    voicePermissions,
+    setVoicePermission,
 
     appsWithSaveAssets,
     logs,

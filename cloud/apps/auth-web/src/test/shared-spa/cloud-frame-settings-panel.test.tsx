@@ -382,6 +382,97 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     expect(screen.queryByText("Default (on for this panel)")).toBeNull();
   });
 
+  it("draws the voice chat switch and what it may do only on a frame with a microphone", () => {
+    // docs/voice-chat.md "What the voice chat may do". An E1004 has no
+    // microphone and reports -1 for every pin: the pins field stays (a PDM
+    // microphone on its J2 header is declared there) and says plainly what
+    // empty means, "-1"; the switch and the permission switches are not
+    // drawn, and Button actions does not offer Voice chat.
+    const pinPlaceholders = () =>
+      [...document.querySelectorAll<HTMLInputElement>("input[placeholder]")]
+        .map((input) => input.placeholder)
+        .filter((placeholder) => placeholder === "-1" || placeholder.endsWith("(board default)"));
+    renderPanel(
+      cloudFrame("esp32-s3", "2026.10.20", "EPD_13in3e", {
+        hardwarePreset: "seeed_reterminal_e1004",
+        micClkPin: -1,
+        micDataPin: -1,
+        micPwrPin: -1,
+        microphone: false,
+        voiceChat: true,
+      }),
+    );
+    expect(screen.queryByText("Microphone GPIO")).toBeTruthy();
+    expect(pinPlaceholders()).toEqual(["-1", "-1", "-1"]);
+    expect(screen.queryByText("Voice chat")).toBeNull();
+    expect(screen.queryByText("Voice chat may")).toBeNull();
+    expect(renderedFieldNames()).not.toContain("voice_create_scenes");
+    cleanup();
+
+    // Older firmware reports no pins at all: an E1004's preset has none, so
+    // the same; an E1002's preset has them, so the controls are drawn (and
+    // disabled below the firmware floor) with the preset's pins spelled out.
+    renderPanel(cloudFrame("esp32-s3", "2026.10.19", "EPD_13in3e", { hardwarePreset: "seeed_reterminal_e1004" }));
+    expect(pinPlaceholders()).toEqual(["-1", "-1", "-1"]);
+    expect(screen.queryByText("Voice chat may")).toBeNull();
+    cleanup();
+    renderPanel(cloudFrame("esp32-s3", "2026.10.19", "EPD_7in3e", { hardwarePreset: "seeed_reterminal_e1002" }));
+    expect(pinPlaceholders()).toEqual(["42 (board default)", "41 (board default)", "38 (board default)"]);
+    expect(screen.queryByText("Voice chat may")).toBeTruthy();
+    expect(document.querySelector('button[name="voice_use_scenes"]')?.matches(":disabled")).toBe(true);
+    cleanup();
+
+    // An E1002 whose clock was set to -1 on its console has no microphone any more.
+    renderPanel(
+      cloudFrame("esp32-s3", "2026.10.20", "EPD_7in3e", {
+        hardwarePreset: "seeed_reterminal_e1002",
+        micClkPin: -1,
+        micDataPin: 41,
+        micPwrPin: 38,
+        microphone: false,
+      }),
+    );
+    expect(pinPlaceholders()).toEqual(["-1", "41 (board default)", "38 (board default)"]);
+    expect(screen.queryByText("Voice chat may")).toBeNull();
+    cleanup();
+
+    // An E1002 reports its pins: the switch, and the switches as the frame
+    // row has them (the defaults filled in by the cloud).
+    const frame = cloudFrame("esp32-s3", "2026.10.20", "EPD_7in3e", {
+      hardwarePreset: "seeed_reterminal_e1002",
+      micClkPin: 42,
+      micDataPin: 41,
+      micPwrPin: 38,
+      microphone: true,
+      voiceChat: true,
+    });
+    renderPanel({
+      ...frame,
+      voice_permissions: { change_settings: true, create_scenes: false, use_albums: true, use_scenes: false },
+    });
+    expect(pinPlaceholders()).toEqual(["42 (board default)", "41 (board default)", "38 (board default)"]);
+    expect(screen.getAllByText("Voice chat").length).toBeGreaterThan(0);
+    expect(screen.getByText("Voice chat may")).toBeTruthy();
+    expect(renderedFieldNames()).toEqual(
+      expect.arrayContaining(["voice_change_settings", "voice_use_scenes", "voice_create_scenes", "voice_use_albums"]),
+    );
+    expect(
+      screen.getAllByText("On: a spoken request can list your photo albums and play one on the frame").length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText("On: a spoken request can rotate the frame").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Off: the installed scenes are left alone").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Off: only the scenes already on the frame").length).toBeGreaterThan(0);
+    // A flip edits the form's `voice_permissions` (its own route on save), not a device key.
+    fireEvent.click(document.querySelector('button[name="voice_create_scenes"]')!);
+    expect(screen.getAllByText("On: a spoken request can put a new scene on the frame, such as a picture").length).toBeGreaterThan(0);
+    expect(frameLogic({ frameId: frame.id }).values.frameForm.voice_permissions).toEqual({
+      change_settings: true,
+      create_scenes: true,
+      use_albums: true,
+      use_scenes: false,
+    });
+  });
+
   it("shows the button map the frame reported, and edits start from it", () => {
     // A reTerminal E1004 provisioned over USB runs the three keys its
     // `set hardware` bundle gave it; the cloud never pushed a list, so the

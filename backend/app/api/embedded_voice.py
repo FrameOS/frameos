@@ -8,14 +8,17 @@ process's memory until then (app/utils/voice_chat.py VoiceSessionStore). The
 closing request answers when the turn is over: the transcript, the reply and
 the tools that ran, or `{"ok": false, "error": …}` for what the frame should
 sound as an error. The frame's bearer is its `server_api_key`, as on every
-other `/embedded` route; the tools the turn gets are the four a frame may
-drive (VoiceTools), never the account's MCP tools.
+other `/embedded` route; the tools the turn gets are the six a frame may
+drive (VoiceTools), narrowed by the owner's three permission switches in the
+frame's device_config (VoicePermissions), never the account's MCP tools.
 
 The cloud's twin is cloud/apps/auth-web/app/api/frames/[frameId]/voice/[sessionId]/route.ts."""
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import secrets
 from datetime import datetime, timedelta
 from http import HTTPStatus
 from typing import Any
@@ -31,18 +34,22 @@ from app.database import get_db
 from app.models.chat import Chat, ChatMessage, find_project_chat, project_chat_id
 from app.models.frame import Frame
 from app.models.log import new_log
+from app.models.photo_share import PhotoShare
 from app.models.settings import get_settings_dict
 from app.redis import get_redis
 from app.models.frame import update_frame
 from app.utils.ai_scene import CHAT_MODEL, openai_model
 from app.utils.embedded_commands import nudge_embedded_frame, queue_embedded_command, queue_embedded_scene_preview
+from app.utils import photos
 from app.utils.frame_commands import enqueue_frame_command
+from app.utils.photo_album_scene import DEFAULT_SECONDS, build_photo_album_scene
 from app.utils.rate_limit import hit_rate_limit
 from app.utils.upload_limits import read_body_limited
 from app.utils.voice_chat import (
     VOICE_BYTES_PER_SECOND,
     VOICE_MAX_CHUNK_BYTES,
     VOICE_SESSIONS_PER_FRAME_PER_15_MIN,
+    VoicePermissions,
     VoiceSessionStore,
     VoiceTools,
     VoiceTurnResult,
@@ -200,7 +207,79 @@ async def api_embedded_device_voice(
         nudged = await nudge_embedded_frame(frame, redis)
         return {"status": "queued" if not nudged else "pulled"}
 
+    async def list_albums() -> dict[str, Any]:
+        # The photo library's root (docs/photos.md): the albums, as the
+        # Photos page lists them. A library that is not set up says so.
+        try:
+            await asyncio.to_thread(photos.ready_store)
+            listing = await asyncio.to_thread(photos.list_folder, db, int(frame.project_id), "")
+        except HTTPException as error:
+            return {"ok": False, "error": "photos_unavailable", "detail": str(error.detail)[:300]}
+        return {
+            "albums": [
+                {"path": entry["path"], "name": entry.get("name"), "photos": entry.get("items", 0)}
+                for entry in listing["entries"]
+                if entry.get("kind") == "folder"
+            ]
+        }
+
+    async def install_album(path: str, options: dict[str, Any]) -> dict[str, Any]:
+        # What the MCP's photo_album_install does for this frame (docs/photos.md
+        # "Installing photo scenes"): the frame's own share link to the folder
+        # (made now if it has none), the album scene saved next to the frame's
+        # scenes, a fast deploy (the device pulls the saved scenes) and the
+        # switch to it, as the Settings' set_next_scene route queues them.
+        from app.api.photos import _frame_origin
+        from app.tasks import fast_deploy_frame
+        from app.tasks.utils import begin_deploy_progress, deploy_progress_kind_for_frame
+
+        project_id = int(frame.project_id)
+        try:
+            rel = photos.validate_path(path)
+            await asyncio.to_thread(photos.ready_store)
+            await asyncio.to_thread(photos.assert_shareable_folder, db, project_id, rel)
+            origin = _frame_origin(frame)
+        except HTTPException as error:
+            return {"ok": False, "status": "failed", "error": "album_unavailable", "detail": str(error.detail)[:300]}
+        share = (
+            db.query(PhotoShare)
+            .filter(
+                PhotoShare.project_id == project_id,
+                PhotoShare.path == rel,
+                PhotoShare.frame_id == int(frame.id),
+                PhotoShare.name.is_(None),
+            )
+            .order_by(PhotoShare.id.asc())
+            .first()
+        )
+        if share is None:
+            share = PhotoShare(project_id=project_id, path=rel, frame_id=int(frame.id), token=f"pk_{secrets.token_urlsafe(32)}")
+            db.add(share)
+            db.commit()
+            db.refresh(share)
+        scene = build_photo_album_scene(
+            name=photos.base_name(rel),
+            album_url=origin + photos.share_url(share.token),
+            seconds=options.get("seconds", DEFAULT_SECONDS),
+            order=options.get("order", "random"),
+            fit="cover",
+            shapes=list(photos.SHARE_SHAPES),
+        )
+        saved = [existing for existing in (frame.scenes or []) if isinstance(existing, dict)]
+        frame.scenes = [*saved, scene]
+        db.add(frame)
+        db.commit()
+        await update_frame(db, redis, frame)
+        await new_log(db, redis, int(frame.id), "stdinfo", f"Voice chat installed the album {rel}")
+        await begin_deploy_progress(db, redis, frame, deploy_progress_kind_for_frame(frame, "fast"))
+        await fast_deploy_frame(int(frame.id), redis)
+        outcome = await queue_command("set_current_scene", {"scene_id": scene["id"]})
+        return {"scene": scene["name"], "scene_id": scene["id"], "album": rel, **outcome}
+
     image_sources = image_sources_for_settings(settings)
+    # The owner's switches (Settings -> Voice chat): a tool they turned off is
+    # not offered to the model, and refused if named anyway.
+    permissions = VoicePermissions.from_frame(frame)
     tools = VoiceTools(
         frame=frame,
         active_scene_id=active_scene_id,
@@ -208,6 +287,9 @@ async def api_embedded_device_voice(
         preview_scenes=preview_scenes,
         update_settings=update_settings,
         image_sources=image_sources,
+        permissions=permissions,
+        list_albums=list_albums,
+        install_album=install_album,
     )
     outcome = await transcribe_and_answer(
         pcm=pcm,
@@ -215,7 +297,7 @@ async def api_embedded_device_voice(
         model=openai_model(openai_settings, "chatModel", CHAT_MODEL),
         reasoning_effort=openai_settings.get("chatReasoningEffort") or None,
         scene_names=scene_names,
-        context_block=voice_frame_context(frame, active_scene_id, frame_context_block(frame), image_sources),
+        context_block=voice_frame_context(frame, active_scene_id, frame_context_block(frame), image_sources, permissions),
         history=history,
         tools=tools,
     )

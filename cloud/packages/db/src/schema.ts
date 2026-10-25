@@ -1027,6 +1027,12 @@ export const frames = pgTable(
     // route computes it once and backfills. Never holds a credential, only
     // group names.
     serviceSettingGroups: jsonb("service_setting_groups"),
+    // What the voice chat may do on this frame (docs/voice-chat.md "What the
+    // voice chat may do"): {change_settings, use_scenes, create_scenes}, the
+    // owner's switches under Settings. Plane-side policy the device never
+    // sees (auth-web's voice-permissions.ts reads it); NULL = the defaults
+    // (settings and installed scenes allowed, new scenes not).
+    voicePermissions: jsonb("voice_permissions"),
     // Desired vs device-acked interpreted-scene payload checksums.
     assignedChecksum: text("assigned_checksum"),
     scenesChecksum: text("scenes_checksum"),

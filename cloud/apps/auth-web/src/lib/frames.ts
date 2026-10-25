@@ -28,6 +28,7 @@ import {
 } from "./blobs";
 import { deviceDeliverableFields } from "./frame-service-settings";
 import { frameLanAccess } from "./frame-lan-access";
+import { readVoicePermissions } from "./voice-permissions";
 import { commandTtlForFrame } from "./frame-sleep";
 import { deployProgressKindForCommand, startDeployProgress } from "./deploy-progress";
 import { requiredSettingsForScenes } from "./preview-settings";
@@ -816,6 +817,11 @@ export function frameSummary(
     // its next poll. What each scene DECLARES is per assignment, on
     // GET /api/frames/{id}/scenes.
     service_setting_groups: readServiceSettingGroups(frame.serviceSettingGroups) ?? [],
+    // What the voice chat may do on this frame (docs/voice-chat.md "What the
+    // voice chat may do"): the owner's three switches, defaults filled in, so
+    // the Settings panel draws them in a known position. Written by
+    // POST /api/frames/{id}/voice/permissions; never pushed to the device.
+    voice_permissions: readVoicePermissions(frame.voicePermissions),
     ...(linkedClient
       ? {
           service_settings_enabled: linkedClientScopes(linkedClient).includes(

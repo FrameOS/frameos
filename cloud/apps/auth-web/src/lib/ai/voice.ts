@@ -13,11 +13,15 @@
 //   prompt, the frame's context block and voiceTools — the six tools a
 //   frame's own token may drive (list scenes, activate one, set the showing
 //   scene's state, redraw, show a picture as a preview scene from the keys
-//   the frame already has, rotate / re-time the frame). Not the MCP server's
-//   tools: a frame's credential is not the owner's.
+//   the frame already has, rotate the frame) plus the two album tools (list
+//   the photo albums, show one), narrowed by the owner's four permission
+//   switches (voice-permissions.ts: change settings, use the installed
+//   scenes, put new scenes on the frame, play the photo albums). Not the MCP
+//   server's tools: a frame's credential is not the owner's.
 //
-// The backend's copy is backend/app/utils/voice_chat.py: the prompt and the
-// tool definitions are kept the same there (its test reads this file).
+// The backend's copy is backend/app/utils/voice_chat.py: the prompt, the tool
+// definitions and the permission table are kept the same there (its test
+// reads this file and voice-permissions.ts).
 import { createHash, randomUUID } from "node:crypto";
 import { appCatalog } from "./context";
 import type { ResponsesToolDefinition } from "./openai";
@@ -25,6 +29,23 @@ import { OpenAiRequestError } from "./openai";
 import type { JsonObject } from "./scene-utils";
 import type { ExtraTools, ToolOutput } from "./tools";
 import { untrustedResult } from "./tools";
+import {
+  defaultVoicePermissions,
+  voicePermissionAllows,
+  voicePermissionContextLines,
+  voicePermissionDescriptions,
+  voiceToolPermissions,
+  type VoicePermissions,
+} from "../voice-permissions";
+
+export {
+  defaultVoicePermissions,
+  readVoicePermissions,
+  voicePermissionKeys,
+  voiceToolPermissions,
+  type VoicePermissionKey,
+  type VoicePermissions,
+} from "../voice-permissions";
 
 export const VOICE_SAMPLE_RATE_HZ = 16000;
 export const VOICE_BYTES_PER_SECOND = VOICE_SAMPLE_RATE_HZ * 2;
@@ -271,10 +292,14 @@ Tools: list_scenes (what the frame holds and which scene shows), activate_scene 
 set_scene_state (set the showing scene's public fields, such as a message board's text), render_now (redraw the
 frame), show_image (put a picture on the frame: a photo found for a search, or an image generated from a
 description; the frame's context says which sources it has), rotate_frame (turn the display to 0, 90, 180 or 270
-degrees; "another 90" is the rotation in the context plus 90). "Next" and "previous" mean the scene after or before
-the one showing, in list order, wrapping around. "Show me X" with no scene of that name is show_image. These are the
-only things you can do; anything else (editing scenes, timing, other frames, the account) is for the workspace, and
-you say so in a sentence.
+degrees; "another 90" is the rotation in the context plus 90), list_albums (the photo albums in the owner's library,
+by path), show_album (play an album on the frame: it makes a scene for the album, installs it next to the frame's
+scenes and shows it). The owner chooses which of these the voice chat may use: the context's "Voice chat may" and
+"may not" lines say which, and a tool you were not given is one the owner switched off, so when asked for it say so
+in a sentence (it is a switch in the frame's settings) and do nothing else. "Next" and "previous" mean the scene after
+or before the one showing, in list order, wrapping around. "Show me X" with no scene of that name is show_album when
+an album is called that (list_albums tells), else show_image. These are the only things you can do; anything else
+(editing scenes, timing, other frames, the account) is for the workspace, and you say so in a sentence.
 `.trim();
 }
 
@@ -362,19 +387,53 @@ export const voiceToolDefinitions: ResponsesToolDefinition[] = [
     },
     type: "function",
   },
+  {
+    description:
+      "The photo albums in the owner's library (docs/photos.md), by path, with how many photos each holds.",
+    name: "list_albums",
+    parameters: { additionalProperties: false, properties: {}, type: "object" },
+    type: "function",
+  },
+  {
+    description:
+      "Play a photo album on the frame: makes a scene that shows one photo of the album at a time, installs " +
+      "it next to the frame's scenes and shows it now (the same as Install photo scenes in the workspace). " +
+      "The album is a path from list_albums.",
+    name: "show_album",
+    parameters: {
+      additionalProperties: false,
+      properties: {
+        order: {
+          description: "random (default) shows every photo once before any repeats.",
+          enum: ["random", "sequential", "newest", "oldest"],
+          type: "string",
+        },
+        path: { description: "The album's path, from list_albums.", type: "string" },
+        seconds: { description: "How long each photo stays. Default 3600.", minimum: 1, type: "number" },
+      },
+      required: ["path"],
+      type: "object",
+    },
+    type: "function",
+  },
 ];
 
 export const voiceToolLabels: Record<string, string> = {
   activate_scene: "Activate scene",
+  list_albums: "List albums",
   list_scenes: "List scenes",
   render_now: "Render now",
   rotate_frame: "Rotate frame",
   set_scene_state: "Set scene state",
+  show_album: "Show album",
   show_image: "Show image",
 };
 
 const MAX_STATE_BYTES = 16 * 1024;
 const MAX_IMAGE_QUERY_CHARS = 400;
+const MAX_ALBUM_PATH_CHARS = 1024;
+export const ALBUM_ORDERS = ["random", "sequential", "newest", "oldest"] as const;
+export type AlbumOrder = (typeof ALBUM_ORDERS)[number];
 // The contract's rule for the one setting the voice turn may change
 // (docs/cloud-frames-contract.json `rotate`). The frame's render interval is
 // deliberately not a voice tool: a frame sets its own, scenes have theirs, and
@@ -514,6 +573,20 @@ export type VoiceQueue = (
 export type VoicePreview = (scenes: JsonObject[], sceneId: string) => Promise<VoiceQueueOutcome>;
 export type VoiceSettingsUpdate = (settings: Record<string, number>) => Promise<VoiceQueueOutcome>;
 
+/** The photo library (docs/photos.md), the route's own too: the albums at
+ * the root as {path, name, photos}, and the install of one on this frame
+ * (the work of the MCP's photo_album_install: the frame's share link, the
+ * album scene saved as a private scene and assigned, the push with it
+ * active). */
+export type VoiceAlbum = { path: string; name: string; photos: number };
+export type VoiceAlbums = {
+  list: () => Promise<{ albums: VoiceAlbum[] } | { ok: false; error: string; detail?: string }>;
+  install: (
+    path: string,
+    options: { seconds?: number; order?: AlbumOrder },
+  ) => Promise<VoiceQueueOutcome & { scene?: string | undefined; scene_id?: string | undefined; album?: string | undefined }>;
+};
+
 export function voiceTools({
   scenes,
   activeSceneId,
@@ -521,6 +594,8 @@ export function voiceTools({
   imageSources = [],
   previewScenes,
   updateSettings,
+  albums,
+  permissions = defaultVoicePermissions,
 }: {
   scenes: VoiceScene[];
   activeSceneId: string | null | undefined;
@@ -528,12 +603,27 @@ export function voiceTools({
   imageSources?: ImageSource[];
   previewScenes?: VoicePreview;
   updateSettings?: VoiceSettingsUpdate;
+  albums?: VoiceAlbums;
+  /** The owner's switches (docs/voice-chat.md "What the voice chat may do"):
+   * a tool they turned off is not offered at all, and refused when named
+   * anyway (a model's habit from an earlier turn). */
+  permissions?: VoicePermissions;
 }): ExtraTools & { changed: string[] } {
   const changed: string[] = [];
   const text = (value: unknown): ToolOutput => ({ images: [], text: JSON.stringify(value) });
   return {
     changed,
     async call(name: string, args: JsonObject): Promise<ToolOutput> {
+      const gate = voiceToolPermissions[name];
+      if (gate !== undefined && !voicePermissionAllows(permissions, name)) {
+        return text({
+          detail:
+            `The owner has not allowed the voice chat to ${voicePermissionDescriptions[gate]} on this frame. ` +
+            "Say so; it is a switch in the frame's settings.",
+          error: "not_allowed",
+          ok: false,
+        });
+      }
       switch (name) {
         case "list_scenes":
           return {
@@ -619,11 +709,49 @@ export function voiceTools({
             ...outcome,
           });
         }
+        case "list_albums": {
+          if (!albums) {
+            return text({ error: "photos_unavailable", ok: false });
+          }
+          const listing = await albums.list();
+          if ("ok" in listing && listing.ok === false) {
+            return text(listing);
+          }
+          return { images: [], text: untrustedResult("photo_albums", JSON.stringify(listing)) };
+        }
+        case "show_album": {
+          const path =
+            typeof args.path === "string" ? args.path.trim().replace(/^\/+|\/+$/g, "").slice(0, MAX_ALBUM_PATH_CHARS) : "";
+          if (!path) {
+            return text({ error: "path must name an album from list_albums", ok: false });
+          }
+          const options: { seconds?: number; order?: AlbumOrder } = {};
+          if (args.seconds !== undefined && args.seconds !== null) {
+            if (typeof args.seconds !== "number" || !Number.isFinite(args.seconds) || args.seconds < 1) {
+              return text({ error: "seconds must be a number of at least 1", ok: false });
+            }
+            options.seconds = args.seconds;
+          }
+          if (args.order !== undefined && args.order !== null) {
+            if (!(ALBUM_ORDERS as readonly unknown[]).includes(args.order)) {
+              return text({ error: `order must be one of ${ALBUM_ORDERS.join(", ")}`, ok: false });
+            }
+            options.order = args.order as AlbumOrder;
+          }
+          if (!albums) {
+            return text({ error: "photos_unavailable", ok: false });
+          }
+          const outcome = await albums.install(path, options);
+          if (outcome.ok) {
+            changed.push(name);
+          }
+          return text(outcome);
+        }
         default:
           return text({ error: `unknown tool ${name}`, ok: false });
       }
     },
-    definitions: voiceToolDefinitions,
+    definitions: voiceToolDefinitions.filter((tool) => voicePermissionAllows(permissions, tool.name)),
     labels: voiceToolLabels,
   };
 }
@@ -644,12 +772,14 @@ export function voiceChatId(frameId: string): string {
 }
 
 /** The chat's frame context block, plus what the voice turn needs: which
- * scene shows, and that the microphone brought the message. */
+ * scene shows, the rotation, the picture sources, what the owner allowed the
+ * voice chat to do, and that the microphone brought the message. */
 export function voiceContextBlock(
   frameBlock: string,
   showing: VoiceScene | null | undefined,
   rotate = 0,
   imageSources: readonly string[] = [],
+  permissions: VoicePermissions = defaultVoicePermissions,
 ): string {
   const lines = [frameBlock];
   if (showing) {
@@ -659,6 +789,7 @@ export function voiceContextBlock(
   }
   lines.push(`- Rotation: ${rotate} degrees clockwise`);
   lines.push(`- Picture sources for show_image: ${imageSources.length > 0 ? imageSources.join(", ") : "none"}`);
+  lines.push(...voicePermissionContextLines(permissions));
   lines.push("The user spoke this into the frame's microphone; the message is the transcript.");
   return lines.join("\n");
 }

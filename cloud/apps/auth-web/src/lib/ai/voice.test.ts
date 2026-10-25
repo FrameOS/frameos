@@ -1,18 +1,23 @@
 // The voice chat's pure parts (docs/voice-chat.md): the session store's caps,
-// the WAV wrapper, the frame-scoped tools, and the parity of prompt and tool
-// definitions with the backend's copy (backend/app/utils/voice_chat.py).
+// the WAV wrapper, the frame-scoped tools and the owner's switches over them,
+// and the parity of prompt, tool definitions and permission table with the
+// backend's copy (backend/app/utils/voice_chat.py).
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   buildVoiceSystemPrompt,
+  defaultVoicePermissions,
   imageSourcesForSettings,
   pcmToWav,
+  readVoicePermissions,
   VOICE_MAX_AUDIO_BYTES,
   voiceChatId,
+  voiceContextBlock,
   voiceSessions,
   VoiceSessionStore,
   voiceToolDefinitions,
+  voiceToolPermissions,
   voiceTools,
 } from "./voice";
 
@@ -84,13 +89,16 @@ describe("voiceTools", () => {
       },
       scenes,
     });
+    // The defaults: everything but putting new scenes on the frame, which the
+    // owner opts into (docs/voice-chat.md "What the voice chat may do").
     expect(tools.definitions.map((tool) => tool.name)).toEqual([
       "list_scenes",
       "activate_scene",
       "set_scene_state",
       "render_now",
-      "show_image",
       "rotate_frame",
+      "list_albums",
+      "show_album",
     ]);
     const listing = await tools.call("list_scenes", {});
     expect(listing.text.startsWith('<untrusted_data source="frame_scenes">')).toBe(true);
@@ -105,6 +113,7 @@ describe("voiceTools", () => {
     const queued: unknown[] = [];
     const tools = voiceTools({
       activeSceneId: null,
+      permissions: { ...defaultVoicePermissions, create_scenes: true },
       queue: async (type) => {
         queued.push(type);
         return { ok: true };
@@ -133,6 +142,7 @@ describe("voiceTools", () => {
     const tools = voiceTools({
       activeSceneId: null,
       imageSources: ["photo"],
+      permissions: { ...defaultVoicePermissions, create_scenes: true },
       previewScenes: async (previewed, sceneId) => {
         previews.push([previewed, sceneId]);
         return { command_id: "cmd-2", ok: true, type: "set_scenes" };
@@ -188,6 +198,104 @@ describe("voiceTools", () => {
     // The frame's render interval is not a voice setting at all.
     expect(JSON.parse((await tools.call("set_frame_settings", { interval: 600 })).text).ok).toBe(false);
     expect(pushed).toEqual([{ rotate: 90 }]);
+  });
+
+  it("offers only what the owner's switches allow, and refuses the rest when named anyway", async () => {
+    const queued: unknown[] = [];
+    const tools = voiceTools({
+      activeSceneId: null,
+      imageSources: ["photo"],
+      permissions: { change_settings: false, create_scenes: true, use_albums: false, use_scenes: false },
+      previewScenes: async () => ({ command_id: "cmd-4", ok: true, type: "set_scenes" }),
+      queue: async (type) => {
+        queued.push(type);
+        return { ok: true };
+      },
+      scenes,
+      updateSettings: async () => ({ ok: true }),
+    });
+    // The listing is always there: a read, and what the model names when it declines.
+    expect(tools.definitions.map((tool) => tool.name)).toEqual(["list_scenes", "show_image"]);
+    for (const [name, args] of [
+      ["activate_scene", { scene_id: scenes[0]!.id }],
+      ["set_scene_state", { state: { text: "hi" } }],
+      ["render_now", {}],
+      ["rotate_frame", { degrees: 90 }],
+      ["list_albums", {}],
+      ["show_album", { path: "Summer" }],
+    ] as const) {
+      const refused = JSON.parse((await tools.call(name, args as never)).text);
+      expect(refused, name).toMatchObject({ error: "not_allowed", ok: false });
+      expect(refused.detail, name).toContain("The owner has not allowed the voice chat to");
+    }
+    expect(queued).toEqual([]);
+    expect(tools.changed).toEqual([]);
+    expect(JSON.parse((await tools.call("show_image", { query: "a banana" })).text).ok).toBe(true);
+    expect((await tools.call("list_scenes", {})).text).toContain('"Clock"');
+
+    // Everything off leaves the listing, and the context says so in two lines.
+    const none = { change_settings: false, create_scenes: false, use_albums: false, use_scenes: false };
+    expect(voiceTools({ activeSceneId: null, permissions: none, queue: async () => ({ ok: true }), scenes }).definitions.map((tool) => tool.name)).toEqual(["list_scenes"]);
+    const context = voiceContextBlock("frame", null, 0, [], none);
+    expect(context).toContain("- Voice chat may: nothing but list the scenes");
+    expect(context).toContain(
+      "- Voice chat may not: change the frame's settings (rotate_frame); use the installed scenes: switch between " +
+        "them, set their fields, redraw (activate_scene, set_scene_state, render_now); put new scenes on the frame (show_image); " +
+        "play the photo albums: list them, show one on the frame (list_albums, show_album)",
+    );
+    const defaults = voiceContextBlock("frame", null, 0, []);
+    expect(defaults).toContain("- Voice chat may: change the frame's settings (rotate_frame); use the installed scenes");
+    expect(defaults).toContain("- Voice chat may not: put new scenes on the frame (show_image)");
+  });
+
+  it("lists the albums and plays one through the route's own photo library", async () => {
+    const installs: unknown[] = [];
+    const tools = voiceTools({
+      activeSceneId: null,
+      albums: {
+        install: async (path, options) => {
+          installs.push([path, options]);
+          return { album: path, command_id: "cmd-5", ok: true, scene: path, scene_id: "s-1", type: "set_scenes" };
+        },
+        list: async () => ({ albums: [{ name: "Summer 2026", path: "Summer 2026", photos: 12 }] }),
+      },
+      queue: async () => ({ ok: true }),
+      scenes,
+    });
+    const listed = await tools.call("list_albums", {});
+    expect(listed.text.startsWith('<untrusted_data source="photo_albums">')).toBe(true);
+    expect(listed.text).toContain('"path":"Summer 2026"');
+    const shown = JSON.parse((await tools.call("show_album", { path: "/Summer 2026/", seconds: 600 })).text);
+    expect(shown).toMatchObject({ album: "Summer 2026", ok: true, scene: "Summer 2026", type: "set_scenes" });
+    expect(installs).toEqual([["Summer 2026", { seconds: 600 }]]);
+    expect(tools.changed).toEqual(["show_album"]);
+    // A bad interval or order never reaches the library; no path neither.
+    expect(JSON.parse((await tools.call("show_album", { path: "Summer 2026", seconds: 0 })).text).ok).toBe(false);
+    expect(JSON.parse((await tools.call("show_album", { order: "sideways", path: "Summer 2026" })).text).ok).toBe(false);
+    expect(JSON.parse((await tools.call("show_album", {})).text).ok).toBe(false);
+    expect(installs).toHaveLength(1);
+    // Without a library hook (a test's bare tools) the model is told, not thrown at.
+    const bare = voiceTools({ activeSceneId: null, queue: async () => ({ ok: true }), scenes });
+    expect(JSON.parse((await bare.call("list_albums", {})).text).error).toBe("photos_unavailable");
+  });
+
+  it("reads the stored column with the defaults for what is missing or malformed", () => {
+    expect(readVoicePermissions(null)).toEqual({
+      change_settings: true,
+      create_scenes: false,
+      use_albums: true,
+      use_scenes: true,
+    });
+    expect(readVoicePermissions({ create_scenes: true, use_scenes: "no" })).toEqual({
+      change_settings: true,
+      create_scenes: true,
+      use_albums: true,
+      use_scenes: true,
+    });
+    // Every tool but the listing answers to a switch, and the table names real tools.
+    expect(new Set(Object.keys(voiceToolPermissions))).toEqual(
+      new Set(voiceToolDefinitions.map((tool) => tool.name).filter((name) => name !== "list_scenes")),
+    );
   });
 });
 

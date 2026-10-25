@@ -35,9 +35,21 @@ def scenes() -> list[dict]:
     ]
 
 
-async def voice_frame(async_client, db, *, api_key: str | None = "sk-test", unsplash_key: str | None = None, image_key: str | None = None):
+async def voice_frame(
+    async_client,
+    db,
+    *,
+    api_key: str | None = "sk-test",
+    unsplash_key: str | None = None,
+    image_key: str | None = None,
+    permissions: dict | None = None,
+):
     frame = await device_frame(async_client, db)
     frame.scenes = scenes()
+    if permissions:
+        # The owner's switches, as the Settings panel writes them (camelCase
+        # device_config keys; docs/voice-chat.md "What the voice chat may do").
+        frame.device_config = {**(frame.device_config or {}), **permissions}
     db.add(frame)
     # One row per (project, key): a second frame in the test's project rewrites them.
     for key, value in (
@@ -113,16 +125,20 @@ async def test_a_spoken_scene_switch_is_transcribed_answered_and_queued(async_cl
     assert heard["calls"][0]["prompt"] == "Clock, Calendar"
     assert heard["calls"][0]["api_key"] == "sk-test"
 
-    # The model saw the voice prompt, the frame's context, and ONLY the four
-    # voice tools: a frame's token must not drive the account's MCP tools.
+    # The model saw the voice prompt, the frame's context, and ONLY the voice
+    # tools the owner's switches allow: a frame's token must not drive the
+    # account's MCP tools, and putting new scenes on the frame (show_image) is
+    # off until the owner opts in.
     first = openai.requests[0]
     assert first["instructions"] == build_voice_system_prompt()
     assert [tool["name"] for tool in first["tools"]] == [
-        "list_scenes", "activate_scene", "set_scene_state", "render_now", "show_image", "rotate_frame",
+        "list_scenes", "activate_scene", "set_scene_state", "render_now", "rotate_frame", "list_albums", "show_album",
     ]
     context = first["input"][0]["content"][0]["text"]
     assert "Calendar (cal-2)" in context and "ESP32 Frame" in context
     assert "spoke this into the frame's microphone" in context
+    assert "- Voice chat may: change the frame's settings (rotate_frame); use the installed scenes" in context
+    assert "- Voice chat may not: put new scenes on the frame (show_image)" in context
     # No Unsplash or OpenAI image key in this project: the model is told so.
     assert "- Picture sources for show_image: none" in context
     assert first["input"][-1]["content"][0]["text"] == "switch to the calendar please"
@@ -196,7 +212,9 @@ async def test_an_unknown_scene_queues_nothing(async_client, no_auth_client, db,
 async def test_show_image_previews_a_picture_scene_next_to_the_saved_ones(async_client, no_auth_client, db, redis, heard, monkeypatch):
     from app.api.embedded_device import embedded_settings_payload
 
-    frame = await voice_frame(async_client, db, unsplash_key="un-key", image_key="sk-images")
+    frame = await voice_frame(
+        async_client, db, unsplash_key="un-key", image_key="sk-images", permissions={"voiceCreateScenes": True}
+    )
     openai = ScriptedOpenAi([
         ("", [call("show_image", {"query": "a banana"}, "c1")]),
         ("Here is a banana.", []),
@@ -285,7 +303,7 @@ async def test_show_image_previews_a_picture_scene_next_to_the_saved_ones(async_
     assert (await async_client.get(f"/api/frames/{frame.id}")).json()["frame"]["scene_preview"] is None
 
     # Asked for art with only a photo key: told which sources exist, nothing queued.
-    frame2 = await voice_frame(async_client, db, unsplash_key="un-key")
+    frame2 = await voice_frame(async_client, db, unsplash_key="un-key", permissions={"voiceCreateScenes": True})
     openai2 = ScriptedOpenAi([
         ("", [call("show_image", {"query": "a cat in space", "source": "generated"}, "c1")]),
         ("I can only find photos on this frame.", []),
@@ -326,6 +344,191 @@ async def test_rotate_frame_rotates_the_frame(async_client, no_auth_client, db, 
     assert embedded_settings_etag(db, frame) != etag_before
     rows = db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).all()
     assert [(row.type, row.status, row.detail) for row in rows] == [("set_settings", "pending", "rotate=90")]
+
+
+@pytest.mark.asyncio
+async def test_the_owners_switches_narrow_the_tools(async_client, no_auth_client, db, redis, heard, monkeypatch):
+    """docs/voice-chat.md "What the voice chat may do": a switch the owner
+    turned off takes its tools out of the model's hands, the context says so,
+    and a call made anyway (from an older turn's habit) is refused."""
+    frame = await voice_frame(
+        async_client,
+        db,
+        unsplash_key="un-key",
+        permissions={"voiceUseScenes": False, "voiceCreateScenes": True, "voice_change_settings": False},
+    )
+    openai = ScriptedOpenAi([
+        ("", [call("activate_scene", {"scene_id": "cal-2"}, "c1"), call("rotate_frame", {"degrees": 90}, "c2")]),
+        ("Switching scenes is switched off for this frame.", []),
+    ])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is True
+    # Only what the owner allowed is offered: the listing (always), the
+    # picture and the albums (on by default); the snake_case spelling of a
+    # switch counts like the camelCase.
+    first = openai.requests[0]
+    assert [tool["name"] for tool in first["tools"]] == ["list_scenes", "show_image", "list_albums", "show_album"]
+    context = first["input"][0]["content"][0]["text"]
+    assert "- Voice chat may: put new scenes on the frame (show_image)" in context
+    assert (
+        "- Voice chat may not: change the frame's settings (rotate_frame); use the installed scenes: switch between "
+        "them, set their fields, redraw (activate_scene, set_scene_state, render_now)"
+    ) in context
+    # Named anyway: refused with the reason, nothing on the queue, the frame unturned.
+    outputs = tool_outputs(openai.requests[1])
+    for call_id in ("c1", "c2"):
+        refused = json.loads(outputs[call_id])
+        assert refused["ok"] is False and refused["error"] == "not_allowed"
+        assert "The owner has not allowed the voice chat to" in refused["detail"]
+    assert db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).count() == 0
+    db.expire_all()
+    assert (frame.rotate or 0) == 0
+
+    # Everything off leaves the listing: the model can still say what the frame has.
+    frame2 = await voice_frame(
+        async_client,
+        db,
+        permissions={"voiceUseScenes": False, "voiceChangeSettings": False, "voiceCreateScenes": False, "voiceUseAlbums": False},
+    )
+    openai2 = ScriptedOpenAi([("The frame shows the Clock; I may not change anything here.", [])])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai2)
+    response = await no_auth_client.post(url(frame2, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame2), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    assert [tool["name"] for tool in openai2.requests[0]["tools"]] == ["list_scenes"]
+    assert "- Voice chat may: nothing but list the scenes" in openai2.requests[0]["input"][0]["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_voice_permissions_are_the_planes_and_never_the_frames(async_client, no_auth_client, db, redis):
+    """The three switches are saved like the other ESP32 knobs (device_config,
+    through the frame's update) and read back, but the device's settings poll
+    never carries them: the firmware has no say in what the chat may do."""
+    from app.api.embedded_device import embedded_frame_settings
+
+    frame = await device_frame(async_client, db)
+    response = await async_client.post(
+        f"/api/frames/{frame.id}",
+        json={"device_config": {**(frame.device_config or {}), "voiceChat": True, "voiceUseScenes": False, "voiceCreateScenes": True}},
+    )
+    assert response.status_code == 200, response.text
+    db.expire_all()
+    stored = (await async_client.get(f"/api/frames/{frame.id}")).json()["frame"]["device_config"]
+    assert stored["voiceUseScenes"] is False and stored["voiceCreateScenes"] is True
+    assert "voiceChangeSettings" not in stored  # unset = the default (on)
+    assert voice_chat.VoicePermissions.from_frame(frame).as_dict() == {
+        "change_settings": True, "use_scenes": False, "create_scenes": True, "use_albums": True,
+    }
+    polled = embedded_frame_settings(frame)
+    assert polled["voiceChat"] is True
+    assert not any(key.startswith("voice") and key != "voiceChat" for key in polled), polled
+    body = (await no_auth_client.get(f"/api/frames/{frame.id}/embedded/settings", headers=auth(frame))).json()["frame"]
+    assert not any(key.startswith("voice") and key != "voiceChat" for key in body), body
+
+
+def test_voice_permissions_default_and_gate_each_tool():
+    from app.utils.voice_chat import VOICE_TOOL_PERMISSIONS, VoicePermissions
+
+    defaults = VoicePermissions.from_device_config(None)
+    assert defaults.as_dict() == {"change_settings": True, "use_scenes": True, "create_scenes": False, "use_albums": True}
+    # Every tool but the listing answers to a switch, and the table names real tools.
+    names = {tool["name"] for tool in VOICE_TOOL_DEFINITIONS}
+    assert set(VOICE_TOOL_PERMISSIONS) == names - {"list_scenes"}
+    assert defaults.allows("list_scenes") and defaults.allows("activate_scene") and not defaults.allows("show_image")
+    # A non-bool is ignored, not believed.
+    assert VoicePermissions.from_device_config({"voiceUseScenes": "no", "voice_create_scenes": True}).as_dict() == {
+        "change_settings": True, "use_scenes": True, "create_scenes": True, "use_albums": True,
+    }
+    assert not VoicePermissions.from_device_config({"voice_use_albums": False}).allows("show_album")
+
+
+@pytest.fixture
+def photo_library(tmp_path, monkeypatch):
+    """A photo library on disk (test_photos.py's fixture, the parts the album
+    tools touch): the store under tmp_path, no S3, no container check."""
+    from app.utils import photos as photos_utils
+
+    monkeypatch.setenv("FRAMEOS_PHOTOS_DIR", str(tmp_path / "photos"))
+    for name in ("FRAMEOS_PHOTOS_ALLOW_EPHEMERAL", "HASSIO_TOKEN", "FRAMEOS_PHOTOS_S3_ENDPOINT", "FRAMEOS_PHOTOS_S3_BUCKET"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(photos_utils, "_running_in_docker", lambda: False)
+    monkeypatch.setattr(photos_utils, "_STORE", None)
+    photos_utils._READINESS_CACHE.clear()
+
+
+@pytest.mark.asyncio
+async def test_show_album_installs_the_album_scene_on_the_frame(async_client, no_auth_client, db, redis, heard, monkeypatch, photo_library):
+    """The album tools (docs/voice-chat.md "What the voice chat may do",
+    docs/photos.md): list_albums names the library's folders, show_album does
+    what photo_album_install does for this frame — the frame's own share link,
+    the album scene saved next to the frame's scenes, the switch queued."""
+    from app.models.photo_share import PhotoShare
+
+    frame = await voice_frame(async_client, db)
+    assert (await async_client.post("/api/photos/folders", json={"path": "Summer 2026"})).status_code == 200
+    assert (await async_client.post("/api/photos/folders", json={"path": "Winter"})).status_code == 200
+    openai = ScriptedOpenAi([
+        ("", [call("list_albums", {}, "c1")]),
+        ("", [call("show_album", {"path": "Summer 2026", "seconds": 600}, "c2")]),
+        ("Playing Summer 2026.", []),
+    ])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    heard["text"]["value"] = "show the summer photos"
+    response = await no_auth_client.post(url(frame, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    assert response.json()["tools"] == ["list_albums", "show_album"]
+    # The listing is the library's root, as untrusted data.
+    outputs = tool_outputs(openai.requests[1])
+    assert outputs["c1"].startswith('<untrusted_data source="photo_albums">')
+    assert '"path": "Summer 2026"' in outputs["c1"] and '"path": "Winter"' in outputs["c1"]
+    shown = json.loads(tool_outputs(openai.requests[2])["c2"])
+    assert shown["ok"] is True and shown["scene"] == "Summer 2026" and shown["album"] == "Summer 2026"
+    # The album scene is on the frame's saved list, playing the frame's own
+    # share link to the folder, with the spoken interval.
+    db.expire_all()
+    names = [scene["name"] for scene in frame.scenes]
+    assert names == ["Clock", "Calendar", "Summer 2026"]
+    album_scene = frame.scenes[-1]
+    assert album_scene["id"] == shown["scene_id"]
+    share = db.query(PhotoShare).filter(PhotoShare.project_id == frame.project_id).one()
+    assert share.path == "Summer 2026" and share.frame_id == frame.id
+    app_node = next(node for node in album_scene["nodes"] if node["data"]["keyword"] == "photoAlbum")
+    assert app_node["data"]["config"]["album"].endswith(f"/api/photos/shared/{share.token}")
+    assert album_scene["settings"]["refreshInterval"] == 600
+    # And the switch to it is on the queue, as set_next_scene would leave it.
+    commands = db.query(FrameCommand).filter(FrameCommand.frame_id == frame.id).all()
+    assert [(c.type, c.payload) for c in commands] == [("set_current_scene", {"scene_id": album_scene["id"]})]
+
+    # A folder that is not there: told, nothing installed; a bad interval too.
+    openai2 = ScriptedOpenAi([
+        ("", [call("show_album", {"path": "Nope"}, "c1"), call("show_album", {"path": "Winter", "seconds": 0}, "c2")]),
+        ("There is no album called Nope.", []),
+    ])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai2)
+    response = await no_auth_client.post(url(frame, 0, done=1, session="album-session-2"), content=SECOND_OF_SPEECH, headers={**auth(frame), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    refused = tool_outputs(openai2.requests[1])
+    assert json.loads(refused["c1"])["ok"] is False and json.loads(refused["c1"])["error"] == "album_unavailable"
+    assert json.loads(refused["c2"]) == {"ok": False, "error": "seconds must be a number of at least 1"}
+    db.expire_all()
+    assert len(frame.scenes) == 3
+
+    # The owner's switch off: neither album tool is offered, and a call is refused.
+    frame2 = await voice_frame(async_client, db, permissions={"voiceUseAlbums": False})
+    openai3 = ScriptedOpenAi([
+        ("", [call("list_albums", {}, "c1")]),
+        ("The albums are switched off for this frame.", []),
+    ])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai3)
+    response = await no_auth_client.post(url(frame2, 0, done=1), content=SECOND_OF_SPEECH, headers={**auth(frame2), **PCM_HEADERS})
+    assert response.status_code == 200, response.text
+    assert [tool["name"] for tool in openai3.requests[0]["tools"]] == [
+        "list_scenes", "activate_scene", "set_scene_state", "render_now", "rotate_frame",
+    ]
+    context = openai3.requests[0]["input"][0]["content"][0]["text"]
+    assert "- Voice chat may not: put new scenes on the frame (show_image); play the photo albums: list them, show one on the frame (list_albums, show_album)" in context
+    assert json.loads(tool_outputs(openai3.requests[1])["c1"])["error"] == "not_allowed"
 
 
 @pytest.mark.asyncio
@@ -424,8 +627,16 @@ def test_the_voice_tools_match_the_cloud():
     (docs/voice-chat.md): the cloud's voice.ts carries copies."""
     from pathlib import Path
 
-    cloud = (Path(__file__).resolve().parents[4] / "cloud" / "apps" / "auth-web" / "src" / "lib" / "ai" / "voice.ts").read_text()
+    lib = Path(__file__).resolve().parents[4] / "cloud" / "apps" / "auth-web" / "src" / "lib"
+    cloud = (lib / "ai" / "voice.ts").read_text() + (lib / "voice-permissions.ts").read_text()
     for tool in VOICE_TOOL_DEFINITIONS:
         assert f'name: "{tool["name"]}"' in cloud, tool["name"]
     for line in build_voice_system_prompt().splitlines():
         assert line in cloud, line
+    # And the permission table: which switch each tool answers to, and the defaults.
+    from app.utils.voice_chat import DEFAULT_VOICE_PERMISSIONS, VOICE_TOOL_PERMISSIONS
+
+    for tool, switch in VOICE_TOOL_PERMISSIONS.items():
+        assert f'{tool}: "{switch}"' in cloud, tool
+    for switch, value in DEFAULT_VOICE_PERMISSIONS.items():
+        assert f"{switch}: {'true' if value else 'false'}" in cloud, switch
