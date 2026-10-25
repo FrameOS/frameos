@@ -179,16 +179,18 @@ Still open:
   board (the E1002 V1.2 schematic feeds RTC_VDD from the cell through a
   diode); with a cell in, the cold boot should say `loaded:true`.
 - [ ] **The E1004** (bench 2026-10-25, frame 70 on the self-hosted backend, the
-  32 MB image in both slots): the boot found `sda19/scl20: pcf8563 sht4x
-  sy6974b` (the charger on the clock's bus, as its schematic says), mounted
-  the preinstalled 16 GB card on the panel bus through the migration path,
-  wrote the clock after SNTP (the chip had never been set) and decided
-  `deepSleep: off, onBattery: false, usbPower: true` with
-  `deep_sleep_on_battery 1` — the desk-bound E1004 stays awake on USB now.
-  Its USB bridge dropped off the host three minutes in and did not return
-  during the session; still to see: the LED on GPIO48 (the Sticky's buzzer
-  pin: `set hardware seeed_reterminal_sticky` on an E1004 must light nothing
-  odd), the 13.3" 30 s refresh with an SD read right after, `i2c sync`.
+  32 MB image): the boot found `sda19/scl20: pcf8563 sht4x sy6974b` (the
+  charger on the clock's bus, as its schematic says), mounted the preinstalled
+  16 GB card on the panel bus through the migration path, kept its clock
+  through a reset, and decided `deepSleep: off, onBattery: false, usbPower:
+  true` with `deep_sleep_on_battery 1` — the desk-bound E1004 stays awake on
+  USB now. `display_test bands` (the 13.3" refresh, 1200x1600) came back
+  `ESP_OK` on the shared bus and `usb_api list-assets` read the card right
+  after; `i2c sync` wrote the clock first time. Its LED is lit HIGH (the
+  table said inverted and it idled lit, blinking dark on a press; fixed in the
+  table and the preset, `set led_type gpio` on a board whose NVS already
+  holds the earlier default). Still to see by eye: dark at rest, green on a
+  press and through a hold, on the fixed polarity.
 - [ ] **The WS2812 kind** (no board with one is to hand): `set led_type
   ws2812` on a pin with a pixel lights it soft white per note.
 
