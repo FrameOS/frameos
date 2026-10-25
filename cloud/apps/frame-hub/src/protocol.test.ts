@@ -379,6 +379,7 @@ describe("browser event shaping", () => {
       // travel to the browser (so the workspace can say which keys this
       // frame's scenes want); no field or value ever does.
       serviceSettingGroups: ["unsplash"],
+      voicePermissions: null,
       settings: { interval: 300, rotate: 90 },
       // Provisioning intent, cleared once applied — it never reaches the wire.
       sceneSourceFrameId: null,
@@ -415,6 +416,9 @@ describe("browser event shaping", () => {
       service_setting_groups: ["unsplash"],
       sleep_reason: null,
       status: "active",
+      // The owner's voice chat switches (docs/voice-chat.md "What the voice
+      // chat may do"), the defaults for a row that never set them.
+      voice_permissions: { change_settings: true, create_scenes: false, use_scenes: true },
     });
   });
 
@@ -446,6 +450,7 @@ describe("browser event shaping", () => {
       assignedSceneState: null,
       deployedSceneState: null,
       serviceSettingGroups: null,
+      voicePermissions: null,
       settings: null,
       sceneSourceFrameId: null,
       status: "active",

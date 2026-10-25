@@ -13,11 +13,14 @@
 //   prompt, the frame's context block and voiceTools — the six tools a
 //   frame's own token may drive (list scenes, activate one, set the showing
 //   scene's state, redraw, show a picture as a preview scene from the keys
-//   the frame already has, rotate / re-time the frame). Not the MCP server's
+//   the frame already has, rotate the frame), narrowed by the owner's three
+//   permission switches (voice-permissions.ts: change settings, use the
+//   installed scenes, put new scenes on the frame). Not the MCP server's
 //   tools: a frame's credential is not the owner's.
 //
-// The backend's copy is backend/app/utils/voice_chat.py: the prompt and the
-// tool definitions are kept the same there (its test reads this file).
+// The backend's copy is backend/app/utils/voice_chat.py: the prompt, the tool
+// definitions and the permission table are kept the same there (its test
+// reads this file and voice-permissions.ts).
 import { createHash, randomUUID } from "node:crypto";
 import { appCatalog } from "./context";
 import type { ResponsesToolDefinition } from "./openai";
@@ -25,6 +28,23 @@ import { OpenAiRequestError } from "./openai";
 import type { JsonObject } from "./scene-utils";
 import type { ExtraTools, ToolOutput } from "./tools";
 import { untrustedResult } from "./tools";
+import {
+  defaultVoicePermissions,
+  voicePermissionAllows,
+  voicePermissionContextLines,
+  voicePermissionDescriptions,
+  voiceToolPermissions,
+  type VoicePermissions,
+} from "../voice-permissions";
+
+export {
+  defaultVoicePermissions,
+  readVoicePermissions,
+  voicePermissionKeys,
+  voiceToolPermissions,
+  type VoicePermissionKey,
+  type VoicePermissions,
+} from "../voice-permissions";
 
 export const VOICE_SAMPLE_RATE_HZ = 16000;
 export const VOICE_BYTES_PER_SECOND = VOICE_SAMPLE_RATE_HZ * 2;
@@ -271,10 +291,12 @@ Tools: list_scenes (what the frame holds and which scene shows), activate_scene 
 set_scene_state (set the showing scene's public fields, such as a message board's text), render_now (redraw the
 frame), show_image (put a picture on the frame: a photo found for a search, or an image generated from a
 description; the frame's context says which sources it has), rotate_frame (turn the display to 0, 90, 180 or 270
-degrees; "another 90" is the rotation in the context plus 90). "Next" and "previous" mean the scene after or before
-the one showing, in list order, wrapping around. "Show me X" with no scene of that name is show_image. These are the
-only things you can do; anything else (editing scenes, timing, other frames, the account) is for the workspace, and
-you say so in a sentence.
+degrees; "another 90" is the rotation in the context plus 90). The owner chooses which of these the voice chat may
+use: the context's "Voice chat may" and "may not" lines say which, and a tool you were not given is one the owner
+switched off, so when asked for it say so in a sentence (it is a switch in the frame's settings) and do nothing else.
+"Next" and "previous" mean the scene after or before the one showing, in list order, wrapping around. "Show me X"
+with no scene of that name is show_image. These are the only things you can do; anything else (editing scenes,
+timing, other frames, the account) is for the workspace, and you say so in a sentence.
 `.trim();
 }
 
@@ -521,6 +543,7 @@ export function voiceTools({
   imageSources = [],
   previewScenes,
   updateSettings,
+  permissions = defaultVoicePermissions,
 }: {
   scenes: VoiceScene[];
   activeSceneId: string | null | undefined;
@@ -528,12 +551,26 @@ export function voiceTools({
   imageSources?: ImageSource[];
   previewScenes?: VoicePreview;
   updateSettings?: VoiceSettingsUpdate;
+  /** The owner's switches (docs/voice-chat.md "What the voice chat may do"):
+   * a tool they turned off is not offered at all, and refused when named
+   * anyway (a model's habit from an earlier turn). */
+  permissions?: VoicePermissions;
 }): ExtraTools & { changed: string[] } {
   const changed: string[] = [];
   const text = (value: unknown): ToolOutput => ({ images: [], text: JSON.stringify(value) });
   return {
     changed,
     async call(name: string, args: JsonObject): Promise<ToolOutput> {
+      const gate = voiceToolPermissions[name];
+      if (gate !== undefined && !voicePermissionAllows(permissions, name)) {
+        return text({
+          detail:
+            `The owner has not allowed the voice chat to ${voicePermissionDescriptions[gate]} on this frame. ` +
+            "Say so; it is a switch in the frame's settings.",
+          error: "not_allowed",
+          ok: false,
+        });
+      }
       switch (name) {
         case "list_scenes":
           return {
@@ -623,7 +660,7 @@ export function voiceTools({
           return text({ error: `unknown tool ${name}`, ok: false });
       }
     },
-    definitions: voiceToolDefinitions,
+    definitions: voiceToolDefinitions.filter((tool) => voicePermissionAllows(permissions, tool.name)),
     labels: voiceToolLabels,
   };
 }
@@ -644,12 +681,14 @@ export function voiceChatId(frameId: string): string {
 }
 
 /** The chat's frame context block, plus what the voice turn needs: which
- * scene shows, and that the microphone brought the message. */
+ * scene shows, the rotation, the picture sources, what the owner allowed the
+ * voice chat to do, and that the microphone brought the message. */
 export function voiceContextBlock(
   frameBlock: string,
   showing: VoiceScene | null | undefined,
   rotate = 0,
   imageSources: readonly string[] = [],
+  permissions: VoicePermissions = defaultVoicePermissions,
 ): string {
   const lines = [frameBlock];
   if (showing) {
@@ -659,6 +698,7 @@ export function voiceContextBlock(
   }
   lines.push(`- Rotation: ${rotate} degrees clockwise`);
   lines.push(`- Picture sources for show_image: ${imageSources.length > 0 ? imageSources.join(", ") : "none"}`);
+  lines.push(...voicePermissionContextLines(permissions));
   lines.push("The user spoke this into the frame's microphone; the message is the transcript.");
   return lines.join("\n");
 }

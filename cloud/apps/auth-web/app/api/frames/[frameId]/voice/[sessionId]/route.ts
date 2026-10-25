@@ -18,6 +18,7 @@ import {
   MAX_VOICE_HISTORY,
   MAX_VOICE_ROUNDS,
   pcmPeak,
+  readVoicePermissions,
   TRANSCRIPTION_MODEL,
   transcribePcm,
   transcriptIsHintEcho,
@@ -86,6 +87,9 @@ export const maxDuration = 300;
 // preview push, a settings push): a frame's token is a frame's credential,
 // never the owner's. A picture (show_image) uses only the service keys the
 // owner already granted this frame's scenes: the voice turn grants nothing.
+// The owner's three permission switches (frames.voice_permissions,
+// docs/voice-chat.md "What the voice chat may do") decide which of the tools
+// the model is offered at all.
 
 // "Now"-commands expire like the event route's: a scene switch spoken on
 // Monday must not fire on Friday.
@@ -394,7 +398,16 @@ export async function POST(
     return { command_id: command?.id, ok: true, type: "set_settings" };
   };
 
-  const tools = voiceTools({ activeSceneId: showing?.id, imageSources, previewScenes, queue, scenes, updateSettings });
+  const permissions = readVoicePermissions(frame.voicePermissions);
+  const tools = voiceTools({
+    activeSceneId: showing?.id,
+    imageSources,
+    permissions,
+    previewScenes,
+    queue,
+    scenes,
+    updateSettings,
+  });
   const toolContext: ToolContext = {
     accountId,
     baseTools: false,
@@ -419,6 +432,7 @@ export async function POST(
             ? (readFrameSettings(frame.settings).rotate as number)
             : 0,
           imageSources,
+          permissions,
         ),
         history,
         prompt: transcript,
