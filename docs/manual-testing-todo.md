@@ -92,14 +92,16 @@ idled at 80 KB free as before the branch. Seen once and not reproduced: with
 held in internal RAM) back to back, the console and the render task went
 silent while the cloud socket stayed up; a second identical run only showed
 `freeHeapMallocKB: 0` for the moment of the listing and recovered. Watch
-for it. Still open:
+for it. Unplugged for a few minutes, the metrics read `usbPower:false
+charging:false onBattery:true` (3902 mV) and flipped back on the replug.
+Still open:
 
 - [ ] **By eye**: the green LED lights with `led blink`, with the two clicks
   of a press and each tick of a hold, and with the voice chat's sparkle,
   ticks and answer after `set buzzer_pin -1`; Settings → "Buzzer, LED and
   microphone" shows `6 on the frame` and setting -1 darkens it live.
-- [ ] **Unplugged**: `usb_power=0`, the `power` log line `onBattery:true`,
-  and `deep_sleep_on_battery 1` sleeping between renders only then.
+- [ ] **`deep_sleep_on_battery 1` with USB in** stays awake, and sleeps
+  between renders once unplugged (the switch is off on the bench frame).
 - [ ] **A real power cut** (the rear switch, a minute, no Wi-Fi): the boot
   log says `rtc: clock set from the PCF8563` with the right time and the
   schedule runs before SNTP (the reset-button path passed).
