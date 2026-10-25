@@ -704,7 +704,7 @@ export function FrameSettingsProvider({
     ? {
         pin: frameForm.led_pin,
         type: ledType(frameForm.led_type),
-        reportedPin: reportedPin(frame.hardware?.ledPin),
+        reportedPin: typeof frame.hardware?.ledPin === 'number' ? frame.hardware.ledPin : undefined,
         reportedType: ledType(frame.hardware?.ledType),
         disabledReason: statusLedDisabledReason,
       }
