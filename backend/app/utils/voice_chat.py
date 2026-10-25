@@ -693,10 +693,10 @@ class VoiceTools(ToolBox):
         if name == "list_albums":
             if self._list_albums is None:
                 return ToolOutput(json.dumps({"ok": False, "error": "photos_unavailable"}))
-            listing = await self._list_albums()
-            if not listing.get("ok", True):
-                return ToolOutput(json.dumps(listing))
-            return ToolOutput(untrusted_result("photo_albums", json.dumps(listing)))
+            albums = await self._list_albums()
+            if not albums.get("ok", True):
+                return ToolOutput(json.dumps(albums))
+            return ToolOutput(untrusted_result("photo_albums", json.dumps(albums)))
         if name == "show_album":
             path = str(args.get("path") or "").strip().strip("/")[:MAX_ALBUM_PATH_CHARS]
             if not path:

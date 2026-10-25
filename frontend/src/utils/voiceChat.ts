@@ -1,13 +1,13 @@
 // Voice chat on a frame (docs/voice-chat.md): whether the frame has a
 // microphone at all, and what the owner lets the voice chat do.
 //
-// The three permission switches are plane-side policy, never a firmware
+// The four permission switches are plane-side policy, never a firmware
 // setting: the cloud keeps them in the frame's `voice_permissions`
 // (POST /api/frames/{id}/voice/permissions), the backend in the frame's
 // device_config as voiceChangeSettings / voiceUseScenes / voiceCreateScenes /
-// voiceUseAlbums (the device's settings poll never carries them). The planes read them when
-// they build a voice turn's tools; this module is the SPA's reader and
-// writer for both spellings. Keep the keys and defaults alike with
+// voiceUseAlbums (the device's settings poll never carries them). The planes
+// read them when they build a voice turn's tools; this module is the SPA's
+// reader and writer for both spellings. Keep the keys and defaults alike with
 // cloud/apps/auth-web/src/lib/voice-permissions.ts and
 // backend/app/utils/voice_chat.py.
 import type { FrameEmbeddedHardwarePreset, FrameType } from '../types'
@@ -83,63 +83,129 @@ export function deviceConfigWithVoicePermission(
   return next
 }
 
-/**
- * Boards whose preset carries a PDM microphone (docs/voice-chat.md "Boards").
- * Mirrors the backend's EMBEDDED_SEEED_RETERMINAL_MIC presets and
- * fos_board.c's k_mics table; the E1004 has none.
- */
-export const EMBEDDED_PRESETS_WITH_MICROPHONE: readonly FrameEmbeddedHardwarePreset[] = [
-  'seeed_reterminal_e1001',
-  'seeed_reterminal_e1002',
-]
+// ----------------------------------------------------------- the microphone
+//
+// One rule for the pins field's placeholders, the voice chat controls and
+// the "Voice chat" button action: the EFFECTIVE microphone pins are the
+// configured ones where set, the board's own where not, and a frame has a
+// microphone when the effective clock and data pins are both a GPIO. The
+// board's own pins are what a cloud frame reports in its hello
+// (`hardware.micClkPin` …, -1 = none) or, nothing reported, what its preset
+// carries; a backend frame's are its preset's. No preset with a microphone,
+// nothing reported: -1, and nothing to do with voice is drawn.
+
+/** The PDM microphone's clock, data and power GPIO; -1 = none (power: -1 = always powered). */
+export type MicrophonePins = { clk: number; data: number; pwr: number }
+
+export const NO_MICROPHONE_PINS: MicrophonePins = { clk: -1, data: -1, pwr: -1 }
 
 /**
- * What the configured microphone pins say: true when the clock and the data
- * line are both set to a GPIO, false when either is -1 (no microphone), null
- * when they are left to the board's own (unset, or only one of them set).
+ * Boards whose preset carries a PDM microphone (docs/voice-chat.md "Boards"):
+ * the reTerminal E1001 and E1002 (clock GPIO42, data GPIO41, power GPIO38).
+ * Mirrors the backend's EMBEDDED_SEEED_RETERMINAL_MIC and fos_board.c's
+ * k_mics table; the E1004 and every other preset have none.
  */
-export function configuredMicrophone(clkPin: number | undefined, dataPin: number | undefined): boolean | null {
-  if ((clkPin !== undefined && clkPin < 0) || (dataPin !== undefined && dataPin < 0)) {
-    return false
-  }
-  if (clkPin !== undefined && dataPin !== undefined) {
-    return true
-  }
-  return null
+export const EMBEDDED_PRESET_MICROPHONE_PINS: Partial<Record<FrameEmbeddedHardwarePreset, MicrophonePins>> = {
+  seeed_reterminal_e1001: { clk: 42, data: 41, pwr: 38 },
+  seeed_reterminal_e1002: { clk: 42, data: 41, pwr: 38 },
+}
+
+export const EMBEDDED_PRESETS_WITH_MICROPHONE: readonly FrameEmbeddedHardwarePreset[] = Object.keys(
+  EMBEDDED_PRESET_MICROPHONE_PINS
+) as FrameEmbeddedHardwarePreset[]
+
+/** The preset's microphone pins, -1 everywhere for a preset without one (or no preset). */
+export function presetMicrophonePins(hardwarePreset: string | null | undefined): MicrophonePins {
+  return EMBEDDED_PRESET_MICROPHONE_PINS[(hardwarePreset ?? '') as FrameEmbeddedHardwarePreset] ?? NO_MICROPHONE_PINS
+}
+
+type ReportedPins = {
+  clk?: number | null | undefined
+  data?: number | null | undefined
+  pwr?: number | null | undefined
 }
 
 /**
- * A backend-managed ESP32 frame has a microphone when its device_config names
- * one (either spelling), or, pins left to the board, when its preset carries
- * one. Virtual frames and Picos never do; the caller keeps those out.
+ * The board's own pins: what the frame reported (a cloud frame's hello,
+ * `hardware.micClkPin` …; a reported -1 is a reported none), the preset's
+ * table for a pin it did not report, -1 for the rest.
+ */
+export function boardMicrophonePins({
+  hardwarePreset,
+  reported,
+}: {
+  hardwarePreset?: string | null | undefined
+  reported?: ReportedPins | undefined
+}): MicrophonePins {
+  const preset = presetMicrophonePins(hardwarePreset)
+  const pick = (value: number | null | undefined, fallback: number): number =>
+    typeof value === 'number' && Number.isFinite(value) ? value : fallback
+  return {
+    clk: pick(reported?.clk, preset.clk),
+    data: pick(reported?.data, preset.data),
+    pwr: pick(reported?.pwr, preset.pwr),
+  }
+}
+
+type ConfiguredPins = { clk?: number | undefined; data?: number | undefined; pwr?: number | undefined }
+
+/** The pins the frame runs with: each configured pin where set, the board's own where not. */
+export function effectiveMicrophonePins(configured: ConfiguredPins, board: MicrophonePins): MicrophonePins {
+  return {
+    clk: configured.clk ?? board.clk,
+    data: configured.data ?? board.data,
+    pwr: configured.pwr ?? board.pwr,
+  }
+}
+
+/** Whether these pins name a microphone: a clock and a data line, both a GPIO. */
+export function microphonePinsNameOne(pins: MicrophonePins): boolean {
+  return pins.clk >= 0 && pins.data >= 0
+}
+
+/** The configured pins of a backend frame's device_config, either spelling (camelCase wins). */
+export function configuredMicrophonePinsOf(deviceConfig: DeviceConfig | null | undefined): ConfiguredPins {
+  return {
+    clk: deviceConfig?.micClkPin ?? deviceConfig?.mic_clk_pin,
+    data: deviceConfig?.micDataPin ?? deviceConfig?.mic_data_pin,
+    pwr: deviceConfig?.micPwrPin ?? deviceConfig?.mic_pwr_pin,
+  }
+}
+
+/** What an empty pin field means, spelled out: the board's own GPIO, or plainly -1 when the board has none. */
+export function microphonePinPlaceholder(boardPin: number): string {
+  return boardPin >= 0 ? `${boardPin} (board default)` : '-1'
+}
+
+/**
+ * A backend-managed ESP32 frame has a microphone when its effective pins
+ * (device_config over the preset's own) name one. Virtual frames and Picos
+ * never do; the caller keeps those out.
  */
 export function backendFrameHasMicrophone(
   deviceConfig: DeviceConfig | null | undefined,
   hardwarePreset: FrameEmbeddedHardwarePreset | string | null | undefined
 ): boolean {
-  const configured = configuredMicrophone(
-    deviceConfig?.micClkPin ?? deviceConfig?.mic_clk_pin,
-    deviceConfig?.micDataPin ?? deviceConfig?.mic_data_pin
+  return microphonePinsNameOne(
+    effectiveMicrophonePins(configuredMicrophonePinsOf(deviceConfig), boardMicrophonePins({ hardwarePreset }))
   )
-  if (configured !== null) {
-    return configured
-  }
-  return EMBEDDED_PRESETS_WITH_MICROPHONE.includes(hardwarePreset as FrameEmbeddedHardwarePreset)
 }
 
 /**
- * A cloud-managed ESP32 frame has a microphone when the form's pins name one
- * (a push on its way), or, pins left to the board, when the frame reported one
- * in its hello (`hardware.microphone`). Nothing reported and nothing set is
- * no microphone: the controls appear once the frame says so, or once pins are set.
+ * A cloud-managed ESP32 frame has a microphone when its effective pins (the
+ * form's over what it reported, over its reported preset's own) name one.
  */
 export function cloudFrameHasMicrophone(
   hardware: FrameType['hardware'] | null | undefined,
-  form: { mic_clk_pin?: number; mic_data_pin?: number }
+  form: { mic_clk_pin?: number; mic_data_pin?: number; mic_pwr_pin?: number }
 ): boolean {
-  const configured = configuredMicrophone(form.mic_clk_pin, form.mic_data_pin)
-  if (configured !== null) {
-    return configured
-  }
-  return hardware?.microphone === true
+  return microphonePinsNameOne(
+    effectiveMicrophonePins(
+      { clk: form.mic_clk_pin, data: form.mic_data_pin, pwr: form.mic_pwr_pin },
+      boardMicrophonePins({
+        hardwarePreset: hardware?.hardwarePreset,
+        reported: { clk: hardware?.micClkPin, data: hardware?.micDataPin, pwr: hardware?.micPwrPin },
+      })
+    )
+  )
 }

@@ -21,6 +21,7 @@ import {
 import type { GPIOButton, Palette } from '../../../../../types'
 import { buttonRoleByLabel, buttonRoles, keyboardLayouts } from '../../../../../utils/eventsContract.gen'
 import { useFrameSettings } from '../frameSettingsContext'
+import { microphonePinPlaceholder } from '../../../../../utils/voiceChat'
 
 /**
  * The field blocks more than one section renders.
@@ -360,23 +361,24 @@ function ButtonBeepField(): JSX.Element | null {
 /**
  * The PDM microphone's pins (docs/voice-chat.md; fos_mic.c), one row: the
  * clock, the data line and the GPIO that powers the microphone for a
- * session. Empty leaves the board's own (the reTerminal E1001/E1002: 42, 41
- * and 38; the E1004 has none, and a PDM mic on its J2 header is 42/41 with
- * no power pin), -1 = no microphone (power: -1 = always powered). Read at
- * every session's start, so a change applies live.
+ * session. Empty leaves the board's own, and the placeholder says what that
+ * is: the GPIO the board has ("42 (board default)" on the reTerminal
+ * E1001/E1002, from what a cloud frame reported or the preset's table) or
+ * plainly "-1" when the board has none (the E1004, every other preset, a
+ * custom board; a PDM mic on the E1004's J2 header is 42/41 with no power
+ * pin). -1 = no microphone (power: -1 = always powered). Read at every
+ * session's start, so a change applies live.
  */
 function MicrophoneField(): JSX.Element | null {
   const { microphone, setMicrophonePins } = useFrameSettings()
   if (!microphone) {
     return null
   }
-  const { clkPin, dataPin, pwrPin, reportedClkPin, reportedDataPin, reportedPwrPin, disabledReason } = microphone
-  const placeholder = (reported: number | undefined, none: string): string =>
-    reported === undefined ? 'Board default, -1 = none' : reported < 0 ? none : `${reported} on the frame`
-  const pins: { name: string; value: number | undefined; reported: number | undefined; none: string; patch: (v: number | undefined) => void }[] = [
-    { name: 'Clock', value: clkPin, reported: reportedClkPin, none: 'None on the frame', patch: (v) => setMicrophonePins({ clkPin: v }) },
-    { name: 'Data', value: dataPin, reported: reportedDataPin, none: 'None on the frame', patch: (v) => setMicrophonePins({ dataPin: v }) },
-    { name: 'Power switch', value: pwrPin, reported: reportedPwrPin, none: 'Always powered', patch: (v) => setMicrophonePins({ pwrPin: v }) },
+  const { clkPin, dataPin, pwrPin, boardClkPin, boardDataPin, boardPwrPin, disabledReason } = microphone
+  const pins: { name: string; value: number | undefined; board: number; patch: (v: number | undefined) => void }[] = [
+    { name: 'Clock', value: clkPin, board: boardClkPin, patch: (v) => setMicrophonePins({ clkPin: v }) },
+    { name: 'Data', value: dataPin, board: boardDataPin, patch: (v) => setMicrophonePins({ dataPin: v }) },
+    { name: 'Power switch', value: pwrPin, board: boardPwrPin, patch: (v) => setMicrophonePins({ pwrPin: v }) },
   ]
   return (
     <fieldset disabled={disabledReason !== undefined} className="min-w-0 space-y-2">
@@ -401,7 +403,11 @@ function MicrophoneField(): JSX.Element | null {
           {pins.map((pin) => (
             <div key={pin.name} className="space-y-1">
               <span className="frameos-muted text-xs">{pin.name}</span>
-              <NumberTextInput value={pin.value} onChange={pin.patch} placeholder={placeholder(pin.reported, pin.none)} />
+              <NumberTextInput
+                value={pin.value}
+                onChange={pin.patch}
+                placeholder={microphonePinPlaceholder(pin.board)}
+              />
             </div>
           ))}
         </div>

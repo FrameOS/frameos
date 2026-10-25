@@ -384,28 +384,65 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
 
   it("draws the voice chat switch and what it may do only on a frame with a microphone", () => {
     // docs/voice-chat.md "What the voice chat may do". An E1004 has no
-    // microphone and says so: the pins field stays (a PDM microphone on its
-    // J2 header is declared there), the switch and the three permission
-    // switches are not drawn, and Button actions does not offer Voice chat.
+    // microphone and reports -1 for every pin: the pins field stays (a PDM
+    // microphone on its J2 header is declared there) and says plainly what
+    // empty means, "-1"; the switch and the permission switches are not
+    // drawn, and Button actions does not offer Voice chat.
+    const pinPlaceholders = () =>
+      [...document.querySelectorAll<HTMLInputElement>("input[placeholder]")]
+        .map((input) => input.placeholder)
+        .filter((placeholder) => placeholder === "-1" || placeholder.endsWith("(board default)"));
     renderPanel(
-      cloudFrame("esp32-s3", "2026.10.20", "EPD_13in3e", { hardwarePreset: "seeed_reterminal_e1004", microphone: false }),
+      cloudFrame("esp32-s3", "2026.10.20", "EPD_13in3e", {
+        hardwarePreset: "seeed_reterminal_e1004",
+        micClkPin: -1,
+        micDataPin: -1,
+        micPwrPin: -1,
+        microphone: false,
+        voiceChat: true,
+      }),
     );
     expect(screen.queryByText("Microphone GPIO")).toBeTruthy();
+    expect(pinPlaceholders()).toEqual(["-1", "-1", "-1"]);
     expect(screen.queryByText("Voice chat")).toBeNull();
     expect(screen.queryByText("Voice chat may")).toBeNull();
     expect(renderedFieldNames()).not.toContain("voice_create_scenes");
     cleanup();
 
-    // Firmware that reports nothing about a microphone: the same, until it does.
+    // Older firmware reports no pins at all: an E1004's preset has none, so
+    // the same; an E1002's preset has them, so the controls are drawn (and
+    // disabled below the firmware floor) with the preset's pins spelled out.
+    renderPanel(cloudFrame("esp32-s3", "2026.10.19", "EPD_13in3e", { hardwarePreset: "seeed_reterminal_e1004" }));
+    expect(pinPlaceholders()).toEqual(["-1", "-1", "-1"]);
+    expect(screen.queryByText("Voice chat may")).toBeNull();
+    cleanup();
     renderPanel(cloudFrame("esp32-s3", "2026.10.19", "EPD_7in3e", { hardwarePreset: "seeed_reterminal_e1002" }));
-    expect(screen.queryByText("Microphone GPIO")).toBeTruthy();
+    expect(pinPlaceholders()).toEqual(["42 (board default)", "41 (board default)", "38 (board default)"]);
+    expect(screen.queryByText("Voice chat may")).toBeTruthy();
+    expect(document.querySelector('button[name="voice_use_scenes"]')?.matches(":disabled")).toBe(true);
+    cleanup();
+
+    // An E1002 whose clock was set to -1 on its console has no microphone any more.
+    renderPanel(
+      cloudFrame("esp32-s3", "2026.10.20", "EPD_7in3e", {
+        hardwarePreset: "seeed_reterminal_e1002",
+        micClkPin: -1,
+        micDataPin: 41,
+        micPwrPin: 38,
+        microphone: false,
+      }),
+    );
+    expect(pinPlaceholders()).toEqual(["-1", "41 (board default)", "38 (board default)"]);
     expect(screen.queryByText("Voice chat may")).toBeNull();
     cleanup();
 
-    // An E1002 reports one: the switch, and the three switches as the frame
+    // An E1002 reports its pins: the switch, and the switches as the frame
     // row has them (the defaults filled in by the cloud).
     const frame = cloudFrame("esp32-s3", "2026.10.20", "EPD_7in3e", {
       hardwarePreset: "seeed_reterminal_e1002",
+      micClkPin: 42,
+      micDataPin: 41,
+      micPwrPin: 38,
       microphone: true,
       voiceChat: true,
     });
@@ -413,6 +450,7 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
       ...frame,
       voice_permissions: { change_settings: true, create_scenes: false, use_albums: true, use_scenes: false },
     });
+    expect(pinPlaceholders()).toEqual(["42 (board default)", "41 (board default)", "38 (board default)"]);
     expect(screen.getAllByText("Voice chat").length).toBeGreaterThan(0);
     expect(screen.getByText("Voice chat may")).toBeTruthy();
     expect(renderedFieldNames()).toEqual(
