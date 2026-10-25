@@ -221,9 +221,16 @@ async def test_publish_inline_unknown_frame_404s(async_client, db, store_calls):
     assert store_calls == []
 
 
+# The cloud's listing names its URLs on the scenes host, not on the provider
+# host the backend linked to (in production: scenes.frameos.net next to
+# cloud.frameos.net).
+SCENES_HOST = "https://scenes.frameos.net"
+
+
 @pytest.mark.asyncio
 async def test_drive_lists_scenes_and_proxies_images(async_client, db, monkeypatch):
     make_connected_link(db)
+    scene_id = "11111111-1111-1111-1111-111111111111"
 
     async def store_drive(provider_url, access_token):
         assert provider_url == PROVIDER
@@ -234,9 +241,10 @@ async def test_drive_lists_scenes_and_proxies_images(async_client, db, monkeypat
                 {
                     "id": "sunrise-clock",
                     "name": "Sunrise Clock",
-                    "sceneId": "11111111-1111-1111-1111-111111111111",
-                    "image": f"{PROVIDER}/api/store/scenes/11111111-1111-1111-1111-111111111111/image",
-                    "zip": f"{PROVIDER}/api/store/scenes/11111111-1111-1111-1111-111111111111/download",
+                    "sceneId": scene_id,
+                    "image": f"{SCENES_HOST}/api/store/scenes/{scene_id}/image",
+                    "url": f"{SCENES_HOST}/s/sunrise-clock",
+                    "zip": f"{SCENES_HOST}/api/store/scenes/{scene_id}/download",
                     "visibility": "private",
                 }
             ],
@@ -246,10 +254,33 @@ async def test_drive_lists_scenes_and_proxies_images(async_client, db, monkeypat
     response = await async_client.get("/api/cloud/store/drive")
     assert response.status_code == 200, response.text
     template = response.json()["templates"][0]
-    # Image URLs are rewritten to the authenticated backend proxy; zips keep
-    # their provider URL (POST /api/templates attaches the token for those).
-    assert template["image"] == "/api/cloud/store/drive/image/11111111-1111-1111-1111-111111111111"
-    assert template["zip"].startswith(PROVIDER)
+    # Image URLs are rewritten to the authenticated backend proxy. Zips are
+    # re-addressed to the provider host: that is the one host the link token
+    # goes to (cloud_headers_for_url), so a private scene's install through
+    # POST /api/templates {url} carries it. Left on the scenes host, the
+    # backend fetched the private scene anonymously and the store answered 404.
+    assert template["image"] == f"/api/cloud/store/drive/image/{scene_id}"
+    assert template["zip"] == f"{PROVIDER}/api/store/scenes/{scene_id}/download"
+    # The scene's page link stays where the cloud put it: it is for the browser.
+    assert template["url"] == f"{SCENES_HOST}/s/sunrise-clock"
+
+
+@pytest.mark.asyncio
+async def test_drive_leaves_entries_without_scene_id_alone(async_client, db, monkeypatch):
+    """Only an entry that names its scene can be re-addressed; anything else
+    (an older cloud, a malformed row) keeps its URLs as served."""
+    make_connected_link(db)
+
+    async def store_drive(provider_url, access_token):
+        return 200, {
+            "name": "My cloud drive",
+            "templates": [{"id": "legacy", "name": "Legacy", "zip": f"{SCENES_HOST}/legacy.zip"}],
+        }
+
+    monkeypatch.setattr(cloud_link, "store_drive", store_drive)
+    response = await async_client.get("/api/cloud/store/drive")
+    assert response.status_code == 200, response.text
+    assert response.json()["templates"][0]["zip"] == f"{SCENES_HOST}/legacy.zip"
 
 
 @pytest.mark.asyncio
