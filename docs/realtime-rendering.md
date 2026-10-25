@@ -42,13 +42,27 @@ The scan-out stayed clean throughout: 0 dropped frames and 0 late refills over
 continuous rendering (`lcd`), worst refill 0.5 ms late against 0.9 ms of
 slack.
 
-What is left is the JavaScript lifecycle: the runtime is built, the prelude
-and the module compiled, and all of it torn down again on every render
-(`single_scene_host.nim` `releaseIdleJsAppRuntimes`), about 170 ms of the
-290. Keeping the runtime through an animation's quiet frames (a throwaway
-patch, measured the same day) took the scene to 7.8 fps, ~115 ms a frame.
-That and the SVG path (parse, return trip, raster: ~100 ms) are the next
-steps in `docs/realtime-todo.md`.
+A second round the same day took it to **~50 ms a frame (19.6 fps)**, each
+step measured on the board:
+
+| Step | Frame | fps |
+| --- | --- | --- |
+| After the first round | ~290 ms | 3.3 |
+| JS interpreters kept between frames | ~120 ms | 8.0 |
+| Repaint only the box that changed; parsed paths shared; `-O2` for pixie's raster | 94 ms | 10.2 |
+| QIO flash | 71 ms | 13.5 |
+| A third frame buffer | 56 ms | 17.0 |
+| No heap walk per frame; the SVG spec read off the JS object; the fast XML reader; flattened shapes kept | ~50 ms | 19.3 |
+| The metrics sample with the frame logged in full, not every second | ~50 ms | 19.6 |
+
+Where the 50 ms go now, from probes around each phase (not in the tree):
+`get()` ~5 ms, the SVG parse ~10 (half of it the XML), the raster of the
+logo's ~130x85 box ~20, the interpreter around them ~7, the rest the
+allocator (~560 allocations and frees a frame at 6 and 3.4 µs each on the
+PSRAM heap) and the LCD's refill interrupt, which copies 19.2 KB of the
+front buffer out of PSRAM every 0.9 ms on the render core: halving the pixel
+clock took a frame from 62 to 55 ms. `docs/realtime-todo.md` has what is
+left.
 
 ## Why loop tuning alone cannot get there: PSRAM is the wall
 
@@ -63,9 +77,12 @@ steps in `docs/realtime-todo.md`.
   42.3 Hz) the panel reads 19.5 MB/s out of PSRAM continuously; its refill
   interrupt runs on the render core every 0.9 ms, and the driver preloads each
   next 19.2 KB chunk into the 32 KB data cache.
-- **Code fetches share the bus.** Every instruction-cache miss is a DIO flash
+- **Code fetches share the bus.** Every instruction-cache miss is a flash
   read on the same bus PSRAM uses, and a 3.2 MB firmware with QuickJS in it
-  misses a 16 KB cache often.
+  misses a 16 KB cache often. In DIO mode that was the largest single cost:
+  QIO flash took DVD Logo Bounce from 10.2 to 13.5 fps, exactly what a 32 KB
+  instruction cache did in DIO (which costs 16 KB of internal RAM; a 64 KB
+  data cache on top added nothing).
 
 So the work is to touch the full frame in PSRAM at most once per frame (and,
 later, to touch only what changed), not to make each pass a little faster.
@@ -85,7 +102,8 @@ not deep-sleep, animates:
   schedule, like the ordinary wait.
 - The per-pass work runs once a second instead of once a frame: the settings
   and command pulls, the scene sync, the battery, charger and gauge reads,
-  the power decision, the Nim settings pushes, the metrics sample.
+  the power decision, the Nim settings pushes. The metrics sample goes with
+  the frame logged in full (below).
 - One frame in ten seconds is logged in full — `render:scene` …
   `render:done`, the cloud's render announce, the backend's image push — with
   a `render:animation` summary of the frames before it (`frames`, `fps`,
@@ -106,14 +124,12 @@ matter, not only for the logs' readers.
 
 An RGB565 LCD's scene canvas is 565 whatever the PSRAM, and it is the panel's
 own back frame buffer: `fos_display_render_target` hands the render task the
-buffer nobody scans (after the switch to the previous frame has happened),
+buffer neither scanned nor waiting to be,
 `frameos_nim_render_panel` makes it the canvas (`panelCanvas` in
 `embedded_runtime.nim`, pixie's `newImage565Over` with `ditherStores`, the
 rounding the pack used to do), and the blit is a buffer switch — no pack, no
-copy, no SHA. The switch is asked for at once and waited for by the next
-writer (`settle_front` in `lcd_st7701s_rgb.c`), so a render longer than a
-frame never waits for the panel. A rotated panel still packs, into the same
-buffer.
+copy, no SHA, and with three buffers (below) no wait for the panel either. A
+rotated panel still packs, into the same buffer.
 
 The snapshot behind `/image`, `image_get` and the backend push is the front
 buffer itself, dropped before it is drawn in again; a stream copies it out
@@ -148,6 +164,105 @@ FrameOS/pixie#13). Every platform runs it: the Pi and the browser preview
 save the same pass. `frameos/tests/test_background_deferral.nim` pins the
 cases, including a canvas that starts out holding the frame before last.
 
+### JS interpreters live between frames on a frame that stays awake
+
+The single-scene host used to tear every idle JS app interpreter down after
+each render on an ESP32 and build it again on the next: QuickJS, the 6.4 KB
+prelude, the app, ~170 ms of a SenseCAP frame. A frame that does not
+deep-sleep (`frameos_nim_set_keep_js`, from the client's housekeeping) now
+keeps them (`settleIdleJsAppRuntimes(keep)`), the way a Pi always has: 181 KB
+for DVD Logo Bounce, reported as `jsKB` on the `render:animation` line next
+to the free PSRAM, which held at ~4.6 MB. They go when render memory runs
+short (`utils/memory.renderMemoryReleaseHook`): below 2 MB free before a
+render or a decode, and when a decode finds the largest free block under
+that. A deep-sleeping frame releases them as before (it wakes to a fresh boot
+anyway), and so does the editor's preview while it runs as an ESP32, so that
+an app keeping values in module variables misbehaves there and not only on a
+sleeping frame: `frameos.remember` stays the way to keep a value.
+
+### A whole-frame SVG repaints what changed
+
+When a scene's render is one fused node drawing one SVG into an LCD's buffer
+(`ExecutionContext.wholeFrame`) and the SVG covers it opaquely,
+`utils/svg_frames.nim` keeps the parsed SVG each buffer holds; the next render
+into that buffer repaints only pixie's `damage` box between the two SVGs (a
+`view()` of the buffer, `renderInto` with its origin) — for DVD Logo Bounce a
+box around where the logo was and where it is, ~130x85 pixels instead of
+230,400. The firmware counts every write into a buffer that is not a render
+in place (a copy, a clear, an overlay: `s_generation` in
+`lcd_st7701s_rgb.c`), and a buffer whose count moved, a render of anything
+else, or a failed one leaves no record, so its next frame is drawn whole.
+`utils/tests/test_svg_frames.nim` checks every frame against a whole render.
+
+pixie shares the parsed data of a `<path d>` between SVGs (a per-thread cache
+by the data's text), so "this element did not change" is a pointer
+comparison, its bounds are measured once, and a fill keeps the shapes it
+flattens to (`share`), per scale, so a path drawn every frame under a new
+translation is flattened once.
+
+### The SVG path
+
+- The spec `frameos.svg(markup, {width, height})` returns is read straight
+  off the JS object: the markup copied out once, the other properties one by
+  one when they are plain values (`plainSpecRestFromJs`), the old JSON round
+  trip only for anything else.
+- pixie reads the markup an app writes without std/parsexml's
+  character-at-a-time token building (`parseSvgXmlFast`, the same tree, a
+  differential test over pixie's SVG corpus), and refuses — to the full
+  parser — whatever it does not reproduce exactly.
+- An SVG drawn into the target the planner offered never computes the
+  standalone raster bound (`boundedRequestedDimensions`): it is only needed
+  when the SVG is rasterized on its own.
+- pixie's raster modules (`paths`, `images`, `blends`, `internal`, `rgb565`,
+  `common`) compile at `-O2` on the ESP32 (+36 KB of flash): the logo's
+  raster went from 31 to 26 ms. The XML and string modules gained nothing at
+  `-O2` and stay `-Os`.
+- The 565 and grey coverage stores write a fully covered pixel of an opaque
+  fill packed, without unpacking, blending and packing it.
+
+### Per-frame code does not walk the heap
+
+`availableRenderBytes()` asks for the largest free PSRAM block, and ESP-IDF
+answers that by walking every block of the heap: 0.5–2 ms with the ~800 a
+running frame holds. The render path asked it several times a frame: the
+decode budget before every render and every SVG, the kept interpreters'
+check, the SVG's raster bound. The decode budget's largest-block half is now
+measured only when a decode first reads it (pixie's
+`setDecodeContiguousBudgetProvider`), and the other checks ask
+`availableRenderHeadroomBytes()` (the free total, 8 µs). A new per-frame
+memory question asks the free total; the largest block is for a decision
+about one big allocation.
+
+### Three frame buffers
+
+With two, a finished render had to wait for the frame boundary at which the
+panel switched to it before the next could draw in the other buffer: a
+55 ms render took three 23.6 ms scans, 71 ms. With three
+(`lcd_st7701s_rgb.c`) the next render draws into the third while the last
+waits for its boundary, and a writer waits only before handing a picture
+over, while the one handed over before is not on the glass yet. Each buffer
+holds the frame from three renders back, so the damage box spans three
+steps of the logo. 460 KB more PSRAM (`fos_display_render_psram_bytes` and
+both device-limits ports count three).
+
+### Flash in QIO mode (the S3)
+
+The S3 fetches every instruction through a 16 KB cache, and in DIO mode a
+miss moves two bits a clock. The S3 image is built for QIO
+(`sdkconfig.defaults`): the header still says DIO, the bootloader switches
+the flash to quad itself and stays in DIO on a chip that refuses its QE bit.
+The bootloader is only replaced by a USB flash, so a frame updated over the
+air keeps its DIO bootloader and its speed; a DIO bootloader with a QIO app
+was measured to boot, render and write flash as before. The C3 overlay keeps
+DIO: measured on the S3 only, and a thin client is not fetch-bound.
+
+### Metrics with the logged frame
+
+An animating frame takes its metrics sample with the frame it logs in full,
+every ten seconds, not with every second's housekeeping: a sample is three
+heap walks and a line the provider's Metrics panel stores, and once a second
+was 3,600 an hour.
+
 ### The Pi
 
 The interpreter's savings above are the Pi's too. The Linux path's own
@@ -167,7 +282,16 @@ rotation pass can. `docs/realtime-todo.md` has them.
 - `lcd` prints the scan-out's health (frames, drops, late refills, the worst
   refill) and `lcd pclk <MHz>` retunes the pixel clock live.
 - `render:animation` lines carry the frame rate while a scene animates.
-- A per-phase probe like the one behind the table above is a dozen lines of
-  `getMonoTime` around `ensureReady` (app_runtime.nim) and
-  `renderSvgIntoTarget`; it is not in the tree, because its own console line
-  costs a frame ~20 ms of UART.
+- A per-phase probe like the ones behind the tables above is a dozen lines of
+  `getMonoTime` around the phases (`ensureReady`, the `get()` call and
+  `toValue` in app_runtime.nim, the parse and the raster in svg_frames.nim),
+  printed every twentieth frame; it is not in the tree, because its own
+  console line costs a frame ~20 ms of UART.
+- Sampling core 1's PC from core 0 through the S3's Assist Debug registers
+  (`ASSIST_DEBUG_CORE_1_RCD_PDEBUGPC_REG`) looks like a free profiler and is
+  not one to trust: on this workload a quarter of the samples landed in
+  QuickJS's compiler, which a hardware breakpoint on core 1
+  (`esp_cpu_set_breakpoint` from a task pinned there) showed never runs once
+  the scene is up. A breakpoint that does fire panics with a full backtrace,
+  which makes it the honest way to ask "is this called every frame, and from
+  where".

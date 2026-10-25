@@ -339,12 +339,14 @@ for the two Spectra boards most of the bench work runs on:
   glass hangs off the S3's parallel RGB interface: sixteen data lines
   (B0..B4 = GPIO15..11, G0..G5 = GPIO10..5, R0..R4 = GPIO4..0), HSYNC 16,
   VSYNC 17, DE 18, PCLK 21 — so GPIO21 is not a heartbeat LED here. The
-  LCD peripheral scans continuously: two PSRAM frame buffers (a new picture
-  goes into the hidden one and is switched in at a frame boundary, so the
-  glass never shows half of each) feed two 20-line bounce buffers in
+  LCD peripheral scans continuously: three PSRAM frame buffers (a new
+  picture goes into one that is neither scanned nor waiting to be, and is
+  switched in at a frame boundary, so the glass never shows half of each and
+  the next render never waits for the switch) feed two 20-line bounce buffers in
   internal RAM that an interrupt refills. That refill is the fragile part:
   PSRAM shares one bus with the program flash, and the generic image runs a
-  160 MHz CPU, DIO flash and 80 MHz PSRAM, so the pixel clock is 12 MHz
+  160 MHz CPU, DIO flash (QIO on a frame flashed over USB since 2026-10-25)
+  and 80 MHz PSRAM, so the pixel clock is 12 MHz
   (42 fps; Seeed's 18 and ESPHome's 16 dropped frames on the bench while a
   finger moved on the glass), the refill interrupt and the render task
   share core 1 (the render's bulk copies pause while it runs), big heap
@@ -364,7 +366,7 @@ for the two Spectra boards most of the bench work runs on:
   below a second **animates** (`main/fos_animation.c`): frames paced in
   microseconds, the pulls and sensors once a second, one frame in ten logged
   in full with a `render:animation` summary of the rest. DVD Logo Bounce
-  runs at 3.3 fps there (one frame per 300 s before, ~570 ms a frame when
+  runs at 19.6 fps there (one frame per 300 s before, ~570 ms a frame when
   forced); `docs/realtime-rendering.md` has the measurements and
   `docs/realtime-todo.md` what is left. The controller's own
   setup goes over a 9-bit 3-wire SPI bit-banged on GPIO41 (clock) and GPIO48

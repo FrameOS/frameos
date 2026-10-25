@@ -40,10 +40,11 @@ line in the map).
 6. **`docs/ui-todo.md`** — JSX widgets that render and react on the frame.
    Designed, not started. Lower priority for now, not parked.
 7. **`docs/realtime-todo.md`** — LCD frames that animate (ESP32 animation
-   mode shipped: DVD Logo Bounce on the SenseCAP Indicator went from one
-   frame per 300 s to 3.3 fps). **Next up:** keep an animating scene's JS
-   runtime alive (~170 ms of its ~290 ms a frame; the owner's call), then
-   the SVG path and damage tracking. The model is `docs/realtime-rendering.md`.
+   mode, the in-place canvas with three buffers, kept JS interpreters, damage
+   repaints and QIO flash shipped: DVD Logo Bounce on the SenseCAP Indicator
+   went from one frame per 300 s to 19.6 fps). **Next up:** the LCD refill
+   off the CPU (GDMA), then the SVG parse and a retained compositor. The
+   model is `docs/realtime-rendering.md`.
 8. **`docs/scenes-todo.md`** — 49 store scene ideas, which
    `build-todo-scenes.ts` builds from. Lower priority for now, not parked.
 9. **`cloud/STORE-TODO.md`** — the store's design record (decisions, threat

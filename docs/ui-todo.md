@@ -148,8 +148,9 @@ events itself.
    LCD boards are the other case: the SenseCAP Indicator (FT6336U) and the
    reTerminal Sticky and E1003 (GT911) have touch as pointer events, the
    Indicator draws straight into its frame buffer and animates
-   (`docs/realtime-rendering.md`), and dirty rects there are the damage
-   tracking of `docs/realtime-todo.md` item 3. Buttons-as-focus stays the
+   (`docs/realtime-rendering.md`), and dirty rects there build on its damage
+   repaint (`utils/svg_frames.nim`) and the retained compositor of
+   `docs/realtime-todo.md` item 3. Buttons-as-focus stays the
    input story for the boards without glass.
 9. **Dogfood: the status screen.** `buildStatusScreen` (both copies) and the
    provisioning screens are hand-drawn today — port one to the widget layer
