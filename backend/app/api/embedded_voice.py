@@ -8,9 +8,17 @@ process's memory until then (app/utils/voice_chat.py VoiceSessionStore). The
 closing request answers when the turn is over: the transcript, the reply and
 the tools that ran, or `{"ok": false, "error": …}` for what the frame should
 sound as an error. The frame's bearer is its `server_api_key`, as on every
-other `/embedded` route; the tools the turn gets are the six a frame may
-drive (VoiceTools), narrowed by the owner's three permission switches in the
+other `/embedded` route; the tools the turn gets are the frame-scoped ones
+(VoiceTools), narrowed by the owner's four permission switches in the
 frame's device_config (VoicePermissions), never the account's MCP tools.
+
+The exchanges are one chat per frame (the frame's voice chat in the workspace's
+chat drawer): what was heard, a `log` row with every tool the turn ran and
+what came of it, and the reply. The next turn gets the last few exchanges as
+history, each with how long ago it was and its actions, so "make it bigger"
+has the scene the previous turn built to refer to (voice_history_for_model).
+`create_scene` and `change_scene` run the scene AI as a sub-turn
+(app/utils/voice_scene_builder.py) and push what it built as a preview.
 
 The cloud's twin is cloud/apps/auth-web/app/api/frames/[frameId]/voice/[sessionId]/route.ts."""
 from __future__ import annotations
@@ -19,7 +27,8 @@ import asyncio
 import json
 import re
 import secrets
-from datetime import datetime, timedelta
+import time
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from typing import Any
 
@@ -45,10 +54,14 @@ from app.utils.frame_commands import enqueue_frame_command
 from app.utils.photo_album_scene import DEFAULT_SECONDS, build_photo_album_scene
 from app.utils.rate_limit import hit_rate_limit
 from app.utils.upload_limits import read_body_limited
+from app.utils.frame_commands import scene_preview_info, scene_preview_scene
 from app.utils.voice_chat import (
+    MAX_VOICE_HISTORY_TURNS,
     VOICE_BYTES_PER_SECOND,
+    VOICE_LOG_TOOL,
     VOICE_MAX_CHUNK_BYTES,
     VOICE_SESSIONS_PER_FRAME_PER_15_MIN,
+    VOICE_TURN_TOOL,
     VoicePermissions,
     VoiceSessionStore,
     VoiceTools,
@@ -57,7 +70,10 @@ from app.utils.voice_chat import (
     transcribe_and_answer,
     voice_chat_id,
     voice_frame_context,
+    voice_history_for_model,
+    voice_turn_log,
 )
+from app.utils.voice_scene_builder import build_scene_by_voice
 from . import api_public
 
 __all__ = ["api_embedded_device_voice"]
@@ -68,7 +84,8 @@ SESSION_ID_PATTERN = r"^[A-Za-z0-9_-]{8,64}$"
 MIN_AUDIO_SECONDS = 0.3
 # A scene switch waits this long for the awake frame's ack, as the event route does.
 COMMAND_WAIT_SECONDS = 4.0
-MAX_HISTORY_MESSAGES = 8
+# Three rows per exchange (heard, log, reply), a few more for the workspace's own.
+MAX_HISTORY_ROWS = 4 * MAX_VOICE_HISTORY_TURNS
 
 _sessions = VoiceSessionStore()
 
@@ -95,19 +112,21 @@ def _voice_chat(db: Session, frame: Frame) -> Chat:
     return chat
 
 
-def _history(db: Session, chat: Chat) -> list[dict[str, str]]:
+def _history(db: Session, chat: Chat, now: datetime) -> list[dict[str, str]]:
+    """The earlier exchanges for the model: transcript, reply and the turn's
+    actions with its age (voice_history_for_model), oldest first."""
     messages = (
         db.query(ChatMessage)
         .filter(ChatMessage.project_id == chat.project_id, ChatMessage.chat_id == chat.id)
         .order_by(ChatMessage.created_at.desc())
-        .limit(MAX_HISTORY_MESSAGES)
+        .limit(MAX_HISTORY_ROWS)
         .all()
     )
-    return [
-        {"role": message.role, "content": message.content}
-        for message in reversed(messages)
-        if message.role in ("user", "assistant") and message.content and message.tool != "error"
+    rows = [
+        {"role": m.role, "content": m.content, "tool": m.tool, "created_at": m.created_at}
+        for m in reversed(messages)
     ]
+    return voice_history_for_model(rows, now=now)
 
 
 def _failure(error: str, detail: str) -> JSONResponse:
@@ -155,9 +174,17 @@ async def api_embedded_device_voice(
     if len(pcm) < MIN_AUDIO_SECONDS * VOICE_BYTES_PER_SECOND:
         return _failure("nothing_heard", "the recording was too short")
 
-    active_scene_id = await _active_scene_id(redis, frame)
+    started = time.monotonic()
+    now = datetime.now(timezone.utc)
+    # The scene the frame shows for now without holding it (the editor's or
+    # an earlier turn's preview): the model is told, and change_scene edits it.
+    preview_info = scene_preview_info(db, frame)
+    preview_scene = scene_preview_scene(db, frame) if preview_info else None
+    active_scene_id = await _active_scene_id(
+        redis, frame, [*(frame.scenes or []), *([preview_scene] if preview_scene else [])]
+    )
     chat = _voice_chat(db, frame)
-    history = _history(db, chat)
+    history = _history(db, chat, now)
     scene_names = [
         str(scene.get("name")) for scene in (frame.scenes or []) if isinstance(scene, dict) and scene.get("name")
     ]
@@ -276,6 +303,29 @@ async def api_embedded_device_voice(
         outcome = await queue_command("set_current_scene", {"scene_id": scene["id"]})
         return {"scene": scene["name"], "scene_id": scene["id"], "album": rel, **outcome}
 
+    model = openai_model(openai_settings, "chatModel", CHAT_MODEL)
+    reasoning_effort = openai_settings.get("chatReasoningEffort") or None
+
+    async def build_scene(request: str, base: dict[str, Any] | None, name: str | None) -> dict[str, Any]:
+        # The scene AI as a sub-turn (voice_scene_builder.py): the editor
+        # tools alone, the scene rendered in the frame's memory before it is
+        # handed back; the tool then pushes it as the preview above.
+        from app.api.ai_scenes import _split_state_nodes_by_app
+
+        what = f"changes {base.get('name')}" if base else "builds a scene"
+        await new_log(db, redis, int(frame.id), "stdinfo", f"Voice chat {what}: {request[:200]}")
+        return await build_scene_by_voice(
+            frame=frame,
+            frame_context=frame_context_block(frame),
+            request=request,
+            base=base,
+            name=name,
+            api_key=api_key.strip(),
+            model=model,
+            reasoning_effort=reasoning_effort,
+            split_state_nodes=_split_state_nodes_by_app,
+        )
+
     image_sources = image_sources_for_settings(settings)
     # The owner's switches (Settings -> Voice chat): a tool they turned off is
     # not offered to the model, and refused if named anyway.
@@ -290,14 +340,18 @@ async def api_embedded_device_voice(
         permissions=permissions,
         list_albums=list_albums,
         install_album=install_album,
+        build_scene=build_scene,
+        preview_scene=preview_scene,
     )
     outcome = await transcribe_and_answer(
         pcm=pcm,
         api_key=api_key.strip(),
-        model=openai_model(openai_settings, "chatModel", CHAT_MODEL),
-        reasoning_effort=openai_settings.get("chatReasoningEffort") or None,
+        model=model,
+        reasoning_effort=reasoning_effort,
         scene_names=scene_names,
-        context_block=voice_frame_context(frame, active_scene_id, frame_context_block(frame), image_sources, permissions),
+        context_block=voice_frame_context(
+            frame, active_scene_id, frame_context_block(frame), image_sources, permissions, preview=preview_info, now=now
+        ),
         history=history,
         tools=tools,
     )
@@ -306,14 +360,24 @@ async def api_embedded_device_voice(
         await new_log(db, redis, int(frame.id), "stderr", f"Voice chat failed ({error}): {detail[:300]}")
         return _failure(error, detail)
 
-    # Both rows land in one commit; a millisecond apart keeps the history in
-    # order on a database whose default timestamp is the whole second.
-    now = datetime.utcnow()
-    chat.updated_at = now
+    # The exchange, three rows in one commit: what was heard, the log of what
+    # was done (the workspace draws it as a log bubble; the next turn reads it
+    # as history), the reply. A millisecond apart keeps them in order on a
+    # database whose default timestamp is the whole second.
+    stored_at = datetime.utcnow()
+    chat.updated_at = stored_at
     db.add(ChatMessage(project_id=chat.project_id, chat_id=chat.id, role="user", content=outcome.transcript,
-                       tool="voice", created_at=now))
+                       tool=VOICE_TURN_TOOL, created_at=stored_at))
+    db.add(ChatMessage(
+        project_id=chat.project_id,
+        chat_id=chat.id,
+        role="assistant",
+        content=voice_turn_log(outcome.actions, session_id=session_id, seconds=time.monotonic() - started, at=stored_at),
+        tool=VOICE_LOG_TOOL,
+        created_at=stored_at + timedelta(milliseconds=1),
+    ))
     db.add(ChatMessage(project_id=chat.project_id, chat_id=chat.id, role="assistant", content=outcome.reply,
-                       tool="voice", created_at=now + timedelta(milliseconds=1)))
+                       tool=VOICE_TURN_TOOL, created_at=stored_at + timedelta(milliseconds=2)))
     db.commit()
     await new_log(
         db,
@@ -321,7 +385,7 @@ async def api_embedded_device_voice(
         int(frame.id),
         "stdinfo",
         json.dumps({"event": "voice:turn", "transcript": outcome.transcript[:300], "reply": outcome.reply[:300],
-                    "tools": outcome.tools}),
+                    "tools": outcome.tools, "seconds": round(time.monotonic() - started, 1)}),
     )
     return {"ok": True, "transcript": outcome.transcript, "reply": outcome.reply, "tools": outcome.tools}
 

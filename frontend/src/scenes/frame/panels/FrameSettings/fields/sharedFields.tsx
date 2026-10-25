@@ -508,7 +508,7 @@ const VOICE_PERMISSION_ROWS: {
     key: 'create_scenes',
     name: 'voice_create_scenes',
     label: 'Create new scenes',
-    on: 'On: a spoken request can put a new scene on the frame, such as a picture',
+    on: 'On: a spoken request can put a new scene on the frame as a preview: a picture, or a scene the AI builds or changes to order',
     off: 'Off: only the scenes already on the frame',
   },
   {

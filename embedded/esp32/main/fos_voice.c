@@ -39,11 +39,12 @@ static const char *TAG = "fos_voice";
  * that just woke from deep sleep records at once and uploads once online. */
 #define VOICE_WIFI_WAIT_MS 20000
 /* A chunk's HTTP round trip; the last chunk waits for the transcription and
- * the chat turn behind it. */
+ * the chat turn behind it — up to the scene AI building a scene and checking
+ * its render (docs/voice-chat.md "The chat turn", create_scene). */
 #define VOICE_CHUNK_TIMEOUT_MS 30000
-#define VOICE_DONE_TIMEOUT_MS 120000
+#define VOICE_DONE_TIMEOUT_MS 180000
 /* Deep sleep stays off for the session and the answer. */
-#define VOICE_KEEP_AWAKE_MS 150000
+#define VOICE_KEEP_AWAKE_MS 210000
 /* The answer the plane sends: the transcript, a short reply, tool names. */
 #define VOICE_REPLY_MAX_BYTES 4096
 /* What the frame log keeps of the transcript and the reply. */

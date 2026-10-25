@@ -6,17 +6,18 @@ import { createAccountScene } from "../../../../../../src/lib/account-scene-crea
 import { storedAccountSettings } from "../../../../../../src/lib/account-settings";
 import { recordAuditEvent } from "../../../../../../src/lib/audit";
 import { resolveAiAccess } from "../../../../../../src/lib/ai/api-key";
-import { appendChatMessage, ensureChat, historyForModel } from "../../../../../../src/lib/ai/chat-store";
+import { appendChatMessage, chatMessages, ensureChat } from "../../../../../../src/lib/ai/chat-store";
 import { assignedScenes, frameContextBlock } from "../../../../../../src/lib/ai/frame-context";
 import { buildInitialInput, runAgentLoop } from "../../../../../../src/lib/ai/loop";
 import { OpenAiRequestError } from "../../../../../../src/lib/ai/openai";
 import type { JsonObject } from "../../../../../../src/lib/ai/scene-utils";
 import { inFlightSpendMicros } from "../../../../../../src/lib/ai/spend-reservations";
 import type { ToolContext } from "../../../../../../src/lib/ai/tools";
+import { buildSceneByVoice } from "../../../../../../src/lib/ai/voice-scene-builder";
 import {
   buildVoiceSystemPrompt,
   imageSourcesForSettings,
-  MAX_VOICE_HISTORY,
+  MAX_VOICE_HISTORY_TURNS,
   MAX_VOICE_ROUNDS,
   pcmPeak,
   readVoicePermissions,
@@ -26,12 +27,16 @@ import {
   VOICE_MAX_CHUNK_BYTES,
   VOICE_MIN_AUDIO_BYTES,
   VOICE_SESSION_ID_PATTERN,
+  VOICE_LOG_TOOL,
   VOICE_SESSIONS_PER_FRAME_PER_15_MIN,
   VOICE_SILENCE_PEAK,
+  VOICE_TURN_TOOL,
   voiceChatId,
   voiceContextBlock,
+  voiceHistoryForModel,
   voiceSessions,
   voiceTools,
+  voiceTurnLog,
   type VoiceAlbums,
   type VoicePreview,
   type VoiceQueue,
@@ -51,6 +56,7 @@ import {
 } from "../../../../../../src/lib/frame-scenes";
 import { buildServiceSettingsPayload } from "../../../../../../src/lib/frame-service-settings";
 import {
+  buildScenesPayloadForFrame,
   computeAndStoreServiceSettingGroups,
   enqueueFrameCommand,
   enqueueFrameSettingsPush,
@@ -59,6 +65,8 @@ import {
   mergeFrameSettings,
   readFrameSettings,
   readServiceSettingGroups,
+  scenePreviewScene,
+  scenePreviewsByFrame,
   supersedePendingCommands,
   validateFrameSettings,
 } from "../../../../../../src/lib/frames";
@@ -100,9 +108,17 @@ export const maxDuration = 300;
 // preview push, a settings push): a frame's token is a frame's credential,
 // never the owner's. A picture (show_image) uses only the service keys the
 // owner already granted this frame's scenes: the voice turn grants nothing.
-// The owner's three permission switches (frames.voice_permissions,
+// The owner's four permission switches (frames.voice_permissions,
 // docs/voice-chat.md "What the voice chat may do") decide which of the tools
 // the model is offered at all.
+//
+// The exchanges are one chat per frame (the frame's voice chat in the
+// workspace's chat drawer): what was heard, a `log` row with every tool the
+// turn ran and what came of it, and the reply. The next turn gets the last
+// few exchanges as history, each with how long ago it was and its actions, so
+// "make it bigger" has the scene the previous turn built to refer to
+// (voiceHistoryForModel). create_scene and change_scene run the scene AI as a
+// sub-turn (voice-scene-builder.ts) and push what it built as a preview.
 
 // "Now"-commands expire like the event route's: a scene switch spoken on
 // Monday must not fire on Friday.
@@ -240,12 +256,22 @@ export async function POST(
     return failure("nothing_heard", "only the scene names came back");
   }
 
+  const startedAt = Date.now();
+  const now = new Date();
   const chat = await ensureChat(db, accountId, {
     chatId: voiceChatId(frame.id),
     contextType: "frame",
     frameId: frame.id,
   });
-  const history = chat ? await historyForModel(db, chat.id, MAX_VOICE_HISTORY) : [];
+  // The earlier exchanges, each with its age and the log of what was done:
+  // three rows per exchange, a few more for the workspace's own messages.
+  const rows = chat ? (await chatMessages(db, chat.id)).slice(-4 * MAX_VOICE_HISTORY_TURNS) : [];
+  const history = voiceHistoryForModel(rows, { now });
+  // The scene the frame shows for now without holding it (the editor's or
+  // an earlier turn's preview): the model is told, and change_scene edits it.
+  const preview = (await scenePreviewsByFrame(db, [frame.id])).get(frame.id) ?? null;
+  const previewScene = preview ? ((await scenePreviewScene(db, frame.id))?.scene as JsonObject | undefined) ?? null : null;
+  const context = await frameContextBlock(db, accountId, frame.id);
 
   // Each tool queues what the workspace's rail would, on this frame alone.
   const queue: VoiceQueue = async (type, payload) => {
@@ -485,14 +511,67 @@ export async function POST(
     },
   };
 
+  // An installed scene's runtime JSON, for change_scene: the bundle the
+  // frame was sent, by the store id's device id.
+  const sceneContent = async (storeSceneId: string): Promise<JsonObject | null> => {
+    const built = await buildScenesPayloadForFrame(db, frame.id);
+    if ("error" in built) {
+      return null;
+    }
+    const deviceSceneId = await deviceSceneIdForFrame(db, frame.id, storeSceneId);
+    const found = built.scenes.find(
+      (scene) => scene && typeof scene === "object" && (scene as JsonObject).id === deviceSceneId,
+    );
+    return (found as JsonObject | undefined) ?? null;
+  };
+  // The scene AI as a sub-turn (voice-scene-builder.ts): the editor and
+  // catalog tools alone, the scene rendered in the frame's memory before it
+  // is handed back; the tool then pushes it as the preview above. Each of
+  // its rounds is metered like the turn's own.
+  let sceneTurns = 0;
+  const buildScene = async (request: string, base: JsonObject | null, name: string | null) => {
+    sceneTurns += 1;
+    const sceneTurnId = `${turnId}-scene-${sceneTurns}`;
+    logInfo("frames.voice_scene_build", { base: base ? String(base.name) : null, frameId: frame.id, request: request.slice(0, 200) });
+    return buildSceneByVoice({
+      accountId,
+      apiKey: credentials.apiKey,
+      base,
+      db,
+      frameBlock: context.block,
+      frameId: frame.id,
+      model: credentials.model,
+      name,
+      onUsage: (result) => {
+        meterAiUsageInBackground({
+          accountId,
+          chatId: chat?.id ?? null,
+          credentialSource: credentials.source,
+          model: credentials.model,
+          rounds: result.rounds,
+          surface: "voice_chat",
+          turnId: `${sceneTurnId}-${result.rounds}`,
+          usage: result.usage,
+        });
+      },
+      reasoningEffort: credentials.reasoningEffort,
+      renderDevice: context.renderDevice ?? null,
+      renderSize: context.resolution ?? null,
+      request,
+    });
+  };
+
   const permissions = readVoicePermissions(frame.voicePermissions);
   const tools = voiceTools({
     activeSceneId: showing?.id,
     albums,
+    buildScene,
     imageSources,
     permissions,
+    previewScene,
     previewScenes,
     queue,
+    sceneContent,
     scenes,
     updateSettings,
   });
@@ -506,7 +585,6 @@ export async function POST(
     frameId: frame.id,
     prompt: transcript,
   };
-  const context = await frameContextBlock(db, accountId, frame.id);
   let result;
   try {
     result = await runAgentLoop({
@@ -521,6 +599,8 @@ export async function POST(
             : 0,
           imageSources,
           permissions,
+          preview,
+          now,
         ),
         history,
         prompt: transcript,
@@ -547,13 +627,23 @@ export async function POST(
     usage: result.usage,
   });
   const reply = result.reply.trim() || "Done.";
+  const seconds = (Date.now() - startedAt) / 1000;
   if (chat) {
-    await appendChatMessage(db, chat.id, { content: transcript, role: "user", tool: "voice" });
-    await appendChatMessage(db, chat.id, { content: reply, role: "assistant", tool: "voice" });
+    // The exchange, three rows: what was heard, the log of what was done
+    // (the workspace draws it as a log bubble; the next turn reads it as
+    // history), the reply.
+    await appendChatMessage(db, chat.id, { content: transcript, role: "user", tool: VOICE_TURN_TOOL });
+    await appendChatMessage(db, chat.id, {
+      content: voiceTurnLog(tools.actions, { at: new Date(), seconds, sessionId }),
+      role: "assistant",
+      tool: VOICE_LOG_TOOL,
+    });
+    await appendChatMessage(db, chat.id, { content: reply, role: "assistant", tool: VOICE_TURN_TOOL });
   }
   logInfo("frames.voice_turn", {
     frameId: frame.id,
     rounds: result.rounds,
+    seconds: Math.round(seconds * 10) / 10,
     tools: result.toolCalls.join(","),
   });
   return NextResponse.json({ ok: true, reply, tools: result.toolCalls, transcript });

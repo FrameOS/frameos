@@ -464,7 +464,7 @@ describe("the Settings panel on a cloud-managed ESP32", () => {
     expect(screen.getAllByText("Off: only the scenes already on the frame").length).toBeGreaterThan(0);
     // A flip edits the form's `voice_permissions` (its own route on save), not a device key.
     fireEvent.click(document.querySelector('button[name="voice_create_scenes"]')!);
-    expect(screen.getAllByText("On: a spoken request can put a new scene on the frame, such as a picture").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("On: a spoken request can put a new scene on the frame as a preview: a picture, or a scene the AI builds or changes to order").length).toBeGreaterThan(0);
     expect(frameLogic({ frameId: frame.id }).values.frameForm.voice_permissions).toEqual({
       change_settings: true,
       create_scenes: true,

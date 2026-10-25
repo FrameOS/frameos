@@ -155,6 +155,10 @@ export type ToolContext = {
   // (voice.ts), whose caller is a frame's own credential and must not reach
   // the editor's or the store's tools, not even by naming one.
   baseTools?: boolean | undefined;
+  // Set, only these of this file's tools are offered and run: the voice
+  // chat's scene builder (voice-scene-builder.ts) gets the editor and the
+  // catalog tools and nothing that saves, installs or reads the account.
+  allowedTools?: ReadonlySet<string> | undefined;
 };
 
 // A second set of tools the loop offers next to toolDefinitions.
@@ -1803,6 +1807,9 @@ export async function runTool(name: string, args: JsonObject, ctx: ToolContext):
     if (ctx.extraTools && ctx.extraTools.labels[name] !== undefined) {
       return ctx.extraTools.call(name, args);
     }
+    throw new Error(`Unknown tool: ${name}`);
+  }
+  if (ctx.allowedTools && name in toolLabels && !ctx.allowedTools.has(name)) {
     throw new Error(`Unknown tool: ${name}`);
   }
   if (name === "render_scene") {
