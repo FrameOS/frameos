@@ -2246,6 +2246,7 @@ static void client_task(void *arg)
         if (force_render) s_loud_next = true;
         force_render = false;
         bool rendered = false;
+        bool frame_quiet = false;
         if (s_render_paused_for_memory) {
             /* Paused after repeated PSRAM exhaustion — see
              * fos_client_render_recovery_boot. Skipping the render is what
@@ -2270,6 +2271,7 @@ static void client_task(void *arg)
                 /* An animation logs one frame in full every so often, with
                  * the summary of the quiet ones before it. */
                 bool quiet = !s_loud_next && fos_animation_frame_quiet(&s_anim, esp_timer_get_time());
+                frame_quiet = quiet;
                 s_loud_next = false;
                 if (s_anim.active && !quiet) log_animation("running", true);
                 set_quiet(quiet);
@@ -2280,7 +2282,12 @@ static void client_task(void *arg)
                 fos_animation_frame_done(&s_anim, cycle_start, esp_timer_get_time());
             }
         }
-        if (housekeeping) log_metrics_sample();
+        /* An animation samples with the frame it logs in full, every ten
+         * seconds: a sample is three heap walks and a line the provider's
+         * Metrics panel stores, and once a second was 3,600 an hour. A pass
+         * that renders nothing keeps the once-a-second housekeeping. */
+        bool sample_metrics = s_anim.active && rendered ? !frame_quiet : housekeeping;
+        if (sample_metrics) log_metrics_sample();
         frameos_nim_flush_logs(); /* the sample must not wait for next pass */
 
         /* The scene's refreshInterval is authoritative when a scene is
