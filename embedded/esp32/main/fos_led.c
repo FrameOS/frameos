@@ -148,6 +148,11 @@ void fos_led_init(void)
 {
     if (s_lock) return;
     s_lock = xSemaphoreCreateMutex();
+    /* Claim the pin now and drive it dark: left floating until the first
+     * note, the E1004's LED glowed green from reset until something pressed
+     * a key (its transistor's base floats high), and an inverted LED can sit
+     * half-lit the same way. */
+    fos_led_set(false);
 }
 
 /* Show the notes' state or the hold, whichever is lit. Under s_lock. */

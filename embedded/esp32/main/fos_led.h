@@ -21,7 +21,8 @@
 
 #include <stdbool.h>
 
-/* Once, early in boot. Nothing lights until the first fos_led_set(true). */
+/* Once, early in boot, after the config: claims the pin and drives it dark,
+ * so the LED does not glow from reset until its first note. */
 void fos_led_init(void);
 /* Light or darken the LED for a note. Safe from any task; a no-op without
  * one. While a hold is on (below) the LED stays lit whatever this says. */
