@@ -298,6 +298,16 @@ export interface FrameType {
     /** Voice chat: holding the voice key opens the microphone (docs/voice-chat.md). Default on. */
     voiceChat?: boolean
     voice_chat?: boolean
+    /** What the voice chat may do (docs/voice-chat.md "What the voice chat may
+     * do"): the backend's spelling of the three switches; plane-side, never
+     * polled by the device. Unset = the default (settings and installed
+     * scenes on, new scenes off). The cloud keeps `voice_permissions`. */
+    voiceChangeSettings?: boolean
+    voice_change_settings?: boolean
+    voiceUseScenes?: boolean
+    voice_use_scenes?: boolean
+    voiceCreateScenes?: boolean
+    voice_create_scenes?: boolean
     renderMode?: 'local' | 'remote' | 'on_device' | 'thin_client' | 'backend'
     hardwarePreset?: FrameEmbeddedHardwarePreset
     /** Virtual frames only: how the backend quantizes the rendered image.
@@ -435,6 +445,12 @@ export interface FrameType {
     backgroundColor?: string
   }
   schedule?: FrameSchedule
+  /** Cloud frames: what the voice chat may do (docs/voice-chat.md "What the
+   * voice chat may do"), the owner's three switches with the defaults filled
+   * in, from GET /api/frames/{id}; saved through POST .../voice/permissions,
+   * its own route like the schedule. Backend frames keep the same three in
+   * device_config (voiceChangeSettings, voiceUseScenes, voiceCreateScenes). */
+  voice_permissions?: { change_settings: boolean; use_scenes: boolean; create_scenes: boolean }
   gpio_buttons?: GPIOButton[]
   /** The frame's event map (docs/events.md "Event map"): what its buttons do
    * whatever scene shows, "Button actions" in Settings. Undefined: never set

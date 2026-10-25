@@ -36,7 +36,20 @@ confirm. Still open:
   a repaint of the last image when the chat only answered ("What's on the
   frame?": the photo stays, no `render:scene` at all); the next render takes
   it off. An error shows its sentence ("I didn't catch that…" for silence).
-- [ ] **"Show me a banana"** pushes a preview scene (`Voice: a banana`, an
+- [ ] **"Voice chat may"** (Settings → Buzzer and microphone, `docs/voice-chat.md`
+  "What the voice chat may do"): with **Use installed scenes** off, "switch
+  to the calendar" is declined in a sentence and nothing is queued
+  (`voice:reply` names no tool, `commands:sync received 0`); with **Create
+  new scenes** left off (the default) "show me a banana" is declined the same
+  way, and turned on it previews the picture; with **Change settings** off
+  "rotate the frame" leaves it unturned. Once on the backend and once on a
+  cloud-managed frame; the switches save with the frame's Settings and apply
+  to the next sentence without a push.
+- [ ] **No microphone, no controls**: on the E1004 (no microphone reported)
+  the Settings panel shows the Microphone GPIO pins and neither the Voice
+  chat switch nor "Voice chat may"; setting clock 42 and data 41 makes them
+  appear, -1 takes them away again.
+- [ ] **"Show me a banana"** (with **Create new scenes** on) pushes a preview scene (`Voice: a banana`, an
   Unsplash photo; "generate a banana" → OpenAI art when the project has an
   `openAI.apiKey`) next to the saved scenes and shows it in the one render
   with the notice; "switch to the calendar" afterwards still works. On a

@@ -136,8 +136,15 @@ function ReadOnlyGpioButtons({ buttons }: { buttons: GPIOButton[] }): JSX.Elemen
  * (the save then pushes it); everything else is the editable list.
  */
 export function GpioButtonsSection(): JSX.Element {
-  const { configuredGpioButtons, reportedGpioButtons, frameForm, setFrameFormValues, buttonBeep, voiceChat } =
-    useFrameSettings()
+  const {
+    configuredGpioButtons,
+    reportedGpioButtons,
+    frameForm,
+    setFrameFormValues,
+    buttonBeep,
+    microphone,
+    voiceChat,
+  } = useFrameSettings()
   // The cloud form carries `gpio_buttons` only once a push set it; until
   // then the frame runs the map its board preset (or a console `set`) gave
   // it, which is the one the report shows.
@@ -258,16 +265,19 @@ export function GpioButtonsSection(): JSX.Element {
           ))
         )}
       </div>
-      {buttonBeep || voiceChat ? (
+      {buttonBeep || microphone || voiceChat ? (
         <>
           {/* The board's buzzer and microphone: their own box under the
               buttons they answer for, so the button rows stay a list of
-              buttons. No nav entry of its own; GPIO's link lands above it. */}
+              buttons. No nav entry of its own; GPIO's link lands above it.
+              The pins field is on every ESP32 board; the voice chat switch
+              and what it may do appear once the frame has a microphone. */}
           <H6 id="frame-settings-gpio-extras">Buzzer and microphone</H6>
           <div className="pl-2 @md:pl-8 space-y-2">
             <ButtonBeepField />
             <MicrophoneField />
             <VoiceChatField />
+            <VoicePermissionsField />
           </div>
         </>
       ) : null}
@@ -407,6 +417,8 @@ function MicrophoneField(): JSX.Element | null {
  * plane for the AI chat. A switch, on by default on a board with a
  * microphone (ESP32 only); off keeps the microphone shut whatever the
  * buttons are bound to. Which key, and that it is held, is the row's to say.
+ * Drawn only on a frame with a microphone (the context's `voiceChat` is null
+ * otherwise): a board without one has nothing to switch.
  */
 function VoiceChatField(): JSX.Element | null {
   const { voiceChat, setVoiceChat } = useFrameSettings()
@@ -450,6 +462,85 @@ function VoiceChatField(): JSX.Element | null {
                 : 'Off: the microphone stays shut'
             }
           />
+        </div>
+      </div>
+    </fieldset>
+  )
+}
+
+/**
+ * What the voice chat may do on this frame (docs/voice-chat.md "What the
+ * voice chat may do"): three switches under the voice chat's, one per kind of
+ * thing a spoken request can change. A switch that is off takes its tools out
+ * of the AI's hands for the next sentence (the plane builds the turn's tools
+ * from these, nothing is sent to the device), and the AI says so when asked.
+ * Settings and the installed scenes are on by default; new scenes on the
+ * frame are opted into. Drawn wherever the voice chat switch is.
+ */
+const VOICE_PERMISSION_ROWS: {
+  key: 'change_settings' | 'use_scenes' | 'create_scenes'
+  name: string
+  label: string
+  on: string
+  off: string
+}[] = [
+  {
+    key: 'change_settings',
+    name: 'voice_change_settings',
+    label: 'Change settings',
+    on: 'On: a spoken request can rotate the frame',
+    off: 'Off: the frame settings stay as they are',
+  },
+  {
+    key: 'use_scenes',
+    name: 'voice_use_scenes',
+    label: 'Use installed scenes',
+    on: 'On: a spoken request can switch scenes, set their fields and redraw',
+    off: 'Off: the installed scenes are left alone',
+  },
+  {
+    key: 'create_scenes',
+    name: 'voice_create_scenes',
+    label: 'Create new scenes',
+    on: 'On: a spoken request can put a new scene on the frame, such as a picture',
+    off: 'Off: only the scenes already on the frame',
+  },
+]
+
+function VoicePermissionsField(): JSX.Element | null {
+  const { voicePermissions, setVoicePermission, voiceChat } = useFrameSettings()
+  if (!voicePermissions || !voiceChat) {
+    return null
+  }
+  return (
+    <fieldset disabled={voiceChat.disabledReason !== undefined} className="min-w-0 space-y-2">
+      <div className="space-y-1 @md:flex @md:gap-2">
+        <Label className="@md:w-1/3">
+          Voice chat may
+          <Tooltip
+            title={
+              <>
+                What a spoken request is allowed to do on this frame. The AI gets only the tools these switches allow,
+                and tells the speaker when a request needs one that is off. Changing settings and using the scenes
+                already on the frame are on by default; creating new scenes (a picture asked for by voice is one, and
+                scenes built to order will be) is off until you turn it on. Applied by this control plane from the
+                next sentence on; nothing is sent to the frame.
+              </>
+            }
+          />
+        </Label>
+        <div className="w-full space-y-2">
+          {VOICE_PERMISSION_ROWS.map((row) => (
+            <div key={row.key} className="space-y-1">
+              <span className="frameos-muted text-xs">{row.label}</span>
+              <Switch
+                name={row.name}
+                value={voicePermissions[row.key]}
+                onChange={(next) => setVoicePermission(row.key, next)}
+                label={voicePermissions[row.key] ? row.on : row.off}
+              />
+            </div>
+          ))}
         </div>
       </div>
     </fieldset>
