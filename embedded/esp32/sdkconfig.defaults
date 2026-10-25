@@ -51,6 +51,16 @@ CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# Quad I/O flash reads. The S3 runs every instruction from flash through a
+# 16 KB cache, and in DIO mode a cache miss moves two bits a clock: DVD Logo
+# Bounce on the SenseCAP Indicator ran 10.2 fps in DIO and 13.5 in QIO
+# (2026-10-25), as fast as a 32 KB instruction cache, which would cost 16 KB
+# of internal RAM. The image header still says DIO; the bootloader switches
+# the flash to quad itself and stays in DIO when the chip refuses its QE bit
+# (an octal flash is left alone). Only a USB flash replaces the bootloader:
+# a frame updated over the air keeps its DIO one, and its speed.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+
 # app_main mounts and may format SPIFFS during first boot. ESP-IDF's default
 # 3584-byte main task stack can overflow in that path before FrameOS reaches
 # Wi-Fi or OTA rollback validation.

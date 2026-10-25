@@ -8,6 +8,11 @@ CONFIG_IDF_TARGET="esp32c3"
 # be off so nothing probes for it.
 # CONFIG_SPIRAM is not set
 
+# DIO flash reads: the base config's QIO was measured on the S3 only, and a
+# thin client's work is not instruction-fetch bound.
+# CONFIG_ESPTOOLPY_FLASHMODE_QIO is not set
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+
 # The base config pushes mbedTLS buffers to PSRAM; on the C3 keep them on the
 # internal heap but allocate them per-connection so idle TLS costs nothing.
 # CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC is not set
