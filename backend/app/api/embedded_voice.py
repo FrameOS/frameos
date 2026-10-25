@@ -8,8 +8,9 @@ process's memory until then (app/utils/voice_chat.py VoiceSessionStore). The
 closing request answers when the turn is over: the transcript, the reply and
 the tools that ran, or `{"ok": false, "error": …}` for what the frame should
 sound as an error. The frame's bearer is its `server_api_key`, as on every
-other `/embedded` route; the tools the turn gets are the four a frame may
-drive (VoiceTools), never the account's MCP tools.
+other `/embedded` route; the tools the turn gets are the six a frame may
+drive (VoiceTools), narrowed by the owner's three permission switches in the
+frame's device_config (VoicePermissions), never the account's MCP tools.
 
 The cloud's twin is cloud/apps/auth-web/app/api/frames/[frameId]/voice/[sessionId]/route.ts."""
 from __future__ import annotations
@@ -43,6 +44,7 @@ from app.utils.voice_chat import (
     VOICE_BYTES_PER_SECOND,
     VOICE_MAX_CHUNK_BYTES,
     VOICE_SESSIONS_PER_FRAME_PER_15_MIN,
+    VoicePermissions,
     VoiceSessionStore,
     VoiceTools,
     VoiceTurnResult,
@@ -201,6 +203,9 @@ async def api_embedded_device_voice(
         return {"status": "queued" if not nudged else "pulled"}
 
     image_sources = image_sources_for_settings(settings)
+    # The owner's switches (Settings -> Voice chat): a tool they turned off is
+    # not offered to the model, and refused if named anyway.
+    permissions = VoicePermissions.from_frame(frame)
     tools = VoiceTools(
         frame=frame,
         active_scene_id=active_scene_id,
@@ -208,6 +213,7 @@ async def api_embedded_device_voice(
         preview_scenes=preview_scenes,
         update_settings=update_settings,
         image_sources=image_sources,
+        permissions=permissions,
     )
     outcome = await transcribe_and_answer(
         pcm=pcm,
@@ -215,7 +221,7 @@ async def api_embedded_device_voice(
         model=openai_model(openai_settings, "chatModel", CHAT_MODEL),
         reasoning_effort=openai_settings.get("chatReasoningEffort") or None,
         scene_names=scene_names,
-        context_block=voice_frame_context(frame, active_scene_id, frame_context_block(frame), image_sources),
+        context_block=voice_frame_context(frame, active_scene_id, frame_context_block(frame), image_sources, permissions),
         history=history,
         tools=tools,
     )

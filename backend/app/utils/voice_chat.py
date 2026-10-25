@@ -11,13 +11,15 @@ Three parts, each small:
 - the transcription: OpenAI's /v1/audio/transcriptions on the PCM wrapped as
   a WAV, the frame's scene names as the prompt;
 - the turn: the chat's own agent loop (app/utils/ai_chat_agent.py) with the
-  voice system prompt, the frame's context block, and VoiceTools — the four
+  voice system prompt, the frame's context block, and VoiceTools — the six
   tools a frame's own token may drive (list scenes, activate one, set the
-  showing scene's state, redraw). Not the MCP server's tools: a frame's
-  credential is not the owner's.
+  showing scene's state, redraw, show a picture, rotate), narrowed by the
+  owner's three permission switches (VoicePermissions: change settings, use
+  the installed scenes, put new scenes on the frame). Not the MCP server's
+  tools: a frame's credential is not the owner's.
 
-The cloud's copy is cloud/apps/auth-web/src/lib/ai/voice.ts: the prompt and
-the tool definitions are kept the same there."""
+The cloud's copy is cloud/apps/auth-web/src/lib/ai/voice.ts: the prompt, the
+tool definitions and the permission table are kept the same there."""
 from __future__ import annotations
 
 import asyncio
@@ -44,6 +46,8 @@ __all__ = [
     "VOICE_SESSION_TTL_SECONDS",
     "VOICE_SAMPLE_RATE_HZ",
     "VOICE_TOOL_DEFINITIONS",
+    "VOICE_TOOL_PERMISSIONS",
+    "VoicePermissions",
     "VoiceSessionStore",
     "VoiceTools",
     "VoiceTurnResult",
@@ -79,6 +83,83 @@ def voice_chat_id(frame_id: int) -> str:
     so "no, the other one" has the previous turn to refer to. The backend
     derives the stored id from it (project_chat_id)."""
     return f"voice:{frame_id}"
+
+
+# ---------------------------------------------------------- permissions
+
+# What the voice chat may do on this frame (docs/voice-chat.md "What the
+# voice chat may do"): the owner's three switches. Plane-side policy, never a
+# firmware setting: the planes decide which tools the turn is offered. The
+# backend keeps them in device_config as `voiceChangeSettings` /
+# `voiceUseScenes` / `voiceCreateScenes` (the device's settings poll does not
+# carry them), the cloud in frames.voice_permissions. The cloud's copy is
+# voice.ts (voiceToolPermissions, defaultVoicePermissions): keep both alike.
+VOICE_PERMISSION_KEYS = ("change_settings", "use_scenes", "create_scenes")
+DEFAULT_VOICE_PERMISSIONS = {"change_settings": True, "use_scenes": True, "create_scenes": False}
+VOICE_PERMISSION_DEVICE_CONFIG_KEYS = {
+    "change_settings": ("voiceChangeSettings", "voice_change_settings"),
+    "use_scenes": ("voiceUseScenes", "voice_use_scenes"),
+    "create_scenes": ("voiceCreateScenes", "voice_create_scenes"),
+}
+# Which switch each tool answers to. A tool not listed (list_scenes) is
+# always offered: it reads, and it is what the model names when it must
+# decline. show_image puts a scene the frame did not hold on the frame, so it
+# is a new scene, not a use of an installed one.
+VOICE_TOOL_PERMISSIONS = {
+    "activate_scene": "use_scenes",
+    "set_scene_state": "use_scenes",
+    "render_now": "use_scenes",
+    "show_image": "create_scenes",
+    "rotate_frame": "change_settings",
+}
+# How the context names each switch to the model, on and off.
+VOICE_PERMISSION_DESCRIPTIONS = {
+    "change_settings": "change the frame's settings (rotate_frame)",
+    "use_scenes": "use the installed scenes: switch between them, set their fields, redraw (activate_scene, set_scene_state, render_now)",
+    "create_scenes": "put new scenes on the frame (show_image)",
+}
+
+
+@dataclass(frozen=True)
+class VoicePermissions:
+    change_settings: bool = True
+    use_scenes: bool = True
+    create_scenes: bool = False
+
+    def allows(self, tool: str) -> bool:
+        """Whether the turn may be offered (and may run) this tool."""
+        key = VOICE_TOOL_PERMISSIONS.get(tool)
+        return key is None or bool(getattr(self, key))
+
+    def as_dict(self) -> dict[str, bool]:
+        return {key: bool(getattr(self, key)) for key in VOICE_PERMISSION_KEYS}
+
+    def context_lines(self) -> list[str]:
+        """The two lines the frame's context block carries: what the owner
+        allowed and what not, each naming its tools."""
+        allowed = [VOICE_PERMISSION_DESCRIPTIONS[key] for key in VOICE_PERMISSION_KEYS if getattr(self, key)]
+        denied = [VOICE_PERMISSION_DESCRIPTIONS[key] for key in VOICE_PERMISSION_KEYS if not getattr(self, key)]
+        return [
+            f"- Voice chat may: {'; '.join(allowed) if allowed else 'nothing but list the scenes'}",
+            f"- Voice chat may not: {'; '.join(denied) if denied else 'nothing is switched off'}",
+        ]
+
+    @classmethod
+    def from_device_config(cls, device_config: Any) -> "VoicePermissions":
+        """The backend's spelling: camelCase first, the snake_case twin a USB
+        provisioning might have left; anything but a bool is the default."""
+        values = dict(DEFAULT_VOICE_PERMISSIONS)
+        if isinstance(device_config, dict):
+            for key, names in VOICE_PERMISSION_DEVICE_CONFIG_KEYS.items():
+                for name in names:
+                    if isinstance(device_config.get(name), bool):
+                        values[key] = device_config[name]
+                        break
+        return cls(**values)
+
+    @classmethod
+    def from_frame(cls, frame: Frame) -> "VoicePermissions":
+        return cls.from_device_config(frame.device_config)
 
 
 # ------------------------------------------------------------- sessions
@@ -254,10 +335,12 @@ Tools: list_scenes (what the frame holds and which scene shows), activate_scene 
 set_scene_state (set the showing scene's public fields, such as a message board's text), render_now (redraw the
 frame), show_image (put a picture on the frame: a photo found for a search, or an image generated from a
 description; the frame's context says which sources it has), rotate_frame (turn the display to 0, 90, 180 or 270
-degrees; "another 90" is the rotation in the context plus 90). "Next" and "previous" mean the scene after or before
-the one showing, in list order, wrapping around. "Show me X" with no scene of that name is show_image. These are the
-only things you can do; anything else (editing scenes, timing, other frames, the account) is for the workspace, and
-you say so in a sentence.
+degrees; "another 90" is the rotation in the context plus 90). The owner chooses which of these the voice chat may
+use: the context's "Voice chat may" and "may not" lines say which, and a tool you were not given is one the owner
+switched off, so when asked for it say so in a sentence (it is a switch in the frame's settings) and do nothing else.
+"Next" and "previous" mean the scene after or before the one showing, in list order, wrapping around. "Show me X"
+with no scene of that name is show_image. These are the only things you can do; anything else (editing scenes,
+timing, other frames, the account) is for the workspace, and you say so in a sentence.
 """.strip()
 
 
@@ -466,6 +549,7 @@ class VoiceTools(ToolBox):
         preview_scenes: PreviewScenes | None = None,
         update_settings: UpdateSettings | None = None,
         image_sources: list[str] | None = None,
+        permissions: VoicePermissions | None = None,
     ) -> None:
         self._frame = frame
         self._active_scene_id = active_scene_id
@@ -473,10 +557,13 @@ class VoiceTools(ToolBox):
         self._preview = preview_scenes
         self._update_settings = update_settings
         self._image_sources = list(image_sources or [])
+        self.permissions = permissions or VoicePermissions()
         self.changed: list[str] = []
 
     def definitions(self) -> list[JsonObject]:
-        return VOICE_TOOL_DEFINITIONS
+        # A tool the owner switched off is not offered at all; `call` refuses
+        # it as well, for a model that names one from an earlier turn.
+        return [tool for tool in VOICE_TOOL_DEFINITIONS if self.permissions.allows(str(tool["name"]))]
 
     def label(self, name: str) -> str:
         return VOICE_TOOL_LABELS.get(name, name)
@@ -485,6 +572,12 @@ class VoiceTools(ToolBox):
         return [scene for scene in (self._frame.scenes or []) if isinstance(scene, dict) and scene.get("id")]
 
     async def call(self, name: str, args: JsonObject) -> ToolOutput:
+        if name in VOICE_TOOL_PERMISSIONS and not self.permissions.allows(name):
+            return ToolOutput(json.dumps({
+                "ok": False,
+                "error": "not_allowed",
+                "detail": f"The owner has not allowed the voice chat to {VOICE_PERMISSION_DESCRIPTIONS[VOICE_TOOL_PERMISSIONS[name]]} on this frame. Say so; it is a switch in the frame's settings.",
+            }))
         if name == "list_scenes":
             listing = [
                 {
@@ -557,11 +650,16 @@ class VoiceTurnResult:
 
 
 def voice_frame_context(
-    frame: Frame, active_scene_id: str | None, frame_context: str, image_sources: list[str] | None = None
+    frame: Frame,
+    active_scene_id: str | None,
+    frame_context: str,
+    image_sources: list[str] | None = None,
+    permissions: VoicePermissions | None = None,
 ) -> str:
     """The chat's frame context block, plus what the voice turn needs: which
-    scene shows, the rotation, which picture sources the frame has, and that
-    the microphone brought the message."""
+    scene shows, the rotation, which picture sources the frame has, what the
+    owner allowed the voice chat to do, and that the microphone brought the
+    message."""
     lines = [frame_context]
     if active_scene_id:
         name = next(
@@ -571,6 +669,7 @@ def voice_frame_context(
         lines.append(f"- Showing now: {untrusted_result('active_scene', json.dumps({'id': active_scene_id, 'name': name}))}")
     lines.append(f"- Rotation: {int(frame.rotate or 0)} degrees clockwise")
     lines.append(f"- Picture sources for show_image: {', '.join(image_sources) if image_sources else 'none'}")
+    lines.extend((permissions or VoicePermissions()).context_lines())
     lines.append("The user spoke this into the frame's microphone; the message is the transcript.")
     return "\n".join(lines)
 

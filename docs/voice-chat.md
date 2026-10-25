@@ -142,7 +142,9 @@ microphone path (yet).
   42/41/38, a USB provisioning writes them as one `mic_pins` line), the cloud
   pushes them with `set_settings` and shows what the frame reports
   (`hardware.micClkPin` …). Settings → "Buzzer and microphone" has the three
-  fields next to the voice chat switch.
+  fields next to the voice chat switch and, under it, the three switches for
+  what the voice chat may do ("What the voice chat may do" below) — those are
+  the control plane's, never a device setting.
 
 ## The upload (one HTTP contract, both planes)
 
@@ -191,7 +193,8 @@ previous turn to refer to. The agent loop is the chat's
 with a **voice system prompt** instead of the editor's (short answers, act,
 never ask for confirmation: the spoken request is the confirmation; the
 transcript may carry recognition errors), the frame's context block, and
-**only the frame-scoped voice tools**, run in-process by the plane:
+**only the frame-scoped voice tools** the owner's switches allow ("What the
+voice chat may do" below), run in-process by the plane:
 
 | tool | does |
 |---|---|
@@ -215,13 +218,63 @@ in the `done` response and logs them. On the cloud the turn is metered like
 any chat turn (`meterAiUsageInBackground`, surface `voice_chat`, the
 transcription's audio tokens as a second record on its own model).
 
+## What the voice chat may do
+
+Three switches per frame, the owner's, under the voice chat switch in
+Settings → "Buzzer and microphone" ("Voice chat may"):
+
+| switch | default | tools |
+|---|---|---|
+| **Change settings** (`change_settings`) | on | `rotate_frame` |
+| **Use installed scenes** (`use_scenes`) | on | `activate_scene`, `set_scene_state`, `render_now` |
+| **Create new scenes** (`create_scenes`) | **off** (opted into) | `show_image`: a picture asked for by voice is a scene the frame did not hold, so it is a new scene, not a use of an installed one. A scene built to order ("What is not here yet") sits behind the same switch |
+
+`list_scenes` answers to none of them: it reads, and it is what the model
+names when it has to decline.
+
+Plane-side policy, never a firmware setting: the turn's tool list is built
+from the switches (`VoiceTools.definitions`, `voiceTools({permissions})`),
+so a tool that is off is **not offered** to the model at all, and is refused
+with `not_allowed` when named anyway (a habit from an earlier turn in the
+chat's history); the context block carries two lines, `- Voice chat may: …`
+and `- Voice chat may not: …`, each naming its tools, and the system prompt
+tells the model that a tool it was not given is one the owner switched off,
+to be said in a sentence when asked for. Applied from the next spoken
+sentence on; nothing is queued to the device.
+
+Where they live: the backend keeps the three in `device_config` as
+`voiceChangeSettings` / `voiceUseScenes` / `voiceCreateScenes` (the
+snake_case twins are read too; saved with the frame like the other ESP32
+knobs; the device's settings poll never carries them), the cloud in
+`frames.voice_permissions` (`{change_settings, use_scenes, create_scenes}`,
+written by `POST /api/frames/{id}/voice/permissions` with any subset of the
+keys, read back on `GET /api/frames/{id}` as `voice_permissions` with the
+defaults filled in; the SPA saves it with the form through its own route,
+like the schedule). The table of which tool answers to which switch is
+`VOICE_TOOL_PERMISSIONS` (`app/utils/voice_chat.py`) and
+`voiceToolPermissions` (`cloud/apps/auth-web/src/lib/voice-permissions.ts`),
+pinned to each other by both planes' parity tests; the SPA's reader for both
+spellings is `frontend/src/utils/voiceChat.ts`.
+
+**No microphone, no controls.** The voice chat switch and the three switches
+are drawn only on a frame with a microphone: a cloud frame that reports
+`hardware.microphone` (2026.10.20 firmware) or whose pins field names one, a
+backend frame whose `device_config` pins name one (either spelling) or, pins
+left to the board, whose preset carries one (E1001/E1002; the E1004 none).
+A clock or data pin of -1 is no microphone on either plane. The pins field
+itself stays on every real ESP32 board, because it is how a PDM microphone
+on a header is declared; once the clock and data pins are set the controls
+appear, and Button actions offers "Voice chat" on the same rule.
+
 ## What is not here yet
 
 - **Scenes written by voice.** `show_image` builds one fixed scene; "make me
   a scene with the weather and a quote" would run the scene AI
   (`ai_scene_chat` on the cloud, the chat's editor tools on the backend) as a
-  sub-turn and preview the result. Half a minute of model time, and the
-  render-in-the-frame's-memory check (`docs/ai-chat.md`) before the push.
+  sub-turn and preview the result, behind the **Create new scenes** switch
+  above. Half a minute of model time (the frame waits two minutes for the
+  answer, `VOICE_DONE_TIMEOUT_MS`), and the render-in-the-frame's-memory
+  check (`docs/ai-chat.md`) before the push.
 - **Word-by-word transcription.** The audio streams up while the user talks,
   so the only wait after the release is the transcription and the turn
   itself; the transcription itself starts at the release. OpenAI's Realtime
