@@ -28,6 +28,26 @@ if(NIM_GENERATED_SRCS)
         -Wno-error=implicit-function-declaration
         -fno-strict-aliasing -fno-lto)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE FRAMEOS_NIM_ENABLED=1)
+    # pixie's raster modules compile at -O2 instead of the image's -Os: an
+    # animated logo's raster went from 31 to 26 ms on the SenseCAP Indicator
+    # for 36 KB of flash. The SVG, XML and string modules gained nothing and
+    # stay -Os (docs/realtime-rendering.md). Nim names a module's C file
+    # after its path, ROT13'd: "@fcvkvr@fcnguf" is "@spixie@spaths".
+    set(FRAMEOS_NIM_HOT_MODULES
+        "@fcvkvr@fcnguf.nim.c"     # pixie/paths: flattening, coverage, fills
+        "@fcvkvr@fvzntrf.nim.c"    # pixie/images
+        "@fcvkvr@foyraqf.nim.c"    # pixie/blends
+        "@fcvkvr@fvagreany.nim.c"  # pixie/internal
+        "@fcvkvr@feto565.nim.c"    # pixie/rgb565
+        "@fcvkvr@fpbzzba.nim.c")   # pixie/common
+    foreach(src ${NIM_GENERATED_SRCS})
+        foreach(hot ${FRAMEOS_NIM_HOT_MODULES})
+            string(FIND "${src}" "${hot}" at)
+            if(NOT at EQUAL -1)
+                set_source_files_properties("${src}" PROPERTIES COMPILE_OPTIONS "-O2")
+            endif()
+        endforeach()
+    endforeach()
 else()
     # fos_netguard.c is in both branches on purpose: fos_cloud.c arms the
     # private-network policy unconditionally, so a thin-client image that

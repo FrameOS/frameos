@@ -51,8 +51,10 @@ extern void NimMain(void);
 extern bool fos_nim_init_impl(int width, int height, const char *name, int max_http_response_bytes,
                               int rotate);
 extern int fos_nim_render_impl(uint8_t *buf, size_t len, int pixel_format);
-extern int fos_nim_render_panel_impl(uint8_t *buf, size_t len, int pixel_format);
+extern int fos_nim_render_panel_impl(uint8_t *buf, size_t len, int pixel_format, uint32_t generation);
 extern void fos_nim_set_quiet_impl(int quiet);
+extern void fos_nim_set_keep_js_impl(int keep);
+extern size_t fos_nim_js_runtime_bytes_impl(void);
 extern int fos_nim_render_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
 extern const char *fos_nim_info_impl(void);
@@ -698,14 +700,14 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
     return result;
 }
 
-int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format)
+int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format, uint32_t generation)
 {
     if (!s_nim_ready || !buf) return -1;
     if (!nim_lock_take()) return -1;
     int result;
     if (setjmp(s_nim_oom_jmp) == 0) {
         s_nim_oom_jmp_armed = true;
-        result = fos_nim_render_panel_impl(buf, len, pixel_format);
+        result = fos_nim_render_panel_impl(buf, len, pixel_format, generation);
         if (result == 0) nim_note_healthy_render();
     } else {
         nim_oom_abort_note("render");
@@ -722,6 +724,23 @@ void frameos_nim_set_quiet(bool quiet)
     if (!nim_lock_take()) return;
     fos_nim_set_quiet_impl(quiet ? 1 : 0);
     nim_lock_give();
+}
+
+void frameos_nim_set_keep_js(bool keep)
+{
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    fos_nim_set_keep_js_impl(keep ? 1 : 0);
+    nim_lock_give();
+}
+
+size_t frameos_nim_js_runtime_bytes(void)
+{
+    if (!s_nim_ready) return 0;
+    if (!nim_lock_take()) return 0;
+    size_t bytes = fos_nim_js_runtime_bytes_impl();
+    nim_lock_give();
+    return bytes;
 }
 
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)

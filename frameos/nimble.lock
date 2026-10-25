@@ -151,7 +151,7 @@
     },
     "pixie": {
       "version": "6.1.0",
-      "vcsRevision": "393db1e1b4524c5067136bead7a915e89123ceab",
+      "vcsRevision": "f17ee28936b11de8ed16652371cb22b196be12b7",
       "url": "https://github.com/FrameOS/pixie",
       "downloadMethod": "git",
       "dependencies": [
@@ -164,7 +164,7 @@
         "crunchy"
       ],
       "checksums": {
-        "sha1": "dc1ecee888fb0a05123761aef5022d08ccf8f2d8"
+        "sha1": "ecbdba2161870a69b2808a9f1d3c5c99fbb43cf5"
       }
     }
   },

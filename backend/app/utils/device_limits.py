@@ -45,11 +45,11 @@ def esp32_canvas_bytes_per_pixel(width: int, height: int, psram_bytes: int, pixe
 def esp32_device_limits(width: int, height: int, psram_bytes: int, pixel_format: int | None = None) -> dict:
     """The wasm renderer's ceiling for an ESP32 with this PSRAM at this panel
     size: the device's heap (PSRAM less the panel buffers — an e-paper panel's
-    packed 4 bpp buffer, an RGB565 LCD's packed buffer and its two frame
+    packed 4 bpp buffer, an RGB565 LCD's packed buffer and its three frame
     buffers — and the emergency reserve), plus what the renderer spends on its
     RGBX canvas that a 565- or luma-canvas device does not."""
     pixels = max(1, width) * max(1, height)
-    packed_bytes = pixels * 2 * 3 if pixel_format == ESP32_PIXEL_RGB565 else -(-pixels // 2)
+    packed_bytes = pixels * 2 * 4 if pixel_format == ESP32_PIXEL_RGB565 else -(-pixels // 2)
     device_heap = max(512 * 1024, psram_bytes - packed_bytes - ESP32_EMERGENCY_RESERVE_BYTES)
     preview_overhead = pixels * 4 - pixels * esp32_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
     return {

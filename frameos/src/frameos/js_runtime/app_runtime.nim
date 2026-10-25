@@ -13,6 +13,7 @@ import frameos/utils/asset_colors
 import frameos/utils/dither
 import frameos/utils/exif
 import frameos/utils/image
+import frameos/utils/svg_frames
 import frameos/utils/paths
 import frameos/utils/system
 import frameos/js_runtime/burrito
@@ -108,7 +109,8 @@ proc teardownJsRuntime(runtime: JsAppRuntime) =
 var liveJsRuntimes: seq[JsAppRuntime] = @[]
   ## Every interpreter built and not yet released, on every platform: the
   ## single-scene host (an ESP32, the editor's preview) drops the idle ones
-  ## after each render, and an ESP32 also evicts them under memory pressure.
+  ## after each render unless the frame keeps them (settleIdleJsAppRuntimes),
+  ## and an ESP32 also evicts them under memory pressure.
 
 when defined(frameosEmbedded):
   # Every JS app node builds its own QuickJS runtime, and each one costs about
@@ -123,11 +125,9 @@ when defined(frameosEmbedded):
   # and rebuild the others on demand. Rebuilding re-runs the app's init(), so
   # this only happens when headroom is actually short: a Pi, the backend and a
   # roomy frame never evict and keep today's behaviour exactly.
-  const JsEvictHeadroomBytes = 2 * 1024 * 1024
-
   proc evictIdleJsRuntimes(keep: JsAppRuntime) =
     let headroom = availableRenderBytes()
-    if headroom <= 0 or headroom >= JsEvictHeadroomBytes:
+    if headroom <= 0 or headroom >= RenderMemoryShortBytes:
       return
     for other in liveJsRuntimes:
       if other != keep and other.ready and not jsRuntimeStack.contains(other):
@@ -155,6 +155,52 @@ proc releaseIdleJsAppRuntimes*() =
   for runtime in liveJsRuntimes:
     if runtime.ready and not jsRuntimeStack.contains(runtime):
       teardownJsRuntime(runtime)
+
+proc hasIdleJsAppRuntimes(): bool =
+  for runtime in liveJsRuntimes:
+    if runtime.ready and not jsRuntimeStack.contains(runtime):
+      return true
+  false
+
+proc settleIdleJsAppRuntimes*(keep: bool): bool =
+  ## After a render on the single-scene host. `keep` (an ESP32 that does not
+  ## deep-sleep): the idle interpreters stay for the next render while there
+  ## is room, and it calls into them instead of building QuickJS and compiling
+  ## the prelude and the app again — ~170 ms of a SenseCAP Indicator frame,
+  ## a Pi's behaviour. Released otherwise (a deep-sleeping frame wakes to a
+  ## fresh boot anyway), and released later when render memory runs short
+  ## (utils/memory.renderMemoryReleaseHook). Apps still must not count on
+  ## module variables outliving a render: `frameos.remember` is the way.
+  ## Whether they were kept.
+  if keep and hasIdleJsAppRuntimes():
+    let headroom = availableRenderHeadroomBytes()
+    if headroom <= 0 or headroom >= RenderMemoryShortBytes:
+      return true
+  releaseIdleJsAppRuntimes()
+  false
+
+proc liveJsAppRuntimeBytes*(): int =
+  ## What the live JS app interpreters hold, for the memory a kept scene
+  ## costs (the ESP32's `render:animation` line). Walks every interpreter's
+  ## heap: for a once-in-a-while log line, not per frame.
+  for runtime in liveJsRuntimes:
+    if runtime.ready:
+      result += runtime.js.heapBytes()
+
+when defined(frameosEmbedded):
+  proc releaseKeptJsAppRuntimes(): bool {.nimcall, raises: [].} =
+    ## utils/memory's release hook: render memory is short, so the
+    ## interpreters a frame kept between renders go, as releasing them after
+    ## every render used to guarantee.
+    if not hasIdleJsAppRuntimes():
+      return false
+    try:
+      releaseIdleJsAppRuntimes()
+    except CatchableError:
+      discard
+    true
+
+  renderMemoryReleaseHook = releaseKeptJsAppRuntimes
 
 proc abandonMidCallJsAppRuntimes*(): tuple[count, bytes: int] =
   ## After an out-of-memory abort (single_scene_host.recoverAbortedRun): drop
@@ -1555,6 +1601,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   const __jsReplacer = (k, v) =>
     (typeof v === 'bigint') ? { __bigint: v.toString() } : v;
   globalThis.__frameosStringify = (v) => JSON.stringify(v, __jsReplacer);
+  globalThis.__frameosSpecRest = (s) => { const r = { ...s }; delete r.svg; return r; };
   const __frameosUnwrap = (v) => (v && v.__frameosUndef === true) ? undefined : v;
   const __frameosProxy = (scope, getter) => new Proxy({}, {
     get(_, k) { return (typeof k === "string") ? __frameosUnwrap(getter(k)) : undefined; },
@@ -1720,7 +1767,7 @@ proc colorWithOpacity(spec: JsonNode): Color =
   return color
 
 proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: string,
-    requestedWidth, requestedHeight, rasterWidth, rasterHeight: int): Image =
+    requestedWidth, requestedHeight: int): Image =
   ## Rasterizes an SVG into the target the planner offered this node, when
   ## there is one of the size the scene asked for; nil when the caller should
   ## rasterize standalone.
@@ -1728,8 +1775,8 @@ proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: string
   ## Paint the cell directly first. The target is the cell of the live
   ## canvas or the chain's scratch — it exists already, so rendering into it
   ## costs the SVG's own paths and the paint strips pixie sizes to the budget,
-  ## and nothing the size of the cell. The raster bound the caller computed
-  ## (`rasterWidth`/`Height`) assumes a fresh full-size buffer, which this
+  ## and nothing the size of the cell. The raster bound
+  ## (boundedRequestedDimensions) assumes a fresh full-size buffer, which this
   ## path never allocates, so it is not consulted here: it is what left the
   ## E1004's hourly chart at 286x229 in a 1200x960 cell (2026-09-05) — 2 MB of
   ## free PSRAM with an 848 KB largest block put the bound at the 65,536-pixel
@@ -1746,6 +1793,10 @@ proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: string
   if offeredWidth != requestedWidth or offeredHeight != requestedHeight:
     # An offer of some other size (a planner that scaled the cell): only a
     # raster of exactly that size can claim it.
+    # The bound walks the PSRAM heap on an ESP32, so it is worked out only
+    # here and where the SVG is rasterized standalone, never per frame for
+    # a target of the requested size.
+    let (rasterWidth, rasterHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
     if offeredWidth == rasterWidth and offeredHeight == rasterHeight:
       let (target, _) = owner.takeDecodeTarget(context)
       if not target.isNil and renderSvgIntoTarget(svg, target):
@@ -1758,7 +1809,11 @@ proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: string
   if target.isNil:
     return nil
   var owed = takeOwedBackground(context, target)
-  let rendered = renderSvgIntoTargetWithDegrade(svg, target, owed)
+  # An LCD's buffer that only this SVG draws repaints just what changed
+  # (utils/svg_frames.nim); anything else, and a refusal there, as before.
+  var rendered = renderSvgFrame(svg, target, owed, context.wholeFrame)
+  if not rendered:
+    rendered = renderSvgIntoTargetWithDegrade(svg, target, owed)
   if owed.isSome:
     # Nothing could be drawn: the consumer paints over a background.
     payBackground(target, owed.get())
@@ -1777,10 +1832,10 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     if data.startsWith("<svg") or data.startsWith("<?xml") or data.contains("<svg"):
       let requestedWidth = defaultImageWidth(owner, context, %*{})
       let requestedHeight = defaultImageHeight(owner, context, %*{})
-      let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
-      let degraded = svgIntoOfferedTarget(owner, context, data, requestedWidth, requestedHeight, svgWidth, svgHeight)
+      let degraded = svgIntoOfferedTarget(owner, context, data, requestedWidth, requestedHeight)
       if not degraded.isNil:
         return degraded
+      let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
       let image = decodeSvgWithFallback(data, svgWidth, svgHeight)
       if image.isSome:
         return image.get()
@@ -1810,7 +1865,6 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
       # The spec's width/height are scene-requested: bounded like a decode.
       let requestedWidth = defaultImageWidth(owner, context, spec)
       let requestedHeight = defaultImageHeight(owner, context, spec)
-      let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
       # The same `intoTarget` handshake as the plain-canvas branch below: an
       # SVG panel is the common shape for a JS render app, and rasterizing it
       # into the target the planner offered is what keeps a full-size second
@@ -1830,11 +1884,17 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
       # the mean colour over the changed area is identical. Weighed against
       # 1.48MB of PSRAM and 5.2s per render on a frame with ~6.6MB free, the
       # call was to take the memory (docs/value-pipeline.md).
-      let intoTarget = svgIntoOfferedTarget(owner, context, spec["svg"].getStr(),
-        requestedWidth, requestedHeight, svgWidth, svgHeight)
+      # `.str`, not getStr: the markup is not copied on its way to the parser.
+      let svgNode = spec["svg"]
+      let intoTarget =
+        if svgNode.kind == JString:
+          svgIntoOfferedTarget(owner, context, svgNode.str, requestedWidth, requestedHeight)
+        else:
+          nil
       if not intoTarget.isNil:
         when defined(memProbe): memProbe("    svg decode AFTER (into target)")
         return intoTarget
+      let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
       let image = decodeSvgWithFallback(spec["svg"].getStr(), svgWidth, svgHeight)
       when defined(memProbe): memProbe("    svg decode AFTER")
       if image.isSome:
@@ -1923,6 +1983,76 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
   else:
     return VNone()
 
+proc plainSpecRestFromJs(ctx: ptr JSContext, payload: JSValueConst): JsonNode =
+  ## The spec's own enumerable properties but `svg`, read one at a time when
+  ## each is a string, a number, a boolean, null or undefined — what
+  ## `frameos.svg(markup, {width, height})` makes — exactly as the JSON
+  ## round trip below reads them (undefined dropped, NaN and infinities
+  ## null). nil when one is anything else, which then takes that round
+  ## trip: a call into JS, a stringify and a parse, 3 ms of an animated
+  ## frame on an ESP32.
+  var
+    tab: ptr UncheckedArray[JSPropertyEnum]
+    count: uint32
+  if JS_GetOwnPropertyNames(ctx, addr tab, addr count, payload,
+      (JS_GPN_STRING_MASK or JS_GPN_ENUM_ONLY).cint) != 0:
+    JS_FreeValue(ctx, JS_GetException(ctx))
+    return nil
+  defer: JS_FreePropertyEnum(ctx, tab, count)
+  result = newJObject()
+  for i in 0 ..< count.int:
+    let name = JS_AtomToString(ctx, tab[i].atom)
+    let key = toNimString(ctx, name)
+    JS_FreeValue(ctx, name)
+    if key == "svg":
+      continue
+    let value = JS_GetProperty(ctx, payload, tab[i].atom)
+    try:
+      if jsIsString(value):
+        result[key] = %toNimString(ctx, value)
+      elif jsIsBool(value):
+        result[key] = %toNimBool(ctx, value)
+      elif jsIsNull(value):
+        result[key] = newJNull()
+      elif jsIsUndefined(value):
+        discard
+      elif jsIsNumber(value):
+        let f = toNimFloat(ctx, value)
+        result[key] = if f.isNaN or f == Inf or f == NegInf: newJNull() else: jsValueToJson(ctx, value)
+      else:
+        return nil
+    finally:
+      JS_FreeValue(ctx, value)
+
+proc svgImageSpecFromJs(ctx: ptr JSContext, payload: JSValueConst): JsonNode =
+  ## A `frameos.svg(...)` spec read straight off the object: the markup is
+  ## copied out as a string and only the small rest of the spec goes through
+  ## JSON. Stringifying a 4 KB SVG and parsing it back cost a 480x480 frame
+  ## 12 ms on an ESP32. nil when `payload` is not such a spec.
+  if not jsIsObject(payload):
+    return nil
+  let kind = JS_GetPropertyStr(ctx, payload, "__frameosType")
+  defer: JS_FreeValue(ctx, kind)
+  if not jsIsString(kind) or toNimString(ctx, kind) != "image":
+    return nil
+  let svg = JS_GetPropertyStr(ctx, payload, "svg")
+  defer: JS_FreeValue(ctx, svg)
+  if not jsIsString(svg):
+    return nil
+  result = plainSpecRestFromJs(ctx, payload)
+  if not result.isNil:
+    result["svg"] = %toNimString(ctx, svg)
+    return
+  let rest = callGlobalFunction(ctx, "__frameosSpecRest", [payload])
+  defer: JS_FreeValue(ctx, rest)
+  if JS_IsException(rest) != 0:
+    JS_FreeValue(ctx, JS_GetException(ctx))
+    return nil
+  result = jsValueToJson(ctx, rest)
+  if result.kind != JObject:
+    return nil
+  result["svg"] = %toNimString(ctx, svg)
+
 proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, payload: JSValueConst, expectedType: string): Value =
   let ctx = runtime.js.context
 
@@ -1932,6 +2062,9 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
     return VNone()
 
   if expectedType == "image" or jsIsObject(payload) or JS_IsArray(ctx, payload) != 0:
+    let svgSpec = svgImageSpecFromJs(ctx, payload)
+    if not svgSpec.isNil:
+      return runtime.toValue(owner, context, svgSpec, expectedType)
     return runtime.toValue(owner, context, jsValueToJson(ctx, payload), expectedType)
 
   if expectedType.len > 0:

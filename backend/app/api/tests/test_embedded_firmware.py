@@ -362,9 +362,9 @@ def test_embedded_render_psram_estimate():
     need = embedded_render_psram_bytes(800, 480, FOS_PIXEL_4BPP_SPECTRA6, 8 * mb)
     assert 3_250_000 < need < 3_350_000
     # The SenseCAP Indicator's 480x480 LCD: a 565 canvas, the packed buffer and
-    # the two frame buffers it scans, each 460.8 KB, plus the reserve.
+    # the three frame buffers it scans, each 460.8 KB, plus the reserve.
     need = embedded_render_psram_bytes(480, 480, FOS_PIXEL_RGB565, 8 * mb)
-    assert need == 4 * 480 * 480 * 2 + 1536 * 1024
+    assert need == 5 * 480 * 480 * 2 + 1536 * 1024
     # 1200x1600 Spectra 6 on 8 MB: 3.84MB 565 canvas + 960KB packed + 1.5MB reserve, under 8MB.
     need = embedded_render_psram_bytes(1200, 1600, FOS_PIXEL_4BPP_SPECTRA6, 8 * mb)
     assert 6_300_000 < need < 6_400_000

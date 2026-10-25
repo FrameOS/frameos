@@ -185,13 +185,19 @@ bool fos_display_is_lcd(void)
     return s_panel && s_panel->bus == FOS_PANEL_BUS_RGB;
 }
 
-uint8_t *fos_display_render_target(size_t *len)
+uint8_t *fos_display_render_target(size_t *len, uint32_t *generation)
 {
     if (len) *len = 0;
+    if (generation) *generation = 0;
     if (!fos_display_is_lcd()) return NULL;
-    uint8_t *target = fos_lcd_st7701s_back_buffer();
+    uint8_t *target = fos_lcd_st7701s_back_buffer(generation);
     if (target && len) *len = fos_display_buffer_size();
     return target;
+}
+
+void fos_display_mark_written(const uint8_t *buf)
+{
+    if (fos_display_is_lcd()) fos_lcd_st7701s_mark_written(buf);
 }
 
 void fos_display_release_render_target(void)
@@ -293,8 +299,8 @@ size_t fos_display_canvas_bytes(void)
 size_t fos_display_render_psram_bytes(void)
 {
     if (!s_panel) return 0;
-    /* An RGB LCD scans two frame buffers of its own (lcd_st7701s_rgb.c). */
-    size_t lcd_fbs = s_panel->bus == FOS_PANEL_BUS_RGB ? 2u * fos_display_buffer_size() : 0u;
+    /* An RGB LCD scans three frame buffers of its own (lcd_st7701s_rgb.c). */
+    size_t lcd_fbs = s_panel->bus == FOS_PANEL_BUS_RGB ? 3u * fos_display_buffer_size() : 0u;
     return fos_display_canvas_bytes() + fos_display_buffer_size() + lcd_fbs + FOS_RENDER_PSRAM_RESERVE;
 }
 

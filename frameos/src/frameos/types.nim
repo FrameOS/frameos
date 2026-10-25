@@ -520,6 +520,10 @@ type
     # painted over.
     backgroundPending*: bool
     backgroundColor*: Color
+    # This render's flow is a single node: whatever its image input paints
+    # into the canvas is the whole frame (utils/svg_frames.nim repaints only
+    # the damage on an LCD's buffer then).
+    wholeFrame*: bool
     # Set while resolving an image input whose consumer will draw the result
     # onto the canvas full-frame: producers may decode straight into
     # `decodeTargetImage` with `decodeTargetScalingMode` (cover/contain/

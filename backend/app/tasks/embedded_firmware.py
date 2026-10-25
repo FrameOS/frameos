@@ -1469,9 +1469,9 @@ def embedded_render_psram_bytes(
     ``psram_bytes`` of PSRAM (the canvas format depends on it)."""
     canvas = width * height * embedded_render_canvas_bytes_per_pixel(width, height, psram_bytes, pixel_format)
     packed = embedded_buffer_size(width, height, pixel_format)
-    # An RGB LCD (the only FOS_PIXEL_RGB565 panel) scans two frame buffers of
-    # its own; mirrors fos_display_render_psram_bytes in frameos_display.c.
-    lcd_frame_buffers = 2 * packed if pixel_format == FOS_PIXEL_RGB565 else 0
+    # An RGB LCD (the only FOS_PIXEL_RGB565 panel) scans three frame buffers
+    # of its own; mirrors fos_display_render_psram_bytes in frameos_display.c.
+    lcd_frame_buffers = 3 * packed if pixel_format == FOS_PIXEL_RGB565 else 0
     return canvas + packed + lcd_frame_buffers + EMBEDDED_RENDER_PSRAM_RESERVE_BYTES
 
 

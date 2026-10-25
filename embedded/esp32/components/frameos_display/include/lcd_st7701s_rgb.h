@@ -56,8 +56,12 @@ void fos_lcd_st7701s_sleep(void);
  * presents it — a copy-free display — or
  * fos_lcd_st7701s_release_back_buffer() gives it back unshown. NULL before
  * init. */
-uint8_t *fos_lcd_st7701s_back_buffer(void);
+uint8_t *fos_lcd_st7701s_back_buffer(uint32_t *generation);
 void fos_lcd_st7701s_release_back_buffer(void);
+/* `*generation` above counts the writes into that buffer other than a render
+ * drawn in place (a copy, a clear, and what the caller reports here: an
+ * overlay drawn over a render in place). */
+void fos_lcd_st7701s_mark_written(const uint8_t *buf);
 /* Called with a buffer just before it is written to (drawn in, copied into,
  * cleared): a snapshot that points at the last picture lets go of it. */
 void fos_lcd_st7701s_set_before_write_hook(void (*hook)(const uint8_t *buf));

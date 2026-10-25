@@ -678,14 +678,15 @@ proc fos_nim_render_alloc_impl(
 proc fos_nim_render_panel_impl(
     buf: ptr UncheckedArray[uint8];
     bufLen: csize_t;
-    pixelFormat: cint
+    pixelFormat: cint;
+    generation: uint32
   ): cint {.exportc, cdecl.} =
   ## Render into the panel's own buffer — an LCD's back frame buffer, which
   ## the firmware shows with a buffer switch and no copy. Where the canvas can
   ## be that buffer (renderCanvas: a 565 panel, unrotated) the scene draws
   ## straight into it and nothing is packed; otherwise the canvas is packed
   ## into it as fos_nim_render_impl always does.
-  setPanelTarget(buf, bufLen.int)
+  setPanelTarget(buf, bufLen.int, generation)
   try:
     result = fos_nim_render_impl(buf, bufLen, pixelFormat)
   finally:

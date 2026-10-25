@@ -154,7 +154,7 @@ export function esp32PixelFormatIsGrey(pixelFormat: unknown): boolean {
 
 /** The heap an ESP32-S3 frame really has for rendering: PSRAM, less the panel
  * buffers the display driver owns — an e-paper panel's packed 4 bpp buffer,
- * or an RGB565 LCD's packed buffer and the two frame buffers it scans — and
+ * or an RGB565 LCD's packed buffer and the three frame buffers it scans — and
  * the emergency reserve armed at boot. The canvas is allocated out of what is
  * left. */
 export function esp32DeviceHeapBytes(
@@ -164,7 +164,7 @@ export function esp32DeviceHeapBytes(
   pixelFormat: number | null = null
 ): number {
   const pixels = Math.max(1, width) * Math.max(1, height)
-  const packedBytes = pixelFormat === ESP32_PIXEL_RGB565 ? pixels * 2 * 3 : Math.ceil(pixels / 2)
+  const packedBytes = pixelFormat === ESP32_PIXEL_RGB565 ? pixels * 2 * 4 : Math.ceil(pixels / 2)
   return Math.max(512 * 1024, psramBytes - packedBytes - ESP32_EMERGENCY_RESERVE_BYTES)
 }
 

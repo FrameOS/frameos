@@ -22,6 +22,7 @@ import frameos/values
 import frameos/planner
 import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_runtime
+import frameos/utils/svg_frames
 
 # ------------------------------------------------------------------ C hooks
 
@@ -429,6 +430,16 @@ proc fos_nim_load_tz_data_impl(sliceJson: cstring, timeZone: cstring): cstring {
 
 var quietRenders* = false
 
+proc fos_nim_set_keep_js_impl(keep: cint) {.exportc, cdecl.} =
+  ## The firmware's say on keeping the scene's JS interpreters between
+  ## renders (single_scene_host.keepJsRuntimes): yes on a frame that does not
+  ## deep-sleep, while there is room.
+  host.keepJsRuntimes = keep != 0
+
+proc fos_nim_js_runtime_bytes_impl(): csize_t {.exportc, cdecl.} =
+  ## What the live JS app interpreters hold, for the render:animation line.
+  liveJsAppRuntimeBytes().csize_t
+
 proc fos_nim_set_quiet_impl(quiet: cint) {.exportc, cdecl.} =
   ## An animation's quiet frame (fos_animation.h): no `render #N` line and no
   ## scene log lines until the next frame that logs in full.
@@ -789,9 +800,16 @@ var panelTargetBytes: int
 var panelCanvases: array[2, Image]
 var nextPanelCanvas = 0
 
-proc setPanelTarget*(target: pointer, bytes: int) =
+proc setPanelTarget*(target: pointer, bytes: int, generation: uint32 = 0) =
+  ## `generation`: the writes the firmware made into the buffer, so a scene
+  ## that draws it whole from one SVG knows whether it still holds the last
+  ## frame drawn there (utils/svg_frames.nim).
   panelTarget = target
   panelTargetBytes = bytes
+  if target.isNil:
+    endPanelFrame()
+  else:
+    beginPanelFrame(target, generation)
 
 proc sceneCanvasFormat*(): PixelFormat =
   when defined(frameosCanvasRgbx): pfRgbx

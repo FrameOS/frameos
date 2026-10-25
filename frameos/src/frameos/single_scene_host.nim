@@ -38,6 +38,11 @@ type
     exported*: ExportedInterpretedScene
     sceneId*: Option[SceneId]             ## the current scene, resident or not
     renderRequested*: bool
+    keepJsRuntimes*: bool
+      ## Keep the scene's idle JS interpreters between renders while there is
+      ## room (settleIdleJsAppRuntimes): an ESP32 that does not deep-sleep.
+      ## The preview leaves it off and releases them, as a deep-sleeping
+      ## frame must, so an app leaning on module state shows it there.
     events*: EventLoop
     # The payload of a `setCurrentScene` that carried `state`, held until that
     # scene is the resident one.
@@ -298,11 +303,13 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
     result = interpreter.render(host.scene, context)
   discard host.events.tick()
   discard host.events.drain()
-  # The scene is done with its JS apps until the next render. On an ESP32 that
-  # is minutes away, and the image packing and the next decode want the
-  # memory. The preview does the same while it runs as an ESP32, so that an
-  # app keeping values in module variables, which do not survive this,
-  # misbehaves in the editor rather than only on the frame; otherwise it
-  # keeps them, as a Pi does (releaseIdleJsAppRuntimes).
+  # The scene is done with its JS apps until the next render. On a
+  # deep-sleeping ESP32 that is a fresh boot away, and the next decode wants
+  # the memory: they go. An ESP32 that stays awake keeps them while there is
+  # room (keepJsRuntimes), and the next render skips building them again;
+  # they still go before a render or a decode that finds headroom short. The
+  # preview releases them while it runs as an ESP32, so that an app keeping
+  # values in module variables misbehaves in the editor rather than only on
+  # a sleeping frame; otherwise it keeps them, as a Pi does.
   if runsAsEmbedded():
-    releaseIdleJsAppRuntimes()
+    discard settleIdleJsAppRuntimes(host.keepJsRuntimes)

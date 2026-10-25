@@ -1513,11 +1513,12 @@ static esp_err_t render_once(bool quiet)
             frameos_nim_request_fresh_pass();
         }
         size_t target_len = 0;
-        uint8_t *target = fos_display_present() ? fos_display_render_target(&target_len) : NULL;
+        uint32_t generation = 0;
+        uint8_t *target = fos_display_present() ? fos_display_render_target(&target_len, &generation) : NULL;
         if (target && target_len == buf_len) {
             buf = target;
             in_panel = true;
-            err = frameos_nim_render_panel(buf, buf_len, format) == 0 ? ESP_OK : ESP_FAIL;
+            err = frameos_nim_render_panel(buf, buf_len, format, generation) == 0 ? ESP_OK : ESP_FAIL;
         } else {
             if (target) fos_display_release_render_target();
             err = frameos_nim_render_alloc(&buf, &buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
@@ -1584,6 +1585,9 @@ static esp_err_t render_once(bool quiet)
         }
         lan_overlay_begin(&lan_overlay, buf, width, height, format);
         notice_overlay_begin(&notice, buf, width, height, format);
+        /* Drawn into the buffer the panel shows: the next render in place
+         * there must not take it for its own frame. */
+        if (in_panel && (lan_overlay.drawn || notice.drawn)) fos_display_mark_written(buf);
     }
     bool overlay_drawn = lan_overlay.drawn || notice.drawn;
     if (err == ESP_OK && fos_display_present()) {
@@ -1916,21 +1920,26 @@ static void log_animation(const char *status, bool logged_frame)
 {
     fos_animation_stats_t stats;
     bool any = fos_animation_take_stats(&s_anim, esp_timer_get_time(), logged_frame, &stats);
-    char line[256];
+    char line[320];
     if (strcmp(status, "start") == 0) {
         snprintf(line, sizeof(line),
                  "{\"event\":\"render:animation\",\"source\":\"esp32\",\"status\":\"start\","
                  "\"periodMs\":%lu}",
                  (unsigned long)((s_anim.period_us + 500) / 1000));
     } else if (any) {
+        /* What an animation costs in memory, beside how fast it runs: the
+         * interpreters it keeps between frames, and what is left. */
         snprintf(line, sizeof(line),
                  "{\"event\":\"render:animation\",\"source\":\"esp32\",\"status\":\"%s\","
                  "\"frames\":%lu,\"seconds\":%.1f,\"fps\":%lu.%lu,\"avgMs\":%lu,\"maxMs\":%lu,"
-                 "\"periodMs\":%lu}",
+                 "\"periodMs\":%lu,\"jsKB\":%u,\"freePsramKB\":%u,\"largestPsramKB\":%u}",
                  status, (unsigned long)stats.frames, (double)stats.window_us / 1000000.0,
                  (unsigned long)(stats.fps_x10 / 10), (unsigned long)(stats.fps_x10 % 10),
                  (unsigned long)stats.avg_ms, (unsigned long)stats.max_ms,
-                 (unsigned long)stats.period_ms);
+                 (unsigned long)stats.period_ms,
+                 (unsigned)(frameos_nim_js_runtime_bytes() / 1024),
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024));
     } else if (strcmp(status, "stop") == 0) {
         snprintf(line, sizeof(line),
                  "{\"event\":\"render:animation\",\"source\":\"esp32\",\"status\":\"stop\"}");
@@ -2213,6 +2222,10 @@ static void client_task(void *arg)
             s_pass_battery_critical = battery_critical;
             s_pass_deep_sleep = deep_sleep_now;
             s_pass_battery_pct = battery_pct;
+            /* A frame that stays awake keeps its scene's JS interpreters
+             * between renders while there is room; a deep sleep ends them
+             * anyway. */
+            frameos_nim_set_keep_js(!deep_sleep_now);
         }
         bool battery_critical = s_pass_battery_critical;
         bool deep_sleep_now = s_pass_deep_sleep;

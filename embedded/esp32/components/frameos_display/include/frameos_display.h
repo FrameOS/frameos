@@ -61,8 +61,12 @@ bool fos_display_is_lcd(void);
  * this task's until then, or until fos_display_release_render_target() hands
  * it back unshown. NULL (and `*len` 0) for every panel that is not an LCD,
  * which renders into a canvas of its own and packs. */
-uint8_t *fos_display_render_target(size_t *len);
+uint8_t *fos_display_render_target(size_t *len, uint32_t *generation);
 void fos_display_release_render_target(void);
+/* `*generation` above counts the writes into the buffer other than a render
+ * drawn in place; report an overlay drawn over such a render here, so the
+ * next render into the buffer knows it holds more than the scene drew. */
+void fos_display_mark_written(const uint8_t *buf);
 /* Called with a panel buffer just before it is written to: a snapshot that
  * points at the last picture shown lets go of it (fos_client.c). */
 void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf));

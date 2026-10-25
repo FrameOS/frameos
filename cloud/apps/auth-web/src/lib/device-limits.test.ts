@@ -75,8 +75,9 @@ describe("the ESP32 canvas format", () => {
 
   it("is RGB565 on an RGB565 LCD, whose canvas is its own frame buffer", () => {
     expect(esp32CanvasBytesPerPixel(480, 480, PSRAM_8MB, ESP32_PIXEL_RGB565)).toBe(2);
+    // The packed buffer and the three frame buffers the panel scans.
     expect(esp32DeviceHeapBytes(480, 480, PSRAM_8MB, ESP32_PIXEL_RGB565)).toBe(
-      PSRAM_8MB - 3 * 480 * 480 * 2 - 1024 * 1024,
+      PSRAM_8MB - 4 * 480 * 480 * 2 - 1024 * 1024,
     );
   });
 });

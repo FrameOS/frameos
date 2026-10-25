@@ -1703,6 +1703,14 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
     # backgroundPending). Paid below when nothing draws.
     context.backgroundColor = scene.backgroundColor
     context.backgroundPending = true
+    # One render listener whose flow is one node: what that node draws is the
+    # whole frame.
+    context.wholeFrame = false
+    if scene.eventListeners.hasKey("render") and scene.eventListeners["render"].len == 1:
+      let first = scene.nextNodeIds.getOrDefault(scene.eventListeners["render"][0], -1.NodeId)
+      if first != 0.NodeId and first != -1.NodeId:
+        let after = scene.nextNodeIds.getOrDefault(first, -1.NodeId)
+        context.wholeFrame = after == 0.NodeId or after == -1.NodeId
   else:
     discard
 

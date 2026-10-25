@@ -39,12 +39,12 @@ def test_an_esp32_that_renders_on_the_device_renders_in_its_psram():
     assert frame_render_device(e1004).pixel_format == 7
 
     # The SenseCAP Indicator's LCD: a 565 canvas that is its own frame buffer,
-    # beside the two it scans.
+    # one of the three it scans.
     indicator = Frame(id=4, mode="embedded", device="lcd.st7701s_480x480",
                       embedded={"hardwarePreset": "seeed_sensecap_indicator_d1"})
     device = frame_render_device(indicator)
     assert device is not None and device.pixel_format == 9
-    assert device.limits(480, 480)["memoryBytes"] == 6_418_432
+    assert device.limits(480, 480)["memoryBytes"] == 5_957_632
 
 
 def test_frames_that_do_not_render_in_a_few_megabytes_render_unlimited():
