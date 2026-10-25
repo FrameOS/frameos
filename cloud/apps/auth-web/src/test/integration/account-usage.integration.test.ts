@@ -18,6 +18,7 @@ import {
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as getGrants } from "../../../app/api/backends/grants/route";
 import { POST as saveBackup } from "../../../app/api/backends/backups/route";
+import { GET as getPlan } from "../../../app/api/account/plan/route";
 import { POST as createScene } from "../../../app/api/account/scenes/route";
 import { POST as authorizeDevice } from "../../../app/api/device/authorize/route";
 import { POST as pollDevice } from "../../../app/api/device/poll/route";
@@ -34,10 +35,12 @@ import {
 } from "@frameos-cloud/ledger";
 import { resolveAiAccess } from "../../lib/ai/api-key";
 import { sealedBackupBase64 } from "./sealed-backup";
+import type { PlanCatalog } from "../../lib/plan-catalog";
 import {
   accountUsage,
   maxBackupBytesPerAccount,
   maxFrameLogBytesPerAccount,
+  maxPhotoBytesPerAccount,
   maxPrivateSceneBytesPerAccount,
 } from "../../lib/usage";
 
@@ -315,6 +318,43 @@ describe("account storage usage and quotas", () => {
     expect(usage.scenes.private_max_bytes).toBe(maxPrivateSceneBytesPerAccount);
     expect(usage.backups.max_bytes).toBe(maxBackupBytesPerAccount);
     expect(usage.frame_logs.max_bytes).toBe(maxFrameLogBytesPerAccount);
+  });
+
+  // The plan cards on the usage page: Free is the account's own limits, the
+  // paid stops multiply them, and only Free can be chosen.
+  it("offers Free, Private and Business built from the free plan's own numbers", async () => {
+    const accountId = await signIn();
+    const usage = await accountUsage(db, accountId);
+    expect(usage.plan.name).toBe("Free");
+    expect(usage.photos.max_bytes).toBe(maxPhotoBytesPerAccount);
+
+    const response = await getPlan(new NextRequest(new URL("/api/account/plan", baseUrl)));
+    expect(response.status).toBe(200);
+    const { catalog } = (await response.json()) as { catalog: PlanCatalog };
+    expect(catalog.groups.map((group) => [group.key, group.available])).toEqual([
+      ["free", true],
+      ["private", false],
+      ["business", false],
+    ]);
+    const free = catalog.groups[0]?.stops[0];
+    expect(free).toMatchObject({ code: "payg", current: true, features: [], price_micros: "0" });
+    expect(free?.limits).toEqual({
+      backup_bytes: usage.backups.max_bytes,
+      cloud_rendered_frames: usage.cloud_rendered_frames.max_count,
+      frame_log_bytes: usage.frame_logs.max_bytes,
+      frames: usage.frames.max_count,
+      people: 1,
+      photo_bytes: usage.photos.max_bytes,
+      private_scene_bytes: usage.scenes.private_max_bytes,
+    });
+    const privatePlan = catalog.groups[1]?.stops[0];
+    expect(privatePlan).toMatchObject({ code: "private-2", current: false, price_micros: "2000000" });
+    expect(privatePlan?.limits).toMatchObject({
+      cloud_rendered_frames: 2,
+      frames: 40,
+      people: 2,
+      photo_bytes: 2 * usage.photos.max_bytes,
+    });
   });
 
   it("refuses a new private scene over the private byte quota", async () => {

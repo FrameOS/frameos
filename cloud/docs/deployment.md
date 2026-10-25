@@ -607,7 +607,7 @@ the complete app on one localhost port exactly as before.
 Per-account limits for cloud-managed frames, all optional:
 
 ```text
-FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT=50       # enrolled frames
+FRAMEOS_CLOUD_MAX_FRAMES_PER_ACCOUNT=20       # enrolled frames
 FRAMEOS_CLOUD_MAX_CLAIM_TOKENS_PER_ACCOUNT=50 # outstanding unused claim codes
 FRAMEOS_CLOUD_CLAIM_TOKEN_TTL_HOURS=24        # how long a claim code lives
 ```
@@ -636,8 +636,8 @@ its rows in Postgres and its bytes in the object store, under random keys
 jsonb column of its `photo_entries` row, not an object. All optional:
 
 ```text
-FRAMEOS_CLOUD_MAX_PHOTO_MB=1024     # storage per verified account
-FRAMEOS_CLOUD_MAX_UNVERIFIED_PHOTO_MB=250  # until the email is verified
+FRAMEOS_CLOUD_MAX_PHOTO_MB=250      # the free plan's storage (a paid plan's row can raise it)
+FRAMEOS_CLOUD_MAX_UNVERIFIED_PHOTO_MB=250  # at most this until the email is verified
 PHOTODNA_SUBSCRIPTION_KEY=…         # PhotoDNA scanning of every upload
 PHOTODNA_ENDPOINT=…                 # overrides the PhotoDNA Match URL
 FRAMEOS_PHOTO_UPLOAD_DIR=…          # where unfinished uploads wait

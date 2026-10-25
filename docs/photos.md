@@ -516,10 +516,11 @@ only rewrites rows. A photo's color profile is the `colors` column (jsonb) of
 its row, its metadata the `metadata` column (jsonb; see Metadata).
 
 Uploads accept JPEG, PNG, GIF and WebP only (every byte stored must pass the
-scan), at most 250 MiB each. Each account has `FRAMEOS_CLOUD_MAX_PHOTO_MB` of
-storage (default 1024) once its email is verified (a social login counts),
-and the smaller `FRAMEOS_CLOUD_MAX_UNVERIFIED_PHOTO_MB` (default 250) until
-then; at most 100 000 entries and 16 unfinished uploads.
+scan), at most 250 MiB each. Each account has its plan's photo storage once
+its email is verified (a social login counts): `FRAMEOS_CLOUD_MAX_PHOTO_MB`
+(default 250) on the free plan, more on a paid one
+(`cloud/docs/accounting-todo.md` §0.1). Until then it has at most
+`FRAMEOS_CLOUD_MAX_UNVERIFIED_PHOTO_MB` (default 250); at most 100 000 entries and 16 unfinished uploads.
 Unfinished uploads wait on the app server's disk (`FRAMEOS_PHOTO_UPLOAD_DIR`),
 never in the bucket, and a finished one is hashed, scanned, read for its
 metadata, thumbnailed and streamed to the bucket from that file, never held
