@@ -92,7 +92,12 @@ space inside an expression until quickts is fixed: `{`${count} items`}`,
 `e2e/scenes/jsx*.json` are fifteen interfaces built this way (a dashboard,
 an agenda, a month, a departure board, a photo card, a forecast, a status
 board, an energy chart, a front page, a word clock, a recipe, a player,
-the DVD frame), snapshotted by CI like every scene fixture.
+the DVD frame), snapshotted by CI like every scene fixture. The
+`jsxSquare*` ones are eleven made for a 480x480 touch screen (the SenseCAP
+Indicator), each snapshotted after the taps its `e2eEvents` make: a home
+panel's switches, a calculator, a to-do list, a player, tabs, a color
+picker, a counter, a forecast's days, and an analog clock, a word clock and
+the DVD frame with their `at` field pinning the time.
 
 In an `<svg>`, React's camelCase attribute names are read as SVG's
 (`strokeWidth` is `stroke-width`), except SVG's own camelCase ones

@@ -1,0 +1,124 @@
+{
+  "id": "jsxSquarePlayer",
+  "name": "JSX: Now playing (480x480, touch)",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600.0,
+    "backgroundColor": "#000000"
+  },
+  "e2eFrame": {
+    "width": 480,
+    "height": 480
+  },
+  "e2eEvents": [
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 26624,
+        "y": 27306,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 26624,
+        "y": 27306,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    }
+  ],
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: Now playing",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [
+        {
+          "name": "at",
+          "label": "Time to show (empty: now)",
+          "type": "string",
+          "value": ""
+        }
+      ],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: Now playing\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"at\",\n      \"label\": \"Time to show (empty: now)\",\n      \"type\": \"string\",\n      \"value\": \"\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// @name JSX: Now playing\n// @background #000000\n// @refresh 1\n// A player: play and pause, skip back and forward. The cover is a gradient and\n// an SVG; the bar moves with the clock while it plays.\n// `at` (a field) pins the time, for a snapshot; empty, it is the clock.\nconst tracks = [\n  { title: 'Log Cabin Lullaby', artist: 'The Forest Choir', length: 201, cover: 'from-fuchsia-500 to-indigo-800', bg: 'bg-fuchsia-950' },\n  { title: 'Northern Lights', artist: 'Aurora Static', length: 244, cover: 'from-emerald-300 to-cyan-800', bg: 'bg-emerald-950' },\n  { title: 'Paper Boats', artist: 'Juniper Lane', length: 187, cover: 'from-amber-300 to-rose-600', bg: 'bg-rose-950' },\n  { title: 'Night Bus Home', artist: 'Metro Hum', length: 222, cover: 'from-sky-400 to-slate-800', bg: 'bg-sky-950' },\n]\n\nlet index = 0\nlet playing = true\nlet offset = 74 // seconds played when the clock started\nlet since = null\nlet clockAt = () => Date.now()\n\nconst position = () => {\n  const t = offset + (playing ? (clockAt() - since) / 1000 : 0)\n  return t % tracks[index].length\n}\nconst toggle = () => {\n  offset = position(); since = clockAt(); playing = !playing\n}\nconst skip = (by) => {\n  index = (index + by + tracks.length) % tracks.length; offset = 0; since = clockAt()\n}\nconst clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`\n\nconst Icon = ({ d, className }) => (\n  <svg className={className} viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d={d} /></svg>\n)\n\nexport function get(app) {\n  if (app.config.at) clockAt = () => Date.parse(app.config.at)\n  if (since === null) since = clockAt()\n  const track = tracks[index]\n  const at = position()\n  return (\n    <div className={`flex flex-col items-center gap-4 px-8 py-6 ${track.bg} text-white`}>\n      <span className=\"text-xs uppercase text-white/60 font-semibold\">{`Track ${index + 1} of ${tracks.length}`}</span>\n      <div className={`w-44 h-44 rounded-3xl bg-gradient-to-br ${track.cover} flex items-center justify-center`}>\n        <svg className=\"w-24 h-24 text-white/70\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth={1.5} strokeLinecap=\"round\">\n          <circle cx={12} cy={12} r={10} />\n          <circle cx={12} cy={12} r={6} />\n          <circle cx={12} cy={12} r={2} fill=\"currentColor\" />\n        </svg>\n      </div>\n      <div className=\"flex flex-col items-center w-full\">\n        <span className=\"text-2xl font-bold truncate\">{track.title}</span>\n        <span className=\"text-white/70\">{track.artist}</span>\n      </div>\n      <div className=\"flex flex-col w-full gap-1\">\n        <div className=\"h-1 rounded-full bg-white/20\">\n          <div className={`h-1 rounded-full bg-white w-[${(at * 100) / track.length}%]`} />\n        </div>\n        <div className=\"flex justify-between text-xs text-white/60\">\n          <span>{clock(at)}</span>\n          <span>{clock(track.length)}</span>\n        </div>\n      </div>\n      <div className=\"flex items-center justify-between w-full px-6\">\n        <div className=\"w-16 h-16 rounded-full flex items-center justify-center active:bg-white/20\" onClick={() => skip(-1)}>\n          <Icon className=\"w-9 h-9 text-white/80\" d=\"M6 6h2v12H6zM9.5 12l8.5 6V6z\" />\n        </div>\n        <div className=\"w-20 h-20 rounded-full bg-white flex items-center justify-center active:bg-white/60\" onClick={toggle}>\n          <Icon className=\"w-10 h-10 text-black\" d={playing ? 'M6 4h4v16H6zM14 4h4v16h-4z' : 'M7 4v16l13-8z'} />\n        </div>\n        <div className=\"w-16 h-16 rounded-full flex items-center justify-center active:bg-white/20\" onClick={() => skip(1)}>\n          <Icon className=\"w-9 h-9 text-white/80\" d=\"M16 6h2v12h-2zM6 18l8.5-6L6 6z\" />\n        </div>\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {
+          "at": "2024-03-12T14:40:00"
+        }
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

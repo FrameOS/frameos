@@ -1,0 +1,137 @@
+{
+  "id": "jsxSquareColors",
+  "name": "JSX: Colors (480x480, touch)",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600.0,
+    "backgroundColor": "#18181b"
+  },
+  "e2eFrame": {
+    "width": 480,
+    "height": 480
+  },
+  "e2eEvents": [
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 24029,
+        "y": 29081,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 24029,
+        "y": 29081,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 10854,
+        "y": 13653,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 10854,
+        "y": 13653,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    }
+  ],
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: Colors",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: Colors\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// @name JSX: Colors\n// @background #18181b\n// @refresh 3600\n// Tailwind's palette, picked by tapping. The classes are read when the frame\n// draws, so `bg-${hue}-${shade}` works for every hue and shade.\nconst hues = ['red', 'orange', 'amber', 'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan',\n  'sky', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose', 'stone']\nconst shades = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]\n\nlet hue = 'sky'\nlet shade = 500\n\nexport function get(app) {\n  const ink = shade < 400 ? 'text-black/80' : 'text-white'\n  return (\n    <div className=\"flex flex-col gap-3 p-5 bg-zinc-900 text-white\">\n      <div className={`flex flex-col justify-end h-36 rounded-3xl p-5 bg-${hue}-${shade} ${ink}`}>\n        <span className=\"text-sm uppercase opacity-70 font-semibold\">Tap a color</span>\n        <span className=\"text-3xl font-mono\">{`bg-${hue}-${shade}`}</span>\n      </div>\n      <div className=\"flex gap-1 h-12\">\n        {shades.map((s) => (\n          <div className={`flex-1 rounded-lg bg-${hue}-${s} ${s === shade ? 'border-4 border-white' : ''}`}\n            onClick={() => { shade = s }} />\n        ))}\n      </div>\n      <div className=\"flex-1 grid grid-cols-6 gap-2\">\n        {hues.map((h) => (\n          <div className={`rounded-xl bg-${h}-500 ${h === hue ? 'border-4 border-white' : 'active:border-4 active:border-white/50'}`}\n            onClick={() => { hue = h }} />\n        ))}\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

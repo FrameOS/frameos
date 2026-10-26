@@ -1,0 +1,137 @@
+{
+  "id": "jsxSquareTodo",
+  "name": "JSX: To-do (480x480, touch)",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600.0,
+    "backgroundColor": "#f1f5f9"
+  },
+  "e2eFrame": {
+    "width": 480,
+    "height": 480
+  },
+  "e2eEvents": [
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 16384,
+        "y": 12424,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 16384,
+        "y": 12424,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 16384,
+        "y": 16520,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 16384,
+        "y": 16520,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    }
+  ],
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: To-do",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: To-do\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// @name JSX: To-do\n// @background #f1f5f9\n// @refresh 3600\n// A to-do list you can tap: a row ticks itself off and the header counts.\nconst items = [\n  'Water the plants',\n  'Call grandma about Sunday',\n  'Book the dentist',\n  'Oat milk, coffee beans, lemons',\n  'Take the recycling out',\n  'Fix the bike light',\n]\n\nlet done = null\nconst load = () => {\n  if (done === null) done = frameos.recall('done') ?? [true, false, false, false, false, false]\n}\n\nconst Check = () => (\n  <svg className=\"w-5 h-5 text-white\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth={3} strokeLinecap=\"round\" strokeLinejoin=\"round\">\n    <path d=\"M5 12l5 5L20 7\" />\n  </svg>\n)\n\nexport function get(app) {\n  load()\n  const count = done.filter(Boolean).length\n  return (\n    <div className=\"flex flex-col gap-2 p-6 bg-slate-100 text-slate-800\">\n      <div className=\"flex items-end justify-between\">\n        <span className=\"text-4xl font-bold\">Today</span>\n        <span className=\"text-lg text-slate-500\">{`${count} of ${items.length} done`}</span>\n      </div>\n      <div className=\"h-2 rounded-full bg-slate-200 mb-2\">\n        <div className={`h-2 rounded-full bg-emerald-500 w-[${(count * 100) / items.length}%]`} />\n      </div>\n      {items.map((text, i) => (\n        <div className=\"flex items-center gap-4 rounded-2xl bg-white px-4 py-3 active:bg-sky-100\"\n          onClick={() => { done[i] = !done[i]; frameos.remember('done', done) }}>\n          <div className={`w-7 h-7 rounded-full flex items-center justify-center ${done[i] ? 'bg-emerald-500' : 'border-2 border-slate-300'}`}>\n            {done[i] ? <Check /> : null}\n          </div>\n          <span className={`flex-1 text-lg truncate ${done[i] ? 'line-through text-slate-400' : ''}`}>{text}</span>\n        </div>\n      ))}\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}
