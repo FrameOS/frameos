@@ -24,7 +24,7 @@ type
   UiEvent* = enum
     ## The handlers an element can have, by the event that runs them.
     ueClick = "tap", ueDoubleClick = "doubleTap", ueLongPress = "longPress",
-    uePointerDown = "pointerDown", uePointerUp = "pointerUp"
+    uePointerDown = "pointerDown", uePointerUp = "pointerUp", uePointerMove = "pointerMove"
 
   UiRegion* = object
     ## An element the pointer can do something to, where the layout put it:
@@ -72,7 +72,7 @@ type
 const
   # The attributes the JSX walker turns onClick, onLongPress, ... into.
   handlerAttrs: array[UiEvent, string] = ["on-click", "on-double-click",
-    "on-long-press", "on-pointer-down", "on-pointer-up"]
+    "on-long-press", "on-pointer-down", "on-pointer-up", "on-pointer-move"]
   Unbounded = 1e9'f32
   MaxDepth = 64
 

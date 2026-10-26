@@ -289,10 +289,12 @@ button; the raw pointer events never do.
 
 **JSX UIs.** A JS app's UI (`docs/jsx-ui.md` "Events") is hit-tested in
 the interpreter before the scene's event nodes hear the event: `tap`,
-`doubleTap`, `longPress`, `pointerDown` and `pointerUp` run the innermost
-element's handler, and `pointerMove` / `pointerDown` / `pointerUp` move its
-`hover:` and `active:` classes. Either one dispatches `render` (origin
-`scene`). A scene listens for those events while a UI in it has elements
+`doubleTap`, `longPress`, `pointerDown`, `pointerUp` and `pointerMove` run
+the innermost element's handler, and `pointerMove` / `pointerDown` /
+`pointerUp` move its `hover:` and `active:` classes. A press is captured:
+the element that took a `pointerDown` (an `onPointerDown` or `onPointerMove`)
+gets that `pointerId`'s moves and release until it lifts. Either one
+dispatches `render` (origin `scene`). A scene listens for those events while a UI in it has elements
 that want them, so a scene with neither still costs nothing per motion
 report.
 

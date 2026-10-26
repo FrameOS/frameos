@@ -7,6 +7,12 @@
 ## when one changed something: a handler ran, or the elements the pointer is
 ## over or pressing are not the ones the last render drew. The next layout
 ## reads those (`input`) for its hover:, active: and group-hover: classes.
+##
+## A press is captured, as a browser captures a touch: the innermost element
+## with an onPointerDown or onPointerMove under it gets that pointer's moves
+## and its release until it lifts, wherever they land (`captures`), with
+## localX / localY still from its corner, so a slider follows a finger that
+## slides off its end. A move with no press goes to the element under it.
 
 import std/json
 import frameos/ui/layout
@@ -22,6 +28,7 @@ type
     offsetX*, offsetY*: float32 ## the UI's corner in the scene's canvas
     regions*: seq[UiRegion]     ## the last render's, in paint order
     input*: UiInput             ## what the pointer is doing, for the next one
+    captures*: seq[(int, int)]  ## (pointerId, region key) of each press held
     call*: UiHandlerCall
 
 const MaxTargets = 16
@@ -55,13 +62,15 @@ proc handlerKind(event: string): int =
   of "longPress": ord(ueLongPress)
   of "pointerDown": ord(uePointerDown)
   of "pointerUp": ord(uePointerUp)
+  of "pointerMove": ord(uePointerMove)
   else: -1
 
 proc wants(r: UiRegion, event: string): bool =
   case event
-  of "pointerMove": r.hover or r.group
+  of "pointerMove": r.hover or r.group or r.handlers[uePointerMove] > 0
   of "pointerDown", "pointerUp", "pointerCancel":
-    r.active or r.hover or r.group or r.handlers[uePointerDown] > 0 or r.handlers[uePointerUp] > 0
+    r.active or r.hover or r.group or r.handlers[uePointerDown] > 0 or
+      r.handlers[uePointerUp] > 0 or r.handlers[uePointerMove] > 0
   else:
     let kind = handlerKind(event)
     kind >= 0 and r.handlers[UiEvent(kind)] > 0
@@ -82,6 +91,18 @@ proc keysOver(target: UiTarget, lx, ly: float32, active: bool): seq[int] =
         lx >= r.x and ly >= r.y and lx < r.x + r.w and ly < r.y + r.h:
       result.add r.key
 
+proc captureOf(target: UiTarget, pointer: int): int =
+  ## The key of the element holding the pointer's press, -1 for none.
+  for (held, key) in target.captures:
+    if held == pointer:
+      return key
+  -1
+
+proc release(target: UiTarget, pointer: int) =
+  for i in countdown(target.captures.high, 0):
+    if target.captures[i][0] == pointer:
+      target.captures.delete(i)
+
 proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
   ## Hands a pointer event to the scene's UIs. True when the frame should
   ## render again: a handler ran (whatever it changed, the picture is the
@@ -93,11 +114,22 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
     y = if placed: payload["y"].getFloat() else: 0
     touch = placed and payload{"pointerType"}.getStr() == "touch"
     kind = handlerKind(event)
-  var handled = false
+    pointer = if payload.isNil or payload.kind != JObject: 0 else: payload{"pointerId"}.getInt(0)
+    follows = event in ["pointerMove", "pointerUp", "pointerCancel"]
+  var
+    handled = false
+    capturing: UiTarget # the UI holding this pointer's press, if one does
+  if follows:
+    for target in targets:
+      if target.sceneId == sceneId and target.captureOf(pointer) >= 0:
+        capturing = target
+        break
   for target in targets:
     if target.sceneId != sceneId:
       continue
+    let captured = if follows: target.captureOf(pointer) else: -1
     if released:
+      target.release(pointer)
       if target.input.pressed.len > 0:
         target.input.pressed.setLen(0)
         result = true
@@ -120,7 +152,28 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
         if pressed != target.input.pressed:
           target.input.pressed = pressed
           result = true
+        # The innermost element that takes a press holds the pointer.
+        target.release(pointer)
+        for i in countdown(target.regions.high, 0):
+          let r = target.regions[i]
+          if (r.handlers[uePointerDown] > 0 or r.handlers[uePointerMove] > 0) and
+              lx >= r.x and ly >= r.y and lx < r.x + r.w and ly < r.y + r.h:
+            target.captures.add((pointer, r.key))
+            break
     if handled or kind < 0 or target.call.isNil:
+      continue
+    if not capturing.isNil:
+      # A held press: its moves and its release go to the element that took
+      # it, inside its box or not, and to nothing else.
+      if captured >= 0:
+        for r in target.regions:
+          if r.key == captured:
+            let handler = r.handlers[UiEvent(kind)]
+            if handler > 0:
+              target.call(handler - 1, event, payload, lx - r.x, ly - r.y)
+              handled = true
+              result = true
+            break
       continue
     # The innermost element with a handler for it: the last one painted.
     for i in countdown(target.regions.high, 0):

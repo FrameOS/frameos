@@ -111,7 +111,7 @@ interface FrameOSStreamRef { __frameosType: "streamRef"; id: number; }
 interface FrameOSElement { type: string; props: Record<string, any>; }
 /** What a handler gets: the pointer event, and where in the element it was. */
 interface FrameOSUiEvent {
-  type: "tap" | "doubleTap" | "longPress" | "pointerDown" | "pointerUp";
+  type: "tap" | "doubleTap" | "longPress" | "pointerDown" | "pointerUp" | "pointerMove";
   x: number;
   y: number;
   localX: number;
@@ -130,6 +130,8 @@ interface FrameOSElementProps {
   onLongPress?: (event: FrameOSUiEvent) => void;
   onPointerDown?: (event: FrameOSUiEvent) => void;
   onPointerUp?: (event: FrameOSUiEvent) => void;
+  /** The pointer moved: over the element, or anywhere while a press it took is held (captured until the release). */
+  onPointerMove?: (event: FrameOSUiEvent) => void;
   [attribute: string]: any;
 }
 declare namespace JSX {
