@@ -221,14 +221,20 @@ proc releaseRenderMemory*(): bool =
   ## decode was just refused. Whether anything went (then try it again).
   not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook()
 
-proc keepIdleInterpreters*(): bool =
+proc keepIdleInterpreters*(holdingPictures = false): bool =
   ## Whether the idle JS interpreters may stay for the next render: while the
   ## headroom holds RenderMemoryShortBytes after a render that decoded
   ## something (the next may decode again, at full resolution), and
   ## KeepInterpretersBytes after one that decoded nothing. A decode releases
   ## them first when it is short either way. Settles the decode flag.
+  ##
+  ## `holdingPictures`: one of them keeps pictures (fetchImage's `keep`, a
+  ## JSX gallery's photo), which go with it. Letting it go would not spare
+  ## the next decode, it would cause one, so it stays down to
+  ## KeepInterpretersBytes after a decode too.
   let headroom = availableRenderHeadroomBytes()
-  let floor = if decodedSinceSettle: RenderMemoryShortBytes else: KeepInterpretersBytes
+  let floor = if decodedSinceSettle and not holdingPictures: RenderMemoryShortBytes
+              else: KeepInterpretersBytes
   decodedSinceSettle = false
   headroom <= 0 or headroom >= floor
 

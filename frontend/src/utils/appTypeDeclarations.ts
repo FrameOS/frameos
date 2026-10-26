@@ -213,6 +213,13 @@ declare const frameos: {
       exif?: boolean;
       // The image's color profile (a .frameos.json sidecar's colors object); null = none, clears the last palette.
       colors?: { [key: string]: any } | null;
+      // Keep the picture for later renders (a JSX gallery's photo, drawn again without a download) until
+      // frameos.releaseImage(ref) or the interpreter goes; 8 at most. Never the consumer's target.
+      keep?: boolean;
+      // With keep: the size to decode it at, in the canvas's pixel format (a host decodes at the picture's own size).
+      width?: number;
+      height?: number;
+      fit?: "cover" | "contain";
     }
   ): {
     image: FrameOSImageRef | null;
@@ -223,6 +230,8 @@ declare const frameos: {
     exif?: Record<string, any>;
     exifSummary?: string;
   };
+  /** Lets a picture fetchImage kept ({ keep: true }) go. False for one that was not kept, or is gone. */
+  releaseImage(image: FrameOSImageRef | { image: FrameOSImageRef | null } | null): boolean;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

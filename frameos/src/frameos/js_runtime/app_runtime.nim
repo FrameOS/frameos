@@ -62,6 +62,10 @@ type
     lastJsxConfig: JsonNode
     lastJsxAt: MonoTime
     transientImageIds: seq[int]
+    keptImageIds: seq[int]
+      ## `fetchImage(url, {keep: true})`'s pictures, oldest first: they stay
+      ## for later renders until `frameos.releaseImage` or the interpreter
+      ## goes (MaxKeptImages at most).
     ## `frameos.remember` / `recall`: values the app keeps between renders, as
     ## JSON text. Held here and not in the interpreter because an ESP32 tears
     ## every idle interpreter down after a render (releaseIdleJsAppRuntimes),
@@ -116,6 +120,7 @@ proc teardownJsRuntime(runtime: JsAppRuntime) =
   runtime.initialized = false
   runtime.images.clear()
   runtime.transientImageIds.setLen(0)
+  runtime.keptImageIds.setLen(0)
 
 var liveJsRuntimes: seq[JsAppRuntime] = @[]
   ## Every interpreter built and not yet released, on every platform: the
@@ -173,6 +178,13 @@ proc hasIdleJsAppRuntimes(): bool =
       return true
   false
 
+proc idleJsAppRuntimesHoldPictures(): bool =
+  ## Whether an idle interpreter keeps pictures (fetchImage's `keep`).
+  for runtime in liveJsRuntimes:
+    if runtime.ready and not jsRuntimeStack.contains(runtime) and runtime.keptImageIds.len > 0:
+      return true
+  false
+
 proc settleIdleJsAppRuntimes*(keep: bool): bool =
   ## After a render on the single-scene host. `keep` (an ESP32 that does not
   ## deep-sleep): the idle interpreters stay for the next render while there
@@ -183,8 +195,10 @@ proc settleIdleJsAppRuntimes*(keep: bool): bool =
   ## and released later when a decode is short of memory
   ## (utils/memory.renderMemoryReleaseHook). Apps still must not count on
   ## module variables outliving a render: `frameos.remember` is the way.
-  ## Whether they were kept.
-  if keep and hasIdleJsAppRuntimes() and keepIdleInterpreters():
+  ## An interpreter that keeps pictures stays down to the lower floor after
+  ## a decode too: they would only be decoded again. Whether they were kept.
+  if keep and hasIdleJsAppRuntimes() and
+      keepIdleInterpreters(holdingPictures = idleJsAppRuntimesHoldPictures()):
     return true
   releaseIdleJsAppRuntimes()
   false
@@ -368,6 +382,7 @@ proc jsFetchText(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
     return nimStringToJS(ctx, "")
 
 proc storeTransientImageJson(runtime: JsAppRuntime, image: Image): JsonNode
+proc storeKeptImageJson(runtime: JsAppRuntime, owner: AppRoot, image: Image): JsonNode
 
 const JsHttpMaxTimeoutMs = 600_000
 
@@ -552,6 +567,15 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
   ## earlier photo's palette override is cleared; without the key nothing
   ## about colors changes. With adjustments, `contain` does not claim the
   ## target: they must not touch the canvas around the photo.
+  ##
+  ## `keep: true` makes a picture the app holds: the ref stays valid for
+  ## later renders (a JSX gallery's photo, drawn again after a tap without a
+  ## download) until `frameos.releaseImage(ref)` or the interpreter goes,
+  ## MaxKeptImages at most. A kept picture is the app's own image, never the
+  ## consumer's target: `width` / `height` (and `fit`, cover or contain) say
+  ## the size to decode it at, in the canvas's pixel format, so an ESP32
+  ## holds a 480x480 photo in 450 KB of RGB565; without them it decodes at
+  ## its own size.
   let e = env(ctx)
   var response = %*{"image": newJNull()}
   if e == nil:
@@ -591,8 +615,28 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
         setRenderPaletteOverride(colorProfile.get().palette)
       else:
         clearRenderPaletteOverride()
+    let keep = options{"keep"}.getBool(false)
     var downloaded: tuple[image: Image, data: string]
-    if offeredWidth > 0 and offeredHeight > 0 and
+    if keep:
+      let
+        keepWidth = options{"width"}.getInt(0)
+        keepHeight = options{"height"}.getInt(0)
+      if keepWidth > 0 and keepHeight > 0:
+        # The canvas's format where one is about (RGB565 on an LCD), so
+        # drawing the picture later is a copy.
+        let like =
+          if not context.isNil and not context.decodeTargetImage.isNil: context.decodeTargetImage
+          else: context.contextImage()
+        let target =
+          if like.isNil: newImage(keepWidth, keepHeight)
+          else: newImageLike(like, keepWidth, keepHeight)
+        if not like.isNil:
+          target.ditherStores = like.ditherStores # as a decode into the canvas
+        downloaded = downloadImageWithDataInto(urlStr, target, maxBytes = maxBytes,
+          headers = headers, fit = scaledDecodeFit(options{"fit"}.getStr("cover")))
+      else:
+        downloaded = downloadImageWithData(urlStr, maxBytes = maxBytes, headers = headers)
+    elif offeredWidth > 0 and offeredHeight > 0 and
         (offeredFit notin DecoderFits or (adjustColors and offeredFit == "contain")):
       downloaded = downloadImageWithDataBounded(urlStr, offeredWidth, offeredHeight,
         maxBytes = maxBytes, headers = headers)
@@ -611,7 +655,9 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
       # Explicit sliders stand; the consumer's automatic fit skips this one.
       markImageGraded(downloaded.image)
 
-    response["image"] = e.runtime.storeTransientImageJson(downloaded.image)
+    response["image"] =
+      if keep: e.runtime.storeKeptImageJson(owner, downloaded.image)
+      else: e.runtime.storeTransientImageJson(downloaded.image)
     response["width"] = %*downloaded.image.width
     response["height"] = %*downloaded.image.height
 
@@ -1363,6 +1409,34 @@ proc storeTransientImageJson(runtime: JsAppRuntime, image: Image): JsonNode =
   if result.kind == JObject:
     runtime.transientImageIds.add(result["id"].getInt())
 
+const MaxKeptImages = 8
+  ## Pictures an app may keep at once; the oldest goes for a ninth.
+
+proc storeKeptImageJson(runtime: JsAppRuntime, owner: AppRoot, image: Image): JsonNode =
+  result = runtime.storeImageJson(image)
+  if result.kind == JObject:
+    runtime.keptImageIds.add(result["id"].getInt())
+    if runtime.keptImageIds.len > MaxKeptImages:
+      runtime.images.del(runtime.keptImageIds[0])
+      runtime.keptImageIds.delete(0)
+      frameos_apps.log(owner, %*{"event": "js:keptImages", "dropped": "oldest",
+        "limit": MaxKeptImages})
+
+proc releaseKeptImage(runtime: JsAppRuntime, id: int): bool =
+  let at = runtime.keptImageIds.find(id)
+  if at < 0:
+    return false
+  runtime.keptImageIds.delete(at)
+  runtime.images.del(id)
+  true
+
+proc jsReleaseImage(ctx: ptr JSContext, id: JSValue): JSValue {.nimcall.} =
+  ## `frameos.releaseImage(ref)`: a kept picture goes; false for any other.
+  let e = env(ctx)
+  if e == nil:
+    return nimBoolToJS(ctx, false)
+  nimBoolToJS(ctx, e.runtime.releaseKeptImage(toNimFloat(ctx, id).int))
+
 proc clearTransientImages(runtime: JsAppRuntime) =
   for id in runtime.transientImageIds:
     if runtime.images.hasKey(id):
@@ -1599,6 +1673,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsFetchText", jsFetchText)
   runtime.js.registerFunction("jsHttpRequest", jsHttpRequest)
   runtime.js.registerFunction("jsFetchImage", jsFetchImage)
+  runtime.js.registerFunction("jsReleaseImage", jsReleaseImage)
   runtime.js.registerFunction("jsAssets", jsAssets)
   runtime.js.registerFunction("jsStreams", jsStreams)
   runtime.js.registerFunction("jsGetSetting", jsGetSetting)
@@ -1650,6 +1725,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
     fetchImage: (url, options) => JSON.parse(
       jsFetchImage(String(url || ""), JSON.stringify(options || {}, __jsReplacer)) || '{"image":null}'
     ),
+    releaseImage: (ref) => jsReleaseImage(Number(((ref && ref.image) || ref || {}).id || 0)) === true,
     listAssets: (dir) => __frameosAsset("list", dir) || [],
     assetExists: (path) => __frameosAsset("exists", path) === true,
     assetSize: (path) => __frameosAsset("size", path) ?? -1,

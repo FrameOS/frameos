@@ -301,6 +301,13 @@ render tries again. `frameos.fetchImage` never throws; it answers
 **Photos.** `frameos.fetchImage(url, { headers, saveAsset })` downloads and
 decodes natively, and the bytes never enter the JS heap. Return its `image`.
 Use it for every photo, and `httpRequest` only for the JSON around it.
+Its image lasts one render. A JSX UI that shows a photo across renders
+(a tap, a hover, its interval) keeps it instead:
+`frameos.fetchImage(url, { keep: true, width, height })` decodes it at that
+size and the ref stays valid until `frameos.releaseImage(ref)` or the
+interpreter goes (8 at most). Hold the ref in a module variable and fetch
+again when it is gone: an ESP32 short of memory drops the interpreter, and
+the picture with it.
 
 **Assets and permissions.** Asset paths are relative to the frame's assets
 folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,
@@ -795,6 +802,13 @@ declare const frameos: {
       exif?: boolean;
       // The image's color profile (a .frameos.json sidecar's colors object); null = none, clears the last palette.
       colors?: { [key: string]: any } | null;
+      // Keep the picture for later renders (a JSX gallery's photo, drawn again without a download) until
+      // frameos.releaseImage(ref) or the interpreter goes; 8 at most. Never the consumer's target.
+      keep?: boolean;
+      // With keep: the size to decode it at, in the canvas's pixel format (a host decodes at the picture's own size).
+      width?: number;
+      height?: number;
+      fit?: "cover" | "contain";
     }
   ): {
     image: FrameOSImageRef | null;
@@ -805,6 +819,8 @@ declare const frameos: {
     exif?: Record<string, any>;
     exifSummary?: string;
   };
+  /** Lets a picture fetchImage kept ({ keep: true }) go. False for one that was not kept, or is gone. */
+  releaseImage(image: FrameOSImageRef | { image: FrameOSImageRef | null } | null): boolean;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;
