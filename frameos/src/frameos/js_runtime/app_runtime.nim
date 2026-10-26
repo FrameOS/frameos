@@ -630,6 +630,8 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
         let target =
           if like.isNil: newImage(keepWidth, keepHeight)
           else: newImageLike(like, keepWidth, keepHeight)
+        if not like.isNil:
+          target.ditherStores = like.ditherStores # as a decode into the canvas
         downloaded = downloadImageWithDataInto(urlStr, target, maxBytes = maxBytes,
           headers = headers, fit = scaledDecodeFit(options{"fit"}.getStr("cover")))
       else:
