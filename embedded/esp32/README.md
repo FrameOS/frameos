@@ -68,7 +68,8 @@ components/
                           the configured panel (see "Every supported panel
                           driver is compiled into each firmware image")
   frameos_nim/            the FrameOS Nim runtime compiled to C (see build_nim.sh);
-                          builds a stub when nimcache/ is absent
+                          builds a stub when nimcache/ is absent. fos_rows.c shares a
+                          pixel loop's rows with a helper on the other core (resample.nim)
 partitions_4mb.csv        4MB: nvs + phy + factory app + 512K state; no OTA
 partitions.csv            8MB: nvs + otadata + phy + ota_0/ota_1 (3520K each) + 1M state
 partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (4032K each) + 8M state
@@ -356,7 +357,10 @@ for the two Spectra boards most of the bench work runs on:
   share core 1 (the render's bulk copies pause while it runs), big heap
   reallocs copy outside the heap's spinlock (`fos_heap_realloc`: the IDF
   heap copies with interrupts off, which held the refill off for 1-2 ms),
-  `CONFIG_LCD_RGB_RESTART_IN_VSYNC` resyncs a frame that still starves, and
+  the driver restarts the DMA at the next vertical blank after a frame that
+  still starves (not `CONFIG_LCD_RGB_RESTART_IN_VSYNC`, whose restart at every
+  blank kept a stale refill count and ran the picture one bounce buffer
+  ahead, the top of the next frame on the bottom rows), and
   the "skip an unchanged picture" hash is not written to flash (a flash
   write switches the cache off and stalls the refill; an LCD comes up blank
   after a reboot anyway). Any other flash write (a settings save, a scene
@@ -514,11 +518,13 @@ file without one was written by firmware that still pinned defaults and is
 dropped the first time it is read, so the deployed defaults win. State for a scene
 that is not resident (a wake-check pass, a switch carrying state) goes to the
 file right away, so a deep sleep in between loses nothing. Writes go
-behind: a change waits in RAM and reaches the flash after a minute (later
-changes ride along), before a deep sleep and before a restart. A SPIFFS write
-that erases a block holds the flash cache off for 50-100 ms, which stalls
-both cores and makes an RGB LCD scan garbage, and the touch test's taps are
-disk fields: one write per tap flickered the SenseCAP Indicator. Both control
+behind: a change waits in RAM and reaches the flash after a minute, ten on
+an RGB LCD (later changes ride along), before a deep sleep and before a
+restart. A SPIFFS write that erases a block holds the flash cache off for
+50-100 ms, which stalls both cores and makes an RGB LCD scan garbage, and the
+touch test's taps are disk fields: one write per tap flickered the SenseCAP
+Indicator. A slideshow's photo counter is one too: written every minute it
+still erased a block every several minutes. Both control
 planes get it: the cloud hello and the commands pull report the persisted
 state even before the first render, keyed by scene id.
 
@@ -543,10 +549,13 @@ A `scene_event` (`setSceneState`, a button, a custom event) meets the same
 timing: the cloud delivers it the moment the session is up, the wake's render
 already holds the runtime, and the handler used to answer `busy` after three
 seconds — an answer the hub never retries, so no state ever reached a
-sleeping frame. A busy scene event is now kept (`fos_events_defer`, a
-handful of slots, `event:deferred` in the log), delivered by the render task
-at the start of its next pass (`event:deferred:delivered`), rendered on that
-pass, and counted as work that holds the deep sleep.
+sleeping frame. Scene code also runs on the render task alone: a scene event
+from HTTP, the cloud or the console is queued for it (`fos_events_defer`, 16
+slots, a newer pointer move replacing a waiting one, `event:dropped` when
+full), delivered at the start of a pass or in the idle wait, rendered by the
+scene's own render rule, and counted as work that holds the deep sleep. The
+first `/event/pointerMove` over HTTP had compiled the scene's JS on the 8 KB
+HTTP task and crashed the frame (2026-10-26).
 
 The cloud log tap only runs while the session is up, so the first ~15 s of a
 wake (the wake cause, the scene load, the replayed button press) and

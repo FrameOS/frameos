@@ -488,9 +488,11 @@ static esp_err_t rgb_init(void)
          * crept down the glass (2026-10-25). The fill interrupt is not
          * IRAM-safe on purpose — the driver notes a copy from a PSRAM frame
          * buffer crashes while a flash write has the cache off — so a flash
-         * write (an NVS save) costs a disturbed frame, which
-         * CONFIG_LCD_RGB_RESTART_IN_VSYNC (sdkconfig.defaults) resyncs at
-         * the next vertical blank instead of letting it drift. */
+         * write (an NVS save) costs a disturbed frame, after which the
+         * driver restarts the DMA at the next vertical blank. Not
+         * CONFIG_LCD_RGB_RESTART_IN_VSYNC: its restart at every blank kept
+         * a stale refill count and left the picture one bounce buffer
+         * ahead (sdkconfig.defaults). */
         .bounce_buffer_size_px = FOS_LCD_ST7701S_WIDTH * b->bounce_lines,
         .dma_burst_size = 64,
         .hsync_gpio_num = b->hsync,

@@ -124,6 +124,68 @@ static void test_logging_cadence(void)
     CHECK(stats.frames == 1 && stats.max_ms == 80, "of what ran since: %u / %u", stats.frames, stats.max_ms);
 }
 
+static void test_bursts(void)
+{
+    /* A finger dragged over a scene that renders on its own render rule:
+     * frames ~100 ms apart, outside animation. */
+    fos_animation_t a;
+    memset(&a, 0, sizeof(a));
+    fos_animation_stats_t st;
+    bool owed = true;
+
+    /* A lone frame, long after anything: loud, with its pulls. */
+    CHECK(fos_animation_housekeeping_due(&a, 50 * S), "a pass out of nowhere does its housekeeping");
+    CHECK(!fos_animation_burst_quiet(&a, 50 * S), "the first frame logs in full");
+    fos_animation_burst_frame_done(&a, 50 * S, 50 * S + 90 * MS, false);
+
+    /* The next ones, 100 ms apart: quiet, the pulls once a second. */
+    int64_t t = 50 * S + 100 * MS;
+    CHECK(!fos_animation_housekeeping_due(&a, t), "not again within the burst's second");
+    CHECK(fos_animation_burst_quiet(&a, t), "the second frame is quiet");
+    fos_animation_burst_frame_done(&a, t, t + 90 * MS, true);
+    CHECK(!fos_animation_burst_end(&a, t + 500 * MS, &st, &owed), "not over half a second later");
+    for (int i = 0; i < 20; i++) {
+        t += 100 * MS;
+        bool quiet = fos_animation_burst_quiet(&a, t);
+        fos_animation_burst_frame_done(&a, t, t + 90 * MS, quiet);
+    }
+    CHECK(fos_animation_housekeeping_due(&a, t + 100 * MS), "a second on, the pulls run once");
+    CHECK(!fos_animation_housekeeping_due(&a, t + 200 * MS), "and are marked done");
+
+    /* Ten seconds into a long drag, one frame logs in full again. */
+    int64_t loud_at = 0;
+    for (int i = 0; i < 100 && !loud_at; i++) {
+        t += 100 * MS;
+        bool quiet = fos_animation_burst_quiet(&a, t);
+        if (!quiet) loud_at = t;
+        fos_animation_burst_frame_done(&a, t, t + 90 * MS, quiet);
+    }
+    CHECK(loud_at >= 60 * S && loud_at <= 60 * S + 100 * MS, "a frame in full ten seconds in, got %lld",
+          (long long)loud_at);
+    t += 100 * MS;
+    fos_animation_burst_frame_done(&a, t, t + 90 * MS, fos_animation_burst_quiet(&a, t));
+
+    /* The finger lifts: a second later the burst is over, once, its last
+     * frame owed its announce. */
+    CHECK(!fos_animation_burst_end(&a, t + 90 * MS + 999 * MS, &st, &owed), "within the second: not over");
+    CHECK(fos_animation_burst_end(&a, t + 90 * MS + 1 * S, &st, &owed), "over");
+    CHECK(owed, "the last frame was quiet");
+    CHECK(st.frames == 102, "every frame of the burst, got %u", (unsigned)st.frames);
+    CHECK(st.avg_ms == 90 && st.max_ms == 90, "their render time");
+    CHECK(!fos_animation_burst_end(&a, t + 5 * S, &st, &owed), "said once");
+    CHECK(fos_animation_housekeeping_due(&a, t + 5 * S), "after it every pass does its housekeeping");
+
+    /* A single tap is not a burst worth a line, and owes nothing. */
+    fos_animation_burst_frame_done(&a, 200 * S, 200 * S + 90 * MS, false);
+    CHECK(!fos_animation_burst_end(&a, 202 * S, &st, &owed), "one loud frame: nothing to say");
+
+    /* Animating, bursts are not counted: the animation logs its own way. */
+    CHECK(fos_animation_update(&a, true, 0.05, 300 * S), "starts");
+    fos_animation_burst_frame_done(&a, 300 * S, 300 * S + 40 * MS, true);
+    CHECK(!fos_animation_burst_quiet(&a, 300 * S + 50 * MS), "no burst while animating");
+    CHECK(!fos_animation_burst_end(&a, 310 * S, &st, &owed), "and nothing ends");
+}
+
 int main(void)
 {
     test_wanted();
@@ -131,6 +193,7 @@ int main(void)
     test_housekeeping_once_a_second();
     test_pacing();
     test_logging_cadence();
+    test_bursts();
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

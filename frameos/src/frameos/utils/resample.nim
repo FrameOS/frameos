@@ -9,6 +9,16 @@
 ## zoom near 1 is the row below. Edges clamp to the outermost pixels, so a
 ## crop that touches the border has no transparent fringe. The weights are
 ## on premultiplied colors, which is what mixing them needs.
+##
+## A 565 canvas that asks for dithered stores (an RGB LCD's) gets every pixel
+## rounded against a 4x4 threshold fixed to the screen. The source stays
+## RGBX. A 565 copy of it, dithered once, drew in two thirds of the time, but
+## each frame resampled the copy's noise at a new phase and rounded it again:
+## between two frames of a sky the changed pixels formed a grid of lines that
+## slid with the zoom, banding on the glass while the picture moved
+## (2026-10-26).
+##
+## On the ESP32 the rows are shared between both cores (fos_rows.c).
 
 import pixie
 
@@ -52,146 +62,186 @@ template mix(a, b, weight: uint32): uint32 =
     0x00800080'u32) shr 8) and 0x00FF00FF'u32
   rb or (ag shl 8)
 
-proc interpolateRow(source: Image, row: int, columns: seq[AxisTap], into: var seq[uint32]) =
-  let pixels = cast[ptr UncheckedArray[uint32]](source.data)
-  let start = source.dataIndex(0, row)
-  for x in 0 ..< columns.len:
-    let tap = columns[x]
+# RGBX to 565 for a canvas that asks for dithered stores, against a 4x4
+# Bayer threshold fixed to the screen. Each channel is first scaled into
+# 0..248 (0..252 for green), so adding a threshold of up to one step never
+# carries into the next field and red and blue go in one word.
+const Bayer4 = [[0'u32, 8, 2, 10], [12'u32, 4, 14, 6], [3'u32, 11, 1, 9], [15'u32, 7, 13, 5]]
+
+type DitherRow = array[4, uint32] ## per x mod 4: red and blue's threshold, or green's
+
+proc ditherRow(y: int): tuple[rb, g: DitherRow] =
+  for i in 0 ..< 4:
+    let cell = Bayer4[y and 3][i]
+    result.rb[i] = (cell shr 1) or ((cell shr 1) shl 16)
+    result.g[i] = cell shr 2
+
+template packDithered(value, rbStep, gStep: uint32): uint16 =
+  let v = value
+  var rb = v and 0x00FF00FF'u32
+  rb = rb - ((rb shr 5) and 0x00070007'u32) + rbStep
+  var g = (v shr 8) and 0xFF'u32
+  g = g - (g shr 6) + gStep
+  uint16(((rb shr 3) and 0x1F'u32) shl 11 or (g shr 2) shl 5 or ((rb shr 19) and 0x1F'u32))
+
+type
+  RowJob = object
+    ## What a worker reads, as plain values and pointers: the second core's
+    ## worker must not touch a ref. The loops read through these locals
+    ## because the firmware builds with -fno-strict-aliasing, where a field
+    ## of a seq or an Image read in the loop is read again after every store.
+    source: ptr UncheckedArray[uint32]
+    sourceOrigin, sourceStride: int
+    target: pointer
+    targetOrigin, targetStride: int
+    format: PixelFormat
+    dither: bool
+    width: int
+    columns, rows: ptr UncheckedArray[AxisTap]
+    scratch: ptr UncheckedArray[uint32] ## two rows per worker
+
+  RowsProc = proc(ctx: pointer, worker, first, last: int32) {.cdecl, gcsafe, raises: [].}
+
+proc interpolateRow(job: ptr RowJob, row: int, dest: ptr UncheckedArray[uint32]) =
+  let pixels = job.source
+  let taps = job.columns
+  let start = job.sourceOrigin + job.sourceStride * row
+  for x in 0 ..< job.width:
+    let tap = taps[x]
     let at = start + tap.first.int
     let left = pixels[at]
-    into[x] = if tap.weight == 0: left else: mix(left, pixels[at + tap.step.int], tap.weight)
+    dest[x] = if tap.weight == 0: left else: mix(left, pixels[at + tap.step.int], tap.weight)
 
-# 565 onto 565: each pixel spread into a word with a gap above every field
-# (green moved to the top half), so one multiply pair mixes all three and the
-# result folds back to 565 with no pack, no dither and no rounding per field
-# beyond the one constant. 5 bits of weight. About a third of the RGBX path's
-# cost per pixel on the S3, whose canvas is 565 on an RGB LCD.
+proc storeRow565Dithered(out16: ptr UncheckedArray[uint16], upper, lower: ptr UncheckedArray[uint32],
+    width, y: int, weight: uint32) =
+  ## The vertical mix, the threshold for the pixel's place on the screen and
+  ## the pack; two pixels a store where the row is word aligned.
+  let (rbSteps, gSteps) = ditherRow(y)
+  let (rb0, rb1, rb2, rb3) = (rbSteps[0], rbSteps[1], rbSteps[2], rbSteps[3])
+  let (g0, g1, g2, g3) = (gSteps[0], gSteps[1], gSteps[2], gSteps[3])
+  template fill(pixel: untyped) =
+    var x = 0
+    if (cast[uint](out16) and 3) == 0:
+      let out32 = cast[ptr UncheckedArray[uint32]](out16)
+      while x + 4 <= width:
+        out32[x shr 1] = packDithered(pixel(x), rb0, g0).uint32 or
+          (packDithered(pixel(x + 1), rb1, g1).uint32 shl 16)
+        out32[(x shr 1) + 1] = packDithered(pixel(x + 2), rb2, g2).uint32 or
+          (packDithered(pixel(x + 3), rb3, g3).uint32 shl 16)
+        x += 4
+    while x < width:
+      out16[x] = packDithered(pixel(x), rbSteps[x and 3], gSteps[x and 3])
+      inc x
+  template straight(i: int): uint32 = upper[i]
+  template mixed(i: int): uint32 = mix(upper[i], lower[i], weight)
+  if weight == 0:
+    fill(straight)
+  else:
+    fill(mixed)
 
-const
-  SpreadMask = 0x07E0F81F'u32
-  SpreadHalf = 0x00208010'u32 ## 16, the rounding half, in each field
+proc storeRow(job: ptr RowJob, y: int, upper, lower: ptr UncheckedArray[uint32], weight: uint32) =
+  ## One target row: the vertical mix goes straight into the canvas.
+  let width = job.width
+  let start = job.targetOrigin + job.targetStride * y
+  case job.format
+  of pfRgbx:
+    let out32 = cast[ptr UncheckedArray[uint32]](job.target)
+    if weight == 0:
+      for x in 0 ..< width:
+        out32[start + x] = upper[x]
+    else:
+      for x in 0 ..< width:
+        out32[start + x] = mix(upper[x], lower[x], weight)
+  of pfRgb565:
+    let out16 = cast[ptr UncheckedArray[uint16]](job.target)
+    if job.dither:
+      storeRow565Dithered(cast[ptr UncheckedArray[uint16]](out16[start].addr), upper, lower,
+        width, y, weight)
+    else:
+      for x in 0 ..< width:
+        let value = if weight == 0: upper[x] else: mix(upper[x], lower[x], weight)
+        out16[start + x] = rgbxToRgb565(cast[ColorRGBX](value))
+  of pfGray8:
+    let out8 = cast[ptr UncheckedArray[uint8]](job.target)
+    for x in 0 ..< width:
+      let value = if weight == 0: upper[x] else: mix(upper[x], lower[x], weight)
+      out8[start + x] = rgbxToGray8(cast[ColorRGBX](value))
 
-template spread(p: uint16): uint32 =
-  (p.uint32 or (p.uint32 shl 16)) and SpreadMask
-
-template fold(v: uint32): uint16 =
-  uint16((v or (v shr 16)) and 0xFFFF'u32)
-
-template mix565(a, b, weight: uint32): uint32 =
-  ((a * (32'u32 - weight) + b * weight + SpreadHalf) shr 5) and SpreadMask
-
-proc interpolateRow565(source: Image, row: int, columns: seq[AxisTap], into: var seq[uint32]) =
-  let pixels = source.data16
-  let start = source.dataIndex(0, row)
-  for x in 0 ..< columns.len:
-    let tap = columns[x]
-    let at = start + tap.first.int
-    let left = spread(pixels[at])
-    let weight = tap.weight shr 3
-    into[x] = if weight == 0: left else: mix565(left, spread(pixels[at + tap.step.int]), weight)
-
-proc drawRectBilinear565(target, source: Image, columns, rows: seq[AxisTap]) =
-  let width = target.width
-  var upper = newSeq[uint32](width)
-  var lower = newSeq[uint32](width)
+proc drawRows(ctx: pointer, worker, first, last: int32) {.cdecl, gcsafe, raises: [].} =
+  ## Target rows [first, last) with this worker's two cached source rows.
+  let job = cast[ptr RowJob](ctx)
+  let width = job.width
+  var upper = cast[ptr UncheckedArray[uint32]](job.scratch[worker.int * 2 * width].addr)
+  var lower = cast[ptr UncheckedArray[uint32]](job.scratch[(worker.int * 2 + 1) * width].addr)
   var upperRow = -1
   var lowerRow = -1
-  for y in 0 ..< target.height:
-    let tap = rows[y]
+  for y in first.int ..< last.int:
+    let tap = job.rows[y]
     let top = tap.first.int
     let bottom = top + tap.step.int
-    let weight = tap.weight shr 3
     if top != upperRow:
       if top == lowerRow:
         swap(upper, lower)
         swap(upperRow, lowerRow)
       else:
-        interpolateRow565(source, top, columns, upper)
+        interpolateRow(job, top, upper)
         upperRow = top
-    if weight != 0 and bottom != lowerRow:
-      interpolateRow565(source, bottom, columns, lower)
+    if tap.weight != 0 and bottom != lowerRow:
+      interpolateRow(job, bottom, lower)
       lowerRow = bottom
-    let out16 = target.data16
-    let start = target.dataIndex(0, y)
-    if weight == 0:
-      for x in 0 ..< width:
-        out16[start + x] = fold(upper[x])
-    else:
-      for x in 0 ..< width:
-        out16[start + x] = fold(mix565(upper[x], lower[x], weight))
+    storeRow(job, y, upper, lower, tap.weight)
 
-proc toRgb565Copy*(source: Image): Image =
-  ## A 565 copy of an RGBX image, dithered once here instead of on every
-  ## frame's store (rgbxToRgb565Dithered: smooth skies keep their gradient),
-  ## for drawRectBilinear onto a 565 canvas. Half the RGBX image's bytes.
-  doAssert source.format == pfRgbx
-  result = newImage565(source.width, source.height)
-  result.ditherStores = true
-  for y in 0 ..< source.height:
-    let from0 = source.dataIndex(0, y)
-    let to0 = result.dataIndex(0, y)
-    for x in 0 ..< source.width:
-      result.data16[to0 + x] = rgbxToRgb565Dithered(source.data[from0 + x], to0 + x)
+when defined(frameosEmbedded):
+  proc rowsWorkers(): int32 {.importc: "fos_rows_workers", cdecl.}
+  proc runRows(fn: RowsProc, ctx: pointer, rows, blockRows: int32) {.importc: "fos_rows_run", cdecl.}
+elif defined(testing):
+  var testRowBlocks* = 0 ## > 0: draw in blocks of this many rows, workers 0 and 1 in turn
+  proc rowsWorkers(): int32 = 2
+  proc runRows(fn: RowsProc, ctx: pointer, rows, blockRows: int32) =
+    if testRowBlocks <= 0:
+      fn(ctx, 0, 0, rows)
+      return
+    var first = 0'i32
+    while first < rows:
+      let last = min(rows, first + testRowBlocks.int32)
+      fn(ctx, (first div testRowBlocks.int32) and 1, first, last)
+      first = last
+else:
+  proc rowsWorkers(): int32 = 1
+  proc runRows(fn: RowsProc, ctx: pointer, rows, blockRows: int32) = fn(ctx, 0, 0, rows)
+
+const BlockRows = 32 ## a worker's share at a time; each block caches its first two source rows afresh
 
 proc drawRectBilinear*(target, source: Image, sx, sy, sw, sh: float) =
-  ## Fills all of `target` with the source rectangle (sx, sy, sw, sh), in
-  ## source pixels. The source is RGBX (a decoded photo is), onto a target of
-  ## any format, a 565 one dithered when it asks for that; or 565
-  ## (toRgb565Copy) onto a 565 target.
-  doAssert source.format == pfRgbx or
-    (source.format == pfRgb565 and target.format == pfRgb565),
-    "drawRectBilinear reads an RGBX source, or a 565 one onto a 565 target"
-  if source.format == pfRgb565:
-    if target.width > 0 and target.height > 0 and source.width > 0 and source.height > 0:
-      drawRectBilinear565(target, source, axisTaps(sx, sw, target.width, source.width),
-        axisTaps(sy, sh, target.height, source.height))
-    return
+  ## Fills all of `target` with the RGBX source rectangle (sx, sy, sw, sh),
+  ## in source pixels, onto a target of any format; a 565 one dithered when
+  ## it asks for that.
+  doAssert source.format == pfRgbx, "drawRectBilinear reads an RGBX source"
   let width = target.width
   let height = target.height
   if width <= 0 or height <= 0 or source.width <= 0 or source.height <= 0:
     return
   let columns = axisTaps(sx, sw, width, source.width)
   let rows = axisTaps(sy, sh, height, source.height)
-  var upper = newSeq[uint32](width)
-  var lower = newSeq[uint32](width)
-  var upperRow = -1
-  var lowerRow = -1
-  for y in 0 ..< height:
-    let tap = rows[y]
-    let top = tap.first.int
-    let bottom = top + tap.step.int
-    if top != upperRow:
-      if top == lowerRow:
-        swap(upper, lower)
-        swap(upperRow, lowerRow)
-      else:
-        interpolateRow(source, top, columns, upper)
-        upperRow = top
-    if tap.weight != 0 and bottom != lowerRow:
-      interpolateRow(source, bottom, columns, lower)
-      lowerRow = bottom
-    let start = target.dataIndex(0, y)
-    let weight = tap.weight
-    # One pass per row: the vertical mix goes straight into the canvas.
-    template emit(value: untyped) =
-      case target.format
-      of pfRgbx:
-        let pixels = cast[ptr UncheckedArray[uint32]](target.data)
-        for x {.inject.} in 0 ..< width:
-          pixels[start + x] = value
-      of pfRgb565:
-        if target.ditherStores:
-          for x {.inject.} in 0 ..< width:
-            target.data16[start + x] = rgbxToRgb565Dithered(cast[ColorRGBX](value), start + x)
-        else:
-          for x {.inject.} in 0 ..< width:
-            target.data16[start + x] = rgbxToRgb565(cast[ColorRGBX](value))
-      of pfGray8:
-        for x {.inject.} in 0 ..< width:
-          target.data8[start + x] = rgbxToGray8(cast[ColorRGBX](value))
-    if weight == 0:
-      emit(upper[x])
-    else:
-      emit(mix(upper[x], lower[x], weight))
+  let workers = rowsWorkers()
+  var scratch = newSeq[uint32](2 * workers.int * width)
+  var job = RowJob(
+    source: cast[ptr UncheckedArray[uint32]](source.data),
+    sourceOrigin: source.origin,
+    sourceStride: source.stride,
+    targetOrigin: target.origin,
+    targetStride: target.stride,
+    format: target.format,
+    dither: target.ditherStores,
+    width: width,
+    columns: cast[ptr UncheckedArray[AxisTap]](columns[0].unsafeAddr),
+    rows: cast[ptr UncheckedArray[AxisTap]](rows[0].unsafeAddr),
+    scratch: cast[ptr UncheckedArray[uint32]](scratch[0].addr))
+  job.target =
+    case target.format
+    of pfRgbx: cast[pointer](target.data)
+    of pfRgb565: cast[pointer](target.data16)
+    of pfGray8: cast[pointer](target.data8)
+  runRows(drawRows, job.addr, height.int32, BlockRows)
 
 {.pop.}

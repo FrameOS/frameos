@@ -28,9 +28,6 @@
  */
 
 #define FOS_EVENT_SCENE_ID_LEN 128
-/* How long a `setCurrentScene` waits for the runtime to take the `state` that
- * came with it. The switch itself never waits; see set_current_scene(). */
-#define FOS_EVENT_STATE_HANDOFF_MS 2000
 /* A restart that was asked for over a connection waits this long first, so the
  * HTTP response or the cloud ack gets onto the wire. */
 #define FOS_EVENT_RESTART_DELAY_MS 750
@@ -276,12 +273,12 @@ void fos_events_init(void)
  * IS the current one. The Nim dispatcher does exactly that for a
  * `setCurrentScene` it is handed — it asks for the same switch through the
  * scene-select hook (the same id queued twice is one switch) and keeps the
- * state pending, or applies it right away when that scene is already showing.
- * Handed over BEFORE the render is requested, so the pending state is in place
- * when the render task wakes; bounded, because a caller here may be the
- * WebSocket or the HTTP task and the switch itself must not wait for a render
- * to finish. If the runtime stays busy the scene still switches, with its
- * default state, and the log says what was lost. */
+ * state pending, or applies it right away when that scene is already showing,
+ * which runs the scene's handlers. So the hand-over happens on the render task
+ * (fos_events_defer from any other), which delivers waiting events before it
+ * applies a queued switch: the pending state is in place when the scene
+ * opens. A `direction` is the dispatcher's to resolve, on the render task
+ * too. */
 static fos_event_result_t set_current_scene(fos_event_origin_t origin, const char *payload)
 {
     char scene_id[FOS_EVENT_SCENE_ID_LEN];
@@ -299,6 +296,9 @@ static fos_event_result_t set_current_scene(fos_event_origin_t origin, const cha
             !frameos_nim_available()) {
             return FOS_EVENT_FAILED;
         }
+        if (!fos_client_on_render_task()) {
+            return fos_events_defer(origin, FOS_EVENT_SET_CURRENT_SCENE, payload) ? FOS_EVENT_DONE : FOS_EVENT_BUSY;
+        }
         if (!frameos_nim_send_event(origin, FOS_EVENT_SET_CURRENT_SCENE, payload)) return FOS_EVENT_FAILED;
         fos_client_render_now();
         return FOS_EVENT_DONE;
@@ -307,12 +307,11 @@ static fos_event_result_t set_current_scene(fos_event_origin_t origin, const cha
 
     const char *state = top_level_value(payload, "state");
     if (state != NULL && *state == '{' && frameos_nim_available()) {
-        bool busy = false;
-        frameos_nim_send_event_wait(origin, FOS_EVENT_SET_CURRENT_SCENE, payload,
-                                    FOS_EVENT_STATE_HANDOFF_MS, &busy);
-        if (busy) {
+        if (fos_client_on_render_task()) {
+            frameos_nim_send_event(origin, FOS_EVENT_SET_CURRENT_SCENE, payload);
+        } else if (!fos_events_defer(origin, FOS_EVENT_SET_CURRENT_SCENE, payload)) {
             frameos_nim_log_hook("{\"event\":\"event:setCurrentScene:stateDropped\","
-                                 "\"source\":\"esp32\",\"reason\":\"runtime busy\"}");
+                                 "\"source\":\"esp32\",\"reason\":\"render task queue full\"}");
         }
     }
     fos_client_render_now();
@@ -321,7 +320,7 @@ static fos_event_result_t set_current_scene(fos_event_origin_t origin, const cha
 
 /* --------------------------------------------------------- deferred events */
 
-#define FOS_EVENTS_DEFERRED_MAX 4
+#define FOS_EVENTS_DEFERRED_MAX 16
 
 typedef struct {
     fos_event_origin_t origin;
@@ -345,9 +344,20 @@ bool fos_events_defer(fos_event_origin_t origin, const char *name, const char *p
         if (payload == NULL) return false;
         memcpy(payload, payload_json, len + 1);
     }
+    bool coalesce = fos_event_spec(name)->coalesce_latest;
     bool queued = false;
+    char *replaced = NULL;
     portENTER_CRITICAL(&s_deferred_lock);
-    if (s_deferred_count < FOS_EVENTS_DEFERRED_MAX) {
+    for (size_t i = 0; coalesce && i < s_deferred_count; i++) {
+        deferred_event_t *slot = &s_deferred[i];
+        if (slot->origin == origin && strcmp(slot->name, name) == 0) {
+            replaced = slot->payload;
+            slot->payload = payload;
+            queued = true;
+            break;
+        }
+    }
+    if (!queued && s_deferred_count < FOS_EVENTS_DEFERRED_MAX) {
         deferred_event_t *slot = &s_deferred[s_deferred_count++];
         slot->origin = origin;
         snprintf(slot->name, sizeof(slot->name), "%s", name);
@@ -355,11 +365,12 @@ bool fos_events_defer(fos_event_origin_t origin, const char *name, const char *p
         queued = true;
     }
     portEXIT_CRITICAL(&s_deferred_lock);
+    free(replaced);
     if (!queued) {
         free(payload);
+        log_event_line("event:dropped", origin, name, "render task queue full");
         return false;
     }
-    log_event_line("event:deferred", origin, name, "runtime busy");
     fos_client_wake_for_events();
     return true;
 }
@@ -372,7 +383,8 @@ bool fos_events_deferred_pending(void)
 bool fos_events_deliver_deferred(void)
 {
     /* Render task only: it owns the runtime between renders, so the wait is
-     * the dispatcher's own queue, never a render. */
+     * the dispatcher's own queue, never a render. What came of each event is
+     * the Nim dispatcher's to log. */
     bool delivered_any = false;
     while (true) {
         deferred_event_t event;
@@ -387,8 +399,6 @@ bool fos_events_deliver_deferred(void)
         portEXIT_CRITICAL(&s_deferred_lock);
         if (!have) break;
         fos_event_result_t result = fos_events_dispatch(event.origin, event.name, event.payload);
-        log_event_line("event:deferred:delivered", event.origin, event.name,
-                       result == FOS_EVENT_DONE ? NULL : "not delivered");
         free(event.payload);
         if (result == FOS_EVENT_DONE) delivered_any = true;
     }
@@ -397,8 +407,8 @@ bool fos_events_deliver_deferred(void)
 
 /* ---------------------------------------------------------------- dispatch */
 
-fos_event_result_t fos_events_dispatch_wait(fos_event_origin_t origin, const char *name,
-                                            const char *payload_json, int timeout_ms)
+fos_event_result_t fos_events_dispatch(fos_event_origin_t origin, const char *name,
+                                       const char *payload_json)
 {
     if (name == NULL || name[0] == '\0') return FOS_EVENT_FAILED;
     const char *payload = payload_json && payload_json[0] ? payload_json : "{}";
@@ -436,27 +446,14 @@ fos_event_result_t fos_events_dispatch_wait(fos_event_origin_t origin, const cha
 
     /* Everything a scene hears: input, custom events, setSceneState, turnOn /
      * turnOff. The Nim dispatcher queues it, drains the queue and applies the
-     * contract's render rule; all that is left to do here is pass the render
-     * request on. */
+     * contract's render rule, running the scene's handlers as it goes, so it
+     * runs on the render task alone (fos_events_defer); all that is left to
+     * do here is pass the render request on. */
     if (!frameos_nim_available()) return FOS_EVENT_FAILED;
-    bool delivered;
-    if (timeout_ms < 0) {
-        delivered = frameos_nim_send_event(origin, name, payload);
-        if (frameos_nim_render_requested()) fos_client_render_now();
-    } else {
-        bool busy = false;
-        delivered = frameos_nim_send_event_wait(origin, name, payload, timeout_ms, &busy);
-        if (busy) return FOS_EVENT_BUSY;
-        /* frameos_nim_render_requested() waits for the same lock, and a render
-         * may have started since: end the render task's wait instead — its
-         * loop reads the flag on its own task. */
-        fos_client_wake_for_events();
+    if (!fos_client_on_render_task()) {
+        return fos_events_defer(origin, name, payload) ? FOS_EVENT_DONE : FOS_EVENT_BUSY;
     }
+    bool delivered = frameos_nim_send_event(origin, name, payload);
+    if (frameos_nim_render_requested()) fos_client_render_for_scene();
     return delivered ? FOS_EVENT_DONE : FOS_EVENT_FAILED;
-}
-
-fos_event_result_t fos_events_dispatch(fos_event_origin_t origin, const char *name,
-                                       const char *payload_json)
-{
-    return fos_events_dispatch_wait(origin, name, payload_json, -1);
 }
