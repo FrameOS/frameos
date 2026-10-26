@@ -281,15 +281,15 @@ for n in 1..3:
 # A finger that went down before a render and lifted during it. On an ESP32
 # the release waits in the touch queue until the render is over, stamped with
 # when the glass reported it (`atMs`). The render must not tick the pointer to
-# now first: 700 ms after the press it was a `longPress`, and the release
-# that followed no tap (the SenseCAP Indicator's weather panel, whose press
-# render took 750 ms).
+# now first: a render that ended more than `longPressMs` after the press made
+# it a `longPress`, and the release that followed no tap (the SenseCAP
+# Indicator's weather panel, whose first press renders take 800 ms).
 let tapHost = SingleSceneHost(frameConfig: config, logger: abortLogger)
 tapHost.requestSelect = proc (sceneId: string): bool = true
 tapHost.start()
 tapHost.makeCurrent(tapSceneId.SceneId)
 logLines.setLen(0)
-let pressedAt = getMonoTime().ticks div 1_000_000 - 700
+let pressedAt = getMonoTime().ticks div 1_000_000 - 1200
 discard tapHost.send(eoDriver, "pointerDown", %*{"x": 100, "y": 100, "pointerId": 1,
   "pointerType": "touch", "button": 0, "buttons": 1, "atMs": pressedAt})
 discard tapHost.renderScene(ExecutionContext(scene: tapHost.scene, event: "render",
@@ -301,7 +301,7 @@ doAssert count("heard tap") == 1, "a 100 ms press is a tap: " & $logLines
 # Held on through it, the finger is a long press at the platform's next tick.
 logLines.setLen(0)
 discard tapHost.send(eoDriver, "pointerDown", %*{"x": 100, "y": 100, "pointerId": 1,
-  "pointerType": "touch", "button": 0, "buttons": 1, "atMs": getMonoTime().ticks div 1_000_000 - 700})
+  "pointerType": "touch", "button": 0, "buttons": 1, "atMs": getMonoTime().ticks div 1_000_000 - 1200})
 discard tapHost.renderScene(ExecutionContext(scene: tapHost.scene, event: "render",
   payload: %*{}, loopIndex: 0, loopKey: "."))
 doAssert tapHost.tick(), "the tick makes the long press"

@@ -278,6 +278,8 @@ contract's `gestures` numbers, so every host agrees: `tap {x, y, pointerId,
 pointerType}` — down and up within `tapSlopPx` and `tapMs`; `doubleTap` — a
 second tap within `doubleTapMs` of the first, in the same place (the first
 tap is delivered too); `longPress {…, durationMs}` — held `longPressMs`
+(a second, as a button's: a hold is as long on the glass as on a key, and
+`tapMs` is the same second, so a press that did not move is one or the other)
 without moving, delivered while it is still held where the host ticks the
 dispatcher (the Linux runner and the preview do; the ESP32 asleep in a render
 does not, and delivers it on release), and then no `tap`; `swipe {direction,
