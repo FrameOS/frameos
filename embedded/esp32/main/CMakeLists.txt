@@ -51,6 +51,7 @@ idf_component_register(
         "fos_assets_path.c"
         "fos_assets_sd.c"
         "fos_assets_flash.c"
+        "fos_spiffs_gc.c"
         "fos_sd_probe.c"
     PRIV_REQUIRES
         nvs_flash
@@ -82,6 +83,16 @@ idf_component_register(
         frameos_nim
         monocypher
 )
+
+# esp_spiffs_gc's SPIFFS_gc goes through fos_spiffs_gc.c, which erases the
+# blocks holding only deleted pages before SPIFFS collects by erase age. It
+# reads the partition's counters, so it compiles against SPIFFS's own
+# headers (private to the spiffs component).
+idf_build_get_property(fos_idf_path IDF_PATH)
+set_source_files_properties(fos_spiffs_gc.c PROPERTIES
+    INCLUDE_DIRECTORIES "${fos_idf_path}/components/spiffs/spiffs/src")
+# -u: the only reference is esp_spiffs.c's, which the archive scan can pass.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=SPIFFS_gc" "-u __wrap_SPIFFS_gc")
 
 # Default panel for a local development build. All panel drivers are
 # compiled in regardless; this only picks the boot-time default before

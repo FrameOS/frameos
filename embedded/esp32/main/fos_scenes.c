@@ -272,13 +272,13 @@ static char *read_file(const char *path, size_t *out_len)
 
 /* Erased pages for `len` more bytes, made now. SPIFFS reuses a deleted
  * file's pages only after a garbage collection, and left to itself it runs
- * one when a write finds no free page, a few blocks at a time: with 460 KB
- * of photos beside them, scene writes on the SenseCAP's 1 MB /state failed
- * with ENOSPC at 54-64% used. One esp_spiffs_gc stops after a few blocks
- * (SPIFFS_ERR_FULL when those were not enough), so it is asked again, a few
- * times (each is ~1.5 s there); it returns at once when the room is already
- * there. On that board the write went through after rounds that each said
- * FULL, where without them it failed. */
+ * one inside the write, by erase age: with 460 KB of photos beside them,
+ * scene writes on the SenseCAP's 1 MB /state failed with ENOSPC at 54-64%
+ * used. esp_spiffs_gc goes through fos_spiffs_gc.c, which erases the blocks
+ * holding only deleted pages first; SPIFFS's own collection after it stops
+ * after 10 blocks (SPIFFS_ERR_FULL when those were not enough), so it is
+ * asked again, a few times. It returns at once when the room is already
+ * there. */
 #define SCENES_WRITE_MARGIN 4096
 #define SCENES_GC_ROUNDS 4
 
