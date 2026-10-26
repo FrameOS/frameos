@@ -93,9 +93,15 @@ SVG path work. Roughly in order of what each would buy there:
     the picture on the glass in the middle. Find where it goes (the
     snapshot, the stage lines on a 115200-baud console with a 2 KB TX
     buffer) and move what can go after the picture.
-13. **What a JSX render still pays whole.** Per toggle of the home panel:
-    `get()` ~17 ms, the walk ~9, the layout's build ~10 and flex ~12, the
-    emit ~12, pixie's parse ~13 and the damage ~8–14. The parse and the emit
-    could keep the elements of boxes that did not move as text keeps its
-    nodes now, and the walk could skip a subtree whose JS objects are the
-    ones of the last render.
+13. **What a JSX render still pays.** Since subtrees that did not change
+    flow through as the same objects (`docs/jsx-ui.md` "Repainting what
+    changed"), a toggle of the home panel pays `get()` ~15 ms (its tiles
+    memo()'d: what is left is the call into QuickJS and the tree around
+    them), the walk ~3, the layout ~12 (the root and the grid around the
+    changed tile are built and laid out again), the emit ~7, the parse ~5
+    and the damage ~7 (the bounds of the changed tile's new paths, flattened
+    to measure them), then ~70 ms of raster for the tile and the count. A
+    calculator key's press render skips get() and the walk (~27 ms).
+    Next: measure a rounded box's bounds from its corners instead of
+    flattening its arcs, and keep a rebuilt box's own background node when
+    its paint did not change.
