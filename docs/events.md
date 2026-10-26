@@ -287,10 +287,31 @@ x, y, startX, startY, …}` — down and up at least `swipeMinPx` apart, in one 
 `left` / `right` / `up` / `down`. Gestures render `if-state-changed`, like a
 button; the raw pointer events never do.
 
+**Edge swipes.** A touch or pen press within `gestures.edgePx` of an edge of
+the screen (on a screen at least four of those across) is held back from the
+scene until it shows what it is. Moved `swipeMinPx` away from that edge, more
+away than along it, it is an `edgeSwipe {edge, direction, x, y, startX,
+startY, …}` (`edge` where it began, `direction` the way it went) and the
+frame's: the scene hears no `pointerDown`, `pointerMove`, `pointerUp` or
+gesture of that touch, so the slider it began on stays where it was, and
+the frame's event map can make it a scene switch whatever the scene draws
+(the SenseCAP Indicator's preset: in from the right edge the next scene, from
+the left the previous). Lifted, held for a `longPress`, or moved along the
+edge instead, it is the scene's after all: its `pointerDown` goes out then,
+late, and the rest as it comes, so a button at the edge still works. A
+mouse is never held.
+
+**Display power.** `turnOn` and `turnOff` ask the host to switch the panel,
+and `toggleScreen` switches it to what it is not; the dispatcher keeps which
+(`displayOn`), and the scene hears the `turnOn` or `turnOff` it became. A
+press on a dark screen turns it back on and goes nowhere else: its down, its
+up and whatever gesture it makes never reach the scene, since nobody could
+see what they were pressing.
+
 **JSX UIs.** A JS app's UI (`docs/jsx-ui.md` "Events") is hit-tested in
 the interpreter before the scene's event nodes hear the event: `tap`,
-`doubleTap`, `longPress`, `pointerDown`, `pointerUp` and `pointerMove` run
-the innermost element's handler, and `pointerMove` / `pointerDown` /
+`doubleTap`, `longPress`, `swipe` (the element it began on), `pointerDown`,
+`pointerUp` and `pointerMove` run the innermost element's handler, and `pointerMove` / `pointerDown` /
 `pointerUp` move its `hover:` and `active:` classes. A press is captured:
 the element that took a `pointerDown` (an `onPointerDown` or `onPointerMove`)
 gets that `pointerId`'s moves and release until it lifts. Either one
@@ -597,7 +618,7 @@ an event means:
 
 | Behaviour | Linux | ESP32 | wasm preview |
 |---|---|---|---|
-| Display power (`turnOn` / `turnOff`) | the driver acts, then the scene hears it | nothing to switch (e-paper holds its image unpowered); the scene hears it | nothing to switch; the scene hears it |
+| Display power (`turnOn` / `turnOff` / `toggleScreen`) | the driver acts, then the scene hears it | an RGB LCD switches its backlight and renders nothing while it is dark; e-paper has nothing to switch (it holds its image unpowered); the scene hears it either way | nothing to switch; the scene hears it |
 | Device commands | all five | `metrics` has no host; the rest are the firmware's (`fos_events.c`) | none: logged and ignored |
 | When a queued event is delivered | the runner thread's message loop | on the task that sent it, before `frameos_nim_send_event` returns; what a render dispatched, right after the render | before `frameos_wasm_event` returns; right after a render |
 | An event aimed at a scene that is not the current one (`target`) | delivered if that scene is in memory | dropped: one resident scene | dropped |

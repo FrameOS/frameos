@@ -191,13 +191,15 @@ def load():
             if "since" in schedule and not VERSION_RE.fullmatch(schedule["since"]):
                 fail(f"{where}: schedule.since must be a FrameOS version")
 
-    for section, keys in (("gestures", ("tapSlopPx", "tapMs", "doubleTapMs", "longPressMs", "swipeMinPx")),
+    for section, keys in (("gestures", ("tapSlopPx", "tapMs", "doubleTapMs", "longPressMs", "swipeMinPx", "edgePx")),
                           ("buttons", ("doublePressMs", "longPressMs"))):
         for key in keys:
             if not isinstance(doc[section].get(key), int) or doc[section][key] <= 0:
                 fail(f"{section}.{key}: a positive integer")
     if doc["gestures"].get("directions") != ["left", "right", "up", "down"]:
         fail("gestures.directions: left, right, up, down")
+    if doc["gestures"].get("edges") != ["left", "right", "top", "bottom"]:
+        fail("gestures.edges: left, right, top, bottom")
     buttons = doc["buttons"]
     if not buttons.get("roles") or any(not NAME_RE.fullmatch(r) for r in buttons["roles"]):
         fail("buttons.roles: camelCase identifiers")
@@ -270,6 +272,7 @@ def unit_options(doc):
         "button-action": doc["buttons"]["actions"],
         "gpio-action": doc["buttons"]["edges"],
         "swipe-direction": doc["gestures"]["directions"],
+        "screen-edge": doc["gestures"]["edges"],
         "pointer-type": doc["pointer"]["types"],
         "scene-direction": doc["scenes"]["directions"],
     }
@@ -382,6 +385,7 @@ def gen_nim(doc):
         f"  GestureDoubleTapMs* = {int(doc['gestures']['doubleTapMs'])}",
         f"  GestureLongPressMs* = {int(doc['gestures']['longPressMs'])}",
         f"  GestureSwipeMinPx* = {int(doc['gestures']['swipeMinPx'])}",
+        f"  GestureEdgePx* = {int(doc['gestures']['edgePx'])}",
         "  ## A GPIO button: a short press waits `ButtonDoublePressMs` for a second down; a hold is a `longPress` at every whole `ButtonLongPressMs`.",
         f"  ButtonDoublePressMs* = {int(doc['buttons']['doublePressMs'])}",
         f"  ButtonLongPressMs* = {int(doc['buttons']['longPressMs'])}",

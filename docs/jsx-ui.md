@@ -256,8 +256,11 @@ export const get = () => (
 - **`onClick`** runs on a `tap` (a press and a release in one place, by
   finger, pen or mouse), **`onDoubleClick`** on a `doubleTap`,
   **`onLongPress`** on a `longPress`, **`onPointerDown`** / **`onPointerUp`**
-  on the raw press and release, **`onPointerMove`** as the pointer moves.
-  The handler gets the event's payload plus `type`, `localX` and `localY`
+  on the raw press and release, **`onPointerMove`** as the pointer moves,
+  **`onSwipe`** on a `swipe` (its `direction`, to the element it began on,
+  wherever it lifted). A swipe in from the screen's edge is the frame's
+  (`edgeSwipe`, docs/events.md "Edge swipes"): no element hears any of that
+  touch, so a slider at the edge of a page is safe from it. The handler gets the event's payload plus `type`, `localX` and `localY`
   (from the element's corner): `onClick={(e) => ...}`. The innermost element
   with a handler for the event takes it, so a tap on a label inside a card
   runs the card's `onClick`.

@@ -24,7 +24,7 @@
 ## other threads reach it through `channels.eventChannel`, which the runner
 ## empties into `enqueue`.
 
-import std/[deques, hashes, json, monotimes, options, tables]
+import std/[deques, hashes, json, monotimes, options, sequtils, tables]
 import ./events
 import ./event_log
 import ./types
@@ -112,6 +112,11 @@ type
     watching, watchedOk: bool
     dropped*: int ## events refused because a lane was full; the host reports and resets it
     inputState*: InputState
+    # Display power, as far as the dispatcher asked for it: `toggleScreen`
+    # flips it, and a touch on a dark screen turns it back on and is the
+    # screen's, never the scene's, until it lifts (`waking`, by pointer id).
+    displayOn*: bool
+    waking: seq[int]
 
 proc hasStatePayload*(payload: JsonNode): bool =
   ## Whether an event's payload carries a `state` object. `payload{"state"}` is
@@ -128,7 +133,7 @@ proc newEventLoop*(host: EventHost, frameConfig: FrameConfig,
                    laneCapacity = DefaultLaneCapacity): EventLoop =
   EventLoop(host: host, frameConfig: frameConfig, laneCapacity: laneCapacity,
     main: initDeque[EventEnvelope](), input: initDeque[EventEnvelope](),
-    inputState: initInputState(frameConfig))
+    inputState: initInputState(frameConfig), displayOn: true)
 
 proc pending*(loop: EventLoop): int =
   loop.main.len + loop.input.len
@@ -359,6 +364,23 @@ proc aliasPayload(alias: string, payload: JsonNode): JsonNode =
     if payload.hasKey(key):
       result[key] = payload[key]
 
+proc setDisplay(loop: EventLoop, on: bool, envelope: EventEnvelope, policy: EventPolicy): bool =
+  ## `turnOn`, `turnOff` and `toggleScreen`: the host switches the panel, and
+  ## the scene hears what it became (a toggle is a `turnOn` or a `turnOff` to
+  ## it, so a scene that pauses on `turnOff` needs to know nothing more).
+  loop.displayOn = on
+  loop.host.displayPower(on)
+  var heard = envelope
+  heard.name = if on: evTurnOn else: evTurnOff
+  discard loop.deliver(heard, eventPolicy(heard.name))
+  true
+
+proc pointerIdOf(delivery: InputDelivery): int =
+  ## The pointer a pointer event or a gesture is about, -1 for anything else.
+  if delivery.payload.isNil or delivery.payload.kind != JObject or not delivery.payload.hasKey("pointerId"):
+    return -1
+  delivery.payload["pointerId"].getInt(-1)
+
 proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDelivery, fromRender: bool): bool =
   ## An input event to the scene: under its name, and under each old name it
   ## has (`mouseMove` for `pointerMove`), each only when the scene listens.
@@ -404,9 +426,27 @@ proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
   elif not loop.inputState.applyNamedInput(envelope.name, envelope.payload, envelope.origin,
       envelope.tMono, deliveries):
     return loop.deliver(envelope, eventPolicy(envelope.name))
+  var lifted: seq[int]
   for delivery in deliveries:
+    let id = pointerIdOf(delivery)
+    if id >= 0:
+      # A touch on a dark screen turns it on, and nothing of that touch (its
+      # moves, its release, the tap it makes) reaches the scene: nobody can
+      # see what they would be pressing.
+      if not loop.displayOn and delivery.name == evPointerDown:
+        discard loop.setDisplay(true, EventEnvelope(name: evTurnOn, payload: newJObject(),
+          origin: eoSystem, target: envelope.target), eventPolicy(evTurnOn))
+        loop.waking.add(id)
+        result = true
+        continue
+      if id in loop.waking:
+        if delivery.name in [evPointerUp, evPointerCancel]:
+          lifted.add(id)
+        continue
     if loop.deliverInput(envelope.target, delivery, envelope.fromRender):
       result = true
+  for id in lifted:
+    loop.waking.keepItIf(it != id)
 
 proc process(loop: EventLoop, envelope: EventEnvelope): bool =
   ## False when the event came to nothing: refused, or no scene to take it.
@@ -441,9 +481,9 @@ proc process(loop: EventLoop, envelope: EventEnvelope): bool =
     if result:
       loop.renderWanted = true
   of evTurnOn, evTurnOff:
-    loop.host.displayPower(envelope.name == evTurnOn)
-    discard loop.deliver(envelope, policy)
-    result = true
+    result = loop.setDisplay(envelope.name == evTurnOn, envelope, policy)
+  of evToggleScreen:
+    result = loop.setDisplay(not loop.displayOn, envelope, policy)
   else:
     result = loop.deliver(envelope, policy)
 

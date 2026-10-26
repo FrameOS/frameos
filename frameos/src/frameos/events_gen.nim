@@ -66,6 +66,7 @@ const
   GestureDoubleTapMs* = 350
   GestureLongPressMs* = 1000
   GestureSwipeMinPx* = 48
+  GestureEdgePx* = 24
   ## A GPIO button: a short press waits `ButtonDoublePressMs` for a second down; a hold is a `longPress` at every whole `ButtonLongPressMs`.
   ButtonDoublePressMs* = 350
   ButtonLongPressMs* = 1000
@@ -94,9 +95,11 @@ const
   evDoubleTap* = "doubleTap"
   evLongPress* = "longPress"
   evSwipe* = "swipe"
+  evEdgeSwipe* = "edgeSwipe"
   evWheel* = "wheel"
   evTurnOn* = "turnOn"
   evTurnOff* = "turnOff"
+  evToggleScreen* = "toggleScreen"
   evGpio* = "gpio"
   evButton* = "button"
   evSetSceneState* = "setSceneState"
@@ -108,7 +111,7 @@ const
   evUploadScenes* = "uploadScenes"
   evVoiceChat* = "voiceChat"
 
-  ContractEventNames*: array[31, string] = [
+  ContractEventNames*: array[33, string] = [
     evInit,
     evRender,
     evOpen,
@@ -127,9 +130,11 @@ const
     evDoubleTap,
     evLongPress,
     evSwipe,
+    evEdgeSwipe,
     evWheel,
     evTurnOn,
     evTurnOff,
+    evToggleScreen,
     evGpio,
     evButton,
     evSetSceneState,
@@ -142,7 +147,7 @@ const
     evVoiceChat,
   ]
 
-  ContractEventPolicies*: array[31, EventPolicy] = [
+  ContractEventPolicies*: array[33, EventPolicy] = [
     EventPolicy( # init
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
@@ -256,6 +261,13 @@ const
       synthesized: true,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
+    EventPolicy( # edgeSwipe
+      class: ecInput, device: edPointer, listen: true, dispatch: false,
+      origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
+      renderAfter: raNever, coalesceLatest: false, log: elFull,
+      synthesized: true,
+      aliasOfIndex: -1,
+      linux: true, esp32: true, wasm: true),
     EventPolicy( # wheel
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
@@ -271,6 +283,12 @@ const
     EventPolicy( # turnOff
       class: ecSceneCommand, device: edNone, listen: true, dispatch: true,
       origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem, eoEventMap},
+      renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
+      linux: true, esp32: true, wasm: true),
+    EventPolicy( # toggleScreen
+      class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
+      origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap},
       renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
@@ -370,19 +388,21 @@ proc contractEventIndex*(name: string): int =
   of evDoubleTap: 15
   of evLongPress: 16
   of evSwipe: 17
-  of evWheel: 18
-  of evTurnOn: 19
-  of evTurnOff: 20
-  of evGpio: 21
-  of evButton: 22
-  of evSetSceneState: 23
-  of evSetCurrentScene: 24
-  of evMetrics: 25
-  of evReload: 26
-  of evRestart: 27
-  of evReboot: 28
-  of evUploadScenes: 29
-  of evVoiceChat: 30
+  of evEdgeSwipe: 18
+  of evWheel: 19
+  of evTurnOn: 20
+  of evTurnOff: 21
+  of evToggleScreen: 22
+  of evGpio: 23
+  of evButton: 24
+  of evSetSceneState: 25
+  of evSetCurrentScene: 26
+  of evMetrics: 27
+  of evReload: 28
+  of evRestart: 29
+  of evReboot: 30
+  of evUploadScenes: 31
+  of evVoiceChat: 32
   else: -1
 
 proc eventAliasCount*(name: string): int =
@@ -429,6 +449,7 @@ proc eventPayloadKeyCount*(name: string): int =
   of evDoubleTap: 4
   of evLongPress: 5
   of evSwipe: 7
+  of evEdgeSwipe: 8
   of evWheel: 4
   of evGpio: 9
   of evButton: 7
@@ -546,6 +567,17 @@ proc eventPayloadKey*(name: string, index: int): string =
     of 4: "startY"
     of 5: "pointerId"
     of 6: "pointerType"
+    else: ""
+  of evEdgeSwipe:
+    case index
+    of 0: "edge"
+    of 1: "direction"
+    of 2: "x"
+    of 3: "y"
+    of 4: "startX"
+    of 5: "startY"
+    of 6: "pointerId"
+    of 7: "pointerType"
     else: ""
   of evWheel:
     case index

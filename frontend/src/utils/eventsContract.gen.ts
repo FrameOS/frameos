@@ -31,9 +31,11 @@ export type ContractEventName =
   | 'doubleTap'
   | 'longPress'
   | 'swipe'
+  | 'edgeSwipe'
   | 'wheel'
   | 'turnOn'
   | 'turnOff'
+  | 'toggleScreen'
   | 'gpio'
   | 'button'
   | 'setSceneState'
@@ -496,6 +498,31 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     },
     "since": "2026.9.23"
   },
+  "edgeSwipe": {
+    "class": "input",
+    "device": "pointer",
+    "synthesized": true,
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "driver",
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system"
+    ],
+    "renderAfter": "never",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": true,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.10.21"
+  },
   "wheel": {
     "class": "input",
     "device": "pointer",
@@ -575,6 +602,28 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
         "linux"
       ]
     }
+  },
+  "toggleScreen": {
+    "class": "scene-command",
+    "listen": false,
+    "dispatch": true,
+    "origins": [
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system",
+      "eventMap"
+    ],
+    "renderAfter": "if-state-changed",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": true,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.10.21"
   },
   "gpio": {
     "class": "input",
@@ -968,12 +1017,16 @@ interface FrameOSEventPayloads {
   longPress: { x: number; y: number; durationMs: number; pointerId: number; pointerType: string };
   /** A press and a release at least \`gestures.swipeMinPx\` apart, in one of four directions. */
   swipe: { direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
+  /** A finger or a pen that went down within \`gestures.edgePx\` of an edge of the screen and moved at least \`gestures.swipeMinPx\` away from it, as on a phone: \`edge\` is where it started, \`direction\` the way it went. The frame takes that touch: the scene hears no pointerDown, pointerMove or pointerUp of it, so a slider under it stays as it was. A touch there that lifts, holds or moves along the edge instead is the scene's after all, with its pointerDown a little late. Not a mouse. */
+  edgeSwipe: { edge: string; direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
   /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */
   wheel: { deltaX: number; deltaY: number; x: number; y: number };
   /** Turn the screen on */
   turnOn: Record<string, never>;
   /** Turn the screen off */
   turnOff: Record<string, never>;
+  /** Turn the screen off when it is on, and on when it is off. The scene hears the \`turnOn\` or \`turnOff\` it became. */
+  toggleScreen: Record<string, never>;
   /** A GPIO button going \`down\` or \`up\`, the moment it happens. \`up\` says how long it was held. */
   gpio: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; claimed?: boolean; atMs?: number; level?: number };
   /** A GPIO button pressed: a \`press\`, a \`doublePress\` or a \`longPress\`, one event per press. */

@@ -111,13 +111,15 @@ interface FrameOSStreamRef { __frameosType: "streamRef"; id: number; }
 interface FrameOSElement { type: string; props: Record<string, any>; }
 /** What a handler gets: the pointer event, and where in the element it was. */
 interface FrameOSUiEvent {
-  type: "tap" | "doubleTap" | "longPress" | "pointerDown" | "pointerUp" | "pointerMove";
+  type: "tap" | "doubleTap" | "longPress" | "swipe" | "pointerDown" | "pointerUp" | "pointerMove";
   x: number;
   y: number;
   localX: number;
   localY: number;
   pointerId?: number;
   pointerType?: "mouse" | "touch" | "pen";
+  /** A swipe's way: "left", "right", "up" or "down". */
+  direction?: "left" | "right" | "up" | "down";
   [key: string]: any;
 }
 interface FrameOSElementProps {
@@ -132,6 +134,8 @@ interface FrameOSElementProps {
   onPointerUp?: (event: FrameOSUiEvent) => void;
   /** The pointer moved: over the element, or anywhere while a press it took is held (captured until the release). */
   onPointerMove?: (event: FrameOSUiEvent) => void;
+  /** A swipe that began on the element, with its direction; one in from the screen edge is the frame's. */
+  onSwipe?: (event: FrameOSUiEvent) => void;
   [attribute: string]: any;
 }
 declare namespace JSX {

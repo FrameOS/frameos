@@ -2653,6 +2653,202 @@
     ]
    },
    {
+    "name": "toggleScreen flips the display, and a touch on a dark screen only wakes it",
+    "why": "The dispatcher keeps whether the screen is on: a toggle turns it off when it is on and on when it is off, and the scene hears the turnOff or turnOn it became. A press on a dark screen turns it on and is nobody else's: its down, its up and whatever gesture it makes never reach the scene (nobody could see what they were pressing). The next press is the scene's again.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/toggle",
+      "name": "toggle",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "turnOff"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "dark",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "e2",
+        "type": "event",
+        "data": {
+         "keyword": "turnOn"
+        }
+       },
+       {
+        "id": "a2",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "dark",
+          "valueJson": false
+         }
+        }
+       },
+       {
+        "id": "e3",
+        "type": "event",
+        "data": {
+         "keyword": "mouseDown"
+        }
+       },
+       {
+        "id": "a3",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "pressed",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x2",
+        "source": "e2",
+        "sourceHandle": "next",
+        "target": "a2",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x3",
+        "source": "e3",
+        "sourceHandle": "next",
+        "target": "a3",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "scene": "fixtures/dispatcher/toggle",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "toggleScreen"
+       }
+      ],
+      "trace": [
+       "power off",
+       "run toggle turnOff",
+       "render"
+      ],
+      "state": {
+       "dark": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "mouseDown",
+        "payload": {
+         "button": 0
+        }
+       },
+       {
+        "origin": "driver",
+        "event": "mouseUp",
+        "payload": {
+         "button": 0
+        }
+       }
+      ],
+      "trace": [
+       "power on",
+       "run toggle turnOn",
+       "render"
+      ],
+      "state": {
+       "dark": false,
+       "pressed": null
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "mouseDown",
+        "payload": {
+         "button": 0
+        }
+       }
+      ],
+      "trace": [
+       "run toggle mouseDown"
+      ],
+      "state": {
+       "pressed": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "mouseUp",
+        "payload": {
+         "button": 0
+        }
+       },
+       {
+        "origin": "schedule",
+        "event": "toggleScreen"
+       }
+      ],
+      "trace": [
+       "power off",
+       "run toggle turnOff",
+       "render"
+      ],
+      "state": {
+       "dark": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "toggleScreen"
+       }
+      ],
+      "trace": [
+       "power on",
+       "run toggle turnOn",
+       "render"
+      ],
+      "state": {
+       "dark": false
+      }
+     }
+    ]
+   },
+   {
     "name": "a scene that re-dispatches its own event is handed back after a burst",
     "why": "One drain delivers at most its budget and leaves the rest queued, so the host's render loop (or its one task) gets a turn. Nothing is dropped.",
     "scenes": [

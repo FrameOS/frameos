@@ -437,6 +437,31 @@
       "synthesized": true
     },
     {
+      "name": "edgeSwipe",
+      "class": "input",
+      "device": "pointer",
+      "description": "A finger or a pen that went down within `gestures.edgePx` of an edge of the screen and moved at least `gestures.swipeMinPx` away from it, as on a phone: `edge` is where it started, `direction` the way it went. The frame takes that touch: the scene hears no pointerDown, pointerMove or pointerUp of it, so a slider under it stays as it was. A touch there that lifts, holds or moves along the edge instead is the scene's after all, with its pointerDown a little late. Not a mouse.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [
+        {"name": "edge", "label": "Edge", "type": "string", "required": true, "unit": "screen-edge"},
+        {"name": "direction", "label": "Direction", "type": "string", "required": true, "unit": "swipe-direction"},
+        {"name": "x", "label": "X", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "y", "label": "Y", "type": "integer", "required": true, "unit": "scene-px", "wire": "pointer", "filter": "more"},
+        {"name": "startX", "label": "Start X", "type": "integer", "required": true, "unit": "scene-px", "filter": "more"},
+        {"name": "startY", "label": "Start Y", "type": "integer", "required": true, "unit": "scene-px", "filter": "more"},
+        {"name": "pointerId", "label": "Pointer", "type": "integer", "required": true, "unit": "pointer-id", "filter": "more"},
+        {"name": "pointerType", "label": "Pointer type", "type": "string", "required": true, "unit": "pointer-type"}
+      ],
+      "origins": ["driver", "preview", "scene", "schedule", "http:write", "http:admin", "system"],
+      "renderAfter": "never",
+      "coalesce": "none",
+      "log": "full",
+      "hosts": {"linux": true, "esp32": true, "wasm": true},
+      "since": "2026.10.21",
+      "synthesized": true
+    },
+    {
       "name": "wheel",
       "class": "input",
       "device": "pointer",
@@ -483,6 +508,20 @@
       "coalesce": "none",
       "log": "full",
       "hosts": {"linux": true, "esp32": true, "wasm": true}
+    },
+    {
+      "name": "toggleScreen",
+      "class": "scene-command",
+      "description": "Turn the screen off when it is on, and on when it is off. The scene hears the `turnOn` or `turnOff` it became.",
+      "listen": false,
+      "dispatch": true,
+      "payload": [],
+      "origins": ["scene", "schedule", "http:write", "http:admin", "system", "eventMap"],
+      "renderAfter": "if-state-changed",
+      "coalesce": "none",
+      "log": "full",
+      "hosts": {"linux": true, "esp32": true, "wasm": true},
+      "since": "2026.10.21"
     },
     {
       "name": "gpio",
@@ -674,7 +713,10 @@
     "doubleTapMs": 350,
     "longPressMs": 1000,
     "swipeMinPx": 48,
-    "directions": ["left", "right", "up", "down"]
+    "directions": ["left", "right", "up", "down"],
+    "$edgeComment": "edgeSwipe: a touch or pen press this close to an edge, in scene pixels, is held back from the scene until it is a swipe away from that edge (then the frame's) or not (then the scene's, delivered as it happened).",
+    "edgePx": 24,
+    "edges": ["left", "right", "top", "bottom"]
   },
   "buttons": {
     "$comment": "GPIO buttons, as two events. `gpio` is the line: `edges`, `down` and `up`, delivered the moment the driver reports them (`up` with `durationMs`), for a scene that wants the key itself (a counter that counts every tap, hold-to-show). `button` is what the person meant (`actions`), and each press is exactly one of them: `press` once a short press is over and `doublePressMs` has passed since its release with no second down; `doublePress` on the second down within that window (the pair is that and nothing more: no `press`, no `longPress`, and the third down starts over); `longPress` on the `up` of a press held at least `longPressMs`, once, after the `up`, with the same `durationMs` (nothing is delivered while a key is held). The rules are timed from the edges' `atMs` (when the driver saw the edge, on the frame's monotonic clock; a `button` carries its press's first `down`), never from when they were delivered, so a press made while the panel was refreshing keeps its timing. A `gpio` edge's `level` is the line (0 is down: the line is pulled up). A `button` with a `level`, or with the action `down` or `up`, is an edge from a producer older than `gpio` (2026.10.16) and is taken as one. `roles` is what a button MEANS, so a store scene filters on `role: \"next\"` and not on a silkscreen label; a frame configures a role per button (`gpioButtons[].role`), and `roleByLabel` is the default for a button without one, by its label (case-insensitive). The ESP32 buzzer clicks on `down`, lower on every `up`, and higher on the second `down` of a `doublePress`; while a key is held it sounds a short falling pair at every whole `longPressMs`, counting the hold (the scene's `longPress` still comes once, with the `up`); a `press` adds no sound of its own. A `gpio` `up` with `claimed: true` is a key the frame took for itself (a key whose long press the frame's event map binds to `voiceChat` starts the voice chat at the hold and is claimed until it is let go, docs/voice-chat.md): the edge is delivered as the line it is, and the button layer makes nothing of that press (no `press`, no `longPress`).",
