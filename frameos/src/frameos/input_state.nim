@@ -62,6 +62,7 @@ type
     wake: bool      ## began with the down that woke the device: its button-layer event says so
 
 type PointerRecord = object
+  id: int
   x, y: int
   buttons: int
   pointerType: string
@@ -91,7 +92,7 @@ type
     panelWidth, panelHeight, rotate: int
     flip: string
     cursorX*, cursorY*: int        ## pointer 0: the one cursor every mouse moves
-    pointers: Table[int, PointerRecord]
+    pointers: seq[PointerRecord]   ## a handful at most: a search beats a table's code
     pointerInputLost*: bool        ## a queue dropped pointer input: what is down gets a cancel
     when not defined(frameosEmbedded):
       # A relative mouse (its drawn cursor, the wheel) and a keyboard: Linux
@@ -105,7 +106,6 @@ type
 
 proc initInputState*(config: FrameConfig): InputState =
   result = InputState(buttonRoles: @[], buttons: @[])
-  result.pointers = initTable[int, PointerRecord]()
   when not defined(frameosEmbedded):
     result.keyboardLayout = "us"
   if config.isNil:
@@ -333,17 +333,38 @@ proc pointerTypeName(kind: int): string =
 
 # ------------------------------------------------------------------ pointers
 
+proc findPointer(state: InputState, id: int): int =
+  for index in 0 ..< state.pointers.len:
+    if state.pointers[index].id == id:
+      return index
+  -1
+
 proc pointer(state: var InputState, id: int, pointerType: string, origin: EventOrigin): ptr PointerRecord =
-  if not state.pointers.hasKey(id):
-    state.pointers[id] = PointerRecord(x: state.cursorX, y: state.cursorY,
-      pointerType: (if pointerType.len > 0: pointerType else: "mouse"), origin: origin)
-  result = addr state.pointers[id]
+  var index = state.findPointer(id)
+  if index < 0:
+    index = state.pointers.len
+    state.pointers.add(PointerRecord(id: id, x: state.cursorX, y: state.cursorY,
+      pointerType: (if pointerType.len > 0: pointerType else: "mouse"), origin: origin))
+  result = addr state.pointers[index]
   if pointerType.len > 0:
     result.pointerType = pointerType
   result.origin = origin
 
-proc pointerPayload(rec: PointerRecord, id: int): JsonNode =
-  %*{"x": rec.x, "y": rec.y, "pointerId": id, "pointerType": rec.pointerType, "buttons": rec.buttons}
+proc pointerEvent(rec: PointerRecord, name: string, origin: EventOrigin, buttons = false): InputDelivery =
+  ## Every pointer and gesture payload: where, which pointer, what kind; a
+  ## move, a press and a release also say which buttons are held.
+  let payload = newJObject()
+  payload["x"] = %rec.x
+  payload["y"] = %rec.y
+  payload["pointerId"] = %rec.id
+  payload["pointerType"] = %rec.pointerType
+  if buttons:
+    payload["buttons"] = %rec.buttons
+  InputDelivery(name: name, origin: origin, payload: payload)
+
+proc pressEvent(rec: PointerRecord, name: string, origin: EventOrigin, button: int): InputDelivery =
+  result = pointerEvent(rec, name, origin, buttons = true)
+  result.payload["button"] = %button
 
 when not defined(frameosEmbedded):
   proc moveCursorTo(state: var InputState, x, y: int, now: MonoTime) =
@@ -366,10 +387,6 @@ proc place(state: var InputState, rec: ptr PointerRecord, x, y: int) =
   # continues from where the finger was. Only a relative mouse SHOWS it.
   state.cursorX = rec.x
   state.cursorY = rec.y
-
-proc gesture(rec: PointerRecord, id: int, name: string, origin: EventOrigin): InputDelivery =
-  InputDelivery(name: name, origin: origin,
-    payload: %*{"x": rec.x, "y": rec.y, "pointerId": id, "pointerType": rec.pointerType})
 
 proc edgeAt(state: InputState, x, y: int): string =
   ## The edge of the screen within `GestureEdgePx` of (x, y), the nearest
@@ -411,7 +428,7 @@ proc pointerMoved(state: var InputState, id: int, pointerType: string, x, y: int
       # Away from the edge: the frame's swipe, and none of it the scene's.
       rec.edgeTaken = true
       rec.edgeHeld.setLen(0)
-      var swipe = gesture(rec[], id, evEdgeSwipe, origin)
+      var swipe = pointerEvent(rec[], evEdgeSwipe, origin)
       swipe.payload["edge"] = %rec.edge
       swipe.payload["direction"] = %(case rec.edge
         of "left": "right"
@@ -425,7 +442,7 @@ proc pointerMoved(state: var InputState, id: int, pointerType: string, x, y: int
     if abs(along) <= GestureTapSlopPx or abs(along) < inward:
       return # not yet one or the other: held, the move with it
     releaseEdge(rec, output) # along the edge: a drag that happens to start there
-  output.add(InputDelivery(name: evPointerMove, payload: pointerPayload(rec[], id), origin: origin))
+  output.add(pointerEvent(rec[], evPointerMove, origin, buttons = true))
 
 when not defined(frameosEmbedded):
   proc cursorMovedBy(state: var InputState, dx, dy: int, origin: EventOrigin, now: MonoTime,
@@ -454,9 +471,7 @@ proc pointerDown(state: var InputState, id: int, pointerType: string, button: in
     rec.edgeHeld.setLen(0)
     rec.edge = if rec.pointerType == "mouse": "" else: state.edgeAt(rec.x, rec.y)
     pressed = true
-  var payload = pointerPayload(rec[], id)
-  payload["button"] = %button
-  let down = InputDelivery(name: evPointerDown, payload: payload, origin: origin)
+  let down = pressEvent(rec[], evPointerDown, origin, button)
   if rec.edgeTaken:
     return
   if pressed and rec.edge.len > 0 or rec.edgeHeld.len > 0:
@@ -478,9 +493,7 @@ proc pointerUp(state: var InputState, id: int, pointerType: string, button: int,
     return
   if rec.edge.len > 0:
     releaseEdge(rec, output) # lifted before it was a swipe: the scene's press after all
-  var payload = pointerPayload(rec[], id)
-  payload["button"] = %button
-  output.add(InputDelivery(name: evPointerUp, payload: payload, origin: origin))
+  output.add(pressEvent(rec[], evPointerUp, origin, button))
   if not rec.down or rec.buttons != 0:
     return
   rec.down = false
@@ -495,16 +508,16 @@ proc pointerUp(state: var InputState, id: int, pointerType: string, button: int,
     return
   if not rec.moved:
     if held >= GestureLongPressMs:
-      var press = gesture(rec[], id, evLongPress, origin)
+      var press = pointerEvent(rec[], evLongPress, origin)
       press.payload["durationMs"] = %held
       output.add(press)
       rec.hasLastTap = false
       return
     if held <= GestureTapMs:
-      output.add(gesture(rec[], id, evTap, origin))
+      output.add(pointerEvent(rec[], evTap, origin))
       if rec.hasLastTap and msSince(now, rec.lastTapAt) <= GestureDoubleTapMs and
           abs(rec.x - rec.lastTapX) <= GestureTapSlopPx and abs(rec.y - rec.lastTapY) <= GestureTapSlopPx:
-        output.add(gesture(rec[], id, evDoubleTap, origin))
+        output.add(pointerEvent(rec[], evDoubleTap, origin))
         rec.hasLastTap = false
       else:
         rec.hasLastTap = true
@@ -514,7 +527,7 @@ proc pointerUp(state: var InputState, id: int, pointerType: string, button: int,
     return
   rec.hasLastTap = false
   if max(abs(dx), abs(dy)) >= GestureSwipeMinPx:
-    var swipe = gesture(rec[], id, evSwipe, origin)
+    var swipe = pointerEvent(rec[], evSwipe, origin)
     swipe.payload["direction"] = %(if abs(dx) >= abs(dy): (if dx > 0: "right" else: "left")
                                    else: (if dy > 0: "down" else: "up"))
     swipe.payload["startX"] = %rec.downX
@@ -522,15 +535,15 @@ proc pointerUp(state: var InputState, id: int, pointerType: string, button: int,
     output.add(swipe)
 
 proc pointerCancel(state: var InputState, id: int, origin: EventOrigin, output: var seq[InputDelivery]) =
-  if not state.pointers.hasKey(id):
+  let index = state.findPointer(id)
+  if index < 0:
     return
-  let rec = addr state.pointers[id]
+  let rec = addr state.pointers[index]
   # An edge press the scene never heard (held back, or the frame's) has
   # nothing for the scene to cancel.
   let heard = not rec.edgeTaken and rec.edge.len == 0
   if heard and (rec.down or rec.buttons != 0):
-    output.add(InputDelivery(name: evPointerCancel, origin: origin,
-      payload: %*{"x": rec.x, "y": rec.y, "pointerId": id, "pointerType": rec.pointerType}))
+    output.add(pointerEvent(rec[], evPointerCancel, origin))
   rec.edge = ""
   rec.edgeHeld.setLen(0)
   rec.edgeTaken = false
@@ -544,7 +557,8 @@ proc cancelPointers*(state: var InputState, origin: EventOrigin, output: var seq
   ## and its up, or a device went away (`deviceId`: only that device's
   ## pointers, and the cursor when `mouseToo`). A scene holding a drag hears it.
   var ids: seq[int]
-  for id, rec in state.pointers:
+  for rec in state.pointers:
+    let id = rec.id
     if not (rec.down or rec.buttons != 0):
       continue
     if deviceId >= 0 and id != 0 and id div PointersPerDevice != deviceId:
@@ -743,7 +757,7 @@ proc applyNamedPointerOrKey(state: var InputState, name: string, payload: JsonNo
   of evTap, evDoubleTap, evLongPress, evSwipe, evEdgeSwipe:
     # Injected, not made here: the position is converted, the rest passes.
     let (id, pointerType) = state.pointerFromPayload(payload, origin)
-    let rec = state.pointers[id]
+    let rec = state.pointers[state.findPointer(id)]
     var delivered = copy(payload)
     delivered["x"] = %rec.x
     delivered["y"] = %rec.y
@@ -756,20 +770,25 @@ proc applyNamedPointerOrKey(state: var InputState, name: string, payload: JsonNo
     else:
       state.keyFromPayload(name, payload, origin, output)
   of evTextInput:
-    output.add(InputDelivery(name: name, origin: origin, payload: %*{"text": payload{"text"}.getStr()}))
+    # No keyboard on an ESP32 (docs/events.md "Input"): one sent anyway is
+    # delivered as it came.
+    when defined(frameosEmbedded):
+      return false
+    else:
+      output.add(InputDelivery(name: name, origin: origin, payload: %*{"text": payload{"text"}.getStr()}))
   else:
     return false
   true
 
 proc tickPointers(state: var InputState, now: MonoTime, output: var seq[InputDelivery]) =
-  for id, rec in state.pointers.mpairs:
+  for rec in state.pointers.mitems:
     if rec.down and not rec.edgeTaken and not rec.moved and not rec.longPressed and
         msSince(now, rec.downAt) >= GestureLongPressMs:
       if rec.edge.len > 0:
         releaseEdge(addr rec, output) # held still at the edge: the scene's long press
       rec.longPressed = true
       rec.hasLastTap = false
-      var press = gesture(rec, id, evLongPress, rec.origin)
+      var press = pointerEvent(rec, evLongPress, rec.origin)
       press.payload["durationMs"] = %msSince(now, rec.downAt)
       output.add(press)
   when not defined(frameosEmbedded):
@@ -791,7 +810,7 @@ else:
 
 proc pointersDown*(state: InputState): int =
   ## How many pointers are held: what a host asks to know whether to tick.
-  for _, rec in state.pointers:
+  for rec in state.pointers:
     if rec.down:
       inc result
 

@@ -5,6 +5,8 @@ import os
 import system
 import strutils
 import tables
+import zippy
+import assets/tz_aliases
 
 var timeZoneDataLoaded = false
 var timeZoneAliasDataLoaded = false
@@ -67,8 +69,9 @@ proc initTimeZone*() =
 proc initTimeZoneAliases() =
   if timeZoneAliasDataLoaded:
     return
-  const aliasData = staticRead("../../assets/compiled/tz/timezone_aliases.json")
-  let aliases = parseJson(aliasData)
+  # assets/compiled/tz/timezone_aliases.json, raw-deflated by prepare_assets:
+  # 2.5 KB in the image instead of 8.6 KB.
+  let aliases = parseJson(uncompress(timeZoneAliasesDeflated, dfDeflate))
   if aliases.kind == JObject:
     for alias, target in aliases:
       if target.kind == JString:

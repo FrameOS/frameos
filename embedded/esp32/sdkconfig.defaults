@@ -113,6 +113,37 @@ CONFIG_ESP_HTTPS_SERVER_ENABLE=y
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 # CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE is not set
+# TLS no frame negotiates (6.8K of image). P-256, P-384, P-521 and X25519
+# stay: they are what WPA3-SAE and every public TLS server use. Static ECDH
+# key exchanges have no forward secrecy and no current server offers them;
+# TLS 1.3 has no renegotiation and 1.2 servers do not ask for it. Nothing here
+# parses a CRL, a CSR or PKCS#7, and the frame's HTTPS server never turns
+# session tickets on (HTTPD_SSL_CONFIG_DEFAULT; resuming outgoing sessions is
+# the client's switch, which stays).
+# CONFIG_MBEDTLS_ECP_DP_SECP192R1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_SECP224R1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_SECP192K1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_SECP224K1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_SECP256K1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_BP256R1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_BP384R1_ENABLED is not set
+# CONFIG_MBEDTLS_ECP_DP_BP512R1_ENABLED is not set
+# CONFIG_MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA is not set
+# CONFIG_MBEDTLS_KEY_EXCHANGE_ECDH_RSA is not set
+# CONFIG_MBEDTLS_SSL_RENEGOTIATION is not set
+# CONFIG_MBEDTLS_X509_CRL_PARSE_C is not set
+# CONFIG_MBEDTLS_X509_CSR_PARSE_C is not set
+# CONFIG_MBEDTLS_PKCS7_C is not set
+# CONFIG_MBEDTLS_SERVER_SSL_SESSION_TICKETS is not set
+
+# Wi-Fi a frame does not use (11.6K of image): WPA3 on its own setup hotspot
+# (that is WPA2-PSK, fos_wifi.c), WPA3 public-key (SAE-PK) networks, and OWE
+# ("Enhanced Open"). Joining a WPA3-SAE network stays. Enterprise (802.1X)
+# was never linked, and is listed so it stays out.
+# CONFIG_ESP_WIFI_SOFTAP_SAE_SUPPORT is not set
+# CONFIG_ESP_WIFI_ENABLE_SAE_PK is not set
+# CONFIG_ESP_WIFI_ENABLE_WPA3_OWE_STA is not set
+# CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT is not set
 
 # Wi-Fi provisioning portal posts can carry long headers/forms
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024

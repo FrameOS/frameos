@@ -33,7 +33,10 @@ when defined(frameosEmbedded):
   import pixie/blends
   import pixie/fileformats/bmp
   import pixie/fileformats/jpeg
-  import pixie/fileformats/ppm
+  when not defined(pixieNoPpm):
+    # The ESP32 build drops the codec (embedded/esp32/build_nim.sh); importing
+    # it here linked its streaming decoder back in.
+    import pixie/fileformats/ppm
   import pixie/fileformats/webp
   import pixie/inflatestream
 when not defined(frameosEmbedded) and not defined(frameosWasm):
@@ -842,7 +845,8 @@ proc readImageIntoTarget*(path: string, target: Image, scalingMode: string): boo
     # time. Every BMP on the Waveshare demo card is one of these.
     streamableBmp = not jpeg and bmpIsProvablyOpaque(header)
     # PPM P6 has no alpha channel at all, so there is nothing to prove.
-    streamablePpm = not jpeg and isPpmHeader(header)
+    when not defined(pixieNoPpm):
+      streamablePpm = not jpeg and isPpmHeader(header)
   let format =
     if jpeg: "JPEG"
     elif streamablePng: "PNG"
