@@ -42,7 +42,7 @@ parsed in Nim. A UI goes through the layout (`ui/layout.nim`, with
 an SVG one. From there both take the road a `frameos.svg` spec takes: into
 the target the planner offered when there is one (no second image), the
 owed background waived by an opaque full-size first rect, and on an LCD only
-the box that changed repainted (`utils/svg_frames.nim`).
+what changed repainted ([Repainting what changed](#repainting-what-changed)).
 
 Text is set with pixie's typesetter and drawn as its outlines, pictures go
 in as `<image>` elements that carry the decoded image, and boxes are rects
@@ -56,6 +56,46 @@ the DVD frame's markup in 18 µs and the same drawing from nodes in 4 µs. On
 the SenseCAP Indicator the parse was ~10 ms of a 50 ms frame
 (`docs/realtime-rendering.md`); the device number for JSX is still to be
 measured.
+
+## Repainting what changed
+
+Each render builds the whole tree again, as React does; what keeps a tap
+cheap is that the pictures are reconciled, not the code:
+
+- **Text that did not change is not set again.** The layout keeps, per UI
+  (its `UiMemo`, on the UI's target in `ui/events.nim`), what the last
+  layout set in type: the arrangement of each text by its runs, style,
+  width and alignment, and the outlines it emitted at a place. Text that
+  comes back the same is neither typeset nor outlined, and it is handed to
+  pixie as the very same nodes and shared paths, so pixie compares it by
+  identity, keeps its bounds and its flattened shapes. What a layout did
+  not use is let go.
+- **Damage is a few boxes, matched in order.** On an LCD whose canvas is
+  the panel's own buffer, `utils/svg_frames.nim` keeps the parsed SVG each
+  buffer holds and compares the next with it (pixie's `damageRects`): the
+  two element lists are matched in order, identical with identical, like a
+  keyed list, so an element added or removed (a check mark ticked) is
+  damage where it is and the rest still match. The damage is up to six
+  boxes, joined where they meet.
+- **A box draws only what can touch it.** Each box is repainted alone, and
+  pixie skips every element whose bounds miss it: a card's box costs that
+  card's paths, not the other cards' flattening and strokes.
+
+On the SenseCAP Indicator (three frame buffers, so each is compared with
+the frame from three renders back), toggling one card of the home panel in
+`e2e/scenes/jsxSquareHome.json` repaints that card and the count above it:
+
+| One card toggled | Before | Now |
+| --- | --- | --- |
+| Pixels repainted | 93,522 (the box from the count to the card) | 28,564 (the card, the count) |
+| Raster | ~790 ms | 68–97 ms |
+| The JS app's node (get, layout, parse, damage, raster) | ~900 ms | 135–167 ms |
+| Render, tap to `render:done` | ~1,040 ms | ~300 ms |
+
+The other square fixtures, the same way (`render:done`, steady): a to-do
+row ticked 493 → 219 ms, a calculator key 328 → ~200 ms, the counter's +
+363 → 226 ms. A frame into a buffer that holds a different scene is drawn
+whole, as before.
 
 ## What it costs
 

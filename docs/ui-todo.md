@@ -61,9 +61,10 @@ Spectra 6.
    `focus:` variant, so the same UI is usable there.
 2. **The fast loop.** Event → pixels well under 100 ms on interactive
    displays: a render that skips the scheduler, and dirty rects between
-   consecutive frames (the ESP32 LCD already repaints only pixie's damage box
-   when the UI's first paint is an opaque full-size background). Budget the
-   pass on a Pi Zero W and on the SenseCAP.
+   consecutive frames (the ESP32 LCD already repaints only what changed, a
+   box per change, when the UI's first paint is an opaque full-size
+   background: `docs/jsx-ui.md` "Repainting what changed"; a home panel's
+   toggle is ~300 ms there). Budget the pass on a Pi Zero W.
 3. **E-paper partial refresh.** The same dirty rects into
    `renderImagePartial` for panels that can; flip `supportsPartialRefresh`
    per verified panel. Spectra 6 stays full-refresh.

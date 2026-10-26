@@ -39,6 +39,22 @@ type
     ## the elements it is over and of those it is pressing.
     hovered*, pressed*: seq[int]
 
+  TextMemo = object
+    key: string          ## the runs, their styles, the width and alignment
+    arrangement: Arrangement
+    bold: seq[Font]      ## its fonts drawn with a stroke (UiNode.bold)
+    drawnAt: array[3, float32] ## x, y, opacity `drawn` was emitted for
+    drawn: seq[SvgNode]  ## its outlines as emitted there, paths shared
+
+  UiMemo* = ref object
+    ## What the last layout of a UI set in type, for the next one (one per
+    ## UI, ui/events.nim's target). Text whose runs, style and box did not
+    ## change is neither typeset nor outlined again, and it comes back as
+    ## the same nodes and paths: pixie compares those by identity, keeps
+    ## their bounds and their flattened shapes (paths.share), so an
+    ## unchanged label costs a repaint nothing.
+    last, kept: seq[TextMemo]
+
   UiNode {.acyclic.} = ref object
     kind: UiKind
     box: Box
@@ -64,6 +80,7 @@ type
     arrangement: Arrangement
     arrangedW: float32
     arrangedAlign: HorizontalAlignment
+    memo: int             ## its arrangement's entry in the memo's `kept`
     # What the pointer can do to it (UiRegion).
     key: int
     handlers: array[UiEvent, int]
@@ -259,11 +276,50 @@ proc cutSpans(spans: seq[Span], keep: int): seq[Span] =
   if result.len > 0:
     result[^1] = newSpan(result[^1].text.strip(leading = false) & "…", result[^1].font)
 
+var memo {.threadvar.}: UiMemo ## the layout's, while layoutUi runs
+
+proc textKey(n: UiNode, width: float32, align: HorizontalAlignment): string =
+  template addBytes(v: untyped) =
+    let at = result.len
+    result.setLen(at + sizeof(v))
+    copyMem(addr result[at], unsafeAddr v, sizeof(v))
+  for i in 0 ..< n.runs.len:
+    result.add n.runs[i].tag
+    result.add '\0'
+    result.add n.runs[i].text
+    result.add '\0'
+    addBytes(n.styles[i])
+  addBytes(width)
+  addBytes(align)
+
+proc recall(key: string): int =
+  ## The memo entry for `key`, moved to the entries this layout keeps; -1.
+  for i in 0 ..< memo.kept.len:
+    if memo.kept[i].key == key:
+      return i
+  for i in 0 ..< memo.last.len:
+    if memo.last[i].key == key:
+      memo.kept.add move(memo.last[i])
+      memo.last.del(i)
+      return memo.kept.high
+  -1
+
 proc arrange(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement =
   ## The text set into `width`, wrapped unless `whitespace-nowrap`, and cut
   ## with an ellipsis after `lines` lines (truncate, line-clamp-N).
   if not n.arrangement.isNil and n.arrangedW == width and n.arrangedAlign == align:
     return n.arrangement
+  var key: string
+  n.memo = -1
+  if not memo.isNil:
+    key = n.textKey(width, align)
+    n.memo = recall(key)
+    if n.memo >= 0:
+      n.arrangement = memo.kept[n.memo].arrangement
+      n.bold = memo.kept[n.memo].bold
+      n.arrangedW = width
+      n.arrangedAlign = align
+      return n.arrangement
   n.ensureSpans()
   # A pixel to spare: pixie rounds the bounds it reports, so text measured
   # at its own width could otherwise wrap when set into it.
@@ -288,6 +344,9 @@ proc arrange(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement
   n.arrangement = result
   n.arrangedW = width
   n.arrangedAlign = align
+  if not memo.isNil:
+    memo.kept.add TextMemo(key: move(key), arrangement: result, bold: n.bold, drawnAt: [-1'f32, 0, 0])
+    n.memo = memo.kept.high
 
 # -------- Layout
 
@@ -788,6 +847,12 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
   let arrangement = n.arrange(w, n.text.align)
   if arrangement.runes.len == 0:
     return
+  let at = [x, y, opacity]
+  if n.memo >= 0 and memo.kept[n.memo].drawnAt == at:
+    for node in memo.kept[n.memo].drawn:
+      drawn.add node
+    return
+  let first = drawn.len
   var paths: seq[Path]
   try:
     paths = arrangement.computePaths()
@@ -811,6 +876,12 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
       node.attrs.add(("stroke-width", num(font.size / 24)))
       node.attrs.add(("stroke-linejoin", "round"))
     drawn.add node
+  if n.memo >= 0:
+    template entry: untyped = memo.kept[n.memo]
+    entry.drawnAt = at
+    entry.drawn = drawn[first .. ^1]
+    for node in entry.drawn:
+      node.path.share() # never changed again: its bounds and shapes are kept
 
 proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradients: var int,
     regions: var seq[UiRegion]) =
@@ -854,11 +925,12 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
           c.emit(x, y, op, drawn, gradients, regions)
 
 proc layoutUi*(root: SvgNode, width, height: int, input: UiInput,
-    regions: var seq[UiRegion]): SvgNode =
+    regions: var seq[UiRegion], textMemo: UiMemo = nil): SvgNode =
   ## A UI tree laid out into a `width` x `height` image, as the SVG that
   ## draws it there. The outermost element fills the image unless its own
   ## classes size it. `input` is what the pointer is doing; `regions` gets
   ## the elements it can do something to, for the next event.
+  memo = textMemo
   let
     w = width.float32
     h = height.float32
@@ -874,6 +946,9 @@ proc layoutUi*(root: SvgNode, width, height: int, input: UiInput,
   result = SvgNode(tag: "svg", attrs: @[("width", $width), ("height", $height)])
   var gradients = 0
   ui.emit(0, 0, 1, result.children, gradients, regions)
+  if not memo.isNil:
+    memo.last = move(memo.kept) # what this layout did not use is let go
+    memo = nil
 
 proc layoutUi*(root: SvgNode, width, height: int): SvgNode =
   var regions: seq[UiRegion]

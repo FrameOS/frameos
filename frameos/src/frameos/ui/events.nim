@@ -22,6 +22,7 @@ type
     offsetX*, offsetY*: float32 ## the UI's corner in the scene's canvas
     regions*: seq[UiRegion]     ## the last render's, in paint order
     input*: UiInput             ## what the pointer is doing, for the next one
+    memo*: UiMemo               ## the last layout's type, for the next one
     call*: UiHandlerCall
 
 const MaxTargets = 16
@@ -36,7 +37,7 @@ proc uiTarget*(sceneId: string, nodeId: int, create = true): UiTarget =
   if create:
     if targets.len >= MaxTargets:
       targets.delete(0)
-    result = UiTarget(sceneId: sceneId, nodeId: nodeId)
+    result = UiTarget(sceneId: sceneId, nodeId: nodeId, memo: UiMemo())
     targets.add result
 
 proc forgetUiTarget*(sceneId: string, nodeId: int) =

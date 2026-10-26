@@ -2007,11 +2007,10 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
   var
     svg = root
     regions: seq[UiRegion]
-  let target = uiTarget(sceneId, owner.nodeId.int, create = false)
+  let target = uiTarget(sceneId, owner.nodeId.int, create = root.tag != "svg")
   if root.tag != "svg":
     try:
-      svg = layoutUi(root, requestedWidth, requestedHeight,
-        if target.isNil: UiInput() else: target.input, regions)
+      svg = layoutUi(root, requestedWidth, requestedHeight, target.input, regions, target.memo)
     except CatchableError as error:
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil

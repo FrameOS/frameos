@@ -189,6 +189,40 @@ suite "ui layout":
     check image[10, 50].r in 100'u8 .. 160'u8
     check image[10, 98].r > 245      # the white under it at the bottom
 
+
+  test "a memo keeps the text that did not change, as the same nodes":
+    # A card's switch flipped: the count above is set again, the labels that
+    # did not change come back as the very nodes (and paths) of the last
+    # layout, so pixie's damage sees them unchanged by identity.
+    proc panel(on: bool): SvgNode =
+      el("div", "flex flex-col gap-2 p-2 bg-slate-900 text-white",
+        el("span", "", txt(if on: "1 of 2 on" else: "0 of 2 on")),
+        el("div", if on: "p-2 bg-amber-300" else: "p-2 bg-slate-700", el("span", "font-semibold", txt("Lamp"))),
+        el("div", "p-2 bg-slate-700", el("span", "", txt("Heating"))))
+    proc paths(svg: SvgNode): seq[SvgNode] =
+      for node in svg.children:
+        if node.tag == "path": result.add node
+    let memo = UiMemo()
+    var regions: seq[UiRegion]
+    let
+      first = layoutUi(panel(false), 200, 120, UiInput(), regions, memo)
+      second = layoutUi(panel(true), 200, 120, UiInput(), regions, memo)
+      a = first.paths
+      b = second.paths
+    check a.len == 3 and b.len == 3
+    check b[0] != a[0]                # the count: set again
+    check b[1] == a[1] and b[2] == a[2] # the labels: the same nodes
+    check b[1].attr("stroke").len > 0   # bold drawn as its outline still
+    # What the memo hands back draws what a layout without it draws.
+    let
+      got = newImage(parseSvg(second, 200, 120))
+      want = newImage(parseSvg(layoutUi(panel(true), 200, 120), 200, 120))
+    var same = true
+    for y in 0 ..< 120:
+      for x in 0 ..< 200:
+        if got[x, y] != want[x, y]: same = false
+    check same
+
   test "it draws":
     let svg = layoutUi(el("div", "flex items-center justify-center bg-slate-900",
       el("div", "w-10 h-10 rounded-full bg-red-500"),
