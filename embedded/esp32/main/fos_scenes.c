@@ -270,10 +270,34 @@ static char *read_file(const char *path, size_t *out_len)
     return buf;
 }
 
+/* Erased pages for `len` more bytes, made now. SPIFFS reuses a deleted
+ * file's pages only after a garbage collection, and left to itself it runs
+ * one when a write finds no free page, a few blocks at a time: with 460 KB
+ * of photos beside them, scene writes on the SenseCAP's 1 MB /state failed
+ * with ENOSPC at 54-64% used. One esp_spiffs_gc stops after a few blocks
+ * (SPIFFS_ERR_FULL when those were not enough), so it is asked again, a few
+ * times (each is ~1.5 s there); it returns at once when the room is already
+ * there. On that board the write went through after rounds that each said
+ * FULL, where without them it failed. */
+#define SCENES_WRITE_MARGIN 4096
+#define SCENES_GC_ROUNDS 4
+
+static void make_room(size_t len)
+{
+    esp_err_t err = ESP_OK;
+    for (int round = 0; round < SCENES_GC_ROUNDS; round++) {
+        err = esp_spiffs_gc("state", len + SCENES_WRITE_MARGIN);
+        if (err == ESP_OK) return;
+    }
+    ESP_LOGW(TAG, "/state: no room for %u bytes after %d garbage collections (%s)",
+             (unsigned)(len + SCENES_WRITE_MARGIN), SCENES_GC_ROUNDS, esp_err_to_name(err));
+}
+
 static esp_err_t write_file_atomic(const char *path, const char *tmp_path,
                                    const char *data, size_t len)
 {
     remove(tmp_path);
+    make_room(len);
     errno = 0;
     FILE *f = fopen(tmp_path, "wb");
     if (f == NULL) {
@@ -316,55 +340,13 @@ static esp_err_t write_file_atomic(const char *path, const char *tmp_path,
     return ESP_OK;
 }
 
+/* The old file stays until the new one is whole: a write that finds no room
+ * fails and keeps it. (It used to delete the old file and write again, and
+ * a second failure left neither: a frame rebooted with no scenes.) */
 static esp_err_t write_file_replace_locked(const char *path, const char *tmp_path,
                                            const char *data, size_t len)
 {
-    esp_err_t err = write_file_atomic(path, tmp_path, data, len);
-    if (err == ESP_OK) return ESP_OK;
-
-    ESP_LOGW(TAG, "atomic write failed for %s; freeing old file and retrying", path);
-    remove(path);
-    remove(tmp_path);
-    errno = 0;
-    FILE *f = fopen(tmp_path, "wb");
-    if (f == NULL) {
-        int err_no = errno;
-        set_scene_error("retry open", tmp_path, len, err_no);
-        ESP_LOGE(TAG, "%s", s_last_error);
-        return scene_err_from_errno(err_no, ESP_FAIL);
-    }
-    size_t written = 0;
-    int err_no = 0;
-    while (written < len) {
-        size_t chunk = len - written;
-        if (chunk > 2048) chunk = 2048;
-        errno = 0;
-        size_t chunk_written = fwrite(data + written, 1, chunk, f);
-        if (chunk_written == 0) {
-            err_no = errno;
-            break;
-        }
-        written += chunk_written;
-    }
-    if (ferror(f) && err_no == 0) err_no = errno;
-    fclose(f);
-    if (written != len) {
-        if (err_no == 0) err_no = ENOSPC;
-        set_scene_error("retry short write", tmp_path, len, err_no);
-        ESP_LOGE(TAG, "%s (written=%u/%u)", s_last_error,
-                 (unsigned)written, (unsigned)len);
-        remove(tmp_path);
-        return scene_err_from_errno(err_no, ESP_ERR_NO_MEM);
-    }
-    errno = 0;
-    if (rename(tmp_path, path) != 0) {
-        int err_no = errno;
-        set_scene_error("retry rename", path, len, err_no);
-        ESP_LOGE(TAG, "%s", s_last_error);
-        remove(tmp_path);
-        return scene_err_from_errno(err_no, ESP_FAIL);
-    }
-    return ESP_OK;
+    return write_file_atomic(path, tmp_path, data, len);
 }
 
 static void load_etag(void)
