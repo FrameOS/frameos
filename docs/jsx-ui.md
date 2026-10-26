@@ -238,6 +238,12 @@ export function get(app) {
   interpreter, as kept photos do (an ESP32 short of memory, a new scene), so
   keep what was drawn as a compact record in `frameos.remember` and draw it
   into a fresh canvas. Only then, never every render.
+- **Undo starts from a second canvas.** Drawing a full record again takes
+  seconds on an ESP32 (~6 s for 3,000 points of 18 px strokes on the SenseCAP
+  Indicator). Keep all but the last few strokes in another canvas too, and
+  undo by drawing it back, `<image href={base} x={0} y={0} width={w}
+  height={h} preserveAspectRatio="none" />` (its rows copied), then the
+  strokes it does not hold.
 - **`frameos.draw(canvas, content)`** draws SVG over what is there: JSX
   (`<line>`, `<circle>`, `<path>`, `<polyline>`, `<rect>`, `<g>`, or an
   `<svg viewBox>` for other units) or SVG markup, in the canvas's pixels.

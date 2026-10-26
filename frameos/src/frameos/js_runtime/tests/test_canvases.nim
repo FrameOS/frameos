@@ -145,6 +145,33 @@ suite "canvases":
       check closeTo(target, expectedFrame(ui.canvasOf()))
       check target[60, 40] == parseHtmlColor("#0f172a").rgbx
 
+  test "one canvas drawn into another: an Undo's starting point":
+    # A paint page keeps all but its last strokes in a second canvas and
+    # draws that back before the few it can take back.
+    let ui = newUi("""
+      export function get(app) {
+        const base = frameos.canvas('base', 20, 10, '#ffffff')
+        const paint = frameos.canvas('paint', 20, 10, '#ffffff')
+        frameos.draw(base, <rect x={2} y={2} width={4} height={4} fill="#ff0000" />)
+        frameos.draw(paint, <rect x={12} y={2} width={4} height={4} fill="#0000ff" />)
+        frameos.setState('copied', frameos.draw(paint, <image href={base} x={0} y={0} width={20} height={10} preserveAspectRatio="none" />))
+        return <div className="w-full h-full bg-white"><img className="w-[20px] h-[10px]" src={paint} /></div>
+      }
+    """, "tests/canvas-copy")
+    discard ui.render()
+    check ui.scene.state{"copied"}.getBool() == true
+    var
+      paint: Image
+      newest = -1
+    for id, image in ui.runtime.images:
+      if image.width == 20 and id > newest: # 'paint', made second
+        paint = image
+        newest = id
+    check not paint.isNil
+    # The base's red where it was drawn, and its white over the paint's blue.
+    check paint[3, 3] == rgbx(255, 0, 0, 255)
+    check paint[13, 3] == rgbx(255, 255, 255, 255)
+
   test "a draw keeps the UI's handlers":
     let ui = newUi("""
       let canvas = null
