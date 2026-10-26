@@ -67,6 +67,10 @@ void fos_display_release_render_target(void);
  * drawn in place; report an overlay drawn over such a render here, so the
  * next render into the buffer knows it holds more than the scene drew. */
 void fos_display_mark_written(const uint8_t *buf);
+/* The same count for any of an LCD's buffers (a render about to draw a
+ * buffer whole copies in the newest one that still holds its frame,
+ * frameos/utils/svg_frames.nim); -1 for any other pointer or panel. */
+int64_t fos_display_buffer_generation(const uint8_t *buf);
 /* Called with a panel buffer just before it is written to: a snapshot that
  * points at the last picture shown lets go of it (fos_client.c). */
 void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf));

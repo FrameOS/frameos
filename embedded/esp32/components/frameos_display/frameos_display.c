@@ -200,6 +200,11 @@ void fos_display_mark_written(const uint8_t *buf)
     if (fos_display_is_lcd()) fos_lcd_st7701s_mark_written(buf);
 }
 
+int64_t fos_display_buffer_generation(const uint8_t *buf)
+{
+    return fos_display_is_lcd() ? fos_lcd_st7701s_buffer_generation(buf) : -1;
+}
+
 void fos_display_release_render_target(void)
 {
     if (fos_display_is_lcd()) fos_lcd_st7701s_release_back_buffer();

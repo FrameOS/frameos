@@ -17,7 +17,14 @@
 ## The record is taken off the shelf when a render into the buffer begins
 ## and put back only by a render that drew the buffer whole this way, so a
 ## render of anything else, a failed one or a write the firmware made leaves
-## no record behind and the next frame into that buffer is drawn whole.
+## no record behind.
+##
+## A buffer with no record of its own (the first renders after a scene came
+## up, two of the SenseCAP's three buffers) starts from the newest other
+## buffer that still holds its record's frame, by that buffer's own write
+## generation (`panelBufferGeneration`): its pixels are copied in, ~25 ms
+## for a 480x480 RGB565 buffer, and only the damage against that frame is
+## drawn. A tap right after a scene comes up costs what any other tap does.
 
 import std/options
 import pixie
@@ -36,10 +43,14 @@ type HeldFrame = object
   svg: Svg
 
 var
-  heldFrames: seq[HeldFrame]
+  heldFrames: seq[HeldFrame] ## oldest first
   panelBuffer: pointer
   panelGeneration: uint32
   panelHeld: Option[HeldFrame]
+  panelBufferGeneration*: proc(buffer: pointer): int64 {.nimcall, raises: [].}
+    ## The firmware's write generation of any of the panel's buffers, -1 for
+    ## one it does not know (embedded_runtime: fos_display_buffer_generation).
+    ## Unset, a buffer without its own record is drawn whole.
 
 when defined(testing):
   var svgFramePixelsForTest* = 0
@@ -60,6 +71,23 @@ proc beginPanelFrame*(buffer: pointer, generation: uint32) =
 proc endPanelFrame*() =
   panelBuffer = nil
   panelHeld = none(HeldFrame)
+
+proc area(rects: seq[tuple[x, y, w, h: int]]): int =
+  for r in rects:
+    result += r.w * r.h
+
+proc newestHeldFrame(target: Image): int =
+  ## The newest record of another buffer that still holds its frame (its
+  ## write generation unchanged since), of the target's size; -1 for none.
+  if panelBufferGeneration.isNil:
+    return -1
+  for i in countdown(heldFrames.high, 0):
+    let frame = heldFrames[i]
+    if frame.buffer != panelBuffer and frame.width == target.width and
+        frame.height == target.height and
+        panelBufferGeneration(frame.buffer) == frame.generation.int64:
+      return i
+  -1
 
 proc forgetPanelFrames*() =
   ## Nothing a buffer held is known any more (a panel or size change).
@@ -99,10 +127,21 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
       return false
     return true
   owed = none(Color) # waived: the SVG's first paint covers every pixel
+  let whole = target.width * target.height
   var rects = @[(x: 0, y: 0, w: target.width, h: target.height)]
   if held.isSome and held.get().generation == panelGeneration and
       held.get().width == target.width and held.get().height == target.height:
     rects = damageRects(held.get().svg, parsed, target.width, target.height, MaxRepaints).rects
+  if rects.area >= whole:
+    # Its own frame is no help (none, written over, another scene's): the
+    # newest frame another buffer holds, copied in, unless the damage
+    # against that is the whole frame too.
+    let source = newestHeldFrame(target)
+    if source >= 0:
+      let found = damageRects(heldFrames[source].svg, parsed, target.width, target.height, MaxRepaints)
+      if not found.full and found.rects.area < whole:
+        copyMem(target.bufferPointer, heldFrames[source].buffer, target.byteSize)
+        rects = found.rects
   when defined(testing):
     svgFramePixelsForTest = 0
   try:
