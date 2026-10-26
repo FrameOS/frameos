@@ -2,6 +2,8 @@ import std/[options, strformat]
 import pixie
 import pixie/fileformats/svg
 import ../svg_frames
+import ../font # the typeface resolver the layout's text uses
+import ../../ui/layout
 
 # An LCD's two frame buffers, drawn in turn by a scene whose whole frame is
 # one SVG: each render repaints only the damage against what that buffer
@@ -143,5 +145,52 @@ block:
   # Two cards' boxes and the count's at most (the switch that came on and
   # the one that went off since the buffer's frame): under a quarter.
   doAssert most > 0 and most < W * H div 4, $most
+
+block:
+  # A UI laid out with its memo (the nodes that did not change handed back,
+  # pixie keeping their parse) through three buffers: every frame still
+  # comes out as a whole render of a fresh layout.
+  proc el(tag, classes: string, children: varargs[SvgNode]): SvgNode =
+    result = SvgNode(tag: tag, attrs: @[("class", classes)])
+    for c in children: result.children.add c
+  proc ui(i: int): SvgNode =
+    # Cards switched on and off, a count whose width changes, now and then
+    # a banner that moves everything below it, and a label that reflows.
+    result = el("div", "flex flex-col gap-2 p-2 bg-slate-900 text-white")
+    if i mod 5 == 3:
+      result.children.add el("div", "h-4 rounded bg-red-500")
+    result.children.add el("div", "flex justify-between text-xs",
+      el("span", "", SvgNode(text: "Home")), el("span", "", SvgNode(text: $(i * 7 mod 13) & " on")))
+    let grid = el("div", "flex-1 grid grid-cols-3 gap-2")
+    for k in 0 ..< 6:
+      let
+        on = (i + k) mod 4 == 0
+        label = if k == 4 and i mod 3 == 1: "A longer card name" else: "Card " & $k
+      grid.children.add el("div", if on: "flex flex-col justify-between p-1 rounded-lg bg-amber-300 text-black" else: "flex flex-col justify-between p-1 rounded-lg bg-slate-700",
+        el("span", "text-xs font-bold", SvgNode(text: label)), el("div", "w-3 h-3 rounded-full bg-white"))
+    result.children.add grid
+  var
+    store: array[3, seq[uint16]]
+    bufs: array[3, Image]
+    memo = UiMemo()
+  # New buffers can sit where the last block's were: nothing is known of them.
+  forgetPanelFrames()
+  for b in 0 .. 2:
+    store[b] = newSeq[uint16](W * H)
+    bufs[b] = newImage565Over(W, H, addr store[b][0])
+    bufs[b].ditherStores = true
+  for i in 0 ..< 24:
+    var regions: seq[UiRegion]
+    let
+      target = bufs[i mod 3]
+      root = layoutUi(ui(i), W, H, UiInput(), regions, memo)
+    beginPanelFrame(target.bufferPointer, 0)
+    var owed = some(color(0, 0, 0, 1))
+    doAssert renderSvgFrame(root, target, owed, true, reuse = true)
+    endPanelFrame()
+    let expected = newImage565(W, H)
+    expected.ditherStores = true
+    parseSvg(layoutUi(ui(i), W, H), W, H).renderInto(expected)
+    doAssert closeTo(target, expected), &"UI frame {i} differs from a whole render"
 
 echo "svg frames ok"

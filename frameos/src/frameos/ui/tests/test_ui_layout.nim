@@ -223,6 +223,70 @@ suite "ui layout":
         if got[x, y] != want[x, y]: same = false
     check same
 
+  test "a tree that did not change comes back as the same nodes":
+    # React's diff, without its API: the second layout of an equal tree (a
+    # new walk of the same JSX) takes every node back, laid out and emitted.
+    proc card(name: string, on: bool): SvgNode =
+      el("div", if on: "p-2 rounded-xl bg-amber-300" else: "p-2 rounded-xl bg-slate-700",
+        el("span", "font-semibold", txt(name)), el("div", "w-4 h-4 rounded-full bg-white"))
+    proc panel(on: array[3, bool], extra = false): SvgNode =
+      result = el("div", "flex flex-col gap-2 p-2 bg-slate-900 text-white")
+      if extra:
+        result.children.add el("div", "h-6 bg-red-500")
+      for i, name in ["Lamp", "Heating", "Fan"]:
+        result.children.add card(name, on[i])
+    proc drawn(svg: SvgNode): Image = newImage(parseSvg(svg, 200, 200))
+    proc samePicture(a, b: SvgNode): bool =
+      let (x, y) = (drawn(a), drawn(b))
+      for j in 0 ..< 200:
+        for i in 0 ..< 200:
+          if x[i, j] != y[i, j]: return false
+      true
+    let memo = UiMemo()
+    var regions: seq[UiRegion]
+    let
+      first = layoutUi(panel([false, true, false]), 200, 200, UiInput(), regions, memo)
+      again = layoutUi(panel([false, true, false]), 200, 200, UiInput(), regions, memo)
+    check again.children.len == first.children.len
+    var same = 0
+    for i in 0 ..< again.children.len:
+      if again.children[i] == first.children[i]: inc same
+    check same == again.children.len
+    # One card changed: its nodes are new, the others' the same objects.
+    let flipped = layoutUi(panel([true, true, false]), 200, 200, UiInput(), regions, memo)
+    var kept, fresh: int
+    for node in flipped.children:
+      if node in again.children: inc kept else: inc fresh
+    check fresh > 0 and fresh < 6 and kept > 6
+    check samePicture(flipped, layoutUi(panel([true, true, false]), 200, 200))
+    # A box above them moves the cards down: drawn where they are now.
+    let moved = layoutUi(panel([true, true, false], extra = true), 200, 200, UiInput(), regions, memo)
+    check samePicture(moved, layoutUi(panel([true, true, false], extra = true), 200, 200))
+
+  test "the pointer rebuilds only what it changes":
+    proc keys(memo: UiMemo, pressed: seq[int]): (SvgNode, seq[UiRegion]) =
+      var regions: seq[UiRegion]
+      let tree = el("div", "flex gap-2 p-2 bg-black",
+        el("div", "w-10 h-10 bg-orange-500 active:bg-orange-300", txt("1")),
+        el("div", "w-10 h-10 bg-orange-500 active:bg-orange-300", txt("2")))
+      (layoutUi(tree, 120, 60, UiInput(pressed: pressed), regions, memo), regions)
+    let memo = UiMemo()
+    let (a, regions) = keys(memo, @[])
+    let (b, _) = keys(memo, @[regions[1].key])
+    check b.children.len == a.children.len
+    # [the root's background, key 1's box and label, key 2's]: the pressed
+    # key's box is new; the other key comes back as it was.
+    check b.children[1] == a.children[1] and b.children[2] == a.children[2]
+    check b.children[3] != a.children[3]
+    let (c, _) = keys(memo, @[])
+    check c.children.len == a.children.len
+
+  test "an icon's currentColor is never written into the app's nodes":
+    let icon = el("svg", "w-4 h-4", SvgNode(tag: "path", attrs: @[("d", "M0 0h24v24z"), ("fill", "currentColor")]))
+    icon.attrs.add(("viewBox", "0 0 24 24"))
+    discard layoutUi(el("div", "flex text-red-500 bg-white", icon), 40, 40)
+    check icon.children[0].attr("fill") == "currentColor"
+
   test "it draws":
     let svg = layoutUi(el("div", "flex items-center justify-center bg-slate-900",
       el("div", "w-10 h-10 rounded-full bg-red-500"),

@@ -66,12 +66,15 @@ proc forgetPanelFrames*() =
   heldFrames.setLen(0)
   endPanelFrame()
 
-proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], wholeFrame: bool): bool =
+proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], wholeFrame: bool,
+    reuse = false): bool =
   ## renderSvgIntoTarget, repainting only the damage when `target` is the
   ## panel buffer this render began on (beginPanelFrame), the render draws
   ## nothing else (`wholeFrame`), the SVG covers it opaquely, and the buffer
   ## still holds the SVG a render left there. `owed`: the scene background
   ## the target still owes, settled as renderSvgIntoTarget settles it.
+  ## `reuse`: the caller hands back nodes it handed over before (a UI's
+  ## layout), for pixie to keep their parse (parseSvg's `reuse`).
   if root.isNil:
     return false
   if panelBuffer.isNil or target.isNil or target.isView or not wholeFrame or
@@ -82,7 +85,7 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
   refreshDecodeBudgetInto()
   var parsed: Svg
   try:
-    parsed = parseSvg(root, target.width, target.height)
+    parsed = parseSvg(root, target.width, target.height, reuse)
   except CatchableError:
     return false
   if not parsed.coversOpaque(target.width, target.height):

@@ -1778,7 +1778,7 @@ proc colorWithOpacity(spec: JsonNode): Color =
   return color
 
 proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: SvgNode,
-    requestedWidth, requestedHeight: int): Image =
+    requestedWidth, requestedHeight: int, reuse = false): Image =
   ## Rasterizes an SVG into the target the planner offered this node, when
   ## there is one of the size the scene asked for; nil when the caller should
   ## rasterize standalone.
@@ -1822,7 +1822,7 @@ proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: SvgNod
   var owed = takeOwedBackground(context, target)
   # An LCD's buffer that only this SVG draws repaints just what changed
   # (utils/svg_frames.nim); anything else, and a refusal there, as before.
-  var rendered = renderSvgFrame(svg, target, owed, context.wholeFrame)
+  var rendered = renderSvgFrame(svg, target, owed, context.wholeFrame, reuse)
   if not rendered:
     rendered = renderSvgIntoTargetWithDegrade(svg, target, owed)
   if owed.isSome:
@@ -2014,7 +2014,9 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
     except CatchableError as error:
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil
-  let intoTarget = svgIntoOfferedTarget(owner, context, svg, requestedWidth, requestedHeight)
+  # A UI's nodes come back from the layout where they did not change.
+  let intoTarget = svgIntoOfferedTarget(owner, context, svg, requestedWidth, requestedHeight,
+    reuse = root.tag != "svg")
   if not intoTarget.isNil:
     if intoTarget.width == requestedWidth and intoTarget.height == requestedHeight:
       if regions.len > 0 or not target.isNil:

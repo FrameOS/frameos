@@ -80,6 +80,17 @@ cheap is that the pictures are reconciled, not the code:
 - **A box draws only what can touch it.** Each box is repainted alone, and
   pixie skips every element whose bounds miss it: a card's box costs that
   card's paths, not the other cards' flattening and strokes.
+- **A subtree that did not change goes through every stage as the same
+  objects.** The layout keeps its last tree (on the UI's `UiMemo`), and an
+  element whose node at the same place is the same, or equal, and that the
+  pointer left as it was takes back its laid-out node: no classes read, its
+  size from the layout cache (two calls kept per node, since a flex item is
+  measured, then placed, and its children are placed again for its final
+  call before it is drawn), and, where its place, size and opacity did not
+  change, the very SVG nodes it emitted. pixie keeps the parse of a node it
+  is handed again (`parseSvg`'s `reuse`), and damageRects knows those
+  elements without comparing them. Gradient ids and handler numbers are part
+  of what must match.
 
 On the SenseCAP Indicator (three frame buffers, so each is compared with
 the frame from three renders back), toggling one card of the home panel in
