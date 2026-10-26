@@ -142,8 +142,13 @@ static void action_render_now(void)
 
 /* How long a scene's changed state may wait in RAM before it is written to
  * the state partition (fos_scene_state.h: a write that erases stalls the
- * flash cache, and an RGB panel scanned from PSRAM glitches). */
+ * flash cache, and an RGB panel scanned from PSRAM glitches). An RGB LCD
+ * waits ten minutes: a Ken Burns slideshow changes its photo counter every
+ * photo, and written every minute it erased a block, a disturbed scan, every
+ * several minutes on the SenseCAP Indicator (2026-10-26). Such a frame runs
+ * on mains power, and a restart or a deep sleep still writes first. */
 #define SCENE_STATE_WRITE_DELAY_MS (60 * 1000)
+#define SCENE_STATE_LCD_WRITE_DELAY_MS (10 * 60 * 1000)
 
 static SemaphoreHandle_t s_scene_state_mutex = NULL;
 
@@ -172,7 +177,7 @@ static void scene_state_write_behind(void)
     s_scene_state_mutex = xSemaphoreCreateMutex();
     if (s_scene_state_mutex == NULL) return; /* writes through, as before */
     const fos_scene_state_write_behind_t behind = {
-        .delay_ms = SCENE_STATE_WRITE_DELAY_MS,
+        .delay_ms = fos_display_is_lcd() ? SCENE_STATE_LCD_WRITE_DELAY_MS : SCENE_STATE_WRITE_DELAY_MS,
         .now_ms = scene_state_now_ms,
         .lock = scene_state_lock,
         .unlock = scene_state_unlock,

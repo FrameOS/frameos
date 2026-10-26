@@ -76,7 +76,14 @@ left.
 - **The scan-out takes its share.** At the 12 MHz pixel clock (548x518 total,
   42.3 Hz) the panel reads 19.5 MB/s out of PSRAM continuously; its refill
   interrupt runs on the render core every 0.9 ms, and the driver preloads each
-  next 19.2 KB chunk into the 32 KB data cache.
+  next 19.2 KB chunk into the 32 KB data cache. A flash write that erases
+  holds that interrupt off (the cache is off), so it costs a disturbed frame;
+  the driver restarts the DMA at the next vertical blank. Not with
+  `CONFIG_LCD_RGB_RESTART_IN_VSYNC`: in IDF 5.5 its restart at every blank
+  keeps the refill count whose parity picks the buffer to refill, and after
+  such a frame half the time every refill wrote the buffer in flight, the
+  picture one bounce buffer ahead (the next frame's top on the bottom rows)
+  until the next flash write (2026-10-26).
 - **Code fetches share the bus.** Every instruction-cache miss is a flash
   read on the same bus PSRAM uses, and a 3.2 MB firmware with QuickJS in it
   misses a 16 KB cache often. In DIO mode that was the largest single cost:
@@ -343,6 +350,12 @@ rotation pass can. `docs/realtime-todo.md` has them.
 - `set debug 1` on the console logs a profile line per node per render.
 - `lcd` prints the scan-out's health (frames, drops, late refills, the worst
   refill) and `lcd pclk <MHz>` retunes the pixel clock live.
+- Whether the bounce buffers are in step is visible from the CPU: the LCD's
+  GDMA channel (`peri_sel` 5) names the descriptor in flight, and the frame
+  buffer chunk each bounce buffer holds says whether the idle one is ahead of
+  it or behind. Sampled through a refill, a healthy scan-out is ~63% "idle
+  one ahead" (the refill's copy is the rest); one stuck a buffer ahead is
+  the reverse. That probe found the restart bug above; it is not in the tree.
 - `render:animation` lines carry the frame rate while a scene animates.
 - A per-phase probe like the ones behind the tables above is a dozen lines of
   `getMonoTime` around the phases (`ensureReady`, the `get()` call and

@@ -357,7 +357,10 @@ for the two Spectra boards most of the bench work runs on:
   share core 1 (the render's bulk copies pause while it runs), big heap
   reallocs copy outside the heap's spinlock (`fos_heap_realloc`: the IDF
   heap copies with interrupts off, which held the refill off for 1-2 ms),
-  `CONFIG_LCD_RGB_RESTART_IN_VSYNC` resyncs a frame that still starves, and
+  the driver restarts the DMA at the next vertical blank after a frame that
+  still starves (not `CONFIG_LCD_RGB_RESTART_IN_VSYNC`, whose restart at every
+  blank kept a stale refill count and ran the picture one bounce buffer
+  ahead, the top of the next frame on the bottom rows), and
   the "skip an unchanged picture" hash is not written to flash (a flash
   write switches the cache off and stalls the refill; an LCD comes up blank
   after a reboot anyway). Any other flash write (a settings save, a scene
@@ -515,11 +518,13 @@ file without one was written by firmware that still pinned defaults and is
 dropped the first time it is read, so the deployed defaults win. State for a scene
 that is not resident (a wake-check pass, a switch carrying state) goes to the
 file right away, so a deep sleep in between loses nothing. Writes go
-behind: a change waits in RAM and reaches the flash after a minute (later
-changes ride along), before a deep sleep and before a restart. A SPIFFS write
-that erases a block holds the flash cache off for 50-100 ms, which stalls
-both cores and makes an RGB LCD scan garbage, and the touch test's taps are
-disk fields: one write per tap flickered the SenseCAP Indicator. Both control
+behind: a change waits in RAM and reaches the flash after a minute, ten on
+an RGB LCD (later changes ride along), before a deep sleep and before a
+restart. A SPIFFS write that erases a block holds the flash cache off for
+50-100 ms, which stalls both cores and makes an RGB LCD scan garbage, and the
+touch test's taps are disk fields: one write per tap flickered the SenseCAP
+Indicator. A slideshow's photo counter is one too: written every minute it
+still erased a block every several minutes. Both control
 planes get it: the cloud hello and the commands pull report the persisted
 state even before the first render, keyed by scene id.
 
