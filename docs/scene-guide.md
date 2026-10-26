@@ -308,6 +308,12 @@ size and the ref stays valid until `frameos.releaseImage(ref)` or the
 interpreter goes (8 at most). Hold the ref in a module variable and fetch
 again when it is gone: an ESP32 short of memory drops the interpreter, and
 the picture with it.
+A picture the app draws into itself is a canvas:
+`frameos.canvas(key, width, height, color)`, drawn into with
+`frameos.draw(canvas, <line .../>)` (any SVG, as JSX or markup) and shown with
+`<img src={canvas}>`. A frame repaints only what was drawn. It lasts as long
+as the interpreter: when `canvas.fresh` is true, draw the record you keep in
+`frameos.remember` into it again.
 
 **Assets and permissions.** Asset paths are relative to the frame's assets
 folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,
@@ -592,6 +598,12 @@ interface FrameOSImageRef {
   width: number;
   height: number;
 }
+/** What frameos.canvas returns: an image ref an img's src takes, that frameos.draw and frameos.clear draw into. */
+interface FrameOSCanvasRef extends FrameOSImageRef {
+  canvas: string;
+  version: number;
+  fresh: boolean;
+}
 
 interface FrameOSNodeRef {
   __frameosType: "node";
@@ -821,6 +833,16 @@ declare const frameos: {
   };
   /** Lets a picture fetchImage kept ({ keep: true }) go. False for one that was not kept, or is gone. */
   releaseImage(image: FrameOSImageRef | { image: FrameOSImageRef | null } | null): boolean;
+  /**
+   * The app's canvas called key: a picture it draws into and shows as an img's src. Made and filled with
+   * color (white) the first time, or when the size changes; the same picture every render while the interpreter
+   * lives (4 at most). Its fresh is true the render it was made: draw your record into it again then.
+   */
+  canvas(key: string, width: number, height: number, color?: string): FrameOSCanvasRef | null;
+  /** Draws SVG (JSX: <line>, <circle>, <path>, <polyline>, <g>, an <svg viewBox>; or markup) into a canvas, over what is there. */
+  draw(canvas: FrameOSCanvasRef, content: FrameOSElement | string): boolean;
+  /** Fills a canvas with color (white by default). */
+  clear(canvas: FrameOSCanvasRef, color?: string): boolean;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;
