@@ -1,7 +1,8 @@
 /* Host test of fos_events.c, the firmware's one routing function for scene
  * events: who may say what (the contract's allow-list), what the firmware does
  * itself without the Nim runtime (render, scene switches, device commands),
- * what is handed to the scene and with which lock discipline. The firmware
+ * what is handed to the scene, and that only the render task hands it over
+ * (any other task queues it for the render task). The firmware
  * functions it calls are the stubs below, which only take notes; FreeRTOS and
  * esp_restart() come from main/tests/host_shim.
  *
@@ -45,7 +46,9 @@ static struct {
     uint32_t nim_origin;
     char nim_event[96];
     char nim_payload[256];
+    char nim_history[1024]; /* every send, "event payload" a line */
     int nim_timeout;
+    bool on_render_task;
     int flushes;
     int restarts;
     int delays;
@@ -62,10 +65,15 @@ static struct {
 static void reset(void)
 {
     bool (*hook)(const char *, const char *) = n.hook;
+    /* Whatever a test left queued for the render task goes first. */
+    n.on_render_task = true;
+    n.nim_available = true;
+    fos_events_deliver_deferred();
     memset(&n, 0, sizeof(n));
     n.hook = hook;
     n.nim_available = true;
     n.nim_result = true;
+    n.on_render_task = true;
     n.task_result = pdPASS;
     n.store_result = ESP_OK;
 }
@@ -73,6 +81,7 @@ static void reset(void)
 void fos_client_render_now(void) { n.renders++; }
 void fos_client_render_fresh(void) { n.renders++; n.fresh_renders++; }
 void fos_client_wake_for_events(void) { n.wakes++; }
+bool fos_client_on_render_task(void) { return n.on_render_task; }
 void fos_scenes_request_sync(void) { n.syncs++; }
 
 esp_err_t fos_scenes_select(const char *scene_id)
@@ -101,6 +110,8 @@ bool frameos_nim_send_event_wait(uint32_t origin, const char *event, const char 
     n.nim_origin = origin;
     snprintf(n.nim_event, sizeof(n.nim_event), "%s", event);
     snprintf(n.nim_payload, sizeof(n.nim_payload), "%s", payload_json ? payload_json : "(null)");
+    size_t used = strlen(n.nim_history);
+    snprintf(n.nim_history + used, sizeof(n.nim_history) - used, "%s %s\n", event, n.nim_payload);
     return n.nim_result;
 }
 
@@ -258,17 +269,34 @@ static void test_set_current_scene(void)
     CHECK(fos_events_dispatch(FOS_ORIGIN_CLOUD, "setCurrentScene", nested) == FOS_EVENT_DONE);
     CHECK(strcmp(n.selected, "outer") == 0);
     /* …and the state rides to the runtime: whole event, the caller's origin,
-     * a bounded wait, before the render is asked for. */
+     * before the render is asked for. */
     CHECK(n.nim_sends == 1 && n.nim_origin == FOS_ORIGIN_CLOUD);
     CHECK(strcmp(n.nim_event, "setCurrentScene") == 0 && strcmp(n.nim_payload, nested) == 0);
-    CHECK(n.nim_timeout == 2000);
+    CHECK(n.nim_timeout == -1);
     CHECK(n.renders == 1 && n.nim_render_polls == 0);
 
-    /* A runtime busy rendering: the scene still switches, the log says what
-     * was lost. */
+    /* From another task (the cloud's, HTTP's): the switch is queued at once,
+     * the state waits for the render task, which hands it over (and queues
+     * the same switch again, one switch). */
     reset();
-    n.nim_busy = true;
-    CHECK(fos_events_dispatch(FOS_ORIGIN_CLOUD, "setCurrentScene", "{\"sceneId\":\"a\",\"state\":{\"n\":1}}") == FOS_EVENT_DONE);
+    n.on_render_task = false;
+    const char *with_state = "{\"sceneId\":\"a\",\"state\":{\"n\":1}}";
+    CHECK(fos_events_dispatch(FOS_ORIGIN_CLOUD, "setCurrentScene", with_state) == FOS_EVENT_DONE);
+    CHECK(n.selects == 1 && n.renders == 1 && n.nim_sends == 0 && n.wakes == 1);
+    CHECK(fos_events_deferred_pending());
+    n.on_render_task = true;
+    CHECK(fos_events_deliver_deferred());
+    CHECK(n.nim_sends == 1 && n.nim_origin == FOS_ORIGIN_CLOUD && strcmp(n.nim_payload, with_state) == 0);
+    CHECK(n.selects == 2 && strcmp(n.selected, "a") == 0 && !fos_events_deferred_pending());
+
+    /* The render task's queue full: the scene still switches, the log says
+     * what was lost. */
+    reset();
+    n.on_render_task = false;
+    for (int i = 0; i < 16; i++) {
+        CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_ADMIN, "button", "{}") == FOS_EVENT_DONE);
+    }
+    CHECK(fos_events_dispatch(FOS_ORIGIN_CLOUD, "setCurrentScene", with_state) == FOS_EVENT_DONE);
     CHECK(n.selects == 1 && n.renders == 1 && n.nim_sends == 0);
     CHECK(strstr(n.log, "event:setCurrentScene:stateDropped") != NULL);
 
@@ -301,6 +329,14 @@ static void test_set_current_scene(void)
     CHECK(n.selects == 0 && n.renders == 1);
     CHECK(n.nim_sends == 1 && n.nim_origin == FOS_ORIGIN_HTTP_WRITE && n.nim_timeout == -1);
     CHECK(strcmp(n.nim_event, "setCurrentScene") == 0 && strcmp(n.nim_payload, "{\"direction\":\"next\"}") == 0);
+    /* From another task the dispatcher resolves it on the render task. */
+    reset();
+    n.on_render_task = false;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "setCurrentScene", "{\"direction\":\"next\"}") == FOS_EVENT_DONE);
+    CHECK(n.nim_sends == 0 && n.renders == 0 && n.selects == 0);
+    n.on_render_task = true;
+    CHECK(fos_events_deliver_deferred());
+    CHECK(n.nim_sends == 1 && n.renders == 1 && strcmp(n.nim_payload, "{\"direction\":\"next\"}") == 0);
     /* A direction the runtime refuses, or no runtime at all: nothing switches. */
     reset();
     n.nim_result = false;
@@ -383,17 +419,42 @@ static void test_scene_events(void)
     CHECK(fos_events_dispatch(FOS_ORIGIN_SCHEDULE, "morningBriefing", "{}") == FOS_EVENT_DONE);
     CHECK(n.nim_sends == 1 && n.nim_origin == FOS_ORIGIN_SCHEDULE && n.logs == 0);
 
-    /* Bounded: never the lock-taking render poll — the render task is woken
-     * and reads the flag itself. */
+    /* Scene code runs on the render task alone: from any other task (HTTP,
+     * the cloud, the console) the event waits for it, the render task is
+     * woken, and `done` means queued. The first /event/pointerMove sent over
+     * HTTP compiled the scene's JS app on the 8 KB HTTP task and crashed the
+     * frame (2026-10-26). */
     reset();
+    n.on_render_task = false;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "pointerMove", "{\"x\":1}") == FOS_EVENT_DONE);
+    CHECK(n.nim_sends == 0 && n.wakes == 1 && n.nim_render_polls == 0);
+    /* A newer move from the same origin replaces the waiting one (the
+     * contract's `coalesce: latest`); a button does not, and keeps its place. */
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "button", "{\"label\":\"A\"}") == FOS_EVENT_DONE);
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "pointerMove", "{\"x\":2}") == FOS_EVENT_DONE);
+    CHECK(fos_events_dispatch(FOS_ORIGIN_CLOUD, "setSceneState", "{}") == FOS_EVENT_DONE);
+    CHECK(n.nim_sends == 0);
+    n.on_render_task = true;
     n.nim_render_requested = true;
-    CHECK(fos_events_dispatch_wait(FOS_ORIGIN_CLOUD, "button", "{}", 3000) == FOS_EVENT_DONE);
-    CHECK(n.nim_timeout == 3000 && n.nim_render_polls == 0 && n.wakes == 1 && n.renders == 0);
+    CHECK(fos_events_deliver_deferred());
+    CHECK(n.nim_sends == 3);
+    CHECK(strcmp(n.nim_history, "pointerMove {\"x\":2}\nbutton {\"label\":\"A\"}\nsetSceneState {}\n") == 0);
+    CHECK(n.renders == 3 && !fos_events_deferred_pending() && !fos_events_deliver_deferred());
 
+    /* Full: refused, logged, nothing kept. */
     reset();
-    n.nim_busy = true;
-    CHECK(fos_events_dispatch_wait(FOS_ORIGIN_CLOUD, "button", "{}", 3000) == FOS_EVENT_BUSY);
-    CHECK(n.nim_sends == 0 && n.wakes == 0 && n.renders == 0);
+    n.on_render_task = false;
+    for (int i = 0; i < 16; i++) {
+        CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "button", "{}") == FOS_EVENT_DONE);
+    }
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "button", "{}") == FOS_EVENT_BUSY);
+    CHECK(strstr(n.log, "event:dropped") != NULL);
+
+    /* The firmware's own part answers from any task, as before. */
+    reset();
+    n.on_render_task = false;
+    CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_WRITE, "render", NULL) == FOS_EVENT_DONE);
+    CHECK(n.renders == 1 && !fos_events_deferred_pending());
 
     /* No runtime in this build. */
     reset();

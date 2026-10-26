@@ -37,6 +37,8 @@ void fos_client_request_commands_sync(void);
 /* Cut the render task's wait short so queued input (button presses) reaches
  * the scene promptly, WITHOUT asking for a render. */
 void fos_client_wake_for_events(void);
+/* Whether the caller is the render task: the one task scene code runs on. */
+bool fos_client_on_render_task(void);
 /* Keep Wi-Fi/HTTP available briefly after a control request on deep-sleep frames. */
 void fos_client_keep_awake_ms(uint32_t ms);
 /* The voice session's hold on the panel (docs/voice-chat.md): from the

@@ -173,6 +173,11 @@ uint32_t fos_client_render_count(void) { return s_render_count; }
 
 static TaskHandle_t s_client_task = NULL;
 
+bool fos_client_on_render_task(void)
+{
+    return s_client_task != NULL && xTaskGetCurrentTaskHandle() == s_client_task;
+}
+
 size_t fos_client_task_stack_free(void)
 {
     return s_client_task != NULL ? (size_t)uxTaskGetStackHighWaterMark(s_client_task) : 0;
@@ -1978,6 +1983,7 @@ static void animation_wait(fos_config_t *config, int64_t wait_us)
         if (nim) {
             fos_buttons_process_events();
             fos_touch_process_events();
+            fos_events_deliver_deferred();
             fos_schedule_tick();
         }
         if (bits & RENDER_NOW_BIT) s_loud_next = true;
@@ -2089,6 +2095,14 @@ static void client_task(void *arg)
         if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
             if (housekeeping) fos_scenes_sync(false);
             fos_scenes_apply_pending();
+            /* Scene events from HTTP, the cloud or the console since the last
+             * look (fos_events_defer): to the scene now, before this pass
+             * renders, and the render shows them. Before the queued switch
+             * is applied: a `setCurrentScene` with state leaves that state
+             * pending here, and the switch opens the scene with it. */
+            if (fos_events_deliver_deferred()) {
+                force_render = true;
+            }
             fos_scenes_apply_pending_selection();
             fos_buttons_process_events();
             fos_touch_process_events();
@@ -2098,12 +2112,6 @@ static void client_task(void *arg)
              * renders once and goes back to deep sleep, which loses the
              * queue. */
             fos_scenes_apply_pending_selection();
-            /* Scene events the cloud delivered while the previous pass was
-             * rendering (fos_events_defer): to the scene now, before this
-             * pass renders, and the render shows them. */
-            if (fos_events_deliver_deferred()) {
-                force_render = true;
-            }
         }
 
         /* The once-a-second work while animating starts here and ends with
@@ -2599,6 +2607,10 @@ static void client_task(void *arg)
             if (nim) {
                 fos_buttons_process_events();
                 fos_touch_process_events();
+                /* An event from HTTP, the cloud or the console: to the scene
+                 * now, not at the next pass an interval away. Whether a frame
+                 * follows is the scene's to say, read just below. */
+                fos_events_deliver_deferred();
                 /* Wall-clock schedule (setCurrentScene at 07:00 etc.) —
                  * evaluated on the render task, like every Nim call. */
                 if (fos_schedule_tick()) want_render = true;

@@ -549,10 +549,13 @@ A `scene_event` (`setSceneState`, a button, a custom event) meets the same
 timing: the cloud delivers it the moment the session is up, the wake's render
 already holds the runtime, and the handler used to answer `busy` after three
 seconds — an answer the hub never retries, so no state ever reached a
-sleeping frame. A busy scene event is now kept (`fos_events_defer`, a
-handful of slots, `event:deferred` in the log), delivered by the render task
-at the start of its next pass (`event:deferred:delivered`), rendered on that
-pass, and counted as work that holds the deep sleep.
+sleeping frame. Scene code also runs on the render task alone: a scene event
+from HTTP, the cloud or the console is queued for it (`fos_events_defer`, 16
+slots, a newer pointer move replacing a waiting one, `event:dropped` when
+full), delivered at the start of a pass or in the idle wait, rendered by the
+scene's own render rule, and counted as work that holds the deep sleep. The
+first `/event/pointerMove` over HTTP had compiled the scene's JS on the 8 KB
+HTTP task and crashed the frame (2026-10-26).
 
 The cloud log tap only runs while the session is up, so the first ~15 s of a
 wake (the wake cause, the scene load, the replayed button press) and

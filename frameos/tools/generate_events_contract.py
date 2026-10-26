@@ -618,6 +618,7 @@ def gen_c(doc):
         "    uint8_t event_class;   /* fos_event_class_t */",
         "    uint16_t origins;      /* mask of fos_event_origin_t that may emit it */",
         "    uint8_t ends_runtime;  /* the firmware does not survive it: a schedule must remember it fired */",
+        "    uint8_t coalesce_latest; /* a newer one waiting replaces the older (pointer moves) */",
         "} fos_event_spec_t;",
         "",
     ]
@@ -629,14 +630,15 @@ def gen_c(doc):
     for event in doc["events"]:
         out.append(
             f"    {{FOS_EVENT_{upper_snake(event['name'])}, FOS_EVENT_CLASS_{upper_snake(event['class'])},\n"
-            f"     {mask(event)}, {1 if event.get('schedule', {}).get('endsRuntime') else 0}}},"
+            f"     {mask(event)}, {1 if event.get('schedule', {}).get('endsRuntime') else 0}, "
+            f"{1 if event['coalesce'] == 'latest' else 0}}},"
         )
     out.append("};")
     out.append(f"#define FOS_EVENT_SPEC_COUNT {len(doc['events'])}")
     out.append("")
     custom = doc["customEvents"]
     out.append("static const fos_event_spec_t FOS_CUSTOM_EVENT_SPEC = {")
-    out.append(f"    NULL, FOS_EVENT_CLASS_CUSTOM,\n     {mask(custom)}, 0}};")
+    out.append(f"    NULL, FOS_EVENT_CLASS_CUSTOM,\n     {mask(custom)}, 0, {1 if custom['coalesce'] == 'latest' else 0}}};")
     declarable = " | ".join(f"FOS_ORIGIN_{upper_snake(o)}" for o in custom.get("declarableOrigins", [])) or "0"
     out.append("/* Origins a scene opts into per custom event; the Nim dispatcher knows the scene's answer. */")
     out.append(f"#define FOS_CUSTOM_EVENT_DECLARABLE_ORIGINS ({declarable})")

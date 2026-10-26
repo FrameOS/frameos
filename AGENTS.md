@@ -88,7 +88,11 @@
   EventHost): a fix there is a fix for both, and a copy in either file is how
   the two drift. wasm does not trap on a nil dereference (address 1 is
   readable) — a green preview check says nothing about one. On the ESP32 the C edge is `embedded/esp32/main/fos_events.c`
-  (one function for HTTP, schedule, cloud, console and buttons). New behaviour
+  (one function for HTTP, schedule, cloud, console and buttons), and scene
+  code runs on the render task alone: what reaches the Nim dispatcher from
+  any other task (HTTP, the cloud, the console) is queued for it
+  (`fos_events_defer`) — the first HTTP `pointerMove` compiled the scene's JS
+  on the 8 KB HTTP task and crashed the frame (2026-10-26). New behaviour
   gets a case in the `dispatcher` section of `docs/event-fixtures.json`
   (`test_event_loop.nim` runs it). **Input** (pointers, keys, buttons) goes
   through `frameos/src/frameos/input_state.nim` — the cursor, the modifiers,
