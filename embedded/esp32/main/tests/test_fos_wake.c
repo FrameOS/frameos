@@ -206,6 +206,42 @@ static void test_wake_schedule_across_a_dst_change(void)
     CHECK(got == 60, "5 min interval at spring-forward: got %u", got);
 }
 
+static void test_an_awake_wait_counts_the_milliseconds(void)
+{
+    const int64_t at_1015_ms = 1792318500LL * 1000; /* 2026-10-18 10:15:00.000 UTC */
+    /* A one-second clock whose render ended 620 ms into a second renders at
+     * the next one, 380 ms on, not a whole second later. */
+    int64_t got = fos_wake_aligned_sleep_ms(at_1015_ms + 620, 1, offset_utc);
+    CHECK(got == 380, "1 s, 620 ms in: got %lld", (long long)got);
+    got = fos_wake_aligned_sleep_ms(at_1015_ms + 999, 1, offset_utc);
+    CHECK(got == 1, "1 s, 999 ms in: got %lld", (long long)got);
+    got = fos_wake_aligned_sleep_ms(at_1015_ms, 1, offset_utc);
+    CHECK(got == 1000, "on the second, a whole one: got %lld", (long long)got);
+    /* The boundaries are fos_wake_aligned_sleep_seconds's. */
+    got = fos_wake_aligned_sleep_ms(at_1015_ms + 250, 3600, offset_utc);
+    CHECK(got == 2700 * 1000 - 250, "hourly: got %lld", (long long)got);
+    got = fos_wake_aligned_sleep_ms(at_1015_ms + 250, 3600, offset_india);
+    CHECK(got == 900 * 1000 - 250, "IST hourly: got %lld", (long long)got);
+    got = fos_wake_aligned_sleep_ms(-1500, 1, offset_utc);
+    CHECK(got == 500, "before 1970 rounds down too: got %lld", (long long)got);
+}
+
+static void test_a_slice_never_waits_zero_ticks(void)
+{
+    /* 100 Hz, the firmware's: a 1000 ms slice the tick ended after 993 ms
+     * leaves 7 ms, which must still be a wait. */
+    CHECK(fos_wake_slice_ticks(7000, 1000, 10) == 1, "7 ms left is one tick");
+    CHECK(fos_wake_slice_ticks(1, 1000, 10) == 1, "1 us left is one tick");
+    CHECK(fos_wake_slice_ticks(0, 1000, 10) == 1, "nothing left is still one tick");
+    CHECK(fos_wake_slice_ticks(-5000, 1000, 10) == 1, "past the deadline is one tick");
+    CHECK(fos_wake_slice_ticks(993000, 1000, 10) == 100, "993 ms rounds up: got %u",
+          fos_wake_slice_ticks(993000, 1000, 10));
+    CHECK(fos_wake_slice_ticks(5000000, 1000, 10) == 100, "capped at the slice");
+    CHECK(fos_wake_slice_ticks(5000000, 50, 10) == 5, "a busy button's 50 ms slice");
+    CHECK(fos_wake_slice_ticks(7500, 1000, 1) == 8, "1000 Hz rounds up too");
+    CHECK(fos_wake_slice_ticks(7500, 1000, 0) == 8, "a tick of 0 ms counts as 1");
+}
+
 int main(void)
 {
     test_arms_every_rtc_capable_button();
@@ -215,6 +251,8 @@ int main(void)
     test_an_edge_stamp_widens_against_the_render_tasks_clock();
     test_wake_schedule_aligns_to_the_local_clock();
     test_wake_schedule_across_a_dst_change();
+    test_an_awake_wait_counts_the_milliseconds();
+    test_a_slice_never_waits_zero_ticks();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok",
            g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

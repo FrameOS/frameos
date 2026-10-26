@@ -51,3 +51,21 @@ int64_t fos_wake_edge_at_ms(uint32_t at_ms_low, int64_t now_ms);
 typedef int (*fos_wake_offset_fn)(int64_t utc_seconds);
 uint32_t fos_wake_aligned_sleep_seconds(int64_t utc_now, uint32_t interval_sec,
                                         fos_wake_offset_fn offset_minutes_at);
+
+/* An awake frame's wait to its next render, in milliseconds where the two
+ * above count whole seconds: from `utc_now_ms` to the same local boundary
+ * fos_wake_aligned_sleep_seconds names for the second it falls in. In whole
+ * seconds, a one-second clock whose render took half of one waited a whole
+ * second more after it and showed every other second. In (0, interval]. */
+int64_t fos_wake_aligned_sleep_ms(int64_t utc_now_ms, uint32_t interval_sec,
+                                  fos_wake_offset_fn offset_minutes_at);
+
+/* The render task waits for its next render in slices (fos_client.c), each an
+ * xEventGroupWaitBits that a touch or a command ends early, until a deadline.
+ * How many ticks of `tick_ms` the next slice waits: what is left of the wait
+ * (`left_us`), at most `max_slice_ms`, rounded UP, and never 0. A wait of 0
+ * ticks returns at once: at 100 Hz the last few milliseconds of a wait were
+ * one, nothing passed, and the render task spun on its core until a pass
+ * happened to take that long (minutes, the task watchdog's IDLE1, a clock
+ * that stopped). A `tick_ms` of 0 counts as 1. */
+uint32_t fos_wake_slice_ticks(int64_t left_us, uint32_t max_slice_ms, uint32_t tick_ms);
