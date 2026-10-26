@@ -169,6 +169,47 @@ In an `<svg>`, React's camelCase attribute names are read as SVG's
 `style={{ fill: "red" }}` becomes a style attribute; `<image href={ref}>`
 takes an image ref like `img`.
 
+### Photos that stay
+
+`frameos.fetchImage`'s image lasts one render: the runtime lets it go when
+`get()` returns. A UI that shows a photo across renders (a tap on a button
+beside it, a hover, the scene's own interval) would download and decode it
+again each time. It keeps it instead:
+
+```tsx
+let photo = null // the ref, while this interpreter lives
+export function get(app) {
+  if (!photo) {
+    photo = frameos.fetchImage(url, { keep: true, width: 480, height: 480 }).image
+  }
+  return <img className="w-full h-full object-cover" src={photo} />
+}
+// Another photo: frameos.releaseImage(photo); photo = null
+```
+
+- **`keep: true`** stores the picture with the app's interpreter. Its ref
+  stays valid in later renders until `frameos.releaseImage(ref)` (true once,
+  for a kept picture) or until the interpreter goes. An app keeps 8 at most;
+  a ninth lets the oldest go.
+- **`width` / `height`** (and `fit`, `cover` by default or `contain`) are the
+  size it is decoded at, in the canvas's pixel format: an ESP32 holds a
+  480x480 photo in 450 KB of RGB565, and drawing it is a copy. A host decodes
+  at the picture's own size.
+- **A kept picture is never the consumer's target.** A UI draws the canvas
+  whole and the photo is one of its elements, so the photo decodes into an
+  image of its own.
+- **Its memory is the interpreter's.** An ESP32 that releases the interpreter
+  (a decode short of memory, a sleeping frame; `docs/js-apps-and-code-nodes.md`)
+  releases the pictures with it, and module variables are new in the next
+  interpreter. So the ref belongs in a module variable, never in
+  `frameos.remember`, and a missing one means fetch again.
+- **Keep what is on screen**, and perhaps the one before. Every kept 480x480
+  photo is 450 KB of PSRAM that the next decode does not have.
+  - An ESP32 keeps an interpreter that holds pictures while 1 MB of headroom
+    is left, after a decode too: letting it go would only decode them again.
+  - An interpreter without pictures needs 2 MB after a decode
+    (`utils/memory.nim`).
+
 ## Layout
 
 A subset of CSS, with Tailwind's preflight: every box is a border-box (`w-24
