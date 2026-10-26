@@ -129,10 +129,10 @@ suite "canvases":
       if i >= 4:
         most = max(most, svgFramePixelsForTest)
       check closeTo(target, expectedFrame(ui.canvasOf()))
-    # The three segments drawn since a buffer's frame, each its own box (a
-    # stroke's box allows for a miter's reach): never the canvas between them.
+    # The three segments drawn since a buffer's frame, each its own box, a
+    # round line's half width around it: never the canvas between them.
     checkpoint $most
-    check most > 0 and most < 100 * 60 div 2
+    check most > 0 and most < 100 * 60 div 5
     # A clear repaints the canvas whole, in every buffer in turn.
     ui.scene.state["clear"] = %*true
     if ui.scene.state.hasKey("seg"):
