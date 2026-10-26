@@ -254,6 +254,15 @@ export function get(app) {
     repainted whole.
   - pixie's `damageRects` cannot see the change itself: the element and its
     picture are the same objects.
+  - A stroke's box is its path grown by how far the stroke reaches: half the
+    width for round or bevel joins, round or butt caps and a single line,
+    and up to the miter limit for a miter join. Draw strokes with
+    `strokeLinejoin="round"` and `strokeLinecap="round"`.
+  - A box inside the picture draws the picture alone (a 565 canvas has no
+    alpha, so nothing under it shows), its rows copied as they are.
+  - On the SenseCAP Indicator a finger drawing repaints ~4K pixels a frame
+    in ~4 ms, ~50 ms a frame in all, and that stays flat after hundreds of
+    strokes.
 - **It is in the canvas's pixel format**, as kept photos are: on an ESP32,
   RGB565 (a 448x276 canvas is 242 KB), and drawn 1:1 by `<img>` at its own
   size.

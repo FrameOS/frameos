@@ -311,9 +311,11 @@ the picture with it.
 A picture the app draws into itself is a canvas:
 `frameos.canvas(key, width, height, color)`, drawn into with
 `frameos.draw(canvas, <line .../>)` (any SVG, as JSX or markup) and shown with
-`<img src={canvas}>`. A frame repaints only what was drawn. It lasts as long
-as the interpreter: when `canvas.fresh` is true, draw the record you keep in
-`frameos.remember` into it again.
+`<img src={canvas}>`. A frame repaints only what was drawn, a box around each
+stroke: give strokes `strokeLinecap="round"` and `strokeLinejoin="round"`,
+whose box is half the width around the line (a miter join's is wider). It
+lasts as long as the interpreter: when `canvas.fresh` is true, draw the
+record you keep in `frameos.remember` into it again.
 
 **Assets and permissions.** Asset paths are relative to the frame's assets
 folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,
