@@ -429,14 +429,22 @@ block test_a_stamped_touch_is_timed_by_its_stamps:
   discard state.applyNamedInput(evPointerUp, %*{"x": 1000, "y": 1000, "pointerId": 1,
     "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 1400}, eoDriver, at(3400), output)
   doAssert output.names == @[evPointerDown, evPointerUp, evTap, evDoubleTap]
-  # Held 700 ms by its stamps: a long press, however soon it is delivered.
+  # Held 1200 ms by its stamps: a long press, however soon it is delivered.
   output.setLen(0)
   discard state.applyNamedInput(evPointerDown, %*{"x": 1000, "y": 1000, "pointerId": 1,
-    "pointerType": "touch", "button": 0, "buttons": 1, "atMs": base + 5000}, eoDriver, at(6000), output)
+    "pointerType": "touch", "button": 0, "buttons": 1, "atMs": base + 5000}, eoDriver, at(7000), output)
   discard state.applyNamedInput(evPointerUp, %*{"x": 1000, "y": 1000, "pointerId": 1,
-    "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 5700}, eoDriver, at(6000), output)
+    "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 6200}, eoDriver, at(7000), output)
   doAssert output.names == @[evPointerDown, evPointerUp, evLongPress]
-  doAssert output[2].payload["durationMs"].getInt() == 700
+  doAssert output[2].payload["durationMs"].getInt() == 1200
+  # Held 700 ms: under a second, a tap, as a key's press is (`tapMs` is
+  # `longPressMs`, the buttons' second).
+  output.setLen(0)
+  discard state.applyNamedInput(evPointerDown, %*{"x": 1000, "y": 1000, "pointerId": 1,
+    "pointerType": "touch", "button": 0, "buttons": 1, "atMs": base + 8000}, eoDriver, at(9000), output)
+  discard state.applyNamedInput(evPointerUp, %*{"x": 1000, "y": 1000, "pointerId": 1,
+    "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 8700}, eoDriver, at(9000), output)
+  doAssert output.names == @[evPointerDown, evPointerUp, evTap]
 
 block test_the_corpus:
   # docs/event-fixtures.json `inputState`: the cases every host answers alike.

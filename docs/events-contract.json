@@ -670,9 +670,9 @@
   "gestures": {
     "$comment": "How the dispatcher makes tap, doubleTap, longPress and swipe out of pointerDown / pointerUp, in scene pixels and milliseconds. The same numbers on every host.",
     "tapSlopPx": 16,
-    "tapMs": 500,
+    "tapMs": 1000,
     "doubleTapMs": 350,
-    "longPressMs": 500,
+    "longPressMs": 1000,
     "swipeMinPx": 48,
     "directions": ["left", "right", "up", "down"]
   },
