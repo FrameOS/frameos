@@ -4,6 +4,7 @@ import pixie/fileformats/svg
 
 import ../app
 import frameos/types
+import frameos/utils/svg_frames
 
 proc makeConfig(width = 6, height = 4): FrameConfig =
   FrameConfig(width: width, height: height, rotate: 0)
@@ -111,3 +112,34 @@ suite "render/svg app":
     check logged.len > 0
     check "Error rendering SVG: " in logged[^1]
     check "Failed to render SVG." notin logged[^1]
+
+  test "a whole-frame SVG on an LCD's buffer repaints only what changed":
+    # The Touch test's shape: render/svg is the whole frame, its SVG starts
+    # with an opaque full-canvas rect and a dot moves. Into the same panel
+    # buffer again, only the dot's old and new boxes are repainted, and the
+    # frame still comes out as a whole render would.
+    const W = 120
+    const H = 80
+    let config = makeConfig(W, H)
+    var storage = newSeq[uint16](W * H)
+    let panel = newImage565Over(W, H, addr storage[0])
+    panel.fill(rgba(255, 0, 255, 255))
+    proc dot(x: int): string =
+      "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"120\" height=\"80\">" &
+        "<rect x=\"0\" y=\"0\" width=\"120\" height=\"80\" fill=\"#202020\"/>" &
+        "<circle cx=\"" & $x & "\" cy=\"40\" r=\"6\" fill=\"#d64545\"/></svg>"
+    proc draw(svg: string) =
+      let app = App(frameConfig: config, scene: makeScene(config),
+        appConfig: AppConfig(inputImage: none(Image), svg: svg, placement: "stretch",
+          offsetX: 0, offsetY: 0, blendMode: "normal"))
+      beginPanelFrame(panel.bufferPointer, 0)
+      app.render(ExecutionContext(hasImage: true, image: panel, wholeFrame: true), panel)
+      endPanelFrame()
+    draw(dot(20))
+    check svgFramePixelsForTest == W * H
+    draw(dot(30))
+    check svgFramePixelsForTest > 0 and svgFramePixelsForTest < W * H div 4
+    let whole = newImage565(W, H)
+    parseSvg(dot(30), W, H).renderInto(whole)
+    for i in 0 ..< W * H:
+      check storage[i] == whole.data16[i]

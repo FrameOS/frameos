@@ -30,6 +30,7 @@
 static struct {
     int renders;
     int fresh_renders;
+    int scene_renders; /* of renders, the scene's own (its render rule) */
     int wakes;
     int syncs;
     int selects;
@@ -80,6 +81,7 @@ static void reset(void)
 
 void fos_client_render_now(void) { n.renders++; }
 void fos_client_render_fresh(void) { n.renders++; n.fresh_renders++; }
+void fos_client_render_for_scene(void) { n.renders++; n.scene_renders++; }
 void fos_client_wake_for_events(void) { n.wakes++; }
 bool fos_client_on_render_task(void) { return n.on_render_task; }
 void fos_scenes_request_sync(void) { n.syncs++; }
@@ -403,6 +405,8 @@ static void test_scene_events(void)
     CHECK(n.nim_sends == 1 && n.nim_origin == FOS_ORIGIN_DRIVER && n.nim_timeout == -1);
     CHECK(strcmp(n.nim_event, "button") == 0 && strcmp(n.nim_payload, "{\"label\":\"A\"}") == 0);
     CHECK(n.nim_render_polls == 1 && n.renders == 1 && n.wakes == 0);
+    /* The scene's own ask, not somebody's: a burst's frame (fos_animation.h). */
+    CHECK(n.scene_renders == 1);
 
     reset();
     CHECK(fos_events_dispatch(FOS_ORIGIN_HTTP_ADMIN, "setSceneState", NULL) == FOS_EVENT_DONE);

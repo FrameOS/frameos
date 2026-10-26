@@ -9,6 +9,8 @@ import uri
 import frameos/apps
 import frameos/types
 import frameos/utils/image
+import frameos/utils/app_images
+import frameos/utils/svg_frames
 
 type
   AppConfig* = object
@@ -68,11 +70,27 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     # onto the image. A standalone raster beside it was a second image the
     # size of the canvas: 7.7 MB at 1200x1600, which an 8 MB ESP32 (the
     # E1004) does not have, so the render aborted out of memory.
+    #
+    # The scene background this canvas still owes is the app's to settle
+    # (the interpreter leaves it, FlowAppsSettlingBackground): an SVG whose
+    # first paint covers the canvas waives it, any other pays it first. And
+    # on an LCD, when the SVG is the whole frame, only what changed since
+    # the SVG this buffer last held is repainted (utils/svg_frames.nim): the
+    # Touch test moved one dot and rewrote one line of text per touch, and
+    # drew all 230,400 pixels twice (the background, then the SVG's own)
+    # for it on the SenseCAP Indicator (2026-10-26).
     if blendMode == NormalBlend and self.appConfig.offsetX == 0 and self.appConfig.offsetY == 0:
-      if not renderSvgIntoTargetWithDegrade(svgMarkup, image):
+      var owed = takeOwedBackground(context, image)
+      var rendered = renderSvgFrame(svgMarkup, image, owed, context.wholeFrame)
+      if not rendered:
+        rendered = renderSvgIntoTargetWithDegrade(svgMarkup, image, owed)
+      if owed.isSome:
+        payBackground(image, owed.get())
+      if not rendered:
         let reason = svgDecodeError(svgMarkup, image.width, image.height)
         raise newException(Exception, if reason.len > 0: reason else: "Failed to render SVG.")
       return
+    paintPendingBackground(context)
     let svgImageOption = decodeSvgWithFallback(svgMarkup, image.width, image.height)
     if svgImageOption.isNone:
       raise newException(Exception, "Failed to render SVG.")
@@ -80,6 +98,7 @@ proc render*(self: App, context: ExecutionContext, image: Image) =
     scaleAndDrawImage(image, svgImage, self.appConfig.placement, self.appConfig.offsetX,
       self.appConfig.offsetY, blendMode)
   except Exception as e:
+    paintPendingBackground(context)
     let message = &"Error rendering SVG: {e.msg}"
     self.logError(message)
     when defined(frameosEmbedded):

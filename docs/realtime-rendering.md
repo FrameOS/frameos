@@ -200,6 +200,12 @@ in place (a copy, a clear, an overlay: `s_generation` in
 `lcd_st7701s_rgb.c`), and a buffer whose count moved, a render of anything
 else, or a failed one leaves no record, so its next frame is drawn whole.
 `utils/tests/test_svg_frames.nim` checks every frame against a whole render.
+`render/svg` takes the same path when it is the whole frame (the store's
+Touch test: a code node writes the SVG, the dot moves), and settles the owed
+background itself (`FlowAppsSettlingBackground` in interpreter.nim): the
+canvas was filled twice per render, by the background and by the SVG's own
+full-canvas rect, and a fill ahead of it would wipe what the damage repaint
+keeps.
 
 pixie shares the parsed data of a `<path d>` between SVGs (a per-thread cache
 by the data's text), so "this element did not change" is a pointer
@@ -268,6 +274,24 @@ USB flash, so a frame updated over the air keeps its DIO bootloader and its
 speed; a DIO bootloader with a QIO app was measured to boot, render and
 write flash as before (on a flash whose QE bit was already set). The C3 overlay keeps
 DIO: measured on the S3 only, and a thin client is not fetch-bound.
+
+### Bursts: a finger on the glass
+
+A scene that renders on its own render rule (the Touch test redraws on every
+pointer move; its interval is an hour) is not an animation, and every one of
+those renders used to be a pass of its own: the settings, command and scene
+pulls, a metrics sample, and ~2 KB of render:* lines into a console buffer of
+2 KB at 115200 baud. ~300 ms a touch for a ~90 ms render. Frames the scene
+asked for (`fos_client_render_for_scene`, its own bit, not `render_now`'s)
+that follow each other within a second are a burst (`fos_animation.c`,
+host-tested), with an animation's rules: the pulls once a second, the first
+frame and one in ten seconds logged in full, the rest quiet, and once the
+burst is a second over a `render:burst` line and, when its last frame was
+quiet, the render announce and backend push it skipped. A frame about to
+deep-sleep is never quiet. With the SVG damage repaint above, a touch is ~65
+ms on the SenseCAP Indicator (2026-10-26): pixie's parse of the SVG, mostly
+its three text lines, ~22 ms; the damage, ~8 ms; and the raster of one box
+around both the dot and the text, a quarter of the screen, ~25 ms.
 
 ### Metrics with the logged frame
 

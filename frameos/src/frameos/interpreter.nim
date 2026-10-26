@@ -54,6 +54,14 @@ proc cachedImageMemoryLimit(): int =
   else:
     0
 
+const FlowAppsSettlingBackground = ["render/svg"]
+  ## Flow apps that settle the scene background still owed themselves (paint
+  ## it before their first paint, or waive it when that paint covers the
+  ## canvas), so it is not painted ahead of them. render/svg: a full-canvas
+  ## background rect is how most SVG scenes begin, and the canvas was filled
+  ## twice per render; on an LCD it also repaints only what changed
+  ## (utils/svg_frames.nim), which a fill ahead of it would have wiped.
+
 proc affordsKeeping(image: Image, memoryLimit: int, context: ExecutionContext): bool =
   ## An image over the memory cache's limit is still kept while the frame
   ## affords it easily: with it held (it is allocated already), render
@@ -627,7 +635,8 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     # fusion holds it until its producer has had the chance to waive it, and
     # pays it after its inputs (below).
     if not asDataNode and context.backgroundPending and
-        not (nodeType == "app" and self.imageFusionPlans.hasKey(currentNodeId)):
+        not (nodeType == "app" and (self.imageFusionPlans.hasKey(currentNodeId) or
+          currentNode.data{"keyword"}.getStr() in FlowAppsSettlingBackground)):
       paintPendingBackground(context)
     case nodeType:
     of "app":
@@ -849,8 +858,9 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         context.decodeTargetNodeId = 0.NodeId
         context.decodeTargetOwned = false
         context.inPlaceImageNodes = @[]
-      # Whatever the producer did not settle, this node draws over.
-      if not asDataNode:
+      # Whatever the producer did not settle, this node draws over, unless it
+      # settles the background itself.
+      if not asDataNode and keyword notin FlowAppsSettlingBackground:
         paintPendingBackground(context)
       if setDecodeBoundsHint:
         context.decodeBoundsWidth = 0

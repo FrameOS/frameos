@@ -454,6 +454,6 @@ fos_event_result_t fos_events_dispatch(fos_event_origin_t origin, const char *na
         return fos_events_defer(origin, name, payload) ? FOS_EVENT_DONE : FOS_EVENT_BUSY;
     }
     bool delivered = frameos_nim_send_event(origin, name, payload);
-    if (frameos_nim_render_requested()) fos_client_render_now();
+    if (frameos_nim_render_requested()) fos_client_render_for_scene();
     return delivered ? FOS_EVENT_DONE : FOS_EVENT_FAILED;
 }

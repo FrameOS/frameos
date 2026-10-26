@@ -62,6 +62,10 @@ static const char *TAG = "fos_client";
 #define RELEASE_BIT BIT3
 /* Animation mode's frame timer (fos_animation.h): the next frame is due. */
 #define FRAME_DUE_BIT BIT4
+/* The scene asked for a render (its render rule, after a touch or a key):
+ * rendered like RENDER_NOW_BIT, but a run of them is a burst
+ * (fos_animation.h), not one loud frame each. */
+#define SCENE_RENDER_BIT BIT5
 #define START_RENDER_LOOP_BIT BIT1
 #define CLIENT_TASK_STACK_BYTES 40960
 
@@ -534,6 +538,13 @@ void fos_client_render_fresh(void)
 {
     __atomic_store_n(&s_render_fresh, true, __ATOMIC_SEQ_CST);
     fos_client_render_now();
+}
+
+void fos_client_render_for_scene(void)
+{
+    if (s_events) {
+        xEventGroupSetBits(s_events, SCENE_RENDER_BIT);
+    }
 }
 
 void fos_client_wake_for_events(void)
@@ -1901,6 +1912,9 @@ static bool s_quiet = false;
  * render, a scene switch): that frame logs in full, so its render:done and
  * the cloud's render announce do not wait for the next ten seconds. */
 static bool s_loud_next = false;
+/* The pass about to start renders because the scene asked (SCENE_RENDER_BIT)
+ * and nothing else did: a frame of a burst (fos_animation.h). */
+static bool s_scene_render = false;
 /* The pass-start power decision, kept between the once-a-second passes that
  * make it while animating. */
 static bool s_pass_battery_critical = false;
@@ -1955,6 +1969,32 @@ static void log_animation(const char *status, bool logged_frame)
     frameos_nim_log_hook(line);
 }
 
+/* A burst (fos_animation.h) a second over: `render:burst` with its frames,
+ * and, when its last frame was quiet, the cloud's render announce and the
+ * backend push that frame skipped, so neither keeps an older picture. */
+static void finish_burst(void)
+{
+    fos_animation_stats_t stats;
+    bool owed = false;
+    if (!fos_animation_burst_end(&s_anim, esp_timer_get_time(), &stats, &owed)) return;
+    char line[256];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"render:burst\",\"source\":\"esp32\",\"frames\":%lu,\"seconds\":%.1f,"
+             "\"fps\":%lu.%lu,\"avgMs\":%lu,\"maxMs\":%lu}",
+             (unsigned long)stats.frames, (double)stats.window_us / 1000000.0,
+             (unsigned long)(stats.fps_x10 / 10), (unsigned long)(stats.fps_x10 % 10),
+             (unsigned long)stats.avg_ms, (unsigned long)stats.max_ms);
+    frameos_nim_log_hook(line);
+    if (owed) {
+        char scene_id[128];
+        char scene_name[128];
+        current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+        fos_cloud_announce_render(scene_id);
+        push_image_to_backend(scene_id);
+    }
+    frameos_nim_flush_logs();
+}
+
 /* The wait between two frames of an animation. What arrives meanwhile is
  * served the way the ordinary wait below serves it: a press or a touch goes
  * to the scene, a command pull runs, the schedule ticks, and a render asked
@@ -1964,7 +2004,7 @@ static void log_animation(const char *status, bool logged_frame)
  * notice). Returns when the next frame is due. */
 static void animation_wait(fos_config_t *config, int64_t wait_us)
 {
-    const EventBits_t signals = RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT;
+    const EventBits_t signals = RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT;
     bool armed = false;
     if (wait_us > 0 && s_frame_timer) {
         esp_timer_stop(s_frame_timer);
@@ -1987,7 +2027,7 @@ static void animation_wait(fos_config_t *config, int64_t wait_us)
             fos_schedule_tick();
         }
         if (bits & RENDER_NOW_BIT) s_loud_next = true;
-        bool due = !armed || (bits & (FRAME_DUE_BIT | RENDER_NOW_BIT)) != 0 ||
+        bool due = !armed || (bits & (FRAME_DUE_BIT | RENDER_NOW_BIT | SCENE_RENDER_BIT)) != 0 ||
                    (nim && frameos_nim_render_requested()) ||
                    fos_animation_wait_us(&s_anim, esp_timer_get_time()) == 0;
         if (due && !render_held()) break;
@@ -2097,11 +2137,13 @@ static void client_task(void *arg)
             fos_scenes_apply_pending();
             /* Scene events from HTTP, the cloud or the console since the last
              * look (fos_events_defer): to the scene now, before this pass
-             * renders, and the render shows them. Before the queued switch
+             * renders, and the render shows them — as the scene's own render
+             * when nothing else forced this pass. Before the queued switch
              * is applied: a `setCurrentScene` with state leaves that state
              * pending here, and the switch opens the scene with it. */
-            if (fos_events_deliver_deferred()) {
+            if (fos_events_deliver_deferred() && !force_render) {
                 force_render = true;
+                s_scene_render = true;
             }
             fos_scenes_apply_pending_selection();
             fos_buttons_process_events();
@@ -2267,7 +2309,12 @@ static void client_task(void *arg)
                             /* a due date past the longest allowed interval is
                              * garbage (clock jump, stale RTC) — render */
                             s_next_render_due < wall_now + 7 * 86400 + 3600;
-        if (force_render) s_loud_next = true;
+        /* A render the scene asked for is not one somebody asked for: a run
+         * of them is a burst, logged like an animation. Not on a frame about
+         * to deep-sleep, which would never make up a quiet frame's skips. */
+        bool scene_render = s_scene_render && !deep_sleep_now;
+        s_scene_render = false;
+        if (force_render && !scene_render) s_loud_next = true;
         force_render = false;
         bool rendered = false;
         bool frame_quiet = false;
@@ -2294,7 +2341,9 @@ static void client_task(void *arg)
             } else {
                 /* An animation logs one frame in full every so often, with
                  * the summary of the quiet ones before it. */
-                bool quiet = !s_loud_next && fos_animation_frame_quiet(&s_anim, esp_timer_get_time());
+                int64_t frame_start = esp_timer_get_time();
+                bool quiet = !s_loud_next && (fos_animation_frame_quiet(&s_anim, frame_start) ||
+                                              (scene_render && fos_animation_burst_quiet(&s_anim, frame_start)));
                 frame_quiet = quiet;
                 s_loud_next = false;
                 if (s_anim.active && !quiet) log_animation("running", true);
@@ -2304,13 +2353,16 @@ static void client_task(void *arg)
                 s_render_in_flight = false;
                 rendered = true;
                 fos_animation_frame_done(&s_anim, cycle_start, esp_timer_get_time());
+                if (scene_render) {
+                    fos_animation_burst_frame_done(&s_anim, frame_start, esp_timer_get_time(), quiet);
+                }
             }
         }
         /* An animation samples with the frame it logs in full, every ten
          * seconds: a sample is three heap walks and a line the provider's
          * Metrics panel stores, and once a second was 3,600 an hour. A pass
          * that renders nothing keeps the once-a-second housekeeping. */
-        bool sample_metrics = s_anim.active && rendered ? !frame_quiet : housekeeping;
+        bool sample_metrics = (s_anim.active || scene_render) && rendered ? !frame_quiet : housekeeping;
         if (sample_metrics) log_metrics_sample();
         frameos_nim_flush_logs(); /* the sample must not wait for next pass */
 
@@ -2577,12 +2629,14 @@ static void client_task(void *arg)
             uint32_t slice = remaining_ms > max_slice ? max_slice : remaining_ms;
             int64_t slice_start_us = esp_timer_get_time();
             EventBits_t bits = xEventGroupWaitBits(
-                s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT,
+                s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT,
                 pdTRUE, pdFALSE, pdMS_TO_TICKS(slice));
             bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
             /* Somebody wants a render. Decided below: now, or — while a voice
              * session holds the panel — when it releases, in one pass. */
             bool want_render = (bits & RENDER_NOW_BIT) != 0;
+            /* The scene's own ask, after a touch or a key: a burst's frame. */
+            bool scene_asked = (bits & SCENE_RENDER_BIT) != 0;
             if (bits & COMMANDS_BIT) {
                 /* The backend nudged: it just queued something for an awake
                  * frame. Pull now; whatever the commands asked for (a render,
@@ -2614,7 +2668,10 @@ static void client_task(void *arg)
                 /* Wall-clock schedule (setCurrentScene at 07:00 etc.) —
                  * evaluated on the render task, like every Nim call. */
                 if (fos_schedule_tick()) want_render = true;
-                if (frameos_nim_render_requested()) want_render = true;
+                if (frameos_nim_render_requested()) scene_asked = true;
+                /* A burst a second over: its summary, and what its last
+                 * frame skipped when that one was quiet. */
+                finish_burst();
             }
             /* A code started (the verb wakes this wait), answered, replaced
              * or expired: within a second, whatever the interval. */
@@ -2638,10 +2695,11 @@ static void client_task(void *arg)
             }
             /* The answer has been read: the panel goes back to the image
              * alone, unless a render is about to do that anyway. */
-            if (!want_render && notice_expired() && !render_held() && !repaint_snapshot(false)) {
+            if (!want_render && !scene_asked && notice_expired() && !render_held() &&
+                !repaint_snapshot(false)) {
                 s_notice_shown_us = 0; /* no snapshot to repaint from; the next render clears it */
             }
-            if (want_render) {
+            if (want_render || scene_asked) {
                 if (render_held()) {
                     /* A voice session is in flight: the chat's switch takes
                      * effect now (its state, the next command, goes to the
@@ -2650,6 +2708,7 @@ static void client_task(void *arg)
                     if (nim) fos_scenes_apply_pending_selection();
                 } else {
                     s_render_owed = false;
+                    s_scene_render = !want_render;
                     force_render = true;
                     break;
                 }

@@ -55,7 +55,12 @@ SVG path work. Roughly in order of what each would buy there:
    fleet image.
 7. **Touch latency.** The FT6336U is polled every 30 ms (no interrupt line on
    the Indicator) and events reach the scene between frames: poll at 10–15 ms
-   on LCD boards and let a touch cut the frame wait short.
+   on LCD boards and let a touch cut the frame wait short. A Touch test frame
+   is ~65 ms now (bursts, `render/svg`'s damage repaint): pixie's damage is
+   one box around everything that changed, a quarter of the screen when the
+   dot is far from the coordinates line, so a box per changed element would
+   repaint a tenth of that; and the SVG parse (~22 ms) lays its three text
+   lines out again every frame, where unchanged text could keep its layout.
 8. **Photos waive the background too.** A JPEG decoded straight into the
    canvas with cover or stretch covers every pixel opaquely; the decode path
    could settle the owed background the way the SVG path does
