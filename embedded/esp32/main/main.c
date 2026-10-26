@@ -54,6 +54,9 @@
 #include "fos_mem.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
+#if CONFIG_IDF_TARGET_ESP32S3
+#include "soc/rtc.h"
+#endif
 #include "frameos_nim.h"
 
 static const char *TAG = "frameos";
@@ -232,10 +235,6 @@ void app_main(void)
         ESP_LOGI(TAG, "battery: %d mV (%d%%)", battery_mv, battery_pct);
     }
 
-    if (HEARTBEAT_GPIO >= 0 && heartbeat_pin_free(config)) {
-        xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
-    }
-
     fos_display_config_t display_config = {
         .panel = config->panel,
         .hardware_preset = config->hardware_preset,
@@ -250,6 +249,29 @@ void app_main(void)
     }
     fos_display_set_temperature_hook(panel_temperature);
 
+    /* An RGB LCD board renders at 240 MHz. The generic image boots every
+     * board at 160 for the battery frames; an LCD is lit and mains-powered
+     * anyway, and its renders are watched (the SenseCAP Indicator's took
+     * ~3.8 s at 160, 2026-10-25). On the S3 both clocks divide the same
+     * 480 MHz PLL, so the PSRAM and flash clocks do not move; the switch is
+     * the one ESP-IDF's power management makes, core voltage first. */
+#if CONFIG_IDF_TARGET_ESP32S3
+    if (fos_display_is_lcd()) {
+        rtc_cpu_freq_config_t cpu;
+        if (rtc_clk_cpu_freq_mhz_to_config(240, &cpu)) {
+            rtc_clk_cpu_freq_set_config(&cpu);
+            printf("cpu: 240 MHz (RGB LCD)\n");
+        }
+    }
+#endif
+
+    /* Not where the pin is wired to something else (heartbeat_pin_free), nor
+     * on an RGB LCD, whose pixel clock is GPIO21 (the SenseCAP Indicator):
+     * the panel is known only once the display is selected. */
+    if (HEARTBEAT_GPIO >= 0 && heartbeat_pin_free(config) && !fos_display_is_lcd()) {
+        xTaskCreate(heartbeat_task, "heartbeat", 2048, NULL, 2, NULL);
+    }
+
     /* Claim the panel buffer here — the panel size is known and Wi-Fi, lwIP,
      * httpd and SPIFFS have not yet carved up the internal heap. On a
      * PSRAM-less C3 this is the difference between a frame that renders and
@@ -262,6 +284,10 @@ void app_main(void)
          * that fos_client.c already uses to hand it back after the blit. */
         frameos_nim_set_render_buffer_hooks((void *(*)(size_t))fos_framebuffer_acquire,
                                             (void (*)(void *))fos_framebuffer_release);
+        /* An RGB LCD's refill interrupt shares core 1 with the render task;
+         * a realloc copying under the heap's spinlock held it off for 1-2 ms
+         * mid-render (a band of stale lines, bench 2026-10-25). */
+        if (fos_display_is_lcd()) frameos_nim_set_realloc_outside_lock(true);
     }
 
     /* fos_assets_sd_mount emits its own structured "assets:sd" line into the

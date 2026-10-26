@@ -9,6 +9,7 @@
 #include "DEV_Config.h"
 #include "frameos_panel_table.h"
 #include "it8951.h"
+#include "lcd_st7701s_rgb.h"
 #include "photo_painter_pmic.h"
 
 static const char *TAG = "fos_display";
@@ -64,6 +65,8 @@ static size_t panel_buffer_size(int width, int height, fos_pixel_format_t format
         case FOS_PIXEL_4BPP_SPECTRA6:
         case FOS_PIXEL_4BPP_GRAY:
             return (((size_t)width + 1u) / 2u) * (size_t)height;
+        case FOS_PIXEL_RGB565:
+            return (size_t)width * (size_t)height * 2u;
         default:
             return 0;
     }
@@ -112,6 +115,11 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
     fos_it8951_set_variant(is_reterminal_e1003_hardware(config) ? FOS_IT8951_VARIANT_SEEED_E1003
                                                                 : FOS_IT8951_VARIANT_WAVESHARE);
 
+    /* The RGB LCD's control wiring (its IO expander, its 3-wire SPI, its
+     * backlight) is the board's, not the panel's: the preset picks the
+     * table, like the PhotoPainter's PMIC and the E1004's panel tuning. */
+    fos_lcd_st7701s_select_board(config->hardware_preset);
+
     if (photo_painter) {
         esp_err_t pmic_err = fos_photo_painter_enable_epd_power();
         if (pmic_err != ESP_OK) {
@@ -129,6 +137,19 @@ esp_err_t fos_display_init(const fos_display_config_t *config)
         DEV_SetSpiClock(0);
     }
     s_panel = entry;
+    /* An RGB LCD comes up now, not at the first blit: its scan-out starts
+     * (a lit white screen instead of a dark one until Wi-Fi), and its IO
+     * expander's I2C bus exists before the touch controller next to it
+     * asks to join (fos_display_shared_i2c_bus, fos_touch_start). */
+    if (entry->bus == FOS_PANEL_BUS_RGB) {
+        s_module_ready = true;
+        if (entry->driver_init() != 0) {
+            ESP_LOGE(TAG, "panel %s failed to start", entry->name);
+            s_panel = NULL;
+            s_module_ready = false;
+            return ESP_FAIL;
+        }
+    }
     ESP_LOGI(TAG, "panel %s (%dx%d, fmt=%d, %u byte buffer)", entry->name,
              fos_display_width(), fos_display_height(), (int)fos_display_format(),
              (unsigned)fos_display_buffer_size());
@@ -152,6 +173,23 @@ fos_pixel_format_t fos_display_format(void)
 size_t fos_display_buffer_size(void)
 {
     return panel_buffer_size(fos_display_width(), fos_display_height(), fos_display_format());
+}
+
+int fos_display_bus(void)
+{
+    return s_panel ? s_panel->bus : FOS_PANEL_BUS_SPI;
+}
+
+bool fos_display_is_lcd(void)
+{
+    return s_panel && s_panel->bus == FOS_PANEL_BUS_RGB;
+}
+
+esp_err_t fos_display_shared_i2c_bus(int sda, int scl, void **bus)
+{
+    if (bus) *bus = NULL;
+    if (!s_panel || s_panel->bus != FOS_PANEL_BUS_RGB || sda < 0 || scl < 0) return ESP_ERR_NOT_FOUND;
+    return fos_lcd_st7701s_i2c_bus(sda, scl, bus);
 }
 
 size_t fos_display_panel_count(void)
@@ -234,7 +272,9 @@ size_t fos_display_canvas_bytes(void)
 size_t fos_display_render_psram_bytes(void)
 {
     if (!s_panel) return 0;
-    return fos_display_canvas_bytes() + fos_display_buffer_size() + FOS_RENDER_PSRAM_RESERVE;
+    /* An RGB LCD scans two frame buffers of its own (lcd_st7701s_rgb.c). */
+    size_t lcd_fbs = s_panel->bus == FOS_PANEL_BUS_RGB ? 2u * fos_display_buffer_size() : 0u;
+    return fos_display_canvas_bytes() + fos_display_buffer_size() + lcd_fbs + FOS_RENDER_PSRAM_RESERVE;
 }
 
 static esp_err_t ensure_module(void)
@@ -242,8 +282,9 @@ static esp_err_t ensure_module(void)
     if (s_module_ready) return ESP_OK;
     /* I2C panels (the SSD1306 OLED) own their bus and reuse the sck/mosi pins
      * as SCL/SDA; bringing up the EPD SPI module on the same GPIOs would take
-     * them away. */
-    if (s_panel && s_panel->bus == FOS_PANEL_BUS_I2C) {
+     * them away. An RGB LCD brings up its own peripheral and has no SPI pins
+     * at all. */
+    if (s_panel && (s_panel->bus == FOS_PANEL_BUS_I2C || s_panel->bus == FOS_PANEL_BUS_RGB)) {
         s_module_ready = true;
         return ESP_OK;
     }
@@ -256,7 +297,9 @@ static esp_err_t ensure_module(void)
 
 esp_err_t fos_display_spi_bus_share(int miso_pin, int *host)
 {
-    if (s_panel && s_panel->bus == FOS_PANEL_BUS_I2C) return ESP_ERR_INVALID_STATE;
+    if (s_panel && (s_panel->bus == FOS_PANEL_BUS_I2C || s_panel->bus == FOS_PANEL_BUS_RGB)) {
+        return ESP_ERR_INVALID_STATE;
+    }
     int shared = DEV_SPI_Bus_Share(miso_pin);
     if (shared < 0) return ESP_ERR_INVALID_STATE;
     if (host) *host = shared;

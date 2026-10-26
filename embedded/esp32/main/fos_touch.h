@@ -1,9 +1,11 @@
 /*
  * The capacitive touch panel: a Goodix GT911 on the Seeed reTerminal Sticky
- * (its own I2C bus, an interrupt line, a reset and a load switch) and the
+ * (its own I2C bus, an interrupt line, a reset and a load switch), the
  * reTerminal E1003 (on the clock's bus, which fos_i2c.c lends it; an
- * interrupt line and a reset). `touch_pins`, docs/events.md "Input". A
- * finger is a pointer to the scene,
+ * interrupt line and a reset; `touch_pins`, docs/events.md "Input"), or a
+ * FocalTech FT6336U on the Seeed SenseCAP Indicator (the LCD's I2C bus, no
+ * interrupt line wired: the task polls it). A finger is a pointer to the
+ * scene,
  * nothing more: the panel's reports become `pointerDown`, `pointerMove` and
  * `pointerUp` with the position on the contract's 0..32767 wire, and the
  * Nim dispatcher (frameos/input_state.nim, the same on every host) makes
@@ -52,6 +54,25 @@ typedef struct {
  * the buffer is too short for the fingers it claims. Pure. */
 int fos_touch_decode(const uint8_t *report, size_t len, fos_touch_point_t *points, size_t max);
 
+/* The FocalTech FT5x06/FT6x36 report, read from FOS_TOUCH_FT_REG_TOUCHES:
+ * the finger count, then six bytes per finger — event flag and x high
+ * nibble, x low, track id and y high nibble, y low, weight, area. Every read
+ * is the present state (no ready bit). The FT6336U tracks two fingers; the
+ * FT5x06 five. */
+#define FOS_TOUCH_FT_REG_TOUCHES 0x02
+#define FOS_TOUCH_FT_POINT_BYTES 6
+#define FOS_TOUCH_FT_REPORT_BYTES (1 + FOS_TOUCH_POINTS_MAX * FOS_TOUCH_FT_POINT_BYTES)
+/* The FT event flag (bits 7-6 of a record's first byte): a finger that just
+ * lifted, or an empty record, is not down. */
+#define FOS_TOUCH_FT_EVENT_UP 1
+#define FOS_TOUCH_FT_EVENT_NONE 3
+
+/* Decode an FT report as read from FOS_TOUCH_FT_REG_TOUCHES onwards: the
+ * fingers down, their track ids and positions in the glass's pixels. Returns
+ * the count (0 for none), -1 for a count the buffer cannot hold or past
+ * FOS_TOUCH_POINTS_MAX. Pure. */
+int fos_touch_decode_ft(const uint8_t *report, size_t len, fos_touch_point_t *points, size_t max);
+
 /* A coordinate in 0..max-1 onto the 0..FOS_TOUCH_WIRE_MAX wire; clamped. Pure. */
 int fos_touch_wire(int value, int max);
 
@@ -62,9 +83,11 @@ bool fos_touch_axes_swapped(int touch_x_max, int touch_y_max, int panel_width, i
 #ifdef ESP_PLATFORM
 #include "esp_err.h"
 /* Once at boot, after fos_config_init and the display (the panel's size
- * decides the axis mapping): powers the controller, resets it, finds it at
- * 0x5d or 0x14 and starts the touch task. ESP_ERR_NOT_FOUND without
- * `touch_pins` or a controller that answers; the frame runs on without. */
+ * decides the axis mapping, and a panel may own the bus the controller sits
+ * on): powers the controller, resets it, finds a GT911 at 0x5d or 0x14 or an
+ * FT6x36/FT5x06 at 0x48 or 0x38 and starts the touch task. ESP_ERR_NOT_FOUND
+ * without `touch_pins` or a controller that answers; the frame runs on
+ * without. */
 esp_err_t fos_touch_start(void);
 /* The render task's: deliver the queued pointer events to the dispatcher.
  * True when any were delivered. */

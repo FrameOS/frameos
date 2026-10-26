@@ -240,6 +240,7 @@ for the two Spectra boards most of the bench work runs on:
 | `seeed_reterminal_e1003` | S3 | EPD_10in3 10.3" sixteen greys (IT8951, E1003 tuning) | reTerminal E1003, 32MB flash, 8MB PSRAM — renders on-device on an 8-bit luma canvas (2.5 MiB); the IT8951 answers on MISO GPIO8 (`dc` slot), panel power GPIO11 (`pwr`), controller power GPIO21 (`cs2`); battery GPIO1 ÷2, switch GPIO40; TF socket on the panel bus (power 39); green LED GPIO16 (lit low); I2C 19/20 with the clock, the SHT40, the charger and the GT911 touch panel (INT 2, reset 48); PDM mic 42/41/38; deep-sleeps on battery |
 | `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas; TF socket as the E1001/E1002; green LED GPIO48 (lit high); I2C 19/20 carries the clock, the sensor AND the charger (39/40 is its J2 header); no microphone |
 | `elecrow_crowpanel_5in79` | S3 | EPD_5in79 5.79" 4-gray | CrowPanel, dual SSD1683 |
+| `seeed_sensecap_indicator_d1` | S3 | LCD_ST7701S_480x480 4" IPS LCD (RGB, 16-bit colour) | SenseCAP Indicator D1/D1S/D1L/D1Pro, 8MB flash, 8MB PSRAM (renders on-device); the LCD's wiring is the driver's board table, no EPD pins; top button GPIO38 (held: next scene); FT6336U touch on the LCD's I2C 39/40, polled; the TF socket, buzzer and sensors are the RP2040's |
 
 - **Seeed reTerminal Sticky** — an ESP32-S3R8 (8 MB PSRAM, 32 MB flash), so
   it renders on-device like the E-series; every pin below is from Seeed's
@@ -332,6 +333,47 @@ for the two Spectra boards most of the bench work runs on:
   and 256 levels feed at most 16. The boot log says `canvas: 1872x1404
   gray8`.
   **None of this has met an E1003 yet.**
+- **Seeed SenseCAP Indicator D1 / D1S / D1L / D1Pro** — an ESP32-S3 (8 MB
+  flash, 8 MB octal PSRAM) next to an RP2040. The 4" 480x480 ST7701S IPS
+  glass hangs off the S3's parallel RGB interface: sixteen data lines
+  (B0..B4 = GPIO15..11, G0..G5 = GPIO10..5, R0..R4 = GPIO4..0), HSYNC 16,
+  VSYNC 17, DE 18, PCLK 21 — so GPIO21 is not a heartbeat LED here. The
+  LCD peripheral scans continuously: two PSRAM frame buffers (a new picture
+  goes into the hidden one and is switched in at a frame boundary, so the
+  glass never shows half of each) feed two 20-line bounce buffers in
+  internal RAM that an interrupt refills. That refill is the fragile part:
+  PSRAM shares one bus with the program flash, and the generic image runs a
+  160 MHz CPU, DIO flash and 80 MHz PSRAM, so the pixel clock is 12 MHz
+  (42 fps; Seeed's 18 and ESPHome's 16 dropped frames on the bench while a
+  finger moved on the glass), the refill interrupt and the render task
+  share core 1 (the render's bulk copies pause while it runs), big heap
+  reallocs copy outside the heap's spinlock (`fos_heap_realloc`: the IDF
+  heap copies with interrupts off, which held the refill off for 1-2 ms),
+  `CONFIG_LCD_RGB_RESTART_IN_VSYNC` resyncs a frame that still starves, and
+  the "skip an unchanged picture" hash is not written to flash (a flash
+  write switches the cache off and stalls the refill; an LCD comes up blank
+  after a reboot anyway). Any other flash write (a settings save, a scene
+  download, an OTA) still costs one disturbed frame. `lcd` on the console
+  counts dropped frames and late refills and sets the pixel clock live.
+  An LCD board runs its CPU at 240 MHz (the generic image boots at 160 for
+  the battery frames; `status` prints `cpu:`), and the demo scene renders,
+  packs and shows in ~0.77 s (3.8 s before the render work of 2026-10-25:
+  the text outline, the gradient fill and the RGB565 pack, which every
+  ESP32 board shares). The controller's own
+  setup goes over a 9-bit 3-wire SPI bit-banged on GPIO41 (clock) and GPIO48
+  (data) with chip-select and reset on a TCA9535 IO expander at 0x20 (SDA39/
+  SCL40; later batches carry an HT8574 at 0x39), the sequence Seeed's own
+  firmware sends; the backlight is GPIO45. All of it is
+  `components/frameos_display/lcd_st7701s_rgb.c`, a board table the preset
+  selects, and the panel is `LCD_ST7701S_480x480` in a new pixel format,
+  `FOS_PIXEL_RGB565` (one little-endian 5/6/5 word per pixel; the Nim packer
+  rounds the canvas's 8-bit channels under the dither's threshold jitter, the
+  snapshot goes out as a 24-bit BMP). The FocalTech FT6336U touch controller
+  (0x48) sits on the expander's bus with its interrupt and reset lines on the
+  expander, unwired to the chip: `fos_touch.c` joins the display's bus
+  (`fos_display_shared_i2c_bus`) and polls it every 30 ms. The top button is
+  GPIO38; held, it walks to the next scene. The TF socket, the buzzer and the
+  CO2/VOC sensors are the RP2040's (UART 19/20 from the S3; not driven).
 
 The TRMNL X (10.3" 1872×1404 parallel e-ink over EPDIY/FastEPD) is not yet
 supported — it needs a parallel display driver class this component does not

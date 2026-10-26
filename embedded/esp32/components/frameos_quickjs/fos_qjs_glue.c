@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "esp_heap_caps.h"
 #include "quickjs/quickjs.h"
@@ -96,6 +97,22 @@ static void fos_js_free(JSMallocState *s, void *ptr)
     heap_caps_free(ptr);
 }
 
+bool fos_heap_realloc_outside_lock = false;
+
+void *fos_heap_realloc(void *ptr, size_t size, uint32_t caps)
+{
+    if (!fos_heap_realloc_outside_lock || ptr == NULL || size < FOS_HEAP_REALLOC_UNLOCKED_MIN) {
+        return heap_caps_realloc(ptr, size, caps);
+    }
+    size_t old_size = heap_caps_get_allocated_size(ptr);
+    if (old_size == 0 || size <= old_size) return heap_caps_realloc(ptr, size, caps); /* shrinks never copy */
+    void *next = heap_caps_malloc(size, caps);
+    if (next == NULL) return NULL; /* the old block is untouched, as with realloc */
+    memcpy(next, ptr, old_size);
+    heap_caps_free(ptr);
+    return next;
+}
+
 static void *fos_js_realloc(JSMallocState *s, void *ptr, size_t size)
 {
     size_t old_size;
@@ -118,9 +135,9 @@ static void *fos_js_realloc(JSMallocState *s, void *ptr, size_t size)
 
     // No heap_caps_realloc with caps fallback chain: realloc keeps the
     // original heap, which is what we want (stays in PSRAM).
-    new_ptr = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    new_ptr = fos_heap_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (new_ptr == NULL)
-        new_ptr = heap_caps_realloc(ptr, size, MALLOC_CAP_8BIT);
+        new_ptr = fos_heap_realloc(ptr, size, MALLOC_CAP_8BIT);
     if (new_ptr == NULL)
         return NULL;
     size_t new_size = fos_js_usable_size(new_ptr);

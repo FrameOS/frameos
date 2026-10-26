@@ -23,6 +23,7 @@ typedef enum {
     FOS_PIXEL_4BPP_7COLOR = 6, /* Waveshare 7-color palette indices */
     FOS_PIXEL_4BPP_SPECTRA6 = 7, /* Spectra 6 indices: 0,1,2,3,5,6 */
     FOS_PIXEL_4BPP_GRAY = 8, /* 16 gray levels, MSB first */
+    FOS_PIXEL_RGB565 = 9, /* 16-bit colour, 5/6/5, one little-endian word per pixel (an LCD) */
 } fos_pixel_format_t;
 
 typedef struct {
@@ -46,6 +47,19 @@ const char *fos_display_selected_panel(void);
 int fos_display_width(void);
 int fos_display_height(void);
 fos_pixel_format_t fos_display_format(void);
+/* How the selected panel is wired: one of the FOS_PANEL_BUS_* kinds in the
+ * generated frameos_panel_table.h (FOS_PANEL_BUS_SPI, 0, when headless). An
+ * RGB LCD owns sixteen data lines and the sync pins: nothing else may blink
+ * them. */
+int fos_display_bus(void);
+/* True when the display refreshes on its own (an LCD scanned from a frame
+ * buffer): a blit shows at once and costs no e-paper wait. */
+bool fos_display_is_lcd(void);
+/* The selected panel's own I2C bus when it runs one on exactly these pins
+ * (the SenseCAP Indicator's LCD shares SDA39/SCL40 with its touch
+ * controller): the handle (an `i2c_master_bus_handle_t`) for another device
+ * to join, or ESP_ERR_NOT_FOUND. */
+esp_err_t fos_display_shared_i2c_bus(int sda, int scl, void **bus);
 size_t fos_display_buffer_size(void);
 size_t fos_display_panel_count(void); /* all panels compiled into this firmware */
 /* True for "none" (headless) and for every panel compiled into this

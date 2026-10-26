@@ -79,6 +79,11 @@ const boardChoices = [
   { label: 'TRMNL 7.5" DIY Kit (XIAO ESP32-S3)', value: 'hw:trmnl_og_diy_kit', platform: genericPlatform },
   { label: 'TRMNL 4.26" DIY Kit (XIAO ESP32-S3)', value: 'hw:trmnl_4in26_diy_kit', platform: genericPlatform },
   { label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)', value: 'hw:seeed_reterminal_sticky', platform: genericPlatform },
+  {
+    label: 'Seeed SenseCAP Indicator D1/D1S (4" LCD ESP32-S3)',
+    value: 'hw:seeed_sensecap_indicator_d1',
+    platform: genericPlatform,
+  },
   { label: 'Seeed reTerminal E1001 (7.5" ESP32-S3)', value: 'hw:seeed_reterminal_e1001', platform: genericPlatform },
   {
     label: 'Seeed reTerminal E1002 (7.3" color ESP32-S3)',

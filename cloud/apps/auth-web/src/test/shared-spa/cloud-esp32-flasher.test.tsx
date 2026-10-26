@@ -710,6 +710,7 @@ describe("Esp32CloudFlasher", () => {
         "hw:trmnl_og_diy_kit",
         "hw:trmnl_4in26_diy_kit",
         "hw:seeed_reterminal_sticky",
+        "hw:seeed_sensecap_indicator_d1",
         "hw:seeed_reterminal_e1001",
         "hw:seeed_reterminal_e1002",
         "hw:seeed_reterminal_e1003",

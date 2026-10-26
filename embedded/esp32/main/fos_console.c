@@ -31,6 +31,8 @@
 #include "fos_codec.h"
 #include "fos_gauge.h"
 #include "fos_touch.h"
+#include "lcd_st7701s_rgb.h"
+#include "esp_private/esp_clk.h"
 #include "fos_client.h"
 #include "fos_i2c.h"
 #include "fos_led.h"
@@ -318,6 +320,7 @@ static int cmd_status(int argc, char **argv)
                fos_codec_has_mic() ? "es7210 microphone" : (fos_codec_has_speaker() ? "" : "no chip answered"), codec);
     }
     fos_touch_print_status();
+    printf("cpu:         %lu MHz\n", (unsigned long)(esp_clk_cpu_freq() / 1000000));
     printf("nim:         %s\n", frameos_nim_info());
     printf("renders:     %lu (last %lld ms)\n",
            (unsigned long)fos_client_render_count(), fos_client_last_render_ms());
@@ -677,6 +680,17 @@ static int cmd_set(int argc, char **argv)
             { "esp32_c3_042_oled", "OLED_SSD1306_72x40",
               "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=6,mosi=5,pwr=-1",
               "9:BOOT",
+              -1, 2.0f, -1, 0, 0 },
+            /* Seeed SenseCAP Indicator D1/D1S/D1L/D1Pro (ESP32-S3, 8 MB flash,
+             * 8 MB PSRAM): the 4" 480x480 ST7701S IPS glass on the chip's RGB
+             * interface, its wiring the LCD driver's own board table
+             * (lcd_st7701s_rgb.c), so no EPD pins; the top button on GPIO38;
+             * the FT6336U touch controller on the LCD's I2C bus
+             * (fos_board_touch_pins). The TF socket, the buzzer and the
+             * sensors hang off the RP2040 co-processor, out of reach. */
+            { "seeed_sensecap_indicator_d1", "LCD_ST7701S_480x480",
+              "rst=-1,dc=-1,cs=-1,cs2=-1,busy=-1,sck=-1,mosi=-1,pwr=-1",
+              "38:BUTTON",
               -1, 2.0f, -1, 0, 0 },
             /* Seeed reTerminal Sticky (ESP32-S3R8, 32MB flash): the panel on
              * SCK13/MOSI14 with EP_PWR_EN GPIO47, the AI/Power key GPIO4 and
@@ -1204,6 +1218,28 @@ static int cmd_display_test(int argc, char **argv)
             uint8_t color = display_test_color_4bpp(mode);
             uint8_t packed = (uint8_t)((color << 4) | color);
             memset(buf, packed, len);
+        }
+    } else if (format == FOS_PIXEL_RGB565) {
+        /* Colour bands on an LCD, or one named colour. */
+        static const struct { const char *name; uint16_t word; } named[] = {
+            {"black", 0x0000}, {"white", 0xFFFF}, {"red", 0xF800}, {"green", 0x07E0},
+            {"blue", 0x001F}, {"yellow", 0xFFE0},
+        };
+        static const uint16_t bands[] = {0x0000, 0xF800, 0x07E0, 0x001F, 0xFFE0, 0xFFFF};
+        uint16_t *pixels = (uint16_t *)buf;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                uint16_t word = 0xFFFF;
+                if (strcmp(mode, "bands") == 0) {
+                    int band = (x * 6) / width;
+                    word = bands[band < 0 ? 0 : band > 5 ? 5 : band];
+                } else {
+                    for (size_t i = 0; i < sizeof(named) / sizeof(named[0]); i++) {
+                        if (strcmp(mode, named[i].name) == 0) word = named[i].word;
+                    }
+                }
+                pixels[(size_t)y * (size_t)width + (size_t)x] = word;
+            }
         }
     } else {
         memset(buf, 0x00, len);
@@ -1921,6 +1957,40 @@ static int cmd_touch(int argc, char **argv)
     return 0;
 }
 
+/* `lcd [reset | pclk <MHz>]`: how steadily an RGB LCD scans out (frames
+ * off schedule since the last reset, the worst one), and a pixel clock to
+ * try live — the bench's way to find the fastest clock the shared
+ * flash/PSRAM bus can feed on a board. Not stored. */
+static int cmd_lcd(int argc, char **argv)
+{
+    if (!fos_display_is_lcd()) {
+        printf("lcd: the panel is not an RGB LCD\n");
+        return 1;
+    }
+    if (argc >= 3 && strcmp(argv[1], "pclk") == 0) {
+        double mhz = atof(argv[2]);
+        esp_err_t err = fos_lcd_st7701s_set_pclk((uint32_t)(mhz * 1000000.0));
+        printf("lcd: pclk %.2f MHz: %s\n", mhz, err == ESP_OK ? "ok" : esp_err_to_name(err));
+        return err == ESP_OK ? 0 : 1;
+    }
+    bool reset = argc >= 2 && strcmp(argv[1], "reset") == 0;
+    fos_lcd_st7701s_stats_t st;
+    if (!fos_lcd_st7701s_stats(&st, reset)) {
+        printf("lcd: not running\n");
+        return 1;
+    }
+    printf("lcd: pclk %.2f MHz, frame %lu us (%.1f fps), %lu frames, %lu dropped, %lu late refills (slack %lu us), "
+           "worst %lu us%s\n",
+           st.pclk_hz / 1e6, (unsigned long)st.frame_us, st.frame_us ? 1e6 / st.frame_us : 0.0,
+           (unsigned long)st.frames, (unsigned long)st.glitches, (unsigned long)st.late_refills,
+           (unsigned long)st.slack_us, (unsigned long)st.max_deviation_us, reset ? " (reset)" : "");
+    for (int i = 0; i < st.recent_count; i++) {
+        printf("lcd:   late frame %lld ms ago, %lu us off\n", (long long)((st.now_us - st.recent[i].at_us) / 1000),
+               (unsigned long)st.recent[i].deviation_us);
+    }
+    return 0;
+}
+
 /* `mic [seconds]`: record from the microphone and print how loud it was,
  * the bench check that the PDM pins are wired (docs/voice-chat.md). A
  * silent room reads a peak in the tens, a voice at arm's length in the
@@ -1983,6 +2053,7 @@ static esp_err_t register_frameos_console_commands(void)
         {.command = "led", .help = "led [on|off|blink] — the status LED", .func = cmd_led},
         {.command = "i2c", .help = "i2c [sync] — probe the I2C buses again; the clock, the charger, the gauge; sync writes the clock", .func = cmd_i2c},
         {.command = "touch", .help = "touch — the touch panel's controller and its last point", .func = cmd_touch},
+        {.command = "lcd", .help = "lcd [reset|pclk <MHz>] — an RGB LCD's scan-out: frames off schedule, the pixel clock", .func = cmd_lcd},
         {.command = "mic", .help = "mic [seconds] — record from the microphone and print the level", .func = cmd_mic},
         {.command = "set", .help = "set <key> <value> — persist a config value", .func = cmd_set},
         {.command = "wifi", .help = "wifi <ssid> [pass] — set Wi-Fi and restart", .func = cmd_wifi},

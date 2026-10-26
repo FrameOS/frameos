@@ -381,6 +381,21 @@ const XTEINK_X4_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>
   mosi: 10,
   pwr: -1,
 }
+// The SenseCAP Indicator's LCD is wired by the firmware's board table: no EPD pins.
+const SEEED_SENSECAP_INDICATOR_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
+  rst: -1,
+  dc: -1,
+  cs: -1,
+  cs2: -1,
+  busy: -1,
+  sck: -1,
+  mosi: -1,
+  pwr: -1,
+}
+// The one key held walks to the next scene (EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP).
+const SEEED_SENSECAP_INDICATOR_EVENT_MAP: EventMapRule[] = [
+  { event: 'button', match: { label: 'BUTTON', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
+]
 const SEEED_RETERMINAL_STICKY_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: 17,
   dc: 16,
@@ -561,6 +576,16 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
     psramMB: 0,
     pins: ESP32_C3_042_OLED_PINS,
     gpioButtons: [{ pin: 9, label: 'BOOT' }],
+  },
+  seeed_sensecap_indicator_d1: {
+    label: 'Seeed SenseCAP Indicator D1/D1S (4" LCD ESP32-S3)',
+    platform: EMBEDDED_ESP32_S3,
+    device: 'lcd.st7701s_480x480',
+    flashSize: '8MB',
+    psramMB: 8,
+    pins: SEEED_SENSECAP_INDICATOR_PINS,
+    gpioButtons: [{ pin: 38, label: 'BUTTON' }],
+    eventMap: SEEED_SENSECAP_INDICATOR_EVENT_MAP,
   },
   seeed_reterminal_sticky: {
     label: 'Seeed reTerminal Sticky (3.97" ESP32-S3)',

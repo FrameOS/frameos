@@ -74,6 +74,32 @@ most:
   GPIO1 with GPIO40 switching the divider; `mic 2` reads a peak; REFRESH
   held talks.
 
+### SenseCAP Indicator bench (what the 2026-10-25 bench could not see)
+
+The D1S on the desk booted the LCD, the FT6336U answered, the demo scene
+rendered and its 24-bit snapshot read right over `/image`; left to a pair of
+eyes and a finger:
+
+- [ ] **The glass itself**: the picture is upright and the right way round
+  (the ST7701S init sends MADCTL 0x10; ESPHome mirrors both axes on this
+  board, Seeed's demo does not — if it is mirrored, `rotate 180` is the
+  quick fix and the init's 0x36 byte the real one); colours are not swapped
+  (`display_test bands` draws black, red, green, blue, yellow, white left to
+  right). Steadiness was measured with `lcd` (no dropped frames or late
+  refills over renders, a moving finger, button presses); still to watch by
+  eye: a scene with a big download, a settings save (one disturbed frame
+  per flash write is expected), an OTA.
+- [ ] **A tap** lands where the finger is: the "Button tester" store scene
+  shows `tap` coordinates; a drag is `pointerMove`s; `touch` on the console
+  shows the last raw point.
+- [ ] **The top button** (GPIO38) held shows the next scene (presses,
+  double presses and the long press reach the event map on the bench; a
+  second scene is needed to see the switch).
+- [ ] **Later batches** carry an HT8574 at 0x39 instead of the TCA9535 at
+  0x20 (Seeed's BSP probes both): the driver's 8-bit path is untested.
+- [ ] **A D1L/D1Pro**: the LoRa radio's expander lines (P0..P3) are left as
+  inputs; nothing talks to the SX1262.
+
 ### Waveshare PhotoPainter / 13.3E6 bench (the codec, `fos_codec.c`)
 
 - [ ] **The chips answer**: `i2c` lists es8311 and es7210 on the board's bus
