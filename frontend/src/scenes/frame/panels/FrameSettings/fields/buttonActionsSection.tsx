@@ -26,7 +26,7 @@ import {
   gestureValue,
   parseGestureValue,
 } from '../../../../../utils/sceneEventMap'
-import { deviceSupportsDisplayPower, frameDisplayDevice } from '../../../../workspace/workspaceSurfaces'
+import { deviceSwitchesDisplay, frameDisplayDevice } from '../../../../workspace/workspaceSurfaces'
 import { useFrameSettings } from '../frameSettingsContext'
 
 /**
@@ -49,11 +49,11 @@ export function ButtonActionsSection(): JSX.Element {
   const rules: EventMapRule[] = frameForm.event_map ?? (cloudProfile ? [] : frame.event_map ?? [])
   const { bindings, others } = frameBindings(rules)
   // What this frame can do with a press: Display on / off only where the
-  // driver powers the panel (not e-paper, not an ESP32), Voice chat only on a
-  // frame with a microphone, and then for a long press alone.
+  // device switches the panel (not e-paper), Voice chat only on a frame with a
+  // microphone, and then for a long press alone.
   const offer: FrameActionOffer = {
     voiceChat: voiceChat !== null,
-    displayPower: deviceSupportsDisplayPower(frameForm.device ?? frameDisplayDevice(frame)),
+    displayPower: deviceSwitchesDisplay(frameForm.device ?? frameDisplayDevice(frame)),
   }
   const conflicts = bindingConflicts(bindings, offer)
 

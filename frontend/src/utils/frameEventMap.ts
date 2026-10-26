@@ -16,7 +16,15 @@ import type { EventMapRule, FrameScene } from '../types'
 import { isEventMapRule } from './cloudFrameSettings'
 import { type ButtonGesture, gestureTitle } from './sceneEventMap'
 
-export type FrameActionKind = 'nextScene' | 'prevScene' | 'showScene' | 'render' | 'turnOn' | 'turnOff' | 'voiceChat'
+export type FrameActionKind =
+  | 'nextScene'
+  | 'prevScene'
+  | 'showScene'
+  | 'render'
+  | 'turnOn'
+  | 'turnOff'
+  | 'toggleScreen'
+  | 'voiceChat'
 
 /** What a bound press does. `sceneId` for `showScene` alone. */
 export interface FrameAction {
@@ -37,21 +45,29 @@ const ACTION_TITLES: Record<FrameActionKind, string> = {
   render: 'Refresh',
   turnOn: 'Display on',
   turnOff: 'Display off',
+  toggleScreen: 'Display on/off',
   voiceChat: 'Voice chat',
 }
 
 /** Every scene-less action a rule can mean; `showScene` needs a scene. What a given frame offers is `frameActionKindsFor`. */
-export const frameActionKinds: readonly FrameActionKind[] = ['nextScene', 'prevScene', 'render', 'turnOn', 'turnOff']
+export const frameActionKinds: readonly FrameActionKind[] = [
+  'nextScene',
+  'prevScene',
+  'render',
+  'turnOn',
+  'turnOff',
+  'toggleScreen',
+]
 
 /** What this frame can do with a press, as far as the actions on offer go. */
 export interface FrameActionOffer {
   /** The frame has voice chat at all (`useFrameSettings().voiceChat`: a microphone, ESP32 only). */
   voiceChat: boolean
   /**
-   * The display's driver can power the panel down and back up
-   * (`deviceSupportsDisplayPower`): the framebuffer and the HyperPixels. On
-   * e-paper and on every ESP32 board `turnOn` / `turnOff` switch nothing
-   * (docs/events.md, the host table), so the row does not offer them there.
+   * The device can switch its panel off and back on for a press
+   * (`deviceSwitchesDisplay`): the framebuffer, the HyperPixels and an ESP32
+   * LCD's backlight. On e-paper `turnOn` / `turnOff` / `toggleScreen` switch
+   * nothing (docs/events.md, the host table), so the row does not offer them.
    */
   displayPower: boolean
 }
@@ -72,7 +88,7 @@ export function gestureCanVoiceChat(gesture: ButtonGesture): boolean {
 export function frameActionKindsFor(gesture: ButtonGesture, offer: FrameActionOffer): readonly FrameActionKind[] {
   const kinds: FrameActionKind[] = ['nextScene', 'prevScene', 'render']
   if (offer.displayPower) {
-    kinds.push('turnOn', 'turnOff')
+    kinds.push('turnOn', 'turnOff', 'toggleScreen')
   }
   if (offer.voiceChat && gestureCanVoiceChat(gesture)) {
     kinds.push('voiceChat')
@@ -89,7 +105,7 @@ export function frameActionUnavailableReason(binding: ButtonBinding, offer: Fram
   if (kind === 'voiceChat') {
     return 'long press only'
   }
-  if (kind === 'turnOn' || kind === 'turnOff') {
+  if (kind === 'turnOn' || kind === 'turnOff' || kind === 'toggleScreen') {
     return 'not on this display'
   }
   return 'not on this frame'
@@ -136,6 +152,7 @@ export function bindingRule(binding: ButtonBinding): EventMapRule {
     case 'render':
     case 'turnOn':
     case 'turnOff':
+    case 'toggleScreen':
     case 'voiceChat':
       return { event: 'button', match, emit: binding.action.kind, as: {} }
   }
@@ -171,7 +188,11 @@ export function bindingOfRule(rule: EventMapRule): ButtonBinding | null {
     return null
   }
   if (
-    (rule.emit === 'render' || rule.emit === 'turnOn' || rule.emit === 'turnOff' || rule.emit === 'voiceChat') &&
+    (rule.emit === 'render' ||
+      rule.emit === 'turnOn' ||
+      rule.emit === 'turnOff' ||
+      rule.emit === 'toggleScreen' ||
+      rule.emit === 'voiceChat') &&
     keys.length === 0
   ) {
     return { gesture, action: { kind: rule.emit } }
@@ -227,7 +248,11 @@ export function bindingConflicts(bindings: readonly ButtonBinding[], offer?: Fra
       conflicts.push(
         `${gestureTitle(binding.gesture)} is bound to Voice chat, which only a long press starts: the frame listens while the key is held and stops when it is let go, so this press does nothing`
       )
-    } else if (offer && !offer.displayPower && (binding.action.kind === 'turnOn' || binding.action.kind === 'turnOff')) {
+    } else if (
+      offer &&
+      !offer.displayPower &&
+      (binding.action.kind === 'turnOn' || binding.action.kind === 'turnOff' || binding.action.kind === 'toggleScreen')
+    ) {
       conflicts.push(
         `${gestureTitle(binding.gesture)} is bound to ${ACTION_TITLES[binding.action.kind]}, but this display cannot be switched off and on; only the scene hears it`
       )
