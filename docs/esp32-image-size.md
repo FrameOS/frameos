@@ -141,10 +141,14 @@ runtime.
 4. ~~**Drop pixie's PPM codec**~~ — **done**, `-d:pixieNoPpm` (FrameOS/pixie#6),
    −5.7 KB. WebP (38 K), GIF (5.9 K) and BMP (8.2 K) are still in; they at
    least correspond to formats a URL might serve.
-5. **Subset the embedded font** (~−90 KB of 146 KB): `Ubuntu-Regular.ttf`
-   carries Latin+Greek+Cyrillic; a Latin subset generated in
-   `tools/generate_compressed_asset_nim.py` would cut most of it, at the cost
-   of blank glyphs for scenes that render other scripts.
+5. ~~**Strip the embedded font**~~ — **done** (2026-10-27),
+   `tools/generate_embedded_font.py` makes `assets/compiled/fonts/Ubuntu-Regular.ttf`
+   from the original in `assets/copied/fonts` without the TrueType hinting,
+   `hdmx`, `VDMX`, `GSUB` and glyph names, none of which pixie reads:
+   146,125 → 57,645 B gzipped, −88.5 KB of image, every glyph, advance and
+   kerning pair unchanged (its `--check`, run by the backend suite). A Latin
+   subset would take about 25 KB more, at the cost of blank glyphs for scenes
+   that render Greek or Cyrillic.
 6. **Move the font to SPIFFS** (−146 KB per OTA slot): the `state` partition
    has room on every profile except 4 MB. Bigger job than 5 (provisioning +
    boot-time load) but takes the weight out of *both* slots.
