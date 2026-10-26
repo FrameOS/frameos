@@ -109,10 +109,27 @@ interface FrameOSStreamRef { __frameosType: "streamRef"; id: number; }
  * frameos.fetchImage or frameos.loadAssetImage returned.
  */
 interface FrameOSElement { type: string; props: Record<string, any>; }
+/** What a handler gets: the pointer event, and where in the element it was. */
+interface FrameOSUiEvent {
+  type: "tap" | "doubleTap" | "longPress" | "pointerDown" | "pointerUp";
+  x: number;
+  y: number;
+  localX: number;
+  localY: number;
+  pointerId?: number;
+  pointerType?: "mouse" | "touch" | "pen";
+  [key: string]: any;
+}
 interface FrameOSElementProps {
   className?: string;
   children?: any;
   src?: FrameOSImageRef | { image: FrameOSImageRef | null } | null;
+  /** A tap on the element; the frame renders again after it. */
+  onClick?: (event: FrameOSUiEvent) => void;
+  onDoubleClick?: (event: FrameOSUiEvent) => void;
+  onLongPress?: (event: FrameOSUiEvent) => void;
+  onPointerDown?: (event: FrameOSUiEvent) => void;
+  onPointerUp?: (event: FrameOSUiEvent) => void;
   [attribute: string]: any;
 }
 declare namespace JSX {

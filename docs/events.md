@@ -278,6 +278,15 @@ x, y, startX, startY, …}` — down and up at least `swipeMinPx` apart, in one 
 `left` / `right` / `up` / `down`. Gestures render `if-state-changed`, like a
 button; the raw pointer events never do.
 
+**JSX UIs.** A JS app's UI (`docs/jsx-ui.md` "Events") is hit-tested in
+the interpreter before the scene's event nodes hear the event: `tap`,
+`doubleTap`, `longPress`, `pointerDown` and `pointerUp` run the innermost
+element's handler, and `pointerMove` / `pointerDown` / `pointerUp` move its
+`hover:` and `active:` classes. Either one dispatches `render` (origin
+`scene`). A scene listens for those events while a UI in it has elements
+that want them, so a scene with neither still costs nothing per motion
+report.
+
 **Keyboard.** `keyDown {code, key, repeat, shift, ctrl, alt, meta,
 linuxCode?}` and `keyUp` (no `repeat`). `code` is the physical key as the W3C
 `KeyboardEvent.code` (`KeyA`, `ArrowLeft`, `Numpad1`) — layout-independent,

@@ -21,6 +21,24 @@ type
   UiKind = enum
     ukBox, ukText, ukImage, ukSvg
 
+  UiEvent* = enum
+    ## The handlers an element can have, by the event that runs them.
+    ueClick = "tap", ueDoubleClick = "doubleTap", ueLongPress = "longPress",
+    uePointerDown = "pointerDown", uePointerUp = "pointerUp"
+
+  UiRegion* = object
+    ## An element the pointer can do something to, where the layout put it:
+    ## one with a handler, or with `hover:` / `active:` classes, or a `group`.
+    x*, y*, w*, h*: float32
+    key*: int                        ## its place in the tree, the same next render
+    handlers*: array[UiEvent, int]   ## a handler's number + 1, 0 for none
+    hover*, active*, group*: bool
+
+  UiInput* = object
+    ## What the pointer was doing when this layout was asked for: the keys of
+    ## the elements it is over and of those it is pressing.
+    hovered*, pressed*: seq[int]
+
   UiNode {.acyclic.} = ref object
     kind: UiKind
     box: Box
@@ -46,8 +64,15 @@ type
     arrangement: Arrangement
     arrangedW: float32
     arrangedAlign: HorizontalAlignment
+    # What the pointer can do to it (UiRegion).
+    key: int
+    handlers: array[UiEvent, int]
+    hover, active, group: bool
 
 const
+  # The attributes the JSX walker turns onClick, onLongPress, ... into.
+  handlerAttrs: array[UiEvent, string] = ["on-click", "on-double-click",
+    "on-long-press", "on-pointer-down", "on-pointer-up"]
   Unbounded = 1e9'f32
   MaxDepth = 64
 
@@ -66,7 +91,24 @@ proc tagStyle(tag: string, text: var Text) =
   elif tag == "u": text.underline = true
   elif tag == "s": text.strike = true
 
-proc addRuns(n: SvgNode, style: Text, into: UiNode, rootW, rootH: float32, depth: int) =
+proc variant(classes, name: string): bool =
+  ## Whether `classes` has a `name:` variant (hover:, not group-hover:).
+  var at = classes.find(name & ":")
+  while at >= 0:
+    if at == 0 or classes[at - 1] in {' ', '\t', '\n', ':', '!'}:
+      return true
+    at = classes.find(name & ":", at + 1)
+
+proc hasClass(classes, name: string): bool =
+  var at = classes.find(name)
+  while at >= 0:
+    let stop = at + name.len
+    if (at == 0 or classes[at - 1] in Whitespace) and (stop == classes.len or classes[stop] in Whitespace):
+      return true
+    at = classes.find(name, at + 1)
+
+proc addRuns(n: SvgNode, style: Text, into: UiNode, rootW, rootH: float32, depth: int,
+    states: set[UiState]) =
   ## The text of an inline element and everything inside it, each run in the
   ## style it was written in.
   if n.isText or n.tag == "br":
@@ -79,19 +121,36 @@ proc addRuns(n: SvgNode, style: Text, into: UiNode, rootW, rootH: float32, depth
     text = style
     box = initBox()
   tagStyle(n.tag, text)
-  box.applyClasses(text, n.attr("class"), rootW, rootH)
+  box.applyClasses(text, n.attr("class"), rootW, rootH, states)
   if box.display != diNone:
     for child in n.children:
-      child.addRuns(text, into, rootW, rootH, depth + 1)
+      child.addRuns(text, into, rootW, rootH, depth + 1, states)
 
 proc newUiNode(kind: UiKind, text: Text): UiNode =
   UiNode(kind: kind, box: initBox(), text: text, lastFix: -1)
 
-proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int): UiNode =
+proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
+    key: int, input: UiInput, groupHover: bool): UiNode =
   var text = inherited
   tagStyle(n.tag, text)
   result = newUiNode(ukBox, text)
-  result.box.applyClasses(result.text, n.attr("class"), rootW, rootH)
+  let classes = n.attr("class")
+  result.key = key
+  result.hover = classes.variant("hover")
+  result.active = classes.variant("active")
+  result.group = classes.hasClass("group")
+  for event in UiEvent:
+    var id: float32
+    let value = n.attr(handlerAttrs[event])
+    if value.len > 0 and number(value, 0, value.len, id):
+      result.handlers[event] = int(id) + 1
+  var states: set[UiState]
+  if groupHover: states.incl usGroupHover
+  if result.hover and key in input.hovered: states.incl usHover
+  if result.active and key in input.pressed: states.incl usActive
+  result.box.applyClasses(result.text, classes, rootW, rootH, states)
+  # A hovered `group` lights its descendants' group-hover: classes.
+  let childGroup = groupHover or (result.group and key in input.hovered)
   if n.tag == "img" or n.tag == "svg":
     result.kind = if n.tag == "img": ukImage else: ukSvg
     result.src = n
@@ -102,15 +161,17 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int): UiNo
   # container every child is an item, and a run of text one item.
   let flows = result.box.display == diBlock
   var run: UiNode
-  for child in n.children:
+  let inlineStates = if childGroup: {usGroupHover} else: {}
+  for i, child in n.children:
     if child.isText or (flows and child.tag.isInline):
       if run.isNil:
         run = newUiNode(ukText, result.text)
         result.children.add run
-      child.addRuns(result.text, run, rootW, rootH, depth + 1)
+      child.addRuns(result.text, run, rootW, rootH, depth + 1, inlineStates)
     else:
       run = nil
-      result.children.add child.build(result.text, rootW, rootH, depth + 1)
+      result.children.add child.build(result.text, rootW, rootH, depth + 1,
+        key * 31 + i + 1, input, childGroup)
 
 # -------- Text
 
@@ -621,7 +682,8 @@ proc paint(node: SvgNode, c: ColorRGBA, opacity: float32, attr = "fill") =
   if opacity < 1 and attr == "fill":
     node.attrs.add(("opacity", num(opacity)))
 
-proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradients: var int) {.raises: [].}
+proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradients: var int,
+    regions: var seq[UiRegion]) {.raises: [].}
 
 proc emitPaint(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode], gradients: var int) =
   ## The box's background and border.
@@ -750,7 +812,8 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
       node.attrs.add(("stroke-linejoin", "round"))
     drawn.add node
 
-proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradients: var int) =
+proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradients: var int,
+    regions: var seq[UiRegion]) =
   template b: untyped = n.box
   let op = opacity * b.opacity
   if b.display == diNone or op <= 0:
@@ -766,6 +829,10 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     cw = w - b.padX
     ch = h - b.padY
   n.emitPaint(x, y, w, h, op, drawn, gradients)
+  if n.hover or n.active or n.group or n.handlers != default(array[UiEvent, int]):
+    # In paint order: whatever comes later is on top.
+    regions.add UiRegion(x: x, y: y, w: w, h: h, key: n.key, handlers: n.handlers,
+      hover: n.hover, active: n.active, group: n.group)
   case n.kind
   of ukText:
     n.emitText(cx, cy, cw, op, drawn)
@@ -784,16 +851,18 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     for pass in [false, true]:
       for c in n.children:
         if c.box.absolute == pass:
-          c.emit(x, y, op, drawn, gradients)
+          c.emit(x, y, op, drawn, gradients, regions)
 
-proc layoutUi*(root: SvgNode, width, height: int): SvgNode =
+proc layoutUi*(root: SvgNode, width, height: int, input: UiInput,
+    regions: var seq[UiRegion]): SvgNode =
   ## A UI tree laid out into a `width` x `height` image, as the SVG that
   ## draws it there. The outermost element fills the image unless its own
-  ## classes size it.
+  ## classes size it. `input` is what the pointer is doing; `regions` gets
+  ## the elements it can do something to, for the next event.
   let
     w = width.float32
     h = height.float32
-    ui = root.build(initText(), w, h, 0)
+    ui = root.build(initText(), w, h, 0, 0, input, false)
   var
     rw = ui.box.w.resolve(w)
     rh = ui.box.h.resolve(h)
@@ -804,6 +873,10 @@ proc layoutUi*(root: SvgNode, width, height: int): SvgNode =
   ui.y = max(ui.box.margin[0].resolve(h), 0)
   result = SvgNode(tag: "svg", attrs: @[("width", $width), ("height", $height)])
   var gradients = 0
-  ui.emit(0, 0, 1, result.children, gradients)
+  ui.emit(0, 0, 1, result.children, gradients, regions)
+
+proc layoutUi*(root: SvgNode, width, height: int): SvgNode =
+  var regions: seq[UiRegion]
+  layoutUi(root, width, height, UiInput(), regions)
 
 {.pop.}

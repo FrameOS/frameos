@@ -73,6 +73,11 @@ type
     family*: int         ## fontFamilies index: 0 the default face
     lines*: int          ## line-clamp / truncate: 0 is no clamp
 
+  UiState* = enum
+    ## What the pointer is doing to an element, for its `hover:`, `active:`
+    ## and `group-hover:` classes.
+    usHover, usActive, usGroupHover
+
   Head = enum
     hFlex = "flex", hInline = "inline", hGrid = "grid", hBlock = "block",
     hContents = "contents", hHidden = "hidden", hItems = "items", hSelf = "self",
@@ -556,10 +561,12 @@ proc applyClass(box: var Box, text: var Text, s: string, a, b: int, neg: bool) =
   of hAspect:
     box.aspect = [1'f32, 16 / 9, 0][max(0, pick(s, r, b, "square video auto "))]
 
-proc applyClasses*(box: var Box, text: var Text, classes: string, width, height: float32) =
+proc applyClasses*(box: var Box, text: var Text, classes: string, width, height: float32,
+    states: set[UiState] = {}) =
   ## Applies a `className` to `box` and `text`, left to right, so a later
   ## class wins as it does when Tailwind's own order agrees. `width` x
-  ## `height` is the image's size.
+  ## `height` is the image's size; `states` what the pointer is doing to the
+  ## element.
   rootW = width
   rootH = height
   if fontFamilies.len == 0:
@@ -579,8 +586,9 @@ proc applyClasses*(box: var Box, text: var Text, classes: string, width, height:
       inc i
     if i == start:
       break
-    # Variants: the breakpoints and the orientation are about the image;
-    # hover:, focus:, dark: and the rest never apply on a frame.
+    # Variants: the breakpoints and the orientation are about the image,
+    # hover:, active: and group-hover: about the pointer; focus:, dark: and
+    # the rest never apply on a frame.
     var
       a = start
       skip = false
@@ -588,7 +596,7 @@ proc applyClasses*(box: var Box, text: var Text, classes: string, width, height:
       var k = a
       while classes[k] != ':':
         inc k
-      case pick(classes, a, k, "sm md lg xl 2xl portrait landscape ")
+      case pick(classes, a, k, "sm md lg xl 2xl portrait landscape hover active group-hover ")
       of 0: skip = skip or rootW < 640
       of 1: skip = skip or rootW < 768
       of 2: skip = skip or rootW < 1024
@@ -596,6 +604,9 @@ proc applyClasses*(box: var Box, text: var Text, classes: string, width, height:
       of 4: skip = skip or rootW < 1536
       of 5: skip = skip or rootW > rootH
       of 6: skip = skip or rootW < rootH
+      of 7: skip = skip or usHover notin states
+      of 8: skip = skip or usActive notin states
+      of 9: skip = skip or usGroupHover notin states
       else: skip = true
       a = k + 1
     if skip:

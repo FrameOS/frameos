@@ -81,7 +81,7 @@ Nothing is allocated for a scene that returns no JSX.
 
 Text is any string or number child; `null`, `undefined`, `true` and `false`
 draw nothing, and arrays (`items.map(...)`) and fragments are flattened, as
-in React. Function props (`onClick`) are ignored for now.
+in React. Function props starting with `on` are handlers ([Events](#events)).
 
 **White space at the edges of JSX text is dropped** (quickts trims every
 text run, where Babel and TypeScript keep the spaces inside a line), so
@@ -160,11 +160,65 @@ of its own.
   `leading-[1.2]`, `whitespace-nowrap`, `truncate`, `line-clamp-N` (both end
   in an ellipsis).
 - **Variants**: `sm:`, `md:`, `lg:`, `xl:`, `2xl:` test the image's width
-  (640, 768, 1024, 1280, 1536 px), `portrait:` and `landscape:` its shape.
-  Every other variant (`hover:`, `focus:`, `dark:`) never applies on a frame.
+  (640, 768, 1024, 1280, 1536 px), `portrait:` and `landscape:` its shape;
+  `hover:`, `active:` and `group-hover:` the pointer ([Events](#events)).
+  Every other variant (`focus:`, `dark:`) never applies on a frame.
 
 A class this does not know is ignored, as a browser ignores one Tailwind did
 not generate.
+
+## Events
+
+An element can have handlers, as in React, and its classes can follow the
+pointer:
+
+```tsx
+let count = 0
+export const get = () => (
+  <div className="flex items-center justify-center bg-slate-900">
+    <div className="rounded-xl px-8 py-4 bg-sky-500 hover:bg-sky-400 active:bg-sky-700 text-3xl text-white"
+      onClick={() => { count++ }}>
+      {`Tapped ${count} times`}
+    </div>
+  </div>
+)
+```
+
+- **`onClick`** runs on a `tap` (a press and a release in one place, by
+  finger, pen or mouse), **`onDoubleClick`** on a `doubleTap`,
+  **`onLongPress`** on a `longPress`, **`onPointerDown`** / **`onPointerUp`**
+  on the raw press and release. The handler gets the event's payload plus
+  `type`, `localX` and `localY` (from the element's corner): `onClick={(e) =>
+  ...}`. The innermost element with a handler for the event takes it, so a
+  tap on a label inside a card runs the card's `onClick`.
+- **The frame renders again after a handler**, whatever it did: a handler
+  changes what the next `get()` returns (a module variable, `frameos.setState`,
+  `frameos.remember`), and the picture follows.
+- **`hover:`** applies while the pointer is over the element, **`active:`**
+  while it is pressed on it, **`group-hover:`** while the pointer is over an
+  ancestor with the class `group`. A change renders again. A finger that
+  lifts is over nothing, so on a touch screen `hover:` lasts for the press.
+- **Renders cost what they cost on the panel.** On an LCD, a HyperPixel or
+  the browser preview a click answers at once; on e-paper it answers in a
+  refresh, and `hover:` / `active:` are a refresh each: keep them for
+  screens that redraw in a blink.
+- **Where the events come from**: the dispatcher's pointer events and
+  gestures (`docs/events.md` "Input"), on every host: a Pi's touch screen or
+  mouse, the touch glass of an ESP32 LCD board (the SenseCAP Indicator, the
+  reTerminal Sticky and E1003), the pointer over the browser preview, and
+  `POST /event/pointerDown` / `pointerUp` (0..32767 across the panel).
+- **How**: the JSX walker keeps the handler functions of each render in the
+  app's interpreter (`__frameosHandlers`) and numbers them in the tree; the
+  layout hands back the boxes of the elements with handlers or pointer
+  classes (`UiRegion`), placed where the UI lands in the canvas (its cell, or
+  the canvas's corner when the UI is the canvas's size; a UI drawn scaled is
+  not hit-tested); the interpreter hands its scene's pointer events to them
+  (`ui/events.nim`, `runEventInner`) before the scene's event nodes, and the
+  scene listens for pointer events while a UI has regions. A handler runs
+  in its app with the bridge set up as for `get()`; one that throws is logged.
+  An interpreter released since the render (an ESP32 short of memory, a
+  sleeping frame) took its handlers with it: the tap draws the UI afresh and
+  nothing else happens.
 
 ## Text and fonts
 
@@ -181,5 +235,6 @@ corners), shadows, transforms, `z-*` (the order is the tree's, absolute
 children last), group opacity (an element's opacity multiplies into each of
 its paints instead of compositing the group once), letter spacing, inline
 boxes with their own background or padding inside a line of text, `min-content`
-sizing, and handlers (`onClick`, focus): `docs/ui-todo.md` has the plan for
-those.
+sizing, handlers on inline text (a `<span onClick>` in a block's line; one in a
+flex row is an element and works), and focus for frames with buttons and no
+glass: `docs/ui-todo.md` has the plan for those.

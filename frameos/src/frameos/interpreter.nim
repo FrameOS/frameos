@@ -18,6 +18,7 @@ import frameos/planner
 import frameos/refresh_interval
 import frameos/runtime_diagnostics
 import frameos/scene_rhythm
+import frameos/ui/events as ui_events
 from frameos/utils/app_images import paintPendingBackground
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times, math
 import apps/apps
@@ -1673,7 +1674,7 @@ proc sceneListensTo*(scene: FrameScene, event: string): bool =
   ## interpreted keeps every event, because nothing here can tell.
   if scene.isNil or not (scene of InterpretedFrameScene):
     return true
-  InterpretedFrameScene(scene).eventListeners.hasKey(event)
+  InterpretedFrameScene(scene).eventListeners.hasKey(event) or uiListens(scene.id.string, event)
 
 proc runEventInner(self: FrameScene, context: ExecutionContext) =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
@@ -1711,6 +1712,11 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
       if first != 0.NodeId and first != -1.NodeId:
         let after = scene.nextNodeIds.getOrDefault(first, -1.NodeId)
         context.wholeFrame = after == 0.NodeId or after == -1.NodeId
+  of "tap", "doubleTap", "longPress", "pointerDown", "pointerUp", "pointerMove", "pointerCancel":
+    # A JSX UI's handlers and hover:/active: classes (ui/events.nim). A run
+    # of a handler, or a change in what the pointer is over, is a new picture.
+    if dispatchUiEvent(self.id.string, context.event, context.payload):
+      sendEvent("render", %*{}, eoScene)
   else:
     discard
 

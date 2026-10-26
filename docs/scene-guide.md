@@ -443,9 +443,15 @@ export function get(app, context) {
   classes, drawn in the text color where it says `currentColor`.
 - White space at the edges of JSX text is dropped: `{count} items` draws
   "42items". Write `{`${count} items`}`, or lay the parts out with `gap`.
+- Handlers: `onClick` (a tap, by finger or mouse), `onDoubleClick`,
+  `onLongPress`, `onPointerDown`, `onPointerUp`, given `{x, y, localX,
+  localY, type}`. Change what the next `get()` returns (a module variable,
+  `frameos.setState`) and the frame renders again by itself. `hover:`,
+  `active:` and `group-hover:` (inside a `group`) follow the pointer. Each is
+  a render: on e-paper a tap answers in a refresh, so keep hover: and
+  active: for LCDs.
 - Not there: clipping (`overflow-hidden`), shadows, transforms, `z-*`,
-  `hover:` and other states, and handlers (`onClick`). `docs/jsx-ui.md` has
-  the full list.
+  `focus:`. `docs/jsx-ui.md` has the full list.
 
 ## Layout and color
 
@@ -596,10 +602,27 @@ interface FrameOSStreamRef { __frameosType: "streamRef"; id: number; }
  * frameos.fetchImage or frameos.loadAssetImage returned.
  */
 interface FrameOSElement { type: string; props: Record<string, any>; }
+/** What a handler gets: the pointer event, and where in the element it was. */
+interface FrameOSUiEvent {
+  type: "tap" | "doubleTap" | "longPress" | "pointerDown" | "pointerUp";
+  x: number;
+  y: number;
+  localX: number;
+  localY: number;
+  pointerId?: number;
+  pointerType?: "mouse" | "touch" | "pen";
+  [key: string]: any;
+}
 interface FrameOSElementProps {
   className?: string;
   children?: any;
   src?: FrameOSImageRef | { image: FrameOSImageRef | null } | null;
+  /** A tap on the element; the frame renders again after it. */
+  onClick?: (event: FrameOSUiEvent) => void;
+  onDoubleClick?: (event: FrameOSUiEvent) => void;
+  onLongPress?: (event: FrameOSUiEvent) => void;
+  onPointerDown?: (event: FrameOSUiEvent) => void;
+  onPointerUp?: (event: FrameOSUiEvent) => void;
   [attribute: string]: any;
 }
 declare namespace JSX {

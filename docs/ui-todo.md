@@ -18,7 +18,9 @@ Spectra 6.
 
 ## What already exists (build on it, don't rebuild it)
 
-- **JSX UIs that render** (`docs/jsx-ui.md`). `get()` returns JSX; the prelude
+- **JSX UIs that render and answer the pointer** (`docs/jsx-ui.md`):
+  `onClick` and friends, `hover:` / `active:` / `group-hover:`, hit-tested in
+  the interpreter's event path on every host (`ui/events.nim`). `get()` returns JSX; the prelude
   calls function components on the spot; `js_runtime/jsx.nim` reads the tree
   off the JS objects into pixie's `SvgNode`s; `ui/layout.nim` lays a
   non-`<svg>` tree out (block, flex, grid, absolute; Tailwind classes read by
@@ -53,14 +55,10 @@ Spectra 6.
 
 ## The work
 
-1. **Handlers + hit-testing + focus.** Per-render handler table in the app's
-   QuickJS context (the walker skips function props today: give them ids
-   instead), the laid-out boxes kept with their ids, a hit-test on `tap` /
-   `pointerDown` before `dispatchSceneEvent`, a focus ring and
-   prev/next/activate from `button` events for GPIO-only frames. Handler runs
-   → `setState` → re-render. An app interpreter released under memory
-   pressure (`settleIdleJsAppRuntimes`) means a stale handler id: drop the
-   event and render afresh, never crash.
+1. **Focus for frames with buttons and no glass.** Handlers and pointer
+   classes work (`docs/jsx-ui.md` "Events"); a frame with GPIO buttons only
+   needs a focus ring and prev/next/activate from `button` events, with a
+   `focus:` variant, so the same UI is usable there.
 2. **The fast loop.** Event → pixels well under 100 ms on interactive
    displays: a render that skips the scheduler, and dirty rects between
    consecutive frames (the ESP32 LCD already repaints only pixie's damage box
