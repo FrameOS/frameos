@@ -68,7 +68,8 @@ components/
                           the configured panel (see "Every supported panel
                           driver is compiled into each firmware image")
   frameos_nim/            the FrameOS Nim runtime compiled to C (see build_nim.sh);
-                          builds a stub when nimcache/ is absent
+                          builds a stub when nimcache/ is absent. fos_rows.c shares a
+                          pixel loop's rows with a helper on the other core (resample.nim)
 partitions_4mb.csv        4MB: nvs + phy + factory app + 512K state; no OTA
 partitions.csv            8MB: nvs + otadata + phy + ota_0/ota_1 (3520K each) + 1M state
 partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (4032K each) + 8M state

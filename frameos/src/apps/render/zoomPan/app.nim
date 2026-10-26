@@ -8,7 +8,6 @@ import frameos/apps
 import frameos/types
 import frameos/utils/image
 import frameos/utils/resample
-from frameos/utils/memory import availableRenderBytes
 
 type
   AppConfig* = object
@@ -26,8 +25,6 @@ type
     appConfig*: AppConfig
     phaseRestored*: bool
     timeOffset*: float
-    lean*: Image      ## the input in 565, for a 565 canvas (toRgb565Copy)
-    leanOf*: uint64   ## which input it was made of (sourceKey)
 
 proc phase*(now: float, durationSeconds: float): float =
   ## Progress through the current cycle, 0..1, wrapping every durationSeconds.
@@ -139,24 +136,6 @@ proc cropRect*(imageW, imageH, canvasW, canvasH: int, zoom: float, anchor: strin
     (fx, fy) = anchorPoint(anchor, seed)
   result = (freeX * clamp(fx, 0.0, 1.0), freeY * clamp(fy, 0.0, 1.0), w, h)
 
-proc sourceKey*(image: Image): uint64 =
-  ## Which picture this is, cheaply: its buffer, its size and a grid of its
-  ## pixels. The buffer alone is not enough: the next photo of a slideshow is
-  ## decoded after the last one is let go, often into the same block.
-  var h = 14695981039346656037'u64
-  template feed(v: uint64) =
-    h = (h xor v) * 1099511628211'u64
-  feed(cast[uint64](image.bufferPointer))
-  feed(image.width.uint64)
-  feed(image.height.uint64)
-  if image.width > 0 and image.height > 0 and image.format == pfRgbx:
-    for gy in 0 ..< 16:
-      for gx in 0 ..< 16:
-        let x = (gx * 2 + 1) * image.width div 32
-        let y = (gy * 2 + 1) * image.height div 32
-        feed(cast[uint32](image.data[image.dataIndex(x, y)]).uint64)
-  h
-
 proc init*(self: App) =
   if self.appConfig.durationSeconds <= 0:
     self.appConfig.durationSeconds = 60.0
@@ -201,25 +180,7 @@ proc renderAt*(self: App, context: ExecutionContext, image: Image, now: float) =
     # Sample the source rect straight onto the canvas: pixie's draw()
     # pre-scales whole-source copies for non-integer zooms, which allocates
     # multi-MB intermediates every render and fragments ESP32 PSRAM.
-    if sourceImage.format == pfRgbx and image.format == pfRgb565:
-      # A 565 canvas (an RGB LCD): mix in 565 from a copy made once per
-      # picture. Every frame's pack and dither of the RGBX path cost two
-      # thirds of a 300 ms frame on the SenseCAP Indicator (2026-10-25).
-      let key = sourceKey(sourceImage)
-      if self.lean.isNil or self.leanOf != key:
-        self.lean = nil # the last picture's copy goes before the next is made
-        self.leanOf = 0
-        # Only with room to spare: the copy lives as long as the picture.
-        let bytes = sourceImage.width * sourceImage.height * 2
-        let available = availableRenderBytes()
-        if available <= 0 or available > 2 * bytes:
-          self.lean = toRgb565Copy(sourceImage)
-          self.leanOf = key
-      if not self.lean.isNil:
-        drawRectBilinear(image, self.lean, sx, sy, sw, sh)
-      else:
-        drawRectBilinear(image, sourceImage, sx, sy, sw, sh)
-    elif sourceImage.format == pfRgbx:
+    if sourceImage.format == pfRgbx:
       drawRectBilinear(image, sourceImage, sx, sy, sw, sh)
     else:
       let stepX = sw / image.width.float

@@ -309,6 +309,11 @@
   pixie's damage box (`utils/svg_frames.nim`, keyed on the firmware's write
   count per buffer): a new writer into an LCD buffer that is not a render in
   place calls `fos_display_mark_written`.
+- **A pixel loop can use both cores** (`components/frameos_nim/fos_rows.c`):
+  `fos_rows_run` hands a job's rows out in blocks to the render task and a
+  helper on the other core (resample.nim's draw is the first job). The job
+  runs on a task the Nim runtime knows nothing about: plain values and
+  pointers only, no ref, no allocation, no log, nothing that raises.
 
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 

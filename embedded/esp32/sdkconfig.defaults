@@ -92,6 +92,12 @@ CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
 # XIAO's PSRAM is not on the same supply rail quirk as some devkits; ignore
 # the bootup test failing on boards without PSRAM instead of aborting.
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+# 64-byte data cache lines, in the same 32 KB: half the PSRAM transactions
+# for whatever streams through the cache. On the SenseCAP Indicator that is
+# a lot: the LCD refill copies 19.2 KB out of PSRAM every 0.9 ms, and a Ken
+# Burns frame reads its photo and writes 460 KB. That frame's draw went from
+# 115 to 90 ms (2026-10-26).
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 
 # HTTPS to arbitrary backends: bundled CA roots; plain HTTP allowed for LAN dev.
 # The "common" bundle (43 roots: ISRG/Let's Encrypt, DigiCert, Amazon, Google,

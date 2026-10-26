@@ -4,7 +4,7 @@ import frameos/spool
 from frameos/apps as frameos_apps import spoolDir
 from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool, scaleAndDrawImage
 from frameos/utils/memory import renderMemoryInUse, availableRenderBytes,
-  availableRenderHeadroomBytes, RenderMemoryShortBytes
+  availableRenderHeadroomBytes
 when defined(testing):
   from frameos/utils/memory import availableRenderBytesOverride
 when defined(memProbe): import frameos/utils/memory
@@ -54,23 +54,26 @@ proc cachedImageMemoryLimit(): int =
   else:
     0
 
-proc affordsKeeping(image: Image, context: ExecutionContext): bool =
+proc affordsKeeping(image: Image, memoryLimit: int, context: ExecutionContext): bool =
   ## An image over the memory cache's limit is still kept while the frame
   ## affords it easily: with it held (it is allocated already), render
-  ## headroom stays above RenderMemoryShortBytes, the level under which what
-  ## a render can rebuild is let go. A slideshow's photo under an animation
-  ## (render/zoomPan at 24 fps) is a cached producer's output every frame, and
-  ## refused here every frame decoded it again: 6 s a frame on the SenseCAP
-  ## Indicator, whose 524 px photo was 1.1 MB (2026-10-25). The live canvas is
-  ## never kept: a hit would redraw it onto itself.
+  ## headroom stays at or above that limit, room for as much again as the
+  ## memory tier holds of its own accord. A slideshow's photo under an
+  ## animation (render/zoomPan at 24 fps) is a cached producer's output every
+  ## frame, and refused here every frame decoded it again: 6 s a frame on the
+  ## SenseCAP Indicator (2026-10-25). The bar was 2 MB of headroom at first,
+  ## and that board's 1 MB photo left 2.03 MB: for the first minute after a
+  ## boot a few KB of TLS buffers put it under, and the slideshow decoded at
+  ## 0.2 fps until they went (2026-10-26). The live canvas is never kept: a
+  ## hit would redraw it onto itself.
   if context != nil and context.hasImage and not context.image.isNil and
       image.bufferPointer == context.image.bufferPointer:
     return false
   when defined(testing):
     # A host's headroom is its own RAM; a test says what the frame has.
-    availableRenderBytesOverride >= RenderMemoryShortBytes
+    availableRenderBytesOverride >= memoryLimit
   else:
-    availableRenderHeadroomBytes() >= RenderMemoryShortBytes
+    availableRenderHeadroomBytes() >= memoryLimit
 
 var imageSpillDisabled = false
   ## Latched on the first failed spill write, so a full or vanished card is
@@ -382,7 +385,7 @@ proc withCache(scene: InterpretedFrameScene,
   var toStore = fresh
   let memoryLimit = cachedImageMemoryLimit()
   if memoryLimit > 0 and fresh.kind == fkImage and not fresh.img.isNil and
-      fresh.img.byteSize > memoryLimit and not affordsKeeping(fresh.img, context):
+      fresh.img.byteSize > memoryLimit and not affordsKeeping(fresh.img, memoryLimit, context):
     # Never retain a frame-sized image in memory on embedded: pinning a
     # canvas-sized RGBA buffer (7.7MB at 1200x1600) across renders means the
     # next render needs a second canvas and OOMs the module — and when the

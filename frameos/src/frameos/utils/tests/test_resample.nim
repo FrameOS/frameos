@@ -82,31 +82,74 @@ suite "drawRectBilinear":
       for x in 0 ..< 12:
         check target.unsafe[x, y] == owner.unsafe[x + 5, y + 7]
 
-  test "565 onto 565 follows the RGBX path within a 565 step":
-    let source = photo(64, 48)
-    let lean = toRgb565Copy(source)
-    for (sx, sy, sw, sh, w, h) in [(3.25, 2.5, 40.0, 30.0, 53, 41),
-                                   (0.0, 0.0, 64.0, 48.0, 100, 75),
-                                   (0.0, 0.0, 64.0, 48.0, 64, 48)]:
-      let reference = newImage(w, h)
-      drawRectBilinear(reference, source, sx, sy, sw, sh)
-      let target = newImage565(w, h)
-      drawRectBilinear(target, lean, sx, sy, sw, sh)
-      var worst = 0
-      for y in 0 ..< h:
-        for x in 0 ..< w:
-          let got = rgb565ToRgbx(target.data16[target.dataIndex(x, y)])
-          let want = reference.unsafe[x, y]
-          worst = max(worst, max(abs(got.r.int - want.r.int),
-            max(abs(got.g.int - want.g.int), abs(got.b.int - want.b.int))))
-      # The copy's dither offset (up to 8), its 5-bit rounding (up to 4) and
-      # 5-bit weights across the photo's hard edge (90 / 32, up to 3).
-      check worst <= 15
+  test "a dithered 565 canvas keeps a flat color's level":
+    # An LCD's canvas: every pixel rounds against a 4x4 threshold, so each
+    # 4x4 cell averages back to the color within a level.
+    for color in [rgbx(0, 0, 0, 255), rgbx(255, 255, 255, 255), rgbx(100, 150, 200, 255),
+                  rgbx(13, 77, 141, 255), rgbx(250, 3, 129, 255)]:
+      let source = newImage(5, 5)
+      source.fill(color)
+      let target = newImage565(16, 8)
+      target.ditherStores = true
+      drawRectBilinear(target, source, 0.3, 0.7, 4.1, 3.9)
+      for cy in 0 ..< 2:
+        for cx in 0 ..< 4:
+          var r, g, b = 0
+          for y in cy * 4 ..< cy * 4 + 4:
+            for x in cx * 4 ..< cx * 4 + 4:
+              let c = rgb565ToRgbx(target.data16[target.dataIndex(x, y)])
+              r += c.r.int
+              g += c.g.int
+              b += c.b.int
+          check abs(r / 16 - color.r.float) <= 1.0
+          check abs(g / 16 - color.g.float) <= 1.0
+          check abs(b / 16 - color.b.float) <= 1.0
 
-  test "565 at 1:1 is the copy":
-    let lean = toRgb565Copy(photo(21, 13))
-    let target = newImage565(21, 13)
-    drawRectBilinear(target, lean, 0, 0, 21, 13)
-    for y in 0 ..< 13:
-      for x in 0 ..< 21:
-        check target.data16[target.dataIndex(x, y)] == lean.data16[lean.dataIndex(x, y)]
+  test "the dither is fixed to the screen, not to the picture":
+    # Ken Burns moves the picture a little every frame. A pattern carried by
+    # the picture is resampled at a new phase each time, and the pixels that
+    # change between two frames of a sky line up in a grid that slides with
+    # the zoom: banding on the glass while it moves (2026-10-26).
+    let flat = newImage(40, 40)
+    flat.fill(rgbx(90, 140, 205, 255))
+    let first = newImage565(24, 24)
+    first.ditherStores = true
+    drawRectBilinear(first, flat, 1.0, 2.0, 30.0, 30.0)
+    let moved = newImage565(24, 24)
+    moved.ditherStores = true
+    drawRectBilinear(moved, flat, 3.37, 1.11, 27.5, 27.5)
+    for i in 0 ..< 24 * 24:
+      check first.data16[i] == moved.data16[i]
+    # A sky that only changes down the picture: column x is column x + 4.
+    let sky = newImage(60, 60)
+    for y in 0 ..< 60:
+      for x in 0 ..< 60:
+        sky.unsafe[x, y] = rgbx(uint8(110 + y), uint8(150 + y div 2), uint8(225 - y), 255)
+    let target = newImage565(48, 48)
+    target.ditherStores = true
+    drawRectBilinear(target, sky, 5.3, 4.9, 41.7, 41.7)
+    for y in 0 ..< 48:
+      for x in 0 ..< 44:
+        check target.data16[target.dataIndex(x, y)] == target.data16[target.dataIndex(x + 4, y)]
+
+  test "rows drawn in blocks by two workers are the rows of one pass":
+    # The ESP32 shares the rows between its cores (fos_rows.c), each block
+    # starting its own two cached source rows.
+    let source = photo(64, 48)
+    for format in [pfRgbx, pfRgb565, pfGray8]:
+      proc canvas(): Image =
+        result =
+          case format
+          of pfRgbx: newImage(53, 41)
+          of pfRgb565: newImage565(53, 41)
+          of pfGray8: newImageGray8(53, 41)
+        result.ditherStores = format == pfRgb565
+      let whole = canvas()
+      drawRectBilinear(whole, source, 3.25, 2.5, 40.0, 30.0)
+      testRowBlocks = 7
+      let blocks = canvas()
+      drawRectBilinear(blocks, source, 3.25, 2.5, 40.0, 30.0)
+      testRowBlocks = 0
+      for y in 0 ..< 41:
+        for x in 0 ..< 53:
+          check whole.unsafe[x, y] == blocks.unsafe[x, y]

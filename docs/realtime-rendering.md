@@ -272,23 +272,58 @@ was 3,600 an hour.
 ### Photos in motion: Ken Burns
 
 The store's Ken Burns slideshow is data/localImage, cached per cycle, under
-render/zoomPan at 24 fps. On the Indicator (2026-10-25) it went from 0.4 fps
-with every photo refused to ~6.5 fps between photo changes:
+render/zoomPan at 24 fps. On the Indicator it went from 0.4 fps with every
+photo refused (2026-10-25) to 7.4-7.9 fps between photo changes
+(2026-10-26):
 
 | Step | Frame |
 | --- | --- |
 | Before: pixie's float `getRgbaSmooth` per canvas pixel (~10 µs each) | 2.3 s |
 | Fixed-point bilinear (`utils/resample.nim`, `-O2`): columns precomputed, each source row interpolated once for two target rows | 330 ms |
-| Onto a 565 canvas from a 565 copy of the photo made once (dithered there, not per frame), mixed in spread words | ~150 ms |
+| Onto a 565 canvas from a 565 copy of the photo made once, mixed in spread words | ~150 ms |
+| From the photo itself again, rounded against a threshold fixed to the screen; rows on both cores; 64-byte cache lines | ~130 ms |
 
-The photos had not shown at all: a progressive JPEG decoded to a new image
-sized its strips to the whole decode budget and was then refused for the
-output next to them (fixed in pixie, which now plans the output's room
-first). The cached photo is let go before the next one decodes
+The 565 copy banded. It was dithered once, so its noise belonged to the
+picture, and every frame resampled that noise at a new phase and rounded it
+again: between two frames of a sky the pixels that changed formed a grid of
+lines, and the grid slid as the zoom moved. The draw now reads the RGBX photo
+and rounds each pixel to 565 against a 4x4 Bayer threshold picked by its
+place on the screen, so a still sky is a still pattern and a gradient keeps
+its level within one 8-bit step (`test_resample.nim`, and zoomPan's test of a
+flat sky at two moments of a zoom). The draw, alternating the variants frame
+by frame:
+
+| Draw | 32-byte lines | 64-byte lines |
+| --- | --- | --- |
+| 565 copy, one core | ~100 ms | |
+| RGBX, one core | ~145 ms | ~125 ms |
+| RGBX, both cores | ~115 ms | ~90 ms |
+
+**Both cores.** The render task shares core 1 with the LCD's refill
+interrupt, and core 0 mostly waits on the network. `fos_rows.c` hands a
+job's rows out in blocks of 32 to the render task and to a helper pinned to
+core 0 at the render task's priority, each block taken when the last is
+done, and resample.nim's row loop is that job: a C callback over plain
+values and pointers, since the helper is a task the Nim runtime knows
+nothing about. Both cores share one bus to PSRAM, so two cores draw 1.3x as
+fast, not 2x.
+
+**64-byte data cache lines** (`sdkconfig.defaults`, the same 32 KB of
+cache) halve the PSRAM transactions of whatever streams through the cache:
+the refill's copies, the photo's reads and the back buffer's writes. DVD
+Logo Bounce went from 19.6 to 20.5 fps with them, and under the slideshow
+the refill stayed clean (none late, the worst at 387 µs of its 913).
+
+The photos had not shown at all at first: a progressive JPEG decoded to a
+new image sized its strips to the whole decode budget and was then refused
+for the output next to them (fixed in pixie, which now plans the output's
+room first). The cached photo is let go before the next one decodes
 (`withCache`), and kept past the 1 MB memory limit while render headroom
-stays above `RenderMemoryShortBytes` (a 524 px photo is 1.1 MB; refused, it
-was decoded again every frame). What is left, the decode at each photo
-change and the memory-bound draw, is in `docs/realtime-todo.md`.
+stays at that limit or more with it held. The bar was 2 MB at first, and
+the Indicator's 1 MB photo left 2.03 MB: for the first minute after a boot a
+few KB of TLS buffers put it under, and the slideshow decoded its photo
+every frame at 0.2 fps until they went. What is left, the decode at each
+photo change, is in `docs/realtime-todo.md`.
 
 ### The Pi
 
