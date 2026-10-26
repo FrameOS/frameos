@@ -309,12 +309,17 @@ proc JS_SetMemoryLimit*(rt: ptr JSRuntime, limit: csize_t)
 proc JS_SetMaxStackSize*(rt: ptr JSRuntime, stackSize: csize_t)
 proc JS_SetInterruptHandler*(rt: ptr JSRuntime, cb: JSInterruptHandler, opaque: pointer)
 proc JS_ComputeMemoryUsage*(rt: ptr JSRuntime, s: ptr JSMemoryUsage)
+# What compiled functions keep of their source (JS_STRIP_SOURCE: the text
+# Function.prototype.toString returns).
+proc JS_SetStripInfo*(rt: ptr JSRuntime, flags: cint)
 
 # Bytecode serialization
 proc JS_WriteObject*(ctx: ptr JSContext, psize: ptr csize_t, obj: JSValueConst, flags: cint): ptr uint8
 proc JS_ReadObject*(ctx: ptr JSContext, buf: ptr uint8, bufLen: csize_t, flags: cint): JSValue
 
 {.pop.}
+
+const JS_STRIP_SOURCE* = 1.cint ## quickjs.h: strip source code
 
 # Bytecode evaluation from quickjs-libc.h (not built on embedded/wasm)
 when not defined(frameosEmbedded) and not defined(frameosWasm):
@@ -1426,6 +1431,10 @@ proc newQuickJS*(config: QuickJSConfig = defaultConfig()): QuickJS =
         JS_NewRuntime()
   if rt == nil:
     raise newException(JSException, "Failed to create QuickJS runtime")
+  # A function's own source text, kept for toString, which no app reads:
+  # about 20 KB of every app interpreter's heap. Line numbers stay (errors
+  # name the app's line).
+  JS_SetStripInfo(rt, JS_STRIP_SOURCE)
 
   # Embedded sets both in fos_js_new_runtime, sized against PSRAM and the
   # render task's stack; the config defaults are 0 there so we don't undo it.
