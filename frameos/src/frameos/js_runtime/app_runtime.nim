@@ -178,15 +178,14 @@ proc settleIdleJsAppRuntimes*(keep: bool): bool =
   ## deep-sleep): the idle interpreters stay for the next render while there
   ## is room, and it calls into them instead of building QuickJS and compiling
   ## the prelude and the app again — ~170 ms of a SenseCAP Indicator frame,
-  ## a Pi's behaviour. Released otherwise (a deep-sleeping frame wakes to a
-  ## fresh boot anyway), and released later when render memory runs short
+  ## a Pi's behaviour, down to the headroom keepIdleInterpreters asks for.
+  ## Released otherwise (a deep-sleeping frame wakes to a fresh boot anyway),
+  ## and released later when a decode is short of memory
   ## (utils/memory.renderMemoryReleaseHook). Apps still must not count on
   ## module variables outliving a render: `frameos.remember` is the way.
   ## Whether they were kept.
-  if keep and hasIdleJsAppRuntimes():
-    let headroom = availableRenderHeadroomBytes()
-    if headroom <= 0 or headroom >= RenderMemoryShortBytes:
-      return true
+  if keep and hasIdleJsAppRuntimes() and keepIdleInterpreters():
+    return true
   releaseIdleJsAppRuntimes()
   false
 
@@ -1831,6 +1830,9 @@ proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: SvgNod
   # An LCD's buffer that only this SVG draws repaints just what changed
   # (utils/svg_frames.nim); anything else, and a refusal there, as before.
   var rendered = renderSvgFrame(svg, target, owed, context.wholeFrame, reuse)
+  if not rendered and releaseRenderMemory():
+    # A kept interpreter held what the fill needed: it goes, the frame stays.
+    rendered = renderSvgFrame(svg, target, owed, context.wholeFrame, reuse)
   if not rendered:
     rendered = renderSvgIntoTargetWithDegrade(svg, target, owed)
   if owed.isSome:

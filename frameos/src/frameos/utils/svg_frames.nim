@@ -82,7 +82,7 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
     return renderSvgIntoTarget(root, target, owed)
   let held = panelHeld
   panelHeld = none(HeldFrame)
-  refreshDecodeBudgetInto()
+  refreshDecodeBudgetInto(forDecode = false) # a frame decodes nothing: kept interpreters stay
   var parsed: Svg
   try:
     parsed = parseSvg(root, target.width, target.height, reuse)

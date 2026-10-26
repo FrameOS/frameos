@@ -186,24 +186,51 @@ proc decodeHeadroomBytes(): int =
     if runsAsEmbedded() and simulatedRenderBytes() > 0:
       result = max(0, result - SimulatedDecodeReserveBytes)
 
-const RenderMemoryShortBytes* = 2 * 1024 * 1024
-  ## Render memory under which what a render can rebuild is let go
-  ## (renderMemoryReleaseHook), and under which another JS node about to be
-  ## built evicts the idle ones (js_runtime/app_runtime.nim).
+const
+  RenderMemoryShortBytes* = 2 * 1024 * 1024
+    ## Render memory under which a decode lets go of what a render can
+    ## rebuild (renderMemoryReleaseHook), and under which another JS node
+    ## about to be built evicts the idle ones (js_runtime/app_runtime.nim).
+  KeepInterpretersBytes* = 1024 * 1024
+    ## The headroom a frame keeps its idle JS interpreters down to between
+    ## renders that decode nothing (keepIdleInterpreters). Such a render
+    ## allocates a few hundred KB at most (a UI's layout, its parse, pixie's
+    ## paint strips), on top of the reserve that headroom already leaves.
 
-var renderMemoryReleaseHook*: proc(): bool {.nimcall, raises: [].}
-  ## Lets go of what a render can rebuild: the idle JS interpreters an ESP32
-  ## that does not deep-sleep keeps between renders (js_runtime/app_runtime.nim).
-  ## Whether anything went. Called when render memory is short, so that a kept
-  ## interpreter never costs a photo its resolution: when free memory is
-  ## (refreshDecodeBudget, before every render and decode) and when the
-  ## largest free block is (the first time a decode asks for it).
+var
+  renderMemoryReleaseHook*: proc(): bool {.nimcall, raises: [].}
+    ## Lets go of what a render can rebuild: the idle JS interpreters an ESP32
+    ## that does not deep-sleep keeps between renders (js_runtime/app_runtime.nim).
+    ## Whether anything went. Called for a decode when render memory is short,
+    ## so that a kept interpreter never costs a photo its resolution: when free
+    ## memory is (refreshDecodeBudget) and when the largest free block is (the
+    ## first time a decode asks for it); and by a fill pixie refused
+    ## (releaseRenderMemory). Not before every render: a JSX UI just over the
+    ## line lost its interpreter, its memo and its laid-out tree every frame.
+  decodedSinceSettle: bool
+    ## A decode ran since the interpreters were last settled.
 
 proc releaseRenderMemoryIfShort() =
   if not renderMemoryReleaseHook.isNil:
     let headroom = availableRenderHeadroomBytes()
     if headroom > 0 and headroom < RenderMemoryShortBytes:
       discard renderMemoryReleaseHook()
+
+proc releaseRenderMemory*(): bool =
+  ## Lets go of what a render can rebuild, whatever the headroom: a fill or a
+  ## decode was just refused. Whether anything went (then try it again).
+  not renderMemoryReleaseHook.isNil and renderMemoryReleaseHook()
+
+proc keepIdleInterpreters*(): bool =
+  ## Whether the idle JS interpreters may stay for the next render: while the
+  ## headroom holds RenderMemoryShortBytes after a render that decoded
+  ## something (the next may decode again, at full resolution), and
+  ## KeepInterpretersBytes after one that decoded nothing. A decode releases
+  ## them first when it is short either way. Settles the decode flag.
+  let headroom = availableRenderHeadroomBytes()
+  let floor = if decodedSinceSettle: RenderMemoryShortBytes else: KeepInterpretersBytes
+  decodedSinceSettle = false
+  headroom <= 0 or headroom >= floor
 
 when defined(frameosEmbedded):
   proc largestDecodeBlock(): int {.nimcall, raises: [].} =
@@ -229,7 +256,7 @@ proc refreshDecodeContiguousBudget() =
   else:
     setDecodeContiguousBudgetBytes(0)
 
-proc refreshDecodeBudget*() =
+proc refreshDecodeBudget*(forDecode = true) =
   ## Updates pixie's per-decode budget from live memory. Decode
   ## intermediates may take roughly half of what is available, leaving the
   ## other half for the decoded output and the canvas. The intermediates are
@@ -240,20 +267,28 @@ proc refreshDecodeBudget*() =
   ## answer refused a 1.4MB streamed-JPEG working set the heap held with
   ## room to spare (spill bench, 2026-08). Single image-sized buffers keep
   ## checking availableRenderBytes at their own call sites.
-  releaseRenderMemoryIfShort()
+  ##
+  ## `forDecode`: an image is about to be decoded, so kept interpreters go
+  ## first when memory is short. A render's start and an SVG frame pass
+  ## false: they decode nothing of their own.
+  if forDecode:
+    decodedSinceSettle = true
+    releaseRenderMemoryIfShort()
   let available = decodeHeadroomBytes()
   if available > 0:
     setDecodeBudgetBytes(available div 2)
   refreshDecodeContiguousBudget()
 
-proc refreshDecodeBudgetInto*() =
+proc refreshDecodeBudgetInto*(forDecode = true) =
   ## refreshDecodeBudget for decodes that stream into an existing target
   ## (readImageIntoTarget, the spilled/chunked download paths): the decoded
   ## output already exists as the canvas, so no second half needs reserving
   ## and the whole headroom may hold the decode plan. The emergency reserve
   ## sits outside the headroom either way. On the 13.3E6 the halved budget
   ## refused a spilled 4.4MB JPEG whose ~1.8MB plan fit the heap twice over.
-  releaseRenderMemoryIfShort()
+  if forDecode:
+    decodedSinceSettle = true
+    releaseRenderMemoryIfShort()
   let available = decodeHeadroomBytes()
   if available > 0:
     setDecodeBudgetBytes(available)
@@ -261,8 +296,11 @@ proc refreshDecodeBudgetInto*() =
 
 proc ensureRenderAllocation*(bytes: int64, what: string) =
   ## Raises a catchable error when an allocation plan clearly exceeds the
-  ## memory that is still available for rendering.
-  let available = availableRenderBytes()
+  ## memory that is still available for rendering, kept interpreters let go
+  ## first (an image's allocation comes before them, as a decode's does).
+  var available = availableRenderBytes()
+  if available > 0 and bytes > available.int64 and releaseRenderMemory():
+    available = availableRenderBytes()
   if available > 0 and bytes > available.int64:
     raise newException(CatchableError,
       what & " needs " & $(bytes div 1024) & "K but only " &

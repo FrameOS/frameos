@@ -542,7 +542,9 @@ proc fos_nim_render_impl(
     # stale request before running the scene so only new events raised during
     # this render can schedule another pass.
     discard takeRenderRequested()
-    refreshDecodeBudget()
+    # The budget for this render; a decode in it asks again, and only a
+    # decode lets kept interpreters go (utils/memory.refreshDecodeBudget).
+    refreshDecodeBudget(forDecode = false)
     setAssetColorsPanelPalette(panelPaletteForFormat(pixelFormat.int))
     let start = getMonoTime()
     let rendered = renderFrameImage()
@@ -621,7 +623,9 @@ proc fos_nim_render_alloc_impl(
   outLen = 0
   try:
     discard takeRenderRequested()
-    refreshDecodeBudget()
+    # The budget for this render; a decode in it asks again, and only a
+    # decode lets kept interpreters go (utils/memory.refreshDecodeBudget).
+    refreshDecodeBudget(forDecode = false)
     setAssetColorsPanelPalette(panelPaletteForFormat(pixelFormat.int))
     let start = getMonoTime()
     let rendered = renderFrameImage()
