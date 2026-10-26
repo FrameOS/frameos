@@ -40,7 +40,8 @@
 void fos_lcd_st7701s_select_board(const char *hardware_preset);
 
 /* The panel table's four: init brings the whole stack up once (expander,
- * controller, RGB peripheral, backlight) and is a no-op after; display copies
+ * controller, RGB peripheral, backlight), showing the FrameOS mark on black
+ * until the first picture (lcd_splash.h), and is a no-op after; display copies
  * a packed FOS_PIXEL_RGB565 frame into the scan-out buffer; clear shows
  * white; sleep keeps the picture on (an LCD that "slept" after every refresh
  * would be dark). */

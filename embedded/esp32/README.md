@@ -366,6 +366,11 @@ for the two Spectra boards most of the bench work runs on:
   after a reboot anyway). Any other flash write (a settings save, a scene
   download, an OTA) still costs one disturbed frame. `lcd` on the console
   counts dropped frames and late refills and sets the pixel clock live.
+  From the moment the panel is up until the first picture it shows the
+  FrameOS mark on black, its three squares walking the brand colors
+  (`components/frameos_display/lcd_splash.c`, the mark rasterized from
+  `frameos_mark.svg` by `frameos/tools/gen_splash_mark.nim`), at priority 1
+  so the boot under it is not slower.
   An LCD board runs its CPU at 240 MHz (the generic image boots at 160 for
   the battery frames; `status` prints `cpu:`). The scene canvas is the
   panel's own back frame buffer (`fos_display_render_target`, 565 whatever

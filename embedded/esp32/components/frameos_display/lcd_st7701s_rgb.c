@@ -95,6 +95,7 @@ void fos_lcd_st7701s_select_board(const char *hardware_preset)
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include "lcd_splash.h"
 
 #define LCD_I2C_HZ 400000
 #define LCD_I2C_TIMEOUT_MS 50
@@ -133,6 +134,8 @@ static SemaphoreHandle_t s_frame_done = NULL;
  * console `display_test` on another task waits for it. */
 static SemaphoreHandle_t s_write_lock = NULL;
 static void (*s_before_write)(const uint8_t *buf) = NULL;
+/* The boot splash (lcd_splash.h) animates until the first writer. */
+static volatile bool s_splash_on = false;
 /* Every write into a buffer but a render drawn in place counts here: a copy,
  * a clear, an overlay the render task draws (fos_lcd_st7701s_mark_written).
  * A render in place reads it to know whether the buffer still holds what it
@@ -557,6 +560,8 @@ static void settle_front(void)
  * it from fos_lcd_st7701s_back_buffer). */
 static void hold_writer(void)
 {
+    /* A picture is coming: the splash's next frame is its last (splash_task). */
+    s_splash_on = false;
     if (xSemaphoreGetMutexHolder(s_write_lock) == xTaskGetCurrentTaskHandle()) return;
     xSemaphoreTake(s_write_lock, portMAX_DELAY);
 }
@@ -643,16 +648,46 @@ static esp_err_t rgb_init_on_isr_core(void)
     return rgb_init();
 }
 
+/* The splash's squares walk their colors in the scanned buffer until the
+ * first writer takes the lock (hold_writer clears s_splash_on first), so no
+ * frame of it lands after a picture is on its way. At priority 1 on whichever
+ * core is free, and a frame is the squares' ~2,000 pixels: the boot it plays
+ * over (Wi-Fi, the runtime, the scene) runs as it would without it. */
+static void splash_task(void *arg)
+{
+    (void)arg;
+    int64_t start_us = esp_timer_get_time();
+    while (s_splash_on) {
+        vTaskDelay(pdMS_TO_TICKS(FOS_LCD_SPLASH_FRAME_MS));
+        if (xSemaphoreTake(s_write_lock, 0) != pdTRUE) continue;
+        if (s_splash_on) {
+            uint32_t t_ms = (uint32_t)((esp_timer_get_time() - start_us) / 1000);
+            fos_lcd_splash_draw((uint16_t *)s_fbs[s_front], FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, t_ms,
+                                true);
+            s_generation[s_front]++;
+        }
+        xSemaphoreGive(s_write_lock);
+    }
+    vTaskDelete(NULL);
+}
+
 int fos_lcd_st7701s_init(void)
 {
     if (s_ready) return 0;
     if (expander_init() != ESP_OK) return 1;
     controller_init();
     if (rgb_init_on_isr_core() != ESP_OK) return 1;
-    /* White until the first render: a dark panel reads as a dead frame. */
-    for (int i = 0; i < LCD_FBS; i++) fill_buffer(s_fbs[i], 0xFFFF);
+    /* Black with the FrameOS mark until the first picture, not a white
+     * panel for the seconds Wi-Fi, the runtime and the scene take: every
+     * buffer, so whichever is scanned shows it. */
+    for (int i = 0; i < LCD_FBS; i++) {
+        memset(s_fbs[i], 0, LCD_FB_BYTES);
+        fos_lcd_splash_draw((uint16_t *)s_fbs[i], FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, 0, false);
+    }
     backlight_set(true);
     s_ready = true;
+    s_splash_on = true;
+    if (xTaskCreate(splash_task, "fos_splash", 2048, NULL, 1, NULL) != pdPASS) s_splash_on = false;
     ESP_LOGI(TAG, "ST7701S %dx%d up: RGB565 scan-out from PSRAM, pclk %lu Hz", FOS_LCD_ST7701S_WIDTH,
              FOS_LCD_ST7701S_HEIGHT, (unsigned long)s_board->pclk_hz);
     return 0;
