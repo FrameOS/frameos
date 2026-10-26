@@ -1,8 +1,10 @@
 #include "lcd_splash.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "lcd_splash_mark.h"
+#include "lcd_splash_text.h"
 
 /* frameos_mark.svg's squares, bottom-left to top-right (the same three as
  * status_screen.nim's markSquareColors). */
@@ -62,6 +64,45 @@ void fos_lcd_splash_draw(uint16_t *fb, int width, int height, uint32_t t_ms, boo
             int alpha = run & 31;
             if (layer >= first_layer && x + length <= FOS_SPLASH_MARK_W) {
                 uint16_t color = shades[layer][alpha];
+                for (int k = 0; k < length; k++) row[x + k] = color;
+            }
+            x += length;
+        }
+    }
+}
+
+/* The line's top: this far under the mark. */
+#define STATUS_GAP 28
+
+void fos_lcd_splash_draw_status(uint16_t *fb, int width, int height, fos_lcd_splash_status_t status)
+{
+    int mark_y = (height - FOS_SPLASH_MARK_H) / 2;
+    int y0 = mark_y + FOS_SPLASH_MARK_H + STATUS_GAP;
+    if (!fb || width < FOS_SPLASH_MARK_W || width < FOS_SPLASH_TEXT_MAX_W || height < FOS_SPLASH_MARK_H ||
+        y0 + FOS_SPLASH_TEXT_H > height) {
+        return;
+    }
+    int box_x = (width - FOS_SPLASH_TEXT_MAX_W) / 2;
+    for (int y = 0; y < FOS_SPLASH_TEXT_H; y++) {
+        memset(fb + (size_t)(y0 + y) * (size_t)width + (size_t)box_x, 0, FOS_SPLASH_TEXT_MAX_W * sizeof(uint16_t));
+    }
+    int line = (int)status - 1;
+    if (line < 0 || line >= FOS_SPLASH_TEXT_COUNT) return;
+    static const uint8_t gray[3] = {0x9c, 0xa3, 0xaf};
+    uint16_t shades[32];
+    for (int alpha = 0; alpha < 32; alpha++) shades[alpha] = shade(gray, alpha);
+    int line_w = FOS_SPLASH_TEXT_W[line];
+    int x0 = (width - line_w) / 2;
+    for (int y = 0; y < FOS_SPLASH_TEXT_H; y++) {
+        uint16_t *row = fb + (size_t)(y0 + y) * (size_t)width + (size_t)x0;
+        int first = FOS_SPLASH_TEXT_ROWS[line * FOS_SPLASH_TEXT_H + y];
+        int last = FOS_SPLASH_TEXT_ROWS[line * FOS_SPLASH_TEXT_H + y + 1];
+        int x = 0;
+        for (int i = first; i < last; i++) {
+            uint16_t run = FOS_SPLASH_TEXT_RUNS[i];
+            int length = run >> 8;
+            if (((run >> 5) & 7) != 0 && x + length <= line_w) {
+                uint16_t color = shades[run & 31];
                 for (int k = 0; k < length; k++) row[x + k] = color;
             }
             x += length;

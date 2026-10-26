@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "lcd_splash.h"
 
 typedef enum {
     FOS_PIXEL_1BPP = 1, /* packed 1 bit/pixel, MSB first, white=1 */
@@ -55,6 +56,10 @@ int fos_display_bus(void);
 /* True when the display refreshes on its own (an LCD scanned from a frame
  * buffer): a blit shows at once and costs no e-paper wait. */
 bool fos_display_is_lcd(void);
+/* What the boot is waiting for, on an LCD's boot splash (lcd_splash.h): a
+ * line under the FrameOS mark once the wait has lasted a second. Nothing on
+ * any other panel, and nothing once a picture is up. */
+void fos_display_boot_status(fos_lcd_splash_status_t status);
 /* An LCD's own buffer for the next picture, `*len` bytes in the panel's
  * format (fos_display_buffer_size): the renderer draws there in place and
  * fos_display_blit(that buffer) shows it without a copy. The panel stays

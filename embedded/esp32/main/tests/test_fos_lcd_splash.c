@@ -2,7 +2,8 @@
  * Host tests for the RGB LCD's boot splash (components/frameos_display/
  * lcd_splash.c): the mark's runs fill each row exactly, the mark lands in
  * the middle of the panel over black, its squares sit bottom-left to
- * top-right, and an animation frame redraws the squares and nothing else.
+ * top-right, an animation frame redraws the squares and nothing else, and
+ * the status line under the mark replaces the one before and clears.
  *
  * Build and run (from embedded/esp32/):
  *
@@ -18,6 +19,7 @@
 
 #include "lcd_splash.h"
 #include "lcd_splash_mark.h"
+#include "lcd_splash_text.h"
 
 static int g_failures = 0;
 static int g_checks = 0;
@@ -188,6 +190,57 @@ static void test_a_panel_smaller_than_the_mark_gets_nothing(void)
     fos_lcd_splash_draw(NULL, PANEL, PANEL, 0, false); /* no buffer: nothing, no crash */
 }
 
+/* Pixels in rows [y0, y1) that are not black. */
+static int ink_in_rows(const uint16_t *fb, int y0, int y1)
+{
+    int ink = 0;
+    for (int y = y0; y < y1; y++) {
+        for (int x = 0; x < PANEL; x++) ink += fb[y * PANEL + x] != 0;
+    }
+    return ink;
+}
+
+static void test_a_status_line_sits_under_the_mark(void)
+{
+    static uint16_t fb[PANEL * PANEL];
+    memset(fb, 0, sizeof(fb));
+    fos_lcd_splash_draw(fb, PANEL, PANEL, 0, false);
+    int mark_bottom = (PANEL - FOS_SPLASH_MARK_H) / 2 + FOS_SPLASH_MARK_H;
+    int mark_ink = ink_in_rows(fb, 0, mark_bottom);
+    CHECK(ink_in_rows(fb, mark_bottom, PANEL) == 0, "nothing under the mark before a status");
+
+    fos_lcd_splash_draw_status(fb, PANEL, PANEL, FOS_LCD_SPLASH_WIFI);
+    int wifi = ink_in_rows(fb, mark_bottom, PANEL);
+    CHECK(wifi > 300, "\"Connecting to Wi-Fi\" has ink: %d", wifi);
+    CHECK(ink_in_rows(fb, 0, mark_bottom) == mark_ink, "the line leaves the mark alone");
+    /* Centered: as much ink left of the middle as right of it, roughly. */
+    int left = 0, right = 0;
+    for (int y = mark_bottom; y < PANEL; y++) {
+        for (int x = 0; x < PANEL; x++) {
+            if (fb[y * PANEL + x] == 0) continue;
+            if (x < PANEL / 2) left++; else right++;
+        }
+    }
+    CHECK(left > wifi / 3 && right > wifi / 3, "centered: %d left, %d right", left, right);
+    /* Gray at full coverage, never brighter than the mark's white. */
+    int bright = 0;
+    for (int y = mark_bottom; y < PANEL; y++) {
+        for (int x = 0; x < PANEL; x++) bright += fb[y * PANEL + x] == 0xFFFF;
+    }
+    CHECK(bright == 0, "%d white pixels in a gray line", bright);
+
+    /* A shorter line replaces it whole, and none clears it. */
+    fos_lcd_splash_draw_status(fb, PANEL, PANEL, FOS_LCD_SPLASH_STARTING);
+    int starting = ink_in_rows(fb, mark_bottom, PANEL);
+    CHECK(starting > 100 && starting < wifi, "\"Starting\" alone: %d (Wi-Fi line %d)", starting, wifi);
+    fos_lcd_splash_draw_status(fb, PANEL, PANEL, FOS_LCD_SPLASH_NO_STATUS);
+    CHECK(ink_in_rows(fb, mark_bottom, PANEL) == 0, "no status clears the line");
+    CHECK(ink_in_rows(fb, 0, mark_bottom) == mark_ink, "and leaves the mark");
+    fos_lcd_splash_draw_status(fb, PANEL, PANEL, (fos_lcd_splash_status_t)99); /* not a line: cleared, no crash */
+    CHECK(ink_in_rows(fb, mark_bottom, PANEL) == 0, "an unknown status draws nothing");
+    CHECK(FOS_SPLASH_TEXT_COUNT == FOS_LCD_SPLASH_STARTING, "a line for every status");
+}
+
 int main(void)
 {
     test_every_row_is_the_marks_width();
@@ -196,6 +249,7 @@ int main(void)
     test_the_colors_walk_one_square_a_third();
     test_a_frame_redraws_the_squares_alone();
     test_a_panel_smaller_than_the_mark_gets_nothing();
+    test_a_status_line_sits_under_the_mark();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

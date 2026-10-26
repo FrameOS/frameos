@@ -30,6 +30,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "lcd_splash.h"
 
 #define FOS_LCD_ST7701S_WIDTH 480
 #define FOS_LCD_ST7701S_HEIGHT 480
@@ -74,6 +75,11 @@ esp_err_t fos_lcd_st7701s_i2c_bus(int sda, int scl, void **bus);
 
 /* Backlight on or off (the Indicator's GPIO45). ESP_ERR_INVALID_STATE before init. */
 esp_err_t fos_lcd_st7701s_backlight(bool on);
+
+/* What the boot splash says it is waiting for (lcd_splash.h), from whichever
+ * task is booting. It shows once it has lasted FOS_LCD_SPLASH_STATUS_DELAY_MS,
+ * and not at all once a picture has replaced the splash. */
+void fos_lcd_st7701s_splash_status(fos_lcd_splash_status_t status);
 
 /* How steadily the scan-out runs. The driver refills the DMA's bounce
  * buffers from the PSRAM frame buffer in an interrupt; when the shared

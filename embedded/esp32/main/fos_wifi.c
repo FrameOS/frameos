@@ -34,6 +34,10 @@ static char s_ip[16] = "";
 static char s_ap_ssid[32] = "";
 static int s_retries = 0;
 static bool s_time_synced = false;
+/* The boot went on without the clock (fos_wifi_sync_time): its first sync
+ * runs s_late_time_hook. */
+static volatile bool s_time_awaited = true;
+static void (*s_late_time_hook)(void) = NULL;
 static bool s_scan_only = false;
 static bool s_portal_active = false;
 static bool s_portal_sta_retry = false;
@@ -553,7 +557,10 @@ void fos_wifi_drop_stats(uint32_t *drops, uint8_t *last_reason, uint32_t *last_d
 static void on_sntp_synced(struct timeval *tv)
 {
     (void)tv;
+    bool late = !s_time_synced && !s_time_awaited;
     s_time_synced = true;
+    /* Sets an event bit and nothing more (main.c's action_render_now). */
+    if (late && s_late_time_hook) s_late_time_hook();
     /* A board with a battery-backed clock (fos_rtc.c) gets the corrected time
      * written back on the next render pass, so the next cold boot starts
      * right. Not from here: this is lwIP's thread, and an I2C write on it
@@ -561,8 +568,13 @@ static void on_sntp_synced(struct timeval *tv)
     fos_rtc_mark_dirty();
 }
 
+void fos_wifi_set_late_time_hook(void (*hook)(void)) { s_late_time_hook = hook; }
+
 esp_err_t fos_wifi_sync_time(uint32_t timeout_ms)
 {
+    /* Not waiting: a sync from here on is a late one. Before the init, so
+     * that one answering at once counts too. */
+    s_time_awaited = timeout_ms > 0;
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     config.sync_cb = on_sntp_synced;
     esp_err_t err = esp_netif_sntp_init(&config);
@@ -587,12 +599,17 @@ esp_err_t fos_wifi_sync_time(uint32_t timeout_ms)
         ESP_LOGI(TAG, "clock from the RTC: %s", ctime(&kept));
         return ESP_OK;
     }
+    if (timeout_ms == 0) {
+        ESP_LOGI(TAG, "SNTP sync started; the boot goes on without the clock");
+        return ESP_OK;
+    }
     err = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(timeout_ms));
-    s_time_synced = err == ESP_OK;
-    if (s_time_synced) {
+    if (err == ESP_OK) {
+        s_time_synced = true;
         time_t now = time(NULL);
         ESP_LOGI(TAG, "time synced: %s", ctime(&now));
     } else {
+        s_time_awaited = false;
         ESP_LOGW(TAG, "SNTP sync timed out");
     }
     return err;

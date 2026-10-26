@@ -95,7 +95,6 @@ void fos_lcd_st7701s_select_board(const char *hardware_preset)
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
-#include "lcd_splash.h"
 
 #define LCD_I2C_HZ 400000
 #define LCD_I2C_TIMEOUT_MS 50
@@ -134,8 +133,11 @@ static SemaphoreHandle_t s_frame_done = NULL;
  * console `display_test` on another task waits for it. */
 static SemaphoreHandle_t s_write_lock = NULL;
 static void (*s_before_write)(const uint8_t *buf) = NULL;
-/* The boot splash (lcd_splash.h) animates until the first writer. */
+/* The boot splash (lcd_splash.h) animates until the first writer. The
+ * status is set by the booting task and drawn by the splash's. */
 static volatile bool s_splash_on = false;
+static volatile int s_splash_status = FOS_LCD_SPLASH_NO_STATUS;
+static volatile int64_t s_splash_status_at_us = 0;
 /* Every write into a buffer but a render drawn in place counts here: a copy,
  * a clear, an overlay the render task draws (fos_lcd_st7701s_mark_written).
  * A render in place reads it to know whether the buffer still holds what it
@@ -657,18 +659,36 @@ static void splash_task(void *arg)
 {
     (void)arg;
     int64_t start_us = esp_timer_get_time();
+    int shown = FOS_LCD_SPLASH_NO_STATUS; /* the line on the glass */
     while (s_splash_on) {
         vTaskDelay(pdMS_TO_TICKS(FOS_LCD_SPLASH_FRAME_MS));
         if (xSemaphoreTake(s_write_lock, 0) != pdTRUE) continue;
         if (s_splash_on) {
-            uint32_t t_ms = (uint32_t)((esp_timer_get_time() - start_us) / 1000);
-            fos_lcd_splash_draw((uint16_t *)s_fbs[s_front], FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, t_ms,
-                                true);
+            int64_t now_us = esp_timer_get_time();
+            uint16_t *fb = (uint16_t *)s_fbs[s_front];
+            fos_lcd_splash_draw(fb, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT,
+                                (uint32_t)((now_us - start_us) / 1000), true);
+            /* A wait that lasts gets its line; a line already up is
+             * replaced at once, so it never says what is already done. */
+            int wanted = s_splash_status;
+            if (wanted != shown &&
+                (shown != FOS_LCD_SPLASH_NO_STATUS ||
+                 now_us - s_splash_status_at_us >= (int64_t)FOS_LCD_SPLASH_STATUS_DELAY_MS * 1000)) {
+                fos_lcd_splash_draw_status(fb, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT,
+                                           (fos_lcd_splash_status_t)wanted);
+                shown = wanted;
+            }
             s_generation[s_front]++;
         }
         xSemaphoreGive(s_write_lock);
     }
     vTaskDelete(NULL);
+}
+
+void fos_lcd_st7701s_splash_status(fos_lcd_splash_status_t status)
+{
+    s_splash_status_at_us = esp_timer_get_time();
+    s_splash_status = (int)status;
 }
 
 int fos_lcd_st7701s_init(void)
@@ -842,6 +862,7 @@ esp_err_t fos_lcd_st7701s_i2c_bus(int sda, int scl, void **bus)
     if (bus) *bus = NULL;
     return ESP_ERR_NOT_SUPPORTED;
 }
+void fos_lcd_st7701s_splash_status(fos_lcd_splash_status_t status) { (void)status; }
 esp_err_t fos_lcd_st7701s_backlight(bool on)
 {
     (void)on;
