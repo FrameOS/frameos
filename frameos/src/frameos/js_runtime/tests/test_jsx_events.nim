@@ -219,6 +219,69 @@ suite "jsx events":
     discard ui.render(canvas.view(100, 50, 200, 100), canvas.view(100, 50, 200, 100))
     check canvas[200, 100] == rgbx(0x22, 0xc5, 0x5e, 255)
 
+  test "a press is captured: a drag off a slider's end still moves it, until the release":
+    let ui = newUi("""
+      export const get = () => (
+        <div className="p-10 bg-white">
+          <div className="w-20 h-4 bg-black"
+            onPointerDown={(e) => frameos.setState('level', e.localX)}
+            onPointerMove={(e) => frameos.setState('level', e.localX)}
+            onPointerUp={(e) => frameos.setState('up', `${e.localX},${e.localY}`)} />
+          <div className="w-10 h-10 bg-red-500"
+            onPointerMove={(e) => frameos.setState('over', `${e.localX},${e.localY}`)} />
+        </div>
+      )
+    """, "tests/jsx-drag")
+    discard ui.render() # the track at 40,40 (80x16), the box under it at 40,56 (40x40)
+    check uiListens("tests/jsx-drag", "pointerMove")
+    # No press: a move goes to the element under it, and only there.
+    check not dispatchUiEvent("tests/jsx-drag", "pointerMove", at(150, 70))
+    check dispatchUiEvent("tests/jsx-drag", "pointerMove", at(60, 70))
+    check ui.scene.state{"over"}.getStr() == "20,14"
+    check ui.scene.state{"level"}.isNil
+    # A press on the track: it holds the pointer, through a render too.
+    check dispatchUiEvent("tests/jsx-drag", "pointerDown", at(50, 48))
+    check ui.scene.state{"level"}.getInt() == 10
+    check dispatchUiEvent("tests/jsx-drag", "pointerMove", at(90, 48))
+    check ui.scene.state{"level"}.getInt() == 50
+    discard ui.render()
+    # Past its end and over the box: still the track's, from its corner.
+    check dispatchUiEvent("tests/jsx-drag", "pointerMove", at(150, 70))
+    check ui.scene.state{"level"}.getInt() == 110
+    check dispatchUiEvent("tests/jsx-drag", "pointerMove", at(60, 76))
+    check ui.scene.state{"level"}.getInt() == 20
+    check ui.scene.state{"over"}.getStr() == "20,14" # the box heard none of it
+    # The release goes to the track too, wherever it lands, and ends it.
+    check dispatchUiEvent("tests/jsx-drag", "pointerUp", at(10, 90))
+    check ui.scene.state{"up"}.getStr() == "-30,50"
+    check dispatchUiEvent("tests/jsx-drag", "pointerMove", at(60, 76))
+    check ui.scene.state{"over"}.getStr() == "20,20"
+    check ui.scene.state{"level"}.getInt() == 20
+
+  test "two fingers hold two presses":
+    let ui = newUi("""
+      export const get = () => (
+        <div className="flex gap-4 p-4 bg-white">
+          <div className="w-10 h-10 bg-black" onPointerMove={(e) => frameos.setState('a', e.localX)} />
+          <div className="w-10 h-10 bg-black" onPointerMove={(e) => frameos.setState('b', e.localX)} />
+        </div>
+      )
+    """, "tests/jsx-two")
+    discard ui.render() # a at 16,16, b at 72,16 (40x40 each)
+    proc finger(x, y, id: int): JsonNode =
+      %*{"x": x, "y": y, "pointerId": id, "pointerType": "touch", "buttons": 1}
+    # A press on an element with no onPointerDown changes nothing to draw.
+    check not dispatchUiEvent("tests/jsx-two", "pointerDown", finger(20, 20, 1))
+    check not dispatchUiEvent("tests/jsx-two", "pointerDown", finger(80, 20, 2))
+    check dispatchUiEvent("tests/jsx-two", "pointerMove", finger(100, 20, 1)) # over b: a's
+    check dispatchUiEvent("tests/jsx-two", "pointerMove", finger(0, 20, 2))   # over a: b's
+    check ui.scene.state{"a"}.getInt() == 84
+    check ui.scene.state{"b"}.getInt() == -72
+    discard dispatchUiEvent("tests/jsx-two", "pointerUp", finger(100, 20, 1))
+    discard dispatchUiEvent("tests/jsx-two", "pointerUp", finger(0, 20, 2))
+    check dispatchUiEvent("tests/jsx-two", "pointerMove", finger(20, 20, 1)) # no press: under it
+    check ui.scene.state{"a"}.getInt() == 4
+
   test "a handler that throws is logged, and the frame goes on":
     let ui = newUi("""
       export const get = () => <div className="bg-white"><div className="w-10 h-10 bg-black" onClick={() => { throw new Error('nope') }} /></div>
