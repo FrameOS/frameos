@@ -1,8 +1,12 @@
 name: E2E Docker Image
 
+# Pull requests into any branch, so a PR stacked on another one gets the
+# ESP32 build and its size comment too; the Docker image job stays on PRs
+# into main.
 on:
   pull_request:
-    branches: [ "main" ]
+    branches:
+      - '**'
   push:
     branches: [ "main" ]
     paths-ignore:
@@ -23,6 +27,7 @@ permissions:
 jobs:
   docker_image:
     name: Build Docker Image
+    if: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -320,8 +325,14 @@ jobs:
           ls -l .firmware-size .firmware-size/baseline
 
       - name: Render the report
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
+          STACKED_NOTE=""
+          if [ "$BASE_REF" != "main" ]; then
+            STACKED_NOTE=" This PR targets \`$BASE_REF\`, so the difference also counts the PRs it is stacked on."
+          fi
           args=()
           for f in .firmware-size/esp32-s3.json .firmware-size/esp32-s3-32mb.json; do
             [ -f "$f" ] && args+=(--current "$f")
@@ -331,7 +342,7 @@ jobs:
           done
           python3 embedded/esp32/tools/firmware_size.py render "${args[@]}" \
             --baseline-label "${BASELINE_TAG:-latest release}" \
-            --intro "Built from ${GITHUB_SHA::7} by [this run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}); compared with the latest release **${BASELINE_TAG:-?}**." \
+            --intro "Built from ${GITHUB_SHA::7} by [this run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}); compared with the latest release **${BASELINE_TAG:-?}**.${STACKED_NOTE}" \
             --out .firmware-size/comment.md
           cat .firmware-size/comment.md
 
@@ -365,7 +376,12 @@ jobs:
     steps:
       - name: Check parallel jobs
         run: |
-          if [ "${{ needs.docker_image.result }}" != "success" ]; then
+          docker_result="${{ needs.docker_image.result }}"
+          # Skipped by design on a PR stacked on another branch (see docker_image).
+          if [ "$docker_result" = "skipped" ] && [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.base_ref }}" != "main" ]; then
+            docker_result=success
+          fi
+          if [ "$docker_result" != "success" ]; then
             echo "Docker image job finished with result: ${{ needs.docker_image.result }}"
             exit 1
           fi
