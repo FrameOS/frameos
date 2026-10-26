@@ -56,9 +56,13 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # Bounce on the SenseCAP Indicator ran 10.2 fps in DIO and 13.5 in QIO
 # (2026-10-25), as fast as a 32 KB instruction cache, which would cost 16 KB
 # of internal RAM. The image header still says DIO; the bootloader switches
-# the flash to quad itself and stays in DIO when the chip refuses its QE bit
-# (an octal flash is left alone). Only a USB flash replaces the bootloader:
-# a frame updated over the air keeps its DIO one, and its speed.
+# the flash to quad itself (an octal flash is left alone). A flash that
+# refuses its QE bit does NOT fall back to DIO: the bootloader drops to slow
+# reads and the app's flash init asserts, so a board flashed over USB
+# boot-loops (an updated one rolls back to its old app). QEMU's flash is such
+# a chip, so the smoke boots a DIO build (sdkconfig.qemu.defaults); bench a
+# new S3 board before it ships with this image. Only a USB flash replaces the
+# bootloader: a frame updated over the air keeps its DIO one, and its speed.
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 
 # app_main mounts and may format SPIFFS during first boot. ESP-IDF's default

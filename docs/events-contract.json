@@ -312,7 +312,7 @@
       "renderAfter": "never",
       "coalesce": "latest",
       "log": "none",
-      "hosts": {"linux": true, "esp32": false, "wasm": true}
+      "hosts": {"linux": true, "esp32": true, "wasm": true}
     },
     {
       "name": "mouseDown",
@@ -329,7 +329,7 @@
       "renderAfter": "never",
       "coalesce": "none",
       "log": "none",
-      "hosts": {"linux": true, "esp32": false, "wasm": true}
+      "hosts": {"linux": true, "esp32": true, "wasm": true}
     },
     {
       "name": "mouseUp",
@@ -346,7 +346,7 @@
       "renderAfter": "never",
       "coalesce": "none",
       "log": "none",
-      "hosts": {"linux": true, "esp32": false, "wasm": true}
+      "hosts": {"linux": true, "esp32": true, "wasm": true}
     },
     {
       "name": "tap",

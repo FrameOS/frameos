@@ -323,6 +323,24 @@ static const struct {
     {"seeed_sensecap_indicator_d1", "sda=39,scl=40,int=-1,rst=-1,en=-1"},
 };
 
+/* A glass mounted against its panel. The Indicator's sits upside down: a tap
+ * at the top left read as the bottom right (2026-10-25, the touch test). */
+static const struct {
+    const char *preset;
+    int mirror; /* FOS_BOARD_TOUCH_MIRROR_* */
+} k_touch_mirror[] = {
+    {"seeed_sensecap_indicator_d1", FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y},
+};
+
+int fos_board_touch_mirror(const char *hardware_preset)
+{
+    if (!hardware_preset || !hardware_preset[0]) return 0;
+    for (size_t i = 0; i < sizeof(k_touch_mirror) / sizeof(k_touch_mirror[0]); i++) {
+        if (strcmp(hardware_preset, k_touch_mirror[i].preset) == 0) return k_touch_mirror[i].mirror;
+    }
+    return 0;
+}
+
 const char *fos_board_touch_pins(const char *hardware_preset)
 {
     if (!hardware_preset || !hardware_preset[0]) return "";

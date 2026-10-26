@@ -4,7 +4,9 @@ import frameos/spool
 from frameos/apps as frameos_apps import spoolDir
 from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool, scaleAndDrawImage
 from frameos/utils/memory import renderMemoryInUse, availableRenderBytes,
-  availableRenderHeadroomBytes
+  availableRenderHeadroomBytes, RenderMemoryShortBytes
+when defined(testing):
+  from frameos/utils/memory import availableRenderBytesOverride
 when defined(memProbe): import frameos/utils/memory
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
@@ -51,6 +53,24 @@ proc cachedImageMemoryLimit(): int =
     EmbeddedMaxCachedImageBytes
   else:
     0
+
+proc affordsKeeping(image: Image, context: ExecutionContext): bool =
+  ## An image over the memory cache's limit is still kept while the frame
+  ## affords it easily: with it held (it is allocated already), render
+  ## headroom stays above RenderMemoryShortBytes, the level under which what
+  ## a render can rebuild is let go. A slideshow's photo under an animation
+  ## (render/zoomPan at 24 fps) is a cached producer's output every frame, and
+  ## refused here every frame decoded it again: 6 s a frame on the SenseCAP
+  ## Indicator, whose 524 px photo was 1.1 MB (2026-10-25). The live canvas is
+  ## never kept: a hit would redraw it onto itself.
+  if context != nil and context.hasImage and not context.image.isNil and
+      image.bufferPointer == context.image.bufferPointer:
+    return false
+  when defined(testing):
+    # A host's headroom is its own RAM; a test says what the frame has.
+    availableRenderBytesOverride >= RenderMemoryShortBytes
+  else:
+    availableRenderHeadroomBytes() >= RenderMemoryShortBytes
 
 var imageSpillDisabled = false
   ## Latched on the first failed spill write, so a full or vanished card is
@@ -343,6 +363,15 @@ proc withCache(scene: InterpretedFrameScene,
   if TRACING:
     scene.logger.log(payload)
 
+  # A stale image goes before its replacement is made, not after: a
+  # slideshow's last photo held on through the next one's decode, and on the
+  # SenseCAP Indicator the 0.9 MB it pinned was the difference between a
+  # photo and an error frame (2026-10-25). Not on degraded inputs, whose pass
+  # must leave the stored entry for a healthy one to hit.
+  if allowStore and scene.cacheValues.hasKey(nodeId) and
+      scene.cacheValues[nodeId].kind == fkImage:
+    scene.cacheValues.del(nodeId)
+
   let fresh = compute()
   if not allowStore:
     # Degraded inputs: return the value for this pass only. Leaving the stored
@@ -353,7 +382,7 @@ proc withCache(scene: InterpretedFrameScene,
   var toStore = fresh
   let memoryLimit = cachedImageMemoryLimit()
   if memoryLimit > 0 and fresh.kind == fkImage and not fresh.img.isNil and
-      fresh.img.byteSize > memoryLimit:
+      fresh.img.byteSize > memoryLimit and not affordsKeeping(fresh.img, context):
     # Never retain a frame-sized image in memory on embedded: pinning a
     # canvas-sized RGBA buffer (7.7MB at 1200x1600) across renders means the
     # next render needs a second canvas and OOMs the module — and when the

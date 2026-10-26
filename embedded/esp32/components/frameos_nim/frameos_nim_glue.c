@@ -381,6 +381,9 @@ size_t fos_psram_largest_free_block(void)
     return heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
+/* main/fos_assets_flash.c, absent from a build without it. */
+extern int64_t fos_assets_flash_free_bytes(void) __attribute__((weak));
+
 /* Free bytes on the filesystem holding `path`, for the Nim side's
  * getAvailableDiskSpace (utils/system.nim): the spool checks it before
  * spilling an image, so a 1.5 MB canvas is never written onto a 1 MB state
@@ -396,6 +399,12 @@ int64_t fos_vfs_free_bytes(const char *path)
         size_t total = 0, used = 0;
         if (esp_spiffs_info("state", &total, &used) != ESP_OK) return -1;
         return total > used ? (int64_t)(total - used) : 0;
+    }
+    /* No SD card: the assets directory lives on the state partition, less
+     * the reserve the scene store keeps (main/fos_assets_flash.c). */
+    if (fos_assets_flash_free_bytes) {
+        int64_t flash_free = fos_assets_flash_free_bytes();
+        if (flash_free >= 0) return flash_free;
     }
     /* esp_vfs_fat_info wants the mount point itself; walk up from the path
      * until a mount answers (the spool dir is <assets>/.cache). */

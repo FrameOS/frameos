@@ -46,6 +46,7 @@ main/                     boot orchestration + platform modules
   fos_assets.c            asset verbs (list/get/put/mkdir/delete/rename)
   fos_assets_path.c       the assets-path rule behind every asset verb (host-tested)
   fos_assets_sd.c         SD card mount/probe/format for the assets root
+  fos_assets_flash.c      assets on the state partition for a board with no SD card the S3 reaches
   fos_sd_probe.c          SD presence probe used by the assets layer
   fos_framebuffer.c       canvas allocation (RGBX vs RGB565 by PSRAM) and dither/pack
   fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
@@ -252,7 +253,10 @@ for the two Spectra boards most of the bench work runs on:
   Nim dispatcher makes the taps, long presses and swipes of it exactly as on
   a Pi (`docs/events.md` "Input"). The controller reports in its own
   resolution; when its axes run across the panel's (a portrait glass on a
-  landscape panel) the driver swaps them (`touch:ready` says `swapped`). A
+  landscape panel) the driver swaps them (`touch:ready` says `swapped`), and
+  a glass mounted against its panel is mirrored by board
+  (`fos_board_touch_mirror`: the SenseCAP Indicator's, both axes;
+  `touch:ready` says `mirrored`). A
   touch wakes a deep-sleeping frame through ext0 on TP_INT (GPIO21, an RTC
   IO); the controller is held powered through the sleep for it (a few mA).
   The PDM microphone sits on GPIO19/20, the S3's native USB pads: the board's
@@ -382,8 +386,16 @@ for the two Spectra boards most of the bench work runs on:
   (0x48) sits on the expander's bus with its interrupt and reset lines on the
   expander, unwired to the chip: `fos_touch.c` joins the display's bus
   (`fos_display_shared_i2c_bus`) and polls it every 30 ms. The top button is
-  GPIO38; held, it walks to the next scene. The TF socket, the buzzer and the
-  CO2/VOC sensors are the RP2040's (UART 19/20 from the S3; not driven).
+  GPIO38; held, it walks to the next scene. The glass sits upside down on
+  the panel, so the driver mirrors both axes (`fos_board_touch_mirror`), and
+  a finger's arrival is a `pointerMove` to where it landed before its
+  `pointerDown`, as on a Pi. The TF socket, the buzzer and the
+  CO2/VOC sensors are the RP2040's (UART 19/20 from the S3; not driven), so
+  assets live on the state partition instead (`fos_assets_flash.c`, a VFS
+  over `/state/a` at the assets path): a handful of photos in the 1 MB
+  partition, names of 28 bytes at most (`photos/kitchen.jpg` fits; longer is
+  refused, never truncated), and every write leaves 128 KB free for the
+  scenes. `status` prints `assets_flash:` with what is left.
 
 The TRMNL X (10.3" 1872×1404 parallel e-ink over EPDIY/FastEPD) is not yet
 supported — it needs a parallel display driver class this component does not
@@ -501,7 +513,12 @@ redeploy that changes it), and the file carries a `"__persist": 2` marker: a
 file without one was written by firmware that still pinned defaults and is
 dropped the first time it is read, so the deployed defaults win. State for a scene
 that is not resident (a wake-check pass, a switch carrying state) goes to the
-file right away, so a deep sleep in between loses nothing. Both control
+file right away, so a deep sleep in between loses nothing. Writes go
+behind: a change waits in RAM and reaches the flash after a minute (later
+changes ride along), before a deep sleep and before a restart. A SPIFFS write
+that erases a block holds the flash cache off for 50-100 ms, which stalls
+both cores and makes an RGB LCD scan garbage, and the touch test's taps are
+disk fields: one write per tap flickered the SenseCAP Indicator. Both control
 planes get it: the cloud hello and the commands pull report the persisted
 state even before the first render, keyed by scene id.
 

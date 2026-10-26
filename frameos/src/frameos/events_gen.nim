@@ -215,19 +215,19 @@ const
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: true, log: elNone,
       aliasOfIndex: 7,
-      linux: true, esp32: false, wasm: true),
+      linux: true, esp32: true, wasm: true),
     EventPolicy( # mouseDown
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       aliasOfIndex: 8,
-      linux: true, esp32: false, wasm: true),
+      linux: true, esp32: true, wasm: true),
     EventPolicy( # mouseUp
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},
       renderAfter: raNever, coalesceLatest: false, log: elNone,
       aliasOfIndex: 9,
-      linux: true, esp32: false, wasm: true),
+      linux: true, esp32: true, wasm: true),
     EventPolicy( # tap
       class: ecInput, device: edPointer, listen: true, dispatch: false,
       origins: {eoDriver, eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem},

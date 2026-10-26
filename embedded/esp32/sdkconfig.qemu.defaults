@@ -17,3 +17,9 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 # far enough to verify the FrameOS startup path instead of hanging after the
 # bootloader loads the OTA image.
 # CONFIG_SPIRAM is not set
+
+# QEMU's emulated flash takes no QE bit, and with the base config's QIO the
+# bootloader falls back to slow reads and the app's flash init asserts at
+# boot. The smoke proves the image boots, not the flash mode: it builds DIO.
+# CONFIG_ESPTOOLPY_FLASHMODE_QIO is not set
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y

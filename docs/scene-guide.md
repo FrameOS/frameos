@@ -525,9 +525,9 @@ schedule or the cloud may send one only when its declaration lists them in
 | `pointerDown` | yes |  | `x` integer, `y` integer, `button` integer, `buttons` integer, `pointerId` integer, `pointerType` string | all | When a pointer button is pressed or a finger touches the panel. |
 | `pointerUp` | yes |  | `x` integer, `y` integer, `button` integer, `buttons` integer, `pointerId` integer, `pointerType` string | all | When a pointer button is released or a finger lifts |
 | `pointerCancel` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | all | When a pointer that was down is lost without a release: the queue overflowed, the device went away. |
-| `mouseMove` | yes |  | `x` integer, `y` integer | Pi, preview | When a mouse moves. |
-| `mouseDown` | yes |  | `button` integer | Pi, preview | When a mouse button is pressed. |
-| `mouseUp` | yes |  | `button` integer | Pi, preview | When a mouse button is released. |
+| `mouseMove` | yes |  | `x` integer, `y` integer | all | When a mouse moves. |
+| `mouseDown` | yes |  | `button` integer | all | When a mouse button is pressed. |
+| `mouseUp` | yes |  | `button` integer | all | When a mouse button is released. |
 | `tap` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | all | A press and release in one place, within `gestures.tapMs`. |
 | `doubleTap` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | all | A second `tap` in the same place within `gestures.doubleTapMs` of the first. |
 | `longPress` | yes |  | `x` integer, `y` integer, `durationMs` integer, `pointerId` integer, `pointerType` string | all | A pointer held in one place for `gestures.longPressMs`. |

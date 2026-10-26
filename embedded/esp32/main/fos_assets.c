@@ -3,6 +3,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -10,6 +11,7 @@
 
 #include "esp_log.h"
 
+#include "fos_assets_flash.h"
 #include "fos_assets_sd.h"
 #include "fos_config.h"
 
@@ -17,7 +19,9 @@ static const char *TAG = "fos_assets";
 
 bool fos_assets_available(void)
 {
-    return fos_assets_sd_mounted();
+    /* The SD card, or on a board without one the state partition
+     * (fos_assets_flash.c). */
+    return fos_assets_sd_mounted() || fos_assets_flash_active();
 }
 
 const char *fos_assets_root(void)
@@ -199,7 +203,14 @@ esp_err_t fos_assets_write_begin(const char *rel, fos_assets_writer_t *writer,
         return ESP_FAIL;
     }
     fos_assets_full_path(writer->final_path, sizeof(writer->final_path), rel);
-    snprintf(writer->tmp_path, sizeof(writer->tmp_path), "%s.fosput", writer->final_path);
+    if (fos_assets_flash_active()) {
+        /* SPIFFS names are short: a temporary name of its own, hidden. */
+        static unsigned s_put_seq = 0;
+        snprintf(writer->tmp_path, sizeof(writer->tmp_path), "%s/.w%04x", fos_assets_root(),
+                 (++s_put_seq) & 0xffff);
+    } else {
+        snprintf(writer->tmp_path, sizeof(writer->tmp_path), "%s.fosput", writer->final_path);
+    }
     writer->file = fopen(writer->tmp_path, "wb");
     if (!writer->file) {
         ESP_LOGW(TAG, "open %s failed: errno=%d", writer->tmp_path, errno);
@@ -252,11 +263,18 @@ void fos_assets_write_abort(fos_assets_writer_t *writer)
     unlink(writer->tmp_path);
 }
 
+/* Where the parts of chunked uploads wait: `.uploads/<id>.part` on a card;
+ * on the state partition `.u/<hash of the id>` (SPIFFS names are short). */
+static void uploads_dir(char *out, size_t out_len)
+{
+    snprintf(out, out_len, "%s/%s", fos_assets_root(), fos_assets_flash_active() ? ".u" : ".uploads");
+}
+
 void fos_assets_cleanup_stale_uploads(void)
 {
     if (!fos_assets_available()) return;
     char dir_path[FOS_ASSETS_FULL_PATH_MAX];
-    snprintf(dir_path, sizeof(dir_path), "%s/.uploads", fos_assets_root());
+    uploads_dir(dir_path, sizeof(dir_path));
     DIR *dir = opendir(dir_path);
     if (!dir) return;
     struct dirent *entry;
@@ -303,6 +321,12 @@ static int pending_upload_parts(const char *dir_path)
 
 static void chunk_part_path(char *out, size_t out_len, const char *upload_id)
 {
+    if (fos_assets_flash_active()) {
+        uint32_t hash = 2166136261u; /* FNV-1a */
+        for (const char *c = upload_id; *c; c++) hash = (hash ^ (uint8_t)*c) * 16777619u;
+        snprintf(out, out_len, "%s/.u/%08lx", fos_assets_root(), (unsigned long)hash);
+        return;
+    }
     snprintf(out, out_len, "%s/.uploads/%s.part", fos_assets_root(), upload_id);
 }
 
@@ -322,7 +346,7 @@ esp_err_t fos_assets_chunk_begin(const char *upload_id, long long offset,
         return ESP_ERR_INVALID_ARG;
     }
     char dir[FOS_ASSETS_FULL_PATH_MAX];
-    snprintf(dir, sizeof(dir), "%s/.uploads", fos_assets_root());
+    uploads_dir(dir, sizeof(dir));
     if (mkdir(dir, 0775) != 0 && errno != EEXIST) {
         ESP_LOGW(TAG, "mkdir %s failed: errno=%d", dir, errno);
         set_err(err, "write_failed");
