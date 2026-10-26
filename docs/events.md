@@ -247,7 +247,13 @@ the firmware queues the glass's reports as `pointerDown` / `pointerMove` /
 controller's track id; a finger's arrival is a `pointerMove` to where it
 landed, then its `pointerDown`, as the Linux evdev translator sends it) and the render task hands them to this dispatcher
 between passes, so a touch made during a render arrives as a tap when the
-runtime is free. `pointerDown` / `pointerUp`
+runtime is free. Its `pointerDown` and `pointerUp` carry `atMs`, when the
+glass reported them, on the clock of a button's `atMs` (below; the
+dispatcher's alone, a scene's pointer events do not pass it on), and the
+gestures are timed from those, never from the delivery; the render task
+hands the glass's reports over before it ticks the dispatcher. Before
+2026-10-26 a press whose `active:` style started a 1 s render had its release
+delivered after it, and the tap was a `longPress`. `pointerDown` / `pointerUp`
 add `button`: 0 left (and a touch, a pen tip), 1 right, 2 middle, 3 side,
 4 extra, 5 forward, 6 back, 7 task; `buttons` is the mask of what is held
 (`1 << button`). `pointerId` 0 is the one mouse cursor; a finger or a pen

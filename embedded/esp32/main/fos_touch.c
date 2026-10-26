@@ -107,6 +107,7 @@ typedef struct {
     uint8_t id;
     uint16_t x; /* wire units */
     uint16_t y;
+    int64_t at_ms; /* esp_timer, when the controller reported it */
 } touch_event_t;
 
 typedef enum { CTRL_GT911 = 0, CTRL_FT6X36 = 1 } controller_t;
@@ -141,12 +142,14 @@ static bool s_woke = false;
 
 static void enqueue(touch_kind_t kind, uint8_t id, uint16_t x, uint16_t y)
 {
+    int64_t at_ms = esp_timer_get_time() / 1000;
     portENTER_CRITICAL(&s_queue_lock);
     if (kind == TOUCH_MOVE && s_count > 0) {
         touch_event_t *tail = &s_queue[(s_head + s_count - 1) % TOUCH_QUEUE_LEN];
         if (tail->kind == TOUCH_MOVE && tail->id == id) {
             tail->x = x;
             tail->y = y;
+            tail->at_ms = at_ms;
             portEXIT_CRITICAL(&s_queue_lock);
             return;
         }
@@ -161,6 +164,7 @@ static void enqueue(touch_kind_t kind, uint8_t id, uint16_t x, uint16_t y)
     slot->id = id;
     slot->x = x;
     slot->y = y;
+    slot->at_ms = at_ms;
     s_count++;
     portEXIT_CRITICAL(&s_queue_lock);
     fos_client_wake_for_events();
@@ -194,15 +198,18 @@ bool fos_touch_process_events(void)
         char payload[160];
         /* The wire position, the finger (pointer ids from 1: 0 is the one
          * mouse cursor), `touch`, and for a down or an up the primary
-         * button and what is held after it (docs/events.md "Pointer"). */
+         * button, what is held after it and when the glass said so
+         * (`atMs`, the clock the Nim side reads): the queue is drained
+         * between renders, and a tap is timed by its own two reports, not
+         * by when they were delivered (docs/events.md "Pointer"). */
         if (event.kind == TOUCH_MOVE) {
             snprintf(payload, sizeof(payload),
                      "{\"x\":%u,\"y\":%u,\"pointerId\":%u,\"pointerType\":\"touch\",\"buttons\":1}",
                      event.x, event.y, event.id + 1);
         } else {
             snprintf(payload, sizeof(payload),
-                     "{\"x\":%u,\"y\":%u,\"pointerId\":%u,\"pointerType\":\"touch\",\"button\":0,\"buttons\":%d}",
-                     event.x, event.y, event.id + 1, event.kind == TOUCH_DOWN ? 1 : 0);
+                     "{\"x\":%u,\"y\":%u,\"pointerId\":%u,\"pointerType\":\"touch\",\"button\":0,\"buttons\":%d,\"atMs\":%lld}",
+                     event.x, event.y, event.id + 1, event.kind == TOUCH_DOWN ? 1 : 0, (long long)event.at_ms);
         }
         /* `driver`: the glass talking. This is the render task, so the
          * runtime lock is free; fos_events.c asks for the render when a

@@ -538,6 +538,20 @@ void fos_client_wake_for_events(void)
     }
 }
 
+/* The input queues, then time passing, in that order: the buttons' edges and
+ * the glass's reports reach the dispatcher before a tick asks what is still
+ * held. A release waiting in the touch queue behind the render its press
+ * caused would otherwise be a finger held all along: a tap read as a long
+ * press. The render task's, like every Nim call. */
+static void process_input_events(void)
+{
+    fos_buttons_process_events();
+    fos_touch_process_events();
+    if (frameos_nim_tick()) {
+        fos_client_wake_for_events();
+    }
+}
+
 void fos_client_request_commands_sync(void)
 {
     if (s_events) {
@@ -1976,8 +1990,7 @@ static void animation_wait(fos_config_t *config, int64_t wait_us)
             fos_scenes_apply_pending_selection();
         }
         if (nim) {
-            fos_buttons_process_events();
-            fos_touch_process_events();
+            process_input_events();
             fos_schedule_tick();
         }
         if (bits & RENDER_NOW_BIT) s_loud_next = true;
@@ -2090,8 +2103,7 @@ static void client_task(void *arg)
             if (housekeeping) fos_scenes_sync(false);
             fos_scenes_apply_pending();
             fos_scenes_apply_pending_selection();
-            fos_buttons_process_events();
-            fos_touch_process_events();
+            process_input_events();
             /* A press that dispatched `setCurrentScene` (a scene's next/prev
              * button) only queued the switch. Apply it now, so this pass
              * renders the scene it asked for: after a button wake the frame
@@ -2405,11 +2417,9 @@ static void client_task(void *arg)
             int64_t settle_start_us = esp_timer_get_time();
             while (fos_buttons_busy() && esp_timer_get_time() - settle_start_us < 10 * 1000000LL) {
                 vTaskDelay(pdMS_TO_TICKS(20));
-                fos_buttons_process_events();
-                fos_touch_process_events();
+                process_input_events();
             }
-            fos_buttons_process_events();
-            fos_touch_process_events();
+            process_input_events();
             if (frameos_nim_render_requested()) {
                 force_render = true;
                 continue;
@@ -2597,8 +2607,7 @@ static void client_task(void *arg)
             if (waited_ms < slice) slice = waited_ms;
             fos_scene_state_flush(false);
             if (nim) {
-                fos_buttons_process_events();
-                fos_touch_process_events();
+                process_input_events();
                 /* Wall-clock schedule (setCurrentScene at 07:00 etc.) —
                  * evaluated on the render task, like every Nim call. */
                 if (fos_schedule_tick()) want_render = true;

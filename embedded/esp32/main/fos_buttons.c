@@ -495,12 +495,10 @@ void fos_buttons_process_events(void)
             ESP_LOGD(TAG, "gpio edge: no listener heard it");
         }
     }
-    /* Time passing: a key still held is a `longPress` each second, a short
-     * press whose double-press window closed a `press`. This runs on the render task's wait slices, so a
-     * long press lands while the finger is still down. */
-    if (frameos_nim_tick()) {
-        fos_client_wake_for_events();
-    }
+    /* Time passing (a key still held is a `longPress` each second, a short
+     * press whose double-press window closed a `press`) is the caller's
+     * tick, after the touch queue is drained too (fos_client.c
+     * process_input_events). */
 }
 
 /* ------------------------------------------------------- deep-sleep wake */

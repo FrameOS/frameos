@@ -406,6 +406,38 @@ block test_a_stamped_edge_is_timed_by_its_stamp:
   doAssert output.kinds == @["button:press"] and output[0].payload["atMs"].getInt() == base + 1000
   doAssert state.buttonsBusy == 0
 
+block test_a_stamped_touch_is_timed_by_its_stamps:
+  # The ESP32 hands the glass's reports over between renders: a press that
+  # started a 1.2 s render is followed by its release only after it. The
+  # hold is the 120 ms between their stamps, so it is a tap; unstamped, it
+  # would be a long press.
+  var state = initInputState(config(800, 480))
+  var output: seq[InputDelivery]
+  let base = t0.ticks div 1_000_000
+  discard state.applyNamedInput(evPointerDown, %*{"x": 1000, "y": 1000, "pointerId": 1,
+    "pointerType": "touch", "button": 0, "buttons": 1, "atMs": base + 1000}, eoDriver, at(1000), output)
+  state.tick(at(1000), output)
+  doAssert output.names == @[evPointerDown]
+  output.setLen(0)
+  discard state.applyNamedInput(evPointerUp, %*{"x": 1000, "y": 1000, "pointerId": 1,
+    "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 1120}, eoDriver, at(2200), output)
+  doAssert output.names == @[evPointerUp, evTap]
+  # A second tap 200 ms after the first one's stamp, delivered as late: a doubleTap.
+  output.setLen(0)
+  discard state.applyNamedInput(evPointerDown, %*{"x": 1000, "y": 1000, "pointerId": 1,
+    "pointerType": "touch", "button": 0, "buttons": 1, "atMs": base + 1320}, eoDriver, at(3400), output)
+  discard state.applyNamedInput(evPointerUp, %*{"x": 1000, "y": 1000, "pointerId": 1,
+    "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 1400}, eoDriver, at(3400), output)
+  doAssert output.names == @[evPointerDown, evPointerUp, evTap, evDoubleTap]
+  # Held 700 ms by its stamps: a long press, however soon it is delivered.
+  output.setLen(0)
+  discard state.applyNamedInput(evPointerDown, %*{"x": 1000, "y": 1000, "pointerId": 1,
+    "pointerType": "touch", "button": 0, "buttons": 1, "atMs": base + 5000}, eoDriver, at(6000), output)
+  discard state.applyNamedInput(evPointerUp, %*{"x": 1000, "y": 1000, "pointerId": 1,
+    "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 5700}, eoDriver, at(6000), output)
+  doAssert output.names == @[evPointerDown, evPointerUp, evLongPress]
+  doAssert output[2].payload["durationMs"].getInt() == 700
+
 block test_the_corpus:
   # docs/event-fixtures.json `inputState`: the cases every host answers alike.
   const fixturesPath = currentSourcePath().parentDir / ".." / ".." / ".." / ".." / "docs" / "event-fixtures.json"
