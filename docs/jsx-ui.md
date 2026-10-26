@@ -91,6 +91,14 @@ cheap is that the pictures are reconciled, not the code:
   is handed again (`parseSvg`'s `reuse`), and damageRects knows those
   elements without comparing them. Gradient ids and handler numbers are part
   of what must match.
+- **`memo(Component)`**, as React's (the prelude's, `js_runtime/runtime.nim`):
+  a component called with props shallow-equal to its last call at the same
+  place (its turn among the render's calls, or its `key`) returns the element
+  it made then, the same object. The walker gave that element a number
+  (`__frameosNode`) and takes its nodes back without reading it, its
+  handler functions copied into the render's list at the numbers they had.
+  Pass values, not functions made anew each render, and make the handlers
+  inside the component.
 
 On the SenseCAP Indicator (three frame buffers, so each is compared with
 the frame from three renders back), toggling one card of the home panel in

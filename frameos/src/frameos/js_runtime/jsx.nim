@@ -23,12 +23,28 @@ const
 
 {.push raises: [].}
 
-type JsxReader = object
-  ctx: ptr JSContext
-  images: ptr Table[int, Image]
-  nodes: int
-  handlers: JSValue  # this render's onClick, onLongPress, ... functions
-  handlerCount: int
+type
+  JsxKept = object
+    id: int
+    node: SvgNode
+    firstHandler, handlers, nodes: int
+    used: bool
+
+  JsxMemo* = object
+    ## The nodes of elements memo() made (the prelude's), by the number the
+    ## walker gave each: memo returns the same element object while its props
+    ## are the same, and its nodes are taken back without reading it.
+    kept: seq[JsxKept]
+    nextId: int
+
+  JsxReader = object
+    ctx: ptr JSContext
+    images: ptr Table[int, Image]
+    nodes: int
+    handlers: JSValue  # this render's onClick, onLongPress, ... functions
+    handlerCount: int
+    previous: JSValue  # the last render's, for the handlers of kept nodes
+    memo: ptr JsxMemo
 
 proc attrName(name: string): string =
   if name == "className":
@@ -100,6 +116,28 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
       JS_FreeValue(ctx, item)
     JS_FreeValue(ctx, length)
     return
+  # An element memo() made: its number, 0 before the walker gave it one.
+  var memoId = -1
+  if not r.memo.isNil:
+    let mark = ctx.prop(v, "__frameosNode")
+    if jsIsNumber(mark):
+      memoId = ctx.int32Of(mark)
+    JS_FreeValue(ctx, mark)
+  if memoId > 0:
+    for kept in r.memo.kept.mitems:
+      # Taken back where its handlers have the numbers they had: copied
+      # from the last render's list into this one's at those numbers.
+      if kept.id == memoId and kept.firstHandler == r.handlerCount:
+        for h in kept.firstHandler ..< kept.firstHandler + kept.handlers:
+          discard JS_SetPropertyUint32(ctx, r.handlers, h.uint32, JS_GetPropertyUint32(ctx, r.previous, h.uint32))
+        r.handlerCount += kept.handlers
+        r.nodes += kept.nodes
+        kept.used = true
+        into.add kept.node
+        return
+  let
+    firstHandler = r.handlerCount
+    firstNode = r.nodes
   let node = SvgNode()
   if not ctx.stringProp(v, "type", node.tag):
     return
@@ -131,17 +169,36 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
     JS_FreePropertyEnum(ctx, tab, count)
   JS_FreeValue(ctx, props)
   into.add node
+  if memoId >= 0:
+    if memoId == 0:
+      inc r.memo.nextId
+      memoId = r.memo.nextId
+      discard JS_SetPropertyStr(ctx, v, "__frameosNode", JS_NewInt32(ctx, memoId.int32))
+    r.memo.kept.add JsxKept(id: memoId, node: node, firstHandler: firstHandler,
+      handlers: r.handlerCount - firstHandler, nodes: r.nodes - firstNode, used: true)
 
-proc jsxNode*(ctx: ptr JSContext, v: JSValueConst, images: ptr Table[int, Image]): SvgNode =
+proc jsxNode*(ctx: ptr JSContext, v: JSValueConst, images: ptr Table[int, Image],
+    memo: ptr JsxMemo = nil): SvgNode =
   ## The JSX element `v` (see jsxTag) as a node tree. Image refs in `src` or
   ## `href` are looked up in `images`. Handler props (`onClick`) become the
   ## global `__frameosHandlers` of this render, numbered in the attributes
   ## (`on-click="3"`), until the next tree replaces them.
-  var
-    reader = JsxReader(ctx: ctx, images: images, handlers: JS_NewArray(ctx))
-    nodes: seq[SvgNode]
-  reader.addNodes(v, nodes, 0)
   let global = JS_GetGlobalObject(ctx)
+  var
+    reader = JsxReader(ctx: ctx, images: images, handlers: JS_NewArray(ctx), memo: memo,
+      previous: ctx.prop(global, "__frameosHandlers"))
+    nodes: seq[SvgNode]
+  if not memo.isNil:
+    for kept in memo.kept.mitems:
+      kept.used = false
+  reader.addNodes(v, nodes, 0)
+  if not memo.isNil:
+    # What this render's tree no longer holds is let go.
+    var i = 0
+    while i < memo.kept.len:
+      if memo.kept[i].used: inc i
+      else: memo.kept.del(i)
+  JS_FreeValue(ctx, reader.previous)
   discard JS_SetPropertyStr(ctx, global, "__frameosHandlers", reader.handlers)
   JS_FreeValue(ctx, global)
   if nodes.len > 0: nodes[0] else: SvgNode(tag: "svg")

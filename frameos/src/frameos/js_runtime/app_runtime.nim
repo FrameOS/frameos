@@ -54,6 +54,7 @@ type
     initialized*: bool
     nextImageId*: int
     images*: Table[int, Image]
+    jsxMemo*: JsxMemo ## the nodes of memo()'s elements (js_runtime/jsx.nim)
     transientImageIds: seq[int]
     ## `frameos.remember` / `recall`: values the app keeps between renders, as
     ## JSON text. Held here and not in the interpreter because an ESP32 tears
@@ -1712,6 +1713,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   function __frameosInvoke(name) {
     const mod = __frameosExports();
     const fn = mod && mod[name];
+    if (name === "get") globalThis.__frameosRender = (globalThis.__frameosRender | 0) + 1;
     if (typeof fn === "function") {
       return fn(globalThis.__frameosAppInstance, globalThis.__frameosContext);
     }
@@ -2161,7 +2163,8 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
     # has always been.
     let tag = jsxTag(ctx, payload)
     if tag.len > 0 and tag != "image":
-      return VImage(runtime.imageFromJsx(owner, context, jsxNode(ctx, payload, addr runtime.images)))
+      return VImage(runtime.imageFromJsx(owner, context,
+        jsxNode(ctx, payload, addr runtime.images, addr runtime.jsxMemo)))
 
   if expectedType == "image" or jsIsObject(payload) or JS_IsArray(ctx, payload) != 0:
     let svgSpec = svgImageSpecFromJs(ctx, payload)

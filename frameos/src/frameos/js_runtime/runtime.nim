@@ -97,6 +97,30 @@ const __frameosJsx = (type, props, ...children) => {
 };
 globalThis.__frameosFragment = __frameosFragment;
 globalThis.__frameosJsx = __frameosJsx;
+// memo(Component), as React's: called with props shallow-equal to its last
+// call at the same place (its turn among this render's calls, or its key), it
+// returns the element it made then, the same object, and the walker takes
+// that element's nodes back without reading it (js_runtime/jsx.nim).
+const __frameosSameProps = (a, b) => {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const k of keys) if (!Object.is(a[k], b[k])) return false;
+  return true;
+};
+globalThis.memo = (component) => {
+  let render = -1, turn = 0;
+  const last = new Map();
+  return (props) => {
+    if (render !== globalThis.__frameosRender) { render = globalThis.__frameosRender; turn = 0; }
+    const slot = props.key !== undefined ? "k" + props.key : turn++;
+    const before = last.get(slot);
+    if (before !== undefined && __frameosSameProps(before[0], props)) return before[1];
+    const element = component(props);
+    if (element !== null && typeof element === "object" && !Array.isArray(element)) element.__frameosNode = 0;
+    last.set(slot, [props, element]);
+    return element;
+  };
+};
 """)
 
 # -------------------------

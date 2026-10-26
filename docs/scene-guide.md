@@ -450,6 +450,12 @@ export function get(app, context) {
   `active:` and `group-hover:` (inside a `group`) follow the pointer. Each is
   a render: on e-paper a tap answers in a refresh, so keep hover: and
   active: for LCDs.
+- Every render builds the whole tree again, and what did not change is
+  taken back laid out and drawn: an LCD repaints only what changed. For a
+  card repeated in a list, `memo(Card)` (as React's) skips running it while
+  its props are the same; pass it values (`<Card i={i} on={on[i]} />`) and
+  make its `onClick` inside it, since a function made anew each render is
+  never equal.
 - Not there: clipping (`overflow-hidden`), shadows, transforms, `z-*`,
   `focus:`. `docs/jsx-ui.md` has the full list.
 
@@ -630,6 +636,14 @@ declare namespace JSX {
   interface ElementChildrenAttribute { children: {}; }
   interface IntrinsicElements { [tag: string]: FrameOSElementProps; }
 }
+/**
+ * memo(Component), as React's: called with props shallow-equal to its last
+ * call at the same place (its turn among this render's calls, or its key),
+ * the component does not run and the frame takes that element's layout and
+ * drawing back as they were. A function made anew each render
+ * (onClick={() => ...}) is never equal: pass values, make handlers inside.
+ */
+declare function memo<P extends Record<string, any>>(component: (props: P) => any): (props: P & { key?: string | number }) => any;
 
 interface FrameOSApp {
   nodeId: number;
