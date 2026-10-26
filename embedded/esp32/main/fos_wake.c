@@ -79,3 +79,20 @@ uint32_t fos_wake_aligned_sleep_seconds(int64_t utc_now, uint32_t interval_sec,
     if (until > (int64_t)UINT32_MAX) until = UINT32_MAX;
     return (uint32_t)until;
 }
+
+int64_t fos_wake_aligned_sleep_ms(int64_t utc_now_ms, uint32_t interval_sec,
+                                  fos_wake_offset_fn offset_minutes_at)
+{
+    int64_t second = utc_now_ms / 1000;
+    if (utc_now_ms % 1000 < 0) second--;
+    uint32_t until = fos_wake_aligned_sleep_seconds(second, interval_sec, offset_minutes_at);
+    return (second + (int64_t)until) * 1000 - utc_now_ms;
+}
+
+uint32_t fos_wake_slice_ticks(int64_t left_us, uint32_t max_slice_ms, uint32_t tick_ms)
+{
+    int64_t tick_us = (int64_t)(tick_ms ? tick_ms : 1) * 1000;
+    int64_t slice_us = left_us < (int64_t)max_slice_ms * 1000 ? left_us : (int64_t)max_slice_ms * 1000;
+    int64_t ticks = (slice_us + tick_us - 1) / tick_us;
+    return ticks < 1 ? 1 : (uint32_t)ticks;
+}
