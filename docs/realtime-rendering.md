@@ -269,6 +269,27 @@ every ten seconds, not with every second's housekeeping: a sample is three
 heap walks and a line the provider's Metrics panel stores, and once a second
 was 3,600 an hour.
 
+### Photos in motion: Ken Burns
+
+The store's Ken Burns slideshow is data/localImage, cached per cycle, under
+render/zoomPan at 24 fps. On the Indicator (2026-10-25) it went from 0.4 fps
+with every photo refused to ~6.5 fps between photo changes:
+
+| Step | Frame |
+| --- | --- |
+| Before: pixie's float `getRgbaSmooth` per canvas pixel (~10 µs each) | 2.3 s |
+| Fixed-point bilinear (`utils/resample.nim`, `-O2`): columns precomputed, each source row interpolated once for two target rows | 330 ms |
+| Onto a 565 canvas from a 565 copy of the photo made once (dithered there, not per frame), mixed in spread words | ~150 ms |
+
+The photos had not shown at all: a progressive JPEG decoded to a new image
+sized its strips to the whole decode budget and was then refused for the
+output next to them (fixed in pixie, which now plans the output's room
+first). The cached photo is let go before the next one decodes
+(`withCache`), and kept past the 1 MB memory limit while render headroom
+stays above `RenderMemoryShortBytes` (a 524 px photo is 1.1 MB; refused, it
+was decoded again every frame). What is left, the decode at each photo
+change and the memory-bound draw, is in `docs/realtime-todo.md`.
+
 ### The Pi
 
 The interpreter's savings above are the Pi's too. The Linux path's own

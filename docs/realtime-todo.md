@@ -60,7 +60,22 @@ SVG path work. Roughly in order of what each would buy there:
    canvas with cover or stretch covers every pixel opaquely; the decode path
    could settle the owed background the way the SVG path does
    (`takeDecodeTarget` with `deferBackground`).
-9. **The Pi.** The framebuffer driver converts into a staging buffer and
+9. **A slideshow's photo change.** Ken Burns (data/localImage under
+   render/zoomPan) freezes for the decode every time its photo changes:
+   3.7 s for a 640x640 baseline JPEG and 6.3 s for a progressive one on the
+   Indicator at 240 MHz (2026-10-25), next to ~150 ms frames. The file read
+   is a small part (the flash store serves ~140 KB/s over HTTP) and `-O2` for
+   pixie's JPEG module bought ~10% for 9 KB: profile the decode (coefficient
+   and channel planes in PSRAM; a progressive photo also decodes in strips,
+   ~20 passes at the memory a cached photo leaves), then consider decoding
+   straight to 565 or across several frames.
+10. **Full-frame motion is memory-bound.** zoomPan's draw is ~100-130 ms on
+   the Indicator after the fixed-point and 565 work (from 2.3 s): every frame
+   writes the 460 KB back buffer and reads the photo through the PSRAM cache
+   while the LCD scans the front one. 24 fps for a frame that changes every
+   pixel needs a faster bus (120 MHz PSRAM, above) or a draw that touches
+   less memory.
+11. **The Pi.** The framebuffer driver converts into a staging buffer and
    `write()`s it, opening and closing `/dev/fb0` every frame: convert straight
    into an mmapped framebuffer (a full-frame copy and a syscall less), with
    the rotation fused into that pass (a scalar `rotateDegrees` per frame on a

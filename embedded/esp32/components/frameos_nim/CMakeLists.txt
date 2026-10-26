@@ -39,7 +39,8 @@ if(NIM_GENERATED_SRCS)
         "@fcvkvr@foyraqf.nim.c"    # pixie/blends
         "@fcvkvr@fvagreany.nim.c"  # pixie/internal
         "@fcvkvr@feto565.nim.c"    # pixie/rgb565
-        "@fcvkvr@fpbzzba.nim.c")   # pixie/common
+        "@fcvkvr@fpbzzba.nim.c"    # pixie/common
+        "@fsenzrbf@fhgvyf@ferfnzcyr.nim.c") # frameos/utils/resample: zoomPan's frame
     foreach(src ${NIM_GENERATED_SRCS})
         foreach(hot ${FRAMEOS_NIM_HOT_MODULES})
             string(FIND "${src}" "${hot}" at)
