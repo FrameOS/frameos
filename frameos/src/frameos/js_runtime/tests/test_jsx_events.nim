@@ -70,6 +70,20 @@ suite "jsx events":
     check dispatchUiEvent("tests/jsx-click", "tap", at(72, 37))
     check ui.render()[100, 50] == rgbx(0xef, 0x44, 0x44, 255)
 
+  test "a scene loaded again takes its taps to its new app":
+    # Switched away and back: the scene and its app are new, the UI's target
+    # is not. The tap must run the new app's handler, not the old one's.
+    let before = newUi(counter, "tests/jsx-again")
+    discard before.render()
+    let again = newUi(counter, "tests/jsx-again")
+    check again.render()[100, 50] == rgbx(0xef, 0x44, 0x44, 255)
+    check dispatchUiEvent("tests/jsx-again", "tap", at(100, 50))
+    check again.render()[100, 50] == rgbx(0x22, 0xc5, 0x5e, 255)
+    # A scene torn down leaves no target behind.
+    forgetUiTarget("tests/jsx-again", 1)
+    check not uiListens("tests/jsx-again", "tap")
+    check uiTarget("tests/jsx-again", 1, create = false).isNil
+
   test "the handler hears where, and can change the scene's state":
     let ui = newUi("""
       export const get = (app) => (

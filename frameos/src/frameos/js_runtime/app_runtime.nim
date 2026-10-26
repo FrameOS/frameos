@@ -1544,6 +1544,8 @@ proc releaseJsAppRuntime*(app: AppRoot) =
   ## itself after about seven.
   if not (app of DynamicJsApp):
     return
+  if not app.scene.isNil:
+    forgetUiTarget(app.scene.id.string, app.nodeId.int)
   let runtime = DynamicJsApp(app).runtime
   if runtime.isNil:
     return
@@ -1980,12 +1982,13 @@ proc keepUiRegions(runtime: JsAppRuntime, owner: AppRoot, sceneId: string,
   target.regions = move(regions)
   target.offsetX = x.float32
   target.offsetY = y.float32
-  if target.call.isNil:
-    target.call = proc(handler: int, name: string, event: JsonNode, localX, localY: float32) {.closure, raises: [].} =
-      try:
-        runtime.callJsxHandler(owner, handler, name, event, localX, localY)
-      except Exception:
-        discard # a handler's failure is logged; one in the logging has nowhere to go
+  # Into the app that drew these regions, every render: the scene can be
+  # loaded again since the last one (a switch away and back), with a new app.
+  target.call = proc(handler: int, name: string, event: JsonNode, localX, localY: float32) {.closure, raises: [].} =
+    try:
+      runtime.callJsxHandler(owner, handler, name, event, localX, localY)
+    except Exception:
+      discard # a handler's failure is logged; one in the logging has nowhere to go
 
 proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, root: SvgNode): Image =
   ## A JSX tree an app returned: an `<svg>` drawn as it is, anything else a

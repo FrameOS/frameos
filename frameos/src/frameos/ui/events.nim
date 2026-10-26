@@ -39,6 +39,14 @@ proc uiTarget*(sceneId: string, nodeId: int, create = true): UiTarget =
     result = UiTarget(sceneId: sceneId, nodeId: nodeId)
     targets.add result
 
+proc forgetUiTarget*(sceneId: string, nodeId: int) =
+  ## The app node's scene is torn down: its regions, what the pointer was
+  ## doing over them and its way into the app go with it. A target kept
+  ## called the app the scene had before, which was gone.
+  for i in countdown(targets.high, 0):
+    if targets[i].sceneId == sceneId and targets[i].nodeId == nodeId:
+      targets.delete(i)
+
 proc handlerKind(event: string): int =
   ## The UiEvent a pointer event runs handlers for, or -1.
   case event
