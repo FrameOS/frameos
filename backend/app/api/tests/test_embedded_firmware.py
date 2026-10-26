@@ -628,10 +628,16 @@ def test_embedded_hardware_preset_for_seeed_sensecap_indicator():
     assert embedded_buffer_size(480, 480, embedded_firmware_module.FOS_PIXEL_RGB565) == 480 * 480 * 2
     # The LCD's wiring is the firmware's own board table: no EPD pins.
     assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
-    # The top button, held, walks to the next scene.
+    # The top button: pressed it switches the screen, twice the next scene,
+    # held the previous one; swiped in from the right or left edge, the next
+    # or the previous scene.
     assert embedded_gpio_buttons_for_frame(frame) == [(38, "BUTTON")]
     assert frame.event_map == [
-        {"event": "button", "match": {"label": "BUTTON", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+        {"event": "button", "match": {"label": "BUTTON", "action": "press"}, "emit": "toggleScreen", "as": {}},
+        {"event": "button", "match": {"label": "BUTTON", "action": "doublePress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+        {"event": "button", "match": {"label": "BUTTON", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+        {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+        {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
     ]
     # No battery, no buzzer, no microphone, no TF socket the chip can reach
     # (the card slot is the RP2040's).
