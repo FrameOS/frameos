@@ -210,6 +210,69 @@ export function get(app) {
   - An interpreter without pictures needs 2 MB after a decode
     (`utils/memory.nim`).
 
+### Canvases
+
+A picture the app draws into, kept between renders, for a paint page or a
+chart that grows a point at a time:
+
+```tsx
+let canvas = null
+export function get(app) {
+  canvas = frameos.canvas('paint', 448, 276, '#f1f5f9')
+  if (canvas.fresh) replay(canvas) // made just now: draw the record into it again
+  return (
+    <div onPointerMove={(e) => frameos.draw(canvas, <line x1={last.x} y1={last.y} x2={e.localX}
+      y2={e.localY} stroke="#0f172a" strokeWidth={6} strokeLinecap="round" />)}>
+      <img className="w-[448px] h-[276px]" src={canvas} />
+    </div>
+  )
+}
+```
+
+- **`frameos.canvas(key, width, height, color)`** is the app's canvas called
+  `key`. It is made and filled with `color` (white by default) the first
+  time, or again when the size changes, and it is the same picture every
+  render while the interpreter lives. An app has 4 at most; a fifth key lets
+  the oldest go.
+- **`fresh` is true the render it was made.** A canvas goes with its
+  interpreter, as kept photos do (an ESP32 short of memory, a new scene), so
+  keep what was drawn as a compact record in `frameos.remember` and draw it
+  into a fresh canvas. Only then, never every render.
+- **Undo starts from a second canvas.** Drawing a full record again takes
+  seconds on an ESP32 (~6 s for 3,000 points of 18 px strokes on the SenseCAP
+  Indicator). Keep all but the last few strokes in another canvas too, and
+  undo by drawing it back, `<image href={base} x={0} y={0} width={w}
+  height={h} preserveAspectRatio="none" />` (its rows copied), then the
+  strokes it does not hold.
+- **`frameos.draw(canvas, content)`** draws SVG over what is there: JSX
+  (`<line>`, `<circle>`, `<path>`, `<polyline>`, `<rect>`, `<g>`, or an
+  `<svg viewBox>` for other units) or SVG markup, in the canvas's pixels.
+  Only the box the drawing touches is painted. `frameos.clear(canvas, color)`
+  fills it. Both work in handlers too, the way a drag paints.
+- **A frame repaints what was drawn**, not the canvas and not the rest of the
+  UI.
+  - Each draw is noted with its box (`utils/canvas_log.nim`), and each frame
+    an LCD buffer holds knows which version of the canvas it showed.
+  - The next render into that buffer repaints the boxes drawn since, where
+    the `<img>` puts them (`utils/svg_frames.nim`). With three buffers, that
+    is every box since each one's own frame.
+  - A canvas drawn into more often than its log keeps (48 draws) is
+    repainted whole.
+  - pixie's `damageRects` cannot see the change itself: the element and its
+    picture are the same objects.
+  - A stroke's box is its path grown by how far the stroke reaches: half the
+    width for round or bevel joins, round or butt caps and a single line,
+    and up to the miter limit for a miter join. Draw strokes with
+    `strokeLinejoin="round"` and `strokeLinecap="round"`.
+  - A box inside the picture draws the picture alone (a 565 canvas has no
+    alpha, so nothing under it shows), its rows copied as they are.
+  - On the SenseCAP Indicator a finger drawing repaints ~4K pixels a frame
+    in ~4 ms, ~50 ms a frame in all, and that stays flat after hundreds of
+    strokes.
+- **It is in the canvas's pixel format**, as kept photos are: on an ESP32,
+  RGB565 (a 448x276 canvas is 242 KB), and drawn 1:1 by `<img>` at its own
+  size.
+
 ## Layout
 
 A subset of CSS, with Tailwind's preflight: every box is a border-box (`w-24

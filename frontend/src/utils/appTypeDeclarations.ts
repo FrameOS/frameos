@@ -84,6 +84,12 @@ interface FrameOSImageRef {
   width: number;
   height: number;
 }
+/** What frameos.canvas returns: an image ref an img's src takes, that frameos.draw and frameos.clear draw into. */
+interface FrameOSCanvasRef extends FrameOSImageRef {
+  canvas: string;
+  version: number;
+  fresh: boolean;
+}
 
 interface FrameOSNodeRef {
   __frameosType: "node";
@@ -232,6 +238,16 @@ declare const frameos: {
   };
   /** Lets a picture fetchImage kept ({ keep: true }) go. False for one that was not kept, or is gone. */
   releaseImage(image: FrameOSImageRef | { image: FrameOSImageRef | null } | null): boolean;
+  /**
+   * The app's canvas called key: a picture it draws into and shows as an img's src. Made and filled with
+   * color (white) the first time, or when the size changes; the same picture every render while the interpreter
+   * lives (4 at most). Its fresh is true the render it was made: draw your record into it again then.
+   */
+  canvas(key: string, width: number, height: number, color?: string): FrameOSCanvasRef | null;
+  /** Draws SVG (JSX: <line>, <circle>, <path>, <polyline>, <g>, an <svg viewBox>; or markup) into a canvas, over what is there. */
+  draw(canvas: FrameOSCanvasRef, content: FrameOSElement | string): boolean;
+  /** Fills a canvas with color (white by default). */
+  clear(canvas: FrameOSCanvasRef, color?: string): boolean;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

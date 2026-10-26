@@ -178,11 +178,13 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
       handlers: r.handlerCount - firstHandler, nodes: r.nodes - firstNode, used: true)
 
 proc jsxNode*(ctx: ptr JSContext, v: JSValueConst, images: ptr Table[int, Image],
-    memo: ptr JsxMemo = nil): SvgNode =
+    memo: ptr JsxMemo = nil, drawing = false): SvgNode =
   ## The JSX element `v` (see jsxTag) as a node tree. Image refs in `src` or
   ## `href` are looked up in `images`. Handler props (`onClick`) become the
   ## global `__frameosHandlers` of this render, numbered in the attributes
-  ## (`on-click="3"`), until the next tree replaces them.
+  ## (`on-click="3"`), until the next tree replaces them. `drawing`: what
+  ## `frameos.draw` paints into a canvas, whose handlers mean nothing and
+  ## must not replace the UI's.
   let global = JS_GetGlobalObject(ctx)
   var
     reader = JsxReader(ctx: ctx, images: images, handlers: JS_NewArray(ctx), memo: memo,
@@ -199,7 +201,10 @@ proc jsxNode*(ctx: ptr JSContext, v: JSValueConst, images: ptr Table[int, Image]
       if memo.kept[i].used: inc i
       else: memo.kept.del(i)
   JS_FreeValue(ctx, reader.previous)
-  discard JS_SetPropertyStr(ctx, global, "__frameosHandlers", reader.handlers)
+  if drawing:
+    JS_FreeValue(ctx, reader.handlers)
+  else:
+    discard JS_SetPropertyStr(ctx, global, "__frameosHandlers", reader.handlers)
   JS_FreeValue(ctx, global)
   if nodes.len > 0: nodes[0] else: SvgNode(tag: "svg")
 
