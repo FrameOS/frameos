@@ -336,9 +336,9 @@ def snapshot_scenes(files, process, port, receiver, snapshots_dir):
     for scene_file in files:
         base_id = scene_file.stem
         # A fixture that says `execution: "interpreted"` has no compiled
-        # twin (makescenes.py): one render, snapshotted under its own name.
+        # twin (makescenes.py): one render, kept under its own name below.
         interpreted_only = (json.loads(scene_file.read_text()).get('settings') or {}).get('execution') == 'interpreted'
-        variants = [(base_id + '_interpreted', base_id)] if interpreted_only else [
+        variants = [(base_id + '_interpreted', base_id + '_interpreted')] if interpreted_only else [
             (base_id, base_id + '_compiled'),
             (base_id + '_interpreted', base_id + '_interpreted'),
         ]
@@ -372,8 +372,17 @@ def snapshot_scenes(files, process, port, receiver, snapshots_dir):
             image_size = headers.get("X-FrameOS-Image-Bytes", str(len(upload["body"])))
             print(f"Snapshot captured from HTTP upload: {snapshot_path} ({image_size} bytes, hash {image_hash})")
         if interpreted_only:
-            if (snapshots_dir / f"{base_id}.png").exists():
+            # As for a pair below: the committed snapshot stays when the new
+            # render is within the threshold, so a runner's antialiasing
+            # (glyph and corner edges a level apart) is not committed again.
+            interpreted_path = snapshots_dir / f"{base_id}_interpreted.png"
+            final_path = snapshots_dir / f"{base_id}.png"
+            if interpreted_path.exists():
                 print(f"✅ Snapshot captured for interpreted-only scene {base_id}")
+                if final_path.exists() and is_similar_image(final_path, interpreted_path):
+                    interpreted_path.unlink()
+                else:
+                    interpreted_path.replace(final_path)
             else:
                 print(f"❌ Missing snapshot for scene {base_id}")
                 failures += 1

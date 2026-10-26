@@ -21,7 +21,8 @@ cd e2e
 
 A fixture that says `settings.execution: "interpreted"` is rendered by the
 interpreter only (its code nodes are JavaScript with no Nim twin, so there is
-no compiled half to compare; the snapshot is `<id>.png` straight away), and a
+no compiled half to compare; the render is `<id>.png`, kept like a pair's when
+within the threshold of the committed one), and a
 fixture's `e2eEvents` list is POSTed to the frame's `/event/<name>` after the
 first render, so an input scene (`inputTouch`, `inputKeyboard`) is snapshotted
 showing what it heard: the last upload of the burst, taken once nothing more
