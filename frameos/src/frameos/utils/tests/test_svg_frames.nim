@@ -103,4 +103,45 @@ block:
   doAssert renderInto(42, frame(42)) == W * H
   doAssert closeTo(buffers[0], wholeRender(frame(42)))
 
+
+block:
+  # Three buffers in turn (the SenseCAP Indicator's), a panel of six cards
+  # whose switches flip one at a time and a count in the corner: a frame
+  # repaints boxes around what changed since its buffer's frame (the cards
+  # flipped in the last three renders, and the count), never the canvas
+  # between them, and still comes out as a whole render.
+  proc panel(i: int): string =
+    result = &"""<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}">""" &
+      &"""<rect x="0" y="0" width="{W}" height="{H}" fill="#0f172a"/>"""
+    for k in 0 ..< 6:
+      let
+        on = (i + k) mod 6 == 0
+        x = 8 + (k mod 3) * 78
+        y = 40 + (k div 3) * 58
+      result.add &"""<rect x="{x}" y="{y}" width="70" height="50" rx="10" fill="{(if on: "#fcd34d" else: "#334155")}"/>"""
+      result.add &"""<circle cx="{x + (if on: 58 else: 46)}" cy="{y + 12}" r="6" fill="#fff"/>"""
+    result.add &"""<rect x="180" y="8" width="{20 + (i mod 5) * 8}" height="14" rx="3" fill="#94a3b8"/>"""
+    result.add "</svg>"
+  var
+    store3: array[3, seq[uint16]]
+    three: array[3, Image]
+  for b in 0 .. 2:
+    store3[b] = newSeq[uint16](W * H)
+    three[b] = newImage565Over(W, H, addr store3[b][0])
+    three[b].ditherStores = true
+  var most = 0
+  for i in 0 ..< 18:
+    let target = three[i mod 3]
+    beginPanelFrame(target.bufferPointer, 0)
+    var owed = some(color(0, 0, 0, 1))
+    svgFramePixelsForTest = -1
+    doAssert renderSvgFrame(panel(i), target, owed, true)
+    endPanelFrame()
+    if i >= 3:
+      most = max(most, svgFramePixelsForTest)
+    doAssert closeTo(target, wholeRender(panel(i))), &"frame {i} differs from a whole render"
+  # Two cards' boxes and the count's at most (the switch that came on and
+  # the one that went off since the buffer's frame): under a quarter.
+  doAssert most > 0 and most < W * H div 4, $most
+
 echo "svg frames ok"

@@ -8,9 +8,11 @@
 ## `wholeFrame`) and the SVG begins with an opaque full-canvas rect — and
 ## nothing else has written into the buffer since (the firmware's write
 ## generation for it), the buffer holds exactly that SVG's render. The next
-## render into it then repaints pixie's `damage` box between the two SVGs
-## and leaves the rest as it is: for DVD Logo Bounce on the SenseCAP
-## Indicator, a box around the logo instead of 230,400 pixels.
+## render into it then repaints the boxes pixie's `damageRects` finds between
+## the two SVGs, each drawing only the elements over it, and leaves the rest
+## as it is: for DVD Logo Bounce on the SenseCAP Indicator, a box around the
+## logo instead of 230,400 pixels; for a JSX home panel whose switch was
+## flipped, that card and the count it changed, not the canvas between them.
 ##
 ## The record is taken off the shelf when a render into the buffer begins
 ## and put back only by a render that drew the buffer whole this way, so a
@@ -22,6 +24,10 @@ import pixie
 import pixie/fileformats/svg
 import frameos/utils/image
 import frameos/utils/memory
+
+const MaxRepaints = 6
+  ## Boxes a frame repaints at most (pixie's damageRects joins the rest):
+  ## each costs a look at every element's bounds, and those over it.
 
 type HeldFrame = object
   buffer: pointer
@@ -90,20 +96,22 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
       return false
     return true
   owed = none(Color) # waived: the SVG's first paint covers every pixel
-  var box = (full: true, x: 0, y: 0, w: target.width, h: target.height)
+  var rects = @[(x: 0, y: 0, w: target.width, h: target.height)]
   if held.isSome and held.get().generation == panelGeneration and
       held.get().width == target.width and held.get().height == target.height:
-    box = damage(held.get().svg, parsed, target.width, target.height)
+    rects = damageRects(held.get().svg, parsed, target.width, target.height, MaxRepaints).rects
+  when defined(testing):
+    svgFramePixelsForTest = 0
   try:
-    if box.full:
-      parsed.renderInto(target)
-      box = (true, 0, 0, target.width, target.height)
-    elif box.w > 0:
-      parsed.renderInto(target.view(box.x, box.y, box.w, box.h), box.x, box.y)
+    for r in rects:
+      if r.w == target.width and r.h == target.height:
+        parsed.renderInto(target)
+      else:
+        parsed.renderInto(target.view(r.x, r.y, r.w, r.h), r.x, r.y)
+      when defined(testing):
+        svgFramePixelsForTest += r.w * r.h
   except CatchableError:
     return false
-  when defined(testing):
-    svgFramePixelsForTest = box.w * box.h
   heldFrames.add(HeldFrame(buffer: panelBuffer, generation: panelGeneration,
     width: target.width, height: target.height, svg: parsed))
   true
