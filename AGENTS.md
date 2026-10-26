@@ -98,7 +98,7 @@
   report. The ESP32 compiles the pointer and gesture half too (the reTerminal
   Sticky's and the E1003's GT911 glass, `embedded/esp32/main/fos_touch.c`, queues
   `pointerDown` / `pointerMove` / `pointerUp` on the wire and the render task
-  delivers them), not the keyboard half and not the old-name aliases. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
+  delivers them) and the old-name aliases with them, not the keyboard half. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
   evdev translator's `test_translate.nim` are where a rule gets its test.
 
 - **Two event maps, one rule shape** (`docs/events.md` "Event map";

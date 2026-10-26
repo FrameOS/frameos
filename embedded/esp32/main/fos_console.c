@@ -22,6 +22,7 @@
 
 #include "cJSON.h"
 #include "fos_assets.h"
+#include "fos_assets_flash.h"
 #include "fos_assets_sd.h"
 #include "fos_battery.h"
 #include "fos_board.h"
@@ -246,6 +247,10 @@ static int cmd_status(int argc, char **argv)
            (int)fos_assets_sd_mounted(), sd_pins,
            (unsigned long)config->assets_sd.max_freq_khz,
            (int)config->assets_sd.autoformat);
+    if (fos_assets_flash_active()) {
+        printf("assets_flash: on the state partition, %lld KB free for assets\n",
+               (long long)(fos_assets_flash_free_bytes() / 1024));
+    }
     if (fos_assets_sd_last_error()[0]) {
         printf("sd_error:    %s\n", fos_assets_sd_last_error());
     }

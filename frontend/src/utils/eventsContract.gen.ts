@@ -344,7 +344,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "none",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     }
   },
@@ -368,7 +368,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "none",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     }
   },
@@ -392,7 +392,7 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     "log": "none",
     "hosts": {
       "linux": true,
-      "esp32": false,
+      "esp32": true,
       "wasm": true
     }
   },
