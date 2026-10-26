@@ -556,6 +556,25 @@ void fos_client_wake_for_events(void)
     }
 }
 
+/* turnOn / turnOff / toggleScreen (frameos_nim_set_display_power_hook,
+ * called by the dispatcher on this task): an LCD's backlight. While it is
+ * dark the frame renders nothing, since nobody would see it, and the pass
+ * after it comes back on renders at once. A panel with nothing to switch
+ * (e-paper) keeps rendering; the scene still heard the event. */
+static bool s_display_dark = false;
+
+static void display_power(bool on)
+{
+    if (fos_display_power(on) != ESP_OK) return;
+    bool was_dark = s_display_dark;
+    s_display_dark = !on;
+    char line[96];
+    snprintf(line, sizeof(line), "{\"event\":\"display\",\"source\":\"esp32\",\"power\":\"%s\"}",
+             on ? "on" : "off");
+    frameos_nim_log_hook(line);
+    if (on && was_dark) fos_client_render_now();
+}
+
 /* The input queues, then time passing, in that order: the buttons' edges and
  * the glass's reports reach the dispatcher before a tick asks what is still
  * held. A release waiting in the touch queue behind the render its press
@@ -2360,6 +2379,11 @@ static void client_task(void *arg)
             ESP_LOGI(TAG, "wake-check pass; next render due in %ld s",
                      (long)(s_next_render_due - wall_now));
             log_render_skipped("wake_check", -1);
+        } else if (s_display_dark) {
+            /* Dark: nothing to draw for. An animation's next frame is a
+             * second away, so its wait blocks (serving input, a touch that
+             * wakes the screen) instead of turning straight round. */
+            if (s_anim.active) s_anim.next_due_us = esp_timer_get_time() + 1000000;
         } else {
             if (fos_ota_busy()) {
                 /* The OTA task waits for a render that is already under way
@@ -2761,6 +2785,7 @@ void fos_client_start(void)
     if (s_events) return;
     s_events = xEventGroupCreate();
     s_snapshot_lock = xSemaphoreCreateMutex();
+    frameos_nim_set_display_power_hook(display_power);
     fos_framebuffer_set_lend_hook(snapshot_before_lend);
     fos_display_set_before_write_hook(snapshot_before_panel_write);
     const esp_timer_create_args_t frame_timer_args = {

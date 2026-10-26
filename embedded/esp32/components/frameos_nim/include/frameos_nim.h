@@ -95,6 +95,10 @@ void frameos_nim_set_runtime_command_hook(bool (*hook)(const char *command, cons
  * runtime lock, and must not call back into it. */
 void frameos_nim_set_scene_state_hooks(char *(*load)(const char *scene_id),
                                        bool (*save)(const char *scene_id, const char *json));
+/* The display's power for turnOn / turnOff / toggleScreen (docs/events.md):
+ * called on the render task by the dispatcher; NULL switches nothing. */
+void frameos_nim_set_display_power_hook(void (*hook)(bool on));
+void frameos_nim_display_power(bool on);
 char *frameos_nim_scene_state_load(const char *scene_id);
 bool frameos_nim_scene_state_save(const char *scene_id, const char *json);
 const char *frameos_nim_scene_info_json(void);

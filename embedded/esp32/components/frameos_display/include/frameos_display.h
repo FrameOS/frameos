@@ -55,6 +55,10 @@ int fos_display_bus(void);
 /* True when the display refreshes on its own (an LCD scanned from a frame
  * buffer): a blit shows at once and costs no e-paper wait. */
 bool fos_display_is_lcd(void);
+/* The panel's power, for turnOn / turnOff / toggleScreen: an LCD's
+ * backlight. ESP_ERR_NOT_SUPPORTED where there is nothing to switch (e-paper
+ * holds its image unpowered). */
+esp_err_t fos_display_power(bool on);
 /* An LCD's own buffer for the next picture, `*len` bytes in the panel's
  * format (fos_display_buffer_size): the renderer draws there in place and
  * fos_display_blit(that buffer) shows it without a copy. The panel stays

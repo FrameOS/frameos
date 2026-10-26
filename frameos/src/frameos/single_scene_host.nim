@@ -56,6 +56,10 @@ type
       ## `setCurrentScene {direction}` (docs/events.md, "Event map"). nil:
       ## no such switch here.
     runtimeCommand*: proc (command: RuntimeCommand, payload: JsonNode)
+    displayPower*: proc (on: bool)
+      ## `turnOn` / `turnOff` / `toggleScreen`: the platform's backlight (an
+      ## ESP32 LCD). nil where there is nothing to switch: e-paper holds its
+      ## image unpowered, and the preview's canvas has no backlight.
     logEntry*: proc (entry: JsonNode)     ## a frame log line
     note*: proc (message: string)         ## a line for whoever is watching the console
     initialState*: proc (sceneId: SceneId): JsonNode
@@ -234,9 +238,10 @@ proc start*(host: SingleSceneHost) =
   host.events = newEventLoop(EventHost(
     requestRender: proc () = host.renderRequested = true,
     selectScene: proc (payload: JsonNode): bool = host.selectFromEvent(payload),
-    # Neither an e-paper panel (it holds its image unpowered) nor a canvas has a
-    # backlight to switch; the scene still hears the event.
-    displayPower: proc (on: bool) = discard,
+    # The scene hears the event either way, switched or not.
+    displayPower: proc (on: bool) =
+      if not host.displayPower.isNil:
+        host.displayPower(on),
     runtimeCommand: proc (command: RuntimeCommand, payload: JsonNode) =
       if not host.runtimeCommand.isNil:
         host.runtimeCommand(command, payload),

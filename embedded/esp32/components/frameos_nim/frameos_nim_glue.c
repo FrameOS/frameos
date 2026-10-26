@@ -227,6 +227,20 @@ bool frameos_nim_request_scene_select(const char *scene_id)
     return s_scene_select(scene_id);
 }
 
+static void (*s_display_power)(bool on) = NULL;
+
+void frameos_nim_set_display_power_hook(void (*hook)(bool on))
+{
+    s_display_power = hook;
+}
+
+/* Called from Nim (embedded_runtime.nim) for turnOn / turnOff / toggleScreen,
+ * on the render task. */
+void frameos_nim_display_power(bool on)
+{
+    if (s_display_power != NULL) s_display_power(on);
+}
+
 static char *(*s_scene_state_load)(const char *scene_id) = NULL;
 static bool (*s_scene_state_save)(const char *scene_id, const char *json) = NULL;
 
