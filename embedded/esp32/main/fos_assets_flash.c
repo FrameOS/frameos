@@ -149,6 +149,10 @@ static ssize_t fv_write(int fd, const void *data, size_t size)
         errno = ENOSPC;
         return -1;
     }
+    /* Room first, from the blocks holding only deleted pages
+     * (fos_spiffs_gc.c): left to the write, SPIFFS collects the photos'
+     * blocks, moving 14 pages for each one it frees. */
+    esp_spiffs_gc("state", size);
     return write(global_fd, data, size);
 }
 
