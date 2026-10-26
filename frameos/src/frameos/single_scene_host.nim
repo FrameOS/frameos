@@ -311,9 +311,10 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   # deep-sleeping ESP32 that is a fresh boot away, and the next decode wants
   # the memory: they go. An ESP32 that stays awake keeps them while there is
   # room (keepJsRuntimes), and the next render skips building them again;
-  # they still go before a render or a decode that finds headroom short. The
-  # preview releases them while it runs as an ESP32, so that an app keeping
-  # values in module variables misbehaves in the editor rather than only on
-  # a sleeping frame; otherwise it keeps them, as a Pi does.
+  # they still go for a decode, an image or a fill that finds memory short
+  # (utils/memory.nim). The preview releases them while it runs as an ESP32,
+  # so that an app keeping values in module variables misbehaves in the
+  # editor rather than only on a sleeping frame; otherwise it keeps them, as
+  # a Pi does.
   if runsAsEmbedded():
     discard settleIdleJsAppRuntimes(host.keepJsRuntimes)
