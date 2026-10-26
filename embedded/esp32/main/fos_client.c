@@ -42,6 +42,7 @@
 #include "fos_panel_draw.h"
 #include "fos_power.h"
 #include "fos_scenes.h"
+#include "fos_scene_state.h"
 #include "fos_schedule.h"
 #include "fos_settings.h"
 #include "fos_tz.h"
@@ -2054,6 +2055,8 @@ static void client_task(void *arg)
          * settings pushes below run once a second, not once a frame. Outside
          * animation every pass does them. */
         bool housekeeping = fos_animation_housekeeping_due(&s_anim, cycle_start);
+        /* Scene state that has waited its delay (fos_scene_state.h). */
+        if (housekeeping) fos_scene_state_flush(false);
 
         /* First pass of a boot on a cloud-managed frame: the commands that
          * waited out the sleep (a scene switch, a scenes push, a state) are
@@ -2490,6 +2493,8 @@ static void client_task(void *arg)
             keep_awake_s = keep_awake_remaining_seconds();
         }
         if (deep_sleep_now && fos_display_present() && keep_awake_s == 0) {
+            /* What the scene changed is all the next wake has of it. */
+            fos_scene_state_flush(true);
             /* Wake early to check the control plane for commands when asked
              * to — the render schedule itself survives in s_next_render_due
              * (RTC memory), so the check-in wake does not refresh the panel. */
@@ -2590,6 +2595,7 @@ static void client_task(void *arg)
              * actually passed comes off the wait. */
             uint32_t waited_ms = (uint32_t)((esp_timer_get_time() - slice_start_us) / 1000);
             if (waited_ms < slice) slice = waited_ms;
+            fos_scene_state_flush(false);
             if (nim) {
                 fos_buttons_process_events();
                 fos_touch_process_events();

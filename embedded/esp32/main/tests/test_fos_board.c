@@ -299,6 +299,13 @@ static void test_touch_pins(void)
     CHECK(strcmp(fos_board_touch_pins("seeed_reterminal_e1004"), "") == 0, "e1004: no touch");
     CHECK(strcmp(fos_board_touch_pins("waveshare_esp32_s3_photopainter"), "") == 0, "photopainter: no touch");
     CHECK(strcmp(fos_board_touch_pins(""), "") == 0, "no preset");
+    /* The Indicator's glass reads both axes the other way; the others match. */
+    CHECK(fos_board_touch_mirror("seeed_sensecap_indicator_d1") ==
+              (FOS_BOARD_TOUCH_MIRROR_X | FOS_BOARD_TOUCH_MIRROR_Y),
+          "indicator touch mirrored");
+    CHECK(fos_board_touch_mirror("seeed_reterminal_sticky") == 0, "sticky touch not mirrored");
+    CHECK(fos_board_touch_mirror("seeed_reterminal_e1003") == 0, "e1003 touch not mirrored");
+    CHECK(fos_board_touch_mirror("") == 0 && fos_board_touch_mirror(NULL) == 0, "no preset: not mirrored");
     CHECK(strcmp(fos_board_touch_pins(NULL), "") == 0, "NULL preset");
 }
 

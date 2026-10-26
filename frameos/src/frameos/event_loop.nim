@@ -351,14 +351,13 @@ proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
 proc listens(loop: EventLoop, scene: FrameScene, name: string): bool =
   loop.host.sceneListens.isNil or loop.host.sceneListens(scene, name)
 
-when not defined(frameosEmbedded):
-  proc aliasPayload(alias: string, payload: JsonNode): JsonNode =
-    ## The alias's own, smaller payload: the keys its contract row lists.
-    result = newJObject()
-    for index in 0 ..< eventPayloadKeyCount(alias):
-      let key = eventPayloadKey(alias, index)
-      if payload.hasKey(key):
-        result[key] = payload[key]
+proc aliasPayload(alias: string, payload: JsonNode): JsonNode =
+  ## The alias's own, smaller payload: the keys its contract row lists.
+  result = newJObject()
+  for index in 0 ..< eventPayloadKeyCount(alias):
+    let key = eventPayloadKey(alias, index)
+    if payload.hasKey(key):
+      result[key] = payload[key]
 
 proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDelivery, fromRender: bool): bool =
   ## An input event to the scene: under its name, and under each old name it
@@ -383,16 +382,14 @@ proc deliverInput(loop: EventLoop, target: Option[SceneId], delivery: InputDeliv
   if loop.listens(scene, delivery.name):
     loop.runOnScene(scene, delivery.name, payload, eventPolicy(delivery.name), fromRender)
     result = true
-  # The old names are pointer events' (docs/events-contract.json `aliasOf`).
-  # The ESP32 delivers the new names only (docs/events.md "Known host
-  # differences"): leaving this out there leaves the generated alias and
-  # payload-key tables out of its image.
-  when not defined(frameosEmbedded):
-    for index in 0 ..< eventAliasCount(delivery.name):
-      let alias = eventAlias(delivery.name, index)
-      if loop.listens(scene, alias):
-        loop.runOnScene(scene, alias, aliasPayload(alias, payload), eventPolicy(alias), fromRender)
-        result = true
+  # The old names are pointer events' (docs/events-contract.json `aliasOf`),
+  # on every host: store scenes are immutable, and a touch scene written for
+  # `mouseMove` runs on an ESP32's glass too.
+  for index in 0 ..< eventAliasCount(delivery.name):
+    let alias = eventAlias(delivery.name, index)
+    if loop.listens(scene, alias):
+      loop.runOnScene(scene, alias, aliasPayload(alias, payload), eventPolicy(alias), fromRender)
+      result = true
 
 proc processInput(loop: EventLoop, envelope: EventEnvelope): bool =
   ## What a person did, through the input state: the position every pointer

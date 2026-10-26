@@ -50,6 +50,7 @@ idf_component_register(
         "fos_assets.c"
         "fos_assets_path.c"
         "fos_assets_sd.c"
+        "fos_assets_flash.c"
         "fos_sd_probe.c"
     PRIV_REQUIRES
         nvs_flash
@@ -74,6 +75,7 @@ idf_component_register(
         hal
         soc
         spiffs
+        vfs
         fatfs
         sdmmc
         frameos_display
