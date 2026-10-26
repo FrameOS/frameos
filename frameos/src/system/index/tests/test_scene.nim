@@ -262,41 +262,108 @@ suite "system/index scene":
         it[0] == "Frame" and "gamma.local" in it[1])
       setSystemHostnameForTest("")
 
-  test "the inputs row lists configured GPIO pins and the input drivers in the build":
+  test "the inputs row lists the input drivers in the build":
     var config = testConfig()
-    # Nothing wired, no input driver in the build: the row is dropped entirely
-    # (see "the inputs row is absent when nothing can drive the frame").
+    # No input driver in the build: the row is dropped entirely (see "the
+    # inputs and buttons rows are absent when nothing can drive the frame").
     check index_scene.inputsLine(config, @[]) == ""
-    # The gpioButton driver in the build with no pins in frame.json says
-    # nothing either — most frames have no buttons and never will.
-    check index_scene.inputsLine(config, @["gpioButton"]) == ""
     check index_scene.inputsLine(config, @["evdev"]) == "evdev (keyboard, mouse, touch)"
+    # The buttons have their own row, wired or not: the gpioButton driver
+    # adds nothing here.
+    config.gpioButtons = @[GPIOButton(pin: 5, label: "Next")]
+    check index_scene.inputsLine(config, @["gpioButton"]) == ""
+    check index_scene.inputsLine(config, @["gpioButton", "evdev"]) == "evdev (keyboard, mouse, touch)"
+    # An input driver we have no wording for is still named, never dropped.
+    check index_scene.inputsLine(config, @["evdev", "someNewInput"]) ==
+      "evdev (keyboard, mouse, touch) · someNewInput"
+
+  test "the buttons row lists the wired buttons by label and pin":
+    var config = testConfig()
+    check index_scene.buttonsLine(config) == ""
     config.gpioButtons = @[
       GPIOButton(pin: 5, label: "Next"),
       GPIOButton(pin: 6, label: ""),
+      GPIOButton(pin: -1, label: "Unwired"),
     ]
-    # Labelled or not, the pin number is what someone checking their wiring
-    # needs; the gpioButton driver adds nothing the pins have not said.
-    check index_scene.inputsLine(config, @["gpioButton"]) == "GPIO 5 (Next), 6"
-    check index_scene.inputsLine(config, @["gpioButton", "evdev"]) ==
-      "GPIO 5 (Next), 6 · evdev (keyboard, mouse, touch)"
-    # An input driver we have no wording for is still named, never dropped.
-    check index_scene.inputsLine(config, @["evdev", "someNewInput"]) ==
-      "GPIO 5 (Next), 6 · evdev (keyboard, mouse, touch) · someNewInput"
+    # No event map: every press is the scene's, so there is nothing to add.
+    check index_scene.buttonsLine(config) == "Next (GPIO 5) · GPIO 6"
+    config.eventMap = %*[]
+    check index_scene.buttonsLine(config) == "Next (GPIO 5) · GPIO 6"
 
-  test "the inputs row reaches the screen":
+  test "the buttons row says what the frame's event map does with each press":
+    var config = testConfig()
+    config.gpioButtons = @[
+      GPIOButton(pin: 5, label: "LEFT"),
+      GPIOButton(pin: 4, label: "RIGHT"),
+      GPIOButton(pin: 3, label: "REFRESH"),
+    ]
+    # The reTerminal E1002 preset (fos_board.c, EMBEDDED_HARDWARE_PRESETS).
+    config.eventMap = %*[
+      {"event": "button", "match": {"label": "LEFT", "action": "longPress"},
+       "emit": "setCurrentScene", "as": {"direction": "prev"}},
+      {"event": "button", "match": {"label": "RIGHT", "action": "longPress"},
+       "emit": "setCurrentScene", "as": {"direction": "next"}},
+      {"event": "button", "match": {"label": "REFRESH", "action": "longPress"},
+       "emit": "voiceChat", "as": {}},
+    ]
+    check index_scene.buttonsLine(config) ==
+      "LEFT (GPIO 5) long press: previous scene · RIGHT (GPIO 4) long press: next scene · " &
+      "REFRESH (GPIO 3) long press: voice chat"
+
+    let scenes = @[("weather", "Weather")]
+    config.eventMap = %*[
+      # A rewrite hands the press on to the scene: not a frame action, and
+      # being first it wins over the rule after it, as on the dispatcher.
+      {"event": "button", "match": {"label": "LEFT", "action": "press"}, "as": {"label": "A"}},
+      {"event": "button", "match": {"label": "LEFT", "action": "press"}, "emit": "render", "as": {}},
+      {"event": "button", "match": {"label": "LEFT", "action": "doublePress"},
+       "emit": "setCurrentScene", "as": {"sceneId": "weather"}},
+      {"event": "button", "match": {"label": "LEFT", "action": "longPress"},
+       "emit": "setCurrentScene", "as": {"sceneId": "gone"}},
+      # By pin, and with no `action`: every press of the key.
+      {"event": "button", "match": {"pin": 4}, "emit": "turnOff", "as": {}},
+      # Labels compare as the dispatcher compares them: exactly.
+      {"event": "button", "match": {"label": "refresh", "action": "press"}, "emit": "render", "as": {}},
+      {"event": "button", "match": {"label": "REFRESH", "action": "doublePress"}, "emit": "myEvent", "as": {}},
+      # Not a `button` rule, and a label the frame does not have.
+      {"event": "gpio", "match": {"label": "REFRESH"}, "emit": "render", "as": {}},
+      {"event": "button", "match": {"label": "A", "action": "press"}, "emit": "render", "as": {}},
+    ]
+    check index_scene.buttonsLine(config, scenes) ==
+      "LEFT (GPIO 5) double press: show Weather, long press: show gone · " &
+      "RIGHT (GPIO 4) any press: display off · " &
+      "REFRESH (GPIO 3) double press: myEvent"
+
+  test "the buttons row matches a rule on the button's role":
+    var config = testConfig()
+    # B's role is `next` by default (the contract's roleByLabel); a role in
+    # frame.json overrides it.
+    config.gpioButtons = @[GPIOButton(pin: 6, label: "B"), GPIOButton(pin: 7, label: "C", role: "next")]
+    config.eventMap = %*[
+      {"event": "button", "match": {"role": "next", "action": "press"},
+       "emit": "setCurrentScene", "as": {"direction": "next"}},
+    ]
+    check index_scene.buttonsLine(config) ==
+      "B (GPIO 6) press: next scene · C (GPIO 7) press: next scene"
+
+  test "the inputs and buttons rows reach the screen":
     initTimeZone()
     withScenesJson("[]") do (_: string):
       var config = testConfig()
       config.gpioButtons = @[GPIOButton(pin: 16, label: "Menu")]
-      let screen = makeIndexScene(config).buildStatusScreen()
-      check screen.rows.anyIt(it[0] == "Inputs" and it[1] == "GPIO 16 (Menu)")
+      config.eventMap = %*[
+        {"event": "button", "match": {"label": "Menu", "action": "press"}, "emit": "render", "as": {}},
+      ]
+      let scene = makeIndexScene(config)
+      check scene.buildStatusScreen().rows.anyIt(it[0] == "Buttons" and it[1] == "Menu (GPIO 16) press: refresh")
+      check "Buttons: Menu (GPIO 16) press: refresh" in scene.buildSceneListText()
 
-  test "the inputs row is absent when nothing can drive the frame":
+  test "the inputs and buttons rows are absent when nothing can drive the frame":
     initTimeZone()
     withScenesJson("[]") do (_: string):
       let screen = makeIndexScene(testConfig()).buildStatusScreen()
       check not screen.rows.anyIt(it[0] == "Inputs")
+      check not screen.rows.anyIt(it[0] == "Buttons")
 
   test "an adopted shell-less frame reports limited remote control, not disabled":
     initTimeZone()
