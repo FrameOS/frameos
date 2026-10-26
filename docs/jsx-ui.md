@@ -99,6 +99,11 @@ cheap is that the pictures are reconciled, not the code:
   handler functions copied into the render's list at the numbers they had.
   Pass values, not functions made anew each render, and make the handlers
   inside the component.
+- **The pointer alone does not run get().** A render asked for only because
+  hover:, active: or group-hover: changed (no handler ran) lays the last
+  tree out again with the new pointer, as a browser restyles `:hover`
+  without React rendering. Any other event, a different config or the
+  scene's own interval coming round runs `get()` as before.
 
 On the SenseCAP Indicator (three frame buffers, so each is compared with
 the frame from three renders back), toggling one card of the home panel in

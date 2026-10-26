@@ -1760,7 +1760,7 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
     if dispatchUiEvent(self.id.string, context.event, context.payload):
       sendEvent("render", %*{}, eoScene)
   else:
-    discard
+    uiSceneEvent(self.id.string)
 
   if scene.eventListeners.hasKey(context.event):
     # Track filtered-out listeners so a press that matches nothing says so.

@@ -1,4 +1,4 @@
-import std/[algorithm, base64, json, options, os, streams, strformat, strutils, tables]
+import std/[algorithm, base64, json, monotimes, options, os, streams, strformat, strutils, tables, times]
 import frameos/utils/memory
 import pixie
 import pixie/fileformats/svg
@@ -55,6 +55,12 @@ type
     nextImageId*: int
     images*: Table[int, Image]
     jsxMemo*: JsxMemo ## the nodes of memo()'s elements (js_runtime/jsx.nim)
+    # The last tree get() returned, for a render only the pointer asked for
+    # (hover:, active:): laid out again with the new pointer, get() not run,
+    # as a browser restyles :hover without React rendering again.
+    lastJsx: SvgNode
+    lastJsxConfig: JsonNode
+    lastJsxAt: MonoTime
     transientImageIds: seq[int]
     ## `frameos.remember` / `recall`: values the app keeps between renders, as
     ## JSON text. Held here and not in the interpreter because an ESP32 tears
@@ -2163,8 +2169,8 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
     # has always been.
     let tag = jsxTag(ctx, payload)
     if tag.len > 0 and tag != "image":
-      return VImage(runtime.imageFromJsx(owner, context,
-        jsxNode(ctx, payload, addr runtime.images, addr runtime.jsxMemo)))
+      runtime.lastJsx = jsxNode(ctx, payload, addr runtime.images, addr runtime.jsxMemo)
+      return VImage(runtime.imageFromJsx(owner, context, runtime.lastJsx))
 
   if expectedType == "image" or jsIsObject(payload) or JS_IsArray(ctx, payload) != 0:
     let svgSpec = svgImageSpecFromJs(ctx, payload)
@@ -2278,6 +2284,16 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
 
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
   runtime.init(owner, configJson)
+  if not owner.scene.isNil:
+    let target = uiTarget(owner.scene.id.string, owner.nodeId.int, create = false)
+    if not target.isNil and target.inputOnly:
+      target.inputOnly = false
+      # Only the pointer asked for this render: the last tree with the new
+      # pointer, while nothing else can have changed what get() returns (the
+      # same config, a render sooner than the scene's own interval).
+      if not runtime.lastJsx.isNil and runtime.lastJsxConfig == configJson and
+          inMilliseconds(getMonoTime() - runtime.lastJsxAt).float < owner.scene.refreshInterval * 1000:
+        return VImage(runtime.imageFromJsx(owner, context, runtime.lastJsx))
   try:
     runtime.midCall:
       # A throw fails the node, as a raising Nim app does: the interpreter then
@@ -2286,7 +2302,12 @@ proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
       # which the cache then served until it expired.
       let payload = runtime.invoke(owner, configJson, context, "get", raiseOnError = true)
       defer: JS_FreeValue(runtime.js.context, payload)
-      return toValue(runtime, owner, context, payload, runtime.outputType)
+      runtime.lastJsx = nil
+      result = toValue(runtime, owner, context, payload, runtime.outputType)
+      if not runtime.lastJsx.isNil:
+        runtime.lastJsxConfig = copy(configJson)
+        runtime.lastJsxAt = getMonoTime()
+      return
   finally:
     runtime.clearTransientImages()
 
