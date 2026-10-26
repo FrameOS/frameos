@@ -22,9 +22,8 @@ typedef enum {
     FOS_EVENT_FAILED,  /* allowed, but it came to nothing: no runtime, no such
                         * scene id in the payload, a store that failed, a
                         * command this host does not have */
-    FOS_EVENT_BUSY,    /* only from fos_events_dispatch_wait(): the Nim runtime
-                        * was rendering for the whole timeout, nothing was
-                        * delivered */
+    FOS_EVENT_BUSY,    /* a scene event from another task found the render
+                        * task's queue full: nothing was kept */
 } fos_event_result_t;
 
 /* Installs runtime_command() as the Nim runtime's device-command hook, so a
@@ -32,31 +31,26 @@ typedef enum {
  * at boot, next to fos_scenes_init() (which installs the scene-select hook). */
 void fos_events_init(void);
 
-/* Route one event. Synchronous: the firmware's own part (render,
- * setCurrentScene, the device commands) is done when this returns, so an HTTP
- * caller can answer 400 and a cloud verb can ack an error. The part that goes
- * to the scene waits for the Nim runtime lock — behind a render in progress,
- * which on a large panel is a minute and more. Fine for the render task's own
- * producers (schedule, buttons) and the console; see _wait for the rest.
- * `payload_json` may be NULL or empty, meaning {}. */
+/* Route one event. The firmware's own part (render, setCurrentScene, the
+ * device commands) is done when this returns, so an HTTP caller can answer
+ * 400 and a cloud verb can ack an error. The part that goes to the scene runs
+ * on the render task alone: called there (touch, buttons, the schedule) it is
+ * delivered before this returns; called from any other task (HTTP, the cloud,
+ * the console) it is queued for the render task (fos_events_defer), and
+ * FOS_EVENT_DONE means queued, as on Linux. `payload_json` may be NULL or
+ * empty, meaning {}. */
 fos_event_result_t fos_events_dispatch(fos_event_origin_t origin, const char *name,
                                        const char *payload_json);
 
-/* Same, but gives up on the runtime lock after timeout_ms (-1 = wait forever,
- * 0 = try once) and answers FOS_EVENT_BUSY. For the cloud WebSocket task,
- * which must keep answering the hub while a render runs. Nothing the firmware
- * does itself ever waits, with either flavour. */
-fos_event_result_t fos_events_dispatch_wait(fos_event_origin_t origin, const char *name,
-                                            const char *payload_json, int timeout_ms);
-
-/* A scene event that found the runtime busy (FOS_EVENT_BUSY), kept for the
- * render task instead of dropped. On a deep-sleeping frame the cloud delivers
- * its queued verbs the moment the session is up — while the wake's render
- * already holds the runtime — and "busy" was the end of every setSceneState
- * sent to a sleeping E1004 (2026-10-12). Bounded (a handful); false when
- * full. The render task delivers them at the start of its next pass
- * (fos_events_deliver_deferred, true when any were delivered, so the pass
- * renders) and holds the deep sleep while any are waiting. */
+/* A scene event kept for the render task. A scene's handlers are JS, and the
+ * first event compiles the scene's app: QuickJS's parser needs the render
+ * task's 40 KB stack, and run on the 8 KB HTTP task it overflowed into the
+ * task list (the first /event/pointerMove crashed the frame, 2026-10-26).
+ * Bounded; a newer event the contract coalesces (a pointer move) replaces a
+ * waiting one from the same origin; false when full. The render task delivers
+ * them at the start of a pass and in its idle wait
+ * (fos_events_deliver_deferred, true when any were delivered) and holds the
+ * deep sleep while any are waiting. */
 bool fos_events_defer(fos_event_origin_t origin, const char *name, const char *payload_json);
 bool fos_events_deferred_pending(void);
 bool fos_events_deliver_deferred(void);

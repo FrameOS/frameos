@@ -2738,11 +2738,6 @@ static void ws_handle_set_current_scene(const cJSON *root, const cJSON *id, fos_
     }
 }
 
-/* How long `scene_event` waits for the Nim runtime before answering `busy`.
- * Well inside the hub's command timeout, and short enough that the socket's
- * keepalive never notices; the provider may simply send it again. */
-#define FOS_CLOUD_SCENE_EVENT_WAIT_MS 3000
-
 /* `scene_event {name, payload?}`: an event for the scene the frame is showing,
  * said by the provider. The mirror of handleSceneEvent in
  * frameos/src/frameos/cloud/hub_client.nim, token for token: a contract event
@@ -2750,13 +2745,10 @@ static void ws_handle_set_current_scene(const cJSON *root, const cJSON *id, fos_
  * their own — or a custom event, which the Nim dispatcher delivers only when
  * the scene declares it with `origins: ["cloud"]`.
  *
- * One difference from Linux, where the ack means "queued": there is no queue
- * between this task and the scene here, the event is delivered under the
- * runtime lock before the ack. So the wait for that lock is bounded — a render
- * on a large panel holds it for a minute and more, and this task has a hub to
- * keep answering — and `busy` says the event was NOT delivered. `ok` means
- * "handed to the dispatcher"; what came of it (no listener, an undeclared
- * custom event) is in the frame log, as on Linux. */
+ * As on Linux the ack means "queued": scene code runs on the render task
+ * alone, so the event waits there for the render task (fos_events_defer), a
+ * render on a large panel included, and `busy` says that queue was full. What
+ * came of it (no listener, an undeclared custom event) is in the frame log. */
 static void ws_handle_scene_event(const cJSON *root, const cJSON *id, fos_event_origin_t origin)
 {
     const cJSON *name_item = cJSON_GetObjectItem(root, "name");
@@ -2781,15 +2773,7 @@ static void ws_handle_scene_event(const cJSON *root, const cJSON *id, fos_event_
         ws_ack(id, false, "no_memory");
         return;
     }
-    fos_event_result_t result = fos_events_dispatch_wait(origin, name, printed,
-                                                         FOS_CLOUD_SCENE_EVENT_WAIT_MS);
-    /* Busy means a render holds the runtime — on a deep-sleeping frame, the
-     * wake's render, the only moment this verb could ever arrive. Keep it
-     * for the render task instead of telling the hub "busy" (which never
-     * sends it again): `ok` here means queued, like Linux. */
-    if (result == FOS_EVENT_BUSY && fos_events_defer(origin, name, printed)) {
-        result = FOS_EVENT_DONE;
-    }
+    fos_event_result_t result = fos_events_dispatch(origin, name, printed);
     if (printed != NULL) cJSON_free(printed);
     switch (result) {
         case FOS_EVENT_BUSY:

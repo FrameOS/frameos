@@ -14,6 +14,17 @@
  * like the Linux runner's fast-render log pause. The first frame of an
  * animation is always logged: it is the render:done a deploy waits for.
  *
+ * A burst gets the same rules: outside animation, frames the scene itself
+ * asked for (its render rule after a touch or a key) that start within
+ * FOS_ANIMATION_BURST_US of the last one's end. A finger dragged over the
+ * Touch test asked for one every 30 ms, and each logged ~2 KB in full (the
+ * console's 2 KB buffer full, at 115200 baud) and ran the per-pass pulls:
+ * ~300 ms a frame on the SenseCAP Indicator for a ~90 ms render
+ * (2026-10-26). In a burst the pulls run once a second and one frame in
+ * FOS_ANIMATION_LOG_US logs in full, the first among them; when the burst
+ * ends the caller logs its summary and, if its last frame was quiet, makes
+ * up the render announce and the backend push that frame skipped.
+ *
  * Pure: no IDF, no clock of its own (the caller passes esp_timer time), so
  * main/tests/test_fos_animation.c runs it on the host.
  */
@@ -26,6 +37,8 @@
 #define FOS_ANIMATION_HOUSEKEEPING_US (1000LL * 1000LL)
 /* One frame logged in full, with the summary of the frames before it. */
 #define FOS_ANIMATION_LOG_US (10LL * 1000LL * 1000LL)
+/* Frames the scene asked for this close together are one burst. */
+#define FOS_ANIMATION_BURST_US (1000LL * 1000LL)
 
 typedef struct {
     bool active;
@@ -33,10 +46,15 @@ typedef struct {
     int64_t next_due_us;     /* when the next frame should start */
     int64_t housekeeping_us; /* the last pass that did the per-second work */
     int64_t logged_us;       /* the last frame logged in full; 0 = none yet */
-    /* The frames since logged_us (the summary's window). */
+    /* The frames since logged_us (the summary's window), or of the burst. */
     uint32_t frames;
     int64_t render_us_sum;
     int64_t render_us_max;
+    /* A burst, outside animation. */
+    int64_t burst_start_us;  /* its first frame started */
+    int64_t burst_last_us;   /* its last frame ended; 0 = no burst */
+    int64_t burst_logged_us; /* its last frame logged in full; 0 = none */
+    bool burst_owed;         /* its last frame was quiet */
 } fos_animation_t;
 
 typedef struct {
@@ -58,8 +76,9 @@ bool fos_animation_wanted(double scene_interval_s, bool lcd, bool deep_sleep);
  * window's stats for fos_animation_take_stats. */
 bool fos_animation_update(fos_animation_t *a, bool wanted, double scene_interval_s, int64_t now_us);
 
-/* Whether this pass does the per-second work; true on every pass outside
- * animation. Marks it done when it answers true. */
+/* Whether this pass does the per-second work: once a second while
+ * animating or in a burst, every pass otherwise. Marks it done when it
+ * answers true. */
 bool fos_animation_housekeeping_due(fos_animation_t *a, int64_t now_us);
 
 /* Whether the frame starting now is quiet (not logged in full). False for
@@ -80,3 +99,17 @@ void fos_animation_frame_done(fos_animation_t *a, int64_t start_us, int64_t end_
 
 /* Microseconds until the next frame is due (0: now). 0 outside animation. */
 int64_t fos_animation_wait_us(const fos_animation_t *a, int64_t now_us);
+
+/* Whether a frame the scene asked for, starting now outside animation, is
+ * quiet: it is in a burst, and one of the burst's frames logged in full less
+ * than FOS_ANIMATION_LOG_US ago. */
+bool fos_animation_burst_quiet(const fos_animation_t *a, int64_t now_us);
+
+/* Outside animation: a frame the scene asked for started at `start_us`,
+ * ended at `end_us`, logged in full or quiet. */
+void fos_animation_burst_frame_done(fos_animation_t *a, int64_t start_us, int64_t end_us, bool quiet);
+
+/* True once a burst is over (no frame for FOS_ANIMATION_BURST_US) that is
+ * worth saying so: more than one frame, or a quiet last frame. `out` gets
+ * its frames and their times, `owed` whether its last frame was quiet. */
+bool fos_animation_burst_end(fos_animation_t *a, int64_t now_us, fos_animation_stats_t *out, bool *owed);

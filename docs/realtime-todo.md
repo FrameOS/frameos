@@ -56,7 +56,12 @@ SVG path work. Roughly in order of what each would buy there:
    fleet image.
 7. **Touch latency.** The FT6336U is polled every 30 ms (no interrupt line on
    the Indicator) and events reach the scene between frames: poll at 10–15 ms
-   on LCD boards and let a touch cut the frame wait short.
+   on LCD boards and let a touch cut the frame wait short. A Touch test frame
+   is ~65 ms now (bursts, `render/svg`'s damage repaint): pixie's damage is
+   one box around everything that changed, a quarter of the screen when the
+   dot is far from the coordinates line, so a box per changed element would
+   repaint a tenth of that; and the SVG parse (~22 ms) lays its three text
+   lines out again every frame, where unchanged text could keep its layout.
 8. **Photos waive the background too.** A JPEG decoded straight into the
    canvas with cover or stretch covers every pixel opaquely; the decode path
    could settle the owed background the way the SVG path does
@@ -64,18 +69,18 @@ SVG path work. Roughly in order of what each would buy there:
 9. **A slideshow's photo change.** Ken Burns (data/localImage under
    render/zoomPan) freezes for the decode every time its photo changes:
    3.7 s for a 640x640 baseline JPEG and 6.3 s for a progressive one on the
-   Indicator at 240 MHz (2026-10-25), next to ~150 ms frames. The file read
+   Indicator at 240 MHz (2026-10-25), next to ~130 ms frames. The file read
    is a small part (the flash store serves ~140 KB/s over HTTP) and `-O2` for
    pixie's JPEG module bought ~10% for 9 KB: profile the decode (coefficient
    and channel planes in PSRAM; a progressive photo also decodes in strips,
    ~20 passes at the memory a cached photo leaves), then consider decoding
    straight to 565 or across several frames.
-10. **Full-frame motion is memory-bound.** zoomPan's draw is ~100-130 ms on
-   the Indicator after the fixed-point and 565 work (from 2.3 s): every frame
-   writes the 460 KB back buffer and reads the photo through the PSRAM cache
-   while the LCD scans the front one. 24 fps for a frame that changes every
-   pixel needs a faster bus (120 MHz PSRAM, above) or a draw that touches
-   less memory.
+10. **Full-frame motion is memory-bound.** zoomPan's draw is ~90 ms on the
+   Indicator (from 2.3 s), on both cores with 64-byte cache lines: every
+   frame reads the photo and writes the 460 KB back buffer through the PSRAM
+   cache while the LCD scans the front one, and the second core bought 1.3x,
+   not 2x. 24 fps for a frame that changes every pixel needs a faster bus
+   (120 MHz PSRAM, above) or a draw that touches less memory.
 11. **The Pi.** The framebuffer driver converts into a staging buffer and
    `write()`s it, opening and closing `/dev/fb0` every frame: convert straight
    into an mmapped framebuffer (a full-frame copy and a syscall less), with

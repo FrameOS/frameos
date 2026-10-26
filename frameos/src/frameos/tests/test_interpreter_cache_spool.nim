@@ -42,10 +42,12 @@ var hookTargets: seq[Image] = @[]
 # Whether the cache still held the producer's last value while it ran.
 var observedScene: InterpretedFrameScene = nil
 var staleHeldDuringCompute: seq[bool] = @[]
+# Paint a 4 MB image of its own instead of the scratch the interpreter offers.
+var paintOwnImage = false
 
 proc paintingDownload(url: string, maxBytes: int, target: Image,
     fit: ScaledDecodeFit, boundWidth: int, boundHeight: int): tuple[image: Image, data: string] =
-  let image = if target.isNil: newImage(1024, 1024) else: target
+  let image = if target.isNil or paintOwnImage: newImage(1024, 1024) else: target
   let color = callColors[min(hookCalls, callColors.high)]
   hookCalls += 1
   hookTargets.add(target)
@@ -223,6 +225,27 @@ block over_limit_image_stays_in_memory_while_the_frame_affords_it:
   let second = renderOnce(scene)
   doAssert hookCalls == 1, "an affordable image is a memory hit"
   doAssert canvasColor(second) == callColors[0]
+  availableRenderBytesOverride = 0
+  cachedImageMemoryLimitOverride = 0
+
+block an_over_limit_image_needs_the_limit_again_in_headroom:
+  # The bar is the memory tier's own limit: with the image held, room for as
+  # much again. The SenseCAP Indicator's slideshow kept its 1 MB photo with
+  # 2.03 MB to spare only once its boot had settled, under a 2 MB bar.
+  cachedImageMemoryLimitOverride = 1024 * 1024 # the 4 MB photo is over it
+  paintOwnImage = true
+  availableRenderBytesOverride = 1024 * 1024 - 1
+  var scene = freshScene()
+  discard renderOnce(scene)
+  doAssert InterpretedFrameScene(scene).cacheValues.getOrDefault(ProducerNodeId).kind != fkImage,
+    "a byte under the limit: not in memory"
+  availableRenderBytesOverride = 1024 * 1024
+  scene = freshScene()
+  discard renderOnce(scene)
+  doAssert InterpretedFrameScene(scene).cacheValues[ProducerNodeId].kind == fkImage
+  discard renderOnce(scene)
+  doAssert hookCalls == 1, "kept: a memory hit"
+  paintOwnImage = false
   availableRenderBytesOverride = 0
   cachedImageMemoryLimitOverride = 0
 

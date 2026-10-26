@@ -56,6 +56,24 @@ proc svgScene(body: string): JsonNode =
     ]
   }]
 
+proc svgFlowScene(svg: string, offsetX = 0): JsonNode =
+  ## render/svg as the flow node, its SVG in its config: the Touch test's
+  ## shape (there a code node writes the SVG).
+  %*[{
+    "id": "deferral", "name": "Deferral",
+    "settings": {"execution": "interpreted", "backgroundColor": "#00ff00"},
+    "fields": [],
+    "nodes": [
+      {"id": "render", "type": "event", "data": {"keyword": "render"}},
+      {"id": "draw", "type": "app", "data": {"keyword": "render/svg",
+        "config": {"svg": svg, "placement": "stretch", "blendMode": "normal", "offsetX": offsetX}}}
+    ],
+    "edges": [
+      {"id": "e1", "type": "appNodeEdge", "source": "render", "target": "draw",
+       "sourceHandle": "next", "targetHandle": "prev"}
+    ]
+  }]
+
 proc render(scenes: JsonNode): Image =
   let inputs = parseInterpretedSceneInputs($scenes)
   doAssert inputs.len == 1
@@ -100,6 +118,28 @@ block:
   doAssert image[0, 0] == rgbx(255, 0, 0, 255)
   doAssert image[Width - 1, Height - 1] == rgbx(255, 0, 0, 255)
   doAssert image[48, 32] == rgbx(0, 0, 255, 255)
+
+block:
+  # render/svg settles the background itself: a covering SVG waives it (it
+  # was painted ahead of the node, and the canvas filled twice), one that
+  # does not cover pays it once, and the offset path pays it before it draws.
+  const W = $Width
+  const H = $Height
+  let open = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" & W & "\" height=\"" & H & "\">"
+  backgroundPaintsForTest = 0
+  var image = render(svgFlowScene(open & "<rect x=\"0\" y=\"0\" width=\"" & W & "\" height=\"" & H &
+    "\" fill=\"#ff0000\"/><circle cx=\"48\" cy=\"32\" r=\"8\" fill=\"#0000ff\"/></svg>"))
+  doAssert backgroundPaintsForTest == 0, "render/svg's covering SVG paid the background: " & $backgroundPaintsForTest
+  doAssert image.count(Sentinel) == 0 and image.count(rgbx(0, 255, 0, 255)) == 0
+  doAssert image[0, 0] == rgbx(255, 0, 0, 255) and image[48, 32] == rgbx(0, 0, 255, 255)
+  backgroundPaintsForTest = 0
+  image = render(svgFlowScene(open & "<circle cx=\"48\" cy=\"32\" r=\"8\" fill=\"#0000ff\"/></svg>"))
+  doAssert backgroundPaintsForTest == 1, $backgroundPaintsForTest
+  doAssert image.count(Sentinel) == 0 and image[0, 0] == rgbx(0, 255, 0, 255)
+  backgroundPaintsForTest = 0
+  image = render(svgFlowScene(open & "<circle cx=\"48\" cy=\"32\" r=\"8\" fill=\"#0000ff\"/></svg>", offsetX = 4))
+  doAssert backgroundPaintsForTest == 1, $backgroundPaintsForTest
+  doAssert image.count(Sentinel) == 0 and image[0, 0] == rgbx(0, 255, 0, 255)
 
 block:
   # An SVG that does not cover: the background goes down first, once.
