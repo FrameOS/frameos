@@ -1,4 +1,5 @@
 #include "fos_console.h"
+#include "fos_heap_walk.h"
 
 #include <ctype.h>
 #include <fcntl.h>
@@ -386,7 +387,7 @@ static int cmd_heapinfo(int argc, char **argv)
     printf("total=%u free=%u largest=%u min_ever_free=%u\n",
            (unsigned)heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-           (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+           (unsigned)fos_heap_largest_free_block(MALLOC_CAP_SPIRAM),
            (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM));
     printf("--- per-region detail\n");
     heap_caps_print_heap_info(MALLOC_CAP_SPIRAM);

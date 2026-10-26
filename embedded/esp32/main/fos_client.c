@@ -1,4 +1,5 @@
 #include "fos_client.h"
+#include "fos_heap_walk.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -278,7 +279,7 @@ static void log_metrics_sample(void)
         (unsigned)(fos_mem_internal_malloc_free() / 1024),
         (unsigned)(fos_mem_internal_malloc_largest() / 1024),
         (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
-        (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
+        (unsigned)(fos_heap_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
         /* Stack high-water marks, in bytes. This sample runs on the client
          * task itself, so NULL is the render task — the 40 KB
          * CLIENT_TASK_STACK_BYTES that internal RAM pays for whether the
@@ -521,7 +522,7 @@ static void save_display_state(const fos_display_state_t *state)
 static bool should_keep_packed_snapshot(size_t len)
 {
     size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    size_t largest_psram = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t largest_psram = fos_heap_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     return largest_psram >= len && free_psram >= len + FOS_SNAPSHOT_MIN_PSRAM_AFTER_COPY;
 }
 
@@ -1982,7 +1983,7 @@ static void log_animation(const char *status, bool logged_frame)
                  (unsigned long)stats.period_ms,
                  (unsigned)(frameos_nim_js_runtime_bytes() / 1024),
                  (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
-                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024));
+                 (unsigned)(fos_heap_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024));
     } else if (strcmp(status, "stop") == 0) {
         snprintf(line, sizeof(line),
                  "{\"event\":\"render:animation\",\"source\":\"esp32\",\"status\":\"stop\"}");

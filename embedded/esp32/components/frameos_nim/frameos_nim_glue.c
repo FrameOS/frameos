@@ -2,6 +2,7 @@
  * Owns NimMain() (one-shot Nim module init), the log hook, and the
  * outbound-HTTP hook the Nim http_client HAL calls into. */
 #include "frameos_nim.h"
+#include "fos_heap_walk.h"
 #include "fos_qjs_glue.h"
 
 #include "fos_log_backoff.h"
@@ -378,7 +379,7 @@ size_t fos_psram_free_bytes(void)
 
 size_t fos_psram_largest_free_block(void)
 {
-    return heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return fos_heap_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
 /* main/fos_assets_flash.c, absent from a build without it. */
