@@ -48,7 +48,13 @@ int fos_wifi_rssi(void);
  * reason code of the last one (WIFI_REASON_*), and how long the last one
  * that came back stayed down (0 until one has). */
 void fos_wifi_drop_stats(uint32_t *drops, uint8_t *last_reason, uint32_t *last_down_ms);
-/* Wait up to timeout for SNTP time sync after connecting. */
+/* Wait up to timeout for SNTP time sync after connecting. A timeout of 0
+ * starts the sync and returns at once: the clock is set when the pool
+ * answers, and fos_wifi_time_synced() turns true then. */
 esp_err_t fos_wifi_sync_time(uint32_t timeout_ms);
+/* Runs once, on lwIP's thread, when a sync the boot stopped waiting for
+ * (a timeout of 0, or one that ran out) arrives: a frame that rendered
+ * without the clock renders again with it. Set it before the sync starts. */
+void fos_wifi_set_late_time_hook(void (*hook)(void));
 bool fos_wifi_time_synced(void);
 void fos_wifi_set_scan_only(bool enabled);
