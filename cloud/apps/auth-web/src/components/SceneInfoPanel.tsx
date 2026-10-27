@@ -188,7 +188,7 @@ export function SceneInfoPanel({
       ) : null}
       {showTags ? (
         <div className="tag-list">
-          {listing.category ? (
+          {listing.category && !editing ? (
             <Link
               className="tag-pill tag-pill--category"
               href={`/?category=${encodeURIComponent(listing.category)}`}

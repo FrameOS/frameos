@@ -202,13 +202,30 @@ describe("SceneInfoPanel", () => {
     expect(draft.onImagesChange).toHaveBeenCalledWith([shaA]);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Edit category" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Minimum FrameOS version: 2026\.8\.1/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Make public" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
     // No per-version actions here: those are in the bar's versions dialog.
     expect(screen.queryByRole("button", { name: "Unpublish" })).toBeNull();
     expect(screen.getByText(/only visible to you/)).toBeTruthy();
+  });
+
+  it("opens the category editor from the owner's category pill, where a visitor's pill links to the store", () => {
+    const draft = {
+      images: info.images,
+      listing: { ...info.versions[0]!.listing },
+      onImagesChange: vi.fn(),
+      onListingChange: vi.fn(),
+    };
+    render(<SceneInfoPanel {...info} draft={draft} isOwner signedIn />);
+    // The pill is the button now: no link out of the editor beside it.
+    expect(screen.queryByRole("link", { name: "Weather" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Edit category: Weather" }));
+    const select = screen.getByLabelText("Category") as HTMLSelectElement;
+    expect(select.value).toBe("weather");
+    fireEvent.change(select, { target: { value: "calendar" } });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(draft.onListingChange).toHaveBeenCalledWith({ category: "calendar" });
   });
 
   it("shows the owner the minimum FrameOS version on its edit button, and sets the current release in one click", () => {

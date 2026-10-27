@@ -968,6 +968,22 @@ html.theme-dark .button-primary {
   font-weight: 600;
 }
 
+/* The owner's category pill opens the category editor (SceneCategoryEditor). */
+button.tag-pill--editable {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.tag-pill--editable:hover {
+  background: var(--bg-soft);
+}
+
 a.tag-pill--active:hover {
   background: var(--accent, #888);
   color: var(--surface, #fff);
