@@ -140,7 +140,9 @@ runtime.
    (HAL −7.2 K, lwIP −9.2 K, FreeRTOS −3.3 K, QuickJS −3.4 K, SPI −3.5 K, ...).
 4. ~~**Drop pixie's PPM codec**~~ — **done**, `-d:pixieNoPpm` (FrameOS/pixie#6),
    −5.7 KB. WebP (38 K), GIF (5.9 K) and BMP (8.2 K) are still in; they at
-   least correspond to formats a URL might serve.
+   least correspond to formats a URL might serve. Until 2026-10-27
+   `utils/image.nim` imported the PPM module for its streaming path anyway,
+   which linked the streaming decoder back in (3.5 KB); it honours the flag now.
 5. ~~**Strip the embedded font**~~ — **done** (2026-10-27),
    `tools/generate_embedded_font.py` makes `assets/compiled/fonts/Ubuntu-Regular.ttf`
    from the original in `assets/copied/fonts` without the TrueType hinting,
@@ -155,6 +157,11 @@ runtime.
 7. **Config-gate heavy optional apps** (~100–200 KB): calendar+ical is 97 KB;
    wikicommons/openai/unsplash/chart add up. Breaks "any scene runs on any
    frame", so this is a firmware-variant decision, not a flag.
+8. ~~**Wi-Fi and TLS a frame does not use**~~ — **done** (2026-10-27),
+   `sdkconfig.defaults`: no WPA3 on the setup hotspot, no SAE-PK, no OWE
+   (−11.6 KB); no curves beyond P-256/P-384/P-521/X25519, no static ECDH, no
+   renegotiation, no CRL/CSR/PKCS#7 parsing, no server session tickets
+   (−6.8 KB).
 
 Checked and rejected: `CONFIG_NEWLIB_NANO_FORMAT` (~26 KB in `vfprintf` +
 `svfprintf`) — nano formatting has no 64-bit integer conversions and the

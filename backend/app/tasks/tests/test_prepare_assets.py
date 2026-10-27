@@ -57,6 +57,7 @@ def create_project_layout(tmp_path: Path) -> Path:
     write(frameos_root / "src" / "apps" / "data" / "sample" / "config.json", "{\"name\":\"Sample\"}\n")
     write(frameos_root / "assets" / "compiled" / "web" / "control.html", "<html>control</html>\n")
     write(frameos_root / "assets" / "compiled" / "fonts" / "Ubuntu-Regular.ttf", b"font")
+    write(frameos_root / "assets" / "compiled" / "tz" / "timezone_aliases.json", "{}\n")
 
     return frameos_root
 
@@ -81,6 +82,7 @@ def test_prepare_assets_uses_manifest_to_skip_or_regenerate_work(tmp_path, monke
         write(project_root / "src" / "assets" / "frame_web.nim", f"# frame web {version}\n")
         write(project_root / "src" / "assets" / "fonts.nim", f"# fonts {version}\n")
         write(project_root / "src" / "assets" / "repo_scenes.nim", f"# repo scenes {version}\n")
+        write(project_root / "src" / "assets" / "tz_aliases.nim", f"# tz aliases {version}\n")
 
     monkeypatch.setattr(prepare_assets, "build_frontend", fake_build_frontend)
     monkeypatch.setattr(prepare_assets, "generate_asset_modules", fake_generate_asset_modules)
@@ -257,6 +259,7 @@ def test_prepare_assets_uses_packaged_frontend_when_shared_sources_are_missing(t
     write(frameos_root / "src" / "assets" / "frame_web.nim", "# frame web\n")
     write(frameos_root / "src" / "assets" / "fonts.nim", "# fonts\n")
     write(frameos_root / "src" / "assets" / "repo_scenes.nim", "# repo scenes\n")
+    write(frameos_root / "src" / "assets" / "tz_aliases.nim", "# tz aliases\n")
     shutil.rmtree(frameos_root.parent / "frontend" / "src")
 
     build_calls: list[int] = []

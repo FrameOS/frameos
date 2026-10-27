@@ -433,199 +433,26 @@ proc eventAlias*(name: string, index: int): string =
     else: ""
   else: ""
 
-proc eventPayloadKeyCount*(name: string): int =
-  ## How many payload fields the contract lists for `name` (0 for a custom event).
-  case name
-  of evOpen: 1
-  of evKeyDown: 8
-  of evKeyUp: 7
-  of evTextInput: 1
-  of evPointerMove: 5
-  of evPointerDown: 6
-  of evPointerUp: 6
-  of evPointerCancel: 4
+proc aliasPayloadKeyCount*(alias: string): int =
+  ## How many payload fields the contract lists for an old name (`aliasOf`),
+  ## 0 for any other name.
+  case alias
   of evMouseMove: 2
   of evMouseDown: 1
   of evMouseUp: 1
-  of evTap: 4
-  of evDoubleTap: 4
-  of evLongPress: 5
-  of evSwipe: 7
-  of evEdgeSwipe: 8
-  of evWheel: 4
-  of evGpio: 9
-  of evButton: 7
-  of evSetSceneState: 2
-  of evSetCurrentScene: 3
-  of evUploadScenes: 3
   else: 0
 
-proc eventPayloadKey*(name: string, index: int): string =
-  ## The contract's payload fields of `name`, in order. Empty past the count.
-  case name
-  of evOpen:
-    case index
-    of 0: "sceneId"
-    else: ""
-  of evKeyDown:
-    case index
-    of 0: "code"
-    of 1: "key"
-    of 2: "repeat"
-    of 3: "shift"
-    of 4: "ctrl"
-    of 5: "alt"
-    of 6: "meta"
-    of 7: "linuxCode"
-    else: ""
-  of evKeyUp:
-    case index
-    of 0: "code"
-    of 1: "key"
-    of 2: "shift"
-    of 3: "ctrl"
-    of 4: "alt"
-    of 5: "meta"
-    of 6: "linuxCode"
-    else: ""
-  of evTextInput:
-    case index
-    of 0: "text"
-    else: ""
-  of evPointerMove:
-    case index
-    of 0: "x"
-    of 1: "y"
-    of 2: "pointerId"
-    of 3: "pointerType"
-    of 4: "buttons"
-    else: ""
-  of evPointerDown:
-    case index
-    of 0: "x"
-    of 1: "y"
-    of 2: "button"
-    of 3: "buttons"
-    of 4: "pointerId"
-    of 5: "pointerType"
-    else: ""
-  of evPointerUp:
-    case index
-    of 0: "x"
-    of 1: "y"
-    of 2: "button"
-    of 3: "buttons"
-    of 4: "pointerId"
-    of 5: "pointerType"
-    else: ""
-  of evPointerCancel:
-    case index
-    of 0: "x"
-    of 1: "y"
-    of 2: "pointerId"
-    of 3: "pointerType"
-    else: ""
+proc aliasPayloadKey*(alias: string, index: int): string =
+  ## An old name's payload fields, in order. Empty past the count.
+  case alias
   of evMouseMove:
     case index
     of 0: "x"
     of 1: "y"
     else: ""
-  of evMouseDown:
+  of evMouseDown, evMouseUp:
     case index
     of 0: "button"
-    else: ""
-  of evMouseUp:
-    case index
-    of 0: "button"
-    else: ""
-  of evTap:
-    case index
-    of 0: "x"
-    of 1: "y"
-    of 2: "pointerId"
-    of 3: "pointerType"
-    else: ""
-  of evDoubleTap:
-    case index
-    of 0: "x"
-    of 1: "y"
-    of 2: "pointerId"
-    of 3: "pointerType"
-    else: ""
-  of evLongPress:
-    case index
-    of 0: "x"
-    of 1: "y"
-    of 2: "durationMs"
-    of 3: "pointerId"
-    of 4: "pointerType"
-    else: ""
-  of evSwipe:
-    case index
-    of 0: "direction"
-    of 1: "x"
-    of 2: "y"
-    of 3: "startX"
-    of 4: "startY"
-    of 5: "pointerId"
-    of 6: "pointerType"
-    else: ""
-  of evEdgeSwipe:
-    case index
-    of 0: "edge"
-    of 1: "direction"
-    of 2: "x"
-    of 3: "y"
-    of 4: "startX"
-    of 5: "startY"
-    of 6: "pointerId"
-    of 7: "pointerType"
-    else: ""
-  of evWheel:
-    case index
-    of 0: "deltaX"
-    of 1: "deltaY"
-    of 2: "x"
-    of 3: "y"
-    else: ""
-  of evGpio:
-    case index
-    of 0: "pin"
-    of 1: "label"
-    of 2: "role"
-    of 3: "action"
-    of 4: "durationMs"
-    of 5: "wake"
-    of 6: "claimed"
-    of 7: "atMs"
-    of 8: "level"
-    else: ""
-  of evButton:
-    case index
-    of 0: "pin"
-    of 1: "label"
-    of 2: "role"
-    of 3: "action"
-    of 4: "durationMs"
-    of 5: "wake"
-    of 6: "atMs"
-    else: ""
-  of evSetSceneState:
-    case index
-    of 0: "state"
-    of 1: "render"
-    else: ""
-  of evSetCurrentScene:
-    case index
-    of 0: "sceneId"
-    of 1: "direction"
-    of 2: "state"
-    else: ""
-  of evUploadScenes:
-    case index
-    of 0: "scenes"
-    of 1: "sceneId"
-    of 2: "state"
     else: ""
   else: ""
 

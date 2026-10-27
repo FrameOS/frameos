@@ -465,24 +465,30 @@ def gen_nim(doc):
             out.append('    else: ""')
     out.append('  else: ""')
     out.append("")
-    out.append("proc eventPayloadKeyCount*(name: string): int =")
-    out.append("  ## How many payload fields the contract lists for `name` (0 for a custom event).")
-    out.append("  case name")
-    for event in events:
-        if event.get("payload"):
-            out.append(f"  of ev{camel(event['name'])}: {len(event['payload'])}")
+    # Only the old names' fields: the dispatcher cuts an alias's payload down
+    # to them, and nothing else asks. The same two procs over every event
+    # were 2.7 KB of the ESP32 image.
+    alias_events = [event for event in events if event.get("aliasOf") and event.get("payload")]
+    out.append("proc aliasPayloadKeyCount*(alias: string): int =")
+    out.append("  ## How many payload fields the contract lists for an old name (`aliasOf`),")
+    out.append("  ## 0 for any other name.")
+    out.append("  case alias")
+    for event in alias_events:
+        out.append(f"  of ev{camel(event['name'])}: {len(event['payload'])}")
     out.append("  else: 0")
     out.append("")
-    out.append("proc eventPayloadKey*(name: string, index: int): string =")
-    out.append("  ## The contract's payload fields of `name`, in order. Empty past the count.")
-    out.append("  case name")
-    for event in events:
-        if event.get("payload"):
-            out.append(f"  of ev{camel(event['name'])}:")
-            out.append("    case index")
-            for i, field in enumerate(event["payload"]):
-                out.append(f"    of {i}: {nim_str(field['name'])}")
-            out.append('    else: ""')
+    out.append("proc aliasPayloadKey*(alias: string, index: int): string =")
+    out.append("  ## An old name's payload fields, in order. Empty past the count.")
+    out.append("  case alias")
+    alias_keys: dict[tuple[str, ...], list[str]] = {}
+    for event in alias_events:
+        alias_keys.setdefault(tuple(field["name"] for field in event["payload"]), []).append(event["name"])
+    for keys, names in alias_keys.items():
+        out.append(f"  of {', '.join('ev' + camel(name) for name in names)}:")
+        out.append("    case index")
+        for i, key in enumerate(keys):
+            out.append(f"    of {i}: {nim_str(key)}")
+        out.append('    else: ""')
     out.append('  else: ""')
     out.append("")
     out.append("proc buttonRoleForLabel*(upperLabel: string): string =")

@@ -359,8 +359,8 @@ proc listens(loop: EventLoop, scene: FrameScene, name: string): bool =
 proc aliasPayload(alias: string, payload: JsonNode): JsonNode =
   ## The alias's own, smaller payload: the keys its contract row lists.
   result = newJObject()
-  for index in 0 ..< eventPayloadKeyCount(alias):
-    let key = eventPayloadKey(alias, index)
+  for index in 0 ..< aliasPayloadKeyCount(alias):
+    let key = aliasPayloadKey(alias, index)
     if payload.hasKey(key):
       result[key] = payload[key]
 
