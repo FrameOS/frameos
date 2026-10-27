@@ -159,7 +159,10 @@ EDITOR_TOOL_DEFINITIONS: list[JsonObject] = [
             "Edit source code inside the user's CURRENT scene with exact find/replace, without resending the file. "
             "Targets an app's source file (app + file, e.g. weatherPanel / app.ts), a node's inline sources "
             "(node_id + file), or a code node's snippet (node_id alone). Each `find` must match exactly once (set "
-            "all: true to replace every occurrence); a miss reports the problem and changes nothing."
+            "all: true to replace every occurrence); a miss reports the problem and changes nothing. To delete or "
+            "rewrite a long block (dead code, an old renderer) without quoting it, give `from` and `to` instead of "
+            "`find`: the block's first line and its last line, each exact. Everything from the start of `from` "
+            "through the end of the first `to` after it is replaced, however long it is."
         ),
         "parameters": {
             "type": "object",
@@ -175,9 +178,19 @@ EDITOR_TOOL_DEFINITIONS: list[JsonObject] = [
                         "properties": {
                             "all": {"type": "boolean", "description": "Replace every occurrence."},
                             "find": {"type": "string", "description": "Exact text to find (whitespace included)."},
+                            "from": {
+                                "type": "string",
+                                "description": "Instead of find: the exact start of a block to replace (its first "
+                                "line); must match once.",
+                            },
                             "replace": {"type": "string", "description": "Replacement text (empty string deletes)."},
+                            "to": {
+                                "type": "string",
+                                "description": "With from: the exact end of the block (its last line), the first "
+                                "match after from.",
+                            },
                         },
-                        "required": ["find", "replace"],
+                        "required": ["replace"],
                     },
                 },
                 "file": {"type": "string", "description": 'File name inside the sources, e.g. "app.ts".'},

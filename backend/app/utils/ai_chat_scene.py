@@ -267,7 +267,7 @@ def apply_source_edits(base: JsonObject, args: JsonObject) -> tuple[JsonObject, 
     node_id = args.get("node_id") if isinstance(args.get("node_id"), str) else None
     file = args.get("file") if isinstance(args.get("file"), str) else None
     if not edits:
-        return scene, ["edits: send at least one { find, replace }."], ""
+        return scene, ["edits: send at least one { find, replace } or { from, to, replace }."], ""
     if not app and not node_id:
         return scene, ["Name the target: `app` (+ `file`) for a bundled app, or `node_id` for a node."], ""
 
@@ -329,20 +329,54 @@ def apply_source_edits(base: JsonObject, args: JsonObject) -> tuple[JsonObject, 
 
     working = current
     replacements = 0
+
+    def not_found(index: int, label: str, text: str) -> str:
+        first_line = text.split("\n")[0]
+        return (
+            f"edits[{index}]: {label} in {where}: {json.dumps(first_line[:80])}"
+            f"{' (first line shown)' if chr(10) in text else ''}. Check whitespace and quote the text exactly as it appears."
+        )
+
     for index, edit in enumerate(edits):
         find = edit.get("find")
         replace_value = edit.get("replace")
         replace = replace_value if isinstance(replace_value, str) else ""
+        if "from" in edit or "to" in edit:
+            # A block by its first and last lines: dead code, an old renderer,
+            # a section too long to quote whole.
+            start_text = edit.get("from")
+            end_text = edit.get("to")
+            if isinstance(find, str) and find:
+                issues.append(f"edits[{index}]: give either find, or from and to, not both.")
+                continue
+            if not isinstance(start_text, str) or not start_text or not isinstance(end_text, str) or not end_text:
+                issues.append(f"edits[{index}]: a block needs both from and to, each a non-empty string.")
+                continue
+            starts = working.count(start_text)
+            if starts == 0:
+                issues.append(not_found(index, "from not found", start_text))
+                continue
+            if starts > 1:
+                issues.append(
+                    f"edits[{index}]: from matches {starts} times in {where}; include more of the block's first lines."
+                )
+                continue
+            start = working.find(start_text)
+            # The first `to` that ends at or after the end of `from`, so a block
+            # of one line may name the same text twice.
+            end = working.find(end_text, max(start, start + len(start_text) - len(end_text)))
+            if end < 0:
+                issues.append(not_found(index, "to not found after from", end_text))
+                continue
+            working = working[:start] + replace + working[end + len(end_text):]
+            replacements += 1
+            continue
         if not isinstance(find, str) or not find:
             issues.append(f"edits[{index}]: find must be a non-empty string.")
             continue
         count = working.count(find)
         if count == 0:
-            first_line = find.split("\n")[0]
-            issues.append(
-                f"edits[{index}]: not found in {where}: {json.dumps(first_line[:80])}"
-                f"{' (first line shown)' if chr(10) in find else ''}. Check whitespace and quote the text exactly as it appears."
-            )
+            issues.append(not_found(index, "not found", find))
             continue
         if count > 1 and edit.get("all") is not True:
             issues.append(f"edits[{index}]: matches {count} times in {where}; include more surrounding text or set all: true.")
