@@ -39,6 +39,25 @@ type
     ## the elements it is over and of those it is pressing.
     hovered*, pressed*: seq[int]
 
+  TextMemo = object
+    key: string          ## the runs, their styles, the width and alignment
+    arrangement: Arrangement
+    bold: seq[Font]      ## its fonts drawn with a stroke (UiNode.bold)
+    drawnAt: array[3, float32] ## x, y, opacity `drawn` was emitted for
+    drawn: seq[SvgNode]  ## its outlines as emitted there, paths shared
+
+  UiMemo* = ref object
+    ## What the last layout of a UI set in type, for the next one (one per
+    ## UI, ui/events.nim's target). Text whose runs, style and box did not
+    ## change is neither typeset nor outlined again, and it comes back as
+    ## the same nodes and paths: pixie compares those by identity, keeps
+    ## their bounds and their flattened shapes (paths.share), so an
+    ## unchanged label costs a repaint nothing.
+    last, kept: seq[TextMemo]
+    gen: int             ## this layout's number: a node's `memo` holds for it only
+    root: UiNode         ## the last layout's tree, taken back where it did not change
+    rootW, rootH: float32
+
   UiNode {.acyclic.} = ref object
     kind: UiKind
     box: Box
@@ -54,6 +73,14 @@ type
     lastW, lastH: float32
     lastFix: int
     lastSize: Vec2
+    # The layout before that (a flex item is measured, then placed: two
+    # calls, both the same the next time an unchanged item is laid out), and
+    # the call the node was asked for last, which its children are placed
+    # for before it is emitted (`placed`).
+    prevW, prevH: float32
+    prevFix: int
+    prevSize: Vec2
+    asked: (int, float32, float32)
     # An item's margins and sizes while its container lays it out.
     margins: array[4, float32]
     autos: set[0 .. 3]
@@ -64,6 +91,22 @@ type
     arrangement: Arrangement
     arrangedW: float32
     arrangedAlign: HorizontalAlignment
+    memo: int             ## its arrangement's entry in the memo's `kept` ...
+    memoGen: int          ## ... of the layout with this number
+    # What it was built from, for the next layout to take it back unbuilt:
+    # its element, the style it inherited, whether it was in a hovered
+    # group, and its pointer states (`pointer`: it or one below has hover:,
+    # active: or group classes, so the pointer can change it).
+    inherited: Text
+    inGroup, pointer: bool
+    states: set[UiState]
+    # What it emitted last, and for which place, size, opacity, layout call
+    # and first gradient number: the same again is the same nodes again.
+    emitted: seq[SvgNode]
+    emittedRegions: seq[UiRegion]
+    emittedAt: array[5, float32]
+    emittedFor: (int, float32, float32)
+    emittedGradients: (int, int)
     # What the pointer can do to it (UiRegion).
     key: int
     handlers: array[UiEvent, int]
@@ -107,6 +150,10 @@ proc hasClass(classes, name: string): bool =
       return true
     at = classes.find(name, at + 1)
 
+proc pointerClasses(classes: string): bool {.inline.} =
+  ## Classes the pointer can change: hover:, active:, group and group-hover:.
+  classes.contains("hover:") or classes.contains("active:") or classes.contains("group")
+
 proc addRuns(n: SvgNode, style: Text, into: UiNode, rootW, rootH: float32, depth: int,
     states: set[UiState]) =
   ## The text of an inline element and everything inside it, each run in the
@@ -121,20 +168,63 @@ proc addRuns(n: SvgNode, style: Text, into: UiNode, rootW, rootH: float32, depth
     text = style
     box = initBox()
   tagStyle(n.tag, text)
-  box.applyClasses(text, n.attr("class"), rootW, rootH, states)
+  let classes = n.attr("class")
+  if classes.pointerClasses:
+    into.pointer = true
+  box.applyClasses(text, classes, rootW, rootH, states)
   if box.display != diNone:
     for child in n.children:
       child.addRuns(text, into, rootW, rootH, depth + 1, states)
 
 proc newUiNode(kind: UiKind, text: Text): UiNode =
-  UiNode(kind: kind, box: initBox(), text: text, lastFix: -1)
+  UiNode(kind: kind, box: initBox(), text: text, lastFix: -1, prevFix: -1, emittedFor: (-1, 0'f32, 0'f32))
+
+proc sameTree(a, b: SvgNode): bool =
+  ## Whether two element trees say the same: the very nodes (a walk that
+  ## kept them), or the same tags, text, attributes, pictures and children.
+  if a == b:
+    return true
+  if a.isNil or b.isNil or a.tag != b.tag or a.text != b.text or a.image != b.image or
+      a.path != b.path or a.children.len != b.children.len or a.attrs != b.attrs:
+    return false
+  for i in 0 ..< a.children.len:
+    if not sameTree(a.children[i], b.children[i]):
+      return false
+  true
+
+proc statesOf(n: UiNode, input: UiInput, groupHover: bool): set[UiState] =
+  if groupHover: result.incl usGroupHover
+  if n.hover and n.key in input.hovered: result.incl usHover
+  if n.active and n.key in input.pressed: result.incl usActive
+
+proc samePointer(n: UiNode, input: UiInput, groupHover: bool): bool =
+  ## Whether the pointer leaves `n` and what is in it as they were built.
+  if not n.pointer:
+    return true
+  if n.inGroup != groupHover or (n.kind != ukText and n.statesOf(input, groupHover) != n.states):
+    return false
+  let childGroup = groupHover or (n.group and n.key in input.hovered)
+  for c in n.children:
+    if not c.samePointer(input, childGroup):
+      return false
+  true
 
 proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
-    key: int, input: UiInput, groupHover: bool): UiNode =
+    key: int, input: UiInput, groupHover: bool, prev: UiNode): UiNode =
+  ## `n` as a node to lay out. `prev`, the node the last layout built at this
+  ## place, is taken back as it is, laid out and emitted, when nothing it was
+  ## built from changed: React's diff, without its API.
+  if not prev.isNil and prev.kind != ukText and prev.key == key and prev.inherited == inherited and
+      sameTree(prev.src, n) and prev.samePointer(input, groupHover):
+    return prev
   var text = inherited
   tagStyle(n.tag, text)
   result = newUiNode(ukBox, text)
   let classes = n.attr("class")
+  result.src = n
+  result.inherited = inherited
+  result.inGroup = groupHover
+  result.pointer = classes.pointerClasses
   result.key = key
   result.hover = classes.variant("hover")
   result.active = classes.variant("active")
@@ -148,12 +238,12 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   if groupHover: states.incl usGroupHover
   if result.hover and key in input.hovered: states.incl usHover
   if result.active and key in input.pressed: states.incl usActive
+  result.states = states
   result.box.applyClasses(result.text, classes, rootW, rootH, states)
   # A hovered `group` lights its descendants' group-hover: classes.
   let childGroup = groupHover or (result.group and key in input.hovered)
   if n.tag == "img" or n.tag == "svg":
     result.kind = if n.tag == "img": ukImage else: ukSvg
-    result.src = n
     return
   if depth > MaxDepth:
     return
@@ -166,12 +256,24 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
     if child.isText or (flows and child.tag.isInline):
       if run.isNil:
         run = newUiNode(ukText, result.text)
+        run.inGroup = childGroup
         result.children.add run
       child.addRuns(result.text, run, rootW, rootH, depth + 1, inlineStates)
+      if run.pointer:
+        result.pointer = true
     else:
       run = nil
-      result.children.add child.build(result.text, rootW, rootH, depth + 1,
-        key * 31 + i + 1, input, childGroup)
+      let childKey = key * 31 + i + 1
+      var before: UiNode
+      if not prev.isNil:
+        for c in prev.children:
+          if c.kind != ukText and c.key == childKey:
+            before = c
+            break
+      let built = child.build(result.text, rootW, rootH, depth + 1, childKey, input, childGroup, before)
+      if built.pointer:
+        result.pointer = true
+      result.children.add built
 
 # -------- Text
 
@@ -259,11 +361,51 @@ proc cutSpans(spans: seq[Span], keep: int): seq[Span] =
   if result.len > 0:
     result[^1] = newSpan(result[^1].text.strip(leading = false) & "…", result[^1].font)
 
+var memo {.threadvar.}: UiMemo ## the layout's, while layoutUi runs
+
+proc textKey(n: UiNode, width: float32, align: HorizontalAlignment): string =
+  template addBytes(v: untyped) =
+    let at = result.len
+    result.setLen(at + sizeof(v))
+    copyMem(addr result[at], unsafeAddr v, sizeof(v))
+  for i in 0 ..< n.runs.len:
+    result.add n.runs[i].tag
+    result.add '\0'
+    result.add n.runs[i].text
+    result.add '\0'
+    addBytes(n.styles[i])
+  addBytes(width)
+  addBytes(align)
+
+proc recall(key: string): int =
+  ## The memo entry for `key`, moved to the entries this layout keeps; -1.
+  for i in 0 ..< memo.kept.len:
+    if memo.kept[i].key == key:
+      return i
+  for i in 0 ..< memo.last.len:
+    if memo.last[i].key == key:
+      memo.kept.add move(memo.last[i])
+      memo.last.del(i)
+      return memo.kept.high
+  -1
+
 proc arrange(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement =
   ## The text set into `width`, wrapped unless `whitespace-nowrap`, and cut
   ## with an ellipsis after `lines` lines (truncate, line-clamp-N).
   if not n.arrangement.isNil and n.arrangedW == width and n.arrangedAlign == align:
     return n.arrangement
+  var key: string
+  n.memo = -1
+  if not memo.isNil:
+    key = n.textKey(width, align)
+    n.memo = recall(key)
+    n.memoGen = memo.gen
+    if n.memo >= 0:
+      n.arrangement = memo.kept[n.memo].arrangement
+      n.bold = memo.kept[n.memo].bold
+      n.arrangedW = width
+      n.arrangedAlign = align
+      return n.arrangement
   n.ensureSpans()
   # A pixel to spare: pixie rounds the bounds it reports, so text measured
   # at its own width could otherwise wrap when set into it.
@@ -288,6 +430,10 @@ proc arrange(n: UiNode, width: float32, align: HorizontalAlignment): Arrangement
   n.arrangement = result
   n.arrangedW = width
   n.arrangedAlign = align
+  if not memo.isNil:
+    memo.kept.add TextMemo(key: move(key), arrangement: result, bold: n.bold, drawnAt: [-1'f32, 0, 0])
+    n.memo = memo.kept.high
+    n.memoGen = memo.gen
 
 # -------- Layout
 
@@ -347,7 +493,7 @@ proc intrinsic(n: UiNode): Vec2 =
   let box = n.viewBox()
   vec2(box[2], box[3])
 
-proc layout(n: UiNode, w, h: float32, fixW, fixH: bool): Vec2 {.raises: [].}
+proc layout(n: UiNode, w, h: float32, fixW, fixH: bool, force = false): Vec2 {.raises: [].}
 
 proc alignOf(parent, child: Box): Align {.inline.} =
   if child.self != alAuto: child.self else: parent.items
@@ -606,12 +752,16 @@ proc layoutAbsolute(n: UiNode, size: Vec2) =
     c.x = b.border[3] + (if left >= 0: left elif right >= 0: pw - right - s.x else: b.pad[3])
     c.y = b.border[0] + (if top >= 0: top elif bottom >= 0: ph - bottom - s.y else: b.pad[0])
 
-proc layout(n: UiNode, w, h: float32, fixW, fixH: bool): Vec2 =
+proc layout(n: UiNode, w, h: float32, fixW, fixH: bool, force = false): Vec2 =
   ## `n`'s border-box size: `w` x `h` where fixed, else the room it may take
   ## at most, sized to its content. Lays its children out on the way.
   let key = int(fixW) or (int(fixH) shl 1)
-  if n.lastFix == key and n.lastW == w and n.lastH == h:
-    return n.lastSize
+  n.asked = (key, w, h)
+  if not force:
+    if n.lastFix == key and n.lastW == w and n.lastH == h:
+      return n.lastSize
+    if n.prevFix == key and n.prevW == w and n.prevH == h:
+      return n.prevSize # its children are placed for it before it is emitted
   template b: untyped = n.box
   let
     px = b.padX
@@ -643,10 +793,22 @@ proc layout(n: UiNode, w, h: float32, fixW, fixH: bool): Vec2 =
     else: result.x = result.y * b.aspect
   if n.kind == ukBox:
     n.layoutAbsolute(result)
+  n.prevW = n.lastW
+  n.prevH = n.lastH
+  n.prevFix = n.lastFix
+  n.prevSize = n.lastSize
   n.lastW = w
   n.lastH = h
   n.lastFix = key
   n.lastSize = result
+
+proc placed(n: UiNode) =
+  ## The children placed for the call `n` was asked for last: a call the
+  ## layout before the last answered (`prev`) left them where the last put
+  ## them.
+  if n.kind == ukBox and n.asked != (n.lastFix, n.lastW, n.lastH):
+    let (key, w, h) = n.asked
+    discard n.layout(w, h, (key and 1) != 0, (key and 2) != 0, force = true)
 
 # -------- SVG out
 
@@ -749,13 +911,24 @@ proc emitPaint(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode],
     node.paint(b.borderColor, opacity)
     drawn.add node
 
-proc recolor(n: SvgNode, color: string) =
-  ## `currentColor` in an icon is the text color, as in a browser.
+proc recolored(n: SvgNode, color: string): SvgNode =
+  ## `currentColor` in an icon as the text color, as in a browser: `n`
+  ## itself when nothing in it says currentColor, else a copy. The app's
+  ## nodes are never changed: a later layout may take them back.
+  result = n
   for i in 0 ..< n.attrs.len:
     if n.attrs[i][1] == "currentColor":
-      n.attrs[i][1] = color
-  for child in n.children:
-    child.recolor(color)
+      if result == n:
+        result = SvgNode(tag: n.tag, text: n.text, attrs: n.attrs, children: n.children,
+          image: n.image, path: n.path)
+      result.attrs[i][1] = color
+  for i in 0 ..< n.children.len:
+    let child = n.children[i].recolored(color)
+    if child != n.children[i]:
+      if result == n:
+        result = SvgNode(tag: n.tag, text: n.text, attrs: n.attrs, children: n.children,
+          image: n.image, path: n.path)
+      result.children[i] = child
 
 proc emitSvg(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode]) =
   ## An `<svg>` inside a UI: its drawing as a group, its viewBox fitted into
@@ -781,13 +954,20 @@ proc emitSvg(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode]) =
   if opacity < 1:
     group.attrs.add(("opacity", num(opacity)))
   group.children = n.src.children
-  group.recolor(n.text.color.hex)
-  drawn.add group
+  drawn.add group.recolored(n.text.color.hex)
 
 proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
   let arrangement = n.arrange(w, n.text.align)
   if arrangement.runes.len == 0:
     return
+  let
+    at = [x, y, opacity]
+    remembered = not memo.isNil and n.memo >= 0 and n.memoGen == memo.gen
+  if remembered and memo.kept[n.memo].drawnAt == at:
+    for node in memo.kept[n.memo].drawn:
+      drawn.add node
+    return
+  let first = drawn.len
   var paths: seq[Path]
   try:
     paths = arrangement.computePaths()
@@ -811,6 +991,12 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
       node.attrs.add(("stroke-width", num(font.size / 24)))
       node.attrs.add(("stroke-linejoin", "round"))
     drawn.add node
+  if remembered:
+    template entry: untyped = memo.kept[n.memo]
+    entry.drawnAt = at
+    entry.drawn = drawn[first .. ^1]
+    for node in entry.drawn:
+      node.path.share() # never changed again: its bounds and shapes are kept
 
 proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradients: var int,
     regions: var seq[UiRegion]) =
@@ -828,6 +1014,22 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     cy = y + b.pad[0] + b.border[0]
     cw = w - b.padX
     ch = h - b.padY
+    at = [x, y, w, h, op]
+  n.placed()
+  let call = (n.lastFix, n.lastW, n.lastH)
+  if n.kind == ukBox and n.emittedAt == at and n.emittedFor == call and n.emittedGradients[0] == gradients:
+    # Taken back unchanged (build), laid out by the same call and placed
+    # where it was: what it emitted then, the same nodes for pixie to keep.
+    for node in n.emitted:
+      drawn.add node
+    for region in n.emittedRegions:
+      regions.add region
+    gradients += n.emittedGradients[1]
+    return
+  let
+    first = drawn.len
+    firstRegion = regions.len
+    firstGradient = gradients
   n.emitPaint(x, y, w, h, op, drawn, gradients)
   if n.hover or n.active or n.group or n.handlers != default(array[UiEvent, int]):
     # In paint order: whatever comes later is on top.
@@ -852,17 +1054,28 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
       for c in n.children:
         if c.box.absolute == pass:
           c.emit(x, y, op, drawn, gradients, regions)
+    n.emitted = drawn[first .. ^1]
+    n.emittedRegions = regions[firstRegion .. ^1]
+    n.emittedAt = at
+    n.emittedFor = call
+    n.emittedGradients = (firstGradient, gradients - firstGradient)
 
 proc layoutUi*(root: SvgNode, width, height: int, input: UiInput,
-    regions: var seq[UiRegion]): SvgNode =
+    regions: var seq[UiRegion], textMemo: UiMemo = nil): SvgNode =
   ## A UI tree laid out into a `width` x `height` image, as the SVG that
   ## draws it there. The outermost element fills the image unless its own
   ## classes size it. `input` is what the pointer is doing; `regions` gets
   ## the elements it can do something to, for the next event.
+  memo = textMemo
   let
     w = width.float32
     h = height.float32
-    ui = root.build(initText(), w, h, 0, 0, input, false)
+  var before: UiNode
+  if not memo.isNil:
+    inc memo.gen
+    if memo.rootW == w and memo.rootH == h:
+      before = memo.root
+  let ui = root.build(initText(), w, h, 0, 0, input, false, before)
   var
     rw = ui.box.w.resolve(w)
     rh = ui.box.h.resolve(h)
@@ -874,6 +1087,12 @@ proc layoutUi*(root: SvgNode, width, height: int, input: UiInput,
   result = SvgNode(tag: "svg", attrs: @[("width", $width), ("height", $height)])
   var gradients = 0
   ui.emit(0, 0, 1, result.children, gradients, regions)
+  if not memo.isNil:
+    memo.last = move(memo.kept) # what this layout did not use is let go
+    memo.root = ui
+    memo.rootW = w
+    memo.rootH = h
+    memo = nil
 
 proc layoutUi*(root: SvgNode, width, height: int): SvgNode =
   var regions: seq[UiRegion]

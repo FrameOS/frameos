@@ -8,20 +8,33 @@
 ## `wholeFrame`) and the SVG begins with an opaque full-canvas rect — and
 ## nothing else has written into the buffer since (the firmware's write
 ## generation for it), the buffer holds exactly that SVG's render. The next
-## render into it then repaints pixie's `damage` box between the two SVGs
-## and leaves the rest as it is: for DVD Logo Bounce on the SenseCAP
-## Indicator, a box around the logo instead of 230,400 pixels.
+## render into it then repaints the boxes pixie's `damageRects` finds between
+## the two SVGs, each drawing only the elements over it, and leaves the rest
+## as it is: for DVD Logo Bounce on the SenseCAP Indicator, a box around the
+## logo instead of 230,400 pixels; for a JSX home panel whose switch was
+## flipped, that card and the count it changed, not the canvas between them.
 ##
 ## The record is taken off the shelf when a render into the buffer begins
 ## and put back only by a render that drew the buffer whole this way, so a
 ## render of anything else, a failed one or a write the firmware made leaves
-## no record behind and the next frame into that buffer is drawn whole.
+## no record behind.
+##
+## A buffer with no record of its own (the first renders after a scene came
+## up, two of the SenseCAP's three buffers) starts from the newest other
+## buffer that still holds its record's frame, by that buffer's own write
+## generation (`panelBufferGeneration`): its pixels are copied in, ~25 ms
+## for a 480x480 RGB565 buffer, and only the damage against that frame is
+## drawn. A tap right after a scene comes up costs what any other tap does.
 
 import std/options
 import pixie
 import pixie/fileformats/svg
 import frameos/utils/image
 import frameos/utils/memory
+
+const MaxRepaints = 6
+  ## Boxes a frame repaints at most (pixie's damageRects joins the rest):
+  ## each costs a look at every element's bounds, and those over it.
 
 type HeldFrame = object
   buffer: pointer
@@ -30,10 +43,14 @@ type HeldFrame = object
   svg: Svg
 
 var
-  heldFrames: seq[HeldFrame]
+  heldFrames: seq[HeldFrame] ## oldest first
   panelBuffer: pointer
   panelGeneration: uint32
   panelHeld: Option[HeldFrame]
+  panelBufferGeneration*: proc(buffer: pointer): int64 {.nimcall, raises: [].}
+    ## The firmware's write generation of any of the panel's buffers, -1 for
+    ## one it does not know (embedded_runtime: fos_display_buffer_generation).
+    ## Unset, a buffer without its own record is drawn whole.
 
 when defined(testing):
   var svgFramePixelsForTest* = 0
@@ -55,17 +72,37 @@ proc endPanelFrame*() =
   panelBuffer = nil
   panelHeld = none(HeldFrame)
 
+proc area(rects: seq[tuple[x, y, w, h: int]]): int =
+  for r in rects:
+    result += r.w * r.h
+
+proc newestHeldFrame(target: Image): int =
+  ## The newest record of another buffer that still holds its frame (its
+  ## write generation unchanged since), of the target's size; -1 for none.
+  if panelBufferGeneration.isNil:
+    return -1
+  for i in countdown(heldFrames.high, 0):
+    let frame = heldFrames[i]
+    if frame.buffer != panelBuffer and frame.width == target.width and
+        frame.height == target.height and
+        panelBufferGeneration(frame.buffer) == frame.generation.int64:
+      return i
+  -1
+
 proc forgetPanelFrames*() =
   ## Nothing a buffer held is known any more (a panel or size change).
   heldFrames.setLen(0)
   endPanelFrame()
 
-proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], wholeFrame: bool): bool =
+proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], wholeFrame: bool,
+    reuse = false): bool =
   ## renderSvgIntoTarget, repainting only the damage when `target` is the
   ## panel buffer this render began on (beginPanelFrame), the render draws
   ## nothing else (`wholeFrame`), the SVG covers it opaquely, and the buffer
   ## still holds the SVG a render left there. `owed`: the scene background
   ## the target still owes, settled as renderSvgIntoTarget settles it.
+  ## `reuse`: the caller hands back nodes it handed over before (a UI's
+  ## layout), for pixie to keep their parse (parseSvg's `reuse`).
   if root.isNil:
     return false
   if panelBuffer.isNil or target.isNil or target.isView or not wholeFrame or
@@ -73,10 +110,10 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
     return renderSvgIntoTarget(root, target, owed)
   let held = panelHeld
   panelHeld = none(HeldFrame)
-  refreshDecodeBudgetInto()
+  refreshDecodeBudgetInto(forDecode = false) # a frame decodes nothing: kept interpreters stay
   var parsed: Svg
   try:
-    parsed = parseSvg(root, target.width, target.height)
+    parsed = parseSvg(root, target.width, target.height, reuse)
   except CatchableError:
     return false
   if not parsed.coversOpaque(target.width, target.height):
@@ -90,20 +127,33 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
       return false
     return true
   owed = none(Color) # waived: the SVG's first paint covers every pixel
-  var box = (full: true, x: 0, y: 0, w: target.width, h: target.height)
+  let whole = target.width * target.height
+  var rects = @[(x: 0, y: 0, w: target.width, h: target.height)]
   if held.isSome and held.get().generation == panelGeneration and
       held.get().width == target.width and held.get().height == target.height:
-    box = damage(held.get().svg, parsed, target.width, target.height)
+    rects = damageRects(held.get().svg, parsed, target.width, target.height, MaxRepaints).rects
+  if rects.area >= whole:
+    # Its own frame is no help (none, written over, another scene's): the
+    # newest frame another buffer holds, copied in, unless the damage
+    # against that is the whole frame too.
+    let source = newestHeldFrame(target)
+    if source >= 0:
+      let found = damageRects(heldFrames[source].svg, parsed, target.width, target.height, MaxRepaints)
+      if not found.full and found.rects.area < whole:
+        copyMem(target.bufferPointer, heldFrames[source].buffer, target.byteSize)
+        rects = found.rects
+  when defined(testing):
+    svgFramePixelsForTest = 0
   try:
-    if box.full:
-      parsed.renderInto(target)
-      box = (true, 0, 0, target.width, target.height)
-    elif box.w > 0:
-      parsed.renderInto(target.view(box.x, box.y, box.w, box.h), box.x, box.y)
+    for r in rects:
+      if r.w == target.width and r.h == target.height:
+        parsed.renderInto(target)
+      else:
+        parsed.renderInto(target.view(r.x, r.y, r.w, r.h), r.x, r.y)
+      when defined(testing):
+        svgFramePixelsForTest += r.w * r.h
   except CatchableError:
     return false
-  when defined(testing):
-    svgFramePixelsForTest = box.w * box.h
   heldFrames.add(HeldFrame(buffer: panelBuffer, generation: panelGeneration,
     width: target.width, height: target.height, svg: parsed))
   true

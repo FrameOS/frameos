@@ -800,6 +800,13 @@ var panelTargetBytes: int
 var panelCanvases: array[2, Image]
 var nextPanelCanvas = 0
 
+proc displayBufferGeneration(buffer: pointer): int64 {.importc: "fos_display_buffer_generation", cdecl.}
+
+# Any LCD buffer's write generation, for a render that finds no frame of its
+# own in the buffer it draws to take the newest another one still holds.
+panelBufferGeneration = proc(buffer: pointer): int64 {.nimcall, raises: [].} =
+  displayBufferGeneration(buffer)
+
 proc setPanelTarget*(target: pointer, bytes: int, generation: uint32 = 0) =
   ## `generation`: the writes the firmware made into the buffer, so a scene
   ## that draws it whole from one SVG knows whether it still holds the last

@@ -28,6 +28,10 @@ type
     offsetX*, offsetY*: float32 ## the UI's corner in the scene's canvas
     regions*: seq[UiRegion]     ## the last render's, in paint order
     input*: UiInput             ## what the pointer is doing, for the next one
+    memo*: UiMemo               ## the last layout's type, for the next one
+    inputOnly*: bool            ## the pointer changed what it is over or
+                                ## pressing, and no handler ran: the next
+                                ## render needs no new tree (app_runtime.get)
     captures*: seq[(int, int)]  ## (pointerId, region key) of each press held
     call*: UiHandlerCall
 
@@ -43,7 +47,7 @@ proc uiTarget*(sceneId: string, nodeId: int, create = true): UiTarget =
   if create:
     if targets.len >= MaxTargets:
       targets.delete(0)
-    result = UiTarget(sceneId: sceneId, nodeId: nodeId)
+    result = UiTarget(sceneId: sceneId, nodeId: nodeId, memo: UiMemo())
     targets.add result
 
 proc forgetUiTarget*(sceneId: string, nodeId: int) =
@@ -53,6 +57,13 @@ proc forgetUiTarget*(sceneId: string, nodeId: int) =
   for i in countdown(targets.high, 0):
     if targets[i].sceneId == sceneId and targets[i].nodeId == nodeId:
       targets.delete(i)
+
+proc uiSceneEvent*(sceneId: string) =
+  ## Anything but the pointer happened to the scene (a state change, a
+  ## button, a scheduled event): its UIs' next render runs get() again.
+  for target in targets:
+    if target.sceneId == sceneId:
+      target.inputOnly = false
 
 proc handlerKind(event: string): int =
   ## The UiEvent a pointer event runs handlers for, or -1.
@@ -127,31 +138,30 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
   for target in targets:
     if target.sceneId != sceneId:
       continue
+    var moved = false
     let captured = if follows: target.captureOf(pointer) else: -1
     if released:
       target.release(pointer)
       if target.input.pressed.len > 0:
         target.input.pressed.setLen(0)
-        result = true
+        moved = true
       # A finger that lifts is not over anything any more.
       if touch and target.input.hovered.len > 0:
         target.input.hovered.setLen(0)
-        result = true
-    if not placed:
-      continue
+        moved = true
     let
       lx = x - target.offsetX
       ly = y - target.offsetY
-    if event in ["pointerMove", "pointerDown"]:
+    if placed and event in ["pointerMove", "pointerDown"]:
       let hovered = target.keysOver(lx, ly, false)
       if hovered != target.input.hovered:
         target.input.hovered = hovered
-        result = true
+        moved = true
       if event == "pointerDown":
         let pressed = target.keysOver(lx, ly, true)
         if pressed != target.input.pressed:
           target.input.pressed = pressed
-          result = true
+          moved = true
         # The innermost element that takes a press holds the pointer.
         target.release(pointer)
         for i in countdown(target.regions.high, 0):
@@ -160,7 +170,10 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
               lx >= r.x and ly >= r.y and lx < r.x + r.w and ly < r.y + r.h:
             target.captures.add((pointer, r.key))
             break
-    if handled or kind < 0 or target.call.isNil:
+    if moved:
+      target.inputOnly = true
+      result = true
+    if not placed or handled or kind < 0 or target.call.isNil:
       continue
     if not capturing.isNil:
       # A held press: its moves and its release go to the element that took
@@ -171,6 +184,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
             let handler = r.handlers[UiEvent(kind)]
             if handler > 0:
               target.call(handler - 1, event, payload, lx - r.x, ly - r.y)
+              target.inputOnly = false # whatever the handler changed, get() shows it
               handled = true
               result = true
             break
@@ -181,6 +195,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       let handler = r.handlers[UiEvent(kind)]
       if handler > 0 and lx >= r.x and ly >= r.y and lx < r.x + r.w and ly < r.y + r.h:
         target.call(handler - 1, event, payload, lx - r.x, ly - r.y)
+        target.inputOnly = false # whatever the handler changed, get() shows it
         handled = true
         result = true
         break

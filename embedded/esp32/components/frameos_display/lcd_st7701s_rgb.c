@@ -759,6 +759,12 @@ void fos_lcd_st7701s_mark_written(const uint8_t *buf)
     if (index >= 0) s_generation[index]++;
 }
 
+int64_t fos_lcd_st7701s_buffer_generation(const uint8_t *buf)
+{
+    int index = buffer_index(buf);
+    return index < 0 ? -1 : (int64_t)s_generation[index];
+}
+
 void fos_lcd_st7701s_release_back_buffer(void)
 {
     if (!s_ready) return;
@@ -852,6 +858,11 @@ uint8_t *fos_lcd_st7701s_back_buffer(uint32_t *generation)
     return NULL;
 }
 void fos_lcd_st7701s_mark_written(const uint8_t *buf) { (void)buf; }
+int64_t fos_lcd_st7701s_buffer_generation(const uint8_t *buf)
+{
+    (void)buf;
+    return -1;
+}
 void fos_lcd_st7701s_release_back_buffer(void) {}
 void fos_lcd_st7701s_set_before_write_hook(void (*hook)(const uint8_t *buf)) { (void)hook; }
 void fos_lcd_st7701s_sleep(void) {}

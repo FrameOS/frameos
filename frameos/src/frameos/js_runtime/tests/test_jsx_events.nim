@@ -1,4 +1,4 @@
-import std/[json, strutils, unittest]
+import std/[json, os, strutils, unittest]
 import pixie
 
 import frameos/js_runtime/app_runtime
@@ -83,6 +83,81 @@ suite "jsx events":
     forgetUiTarget("tests/jsx-again", 1)
     check not uiListens("tests/jsx-again", "tap")
     check uiTarget("tests/jsx-again", 1, create = false).isNil
+
+  test "memo(Component) runs a card again only when its props changed":
+    # Three cards, memo()'d: a render with nothing changed calls none of them,
+    # a tap that switches one calls that one, and the taps still reach the
+    # handlers of the cards taken back (their functions in this render's list).
+    let ui = newUi("""
+      const on = [false, false, false]
+      let calls = 0
+      const Card = memo(({ i, lit }) => {
+        calls++
+        return <div className={`w-10 h-10 ${lit ? 'bg-green-500' : 'bg-red-500'}`} onClick={() => { on[i] = !on[i] }} />
+      })
+      export function get(app) {
+        const tree = (
+          <div className="flex gap-5 p-5 bg-white">
+            {on.map((lit, i) => <Card i={i} lit={lit} />)}
+          </div>
+        )
+        frameos.setState('calls', calls)
+        return tree
+      }
+    """, "tests/jsx-memo")
+    let red = rgbx(0xef, 0x44, 0x44, 255)
+    let green = rgbx(0x22, 0xc5, 0x5e, 255)
+    var image = ui.render()
+    check ui.scene.state{"calls"}.getInt() == 3
+    check image[25, 25] == red and image[85, 25] == red and image[145, 25] == red
+    discard ui.render()
+    check ui.scene.state{"calls"}.getInt() == 3 # nothing changed: no card ran
+    check dispatchUiEvent("tests/jsx-memo", "tap", at(85, 25)) # the second card
+    image = ui.render()
+    check ui.scene.state{"calls"}.getInt() == 4 # that card alone
+    check image[25, 25] == red and image[85, 25] == green and image[145, 25] == red
+    # The first card was taken back twice: its tap still runs its handler.
+    check dispatchUiEvent("tests/jsx-memo", "tap", at(25, 25))
+    image = ui.render()
+    check ui.scene.state{"calls"}.getInt() == 5
+    check image[25, 25] == green and image[85, 25] == green and image[145, 25] == red
+
+  test "a render only the pointer asked for lays the last tree out again":
+    # hover: changed and no handler ran: the new picture without get(), as
+    # CSS restyles :hover. A handler, any other event, or the scene's own
+    # interval coming round runs get() again.
+    let ui = newUi("""
+      let gets = 0
+      export function get(app) {
+        gets++
+        frameos.setState('gets', gets)
+        return (
+          <div className="flex p-10 bg-white">
+            <div className="w-20 h-10 bg-red-500 hover:bg-green-500" onClick={() => {}} />
+          </div>
+        )
+      }
+    """, "tests/jsx-input-only")
+    ui.scene.refreshInterval = 3600
+    let red = rgbx(0xef, 0x44, 0x44, 255)
+    let green = rgbx(0x22, 0xc5, 0x5e, 255)
+    check ui.render()[50, 50] == red
+    check ui.scene.state{"gets"}.getInt() == 1
+    check dispatchUiEvent("tests/jsx-input-only", "pointerMove", at(50, 50))
+    check ui.render()[50, 50] == green
+    check ui.scene.state{"gets"}.getInt() == 1 # the hover alone: no get()
+    check dispatchUiEvent("tests/jsx-input-only", "tap", at(50, 50))
+    discard ui.render()
+    check ui.scene.state{"gets"}.getInt() == 2 # a handler ran
+    check dispatchUiEvent("tests/jsx-input-only", "pointerMove", at(5, 5))
+    uiSceneEvent("tests/jsx-input-only") # a state change, a button, ...
+    check ui.render()[50, 50] == red
+    check ui.scene.state{"gets"}.getInt() == 3
+    ui.scene.refreshInterval = 0.001 # the scene's own render is due
+    check dispatchUiEvent("tests/jsx-input-only", "pointerMove", at(50, 50))
+    sleep(5)
+    check ui.render()[50, 50] == green
+    check ui.scene.state{"gets"}.getInt() == 4
 
   test "the handler hears where, and can change the scene's state":
     let ui = newUi("""

@@ -15,9 +15,33 @@ endif()
 
 file(STRINGS "${QUICKJS_DIR}/VERSION" QUICKJS_VERSION LIMIT_COUNT 1)
 
+# QuickJS (2026-06-04) carves its small blocks out of 4 KB arenas, one list
+# per size class (31 of them), so an interpreter's heap is its objects plus
+# the empty part of an arena per class in use: the SenseCAP kitchen sink's
+# ~156 KB of objects sat in 268 KB (JS_ComputeMemoryUsage). 1 KB arenas
+# leave a quarter of that empty. The size is a plain #define upstream, so
+# the component compiles a copy of quickjs.c with it changed, and refuses a
+# source that no longer spells it.
+set(FOS_QUICKJS_ARENA_LINE "#define JS_MALLOC_ARENA_SIZE 4096")
+file(READ "${QUICKJS_DIR}/quickjs.c" FOS_QUICKJS_SOURCE)
+string(FIND "${FOS_QUICKJS_SOURCE}" "${FOS_QUICKJS_ARENA_LINE}" FOS_QUICKJS_ARENA_AT)
+if(FOS_QUICKJS_ARENA_AT EQUAL -1)
+    message(FATAL_ERROR "frameos_quickjs: quickjs.c no longer reads "
+                        "`${FOS_QUICKJS_ARENA_LINE}` — update the arena size patch here")
+endif()
+set(FOS_QUICKJS_C "${CMAKE_CURRENT_BINARY_DIR}/quickjs.c")
+if(NOT CMAKE_BUILD_EARLY_EXPANSION)
+    string(REPLACE "${FOS_QUICKJS_ARENA_LINE}" "#define JS_MALLOC_ARENA_SIZE 1024"
+           FOS_QUICKJS_SOURCE "${FOS_QUICKJS_SOURCE}")
+    # Written only when it changed, so a reconfigure does not rebuild it.
+    file(WRITE "${FOS_QUICKJS_C}.new" "${FOS_QUICKJS_SOURCE}")
+    configure_file("${FOS_QUICKJS_C}.new" "${FOS_QUICKJS_C}" COPYONLY)
+endif()
+unset(FOS_QUICKJS_SOURCE)
+
 idf_component_register(
     SRCS
-        "${QUICKJS_DIR}/quickjs.c"
+        "${FOS_QUICKJS_C}"
         "fos_quickjs_tz.c"
         "${QUICKJS_DIR}/dtoa.c"
         "${QUICKJS_DIR}/libregexp.c"
@@ -51,7 +75,7 @@ if(FOS_QUICKJS_GMTOFF_LINE EQUAL -1)
                         "fos_quickjs_tz.h to match, or JS Date loses its time zone on the device")
 endif()
 unset(FOS_QUICKJS_SOURCE)
-set_source_files_properties("${QUICKJS_DIR}/quickjs.c" PROPERTIES
+set_source_files_properties("${FOS_QUICKJS_C}" PROPERTIES
     COMPILE_OPTIONS "-include;${CMAKE_CURRENT_LIST_DIR}/include/fos_quickjs_tz.h")
 
 # newlib has no malloc_usable_size; quickjs.c only uses it in the default

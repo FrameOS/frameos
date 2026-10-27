@@ -57,11 +57,10 @@ SVG path work. Roughly in order of what each would buy there:
 7. **Touch latency.** The FT6336U is polled every 30 ms (no interrupt line on
    the Indicator) and events reach the scene between frames: poll at 10–15 ms
    on LCD boards and let a touch cut the frame wait short. A Touch test frame
-   is ~65 ms now (bursts, `render/svg`'s damage repaint): pixie's damage is
-   one box around everything that changed, a quarter of the screen when the
-   dot is far from the coordinates line, so a box per changed element would
-   repaint a tenth of that; and the SVG parse (~22 ms) lays its three text
-   lines out again every frame, where unchanged text could keep its layout.
+   is ~65 ms now (bursts, `render/svg`'s damage repaint), and the damage is
+   a box per change since 2026-10-26 (pixie's `damageRects`); the SVG parse
+   (~22 ms) still lays its three text lines out again every frame, where
+   unchanged text could keep its layout as a JSX UI's does.
 8. **Photos waive the background too.** A JPEG decoded straight into the
    canvas with cover or stretch covers every pixel opaquely; the decode path
    could settle the owed background the way the SVG path does
@@ -88,3 +87,21 @@ SVG path work. Roughly in order of what each would buy there:
    rotated HyperPixel 4.0 today), keep the canvas between frames, push to the
    driver on its own thread, and wake on input instead of polling at
    200/100 ms. Needs a bench Pi with a HyperPixel and an HDMI panel.
+12. **A tap's frame after the render.** A JSX home panel's toggle renders in
+    ~180 ms in place, and `render:done` comes ~90 ms later: about 30 ms
+    between `render:framebuffer`, `render:device` and `render:done` each,
+    the picture on the glass in the middle. Find where it goes (the
+    snapshot, the stage lines on a 115200-baud console with a 2 KB TX
+    buffer) and move what can go after the picture.
+13. **What a JSX render still pays.** Since subtrees that did not change
+    flow through as the same objects (`docs/jsx-ui.md` "Repainting what
+    changed"), a toggle of the home panel pays `get()` ~15 ms (its tiles
+    memo()'d: what is left is the call into QuickJS and the tree around
+    them), the walk ~3, the layout ~12 (the root and the grid around the
+    changed tile are built and laid out again), the emit ~7, the parse ~5
+    and the damage ~7 (the bounds of the changed tile's new paths, flattened
+    to measure them), then ~70 ms of raster for the tile and the count. A
+    calculator key's press render skips get() and the walk (~27 ms).
+    Next: measure a rounded box's bounds from its corners instead of
+    flattening its arcs, and keep a rebuilt box's own background node when
+    its paint did not change.

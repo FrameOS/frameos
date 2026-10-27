@@ -61,9 +61,10 @@ Spectra 6.
    `focus:` variant, so the same UI is usable there.
 2. **The fast loop.** Event → pixels well under 100 ms on interactive
    displays: a render that skips the scheduler, and dirty rects between
-   consecutive frames (the ESP32 LCD already repaints only pixie's damage box
-   when the UI's first paint is an opaque full-size background). Budget the
-   pass on a Pi Zero W and on the SenseCAP.
+   consecutive frames (the ESP32 LCD already repaints only what changed, a
+   box per change, when the UI's first paint is an opaque full-size
+   background: `docs/jsx-ui.md` "Repainting what changed"; a home panel's
+   toggle is ~300 ms there). Budget the pass on a Pi Zero W.
 3. **E-paper partial refresh.** The same dirty rects into
    `renderImagePartial` for panels that can; flip `supportsPartialRefresh`
    per verified panel. Spectra 6 stays full-refresh.
@@ -72,18 +73,26 @@ Spectra 6.
    LCDs, inline boxes with a background inside a line of text, min-content
    sizing for flex items. Each is flash on an ESP32: measure before merging
    (the firmware-size comment on the PR).
-5. **Emit typed elements instead of attribute strings.** The layout builds
+5. **Constant elements hoisted at compile time.** Babel's
+   react-constant-elements lifts JSX with no dynamic part out of the
+   component, so it is one object made once; the walker would then take
+   its nodes back by identity the way it does memo()'s elements. It needs
+   quickts to do it while it compiles JSX (the prelude cannot tell a
+   constant element from one made fresh each render): until then, a
+   module-level `const icon = <svg>…</svg>` used inside a memo()'d
+   component gets the same effect.
+6. **Emit typed elements instead of attribute strings.** The layout builds
    SVG nodes with string attributes that pixie parses again; a builder that
    appends pixie's elements directly would cut ~2 KB of flash and the
    per-frame string work of a UI. Worth it once a UI animates.
-6. **On the device:** DVD Logo Bounce from JSX on the SenseCAP against the
+7. **On the device:** DVD Logo Bounce from JSX on the SenseCAP against the
    markup version's 50 ms frame (the parse was ~10 ms of it), and a UI
    dashboard's frame time.
-7. **Preview + editor.** Focus simulation for GPIO frames in the device
+8. **Preview + editor.** Focus simulation for GPIO frames in the device
    picker; scene-store lint rules for JSX (`scene-lint.ts`); a "New UI app
    (JSX)" template in `repo/apps/image/`; the AI evals against the scene
    guide's JSX section.
-8. **Dogfood: the status screen.** `buildStatusScreen` (both copies) and the
+9. **Dogfood: the status screen.** `buildStatusScreen` (both copies) and the
    provisioning screens are hand-drawn: port one to JSX once handlers exist.
    If the layer can't express our own status screen, users will hit the same
    walls.

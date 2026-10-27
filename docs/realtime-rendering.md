@@ -192,10 +192,15 @@ sleeping frame: `frameos.remember` stays the way to keep a value.
 When a scene's render is one fused node drawing one SVG into an LCD's buffer
 (`ExecutionContext.wholeFrame`) and the SVG covers it opaquely,
 `utils/svg_frames.nim` keeps the parsed SVG each buffer holds; the next render
-into that buffer repaints only pixie's `damage` box between the two SVGs (a
-`view()` of the buffer, `renderInto` with its origin) — for DVD Logo Bounce a
-box around where the logo was and where it is, ~130x85 pixels instead of
-230,400. The firmware counts every write into a buffer that is not a render
+into that buffer repaints only the boxes pixie's `damageRects` finds between
+the two SVGs (up to six; a `view()` of the buffer each, `renderInto` with its
+origin, which skips every element whose bounds miss it) — for DVD Logo
+Bounce a box around where the logo was and where it is, ~130x85 pixels
+instead of 230,400; for a JSX home panel a toggled card and the count it
+changed, 28,564 pixels and ~80 ms of raster where the one box spanning both
+was 93,522 and ~790 ms (`docs/jsx-ui.md` "Repainting what changed"). The two
+element lists are matched in order, so an element added or removed is
+damage where it is, not a whole frame. The firmware counts every write into a buffer that is not a render
 in place (a copy, a clear, an overlay: `s_generation` in
 `lcd_st7701s_rgb.c`), and a buffer whose count moved, a render of anything
 else, or a failed one leaves no record, so its next frame is drawn whole.
@@ -291,7 +296,8 @@ quiet, the render announce and backend push it skipped. A frame about to
 deep-sleep is never quiet. With the SVG damage repaint above, a touch is ~65
 ms on the SenseCAP Indicator (2026-10-26): pixie's parse of the SVG, mostly
 its three text lines, ~22 ms; the damage, ~8 ms; and the raster of one box
-around both the dot and the text, a quarter of the screen, ~25 ms.
+around both the dot and the text, a quarter of the screen, ~25 ms. (That box
+is two now, the dot's and the text's.)
 
 ### Metrics with the logged frame
 

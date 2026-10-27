@@ -139,6 +139,14 @@ declare namespace JSX {
   interface ElementChildrenAttribute { children: {}; }
   interface IntrinsicElements { [tag: string]: FrameOSElementProps; }
 }
+/**
+ * memo(Component), as React's: called with props shallow-equal to its last
+ * call at the same place (its turn among this render's calls, or its key),
+ * the component does not run and the frame takes that element's layout and
+ * drawing back as they were. A function made anew each render
+ * (onClick={() => ...}) is never equal: pass values, make handlers inside.
+ */
+declare function memo<P extends Record<string, any>>(component: (props: P) => any): (props: P & { key?: string | number }) => any;
 
 interface FrameOSApp {
   nodeId: number;

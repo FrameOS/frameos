@@ -1,4 +1,4 @@
-import std/[algorithm, base64, json, options, os, streams, strformat, strutils, tables]
+import std/[algorithm, base64, json, monotimes, options, os, streams, strformat, strutils, tables, times]
 import frameos/utils/memory
 import pixie
 import pixie/fileformats/svg
@@ -54,6 +54,13 @@ type
     initialized*: bool
     nextImageId*: int
     images*: Table[int, Image]
+    jsxMemo*: JsxMemo ## the nodes of memo()'s elements (js_runtime/jsx.nim)
+    # The last tree get() returned, for a render only the pointer asked for
+    # (hover:, active:): laid out again with the new pointer, get() not run,
+    # as a browser restyles :hover without React rendering again.
+    lastJsx: SvgNode
+    lastJsxConfig: JsonNode
+    lastJsxAt: MonoTime
     transientImageIds: seq[int]
     ## `frameos.remember` / `recall`: values the app keeps between renders, as
     ## JSON text. Held here and not in the interpreter because an ESP32 tears
@@ -171,15 +178,14 @@ proc settleIdleJsAppRuntimes*(keep: bool): bool =
   ## deep-sleep): the idle interpreters stay for the next render while there
   ## is room, and it calls into them instead of building QuickJS and compiling
   ## the prelude and the app again — ~170 ms of a SenseCAP Indicator frame,
-  ## a Pi's behaviour. Released otherwise (a deep-sleeping frame wakes to a
-  ## fresh boot anyway), and released later when render memory runs short
+  ## a Pi's behaviour, down to the headroom keepIdleInterpreters asks for.
+  ## Released otherwise (a deep-sleeping frame wakes to a fresh boot anyway),
+  ## and released later when a decode is short of memory
   ## (utils/memory.renderMemoryReleaseHook). Apps still must not count on
   ## module variables outliving a render: `frameos.remember` is the way.
   ## Whether they were kept.
-  if keep and hasIdleJsAppRuntimes():
-    let headroom = availableRenderHeadroomBytes()
-    if headroom <= 0 or headroom >= RenderMemoryShortBytes:
-      return true
+  if keep and hasIdleJsAppRuntimes() and keepIdleInterpreters():
+    return true
   releaseIdleJsAppRuntimes()
   false
 
@@ -1712,6 +1718,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   function __frameosInvoke(name) {
     const mod = __frameosExports();
     const fn = mod && mod[name];
+    if (name === "get") globalThis.__frameosRender = (globalThis.__frameosRender | 0) + 1;
     if (typeof fn === "function") {
       return fn(globalThis.__frameosAppInstance, globalThis.__frameosContext);
     }
@@ -1778,7 +1785,7 @@ proc colorWithOpacity(spec: JsonNode): Color =
   return color
 
 proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: SvgNode,
-    requestedWidth, requestedHeight: int): Image =
+    requestedWidth, requestedHeight: int, reuse = false): Image =
   ## Rasterizes an SVG into the target the planner offered this node, when
   ## there is one of the size the scene asked for; nil when the caller should
   ## rasterize standalone.
@@ -1822,7 +1829,10 @@ proc svgIntoOfferedTarget(owner: AppRoot, context: ExecutionContext, svg: SvgNod
   var owed = takeOwedBackground(context, target)
   # An LCD's buffer that only this SVG draws repaints just what changed
   # (utils/svg_frames.nim); anything else, and a refusal there, as before.
-  var rendered = renderSvgFrame(svg, target, owed, context.wholeFrame)
+  var rendered = renderSvgFrame(svg, target, owed, context.wholeFrame, reuse)
+  if not rendered and releaseRenderMemory():
+    # A kept interpreter held what the fill needed: it goes, the frame stays.
+    rendered = renderSvgFrame(svg, target, owed, context.wholeFrame, reuse)
   if not rendered:
     rendered = renderSvgIntoTargetWithDegrade(svg, target, owed)
   if owed.isSome:
@@ -2007,15 +2017,16 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
   var
     svg = root
     regions: seq[UiRegion]
-  let target = uiTarget(sceneId, owner.nodeId.int, create = false)
+  let target = uiTarget(sceneId, owner.nodeId.int, create = root.tag != "svg")
   if root.tag != "svg":
     try:
-      svg = layoutUi(root, requestedWidth, requestedHeight,
-        if target.isNil: UiInput() else: target.input, regions)
+      svg = layoutUi(root, requestedWidth, requestedHeight, target.input, regions, target.memo)
     except CatchableError as error:
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil
-  let intoTarget = svgIntoOfferedTarget(owner, context, svg, requestedWidth, requestedHeight)
+  # A UI's nodes come back from the layout where they did not change.
+  let intoTarget = svgIntoOfferedTarget(owner, context, svg, requestedWidth, requestedHeight,
+    reuse = root.tag != "svg")
   if not intoTarget.isNil:
     if intoTarget.width == requestedWidth and intoTarget.height == requestedHeight:
       if regions.len > 0 or not target.isNil:
@@ -2160,7 +2171,8 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
     # has always been.
     let tag = jsxTag(ctx, payload)
     if tag.len > 0 and tag != "image":
-      return VImage(runtime.imageFromJsx(owner, context, jsxNode(ctx, payload, addr runtime.images)))
+      runtime.lastJsx = jsxNode(ctx, payload, addr runtime.images, addr runtime.jsxMemo)
+      return VImage(runtime.imageFromJsx(owner, context, runtime.lastJsx))
 
   if expectedType == "image" or jsIsObject(payload) or JS_IsArray(ctx, payload) != 0:
     let svgSpec = svgImageSpecFromJs(ctx, payload)
@@ -2274,6 +2286,16 @@ proc init*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode) =
 
 proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: ExecutionContext): Value =
   runtime.init(owner, configJson)
+  if not owner.scene.isNil:
+    let target = uiTarget(owner.scene.id.string, owner.nodeId.int, create = false)
+    if not target.isNil and target.inputOnly:
+      target.inputOnly = false
+      # Only the pointer asked for this render: the last tree with the new
+      # pointer, while nothing else can have changed what get() returns (the
+      # same config, a render sooner than the scene's own interval).
+      if not runtime.lastJsx.isNil and runtime.lastJsxConfig == configJson and
+          inMilliseconds(getMonoTime() - runtime.lastJsxAt).float < owner.scene.refreshInterval * 1000:
+        return VImage(runtime.imageFromJsx(owner, context, runtime.lastJsx))
   try:
     runtime.midCall:
       # A throw fails the node, as a raising Nim app does: the interpreter then
@@ -2282,7 +2304,12 @@ proc get*(runtime: JsAppRuntime, owner: AppRoot, configJson: JsonNode, context: 
       # which the cache then served until it expired.
       let payload = runtime.invoke(owner, configJson, context, "get", raiseOnError = true)
       defer: JS_FreeValue(runtime.js.context, payload)
-      return toValue(runtime, owner, context, payload, runtime.outputType)
+      runtime.lastJsx = nil
+      result = toValue(runtime, owner, context, payload, runtime.outputType)
+      if not runtime.lastJsx.isNil:
+        runtime.lastJsxConfig = copy(configJson)
+        runtime.lastJsxAt = getMonoTime()
+      return
   finally:
     runtime.clearTransientImages()
 

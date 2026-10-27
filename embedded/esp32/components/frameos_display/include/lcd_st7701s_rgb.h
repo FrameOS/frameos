@@ -64,6 +64,10 @@ void fos_lcd_st7701s_release_back_buffer(void);
  * drawn in place (a copy, a clear, and what the caller reports here: an
  * overlay drawn over a render in place). */
 void fos_lcd_st7701s_mark_written(const uint8_t *buf);
+/* That count for any of the panel's buffers, not only the one handed out
+ * for drawing: whether a buffer still holds what a render left there when
+ * it read the count. -1 for a pointer that is none of them. */
+int64_t fos_lcd_st7701s_buffer_generation(const uint8_t *buf);
 /* Called with a buffer just before it is written to (drawn in, copied into,
  * cleared): a snapshot that points at the last picture lets go of it. */
 void fos_lcd_st7701s_set_before_write_hook(void (*hook)(const uint8_t *buf));
