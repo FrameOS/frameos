@@ -366,6 +366,15 @@ for the two Spectra boards most of the bench work runs on:
   after a reboot anyway). Any other flash write (a settings save, a scene
   download, an OTA) still costs one disturbed frame. `lcd` on the console
   counts dropped frames and late refills and sets the pixel clock live.
+  From the moment the panel is up until the first picture it shows the
+  FrameOS mark on black, its three squares walking the brand colors
+  (`components/frameos_display/lcd_splash.c`, the mark rasterized from
+  `frameos_mark.svg` by `frameos/tools/gen_splash_mark.nim`), at priority 1
+  so the boot under it is not slower, and under it what the boot is waiting
+  for once that has lasted a second: "Connecting to Wi-Fi", "Updating
+  firmware", "Starting" (`fos_display_boot_status`). An LCD does not wait
+  for the clock: it renders once Wi-Fi is up and again when SNTP answers
+  (`fos_wifi_set_late_time_hook`); the boot used to wait up to 10 s for it.
   An LCD board runs its CPU at 240 MHz (the generic image boots at 160 for
   the battery frames; `status` prints `cpu:`). The scene canvas is the
   panel's own back frame buffer (`fos_display_render_target`, 565 whatever
@@ -809,7 +818,8 @@ per 900 s, with the radio listening the whole time. Three things changed:
   sleep (and the wake timer runs on the same oscillator, so the wake-check
   bookkeeping agrees with it); SNTP now corrects it in the background instead
   of holding the boot for a round trip — or the full 10 s timeout on a slow
-  pool.
+  pool. An RGB LCD skips the wait on every boot, and renders again when the
+  clock arrives.
 - **The log queue drains before the CPU halts.** Everything logged after the
   panel refresh — `render:done`, the `metrics` sample with the battery
   reading, the `sleep` forecast — is queued for the cloud task's 1 s batch
