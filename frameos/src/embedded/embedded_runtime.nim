@@ -32,6 +32,7 @@ proc espFlushLogs() {.importc: "frameos_nim_flush_logs", cdecl.}
   ## log upload is off or internal RAM is short). Safe from the render
   ## task: it takes the log lock, never the Nim lock.
 proc requestSceneSelect(sceneId: cstring): bool {.importc: "frameos_nim_request_scene_select", cdecl.}
+proc requestDisplayPower(on: bool) {.importc: "frameos_nim_display_power", cdecl.}
   ## Queues a scene switch with the firmware (fos_scenes_select), which owns
   ## it: the scene may have to come off flash, and the choice is persisted.
 proc requestRuntimeCommand(command: cstring, payloadJson: cstring): bool {.importc: "frameos_nim_request_runtime_command", cdecl.}
@@ -536,6 +537,9 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
   # The firmware owns a switch (the scene may have to come off flash, and the
   # choice is persisted): it is queued there, and comes back as selectScene.
   host.requestSelect = proc (sceneId: string): bool = requestSceneSelect(sceneId.cstring)
+  # The backlight is the firmware's (fos_client.c): a panel without one
+  # switches nothing there.
+  host.displayPower = proc (on: bool) = requestDisplayPower(on)
   # The scene list in scenes.json order, for `setCurrentScene {direction}`:
   # the catalog's on the lazy path, the parsed payload's on the legacy one.
   host.sceneOrder = proc (): seq[SceneId] =

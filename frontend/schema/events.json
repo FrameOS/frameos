@@ -559,6 +559,83 @@
     ]
   },
   {
+    "name": "edgeSwipe",
+    "description": "A finger or a pen that went down within `gestures.edgePx` of an edge of the screen and moved at least `gestures.swipeMinPx` away from it, as on a phone: `edge` is where it started, `direction` the way it went. The frame takes that touch: the scene hears no pointerDown, pointerMove or pointerUp of it, so a slider under it stays as it was. A touch there that lifts, holds or moves along the edge instead is the scene's after all, with its pointerDown a little late. Not a mouse.",
+    "canListen": true,
+    "fields": [
+      {
+        "name": "edge",
+        "label": "Edge",
+        "type": "string",
+        "required": true,
+        "options": [
+          "left",
+          "right",
+          "top",
+          "bottom"
+        ]
+      },
+      {
+        "name": "direction",
+        "label": "Direction",
+        "type": "string",
+        "required": true,
+        "options": [
+          "left",
+          "right",
+          "up",
+          "down"
+        ]
+      },
+      {
+        "name": "x",
+        "label": "X",
+        "type": "integer",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "y",
+        "label": "Y",
+        "type": "integer",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "startX",
+        "label": "Start X",
+        "type": "integer",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "startY",
+        "label": "Start Y",
+        "type": "integer",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "pointerId",
+        "label": "Pointer",
+        "type": "integer",
+        "required": true,
+        "filter": "more"
+      },
+      {
+        "name": "pointerType",
+        "label": "Pointer type",
+        "type": "string",
+        "required": true,
+        "options": [
+          "mouse",
+          "touch",
+          "pen"
+        ]
+      }
+    ]
+  },
+  {
     "name": "wheel",
     "description": "When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right.",
     "canListen": true,
@@ -604,6 +681,12 @@
     "name": "turnOff",
     "description": "Turn the screen off",
     "canListen": true,
+    "canDispatch": true,
+    "fields": []
+  },
+  {
+    "name": "toggleScreen",
+    "description": "Turn the screen off when it is on, and on when it is off. The scene hears the `turnOn` or `turnOff` it became.",
     "canDispatch": true,
     "fields": []
   },

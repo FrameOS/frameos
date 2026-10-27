@@ -9,6 +9,8 @@ void frameos_nim_set_render_buffer_hooks(void *(*acquire)(size_t len), void (*re
 void frameos_nim_set_realloc_outside_lock(bool on) { (void)on; }
 void frameos_nim_set_scene_select_hook(bool (*select)(const char *scene_id)) { (void)select; }
 void frameos_nim_set_runtime_command_hook(bool (*hook)(const char *command, const char *payload_json)) { (void)hook; }
+void frameos_nim_set_display_power_hook(void (*hook)(bool on)) { (void)hook; }
+void frameos_nim_display_power(bool on) { (void)on; }
 void frameos_nim_set_scene_state_hooks(char *(*load)(const char *scene_id),
                                        bool (*save)(const char *scene_id, const char *json))
 {

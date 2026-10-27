@@ -127,11 +127,21 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
 #define ONE_KEY_VOICE_EVENT_MAP(label) \
     "[{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"longPress\"}," \
     "\"emit\":\"voiceChat\",\"as\":{}}]"
-/* A board with one key and no microphone (the SenseCAP Indicator's top
- * button): held, it walks to the next scene; a press stays the scene's. */
-#define ONE_KEY_NEXT_SCENE_EVENT_MAP(label) \
-    "[{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"longPress\"}," \
-    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}]"
+/* The SenseCAP Indicator: one key and a touch screen, no microphone. The key
+ * pressed switches the screen off and on, pressed twice is the next scene and
+ * held the previous one; a swipe in from the right edge is the next scene and
+ * from the left the previous one (`edgeSwipe`: the scene hears none of it). */
+#define INDICATOR_EVENT_MAP \
+    "[{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"press\"}," \
+    "\"emit\":\"toggleScreen\",\"as\":{}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"doublePress\"}," \
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
+    "{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"longPress\"}," \
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
+    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"right\"}," \
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
+    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"left\"}," \
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}]"
 
 static const struct {
     const char *preset;
@@ -144,7 +154,7 @@ static const struct {
     {"seeed_reterminal_e1002", RETERMINAL_VOICE_EVENT_MAP},
     {"seeed_reterminal_e1003", RETERMINAL_VOICE_EVENT_MAP},
     {"seeed_reterminal_e1004", RETERMINAL_EVENT_MAP},
-    {"seeed_sensecap_indicator_d1", ONE_KEY_NEXT_SCENE_EVENT_MAP("BUTTON")},
+    {"seeed_sensecap_indicator_d1", INDICATOR_EVENT_MAP},
 };
 
 const char *fos_board_event_map(const char *hardware_preset)

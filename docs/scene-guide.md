@@ -301,6 +301,21 @@ render tries again. `frameos.fetchImage` never throws; it answers
 **Photos.** `frameos.fetchImage(url, { headers, saveAsset })` downloads and
 decodes natively, and the bytes never enter the JS heap. Return its `image`.
 Use it for every photo, and `httpRequest` only for the JSON around it.
+Its image lasts one render. A JSX UI that shows a photo across renders
+(a tap, a hover, its interval) keeps it instead:
+`frameos.fetchImage(url, { keep: true, width, height })` decodes it at that
+size and the ref stays valid until `frameos.releaseImage(ref)` or the
+interpreter goes (8 at most). Hold the ref in a module variable and fetch
+again when it is gone: an ESP32 short of memory drops the interpreter, and
+the picture with it.
+A picture the app draws into itself is a canvas:
+`frameos.canvas(key, width, height, color)`, drawn into with
+`frameos.draw(canvas, <line .../>)` (any SVG, as JSX or markup) and shown with
+`<img src={canvas}>`. A frame repaints only what was drawn, a box around each
+stroke: give strokes `strokeLinecap="round"` and `strokeLinejoin="round"`,
+whose box is half the width around the line (a miter join's is wider). It
+lasts as long as the interpreter: when `canvas.fresh` is true, draw the
+record you keep in `frameos.remember` into it again.
 
 **Assets and permissions.** Asset paths are relative to the frame's assets
 folder (`app.frame.assetsPath`, `/srv/assets` by default): uploaded photos,
@@ -544,9 +559,11 @@ schedule or the cloud may send one only when its declaration lists them in
 | `doubleTap` | yes |  | `x` integer, `y` integer, `pointerId` integer, `pointerType` string | all | A second `tap` in the same place within `gestures.doubleTapMs` of the first. |
 | `longPress` | yes |  | `x` integer, `y` integer, `durationMs` integer, `pointerId` integer, `pointerType` string | all | A pointer held in one place for `gestures.longPressMs`. |
 | `swipe` | yes |  | `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | A press and a release at least `gestures.swipeMinPx` apart, in one of four directions. |
+| `edgeSwipe` | yes |  | `edge` string, `direction` string, `x` integer, `y` integer, `startX` integer, `startY` integer, `pointerId` integer, `pointerType` string | all | A finger or a pen that went down within `gestures.edgePx` of an edge of the screen and moved at least `gestures.swipeMinPx` away from it, as on a phone: `edge` is where it started, `direction` the way it went. |
 | `wheel` | yes |  | `deltaX` integer, `deltaY` integer, `x` integer, `y` integer | Pi, preview | When a mouse wheel is scrolled. |
 | `turnOn` | yes | yes |  | all | Turn the screen on |
 | `turnOff` | yes | yes |  | all | Turn the screen off |
+| `toggleScreen` |  | yes |  | all | Turn the screen off when it is on, and on when it is off. |
 | `gpio` | yes |  | `pin` integer, `label` string, `role` string, `action` string, `durationMs`? integer, `wake`? boolean, `claimed`? boolean, `atMs`? integer, `level`? integer | all | A GPIO button going `down` or `up`, the moment it happens. |
 | `button` | yes |  | `pin` integer, `label` string, `role` string, `action` string, `durationMs`? integer, `wake`? boolean, `atMs`? integer | all | A GPIO button pressed: a `press`, a `doublePress` or a `longPress`, one event per press. |
 | `setSceneState` |  | yes | `state`? json, `render`? boolean | all | Set the scene's public state. |
@@ -583,6 +600,12 @@ interface FrameOSImageRef {
   width: number;
   height: number;
 }
+/** What frameos.canvas returns: an image ref an img's src takes, that frameos.draw and frameos.clear draw into. */
+interface FrameOSCanvasRef extends FrameOSImageRef {
+  canvas: string;
+  version: number;
+  fresh: boolean;
+}
 
 interface FrameOSNodeRef {
   __frameosType: "node";
@@ -610,13 +633,15 @@ interface FrameOSStreamRef { __frameosType: "streamRef"; id: number; }
 interface FrameOSElement { type: string; props: Record<string, any>; }
 /** What a handler gets: the pointer event, and where in the element it was. */
 interface FrameOSUiEvent {
-  type: "tap" | "doubleTap" | "longPress" | "pointerDown" | "pointerUp" | "pointerMove";
+  type: "tap" | "doubleTap" | "longPress" | "swipe" | "pointerDown" | "pointerUp" | "pointerMove";
   x: number;
   y: number;
   localX: number;
   localY: number;
   pointerId?: number;
   pointerType?: "mouse" | "touch" | "pen";
+  /** A swipe's way: "left", "right", "up" or "down". */
+  direction?: "left" | "right" | "up" | "down";
   [key: string]: any;
 }
 interface FrameOSElementProps {
@@ -631,6 +656,8 @@ interface FrameOSElementProps {
   onPointerUp?: (event: FrameOSUiEvent) => void;
   /** The pointer moved: over the element, or anywhere while a press it took is held (captured until the release). */
   onPointerMove?: (event: FrameOSUiEvent) => void;
+  /** A swipe that began on the element, with its direction; one in from the screen edge is the frame's. */
+  onSwipe?: (event: FrameOSUiEvent) => void;
   [attribute: string]: any;
 }
 declare namespace JSX {
@@ -708,12 +735,16 @@ interface FrameOSEventPayloads {
   longPress: { x: number; y: number; durationMs: number; pointerId: number; pointerType: string };
   /** A press and a release at least `gestures.swipeMinPx` apart, in one of four directions. */
   swipe: { direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
+  /** A finger or a pen that went down within `gestures.edgePx` of an edge of the screen and moved at least `gestures.swipeMinPx` away from it, as on a phone: `edge` is where it started, `direction` the way it went. The frame takes that touch: the scene hears no pointerDown, pointerMove or pointerUp of it, so a slider under it stays as it was. A touch there that lifts, holds or moves along the edge instead is the scene's after all, with its pointerDown a little late. Not a mouse. */
+  edgeSwipe: { edge: string; direction: string; x: number; y: number; startX: number; startY: number; pointerId: number; pointerType: string };
   /** When a mouse wheel is scrolled (not logged). Deltas are wheel notches; deltaY is positive when scrolling down (towards the user), deltaX when scrolling right. */
   wheel: { deltaX: number; deltaY: number; x: number; y: number };
   /** Turn the screen on */
   turnOn: Record<string, never>;
   /** Turn the screen off */
   turnOff: Record<string, never>;
+  /** Turn the screen off when it is on, and on when it is off. The scene hears the `turnOn` or `turnOff` it became. */
+  toggleScreen: Record<string, never>;
   /** A GPIO button going `down` or `up`, the moment it happens. `up` says how long it was held. */
   gpio: { pin: number; label: string; role: string; action: string; durationMs?: number; wake?: boolean; claimed?: boolean; atMs?: number; level?: number };
   /** A GPIO button pressed: a `press`, a `doublePress` or a `longPress`, one event per press. */
@@ -785,6 +816,13 @@ declare const frameos: {
       exif?: boolean;
       // The image's color profile (a .frameos.json sidecar's colors object); null = none, clears the last palette.
       colors?: { [key: string]: any } | null;
+      // Keep the picture for later renders (a JSX gallery's photo, drawn again without a download) until
+      // frameos.releaseImage(ref) or the interpreter goes; 8 at most. Never the consumer's target.
+      keep?: boolean;
+      // With keep: the size to decode it at, in the canvas's pixel format (a host decodes at the picture's own size).
+      width?: number;
+      height?: number;
+      fit?: "cover" | "contain";
     }
   ): {
     image: FrameOSImageRef | null;
@@ -795,6 +833,18 @@ declare const frameos: {
     exif?: Record<string, any>;
     exifSummary?: string;
   };
+  /** Lets a picture fetchImage kept ({ keep: true }) go. False for one that was not kept, or is gone. */
+  releaseImage(image: FrameOSImageRef | { image: FrameOSImageRef | null } | null): boolean;
+  /**
+   * The app's canvas called key: a picture it draws into and shows as an img's src. Made and filled with
+   * color (white) the first time, or when the size changes; the same picture every render while the interpreter
+   * lives (4 at most). Its fresh is true the render it was made: draw your record into it again then.
+   */
+  canvas(key: string, width: number, height: number, color?: string): FrameOSCanvasRef | null;
+  /** Draws SVG (JSX: <line>, <circle>, <path>, <polyline>, <g>, an <svg viewBox>; or markup) into a canvas, over what is there. */
+  draw(canvas: FrameOSCanvasRef, content: FrameOSElement | string): boolean;
+  /** Fills a canvas with color (white by default). */
+  clear(canvas: FrameOSCanvasRef, color?: string): boolean;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

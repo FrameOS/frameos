@@ -74,6 +74,14 @@ type PointerRecord = object
   hasLastTap: bool
   lastTapAt: MonoTime
   lastTapX, lastTapY: int
+  # A touch or a pen press that began within `GestureEdgePx` of an edge
+  # (`edge`, "" for none) is held back (`edgeHeld`, its pointerDown) until it
+  # is an `edgeSwipe` — then the frame's (`edgeTaken`), and the scene hears
+  # nothing of it — or not: then the held press goes out, late, and the rest
+  # as it comes.
+  edge: string
+  edgeHeld: seq[InputDelivery]
+  edgeTaken: bool
 
 type
   InputState* = object
@@ -359,10 +367,64 @@ proc place(state: var InputState, rec: ptr PointerRecord, x, y: int) =
   state.cursorX = rec.x
   state.cursorY = rec.y
 
+proc gesture(rec: PointerRecord, id: int, name: string, origin: EventOrigin): InputDelivery =
+  InputDelivery(name: name, origin: origin,
+    payload: %*{"x": rec.x, "y": rec.y, "pointerId": id, "pointerType": rec.pointerType})
+
+proc edgeAt(state: InputState, x, y: int): string =
+  ## The edge of the screen within `GestureEdgePx` of (x, y), the nearest
+  ## one in a corner; "" when there is none, or the screen is too small to
+  ## spare four edge widths across.
+  if state.width < 4 * GestureEdgePx or state.height < 4 * GestureEdgePx:
+    return ""
+  var best = GestureEdgePx
+  for (edge, distance) in [("left", x), ("right", state.width - 1 - x), ("top", y),
+                           ("bottom", state.height - 1 - y)]:
+    if distance < best:
+      best = distance
+      result = edge
+
+proc edgeTravel(rec: PointerRecord): tuple[inward, along: int] =
+  ## How far a held edge press went away from its edge, and along it.
+  case rec.edge
+  of "left": (rec.x - rec.downX, rec.y - rec.downY)
+  of "right": (rec.downX - rec.x, rec.y - rec.downY)
+  of "top": (rec.y - rec.downY, rec.x - rec.downX)
+  else: (rec.downY - rec.y, rec.x - rec.downX)
+
+proc releaseEdge(rec: ptr PointerRecord, output: var seq[InputDelivery]) =
+  ## The held edge press is the scene's after all: its pointerDown now.
+  for held in rec.edgeHeld:
+    output.add(held)
+  rec.edgeHeld.setLen(0)
+  rec.edge = ""
+
 proc pointerMoved(state: var InputState, id: int, pointerType: string, x, y: int,
                   origin: EventOrigin, now: MonoTime, output: var seq[InputDelivery]) =
   let rec = state.pointer(id, pointerType, origin)
   state.place(rec, x, y)
+  if rec.down and rec.edgeTaken:
+    return
+  if rec.down and rec.edge.len > 0:
+    let (inward, along) = edgeTravel(rec[])
+    if inward >= GestureSwipeMinPx and inward > abs(along):
+      # Away from the edge: the frame's swipe, and none of it the scene's.
+      rec.edgeTaken = true
+      rec.edgeHeld.setLen(0)
+      var swipe = gesture(rec[], id, evEdgeSwipe, origin)
+      swipe.payload["edge"] = %rec.edge
+      swipe.payload["direction"] = %(case rec.edge
+        of "left": "right"
+        of "right": "left"
+        of "top": "down"
+        else: "up")
+      swipe.payload["startX"] = %rec.downX
+      swipe.payload["startY"] = %rec.downY
+      output.add(swipe)
+      return
+    if abs(along) <= GestureTapSlopPx or abs(along) < inward:
+      return # not yet one or the other: held, the move with it
+    releaseEdge(rec, output) # along the edge: a drag that happens to start there
   output.add(InputDelivery(name: evPointerMove, payload: pointerPayload(rec[], id), origin: origin))
 
 when not defined(frameosEmbedded):
@@ -380,6 +442,7 @@ proc pointerDown(state: var InputState, id: int, pointerType: string, button: in
   let rec = state.pointer(id, pointerType, origin)
   if button >= 0 and button < 31:
     rec.buttons = rec.buttons or (1 shl button)
+  var pressed = false
   if not rec.down:
     rec.down = true
     rec.downAt = now
@@ -387,19 +450,34 @@ proc pointerDown(state: var InputState, id: int, pointerType: string, button: in
     rec.downY = rec.y
     rec.moved = false
     rec.longPressed = false
+    rec.edgeTaken = false
+    rec.edgeHeld.setLen(0)
+    rec.edge = if rec.pointerType == "mouse": "" else: state.edgeAt(rec.x, rec.y)
+    pressed = true
   var payload = pointerPayload(rec[], id)
   payload["button"] = %button
-  output.add(InputDelivery(name: evPointerDown, payload: payload, origin: origin))
-
-proc gesture(rec: PointerRecord, id: int, name: string, origin: EventOrigin): InputDelivery =
-  InputDelivery(name: name, origin: origin,
-    payload: %*{"x": rec.x, "y": rec.y, "pointerId": id, "pointerType": rec.pointerType})
+  let down = InputDelivery(name: evPointerDown, payload: payload, origin: origin)
+  if rec.edgeTaken:
+    return
+  if pressed and rec.edge.len > 0 or rec.edgeHeld.len > 0:
+    rec.edgeHeld.add(down) # an edge press: the scene's only if it is no swipe
+    return
+  output.add(down)
 
 proc pointerUp(state: var InputState, id: int, pointerType: string, button: int,
                origin: EventOrigin, now: MonoTime, output: var seq[InputDelivery]) =
   let rec = state.pointer(id, pointerType, origin)
   if button >= 0 and button < 31:
     rec.buttons = rec.buttons and not (1 shl button)
+  if rec.edgeTaken:
+    # The frame's swipe: its release, and no gesture, go nowhere.
+    if rec.buttons == 0:
+      rec.down = false
+      rec.edgeTaken = false
+      rec.hasLastTap = false
+    return
+  if rec.edge.len > 0:
+    releaseEdge(rec, output) # lifted before it was a swipe: the scene's press after all
   var payload = pointerPayload(rec[], id)
   payload["button"] = %button
   output.add(InputDelivery(name: evPointerUp, payload: payload, origin: origin))
@@ -447,9 +525,15 @@ proc pointerCancel(state: var InputState, id: int, origin: EventOrigin, output: 
   if not state.pointers.hasKey(id):
     return
   let rec = addr state.pointers[id]
-  if rec.down or rec.buttons != 0:
+  # An edge press the scene never heard (held back, or the frame's) has
+  # nothing for the scene to cancel.
+  let heard = not rec.edgeTaken and rec.edge.len == 0
+  if heard and (rec.down or rec.buttons != 0):
     output.add(InputDelivery(name: evPointerCancel, origin: origin,
       payload: %*{"x": rec.x, "y": rec.y, "pointerId": id, "pointerType": rec.pointerType}))
+  rec.edge = ""
+  rec.edgeHeld.setLen(0)
+  rec.edgeTaken = false
   rec.down = false
   rec.buttons = 0
   rec.hasLastTap = false
@@ -656,7 +740,7 @@ proc applyNamedPointerOrKey(state: var InputState, name: string, payload: JsonNo
       if payload.isInt("x") and payload.isInt("y"):
         discard state.pointerFromPayload(payload, origin)
       state.wheel(payload{"deltaX"}.getInt(), payload{"deltaY"}.getInt(), origin, output)
-  of evTap, evDoubleTap, evLongPress, evSwipe:
+  of evTap, evDoubleTap, evLongPress, evSwipe, evEdgeSwipe:
     # Injected, not made here: the position is converted, the rest passes.
     let (id, pointerType) = state.pointerFromPayload(payload, origin)
     let rec = state.pointers[id]
@@ -679,7 +763,10 @@ proc applyNamedPointerOrKey(state: var InputState, name: string, payload: JsonNo
 
 proc tickPointers(state: var InputState, now: MonoTime, output: var seq[InputDelivery]) =
   for id, rec in state.pointers.mpairs:
-    if rec.down and not rec.moved and not rec.longPressed and msSince(now, rec.downAt) >= GestureLongPressMs:
+    if rec.down and not rec.edgeTaken and not rec.moved and not rec.longPressed and
+        msSince(now, rec.downAt) >= GestureLongPressMs:
+      if rec.edge.len > 0:
+        releaseEdge(addr rec, output) # held still at the edge: the scene's long press
       rec.longPressed = true
       rec.hasLastTap = false
       var press = gesture(rec, id, evLongPress, rec.origin)

@@ -282,6 +282,29 @@ suite "jsx events":
     check dispatchUiEvent("tests/jsx-two", "pointerMove", finger(20, 20, 1)) # no press: under it
     check ui.scene.state{"a"}.getInt() == 4
 
+  test "a swipe goes to the element it began on, with its direction":
+    let ui = newUi("""
+      export const get = () => (
+        <div className="flex bg-white">
+          <div className="w-[100px] h-[100px]" onSwipe={(e) => frameos.setState('a', e.direction)} />
+          <div className="w-[100px] h-[100px]" onSwipe={(e) => frameos.setState('b', e.direction)} />
+        </div>
+      )
+    """, "tests/jsx-swipe")
+    discard ui.render()
+    check uiListens("tests/jsx-swipe", "swipe")
+    # Down on the first, up over the second: the first one's swipe.
+    check dispatchUiEvent("tests/jsx-swipe", "swipe", %*{"x": 160, "y": 50, "startX": 20, "startY": 50,
+      "direction": "right", "pointerId": 1, "pointerType": "touch"})
+    check ui.scene.state{"a"}.getStr() == "right"
+    check ui.scene.state{"b"}.isNil
+    check dispatchUiEvent("tests/jsx-swipe", "swipe", %*{"x": 120, "y": 10, "startX": 130, "startY": 90,
+      "direction": "up", "pointerId": 1, "pointerType": "touch"})
+    check ui.scene.state{"b"}.getStr() == "up"
+    # Begun below both: nobody's.
+    check not dispatchUiEvent("tests/jsx-swipe", "swipe", %*{"x": 120, "y": 10, "startX": 50, "startY": 150,
+      "direction": "left", "pointerId": 1, "pointerType": "touch"})
+
   test "a handler that throws is logged, and the frame goes on":
     let ui = newUi("""
       export const get = () => <div className="bg-white"><div className="w-10 h-10 bg-black" onClick={() => { throw new Error('nope') }} /></div>

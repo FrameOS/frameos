@@ -56,6 +56,10 @@ int fos_display_bus(void);
 /* True when the display refreshes on its own (an LCD scanned from a frame
  * buffer): a blit shows at once and costs no e-paper wait. */
 bool fos_display_is_lcd(void);
+/* The panel's power, for turnOn / turnOff / toggleScreen: an LCD's
+ * backlight. ESP_ERR_NOT_SUPPORTED where there is nothing to switch (e-paper
+ * holds its image unpowered). */
+esp_err_t fos_display_power(bool on);
 /* What the boot is waiting for, on an LCD's boot splash (lcd_splash.h): a
  * line under the FrameOS mark once the wait has lasted a second. Nothing on
  * any other panel, and nothing once a picture is up. */

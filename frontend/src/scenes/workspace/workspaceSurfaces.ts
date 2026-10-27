@@ -679,6 +679,17 @@ export function deviceSupportsDisplayPower(device?: string | null): boolean {
   return typeof device === 'string' && displayPowerDevices.includes(device)
 }
 
+/**
+ * The displays the device itself switches off and on for a button's
+ * `turnOn` / `turnOff` / `toggleScreen` (the frame's event map): those above,
+ * and an ESP32 RGB LCD, whose firmware switches the backlight. The control
+ * planes' display power verb does not reach an ESP32 yet, which is why the
+ * frame menu still goes by `deviceSupportsDisplayPower`.
+ */
+export function deviceSwitchesDisplay(device?: string | null): boolean {
+  return deviceSupportsDisplayPower(device) || device === 'lcd.st7701s_480x480'
+}
+
 /** The display a frame reports, wherever this control plane keeps it. */
 export function frameDisplayDevice(frame?: FrameCapabilityInput | null): string | null {
   return frame?.device ?? frame?.hardware?.device ?? null

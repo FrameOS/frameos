@@ -34,6 +34,16 @@ block:
   doAssert not keepIdleInterpreters()
 
 block:
+  # An interpreter that keeps pictures (fetchImage's keep) stays down to the
+  # lower floor after a decode too: letting it go would only decode them again.
+  refreshDecodeBudget()
+  doAssert released == 3 # the decode, short, let the idle ones go first
+  doAssert keepIdleInterpreters(holdingPictures = true)
+  refreshDecodeBudget()
+  doAssert released == 4
+  doAssert not keepIdleInterpreters()
+
+block:
   # Under KeepInterpretersBytes they go even after a render that decoded nothing.
   availableRenderBytesOverride = 512 * 1024
   doAssert not keepIdleInterpreters()
@@ -42,20 +52,20 @@ block:
   # Plenty of memory: a decode releases nothing, and they stay after it.
   availableRenderBytesOverride = 3 * 1024 * 1024
   refreshDecodeBudget()
-  doAssert released == 2
+  doAssert released == 4
   doAssert keepIdleInterpreters()
 
 block:
   # An image allocation that does not fit releases them before it is refused.
   availableRenderBytesOverride = 1024 * 1024
   ensureRenderAllocation(512 * 1024, "a small image")
-  doAssert released == 2
+  doAssert released == 4
   var refused = false
   try:
     ensureRenderAllocation(2 * 1024 * 1024, "a big image")
   except CatchableError:
     refused = true
-  doAssert refused and released == 3
-  doAssert releaseRenderMemory() and released == 4
+  doAssert refused and released == 5
+  doAssert releaseRenderMemory() and released == 6
 
 echo "render memory ok"

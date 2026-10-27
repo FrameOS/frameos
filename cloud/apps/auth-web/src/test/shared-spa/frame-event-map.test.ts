@@ -142,7 +142,9 @@ describe("the rules a device or a push carries", () => {
     expect(isEventMapRule({ event: "button", emit: "reboot" })).toBe(false);
     expect(isEventMapRule("nonsense")).toBe(false);
     // The emits are the contract's: what the eventMap origin may say.
-    expect([...eventMapEmits].sort()).toEqual(["render", "setCurrentScene", "setSceneState", "turnOff", "turnOn", "voiceChat"]);
+    expect([...eventMapEmits].sort()).toEqual([
+      "render", "setCurrentScene", "setSceneState", "toggleScreen", "turnOff", "turnOn", "voiceChat",
+    ]);
   });
 
   it("builds a push the contract accepts, non-rules dropped and `as` always an object", () => {

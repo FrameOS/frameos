@@ -84,6 +84,12 @@ interface FrameOSImageRef {
   width: number;
   height: number;
 }
+/** What frameos.canvas returns: an image ref an img's src takes, that frameos.draw and frameos.clear draw into. */
+interface FrameOSCanvasRef extends FrameOSImageRef {
+  canvas: string;
+  version: number;
+  fresh: boolean;
+}
 
 interface FrameOSNodeRef {
   __frameosType: "node";
@@ -111,13 +117,15 @@ interface FrameOSStreamRef { __frameosType: "streamRef"; id: number; }
 interface FrameOSElement { type: string; props: Record<string, any>; }
 /** What a handler gets: the pointer event, and where in the element it was. */
 interface FrameOSUiEvent {
-  type: "tap" | "doubleTap" | "longPress" | "pointerDown" | "pointerUp" | "pointerMove";
+  type: "tap" | "doubleTap" | "longPress" | "swipe" | "pointerDown" | "pointerUp" | "pointerMove";
   x: number;
   y: number;
   localX: number;
   localY: number;
   pointerId?: number;
   pointerType?: "mouse" | "touch" | "pen";
+  /** A swipe's way: "left", "right", "up" or "down". */
+  direction?: "left" | "right" | "up" | "down";
   [key: string]: any;
 }
 interface FrameOSElementProps {
@@ -132,6 +140,8 @@ interface FrameOSElementProps {
   onPointerUp?: (event: FrameOSUiEvent) => void;
   /** The pointer moved: over the element, or anywhere while a press it took is held (captured until the release). */
   onPointerMove?: (event: FrameOSUiEvent) => void;
+  /** A swipe that began on the element, with its direction; one in from the screen edge is the frame's. */
+  onSwipe?: (event: FrameOSUiEvent) => void;
   [attribute: string]: any;
 }
 declare namespace JSX {
@@ -209,6 +219,13 @@ declare const frameos: {
       exif?: boolean;
       // The image's color profile (a .frameos.json sidecar's colors object); null = none, clears the last palette.
       colors?: { [key: string]: any } | null;
+      // Keep the picture for later renders (a JSX gallery's photo, drawn again without a download) until
+      // frameos.releaseImage(ref) or the interpreter goes; 8 at most. Never the consumer's target.
+      keep?: boolean;
+      // With keep: the size to decode it at, in the canvas's pixel format (a host decodes at the picture's own size).
+      width?: number;
+      height?: number;
+      fit?: "cover" | "contain";
     }
   ): {
     image: FrameOSImageRef | null;
@@ -219,6 +236,18 @@ declare const frameos: {
     exif?: Record<string, any>;
     exifSummary?: string;
   };
+  /** Lets a picture fetchImage kept ({ keep: true }) go. False for one that was not kept, or is gone. */
+  releaseImage(image: FrameOSImageRef | { image: FrameOSImageRef | null } | null): boolean;
+  /**
+   * The app's canvas called key: a picture it draws into and shows as an img's src. Made and filled with
+   * color (white) the first time, or when the size changes; the same picture every render while the interpreter
+   * lives (4 at most). Its fresh is true the render it was made: draw your record into it again then.
+   */
+  canvas(key: string, width: number, height: number, color?: string): FrameOSCanvasRef | null;
+  /** Draws SVG (JSX: <line>, <circle>, <path>, <polyline>, <g>, an <svg viewBox>; or markup) into a canvas, over what is there. */
+  draw(canvas: FrameOSCanvasRef, content: FrameOSElement | string): boolean;
+  /** Fills a canvas with color (white by default). */
+  clear(canvas: FrameOSCanvasRef, color?: string): boolean;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

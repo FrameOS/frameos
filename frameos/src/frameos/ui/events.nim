@@ -74,6 +74,7 @@ proc handlerKind(event: string): int =
   of "pointerDown": ord(uePointerDown)
   of "pointerUp": ord(uePointerUp)
   of "pointerMove": ord(uePointerMove)
+  of "swipe": ord(ueSwipe)
   else: -1
 
 proc wants(r: UiRegion, event: string): bool =
@@ -121,8 +122,11 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
   let
     released = event in ["pointerUp", "pointerCancel"]
     placed = not payload.isNil and payload.kind == JObject and payload.hasKey("x") and payload.hasKey("y")
-    x = if placed: payload["x"].getFloat() else: 0
-    y = if placed: payload["y"].getFloat() else: 0
+    # A swipe belongs to where it began: a card swiped is the card the finger
+    # went down on, wherever it lifted.
+    starts = placed and event == "swipe" and payload.hasKey("startX") and payload.hasKey("startY")
+    x = if starts: payload["startX"].getFloat() elif placed: payload["x"].getFloat() else: 0
+    y = if starts: payload["startY"].getFloat() elif placed: payload["y"].getFloat() else: 0
     touch = placed and payload{"pointerType"}.getStr() == "touch"
     kind = handlerKind(event)
     pointer = if payload.isNil or payload.kind != JObject: 0 else: payload{"pointerId"}.getInt(0)

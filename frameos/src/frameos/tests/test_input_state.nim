@@ -46,6 +46,9 @@ block test_a_wire_position_becomes_a_scene_pixel_on_every_pointer_event:
   doAssert output[0].payload["x"].getInt() == 399 and output[0].payload["y"].getInt() == 479
   doAssert output[0].payload["pointerId"].getInt() == 17 and output[0].payload["pointerType"].getStr() == "touch"
   doAssert output[0].payload["buttons"].getInt() == 0
+  # Off the bottom edge before it presses: a press there is an edge swipe's
+  # to decide (test_a_press_at_an_edge_is_the_frames_swipe_or_the_scenes_press).
+  state.applyDriverInput(abs(17, PointerWireMax div 2, PointerWireMax div 2), eoDriver, at(5), output)
   output.setLen(0)
   state.applyDriverInput(down(17, 0), eoDriver, at(10), output)
   doAssert output.names == @[evPointerDown]
@@ -101,9 +104,9 @@ block test_a_mouse_picked_up_after_a_touch_continues_from_the_finger:
 block test_a_tap_is_a_down_and_an_up_in_one_place:
   var state = initInputState(config(800, 480))
   var output: seq[InputDelivery]
-  state.applyDriverInput(abs(1, 1000, 1000), eoDriver, at(0), output)
+  state.applyDriverInput(abs(1, 4000, 4000), eoDriver, at(0), output)
   state.applyDriverInput(down(1, 0), eoDriver, at(0), output)
-  state.applyDriverInput(abs(1, 1200, 1100), eoDriver, at(50), output) # inside the slop
+  state.applyDriverInput(abs(1, 4200, 4100), eoDriver, at(50), output) # inside the slop
   state.applyDriverInput(up(1, 0), eoDriver, at(120), output)
   doAssert output.names == @[evPointerMove, evPointerDown, evPointerMove, evPointerUp, evTap]
   doAssert output[4].payload["pointerId"].getInt() == 1
@@ -133,7 +136,7 @@ block test_a_right_click_is_not_a_tap:
 block test_a_long_press_is_delivered_while_held_when_the_host_ticks:
   var state = initInputState(config(800, 480))
   var output: seq[InputDelivery]
-  state.applyDriverInput(abs(1, 100, 100), eoPreview, at(0), output)
+  state.applyDriverInput(abs(1, 8000, 8000), eoPreview, at(0), output)
   state.applyDriverInput(down(1, 0), eoPreview, at(0), output)
   output.setLen(0)
   state.tick(at(GestureLongPressMs - 1), output)
@@ -414,37 +417,105 @@ block test_a_stamped_touch_is_timed_by_its_stamps:
   var state = initInputState(config(800, 480))
   var output: seq[InputDelivery]
   let base = t0.ticks div 1_000_000
-  discard state.applyNamedInput(evPointerDown, %*{"x": 1000, "y": 1000, "pointerId": 1,
+  discard state.applyNamedInput(evPointerDown, %*{"x": 8000, "y": 8000, "pointerId": 1,
     "pointerType": "touch", "button": 0, "buttons": 1, "atMs": base + 1000}, eoDriver, at(1000), output)
   state.tick(at(1000), output)
   doAssert output.names == @[evPointerDown]
   output.setLen(0)
-  discard state.applyNamedInput(evPointerUp, %*{"x": 1000, "y": 1000, "pointerId": 1,
+  discard state.applyNamedInput(evPointerUp, %*{"x": 8000, "y": 8000, "pointerId": 1,
     "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 1120}, eoDriver, at(2200), output)
   doAssert output.names == @[evPointerUp, evTap]
   # A second tap 200 ms after the first one's stamp, delivered as late: a doubleTap.
   output.setLen(0)
-  discard state.applyNamedInput(evPointerDown, %*{"x": 1000, "y": 1000, "pointerId": 1,
+  discard state.applyNamedInput(evPointerDown, %*{"x": 8000, "y": 8000, "pointerId": 1,
     "pointerType": "touch", "button": 0, "buttons": 1, "atMs": base + 1320}, eoDriver, at(3400), output)
-  discard state.applyNamedInput(evPointerUp, %*{"x": 1000, "y": 1000, "pointerId": 1,
+  discard state.applyNamedInput(evPointerUp, %*{"x": 8000, "y": 8000, "pointerId": 1,
     "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 1400}, eoDriver, at(3400), output)
   doAssert output.names == @[evPointerDown, evPointerUp, evTap, evDoubleTap]
   # Held 1200 ms by its stamps: a long press, however soon it is delivered.
   output.setLen(0)
-  discard state.applyNamedInput(evPointerDown, %*{"x": 1000, "y": 1000, "pointerId": 1,
+  discard state.applyNamedInput(evPointerDown, %*{"x": 8000, "y": 8000, "pointerId": 1,
     "pointerType": "touch", "button": 0, "buttons": 1, "atMs": base + 5000}, eoDriver, at(7000), output)
-  discard state.applyNamedInput(evPointerUp, %*{"x": 1000, "y": 1000, "pointerId": 1,
+  discard state.applyNamedInput(evPointerUp, %*{"x": 8000, "y": 8000, "pointerId": 1,
     "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 6200}, eoDriver, at(7000), output)
   doAssert output.names == @[evPointerDown, evPointerUp, evLongPress]
   doAssert output[2].payload["durationMs"].getInt() == 1200
   # Held 700 ms: under a second, a tap, as a key's press is (`tapMs` is
   # `longPressMs`, the buttons' second).
   output.setLen(0)
-  discard state.applyNamedInput(evPointerDown, %*{"x": 1000, "y": 1000, "pointerId": 1,
+  discard state.applyNamedInput(evPointerDown, %*{"x": 8000, "y": 8000, "pointerId": 1,
     "pointerType": "touch", "button": 0, "buttons": 1, "atMs": base + 8000}, eoDriver, at(9000), output)
-  discard state.applyNamedInput(evPointerUp, %*{"x": 1000, "y": 1000, "pointerId": 1,
+  discard state.applyNamedInput(evPointerUp, %*{"x": 8000, "y": 8000, "pointerId": 1,
     "pointerType": "touch", "button": 0, "buttons": 0, "atMs": base + 8700}, eoDriver, at(9000), output)
   doAssert output.names == @[evPointerDown, evPointerUp, evTap]
+
+block test_a_press_at_an_edge_is_the_frames_swipe_or_the_scenes_press:
+  # A touch that goes down within GestureEdgePx of an edge is held back until
+  # it is a swipe away from that edge (the frame's: the scene hears none of
+  # it, so a slider under the finger stays put) or not (the scene's, late).
+  var state = initInputState(config(800, 480))
+  var output: seq[InputDelivery]
+  proc wire(px, size: int): int = (px * 32768 + size div 2) div size
+  proc touch(state: var InputState, name: string, x, y, at: int, output: var seq[InputDelivery],
+             pointerType = "touch") =
+    let buttons = if name == evPointerUp: 0 else: 1
+    discard state.applyNamedInput(name, %*{"x": wire(x, 800), "y": wire(y, 480), "pointerId": 1,
+      "pointerType": pointerType, "button": 0, "buttons": buttons}, eoDriver, t0 + initDuration(milliseconds = at), output)
+  # From the right edge, to the left: an edgeSwipe and nothing else.
+  state.touch(evPointerDown, 792, 240, 0, output)
+  doAssert output.len == 0, "held: " & $output.names
+  state.touch(evPointerMove, 770, 242, 30, output)
+  doAssert output.len == 0, "still held inside the swipe distance"
+  state.touch(evPointerMove, 700, 250, 60, output)
+  doAssert output.names == @[evEdgeSwipe], $output.names
+  doAssert output[0].payload["edge"].getStr() == "right"
+  doAssert output[0].payload["direction"].getStr() == "left"
+  doAssert output[0].payload["startX"].getInt() == 792
+  output.setLen(0)
+  state.touch(evPointerMove, 600, 255, 90, output)
+  state.touch(evPointerUp, 590, 255, 120, output)
+  doAssert output.len == 0, "the rest of that touch is the frame's: " & $output.names
+  # A tap at the left edge: the scene's, delivered at the release.
+  state.touch(evPointerDown, 6, 300, 1000, output)
+  doAssert output.len == 0
+  state.touch(evPointerUp, 7, 300, 1080, output)
+  doAssert output.names == @[evPointerDown, evPointerUp, evTap], $output.names
+  doAssert output[0].payload["x"].getInt() == 6
+  output.setLen(0)
+  # Along the left edge: a drag that started there, the scene's from the move
+  # that showed it, and a plain swipe at the end.
+  state.touch(evPointerDown, 5, 100, 2000, output)
+  state.touch(evPointerMove, 8, 200, 2050, output)
+  doAssert output.names == @[evPointerDown, evPointerMove], $output.names
+  output.setLen(0)
+  state.touch(evPointerUp, 8, 220, 2100, output)
+  doAssert output.names == @[evPointerUp, evSwipe], $output.names
+  doAssert output[1].payload["direction"].getStr() == "down"
+  output.setLen(0)
+  # Held still at the bottom edge: the scene's long press, its down first.
+  state.touch(evPointerDown, 400, 475, 3000, output)
+  state.tick(t0 + initDuration(milliseconds = 3000 + GestureLongPressMs), output)
+  doAssert output.names == @[evPointerDown, evLongPress], $output.names
+  output.setLen(0)
+  state.touch(evPointerUp, 400, 475, 3000 + GestureLongPressMs + 100, output)
+  doAssert output.names == @[evPointerUp], $output.names
+  output.setLen(0)
+  # A mouse at an edge is a mouse: nothing held.
+  state.touch(evPointerDown, 2, 240, 5000, output, pointerType = "mouse")
+  doAssert output.names == @[evPointerDown], $output.names
+  state.touch(evPointerUp, 2, 240, 5050, output, pointerType = "mouse")
+  output.setLen(0)
+  # A held edge press that is cancelled: the scene never heard it, so no cancel.
+  state.touch(evPointerDown, 400, 3, 6000, output)
+  discard state.applyNamedInput(evPointerCancel, %*{"pointerId": 1, "pointerType": "touch"}, eoDriver,
+    t0 + initDuration(milliseconds = 6010), output)
+  doAssert output.len == 0, $output.names
+  # In a corner, the nearer edge: 3 px from the top, 10 from the left.
+  state.touch(evPointerDown, 10, 3, 7000, output)
+  state.touch(evPointerMove, 12, 80, 7050, output)
+  doAssert output.names == @[evEdgeSwipe] and output[0].payload["edge"].getStr() == "top" and
+    output[0].payload["direction"].getStr() == "down", $output.names
+  state.touch(evPointerUp, 12, 80, 7100, output)
 
 block test_the_corpus:
   # docs/event-fixtures.json `inputState`: the cases every host answers alike.

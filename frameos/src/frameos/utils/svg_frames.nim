@@ -29,6 +29,7 @@
 import std/options
 import pixie
 import pixie/fileformats/svg
+import frameos/utils/canvas_log
 import frameos/utils/image
 import frameos/utils/memory
 
@@ -41,6 +42,8 @@ type HeldFrame = object
   generation: uint32
   width, height: int
   svg: Svg
+  canvases: seq[tuple[image: Image, version: int]]
+    ## the version of each canvas the frame showed (utils/canvas_log.nim)
 
 var
   heldFrames: seq[HeldFrame] ## oldest first
@@ -89,6 +92,66 @@ proc newestHeldFrame(target: Image): int =
       return i
   -1
 
+proc canvasesShown(svg: Svg): seq[tuple[image: Image, version: int]] =
+  for p in svg.pictures:
+    let log = canvasLogOf(p.image)
+    if not log.isNil:
+      result.add((p.image, log.version))
+
+proc pictureArea(p: SvgPicture, box: Rect, target: Image): tuple[x, y, w, h: int] =
+  ## `box`, in the picture's own pixels, where the frame draws it: through
+  ## the box the picture is stretched into, its clip and its transform, and a
+  ## pixel around for the samples a scaled picture blends.
+  let
+    sx = p.box.w / p.image.width.float32
+    sy = p.box.h / p.image.height.float32
+  var
+    x0 = p.box.x + box.x * sx
+    y0 = p.box.y + box.y * sy
+    x1 = p.box.x + (box.x + box.w) * sx
+    y1 = p.box.y + (box.y + box.h) * sy
+  if p.clip.w >= 0:
+    x0 = max(x0, p.clip.x)
+    y0 = max(y0, p.clip.y)
+    x1 = min(x1, p.clip.x + p.clip.w)
+    y1 = min(y1, p.clip.y + p.clip.h)
+  if x1 <= x0 or y1 <= y0:
+    return (0, 0, 0, 0)
+  var lo = vec2(float32.high, float32.high)
+  var hi = vec2(float32.low, float32.low)
+  for corner in [vec2(x0, y0), vec2(x1, y0), vec2(x0, y1), vec2(x1, y1)]:
+    let c = p.transform * corner
+    lo = vec2(min(lo.x, c.x), min(lo.y, c.y))
+    hi = vec2(max(hi.x, c.x), max(hi.y, c.y))
+  let
+    px0 = clamp(floor(lo.x).int - 1, 0, target.width)
+    py0 = clamp(floor(lo.y).int - 1, 0, target.height)
+    px1 = clamp(ceil(hi.x).int + 1, 0, target.width)
+    py1 = clamp(ceil(hi.y).int + 1, 0, target.height)
+  (px0, py0, px1 - px0, py1 - py0)
+
+proc canvasRects(base: HeldFrame, parsed: Svg, target: Image): seq[tuple[x, y, w, h: int]] =
+  ## What changed in the canvases `parsed` shows since `base` showed them,
+  ## where the frame draws it. A canvas `base` did not show is a new element
+  ## to damageRects already; one drawn into more often than its log keeps
+  ## repaints whole.
+  for p in parsed.pictures:
+    let log = canvasLogOf(p.image)
+    if log.isNil:
+      continue
+    var shown = -1
+    for (image, version) in base.canvases:
+      if image == p.image:
+        shown = version
+    if shown < 0 or shown == log.version:
+      continue
+    let (known, boxes) = log.changedSince(shown)
+    let areas = if known: boxes else: @[rect(0, 0, p.image.width.float32, p.image.height.float32)]
+    for area in areas:
+      let r = pictureArea(p, area, target)
+      if r.w > 0 and r.h > 0:
+        result.add r
+
 proc forgetPanelFrames*() =
   ## Nothing a buffer held is known any more (a panel or size change).
   heldFrames.setLen(0)
@@ -128,10 +191,13 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
     return true
   owed = none(Color) # waived: the SVG's first paint covers every pixel
   let whole = target.width * target.height
-  var rects = @[(x: 0, y: 0, w: target.width, h: target.height)]
+  var
+    rects = @[(x: 0, y: 0, w: target.width, h: target.height)]
+    base: Option[HeldFrame] # the frame the buffer holds after any copy
   if held.isSome and held.get().generation == panelGeneration and
       held.get().width == target.width and held.get().height == target.height:
     rects = damageRects(held.get().svg, parsed, target.width, target.height, MaxRepaints).rects
+    base = held
   if rects.area >= whole:
     # Its own frame is no help (none, written over, another scene's): the
     # newest frame another buffer holds, copied in, unless the damage
@@ -142,6 +208,10 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
       if not found.full and found.rects.area < whole:
         copyMem(target.bufferPointer, heldFrames[source].buffer, target.byteSize)
         rects = found.rects
+        base = some(heldFrames[source])
+  if base.isSome and rects.area < whole:
+    # Canvases drawn into since: pixie sees the same picture in them.
+    rects.add canvasRects(base.get(), parsed, target)
   when defined(testing):
     svgFramePixelsForTest = 0
   try:
@@ -155,7 +225,7 @@ proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], whol
   except CatchableError:
     return false
   heldFrames.add(HeldFrame(buffer: panelBuffer, generation: panelGeneration,
-    width: target.width, height: target.height, svg: parsed))
+    width: target.width, height: target.height, svg: parsed, canvases: parsed.canvasesShown))
   true
 
 proc renderSvgFrame*(svg: string, target: Image, owed: var Option[Color], wholeFrame: bool): bool =

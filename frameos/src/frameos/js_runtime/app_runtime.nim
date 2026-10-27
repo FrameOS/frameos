@@ -15,6 +15,7 @@ import frameos/utils/dither
 import frameos/utils/exif
 import frameos/utils/image
 import frameos/utils/svg_frames
+import frameos/utils/canvas_log
 import frameos/utils/paths
 import frameos/utils/system
 import frameos/js_runtime/burrito
@@ -62,6 +63,13 @@ type
     lastJsxConfig: JsonNode
     lastJsxAt: MonoTime
     transientImageIds: seq[int]
+    keptImageIds: seq[int]
+    canvases: seq[tuple[key: string, id: int]]
+      ## `frameos.canvas(key, ...)`: the pictures the app draws into, kept
+      ## like the ones above until the interpreter goes (MaxCanvases at most).
+      ## `fetchImage(url, {keep: true})`'s pictures, oldest first: they stay
+      ## for later renders until `frameos.releaseImage` or the interpreter
+      ## goes (MaxKeptImages at most).
     ## `frameos.remember` / `recall`: values the app keeps between renders, as
     ## JSON text. Held here and not in the interpreter because an ESP32 tears
     ## every idle interpreter down after a render (releaseIdleJsAppRuntimes),
@@ -114,8 +122,12 @@ proc teardownJsRuntime(runtime: JsAppRuntime) =
   runtime.js.close()
   runtime.ready = false
   runtime.initialized = false
+  for canvas in runtime.canvases:
+    unregisterCanvas(runtime.images.getOrDefault(canvas.id, nil))
   runtime.images.clear()
   runtime.transientImageIds.setLen(0)
+  runtime.keptImageIds.setLen(0)
+  runtime.canvases.setLen(0)
 
 var liveJsRuntimes: seq[JsAppRuntime] = @[]
   ## Every interpreter built and not yet released, on every platform: the
@@ -173,6 +185,14 @@ proc hasIdleJsAppRuntimes(): bool =
       return true
   false
 
+proc idleJsAppRuntimesHoldPictures(): bool =
+  ## Whether an idle interpreter keeps pictures (fetchImage's `keep`).
+  for runtime in liveJsRuntimes:
+    if runtime.ready and not jsRuntimeStack.contains(runtime) and
+        (runtime.keptImageIds.len > 0 or runtime.canvases.len > 0):
+      return true
+  false
+
 proc settleIdleJsAppRuntimes*(keep: bool): bool =
   ## After a render on the single-scene host. `keep` (an ESP32 that does not
   ## deep-sleep): the idle interpreters stay for the next render while there
@@ -183,8 +203,10 @@ proc settleIdleJsAppRuntimes*(keep: bool): bool =
   ## and released later when a decode is short of memory
   ## (utils/memory.renderMemoryReleaseHook). Apps still must not count on
   ## module variables outliving a render: `frameos.remember` is the way.
-  ## Whether they were kept.
-  if keep and hasIdleJsAppRuntimes() and keepIdleInterpreters():
+  ## An interpreter that keeps pictures stays down to the lower floor after
+  ## a decode too: they would only be decoded again. Whether they were kept.
+  if keep and hasIdleJsAppRuntimes() and
+      keepIdleInterpreters(holdingPictures = idleJsAppRuntimesHoldPictures()):
     return true
   releaseIdleJsAppRuntimes()
   false
@@ -368,6 +390,7 @@ proc jsFetchText(ctx: ptr JSContext, url: JSValue): JSValue {.nimcall.} =
     return nimStringToJS(ctx, "")
 
 proc storeTransientImageJson(runtime: JsAppRuntime, image: Image): JsonNode
+proc storeKeptImageJson(runtime: JsAppRuntime, owner: AppRoot, image: Image): JsonNode
 
 const JsHttpMaxTimeoutMs = 600_000
 
@@ -552,6 +575,15 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
   ## earlier photo's palette override is cleared; without the key nothing
   ## about colors changes. With adjustments, `contain` does not claim the
   ## target: they must not touch the canvas around the photo.
+  ##
+  ## `keep: true` makes a picture the app holds: the ref stays valid for
+  ## later renders (a JSX gallery's photo, drawn again after a tap without a
+  ## download) until `frameos.releaseImage(ref)` or the interpreter goes,
+  ## MaxKeptImages at most. A kept picture is the app's own image, never the
+  ## consumer's target: `width` / `height` (and `fit`, cover or contain) say
+  ## the size to decode it at, in the canvas's pixel format, so an ESP32
+  ## holds a 480x480 photo in 450 KB of RGB565; without them it decodes at
+  ## its own size.
   let e = env(ctx)
   var response = %*{"image": newJNull()}
   if e == nil:
@@ -591,8 +623,28 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
         setRenderPaletteOverride(colorProfile.get().palette)
       else:
         clearRenderPaletteOverride()
+    let keep = options{"keep"}.getBool(false)
     var downloaded: tuple[image: Image, data: string]
-    if offeredWidth > 0 and offeredHeight > 0 and
+    if keep:
+      let
+        keepWidth = options{"width"}.getInt(0)
+        keepHeight = options{"height"}.getInt(0)
+      if keepWidth > 0 and keepHeight > 0:
+        # The canvas's format where one is about (RGB565 on an LCD), so
+        # drawing the picture later is a copy.
+        let like =
+          if not context.isNil and not context.decodeTargetImage.isNil: context.decodeTargetImage
+          else: context.contextImage()
+        let target =
+          if like.isNil: newImage(keepWidth, keepHeight)
+          else: newImageLike(like, keepWidth, keepHeight)
+        if not like.isNil:
+          target.ditherStores = like.ditherStores # as a decode into the canvas
+        downloaded = downloadImageWithDataInto(urlStr, target, maxBytes = maxBytes,
+          headers = headers, fit = scaledDecodeFit(options{"fit"}.getStr("cover")))
+      else:
+        downloaded = downloadImageWithData(urlStr, maxBytes = maxBytes, headers = headers)
+    elif offeredWidth > 0 and offeredHeight > 0 and
         (offeredFit notin DecoderFits or (adjustColors and offeredFit == "contain")):
       downloaded = downloadImageWithDataBounded(urlStr, offeredWidth, offeredHeight,
         maxBytes = maxBytes, headers = headers)
@@ -611,7 +663,9 @@ proc jsFetchImage(ctx: ptr JSContext, url: JSValue, optionsJson: JSValue): JSVal
       # Explicit sliders stand; the consumer's automatic fit skips this one.
       markImageGraded(downloaded.image)
 
-    response["image"] = e.runtime.storeTransientImageJson(downloaded.image)
+    response["image"] =
+      if keep: e.runtime.storeKeptImageJson(owner, downloaded.image)
+      else: e.runtime.storeTransientImageJson(downloaded.image)
     response["width"] = %*downloaded.image.width
     response["height"] = %*downloaded.image.height
 
@@ -1363,6 +1417,167 @@ proc storeTransientImageJson(runtime: JsAppRuntime, image: Image): JsonNode =
   if result.kind == JObject:
     runtime.transientImageIds.add(result["id"].getInt())
 
+const MaxKeptImages = 8
+  ## Pictures an app may keep at once; the oldest goes for a ninth.
+
+proc storeKeptImageJson(runtime: JsAppRuntime, owner: AppRoot, image: Image): JsonNode =
+  result = runtime.storeImageJson(image)
+  if result.kind == JObject:
+    runtime.keptImageIds.add(result["id"].getInt())
+    if runtime.keptImageIds.len > MaxKeptImages:
+      runtime.images.del(runtime.keptImageIds[0])
+      runtime.keptImageIds.delete(0)
+      frameos_apps.log(owner, %*{"event": "js:keptImages", "dropped": "oldest",
+        "limit": MaxKeptImages})
+
+proc releaseKeptImage(runtime: JsAppRuntime, id: int): bool =
+  let at = runtime.keptImageIds.find(id)
+  if at < 0:
+    return false
+  runtime.keptImageIds.delete(at)
+  runtime.images.del(id)
+  true
+
+proc jsReleaseImage(ctx: ptr JSContext, id: JSValue): JSValue {.nimcall.} =
+  ## `frameos.releaseImage(ref)`: a kept picture goes; false for any other.
+  let e = env(ctx)
+  if e == nil:
+    return nimBoolToJS(ctx, false)
+  nimBoolToJS(ctx, e.runtime.releaseKeptImage(toNimFloat(ctx, id).int))
+
+const MaxCanvases = 4
+  ## Canvases an app may draw into at once; a fifth key lets the oldest go.
+
+proc canvasImage(runtime: JsAppRuntime, id: int): Image =
+  for canvas in runtime.canvases:
+    if canvas.id == id:
+      return runtime.images.getOrDefault(id, nil)
+
+proc pictureFormatLike(context: ExecutionContext): Image =
+  ## An image in the canvas's pixel format, if one is about: what an app's
+  ## own picture is made like, so drawing it later is a copy.
+  if context.isNil: nil
+  elif not context.decodeTargetImage.isNil: context.decodeTargetImage
+  else: context.contextImage()
+
+proc jsCanvas(ctx: ptr JSContext, key: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
+  ## `frameos.canvas(key, width, height, color)`: the app's canvas called
+  ## `key`, made and filled with `color` (white by default) the first time,
+  ## or again when the size changed. The same picture every render while
+  ## the interpreter lives; `fresh` says it was just made, so the app draws
+  ## its record into it again.
+  let e = env(ctx)
+  if e == nil:
+    return nimStringToJS(ctx, "null")
+  let name = toNimString(ctx, key)
+  var options = newJObject()
+  try:
+    options = parseJson(toNimString(ctx, optionsJson))
+  except CatchableError:
+    discard
+  let
+    width = options{"width"}.getInt(0)
+    height = options{"height"}.getInt(0)
+  if width <= 0 or height <= 0 or width * height > 4096 * 4096:
+    frameos_apps.logError(e.owner, "frameos.canvas needs a width and a height")
+    return nimStringToJS(ctx, "null")
+  let runtime = e.runtime
+  var
+    id = 0
+    fresh = false
+  for canvas in runtime.canvases:
+    if canvas.key == name:
+      let image = runtime.images.getOrDefault(canvas.id, nil)
+      if not image.isNil and image.width == width and image.height == height:
+        id = canvas.id
+  if id == 0:
+    try:
+      for i in countdown(runtime.canvases.high, 0):
+        if runtime.canvases[i].key == name or
+            (runtime.canvases.len >= MaxCanvases and i == 0):
+          unregisterCanvas(runtime.images.getOrDefault(runtime.canvases[i].id, nil))
+          runtime.images.del(runtime.canvases[i].id)
+          runtime.canvases.delete(i)
+      let like = pictureFormatLike(e.context)
+      let image = if like.isNil: newImage(width, height) else: newImageLike(like, width, height)
+      if not like.isNil:
+        image.ditherStores = like.ditherStores
+      let color = options{"color"}.getStr("")
+      image.fill(parseHtmlColor(if color.len > 0: color else: "#ffffff").rgbx)
+      inc runtime.nextImageId
+      id = runtime.nextImageId
+      runtime.images[id] = image
+      runtime.canvases.add((name, id))
+      discard registerCanvas(image)
+      fresh = true
+    except CatchableError as err:
+      frameos_apps.logError(e.owner, "frameos.canvas failed: " & err.msg)
+      return nimStringToJS(ctx, "null")
+  let log = canvasLogOf(runtime.images[id])
+  nimStringToJS(ctx, $(%*{"__frameosType": "imageRef", "id": id, "width": width, "height": height,
+    "canvas": name, "version": (if log.isNil: 0 else: log.version), "fresh": fresh}))
+
+proc jsCanvasDraw(ctx: ptr JSContext, id: JSValue, content: JSValue): JSValue {.nimcall.} =
+  ## `frameos.draw(canvas, content)`: SVG drawn into the canvas's pixels,
+  ## over what is there. `content` is JSX (`<line .../>`, `<g>`, `<path>`,
+  ## an `<svg viewBox>`) or SVG markup, in the canvas's pixels unless an
+  ## `<svg>` says otherwise. Only the box it touches is drawn, and noted
+  ## for the frames that show the canvas.
+  let e = env(ctx)
+  if e == nil:
+    return nimBoolToJS(ctx, false)
+  let image = e.runtime.canvasImage(toNimFloat(ctx, id).int)
+  if image.isNil:
+    return nimBoolToJS(ctx, false)
+  try:
+    let size = [("width", $image.width), ("height", $image.height)]
+    var node: SvgNode
+    if jsIsString(content):
+      let markup = toNimString(ctx, content)
+      node = svgRoot(if markup.strip().startsWith("<svg"): markup
+        else: "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" & $image.width &
+          "\" height=\"" & $image.height & "\">" & markup & "</svg>")
+    else:
+      node = jsxNode(ctx, content, addr e.runtime.images, drawing = true)
+      if node.tag != "svg":
+        node = SvgNode(tag: "svg", attrs: @size, children: @[node])
+    if node.attr("viewBox").len == 0 and node.attr("width").len == 0:
+      for (name, value) in size:
+        node.setAttr(name, value)
+    let
+      drawn = parseSvg(node, image.width, image.height)
+      nothing = parseSvg(SvgNode(tag: "svg", attrs: @size), image.width, image.height)
+      box = damage(nothing, drawn, image.width, image.height)
+    if box.w <= 0 or box.h <= 0:
+      return nimBoolToJS(ctx, true)
+    if box.full or (box.w == image.width and box.h == image.height):
+      drawn.renderInto(image)
+    else:
+      drawn.renderInto(image.view(box.x, box.y, box.w, box.h), box.x, box.y)
+    let log = registerCanvas(image)
+    log.drew(rect(box.x.float32, box.y.float32, box.w.float32, box.h.float32))
+    return nimBoolToJS(ctx, true)
+  except CatchableError as err:
+    frameos_apps.logError(e.owner, "frameos.draw failed: " & err.msg)
+    return nimBoolToJS(ctx, false)
+
+proc jsCanvasClear(ctx: ptr JSContext, id: JSValue, color: JSValue): JSValue {.nimcall.} =
+  ## `frameos.clear(canvas, color)`: the canvas filled (white by default).
+  let e = env(ctx)
+  if e == nil:
+    return nimBoolToJS(ctx, false)
+  let image = e.runtime.canvasImage(toNimFloat(ctx, id).int)
+  if image.isNil:
+    return nimBoolToJS(ctx, false)
+  try:
+    let name = toNimString(ctx, color)
+    image.fill(parseHtmlColor(if name.len > 0: name else: "#ffffff").rgbx)
+    registerCanvas(image).drew(rect(0, 0, image.width.float32, image.height.float32))
+    return nimBoolToJS(ctx, true)
+  except CatchableError as err:
+    frameos_apps.logError(e.owner, "frameos.clear failed: " & err.msg)
+    return nimBoolToJS(ctx, false)
+
 proc clearTransientImages(runtime: JsAppRuntime) =
   for id in runtime.transientImageIds:
     if runtime.images.hasKey(id):
@@ -1599,6 +1814,10 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsFetchText", jsFetchText)
   runtime.js.registerFunction("jsHttpRequest", jsHttpRequest)
   runtime.js.registerFunction("jsFetchImage", jsFetchImage)
+  runtime.js.registerFunction("jsReleaseImage", jsReleaseImage)
+  runtime.js.registerFunction("jsCanvas", jsCanvas)
+  runtime.js.registerFunction("jsCanvasDraw", jsCanvasDraw)
+  runtime.js.registerFunction("jsCanvasClear", jsCanvasClear)
   runtime.js.registerFunction("jsAssets", jsAssets)
   runtime.js.registerFunction("jsStreams", jsStreams)
   runtime.js.registerFunction("jsGetSetting", jsGetSetting)
@@ -1650,6 +1869,12 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
     fetchImage: (url, options) => JSON.parse(
       jsFetchImage(String(url || ""), JSON.stringify(options || {}, __jsReplacer)) || '{"image":null}'
     ),
+    releaseImage: (ref) => jsReleaseImage(Number(((ref && ref.image) || ref || {}).id || 0)) === true,
+    canvas: (key, width, height, color) => JSON.parse(jsCanvas(String(key || "canvas"),
+      JSON.stringify({ width: Number(width || 0), height: Number(height || 0), color: String(color || "") }))),
+    draw: (canvas, content) => jsCanvasDraw(Number((canvas && canvas.id) || 0),
+      (content && typeof content === "object") ? content : String(content || "")) === true,
+    clear: (canvas, color) => jsCanvasClear(Number((canvas && canvas.id) || 0), String(color || "")) === true,
     listAssets: (dir) => __frameosAsset("list", dir) || [],
     assetExists: (path) => __frameosAsset("exists", path) === true,
     assetSize: (path) => __frameosAsset("size", path) ?? -1,

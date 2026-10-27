@@ -185,6 +185,12 @@ bool fos_display_is_lcd(void)
     return s_panel && s_panel->bus == FOS_PANEL_BUS_RGB;
 }
 
+esp_err_t fos_display_power(bool on)
+{
+    if (!fos_display_is_lcd()) return ESP_ERR_NOT_SUPPORTED;
+    return fos_lcd_st7701s_backlight(on);
+}
+
 void fos_display_boot_status(fos_lcd_splash_status_t status)
 {
     if (fos_display_is_lcd()) fos_lcd_st7701s_splash_status(status);
