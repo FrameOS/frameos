@@ -10,6 +10,8 @@ import { PathInput } from '../Assets/PathInput'
 import { FrameId, StateField } from '../../../../types'
 import { booleanFieldValue } from '../../../../utils/booleanField'
 import { REFRESH_INTERVAL_ROLE } from '../../../../utils/refreshInterval'
+import type { GeoLocation } from '../../../../utils/geolocation'
+import { WithLocateButton } from '../../../../components/LocateButton'
 
 /** The "true"/"false" option for a boolean value in either shape (a real
  * `true` from the frame's state or a scene default matched no option). */
@@ -25,16 +27,30 @@ interface StateFieldEditProps {
   stateChanges: Record<string, any>
   /** Enables the file/folder picker for 'path' fields; without it they render as plain text. */
   frameId?: FrameId
+  /** On the first of a scene's latitude and longitude fields
+   * (`locationFieldPair`): a locate button at the input's end, which sets
+   * both to the browser's location. */
+  onLocate?: (location: GeoLocation) => void
 }
 
-export function StateFieldEdit({
+export function StateFieldEdit({ onLocate, ...props }: StateFieldEditProps): JSX.Element {
+  return onLocate ? (
+    <WithLocateButton onLocate={onLocate}>
+      <StateFieldInput {...props} />
+    </WithLocateButton>
+  ) : (
+    <StateFieldInput {...props} />
+  )
+}
+
+function StateFieldInput({
   field,
   stateChanges,
   currentState,
   value,
   onChange,
   frameId,
-}: StateFieldEditProps): JSX.Element {
+}: Omit<StateFieldEditProps, 'onLocate'>): JSX.Element {
   return field.type === 'path' && frameId !== undefined ? (
     <PathInput
       frameId={frameId}

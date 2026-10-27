@@ -25,6 +25,7 @@ import {
 import { cloudFrameSupportsSettingsFrom } from '../../../../utils/cloudFrameSettings'
 import { workspaceMode } from '../../../workspace/workspaceSurfaces'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
+import { type GeoLocation, locationFieldPair } from '../../../../utils/geolocation'
 import { Switch } from '../../../../components/Switch'
 import clsx from 'clsx'
 import { getFrameosSceneDragData, hasFrameosSceneDragData, setFrameosSceneDragData } from '../../../workspace/sceneDrag'
@@ -359,6 +360,7 @@ interface EditRowProps {
   closeEvent: (id: string) => void
   deleteEvent: (id: string) => void
   setEventType: (id: string, eventType: string) => void
+  setEventLocation: (id: string, location: GeoLocation) => void
 }
 
 function CompactScheduleField({
@@ -388,9 +390,12 @@ function EditRow({
   closeEvent,
   deleteEvent,
   setEventType,
+  setEventLocation,
 }: EditRowProps) {
   const systemEvent = isScheduledSystemEvent(event.event)
   const customEvent = isScheduledCustomEvent(event.event)
+  const stateFields = visiblePublicStateFields(eventFields, event.payload?.state ?? {})
+  const locationFields = locationFieldPair(stateFields)
   // An entry that already IS a system action stays editable even below the
   // firmware floor — hiding it would hide what the schedule will do.
   const actionOptions = [
@@ -478,7 +483,7 @@ function EditRow({
         {scheduledEventIsSceneChange(event) && event.payload?.sceneId ? (
           <Group name="state">
             <div className="mt-3 space-y-3">
-              {visiblePublicStateFields(eventFields, event.payload?.state ?? {}).map((field) => (
+              {stateFields.map((field) => (
                 <Field key={field.name} name={field.name} label={field.label || field.name}>
                   {({ value, onChange }) => (
                     <StateFieldEdit
@@ -488,6 +493,11 @@ function EditRow({
                       currentState={{}}
                       stateChanges={{}}
                       frameId={frameId}
+                      onLocate={
+                        field.name === locationFields?.first
+                          ? (location) => setEventLocation(event.id, location)
+                          : undefined
+                      }
                     />
                   )}
                 </Field>
@@ -554,6 +564,7 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
     addEventForScene,
     addSystemEvent,
     setEventType,
+    setEventLocation,
     closeEvent,
     deleteEvent,
     hideDropZone,
@@ -779,6 +790,7 @@ export function Schedule({ scrollContainer = true, drawerMode = false }: Schedul
                       closeEvent={closeEvent}
                       deleteEvent={deleteEvent}
                       setEventType={setEventType}
+                      setEventLocation={setEventLocation}
                     />
                   </Group>
                 </div>

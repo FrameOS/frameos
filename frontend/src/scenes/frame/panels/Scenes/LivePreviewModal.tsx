@@ -19,6 +19,7 @@ import { Modal } from '../../../../components/Modal'
 import { Spinner } from '../../../../components/Spinner'
 import { insertBreaks } from '../../../../utils/insertBreaks'
 import { visiblePublicStateFields } from '../../../../utils/showIf'
+import { locatedValues, locationFieldPair } from '../../../../utils/geolocation'
 import { frameLogic } from '../../frameLogic'
 import { templatesLogic } from '../Templates/templatesLogic'
 import { BrowserAssetsModal } from './BrowserAssetsModal'
@@ -291,6 +292,7 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
   }
 
   const editableFields = editStateValues ? visiblePublicStateFields(publicFields, previewState, editStateValues) : []
+  const locationFields = locationFieldPair(editableFields)
 
   return (
     <Modal
@@ -561,6 +563,15 @@ export function LivePreviewModal({ frameId }: { frameId: FrameId }): JSX.Element
                         field={field}
                         value={editStateValues[field.name]}
                         onChange={(value) => setEditStateValues((values) => ({ ...values, [field.name]: value }))}
+                        onLocate={
+                          locationFields && field.name === locationFields.first
+                            ? (location) =>
+                                setEditStateValues((values) => ({
+                                  ...values,
+                                  ...locatedValues(locationFields, location),
+                                }))
+                            : undefined
+                        }
                         currentState={previewState}
                         stateChanges={editStateValues}
                         frameId={frameId}

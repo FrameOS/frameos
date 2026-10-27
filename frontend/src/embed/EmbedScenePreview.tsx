@@ -17,6 +17,7 @@ import { Spinner } from '../components/Spinner'
 import { TextInput } from '../components/TextInput'
 import { Tooltip } from '../components/Tooltip'
 import { visiblePublicStateFields } from '../utils/showIf'
+import { locatedValues, locationFieldPair } from '../utils/geolocation'
 import { appsModel } from '../models/appsModel'
 import { collectSecretSettingsFromScenes, settingsDetails } from '../scenes/frame/panels/secretSettings'
 import { collectScenePreviewPayloadScenes } from '../scenes/frame/panels/Scenes/scenesLogic'
@@ -230,6 +231,7 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
   }
 
   const editableFields = editStateValues ? visiblePublicStateFields(publicFields, previewState, editStateValues) : []
+  const locationFields = locationFieldPair(editableFields)
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
@@ -491,6 +493,15 @@ export function EmbedScenePreview({ frameId, sceneId }: { frameId: FrameId; scen
                       field={field}
                       value={editStateValues[field.name]}
                       onChange={(value) => setEditStateValues((values) => ({ ...values, [field.name]: value }))}
+                      onLocate={
+                        locationFields && field.name === locationFields.first
+                          ? (location) =>
+                              setEditStateValues((values) => ({
+                                ...values,
+                                ...locatedValues(locationFields, location),
+                              }))
+                          : undefined
+                      }
                       currentState={previewState}
                       stateChanges={editStateValues}
                     />

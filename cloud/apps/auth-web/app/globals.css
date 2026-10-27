@@ -2125,6 +2125,47 @@ canvas.lightbox__image {
   gap: 8px;
 }
 
+.live-preview__locate {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.live-preview__locate-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-preview__locate-button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.live-preview__locate-button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.live-preview__locate-spin {
+  animation: ai-panel-spin 1s linear infinite;
+}
+
+.live-preview__locate-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
 .live-preview__swatch {
   flex: 0 0 auto;
   width: 40px;

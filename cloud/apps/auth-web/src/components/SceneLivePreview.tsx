@@ -22,6 +22,12 @@ import {
 import { ColorAdjustmentControls } from "../../../../../frontend/src/scenes/frame/panels/Assets/ColorAdjustmentControls";
 import { applyAssetColors, autoEndPoints } from "../../../../../frontend/src/utils/assetColors/adjust";
 import {
+  currentLocation,
+  locatedValues,
+  locationFieldPair,
+  type GeoLocation,
+} from "../../../../../frontend/src/utils/geolocation";
+import {
   defaultAssetColorProfile,
   parseAssetColorProfile,
   profileHasAdjustments,
@@ -35,6 +41,8 @@ import {
   FolderOpen,
   ImageDown,
   KeyRound,
+  Loader2,
+  MapPin,
   Maximize2,
   Play,
   RectangleHorizontal,
@@ -902,6 +910,15 @@ export function SceneLivePreviewPanel({
     setEdits((previous) => ({ ...previous, [field.name]: value }));
   }
 
+  // A scene with latitude and longitude fields gets a locate button on the
+  // first of them: the browser's location fills both.
+  const locationFields = locationFieldPair(visibleFields);
+  function editLocation(location: GeoLocation) {
+    if (locationFields) {
+      setEdits((previous) => ({ ...previous, ...locatedValues(locationFields, location) }));
+    }
+  }
+
   function applyState() {
     const state: Record<string, unknown> = {};
     for (const field of visibleFields) {
@@ -1733,6 +1750,7 @@ export function SceneLivePreviewPanel({
                 id={`${fieldIdPrefix}-${field.name}`}
                 key={field.name}
                 onChange={(value) => editField(field, value)}
+                onLocate={field.name === locationFields?.first ? editLocation : undefined}
                 value={
                   field.name in edits ? edits[field.name] : fieldValues[field.name]
                 }
@@ -1811,11 +1829,66 @@ type StateFieldRowProps = {
   id: string;
   value: unknown;
   onChange: (value: unknown) => void;
+  /** The first of the scene's latitude and longitude fields: a locate
+   * button at the input's end. */
+  onLocate?: ((location: GeoLocation) => void) | undefined;
 };
+
+// The input with a square "use my location" button at its end. The
+// browser asks for permission the first time.
+function LocateControl({
+  children,
+  onLocate,
+}: {
+  children: ReactNode;
+  onLocate: (location: GeoLocation) => void;
+}) {
+  const [locating, setLocating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function locate() {
+    setLocating(true);
+    setError(null);
+    try {
+      onLocate(await currentLocation());
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setLocating(false);
+    }
+  }
+
+  return (
+    <div className="live-preview__locate">
+      <div className="live-preview__locate-row">
+        {children}
+        <button
+          aria-label="Use my location"
+          className="live-preview__locate-button"
+          disabled={locating}
+          onClick={() => void locate()}
+          title="Use my location: set the latitude and longitude to where this device is"
+          type="button"
+        >
+          {locating ? (
+            <Loader2 aria-hidden className="live-preview__locate-spin" size={16} />
+          ) : (
+            <MapPin aria-hidden size={16} />
+          )}
+        </button>
+      </div>
+      {error ? (
+        <span className="live-preview__locate-error" role="alert">
+          {error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 // One row of the state form: a label and the control for the field's type.
 // Textareas (text, json) take the full width with the label above.
-function StateFieldRow({ field, id, value, onChange }: StateFieldRowProps) {
+function StateFieldRow({ field, id, value, onChange, onLocate }: StateFieldRowProps) {
   const label = field.label || field.name;
   const type = field.type ?? "string";
 
@@ -1934,7 +2007,7 @@ function StateFieldRow({ field, id, value, onChange }: StateFieldRowProps) {
           {label}
         </label>
       )}
-      {control}
+      {onLocate ? <LocateControl onLocate={onLocate}>{control}</LocateControl> : control}
     </div>
   );
 }

@@ -635,6 +635,42 @@ describe("SceneLivePreviewPanel state-field form", () => {
     );
   }
 
+  it("puts a locate button on the first of a scene's latitude and longitude, which fills both from the browser", async () => {
+    const getCurrentPosition = vi.fn((success: PositionCallback) =>
+      success({ coords: { latitude: 59.4369608, longitude: 24.7535747 } } as GeolocationPosition),
+    );
+    Object.defineProperty(navigator, "geolocation", { configurable: true, value: { getCurrentPosition } });
+    const radar = {
+      fields: [
+        { access: "public", label: "Your latitude", name: "latitude", type: "float", value: "51.5074" },
+        { access: "public", label: "Your longitude", name: "longitude", type: "float", value: "-0.1278" },
+        { access: "public", label: "Radius", name: "radiusKm", type: "float", value: "60" },
+      ],
+      id: "scene-runtime-1",
+      nodes: [],
+    };
+    render(<SceneLivePreviewPanel sceneId="scene-1" scenes={[radar]} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+
+    const locate = screen.getAllByRole("button", { name: "Use my location" });
+    expect(locate).toHaveLength(1);
+    // At the end of the latitude's input, in the same row.
+    expect(locate[0]!.closest(".live-preview__locate")!.contains(screen.getByLabelText("Your latitude"))).toBe(true);
+    fireEvent.click(locate[0]!);
+    await waitFor(() =>
+      expect((screen.getByLabelText("Your latitude") as HTMLInputElement).value).toBe("59.43696"),
+    );
+    expect((screen.getByLabelText("Your longitude") as HTMLInputElement).value).toBe("24.75357");
+    expect(getCurrentPosition).toHaveBeenCalledTimes(1);
+
+    // A refusal says what to do about it.
+    getCurrentPosition.mockImplementationOnce(((_success: PositionCallback, failure: PositionErrorCallback) =>
+      failure({ code: 1, message: "denied" } as GeolocationPositionError)) as never);
+    fireEvent.click(screen.getByRole("button", { name: "Use my location" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Location access was denied");
+    delete (navigator as { geolocation?: unknown }).geolocation;
+  });
+
   it("keeps the actions in a sticky toolbar above the form and flags unapplied edits", async () => {
     await openWithFields();
 
