@@ -471,6 +471,39 @@ describe("SceneLivePreviewPanel viewport", () => {
     // The form matches the applied size, so Resize has nothing to do.
     expect((screen.getByRole("button", { name: "Resize" }) as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("puts the preview on a device from the Device menu: its size, this orientation, its inks", async () => {
+    render(<SceneLivePreviewPanel height={800} sceneId="scene-1" scenes={[clockScene]} width={480} />);
+    await waitFor(() => expect(previews).toHaveLength(1));
+    const sized = (index: number) =>
+      previews[index]!.options as unknown as { width: number; height: number; panelPalette: string | null };
+    const menu = screen.getByLabelText("Device") as HTMLSelectElement;
+    expect(menu.value).toBe("");
+
+    // A 1600x1200 panel, turned to the portrait the preview is in.
+    fireEvent.change(menu, { target: { value: "reterminal-e1004" } });
+    await waitFor(() => expect(previews).toHaveLength(2));
+    expect(sized(1)).toMatchObject({ height: 1600, panelPalette: "spectra6", width: 1200 });
+    expect(menu.value).toBe("reterminal-e1004");
+    expect((screen.getByLabelText("Panel to simulate") as HTMLSelectElement).value).toBe("spectra6");
+
+    // Rotate keeps the device; a size of its own leaves it.
+    fireEvent.click(screen.getByRole("button", { name: "Rotate" }));
+    await waitFor(() => expect(previews).toHaveLength(3));
+    expect(sized(2)).toMatchObject({ height: 1200, width: 1600 });
+    expect(menu.value).toBe("reterminal-e1004");
+
+    // A screen shows full colour: the dither goes off.
+    fireEvent.change(menu, { target: { value: "sensecap-indicator" } });
+    await waitFor(() => expect(previews).toHaveLength(4));
+    expect(sized(3)).toMatchObject({ height: 480, width: 480 });
+    expect(previews[2]!.setPanelPalette).toHaveBeenLastCalledWith(null);
+
+    fireEvent.change(screen.getByLabelText("Resolution"), { target: { value: "500" } });
+    fireEvent.click(screen.getByRole("button", { name: "Resize" }));
+    await waitFor(() => expect(previews).toHaveLength(5));
+    expect(menu.value).toBe("");
+  });
 });
 
 describe("SceneLivePreviewPanel screenshot buttons", () => {

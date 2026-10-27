@@ -1437,6 +1437,21 @@ a.tag-pill--active:hover {
   font-size: 13px;
 }
 
+/* The Device menu's names are long: its row takes the column's width and
+   the menu shrinks inside it rather than pushing the panel wider. */
+.viewport-controls--device {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.viewport-controls__select--device {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+
 .viewport-controls__select:disabled {
   color: var(--muted);
   cursor: not-allowed;

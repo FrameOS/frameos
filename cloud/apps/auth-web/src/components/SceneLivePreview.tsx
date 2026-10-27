@@ -69,6 +69,12 @@ import {
   type PreviewSettingsGroup,
 } from "../lib/preview-settings";
 import type { PreviewLogLine } from "../lib/preview-log";
+import {
+  previewDeviceFor,
+  previewDevices,
+  previewDeviceSize,
+  previewShowsDevice,
+} from "../lib/preview-devices";
 import { isReauthRequired, reauthHref } from "../lib/reauth-client";
 import { selectFieldOptions } from "../lib/select-options";
 import { ImageLightbox } from "./ImageLightbox";
@@ -973,6 +979,27 @@ export function SceneLivePreviewPanel({
     previewRef.current?.selectScene(id);
   }
 
+  // A device from the Device menu: its panel's size, in the orientation the
+  // preview is in, and its inks (a screen turns the dither off). The menu
+  // shows it while the preview stays at its size, Rotate included.
+  // (Not the memory limit's `device`: that one is a board's memory, this
+  // one a panel.)
+  const [panelDeviceKey, setPanelDeviceKey] = useState<string | null>(null);
+  const panelDevice = previewDeviceFor(panelDeviceKey);
+  const shownDeviceKey =
+    panelDevice && previewShowsDevice(panelDevice, viewport) ? panelDevice.key : "";
+  function choosePanelDevice(key: string) {
+    const next = previewDeviceFor(key);
+    setPanelDeviceKey(next?.key ?? null);
+    if (!next) {
+      return;
+    }
+    const size = previewDeviceSize(next, viewport);
+    setViewportForm(size);
+    setViewport(size);
+    choosePanel(next.panel);
+  }
+
   // Portrait <-> landscape: swaps the two sizes and applies at once (the
   // same as typing them and pressing Resize).
   function rotateViewport() {
@@ -1437,6 +1464,31 @@ export function SceneLivePreviewPanel({
           </button>
         </p>
       ) : null}
+      <div className="viewport-controls viewport-controls--device">
+        <label className="viewport-controls__label" htmlFor={`${fieldIdPrefix}-device`}>
+          Device
+        </label>
+        <select
+          className="viewport-controls__select viewport-controls__select--device"
+          id={`${fieldIdPrefix}-device`}
+          onChange={(event) => choosePanelDevice(event.target.value)}
+          title="Resize the preview to a device's panel and dither it to that panel's colors"
+          value={shownDeviceKey}
+        >
+          <option value="">Custom size</option>
+          {(["E-paper", "Screens"] as const).map((group) => (
+            <optgroup key={group} label={group}>
+              {previewDevices
+                .filter((entry) => entry.group === group)
+                .map((entry) => (
+                  <option key={entry.key} value={entry.key}>
+                    {entry.label} ({entry.width}×{entry.height})
+                  </option>
+                ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
       <div className="viewport-controls">
         <label className="viewport-controls__label" htmlFor={`${fieldIdPrefix}-width`}>
           Resolution
