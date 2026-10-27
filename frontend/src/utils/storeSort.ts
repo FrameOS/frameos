@@ -33,3 +33,25 @@ export function sortStoreTemplates(templates: TemplateType[], sort: StoreSort): 
         updated(b).localeCompare(updated(a))
   )
 }
+
+/**
+ * The store's latest additions (the frames home): newest first by when each
+ * scene was added (the index's `created`), not by its last change, which put
+ * every scene that got a new version back at the front. An index cached
+ * before it carried `created` falls back to `updated`; a scene with neither
+ * sorts last, in the index's own order.
+ */
+export function latestStoreAdditions(templates: TemplateType[]): TemplateType[] {
+  return templates
+    .map((template, index) => {
+      const stamp = template.created ?? template.updated
+      return { template, index, at: stamp ? Date.parse(stamp) : NaN }
+    })
+    .sort((a, b) => {
+      if (Number.isNaN(a.at) !== Number.isNaN(b.at)) {
+        return Number.isNaN(a.at) ? 1 : -1
+      }
+      return (Number.isNaN(b.at) ? 0 : b.at) - (Number.isNaN(a.at) ? 0 : a.at) || a.index - b.index
+    })
+    .map(({ template }) => template)
+}
