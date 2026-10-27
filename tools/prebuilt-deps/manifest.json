@@ -4,307 +4,307 @@
       "target": "ubuntu-24.04-arm64",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:10:16.809844+00:00",
+      "updated_at": "2026-10-27T09:19:50.442632+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/ubuntu-24.04-arm64/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/ubuntu-24.04-arm64/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/ubuntu-24.04-arm64/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
         "nim": "8006fcb15aa0c7a23be4d22c3a0db01e-3",
-        "quickjs": "0e8141a15bc7d9ec19a81a7e17f921b6"
+        "quickjs": "1c831f9eea7768a762a939aa0d727bd2"
       },
       "component_sha256sums": {
-        "nim": "5b4fb15ec0cbe69576969a21feefcdcc06c8b8a8cdf39a9d749bc16301c89f6a",
-        "quickjs": "777bd96da7de3ba421eeed3d1e82eacc4e2fe57e91759804acf19938585680de"
+        "quickjs": "48a665e992dcb739fdb38a3a31e8f308c4d02fd16a817b2a5f1d8058864877c7",
+        "nim": "5b4fb15ec0cbe69576969a21feefcdcc06c8b8a8cdf39a9d749bc16301c89f6a"
       }
     },
     {
       "target": "debian-bookworm-armhf",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:10:42.077692+00:00",
+      "updated_at": "2026-10-27T09:19:56.460196+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/debian-bookworm-armhf/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/debian-bookworm-armhf/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/debian-bookworm-armhf/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
         "nim": "55a36baa36d916fb6151e3a81fd8df3a-3",
-        "quickjs": "e5ee5c1ddaf14ed49fc6e7174f005365"
+        "quickjs": "65727ac01d384f7461aac22b7f2bb633"
       },
       "component_sha256sums": {
-        "nim": "a6d876473375cc9986978b88f8b47343e09b2e26777111e05d54a87256c7ea0b",
-        "quickjs": "7e583fe852ebc9d1e59185f46a13e94af24db73ec34649cc653a09ec376c84a4"
+        "quickjs": "fc99a7b881bcf3434466e4e1f14fa907bd34d0df76453e2df6ee820b11127c70",
+        "nim": "a6d876473375cc9986978b88f8b47343e09b2e26777111e05d54a87256c7ea0b"
       }
     },
     {
       "target": "debian-bookworm-arm64",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:10:55.456966+00:00",
+      "updated_at": "2026-10-27T09:19:58.431279+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/debian-bookworm-arm64/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/debian-bookworm-arm64/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/debian-bookworm-arm64/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
         "nim": "efc553de145ce1b6612e4dd3a53b62d7-3",
-        "quickjs": "71e241cf17fc05d1c7a41c7c5ce43f83"
+        "quickjs": "c042e0d14af452d14b5136cf76557e79"
       },
       "component_sha256sums": {
-        "nim": "42449e2c0319f576f04e87f00c40e0d5e0a31ffa300b65dccb8f213121f1e2a8",
-        "quickjs": "037ed7d4503127c99da4da9ebd38503a8e1b32b3263c3f601dbb29569213e8b7"
+        "quickjs": "9e3542d9a55c996a798d31d363ee7c068c2db65f33f8829c98051d5fa8b0c5d1",
+        "nim": "42449e2c0319f576f04e87f00c40e0d5e0a31ffa300b65dccb8f213121f1e2a8"
       }
     },
     {
       "target": "debian-trixie-arm64",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:11:36.876306+00:00",
+      "updated_at": "2026-10-27T09:20:07.071431+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/debian-trixie-arm64/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/debian-trixie-arm64/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/debian-trixie-arm64/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
         "nim": "8882b46a7fe24489ae8a02fc0cb6b280-3",
-        "quickjs": "666b1476714b2e244498005863b2afe4"
+        "quickjs": "9648b321d5eed3bc57ed51cffade0700"
       },
       "component_sha256sums": {
-        "nim": "daddd6b7e111bc117e1b9047bdcd03eae31edbf60ce6fd5e9131820db8ea34dc",
-        "quickjs": "46df97039714e0b2ad1aededc562a72a93f4c46de90ae0d0d1fc6c96e118a76f"
+        "quickjs": "c518f351d145144451820a83963e0f2416be17bbe246a81192da3e87dad2f3cc",
+        "nim": "daddd6b7e111bc117e1b9047bdcd03eae31edbf60ce6fd5e9131820db8ea34dc"
       }
     },
     {
       "target": "debian-trixie-armhf",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:11:43.926849+00:00",
+      "updated_at": "2026-10-27T09:20:08.655055+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/debian-trixie-armhf/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/debian-trixie-armhf/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/debian-trixie-armhf/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
         "nim": "e729e0dc1f26af9871a2ea1b63510b4a-3",
-        "quickjs": "826e8c6546a7d8635707fcdc305ea6cf"
+        "quickjs": "23a89f1d5d63ba7864216a1f058db508"
       },
       "component_sha256sums": {
-        "nim": "18682f011d2cda68be6decdf1e8b3304354d567d110d9298fb628f714ed76638",
-        "quickjs": "e4c2d81c71cedae35d6c2168f4aa6ca3e9f0214fc8da0ea8472abfbc798769e8"
+        "quickjs": "6e054fda2dab8cb77d37692d5a77d4844181c17cee81e7cbf8f74c7fd354d6fc",
+        "nim": "18682f011d2cda68be6decdf1e8b3304354d567d110d9298fb628f714ed76638"
       }
     },
     {
       "target": "ubuntu-24.04-amd64",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:11:26.724565+00:00",
+      "updated_at": "2026-10-27T09:20:04.766994+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/ubuntu-24.04-amd64/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/ubuntu-24.04-amd64/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/ubuntu-24.04-amd64/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
         "nim": "bf63440c8b7ee19c301615053c419f18-3",
-        "quickjs": "4482733e3066085195cd57fed26ec5e6"
+        "quickjs": "8979de74d8af7c2035297af37fe6bf13"
       },
       "component_sha256sums": {
-        "nim": "9960c5c77c1252dacf3adfd50dab2debed6db1d2e9019ea32305c1091cb73e29",
-        "quickjs": "747eb3ea3ecbbef5f4d73b7f81b365bdf2baa2c82be7ef2af6803bf09a8ec29a"
+        "quickjs": "96f080651eddcee5b843967f20ec2f0090b642cec724d1dd4f12ae378236274a",
+        "nim": "9960c5c77c1252dacf3adfd50dab2debed6db1d2e9019ea32305c1091cb73e29"
       }
     },
     {
       "target": "debian-trixie-amd64",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:10:10.610036+00:00",
+      "updated_at": "2026-10-27T09:19:48.625455+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/debian-trixie-amd64/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/debian-trixie-amd64/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/debian-trixie-amd64/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
         "nim": "a6804d875d7ec7d87ee62ba5982d0981-3",
-        "quickjs": "9b0032305df04931a0d68e267d3553ff"
+        "quickjs": "1d625cfbc3491485a97781897800b14c"
       },
       "component_sha256sums": {
-        "nim": "e0e5d8e6b1f7f40d69fd16dfddc109b30caaea2339eeb81fb7032c981fd2fdd0",
-        "quickjs": "67b121827fe6d1d4000b18d3fa13f8b95bac91145f2d1bac9db99f364d9b228e"
+        "quickjs": "b9cac06b183d6714e3c70f00f5d69d2008263089a28a03a7cc51d72bd5f67efd",
+        "nim": "e0e5d8e6b1f7f40d69fd16dfddc109b30caaea2339eeb81fb7032c981fd2fdd0"
       }
     },
     {
       "target": "debian-bookworm-amd64",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:11:54.464133+00:00",
+      "updated_at": "2026-10-27T09:20:10.868353+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/debian-bookworm-amd64/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/debian-bookworm-amd64/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/debian-bookworm-amd64/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
         "nim": "93233a02b26bd7e0c64f6e2ac65c2c58-3",
-        "quickjs": "d5dd5c83718a4fce0e2b3eed2da0d1ad"
+        "quickjs": "543b3041af6fd62ebb1abe10cb2b38c0"
       },
       "component_sha256sums": {
-        "nim": "80f921e711e0002e71c212212599f0a1f35e6b6a57960321db9b244e954ab526",
-        "quickjs": "fb8730937e2156c5bc8f3d2a9ad58c63c15d7cf0db930c365cb236e86456c656"
+        "quickjs": "7a21cf2916ef76ae2bb2b09796f20aecdf68c14e703265a25c73ce2d1352c90f",
+        "nim": "80f921e711e0002e71c212212599f0a1f35e6b6a57960321db9b244e954ab526"
       }
     },
     {
       "target": "debian-bullseye-arm64",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:10:32.736547+00:00",
+      "updated_at": "2026-10-27T09:19:55.119688+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/debian-bullseye-arm64/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/debian-bullseye-arm64/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/debian-bullseye-arm64/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
         "nim": "f13cea84131109c692936a3fbd2c253c-3",
-        "quickjs": "78edda1c69ec12caa9b1ccb24ea2a5cd"
+        "quickjs": "e705bc459f13141a485f585a588e8a61"
       },
       "component_sha256sums": {
-        "nim": "8679a85df6531ac95f99b59fc0be67d8454af798ef87ffa10d3eb2186f92062c",
-        "quickjs": "4fbba391683b550a1da34c46777f3e4e75b6d08ad30f174f14dd063945148a6d"
+        "quickjs": "7902d20f9272d27b73d8a35585783f2c8723058b9f346d3e2ca0f0ca06ecc7c9",
+        "nim": "8679a85df6531ac95f99b59fc0be67d8454af798ef87ffa10d3eb2186f92062c"
       }
     },
     {
       "target": "debian-bullseye-armhf",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:11:05.969652+00:00",
+      "updated_at": "2026-10-27T09:20:00.129913+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/debian-bullseye-armhf/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/debian-bullseye-armhf/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/debian-bullseye-armhf/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
         "nim": "74b76b7a0f41ec098374ddc9f437ce11-3",
-        "quickjs": "6e21c77bf1176650cd2fa40dd7f59868"
+        "quickjs": "2a58fd2526809b9138d2a86f0840b6c2"
       },
       "component_sha256sums": {
-        "nim": "45d168129537e8be132ed9010ee8e2e0bc357b940636874ed7b61fbbcfe5ee86",
-        "quickjs": "83f3e38adeec1e33928c2ca1ef3e36b20bb81b0cf03b00e25211c192fe4b534a"
+        "quickjs": "58ab32888b5e307a759e77280c3b135cb51f854bec34662fe447011a27b814cf",
+        "nim": "45d168129537e8be132ed9010ee8e2e0bc357b940636874ed7b61fbbcfe5ee86"
       }
     },
     {
       "target": "debian-bullseye-amd64",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:12:20.945241+00:00",
+      "updated_at": "2026-10-27T09:20:15.679900+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/debian-bullseye-amd64/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/debian-bullseye-amd64/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/debian-bullseye-amd64/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
         "nim": "db50e844dfe138d2d26151d8117f0dfb-3",
-        "quickjs": "2db32aa2b94004ba82934c1530460455"
+        "quickjs": "0c906b4a935085a7fe91c09a0a203759"
       },
       "component_sha256sums": {
-        "nim": "26543a21382bbefdee0e73c7f84fcd710534bc423b879a548ac278628ebcb3f5",
-        "quickjs": "40d7c5bc425a70eb739f264991a463156e4a4b80395766efdb7f364312724a26"
+        "quickjs": "46ca1fa89d8e22faafe4639bdf4f7e49f3ed2ef3f5878acc9e0deed13c59ad31",
+        "nim": "26543a21382bbefdee0e73c7f84fcd710534bc423b879a548ac278628ebcb3f5"
       }
     },
     {
       "target": "ubuntu-26.04-amd64",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:10:23.849920+00:00",
+      "updated_at": "2026-10-27T09:19:52.792085+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/ubuntu-26.04-amd64/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/ubuntu-26.04-amd64/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/ubuntu-26.04-amd64/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
         "nim": "72b0230d68eb7842fa0b229efc05749c-3",
-        "quickjs": "cacd7cc9bb2ffc95ca83290fec156956"
+        "quickjs": "11dbf5b2d9c50134c276d1ce8cad38d5"
       },
       "component_sha256sums": {
-        "nim": "1db641c9d8b9592025fc8843545477b5269fd0a8ceb718532500946b508278bc",
-        "quickjs": "af23f33509c7e722fafcbd75286bdbe7b601062ab3e6f8315945c710f7219716"
+        "quickjs": "3b8b5f4f7ab17a30a60181ffd1834c2a3e64d58b69b96749a8df5feb0f0b76d0",
+        "nim": "1db641c9d8b9592025fc8843545477b5269fd0a8ceb718532500946b508278bc"
       }
     },
     {
       "target": "ubuntu-26.04-arm64",
       "versions": {
         "nim": "2.2.4",
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:11:18.553463+00:00",
+      "updated_at": "2026-10-27T09:20:02.566202+00:00",
       "component_keys": {
         "nim": "prebuilt-deps/ubuntu-26.04-arm64/nim-2.2.4.tar.gz",
-        "quickjs": "prebuilt-deps/ubuntu-26.04-arm64/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/ubuntu-26.04-arm64/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
         "nim": "38aba7ae42ca041c2fdf1d2e735a2a49-3",
-        "quickjs": "da19c3e925b411abb86f6af778af4b40"
+        "quickjs": "c57ae794bad3de349fd6a1d8e04428e2"
       },
       "component_sha256sums": {
-        "nim": "611275fead9f978648bec646569316768b56473a8f06ab70a131b1b16d98de7d",
-        "quickjs": "6f2bc13695f2207ccec9850b689c5cf4443110a52f3c3dd39f30b8b498836bcc"
+        "quickjs": "d6d38dbcfb58c33580be2ec4423df0e969c3fb3e1161ba58411364adda8d2e51",
+        "nim": "611275fead9f978648bec646569316768b56473a8f06ab70a131b1b16d98de7d"
       }
     },
     {
       "target": "debian-bookworm-armv6",
       "versions": {
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:12:03.717065+00:00",
+      "updated_at": "2026-10-27T09:20:12.377194+00:00",
       "component_keys": {
-        "quickjs": "prebuilt-deps/debian-bookworm-armv6/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/debian-bookworm-armv6/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
-        "quickjs": "e2244c859dc365381e8ae8f08926c36e"
+        "quickjs": "f1b245cdc5d908f701e9be49b340e134"
       },
       "component_sha256sums": {
-        "quickjs": "9002e39a187588fe0364c6f5bcc17756dadf974e4506d7359863397e64757dc1"
+        "quickjs": "d0a28015be943c532274ea219b71b1ab4e2ef865371f625567b0630431fba2a9"
       }
     },
     {
       "target": "debian-trixie-armv6",
       "versions": {
-        "quickjs": "2026-06-04-quickts.1"
+        "quickjs": "2026-06-04-quickts.2"
       },
       "object_key": null,
-      "updated_at": "2026-09-01T22:10:04.984913+00:00",
+      "updated_at": "2026-10-27T09:19:46.202035+00:00",
       "component_keys": {
-        "quickjs": "prebuilt-deps/debian-trixie-armv6/quickjs-2026-06-04-quickts.1.tar.gz"
+        "quickjs": "prebuilt-deps/debian-trixie-armv6/quickjs-2026-06-04-quickts.2.tar.gz"
       },
       "component_md5sums": {
-        "quickjs": "b6ddcb4703201301e910b38f2e0ae0f0"
+        "quickjs": "2352edfa873f7843904f8fbbf575d96c"
       },
       "component_sha256sums": {
-        "quickjs": "5d62877a9ec1c7a0dd693ff54bbb296ee181e499451511f86803e3d3b3154416"
+        "quickjs": "e2ed12ef7f131244829fee35913b2c4d4d5e45edffe1ca18ef7488e58426871b"
       }
     }
   ]

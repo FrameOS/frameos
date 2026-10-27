@@ -456,8 +456,8 @@ export function get(app, context) {
   `frameos.loadAssetImage` returned, with `object-cover` or
   `object-contain`; an `<svg viewBox>` inside a UI is an icon sized by its
   classes, drawn in the text color where it says `currentColor`.
-- White space at the edges of JSX text is dropped: `{count} items` draws
-  "42items". Write `{`${count} items`}`, or lay the parts out with `gap`.
+- White space works as in React: `{count} items` draws "42 items", and
+  indenting children adds nothing.
 - Handlers: `onClick` (a tap, by finger or mouse), `onDoubleClick`,
   `onLongPress`, `onPointerDown`, `onPointerUp`, given `{x, y, localX,
   localY, type}`. Change what the next `get()` returns (a module variable,

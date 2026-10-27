@@ -135,7 +135,7 @@ def test_cross_compiler_bakes_target_cross_packages_into_amd64_toolchain_image(
 @pytest.mark.parametrize(
     ("component", "version"),
     [
-        ("quickjs", "2026-06-04-quickts.1"),
+        ("quickjs", "2026-06-04-quickts.2"),
     ],
 )
 async def test_ensure_prebuilt_component_refreshes_incomplete_cached_artifacts(
@@ -172,7 +172,7 @@ async def test_ensure_prebuilt_component_refreshes_incomplete_cached_artifacts(
 async def test_ensure_prebuilt_component_skips_an_archive_it_cannot_verify(tmp_path, monkeypatch: pytest.MonkeyPatch):
     # A multipart R2 ETag ("<hex>-<parts>") is not the file's MD5, so with no
     # SHA-256 published there is nothing to verify the download against.
-    compiler = make_cross_compiler(tmp_path, monkeypatch, component="quickjs", version="2026-06-04-quickts.1")
+    compiler = make_cross_compiler(tmp_path, monkeypatch, component="quickjs", version="2026-06-04-quickts.2")
     assert compiler.prebuilt_entry is not None
     compiler.prebuilt_entry.component_md5s["quickjs"] = "8006fcb15aa0c7a23be4d22c3a0db01e-3"
     downloads = 0
@@ -190,8 +190,8 @@ async def test_ensure_prebuilt_component_skips_an_archive_it_cannot_verify(tmp_p
 
 @pytest.mark.asyncio
 async def test_ensure_prebuilt_component_rejects_invalid_download(tmp_path, monkeypatch: pytest.MonkeyPatch):
-    compiler = make_cross_compiler(tmp_path, monkeypatch, component="quickjs", version="2026-06-04-quickts.1")
-    dest_dir = compiler.prebuilt_dir / "quickjs-2026-06-04-quickts.1"
+    compiler = make_cross_compiler(tmp_path, monkeypatch, component="quickjs", version="2026-06-04-quickts.2")
+    dest_dir = compiler.prebuilt_dir / "quickjs-2026-06-04-quickts.2"
 
     async def fake_download(_url: str, extract_dir, _expected_md5: str | None) -> None:
         write_component_payload("quickjs", extract_dir, valid=False)
@@ -315,7 +315,7 @@ async def test_quickjs_preparation_is_quiet_on_success(tmp_path, monkeypatch: py
         prebuilt_entry=None,
         logger=logger,
     )
-    prebuilt_dir = tmp_path / "prebuilt" / "quickjs-2026-06-04-quickts.1"
+    prebuilt_dir = tmp_path / "prebuilt" / "quickjs-2026-06-04-quickts.2"
     source_dir = tmp_path / "source"
     build_dir = tmp_path / "build"
     prebuilt_dir.mkdir(parents=True)

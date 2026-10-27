@@ -6,7 +6,7 @@ prebuilt-deps builder all fetch `source/vendor/<name>` from
 archive.frameos.net rather than from the upstream site, so a release only
 has one URL to pin. Uploads once; refuses to overwrite unless --force.
 
-    python tools/prebuilt-deps/r2_put_source.py quickjs-2026-06-04-quickts.1.tar.xz
+    python tools/prebuilt-deps/r2_put_source.py quickjs-2026-06-04-quickts.2.tar.xz
 
 Credentials come from the same .env / R2_* variables as r2_sync.py.
 """

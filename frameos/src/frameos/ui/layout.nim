@@ -125,6 +125,15 @@ const
 proc isText(n: SvgNode): bool {.inline.} =
   n.tag.len == 0 or n.tag == "&"
 
+proc isBlank(n: SvgNode): bool =
+  ## A text child of white space alone (an entity such as `&nbsp;` is not).
+  if n.tag.len != 0:
+    return false
+  for c in n.text:
+    if c notin Whitespace:
+      return false
+  true
+
 proc isInline(tag: string): bool =
   tag in ["span", "b", "strong", "i", "em", "u", "s", "small", "br", "a", "code", "label", "mark"]
 
@@ -255,6 +264,11 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   let inlineStates = if childGroup: {usGroupHover} else: {}
   for i, child in n.children:
     if child.isText or (flows and child.tag.isInline):
+      # White space that starts no text, as between two items (`<A/> <B/>`
+      # on one line) or before a block, is nothing: CSS makes no flex or
+      # grid item of it and no line.
+      if run.isNil and child.isBlank:
+        continue
       if run.isNil:
         run = newUiNode(ukText, result.text)
         run.inGroup = childGroup

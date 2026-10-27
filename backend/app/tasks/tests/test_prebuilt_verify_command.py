@@ -6,7 +6,7 @@ from app.tasks.prebuilt_deps import PrebuiltEntry
 def entry(md5: str | None = None, sha256: str | None = None) -> PrebuiltEntry:
     return PrebuiltEntry(
         target="debian-bookworm-arm64",
-        versions={"quickjs": "2026-06-04-quickts.1"},
+        versions={"quickjs": "2026-06-04-quickts.2"},
         component_urls={"quickjs": "https://archive.frameos.net/q.tar.gz"},
         component_md5s={"quickjs": md5} if md5 else {},
         component_sha256s={"quickjs": sha256} if sha256 else {},

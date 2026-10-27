@@ -15,34 +15,9 @@ endif()
 
 file(STRINGS "${QUICKJS_DIR}/VERSION" QUICKJS_VERSION LIMIT_COUNT 1)
 
-# QuickJS (2026-06-04) carves its small blocks out of 4 KB arenas, one list
-# per size class (31 of them), so an interpreter's heap is its objects plus
-# the empty part of an arena per class in use: the SenseCAP kitchen sink's
-# ~156 KB of objects sat in 268 KB (JS_ComputeMemoryUsage). 1 KB arenas
-# leave a quarter of that empty. The size is a plain #define upstream, so
-# the component compiles a copy of quickjs.c with it changed, and refuses a
-# source that no longer spells it.
-set(FOS_QUICKJS_ARENA_LINE "#define JS_MALLOC_ARENA_SIZE 4096")
-file(READ "${QUICKJS_DIR}/quickjs.c" FOS_QUICKJS_SOURCE)
-string(FIND "${FOS_QUICKJS_SOURCE}" "${FOS_QUICKJS_ARENA_LINE}" FOS_QUICKJS_ARENA_AT)
-if(FOS_QUICKJS_ARENA_AT EQUAL -1)
-    message(FATAL_ERROR "frameos_quickjs: quickjs.c no longer reads "
-                        "`${FOS_QUICKJS_ARENA_LINE}` — update the arena size patch here")
-endif()
-set(FOS_QUICKJS_C "${CMAKE_CURRENT_BINARY_DIR}/quickjs.c")
-if(NOT CMAKE_BUILD_EARLY_EXPANSION)
-    string(REPLACE "${FOS_QUICKJS_ARENA_LINE}" "#define JS_MALLOC_ARENA_SIZE 1024"
-           FOS_QUICKJS_SOURCE "${FOS_QUICKJS_SOURCE}")
-    # Written only when it changed, so a reconfigure does not rebuild it.
-    file(WRITE "${FOS_QUICKJS_C}.new" "${FOS_QUICKJS_SOURCE}")
-    configure_file("${FOS_QUICKJS_C}.new" "${FOS_QUICKJS_C}" COPYONLY)
-endif()
-unset(FOS_QUICKJS_SOURCE)
-
 idf_component_register(
     SRCS
-        "${FOS_QUICKJS_C}"
-        "fos_quickjs_tz.c"
+        "${QUICKJS_DIR}/quickjs.c"
         "${QUICKJS_DIR}/dtoa.c"
         "${QUICKJS_DIR}/libregexp.c"
         "${QUICKJS_DIR}/libunicode.c"
@@ -58,32 +33,13 @@ idf_component_register(
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     _GNU_SOURCE
     CONFIG_VERSION="${QUICKJS_VERSION}"
-    # newlib's struct tm has no tm_gmtoff. quickjs.c reads it exactly once,
-    # in getTimezoneOffset(): `res = -tm.tm_gmtoff / 60;`, where `ti` is the
-    # time_t it just converted. This expansion turns that line into the same
-    # value derived from mktime() (fos_quickjs_tz.c). The earlier
-    # `tm_gmtoff=tm_isdst` here — "the device runs UTC" — made every JS Date
-    # in every interpreted scene run on UTC once frames got real zones.
-    "tm_gmtoff=tm_isdst * 0 + fos_quickjs_neg_gmtoff_seconds(&ti)")
-# The expansion above depends on that one line's spelling; refuse a QuickJS
-# whose source moved rather than silently ship UTC clocks again.
-file(READ "${QUICKJS_DIR}/quickjs.c" FOS_QUICKJS_SOURCE)
-string(FIND "${FOS_QUICKJS_SOURCE}" "res = -tm.tm_gmtoff / 60;" FOS_QUICKJS_GMTOFF_LINE)
-if(FOS_QUICKJS_GMTOFF_LINE EQUAL -1)
-    message(FATAL_ERROR "frameos_quickjs: getTimezoneOffset() in quickjs.c no longer reads "
-                        "`res = -tm.tm_gmtoff / 60;` — update the tm_gmtoff expansion and "
-                        "fos_quickjs_tz.h to match, or JS Date loses its time zone on the device")
-endif()
-unset(FOS_QUICKJS_SOURCE)
-set_source_files_properties("${FOS_QUICKJS_C}" PROPERTIES
-    COMPILE_OPTIONS "-include;${CMAKE_CURRENT_LIST_DIR}/include/fos_quickjs_tz.h")
-
-# newlib has no malloc_usable_size; quickjs.c only uses it in the default
-# allocator's accounting, which fos_js_new_runtime replaces. Upstream's own
-# fallback comment says "change this to return 0". (A compile option because
-# target_compile_definitions drops function-like macros.)
-target_compile_options(${COMPONENT_LIB} PRIVATE
-    "SHELL:-D'malloc_usable_size(ptr)=0'")
+    # QuickJS carves its small blocks out of arenas, one list per size class
+    # (31 of them), so an interpreter's heap is its objects plus the empty
+    # part of an arena per class in use: the SenseCAP kitchen sink's ~156 KB
+    # of objects sat in 268 KB with 4 KB arenas. 1 KB leaves a quarter of
+    # that empty. (newlib's missing tm_gmtoff and malloc_usable_size are
+    # quickts's own business since 2026-06-04-quickts.2.)
+    JS_MALLOC_ARENA_SIZE=1024)
 
 # Same semantics the upstream Makefile builds with; QuickJS C is not
 # warning-clean under the IDF's default -Werror set. Xtensa newlib types

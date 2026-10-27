@@ -49,16 +49,18 @@ python3 tools/prepare_assets.py
 #
 # nimble build_quickjs may have installed a *prebuilt* QuickJS into quickjs/
 # (headers + a native libquickjs.a, no C sources — see
-# tools/install_prebuilt_quickjs.py). emcc needs the sources, so fetch the
-# source tarball into the build dir when quickjs/ has none. Version and
-# sha256 must stay in sync with the build_quickjs task in frameos.nimble.
+# tools/install_prebuilt_quickjs.py), or quickjs/ may be another version's.
+# emcc needs the pinned version's sources, so fetch the source tarball into
+# the build dir unless quickjs/ has them. Version and sha256 must stay in
+# sync with the build_quickjs task in frameos.nimble.
+QJS_TARBALL_VERSION="2026-06-04-quickts.2"
+QJS_TARBALL_SHA256="9d6435424992bd710b28b67e6de10fac57813da8b37ce26913c78343c83d463e"
+qjs_version_of() { head -n1 "$1/VERSION" 2>/dev/null || true; }
 QJS_SRC="$FRAMEOS_DIR/quickjs"
-if [[ ! -f "$QJS_SRC/quickjs.c" ]]; then
+if [[ ! -f "$QJS_SRC/quickjs.c" || "$(qjs_version_of "$QJS_SRC")" != "$QJS_TARBALL_VERSION" ]]; then
     QJS_SRC="$BUILD_DIR/quickjs-src"
-    if [[ ! -f "$QJS_SRC/quickjs.c" ]]; then
-        QJS_TARBALL_VERSION="2026-06-04-quickts.1"
-        QJS_TARBALL_SHA256="94a94f5229ead78f585280b5d41c7b45ab5c53eaf3500e493a5da05f32030e9f"
-        echo "quickjs/ has no C sources (prebuilt install) — downloading QuickJS $QJS_TARBALL_VERSION sources"
+    if [[ ! -f "$QJS_SRC/quickjs.c" || "$(qjs_version_of "$QJS_SRC")" != "$QJS_TARBALL_VERSION" ]]; then
+        echo "quickjs/ has no QuickJS $QJS_TARBALL_VERSION sources — downloading them"
         mkdir -p "$BUILD_DIR"
         curl -fsSL -o "$BUILD_DIR/quickjs-src.tar.xz" \
             "https://archive.frameos.net/source/vendor/quickjs-$QJS_TARBALL_VERSION.tar.xz"
@@ -79,40 +81,31 @@ QJS_VERSION="$(head -n1 "$QJS_SRC/VERSION")"
 mkdir -p "$QJS_BUILD"
 
 qjs_needs_build=0
+# A version change rebuilds: a tarball's files keep their commit times, which
+# can be older than the objects of the version before.
+if [[ "$(cat "$QJS_BUILD/VERSION" 2>/dev/null || true)" != "$QJS_VERSION" ]]; then
+    qjs_needs_build=1
+fi
 for src in quickjs.c dtoa.c libregexp.c libunicode.c cutils.c; do
     obj="$QJS_BUILD/${src%.c}.o"
     if [[ ! -f "$obj" || "$QJS_SRC/$src" -nt "$obj" ]]; then
         qjs_needs_build=1
     fi
 done
-# JS `Date` must follow the frame's configured time zone, not the browser's:
-# quickjs.c reads local time exactly once, `localtime_r(&ti, &tm);` in
-# getTimezoneOffset(), and that call is redirected to
-# tools/wasm/fos_quickjs_tz.c, which asks the Nim runtime (lib/tz.nim) for
-# the zone's offset. Fail loudly if a QuickJS update moves that line.
-if ! grep -q 'localtime_r(&ti, &tm);' "$QJS_SRC/quickjs.c"; then
-    echo "build_wasm.sh: quickjs.c no longer calls 'localtime_r(&ti, &tm);' in getTimezoneOffset() —" >&2
-    echo "update the localtime_r redirect in tools/wasm/fos_quickjs_tz.c" >&2
-    exit 1
-fi
-QJS_TZ_SHIM="$FRAMEOS_DIR/tools/wasm/fos_quickjs_tz.c"
-if [[ "$qjs_needs_build" == "0" && ( "$QJS_TZ_SHIM" -nt "$QJS_BUILD/libquickjs.a" || "${QJS_TZ_SHIM%.c}.h" -nt "$QJS_BUILD/libquickjs.a" ) ]]; then
-    qjs_needs_build=1
-fi
 if [[ "$qjs_needs_build" == "1" || ! -f "$QJS_BUILD/libquickjs.a" ]]; then
     echo "building QuickJS $QJS_VERSION with emcc"
+    # JS `Date` follows the frame's zone, not the browser's: wasm_main.nim
+    # hands QuickJS its own offset with JS_SetTimezoneOffsetFunc (quickts).
+    rm -f "$QJS_BUILD"/*.o "$QJS_BUILD/libquickjs.a"
     for src in quickjs.c dtoa.c libregexp.c libunicode.c cutils.c; do
         emcc -c -O2 \
             -D_GNU_SOURCE \
             -DCONFIG_VERSION="\"$QJS_VERSION\"" \
-            -Dlocaltime_r=fos_quickjs_localtime_r \
-            -include "${QJS_TZ_SHIM%.c}.h" \
             -funsigned-char -fwrapv -fno-strict-aliasing -w \
             "$QJS_SRC/$src" -o "$QJS_BUILD/${src%.c}.o"
     done
-    emcc -c -O2 -w "$QJS_TZ_SHIM" -o "$QJS_BUILD/fos_quickjs_tz.o"
-    rm -f "$QJS_BUILD/libquickjs.a"
     emar rcs "$QJS_BUILD/libquickjs.a" "$QJS_BUILD"/*.o
+    printf '%s\n' "$QJS_VERSION" > "$QJS_BUILD/VERSION"
 fi
 
 # ------------------------------------------------- simulated device memory
@@ -134,7 +127,7 @@ FRAMEOS_VERSION="$(python3 tools/frameos_version.py ../versions.json)"
 # _main keeps Nim's generated main() alive: emscripten calls it on module
 # startup and that runs NimMain (all Nim module initializers, e.g. the
 # baked-in font asset tables).
-EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_embedded,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_device_input,_frameos_wasm_control_event,_frameos_wasm_tick,_frameos_wasm_pointers_down,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error,_frameos_wasm_version,_frameos_wasm_run_app_tests,_frameos_wasm_tz_offset_seconds,_frameos_wasm_set_memory_limit,_frameos_wasm_memory_limit,_frameos_wasm_memory_used,_frameos_wasm_memory_peak,_frameos_wasm_memory_failed,_frameos_wasm_memory_reset_peak,_frameos_wasm_memory_render_headroom
+EXPORTED_FUNCTIONS=_main,_malloc,_free,_frameos_wasm_init,_frameos_wasm_load_scenes,_frameos_wasm_select_scene,_frameos_wasm_set_fusion,_frameos_wasm_set_embedded,_frameos_wasm_set_save_assets,_frameos_wasm_set_scene_state,_frameos_wasm_render,_frameos_wasm_buffer,_frameos_wasm_buffer_len,_frameos_wasm_width,_frameos_wasm_height,_frameos_wasm_event,_frameos_wasm_device_input,_frameos_wasm_control_event,_frameos_wasm_tick,_frameos_wasm_pointers_down,_frameos_wasm_render_requested,_frameos_wasm_next_sleep,_frameos_wasm_scene_interval,_frameos_wasm_scene_info,_frameos_wasm_scene_state,_frameos_wasm_last_error,_frameos_wasm_version,_frameos_wasm_run_app_tests,_frameos_wasm_set_memory_limit,_frameos_wasm_memory_limit,_frameos_wasm_memory_used,_frameos_wasm_memory_peak,_frameos_wasm_memory_failed,_frameos_wasm_memory_reset_peak,_frameos_wasm_memory_render_headroom
 # FS lets the render harness preload a virtual frame's assets into MEMFS;
 # IDBFS (linked below with -lidbfs.js) backs the browser preview's
 # /srv/assets folder with IndexedDB (see tools/wasm/preview-worker.js).
