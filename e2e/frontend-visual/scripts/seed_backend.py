@@ -59,8 +59,8 @@ def make_visual_png(width: int, height: int, title: str, background: str, accent
     image = Image.new("RGB", (width, height), background)
     draw = ImageDraw.Draw(image)
     try:
-        font = ImageFont.truetype(str(ROOT / "frameos/assets/compiled/fonts/Ubuntu-Regular.ttf"), 38)
-        small = ImageFont.truetype(str(ROOT / "frameos/assets/compiled/fonts/Ubuntu-Regular.ttf"), 20)
+        font = ImageFont.truetype(str(ROOT / "frameos/assets/copied/fonts/Ubuntu-Regular.ttf"), 38)
+        small = ImageFont.truetype(str(ROOT / "frameos/assets/copied/fonts/Ubuntu-Regular.ttf"), 20)
     except Exception:
         font = ImageFont.load_default()
         small = ImageFont.load_default()
