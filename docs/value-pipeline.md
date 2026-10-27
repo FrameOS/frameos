@@ -181,6 +181,15 @@ plan is not the claim; now one log field says which you have.
   dimension-preserving rotation), where two in-place flips *are* the
   rotation; 90°/270° change the output's dimensions and stay on the
   allocating path.
+- **1:1 placements stream too.** `render/image` offers its canvas under
+  `center` and the eight anchored placements (`top-left` ... `bottom-right`),
+  and `data/localImage` takes it: pixie's `OneToOneFits` decode only the
+  window of the photo that shows, at scale 1, into the canvas. Before, a
+  4032x3024 JPEG centered on an E1004 (2.4 MB left beside its 1600x1200
+  canvas) fell back to a full-size decode, then to reading the 2.8 MB file in
+  one block, and both were refused. They take no degrade rung (a half-size
+  1:1 decode would show less of the photo, not a softer one). `tiled` stays
+  off the list: a smaller image repeats, which one decode cannot do.
 - **JS apps are natural-size producers, not opaque walls.** A JS app asks the
   runtime for an image whose default size is the context's and draws into it;
   handing it the target instead is `intoTarget` with a natural fit. It is

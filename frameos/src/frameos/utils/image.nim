@@ -109,6 +109,15 @@ proc scaledFitPlacement*(fit: ScaledDecodeFit): string =
   of fitCover: "cover"
   of fitContain: "contain"
   of fitStretch: "stretch"
+  of fitCenter: "center"
+  of fitTopLeft: "top-left"
+  of fitTopCenter: "top-center"
+  of fitTopRight: "top-right"
+  of fitCenterLeft: "center-left"
+  of fitCenterRight: "center-right"
+  of fitBottomLeft: "bottom-left"
+  of fitBottomCenter: "bottom-center"
+  of fitBottomRight: "bottom-right"
 
 proc boundedRequestedDimensions*(width, height: int): tuple[width: int, height: int] =
   ## A scene-requested raster size (an SVG's `width`/`height`, a plain
@@ -642,6 +651,18 @@ proc scalingModeToFit(scalingMode: string): Option[ScaledDecodeFit] =
   of "cover": some(fitCover)
   of "contain": some(fitContain)
   of "stretch": some(fitStretch)
+  # 1:1 in the middle, or pinned to an edge or a corner: a photo larger than
+  # the frame decodes only the window that shows (pixie's OneToOneFits), not
+  # the whole of it.
+  of "center": some(fitCenter)
+  of "top-left": some(fitTopLeft)
+  of "top-center": some(fitTopCenter)
+  of "top-right": some(fitTopRight)
+  of "center-left": some(fitCenterLeft)
+  of "center-right": some(fitCenterRight)
+  of "bottom-left": some(fitBottomLeft)
+  of "bottom-center": some(fitBottomCenter)
+  of "bottom-right": some(fitBottomRight)
   else: none(ScaledDecodeFit)
 
 proc decodeIntoTargetWithDegrade*(target: Image, fit: ScaledDecodeFit,
@@ -657,6 +678,13 @@ proc decodeIntoTargetWithDegrade*(target: Image, fit: ScaledDecodeFit,
     return target
   except PixieError as refusal:
     if not refusal.msg.contains("memory budget"):
+      raise
+    if fit in OneToOneFits:
+      # Center and the anchored fits are 1:1: the same decode into a
+      # half-size image would show less of the photo, and stretching it back
+      # would zoom in. Their plan is the target-sized window cover plans too,
+      # so a refusal goes to the caller's fallback rather than to a picture
+      # framed wrong.
       raise
     let refusalMsg = refusal.msg
     # Halving the target quarters the plan's channel buffers; two rungs cover

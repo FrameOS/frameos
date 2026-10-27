@@ -24,7 +24,11 @@
       "capabilities": {
         "providesTarget": {
           "fitFrom": "placement",
-          "fits": ["cover", "contain", "stretch"],
+          "fits": [
+            "cover", "contain", "stretch", "center",
+            "top-left", "top-center", "top-right", "center-left", "center-right",
+            "bottom-left", "bottom-center", "bottom-right"
+          ],
           "requireStatic": {
             "offsetX": ["0"],
             "offsetY": ["0"],
@@ -34,7 +38,18 @@
             "blendMode": ["normal"]
           },
           "requireUnset": ["inputImage"],
-          "ownedTargetExcludes": [{ "placement": "contain", "blendMode": "overwrite" }]
+          "ownedTargetExcludes": [
+            { "placement": "contain", "blendMode": "overwrite" },
+            { "placement": "center", "blendMode": "overwrite" },
+            { "placement": "top-left", "blendMode": "overwrite" },
+            { "placement": "top-center", "blendMode": "overwrite" },
+            { "placement": "top-right", "blendMode": "overwrite" },
+            { "placement": "center-left", "blendMode": "overwrite" },
+            { "placement": "center-right", "blendMode": "overwrite" },
+            { "placement": "bottom-left", "blendMode": "overwrite" },
+            { "placement": "bottom-center", "blendMode": "overwrite" },
+            { "placement": "bottom-right", "blendMode": "overwrite" }
+          ]
         }
       }
     },
