@@ -185,6 +185,11 @@ bool fos_display_is_lcd(void)
     return s_panel && s_panel->bus == FOS_PANEL_BUS_RGB;
 }
 
+void fos_display_boot_status(fos_lcd_splash_status_t status)
+{
+    if (fos_display_is_lcd()) fos_lcd_st7701s_splash_status(status);
+}
+
 uint8_t *fos_display_render_target(size_t *len, uint32_t *generation)
 {
     if (len) *len = 0;
