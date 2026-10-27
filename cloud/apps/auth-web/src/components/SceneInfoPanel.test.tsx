@@ -97,7 +97,10 @@ describe("SceneInfoPanel", () => {
 
     expect(screen.getByText(/12 downloads/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Marius" }).getAttribute("href")).toBe("/publishers/acc-1");
-    expect(screen.getByText(/requires FrameOS 2026.8.1 or newer/)).toBeTruthy();
+    // The facts: the category into the store, the FrameOS it needs; the
+    // visibility is the owner's.
+    expect(screen.getByText("2026.8.1 or newer").closest("dd")?.previousElementSibling?.textContent).toBe("FrameOS");
+    expect(screen.queryByText("Visibility")).toBeNull();
     expect(screen.getByRole("button", { name: "Report scene" })).toBeTruthy();
 
     // Gallery: the zip's preview plus the uploaded image, thumbnails only
@@ -112,7 +115,7 @@ describe("SceneInfoPanel", () => {
 
     // Description as markdown; no owner editors.
     expect(screen.getByText("station").tagName).toBe("STRONG");
-    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit description" })).toBeNull();
 
     // Installing lives in the bar's dialog, not here.
     expect(screen.queryByRole("textbox", { name: "URL to copy" })).toBeNull();
@@ -154,11 +157,19 @@ describe("SceneInfoPanel", () => {
         signedIn
       />,
     );
-    expect(screen.getByTestId("share-link-url").textContent).toBe("https://scenes.frameos.net/s/clock?share=tok");
+    expect((screen.getByTestId("share-link-url") as HTMLInputElement).value).toBe(
+      "https://scenes.frameos.net/s/clock?share=tok",
+    );
     expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Replace link" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Turn sharing off" })).toBeTruthy();
-    expect(screen.getByText(/sharing link below/)).toBeTruthy();
+    expect(screen.getByText(/Anyone with this link can view and install/)).toBeTruthy();
+    expect(screen.getByText("Private, shared by link")).toBeTruthy();
+    // The scene's own actions sit apart from the link's, last in the column.
+    const actions = document.querySelector(".scene-info__owner-actions")!;
+    expect(actions.textContent).toContain("Make public");
+    expect(actions.textContent).toContain("Delete");
+    expect(document.querySelector(".share-link")!.contains(screen.getByRole("button", { name: "Make public" }))).toBe(false);
   });
 
   it("says so when sharing is off, and offers to turn it back on", () => {
@@ -171,7 +182,8 @@ describe("SceneInfoPanel", () => {
         signedIn
       />,
     );
-    expect(screen.getByText(/sharing is off, so it is only visible to you/)).toBeTruthy();
+    expect(screen.getByText(/Sharing is off: no link works, only you can see the scene/)).toBeTruthy();
+    expect(screen.getByText("Private, only you")).toBeTruthy();
     expect(screen.queryByTestId("share-link-url")).toBeNull();
     expect(screen.getByRole("button", { name: "Turn sharing on" })).toBeTruthy();
     // The rest of the owner controls are still there.
@@ -201,13 +213,13 @@ describe("SceneInfoPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove image 2" }));
     expect(draft.onImagesChange).toHaveBeenCalledWith([shaA]);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Minimum FrameOS version: 2026\.8\.1/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit description" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Minimum FrameOS version: 2026.8.1 or newer" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Make public" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
     // No per-version actions here: those are in the bar's versions dialog.
     expect(screen.queryByRole("button", { name: "Unpublish" })).toBeNull();
-    expect(screen.getByText(/only visible to you/)).toBeTruthy();
+    expect(screen.getByText("Private, only you")).toBeTruthy();
   });
 
   it("opens the category editor from the owner's category pill, where a visitor's pill links to the store", () => {
@@ -236,7 +248,7 @@ describe("SceneInfoPanel", () => {
       onListingChange: vi.fn(),
     };
     render(<SceneInfoPanel {...info} draft={draft} isOwner signedIn />);
-    fireEvent.click(screen.getByRole("button", { name: "Minimum FrameOS version: 2026.8.1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Minimum FrameOS version: 2026.8.1 or newer" }));
     expect((screen.getByLabelText("Minimum FrameOS version") as HTMLInputElement).value).toBe(
       "2026.8.1",
     );

@@ -41,8 +41,12 @@ export function SceneFrameosVersionEditor({
   }
 
   if (!editing) {
+    // The value in the Info panel's FrameOS row, as visitors read it there,
+    // and the owner's button to change it.
+    const shown = frameosVersion ? `${frameosVersion} or newer` : "Any version";
     return (
       <button
+        aria-label={`Minimum FrameOS version: ${shown}`}
         className="tag-edit-button"
         onClick={() => {
           setValue(frameosVersion ?? "");
@@ -51,10 +55,8 @@ export function SceneFrameosVersionEditor({
         title="Set the oldest FrameOS release that can run this scene"
         type="button"
       >
-        <Pencil aria-hidden size={14} />
-        {frameosVersion
-          ? `Minimum FrameOS version: ${frameosVersion}`
-          : "Set minimum FrameOS version"}
+        {shown}
+        <Pencil aria-hidden size={12} />
       </button>
     );
   }

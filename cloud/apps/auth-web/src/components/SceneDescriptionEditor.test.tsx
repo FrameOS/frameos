@@ -11,7 +11,7 @@ describe("SceneDescriptionEditor", () => {
     const onChange = vi.fn();
     render(<SceneDescriptionEditor description="bird journal" onChange={onChange} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit description" }));
     const textarea = screen.getByRole("textbox", {
       name: "Scene description",
     }) as HTMLTextAreaElement;

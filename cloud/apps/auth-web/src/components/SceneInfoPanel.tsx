@@ -107,12 +107,13 @@ export type SceneInfoPanelProps = SceneInfoData & {
   draft?: SceneInfoDraft | undefined;
 };
 
-// Everything the scene page says about a scene: its name (the heading)
-// with the publisher line under it, the images, tags, notices and the
-// description — with the owner's editors in place of the read-only bits.
-// Installing lives in the bar's Install dialog, the versions in the bar's
-// version dropdown and its "Manage versions…" dialog. The workspace's Info
-// column.
+// Everything the scene page says about a scene, top to bottom: its name
+// (the heading) and the publisher line, the description, the images, the
+// facts (category, the FrameOS it needs, and for the owner its visibility),
+// the notices, the owner's sharing link, and the owner's actions. In the
+// owner's draft each fact is its own edit button, in place. Installing lives
+// in the bar's Install dialog, the versions in the bar's version dropdown and
+// its "Manage versions…" dialog. The workspace's Info column.
 export function SceneInfoPanel({
   scene,
   images: latestImages,
@@ -127,13 +128,25 @@ export function SceneInfoPanel({
 }: SceneInfoPanelProps) {
   const isPrivate = scene.visibility !== "public";
   const isActive = scene.status === "active";
+  const isPulled = scene.status === "pulled";
   const editing = draft !== undefined && isOwner && isActive;
   const listing: SceneListingData = draft?.listing ?? shown?.listing ?? scene;
   const images = draft?.images ?? shown?.images ?? latestImages;
 
   // Tags stay in the listing (and the database) but are not shown or
   // edited here any more (2026.10); the category is.
-  const showTags = listing.category || editing;
+  const categoryTitle = listing.category
+    ? (getStoreCategory(listing.category)?.title ?? listing.category)
+    : null;
+  const visibility = isPulled
+    ? "Pulled by moderation"
+    : !isPrivate
+      ? "Public in the store"
+      : share
+        ? "Private, shared by link"
+        : "Private, only you";
+  const showCategory = categoryTitle !== null || editing;
+  const showVersion = listing.frameosVersion !== null || editing;
   // The API keys the scene's apps read (key:<namespace> risk flags).
   const keyTitles = knownSceneAccessFlags(scene.riskFlags)
     .map((flag) => keyFlagNamespace(flag))
@@ -149,9 +162,20 @@ export function SceneInfoPanel({
           <Link href={`/publishers/${scene.accountId}`}>{scene.publisher ?? "FrameOS user"}</Link>{" "}
           · {scene.downloadCount} download
           {scene.downloadCount === 1 ? "" : "s"} · updated {formatDate(new Date(scene.updatedAt))}
-          {listing.frameosVersion ? ` · requires FrameOS ${listing.frameosVersion} or newer` : ""}
         </p>
       </header>
+
+      {isPulled ? (
+        <div className="notice notice-error" role="alert">
+          <span className="pill pill-warning">Pulled</span> This scene was pulled by moderation
+          and is hidden from the store
+          {scene.pulledReason ? `: ${scene.pulledReason}` : "."}
+          {isOwner || isAdmin
+            ? " Only you and moderators can open this page. It cannot be edited, installed or made visible while it is pulled."
+            : ""}
+        </div>
+      ) : null}
+
       {/* The description reads right under the title; ph-no-capture keeps
           the scene's own text (and the gallery's image URLs below) out of
           autocapture labels and attributes. */}
@@ -179,87 +203,69 @@ export function SceneInfoPanel({
         sceneName={scene.name}
         share={share}
       />
-      {editing ? (
-        <SceneFrameosVersionEditor
-          frameosVersion={listing.frameosVersion}
-          key={listing.frameosVersion ?? ""}
-          onChange={(frameosVersion) => draft.onListingChange({ frameosVersion })}
-        />
-      ) : null}
-      {showTags ? (
-        <div className="tag-list">
-          {listing.category && !editing ? (
-            <Link
-              className="tag-pill tag-pill--category"
-              href={`/?category=${encodeURIComponent(listing.category)}`}
-            >
-              {getStoreCategory(listing.category)?.title ?? listing.category}
-            </Link>
+
+      {showCategory || showVersion || isOwner ? (
+        <dl className="scene-facts">
+          {showCategory ? (
+            <div className="scene-facts__row">
+              <dt>Category</dt>
+              <dd>
+                {editing ? (
+                  <SceneCategoryEditor
+                    category={listing.category}
+                    key={listing.category ?? ""}
+                    onChange={(category) => draft.onListingChange({ category })}
+                  />
+                ) : (
+                  <Link
+                    className="tag-pill tag-pill--category"
+                    href={`/?category=${encodeURIComponent(listing.category ?? "")}`}
+                  >
+                    {categoryTitle}
+                  </Link>
+                )}
+              </dd>
+            </div>
           ) : null}
-          {editing ? (
-            <SceneCategoryEditor
-              category={listing.category}
-              key={listing.category ?? ""}
-              onChange={(category) => draft.onListingChange({ category })}
-            />
+          {showVersion ? (
+            <div className="scene-facts__row">
+              <dt>FrameOS</dt>
+              <dd>
+                {editing ? (
+                  <SceneFrameosVersionEditor
+                    frameosVersion={listing.frameosVersion}
+                    key={listing.frameosVersion ?? ""}
+                    onChange={(frameosVersion) => draft.onListingChange({ frameosVersion })}
+                  />
+                ) : (
+                  `${listing.frameosVersion} or newer`
+                )}
+              </dd>
+            </div>
           ) : null}
-        </div>
-      ) : null}
-      {scene.visibility === "public" && isActive ? (
-        <div className="button-row">
-          <ReportSceneButton sceneId={scene.id} signedIn={signedIn} />
-        </div>
+          {isOwner ? (
+            <div className="scene-facts__row">
+              <dt>Visibility</dt>
+              <dd>{visibility}</dd>
+            </div>
+          ) : null}
+        </dl>
       ) : null}
 
-      {scene.status === "pulled" ? (
-        <div className="notice notice-error" role="alert">
-          <span className="pill pill-warning">Pulled</span> This scene was pulled by moderation
-          and is hidden from the store
-          {scene.pulledReason ? `: ${scene.pulledReason}` : "."}
-          {isOwner || isAdmin
-            ? " Only you and moderators can open this page; the scene cannot be edited, installed or made visible while it is pulled."
-            : ""}
-          {isOwner ? (
-            <div className="notice__actions">
-              <StoreSceneActions
-                name={scene.name}
-                sceneId={scene.id}
-                status={scene.status}
-                visibility={scene.visibility}
-              />
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-      {isPrivate && isActive ? (
-        <div className="notice">
-          {isOwner || isAdmin
-            ? share
-              ? "This scene is private — it is only visible to you and to anyone you give the sharing link below."
-              : "This scene is private — sharing is off, so it is only visible to you."
-            : "This scene is private — you are viewing it through a sharing link."}
-          {isOwner ? (
-            <div className="notice__actions">
-              <ShareLinkControls sceneId={scene.id} shareUrl={share ? pageUrl : null} />
-              <StoreSceneActions
-                name={scene.name}
-                sceneId={scene.id}
-                status={scene.status}
-                visibility={scene.visibility}
-              />
-            </div>
-          ) : null}
-        </div>
+      {isPrivate && isActive && !isOwner ? (
+        <p className="copy scene-info__note">
+          This scene is private: you are viewing it through a sharing link.
+        </p>
       ) : null}
       {scene.riskFlags.includes("shell") ? (
-        <p className="notice-error" role="alert">
+        <p className="notice notice-error" role="alert">
           This scene configures apps or custom code that run shell commands on the frame. Only
-          install it if you trust the publisher — review the scene after installing, before
+          install it if you trust the publisher, and review the scene after installing, before
           deploying it.
         </p>
       ) : null}
       {scene.riskFlags.includes("files") ? (
-        <p className="notice-error" role="alert">
+        <p className="notice notice-error" role="alert">
           This scene can read any file on the frame, outside the assets folder too. Installing it
           allows that.
         </p>
@@ -270,7 +276,7 @@ export function SceneInfoPanel({
         </p>
       ) : null}
       {scene.riskFlags.includes("assets-write") ? (
-        <p className="notice-error" role="alert">
+        <p className="notice notice-error" role="alert">
           This scene writes and deletes files in the frame&apos;s assets folder, where your
           uploaded photos and other scenes&apos; files are. Installing it allows that.
         </p>
@@ -282,6 +288,27 @@ export function SceneInfoPanel({
         </p>
       ) : null}
 
+      {isOwner && isPrivate && isActive ? (
+        <section aria-label="Sharing" className="scene-info__section">
+          <h2 className="scene-info__section-title">Sharing link</h2>
+          <ShareLinkControls sceneId={scene.id} shareUrl={share ? pageUrl : null} />
+        </section>
+      ) : null}
+
+      {isOwner ? (
+        <div className="scene-info__owner-actions">
+          <StoreSceneActions
+            name={scene.name}
+            sceneId={scene.id}
+            status={scene.status}
+            visibility={scene.visibility}
+          />
+        </div>
+      ) : scene.visibility === "public" && isActive ? (
+        <div className="button-row">
+          <ReportSceneButton sceneId={scene.id} signedIn={signedIn} />
+        </div>
+      ) : null}
     </div>
   );
 }
