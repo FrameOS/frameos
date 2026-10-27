@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import versions from "../../../../../versions.json";
 import { SceneInfoPanel, type SceneInfoData } from "./SceneInfoPanel";
 
 const { fetchMock, refreshMock } = vi.hoisted(() => ({
@@ -202,12 +203,29 @@ describe("SceneInfoPanel", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit category" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Edit minimum FrameOS version/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Minimum FrameOS version: 2026\.8\.1/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Make public" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
     // No per-version actions here: those are in the bar's versions dialog.
     expect(screen.queryByRole("button", { name: "Unpublish" })).toBeNull();
     expect(screen.getByText(/only visible to you/)).toBeTruthy();
+  });
+
+  it("shows the owner the minimum FrameOS version on its edit button, and sets the current release in one click", () => {
+    const draft = {
+      images: info.images,
+      listing: { ...info.versions[0]!.listing },
+      onImagesChange: vi.fn(),
+      onListingChange: vi.fn(),
+    };
+    render(<SceneInfoPanel {...info} draft={draft} isOwner signedIn />);
+    fireEvent.click(screen.getByRole("button", { name: "Minimum FrameOS version: 2026.8.1" }));
+    expect((screen.getByLabelText("Minimum FrameOS version") as HTMLInputElement).value).toBe(
+      "2026.8.1",
+    );
+    const current = versions.frameos.split("+")[0]!;
+    fireEvent.click(screen.getByRole("button", { name: `Use current version (${current})` }));
+    expect(draft.onListingChange).toHaveBeenCalledWith({ frameosVersion: current });
   });
 
   it("freezes a pulled scene for its owner: the notice, no image controls, only Delete", () => {
