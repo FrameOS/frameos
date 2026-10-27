@@ -7,6 +7,7 @@ import options
 import frameos/apps
 import frameos/types
 import frameos/utils/image
+import frameos/utils/resample
 
 type
   AppConfig* = object
@@ -179,13 +180,16 @@ proc renderAt*(self: App, context: ExecutionContext, image: Image, now: float) =
     # Sample the source rect straight onto the canvas: pixie's draw()
     # pre-scales whole-source copies for non-integer zooms, which allocates
     # multi-MB intermediates every render and fragments ESP32 PSRAM.
-    let stepX = sw / image.width.float
-    let stepY = sh / image.height.float
-    for y in 0 ..< image.height:
-      let srcY = (sy + (y.float + 0.5) * stepY - 0.5).float32
-      for x in 0 ..< image.width:
-        let srcX = (sx + (x.float + 0.5) * stepX - 0.5).float32
-        image.unsafe[x, y] = sourceImage.getRgbaSmooth(srcX, srcY)
+    if sourceImage.format == pfRgbx:
+      drawRectBilinear(image, sourceImage, sx, sy, sw, sh)
+    else:
+      let stepX = sw / image.width.float
+      let stepY = sh / image.height.float
+      for y in 0 ..< image.height:
+        let srcY = (sy + (y.float + 0.5) * stepY - 0.5).float32
+        for x in 0 ..< image.width:
+          let srcX = (sx + (x.float + 0.5) * stepX - 0.5).float32
+          image.unsafe[x, y] = sourceImage.getRgbaSmooth(srcX, srcY)
     if self.appConfig.phaseStateKey != "":
       self.scene.state[self.appConfig.phaseStateKey] = %*(cycles)
   except Exception as e:

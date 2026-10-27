@@ -24,6 +24,7 @@
 #include "esp_timer.h"
 #include "mbedtls/sha256.h"
 
+#include "fos_animation.h"
 #include "fos_backend_http.h"
 #include "fos_battery.h"
 #include "fos_buttons.h"
@@ -42,6 +43,7 @@
 #include "fos_panel_draw.h"
 #include "fos_power.h"
 #include "fos_scenes.h"
+#include "fos_scene_state.h"
 #include "fos_schedule.h"
 #include "fos_settings.h"
 #include "fos_tz.h"
@@ -59,6 +61,12 @@ static const char *TAG = "fos_client";
 /* A voice session ended (fos_client_release_render): its answer goes on the
  * panel now, with the render its tools asked for when there is one. */
 #define RELEASE_BIT BIT3
+/* Animation mode's frame timer (fos_animation.h): the next frame is due. */
+#define FRAME_DUE_BIT BIT4
+/* The scene asked for a render (its render rule, after a touch or a key):
+ * rendered like RENDER_NOW_BIT, but a run of them is a burst
+ * (fos_animation.h), not one loud frame each. */
+#define SCENE_RENDER_BIT BIT5
 #define START_RENDER_LOOP_BIT BIT1
 #define CLIENT_TASK_STACK_BYTES 40960
 
@@ -169,6 +177,11 @@ static void load_display_state(void);
 uint32_t fos_client_render_count(void) { return s_render_count; }
 
 static TaskHandle_t s_client_task = NULL;
+
+bool fos_client_on_render_task(void)
+{
+    return s_client_task != NULL && xTaskGetCurrentTaskHandle() == s_client_task;
+}
 
 size_t fos_client_task_stack_free(void)
 {
@@ -528,6 +541,13 @@ void fos_client_render_fresh(void)
     fos_client_render_now();
 }
 
+void fos_client_render_for_scene(void)
+{
+    if (s_events) {
+        xEventGroupSetBits(s_events, SCENE_RENDER_BIT);
+    }
+}
+
 void fos_client_wake_for_events(void)
 {
     if (s_events) {
@@ -739,14 +759,36 @@ static void snapshot_before_lend(void)
     xSemaphoreGive(s_snapshot_lock);
 }
 
+/* An LCD frame buffer that is about to be drawn in (fos_display_render_target,
+ * a copy into it, a clear): a snapshot pointing at it lets go first. A
+ * stream holds the lock only while it copies the snapshot out
+ * (fos_http_preview_bmp_stream), so this waits milliseconds at most. */
+static void snapshot_before_panel_write(const uint8_t *buf)
+{
+    if (!s_snapshot_lock || !buf) return;
+    if (xSemaphoreTake(s_snapshot_lock, pdMS_TO_TICKS(30000)) != pdTRUE) {
+        ESP_LOGW(TAG, "preview snapshot still held after 30 s; drawing over it");
+        return;
+    }
+    if (s_last_frame_borrowed && s_last_frame == buf) {
+        s_last_frame = NULL;
+        s_last_frame_len = 0;
+        s_last_frame_borrowed = false;
+    }
+    xSemaphoreGive(s_snapshot_lock);
+}
+
+/* `borrow`: `buf` is an LCD frame buffer just shown, which stays as it is
+ * until it is drawn in again (snapshot_before_panel_write lets go then). */
 static void store_snapshot(const uint8_t *buf, size_t len, int width, int height,
                            fos_pixel_format_t format, uint32_t render_count,
-                           int64_t render_ms)
+                           int64_t render_ms, bool borrow)
 {
     if (!buf || len == 0 || width <= 0 || height <= 0 || !s_snapshot_lock) return;
-    if (fos_framebuffer_is_reserved(buf)) {
-        /* The packed bytes stay put in the reservation until the next
-         * borrower; point at them instead of copying. */
+    if (borrow || fos_framebuffer_is_reserved(buf)) {
+        /* The packed bytes stay put in the reservation (or the panel's
+         * buffer) until the next borrower; point at them instead of
+         * copying. */
         xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
         uint8_t *old = s_last_frame_borrowed ? NULL : s_last_frame;
         s_last_frame = (uint8_t *)buf;
@@ -1044,12 +1086,27 @@ static void url_query_escape(const char *src, char *out, size_t out_len)
     out[used] = '\0';
 }
 
+/* The hash of the stored snapshot: what an LCD, which keeps no per-render
+ * hash (render_once), pushes and compares by. */
+static bool snapshot_display_state(fos_display_state_t *state)
+{
+    if (!s_snapshot_lock) return false;
+    xSemaphoreTake(s_snapshot_lock, portMAX_DELAY);
+    bool ok = s_last_frame && s_last_frame_len > 0 &&
+              display_state_for_buffer(s_last_frame, s_last_frame_len, s_last_frame_width,
+                                       s_last_frame_height, s_last_frame_format, state);
+    xSemaphoreGive(s_snapshot_lock);
+    return ok;
+}
+
 static void push_image_to_backend(const char *scene_id)
 {
     fos_config_t *config = fos_config();
     if (!config->backend_url[0] || config->frame_id == 0 || !config->api_key[0]) return;
-    if (!fos_display_present() || !s_display_state_valid) return;
-    if (s_pushed_image_valid &&
+    if (!fos_display_present()) return;
+    bool lcd = fos_display_is_lcd();
+    if (!lcd && !s_display_state_valid) return;
+    if (!lcd && s_pushed_image_valid &&
         memcmp(s_pushed_image_sha, s_display_state.sha256, FOS_DISPLAY_HASH_LEN) == 0) {
         return;
     }
@@ -1060,6 +1117,14 @@ static void push_image_to_backend(const char *scene_id)
     }
     /* No retained snapshot (a hash-only board): nothing to send. */
     if (!fos_client_snapshot_info(NULL, NULL, NULL, NULL, NULL, NULL)) return;
+    fos_display_state_t pushed = s_display_state;
+    if (lcd) {
+        /* Hashed here, at most once per push interval, instead of per frame. */
+        if (!snapshot_display_state(&pushed)) return;
+        if (s_pushed_image_valid && memcmp(s_pushed_image_sha, pushed.sha256, FOS_DISPLAY_HASH_LEN) == 0) {
+            return;
+        }
+    }
     s_last_image_push_us = now_us;
 
     char scene_q[3 * 128 + 1];
@@ -1104,7 +1169,7 @@ static void push_image_to_backend(const char *scene_id)
 
     int64_t ms = (esp_timer_get_time() - now_us) / 1000;
     if (status == 200) {
-        memcpy(s_pushed_image_sha, s_display_state.sha256, FOS_DISPLAY_HASH_LEN);
+        memcpy(s_pushed_image_sha, pushed.sha256, FOS_DISPLAY_HASH_LEN);
         s_pushed_image_valid = true;
         ESP_LOGI(TAG, "image pushed to the backend in %lld ms", ms);
     } else {
@@ -1401,7 +1466,31 @@ static bool notice_expired(void)
            esp_timer_get_time() - s_notice_shown_us >= (int64_t)NOTICE_SHOWN_MS * 1000;
 }
 
-static esp_err_t render_once(void)
+static bool panel_overlay_pending(void)
+{
+    return fos_lan_access_panel_code(fos_lan_access_now(), NULL) != 0 || s_notice_pending;
+}
+
+/* An overlay drawn into an LCD buffer that the panel now shows: it stays on
+ * the glass until the next frame, and the snapshot was copied before it went
+ * on, so there is nothing to put back. */
+static void lan_overlay_forget(lan_overlay_t *ov)
+{
+    free(ov->saved);
+    ov->saved = NULL;
+    ov->drawn = false;
+}
+
+static void notice_overlay_forget(notice_overlay_t *ov)
+{
+    free(ov->saved);
+    ov->saved = NULL;
+    ov->drawn = false;
+}
+
+/* `quiet`: an animation's in-between frame (fos_animation.h) — none of the
+ * render:* lines, no render announce, no backend push. */
+static esp_err_t render_once(bool quiet)
 {
     fos_config_t *config = fos_config();
     int64_t start = esp_timer_get_time();
@@ -1416,14 +1505,22 @@ static esp_err_t render_once(void)
     uint32_t render_attempt = s_render_count + 1;
     char scene_id[128];
     char scene_name[128];
-    current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
-    log_render_event("render:scene", scene_id, scene_name, "rendering", "start",
-                     mode, fos_display_present() ? "pending" : "none", "",
-                     render_attempt, 0, width, height, format, buf_len, ESP_OK);
-    frameos_nim_flush_logs();
+    if (quiet) {
+        scene_id[0] = '\0';
+        scene_name[0] = '\0';
+    } else {
+        current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+        log_render_event("render:scene", scene_id, scene_name, "rendering", "start",
+                         mode, fos_display_present() ? "pending" : "none", "",
+                         render_attempt, 0, width, height, format, buf_len, ESP_OK);
+        frameos_nim_flush_logs();
+    }
 
     uint8_t *buf = NULL;
     esp_err_t err;
+    /* An LCD's back frame buffer, drawn in place: no pack, no copy, and the
+     * blit below is a buffer switch (fos_display_render_target). */
+    bool in_panel = false;
     if (local_render) {
         if (fos_scenes_loaded() == 0) {
             push_status_info();
@@ -1433,7 +1530,17 @@ static esp_err_t render_once(void)
         if (__atomic_exchange_n(&s_render_fresh, false, __ATOMIC_SEQ_CST)) {
             frameos_nim_request_fresh_pass();
         }
-        err = frameos_nim_render_alloc(&buf, &buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
+        size_t target_len = 0;
+        uint32_t generation = 0;
+        uint8_t *target = fos_display_present() ? fos_display_render_target(&target_len, &generation) : NULL;
+        if (target && target_len == buf_len) {
+            buf = target;
+            in_panel = true;
+            err = frameos_nim_render_panel(buf, buf_len, format, generation) == 0 ? ESP_OK : ESP_FAIL;
+        } else {
+            if (target) fos_display_release_render_target();
+            err = frameos_nim_render_alloc(&buf, &buf_len, fos_display_format()) == 0 ? ESP_OK : ESP_FAIL;
+        }
         if (err != ESP_OK) ESP_LOGE(TAG, "nim render failed");
     } else {
         buf = fos_framebuffer_acquire(buf_len);
@@ -1463,25 +1570,42 @@ static esp_err_t render_once(void)
     }
 
     int64_t framebuffer_ms = (esp_timer_get_time() - start) / 1000;
-    log_render_event("render:framebuffer", scene_id, scene_name,
-                     err == ESP_OK ? "rendered" : "error", "framebuffer",
-                     mode, fos_display_present() ? "pending" : "none",
-                     err == ESP_OK ? "" : "render-failed", render_attempt,
-                     framebuffer_ms, width, height, format, buf_len, err);
-    frameos_nim_flush_logs();
+    if (!quiet) {
+        log_render_event("render:framebuffer", scene_id, scene_name,
+                         err == ESP_OK ? "rendered" : "error", "framebuffer",
+                         mode, fos_display_present() ? "pending" : "none",
+                         err == ESP_OK ? "" : "render-failed", render_attempt,
+                         framebuffer_ms, width, height, format, buf_len, err);
+        frameos_nim_flush_logs();
+    }
 
+    /* The hash is an e-paper fact: an unchanged picture skips a refresh that
+     * takes seconds. An LCD shows a frame by switching a buffer, so there is
+     * nothing to skip, and hashing 460 KB cost a frame of its own; the
+     * backend push hashes what it sends (push_image_to_backend). */
     fos_display_state_t rendered_state;
-    bool rendered_state_valid = err == ESP_OK && fos_display_present() &&
+    bool rendered_state_valid = err == ESP_OK && fos_display_present() && !fos_display_is_lcd() &&
         display_state_for_buffer(buf, buf_len, width, height, format, &rendered_state);
     bool skipped_refresh = false;
+    bool snapshot_stored = false;
     const char *refresh = fos_display_present() ? "pending" : "none";
     /* After the hash (which describes the render, not the code) and only for
-     * the panel: see lan_overlay_begin. */
+     * the panel: see lan_overlay_begin. Drawn in place, the buffer is what
+     * the panel shows next and keeps the overlay: the snapshot is a copy
+     * taken before it goes on. */
     lan_overlay_t lan_overlay = {0};
     notice_overlay_t notice = {0};
     if (err == ESP_OK && fos_display_present()) {
+        if (in_panel && panel_overlay_pending()) {
+            store_snapshot(buf, buf_len, width, height, format, s_render_count + 1,
+                           (esp_timer_get_time() - start) / 1000, false);
+            snapshot_stored = true;
+        }
         lan_overlay_begin(&lan_overlay, buf, width, height, format);
         notice_overlay_begin(&notice, buf, width, height, format);
+        /* Drawn into the buffer the panel shows: the next render in place
+         * there must not take it for its own frame. */
+        if (in_panel && (lan_overlay.drawn || notice.drawn)) fos_display_mark_written(buf);
     }
     bool overlay_drawn = lan_overlay.drawn || notice.drawn;
     if (err == ESP_OK && fos_display_present()) {
@@ -1494,23 +1618,32 @@ static esp_err_t render_once(void)
             char sha_hex[FOS_DISPLAY_HASH_LEN * 2 + 1];
             sha256_hex(rendered_state.sha256, sha_hex);
             ESP_LOGI(TAG, "display refresh skipped: packed image unchanged (%.*s)", 12, sha_hex);
-            log_render_event("render:device", scene_id, scene_name, "skipped",
-                             "display", mode, refresh, "unchanged",
-                             render_attempt, (esp_timer_get_time() - start) / 1000,
-                             width, height, format, buf_len, ESP_OK);
-            frameos_nim_flush_logs();
+            if (!quiet) {
+                log_render_event("render:device", scene_id, scene_name, "skipped",
+                                 "display", mode, refresh, "unchanged",
+                                 render_attempt, (esp_timer_get_time() - start) / 1000,
+                                 width, height, format, buf_len, ESP_OK);
+                frameos_nim_flush_logs();
+            }
         } else {
             refresh = "update";
-            log_render_event("render:device", scene_id, scene_name, "refreshing",
-                             "display", mode, refresh, "", render_attempt,
-                             (esp_timer_get_time() - start) / 1000, width, height,
-                             format, buf_len, ESP_OK);
-            frameos_nim_flush_logs();
+            if (!quiet) {
+                log_render_event("render:device", scene_id, scene_name, "refreshing",
+                                 "display", mode, refresh, "", render_attempt,
+                                 (esp_timer_get_time() - start) / 1000, width, height,
+                                 format, buf_len, ESP_OK);
+                frameos_nim_flush_logs();
+            }
             err = fos_display_blit(buf, buf_len);
             refresh = err == ESP_OK ? "updated" : "failed";
             if (overlay_drawn) {
-                lan_overlay_end(&lan_overlay);
-                notice_overlay_end(&notice);
+                if (in_panel) {
+                    lan_overlay_forget(&lan_overlay);
+                    notice_overlay_forget(&notice);
+                } else {
+                    lan_overlay_end(&lan_overlay);
+                    notice_overlay_end(&notice);
+                }
                 s_last_refresh_skipped = false;
                 forget_display_state();
             } else if (err == ESP_OK && rendered_state_valid) {
@@ -1524,6 +1657,10 @@ static esp_err_t render_once(void)
         ESP_LOGI(TAG, "headless: rendered %u bytes, no panel to blit", (unsigned)buf_len);
         refresh = "none";
     }
+    if (in_panel) {
+        lan_overlay_forget(&lan_overlay);
+        notice_overlay_forget(&notice);
+    }
     lan_overlay_end(&lan_overlay); /* already out on every path; never into the snapshot */
     notice_overlay_end(&notice);
     if (err == ESP_OK) {
@@ -1535,7 +1672,10 @@ static esp_err_t render_once(void)
         s_last_render_ms = (esp_timer_get_time() - start) / 1000;
         /* A render without the notice took it off the panel. */
         if (!notice.drawn && !skipped_refresh) s_notice_shown_us = 0;
-        store_snapshot(buf, buf_len, width, height, format, s_render_count, s_last_render_ms);
+        if (!snapshot_stored) {
+            store_snapshot(buf, buf_len, width, height, format, s_render_count, s_last_render_ms,
+                           in_panel);
+        }
         ESP_LOGI(TAG, "render #%lu done in %lld ms",
                  (unsigned long)s_render_count, s_last_render_ms);
         s_render_recovery_restarts = 0; /* a good render clears the streak */
@@ -1551,25 +1691,35 @@ static esp_err_t render_once(void)
     }
     int64_t total_ms = (esp_timer_get_time() - start) / 1000;
     s_render_attempts++;
-    current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
-    log_render_event(err == ESP_OK ? "render:done" : "render:error", scene_id,
-                     scene_name, err == ESP_OK ? "ok" : "error", "complete",
-                     mode, refresh, err == ESP_OK ? "" : "render-cycle-failed",
-                     err == ESP_OK ? s_render_count : render_attempt, total_ms,
-                     width, height, format, buf_len, err);
-    frameos_nim_flush_logs();
-    if (err == ESP_OK && !skipped_refresh) {
+    /* A quiet frame that failed is logged anyway: a broken animation must say
+     * why at once, not ten seconds later. */
+    if (!quiet || err != ESP_OK) {
+        current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+        log_render_event(err == ESP_OK ? "render:done" : "render:error", scene_id,
+                         scene_name, err == ESP_OK ? "ok" : "error", "complete",
+                         mode, refresh, err == ESP_OK ? "" : "render-cycle-failed",
+                         err == ESP_OK ? s_render_count : render_attempt, total_ms,
+                         width, height, format, buf_len, err);
+        frameos_nim_flush_logs();
+    }
+    if (err == ESP_OK && !skipped_refresh && !quiet) {
         /* "I drew something new" — the provider decides whether anyone is
          * looking and fetches the image with image_get if so. */
         fos_cloud_announce_render(scene_id);
     }
-    if (err == ESP_OK) {
+    if (err == ESP_OK && !quiet) {
         /* Also on a skipped refresh: the last push may have failed. */
         push_image_to_backend(scene_id);
     }
-    /* Returns the reservation to the pool, or frees a one-off allocation —
-     * including the Nim renderer's buffer on the local-render path. */
-    fos_framebuffer_release(buf);
+    if (in_panel) {
+        /* Shown: fos_display_blit gave the panel back. Not shown (the render
+         * failed): give it back with the last picture still on the glass. */
+        if (err != ESP_OK) fos_display_release_render_target();
+    } else {
+        /* Returns the reservation to the pool, or frees a one-off allocation —
+         * including the Nim renderer's buffer on the local-render path. */
+        fos_framebuffer_release(buf);
+    }
     if (err != ESP_OK) {
         render_failure_recover(scene_name);
     }
@@ -1761,6 +1911,139 @@ static uint32_t compute_sleep_ms(uint32_t interval, int64_t due_at_us)
     return left_ms > (int64_t)UINT32_MAX ? UINT32_MAX : (uint32_t)left_ms;
 }
 
+/* ------------------------------------------------------- animation mode */
+
+/* A scene below a one-second interval on an LCD (fos_animation.h). */
+static fos_animation_t s_anim;
+static esp_timer_handle_t s_frame_timer = NULL;
+static bool s_quiet = false;
+/* Somebody asked for a render while an animation ran (a cloud or HTTP
+ * render, a scene switch): that frame logs in full, so its render:done and
+ * the cloud's render announce do not wait for the next ten seconds. */
+static bool s_loud_next = false;
+/* The pass about to start renders because the scene asked (SCENE_RENDER_BIT)
+ * and nothing else did: a frame of a burst (fos_animation.h). */
+static bool s_scene_render = false;
+/* The pass-start power decision, kept between the once-a-second passes that
+ * make it while animating. */
+static bool s_pass_battery_critical = false;
+static bool s_pass_deep_sleep = false;
+static int s_pass_battery_pct = -1;
+
+static void frame_timer_fired(void *arg)
+{
+    (void)arg;
+    if (s_events) xEventGroupSetBits(s_events, FRAME_DUE_BIT);
+}
+
+static void set_quiet(bool quiet)
+{
+    if (quiet == s_quiet) return;
+    s_quiet = quiet;
+    frameos_nim_set_quiet(quiet);
+}
+
+/* `render:animation`: a start, the frames since the last full log (`running`,
+ * once every FOS_ANIMATION_LOG_US, before the frame that logs), or a stop. */
+static void log_animation(const char *status, bool logged_frame)
+{
+    fos_animation_stats_t stats;
+    bool any = fos_animation_take_stats(&s_anim, esp_timer_get_time(), logged_frame, &stats);
+    char line[320];
+    if (strcmp(status, "start") == 0) {
+        snprintf(line, sizeof(line),
+                 "{\"event\":\"render:animation\",\"source\":\"esp32\",\"status\":\"start\","
+                 "\"periodMs\":%lu}",
+                 (unsigned long)((s_anim.period_us + 500) / 1000));
+    } else if (any) {
+        /* What an animation costs in memory, beside how fast it runs: the
+         * interpreters it keeps between frames, and what is left. */
+        snprintf(line, sizeof(line),
+                 "{\"event\":\"render:animation\",\"source\":\"esp32\",\"status\":\"%s\","
+                 "\"frames\":%lu,\"seconds\":%.1f,\"fps\":%lu.%lu,\"avgMs\":%lu,\"maxMs\":%lu,"
+                 "\"periodMs\":%lu,\"jsKB\":%u,\"freePsramKB\":%u,\"largestPsramKB\":%u}",
+                 status, (unsigned long)stats.frames, (double)stats.window_us / 1000000.0,
+                 (unsigned long)(stats.fps_x10 / 10), (unsigned long)(stats.fps_x10 % 10),
+                 (unsigned long)stats.avg_ms, (unsigned long)stats.max_ms,
+                 (unsigned long)stats.period_ms,
+                 (unsigned)(frameos_nim_js_runtime_bytes() / 1024),
+                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024),
+                 (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) / 1024));
+    } else if (strcmp(status, "stop") == 0) {
+        snprintf(line, sizeof(line),
+                 "{\"event\":\"render:animation\",\"source\":\"esp32\",\"status\":\"stop\"}");
+    } else {
+        return;
+    }
+    frameos_nim_log_hook(line);
+}
+
+/* A burst (fos_animation.h) a second over: `render:burst` with its frames,
+ * and, when its last frame was quiet, the cloud's render announce and the
+ * backend push that frame skipped, so neither keeps an older picture. */
+static void finish_burst(void)
+{
+    fos_animation_stats_t stats;
+    bool owed = false;
+    if (!fos_animation_burst_end(&s_anim, esp_timer_get_time(), &stats, &owed)) return;
+    char line[256];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"render:burst\",\"source\":\"esp32\",\"frames\":%lu,\"seconds\":%.1f,"
+             "\"fps\":%lu.%lu,\"avgMs\":%lu,\"maxMs\":%lu}",
+             (unsigned long)stats.frames, (double)stats.window_us / 1000000.0,
+             (unsigned long)(stats.fps_x10 / 10), (unsigned long)(stats.fps_x10 % 10),
+             (unsigned long)stats.avg_ms, (unsigned long)stats.max_ms);
+    frameos_nim_log_hook(line);
+    if (owed) {
+        char scene_id[128];
+        char scene_name[128];
+        current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+        fos_cloud_announce_render(scene_id);
+        push_image_to_backend(scene_id);
+    }
+    frameos_nim_flush_logs();
+}
+
+/* The wait between two frames of an animation. What arrives meanwhile is
+ * served the way the ordinary wait below serves it: a press or a touch goes
+ * to the scene, a command pull runs, the schedule ticks, and a render asked
+ * for makes the next frame one that logs in full. A frame slower than the
+ * interval waits for nothing, but the signals are read all the same. A voice
+ * session's hold keeps the panel until its release (whose render carries the
+ * notice). Returns when the next frame is due. */
+static void animation_wait(fos_config_t *config, int64_t wait_us)
+{
+    const EventBits_t signals = RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT;
+    bool armed = false;
+    if (wait_us > 0 && s_frame_timer) {
+        esp_timer_stop(s_frame_timer);
+        xEventGroupClearBits(s_events, FRAME_DUE_BIT);
+        armed = esp_timer_start_once(s_frame_timer, (uint64_t)wait_us) == ESP_OK;
+    }
+    while (true) {
+        EventBits_t bits = armed || render_held()
+            ? xEventGroupWaitBits(s_events, signals | FRAME_DUE_BIT, pdTRUE, pdFALSE,
+                                  pdMS_TO_TICKS(armed ? 1000 : 100))
+            : xEventGroupClearBits(s_events, signals); /* the bits before the clear */
+        bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
+        if ((bits & COMMANDS_BIT) && fos_commands_sync() && nim) {
+            fos_scenes_apply_pending_selection();
+        }
+        if (nim) {
+            fos_buttons_process_events();
+            fos_touch_process_events();
+            fos_events_deliver_deferred();
+            fos_schedule_tick();
+        }
+        if (bits & RENDER_NOW_BIT) s_loud_next = true;
+        bool due = !armed || (bits & (FRAME_DUE_BIT | RENDER_NOW_BIT | SCENE_RENDER_BIT)) != 0 ||
+                   (nim && frameos_nim_render_requested()) ||
+                   fos_animation_wait_us(&s_anim, esp_timer_get_time()) == 0;
+        if (due && !render_held()) break;
+    }
+    if (armed) esp_timer_stop(s_frame_timer);
+}
+
 static void client_task(void *arg)
 {
     fos_config_t *config = fos_config();
@@ -1830,6 +2113,12 @@ static void client_task(void *arg)
         int64_t cycle_start = esp_timer_get_time();
         int64_t due_at_us = wait_ended_us ? wait_ended_us : cycle_start;
         wait_ended_us = 0;
+        /* Animation mode (fos_animation.h): the pulls, the sensors and the
+         * settings pushes below run once a second, not once a frame. Outside
+         * animation every pass does them. */
+        bool housekeeping = fos_animation_housekeeping_due(&s_anim, cycle_start);
+        /* Scene state that has waited its delay (fos_scene_state.h). */
+        if (housekeeping) fos_scene_state_flush(false);
 
         /* First pass of a boot on a cloud-managed frame: the commands that
          * waited out the sleep (a scene switch, a scenes push, a state) are
@@ -1860,8 +2149,18 @@ static void client_task(void *arg)
          * pushed over HTTP/console since the last pass. Both touch the Nim
          * runtime, so they only ever run here on the render task. */
         if (config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available()) {
-            fos_scenes_sync(false);
+            if (housekeeping) fos_scenes_sync(false);
             fos_scenes_apply_pending();
+            /* Scene events from HTTP, the cloud or the console since the last
+             * look (fos_events_defer): to the scene now, before this pass
+             * renders, and the render shows them — as the scene's own render
+             * when nothing else forced this pass. Before the queued switch
+             * is applied: a `setCurrentScene` with state leaves that state
+             * pending here, and the switch opens the scene with it. */
+            if (fos_events_deliver_deferred() && !force_render) {
+                force_render = true;
+                s_scene_render = true;
+            }
             fos_scenes_apply_pending_selection();
             fos_buttons_process_events();
             fos_touch_process_events();
@@ -1871,127 +2170,135 @@ static void client_task(void *arg)
              * renders once and goes back to deep sleep, which loses the
              * queue. */
             fos_scenes_apply_pending_selection();
-            /* Scene events the cloud delivered while the previous pass was
-             * rendering (fos_events_defer): to the scene now, before this
-             * pass renders, and the render shows them. */
-            if (fos_events_deliver_deferred()) {
-                force_render = true;
+        }
+
+        /* The once-a-second work while animating starts here and ends with
+         * the power decision. */
+        if (housekeeping) {
+            /* Live settings: pick up backend-side interval/name/render-mode
+             * changes without a rebuild. ETag'd, so steady state is a 304. */
+            fos_settings_sync(false);
+            /* The backend's command queue — what the workspace asked for while
+             * this frame slept (a scene switch, a state, a render, an update) —
+             * before the render, so a switch lands in THIS pass's render instead
+             * of costing a second panel refresh. */
+            if (fos_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
+                frameos_nim_available()) {
+                fos_scenes_apply_pending_selection();
             }
-        }
+            /* A zone name with no tzdata slice yet (console `set time_zone`,
+             * an older provider): one fetch from tz.frameos.net, rate-limited. */
+            fos_tz_resolve_pending();
 
-        /* Live settings: pick up backend-side interval/name/render-mode
-         * changes without a rebuild. ETag'd, so steady state is a 304. */
-        fos_settings_sync(false);
-        /* The backend's command queue — what the workspace asked for while
-         * this frame slept (a scene switch, a state, a render, an update) —
-         * before the render, so a switch lands in THIS pass's render instead
-         * of costing a second panel refresh. */
-        if (fos_commands_sync() && config->render_mode == FOS_RENDER_LOCAL &&
-            frameos_nim_available()) {
-            fos_scenes_apply_pending_selection();
-        }
-        /* A zone name with no tzdata slice yet (console `set time_zone`,
-         * an older provider): one fetch from tz.frameos.net, rate-limited. */
-        fos_tz_resolve_pending();
+            /* A console `set spill_force` may have changed it since last pass. */
+            fos_nim_http_set_spill_force_bytes(config->http_spill_force_bytes);
+            /* Same for `set debug`: the per-node memory profile is meant to be
+             * switched on over the console mid-flight, without a rebuild. */
+            frameos_nim_set_debug(config->debug_logging ? 1 : 0);
+            frameos_nim_set_fusion(config->image_fusion ? 1 : 0);
+            /* Fallback fit for consumers without their own placement — settings
+             * sync, cloud set_settings and the console all write it live. */
+            frameos_nim_set_scaling_mode(config->scaling_mode);
+            /* The colours block (automatic fit switch, frame-wide correction):
+             * same contract, the Nim side re-parses only when the text changed. */
+            frameos_nim_set_colors(config->colors);
+            frameos_nim_set_palette(config->palette);
+            /* The frame's button bindings (docs/events.md "Event map"), the same
+             * way: the dispatcher reads them off its config on the next press. */
+            frameos_nim_set_event_map(config->event_map);
+            /* Same contract for the zone name: live, one string per pass. */
+            frameos_nim_set_time_zone(config->time_zone);
 
-        /* A console `set spill_force` may have changed it since last pass. */
-        fos_nim_http_set_spill_force_bytes(config->http_spill_force_bytes);
-        /* Same for `set debug`: the per-node memory profile is meant to be
-         * switched on over the console mid-flight, without a rebuild. */
-        frameos_nim_set_debug(config->debug_logging ? 1 : 0);
-        frameos_nim_set_fusion(config->image_fusion ? 1 : 0);
-        /* Fallback fit for consumers without their own placement — settings
-         * sync, cloud set_settings and the console all write it live. */
-        frameos_nim_set_scaling_mode(config->scaling_mode);
-        /* The colours block (automatic fit switch, frame-wide correction):
-         * same contract, the Nim side re-parses only when the text changed. */
-        frameos_nim_set_colors(config->colors);
-        frameos_nim_set_palette(config->palette);
-        /* The frame's button bindings (docs/events.md "Event map"), the same
-         * way: the dispatcher reads them off its config on the next press. */
-        frameos_nim_set_event_map(config->event_map);
-        /* Same contract for the zone name: live, one string per pass. */
-        frameos_nim_set_time_zone(config->time_zone);
-
-        /* Battery guardrail: when the cell is nearly empty, skip the (costly)
-         * render + panel refresh and sleep long so a low battery can't keep
-         * cycling the display down to a damaging voltage. Two bursts a
-         * moment apart, the higher one wins (a radio burst can only sag a
-         * reading, never inflate it); fos_power_decide then weighs it
-         * against the state carried in RTC memory — see fos_power.h for the
-         * log this replays. */
-        int battery_pct = -1, battery_mv = 0;
-        if (fos_battery_present()) {
-            fos_battery_read(&battery_mv, &battery_pct);
-            vTaskDelay(pdMS_TO_TICKS(FOS_BATTERY_RESAMPLE_GAP_MS));
-            int again_mv = 0, again_pct = -1;
-            fos_battery_read(&again_mv, &again_pct);
-            if (again_mv > battery_mv) {
-                battery_mv = again_mv;
-                battery_pct = again_pct;
-            }
-        }
-        /* A clock write SNTP could not land yet (fos_rtc.c). */
-        fos_rtc_retry_pending();
-        /* The charger, where the board has one (fos_charger.c): USB in means
-         * not on battery, whatever the divider reads of a charging cell. */
-        fos_charger_status_t charger;
-        bool charger_known = fos_charger_present() && fos_charger_read(&charger) == ESP_OK;
-        fos_gauge_status_t gauge;
-        if (!charger_known && fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK && gauge.present) {
-            memset(&charger, 0, sizeof(charger));
-            charger.usb_power = !gauge.discharging;
-            charger.charging = gauge.charging;
-            charger.charge_done = gauge.full;
-            charger_known = true;
-        }
-        fos_power_input_t power_in = {
-            .mv = battery_mv,
-            .deep_sleep = config->deep_sleep,
-            .deep_sleep_on_battery = config->deep_sleep_on_battery,
-            .usb_power = charger_known ? (charger.usb_power ? 1 : 0) : -1,
-        };
-        fos_power_decision_t power;
-        fos_power_decide(&power_in, &s_power_state, &power);
-        bool battery_critical = power.critical;
-        bool deep_sleep_now = power.deep_sleep;
-        /* Say what this pass decided and from what: the one line that tells
-         * "deep sleep silently off" from "the owner switched it off". Only
-         * where it can say something — a stay-connected frame without a
-         * cell would just repeat "off" every interval. */
-        if (config->deep_sleep || config->deep_sleep_on_battery || power.suspect ||
-            power.critical) {
-            char line[256];
-            size_t used = (size_t)snprintf(
-                line, sizeof(line),
-                "{\"event\":\"power\",\"source\":\"esp32\",\"deepSleep\":\"%s\","
-                "\"onBattery\":%s,\"wakeCheckSeconds\":%lu",
-                !deep_sleep_now ? "off" : config->deep_sleep ? "always"
-                                  : battery_critical ? "critical" : "battery",
-                power.on_battery ? "true" : "false",
-                (unsigned long)config->wake_check_sec);
-            if (fos_battery_present() && used < sizeof(line) - 96) {
-                used += (size_t)snprintf(line + used, sizeof(line) - used,
-                                         ",\"batteryMillivolts\":%d,\"batteryPercent\":%d",
-                                         battery_mv, battery_pct);
-                if (power.mv_used != battery_mv) {
-                    used += (size_t)snprintf(line + used, sizeof(line) - used,
-                                             ",\"believedMillivolts\":%d", power.mv_used);
+            /* Battery guardrail: when the cell is nearly empty, skip the (costly)
+             * render + panel refresh and sleep long so a low battery can't keep
+             * cycling the display down to a damaging voltage. Two bursts a
+             * moment apart, the higher one wins (a radio burst can only sag a
+             * reading, never inflate it); fos_power_decide then weighs it
+             * against the state carried in RTC memory — see fos_power.h for the
+             * log this replays. */
+            int battery_pct = -1, battery_mv = 0;
+            if (fos_battery_present()) {
+                fos_battery_read(&battery_mv, &battery_pct);
+                vTaskDelay(pdMS_TO_TICKS(FOS_BATTERY_RESAMPLE_GAP_MS));
+                int again_mv = 0, again_pct = -1;
+                fos_battery_read(&again_mv, &again_pct);
+                if (again_mv > battery_mv) {
+                    battery_mv = again_mv;
+                    battery_pct = again_pct;
                 }
             }
-            if (power.suspect && used < sizeof(line) - 24) {
-                used += (size_t)snprintf(line + used, sizeof(line) - used, ",\"suspect\":true");
+            /* A clock write SNTP could not land yet (fos_rtc.c). */
+            fos_rtc_retry_pending();
+            /* The charger, where the board has one (fos_charger.c): USB in means
+             * not on battery, whatever the divider reads of a charging cell. */
+            fos_charger_status_t charger;
+            bool charger_known = fos_charger_present() && fos_charger_read(&charger) == ESP_OK;
+            fos_gauge_status_t gauge;
+            if (!charger_known && fos_gauge_present() && fos_gauge_read(&gauge) == ESP_OK && gauge.present) {
+                memset(&charger, 0, sizeof(charger));
+                charger.usb_power = !gauge.discharging;
+                charger.charging = gauge.charging;
+                charger.charge_done = gauge.full;
+                charger_known = true;
             }
-            if (charger_known && used < sizeof(line) - 40) {
-                used += (size_t)snprintf(line + used, sizeof(line) - used, ",\"usbPower\":%s,\"charging\":%s",
-                                         charger.usb_power ? "true" : "false",
-                                         charger.charging ? "true" : "false");
+            fos_power_input_t power_in = {
+                .mv = battery_mv,
+                .deep_sleep = config->deep_sleep,
+                .deep_sleep_on_battery = config->deep_sleep_on_battery,
+                .usb_power = charger_known ? (charger.usb_power ? 1 : 0) : -1,
+            };
+            fos_power_decision_t power;
+            fos_power_decide(&power_in, &s_power_state, &power);
+            bool battery_critical = power.critical;
+            bool deep_sleep_now = power.deep_sleep;
+            /* Say what this pass decided and from what: the one line that tells
+             * "deep sleep silently off" from "the owner switched it off". Only
+             * where it can say something — a stay-connected frame without a
+             * cell would just repeat "off" every interval. */
+            if (config->deep_sleep || config->deep_sleep_on_battery || power.suspect ||
+                power.critical) {
+                char line[256];
+                size_t used = (size_t)snprintf(
+                    line, sizeof(line),
+                    "{\"event\":\"power\",\"source\":\"esp32\",\"deepSleep\":\"%s\","
+                    "\"onBattery\":%s,\"wakeCheckSeconds\":%lu",
+                    !deep_sleep_now ? "off" : config->deep_sleep ? "always"
+                                      : battery_critical ? "critical" : "battery",
+                    power.on_battery ? "true" : "false",
+                    (unsigned long)config->wake_check_sec);
+                if (fos_battery_present() && used < sizeof(line) - 96) {
+                    used += (size_t)snprintf(line + used, sizeof(line) - used,
+                                             ",\"batteryMillivolts\":%d,\"batteryPercent\":%d",
+                                             battery_mv, battery_pct);
+                    if (power.mv_used != battery_mv) {
+                        used += (size_t)snprintf(line + used, sizeof(line) - used,
+                                                 ",\"believedMillivolts\":%d", power.mv_used);
+                    }
+                }
+                if (power.suspect && used < sizeof(line) - 24) {
+                    used += (size_t)snprintf(line + used, sizeof(line) - used, ",\"suspect\":true");
+                }
+                if (charger_known && used < sizeof(line) - 40) {
+                    used += (size_t)snprintf(line + used, sizeof(line) - used, ",\"usbPower\":%s,\"charging\":%s",
+                                             charger.usb_power ? "true" : "false",
+                                             charger.charging ? "true" : "false");
+                }
+                if (used < sizeof(line) - 2) {
+                    snprintf(line + used, sizeof(line) - used, "}");
+                    frameos_nim_log_hook(line);
+                }
             }
-            if (used < sizeof(line) - 2) {
-                snprintf(line + used, sizeof(line) - used, "}");
-                frameos_nim_log_hook(line);
-            }
+            s_pass_battery_critical = battery_critical;
+            s_pass_deep_sleep = deep_sleep_now;
+            s_pass_battery_pct = battery_pct;
+            /* A frame that stays awake keeps its scene's JS interpreters
+             * between renders while there is room; a deep sleep ends them
+             * anyway. */
+            frameos_nim_set_keep_js(!deep_sleep_now);
         }
+        bool battery_critical = s_pass_battery_critical;
+        bool deep_sleep_now = s_pass_deep_sleep;
+        int battery_pct = s_pass_battery_pct;
         /* A wake-check pass: this deep-sleeping frame woke early (or is held
          * awake) only to check the control plane for commands — the panel's
          * scheduled render is not due yet, so skip the costly refresh. An
@@ -2018,8 +2325,15 @@ static void client_task(void *arg)
                             /* a due date past the longest allowed interval is
                              * garbage (clock jump, stale RTC) — render */
                             s_next_render_due < wall_now + 7 * 86400 + 3600;
+        /* A render the scene asked for is not one somebody asked for: a run
+         * of them is a burst, logged like an animation. Not on a frame about
+         * to deep-sleep, which would never make up a quiet frame's skips. */
+        bool scene_render = s_scene_render && !deep_sleep_now;
+        s_scene_render = false;
+        if (force_render && !scene_render) s_loud_next = true;
         force_render = false;
         bool rendered = false;
+        bool frame_quiet = false;
         if (s_render_paused_for_memory) {
             /* Paused after repeated PSRAM exhaustion — see
              * fos_client_render_recovery_boot. Skipping the render is what
@@ -2041,13 +2355,31 @@ static void client_task(void *arg)
                 ESP_LOGW(TAG, "OTA in progress; skipping render cycle");
                 log_render_skipped("ota", -1);
             } else {
+                /* An animation logs one frame in full every so often, with
+                 * the summary of the quiet ones before it. */
+                int64_t frame_start = esp_timer_get_time();
+                bool quiet = !s_loud_next && (fos_animation_frame_quiet(&s_anim, frame_start) ||
+                                              (scene_render && fos_animation_burst_quiet(&s_anim, frame_start)));
+                frame_quiet = quiet;
+                s_loud_next = false;
+                if (s_anim.active && !quiet) log_animation("running", true);
+                set_quiet(quiet);
                 s_render_in_flight = true;
-                render_once();
+                render_once(quiet);
                 s_render_in_flight = false;
                 rendered = true;
+                fos_animation_frame_done(&s_anim, cycle_start, esp_timer_get_time());
+                if (scene_render) {
+                    fos_animation_burst_frame_done(&s_anim, frame_start, esp_timer_get_time(), quiet);
+                }
             }
         }
-        log_metrics_sample();
+        /* An animation samples with the frame it logs in full, every ten
+         * seconds: a sample is three heap walks and a line the provider's
+         * Metrics panel stores, and once a second was 3,600 an hour. A pass
+         * that renders nothing keeps the once-a-second housekeeping. */
+        bool sample_metrics = (s_anim.active || scene_render) && rendered ? !frame_quiet : housekeeping;
+        if (sample_metrics) log_metrics_sample();
         frameos_nim_flush_logs(); /* the sample must not wait for next pass */
 
         /* The scene's refreshInterval is authoritative when a scene is
@@ -2074,6 +2406,37 @@ static void client_task(void *arg)
         }
         if (battery_critical && interval < FOS_BATTERY_CRITICAL_SLEEP_SEC) {
             interval = FOS_BATTERY_CRITICAL_SLEEP_SEC;
+        }
+
+        /* A scene that asks for frames faster than once a second, on an LCD:
+         * paced in microseconds from here, the whole-second sleep below
+         * skipped (fos_animation.h). */
+        bool animate = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available() &&
+                       !battery_critical && !s_render_paused_for_memory &&
+                       fos_animation_wanted(scene_interval, fos_display_is_lcd(), deep_sleep_now);
+        if (fos_animation_update(&s_anim, animate, scene_interval, esp_timer_get_time())) {
+            if (s_anim.active) {
+                log_animation("start", false);
+            } else {
+                log_animation("stop", false);
+                set_quiet(false);
+            }
+        }
+        if (s_anim.active) {
+            if (rendered) {
+                /* logic/nextSleepDuration, in the animation's own units. */
+                double next_sleep = frameos_nim_next_sleep();
+                if (next_sleep >= 0.0) {
+                    if (next_sleep > 7 * 86400.0) next_sleep = 7 * 86400.0;
+                    s_anim.next_due_us = cycle_start + (int64_t)(next_sleep * 1000000.0);
+                }
+            }
+            /* Core 1 is the render task's and the refill interrupt's; a frame
+             * slower than the panel never blocks, so let the idle task run
+             * once a second (the task watchdog watches it). */
+            if (housekeeping) vTaskDelay(1);
+            animation_wait(config, fos_animation_wait_us(&s_anim, esp_timer_get_time()));
+            continue;
         }
 
         int64_t sleep_decided_us = esp_timer_get_time();
@@ -2208,6 +2571,8 @@ static void client_task(void *arg)
             keep_awake_s = keep_awake_remaining_seconds();
         }
         if (deep_sleep_now && fos_display_present() && keep_awake_s == 0) {
+            /* What the scene changed is all the next wake has of it. */
+            fos_scene_state_flush(true);
             /* Wake early to check the control plane for commands when asked
              * to — the render schedule itself survives in s_next_render_due
              * (RTC memory), so the check-in wake does not refresh the panel. */
@@ -2289,13 +2654,15 @@ static void client_task(void *arg)
              * process_events below delivers them. */
             uint32_t max_slice = fos_buttons_busy() ? 50 : 1000;
             EventBits_t bits = xEventGroupWaitBits(
-                s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT,
+                s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT,
                 pdTRUE, pdFALSE,
                 fos_wake_slice_ticks(wait_until_us - esp_timer_get_time(), max_slice, portTICK_PERIOD_MS));
             bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
             /* Somebody wants a render. Decided below: now, or — while a voice
              * session holds the panel — when it releases, in one pass. */
             bool want_render = (bits & RENDER_NOW_BIT) != 0;
+            /* The scene's own ask, after a touch or a key: a burst's frame. */
+            bool scene_asked = (bits & SCENE_RENDER_BIT) != 0;
             if (bits & COMMANDS_BIT) {
                 /* The backend nudged: it just queued something for an awake
                  * frame. Pull now; whatever the commands asked for (a render,
@@ -2313,13 +2680,21 @@ static void client_task(void *arg)
             /* INPUT_EVENTS_BIT ends the slice early and nothing more: the
              * press is delivered just below, and the render-requested check
              * after it decides whether a frame follows. */
+            fos_scene_state_flush(false);
             if (nim) {
                 fos_buttons_process_events();
                 fos_touch_process_events();
+                /* An event from HTTP, the cloud or the console: to the scene
+                 * now, not at the next pass an interval away. Whether a frame
+                 * follows is the scene's to say, read just below. */
+                fos_events_deliver_deferred();
                 /* Wall-clock schedule (setCurrentScene at 07:00 etc.) —
                  * evaluated on the render task, like every Nim call. */
                 if (fos_schedule_tick()) want_render = true;
-                if (frameos_nim_render_requested()) want_render = true;
+                if (frameos_nim_render_requested()) scene_asked = true;
+                /* A burst a second over: its summary, and what its last
+                 * frame skipped when that one was quiet. */
+                finish_burst();
             }
             /* A code started (the verb wakes this wait), answered, replaced
              * or expired: within a second, whatever the interval. */
@@ -2342,10 +2717,11 @@ static void client_task(void *arg)
             }
             /* The answer has been read: the panel goes back to the image
              * alone, unless a render is about to do that anyway. */
-            if (!want_render && notice_expired() && !render_held() && !repaint_snapshot(false)) {
+            if (!want_render && !scene_asked && notice_expired() && !render_held() &&
+                !repaint_snapshot(false)) {
                 s_notice_shown_us = 0; /* no snapshot to repaint from; the next render clears it */
             }
-            if (want_render) {
+            if (want_render || scene_asked) {
                 if (render_held()) {
                     /* A voice session is in flight: the chat's switch takes
                      * effect now (its state, the next command, goes to the
@@ -2354,6 +2730,7 @@ static void client_task(void *arg)
                     if (nim) fos_scenes_apply_pending_selection();
                 } else {
                     s_render_owed = false;
+                    s_scene_render = !want_render;
                     force_render = true;
                     break;
                 }
@@ -2375,6 +2752,12 @@ void fos_client_start(void)
     s_events = xEventGroupCreate();
     s_snapshot_lock = xSemaphoreCreateMutex();
     fos_framebuffer_set_lend_hook(snapshot_before_lend);
+    fos_display_set_before_write_hook(snapshot_before_panel_write);
+    const esp_timer_create_args_t frame_timer_args = {
+        .callback = frame_timer_fired,
+        .name = "fos_frame",
+    };
+    if (esp_timer_create(&frame_timer_args, &s_frame_timer) != ESP_OK) s_frame_timer = NULL;
     if (!s_events || !s_snapshot_lock) {
         ESP_LOGE(TAG, "render task init failed: event group or snapshot lock unavailable");
         if (s_events) {

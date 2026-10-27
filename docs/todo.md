@@ -9,7 +9,7 @@ models, wire protocols, measurements — lives in the linked docs; the todo
 files only carry the work. **When an item ships, delete it** (and update its
 line in the map).
 
-## The map (2026-10-19)
+## The map (2026-10-25)
 
 1. **`docs/convergence-todo.md`** — the architecture getting smaller: one
    provider protocol on two hosts. **Next up: item 7 stage 1**, the backend
@@ -39,12 +39,18 @@ line in the map).
    merges. The ESP32's open work lives in the other files.
 6. **`docs/ui-todo.md`** — JSX widgets that render and react on the frame.
    Designed, not started. Lower priority for now, not parked.
-7. **`docs/scenes-todo.md`** — 49 store scene ideas, which
+7. **`docs/realtime-todo.md`** — LCD frames that animate (ESP32 animation
+   mode, the in-place canvas with three buffers, kept JS interpreters, damage
+   repaints and QIO flash shipped: DVD Logo Bounce on the SenseCAP Indicator
+   went from one frame per 300 s to 19.6 fps). **Next up:** the LCD refill
+   off the CPU (GDMA), then the SVG parse and a retained compositor. The
+   model is `docs/realtime-rendering.md`.
+8. **`docs/scenes-todo.md`** — 49 store scene ideas, which
    `build-todo-scenes.ts` builds from. Lower priority for now, not parked.
-8. **`cloud/STORE-TODO.md`** — the store's design record (decisions, threat
+9. **`cloud/STORE-TODO.md`** — the store's design record (decisions, threat
    model, protocol), no open work; its open questions are below. The name
    stays because code comments cite its decision numbers.
-9. **Open PRs with their own todo file**, joining this map when they merge:
+10. **Open PRs with their own todo file**, joining this map when they merge:
    #555 (`docs/local-assets-todo.md`: serve-stale caches, bounded image
    libraries, paid-source budgets). Draft #496 and its
    `docs/scene-rhythm-todo.md` are superseded by #582, whose open work is the
@@ -165,8 +171,6 @@ deep-sleep wake), the panel runs again: a *repaint*. Open:
   both panels in (`scenes:load` `embedded-scene-read`), the weather panel is
   kept (its renders take the clock's time, not the weather fetch's). An E1004 1600x1200 split: the copy is refused once
   (`render:rhythm:copyRefused`) and the big panel repaints.
-- **Realtime on an ESP32.** The C render loop ignores scene intervals under
-  1 s and sleeps in whole seconds; a fast ESP32 with an LCD would need both.
 
 ---
 

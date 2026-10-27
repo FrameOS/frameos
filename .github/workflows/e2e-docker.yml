@@ -227,6 +227,11 @@ jobs:
                 embedded/esp32/main/fos_voice_hold.c embedded/esp32/main/tests/test_fos_voice_hold.c \
                 -o /tmp/test_fos_voice_hold
               /tmp/test_fos_voice_hold
+              # Animation mode pacing: a scene below a one-second interval on an LCD, pure.
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/fos_animation.c embedded/esp32/main/tests/test_fos_animation.c \
+                -o /tmp/test_fos_animation
+              /tmp/test_fos_animation
               # The charger register decode, the RTC conversions, the fuel gauge decode
               # and the climate sensor decode, pure.
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \

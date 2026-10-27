@@ -137,6 +137,9 @@ type
     js_malloc_usable_size*: proc(p: ConstPointer): csize_t {.cdecl.}
   JSAtom* = uint32
   JSClassID* = uint32
+  JSPropertyEnum* {.importc: "JSPropertyEnum", header: "quickjs/quickjs.h", bycopy.} = object
+    is_enumerable*: cint
+    atom*: JSAtom
 
   # Pointer types for runtime and context
   JSRuntimePtr* = ptr JSRuntime
@@ -262,6 +265,9 @@ proc JS_NewAtom*(ctx: ptr JSContext, str: cstring): JSAtom
 proc JS_NewAtomLen*(ctx: ptr JSContext, str: cstring, len: csize_t): JSAtom
 proc JS_FreeAtom*(ctx: ptr JSContext, atom: JSAtom)
 proc JS_AtomToString*(ctx: ptr JSContext, atom: JSAtom): JSValue
+proc JS_GetOwnPropertyNames*(ctx: ptr JSContext, ptab: ptr ptr UncheckedArray[JSPropertyEnum],
+    plen: ptr uint32, obj: JSValueConst, flags: cint): cint
+proc JS_FreePropertyEnum*(ctx: ptr JSContext, tab: ptr UncheckedArray[JSPropertyEnum], len: uint32)
 
 # Module loading
 # `module_loader` is a `JSModuleLoaderFunc *` (const char * module name); Nim's
@@ -322,6 +328,8 @@ when not defined(frameosEmbedded) and not defined(frameosWasm):
 # and the caller got a value (a Promise, for a module) where it expected
 # bytecode. compileToBytecode has been quietly serialising the wrong thing.
 const
+  JS_GPN_STRING_MASK* = (1 shl 0)
+  JS_GPN_ENUM_ONLY* = (1 shl 4)
   JS_EVAL_TYPE_GLOBAL* = 0
   JS_EVAL_TYPE_MODULE* = 1
   JS_EVAL_FLAG_STRICT* = (1 shl 3)
@@ -1510,6 +1518,15 @@ proc close*(js: var QuickJS) =
   if js.guard != nil:
     dealloc(js.guard)
     js.guard = nil
+
+proc heapBytes*(js: QuickJS): int =
+  ## The bytes this interpreter's heap holds, by QuickJS's own accounting.
+  ## Walks the heap: not for every frame.
+  if js.runtime == nil:
+    return 0
+  var usage: JSMemoryUsage
+  JS_ComputeMemoryUsage(js.runtime, addr usage)
+  max(0, usage.malloc_size.int)
 
 proc abandon*(js: var QuickJS): int {.discardable.} =
   ## Let go of an interpreter that an out-of-memory abort jumped out of

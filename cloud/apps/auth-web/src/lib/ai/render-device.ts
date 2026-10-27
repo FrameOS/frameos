@@ -1,4 +1,4 @@
-import { esp32DeviceLimits, esp32PixelFormatIsGrey, type DeviceLimits } from "frameos-wasm";
+import { esp32DeviceLimits, type DeviceLimits } from "frameos-wasm";
 import { frameHardwareIsEsp32 } from "../frames";
 
 // The memory a frame renders its scenes in, so the chat's render_scene runs
@@ -8,9 +8,10 @@ import { frameHardwareIsEsp32 } from "../frames";
 // and a PSRAM-less board renders nothing itself, so both are null. The SPA's
 // render check makes the same call (frontend/src/utils/frameRenderDevice.ts).
 
-/** `greyPanel`: the frame's panel is greyscale (`hardware.pixelFormat`), so
- * past RGBX its canvas is one byte of luma a pixel, not 565's two. */
-export type RenderDevice = { label: string; psramBytes: number; greyPanel?: boolean };
+/** `pixelFormat`: the frame's panel format (`hardware.pixelFormat`), which
+ * decides its canvas — one byte of luma a pixel on a grey panel, 565 on an
+ * RGB565 LCD (esp32CanvasBytesPerPixel). Null when the frame does not say. */
+export type RenderDevice = { label: string; psramBytes: number; pixelFormat?: number | null };
 
 /** What the 8 MB boards report; the tightest FrameOS renders on. */
 const defaultEsp32PsramBytes = 8 * 1024 * 1024;
@@ -27,9 +28,10 @@ export function frameRenderDevice(frame: { hardware: unknown }): RenderDevice | 
   if (psramBytes <= 0) {
     return null;
   }
-  const greyPanel = esp32PixelFormatIsGrey((frame.hardware as { pixelFormat?: unknown } | null)?.pixelFormat);
+  const reportedFormat = (frame.hardware as { pixelFormat?: unknown } | null)?.pixelFormat;
+  const pixelFormat = typeof reportedFormat === "number" ? reportedFormat : null;
   const megabytes = Math.round((psramBytes / (1024 * 1024)) * 10) / 10;
-  return { label: `ESP32 with ${megabytes} MB PSRAM`, psramBytes, greyPanel };
+  return { label: `ESP32 with ${megabytes} MB PSRAM`, psramBytes, pixelFormat };
 }
 
 /** The ceiling a render at this size runs under: on an ESP32 the canvas
@@ -39,5 +41,5 @@ export function renderDeviceLimits(
   width: number,
   height: number,
 ): DeviceLimits {
-  return esp32DeviceLimits(width, height, device.psramBytes, device.greyPanel ?? false);
+  return esp32DeviceLimits(width, height, device.psramBytes, device.pixelFormat ?? null);
 }

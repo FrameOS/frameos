@@ -51,6 +51,10 @@ extern void NimMain(void);
 extern bool fos_nim_init_impl(int width, int height, const char *name, int max_http_response_bytes,
                               int rotate);
 extern int fos_nim_render_impl(uint8_t *buf, size_t len, int pixel_format);
+extern int fos_nim_render_panel_impl(uint8_t *buf, size_t len, int pixel_format, uint32_t generation);
+extern void fos_nim_set_quiet_impl(int quiet);
+extern void fos_nim_set_keep_js_impl(int keep);
+extern size_t fos_nim_js_runtime_bytes_impl(void);
 extern int fos_nim_render_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
 extern const char *fos_nim_info_impl(void);
@@ -377,6 +381,9 @@ size_t fos_psram_largest_free_block(void)
     return heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
+/* main/fos_assets_flash.c, absent from a build without it. */
+extern int64_t fos_assets_flash_free_bytes(void) __attribute__((weak));
+
 /* Free bytes on the filesystem holding `path`, for the Nim side's
  * getAvailableDiskSpace (utils/system.nim): the spool checks it before
  * spilling an image, so a 1.5 MB canvas is never written onto a 1 MB state
@@ -392,6 +399,12 @@ int64_t fos_vfs_free_bytes(const char *path)
         size_t total = 0, used = 0;
         if (esp_spiffs_info("state", &total, &used) != ESP_OK) return -1;
         return total > used ? (int64_t)(total - used) : 0;
+    }
+    /* No SD card: the assets directory lives on the state partition, less
+     * the reserve the scene store keeps (main/fos_assets_flash.c). */
+    if (fos_assets_flash_free_bytes) {
+        int64_t flash_free = fos_assets_flash_free_bytes();
+        if (flash_free >= 0) return flash_free;
     }
     /* esp_vfs_fat_info wants the mount point itself; walk up from the path
      * until a mount answers (the spool dir is <assets>/.cache). */
@@ -694,6 +707,49 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format)
     s_nim_oom_jmp_armed = false;
     nim_lock_give();
     return result;
+}
+
+int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format, uint32_t generation)
+{
+    if (!s_nim_ready || !buf) return -1;
+    if (!nim_lock_take()) return -1;
+    int result;
+    if (setjmp(s_nim_oom_jmp) == 0) {
+        s_nim_oom_jmp_armed = true;
+        result = fos_nim_render_panel_impl(buf, len, pixel_format, generation);
+        if (result == 0) nim_note_healthy_render();
+    } else {
+        nim_oom_abort_note("render");
+        result = -1;
+    }
+    s_nim_oom_jmp_armed = false;
+    nim_lock_give();
+    return result;
+}
+
+void frameos_nim_set_quiet(bool quiet)
+{
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    fos_nim_set_quiet_impl(quiet ? 1 : 0);
+    nim_lock_give();
+}
+
+void frameos_nim_set_keep_js(bool keep)
+{
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    fos_nim_set_keep_js_impl(keep ? 1 : 0);
+    nim_lock_give();
+}
+
+size_t frameos_nim_js_runtime_bytes(void)
+{
+    if (!s_nim_ready) return 0;
+    if (!nim_lock_take()) return 0;
+    size_t bytes = fos_nim_js_runtime_bytes_impl();
+    nim_lock_give();
+    return bytes;
 }
 
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)

@@ -511,6 +511,19 @@ type
     loopIndex*: int
     loopKey*: string
     nextSleep*: float
+    # The scene's background colour, owed to the canvas since the render
+    # began and not painted yet (runEventInner): whatever draws first pays it
+    # (`paintPendingBackground`), and a first paint that covers every pixel
+    # opaquely — an SVG's full-canvas background rect — waives it
+    # (`takeOwedBackground`). A fill is a whole pass over the canvas, on an
+    # ESP32 tens of milliseconds of PSRAM traffic, for pixels about to be
+    # painted over.
+    backgroundPending*: bool
+    backgroundColor*: Color
+    # This render's flow is a single node: whatever its image input paints
+    # into the canvas is the whole frame (utils/svg_frames.nim repaints only
+    # the damage on an LCD's buffer then).
+    wholeFrame*: bool
     # Set while resolving an image input whose consumer will draw the result
     # onto the canvas full-frame: producers may decode straight into
     # `decodeTargetImage` with `decodeTargetScalingMode` (cover/contain/

@@ -88,7 +88,11 @@
   EventHost): a fix there is a fix for both, and a copy in either file is how
   the two drift. wasm does not trap on a nil dereference (address 1 is
   readable) — a green preview check says nothing about one. On the ESP32 the C edge is `embedded/esp32/main/fos_events.c`
-  (one function for HTTP, schedule, cloud, console and buttons). New behaviour
+  (one function for HTTP, schedule, cloud, console and buttons), and scene
+  code runs on the render task alone: what reaches the Nim dispatcher from
+  any other task (HTTP, the cloud, the console) is queued for it
+  (`fos_events_defer`) — the first HTTP `pointerMove` compiled the scene's JS
+  on the 8 KB HTTP task and crashed the frame (2026-10-26). New behaviour
   gets a case in the `dispatcher` section of `docs/event-fixtures.json`
   (`test_event_loop.nim` runs it). **Input** (pointers, keys, buttons) goes
   through `frameos/src/frameos/input_state.nim` — the cursor, the modifiers,
@@ -98,7 +102,7 @@
   report. The ESP32 compiles the pointer and gesture half too (the reTerminal
   Sticky's and the E1003's GT911 glass, `embedded/esp32/main/fos_touch.c`, queues
   `pointerDown` / `pointerMove` / `pointerUp` on the wire and the render task
-  delivers them), not the keyboard half and not the old-name aliases. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
+  delivers them) and the old-name aliases with them, not the keyboard half. `docs/events.md` "Input" is the spec; `test_input_state.nim` and the
   evdev translator's `test_translate.nim` are where a rule gets its test.
 
 - **Two event maps, one rule shape** (`docs/events.md` "Event map";
@@ -275,6 +279,46 @@
   on Linux and in the preview, `fos_events.c` on the ESP32. Keep the two
   rules alike.
 
+## Real-time rendering: `docs/realtime-rendering.md`
+
+- A scene below a one-second `refreshInterval`, on an LCD, **animates** on the
+  ESP32 (`main/fos_animation.c`, host-tested): frames paced in microseconds,
+  the per-pass pulls, sensors and settings pushes once a second, one frame in
+  ten seconds logged in full — its `render:done` is what a deploy waits for —
+  with a `render:animation` summary of the quiet frames between. A new
+  per-pass step in `fos_client.c` goes inside the `housekeeping` block unless
+  it must run every frame, and a new per-frame log line costs frames: every
+  line also goes out on the 115200-baud console.
+- **The canvas is the panel where it can be.** An RGB565 LCD's canvas is its
+  back frame buffer (`fos_display_render_target`, `frameos_nim_render_panel`:
+  nothing packed, the blit a buffer switch); a grey or black-and-white panel
+  draws in pixie's luma surface. The canvas rule has five copies
+  (`frameos_display.h` lists them, `docs/device-limits-fixtures.json` pins
+  two): change them together.
+- **The background is owed, not painted** (`ExecutionContext.backgroundPending`).
+  Anything that draws into the canvas other than a flow node calls
+  `paintPendingBackground` first; a producer that takes the live canvas gets
+  it painted by `takeDecodeTarget`, unless it settles it itself
+  (`deferBackground` + `takeOwedBackground`, as the SVG path does with pixie's
+  `coversOpaque`). `test_background_deferral.nim` starts from a canvas holding
+  an old frame, so a debt nobody paid shows.
+- **Per-frame code does not ask `availableRenderBytes()`.** The largest free
+  PSRAM block is a walk of the whole heap on an ESP32 (0.5–2 ms); ask the
+  free total (`availableRenderHeadroomBytes()`, microseconds) and leave the
+  largest block to the one big allocation that needs it — pixie's decode
+  budget measures it only when a decode asks
+  (`setDecodeContiguousBudgetProvider`).
+- A frame that stays awake keeps its scene's JS interpreters between renders
+  (`settleIdleJsAppRuntimes`), and a whole-frame SVG on an LCD repaints only
+  pixie's damage box (`utils/svg_frames.nim`, keyed on the firmware's write
+  count per buffer): a new writer into an LCD buffer that is not a render in
+  place calls `fos_display_mark_written`.
+- **A pixel loop can use both cores** (`components/frameos_nim/fos_rows.c`):
+  `fos_rows_run` hands a job's rows out in blocks to the render task and a
+  helper on the other core (resample.nim's draw is the first job). The job
+  runs on a task the Nim runtime knows nothing about: plain values and
+  pointers only, no ref, no allocation, no log, nothing that raises.
+
 ## Retiring a built-in Nim app: `docs/retired-apps.json` is the contract
 
 - A Nim app that gets a repo JavaScript replacement (`data/immich` →
@@ -286,9 +330,11 @@
   replacement for a scene still on disk. `docs/retired-apps.md` has the
   steps; run `python3 frameos/tools/generate_retired_apps.py` after touching
   the contract or a replacement's files (`test_retired_apps.py` checks it).
-- A port must behave like the Nim app on an ESP32 too: the runtime tears
-  every idle JS interpreter down after each render, so state that outlives a
-  render goes through `frameos.remember` / `recall`, not module variables; a
+- A port must behave like the Nim app on an ESP32 too: a deep-sleeping one
+  (and the editor's preview) tears every idle JS interpreter down after each
+  render, and one that stays awake does when memory runs short, so state that
+  outlives a render goes through `frameos.remember` / `recall`, not module
+  variables; a
   throw in `get()` fails the node like a raising Nim app (defaulted args, no
   cache entry). Port the Nim tests to `js_runtime/tests/test_<app>_js_app.nim`
   with `jsHttpRequestHook` / `contextDownloadHook`, and give the contract the

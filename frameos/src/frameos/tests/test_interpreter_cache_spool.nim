@@ -35,15 +35,24 @@ let callColors = [
   rgbx(0, 0, 255, 255), # third compute: blue
 ]
 
+const ProducerNodeId = 3.NodeId
+
 var hookCalls = 0
 var hookTargets: seq[Image] = @[]
+# Whether the cache still held the producer's last value while it ran.
+var observedScene: InterpretedFrameScene = nil
+var staleHeldDuringCompute: seq[bool] = @[]
+# Paint a 4 MB image of its own instead of the scratch the interpreter offers.
+var paintOwnImage = false
 
 proc paintingDownload(url: string, maxBytes: int, target: Image,
     fit: ScaledDecodeFit, boundWidth: int, boundHeight: int): tuple[image: Image, data: string] =
-  let image = if target.isNil: newImage(1024, 1024) else: target
+  let image = if target.isNil or paintOwnImage: newImage(1024, 1024) else: target
   let color = callColors[min(hookCalls, callColors.high)]
   hookCalls += 1
   hookTargets.add(target)
+  if not observedScene.isNil:
+    staleHeldDuringCompute.add(observedScene.cacheValues.hasKey(ProducerNodeId))
   for y in 0 ..< image.height:
     for x in 0 ..< image.width:
       image.data[image.dataIndex(x, y)] = color
@@ -78,7 +87,6 @@ proc edge(id, source: int, sourceHandle: string, target: int,
   DiagramEdge(id: id.NodeId, source: source.NodeId, sourceHandle: sourceHandle,
     target: target.NodeId, targetHandle: targetHandle, data: %*{})
 
-const ProducerNodeId = 3.NodeId
 
 proc photoScene(): ExportedInterpretedScene =
   ExportedInterpretedScene(
@@ -201,6 +209,63 @@ block no_headroom_upgrades_to_the_live_canvas_and_stores_nothing:
   doAssert hookCalls == 2, "nothing stored means every render recomputes"
 
   availableRenderBytesOverride = 0
+  cachedImageMemoryLimitOverride = 0
+
+block over_limit_image_stays_in_memory_while_the_frame_affords_it:
+  # A slideshow's photo under an animation is the cached producer's output on
+  # every frame. Past the limit with no disk to spill to it was stored
+  # nowhere, and every frame decoded it again. With headroom to spare beside
+  # it, the memory tier keeps it.
+  cachedImageMemoryLimitOverride = 1
+  availableRenderBytesOverride = 3 * 1024 * 1024
+  let scene = freshScene()
+  discard renderOnce(scene)
+  doAssert hookCalls == 1
+  doAssert InterpretedFrameScene(scene).cacheValues[ProducerNodeId].kind == fkImage
+  let second = renderOnce(scene)
+  doAssert hookCalls == 1, "an affordable image is a memory hit"
+  doAssert canvasColor(second) == callColors[0]
+  availableRenderBytesOverride = 0
+  cachedImageMemoryLimitOverride = 0
+
+block an_over_limit_image_needs_the_limit_again_in_headroom:
+  # The bar is the memory tier's own limit: with the image held, room for as
+  # much again. The SenseCAP Indicator's slideshow kept its 1 MB photo with
+  # 2.03 MB to spare only once its boot had settled, under a 2 MB bar.
+  cachedImageMemoryLimitOverride = 1024 * 1024 # the 4 MB photo is over it
+  paintOwnImage = true
+  availableRenderBytesOverride = 1024 * 1024 - 1
+  var scene = freshScene()
+  discard renderOnce(scene)
+  doAssert InterpretedFrameScene(scene).cacheValues.getOrDefault(ProducerNodeId).kind != fkImage,
+    "a byte under the limit: not in memory"
+  availableRenderBytesOverride = 1024 * 1024
+  scene = freshScene()
+  discard renderOnce(scene)
+  doAssert InterpretedFrameScene(scene).cacheValues[ProducerNodeId].kind == fkImage
+  discard renderOnce(scene)
+  doAssert hookCalls == 1, "kept: a memory hit"
+  paintOwnImage = false
+  availableRenderBytesOverride = 0
+  cachedImageMemoryLimitOverride = 0
+
+block a_stale_image_is_released_before_its_replacement_is_made:
+  # The next photo's decode gets the memory the last one held: on the
+  # SenseCAP Indicator that 0.9 MB was the difference between a photo and an
+  # error frame.
+  cachedImageMemoryLimitOverride = 1024 * 1024
+  let scene = freshScene()
+  observedScene = InterpretedFrameScene(scene)
+  staleHeldDuringCompute = @[]
+  discard renderOnce(scene)
+  InterpretedFrameScene(scene).cacheTimes[ProducerNodeId] = 0.0 # expired
+  let second = renderOnce(scene)
+  doAssert hookCalls == 2
+  doAssert staleHeldDuringCompute == @[false, false],
+    "the expired image was still cached while its replacement decoded"
+  doAssert canvasColor(second) == callColors[1]
+  doAssert InterpretedFrameScene(scene).cacheValues[ProducerNodeId].kind == fkImage
+  observedScene = nil
   cachedImageMemoryLimitOverride = 0
 
 block under_limit_images_still_cache_in_memory:

@@ -41,6 +41,26 @@ int frameos_nim_render(uint8_t *buf, size_t len, int pixel_format);
  * scene image is created. The caller owns `*buf` and must free it with free().
  * This lowers peak PSRAM on large panels. */
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format);
+/* Render the current scene into the panel's own buffer — an LCD's back frame
+ * buffer (fos_display_render_target), shown afterwards with a buffer switch
+ * and no copy. Where the scene canvas can be that buffer (a 565 panel,
+ * unrotated) the scene draws straight into it and nothing is packed;
+ * otherwise this packs into it like frameos_nim_render. `generation` counts
+ * the writes the firmware made into this buffer: unchanged since the last
+ * render into it, a scene drawn whole from one SVG repaints only what
+ * changed (frameos/utils/svg_frames.nim). Returns 0 on success; on an
+ * out-of-memory abort the buffer holds a part-drawn frame. */
+int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format, uint32_t generation);
+/* An animation's quiet frames (main/fos_animation.h): no per-render line and
+ * no scene log lines while on. */
+void frameos_nim_set_quiet(bool quiet);
+/* Keep the scene's JS app interpreters between renders while render headroom
+ * allows (yes on a frame that does not deep-sleep): the next render calls
+ * into them instead of building and compiling them again. They still go
+ * before a render or decode that finds headroom short. */
+void frameos_nim_set_keep_js(bool keep);
+/* What the live JS app interpreters hold (walks their heaps: not per frame). */
+size_t frameos_nim_js_runtime_bytes(void);
 /* Backward-compatible 1bpp entrypoint used by older builds/tests. */
 int frameos_nim_render_1bpp(uint8_t *buf, size_t len);
 /* Free-form info string (Nim/runtime versions, render counter). */

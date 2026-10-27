@@ -88,6 +88,13 @@ const char *fos_board_sd_pins(const char *hardware_preset);
  * Keep in step with `touchPins` in EMBEDDED_HARDWARE_PRESETS. */
 const char *fos_board_touch_pins(const char *hardware_preset);
 
+/* Which of the board's touch axes run against its panel's, after any swap
+ * (fos_touch_axes_swapped): the glass as mounted, not wiring, so not part
+ * of the `touch_pins` spec a frame stores. 0 for most boards. */
+#define FOS_BOARD_TOUCH_MIRROR_X 1
+#define FOS_BOARD_TOUCH_MIRROR_Y 2
+int fos_board_touch_mirror(const char *hardware_preset);
+
 /* The board's I2S audio codec as the `codec_pins` spec
  * (`mclk=14,bclk=15,ws=16,din=18,dout=17,pa=7`), "" for a board without one.
  * The Waveshare PhotoPainter and 13.3E6 carry an ES8311 (the speaker) and an

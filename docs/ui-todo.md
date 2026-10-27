@@ -144,9 +144,14 @@ events itself.
    the field-type checklists apply).
 8. **ESP32.** Same Nim layout/painter compiles in; measure flash cost before
    merging (firmware-size CI catches it), keep the handler table inside the
-   existing per-scene QuickJS budget, and accept full-frame renders only —
-   no dirty rects on SPI panels driven over strips. Buttons-as-focus is the
-   input story; there is no touch.
+   existing per-scene QuickJS budget. E-paper takes full-frame renders. The
+   LCD boards are the other case: the SenseCAP Indicator (FT6336U) and the
+   reTerminal Sticky and E1003 (GT911) have touch as pointer events, the
+   Indicator draws straight into its frame buffer and animates
+   (`docs/realtime-rendering.md`), and dirty rects there build on its damage
+   repaint (`utils/svg_frames.nim`) and the retained compositor of
+   `docs/realtime-todo.md` item 3. Buttons-as-focus stays the
+   input story for the boards without glass.
 9. **Dogfood: the status screen.** `buildStatusScreen` (both copies) and the
    provisioning screens are hand-drawn today — port one to the widget layer
    once 1–3 land. If the layer can't express our own status screen, users

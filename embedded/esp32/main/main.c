@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "driver/gpio.h"
@@ -23,8 +24,11 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_system.h"
+#include "esp_timer.h"
 
 #include "fos_assets.h"
+#include "fos_assets_flash.h"
 #include "fos_assets_sd.h"
 #include "fos_battery.h"
 #include "fos_defaults.h"
@@ -134,6 +138,52 @@ static void action_ota_now(void)
 static void action_render_now(void)
 {
     fos_client_render_fresh();
+}
+
+/* How long a scene's changed state may wait in RAM before it is written to
+ * the state partition (fos_scene_state.h: a write that erases stalls the
+ * flash cache, and an RGB panel scanned from PSRAM glitches). An RGB LCD
+ * waits ten minutes: a Ken Burns slideshow changes its photo counter every
+ * photo, and written every minute it erased a block, a disturbed scan, every
+ * several minutes on the SenseCAP Indicator (2026-10-26). Such a frame runs
+ * on mains power, and a restart or a deep sleep still writes first. */
+#define SCENE_STATE_WRITE_DELAY_MS (60 * 1000)
+#define SCENE_STATE_LCD_WRITE_DELAY_MS (10 * 60 * 1000)
+
+static SemaphoreHandle_t s_scene_state_mutex = NULL;
+
+static uint32_t scene_state_now_ms(void)
+{
+    return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+static void scene_state_lock(void)
+{
+    xSemaphoreTake(s_scene_state_mutex, portMAX_DELAY);
+}
+
+static void scene_state_unlock(void)
+{
+    xSemaphoreGive(s_scene_state_mutex);
+}
+
+static void scene_state_flush_on_restart(void)
+{
+    fos_scene_state_flush(true);
+}
+
+static void scene_state_write_behind(void)
+{
+    s_scene_state_mutex = xSemaphoreCreateMutex();
+    if (s_scene_state_mutex == NULL) return; /* writes through, as before */
+    const fos_scene_state_write_behind_t behind = {
+        .delay_ms = fos_display_is_lcd() ? SCENE_STATE_LCD_WRITE_DELAY_MS : SCENE_STATE_WRITE_DELAY_MS,
+        .now_ms = scene_state_now_ms,
+        .lock = scene_state_lock,
+        .unlock = scene_state_unlock,
+    };
+    fos_scene_state_set_write_behind(&behind);
+    esp_register_shutdown_handler(scene_state_flush_on_restart);
 }
 
 static void log_bootup_event(bool online);
@@ -345,7 +395,10 @@ void app_main(void)
     ESP_ERROR_CHECK(fos_wifi_init());
     fos_http_set_actions(action_render_now, action_ota_now);
     /* Scene state across deep sleep: the runtime reads a scene's last public
-     * state when it builds the scene and writes it when it changes. */
+     * state when it builds the scene and writes it when it changes, behind
+     * (fos_scene_state.h): the render task flushes it, and so does a
+     * restart from any task. */
+    scene_state_write_behind();
     frameos_nim_set_scene_state_hooks(fos_scene_state_load, fos_scene_state_save);
 
     bool online = false;
@@ -409,6 +462,12 @@ void app_main(void)
 
     if (fos_scenes_init() != ESP_OK) {
         ESP_LOGW(TAG, "scene storage unavailable, continuing without");
+    } else if (!config->assets_sd.enabled &&
+               fos_assets_flash_mount(config->assets_path[0] ? config->assets_path : "/srv/assets") == ESP_OK) {
+        /* No SD card wired (the SenseCAP Indicator's slot is the RP2040's):
+         * the assets directory lives on the state partition. A board with a
+         * slot and no card keeps waiting for one. */
+        fos_assets_cleanup_stale_uploads();
     }
     /* The other half of what the Nim dispatcher hands back to the firmware:
      * fos_scenes_init installed the scene-select hook, this installs the

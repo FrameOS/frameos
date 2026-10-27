@@ -55,6 +55,21 @@ int fos_display_bus(void);
 /* True when the display refreshes on its own (an LCD scanned from a frame
  * buffer): a blit shows at once and costs no e-paper wait. */
 bool fos_display_is_lcd(void);
+/* An LCD's own buffer for the next picture, `*len` bytes in the panel's
+ * format (fos_display_buffer_size): the renderer draws there in place and
+ * fos_display_blit(that buffer) shows it without a copy. The panel stays
+ * this task's until then, or until fos_display_release_render_target() hands
+ * it back unshown. NULL (and `*len` 0) for every panel that is not an LCD,
+ * which renders into a canvas of its own and packs. */
+uint8_t *fos_display_render_target(size_t *len, uint32_t *generation);
+void fos_display_release_render_target(void);
+/* `*generation` above counts the writes into the buffer other than a render
+ * drawn in place; report an overlay drawn over such a render here, so the
+ * next render into the buffer knows it holds more than the scene drew. */
+void fos_display_mark_written(const uint8_t *buf);
+/* Called with a panel buffer just before it is written to: a snapshot that
+ * points at the last picture shown lets go of it (fos_client.c). */
+void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf));
 /* The selected panel's own I2C bus when it runs one on exactly these pins
  * (the SenseCAP Indicator's LCD shares SDA39/SCL40 with its touch
  * controller): the handle (an `i2c_master_bus_handle_t`) for another device
@@ -71,23 +86,31 @@ int fos_display_panel_width(size_t index);
 int fos_display_panel_height(size_t index);
 fos_pixel_format_t fos_display_panel_format(size_t index);
 /* Bytes per pixel of the scene canvas the Nim renderer composites into
- * (frameos/src/embedded/embedded_runtime.nim, `renderCanvas`), decided per
- * board: 4 (pixie's RGBX) when a full canvas takes at most half the
- * module's PSRAM, else 1 (pixie's 8-bit luma surface) for a greyscale or
- * black-and-white panel and 2 (its 16-bit RGB 5/6/5 surface) for a colour
- * one. Both the 800x480 boards (1.5 MB of 8 MB) and a 1200x1600 panel on a
- * 16 MB module (7.3 MB) get RGBX; 1200x1600 Spectra 6 on an 8 MB module
- * gets 565, which is what makes it fit at all (3.7 MB), and the 1872x1404
- * sixteen-grey reTerminal E1003 gets grey (2.5 MB, where 565 was 5.0 and
- * left the render reserve alone in the module). Rendering into 565 costs
- * colour: the dither keeps its error rows at full precision, but the
- * 5/6-bit rounding of every stored pixel turns a smooth gradient into
- * plateaus the diffusion then prints as visible bands — so 565 canvases
- * store with a per-pixel dither (pixie `ditherStores`) and RGBX is used
- * wherever it fits. Grey costs a grey panel nothing: 256 levels feed at
- * most 16. The same rule lives in `embedded_render_canvas_bytes_per_pixel`
- * in backend embedded_firmware.py, `canvas_bytes_per_pixel` in
- * app/utils/device_limits.py, `canvasBytesPerPixel` in the SPA's
+ * (frameos/src/embedded/embedded_runtime.nim, `renderCanvas`), decided by
+ * the panel first and the module's PSRAM after:
+ *
+ * - 1 (pixie's 8-bit luma surface) for a greyscale or black-and-white
+ *   panel, always. Grey costs it nothing — blending is per channel, so the
+ *   luma of a composite is the composite of the lumas, and 256 levels feed
+ *   at most 16 — and every pass over the canvas (a fill, a blend, the
+ *   dither) moves a quarter of the bytes RGBX would. The 1872x1404
+ *   reTerminal E1003 needs it to fit at all (2.5 MB, where 565 was 5.0).
+ * - 2 (its 16-bit RGB 5/6/5 surface) for an RGB565 LCD, always: the canvas
+ *   is then the panel's own frame buffer (fos_display_render_target), drawn
+ *   in place, with nothing to pack or copy.
+ * - For a colour e-paper panel, 4 (RGBX) when a full canvas takes at most
+ *   half the module's PSRAM, else 2. The 800x480 boards (1.5 MB of 8 MB)
+ *   and a 1200x1600 panel on a 16 MB module (7.3 MB) get RGBX; 1200x1600
+ *   Spectra 6 on an 8 MB module gets 565, which is what makes it fit at all
+ *   (3.7 MB). Rendering into 565 costs colour: the dither keeps its error
+ *   rows at full precision, but the 5/6-bit rounding of every stored pixel
+ *   turns a smooth gradient into plateaus the diffusion then prints as
+ *   visible bands — so 565 canvases store with a per-pixel dither (pixie
+ *   `ditherStores`) and RGBX is used wherever it fits.
+ *
+ * The same rule lives in `embedded_render_canvas_bytes_per_pixel`
+ * in backend embedded_firmware.py, `esp32_canvas_bytes_per_pixel` in
+ * app/utils/device_limits.py, `esp32CanvasBytesPerPixel` in the SPA's
  * utils/deviceLimits.ts and the wasm preview's devices.ts, and
  * `sceneCanvasFormat` in embedded_runtime.nim; keep them in step
  * (docs/device-limits-fixtures.json pins the TS copy and the Python one). */

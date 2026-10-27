@@ -51,6 +51,20 @@ CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# Quad I/O flash reads. The S3 runs every instruction from flash through a
+# 16 KB cache, and in DIO mode a cache miss moves two bits a clock: DVD Logo
+# Bounce on the SenseCAP Indicator ran 10.2 fps in DIO and 13.5 in QIO
+# (2026-10-25), as fast as a 32 KB instruction cache, which would cost 16 KB
+# of internal RAM. The image header still says DIO; the bootloader switches
+# the flash to quad itself (an octal flash is left alone). A flash that
+# refuses its QE bit does NOT fall back to DIO: the bootloader drops to slow
+# reads and the app's flash init asserts, so a board flashed over USB
+# boot-loops (an updated one rolls back to its old app). QEMU's flash is such
+# a chip, so the smoke boots a DIO build (sdkconfig.qemu.defaults); bench a
+# new S3 board before it ships with this image. Only a USB flash replaces the
+# bootloader: a frame updated over the air keeps its DIO one, and its speed.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+
 # app_main mounts and may format SPIFFS during first boot. ESP-IDF's default
 # 3584-byte main task stack can overflow in that path before FrameOS reaches
 # Wi-Fi or OTA rollback validation.
@@ -78,6 +92,12 @@ CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
 # XIAO's PSRAM is not on the same supply rail quirk as some devkits; ignore
 # the bootup test failing on boards without PSRAM instead of aborting.
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+# 64-byte data cache lines, in the same 32 KB: half the PSRAM transactions
+# for whatever streams through the cache. On the SenseCAP Indicator that is
+# a lot: the LCD refill copies 19.2 KB out of PSRAM every 0.9 ms, and a Ken
+# Burns frame reads its photo and writes 460 KB. That frame's draw went from
+# 115 to 90 ms (2026-10-26).
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 
 # HTTPS to arbitrary backends: bundled CA roots; plain HTTP allowed for LAN dev.
 # The "common" bundle (43 roots: ISRG/Let's Encrypt, DigiCert, Amazon, Google,
@@ -114,9 +134,14 @@ CONFIG_FATFS_MAX_LFN=255
 # pin gets the checked address back instead of a second (rebindable) answer.
 CONFIG_LWIP_HOOK_NETCONN_EXT_RESOLVE_CUSTOM=y
 
-# The RGB LCD of the SenseCAP Indicator (lcd_st7701s_rgb.c): restart the
-# scan-out DMA at every vertical blank, so a frame the DMA could not feed in
-# time (a flash write holds its fill interrupt) is one disturbed frame, not a
-# picture that creeps down the glass until the next reboot. No effect on
-# chips without the RGB LCD peripheral.
-CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
+# The RGB LCD of the SenseCAP Indicator (lcd_st7701s_rgb.c) is NOT restarted
+# at every vertical blank. IDF 5.5's restart starts the DMA at bounce buffer 0
+# but keeps the count of refill interrupts whose parity picks the buffer to
+# refill, so one frame with a refill too many or too few (a flash write holds
+# the interrupt, or a blank served late) left every later refill writing the
+# buffer being sent: the picture ran one bounce buffer ahead, the next
+# frame's top on the bottom rows, until the next hiccup flipped it back
+# (2026-10-26). Without it the driver zeroes that count at every blank and
+# restarts the DMA only after a frame that was short of refills, so a flash
+# write costs a disturbed frame, and the next blank puts it right.
+# CONFIG_LCD_RGB_RESTART_IN_VSYNC is not set

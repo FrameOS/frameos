@@ -74,6 +74,7 @@ bool fos_touch_axes_swapped(int touch_x_max, int touch_y_max, int panel_width, i
 #include "driver/rtc_io.h"
 #endif
 
+#include "fos_board.h"
 #include "fos_client.h"
 #include "fos_config.h"
 #include "fos_events.h"
@@ -124,6 +125,7 @@ static i2c_master_dev_handle_t s_dev = NULL;
 static uint8_t s_addr = 0;
 static int s_x_max = 0, s_y_max = 0;
 static bool s_swap = false;
+static int s_mirror = 0; /* FOS_BOARD_TOUCH_MIRROR_*, after the swap */
 static SemaphoreHandle_t s_irq = NULL;
 static portMUX_TYPE s_queue_lock = portMUX_INITIALIZER_UNLOCKED;
 static touch_event_t s_queue[TOUCH_QUEUE_LEN];
@@ -330,12 +332,20 @@ static void touch_task(void *arg)
             int ry = s_swap ? p->x : p->y;
             int x_max = s_swap ? s_y_max : s_x_max;
             int y_max = s_swap ? s_x_max : s_y_max;
+            if (s_mirror & FOS_BOARD_TOUCH_MIRROR_X) rx = x_max - 1 - rx;
+            if (s_mirror & FOS_BOARD_TOUCH_MIRROR_Y) ry = y_max - 1 - ry;
             uint16_t wx = (uint16_t)fos_touch_wire(rx, x_max);
             uint16_t wy = (uint16_t)fos_touch_wire(ry, y_max);
             s_last_raw_x = p->x;
             s_last_raw_y = p->y;
             seen |= (uint8_t)(1u << p->id);
             if ((s_down_mask & (1u << p->id)) == 0) {
+                /* Where the finger landed first, then that it did, as the
+                 * Linux evdev translator does (translate.nim flushSlots):
+                 * a scene that follows the pointer by its moves (the Touch
+                 * test's `mouseMove`) sees a tap where it was, not only a
+                 * finger dragged. */
+                enqueue(TOUCH_MOVE, p->id, wx, wy);
                 enqueue(TOUCH_DOWN, p->id, wx, wy);
             } else if (wx != s_last_x[p->id] || wy != s_last_y[p->id]) {
                 enqueue(TOUCH_MOVE, p->id, wx, wy);
@@ -363,6 +373,12 @@ static void drop_bus(void)
     s_dev = NULL;
     s_bus = NULL;
     s_bus_owned = false;
+}
+
+static const char *mirror_name(void)
+{
+    static const char *const names[] = {"none", "x", "y", "xy"};
+    return names[s_mirror & 3];
 }
 
 esp_err_t fos_touch_start(void)
@@ -439,6 +455,7 @@ esp_err_t fos_touch_start(void)
         s_y_max = fos_display_height();
     }
     s_swap = fos_touch_axes_swapped(s_x_max, s_y_max, fos_display_width(), fos_display_height());
+    s_mirror = fos_board_touch_mirror(config->hardware_preset);
     s_irq = xSemaphoreCreateBinary();
     if (!s_irq) return ESP_ERR_NO_MEM;
     if (!s_polled) {
@@ -451,11 +468,13 @@ esp_err_t fos_touch_start(void)
     }
     if (xTaskCreate(touch_task, "fos_touch", 3072, NULL, 4, NULL) != pdPASS) return ESP_ERR_NO_MEM;
     s_present = true;
-    char line[224];
+    char line[256];
     snprintf(line, sizeof(line),
              "{\"event\":\"touch:ready\",\"source\":\"esp32\",\"controller\":\"%s\",\"address\":\"0x%02x\","
-             "\"xMax\":%d,\"yMax\":%d,\"swapped\":%s,\"polled\":%s,\"sharedBus\":%s,\"wake\":%s}",
+             "\"xMax\":%d,\"yMax\":%d,\"swapped\":%s,\"mirrored\":\"%s\",\"polled\":%s,"
+             "\"sharedBus\":%s,\"wake\":%s}",
              k_controller_names[s_controller], s_addr, s_x_max, s_y_max, s_swap ? "true" : "false",
+             mirror_name(),
              s_polled ? "true" : "false", share ? "true" : "false",
              fos_touch_wake_pin() >= 0 ? "true" : "false");
     log_line(line);
@@ -521,8 +540,9 @@ void fos_touch_print_status(void)
                (int)pins->sda, (int)pins->scl, (int)pins->irq);
         return;
     }
-    printf("touch:       %s at 0x%02x, %dx%d%s, int GPIO %d%s, fingers down 0x%02x, last raw %d,%d, dropped %lu\n",
+    printf("touch:       %s at 0x%02x, %dx%d%s%s%s%s, int GPIO %d%s, fingers down 0x%02x, last raw %d,%d, dropped %lu\n",
            k_controller_names[s_controller], s_addr, s_x_max, s_y_max, s_swap ? " (axes swapped)" : "",
+           s_mirror ? " (mirrored " : "", s_mirror ? mirror_name() : "", s_mirror ? ")" : "",
            (int)pins->irq, s_polled ? " (polled)" : "", (unsigned)s_down_mask,
            s_last_raw_x, s_last_raw_y, (unsigned long)s_dropped);
 }

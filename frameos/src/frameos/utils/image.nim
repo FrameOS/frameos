@@ -138,7 +138,30 @@ proc svgDecodeError*(svg: string, width: int, height: int): string =
   except CatchableError as e:
     e.msg
 
-proc renderSvgIntoTarget*(svg: string, target: Image): bool =
+when defined(testing):
+  var backgroundPaintsForTest* = 0
+    ## How many owed scene backgrounds were painted (test_background_deferral.nim).
+
+proc payBackground*(target: Image, color: Color) =
+  ## A scene background that was owed (ExecutionContext.backgroundPending),
+  ## painted.
+  target.fill(color)
+  when defined(testing):
+    inc backgroundPaintsForTest
+
+proc settleOwedBackground(parsed: Svg, target: Image, owed: var Option[Color]) =
+  ## The scene background still owed on `target` (ExecutionContext's
+  ## backgroundPending, handed over by takeOwedBackground): waived when the
+  ## SVG's first paint covers the target opaquely — a full-canvas background
+  ## rect, which overwrites every pixel anyway — painted otherwise. Settled
+  ## either way.
+  if owed.isNone:
+    return
+  if not parsed.coversOpaque(target.width, target.height):
+    payBackground(target, owed.get())
+  owed = none(Color)
+
+proc renderSvgIntoTarget*(svg: string, target: Image, owed: var Option[Color]): bool =
   ## Rasterizes an SVG straight into a buffer the caller already owns, rather
   ## than allocating one and blending it away afterwards. Returns false when
   ## this path does not apply, and the caller falls back to
@@ -157,10 +180,16 @@ proc renderSvgIntoTarget*(svg: string, target: Image): bool =
     return false
   refreshDecodeBudgetInto()
   try:
-    parseSvg(svg, target.width, target.height).renderInto(target)
+    let parsedSvg = parseSvg(svg, target.width, target.height)
+    settleOwedBackground(parsedSvg, target, owed)
+    parsedSvg.renderInto(target)
     true
   except CatchableError:
     false
+
+proc renderSvgIntoTarget*(svg: string, target: Image): bool =
+  var owed = none(Color)
+  renderSvgIntoTarget(svg, target, owed)
 
 proc renderSvgDegradedInto*(svg: string, target: Image, rasterWidth, rasterHeight: int): bool =
   ## The SVG rung of the degrade ladder (decodeIntoTargetWithDegrade is the
@@ -201,15 +230,20 @@ proc renderSvgDegradedInto*(svg: string, target: Image, rasterWidth, rasterHeigh
   })
   true
 
-proc renderSvgIntoTargetWithDegrade*(svg: string, target: Image): bool =
+proc renderSvgIntoTargetWithDegrade*(svg: string, target: Image, owed: var Option[Color]): bool =
   ## An SVG drawn at the size of a buffer the caller already owns: painted
   ## straight into it (renderSvgIntoTarget), and only when pixie refuses that
   ## (a budget refusal inside a fill) down the degrade ladder — the bounded
   ## raster, then half and a quarter of it, each stretched onto the target.
   ## Nothing the size of the target is allocated on any rung. False when every
-  ## rung failed, which is markup pixie cannot parse.
-  if renderSvgIntoTarget(svg, target):
+  ## rung failed, which is markup pixie cannot parse. `owed`: the scene
+  ## background the target still owes (settleOwedBackground); a rung paints
+  ## it before its raster, and it is settled when this returns true.
+  if renderSvgIntoTarget(svg, target, owed):
     return true
+  if owed.isSome:
+    payBackground(target, owed.get())
+    owed = none(Color)
   let (rasterWidth, rasterHeight) = boundedRequestedDimensions(target.width, target.height)
   var rungs: seq[tuple[width, height: int]] = @[]
   for divisor in [1, 2, 4]:
@@ -220,6 +254,10 @@ proc renderSvgIntoTargetWithDegrade*(svg: string, target: Image): bool =
     if renderSvgDegradedInto(svg, target, rung.width, rung.height):
       return true
   false
+
+proc renderSvgIntoTargetWithDegrade*(svg: string, target: Image): bool =
+  var owed = none(Color)
+  renderSvgIntoTargetWithDegrade(svg, target, owed)
 
 proc decodeImageWithFallback*(data: string): Image =
   decodeImage(data)

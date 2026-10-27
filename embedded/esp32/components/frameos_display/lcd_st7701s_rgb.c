@@ -113,11 +113,39 @@ static volatile uint32_t s_frame_us = 0;
 static volatile uint32_t s_glitch_us = 0;
 static volatile uint32_t s_slack_us = 0;
 static volatile uint32_t s_late_refills = 0;
-/* Double buffering: a new picture goes into the buffer nobody scans, and the
- * driver switches to it at a frame boundary (on_frame_complete says when). */
-static uint8_t *s_fbs[2] = {NULL, NULL};
+/* Three frame buffers in turn: one scanned (s_front), one handed to the
+ * driver for the next frame boundary (s_pending_front; on_frame_complete
+ * says when it switched), and one to draw the next picture in. A writer
+ * never waits to start; it waits before handing its picture over, and only
+ * while the one handed over before is not on the glass yet (settle_front):
+ * a render longer than a frame finds it there. With two buffers each render
+ * waited, before drawing, for the boundary after the one before — DVD Logo
+ * Bounce's 55 ms renders took three 23.6 ms scans each, 13.5 fps. */
+#define LCD_FBS 3
+static uint8_t *s_fbs[LCD_FBS] = {NULL, NULL, NULL};
 static int s_front = 0;
+static int s_pending_front = -1; /* handed to the driver, not yet scanned */
+static int s_drawing = -1;       /* the buffer a writer has (writable_back) */
+static int s_last_drawn = 0;     /* the order buffers are drawn in */
 static SemaphoreHandle_t s_frame_done = NULL;
+/* One writer at a time: the render task drawing a scene straight into the
+ * back buffer (fos_lcd_st7701s_back_buffer) holds it until display(), and a
+ * console `display_test` on another task waits for it. */
+static SemaphoreHandle_t s_write_lock = NULL;
+static void (*s_before_write)(const uint8_t *buf) = NULL;
+/* Every write into a buffer but a render drawn in place counts here: a copy,
+ * a clear, an overlay the render task draws (fos_lcd_st7701s_mark_written).
+ * A render in place reads it to know whether the buffer still holds what it
+ * left there two frames ago. */
+static volatile uint32_t s_generation[LCD_FBS] = {0, 0, 0};
+
+static int buffer_index(const uint8_t *buf)
+{
+    for (int i = 0; i < LCD_FBS; i++) {
+        if (buf == s_fbs[i]) return i;
+    }
+    return -1;
+}
 static volatile int64_t s_last_frame_at_us = 0;
 static volatile uint32_t s_frames = 0;
 static volatile uint32_t s_glitches = 0;
@@ -445,12 +473,13 @@ static esp_err_t rgb_init(void)
         },
         .data_width = 16,
         .bits_per_pixel = 16,
-        /* Two frame buffers: the copy of a new picture never lands in the
-         * one being scanned (a single buffer showed the new picture's top
-         * over the old one's bottom for a frame or two: a flicker every time
-         * the clock changed). 460 KB more PSRAM, counted in
+        /* Three frame buffers (s_fbs): a new picture never lands in the one
+         * being scanned (a single buffer showed the new picture's top over
+         * the old one's bottom for a frame or two: a flicker every time the
+         * clock changed), and the next one is drawn while the last waits for
+         * its frame boundary. 460 KB of PSRAM each, counted in
          * fos_display_render_psram_bytes. */
-        .num_fbs = 2,
+        .num_fbs = LCD_FBS,
         /* The frame buffers live in PSRAM; the DMA scans two bounce
          * buffers in internal RAM that an interrupt refills from them.
          * Scanning PSRAM directly under-ran on this board's 80 MHz octal
@@ -459,9 +488,11 @@ static esp_err_t rgb_init(void)
          * crept down the glass (2026-10-25). The fill interrupt is not
          * IRAM-safe on purpose — the driver notes a copy from a PSRAM frame
          * buffer crashes while a flash write has the cache off — so a flash
-         * write (an NVS save) costs a disturbed frame, which
-         * CONFIG_LCD_RGB_RESTART_IN_VSYNC (sdkconfig.defaults) resyncs at
-         * the next vertical blank instead of letting it drift. */
+         * write (an NVS save) costs a disturbed frame, after which the
+         * driver restarts the DMA at the next vertical blank. Not
+         * CONFIG_LCD_RGB_RESTART_IN_VSYNC: its restart at every blank kept
+         * a stale refill count and left the picture one bounce buffer
+         * ahead (sdkconfig.defaults). */
         .bounce_buffer_size_px = FOS_LCD_ST7701S_WIDTH * b->bounce_lines,
         .dma_burst_size = 64,
         .hsync_gpio_num = b->hsync,
@@ -478,13 +509,16 @@ static esp_err_t rgb_init(void)
         return err;
     }
     timing_for_pclk(b->pclk_hz);
-    err = esp_lcd_rgb_panel_get_frame_buffer(s_panel, 2, (void **)&s_fbs[0], (void **)&s_fbs[1]);
+    err = esp_lcd_rgb_panel_get_frame_buffer(s_panel, LCD_FBS, (void **)&s_fbs[0], (void **)&s_fbs[1],
+                                             (void **)&s_fbs[2]);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RGB panel frame buffers: %s", esp_err_to_name(err));
         return err;
     }
     s_frame_done = xSemaphoreCreateBinary();
     if (!s_frame_done) return ESP_ERR_NO_MEM;
+    s_write_lock = xSemaphoreCreateMutex();
+    if (!s_write_lock) return ESP_ERR_NO_MEM;
     esp_lcd_rgb_panel_event_callbacks_t callbacks = {0};
     callbacks.on_frame_buf_complete = on_frame_complete;
     esp_lcd_rgb_panel_register_event_callbacks(s_panel, &callbacks, NULL);
@@ -507,19 +541,67 @@ static void backlight_set(bool on)
 
 #define LCD_FB_BYTES ((size_t)FOS_LCD_ST7701S_WIDTH * FOS_LCD_ST7701S_HEIGHT * 2u)
 
-/* Hand the back buffer to the driver and wait for the frame boundary at
- * which the refill starts reading it; it is the front buffer after that. */
-static void present_back(void)
+/* The buffer last presented is being scanned: wait for the frame boundary
+ * that switched to it (a few frames at most; on a timeout the switch still
+ * happens, a frame later), after which the one scanned before is free. */
+static void settle_front(void)
 {
-    int back = 1 - s_front;
-    esp_lcd_panel_draw_bitmap(s_panel, 0, 0, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, s_fbs[back]);
-    /* A frame that ended before the call above may have given already:
-     * clear it, then wait for one that ends after it (a few frames at most;
-     * on a timeout the switch still happens, a frame later). */
-    xSemaphoreTake(s_frame_done, 0);
+    if (s_pending_front < 0) return;
     uint32_t wait_ms = (s_frame_us * 4u) / 1000u + 10u;
     xSemaphoreTake(s_frame_done, pdMS_TO_TICKS(wait_ms));
-    s_front = back;
+    s_front = s_pending_front;
+    s_pending_front = -1;
+}
+
+/* The writer's lock, taken once by the task that draws (it may already hold
+ * it from fos_lcd_st7701s_back_buffer). */
+static void hold_writer(void)
+{
+    if (xSemaphoreGetMutexHolder(s_write_lock) == xTaskGetCurrentTaskHandle()) return;
+    xSemaphoreTake(s_write_lock, portMAX_DELAY);
+}
+
+static void release_writer(void)
+{
+    if (xSemaphoreGetMutexHolder(s_write_lock) == xTaskGetCurrentTaskHandle()) {
+        xSemaphoreGive(s_write_lock);
+    }
+}
+
+/* The buffer about to be drawn in, neither scanned nor handed over, and the
+ * next in turn so that each holds the picture from three frames back; whoever
+ * pointed at it as a picture (fos_client.c's snapshot) lets go first. */
+static uint8_t *writable_back(void)
+{
+    if (s_drawing < 0) {
+        for (int step = 1; step <= LCD_FBS; step++) {
+            int i = (s_last_drawn + step) % LCD_FBS;
+            if (i != s_front && i != s_pending_front) {
+                s_drawing = i;
+                break;
+            }
+        }
+    }
+    uint8_t *back = s_fbs[s_drawing];
+    if (s_before_write) s_before_write(back);
+    return back;
+}
+
+/* Hand the drawn buffer to the driver once the one handed over before is on
+ * the glass (the driver switches to the newest it was given, so handing two
+ * over within one frame would skip the first): the refill starts reading it
+ * at the next frame boundary, and it is the front buffer from then on. */
+static void present_back(void)
+{
+    settle_front();
+    int back = s_drawing;
+    esp_lcd_panel_draw_bitmap(s_panel, 0, 0, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, s_fbs[back]);
+    /* A frame that ended before the call above may have given already:
+     * clear it, so the wait in settle_front is for one that ends after it. */
+    xSemaphoreTake(s_frame_done, 0);
+    s_pending_front = back;
+    s_last_drawn = back;
+    s_drawing = -1;
 }
 
 static void fill_buffer(uint8_t *fb, uint16_t color)
@@ -568,8 +650,7 @@ int fos_lcd_st7701s_init(void)
     controller_init();
     if (rgb_init_on_isr_core() != ESP_OK) return 1;
     /* White until the first render: a dark panel reads as a dead frame. */
-    fill_buffer(s_fbs[0], 0xFFFF);
-    fill_buffer(s_fbs[1], 0xFFFF);
+    for (int i = 0; i < LCD_FBS; i++) fill_buffer(s_fbs[i], 0xFFFF);
     backlight_set(true);
     s_ready = true;
     ESP_LOGI(TAG, "ST7701S %dx%d up: RGB565 scan-out from PSRAM, pclk %lu Hz", FOS_LCD_ST7701S_WIDTH,
@@ -580,17 +661,58 @@ int fos_lcd_st7701s_init(void)
 void fos_lcd_st7701s_display(uint8_t *buf)
 {
     if (!s_ready || !buf) return;
+    hold_writer();
     /* Into the buffer nobody scans, then switched in whole at a frame
-     * boundary: the picture changes from one frame to the next. */
-    memcpy(s_fbs[1 - s_front], buf, LCD_FB_BYTES);
+     * boundary: the picture changes from one frame to the next. A picture
+     * drawn straight into that buffer (fos_lcd_st7701s_back_buffer) is
+     * already there. */
+    uint8_t *back = s_drawing >= 0 && buf == s_fbs[s_drawing] ? buf : NULL;
+    if (!back) {
+        back = writable_back();
+        if (buf != back) {
+            memcpy(back, buf, LCD_FB_BYTES);
+            s_generation[buffer_index(back)]++;
+        }
+    }
     present_back();
+    release_writer();
 }
 
 void fos_lcd_st7701s_clear(void)
 {
     if (!s_ready) return;
-    fill_buffer(s_fbs[1 - s_front], 0xFFFF);
+    hold_writer();
+    uint8_t *back = writable_back();
+    fill_buffer(back, 0xFFFF);
+    s_generation[buffer_index(back)]++;
     present_back();
+    release_writer();
+}
+
+uint8_t *fos_lcd_st7701s_back_buffer(uint32_t *generation)
+{
+    if (!s_ready) return NULL;
+    hold_writer();
+    uint8_t *back = writable_back();
+    if (generation) *generation = s_generation[buffer_index(back)];
+    return back;
+}
+
+void fos_lcd_st7701s_mark_written(const uint8_t *buf)
+{
+    int index = buffer_index(buf);
+    if (index >= 0) s_generation[index]++;
+}
+
+void fos_lcd_st7701s_release_back_buffer(void)
+{
+    if (!s_ready) return;
+    release_writer();
+}
+
+void fos_lcd_st7701s_set_before_write_hook(void (*hook)(const uint8_t *buf))
+{
+    s_before_write = hook;
 }
 
 void fos_lcd_st7701s_sleep(void)
@@ -669,6 +791,14 @@ int fos_lcd_st7701s_init(void)
 }
 void fos_lcd_st7701s_display(uint8_t *buf) { (void)buf; }
 void fos_lcd_st7701s_clear(void) {}
+uint8_t *fos_lcd_st7701s_back_buffer(uint32_t *generation)
+{
+    if (generation) *generation = 0;
+    return NULL;
+}
+void fos_lcd_st7701s_mark_written(const uint8_t *buf) { (void)buf; }
+void fos_lcd_st7701s_release_back_buffer(void) {}
+void fos_lcd_st7701s_set_before_write_hook(void (*hook)(const uint8_t *buf)) { (void)hook; }
 void fos_lcd_st7701s_sleep(void) {}
 esp_err_t fos_lcd_st7701s_i2c_bus(int sda, int scl, void **bus)
 {

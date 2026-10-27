@@ -179,6 +179,46 @@ suite "render/zoomPan render":
     check closeTo(canvasLater.data[canvasLater.dataIndex(16, 2)].r, 255)
     check canvasStart.data != canvasLater.data
 
+  test "a dithered 565 canvas draws the crop, and the next picture's colors":
+    let source = quadrantSource(60, 40)
+    let app = makeApp(AppConfig(image: source, motion: "zoomIn", zoomStart: 1.0,
+      zoomEnd: 2.0, durationSeconds: 60.0, easing: "linear", anchor: "left"))
+    let context = ExecutionContext(hasImage: false)
+    let canvas = newImage565(30, 20)
+    canvas.ditherStores = true
+    app.renderAt(context, canvas, 0.0)
+    let corner = rgb565ToRgbx(canvas.data16[canvas.dataIndex(2, 2)])
+    check closeTo(corner.r, 255) and closeTo(corner.g, 0)
+    let far = rgb565ToRgbx(canvas.data16[canvas.dataIndex(27, 17)])
+    check closeTo(far.r, 255) and closeTo(far.g, 255) and closeTo(far.b, 0)
+    let other = newImage(60, 40)
+    other.fill(rgbx(0, 0, 255, 255))
+    app.appConfig.image = other
+    app.renderAt(context, canvas, 2.0)
+    let blue = rgb565ToRgbx(canvas.data16[canvas.dataIndex(15, 10)])
+    check closeTo(blue.b, 255) and closeTo(blue.r, 0)
+
+  test "on a dithered 565 canvas the dither stays put while the picture moves":
+    # A flat sky, two moments of a zoom: the same pixels. A 565 copy of the
+    # picture, dithered once, carried its dither with it, and every frame
+    # resampled it at a new phase: a grid of lines that slid with the zoom,
+    # banding on the SenseCAP Indicator's glass (2026-10-26).
+    let sky = newImage(60, 40)
+    sky.fill(rgbx(90, 140, 205, 255))
+    let app = makeApp(AppConfig(image: sky, motion: "zoomIn", zoomStart: 1.0,
+      zoomEnd: 1.5, durationSeconds: 60.0, easing: "linear", anchor: "center"))
+    let context = ExecutionContext(hasImage: false)
+    let first = newImage565(30, 20)
+    first.ditherStores = true
+    app.renderAt(context, first, 0.0)
+    let later = newImage565(30, 20)
+    later.ditherStores = true
+    app.appConfig.image = sky
+    app.renderAt(context, later, 17.3)
+    for y in 0 ..< 20:
+      for x in 0 ..< 30:
+        check first.data16[first.dataIndex(x, y)] == later.data16[later.dataIndex(x, y)]
+
   test "phase state key restores and persists the animation phase":
     let source = quadrantSource(60, 40)
     let app = makeApp(AppConfig(

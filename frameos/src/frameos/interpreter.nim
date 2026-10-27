@@ -5,6 +5,8 @@ from frameos/apps as frameos_apps import spoolDir
 from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool, scaleAndDrawImage
 from frameos/utils/memory import renderMemoryInUse, availableRenderBytes,
   availableRenderHeadroomBytes
+when defined(testing):
+  from frameos/utils/memory import availableRenderBytesOverride
 when defined(memProbe): import frameos/utils/memory
 import frameos/js_runtime/app_runtime
 import frameos/js_runtime/runtime
@@ -18,6 +20,7 @@ import frameos/planner
 import frameos/refresh_interval
 import frameos/runtime_diagnostics
 import frameos/scene_rhythm
+from frameos/utils/app_images import paintPendingBackground
 import tables, json, os, zippy, chroma, pixie, jsony, sequtils, options, strutils, times, math
 import apps/apps
 
@@ -50,6 +53,35 @@ proc cachedImageMemoryLimit(): int =
     EmbeddedMaxCachedImageBytes
   else:
     0
+
+const FlowAppsSettlingBackground = ["render/svg"]
+  ## Flow apps that settle the scene background still owed themselves (paint
+  ## it before their first paint, or waive it when that paint covers the
+  ## canvas), so it is not painted ahead of them. render/svg: a full-canvas
+  ## background rect is how most SVG scenes begin, and the canvas was filled
+  ## twice per render; on an LCD it also repaints only what changed
+  ## (utils/svg_frames.nim), which a fill ahead of it would have wiped.
+
+proc affordsKeeping(image: Image, memoryLimit: int, context: ExecutionContext): bool =
+  ## An image over the memory cache's limit is still kept while the frame
+  ## affords it easily: with it held (it is allocated already), render
+  ## headroom stays at or above that limit, room for as much again as the
+  ## memory tier holds of its own accord. A slideshow's photo under an
+  ## animation (render/zoomPan at 24 fps) is a cached producer's output every
+  ## frame, and refused here every frame decoded it again: 6 s a frame on the
+  ## SenseCAP Indicator (2026-10-25). The bar was 2 MB of headroom at first,
+  ## and that board's 1 MB photo left 2.03 MB: for the first minute after a
+  ## boot a few KB of TLS buffers put it under, and the slideshow decoded at
+  ## 0.2 fps until they went (2026-10-26). The live canvas is never kept: a
+  ## hit would redraw it onto itself.
+  if context != nil and context.hasImage and not context.image.isNil and
+      image.bufferPointer == context.image.bufferPointer:
+    return false
+  when defined(testing):
+    # A host's headroom is its own RAM; a test says what the frame has.
+    availableRenderBytesOverride >= memoryLimit
+  else:
+    availableRenderHeadroomBytes() >= memoryLimit
 
 var imageSpillDisabled = false
   ## Latched on the first failed spill write, so a full or vanished card is
@@ -342,6 +374,15 @@ proc withCache(scene: InterpretedFrameScene,
   if TRACING:
     scene.logger.log(payload)
 
+  # A stale image goes before its replacement is made, not after: a
+  # slideshow's last photo held on through the next one's decode, and on the
+  # SenseCAP Indicator the 0.9 MB it pinned was the difference between a
+  # photo and an error frame (2026-10-25). Not on degraded inputs, whose pass
+  # must leave the stored entry for a healthy one to hit.
+  if allowStore and scene.cacheValues.hasKey(nodeId) and
+      scene.cacheValues[nodeId].kind == fkImage:
+    scene.cacheValues.del(nodeId)
+
   let fresh = compute()
   if not allowStore:
     # Degraded inputs: return the value for this pass only. Leaving the stored
@@ -352,7 +393,7 @@ proc withCache(scene: InterpretedFrameScene,
   var toStore = fresh
   let memoryLimit = cachedImageMemoryLimit()
   if memoryLimit > 0 and fresh.kind == fkImage and not fresh.img.isNil and
-      fresh.img.byteSize > memoryLimit:
+      fresh.img.byteSize > memoryLimit and not affordsKeeping(fresh.img, memoryLimit, context):
     # Never retain a frame-sized image in memory on embedded: pinning a
     # canvas-sized RGBA buffer (7.7MB at 1200x1600) across renders means the
     # next render needs a second canvas and OOMs the module — and when the
@@ -588,6 +629,15 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
     if TRACING:
       self.logger.log(%*{"event": "interpreter:runNode", "sceneId": self.id, "nodeId": currentNodeId.int,
         "nodeType": nodeType})
+    # A node in the flow may draw on the canvas: the background still owed
+    # goes down first. A data node draws there only through a decode target,
+    # which pays it on the way (takeDecodeTarget); the consumer of an image
+    # fusion holds it until its producer has had the chance to waive it, and
+    # pays it after its inputs (below).
+    if not asDataNode and context.backgroundPending and
+        not (nodeType == "app" and (self.imageFusionPlans.hasKey(currentNodeId) or
+          currentNode.data{"keyword"}.getStr() in FlowAppsSettlingBackground)):
+      paintPendingBackground(context)
     case nodeType:
     of "app":
       let keyword = currentNode.data{"keyword"}.getStr()
@@ -758,6 +808,7 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
                   if context.hasImage and not context.image.isNil:
                     setInterpretedAppField(keyword, app, inputName,
                       Value(kind: fkImage, img: context.image))
+                    paintPendingBackground(context)
                     renderErrorInto(context.image, context.image.width,
                       context.image.height, $e.msg)
                   else:
@@ -807,6 +858,10 @@ proc runNode*(self: FrameScene, nodeId: NodeId, context: ExecutionContext, asDat
         context.decodeTargetNodeId = 0.NodeId
         context.decodeTargetOwned = false
         context.inPlaceImageNodes = @[]
+      # Whatever the producer did not settle, this node draws over, unless it
+      # settles the background itself.
+      if not asDataNode and keyword notin FlowAppsSettlingBackground:
+        paintPendingBackground(context)
       if setDecodeBoundsHint:
         context.decodeBoundsWidth = 0
         context.decodeBoundsHeight = 0
@@ -1685,7 +1740,19 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
         of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
         else: newImage(self.frameConfig.width, self.frameConfig.height)
       context.hasImage = true
-    context.image.fill(scene.backgroundColor)
+    # Owed, not painted: whatever draws first pays it, and a first paint
+    # that covers the canvas opaquely waives it (ExecutionContext's
+    # backgroundPending). Paid below when nothing draws.
+    context.backgroundColor = scene.backgroundColor
+    context.backgroundPending = true
+    # One render listener whose flow is one node: what that node draws is the
+    # whole frame.
+    context.wholeFrame = false
+    if scene.eventListeners.hasKey("render") and scene.eventListeners["render"].len == 1:
+      let first = scene.nextNodeIds.getOrDefault(scene.eventListeners["render"][0], -1.NodeId)
+      if first != 0.NodeId and first != -1.NodeId:
+        let after = scene.nextNodeIds.getOrDefault(first, -1.NodeId)
+        context.wholeFrame = after == 0.NodeId or after == -1.NodeId
   else:
     discard
 
@@ -1739,6 +1806,8 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
         "error": "\"" & context.event & "\" reached the scene but every listener filtered it out" &
           (if expectedFilters.len > 0: " (nodes want " & expectedFilters.join(", ") & ")" else: "")
       }, context.event, context.payload))
+  # A render in which nothing drew still shows the background.
+  paintPendingBackground(context)
 
 proc resolvedRenderDeadlineMs(frameConfig: FrameConfig): int =
   if frameConfig != nil and frameConfig.js != nil and frameConfig.js.renderDeadlineMs >= 0:

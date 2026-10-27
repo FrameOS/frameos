@@ -186,6 +186,33 @@ proc decodeHeadroomBytes(): int =
     if runsAsEmbedded() and simulatedRenderBytes() > 0:
       result = max(0, result - SimulatedDecodeReserveBytes)
 
+const RenderMemoryShortBytes* = 2 * 1024 * 1024
+  ## Render memory under which what a render can rebuild is let go
+  ## (renderMemoryReleaseHook), and under which another JS node about to be
+  ## built evicts the idle ones (js_runtime/app_runtime.nim).
+
+var renderMemoryReleaseHook*: proc(): bool {.nimcall, raises: [].}
+  ## Lets go of what a render can rebuild: the idle JS interpreters an ESP32
+  ## that does not deep-sleep keeps between renders (js_runtime/app_runtime.nim).
+  ## Whether anything went. Called when render memory is short, so that a kept
+  ## interpreter never costs a photo its resolution: when free memory is
+  ## (refreshDecodeBudget, before every render and decode) and when the
+  ## largest free block is (the first time a decode asks for it).
+
+proc releaseRenderMemoryIfShort() =
+  if not renderMemoryReleaseHook.isNil:
+    let headroom = availableRenderHeadroomBytes()
+    if headroom > 0 and headroom < RenderMemoryShortBytes:
+      discard renderMemoryReleaseHook()
+
+when defined(frameosEmbedded):
+  proc largestDecodeBlock(): int {.nimcall, raises: [].} =
+    ## The contiguous decode budget, measured when a decode first asks for it.
+    result = fos_psram_largest_free_block().int
+    if result < RenderMemoryShortBytes and not renderMemoryReleaseHook.isNil and
+        renderMemoryReleaseHook():
+      result = fos_psram_largest_free_block().int
+
 proc refreshDecodeContiguousBudget() =
   ## The headroom budget answers whether a decode's buffers can coexist;
   ## this one bounds the largest SINGLE buffer by the largest free block.
@@ -193,9 +220,12 @@ proc refreshDecodeContiguousBudget() =
   ## 8.6MB free, then died allocating its 3.75MB luma channel in a heap
   ## whose largest block had fragmented below that (2026-08-23). With the
   ## limit set, pixie clamps the sampling resolution to what fits instead.
-  ## Hosts report "plenty" and effectively leave it unlimited.
+  ## On the device the block is measured when a decode first asks: finding
+  ## it walks the whole PSRAM heap, half a millisecond, and an animation
+  ## refreshes the budget several times a frame to decode nothing. Hosts
+  ## report "plenty" and effectively leave it unlimited.
   when defined(frameosEmbedded):
-    setDecodeContiguousBudgetBytes(max(0, fos_psram_largest_free_block().int))
+    setDecodeContiguousBudgetProvider(largestDecodeBlock)
   else:
     setDecodeContiguousBudgetBytes(0)
 
@@ -210,6 +240,7 @@ proc refreshDecodeBudget*() =
   ## answer refused a 1.4MB streamed-JPEG working set the heap held with
   ## room to spare (spill bench, 2026-08). Single image-sized buffers keep
   ## checking availableRenderBytes at their own call sites.
+  releaseRenderMemoryIfShort()
   let available = decodeHeadroomBytes()
   if available > 0:
     setDecodeBudgetBytes(available div 2)
@@ -222,6 +253,7 @@ proc refreshDecodeBudgetInto*() =
   ## and the whole headroom may hold the decode plan. The emergency reserve
   ## sits outside the headroom either way. On the 13.3E6 the halved budget
   ## refused a spilled 4.4MB JPEG whose ~1.8MB plan fit the heap twice over.
+  releaseRenderMemoryIfShort()
   let available = decodeHeadroomBytes()
   if available > 0:
     setDecodeBudgetBytes(available)

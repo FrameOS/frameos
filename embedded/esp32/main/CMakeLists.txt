@@ -24,6 +24,7 @@ idf_component_register(
         "fos_framebuffer.c"
         "fos_wifi.c"
         "fos_http.c"
+        "fos_animation.c"
         "fos_client.c"
         "fos_cloud.c"
         "fos_url_guard.c"
@@ -49,6 +50,7 @@ idf_component_register(
         "fos_assets.c"
         "fos_assets_path.c"
         "fos_assets_sd.c"
+        "fos_assets_flash.c"
         "fos_sd_probe.c"
     PRIV_REQUIRES
         nvs_flash
@@ -73,6 +75,7 @@ idf_component_register(
         hal
         soc
         spiffs
+        vfs
         fatfs
         sdmmc
         frameos_display

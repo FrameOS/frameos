@@ -46,6 +46,7 @@ main/                     boot orchestration + platform modules
   fos_assets.c            asset verbs (list/get/put/mkdir/delete/rename)
   fos_assets_path.c       the assets-path rule behind every asset verb (host-tested)
   fos_assets_sd.c         SD card mount/probe/format for the assets root
+  fos_assets_flash.c      assets on the state partition for a board with no SD card the S3 reaches
   fos_sd_probe.c          SD presence probe used by the assets layer
   fos_framebuffer.c       canvas allocation (RGBX vs RGB565 by PSRAM) and dither/pack
   fos_status_screen.c     boot/status screen renderer (shared design with the Pi's)
@@ -56,6 +57,7 @@ main/                     boot orchestration + platform modules
   fos_buttons.c           GPIO button map → `gpio` edges (origin `driver`, via fos_events.c)
   fos_battery.c           battery ADC sampling; fos_battery_filter.c its outlier filter
   fos_power.c             deep sleep, wake-check render skip, VBUS truth
+  fos_animation.c         animation mode: a scene below a 1 s interval on an LCD, paced in µs (host-tested)
   fos_wake.c              wake scheduling (next render / schedule event)
   fos_tz.c                IANA zone → POSIX TZ rule
   fos_defaults.h          compile-time defaults of the generic image (NVS wins)
@@ -66,7 +68,8 @@ components/
                           the configured panel (see "Every supported panel
                           driver is compiled into each firmware image")
   frameos_nim/            the FrameOS Nim runtime compiled to C (see build_nim.sh);
-                          builds a stub when nimcache/ is absent
+                          builds a stub when nimcache/ is absent. fos_rows.c shares a
+                          pixel loop's rows with a helper on the other core (resample.nim)
 partitions_4mb.csv        4MB: nvs + phy + factory app + 512K state; no OTA
 partitions.csv            8MB: nvs + otadata + phy + ota_0/ota_1 (3520K each) + 1M state
 partitions_ota_16mb.csv   16MB: nvs + otadata + ota_0/ota_1 (4032K each) + 8M state
@@ -251,7 +254,10 @@ for the two Spectra boards most of the bench work runs on:
   Nim dispatcher makes the taps, long presses and swipes of it exactly as on
   a Pi (`docs/events.md` "Input"). The controller reports in its own
   resolution; when its axes run across the panel's (a portrait glass on a
-  landscape panel) the driver swaps them (`touch:ready` says `swapped`). A
+  landscape panel) the driver swaps them (`touch:ready` says `swapped`), and
+  a glass mounted against its panel is mirrored by board
+  (`fos_board_touch_mirror`: the SenseCAP Indicator's, both axes;
+  `touch:ready` says `mirrored`). A
   touch wakes a deep-sleeping frame through ext0 on TP_INT (GPIO21, an RTC
   IO); the controller is held powered through the sleep for it (a few mA).
   The PDM microphone sits on GPIO19/20, the S3's native USB pads: the board's
@@ -324,8 +330,8 @@ for the two Spectra boards most of the bench work runs on:
   panel shares the clock's I2C bus (19/20): `fos_i2c.c` lends `fos_touch.c`
   that bus instead of the touch driver opening a second one on the same pins,
   and a lent bus survives the console's `i2c` rescan. The 8 MB module renders
-  on-device in pixie's **8-bit luma canvas** (`pfGray8`; any grey or black-
-  and-white panel too big for an RGBX canvas gets one, a colour panel gets
+  on-device in pixie's **8-bit luma canvas** (`pfGray8`; every grey or black-
+  and-white panel gets one whatever fits, a colour panel too big for RGBX gets
   565): 2.5 MiB of canvas and 1.25 MiB of packed panel buffer beside the
   1.5 MiB render reserve, about 2.5 MiB more for scenes and apps than a 565
   canvas (5.0 MiB) would leave. A grey panel loses nothing to it: blending
@@ -338,42 +344,62 @@ for the two Spectra boards most of the bench work runs on:
   glass hangs off the S3's parallel RGB interface: sixteen data lines
   (B0..B4 = GPIO15..11, G0..G5 = GPIO10..5, R0..R4 = GPIO4..0), HSYNC 16,
   VSYNC 17, DE 18, PCLK 21 — so GPIO21 is not a heartbeat LED here. The
-  LCD peripheral scans continuously: two PSRAM frame buffers (a new picture
-  goes into the hidden one and is switched in at a frame boundary, so the
-  glass never shows half of each) feed two 20-line bounce buffers in
+  LCD peripheral scans continuously: three PSRAM frame buffers (a new
+  picture goes into one that is neither scanned nor waiting to be, and is
+  switched in at a frame boundary, so the glass never shows half of each and
+  the next render never waits for the switch) feed two 20-line bounce buffers in
   internal RAM that an interrupt refills. That refill is the fragile part:
   PSRAM shares one bus with the program flash, and the generic image runs a
-  160 MHz CPU, DIO flash and 80 MHz PSRAM, so the pixel clock is 12 MHz
+  160 MHz CPU, DIO flash (QIO on a frame flashed over USB since 2026-10-25)
+  and 80 MHz PSRAM, so the pixel clock is 12 MHz
   (42 fps; Seeed's 18 and ESPHome's 16 dropped frames on the bench while a
   finger moved on the glass), the refill interrupt and the render task
   share core 1 (the render's bulk copies pause while it runs), big heap
   reallocs copy outside the heap's spinlock (`fos_heap_realloc`: the IDF
   heap copies with interrupts off, which held the refill off for 1-2 ms),
-  `CONFIG_LCD_RGB_RESTART_IN_VSYNC` resyncs a frame that still starves, and
+  the driver restarts the DMA at the next vertical blank after a frame that
+  still starves (not `CONFIG_LCD_RGB_RESTART_IN_VSYNC`, whose restart at every
+  blank kept a stale refill count and ran the picture one bounce buffer
+  ahead, the top of the next frame on the bottom rows), and
   the "skip an unchanged picture" hash is not written to flash (a flash
   write switches the cache off and stalls the refill; an LCD comes up blank
   after a reboot anyway). Any other flash write (a settings save, a scene
   download, an OTA) still costs one disturbed frame. `lcd` on the console
   counts dropped frames and late refills and sets the pixel clock live.
   An LCD board runs its CPU at 240 MHz (the generic image boots at 160 for
-  the battery frames; `status` prints `cpu:`), and the demo scene renders,
-  packs and shows in ~0.77 s (3.8 s before the render work of 2026-10-25:
-  the text outline, the gradient fill and the RGB565 pack, which every
-  ESP32 board shares). The controller's own
+  the battery frames; `status` prints `cpu:`). The scene canvas is the
+  panel's own back frame buffer (`fos_display_render_target`, 565 whatever
+  the PSRAM): the scene draws straight into it, and the blit is a buffer
+  switch — no pack, no copy, no hash. A scene whose `refreshInterval` is
+  below a second **animates** (`main/fos_animation.c`): frames paced in
+  microseconds, the pulls and sensors once a second, one frame in ten logged
+  in full with a `render:animation` summary of the rest. DVD Logo Bounce
+  runs at 19.6 fps there (one frame per 300 s before, ~570 ms a frame when
+  forced); `docs/realtime-rendering.md` has the measurements and
+  `docs/realtime-todo.md` what is left. The controller's own
   setup goes over a 9-bit 3-wire SPI bit-banged on GPIO41 (clock) and GPIO48
   (data) with chip-select and reset on a TCA9535 IO expander at 0x20 (SDA39/
   SCL40; later batches carry an HT8574 at 0x39), the sequence Seeed's own
   firmware sends; the backlight is GPIO45. All of it is
   `components/frameos_display/lcd_st7701s_rgb.c`, a board table the preset
   selects, and the panel is `LCD_ST7701S_480x480` in a new pixel format,
-  `FOS_PIXEL_RGB565` (one little-endian 5/6/5 word per pixel; the Nim packer
-  rounds the canvas's 8-bit channels under the dither's threshold jitter, the
-  snapshot goes out as a 24-bit BMP). The FocalTech FT6336U touch controller
+  `FOS_PIXEL_RGB565` (one little-endian 5/6/5 word per pixel, pixie's
+  `pfRgb565` layout; the canvas stores with pixie's per-pixel dither so a
+  gradient does not step every eight levels, and the snapshot goes out as a
+  24-bit BMP). The FocalTech FT6336U touch controller
   (0x48) sits on the expander's bus with its interrupt and reset lines on the
   expander, unwired to the chip: `fos_touch.c` joins the display's bus
   (`fos_display_shared_i2c_bus`) and polls it every 30 ms. The top button is
-  GPIO38; held, it walks to the next scene. The TF socket, the buzzer and the
-  CO2/VOC sensors are the RP2040's (UART 19/20 from the S3; not driven).
+  GPIO38; held, it walks to the next scene. The glass sits upside down on
+  the panel, so the driver mirrors both axes (`fos_board_touch_mirror`), and
+  a finger's arrival is a `pointerMove` to where it landed before its
+  `pointerDown`, as on a Pi. The TF socket, the buzzer and the
+  CO2/VOC sensors are the RP2040's (UART 19/20 from the S3; not driven), so
+  assets live on the state partition instead (`fos_assets_flash.c`, a VFS
+  over `/state/a` at the assets path): a handful of photos in the 1 MB
+  partition, names of 28 bytes at most (`photos/kitchen.jpg` fits; longer is
+  refused, never truncated), and every write leaves 128 KB free for the
+  scenes. `status` prints `assets_flash:` with what is left.
 
 The TRMNL X (10.3" 1872×1404 parallel e-ink over EPDIY/FastEPD) is not yet
 supported — it needs a parallel display driver class this component does not
@@ -491,7 +517,14 @@ redeploy that changes it), and the file carries a `"__persist": 2` marker: a
 file without one was written by firmware that still pinned defaults and is
 dropped the first time it is read, so the deployed defaults win. State for a scene
 that is not resident (a wake-check pass, a switch carrying state) goes to the
-file right away, so a deep sleep in between loses nothing. Both control
+file right away, so a deep sleep in between loses nothing. Writes go
+behind: a change waits in RAM and reaches the flash after a minute, ten on
+an RGB LCD (later changes ride along), before a deep sleep and before a
+restart. A SPIFFS write that erases a block holds the flash cache off for
+50-100 ms, which stalls both cores and makes an RGB LCD scan garbage, and the
+touch test's taps are disk fields: one write per tap flickered the SenseCAP
+Indicator. A slideshow's photo counter is one too: written every minute it
+still erased a block every several minutes. Both control
 planes get it: the cloud hello and the commands pull report the persisted
 state even before the first render, keyed by scene id.
 
@@ -516,10 +549,13 @@ A `scene_event` (`setSceneState`, a button, a custom event) meets the same
 timing: the cloud delivers it the moment the session is up, the wake's render
 already holds the runtime, and the handler used to answer `busy` after three
 seconds — an answer the hub never retries, so no state ever reached a
-sleeping frame. A busy scene event is now kept (`fos_events_defer`, a
-handful of slots, `event:deferred` in the log), delivered by the render task
-at the start of its next pass (`event:deferred:delivered`), rendered on that
-pass, and counted as work that holds the deep sleep.
+sleeping frame. Scene code also runs on the render task alone: a scene event
+from HTTP, the cloud or the console is queued for it (`fos_events_defer`, 16
+slots, a newer pointer move replacing a waiting one, `event:dropped` when
+full), delivered at the start of a pass or in the idle wait, rendered by the
+scene's own render rule, and counted as work that holds the deep sleep. The
+first `/event/pointerMove` over HTTP had compiled the scene's JS on the 8 KB
+HTTP task and crashed the frame (2026-10-26).
 
 The cloud log tap only runs while the session is up, so the first ~15 s of a
 wake (the wake cause, the scene load, the replayed button press) and

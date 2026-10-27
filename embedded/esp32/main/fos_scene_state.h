@@ -20,6 +20,17 @@
  * so the id cannot be the name; a hash, unlike the scene-store slot number
  * (fos_scenes.c), does not move when a redeploy reorders the scenes.
  *
+ * Written behind (fos_scene_state_set_write_behind): on the chip the files
+ * share the program flash, and a SPIFFS write that has to erase a block holds
+ * the flash cache off for 50-100 ms. That stalls both cores, and an RGB
+ * panel scanned out of PSRAM shows garbage for those frames (the SenseCAP
+ * Indicator flickered after every tap of the touch test, whose taps are
+ * disk fields: one write in three or four erased, 2026-10-25). So a change
+ * waits in RAM and is written once it has waited the delay (later changes
+ * ride along, so a scene that never settles is still written once a delay),
+ * before a deep sleep and before a restart (main.c, fos_client.c). Losing
+ * power loses at most one delay of changes.
+ *
  * IDF-free on purpose (stdio only), so it has a host test:
  * main/tests/test_fos_scene_state.c, run by
  * backend/app/tasks/tests/test_esp32_scene_state.py.
@@ -28,6 +39,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* The largest state file kept, in bytes of JSON. A scene's public fields are
  * a few short strings and numbers; anything bigger is not state. The cloud
@@ -48,8 +60,26 @@ char *fos_scene_state_load(const char *scene_id);
 
 /* Replace the persisted JSON for a scene. An empty object ("{}", "" or NULL)
  * removes the file. Written to a temporary name and renamed, so a reset
- * mid-write leaves the previous state, never half a file. */
+ * mid-write leaves the previous state, never half a file. With write-behind
+ * on, kept in RAM until fos_scene_state_flush writes it; a load sees it
+ * either way. */
 bool fos_scene_state_save(const char *scene_id, const char *json);
 
 /* Forget a scene's state (a scene the store no longer holds). */
 void fos_scene_state_forget(const char *scene_id);
+
+typedef struct {
+    uint32_t delay_ms;        /* how long a change may wait; 0 writes through */
+    uint32_t (*now_ms)(void); /* a millisecond clock (wraps are fine) */
+    void (*lock)(void);       /* around every call; NULL on one task */
+    void (*unlock)(void);
+} fos_scene_state_write_behind_t;
+
+/* Turn write-behind on (NULL: off). Whatever waits is written first. */
+void fos_scene_state_set_write_behind(const fos_scene_state_write_behind_t *config);
+
+/* Write the changes that have waited the delay; with `all`, every one. */
+void fos_scene_state_flush(bool all);
+
+/* Something is waiting to be written. */
+bool fos_scene_state_pending(void);
