@@ -517,6 +517,14 @@ backend keeps pushing to older firmware directly):
   queued. The frame's sleep line (`{"event":"sleep","wakeInSeconds":…}`)
   gives the backend the wake forecast the workspace shows and a queued
   command's TTL reaches past.
+- A pass that outlasts its interval does not reboot straight into the next
+  one. The interval counts from when the render was due, so a render and a
+  panel refresh longer than it leave the next render already due, and a
+  deep-sleeping frame slept the one-second minimum, rebooted and rendered
+  again, without rest, on battery (a 13.3" rainbow clock: a 60 s interval,
+  4.3 minute passes, 2026-10-27). It rests at least as long as the pass ran
+  (`fos_wake_rest_ms`) and logs `{"event":"render:overrun","intervalSeconds",
+  "passSeconds","restSeconds"}` saying so.
 
 Scene state used to last one render on such a frame. The runtime keeps each
 scene's public state (and its `persist: "disk"` fields) in a file per scene

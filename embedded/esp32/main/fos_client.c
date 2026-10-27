@@ -2478,6 +2478,22 @@ static void client_task(void *arg)
 
         int64_t sleep_decided_us = esp_timer_get_time();
         uint32_t sleep_ms = compute_sleep_ms(interval, due_at_us);
+        if (deep_sleep_now && rendered) {
+            /* A pass that outlasted its interval rests as long as it ran
+             * (fos_wake_rest_ms) instead of rebooting into the next render. */
+            int64_t pass_ms = (sleep_decided_us - due_at_us) / 1000;
+            uint32_t rest_ms = fos_wake_rest_ms(sleep_ms, pass_ms);
+            if (rest_ms > sleep_ms) {
+                char line[192];
+                snprintf(line, sizeof(line),
+                         "{\"event\":\"render:overrun\",\"source\":\"esp32\","
+                         "\"intervalSeconds\":%lu,\"passSeconds\":%lu,\"restSeconds\":%lu}",
+                         (unsigned long)interval, (unsigned long)(pass_ms / 1000),
+                         (unsigned long)((rest_ms + 999) / 1000));
+                frameos_nim_log_hook(line);
+                sleep_ms = rest_ms;
+            }
+        }
         uint32_t sleep_s = (uint32_t)(((uint64_t)sleep_ms + 999) / 1000);
         /* A pass that ran before the scene store finished loading must not
          * park the frame for the whole fallback interval: scenes only load ON

@@ -96,3 +96,10 @@ uint32_t fos_wake_slice_ticks(int64_t left_us, uint32_t max_slice_ms, uint32_t t
     int64_t ticks = (slice_us + tick_us - 1) / tick_us;
     return ticks < 1 ? 1 : (uint32_t)ticks;
 }
+
+uint32_t fos_wake_rest_ms(int64_t left_ms, int64_t pass_ms)
+{
+    int64_t rest = left_ms > pass_ms ? left_ms : pass_ms;
+    if (rest < 1) return 1;
+    return rest > (int64_t)UINT32_MAX ? UINT32_MAX : (uint32_t)rest;
+}

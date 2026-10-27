@@ -242,6 +242,19 @@ static void test_a_slice_never_waits_zero_ticks(void)
     CHECK(fos_wake_slice_ticks(7500, 1000, 0) == 8, "a tick of 0 ms counts as 1");
 }
 
+static void test_a_pass_longer_than_its_interval_rests_as_long(void)
+{
+    /* The schedule's wait stands while the frame keeps up. */
+    CHECK(fos_wake_rest_ms(240000, 20000) == 240000, "a 20 s pass on a 5 min interval");
+    /* The rainbow clock: a 60 s interval, a 260 s pass. The schedule asks for
+     * the 1 ms minimum (the render is overdue); the frame rests 260 s. */
+    CHECK(fos_wake_rest_ms(1, 260000) == 260000, "a 4.3 min pass on a 60 s interval: got %u",
+          fos_wake_rest_ms(1, 260000));
+    CHECK(fos_wake_rest_ms(-5000, 260000) == 260000, "an overdue schedule");
+    CHECK(fos_wake_rest_ms(0, 0) == 1, "never a zero rest");
+    CHECK(fos_wake_rest_ms((int64_t)UINT32_MAX + 5, 0) == UINT32_MAX, "clamped to the counter");
+}
+
 int main(void)
 {
     test_arms_every_rtc_capable_button();
@@ -253,6 +266,7 @@ int main(void)
     test_wake_schedule_across_a_dst_change();
     test_an_awake_wait_counts_the_milliseconds();
     test_a_slice_never_waits_zero_ticks();
+    test_a_pass_longer_than_its_interval_rests_as_long();
     printf("%s: %d checks, %d failures\n", g_failures ? "FAILED" : "ok",
            g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
