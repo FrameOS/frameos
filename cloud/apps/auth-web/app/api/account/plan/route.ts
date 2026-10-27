@@ -1,6 +1,8 @@
 import {
   cancelAccountPlan,
+  fallbackPaygPlan,
   listPlans,
+  paygPlanCode,
   readAccountPlan,
   setAccountPlan,
 } from "@frameos-cloud/ledger";
@@ -12,8 +14,10 @@ import {
   readJsonObject,
   requireDatabase,
 } from "../../../../src/lib/device-flow";
+import { planCatalog } from "../../../../src/lib/plan-catalog";
 import { rateLimitResponse } from "../../../../src/lib/rate-limit";
 import { readSession } from "../../../../src/lib/session";
+import { limitsForPlan } from "../../../../src/lib/usage";
 
 export const runtime = "nodejs";
 
@@ -55,9 +59,14 @@ export async function GET(request: NextRequest) {
     readAccountPlan(db, session.accountId),
     listPlans(db),
   ]);
+  const free = plans.find((plan) => plan.code === paygPlanCode) ?? fallbackPaygPlan;
   return NextResponse.json(
     {
       cancel_at: current.cancelAt?.toISOString() ?? null,
+      // Free, Private and Business as the usage page draws them (plan-catalog.ts).
+      // `plans` below is the billing_plans rows, which a paid stop joins once
+      // support activates it.
+      catalog: planCatalog(limitsForPlan(free), current.plan.code),
       // A downgrade waits for the rollover; this names where it lands.
       next_plan_code: current.nextPlanCode,
       plan: {

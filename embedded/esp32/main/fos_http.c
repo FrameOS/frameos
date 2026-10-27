@@ -403,7 +403,7 @@ static bool request_from_hotspot(httpd_req_t *req)
     return false;
 }
 
-static esp_err_t require_protected_access(httpd_req_t *req)
+static bool protected_access_allowed(httpd_req_t *req)
 {
     fos_config_t *config = fos_config();
 
@@ -418,14 +418,18 @@ static esp_err_t require_protected_access(httpd_req_t *req)
      * (2026-09-04, E1002). The LAN side keeps the gate: the portal httpd
      * also serves the station interface for a moment when the stored
      * network answers after all, and that path is not physical access. */
-    if (s_portal_mode && request_from_hotspot(req)) return ESP_OK;
+    if (s_portal_mode && request_from_hotspot(req)) return true;
     bool credentials_configured = config->api_key[0] != '\0' || admin_auth_configured(config);
-    if (s_portal_mode && !credentials_configured) return ESP_OK;
+    if (s_portal_mode && !credentials_configured) return true;
+    return request_bearer_matches(req, config) || request_basic_matches(req, config);
+}
 
-    if (request_bearer_matches(req, config) || request_basic_matches(req, config)) {
-        return ESP_OK;
-    }
-
+/* The answer to a request protected_access_allowed turned down. What it
+ * returns is the send's result, ESP_OK when the refusal went out: it is the
+ * handler's return value, never a verdict on access. */
+static esp_err_t refuse_protected_access(httpd_req_t *req)
+{
+    fos_config_t *config = fos_config();
     if (s_portal_mode) {
         log_http_denied(req, 401);
         httpd_resp_set_hdr(req, "WWW-Authenticate", "Basic realm=\"FrameOS\"");
@@ -447,9 +451,14 @@ static esp_err_t require_protected_access(httpd_req_t *req)
     return httpd_resp_send_err(req, HTTPD_401_UNAUTHORIZED, "Authentication required");
 }
 
+/* Every protected handler's first line. The refusal returns from the handler
+ * whatever sending it returned. The gate used to hand back the send's result
+ * as its verdict, ESP_OK once the 401 went out, so every protected handler
+ * ran after refusing its request: an unauthenticated asset delete deleted
+ * the file while its client read "Authentication required" (2026-10-25),
+ * and every other protected route passed the same way. */
 #define REQUIRE_PROTECTED_ACCESS() do { \
-        esp_err_t auth_err = require_protected_access(req); \
-        if (auth_err != ESP_OK) return auth_err; \
+        if (!protected_access_allowed(req)) return refuse_protected_access(req); \
     } while (0)
 
 esp_err_t fos_http_store_uploaded_scenes_payload(const char *body, size_t len)

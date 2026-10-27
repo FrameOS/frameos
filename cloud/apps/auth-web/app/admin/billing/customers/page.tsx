@@ -199,7 +199,7 @@ export default async function AdminBillingCustomersPage({ searchParams }: PagePr
             <section className="section-block">
               <h2>Plan and AI switch</h2>
               <p className="section-description">
-                On the <strong>{plan?.plan.name ?? "Pay as you go"}</strong> plan
+                On the <strong>{plan?.plan.name ?? "Free"}</strong> plan
                 {plan?.subscribed ? "" : " (no subscription row — the default)"}
                 {plan?.nextPlanCode ? `, moving to ${plan.nextPlanCode} at the rollover` : ""}
                 {plan?.cancelAt ? `, ends ${formatDateTime(plan.cancelAt)}` : ""}.

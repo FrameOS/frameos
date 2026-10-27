@@ -403,6 +403,7 @@ void app_main(void)
 
     bool online = false;
     if (fos_config_wifi_ready()) {
+        fos_display_boot_status(FOS_LCD_SPLASH_WIFI);
         online = fos_wifi_connect(WIFI_CONNECT_TIMEOUT_MS) == ESP_OK;
         if (!online) {
             ESP_LOGW(TAG, "Wi-Fi unreachable; starting provisioning portal");
@@ -412,12 +413,23 @@ void app_main(void)
     }
 
     if (online) {
-        fos_wifi_sync_time(SNTP_TIMEOUT_MS);
+        if (fos_display_is_lcd()) {
+            /* An LCD shows its first picture without the clock and renders
+             * again when the pool answers: a frame is cheap there, and the
+             * boot waited for SNTP longer than for Wi-Fi (up to the whole
+             * timeout, 10 s, on a pool that answered late). A panel that
+             * refreshes for seconds still waits, so it refreshes once. */
+            fos_wifi_set_late_time_hook(action_render_now);
+            fos_wifi_sync_time(0);
+        } else {
+            fos_wifi_sync_time(SNTP_TIMEOUT_MS);
+        }
         /* A pending-verify image stays pending until its first render
          * completes (fos_client.c: fos_ota_mark_boot_valid there), so a
          * release that boots, joins Wi-Fi and then dies in Nim or scene init
          * rolls back instead of boot-looping with a valid mark. */
         if (fos_ota_boot_request_pending()) {
+            fos_display_boot_status(FOS_LCD_SPLASH_UPDATE);
             esp_err_t ota_err = fos_ota_run_boot_request();
             if (ota_err != ESP_OK) {
                 ESP_LOGW(TAG, "boot OTA request failed: %s", esp_err_to_name(ota_err));
@@ -431,6 +443,9 @@ void app_main(void)
      * below, so starting it here only claims the stack. */
     /* Before any render: decides whether the previous boot was a memory
      * rescue and whether rendering should stay paused this time. */
+    /* The portal draws its own screen; a frame online is on its way to the
+     * first render. */
+    fos_display_boot_status(online ? FOS_LCD_SPLASH_STARTING : FOS_LCD_SPLASH_NO_STATUS);
     BOOTMEM("after-wifi");
     FOS_MEM_LOG_MILESTONE(TAG, "after-wifi");
     fos_client_render_recovery_boot();

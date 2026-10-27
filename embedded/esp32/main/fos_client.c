@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <time.h>
 
 #include "freertos/FreeRTOS.h"
@@ -1892,28 +1893,36 @@ static int local_offset_minutes_at(int64_t utc)
     return fos_tz_active() ? fos_tz_offset_minutes((time_t)utc) : fos_schedule_utc_offset_minutes();
 }
 
-/* How long to wait before the next render, in seconds.
+/* How long to wait before the next render, in milliseconds.
  *
  * wake_schedule + a synced clock → align to the LOCAL clock's interval
  * boundaries (a 1h frame wakes at the top of the hour, a 5min frame on
  * :00/:05/..., a daily one at local midnight — fos_wake.h), which is what
- * makes clock faces tick on time. Otherwise we subtract the time already
- * spent this cycle (boot + Wi-Fi + render) so the period stays ~interval
- * instead of drifting by however long a render took. */
-static uint32_t compute_sleep_seconds(uint32_t interval, int64_t cycle_start_us)
+ * makes clock faces tick on time. Otherwise an interval from `due_at_us`,
+ * when this pass's render was due (the pass's start when nothing scheduled
+ * it), so the time spent since (boot + Wi-Fi + render) comes off and the
+ * period stays the interval instead of drifting by it. A deep sleep rounds
+ * this up to whole seconds; an awake wait keeps the milliseconds: in whole
+ * seconds a one-second clock whose render took half of one waited a whole
+ * second after it, and showed every other second. */
+static uint32_t compute_sleep_ms(uint32_t interval, int64_t due_at_us)
 {
     fos_config_t *config = fos_config();
     if (interval == 0) interval = 1;
+    int64_t left_ms = -1;
     if (config->wake_schedule && fos_wifi_time_synced()) {
-        time_t now = time(NULL);
-        if (now > 1000000000) { /* clock actually set, not 1970 */
-            return fos_wake_aligned_sleep_seconds((int64_t)now, interval, local_offset_minutes_at);
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        if (now.tv_sec > 1000000000) { /* clock actually set, not 1970 */
+            left_ms = fos_wake_aligned_sleep_ms((int64_t)now.tv_sec * 1000 + now.tv_usec / 1000, interval,
+                                                local_offset_minutes_at);
         }
     }
-    int64_t elapsed_s = (esp_timer_get_time() - cycle_start_us) / 1000000;
-    if (elapsed_s < 0) elapsed_s = 0;
-    if ((uint32_t)elapsed_s >= interval) return 1;
-    return interval - (uint32_t)elapsed_s;
+    if (left_ms < 0) {
+        left_ms = (int64_t)interval * 1000 - (esp_timer_get_time() - due_at_us) / 1000;
+    }
+    if (left_ms < 1) return 1;
+    return left_ms > (int64_t)UINT32_MAX ? UINT32_MAX : (uint32_t)left_ms;
 }
 
 /* ------------------------------------------------------- animation mode */
@@ -2056,6 +2065,11 @@ static void client_task(void *arg)
      * next pass must render even if the wake-check bookkeeping says the
      * scheduled render is not due yet. */
     bool force_render = false;
+    /* When the last pass's wait ran out, uninterrupted: this pass's render was
+     * due then, and the next one is an interval after that, not after this
+     * pass began. Counted from each pass, a one-second clock came round every
+     * 1.03 s and showed one second twice every half minute. 0 otherwise. */
+    int64_t wait_ended_us = 0;
     xEventGroupWaitBits(s_events, START_RENDER_LOOP_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
     {
         /* A button woke the chip: this pass renders, whatever the wake-check
@@ -2110,6 +2124,8 @@ static void client_task(void *arg)
             continue;
         }
         int64_t cycle_start = esp_timer_get_time();
+        int64_t due_at_us = wait_ended_us ? wait_ended_us : cycle_start;
+        wait_ended_us = 0;
         /* Animation mode (fos_animation.h): the pulls, the sensors and the
          * settings pushes below run once a second, not once a frame. Outside
          * animation every pass does them. */
@@ -2435,7 +2451,9 @@ static void client_task(void *arg)
             continue;
         }
 
-        uint32_t sleep_s = compute_sleep_seconds(interval, cycle_start);
+        int64_t sleep_decided_us = esp_timer_get_time();
+        uint32_t sleep_ms = compute_sleep_ms(interval, due_at_us);
+        uint32_t sleep_s = (uint32_t)(((uint64_t)sleep_ms + 999) / 1000);
         /* A pass that ran before the scene store finished loading must not
          * park the frame for the whole fallback interval: scenes only load ON
          * a pass, so nothing wakes the loop when they become loadable, and a
@@ -2629,18 +2647,26 @@ static void client_task(void *arg)
             if (sleep_s > keep_awake_s) sleep_s = keep_awake_s;
         }
         /* Wait in 1s slices so scene-dispatched "render" events (QuickJS
-         * setting the redraw flag) take effect promptly. */
-        uint32_t remaining_ms = sleep_s * 1000;
-        while (remaining_ms > 0) {
+         * setting the redraw flag) take effect promptly, until a deadline:
+         * the wait decided above, to the millisecond, or what is left of it
+         * after a keep-awake or a retry shortened sleep_s. A slice a signal
+         * ends early takes off only the time that passed, and none waits 0
+         * ticks (fos_wake_slice_ticks): counted in slices of whole ms, the
+         * last few ms of a wait were one, and the loop spun until a pass
+         * happened to take that long. One pass at least, a tick long when
+         * the render ran past its interval: what is queued is served, and
+         * the idle task on this core runs between two renders. */
+        int64_t wait_ms = (int64_t)sleep_s * 1000 < (int64_t)sleep_ms ? (int64_t)sleep_s * 1000 : sleep_ms;
+        int64_t wait_until_us = sleep_decided_us + wait_ms * 1000;
+        do {
             /* 50 ms while a button is busy: its `press` is due 350 ms after
              * the tap and its `longPress`es on each second, and only the
              * process_events below delivers them. */
             uint32_t max_slice = fos_buttons_busy() ? 50 : 1000;
-            uint32_t slice = remaining_ms > max_slice ? max_slice : remaining_ms;
-            int64_t slice_start_us = esp_timer_get_time();
             EventBits_t bits = xEventGroupWaitBits(
                 s_events, RENDER_NOW_BIT | INPUT_EVENTS_BIT | COMMANDS_BIT | RELEASE_BIT | SCENE_RENDER_BIT,
-                pdTRUE, pdFALSE, pdMS_TO_TICKS(slice));
+                pdTRUE, pdFALSE,
+                fos_wake_slice_ticks(wait_until_us - esp_timer_get_time(), max_slice, portTICK_PERIOD_MS));
             bool nim = config->render_mode == FOS_RENDER_LOCAL && frameos_nim_available();
             /* Somebody wants a render. Decided below: now, or — while a voice
              * session holds the panel — when it releases, in one pass. */
@@ -2663,10 +2689,7 @@ static void client_task(void *arg)
             }
             /* INPUT_EVENTS_BIT ends the slice early and nothing more: the
              * press is delivered just below, and the render-requested check
-             * after it decides whether a frame follows. Only the time that
-             * actually passed comes off the wait. */
-            uint32_t waited_ms = (uint32_t)((esp_timer_get_time() - slice_start_us) / 1000);
-            if (waited_ms < slice) slice = waited_ms;
+             * after it decides whether a frame follows. */
             fos_scene_state_flush(false);
             if (nim) {
                 process_input_events();
@@ -2685,12 +2708,11 @@ static void client_task(void *arg)
             /* A code started (the verb wakes this wait), answered, replaced
              * or expired: within a second, whatever the interval. */
             if (lan_access_panel_changed()) want_render = true;
-            remaining_ms -= slice;
-            if (remaining_ms == 0 && render_held()) {
+            if (render_held() && esp_timer_get_time() >= wait_until_us) {
                 /* The interval ran out under the hold: that render is owed
                  * to the release too. */
                 s_render_owed = true;
-                remaining_ms = 1000;
+                wait_until_us = esp_timer_get_time() + 1000000;
             }
             if (bits & RELEASE_BIT) {
                 /* The voice session is over and its answer is pending. A
@@ -2728,7 +2750,8 @@ static void client_task(void *arg)
                 force_render = true;
                 break;
             }
-        }
+        } while (esp_timer_get_time() < wait_until_us);
+        if (!force_render) wait_ended_us = wait_until_us;
     }
 }
 
