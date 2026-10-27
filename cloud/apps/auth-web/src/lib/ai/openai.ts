@@ -158,6 +158,7 @@ export async function streamResponse({
   instructions,
   input,
   tools,
+  toolChoice,
   reasoningEffort,
   onTextDelta,
   onFunctionCallProgress,
@@ -169,6 +170,9 @@ export async function streamResponse({
   instructions: string;
   input: ResponseInputItem[];
   tools: ResponsesToolDefinition[];
+  // "none": the model answers in text with the tools still defined (the
+  // input holds its earlier calls to them).
+  toolChoice?: "none" | undefined;
   reasoningEffort?: string;
   onTextDelta: (delta: string) => void;
   onFunctionCallProgress?: (progress: FunctionCallProgress) => void;
@@ -183,6 +187,7 @@ export async function streamResponse({
     store: false,
     stream: true,
     tools,
+    ...(toolChoice ? { tool_choice: toolChoice } : {}),
   };
   if (useReasoning) {
     body.reasoning = { effort: reasoningEffort ?? DEFAULT_REASONING_EFFORT };

@@ -205,3 +205,62 @@ describe("runAgentLoop and rendered images", () => {
     expect(usage.inputTokens).toBeLessThan(estimatedImageTokens + 100);
   });
 });
+
+describe("runAgentLoop out of rounds", () => {
+  beforeEach(() => {
+    streamResponse.mockReset();
+    runTool.mockReset();
+    runTool.mockResolvedValue(text("{}"));
+  });
+
+  it("asks the model, with its tools off, to say where it stopped instead of ending on a canned line", async () => {
+    const calls: { toolChoice: string | undefined; input: ResponseInputItem[] }[] = [];
+    streamResponse.mockImplementation(
+      async (options: { toolChoice?: string; input: ResponseInputItem[]; onTextDelta: (delta: string) => void }) => {
+        calls.push({ input: structuredClone(options.input), toolChoice: options.toolChoice });
+        if (options.toolChoice === "none") {
+          options.onTextDelta("I fixed the radar and rendered it once; the list still overflows. Say continue.");
+          return { functionCalls: [], output: [], outputText: "", status: "completed", usage };
+        }
+        return round([{ args: { edits: [] }, name: "edit_app_source" }]);
+      },
+    );
+    const emitted: string[] = [];
+    const result = await runAgentLoop({
+      apiKey: "sk-test",
+      emit: (event) => {
+        if (event.type === "delta") emitted.push(event.text);
+      },
+      input: [],
+      maxRounds: 3,
+      model: "gpt-test",
+      reasoningEffort: "low",
+      toolContext: {} as never,
+    });
+
+    expect(calls.map((call) => call.toolChoice ?? "auto")).toEqual(["auto", "auto", "auto", "none"]);
+    expect(JSON.stringify(calls[3]!.input.at(-1))).toContain("You have used all 3 steps");
+    expect(result.reply).toBe("I fixed the radar and rendered it once; the list still overflows. Say continue.");
+    expect(result.rounds).toBe(4);
+    expect(runTool).toHaveBeenCalledTimes(3);
+    expect(emitted.join("")).toBe(result.reply);
+  });
+
+  it("falls back to saying how to go on when the last round says nothing", async () => {
+    streamResponse.mockImplementation(async (options: { toolChoice?: string }) =>
+      options.toolChoice === "none"
+        ? { functionCalls: [], output: [], outputText: "", status: "completed", usage }
+        : round([{ args: {}, name: "render_scene" }]),
+    );
+    const result = await runAgentLoop({
+      apiKey: "sk-test",
+      emit: () => {},
+      input: [],
+      maxRounds: 1,
+      model: "gpt-test",
+      reasoningEffort: "low",
+      toolContext: {} as never,
+    });
+    expect(result.reply).toContain('Say "continue"');
+  });
+});

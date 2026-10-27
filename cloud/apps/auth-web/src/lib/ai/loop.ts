@@ -49,7 +49,25 @@ export type ChatStreamEvent =
   // never counted, ignored by clients.
   | { type: "ping" };
 
-export const MAX_TOOL_ROUNDS = 12;
+// Model rounds one reply may take. A scene built, rendered, fixed and
+// rendered again at two sizes is well past a dozen rounds of legitimate work;
+// what bounds a runaway is the account's daily AI line, checked after every
+// round (the chat route's onRound), not this. The backend's ai_chat_agent.py
+// keeps the same number.
+export const MAX_TOOL_ROUNDS = 40;
+
+// The last round of a reply that used them all: tools off, so the model says
+// where it stopped instead of the reply ending mid-work.
+export function outOfStepsNote(maxRounds: number): string {
+  return (
+    `You have used all ${maxRounds} steps one reply may take, so you cannot call tools now. ` +
+    "In a few sentences tell the user what you did, what state it is in, and what is left; " +
+    'they can say "continue" for you to pick up where you stopped.'
+  );
+}
+
+export const outOfStepsReply =
+  'I ran out of steps for this reply before finishing. Say "continue" and I will pick up where I stopped.';
 
 // What one model round looked like, for telemetry. Reported after every
 // streamResponse call, failed ones included (then `error` is set and usage
@@ -356,11 +374,65 @@ export async function runAgentLoop({
     }
   }
 
-  // Ran out of rounds mid-tool-use: surface what we have.
-  if (!reply.trim()) {
-    reply =
-      "I ran out of steps while working on this. The partial work above may be incomplete — please try again with a narrower request.";
-    emit({ text: reply, type: "delta" });
+  // Out of rounds mid-tool-use: one more round with the tools off, so the
+  // model tells the user what it did and what is left. It used to end on a
+  // canned line asking for "a narrower request", after work that was going
+  // fine (2026-10-27).
+  const replyBeforeWrapUp = reply.length;
+  if (reply.trim()) {
+    reply += "\n\n";
+    emit({ text: "\n\n", type: "delta" });
+  }
+  input.push(userMessage(outOfStepsNote(maxRounds)));
+  rounds += 1;
+  const wrapUpStartedAt = Date.now();
+  try {
+    const response = await streamResponse({
+      apiKey,
+      input,
+      instructions,
+      model,
+      onTextDelta: (delta) => {
+        reply += delta;
+        emit({ text: delta, type: "delta" });
+      },
+      reasoningEffort,
+      ...(signal ? { signal } : {}),
+      toolChoice: "none",
+      tools,
+    });
+    onRound?.({
+      latencyMs: Date.now() - wrapUpStartedAt,
+      round: rounds,
+      status: response.status,
+      toolCalls: [],
+      usage: response.usage,
+    });
+    usage = addUsage(usage, response.usage);
+  } catch (error) {
+    const requestFailed = error instanceof OpenAiRequestError && error.status >= 400;
+    onRound?.({
+      error: error instanceof Error ? error.message : String(error),
+      ...(error instanceof OpenAiRequestError ? { httpStatus: error.status } : {}),
+      latencyMs: Date.now() - wrapUpStartedAt,
+      round: rounds,
+      status: "failed",
+      toolCalls: [],
+      ...(requestFailed
+        ? {}
+        : {
+            usage: estimatedUsage(instructions, input, replyBeforeWrapUp, reply),
+            usageEstimated: true,
+          }),
+    });
+    if (signal?.aborted) {
+      // A stop (or the account's daily line) ends the turn as in any round.
+      throw error;
+    }
+  }
+  if (!reply.slice(replyBeforeWrapUp).trim()) {
+    reply += outOfStepsReply;
+    emit({ text: outOfStepsReply, type: "delta" });
   }
   return { reply, rounds, tool: toolContext.deliveredTool ?? "reply", toolCalls, usage };
 }

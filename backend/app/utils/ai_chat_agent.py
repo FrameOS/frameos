@@ -9,6 +9,7 @@ frontend/src/utils/aiChatStream.ts."""
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
@@ -17,10 +18,26 @@ import httpx
 
 from app.utils.photo_share_links import PhotoLinkRedactor
 
+logger = logging.getLogger(__name__)
+
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 OPENAI_IDLE_TIMEOUT_SECONDS = 120.0
 DEFAULT_REASONING_EFFORT = "low"
-MAX_TOOL_ROUNDS = 16
+# Model rounds one reply may take: the cloud's loop.ts keeps the same number.
+# A scene built, rendered, fixed and rendered again is well past a dozen.
+MAX_TOOL_ROUNDS = 40
+
+OUT_OF_STEPS_REPLY = 'I ran out of steps for this reply before finishing. Say "continue" and I will pick up where I stopped.'
+
+
+def out_of_steps_note(max_rounds: int) -> str:
+    """The last round of a reply that used them all: tools off, so the model
+    says where it stopped instead of the reply ending mid-work."""
+    return (
+        f"You have used all {max_rounds} steps one reply may take, so you cannot call tools now. "
+        "In a few sentences tell the user what you did, what state it is in, and what is left; "
+        'they can say "continue" for you to pick up where you stopped.'
+    )
 
 PHOTO_LINK_NOTE = (
     "Photos album share links in this conversation are shown with placeholder tokens "
@@ -125,6 +142,7 @@ async def stream_response(
     reasoning_effort: str | None,
     on_text_delta: Callable[[str], Awaitable[None]],
     on_call_progress: Callable[[str, int], Awaitable[None]] | None = None,
+    tool_choice: str | None = None,
 ) -> StreamedResponse:
     body: dict[str, Any] = {
         "model": model,
@@ -134,6 +152,10 @@ async def stream_response(
         "store": False,
         "stream": True,
     }
+    if tool_choice:
+        # "none": a text answer, the tools still defined (the input holds the
+        # model's earlier calls to them).
+        body["tool_choice"] = tool_choice
     if model_supports_reasoning(model):
         body["reasoning"] = {"effort": reasoning_effort or DEFAULT_REASONING_EFFORT}
         # store:false tool loops must round-trip the reasoning items.
@@ -345,14 +367,34 @@ async def run_agent_loop(
             if not photo_links_noted and photo_links.size > 0:
                 input_items.append(user_message(PHOTO_LINK_NOTE))
                 photo_links_noted = True
+
+        # Out of rounds mid-tool-use: one more round with the tools off, so the
+        # model tells the user what it did and what is left. It used to end on
+        # a canned line asking for "a narrower request" (2026-10-27).
+        reply_before_wrap_up = len(reply)
+        if reply.strip():
+            await on_text_delta("\n\n")
+        input_items.append(user_message(out_of_steps_note(max_rounds)))
+        rounds += 1
+        try:
+            await stream_response(
+                client=client,
+                api_key=api_key,
+                model=model,
+                instructions=instructions,
+                input_items=input_items,
+                tools=definitions,
+                reasoning_effort=reasoning_effort,
+                on_text_delta=on_text_delta,
+                tool_choice="none",
+            )
+        except Exception:
+            logger.exception("ai chat: the out-of-steps summary round failed")
     finally:
         if owns_client:
             await client.aclose()
 
-    if not reply.strip():
-        reply = (
-            "I ran out of steps while working on this. The partial work above may be incomplete — please try again "
-            "with a narrower request."
-        )
-        await emit({"type": "delta", "text": reply})
+    if not reply[reply_before_wrap_up:].strip():
+        reply += OUT_OF_STEPS_REPLY
+        await emit({"type": "delta", "text": OUT_OF_STEPS_REPLY})
     return AgentResult(reply=reply, tool=tools.delivered_tool or "reply", rounds=rounds, tool_calls=tool_calls)

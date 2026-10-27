@@ -91,6 +91,13 @@ TypeScript (`src/lib/ai/loop.ts`, `openai.ts`), the backend's a port of it
 placeholders before anything reaches the model on both
 (`share-links-in-scenes.ts`, `photo_share_links.py`).
 
+A reply may take 40 rounds (`MAX_TOOL_ROUNDS` on both; on the cloud the
+account's daily AI line, checked after every round, is what stops a runaway).
+A reply that uses them all gets one more round with `tool_choice: "none"`
+and a note asking the model what it did and what is left, so it ends on its
+own summary and the user can say "continue" (`outOfStepsNote` /
+`out_of_steps_note`).
+
 ## The tools: the MCP server's, plus the editor's
 
 The chat has every tool its plane's MCP server has (`docs/mcp.md`,

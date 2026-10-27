@@ -63,6 +63,7 @@ class ScriptedOpenAi:
             "input": json.loads(json.dumps(kwargs["input_items"])),
             "tools": kwargs["tools"],
             "instructions": kwargs["instructions"],
+            "tool_choice": kwargs.get("tool_choice"),
         })
         text, calls = self.rounds[len(self.requests) - 1]
         if text:
@@ -437,3 +438,44 @@ def test_mcp_images_reach_the_model():
 
     failed = mcp_result_output("frame_screenshot", {"isError": True, "content": [{"type": "text", "text": "offline"}]})
     assert json.loads(failed.text) == {"ok": False, "error": "offline"}
+
+
+@pytest.mark.asyncio
+async def test_out_of_rounds_ends_with_the_models_own_summary():
+    """A reply that used every round used to end on a canned line asking for
+    "a narrower request" after work that was going fine. One more round, with
+    the tools off, has the model say where it stopped; the cloud's loop.ts
+    does the same (loop.test.ts)."""
+
+    class Tools(ai_chat_agent.ToolBox):
+        def definitions(self):
+            return [{"type": "function", "name": "render_scene", "parameters": {"type": "object"}}]
+
+        async def call(self, name, args):
+            return ai_chat_agent.ToolOutput(text="{}")
+
+    calls = [{"type": "function_call", "call_id": f"c{i}", "name": "render_scene", "arguments": "{}"} for i in range(3)]
+    openai = ScriptedOpenAi([
+        ("", [calls[0]]),
+        ("", [calls[1]]),
+        ("Rendered it twice; the list still overflows. Say continue.", []),
+    ])
+    events: list[dict] = []
+
+    async def emit(event):
+        events.append(event)
+
+    original = ai_chat_agent.stream_response
+    ai_chat_agent.stream_response = openai
+    try:
+        result = await ai_chat_agent.run_agent_loop(
+            api_key="sk-test", model="gpt-test", reasoning_effort="low", instructions="",
+            input_items=[], tools=Tools(), emit=emit, max_rounds=2,
+        )
+    finally:
+        ai_chat_agent.stream_response = original
+
+    assert [request["tool_choice"] for request in openai.requests] == [None, None, "none"]
+    assert "You have used all 2 steps" in json.dumps(openai.requests[2]["input"][-1])
+    assert result.reply == "Rendered it twice; the list still overflows. Say continue."
+    assert result.rounds == 3
