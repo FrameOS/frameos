@@ -17,7 +17,17 @@
 
 static const char *TAG = "fos_codec";
 
-#if SOC_I2S_HW_VERSION_2
+/* The codec runs on the S3's I2S0: its signal names, and the receiver set up
+ * the way the PDM microphone's is (fos_i2s.h, which exists where the I2S
+ * decodes PDM). The C3's I2S is HW version 2 as well, but has neither, and
+ * no board of it carries a codec. */
+#if SOC_I2S_HW_VERSION_2 && SOC_I2S_SUPPORTS_PDM2PCM
+#define FOS_CODEC_I2S 1
+#else
+#define FOS_CODEC_I2S 0
+#endif
+
+#if FOS_CODEC_I2S
 #include "esp_heap_caps.h"
 #include "esp_private/gdma.h"
 #include "esp_private/gpio.h"
@@ -137,7 +147,7 @@ static esp_err_t es7210_setup(void)
 
 /* ------------------------------------------------------------- the I2S */
 
-#if SOC_I2S_HW_VERSION_2
+#if FOS_CODEC_I2S
 static void i2s_setup(const fos_codec_pins_t *pins)
 {
     i2s_dev_t *hw = CODEC_HW;
@@ -261,7 +271,7 @@ static void fill_tone(uint32_t freq_hz)
         s_tone[i] = ((i / half) & 1) ? (int16_t)-TONE_AMPLITUDE : (int16_t)TONE_AMPLITUDE;
     }
 }
-#endif /* SOC_I2S_HW_VERSION_2 */
+#endif /* FOS_CODEC_I2S */
 
 /* ------------------------------------------------------------- the API */
 
@@ -270,7 +280,7 @@ bool fos_codec_init(void)
     const fos_config_t *config = fos_config();
     const fos_codec_pins_t *pins = &config->codec_pins;
     if (pins->bclk < 0 || pins->ws < 0) return false;
-#if !SOC_I2S_HW_VERSION_2
+#if !FOS_CODEC_I2S
     ESP_LOGW(TAG, "no I2S codec support on this chip");
     return false;
 #else
@@ -338,7 +348,7 @@ bool fos_codec_has_speaker(void)
 
 esp_err_t fos_codec_rx_begin(size_t eof_bytes)
 {
-#if !SOC_I2S_HW_VERSION_2
+#if !FOS_CODEC_I2S
     (void)eof_bytes;
     return ESP_ERR_NOT_SUPPORTED;
 #else
@@ -354,7 +364,7 @@ esp_err_t fos_codec_rx_begin(size_t eof_bytes)
 
 void fos_codec_rx_end(void)
 {
-#if SOC_I2S_HW_VERSION_2
+#if FOS_CODEC_I2S
     if (!s_lock) return;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_rx_on = false;
@@ -365,7 +375,7 @@ void fos_codec_rx_end(void)
 
 void fos_codec_tone(uint32_t freq_hz)
 {
-#if !SOC_I2S_HW_VERSION_2
+#if !FOS_CODEC_I2S
     (void)freq_hz;
 #else
     if (!fos_codec_has_speaker()) return;
