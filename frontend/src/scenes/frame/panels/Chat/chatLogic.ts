@@ -238,6 +238,7 @@ export interface chatLogicValues {
     id: string | null
     type: ChatContextType
   }
+  editorSceneId: string | null
   error: string | null
   hasMoreChats: boolean
   historyForRequest: {
@@ -456,7 +457,8 @@ export interface chatLogicActions {
 export interface chatLogicMeta {
   key: FrameId
   __keaTypeGenInternalSelectorTypes: {
-    selectedScene: (scenes: any, activeSceneEditorId: any) => FrameScene | null
+    editorSceneId: (activeSceneEditorId: any, arg: string | null | undefined) => string | null
+    selectedScene: (scenes: any, editorSceneId: any) => FrameScene | null
     activeEditAppContext: (activeEditApp: any) => {
       nodeData: AppNodeData | null
       nodeId: string
@@ -465,7 +467,7 @@ export interface chatLogicMeta {
     activeChat: (chats: any, openedChats: any, activeChatId: any) => ChatSummary | null
     activeChatChosen: (activeChatId: any, activeChat: any, chatMessagesLoading: any, chatMessagesLoaded: any) => boolean
     linkableChatId: (chatView: any, activeChatId: any, activeChatChosen: any) => string | null
-    chatSceneId: (activeChat: any, activeSceneEditorId: any) => string | null
+    chatSceneId: (activeChat: any, editorSceneId: any) => string | null
     chatContextType: (
       activeChat: any,
       activeEditAppContext: any,
@@ -950,10 +952,19 @@ export const chatLogic = kea<chatLogicType>([
     ],
   }),
   selectors({
+    // The scene the user is editing: the one the drawer was opened on (the
+    // workspace's scene page, `?drawer=chat&sceneId=`), else a scene editor
+    // panel's. The scene page opens no editor panel, so reading the panel
+    // alone sent no scene from it, or the last scene a panel had open.
+    editorSceneId: [
+      (s: any) => [s.activeSceneEditorId, (_: any, props: ChatLogicProps) => props.sceneId],
+      (activeSceneEditorId: string | null, propsSceneId: string | null | undefined): string | null =>
+        propsSceneId || activeSceneEditorId || null,
+    ],
     selectedScene: [
-      (s: any) => [s.scenes, s.activeSceneEditorId],
-      (scenes: FrameScene[], activeSceneEditorId: string | null) =>
-        scenes?.find((scene: FrameScene) => scene.id === activeSceneEditorId) ?? null,
+      (s: any) => [s.scenes, s.editorSceneId],
+      (scenes: FrameScene[], editorSceneId: string | null) =>
+        editorSceneId ? (scenes?.find((scene: FrameScene) => scene.id === editorSceneId) ?? null) : null,
     ],
     activeEditAppContext: [
       (s: any) => [s.activeEditApp],
@@ -999,8 +1010,8 @@ export const chatLogic = kea<chatLogicType>([
         chatView === 'chat' && activeChatChosen ? activeChatId : null,
     ],
     chatSceneId: [
-      (s: any) => [s.activeChat, s.activeSceneEditorId],
-      (activeChat: ChatSummary | null, activeSceneEditorId: string | null): string | null => {
+      (s: any) => [s.activeChat, s.editorSceneId],
+      (activeChat: ChatSummary | null, editorSceneId: string | null): string | null => {
         if (activeChat) {
           const contextType = getChatContextType(activeChat)
           if (contextType === 'scene') {
@@ -1008,7 +1019,7 @@ export const chatLogic = kea<chatLogicType>([
           }
           return null
         }
-        return activeSceneEditorId ?? null
+        return editorSceneId
       },
     ],
     chatContextType: [

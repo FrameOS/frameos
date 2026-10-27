@@ -69,6 +69,7 @@ export default tseslint.config(
       "**/src/test/shared-spa/frame-admin-ai-drawer.test.tsx",
       "**/src/test/shared-spa/ai-chat-drawer-url.test.tsx",
       "**/src/test/shared-spa/render-check-image.test.ts",
+      "**/src/test/shared-spa/chat-editor-scene.test.ts",
       "**/src/test/shared-spa/store-refresh.test.ts",
       // Same exclusion, same reason: devices.ts reaches components/Select.tsx.
       "**/src/test/shared-spa/device-catalog-mirror.test.ts",
