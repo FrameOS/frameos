@@ -1,0 +1,91 @@
+{
+  "id": "jsxStatus",
+  "name": "JSX: service status",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600,
+    "backgroundColor": "#f4f4f5"
+  },
+  "e2eFrame": {
+    "width": 800,
+    "height": 480
+  },
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: service status",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: service status\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// A status board: services in a grid, a dot and a sparkline each.\nconst services = [\n  { name: 'Home Assistant', state: 'up', latency: [12, 14, 11, 13, 12, 15, 12, 11, 12, 13], note: '99.98% this month' },\n  { name: 'Photo backup', state: 'up', latency: [40, 42, 38, 41, 45, 43, 40, 39, 41, 40], note: '2,418 photos today' },\n  { name: 'Media server', state: 'slow', latency: [30, 32, 35, 50, 80, 120, 95, 70, 60, 55], note: 'Transcoding a 4K film' },\n  { name: 'Router', state: 'up', latency: [2, 2, 3, 2, 2, 2, 3, 2, 2, 2], note: '412 Mbit/s down' },\n  { name: 'Weather station', state: 'down', latency: [5, 5, 6, 5, 0, 0, 0, 0, 0, 0], note: 'No data since 13:52' },\n  { name: 'Frames', state: 'up', latency: [20, 22, 21, 19, 23, 20, 21, 22, 20, 21], note: '6 online, 1 asleep' },\n]\nconst tone = { up: 'bg-emerald-400', slow: 'bg-amber-400', down: 'bg-rose-500' }\nconst stroke = { up: '#34d399', slow: '#fbbf24', down: '#f43f5e' }\n\nconst Spark = ({ values, color }) => {\n  const max = Math.max(...values, 1)\n  const points = values.map((v, i) => `${(i * 100) / (values.length - 1)},${30 - (v / max) * 26}`).join(' ')\n  return (\n    <svg className=\"w-full h-8\" viewBox=\"0 0 100 32\" preserveAspectRatio=\"none\">\n      <polyline points={points} fill=\"none\" stroke={color} strokeWidth={2} strokeLinejoin=\"round\" />\n    </svg>\n  )\n}\n\nexport function get(app) {\n  const down = services.filter((s) => s.state === 'down').length\n  return (\n    <div className=\"flex flex-col gap-4 p-6 bg-zinc-100 text-zinc-900\">\n      <div className=\"flex items-center justify-between\">\n        <span className=\"text-3xl font-bold\">Home lab</span>\n        <span className={`rounded-full px-4 py-1 text-sm font-semibold ${down ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>\n          {down ? `${down} service down` : 'All systems normal'}\n        </span>\n      </div>\n      <div className=\"flex-1 grid grid-cols-3 gap-4\">\n        {services.map((s) => (\n          <div className=\"flex flex-col justify-between rounded-xl bg-white p-4 border border-zinc-200\">\n            <div className=\"flex items-center gap-2\">\n              <div className={`w-3 h-3 rounded-full ${tone[s.state]}`} />\n              <span className=\"text-lg font-semibold truncate\">{s.name}</span>\n            </div>\n            <Spark values={s.latency} color={stroke[s.state]} />\n            <span className={`text-sm truncate ${s.state === 'down' ? 'text-rose-600 font-medium' : 'text-zinc-500'}`}>{s.note}</span>\n          </div>\n        ))}\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

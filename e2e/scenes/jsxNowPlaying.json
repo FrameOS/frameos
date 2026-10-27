@@ -1,0 +1,96 @@
+{
+  "id": "jsxNowPlaying",
+  "name": "JSX: now playing",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600,
+    "backgroundColor": "#000000"
+  },
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: now playing",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [
+        {
+          "name": "url",
+          "label": "Image URL",
+          "type": "string",
+          "value": ""
+        }
+      ],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: now playing\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"url\",\n      \"label\": \"Image URL\",\n      \"type\": \"string\",\n      \"value\": \"\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// Now playing, for a small portrait screen.\nconst Icon = ({ d, big = false }) => (\n  <svg className={big ? 'w-14 h-14 text-white' : 'w-8 h-8 text-white/80'} viewBox=\"0 0 24 24\">\n    <path fill=\"currentColor\" d={d} />\n  </svg>\n)\nexport function get(app) {\n  const cover = frameos.fetchImage(app.config.url)\n  return (\n    <div className=\"flex flex-col items-center gap-4 p-6 bg-gradient-to-b from-fuchsia-900 via-purple-950 to-black text-white\">\n      <span className=\"text-xs uppercase text-white/60 font-semibold\">Playing from your library</span>\n      <img className=\"w-64 h-64 rounded-2xl object-cover\" src={cover} />\n      <div className=\"flex flex-col items-center w-full\">\n        <span className=\"text-2xl font-bold truncate\">Log Cabin Lullaby</span>\n        <span className=\"text-white/70\">The Forest Choir</span>\n      </div>\n      <div className=\"flex flex-col w-full gap-1\">\n        <div className=\"h-1 rounded-full bg-white/20\"><div className=\"h-1 w-2/3 rounded-full bg-white\" /></div>\n        <div className=\"flex justify-between text-xs text-white/60\"><span>2:14</span><span>3:21</span></div>\n      </div>\n      <div className=\"flex items-center justify-between w-full px-4\">\n        <Icon d=\"M6 6h2v12H6zM9.5 12l8.5 6V6z\" />\n        <Icon big d=\"M6 4h4v16H6zM14 4h4v16h-4z\" />\n        <Icon d=\"M16 6h2v12h-2zM6 18l8.5-6L6 6z\" />\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {
+          "url": "https://frameos.net/img/bird_in_ci_tests.png"
+        }
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "id": "jsxHomePortrait",
+  "name": "JSX: home dashboard, portrait",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600,
+    "backgroundColor": "#0f172a"
+  },
+  "e2eFrame": {
+    "width": 480,
+    "height": 800
+  },
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: home dashboard, portrait",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: home dashboard, portrait\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// A home dashboard: clock, weather, three readings and today's list.\n// The portrait: classes rearrange it on a portrait frame.\nconst Sun = () => (\n  <svg className=\"w-16 h-16 text-amber-400\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth={2} strokeLinecap=\"round\">\n    <circle cx={12} cy={12} r={4} />\n    <path d=\"M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4\" />\n  </svg>\n)\n\nconst Reading = ({ label, value, unit, tone }) => (\n  <div className=\"flex flex-col gap-1 rounded-xl bg-white/10 p-4 flex-1\">\n    <span className=\"text-sm uppercase text-slate-400\">{label}</span>\n    <div className=\"flex items-end gap-1\">\n      <span className={`text-4xl font-bold ${tone}`}>{value}</span>\n      <span className=\"text-lg text-slate-400 mb-1\">{unit}</span>\n    </div>\n  </div>\n)\n\nconst todo = [\n  { text: 'Water the plants', done: true },\n  { text: 'Call grandma about the weekend trip and the long story about the cat', done: false },\n  { text: 'Oat milk, coffee beans, lemons', done: false },\n  { text: 'Recycling goes out tonight', done: false },\n]\n\nexport function get(app) {\n  return (\n    <div className=\"flex flex-col gap-4 p-6 bg-gradient-to-br from-slate-900 to-indigo-950 text-white\">\n      <div className=\"flex portrait:flex-col items-center portrait:items-start justify-between portrait:gap-6\">\n        <div className=\"flex flex-col\">\n          <span className=\"text-6xl portrait:text-8xl font-bold\">14:40</span>\n          <span className=\"text-xl text-slate-300\">Tuesday, 12 March</span>\n        </div>\n        <div className=\"flex items-center gap-3\">\n          <Sun />\n          <div className=\"flex flex-col items-end\">\n            <span className=\"text-5xl font-semibold\">18°</span>\n            <span className=\"text-slate-300\">Sunny, light wind</span>\n          </div>\n        </div>\n      </div>\n      <div className=\"flex portrait:flex-col gap-4\">\n        <Reading label=\"Indoor\" value=\"21.5\" unit=\"°C\" tone=\"text-emerald-400\" />\n        <Reading label=\"Humidity\" value=\"48\" unit=\"%\" tone=\"text-sky-400\" />\n        <Reading label=\"Power\" value=\"1.2\" unit=\"kW\" tone=\"text-rose-400\" />\n      </div>\n      <div className=\"flex-1 rounded-xl border border-white/20 p-4 flex flex-col gap-2\">\n        <span className=\"text-sm uppercase text-slate-400\">Today</span>\n        {todo.map((item) => (\n          <div className=\"flex items-center gap-3\">\n            <div className={`w-3 h-3 rounded-full ${item.done ? 'bg-emerald-400' : 'border-2 border-slate-400'}`} />\n            <span className={`text-lg truncate ${item.done ? 'text-slate-400 line-through' : ''}`}>{item.text}</span>\n          </div>\n        ))}\n      </div>\n      <div className=\"absolute bottom-1 right-6 text-xs text-slate-500\">updated 14:40</div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

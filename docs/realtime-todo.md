@@ -19,12 +19,13 @@ SVG path work. Roughly in order of what each would buy there:
    descriptor chain built once and restarted from the callback, with the
    frame buffer written back from the cache before it is handed over. Moving
    the interrupt to core 0 was measured: no faster, and 60 late refills.
-2. **The SVG parse, ~10 ms.** Half is the XML: every element gets a
-   64-slot `StringTable` and every value a string. Parsing the markup straight
-   into pixie's element list (no `XmlNode` tree) is the structural fix; for an
-   app that rebuilds the same document with new numbers each frame, diffing
-   the markup against the last frame's and re-reading only the changed
-   attributes would take most of the rest.
+2. **The SVG parse, ~10 ms.** An app that returns its SVG as JSX skips the
+   markup (`docs/jsx-ui.md`): pixie reads the node tree the JSX makes, 4 µs
+   where the DVD frame's markup took 18 µs on a laptop. Not measured on the
+   board yet; the store scene still builds markup. What is left of the parse
+   is each element's attributes read from strings; for an app that rebuilds
+   the same document with new numbers each frame, re-reading only the
+   attributes that changed would take most of it.
 3. **A retained compositor** for the UI layer (`docs/ui-todo.md`): elements
    with bounds, a moved or changed element repaints its old and new box, a
    tap hit-tests the retained list and redraws one element into a `view()` of

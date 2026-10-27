@@ -1,0 +1,91 @@
+{
+  "id": "jsxRecipe",
+  "name": "JSX: recipe card",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600,
+    "backgroundColor": "#fff7ed"
+  },
+  "e2eFrame": {
+    "width": 800,
+    "height": 480
+  },
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: recipe card",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: recipe card\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// A recipe on the kitchen frame: what to buy, what to do, how long.\nconst ingredients = [\n  ['400 g', 'spaghetti'], ['4', 'egg yolks'], ['100 g', 'pecorino, grated'], ['150 g', 'guanciale'], ['', 'black pepper, lots'],\n]\nconst steps = [\n  'Cut the guanciale into strips and render it slowly in a dry pan.',\n  'Beat the yolks with the pecorino and a ladle of pasta water.',\n  'Cook the spaghetti one minute short of the packet time.',\n  'Off the heat, toss the pasta with the fat, then the egg mixture, until glossy.',\n]\nconst Chip = ({ children }) => <span className=\"rounded-full bg-orange-100 text-orange-800 px-3 py-1 text-sm font-semibold\">{children}</span>\n\nexport function get(app) {\n  return (\n    <div className=\"flex flex-col gap-4 p-6 bg-orange-50 text-stone-800 font-[PT_Sans]\">\n      <div className=\"flex items-center justify-between\">\n        <span className=\"text-4xl font-bold\">Spaghetti carbonara</span>\n        <div className=\"flex gap-2\"><Chip>25 min</Chip><Chip>Serves 4</Chip></div>\n      </div>\n      <div className=\"flex-1 flex gap-6\">\n        <div className=\"flex flex-col gap-2 w-60 rounded-xl bg-white p-4\">\n          <span className=\"text-sm uppercase font-bold text-orange-700\">Ingredients</span>\n          {ingredients.map(([amount, what]) => (\n            <div className=\"flex gap-2 border-b border-orange-100 pb-1\">\n              <span className=\"w-14 text-right font-bold\">{amount}</span>\n              <span className=\"flex-1\">{what}</span>\n            </div>\n          ))}\n        </div>\n        <div className=\"flex-1 flex flex-col gap-3\">\n          {steps.map((step, i) => (\n            <div className=\"flex gap-3 items-start\">\n              <span className=\"w-8 h-8 shrink-0 rounded-full bg-orange-500 text-white font-bold flex items-center justify-center\">{i + 1}</span>\n              <span className=\"flex-1 text-lg leading-snug\">{step}</span>\n            </div>\n          ))}\n        </div>\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

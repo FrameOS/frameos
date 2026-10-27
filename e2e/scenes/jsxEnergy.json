@@ -1,0 +1,91 @@
+{
+  "id": "jsxEnergy",
+  "name": "JSX: energy chart",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600,
+    "backgroundColor": "#f5f5f4"
+  },
+  "e2eFrame": {
+    "width": 800,
+    "height": 480
+  },
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: energy chart",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: energy chart\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// Energy today: a bar chart drawn as JSX SVG, inside a UI with the totals.\nconst hours = [0.3, 0.2, 0.2, 0.2, 0.3, 0.4, 0.9, 1.6, 1.2, 0.8, 0.6, 0.5, 0.7, 0.6, 0.9, 0.5]\nconst solar = [0, 0, 0, 0, 0, 0, 0.1, 0.4, 0.9, 1.5, 2.1, 2.6, 2.8, 2.7, 2.3, 1.8]\n\nconst Chart = () => {\n  const W = 480, H = 220, max = 3, bw = W / hours.length\n  return (\n    <svg className=\"w-full flex-1\" viewBox={`0 0 ${W} ${H + 24}`} preserveAspectRatio=\"none\">\n      {[1, 2, 3].map((v) => <line x1={0} x2={W} y1={H - (v / max) * H} y2={H - (v / max) * H} stroke=\"#e7e5e4\" strokeWidth={1} />)}\n      {solar.map((v, i) => <rect x={i * bw + 3} y={H - (v / max) * H} width={bw - 6} height={(v / max) * H} rx={3} fill=\"#fcd34d\" />)}\n      {hours.map((v, i) => <rect x={i * bw + 9} y={H - (v / max) * H} width={bw - 18} height={(v / max) * H} rx={2} fill=\"#0f766e\" />)}\n      {[0, 4, 8, 12].map((h) => <text x={h * bw + 2} y={H + 18} fontSize={13} fill=\"#78716c\">{`${String(h).padStart(2, '0')}:00`}</text>)}\n    </svg>\n  )\n}\n\nconst Total = ({ label, value, unit, dot }) => (\n  <div className=\"flex flex-col gap-1\">\n    <div className=\"flex items-center gap-2\">\n      <div className={`w-3 h-3 rounded-sm ${dot}`} />\n      <span className=\"text-sm uppercase text-stone-500\">{label}</span>\n    </div>\n    <span className=\"text-4xl font-bold text-stone-800\">{value}<span className=\"text-xl font-normal text-stone-400\">{` ${unit}`}</span></span>\n  </div>\n)\n\nexport function get(app) {\n  return (\n    <div className=\"flex gap-6 p-6 bg-stone-100\">\n      <div className=\"flex flex-col justify-between w-56\">\n        <div className=\"flex flex-col\">\n          <span className=\"text-3xl font-bold text-stone-800\">Energy</span>\n          <span className=\"text-stone-500\">Today until 15:00</span>\n        </div>\n        <Total label=\"Used\" value=\"10.3\" unit=\"kWh\" dot=\"bg-teal-700\" />\n        <Total label=\"Solar\" value=\"17.2\" unit=\"kWh\" dot=\"bg-amber-300\" />\n        <div className=\"rounded-lg bg-emerald-100 text-emerald-800 px-3 py-2 text-sm font-medium\">{`6.9 kWh to the grid, €0.48 earned`}</div>\n      </div>\n      <div className=\"flex-1 flex flex-col rounded-2xl bg-white p-4 gap-2\">\n        <span className=\"text-sm uppercase text-stone-500\">kWh per hour</span>\n        <Chart />\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

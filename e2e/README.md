@@ -21,7 +21,8 @@ cd e2e
 
 A fixture that says `settings.execution: "interpreted"` is rendered by the
 interpreter only (its code nodes are JavaScript with no Nim twin, so there is
-no compiled half to compare; the snapshot is `<id>.png` straight away), and a
+no compiled half to compare; the render is `<id>.png`, kept like a pair's when
+within the threshold of the committed one), and a
 fixture's `e2eEvents` list is POSTed to the frame's `/event/<name>` after the
 first render, so an input scene (`inputTouch`, `inputKeyboard`) is snapshotted
 showing what it heard: the last upload of the burst, taken once nothing more
@@ -29,6 +30,11 @@ arrives for `FRAMEOS_E2E_EVENT_SETTLE` seconds (3), never the first render,
 which on a slow runner shows the first key alone. The reset scene drawn
 between two fixtures is waited for as well, so its late upload is never
 mistaken for the next scene's.
+
+Every fixture is drawn on `frame.json`'s 320x480 frame unless it says
+`"e2eFrame": {"width": 800, "height": 480}`: each size gets a frameos of its
+own, one after the other (the JSX interfaces, `scenes/jsx*.json`, are
+800x480, 480x800 and 480x480).
 
 `./run` hands off to the `Makefile`: `makescenes.py` compiles the fixture
 scenes in `scenes/` into `generated/`, a copy of `frameos/` is built with

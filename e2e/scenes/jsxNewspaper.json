@@ -1,0 +1,91 @@
+{
+  "id": "jsxNewspaper",
+  "name": "JSX: black-and-white front page",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600,
+    "backgroundColor": "#ffffff"
+  },
+  "e2eFrame": {
+    "width": 800,
+    "height": 480
+  },
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: black-and-white front page",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: black-and-white front page\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// A front page in black and white: for a monochrome e-paper panel.\nconst stories = [\n  { kicker: 'City', title: 'Tram line 81 reopens after a summer of works', body: 'The route through Flagey runs again from Monday, with new stops at the ponds and longer platforms for the new trams.' },\n  { kicker: 'Weather', title: 'The warmest March day since records began', body: 'Uccle measured 21.4 degrees on Tuesday afternoon. The heat lasts until Thursday, when rain moves in from the coast.' },\n  { kicker: 'Culture', title: 'A museum of frames, and of what is in them', body: 'The new gallery in the old post office shows a century of picture frames, from gilded wood to e-paper.' },\n]\nexport function get(app) {\n  return (\n    <div className=\"flex flex-col px-8 py-5 bg-white text-black font-[Liberation_Serif]\">\n      <div className=\"flex items-end justify-between border-b-4 border-black pb-1\">\n        <span className=\"text-5xl font-bold\">The Daily Frame</span>\n        <span className=\"text-sm text-right\">{`Tuesday 12 March 2024 · No. 1,204`}</span>\n      </div>\n      <div className=\"border-b border-black py-3\">\n        <span className=\"text-4xl font-bold leading-tight\">Brussels votes to keep every Sunday car-free</span>\n      </div>\n      <div className=\"flex-1 grid grid-cols-3 gap-6 pt-3\">\n        {stories.map((s) => (\n          <div className=\"flex flex-col gap-1 border-t-2 border-black pt-2\">\n            <span className=\"text-xs uppercase font-bold font-[FiraGO]\">{s.kicker}</span>\n            <span className=\"text-xl font-bold leading-snug\">{s.title}</span>\n            <span className=\"text-base leading-snug line-clamp-4\">{s.body}</span>\n          </div>\n        ))}\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

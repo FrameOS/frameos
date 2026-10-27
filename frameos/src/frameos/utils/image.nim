@@ -11,8 +11,6 @@ import strutils
 import strformat
 import uri
 import frameos/events_gen
-import std/xmltree
-import std/strtabs
 
 import frameos/spool
 import frameos/channels
@@ -116,25 +114,45 @@ proc boundedRequestedDimensions*(width, height: int): tuple[width: int, height: 
   ## used to be an allocation failure — on the ESP32 an abort, not an error.
   displayDecodeDimensions(max(1, width), max(1, height))
 
-proc decodeSvgWithFallback*(svg: string, width: int, height: int): Option[Image] =
+proc svgRoot*(markup: string): SvgNode =
+  ## SVG markup as the node tree pixie draws from, or nil when it does not
+  ## parse. Parsed once, a tree can be drawn at any size (the degrade
+  ## ladder's rungs) without reading the markup again.
+  try:
+    parseSvgNodes(markup)
+  except CatchableError:
+    nil
+
+proc decodeSvgWithFallback*(root: SvgNode, width: int, height: int): Option[Image] =
   ## Rasterises an SVG into a new image of the given size; none when pixie
   ## cannot parse it. pixie fills gradient paints through a coverage mask and
   ## a paint image, sized to the decode budget in row strips (paintStripRows),
   ## so the budget is refreshed here: the render tick's value predates the JS
   ## runtimes and data this SVG was made from.
   refreshDecodeBudget()
+  if root.isNil:
+    return none(Image)
   try:
-    return some(newImage(parseSvg(svg, width, height)))
+    return some(newImage(parseSvg(root, width, height)))
   except CatchableError:
     return none(Image)
 
-proc svgDecodeError*(svg: string, width: int, height: int): string =
+proc decodeSvgWithFallback*(svg: string, width: int, height: int): Option[Image] =
+  decodeSvgWithFallback(svgRoot(svg), width, height)
+
+proc svgDecodeError*(root: SvgNode, width: int, height: int): string =
   ## Why `decodeSvgWithFallback` produced nothing — the parser's own message,
   ## so a JS app's broken markup (an unescaped '&', an unsupported tag) is
   ## reported instead of surfacing as an unexplained "No image provided".
   try:
-    discard parseSvg(svg, width, height)
+    discard parseSvg(root, width, height)
     ""
+  except CatchableError as e:
+    e.msg
+
+proc svgDecodeError*(svg: string, width: int, height: int): string =
+  try:
+    svgDecodeError(parseSvgNodes(svg), width, height)
   except CatchableError as e:
     e.msg
 
@@ -161,7 +179,7 @@ proc settleOwedBackground(parsed: Svg, target: Image, owed: var Option[Color]) =
     payBackground(target, owed.get())
   owed = none(Color)
 
-proc renderSvgIntoTarget*(svg: string, target: Image, owed: var Option[Color]): bool =
+proc renderSvgIntoTarget*(root: SvgNode, target: Image, owed: var Option[Color]): bool =
   ## Rasterizes an SVG straight into a buffer the caller already owns, rather
   ## than allocating one and blending it away afterwards. Returns false when
   ## this path does not apply, and the caller falls back to
@@ -176,22 +194,29 @@ proc renderSvgIntoTarget*(svg: string, target: Image, owed: var Option[Color]): 
   ## scene OOM-aborted on: a 1200x960 cell's gradient background used to cost
   ## a 9.2 MB mask+fill pair here, with no band fallback because an OOM abort
   ## is not a CatchableError.
-  if target.isNil or target.width <= 0 or target.height <= 0:
+  if root.isNil or target.isNil or target.width <= 0 or target.height <= 0:
     return false
   refreshDecodeBudgetInto()
   try:
-    let parsedSvg = parseSvg(svg, target.width, target.height)
+    let parsedSvg = parseSvg(root, target.width, target.height)
     settleOwedBackground(parsedSvg, target, owed)
     parsedSvg.renderInto(target)
     true
   except CatchableError:
     false
 
+proc renderSvgIntoTarget*(root: SvgNode, target: Image): bool =
+  var owed = none(Color)
+  renderSvgIntoTarget(root, target, owed)
+
+proc renderSvgIntoTarget*(svg: string, target: Image, owed: var Option[Color]): bool =
+  renderSvgIntoTarget(svgRoot(svg), target, owed)
+
 proc renderSvgIntoTarget*(svg: string, target: Image): bool =
   var owed = none(Color)
   renderSvgIntoTarget(svg, target, owed)
 
-proc renderSvgDegradedInto*(svg: string, target: Image, rasterWidth, rasterHeight: int): bool =
+proc renderSvgDegradedInto*(root: SvgNode, target: Image, rasterWidth, rasterHeight: int): bool =
   ## The SVG rung of the degrade ladder (decodeIntoTargetWithDegrade is the
   ## decoders'): rasterize at a size the budget allows, then stretch that onto
   ## the full-size target the planner already owns. The target costs nothing
@@ -211,7 +236,7 @@ proc renderSvgDegradedInto*(svg: string, target: Image, rasterWidth, rasterHeigh
     return false
   if rasterWidth >= target.width and rasterHeight >= target.height:
     return false
-  let raster = decodeSvgWithFallback(svg, rasterWidth, rasterHeight)
+  let raster = decodeSvgWithFallback(root, rasterWidth, rasterHeight)
   if raster.isNone:
     return false
   try:
@@ -230,7 +255,10 @@ proc renderSvgDegradedInto*(svg: string, target: Image, rasterWidth, rasterHeigh
   })
   true
 
-proc renderSvgIntoTargetWithDegrade*(svg: string, target: Image, owed: var Option[Color]): bool =
+proc renderSvgDegradedInto*(svg: string, target: Image, rasterWidth, rasterHeight: int): bool =
+  renderSvgDegradedInto(svgRoot(svg), target, rasterWidth, rasterHeight)
+
+proc renderSvgIntoTargetWithDegrade*(root: SvgNode, target: Image, owed: var Option[Color]): bool =
   ## An SVG drawn at the size of a buffer the caller already owns: painted
   ## straight into it (renderSvgIntoTarget), and only when pixie refuses that
   ## (a budget refusal inside a fill) down the degrade ladder — the bounded
@@ -239,7 +267,9 @@ proc renderSvgIntoTargetWithDegrade*(svg: string, target: Image, owed: var Optio
   ## rung failed, which is markup pixie cannot parse. `owed`: the scene
   ## background the target still owes (settleOwedBackground); a rung paints
   ## it before its raster, and it is settled when this returns true.
-  if renderSvgIntoTarget(svg, target, owed):
+  if root.isNil:
+    return false
+  if renderSvgIntoTarget(root, target, owed):
     return true
   if owed.isSome:
     payBackground(target, owed.get())
@@ -251,9 +281,12 @@ proc renderSvgIntoTargetWithDegrade*(svg: string, target: Image, owed: var Optio
     if rung notin rungs and (rung.width < target.width or rung.height < target.height):
       rungs.add(rung)
   for rung in rungs:
-    if renderSvgDegradedInto(svg, target, rung.width, rung.height):
+    if renderSvgDegradedInto(root, target, rung.width, rung.height):
       return true
   false
+
+proc renderSvgIntoTargetWithDegrade*(svg: string, target: Image, owed: var Option[Color]): bool =
+  renderSvgIntoTargetWithDegrade(svgRoot(svg), target, owed)
 
 proc renderSvgIntoTargetWithDegrade*(svg: string, target: Image): bool =
   var owed = none(Color)
@@ -277,12 +310,13 @@ proc decodeImageWithDisplayBounds*(data: var string,
   # it is being rasterized for this display either way.
   if looksLikeSvg(data):
     try:
-      let parsed = parseSvg(data)
+      let root = parseSvgNodes(data)
+      let parsed = parseSvg(root)
       if parsed.width > 0 and parsed.height > 0:
         let bounded = displayDecodeDimensions(
           ImageDimensions(width: parsed.width, height: parsed.height),
           maxEdge, maxPixels)
-        let image = decodeSvgWithFallback(data, bounded.width, bounded.height)
+        let image = decodeSvgWithFallback(root, bounded.width, bounded.height)
         if image.isSome:
           data = ""
           return image.get()

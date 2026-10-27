@@ -60,21 +60,23 @@ proc forgetPanelFrames*() =
   heldFrames.setLen(0)
   endPanelFrame()
 
-proc renderSvgFrame*(svg: string, target: Image, owed: var Option[Color], wholeFrame: bool): bool =
+proc renderSvgFrame*(root: SvgNode, target: Image, owed: var Option[Color], wholeFrame: bool): bool =
   ## renderSvgIntoTarget, repainting only the damage when `target` is the
   ## panel buffer this render began on (beginPanelFrame), the render draws
   ## nothing else (`wholeFrame`), the SVG covers it opaquely, and the buffer
   ## still holds the SVG a render left there. `owed`: the scene background
   ## the target still owes, settled as renderSvgIntoTarget settles it.
+  if root.isNil:
+    return false
   if panelBuffer.isNil or target.isNil or target.isView or not wholeFrame or
       target.bufferPointer != panelBuffer:
-    return renderSvgIntoTarget(svg, target, owed)
+    return renderSvgIntoTarget(root, target, owed)
   let held = panelHeld
   panelHeld = none(HeldFrame)
   refreshDecodeBudgetInto()
   var parsed: Svg
   try:
-    parsed = parseSvg(svg, target.width, target.height)
+    parsed = parseSvg(root, target.width, target.height)
   except CatchableError:
     return false
   if not parsed.coversOpaque(target.width, target.height):
@@ -105,3 +107,6 @@ proc renderSvgFrame*(svg: string, target: Image, owed: var Option[Color], wholeF
   heldFrames.add(HeldFrame(buffer: panelBuffer, generation: panelGeneration,
     width: target.width, height: target.height, svg: parsed))
   true
+
+proc renderSvgFrame*(svg: string, target: Image, owed: var Option[Color], wholeFrame: bool): bool =
+  renderSvgFrame(svgRoot(svg), target, owed, wholeFrame)

@@ -340,7 +340,7 @@ called. A `get()`-only app in a button flow does nothing at all; from FrameOS
 
 | category | export the runtime calls | how the node is wired |
 |---|---|---|
-| `data` | `export function get(app, context)` → returns the `output` value (string, json, or `frameos.svg`/`frameos.image` for an image) | `codeNodeEdge` from `fieldOutput` into another node's `fieldInput/<field>` (e.g. `render/image`'s `image`) |
+| `data` | `export function get(app, context)` → returns the `output` value (string, json, or `frameos.svg`/`frameos.image` or JSX for an image: `docs/jsx-ui.md`) | `codeNodeEdge` from `fieldOutput` into another node's `fieldInput/<field>` (e.g. `render/image`'s `image`) |
 | `logic` | `export function run(app, context)` → returns nothing; acts with `frameos.setState`, `frameos.setNextSleep`, … | in a flow: `appNodeEdge` from an event node's `next` (or the node before it) into its `prev`, e.g. `button` → the app → a `render` dispatch |
 
 `export function init(app)` is optional and runs each time the app's
@@ -406,7 +406,9 @@ The rules live in `frameos/src/frameos/refresh_interval.nim` (runtime),
 
 ## SVG that the frame can draw
 
-`render/svg` (and `frameos.svg(...)` in JS apps) go through a strict renderer.
+`render/svg` (and `frameos.svg(...)` in JS apps, and `<svg>` JSX returned
+from a `.tsx` app's `get()`, which skips the markup: `docs/jsx-ui.md`) go
+through a strict renderer.
 Any unsupported tag fails the **whole** document — `render/svg` prints
 "Failed to render SVG", a JS app's image comes back empty ("No image
 provided"). Supported: `svg` (with a `viewBox`), `g`, `path`, `rect`,

@@ -10,6 +10,7 @@ from app.models import Frame
 
 FIXTURE_URLS = {
     "https://frameos.net/img/logo_in_ci_tests.png": "/fixtures/logo_in_ci_tests.png",
+    "https://frameos.net/img/bird_in_ci_tests.png": "/fixtures/bird.png",
     "https://frameos.net/.ci_text_file": "/fixtures/ci_text_file",
     "https://frameos.net/.this-is-not-a-file-that-exists": "/fixtures/missing",
 }

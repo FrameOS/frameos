@@ -1,0 +1,91 @@
+{
+  "id": "jsxAgenda",
+  "name": "JSX: day agenda",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600,
+    "backgroundColor": "#fafaf9"
+  },
+  "e2eFrame": {
+    "width": 800,
+    "height": 480
+  },
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: day agenda",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: day agenda\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// A day agenda: the date on the left, the events on the right.\nconst events = [\n  { time: '08:30', end: '09:00', title: 'Stand-up', place: 'Kitchen table', color: 'border-sky-400', tag: 'Work' },\n  { time: '10:00', end: '11:30', title: 'Design review: the new frame menus', place: 'Room 4.12 and online', color: 'border-violet-400', tag: 'Work' },\n  { time: '12:30', end: '13:30', title: 'Lunch with Ana', place: 'Le Pain Quotidien, Sablon', color: 'border-amber-400', tag: 'Personal' },\n  { time: '16:00', end: '17:00', title: 'Dentist', place: 'Rue de la Loi 12', color: 'border-rose-400', tag: 'Health' },\n  { time: '19:30', end: '22:00', title: 'Football: Belgium against the Netherlands, at Tom\\'s place with everyone', place: 'Ixelles', color: 'border-emerald-400', tag: 'Fun' },\n]\n\nexport function get(app) {\n  return (\n    <div className=\"flex bg-stone-50 text-stone-900\">\n      <div className=\"flex flex-col justify-between w-64 p-8 bg-stone-900 text-stone-50\">\n        <div className=\"flex flex-col\">\n          <span className=\"text-2xl uppercase text-amber-300\">Tuesday</span>\n          <span className=\"text-9xl font-bold leading-none\">12</span>\n          <span className=\"text-3xl\">March</span>\n        </div>\n        <div className=\"flex flex-col gap-1 text-stone-400\">\n          <span>5 events</span>\n          <span>Next: Design review in 1 h 20 min</span>\n        </div>\n      </div>\n      <div className=\"flex-1 flex flex-col gap-3 p-6\">\n        {events.map((e) => (\n          <div className={`flex gap-4 items-center border-l-4 ${e.color} bg-white rounded-r-lg px-4 py-2`}>\n            <div className=\"flex flex-col w-14\">\n              <span className=\"text-lg font-semibold\">{e.time}</span>\n              <span className=\"text-sm text-stone-400\">{e.end}</span>\n            </div>\n            <div className=\"flex-1 flex flex-col\">\n              <span className=\"text-lg font-medium truncate\">{e.title}</span>\n              <span className=\"text-sm text-stone-500 truncate\">{e.place}</span>\n            </div>\n            <span className=\"text-xs uppercase rounded-full bg-stone-100 px-2 py-1 text-stone-500\">{e.tag}</span>\n          </div>\n        ))}\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

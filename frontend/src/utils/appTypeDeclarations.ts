@@ -101,6 +101,26 @@ interface FrameOSColorRef {
 }
 interface FrameOSStreamRef { __frameosType: "streamRef"; id: number; }
 
+/**
+ * What JSX makes in an app (.tsx): get() can return it as its image. An <svg>
+ * is drawn as it is; any other element is a UI laid out with Tailwind classes
+ * (className="flex items-center gap-2 p-4 bg-slate-900 text-white") —
+ * docs/jsx-ui.md has what is supported. <img src={...}> takes the image
+ * frameos.fetchImage or frameos.loadAssetImage returned.
+ */
+interface FrameOSElement { type: string; props: Record<string, any>; }
+interface FrameOSElementProps {
+  className?: string;
+  children?: any;
+  src?: FrameOSImageRef | { image: FrameOSImageRef | null } | null;
+  [attribute: string]: any;
+}
+declare namespace JSX {
+  type Element = FrameOSElement;
+  interface ElementChildrenAttribute { children: {}; }
+  interface IntrinsicElements { [tag: string]: FrameOSElementProps; }
+}
+
 interface FrameOSApp {
   nodeId: number;
   nodeName: string;
