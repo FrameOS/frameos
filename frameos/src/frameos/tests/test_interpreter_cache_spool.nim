@@ -3,7 +3,7 @@ import pixie
 import ../interpreter
 import ../types
 import ../spool
-from ../utils/memory import availableRenderBytesOverride
+from ../utils/memory import availableRenderBytesOverride, setSimulatedEmbedded
 import ../utils/app_images
 
 # The node cache's disk tier, from the interpreter's side
@@ -60,10 +60,10 @@ proc paintingDownload(url: string, maxBytes: int, target: Image,
 
 contextDownloadHook = paintingDownload
 
-proc testConfig(): FrameConfig =
+proc testConfig(width = 8, height = 4): FrameConfig =
   FrameConfig(
-    width: 8,
-    height: 4,
+    width: width,
+    height: height,
     rotate: 0,
     scalingMode: "cover",
     debug: false,
@@ -115,7 +115,7 @@ proc photoScene(): ExportedInterpretedScene =
     ]
   )
 
-proc freshScene(): FrameScene =
+proc freshScene(width = 8, height = 4): FrameScene =
   let sceneId = "tests/cache-spool".SceneId
   var uploaded = initTable[SceneId, ExportedInterpretedScene]()
   uploaded[sceneId] = photoScene()
@@ -123,7 +123,7 @@ proc freshScene(): FrameScene =
   resetInterpretedScenes()
   hookCalls = 0
   hookTargets = @[]
-  let config = testConfig()
+  let config = testConfig(width, height)
   init(sceneId, config, testLogger(config), %*{})
 
 proc renderOnce(scene: FrameScene): Image =
@@ -210,6 +210,26 @@ block no_headroom_upgrades_to_the_live_canvas_and_stores_nothing:
 
   availableRenderBytesOverride = 0
   cachedImageMemoryLimitOverride = 0
+
+block a_preview_running_as_an_esp32_takes_the_devices_cache_limit:
+  # The editor's preview simulating an ESP32 (frameos_wasm_set_embedded) is
+  # not built with -d:frameosEmbedded, and its cache limit used to be a
+  # host's: none. Flights Above Me (a cached JS app into render/image) then
+  # got a 7.68 MB scratch at 1600x1200 and the preview ran out of memory on
+  # the E1004 where the frame decodes into the live canvas. 600x480 at four
+  # bytes a pixel is 1.15 MB, over the device's 1 MB limit.
+  setSimulatedEmbedded(true)
+  availableRenderBytesOverride = 64 # no room for a scratch beside the canvas
+  let simulated = freshScene(600, 480)
+  let canvas = renderOnce(simulated)
+  doAssert hookTargets[0] == canvas, "as the device: decode into the live canvas"
+  doAssert not InterpretedFrameScene(simulated).cacheValues.hasKey(ProducerNodeId)
+  setSimulatedEmbedded(false)
+  # A host keeps what it cached: the producer gets a scratch of its own.
+  let host = freshScene(600, 480)
+  let hostCanvas = renderOnce(host)
+  doAssert hookTargets[0] != hostCanvas, "a host's cached producer owns a scratch"
+  availableRenderBytesOverride = 0
 
 block over_limit_image_stays_in_memory_while_the_frame_affords_it:
   # A slideshow's photo under an animation is the cached producer's output on

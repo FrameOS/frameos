@@ -4,7 +4,7 @@ import frameos/spool
 from frameos/apps as frameos_apps import spoolDir
 from frameos/utils/image import renderError, renderErrorInto, spillImageToSpool, materializeImageSpool, scaleAndDrawImage
 from frameos/utils/memory import renderMemoryInUse, availableRenderBytes,
-  availableRenderHeadroomBytes
+  availableRenderHeadroomBytes, runsAsEmbedded
 when defined(testing):
   from frameos/utils/memory import availableRenderBytesOverride
 when defined(memProbe): import frameos/utils/memory
@@ -34,8 +34,7 @@ var eventListenersRun* {.threadvar.}: int
   ## state); the event fixtures do, to say how many listeners an event reached.
 
 const TRACING = false
-when defined(frameosEmbedded):
-  const EmbeddedMaxCachedImageBytes = 1024 * 1024
+const EmbeddedMaxCachedImageBytes = 1024 * 1024
 
 when defined(testing):
   var cachedImageMemoryLimitOverride* = 0
@@ -47,10 +46,16 @@ proc cachedImageMemoryLimit(): int =
   ## goes to the disk tier instead, or is not stored at all when there is no
   ## disk to take it. 0 means no limit, which is the host behavior — a host
   ## can afford to keep what it cached.
+  ##
+  ## The editor's preview running as an ESP32 takes the device's limit too.
+  ## It used to keep a host's, so a cached producer on a 1600x1200 frame was
+  ## always handed a canvas-sized scratch: 7.68 MB the device never allocates
+  ## (past this limit with no room for one it decodes into the live canvas),
+  ## and the preview ran out of memory where the frame renders.
   when defined(testing):
     if cachedImageMemoryLimitOverride > 0:
       return cachedImageMemoryLimitOverride
-  when defined(frameosEmbedded):
+  if runsAsEmbedded():
     EmbeddedMaxCachedImageBytes
   else:
     0

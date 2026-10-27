@@ -316,6 +316,15 @@ offer-time and store-time, is a log line with its reason and numbers — the
 same rule the planner's refusals follow, and how both of those bugs were
 found.
 
+The editor's preview running as an ESP32 (`frameos_wasm_set_embedded`, the
+memory limit's ESP32 boards, a preview of an ESP32 frame) takes the device's
+1 MB memory-cache limit too (`cachedImageMemoryLimit` follows
+`runsAsEmbedded`). It is not built with `-d:frameosEmbedded`, and through
+2026.10.21 it kept a host's unlimited cache, so a cached producer on a
+1600×1200 frame (Flights Above Me: a JS app's JSX into `render/image`) was
+always handed a 7.68 MB scratch and the preview ran out of memory where the
+E1004 upgrades to the live canvas and renders.
+
 What a hit costs: one canvas-sized allocation for the length of the consumer's
 draw (freed with the render), against a re-download, a decode and its
 intermediates. What a miss adds: one sequential file write of `w×h×4` bytes.
