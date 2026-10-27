@@ -5,7 +5,8 @@
 ## up in the ESP32 image, which runs at ~91% of its OTA slot, so the second
 ## copy is 8 KB of flash spent on a table that is already there. zippy is
 ## linked either way — the gzip path needs it — so on the device crunchy's
-## entry points forward to zippy's.
+## entry points forward to zippy's (which patched_zippy_crc.nim forwards to
+## the ROM's).
 ##
 ## Same polynomial, same convention, same results: this is a de-duplication,
 ## not a different checksum. Only the embedded build patches it; Pi and

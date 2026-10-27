@@ -99,9 +99,9 @@ void fos_lcd_splash_draw_status(uint16_t *fb, int width, int height, fos_lcd_spl
         int last = FOS_SPLASH_TEXT_ROWS[line * FOS_SPLASH_TEXT_H + y + 1];
         int x = 0;
         for (int i = first; i < last; i++) {
-            uint16_t run = FOS_SPLASH_TEXT_RUNS[i];
-            int length = run >> 8;
-            if (((run >> 5) & 7) != 0 && x + length <= line_w) {
+            uint8_t run = FOS_SPLASH_TEXT_RUNS[i];
+            int length = (run >> 5) + 1;
+            if ((run & 31) != 0 && x + length <= line_w) {
                 uint16_t color = shades[run & 31];
                 for (int k = 0; k < length; k++) row[x + k] = color;
             }

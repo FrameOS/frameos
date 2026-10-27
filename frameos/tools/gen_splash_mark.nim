@@ -80,6 +80,28 @@ proc encode(layers: seq[Image], runs: var seq[uint16]): seq[int] =
   result.add(runs.len)
   doAssert runs.len < 65536
 
+proc encodeText(image: Image, runs: var seq[uint8]): seq[int] =
+  ## As `encode` for one layer, a byte a run: ((length - 1) << 5) | alpha,
+  ## `length` pixels (1..8) at coverage alpha/31, a longer stretch as more
+  ## runs. A row ends at its last inked pixel: the rest of it is the black
+  ## the line is drawn over.
+  for y in 0 ..< image.height:
+    result.add(runs.len)
+    var row: seq[int] = @[]
+    for x in 0 ..< image.width:
+      row.add((int(image[x, y].a) * 31 + 127) div 255)
+    while row.len > 0 and row[^1] == 0:
+      row.setLen(row.len - 1)
+    var x = 0
+    while x < row.len:
+      var length = 1
+      while length < 8 and x + length < row.len and row[x + length] == row[x]:
+        inc length
+      runs.add(uint8(((length - 1) shl 5) or row[x]))
+      x += length
+  result.add(runs.len)
+  doAssert runs.len < 65536
+
 var runs: seq[uint16] = @[]
 let rows = encode(layers, runs)
 
@@ -97,11 +119,12 @@ lines.add("/* Row y is FOS_SPLASH_MARK_RUNS[FOS_SPLASH_MARK_ROWS[y]] up to the r
 lines.add(" * first. A run is (length << 8) | (layer << 5) | alpha: `length` pixels of")
 lines.add(" * layer `layer` (0 none, 1 the frame, 2..4 the squares from the bottom-left")
 lines.add(" * one to the top-right one) at coverage alpha/31. */")
-proc table(name: string, values: seq[int]) =
-  lines.add(&"static const uint16_t {name}[{values.len}] = {{")
+proc table(name: string, values: seq[int], bytes = false) =
+  let kind = if bytes: "uint8_t" else: "uint16_t"
+  lines.add(&"static const {kind} {name}[{values.len}] = {{")
   var line = "   "
   for i, value in values:
-    let item = &" 0x{value:04X},"
+    let item = if bytes: &" 0x{value:02X}," else: &" 0x{value:04X},"
     if line.len + item.len > 100:
       lines.add(line)
       line = "   "
@@ -127,7 +150,7 @@ var font = newFont(readTypeface(currentSourcePath().parentDir() / fontPath))
 font.size = textSize
 font.paint = color(1, 1, 1, 1)
 let lineHeight = int(ceil(font.defaultLineHeight)) + 2
-var textRuns: seq[uint16] = @[]
+var textRuns: seq[uint8] = @[]
 var textRows: seq[int] = @[]
 var textWidths: seq[int] = @[]
 for line in statusLines:
@@ -136,7 +159,7 @@ for line in statusLines:
   let image = newImage(lineWidth, lineHeight)
   image.fillText(arrangement, translate(vec2(1, 1)))
   textWidths.add(lineWidth)
-  let starts = encode(@[image], textRuns)
+  let starts = encodeText(image, textRuns)
   for i in 0 ..< lineHeight:
     textRows.add(starts[i])
 textRows.add(textRuns.len)
@@ -154,8 +177,9 @@ lines.add("/* Line i (fos_lcd_splash_status_t i + 1), in Ubuntu Regular at " & $
 for i, line in statusLines:
   lines.add(&" *   {i}: \"{line}\"")
 lines.add(" * is FOS_SPLASH_TEXT_W[i] wide, and its row y is FOS_SPLASH_TEXT_RUNS from")
-lines.add(" * FOS_SPLASH_TEXT_ROWS[i * FOS_SPLASH_TEXT_H + y] up to the next row's start,")
-lines.add(" * runs as lcd_splash_mark.h's with one layer. */")
+lines.add(" * FOS_SPLASH_TEXT_ROWS[i * FOS_SPLASH_TEXT_H + y] up to the next row's start.")
+lines.add(" * A run is a byte, ((length - 1) << 5) | alpha: `length` pixels (1..8) at")
+lines.add(" * coverage alpha/31. A row ends at its last inked pixel. */")
 table("FOS_SPLASH_TEXT_W", textWidths)
 lines.add("")
 table("FOS_SPLASH_TEXT_ROWS", textRows)
@@ -163,9 +187,9 @@ lines.add("")
 var textRunValues: seq[int] = @[]
 for run in textRuns:
   textRunValues.add(int(run))
-table("FOS_SPLASH_TEXT_RUNS", textRunValues)
+table("FOS_SPLASH_TEXT_RUNS", textRunValues, bytes = true)
 lines.add("")
 let textPath = currentSourcePath().parentDir() / textHeader
 writeFile(textPath, lines.join("\n"))
 echo "wrote ", textPath.normalizedPath(), " (", statusLines.len, " lines, ", textRuns.len, " runs, ",
-  textRuns.len * 2 + textRows.len * 2 + textWidths.len * 2, " bytes)"
+  textRuns.len + textRows.len * 2 + textWidths.len * 2, " bytes)"

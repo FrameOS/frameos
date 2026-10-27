@@ -166,9 +166,12 @@ runtime.
 Checked and rejected: `CONFIG_NEWLIB_NANO_FORMAT` (~26 KB in `vfprintf` +
 `svfprintf`) — nano formatting has no 64-bit integer conversions and the
 firmware uses `%lld`/`%llu`/`%llx` 29 times, including cloud JSON timestamps.
-Dropping the last `sscanf` call from FrameOS code does *not* remove newlib's
-float-capable scanf either: ESP-IDF's `console` component calls it from
-`linenoise.c`. mbedTLS' ARIA cipher (3.4 KB) has no Kconfig switch in IDF 5.5.
+newlib's float-capable scanf stayed linked after FrameOS code stopped calling
+`sscanf`: cJSON's `print_number` reads its own `%1.15g` back with
+`sscanf(buf, "%lg", ...)`. (linenoise's call never survives the section GC.)
+Since 2026-10-27 the linker routes `sscanf` to `main/fos_sscanf.c`, which
+answers `%lg` with `strtod` and hands every other format to the integer-only
+`vsiscanf` that `tzset` links anyway (−9.6 KB). mbedTLS' ARIA cipher (3.4 KB) has no Kconfig switch in IDF 5.5.
 IPv6 (≈14 KB in `nd6`/`ip6`/`mld6`) is deliberately kept.
 
 ---
@@ -304,10 +307,13 @@ merging those is worth ~1.4 KB each and needs the two declarations found first.
   `NimStringV2` headers — 51.5 KB of pure 8-byte header — carrying ~77 KB of
   actual text in ~159 KB of rodata. Log event names and JSON keys dominate.
   No lever short of patching the compiler.
-- Dragonbox's `pow10` is 9,904 B of float printing. `-d:nimLegacySprintf`
-  routes `$float` back through newlib, but changes how floats stringify
-  (`0.1` → `0.10000000000000001`), and those strings reach scene state and the
-  cloud. Not measured; not recommended without a formatting audit.
+- Dragonbox's `pow10` is 9,904 B of float printing (≈13 KB with
+  `writeFloatToBufferRoundtrip`). `-d:nimLegacySprintf` routes `$float` back
+  through newlib's `%.16g`, which changes how some floats stringify on the
+  device: `0.1` stays `0.1`, but `0.1 + 0.2` becomes `0.3` (no longer the same
+  double), `1.5e-7` prints as `1.5e-07` instead of `0.00000015`, and 17-digit
+  values lose their last digit. Those strings reach scene state, text a scene
+  draws and the cloud, so it needs a decision, not just a flag.
 
 ---
 
@@ -426,3 +432,81 @@ where QRgen's templates expanded one per mask.
   URL, which carries the access key, and JS apps (store scenes included)
   must not be handed that key. The Linux runtime's screens need a Nim
   encoder anyway, and every scene would have carried the encoder's source.
+
+---
+
+# Before the release after 2026.10.20 (2026-10-27)
+
+*`esp32-s3`, 8 MB layout, every image a fresh `ci_build_image.sh` build in
+`frameos-esp32-ci-check`. v2026.10.20 rebuilt from its tag this way comes out
+at its published 3,146,976 bytes exactly.*
+
+**Main at ea305a4f7 was 3,209,424 bytes, +62,448 over the release; the five
+cuts below take it to 3,166,480 (−42,944, 87.8% of the slot).** The C3 thin
+client goes 1,392,704 → 1,367,696 (−25,008, Monocypher and sscanf).
+
+The e2e-docker job reported 3,224,688 for the same commit, and 3,224,672 for
+22d8fd6e3, which builds locally at 3,209,408: its builds of current main run
+about 15 KB over a fresh one of the same tree. Not explained yet; the release
+job's number is the one that counts.
+
+## Where the 62 KB came from
+
+Per merge, from each push's `esp32-firmware-size` artifact (CI terms, so the
+sum carries the 15 KB above):
+
+| PR | Δ app bytes | What |
+|---|---:|---|
+| #621 reTerminal Sticky | +24,416 | `input_state` pointer half, `fos_touch`, `fos_codec` |
+| #623 outline, gradient | +6,464 | `blendCoverage` at -O2 |
+| #624 reTerminal E1003 | +18,832 | pixie's Gray8 surface, `it8951.c` |
+| #622 SenseCAP Indicator | +17,504 | IDF RGB LCD driver, ST7701S |
+| #626 real-time rendering | +38,272 | pixie SVG damage + fast parser, `resample`, `fos_animation` |
+| #633 LCD splash | +11,488 | the mark and the status lines as runs, 10 KB of tables |
+| #628 JSX layout | +36,960 | `ui/layout` 25.8 KB, `ui/tailwind` 10.2 KB |
+| #629 JSX events | +10,448 | `ui/events`, handler calls |
+| #631 JSX reconciliation | +10,960 | `ui/layout`, `svg_frames` |
+| #634 SenseCAP touch, canvases | +25,328 | `jsCanvas` 3.1 KB, `jsCanvasDraw` 2.6 KB, kept images |
+| #636 + #637 font, Kconfig | −123,520 | |
+
+Almost all of it is feature code; the Nim traps above (seq hooks per type,
+`%*` sites) account for a few KB at most, in `system.nim` (+9.5 KB of
+`delete`/`==`/`add` instantiations for the new types).
+
+## The cuts: −42,944
+
+| Cut | Saves | Behaviour |
+|---|---:|---|
+| Monocypher `BLAKE2_NO_UNROLLING` | −15,508 | same hash; blake2b only hashes the OTA image |
+| `sscanf` through `fos_sscanf.c` | −9,476 | cJSON's `%lg` read-back is `strtod`; other formats `vsiscanf` |
+| zippy's CRC-32 → `esp_rom_crc32_le` | −8,447 | same checksum (zlib's), no 8 KB table |
+| chroma's color names packed | −6,207 | same 148 names and colors |
+| Splash lines as byte runs | −3,502 | pixel-identical |
+
+- **Monocypher** (`components/monocypher/CMakeLists.txt`): its own switch
+  rolls the twelve BLAKE2b rounds into a loop. `blake2b_compress` is 17,845 B
+  of Xtensa unrolled and 2,137 rolled; on a laptop the rolled one is as fast.
+- **sscanf** (`main/fos_sscanf.c`, `--wrap=sscanf` in `main/CMakeLists.txt`):
+  the map's cross-reference table names cJSON's `print_number` as the one
+  live caller. `test_fos_sscanf.c` checks the `%lg` path against the C
+  library's on what cJSON prints and on inputs it never prints.
+- **CRC-32** (`src/embedded/patched_zippy_crc.nim`, `patchFile` in
+  `config.nims`): the ROM's `crc32_le` is `~crc`, the 0xEDB88320 table,
+  `~crc` (IDF's Linux reference implementation), so `esp_rom_crc32_le(0, …)`
+  is zippy's `crc32`. crunchy's patch already forwards to zippy's, so PNG
+  chunks and gzip trailers both use the ROM.
+- **Color names** (`src/embedded/patched_chroma_names.nim`): chroma's
+  compile-time `Table[string, string]` is 256 slots of hash, name and hex.
+  The patch is one `name=RRGGBB;` string read in order;
+  `tests/test_patched_chroma_names.nim` compares every entry with chroma's.
+- **Splash** (`tools/gen_splash_mark.nim`): a status line's run is a byte,
+  ((length − 1) << 5) | alpha, and a row stops at its last inked pixel:
+  7,656 → 4,160 B. The mark keeps its 16-bit runs (four layers).
+
+## Not done, needs a decision
+
+- `-d:nimLegacySprintf`, ≈ −13 KB: see "Constant data" above.
+- QuickJS without `CONFIG_ALL_UNICODE` / `CONFIG_ATOMICS`, ≈ −51 KB: the
+  2026-10-26 audit, skipped then.
+- pixie's QOI (2.4 KB), GIF (5.7 KB) and BMP (7.7 KB) decoders: formats a URL
+  might still serve.

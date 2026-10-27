@@ -30,6 +30,8 @@ main/                     boot orchestration + platform modules
   fos_console.c           serial REPL (UART0 + USB-Serial/JTAG): status / set / wifi / render / ota / ...
   fos_cloud_contract.c    the generated cloud verb/settings contract walker (fos_cloud_contract_gen.h)
   fos_json_guard.c        JSON depth pre-scan for the small-stack parser tasks
+  fos_sscanf.c            sscanf for the linker's --wrap: cJSON's "%lg" read-back as strtod, so
+                          newlib's floating-point scanf is never linked (host-tested)
   fos_settings.c          backend/cloud settings pull (TLS pair, admin login, service keys, schedule)
   fos_scenes.c            /state scene store: combined payload, per-scene split, OOM-restart mark, wipe
   fos_scene_state.c       scene state across deep sleep: one JSON file per scene under /state (host-tested)
@@ -86,7 +88,7 @@ main/tests/               host tests for the IDF-free modules (plain `cc`, no ID
                           checks that every frameos_nim.h function has a frameos_nim_stub.c
                           twin: the C3 thin client links the stub, and only a release builds
                           it); the contract
-                          walker, JSON guard, upload limits, assets-path, URL guard, minisig,
+                          walker, JSON guard, sscanf, upload limits, assets-path, URL guard, minisig,
                           config-parse, schedule catch-up and console-line tests run in the ESP32 job of
                           .github/workflows/e2e-docker.yml. Nothing else runs them, so a new
                           host test is not a test until it is wired into one of the two.
