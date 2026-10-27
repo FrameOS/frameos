@@ -11,6 +11,8 @@
 // forwarded). Keys SAVED on the account settings page persist server-side
 // (account_settings) and seed the preview automatically.
 
+import { keyedRepoAppSources } from "../../../../../frontend/src/generated/keyedRepoApps";
+
 export type PreviewSettingsField = {
   label: string;
   path: [string, string];
@@ -166,11 +168,59 @@ export function paidServicesForScenes(
   return requiredSettingsForScenes(rawScenes).filter((group) => group.paid);
 }
 
+function configList(config: unknown, key: "settings" | "permissions"): string[] {
+  const value = (config as Record<string, unknown> | null)?.[key];
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+function parsedConfig(raw: unknown): unknown {
+  if (typeof raw !== "string") {
+    return null;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+// Whether an app a scene carries is one of FrameOS's own repo apps with its
+// code unchanged: every code file exactly the repo's, and a config.json that
+// asks for no key and no permission the repo's does not. Labels, defaults and
+// formatting may differ (the store writes `"permissions": []` where the repo
+// leaves it out). Since the Immich app moved from Nim to a repo JS app every
+// Immich scene carries its code, and the preview held all of them back as
+// if a stranger had written it.
+export function isUnchangedRepoApp(sources: AppSources | undefined): boolean {
+  if (!sources) {
+    return false;
+  }
+  const files = Object.entries(sources).filter(([name]) => name !== "config.json");
+  if (files.length === 0) {
+    return false;
+  }
+  return Object.values(keyedRepoAppSources).some((repo) => {
+    if (!files.every(([name, content]) => repo[name] === content)) {
+      return false;
+    }
+    const ours = parsedConfig(repo["config.json"]);
+    const theirs = parsedConfig(sources["config.json"]);
+    if (theirs === null) {
+      return sources["config.json"] === undefined;
+    }
+    return (["settings", "permissions"] as const).every((key) => {
+      const allowed = new Set(configList(ours, key));
+      return configList(theirs, key).every((entry) => allowed.has(entry));
+    });
+  });
+}
+
 // Settings groups a scene claims through app sources it carries itself
 // (a config.json under sources), as opposed to the stock apps' catalogue.
 // Scene code is untrusted — a published scene can be anyone's — and an app
 // that ships its own config.json decides which of the viewer's stored keys
-// it may read. The stock apps are ours; these are not.
+// it may read. The stock apps are ours, and so is a repo app whose code the
+// scene carries unchanged (isUnchangedRepoApp); anything else is not.
 export function embeddedSourceSettingsForScenes(
   rawScenes: Record<string, unknown>[],
 ): PreviewSettingsGroup[] {
@@ -185,6 +235,9 @@ export function embeddedSourceSettingsForScenes(
       const sources =
         node.data?.sources ??
         (keyword ? scene.apps?.[keyword]?.sources : undefined);
+      if (isUnchangedRepoApp(sources)) {
+        continue;
+      }
       for (const key of settingsFromSources(sources)) {
         keys.add(key);
       }

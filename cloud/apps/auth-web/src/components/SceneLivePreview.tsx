@@ -1382,7 +1382,11 @@ export function SceneLivePreviewPanel({
       <div className="live-preview">
         {previewGated ? (
           <div className="live-preview__gate" role="status">
-            <CircleDollarSign aria-hidden className="live-preview__gate-icon" size={28} />
+            {gateReasons.billed.length > 0 ? (
+              <CircleDollarSign aria-hidden className="live-preview__gate-icon" size={28} />
+            ) : (
+              <KeyRound aria-hidden className="live-preview__gate-icon" size={28} />
+            )}
             <p className="live-preview__gate-title">
               This preview waits for you to start it
             </p>
@@ -1391,7 +1395,7 @@ export function SceneLivePreviewPanel({
                 ? `This scene calls ${joinNames(gateReasons.billed)}, which bills every request to your key, and brings its own code for ${joinNames(gateReasons.embedded)}, which decides what it sends where with your stored keys.`
                 : gateReasons.billed.length > 0
                   ? `This scene calls ${joinNames(gateReasons.billed)}, which bills every request to your key.`
-                  : `This scene brings its own code for ${joinNames(gateReasons.embedded)} and runs it with your stored keys. That code decides what it sends where.`}{" "}
+                  : `This scene brings its own code for ${joinNames(gateReasons.embedded)}, not the app FrameOS ships, and runs it with your stored keys. That code decides what it sends where.`}{" "}
               Nothing renders until you ask for it, and every change to the
               scene needs a fresh go-ahead.
             </p>
