@@ -641,6 +641,23 @@ export function Chat({ frameId, sceneId = null }: { frameId: FrameId | null; sce
                             message.logContent,
                             isUser
                           )}
+                          {message.preview ? (
+                            <a
+                              href={message.preview.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="mt-3 block"
+                              title="Open the rendered preview"
+                            >
+                              <img
+                                src={message.preview.url}
+                                width={message.preview.width}
+                                height={message.preview.height}
+                                alt="Rendered preview of the scene"
+                                className="h-auto max-h-96 w-auto max-w-full rounded-lg border border-slate-500/30"
+                              />
+                            </a>
+                          ) : null}
                           {(message.proposals ?? []).map((card) => renderInstallProposal(message.id, card))}
                         </div>
                       </div>

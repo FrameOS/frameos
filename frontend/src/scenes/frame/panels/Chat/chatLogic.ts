@@ -29,6 +29,7 @@ import {
 } from '../../../../utils/cloudAiChat'
 import { installCloudFrameStoreScene } from '../../../../utils/cloudFrameApi'
 import { renderSceneCheck } from '../../../../utils/wasmSceneRenderCheck'
+import { assignSceneImages } from '../../../../utils/sceneImages'
 import { frameRenderDevice } from '../../../../utils/frameRenderDevice'
 import { wasmPreviewDimensions } from '../../../../utils/wasmScenePreview'
 import { getCurrentProjectId, projectApiPathForProject } from '../../../../utils/projectApi'
@@ -107,6 +108,9 @@ export type ChatMessage = {
   isStreaming?: boolean
   createdAt?: string
   proposals?: ChatInstallProposal[]
+  /** The frame the render check drew for the scene this reply delivered:
+   * an object URL, for this session only (history reloads without it). */
+  preview?: { url: string; width: number; height: number }
 }
 
 function proposalsFromPayload(payload: unknown): ChatInstallProposal[] | undefined {
@@ -1793,6 +1797,14 @@ export const chatLogic = kea<chatLogicType>([
               )
               const checkedAs = device ? ` in the frame's memory (${device.label})` : ''
               const uniqueErrors = Array.from(new Set(check.errors))
+              if (check.image) {
+                // Shown under the reply even when errors were logged: it is
+                // what the frame would display.
+                const { blob, width, height } = check.image
+                actions.updateMessage(turnChatId, assistantMessageId, {
+                  preview: { url: URL.createObjectURL(blob), width, height },
+                })
+              }
               if (check.unavailable) {
                 // The runtime never started: that says nothing about the
                 // scene, so the assistant is not asked to "fix" it.
@@ -1803,6 +1815,16 @@ export const chatLogic = kea<chatLogicType>([
                   check.renderMs !== null ? ` (${(check.renderMs / 1000).toFixed(1)}s)` : ''
                 }`
                 actions.updateMessage(turnChatId, assistantMessageId, { logContent })
+                if (check.image) {
+                  // The scene's tile shows what the assistant made until the
+                  // frame renders it itself.
+                  void assignSceneImages(
+                    frameId,
+                    [deliveredSceneId],
+                    { blob: check.image.blob },
+                    { label: 'AI preview' }
+                  )
+                }
               } else {
                 const round = renderCheckRound ?? 0
                 logContent = check.outOfMemory

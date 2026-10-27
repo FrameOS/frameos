@@ -162,6 +162,13 @@ chat. A reload or the Back button opens that chat again, also one older than
 the history's first page: `GET …/ai/chats/{id}` returns its summary with the
 messages (`chatLogic.openChat`).
 
+A reply that delivers a scene to a frame's editor is followed by the render
+check (`renderSceneCheck`, in the browser's wasm runtime, in the frame's memory
+on an ESP32): the frame it drew is shown under the reply, errors or not, and
+when the check passes it becomes the scene's image (`assignSceneImages`, the
+scene tile) until the frame renders the scene itself. The picture is the
+session's own (an object URL); a chat reopened from history has none.
+
 ## Links
 
 The assistant links the frames and scenes it names, with the ids its tools
