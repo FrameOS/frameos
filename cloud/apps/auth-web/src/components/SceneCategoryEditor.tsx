@@ -53,7 +53,7 @@ export function SceneCategoryEditor({
       <select
         aria-label="Category"
         autoFocus
-        className="input"
+        className="tag-editor__select"
         onChange={(event) => setValue(event.target.value)}
         value={value}
       >
@@ -65,7 +65,7 @@ export function SceneCategoryEditor({
         ))}
       </select>
       <button
-        className="button"
+        className="button button--small"
         onClick={() => {
           setEditing(false);
           onChange(value || null);
@@ -75,7 +75,12 @@ export function SceneCategoryEditor({
         <Check aria-hidden size={14} />
         Done
       </button>
-      <button className="button button--subtle" onClick={() => setEditing(false)} type="button">
+      <button
+        aria-label="Cancel"
+        className="button button--small button--subtle"
+        onClick={() => setEditing(false)}
+        type="button"
+      >
         <X aria-hidden size={14} />
       </button>
     </span>

@@ -3218,6 +3218,23 @@ a.stat-tile:hover {
 .scene-facts .tag-editor__input {
   width: 8em;
   min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+/* The category's select in the facts list: a control the size of the small
+   buttons beside it, not a full-width form field. */
+.tag-editor__select {
+  min-height: 30px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 6px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
 }
 
 .scene-info__note {

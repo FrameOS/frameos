@@ -80,13 +80,13 @@ export function SceneFrameosVersionEditor({
         placeholder={currentFrameosVersion ?? "2026.7.5"}
         value={value}
       />
-      <button className="button" onClick={commit} type="button">
+      <button className="button button--small" onClick={commit} type="button">
         <Check aria-hidden size={14} />
         Done
       </button>
       {currentFrameosVersion && value.trim() !== currentFrameosVersion ? (
         <button
-          className="button button--subtle"
+          className="button button--small button--subtle"
           onClick={() => {
             setError(null);
             setEditing(false);
@@ -100,7 +100,7 @@ export function SceneFrameosVersionEditor({
       ) : null}
       <button
         aria-label="Cancel"
-        className="button button--subtle"
+        className="button button--small button--subtle"
         onClick={() => {
           setEditing(false);
           setError(null);
