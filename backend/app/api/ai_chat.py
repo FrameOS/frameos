@@ -37,6 +37,7 @@ from app.utils.ai_chat_tools import (
     INSTALL_OUT_OF_MEMORY_NOTE,
     BackendChatTools,
     RenderedScene,
+    render_size_context,
     rgba_to_png,
     untrusted_result,
 )
@@ -217,6 +218,9 @@ async def ai_chat_turn(data: AiChatRequest, request: Request, db: Session = Depe
             "The user opened this chat from the frames overview, not from one frame, and has no scene editor open. "
             "Find the frame they mean with frames_list when the request is about one."
         )
+    render_size = _render_size(data.render_size, frame)
+    if render_size and frame is not None and data.editor is not False:
+        context_parts.append(render_size_context(*render_size))
     if scene is not None:
         context_parts.append(_scene_context(scene, data.selected_nodes or [], data.selected_edges or []))
     if data.time_zone:
@@ -346,7 +350,7 @@ async def ai_chat_turn(data: AiChatRequest, request: Request, db: Session = Depe
         render_scene=render,
         current_scene=scene,
         editor_scenes=editor_scenes,
-        render_size=_render_size(data.render_size, frame),
+        render_size=render_size,
         split_state_nodes=_split_state_nodes_by_app,
         editor_available=frame is not None and data.editor is not False,
         check_install=check_install,

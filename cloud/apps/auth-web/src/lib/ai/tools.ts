@@ -711,18 +711,27 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
     description:
       "Look at a scene: render it once with the real FrameOS runtime and get the frame back as an image, " +
       "with the errors it logged. Renders what you delivered this turn, otherwise the user's current scene " +
-      "as the editor holds it, at the size the user's preview uses. This is the only way to see a scene: " +
-      "use it whenever the user talks about how it looks, and to check a visual change before you finish.",
+      "as the editor holds it. It draws at the size the user's preview uses unless you pass width and height: " +
+      "pass both to see the scene at any other size (portrait instead of landscape, another frame's panel). " +
+      "When the scene must look right at several sizes, render it once per size (several calls in one round " +
+      "are fine) and fix what breaks at any of them. This is the only way to see a scene: use it whenever the " +
+      "user talks about how it looks, and to check a visual change before you finish.",
     name: "render_scene",
     parameters: {
       additionalProperties: false,
       properties: {
-        height: { description: "Frame height in pixels (omit for the preview's size).", type: "integer" },
+        height: {
+          description: "Height in pixels to render at, with width (omit both for the preview's size).",
+          type: "integer",
+        },
         scene_id: {
           description: "Which scene to render when the editor holds several (omit for the one being edited).",
           type: "string",
         },
-        width: { description: "Frame width in pixels (omit for the preview's size).", type: "integer" },
+        width: {
+          description: "Width in pixels to render at, with height (omit both for the preview's size).",
+          type: "integer",
+        },
       },
       type: "object",
     },
@@ -1645,9 +1654,20 @@ export type ToolImage = { dataUrl: string };
 export type ToolOutput = { images: ToolImage[]; text: string };
 
 // A render holds a wasm worker for up to 30 s and its image rides in every
-// later round of the turn: a look, a fix and a check, with one to spare.
-export const MAX_RENDERS_PER_TURN = 4;
+// later round of the turn: a look and a check after a fix at two sizes
+// (portrait and landscape), with two to spare.
+export const MAX_RENDERS_PER_TURN = 6;
 const defaultRenderSize = { height: 480, width: 800 };
+
+// The turn's context line naming the size render_scene draws at, so "it
+// looks wrong in portrait" can be checked at the size the user means. The
+// backend's render_size_context says the same.
+export function renderSizeContext(size: { width: number; height: number }): string {
+  return (
+    `The user's preview draws scenes at ${size.width}x${size.height} pixels: render_scene renders at that ` +
+    "size unless you pass width and height."
+  );
+}
 const maxRenderLogLines = 20;
 
 const renderFailureNotes: Record<SceneRenderError["code"], string> = {

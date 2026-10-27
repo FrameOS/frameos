@@ -88,6 +88,9 @@ type SceneLivePreviewPanelProps = {
   /** The account's settings page (where service keys are saved), linked from
    * the credentials hint when a scene needs keys. */
   settingsUrl?: string | undefined;
+  /** The size the preview draws at, on mount and after every Resize or
+   * rotate: the workspace's AI panel renders at it. */
+  onViewportChange?: ((size: { width: number; height: number }) => void) | undefined;
 };
 
 type SceneJsonLike = { id: string } & Record<string, unknown>;
@@ -262,6 +265,7 @@ export function SceneLivePreviewPanel({
   canSaveToGallery = false,
   onImageRegistered,
   settingsUrl,
+  onViewportChange,
 }: SceneLivePreviewPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -317,6 +321,11 @@ export function SceneLivePreviewPanel({
     width: width || 800,
   });
   const [viewportForm, setViewportForm] = useState(viewport);
+  const onViewportChangeRef = useRef(onViewportChange);
+  onViewportChangeRef.current = onViewportChange;
+  useEffect(() => {
+    onViewportChangeRef.current?.(viewport);
+  }, [viewport]);
 
   // Bumped by the Restart button; recreates the whole wasm runtime.
   const [restartCount, setRestartCount] = useState(0);

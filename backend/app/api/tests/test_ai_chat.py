@@ -217,6 +217,62 @@ async def test_scenes_are_delivered_to_the_editor_and_patched(async_client, db, 
 
 
 @pytest.mark.asyncio
+async def test_render_scene_renders_at_the_preview_size_or_any_size_the_model_asks_for(
+    async_client, db, redis, monkeypatch
+):
+    """The model is told the size of the user's preview and renders there by
+    default, and checks other sizes (portrait, another panel) by asking for
+    them: one call per size, in the same round."""
+    from app.utils import embedded_render
+    from app.utils.embedded_render import SceneRender
+
+    frame = await _setup(db, redis)
+    asked: list[tuple[int, int]] = []
+
+    async def fake_render(_frame, width, height, **kwargs):
+        asked.append((width, height))
+        return SceneRender(b"\x00" * (width * height * 4))
+
+    monkeypatch.setattr(embedded_render, "render_scene", fake_render)
+    monkeypatch.setattr(embedded_render, "thin_client_renderer_available", lambda: True)
+    scene = {
+        "id": "clock",
+        "name": "Clock",
+        "nodes": [{"id": "render", "type": "event", "data": {"keyword": "render"}}],
+        "edges": [],
+    }
+    openai = ScriptedOpenAi([
+        ("", [call("render_scene", {}, "c1"), call("render_scene", {"width": 80, "height": 48}, "c2")]),
+        ("It works in both.", []),
+    ])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    response = await async_client.post(
+        f"/api/projects/{frame.project_id}/ai/chat",
+        json={
+            "prompt": "does it look right in portrait and on a small panel?",
+            "frameId": frame.id,
+            "sceneId": "clock",
+            "scene": scene,
+            "renderSize": {"width": 120, "height": 160},
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    assert asked == [(120, 160), (80, 48)]
+    context = openai.requests[0]["input"][0]["content"][0]["text"]
+    # The same words as the cloud's renderSizeContext (render-scene.test.ts).
+    assert (
+        "The user's preview draws scenes at 120x160 pixels: render_scene renders at that size unless you pass "
+        "width and height."
+    ) in context
+    outputs = tool_outputs(openai.requests[1])
+    # An output with an image is a list: the result's text, then the frame.
+    results = [json.loads(outputs[call_id][0]["text"].split("\n", 1)[0]) for call_id in ("c1", "c2")]
+    assert [(result["width"], result["height"]) for result in results] == [(120, 160), (80, 48)]
+    assert [part["type"] for part in outputs["c2"]] == ["input_text", "input_image"]
+
+
+@pytest.mark.asyncio
 async def test_render_scene_on_an_esp32_renders_in_the_frames_memory(async_client, db, redis, monkeypatch):
     """The E1004 aborted a scene that rendered fine everywhere else: a chat
     about an ESP32 frame renders in that frame's PSRAM, and running out comes

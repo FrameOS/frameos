@@ -111,7 +111,12 @@ Next to them, the editor tools: `create_scenes`, `update_scene`,
 `patch_scene`, `edit_app_source` (deliver to the editor, after validation) and
 `render_scene` (look at a scene: the cloud's headless wasm renderer,
 `scene-render.ts`; the backend's `embedded_render.py`, when Node and the wasm
-build are present). With `editor: false`, `create_scenes` points the model at
+build are present). It draws at the request's `renderSize`, the size the
+user's preview draws at (the store editor's Preview panel after a Resize or a
+rotate, a frame's rotated resolution), and the turn's context names that size
+(`renderSizeContext` / `render_size_context`, the same sentence on both);
+`width` and `height` render at any other size, one call per size when a scene
+must work at several. With `editor: false`, `create_scenes` points the model at
 `scene_create` / `frame_scene_install` instead. The cloud keeps its own extra
 tools too (catalog and doc search, store, `save_scene`, `add_scene_to_frame`).
 

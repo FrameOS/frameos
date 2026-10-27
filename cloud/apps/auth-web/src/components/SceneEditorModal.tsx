@@ -1068,6 +1068,11 @@ export function SceneEditorWorkspace({
   };
   const open: SceneEditorPanels = { ...panels, info: panels.info && info !== undefined };
   const layout = sceneEditorPanelNames.filter((name) => open[name]);
+  // The size the Preview panel draws at (its Resize and rotate included):
+  // the AI panel's render check and the assistant's render_scene use it, so
+  // the frame the assistant looks at is the one the user sees. The scene's
+  // size until the Preview has been open.
+  const [previewSize, setPreviewSize] = useState<{ width: number; height: number } | null>(null);
   // The editor is heavy (kea, Monaco, wasm): mounted the first time its
   // panel opens, and kept mounted — hidden — from then on, so hiding the
   // panel keeps the unsaved edits.
@@ -1221,7 +1226,12 @@ export function SceneEditorWorkspace({
                 <X aria-hidden />
               </button>
             ) : null}
-            <SceneAiPanel {...ai} height={height} selectedSceneId={sceneId ?? null} width={width} />
+            <SceneAiPanel
+              {...ai}
+              height={previewSize?.height ?? height}
+              selectedSceneId={sceneId ?? null}
+              width={previewSize?.width ?? width}
+            />
           </aside>
         </>
       ) : null}
@@ -1248,6 +1258,7 @@ export function SceneEditorWorkspace({
                 editorSceneId={sceneId ?? null}
                 height={height}
                 onImageRegistered={preview.onImageRegistered}
+                onViewportChange={setPreviewSize}
                 sceneId={preview.sceneId}
                 scenes={preview.scenes}
                 settingsUrl={preview.settingsUrl}

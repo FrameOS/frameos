@@ -191,17 +191,27 @@ EDITOR_TOOL_DEFINITIONS: list[JsonObject] = [
         "name": "render_scene",
         "description": (
             "Look at a scene: render it once with the real FrameOS runtime and get the frame back as an image. "
-            "Renders what you delivered this turn, otherwise the user's current scene as the editor holds it, at "
-            "the frame's size. Use it whenever the user talks about how a scene looks, and to check a visual change "
-            "before you finish. To see what a physical frame is showing right now, use frame_screenshot instead."
+            "Renders what you delivered this turn, otherwise the user's current scene as the editor holds it. It "
+            "draws at the size the user's preview uses unless you pass width and height: pass both to see the scene "
+            "at any other size (portrait instead of landscape, another frame's panel). When the scene must look "
+            "right at several sizes, render it once per size (several calls in one round are fine) and fix what "
+            "breaks at any of them. Use it whenever the user talks about how a scene looks, and to check a visual "
+            "change before you finish. To see what a physical frame is showing right now, use frame_screenshot "
+            "instead."
         ),
         "parameters": {
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "height": {"type": "integer", "description": "Frame height in pixels (omit for the frame's size)."},
+                "height": {
+                    "type": "integer",
+                    "description": "Height in pixels to render at, with width (omit both for the preview's size).",
+                },
                 "scene_id": {"type": "string", "description": "Which scene to render (omit for the one being edited)."},
-                "width": {"type": "integer", "description": "Frame width in pixels (omit for the frame's size)."},
+                "width": {
+                    "type": "integer",
+                    "description": "Width in pixels to render at, with height (omit both for the preview's size).",
+                },
             },
         },
     },
@@ -242,6 +252,16 @@ INSTALL_OUT_OF_MEMORY_NOTE = (
 )
 
 MAX_RENDER_LOG_LINES = 20
+
+
+def render_size_context(width: int, height: int) -> str:
+    """The turn's context line naming the size render_scene draws at, so "it looks
+    wrong in portrait" can be checked at the size the user means. The cloud's
+    renderSizeContext (lib/ai/tools.ts) says the same."""
+    return (
+        f"The user's preview draws scenes at {width}x{height} pixels: render_scene renders at that size unless you "
+        "pass width and height."
+    )
 RENDER_OUT_OF_MEMORY_NOTE = (
     "The scene needs more memory than the frame has, so on the frame this render aborts and the device restarts. "
     "Make it need less: every image the size of the frame is width x height x 4 bytes, so draw into the frame's "

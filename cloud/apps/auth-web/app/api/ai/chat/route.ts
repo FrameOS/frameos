@@ -35,7 +35,7 @@ import type {
   ScenesEvent,
   ToolContext,
 } from "../../../../src/lib/ai/tools";
-import { untrustedResult } from "../../../../src/lib/ai/tools";
+import { renderSizeContext, untrustedResult } from "../../../../src/lib/ai/tools";
 import {
   activeTurnForChat,
   activeTurnCountForAccount,
@@ -444,6 +444,12 @@ export async function POST(request: NextRequest) {
         "(\"Save as new version\" for their own scene, \"Fork & save copy\" otherwise) or with save_scene; there is no Deploy button here.",
     );
   }
+  // What render_scene draws at: the client's preview, else the frame's
+  // resolution (older clients send no size), else the default.
+  const renderSize = renderSizeFrom(body.renderSize) ?? frameResolution ?? null;
+  if (renderSize && body.editor !== false) {
+    contextParts.push(renderSizeContext(renderSize));
+  }
   if (scenePayload) {
     contextParts.push(
       `The user has this scene open in the editor (its id is "${sceneId ?? scenePayload.id}"). ` +
@@ -535,9 +541,7 @@ export async function POST(request: NextRequest) {
     prompt,
     // Audit actor for save_scene's store write.
     providerSubject: session.providerSubject,
-    // What render_scene draws at: the client's preview, else the frame's
-    // resolution (older clients send no size), else the default.
-    renderSize: renderSizeFrom(body.renderSize) ?? frameResolution ?? null,
+    renderSize,
     renderTimeZone: timeZoneFrom(body.timeZone),
     renderDevice: renderDevice ?? null,
     storeSceneId,
