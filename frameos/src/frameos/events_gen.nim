@@ -71,6 +71,8 @@ const
   ButtonDoublePressMs* = 350
   ButtonLongPressMs* = 1000
   ButtonRoles*: array[9, string] = ["primary", "secondary", "next", "prev", "up", "down", "back", "menu", "refresh"]
+  ## The presses a `button` event carries as its `action` (`buttons.actions`).
+  ButtonActions*: array[3, string] = ["press", "doublePress", "longPress"]
   PointerTypes*: array[3, string] = ["mouse", "touch", "pen"]
   ## `setCurrentScene {direction}`: the ways through the frame's scene list (docs/events.md).
   SceneDirections*: array[2, string] = ["next", "prev"]

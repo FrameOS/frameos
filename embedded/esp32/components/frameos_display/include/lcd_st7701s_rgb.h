@@ -30,6 +30,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "lcd_splash.h"
 
 #define FOS_LCD_ST7701S_WIDTH 480
 #define FOS_LCD_ST7701S_HEIGHT 480
@@ -40,7 +41,8 @@
 void fos_lcd_st7701s_select_board(const char *hardware_preset);
 
 /* The panel table's four: init brings the whole stack up once (expander,
- * controller, RGB peripheral, backlight) and is a no-op after; display copies
+ * controller, RGB peripheral, backlight), showing the FrameOS mark on black
+ * until the first picture (lcd_splash.h), and is a no-op after; display copies
  * a packed FOS_PIXEL_RGB565 frame into the scan-out buffer; clear shows
  * white; sleep keeps the picture on (an LCD that "slept" after every refresh
  * would be dark). */
@@ -77,6 +79,11 @@ esp_err_t fos_lcd_st7701s_i2c_bus(int sda, int scl, void **bus);
 
 /* Backlight on or off (the Indicator's GPIO45). ESP_ERR_INVALID_STATE before init. */
 esp_err_t fos_lcd_st7701s_backlight(bool on);
+
+/* What the boot splash says it is waiting for (lcd_splash.h), from whichever
+ * task is booting. It shows once it has lasted FOS_LCD_SPLASH_STATUS_DELAY_MS,
+ * and not at all once a picture has replaced the splash. */
+void fos_lcd_st7701s_splash_status(fos_lcd_splash_status_t status);
 
 /* How steadily the scan-out runs. The driver refills the DMA's bounce
  * buffers from the PSRAM frame buffer in an interrupt; when the shared

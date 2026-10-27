@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "lcd_splash.h"
 
 typedef enum {
     FOS_PIXEL_1BPP = 1, /* packed 1 bit/pixel, MSB first, white=1 */
@@ -59,6 +60,10 @@ bool fos_display_is_lcd(void);
  * backlight. ESP_ERR_NOT_SUPPORTED where there is nothing to switch (e-paper
  * holds its image unpowered). */
 esp_err_t fos_display_power(bool on);
+/* What the boot is waiting for, on an LCD's boot splash (lcd_splash.h): a
+ * line under the FrameOS mark once the wait has lasted a second. Nothing on
+ * any other panel, and nothing once a picture is up. */
+void fos_display_boot_status(fos_lcd_splash_status_t status);
 /* An LCD's own buffer for the next picture, `*len` bytes in the panel's
  * format (fos_display_buffer_size): the renderer draws there in place and
  * fos_display_blit(that buffer) shows it without a copy. The panel stays
