@@ -28,6 +28,17 @@ ARG CROSS_PREFIX=
 ARG CROSS_EXPECTED_CPU_ARCH=
 
 ENV DEBIAN_FRONTEND=noninteractive
+# Debian 11 left the regular mirror when its LTS ended (2026-08-31): the
+# index still lists bullseye-security packages that 404 there, so a bullseye
+# build reads archive.debian.org.
+RUN if [ "${DISTRO_NAME}-${DISTRO_RELEASE}" = "debian-bullseye" ]; then \
+      printf '%s\n' \
+        "deb http://archive.debian.org/debian bullseye main" \
+        "deb http://archive.debian.org/debian bullseye-updates main" \
+        "deb http://archive.debian.org/debian-security bullseye-security main" \
+        > /etc/apt/sources.list \
+      && rm -f /etc/apt/sources.list.d/*; \
+    fi
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
       build-essential \
