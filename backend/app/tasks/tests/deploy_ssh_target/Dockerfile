@@ -30,13 +30,13 @@ RUN set -eux; \
     touch /boot/config.txt; \
     sed -ri 's/^#?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config; \
     sed -ri 's/^#?PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config; \
-    wget -q -O /tmp/quickjs.tar.xz https://archive.frameos.net/source/vendor/quickjs-2026-06-04-quickts.1.tar.xz; \
-    echo "94a94f5229ead78f585280b5d41c7b45ab5c53eaf3500e493a5da05f32030e9f  /tmp/quickjs.tar.xz" | sha256sum -c -; \
+    wget -q -O /tmp/quickjs.tar.xz https://archive.frameos.net/source/vendor/quickjs-2026-06-04-quickts.2.tar.xz; \
+    echo "9d6435424992bd710b28b67e6de10fac57813da8b37ce26913c78343c83d463e  /tmp/quickjs.tar.xz" | sha256sum -c -; \
     tar -xf /tmp/quickjs.tar.xz -C /tmp; \
-    cp -a /tmp/quickjs-2026-06-04-quickts.1 /srv/frameos/vendor/quickjs/quickjs-2026-06-04-quickts.1; \
-    make -C /srv/frameos/vendor/quickjs/quickjs-2026-06-04-quickts.1 libquickjs.a; \
+    cp -a /tmp/quickjs-2026-06-04-quickts.2 /srv/frameos/vendor/quickjs/quickjs-2026-06-04-quickts.2; \
+    make -C /srv/frameos/vendor/quickjs/quickjs-2026-06-04-quickts.2 libquickjs.a; \
     chown -R "${FRAMEOS_E2E_USER}:${FRAMEOS_E2E_USER}" /srv/frameos; \
-    rm -rf /tmp/quickjs.tar.xz /tmp/quickjs-2026-06-04-quickts.1; \
+    rm -rf /tmp/quickjs.tar.xz /tmp/quickjs-2026-06-04-quickts.2; \
     rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \

@@ -63,11 +63,13 @@ call `f<a>(b)`. It cannot affect `.js` sources, where the pass is off.
 
 ## How FrameOS uses it
 
-Done 2026-09-02. The moving parts, for the next time the version changes:
+Done 2026-09-02 with `2026-06-04-quickts.1`; on `2026-06-04-quickts.2` since
+2026-10-27. The moving parts, for the next time the version changes:
 
-- **One source tarball, one version string.** Release `2026-06-04-quickts.1`
-  is the git tag `v2026-06-04-quickts.1` in the quickts repo, published as
-  `quickjs-2026-06-04-quickts.1.tar.xz` (unpacks to `quickjs-<version>/`,
+- **One source tarball, one version string.** Release `<version>` (now
+  `2026-06-04-quickts.2`) is the git tag `v<version>` in the quickts repo,
+  `git archive --prefix=quickjs-<version>/` of it published as
+  `quickjs-<version>.tar.xz` (unpacks to `quickjs-<version>/`,
   Bellard's layout) both as a GitHub release asset and mirrored at
   `https://archive.frameos.net/source/vendor/` with
   `tools/prebuilt-deps/r2_put_source.py`. Every fetcher reads the mirror:
@@ -77,14 +79,26 @@ Done 2026-09-02. The moving parts, for the next time the version changes:
   `backend/app/tasks/frame_deploy_helpers.py` (`DEFAULT_QUICKJS_VERSION`, the
   on-device source-build fallback). The component is still called `quickjs`
   everywhere -- it *is* QuickJS -- so nothing keyed on that name moved.
+  `build_quickjs` refuses a `quickjs/` of another version, and
+  `build_wasm.sh` fetches the pinned sources when `quickjs/` is not them.
 - **Prebuilt libraries for all 15 targets** (`tools/prebuilt-deps/manifest.json`,
-  `archive.frameos.net/prebuilt-deps/<target>/quickjs-2026-06-04-quickts.1.tar.gz`)
-  were rebuilt from the tarball and uploaded; the archives now ship
+  `archive.frameos.net/prebuilt-deps/<target>/quickjs-<version>.tar.gz`)
+  are rebuilt from the tarball and uploaded; the archives ship
   `quickts*.h` next to `quickjs.h`. The older `quickjs-2026-06-04` archives
   stay under their versioned keys, so checkouts with the old manifest keep
   working. `ubuntu-26.04-amd64` cannot be built under QEMU on an arm64 Mac
   (`tar: Cannot mkdir: Function not implemented`); build that one natively on
   monster and rsync the component directory back before `r2_sync.py upload`.
+  Debian 11 left the regular mirror when its LTS ended, so the bullseye
+  targets read archive.debian.org (`Dockerfile.quickjs`, `Dockerfile.nim`).
+- **FrameOS patches nothing in it** (since quickts.2). The ESP32 build sets
+  `JS_MALLOC_ARENA_SIZE=1024`, and quickts handles newlib's missing
+  `tm_gmtoff` and `malloc_usable_size` itself; the browser preview gives
+  `Date` the frame's zone with `JS_SetTimezoneOffsetFunc`
+  (`src/wasm/wasm_main.nim`). Before, the ESP32 component compiled a copy of
+  `quickjs.c` with the arena size rewritten plus a `tm_gmtoff` macro, and
+  `build_wasm.sh` redirected `localtime_r`, each guarded by a check on one
+  line of `quickjs.c`.
 - **ESP32 and WASM** compile `frameos/quickjs/quickjs.c` from source, so they
   picked quickts up with the tarball; the root `Dockerfile` now copies the
   three `quickts*.h` headers into `/app/frameos/quickjs` alongside it. On

@@ -44,26 +44,37 @@ task relock, "Regenerate nimble.lock":
   rmFile("nimble.lock")
   exec "nimble lock"
 
+# quickts: upstream QuickJS plus native TypeScript/JSX parsing
+# (https://github.com/FrameOS/quickts). Keep the version and checksum in step
+# with tools/install_prebuilt_quickjs.py, tools/build_wasm.sh,
+# tools/prebuilt-deps/build.sh, the root Dockerfile and
+# backend/app/tasks/frame_deploy_helpers.py.
+const
+  QuickjsVersion = "2026-06-04-quickts.2"
+  QuickjsSha256 = "9d6435424992bd710b28b67e6de10fac57813da8b37ce26913c78343c83d463e"
+
 task build_quickjs, "Build QuickJS":
   if dirExists("quickjs"):
-    echo "QuickJS directory already exists, skipping download and build."
-    return
+    let have = if fileExists("quickjs/VERSION"): readFile("quickjs/VERSION").strip() else: ""
+    if have == QuickjsVersion:
+      echo "QuickJS " & QuickjsVersion & " is already in quickjs/, skipping download and build."
+      return
+    # Not removed here: in a worktree quickjs/ is often a link to another
+    # checkout's.
+    echo "quickjs/ holds QuickJS " & (if have.len > 0: have else: "of no known version") &
+      ", this checkout pins " & QuickjsVersion & ": remove quickjs/ and run nimble build_quickjs again."
+    quit(1)
   echo "Downloading prebuilt QuickJS if available..."
   exec "python tools/install_prebuilt_quickjs.py || true"
   if dirExists("quickjs"):
     echo "Using prebuilt QuickJS."
     return
-  # quickts: upstream QuickJS plus native TypeScript/JSX parsing
-  # (https://github.com/FrameOS/quickts). Keep the version and checksum in
-  # step with tools/install_prebuilt_quickjs.py, tools/build_wasm.sh,
-  # tools/prebuilt-deps/build.sh, the root Dockerfile and
-  # backend/app/tasks/frame_deploy_helpers.py.
   echo "Downloading and building quickts (QuickJS + TypeScript) from source..."
-  exec "curl -L -o quickjs.tar.xz https://archive.frameos.net/source/vendor/quickjs-2026-06-04-quickts.1.tar.xz"
-  exec "echo '94a94f5229ead78f585280b5d41c7b45ab5c53eaf3500e493a5da05f32030e9f  quickjs.tar.xz' | sha256sum -c -"
+  exec "curl -L -o quickjs.tar.xz https://archive.frameos.net/source/vendor/quickjs-" & QuickjsVersion & ".tar.xz"
+  exec "echo '" & QuickjsSha256 & "  quickjs.tar.xz' | sha256sum -c -"
   exec "tar -xf quickjs.tar.xz"
   exec "rm quickjs.tar.xz"
-  exec "mv quickjs-2026-06-04-quickts.1 quickjs"
+  exec "mv quickjs-" & QuickjsVersion & " quickjs"
   exec "cd quickjs && make"
 
 task test, "Run tests":

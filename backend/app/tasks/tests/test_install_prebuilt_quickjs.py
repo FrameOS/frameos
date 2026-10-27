@@ -19,7 +19,7 @@ def load_installer():
 
 
 def write_quickjs_archive(archive_path: Path, tmp_path: Path) -> str:
-    payload = tmp_path / "payload" / "quickjs-2026-06-04-quickts.1"
+    payload = tmp_path / "payload" / "quickjs-2026-06-04-quickts.2"
     include = payload / "include" / "quickjs"
     lib = payload / "lib"
     include.mkdir(parents=True)
@@ -47,11 +47,11 @@ def write_manifest(manifest_path: Path, archive_md5: str | None, archive_sha256:
                 "entries": [
                     {
                         "target": "debian-bookworm-amd64",
-                        "versions": {"quickjs": "2026-06-04-quickts.1"},
+                        "versions": {"quickjs": "2026-06-04-quickts.2"},
                         "component_keys": {
                             "quickjs": (
                                 "prebuilt-deps/debian-bookworm-amd64/"
-                                "quickjs-2026-06-04-quickts.1.tar.gz"
+                                "quickjs-2026-06-04-quickts.2.tar.gz"
                             )
                         },
                         **entry_sums,
@@ -83,7 +83,7 @@ def test_installs_prebuilt_quickjs_archive_shape(tmp_path):
         archive_root
         / "prebuilt-deps"
         / "debian-bookworm-amd64"
-        / "quickjs-2026-06-04-quickts.1.tar.gz"
+        / "quickjs-2026-06-04-quickts.2.tar.gz"
     )
     archive_md5 = write_quickjs_archive(archive_path, tmp_path)
     manifest_path = tmp_path / "manifest.json"
@@ -110,7 +110,7 @@ def test_installs_prebuilt_quickjs_archive_shape(tmp_path):
     assert (dest / "include" / "quickjs" / "cutils.h").exists()
     assert (dest / "libquickjs.a").read_bytes() == b"!<arch>\n"
     assert (dest / "lib" / "libquickjs.a").exists()
-    assert (dest / "VERSION").read_text() == "2026-06-04-quickts.1\n"
+    assert (dest / "VERSION").read_text() == "2026-06-04-quickts.2\n"
 
 
 def run_installer(tmp_path: Path, *, md5: str | None, sha256: str | None, archive_md5_ok: bool = True):
@@ -120,7 +120,7 @@ def run_installer(tmp_path: Path, *, md5: str | None, sha256: str | None, archiv
         archive_root
         / "prebuilt-deps"
         / "debian-bookworm-amd64"
-        / "quickjs-2026-06-04-quickts.1.tar.gz"
+        / "quickjs-2026-06-04-quickts.2.tar.gz"
     )
     real_md5 = write_quickjs_archive(archive_path, tmp_path)
     real_sha256 = installer.file_sha256sum(archive_path)

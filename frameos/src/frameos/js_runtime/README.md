@@ -54,7 +54,7 @@ runtime stack:
   https://github.com/tapsterbot/burrito/blob/main/src/burrito/qjs.nim and then
   adjusted for FrameOS build/runtime needs. Burrito is MIT licensed with
   copyright attribution to Tapster Robotics, Inc.
-- QuickJS is [quickts](https://github.com/FrameOS/quickts) (upstream plus native TypeScript/JSX parsing), downloaded/built by `frameos.nimble` as `quickjs-2026-06-04-quickts.1`.
+- QuickJS is [quickts](https://github.com/FrameOS/quickts) (upstream plus native TypeScript/JSX parsing), downloaded/built by `frameos.nimble` as `quickjs-2026-06-04-quickts.2`.
   QuickJS is MIT licensed with copyright attribution to Fabrice Bellard and
   Charlie Gordon.
 
