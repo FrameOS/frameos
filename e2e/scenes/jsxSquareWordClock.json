@@ -1,0 +1,100 @@
+{
+  "id": "jsxSquareWordClock",
+  "name": "JSX: Word clock (480x480, touch)",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600.0,
+    "backgroundColor": "#0a0a0a"
+  },
+  "e2eFrame": {
+    "width": 480,
+    "height": 480
+  },
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: Word clock",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [
+        {
+          "name": "at",
+          "label": "Time to show (empty: now)",
+          "type": "string",
+          "value": ""
+        }
+      ],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: Word clock\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"at\",\n      \"label\": \"Time to show (empty: now)\",\n      \"type\": \"string\",\n      \"value\": \"\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// @name JSX: Word clock\n// @background #0a0a0a\n// @refresh 30\n// A word clock: the letters that tell the time lit, the rest faint, and a dot\n// for each minute past the five.\n// `at` (a field) pins the time, for a snapshot; empty, it is the clock.\nconst rows = ['ITLISASAMPM', 'ACQUARTERDC', 'TWENTYFIVEX', 'HALFSTENFTO', 'PASTERUNINE',\n  'ONESIXTHREE', 'FOURFIVETWO', 'EIGHTELEVEN', 'SEVENTWELVE', 'TENSEOCLOCK']\n// [row, first letter, length]\nconst W = {\n  IT: [0, 0, 2], IS: [0, 3, 2], AM: [0, 7, 2], PM: [0, 9, 2], A: [1, 0, 1], QUARTER: [1, 2, 7],\n  TWENTY: [2, 0, 6], FIVE_M: [2, 6, 4], HALF: [3, 0, 4], TEN_M: [3, 5, 3], TO: [3, 9, 2],\n  PAST: [4, 0, 4], OCLOCK: [9, 5, 6],\n}\nconst hours = [[8, 5, 6], [5, 0, 3], [6, 8, 3], [5, 6, 5], [6, 0, 4], [6, 4, 4],\n  [5, 3, 3], [8, 0, 5], [7, 0, 5], [4, 7, 4], [9, 0, 3], [7, 5, 6]] // twelve, one .. eleven\nconst minuteWords = [\n  ['OCLOCK'], ['FIVE_M', 'PAST'], ['TEN_M', 'PAST'], ['A', 'QUARTER', 'PAST'], ['TWENTY', 'PAST'],\n  ['TWENTY', 'FIVE_M', 'PAST'], ['HALF', 'PAST'], ['TWENTY', 'FIVE_M', 'TO'], ['TWENTY', 'TO'],\n  ['A', 'QUARTER', 'TO'], ['TEN_M', 'TO'], ['FIVE_M', 'TO'],\n]\n\nexport function get(app) {\n  const now = app.config.at ? new Date(app.config.at) : new Date()\n  const five = Math.floor(now.getMinutes() / 5)\n  const hour = (now.getHours() + (five > 6 ? 1 : 0)) % 12\n  const lit = [W.IT, W.IS, now.getHours() < 12 ? W.AM : W.PM, hours[hour], ...minuteWords[five].map((w) => W[w])]\n  const on = (r, c) => lit.some(([row, start, n]) => row === r && c >= start && c < start + n)\n  const extra = now.getMinutes() % 5\n  return (\n    <div className=\"flex flex-col items-center justify-center gap-6 bg-neutral-950\">\n      <div className=\"grid grid-cols-11 gap-x-3 gap-y-1\">\n        {rows.flatMap((row, r) => row.split('').map((ch, c) => (\n          <span className={`text-3xl text-center ${on(r, c) ? 'text-amber-200 font-bold' : 'text-neutral-800'}`}>{ch}</span>\n        )))}\n      </div>\n      <div className=\"flex gap-4\">\n        {[1, 2, 3, 4].map((i) => (\n          <div className={`w-3 h-3 rounded-full ${i <= extra ? 'bg-amber-200' : 'bg-neutral-800'}`} />\n        ))}\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {
+          "at": "2024-03-12T14:40:00"
+        }
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

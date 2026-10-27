@@ -1,0 +1,104 @@
+{
+  "id": "jsxPress",
+  "name": "JSX: a button held down",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600,
+    "backgroundColor": "#0a0a0a"
+  },
+  "e2eFrame": {
+    "width": 800,
+    "height": 480
+  },
+  "e2eEvents": [
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 16384,
+        "y": 14472,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    }
+  ],
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: a button held down",
+      "category": "data",
+      "description": "A JSX interface with handlers (docs/jsx-ui.md \"Events\").",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: a button held down\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface with handlers (docs/jsx-ui.md \\\"Events\\\").\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// A button held down: active: styles while the finger is on it.\nexport const get = () => (\n  <div className=\"flex flex-col items-center justify-center gap-6 bg-neutral-950 text-white\">\n    <div className=\"w-48 h-48 rounded-full bg-rose-500 border-8 border-rose-500/30 flex items-center justify-center active:bg-rose-700 active:border-white\"\n      onPointerDown={() => {}}>\n      <svg className=\"w-20 h-20 text-white\" viewBox=\"0 0 24 24\" fill=\"currentColor\">\n        <path d=\"M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z\" />\n      </svg>\n    </div>\n    <span className=\"text-2xl text-neutral-400\">Hold to talk</span>\n  </div>\n)\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

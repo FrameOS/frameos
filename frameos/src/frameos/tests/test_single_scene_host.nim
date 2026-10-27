@@ -159,6 +159,27 @@ scenes.add(%*{
     "config.json": $(%*{"name": "Counter", "category": "logic"})
   }}}
 })
+# A scene that says which gesture it heard.
+const tapSceneId = "tests/single-scene-host/tap"
+scenes.add(%*{
+  "id": tapSceneId,
+  "name": "tap",
+  "settings": {"execution": "interpreted", "refreshInterval": 300},
+  "fields": [],
+  "nodes": [
+    {"id": "render", "type": "event", "data": {"keyword": "render"}},
+    {"id": "tap", "type": "event", "data": {"keyword": "tap"}},
+    {"id": "long", "type": "event", "data": {"keyword": "longPress"}},
+    {"id": "sayTap", "type": "code", "data": {"codeArgs": [], "codeOutputs": [],
+      "codeJS": "(console.log('heard tap'), 1)"}},
+    {"id": "sayLong", "type": "code", "data": {"codeArgs": [], "codeOutputs": [],
+      "codeJS": "(console.log('heard longPress'), 1)"}}
+  ],
+  "edges": [
+    {"id": "t1", "source": "tap", "sourceHandle": "next", "target": "sayTap", "targetHandle": "prev"},
+    {"id": "t2", "source": "long", "sourceHandle": "next", "target": "sayLong", "targetHandle": "prev"}
+  ]
+})
 replaceInterpretedScenesCache(buildInterpretedScenes(parseInterpretedSceneInputs($scenes)))
 
 var abortIn = ""          # "http" or "code": where the next run jumps out
@@ -256,4 +277,34 @@ renderValuesThrice()
 for n in 1..3:
   doAssert count("module " & $n & " init 1 kept " & $n) == 1,
     "as a Pi: one module and one init() for the scene's life: " & $logLines
+
+# A finger that went down before a render and lifted during it. On an ESP32
+# the release waits in the touch queue until the render is over, stamped with
+# when the glass reported it (`atMs`). The render must not tick the pointer to
+# now first: a render that ended more than `longPressMs` after the press made
+# it a `longPress`, and the release that followed no tap (the SenseCAP
+# Indicator's weather panel, whose first press renders take 800 ms).
+let tapHost = SingleSceneHost(frameConfig: config, logger: abortLogger)
+tapHost.requestSelect = proc (sceneId: string): bool = true
+tapHost.start()
+tapHost.makeCurrent(tapSceneId.SceneId)
+logLines.setLen(0)
+let pressedAt = getMonoTime().ticks div 1_000_000 - 1200
+discard tapHost.send(eoDriver, "pointerDown", %*{"x": 100, "y": 100, "pointerId": 1,
+  "pointerType": "touch", "button": 0, "buttons": 1, "atMs": pressedAt})
+discard tapHost.renderScene(ExecutionContext(scene: tapHost.scene, event: "render",
+  payload: %*{}, loopIndex: 0, loopKey: "."))
+doAssert count("heard longPress") == 0, "the render made the held finger a long press: " & $logLines
+discard tapHost.send(eoDriver, "pointerUp", %*{"x": 100, "y": 100, "pointerId": 1,
+  "pointerType": "touch", "button": 0, "buttons": 0, "atMs": pressedAt + 100})
+doAssert count("heard tap") == 1, "a 100 ms press is a tap: " & $logLines
+# Held on through it, the finger is a long press at the platform's next tick.
+logLines.setLen(0)
+discard tapHost.send(eoDriver, "pointerDown", %*{"x": 100, "y": 100, "pointerId": 1,
+  "pointerType": "touch", "button": 0, "buttons": 1, "atMs": getMonoTime().ticks div 1_000_000 - 1200})
+discard tapHost.renderScene(ExecutionContext(scene: tapHost.scene, event: "render",
+  payload: %*{}, loopIndex: 0, loopKey: "."))
+doAssert tapHost.tick(), "the tick makes the long press"
+doAssert count("heard longPress") == 1, $logLines
+tapHost.dropScene()
 echo "ok"

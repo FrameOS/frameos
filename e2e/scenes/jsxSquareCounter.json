@@ -1,0 +1,159 @@
+{
+  "id": "jsxSquareCounter",
+  "name": "JSX: Counter (480x480, touch)",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600.0,
+    "backgroundColor": "#1e1b4b"
+  },
+  "e2eFrame": {
+    "width": 480,
+    "height": 480
+  },
+  "e2eEvents": [
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 24849,
+        "y": 21845,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 24849,
+        "y": 21845,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 24849,
+        "y": 21845,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 24849,
+        "y": 21845,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 24849,
+        "y": 21845,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 24849,
+        "y": 21845,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    }
+  ],
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: Counter",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: Counter\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// @name JSX: Counter\n// @background #1e1b4b\n// @refresh 3600\n// The smallest interactive UI: onClick changes a number, active: darkens the\n// button under the finger, and frameos.remember keeps the count.\nlet count = null\nconst load = () => {\n  if (count === null) count = frameos.recall('count') ?? 0\n}\nconst set = (n) => { count = n; frameos.remember('count', n) }\n\nconst Sign = ({ d }) => (\n  <svg className=\"w-14 h-14 text-white\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth={3} strokeLinecap=\"round\">\n    <path d={d} />\n  </svg>\n)\n\nexport function get(app) {\n  load()\n  return (\n    <div className=\"flex flex-col items-center justify-center gap-6 bg-indigo-950 text-white\">\n      <span className=\"text-lg uppercase text-indigo-300 font-semibold\">Tap counter</span>\n      <span className=\"text-9xl font-bold\">{`${count}`}</span>\n      <div className=\"flex items-center gap-6\">\n        <div className=\"w-28 h-28 rounded-full flex items-center justify-center bg-rose-500 active:bg-rose-700\" onClick={() => set(count - 1)}>\n          <Sign d=\"M5 12h14\" />\n        </div>\n        <div className=\"px-5 py-3 rounded-xl bg-white/10 text-lg text-slate-300 active:bg-white/30\" onClick={() => set(0)}>Reset</div>\n        <div className=\"w-28 h-28 rounded-full flex items-center justify-center bg-emerald-500 active:bg-emerald-700\" onClick={() => set(count + 1)}>\n          <Sign d=\"M12 5v14M5 12h14\" />\n        </div>\n      </div>\n      <span className=\"text-sm text-slate-500\">Hold the top button for the next example</span>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

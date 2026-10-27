@@ -247,7 +247,13 @@ the firmware queues the glass's reports as `pointerDown` / `pointerMove` /
 controller's track id; a finger's arrival is a `pointerMove` to where it
 landed, then its `pointerDown`, as the Linux evdev translator sends it) and the render task hands them to this dispatcher
 between passes, so a touch made during a render arrives as a tap when the
-runtime is free. `pointerDown` / `pointerUp`
+runtime is free. Its `pointerDown` and `pointerUp` carry `atMs`, when the
+glass reported them, on the clock of a button's `atMs` (below; the
+dispatcher's alone, a scene's pointer events do not pass it on), and the
+gestures are timed from those, never from the delivery; the render task
+hands the glass's reports over before it ticks the dispatcher. Before
+2026-10-26 a press whose `active:` style started a 1 s render had its release
+delivered after it, and the tap was a `longPress`. `pointerDown` / `pointerUp`
 add `button`: 0 left (and a touch, a pen tip), 1 right, 2 middle, 3 side,
 4 extra, 5 forward, 6 back, 7 task; `buttons` is the mask of what is held
 (`1 << button`). `pointerId` 0 is the one mouse cursor; a finger or a pen
@@ -272,12 +278,25 @@ contract's `gestures` numbers, so every host agrees: `tap {x, y, pointerId,
 pointerType}` — down and up within `tapSlopPx` and `tapMs`; `doubleTap` — a
 second tap within `doubleTapMs` of the first, in the same place (the first
 tap is delivered too); `longPress {…, durationMs}` — held `longPressMs`
+(a second, as a button's: a hold is as long on the glass as on a key, and
+`tapMs` is the same second, so a press that did not move is one or the other)
 without moving, delivered while it is still held where the host ticks the
 dispatcher (the Linux runner and the preview do; the ESP32 asleep in a render
 does not, and delivers it on release), and then no `tap`; `swipe {direction,
 x, y, startX, startY, …}` — down and up at least `swipeMinPx` apart, in one of
 `left` / `right` / `up` / `down`. Gestures render `if-state-changed`, like a
 button; the raw pointer events never do.
+
+**JSX UIs.** A JS app's UI (`docs/jsx-ui.md` "Events") is hit-tested in
+the interpreter before the scene's event nodes hear the event: `tap`,
+`doubleTap`, `longPress`, `pointerDown`, `pointerUp` and `pointerMove` run
+the innermost element's handler, and `pointerMove` / `pointerDown` /
+`pointerUp` move its `hover:` and `active:` classes. A press is captured:
+the element that took a `pointerDown` (an `onPointerDown` or `onPointerMove`)
+gets that `pointerId`'s moves and release until it lifts. Either one
+dispatches `render` (origin `scene`). A scene listens for those events while a UI in it has elements
+that want them, so a scene with neither still costs nothing per motion
+report.
 
 **Keyboard.** `keyDown {code, key, repeat, shift, ctrl, alt, meta,
 linuxCode?}` and `keyUp` (no `repeat`). `code` is the physical key as the W3C

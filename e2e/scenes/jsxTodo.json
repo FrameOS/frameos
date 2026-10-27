@@ -1,0 +1,147 @@
+{
+  "id": "jsxTodo",
+  "name": "JSX: a to-do list, tapped twice, the mouse over a row",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600,
+    "backgroundColor": "#f1f5f9"
+  },
+  "e2eFrame": {
+    "width": 800,
+    "height": 480
+  },
+  "e2eEvents": [
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 12288,
+        "y": 13243,
+        "pointerId": 0,
+        "pointerType": "mouse",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 12288,
+        "y": 13243,
+        "pointerId": 0,
+        "pointerType": "mouse",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 12288,
+        "y": 17612,
+        "pointerId": 0,
+        "pointerType": "mouse",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 12288,
+        "y": 17612,
+        "pointerId": 0,
+        "pointerType": "mouse",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerMove",
+      "payload": {
+        "x": 12288,
+        "y": 21981,
+        "pointerId": 0,
+        "pointerType": "mouse",
+        "buttons": 0
+      }
+    }
+  ],
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: a to-do list, tapped twice, the mouse over a row",
+      "category": "data",
+      "description": "A JSX interface with handlers (docs/jsx-ui.md \"Events\").",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: a to-do list, tapped twice, the mouse over a row\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface with handlers (docs/jsx-ui.md \\\"Events\\\").\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// A to-do list you can tap: a row ticks itself off, the header counts, and the\n// row under the mouse offers what a tap would do (group-hover:).\nconst items = [\n  { text: 'Water the plants', done: true },\n  { text: 'Call grandma about Sunday', done: false },\n  { text: 'Book the dentist', done: false },\n  { text: 'Oat milk, coffee beans, lemons', done: false },\n  { text: 'Take the recycling out', done: false },\n]\n\nconst Check = () => (\n  <svg className=\"w-5 h-5 text-white\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth={3} strokeLinecap=\"round\" strokeLinejoin=\"round\">\n    <path d=\"M5 12l5 5L20 7\" />\n  </svg>\n)\n\nexport function get(app) {\n  const done = items.filter((item) => item.done).length\n  return (\n    <div className=\"flex flex-col gap-3 p-8 bg-slate-100 text-slate-800\">\n      <div className=\"flex items-end justify-between\">\n        <span className=\"text-4xl font-bold\">Today</span>\n        <span className=\"text-xl text-slate-500\">{`${done} of ${items.length} done`}</span>\n      </div>\n      <div className=\"h-2 rounded-full bg-slate-200\">\n        <div className={`h-2 rounded-full bg-emerald-500 w-[${(done * 100) / items.length}%]`} />\n      </div>\n      {items.map((item) => (\n        <div className=\"group flex items-center gap-4 rounded-xl bg-white px-5 py-3 hover:bg-sky-50\"\n          onClick={() => { item.done = !item.done }}>\n          <div className={`w-7 h-7 rounded-full flex items-center justify-center ${item.done ? 'bg-emerald-500' : 'border-2 border-slate-300'}`}>\n            {item.done ? <Check /> : null}\n          </div>\n          <span className={`flex-1 text-xl ${item.done ? 'line-through text-slate-400' : ''}`}>{item.text}</span>\n          <span className=\"text-sm font-semibold text-sky-600 opacity-0 group-hover:opacity-100\">{item.done ? 'Undo' : 'Mark done'}</span>\n        </div>\n      ))}\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

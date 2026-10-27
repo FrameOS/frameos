@@ -1,0 +1,100 @@
+{
+  "id": "jsxSquareClock",
+  "name": "JSX: Clock (480x480, touch)",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600.0,
+    "backgroundColor": "#0b1020"
+  },
+  "e2eFrame": {
+    "width": 480,
+    "height": 480
+  },
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: Clock",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [
+        {
+          "name": "at",
+          "label": "Time to show (empty: now)",
+          "type": "string",
+          "value": ""
+        }
+      ],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: Clock\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"at\",\n      \"label\": \"Time to show (empty: now)\",\n      \"type\": \"string\",\n      \"value\": \"\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// @name JSX: Clock\n// @background #0b1020\n// @refresh 1\n// An analog clock drawn as a JSX <svg>: no markup is built or parsed.\n// `at` (a field) pins the time, for a snapshot; empty, it is the clock.\nconst C = 240\nconst at = (angle, r) => [C + r * Math.sin(angle), C - r * Math.cos(angle)]\nconst Hand = ({ angle, from, to, width, color }) => {\n  const [x1, y1] = at(angle, from)\n  const [x2, y2] = at(angle, to)\n  return <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={width} strokeLinecap=\"round\" />\n}\nconst days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']\n\nexport function get(app) {\n  const now = app.config.at ? new Date(app.config.at) : new Date()\n  const s = now.getSeconds()\n  const m = now.getMinutes() + s / 60\n  const h = (now.getHours() % 12) + m / 60\n  const tau = Math.PI * 2\n  return (\n    <svg width={480} height={480} viewBox=\"0 0 480 480\">\n      <rect x={0} y={0} width={480} height={480} fill=\"#0b1020\" />\n      <circle cx={C} cy={C} r={220} fill=\"#131c38\" />\n      <circle cx={C} cy={C} r={220} fill=\"none\" stroke=\"#2a3a6b\" strokeWidth={4} />\n      {Array.from({ length: 60 }).map((_, i) => (\n        <Hand angle={(i * tau) / 60} from={i % 5 === 0 ? 178 : 194} to={204}\n          width={i % 5 === 0 ? 6 : 2} color={i % 5 === 0 ? '#e2e8f0' : '#475569'} />\n      ))}\n      <rect x={C + 52} y={C - 18} width={88} height={36} rx={8} fill=\"#0b1020\" />\n      <text x={C + 96} y={C + 9} fontSize={24} fill=\"#fbbf24\" textAnchor=\"middle\">{`${days[now.getDay()]} ${now.getDate()}`}</text>\n      <Hand angle={(h * tau) / 12} from={-16} to={110} width={12} color=\"#e2e8f0\" />\n      <Hand angle={(m * tau) / 60} from={-20} to={170} width={8} color=\"#e2e8f0\" />\n      <Hand angle={(s * tau) / 60} from={-30} to={186} width={3} color=\"#f97316\" />\n      <circle cx={C} cy={C} r={9} fill=\"#f97316\" />\n      <circle cx={C} cy={C} r={3} fill=\"#0b1020\" />\n    </svg>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {
+          "at": "2024-03-12T14:40:00"
+        }
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

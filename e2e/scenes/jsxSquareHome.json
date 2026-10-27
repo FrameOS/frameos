@@ -1,0 +1,115 @@
+{
+  "id": "jsxSquareHome",
+  "name": "JSX: Home (480x480, touch)",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600.0,
+    "backgroundColor": "#0f172a"
+  },
+  "e2eFrame": {
+    "width": 480,
+    "height": 480
+  },
+  "e2eEvents": [
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 8601,
+        "y": 18090,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 8601,
+        "y": 18090,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    }
+  ],
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: Home",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: Home\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// @name JSX: Home\n// @background #0f172a\n// @refresh 3600\n// A home panel: tap a tile to switch it, the header counts what is on.\n// frameos.remember keeps the switches between renders, until the scene unloads.\nconst Icon = ({ children }) => (\n  <svg className=\"w-9 h-9\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" strokeWidth={2} strokeLinecap=\"round\" strokeLinejoin=\"round\">\n    {children}\n  </svg>\n)\nconst Bulb = () => <Icon><path d=\"M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z\" /></Icon>\nconst Flame = () => <Icon><path d=\"M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1.1-2.1-.2-4.1 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.2.4-2.3 1-3a2.5 2.5 0 0 0 2.5 2.5z\" /></Icon>\nconst Fan = () => <Icon><path d=\"M10.8 16.4a6.1 6.1 0 0 1-8.6-7l5.4 1.4a6.1 6.1 0 0 1 7-8.6l-1.4 5.4a6.1 6.1 0 0 1 8.6 7l-5.4-1.4a6.1 6.1 0 0 1-7 8.6z\" /><circle cx={12} cy={12} r={1} /></Icon>\nconst Lock = () => <Icon><rect x={4} y={11} width={16} height={10} rx={2} /><path d=\"M8 11V7a4 4 0 0 1 8 0v4\" /></Icon>\nconst Music = () => <Icon><path d=\"M9 18V5l12-2v13\" /><circle cx={6} cy={18} r={3} /><circle cx={18} cy={16} r={3} /></Icon>\nconst Tv = () => <Icon><rect x={2} y={7} width={20} height={14} rx={2} /><path d=\"M17 2l-5 5-5-5\" /></Icon>\n\nconst devices = [\n  { name: 'Living room', icon: <Bulb />, on: 'Lights 80%', off: 'Lights off', tone: 'bg-amber-300 text-amber-950' },\n  { name: 'Heating', icon: <Flame />, on: 'Heating to 21\u00b0', off: 'Off, 17\u00b0 inside', tone: 'bg-orange-400 text-orange-950' },\n  { name: 'Bedroom fan', icon: <Fan />, on: 'Speed 2', off: 'Off', tone: 'bg-sky-300 text-sky-950' },\n  { name: 'Front door', icon: <Lock />, on: 'Locked', off: 'Unlocked', tone: 'bg-emerald-300 text-emerald-950' },\n  { name: 'Kitchen radio', icon: <Music />, on: 'Playing jazz', off: 'Paused', tone: 'bg-violet-300 text-violet-950' },\n  { name: 'TV', icon: <Tv />, on: 'On, channel 4', off: 'Standby', tone: 'bg-rose-300 text-rose-950' },\n]\n\nlet state = null\nconst load = () => {\n  if (state === null) state = frameos.recall('home') ?? [true, true, false, true, false, false]\n}\n\nexport function get(app) {\n  load()\n  const count = state.filter(Boolean).length\n  return (\n    <div className=\"flex flex-col gap-4 p-5 bg-slate-900 text-white\">\n      <div className=\"flex items-end justify-between\">\n        <span className=\"text-3xl font-bold\">Home</span>\n        <span className=\"text-lg text-slate-400\">{`${count} of ${devices.length} on`}</span>\n      </div>\n      <div className=\"flex-1 grid grid-cols-2 gap-3\">\n        {devices.map((d, i) => (\n          <div className={`flex flex-col justify-between rounded-3xl p-4 ${state[i] ? d.tone : 'bg-white/10 text-slate-300'}`}\n            onClick={() => { state[i] = !state[i]; frameos.remember('home', state) }}>\n            <div className=\"flex items-start justify-between\">\n              {d.icon}\n              <div className={`flex items-center w-12 h-7 rounded-full px-1 ${state[i] ? 'justify-end bg-black/20' : 'justify-start bg-white/15'}`}>\n                <div className=\"w-5 h-5 rounded-full bg-white\" />\n              </div>\n            </div>\n            <div className=\"flex flex-col\">\n              <span className=\"text-lg font-semibold\">{d.name}</span>\n              <span className=\"text-sm opacity-70\">{state[i] ? d.on : d.off}</span>\n            </div>\n          </div>\n        ))}\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

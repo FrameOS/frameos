@@ -62,9 +62,9 @@ const
   CustomEventMaxNameLength* = 63
   ## How the dispatcher makes gestures out of pointerDown / pointerUp (docs/events.md).
   GestureTapSlopPx* = 16
-  GestureTapMs* = 500
+  GestureTapMs* = 1000
   GestureDoubleTapMs* = 350
-  GestureLongPressMs* = 500
+  GestureLongPressMs* = 1000
   GestureSwipeMinPx* = 48
   ## A GPIO button: a short press waits `ButtonDoublePressMs` for a second down; a hold is a `longPress` at every whole `ButtonLongPressMs`.
   ButtonDoublePressMs* = 350

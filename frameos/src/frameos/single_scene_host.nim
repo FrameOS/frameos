@@ -274,7 +274,7 @@ proc send*(host: SingleSceneHost, origin: EventOrigin, event: string, payload: J
   # carries when it was seen (`atMs`), and the input state advances the holds
   # to that moment itself; ticking to now first turned a tap made during a
   # 30 s refresh into a 30 s long press before its release was delivered.
-  # Time passes in `tick` and after `renderScene`, between events.
+  # Time passes in `tick`, between events.
   host.events.dispatchNow(origin, event, payload)
 
 proc tick*(host: SingleSceneHost): bool =
@@ -301,7 +301,11 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   ## `render` among it is one more pass.
   host.events.hostRun:
     result = interpreter.render(host.scene, context)
-  discard host.events.tick()
+  # No tick here either: a finger that went down before this render and
+  # lifted during it has its release still in the platform's queue (the
+  # ESP32's touch queue, the preview worker's messages), so ticking to now
+  # made a tap held across a 750 ms render a `longPress`, and the release
+  # no tap. The platform ticks once it has delivered what it queued.
   discard host.events.drain()
   # The scene is done with its JS apps until the next render. On a
   # deep-sleeping ESP32 that is a fresh boot away, and the next decode wants

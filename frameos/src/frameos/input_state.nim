@@ -637,11 +637,14 @@ proc applyNamedPointerOrKey(state: var InputState, name: string, payload: JsonNo
       let rec = state.pointer(id, pointerType, origin)
       state.pointerMoved(id, pointerType, rec.x, rec.y, origin, now, output)
   of evPointerDown, evMouseDown:
+    # Timed as a button edge is: an ESP32 delivers the glass's reports
+    # between renders, so a release waits out the render its press caused,
+    # and a 100 ms tap on a 1 s render was a long press timed from `now`.
     let (id, pointerType) = state.pointerFromPayload(payload, origin)
-    state.pointerDown(id, pointerType, payload{"button"}.getInt(0), origin, now, output)
+    state.pointerDown(id, pointerType, payload{"button"}.getInt(0), origin, seenAt(payload, now), output)
   of evPointerUp, evMouseUp:
     let (id, pointerType) = state.pointerFromPayload(payload, origin)
-    state.pointerUp(id, pointerType, payload{"button"}.getInt(0), origin, now, output)
+    state.pointerUp(id, pointerType, payload{"button"}.getInt(0), origin, seenAt(payload, now), output)
   of evPointerCancel:
     let id = payload{"pointerId"}.getInt(0)
     discard state.pointer(id, payload{"pointerType"}.getStr(), origin)

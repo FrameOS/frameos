@@ -20,6 +20,7 @@ import frameos/utils/system
 import frameos/js_runtime/burrito
 import frameos/js_runtime/jsx
 import frameos/ui/layout
+import frameos/ui/events
 
 type
   JsAssetGrant* = enum
@@ -1543,6 +1544,8 @@ proc releaseJsAppRuntime*(app: AppRoot) =
   ## itself after about seven.
   if not (app of DynamicJsApp):
     return
+  if not app.scene.isNil:
+    forgetUiTarget(app.scene.id.string, app.nodeId.int)
   let runtime = DynamicJsApp(app).runtime
   if runtime.isNil:
     return
@@ -1701,6 +1704,11 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   // A node in a flow calls run(), a node feeding a field calls get(). An app
   // without the one its node needs does nothing, so say so, once.
   const __frameosMissing = {};
+  // A JSX UI's onClick (and friends), numbered by the walker (js_runtime/jsx.nim).
+  globalThis.__frameosHandle = (id, event, localX, localY, type) => {
+    const handler = (globalThis.__frameosHandlers || [])[id];
+    if (typeof handler === "function") handler({ ...JSON.parse(event), type, localX, localY });
+  };
   function __frameosInvoke(name) {
     const mod = __frameosExports();
     const fn = mod && mod[name];
@@ -1943,28 +1951,85 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
   else:
     return nil
 
-proc imageFromJsx(owner: AppRoot, context: ExecutionContext, root: SvgNode): Image =
+proc callJsxHandler(runtime: JsAppRuntime, owner: AppRoot, handler: int, name: string,
+    event: JsonNode, localX, localY: float32) =
+  ## Runs an onClick (onLongPress, ...) of the UI's last render in its app,
+  ## with the bridge set up as for get(). An interpreter released since then
+  ## took its handlers with it: nothing runs, and the render that follows
+  ## draws the UI afresh.
+  if not runtime.ready:
+    return
+  let
+    ctx = runtime.js.context
+    configJson = if owner of DynamicJsApp: DynamicJsApp(owner).configJson else: newJObject()
+  runtime.midCall:
+    jsAppEnvByCtx[ctx] = JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson,
+      context: ExecutionContext(scene: owner.scene, event: name, payload: event, loopKey: ".", nextSleep: -1))
+    let args = [JS_NewInt32(ctx, handler.int32), nimStringToJS(ctx, $event),
+      JS_NewFloat64(ctx, localX), JS_NewFloat64(ctx, localY), nimStringToJS(ctx, name)]
+    let returned = callGlobalFunction(ctx, "__frameosHandle", args)
+    for arg in args:
+      JS_FreeValue(ctx, arg)
+    jsAppEnvByCtx.del(ctx)
+    if JS_IsException(returned) != 0:
+      frameos_apps.logError(owner, "JS app handler failed: " & mappedJsExceptionDetails(ctx).message)
+    JS_FreeValue(ctx, returned)
+
+proc keepUiRegions(runtime: JsAppRuntime, owner: AppRoot, sceneId: string,
+    regions: var seq[UiRegion], x, y: int) =
+  ## What the pointer can do to the UI just drawn with its corner at x, y.
+  let target = uiTarget(sceneId, owner.nodeId.int)
+  target.regions = move(regions)
+  target.offsetX = x.float32
+  target.offsetY = y.float32
+  # Into the app that drew these regions, every render: the scene can be
+  # loaded again since the last one (a switch away and back), with a new app.
+  target.call = proc(handler: int, name: string, event: JsonNode, localX, localY: float32) {.closure, raises: [].} =
+    try:
+      runtime.callJsxHandler(owner, handler, name, event, localX, localY)
+    except Exception:
+      discard # a handler's failure is logged; one in the logging has nowhere to go
+
+proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, root: SvgNode): Image =
   ## A JSX tree an app returned: an `<svg>` drawn as it is, anything else a
   ## UI laid out at the size of the image asked for (ui/layout.nim) and drawn
   ## as the SVG that makes. The same road as `frameos.svg` from there: into
   ## the target the planner offered when there is one, repainting only what
   ## changed on an LCD, else rasterized on its own.
+  ##
+  ## A UI's handlers, hover: and active: classes leave regions behind for the
+  ## pointer (ui/events.nim), placed where the UI lands in the canvas: the
+  ## offered cell's corner, or the canvas's when the UI is the canvas's size.
   let
     requestedWidth = defaultImageWidth(owner, context, %*{})
     requestedHeight = defaultImageHeight(owner, context, %*{})
-  var svg = root
+    sceneId = if owner.scene.isNil: "" else: owner.scene.id.string
+  var
+    svg = root
+    regions: seq[UiRegion]
+  let target = uiTarget(sceneId, owner.nodeId.int, create = false)
   if root.tag != "svg":
     try:
-      svg = layoutUi(root, requestedWidth, requestedHeight)
+      svg = layoutUi(root, requestedWidth, requestedHeight,
+        if target.isNil: UiInput() else: target.input, regions)
     except CatchableError as error:
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil
   let intoTarget = svgIntoOfferedTarget(owner, context, svg, requestedWidth, requestedHeight)
   if not intoTarget.isNil:
+    if intoTarget.width == requestedWidth and intoTarget.height == requestedHeight:
+      if regions.len > 0 or not target.isNil:
+        runtime.keepUiRegions(owner, sceneId, regions, intoTarget.origin mod max(intoTarget.stride, 1),
+          intoTarget.origin div max(intoTarget.stride, 1))
     return intoTarget
   let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
   let image = decodeSvgWithFallback(svg, svgWidth, svgHeight)
   if image.isSome:
+    let (canvasWidth, canvasHeight) =
+      if context.hasImage and not context.image.isNil: (context.image.width, context.image.height)
+      else: (frameos_apps.renderWidth(owner.frameConfig), frameos_apps.renderHeight(owner.frameConfig))
+    if svgWidth == canvasWidth and svgHeight == canvasHeight and (regions.len > 0 or not target.isNil):
+      runtime.keepUiRegions(owner, sceneId, regions, 0, 0)
     return image.get()
   frameos_apps.logError(owner, "JS app returned JSX that failed to render: " &
     svgDecodeError(svg, svgWidth, svgHeight))
@@ -2095,7 +2160,7 @@ proc toValue(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionContext, p
     # has always been.
     let tag = jsxTag(ctx, payload)
     if tag.len > 0 and tag != "image":
-      return VImage(imageFromJsx(owner, context, jsxNode(ctx, payload, addr runtime.images)))
+      return VImage(runtime.imageFromJsx(owner, context, jsxNode(ctx, payload, addr runtime.images)))
 
   if expectedType == "image" or jsIsObject(payload) or JS_IsArray(ctx, payload) != 0:
     let svgSpec = svgImageSpecFromJs(ctx, payload)

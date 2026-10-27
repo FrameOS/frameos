@@ -289,6 +289,12 @@
   never paint a UI some other way, or it loses the damage repaint and the
   background waiver (`utils/svg_frames.nim`). pixie's SVG input is the
   `SvgNode` tree, markup included (`parseSvgNodes`).
+- Handlers (`onClick`, …) and `hover:` / `active:` classes: the walker keeps
+  each render's handler functions in the app's interpreter, the layout hands
+  back the regions, and `ui/events.nim` hit-tests the scene's pointer events
+  in `runEventInner` (every host) and dispatches `render` when something
+  changed. A new handler is a `UiEvent` and a walker attribute, never a
+  `case event` in a host.
 - Flash is the budget: the layer cost +37.3 KB on the ESP32-S3 image. A new
   class or element goes in `tailwind.nim` / `layout.nim`, `docs/jsx-ui.md`
   and the scene guide's JSX section, and the PR says what it cost (the

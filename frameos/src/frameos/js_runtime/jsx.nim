@@ -27,6 +27,8 @@ type JsxReader = object
   ctx: ptr JSContext
   images: ptr Table[int, Image]
   nodes: int
+  handlers: JSValue  # this render's onClick, onLongPress, ... functions
+  handlerCount: int
 
 proc attrName(name: string): string =
   if name == "className":
@@ -116,8 +118,13 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
         r.addNodes(value, node.children, depth + 1)
       elif name in ["src", "href"] and jsIsObject(value):
         node.image = r.imageOf(value)
-      elif name notin ["key", "ref"] and JS_IsFunction(ctx, value) == 0 and
-          not jsIsNull(value) and not jsIsUndefined(value):
+      elif JS_IsFunction(ctx, value) != 0:
+        # onClick={() => ...}: kept in the app's context, the node says which.
+        if name.len > 2 and name[0] == 'o' and name[1] == 'n' and name[2] in {'A' .. 'Z'}:
+          discard JS_SetPropertyUint32(ctx, r.handlers, r.handlerCount.uint32, JS_DupValue(ctx, value))
+          node.attrs.add((attrName(name), $r.handlerCount))
+          inc r.handlerCount
+      elif name notin ["key", "ref"] and not jsIsNull(value) and not jsIsUndefined(value):
         # A number, a boolean or points={[1, 2, 3, 4]}: what String() makes of it
         node.attrs.add((attrName(name), toNimString(ctx, value)))
       JS_FreeValue(ctx, value)
@@ -127,11 +134,16 @@ proc addNodes(r: var JsxReader, v: JSValueConst, into: var seq[SvgNode], depth: 
 
 proc jsxNode*(ctx: ptr JSContext, v: JSValueConst, images: ptr Table[int, Image]): SvgNode =
   ## The JSX element `v` (see jsxTag) as a node tree. Image refs in `src` or
-  ## `href` are looked up in `images`.
+  ## `href` are looked up in `images`. Handler props (`onClick`) become the
+  ## global `__frameosHandlers` of this render, numbered in the attributes
+  ## (`on-click="3"`), until the next tree replaces them.
   var
-    reader = JsxReader(ctx: ctx, images: images)
+    reader = JsxReader(ctx: ctx, images: images, handlers: JS_NewArray(ctx))
     nodes: seq[SvgNode]
   reader.addNodes(v, nodes, 0)
+  let global = JS_GetGlobalObject(ctx)
+  discard JS_SetPropertyStr(ctx, global, "__frameosHandlers", reader.handlers)
+  JS_FreeValue(ctx, global)
   if nodes.len > 0: nodes[0] else: SvgNode(tag: "svg")
 
 {.pop.}

@@ -1,0 +1,115 @@
+{
+  "id": "jsxSquareSteps",
+  "name": "JSX: Steps (480x480, touch)",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600.0,
+    "backgroundColor": "#18181b"
+  },
+  "e2eFrame": {
+    "width": 480,
+    "height": 480
+  },
+  "e2eEvents": [
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 10581,
+        "y": 2594,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 10581,
+        "y": 2594,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    }
+  ],
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: Steps",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: Steps\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// @name JSX: Steps\n// @background #18181b\n// @refresh 3600\n// Tabs: a tap picks one, and the panel under them changes.\nconst tabs = ['Today', 'Week', 'Month']\nlet active = 0\n\nconst steps = [6.2, 8.4, 4.1, 9.8, 7.3, 11.2, 5.6]\nconst days = ['M', 'T', 'W', 'T', 'F', 'S', 'S']\n\nconst Today = () => (\n  <div className=\"flex flex-col items-center justify-center h-full gap-2\">\n    <span className=\"text-8xl font-bold\">7,341</span>\n    <span className=\"text-xl text-zinc-400\">steps so far today</span>\n    <div className=\"w-64 h-3 rounded-full bg-white/10 mt-4\">\n      <div className=\"h-3 w-[73%] rounded-full bg-lime-400\" />\n    </div>\n    <span className=\"text-sm text-zinc-500\">73% of 10,000</span>\n  </div>\n)\n\nconst Week = () => (\n  <div className=\"flex items-end gap-3 h-full\">\n    {steps.map((k, i) => (\n      <div className=\"flex-1 flex flex-col items-center gap-2 h-full justify-end\">\n        <span className=\"text-xs text-zinc-400\">{`${k}k`}</span>\n        <div className={`w-full rounded-t-lg ${i === 5 ? 'bg-lime-400' : 'bg-lime-400/40'} h-[${Math.round(k * 6.5)}%]`} />\n        <span className=\"text-zinc-300\">{days[i]}</span>\n      </div>\n    ))}\n  </div>\n)\n\nconst Month = () => (\n  <div className=\"grid grid-cols-7 gap-2 h-full\">\n    {Array.from({ length: 28 }).map((_, i) => (\n      <div className={`h-12 rounded-md ${['bg-lime-400', 'bg-lime-400/60', 'bg-lime-400/30', 'bg-zinc-800'][(i * 7 + 3) % 4]}`} />\n    ))}\n  </div>\n)\n\nexport function get(app) {\n  return (\n    <div className=\"flex flex-col bg-zinc-900 text-white\">\n      <div className=\"flex items-center gap-2 p-4 border-b border-white/10\">\n        {tabs.map((tab, i) => (\n          <div className={`px-5 py-2 rounded-lg text-lg ${i === active ? 'bg-white text-zinc-900 font-semibold' : 'text-zinc-400 active:bg-white/10'}`}\n            onClick={() => { active = i }}>{tab}</div>\n        ))}\n        <span className=\"flex-1 text-right text-zinc-500\">Steps</span>\n      </div>\n      <div className=\"flex-1 p-6\">{[<Today />, <Week />, <Month />][active]}</div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}

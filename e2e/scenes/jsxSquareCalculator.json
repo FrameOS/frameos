@@ -1,0 +1,203 @@
+{
+  "id": "jsxSquareCalculator",
+  "name": "JSX: Calculator (480x480, touch)",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600.0,
+    "backgroundColor": "#000000"
+  },
+  "e2eFrame": {
+    "width": 480,
+    "height": 480
+  },
+  "e2eEvents": [
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 4710,
+        "y": 24302,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 4710,
+        "y": 24302,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 12492,
+        "y": 24302,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 12492,
+        "y": 24302,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 28057,
+        "y": 14472,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 28057,
+        "y": 14472,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 20275,
+        "y": 24302,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 20275,
+        "y": 24302,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 28057,
+        "y": 29218,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 28057,
+        "y": 29218,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    }
+  ],
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: Calculator",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: Calculator\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// @name JSX: Calculator\n// @background #000000\n// @refresh 3600\n// A calculator: a four-column grid of keys, active: lights the key under the\n// finger, and the operator waiting for its second number stays lit.\nconst keys = ['C', '\u00b1', '%', '\u00f7', '7', '8', '9', '\u00d7', '4', '5', '6', '\u2212', '1', '2', '3', '+', '0', '.', '=']\nconst ops = {\n  '+': (a, b) => a + b,\n  '\u2212': (a, b) => a - b,\n  '\u00d7': (a, b) => a * b,\n  '\u00f7': (a, b) => a / b,\n}\n\nlet display = '0'\nlet acc = null\nlet op = null\nlet fresh = true\n\nconst format = (n) => {\n  if (!isFinite(n)) return 'Error'\n  const s = String(parseFloat(n.toPrecision(9)))\n  return s.length > 10 ? n.toExponential(3) : s\n}\n\nconst press = (key) => {\n  if (key >= '0' && key <= '9') {\n    display = fresh || display === '0' ? key : display.length < 9 ? display + key : display\n    fresh = false\n  } else if (key === '.') {\n    if (fresh) display = '0.'\n    else if (!display.includes('.')) display += '.'\n    fresh = false\n  } else if (key === 'C') {\n    display = '0'; acc = null; op = null; fresh = true\n  } else if (key === '\u00b1') {\n    if (display !== '0') display = display.startsWith('-') ? display.slice(1) : '-' + display\n  } else if (key === '%') {\n    display = format(parseFloat(display) / 100); fresh = true\n  } else if (key === '=') {\n    if (op && acc !== null) display = format(ops[op](acc, parseFloat(display)))\n    acc = null; op = null; fresh = true\n  } else {\n    if (op && acc !== null && !fresh) display = format(ops[op](acc, parseFloat(display)))\n    acc = parseFloat(display); op = key; fresh = true\n  }\n}\n\nconst tone = (key) => {\n  if (key in ops || key === '=') {\n    return key === op && fresh ? 'bg-white text-orange-500' : 'bg-orange-500 text-white active:bg-orange-300'\n  }\n  if (key === 'C' || key === '\u00b1' || key === '%') return 'bg-neutral-400 text-black active:bg-neutral-200'\n  return 'bg-neutral-800 text-white active:bg-neutral-600'\n}\n\nexport function get(app) {\n  return (\n    <div className=\"flex flex-col gap-3 p-4 bg-black\">\n      <div className=\"flex flex-col items-end justify-end h-20 px-3\">\n        <span className=\"text-lg text-neutral-500 h-6\">{op && acc !== null ? `${format(acc)} ${op}` : ''}</span>\n        <span className=\"text-5xl text-white truncate\">{display}</span>\n      </div>\n      <div className=\"grid grid-cols-4 gap-2\">\n        {keys.map((key) => (\n          <div className={`h-16 rounded-2xl flex items-center justify-center text-3xl ${key === '0' ? 'col-span-2' : ''} ${tone(key)}`}\n            onClick={() => press(key)}>{key}</div>\n        ))}\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {}
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}
