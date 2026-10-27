@@ -36,8 +36,14 @@ elif defined(frameosEmbedded):
   patchFile("stdlib", "malloc", "src/embedded/patched_malloc")
 
   # crunchy and zippy each build their own 8 KB slicing-by-8 CRC-32 table, and
-  # both are linked into the firmware. Point crunchy's at zippy's.
+  # the ROM has the same CRC-32. Point crunchy's at zippy's, and zippy's at
+  # the ROM's.
   patchFile("crunchy", "crc32", "src/embedded/patched_crc32")
+  patchFile("zippy", "crc", "src/embedded/patched_zippy_crc")
+
+  # chroma's 148 CSS color names are a 256-slot compile-time Table, 9.1 KB;
+  # the same names packed into one string are about 2 KB.
+  patchFile("chroma", "names", "src/embedded/patched_chroma_names")
 
 when defined(testing):
   # Test binaries (testament passes -d:testing) are built without C

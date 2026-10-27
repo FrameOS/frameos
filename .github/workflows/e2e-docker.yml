@@ -188,6 +188,12 @@ jobs:
                 embedded/esp32/main/fos_json_guard.c embedded/esp32/main/tests/test_fos_json_guard.c \
                 -o /tmp/test_fos_json_guard
               /tmp/test_fos_json_guard
+              # sscanf without the floating-point scanf: the cJSON "%lg"
+              # read-back goes to strtod (fos_sscanf.c, the --wrap=sscanf).
+              cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
+                embedded/esp32/main/fos_sscanf.c embedded/esp32/main/tests/test_fos_sscanf.c \
+                -o /tmp/test_fos_sscanf
+              /tmp/test_fos_sscanf
               # Upload bounds + usb_api payload timeout math (fos_upload_limits.h).
               cc -std=c11 -Wall -Wextra -Werror -O2 -Iembedded/esp32/main \
                 embedded/esp32/main/tests/test_fos_upload_limits.c \

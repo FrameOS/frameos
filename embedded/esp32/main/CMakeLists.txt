@@ -53,6 +53,7 @@ idf_component_register(
         "fos_assets_flash.c"
         "fos_spiffs_gc.c"
         "fos_sd_probe.c"
+        "fos_sscanf.c"
     PRIV_REQUIRES
         nvs_flash
         esp_wifi
@@ -93,6 +94,10 @@ set_source_files_properties(fos_spiffs_gc.c PROPERTIES
     INCLUDE_DIRECTORIES "${fos_idf_path}/components/spiffs/spiffs/src")
 # -u: the only reference is esp_spiffs.c's, which the archive scan can pass.
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=SPIFFS_gc" "-u __wrap_SPIFFS_gc")
+
+# sscanf goes through fos_sscanf.c: cJSON's "%lg" read-back is strtod there,
+# so newlib's floating-point scanf (9.6 KB) is never linked.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=sscanf" "-u __wrap_sscanf")
 
 # Default panel for a local development build. All panel drivers are
 # compiled in regardless; this only picks the boot-time default before
