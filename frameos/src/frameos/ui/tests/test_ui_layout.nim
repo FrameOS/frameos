@@ -91,6 +91,18 @@ suite "ui layout":
     check r[3].geom == (96, 0, 40, 40)
     check parseSvg(svg, 200, 100).coversOpaque(200, 100)
 
+  test "white space between items is no item":
+    let svg = layoutUi(el("div", "flex gap-2 bg-black",
+      txt(" "),
+      el("div", "w-10 h-10 bg-red-500"), txt(" "),
+      el("div", "w-10 h-10 bg-green-500"), txt("\n  "),
+      el("div", "w-10 h-10 bg-blue-500")), 200, 100)
+    let r = svg.rects
+    check r.len == 4
+    check r[1].geom == (0, 0, 40, 40)
+    check r[2].geom == (48, 0, 40, 40)
+    check r[3].geom == (96, 0, 40, 40)
+
   test "justify, align and grow":
     let r = layoutUi(el("div", "flex justify-between items-center h-full",
       el("div", "w-10 h-10 bg-red-500"),
@@ -181,6 +193,23 @@ suite "ui layout":
     for node in svg.children:
       if node.tag == "path": fills.add node.attr("fill")
     check fills == @["#000000", "#ff0000".replace("ff0000", "ef4444"), "#000000"]
+
+  test "text around a value keeps its spaces":
+    proc drawn(children: varargs[SvgNode]): Image =
+      newImage(parseSvg(layoutUi(el("div", "bg-white text-black", children), 300, 60), 300, 60))
+    proc inkRight(image: Image): int =
+      result = -1
+      for x in countdown(image.width - 1, 0):
+        for y in 0 ..< image.height:
+          if image[x, y].r < 128:
+            return x
+    let whole = drawn(txt("42 items")).inkRight
+    # `{n} items`: the value and the text after it are two children
+    let split = drawn(txt("42"), txt(" items")).inkRight
+    let joined = drawn(txt("42"), txt("items")).inkRight
+    checkpoint "ink ends at " & $whole & " whole, " & $split & " split, " & $joined & " without the space"
+    check abs(split - whole) <= 1
+    check joined < whole - 2
 
   test "a gradient fades to transparent":
     let svg = layoutUi(el("div", "bg-white", el("div", "h-full bg-gradient-to-b from-black to-transparent")), 20, 100)

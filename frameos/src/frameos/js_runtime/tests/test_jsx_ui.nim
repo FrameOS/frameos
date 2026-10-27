@@ -127,6 +127,25 @@ suite "jsx":
     check dark > 100
     check red > 20
 
+  test "a space next to a value is drawn, as in React":
+    # quickts keeps white space that touches no line break (since quickts.2)
+    proc inkRight(source: string): int =
+      let image = render("""
+        export function get(app) {
+          const n = 42
+          return <div className="bg-white text-black p-2">""" & source & """</div>
+        }
+      """, 200, 40)
+      result = -1
+      for x in countdown(image.width - 1, 0):
+        for y in 0 ..< image.height:
+          if image[x, y].r < 128:
+            return x
+    let spaced = inkRight("{n} items")
+    checkpoint "ink ends at " & $spaced
+    check abs(spaced - inkRight("{`${n} items`}")) <= 1
+    check inkRight("{n}items") < spaced - 2
+
   test "an svg icon inside a UI takes the text colour":
     let image = render("""
       export const get = () => (

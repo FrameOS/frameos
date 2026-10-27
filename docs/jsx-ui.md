@@ -147,11 +147,11 @@ Text is any string or number child; `null`, `undefined`, `true` and `false`
 draw nothing, and arrays (`items.map(...)`) and fragments are flattened, as
 in React. Function props starting with `on` are handlers ([Events](#events)).
 
-**White space at the edges of JSX text is dropped** (quickts trims every
-text run, where Babel and TypeScript keep the spaces inside a line), so
-`{count} items` draws "42items" and `March <b>12</b>` "March12". Put the
-space inside an expression until quickts is fixed: `{`${count} items`}`,
-`{'March '}<b>12</b>`, or lay the two out with `gap`.
+**White space works as in React.** A space inside a line is kept, so
+`{count} items` draws "42 items" and `March <b>12</b>` "March 12". White
+space that touches a line break is dropped, so indenting children adds
+nothing, and white space alone between two items of a flex or grid
+container is no item, as in CSS.
 
 `e2e/scenes/jsx*.json` are fifteen interfaces built this way (a dashboard,
 an agenda, a month, a departure board, a photo card, a forecast, a status
