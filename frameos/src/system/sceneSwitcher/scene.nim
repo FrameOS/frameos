@@ -24,6 +24,7 @@ import pixie/fileformats/svg
 import frameos/types
 import frameos/channels
 import frameos/events_gen
+import frameos/panel_shape
 import frameos/ui/layout
 import frameos/ui/events
 import frameos/utils/font
@@ -44,6 +45,11 @@ type
     ## Where the tiles go: `perPage` of them, `cols` across, from (x0, y0).
     cols*, rows*, perPage*, pages*: int
     tileW*, tileH*, gap*, x0*, y0*, pad*, headerH*: int
+    ## A round panel (frameos/panel_shape): the tiles fill the square inside
+    ## the circle `radius` px around (cx, cy) (`RoundInset` in from the rim),
+    ## and the title, the arrows and Close sit in the four arcs around it.
+    round*: bool
+    cx*, cy*, radius*, side*: int
 
   SceneSwitcherScene* = ref object of FrameScene
     entries*: seq[SwitcherEntry] ## what the last render or key listed
@@ -53,6 +59,9 @@ const
   SwitcherNode = 1 ## the ui/events target its tiles live in
   IdleSecondsFast* = 60.0
   IdleSecondsPaper* = 300.0
+  RoundInset* = 12
+    ## How far in from a round panel's rim everything stays: its bezel covers
+    ## some of the circle, and a finger at the very edge misses the glass.
   MaxCols = 6
   MaxRows = 6
 
@@ -97,20 +106,34 @@ proc canvasSize(frameConfig: FrameConfig): (int, int) =
   if frameConfig.rotate in [90, 270]: (frameConfig.height, frameConfig.width)
   else: (frameConfig.width, frameConfig.height)
 
-proc switcherGrid*(count, width, height: int, thumbnails: bool): SwitcherGrid =
+proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false): SwitcherGrid =
   ## The tile grid for `count` scenes on a `width` x `height` canvas: every
   ## scene on one page while the tiles stay big enough to read, else as many
   ## per page as fit. Among the grids that hold them all, the one whose
   ## pictures (at the canvas's own aspect) or name cards come out largest.
+  ## On a round panel the grid is the square inscribed in the circle that
+  ## stays `RoundInset` in from the rim, so no tile has a corner off the glass.
   let unit = min(width, height).float
   result.pad = clamp(int(round(unit * 0.035)), 4, 24)
   result.gap = clamp(int(round(unit * 0.025)), 3, 16)
   result.headerH = clamp(int(round(unit * 0.11)), 18, 64)
   result.x0 = result.pad
   result.y0 = result.headerH + result.gap
-  let
+  var
     gw = max(width - 2 * result.pad, 1)
     gh = max(height - result.y0 - result.pad, 1)
+  if round:
+    result.round = true
+    result.cx = width div 2
+    result.cy = height div 2
+    result.radius = max(min(width, height) div 2 - RoundInset, 8)
+    # Two pixels inside the circle at its corners, whatever the rounding.
+    result.side = max(int(floor(result.radius.float * sqrt(2.0))) - 4, 8)
+    result.x0 = result.cx - result.side div 2
+    result.y0 = result.cy - result.side div 2
+    gw = result.side
+    gh = result.side
+  let
     minW = min(clamp(unit * 0.2, 48, 200), gw.float)
     minH = min(clamp(unit * 0.15, 36, 160), gh.float)
     aspect = width.float / max(height, 1).float
@@ -155,7 +178,8 @@ proc switcherGrid*(count, width, height: int, thumbnails: bool): SwitcherGrid =
   result.pages = max(1, (count + result.perPage - 1) div result.perPage)
 
 proc grid(self: SceneSwitcherScene, width, height: int): SwitcherGrid =
-  switcherGrid(self.entries.len, width, height, not sceneSwitcherThumbnail.isNil)
+  switcherGrid(self.entries.len, width, height, not sceneSwitcherThumbnail.isNil,
+    round = not self.frameConfig.isNil and panelIsRound(self.frameConfig.device))
 
 proc grid(self: SceneSwitcherScene): SwitcherGrid =
   let (width, height) = canvasSize(self.frameConfig)
@@ -334,7 +358,7 @@ when not defined(frameosEmbedded):
       titleH = clamp(int(round(grid.tileH.float * 0.2)), 14, 44)
       pw = max(grid.tileW - 2 * look.border - 2 * look.inner, 1)
       ph = max(grid.tileH - 2 * look.border - 2 * look.inner - titleH, 1)
-      size = clamp(int(round(titleH.float * 0.62)), 10, 28)
+      size = clamp(int(round(min(titleH.float * 0.62, grid.tileW.float * 0.13))), 10, 28)
     var picture: Image
     try:
       picture = sceneSwitcherThumbnail(self.frameConfig, self.entries[index].id, pw, ph)
@@ -390,18 +414,15 @@ proc tile(self: SceneSwitcherScene, index: int, grid: SwitcherGrid, slot: int, p
   name.px("text", size)
   result.children.add el("div", name, txt(title))
 
-proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool): SvgNode =
-  ## The switcher as a UI tree: the header (its title, the page and its
-  ## arrows, Close) and one page of tiles, each where switcherGrid put it.
-  let
-    grid = self.grid(width, height)
-    page = clamp(self.state{"page"}.getInt(0), 0, grid.pages - 1)
-    lit = self.highlighted()
-    size = clamp(grid.headerH * 45 div 100, 12, 32)
-    small = max(size * 3 div 4, 10)
-    button = if paper: " border-2 border-black" else: " bg-zinc-800 active:bg-zinc-600"
-  result = el("div", if paper: "relative w-full h-full bg-white text-black"
-    else: "relative w-full h-full bg-zinc-950 text-white")
+proc arrowButton(size, chevronSize: int, left: bool, paper: bool, button: string): SvgNode =
+  var c = "shrink-0 flex items-center justify-center rounded-full"
+  c.square(size)
+  c.add button
+  el("div", c, chevron(chevronSize, left, if paper: "#000000" else: "#ffffff"))
+
+proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: int, paper: bool,
+    width, size, small: int, button: string) =
+  ## A rectangular panel's header: the title, the page and its arrows, Close.
   var c: string
   c.at(0, 0, width, grid.headerH)
   c.add " flex items-center"
@@ -414,27 +435,107 @@ proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool): SvgNode =
   c.px("text", size)
   header.children.add el("span", c, txt("Scenes"))
   if grid.pages > 1:
-    let
-      arrow = clamp(grid.headerH * 6 div 10, 14, 40)
-      ink = if paper: "#000000" else: "#ffffff"
-    var round = "shrink-0 flex items-center justify-center rounded-full"
-    round.square(arrow)
-    round.add button
-    header.children.add el("div", round, chevron(arrow * 2 div 3, true, ink)).onClick(self.entries.len + 1)
+    let arrow = clamp(grid.headerH * 6 div 10, 14, 40)
+    header.children.add arrowButton(arrow, arrow * 2 div 3, true, paper, button).onClick(self.entries.len + 1)
     c = "shrink-0"
     c.px("text", small)
     header.children.add el("span", c, txt($(page + 1) & " / " & $grid.pages))
-    header.children.add el("div", round, chevron(arrow * 2 div 3, false, ink)).onClick(self.entries.len + 2)
+    header.children.add arrowButton(arrow, arrow * 2 div 3, false, paper, button).onClick(self.entries.len + 2)
   c = "shrink-0 rounded-full"
   c.px("px", max(6, small))
   c.px("py", max(2, small div 4))
   c.px("text", small)
   c.add button
   header.children.add el("div", c, txt("Close")).onClick(self.entries.len)
-  result.children.add header
-  if self.entries.len == 0:
+  root.children.add header
+
+when not defined(frameosEmbedded):
+  # No ESP32 board is round (frameos/panel_shape.nim): the firmware
+  # carries the rectangular header alone.
+  proc chordHalf(radius, dy: int): int =
+    ## Half the width of a circle of `radius` at `dy` from its centre.
+    if abs(dy) >= radius: 0 else: int(floor(sqrt(float(radius * radius - dy * dy))))
+
+  proc roundChrome(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: int, paper: bool,
+      size, small: int, button: string) =
+    ## A round panel's: the tiles fill the square inside the circle, and the
+    ## four arcs around it hold the title and the page (12 o'clock), the page
+    ## arrows (9 and 3) and Close (6). Every box is cut to the chord it sits
+    ## on, so no corner leaves the circle `RoundInset` in from the rim.
+    let
+      arc = grid.y0 - (grid.cy - grid.radius) # the top and bottom arcs' depth
+      rowH = max(min(clamp(grid.headerH * 7 div 10, 16, 44), arc - grid.gap), 8)
+      top = grid.y0 - grid.gap div 2 - rowH
+      titleHalf = max(chordHalf(grid.radius, grid.cy - top) - 2, 4)
+    var c: string
+    c.at(grid.cx - titleHalf, top, 2 * titleHalf, rowH)
+    c.add " flex items-center justify-center"
+    c.px("gap", max(4, small div 2))
+    let title = el("div", c)
+    c = "truncate font-bold"
+    c.px("text", size)
+    title.children.add el("span", c, txt("Scenes"))
+    if grid.pages > 1:
+      c = "shrink-0"
+      c.px("text", small)
+      if not paper:
+        c.add " text-zinc-400"
+      title.children.add el("span", c, txt($(page + 1) & " / " & $grid.pages))
+    root.children.add title
+    let
+      closeTop = grid.y0 + grid.side + grid.gap div 2
+      closeHalf = max(chordHalf(grid.radius, closeTop + rowH - grid.cy) - 2, 4)
+      closeW = min(2 * closeHalf, max(small * 6, 72))
     c = ""
-    c.at(0, grid.y0, width, max(height - grid.y0, 1))
+    c.at(grid.cx - closeW div 2, closeTop, closeW, rowH)
+    c.add " flex items-center justify-center rounded-full"
+    c.px("text", small)
+    c.add button
+    root.children.add el("div", c, txt("Close")).onClick(self.entries.len)
+    if grid.pages > 1:
+      let room = grid.x0 - (grid.cx - grid.radius) - grid.gap div 2
+      var a = min(clamp(grid.radius * 19 div 100, 20, 48), room - 2)
+      # Its far corners on the circle at most.
+      while a > 12 and (grid.side div 2 + grid.gap div 2 + a) ^ 2 + (a div 2 + 1) ^ 2 > grid.radius ^ 2:
+        dec a
+      let
+        y = grid.cy - a div 2
+        left = arrowButton(a, a * 2 div 3, true, paper, button).onClick(self.entries.len + 1)
+        right = arrowButton(a, a * 2 div 3, false, paper, button).onClick(self.entries.len + 2)
+      # Placed where the circle has room for them, beside the tiles.
+      left.attrs[0][1].add " absolute"
+      left.attrs[0][1].px("left", grid.x0 - grid.gap div 2 - a)
+      left.attrs[0][1].px("top", y)
+      right.attrs[0][1].add " absolute"
+      right.attrs[0][1].px("left", grid.x0 + grid.side + grid.gap div 2)
+      right.attrs[0][1].px("top", y)
+      root.children.add left
+      root.children.add right
+
+proc tree*(self: SceneSwitcherScene, width, height: int, paper: bool): SvgNode =
+  ## The switcher as a UI tree: the header (its title, the page and its
+  ## arrows, Close), or on a round panel the same around the circle, and one
+  ## page of tiles, each where switcherGrid put it.
+  let
+    grid = self.grid(width, height)
+    page = clamp(self.state{"page"}.getInt(0), 0, grid.pages - 1)
+    lit = self.highlighted()
+    size = clamp(grid.headerH * 45 div 100, 12, 32)
+    small = max(size * 3 div 4, 10)
+    button = if paper: " border-2 border-black" else: " bg-zinc-800 active:bg-zinc-600"
+  result = el("div", if paper: "relative w-full h-full bg-white text-black"
+    else: "relative w-full h-full bg-zinc-950 text-white")
+  when defined(frameosEmbedded):
+    self.header(result, grid, page, paper, width, size, small, button)
+  else:
+    if grid.round:
+      self.roundChrome(result, grid, page, paper, size, small, button)
+    else:
+      self.header(result, grid, page, paper, width, size, small, button)
+  var c: string
+  if self.entries.len == 0:
+    if grid.round: c.at(grid.x0, grid.y0, grid.side, grid.side)
+    else: c.at(0, grid.y0, width, max(height - grid.y0, 1))
     c.add " flex items-center justify-center text-center"
     c.px("text", size)
     result.children.add el("div", c, txt("No scenes installed yet."))

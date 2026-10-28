@@ -4,6 +4,9 @@ import frameos/channels
 import frameos/types
 import frameos/events_gen
 import frameos/utils/dither
+import frameos/panel_shape
+import frameos/ui/events
+import frameos/ui/layout
 import system/sceneSwitcher/scene as switcher
 
 # The scene switcher (docs/scene-switcher.md): the grid it lays out, the
@@ -262,6 +265,83 @@ block no_scenes_says_so:
   doAssert scene.highlighted() == -1
   scene.send("button", %*{"label": "RIGHT", "role": "next", "action": "press"})
   discard scene.draw(newImage(800, 480))
+
+block a_round_panel_keeps_everything_on_the_glass:
+  # The HyperPixel 2.1" Round: only the circle inscribed in its 480x480 shows
+  # and takes a touch, and its bezel covers the rim. Every region the switcher
+  # hit-tests and every pixel it draws stays RoundInset in from the rim, with
+  # names or pictures, on every page, with a tile highlighted and one pressed.
+  let roundConfig = config(480, 480, "pimoroni.hyperpixel2r")
+  doAssert panelIsRound(roundConfig.device)
+  for pictures in [false, true]:
+    for count in [1, 5, 9, 20]:
+      listed = entries(count)
+      sceneSwitcherThumbnail = if pictures: fakePicture else: nil
+      let scene = newSwitcher(roundConfig, opener = "scene-1")
+      let grid = switcherGrid(count, 480, 480, pictures, round = true)
+      doAssert grid.round and grid.perPage >= min(count, 4), $grid
+      if count == 20:
+        doAssert grid.pages >= 2, "20 scenes page on a round panel: " & $grid
+      for page in 0 ..< grid.pages:
+        let where = $count & " scenes, page " & $(page + 1) & (if pictures: ", pictures" else: "")
+        # Highlight the page's last tile, so the ring is drawn where the
+        # page's corner would be.
+        let last = min((page + 1) * grid.perPage, count) - 1
+        scene.state["page"] = %page
+        scene.state["highlight"] = %("scene-" & $(last + 1))
+        discard scene.draw(newImage(480, 480))
+        let regions = uiTarget(SceneSwitcherId, 1).regions
+        doAssert regions.len >= min(count - page * grid.perPage, grid.perPage) + 1, where
+        for r in regions:
+          for (x, y) in [(r.x, r.y), (r.x + r.w - 1, r.y), (r.x, r.y + r.h - 1), (r.x + r.w - 1, r.y + r.h - 1)]:
+            doAssert insideRound(480, 480, int(x), int(y), RoundInset),
+              where & ": a region reaches off the glass at " & $(x, y) & " " & $r
+        # Press the highlighted tile, draw again: the ring, the pressed tile
+        # and the arrows and Close all inside.
+        let tile = regions[regions.len - 1]
+        var pressed = -1
+        for i, r in regions:
+          if r.handlers[ueClick] == last + 1:
+            pressed = i
+        doAssert pressed >= 0, where & ": the highlighted tile takes a tap"
+        let at = %*{"x": int(regions[pressed].x + regions[pressed].w / 2),
+          "y": int(regions[pressed].y + regions[pressed].h / 2), "pointerId": 1, "pointerType": "touch"}
+        scene.send("pointerDown", at)
+        let image = scene.draw(newImage(480, 480))
+        let background = image[0, 0]
+        var inside = 0
+        for y in 0 ..< 480:
+          for x in 0 ..< 480:
+            if insideRound(480, 480, x, y, RoundInset):
+              if image[x, y] != background:
+                inc inside
+            else:
+              doAssert image[x, y] == background,
+                where & ": drawn off the glass at " & $(x, y) & ": " & $image[x, y]
+        doAssert inside > 1000, where & ": nothing drawn"
+        scene.send("pointerUp", at)
+        discard tile
+  sceneSwitcherThumbnail = nil
+
+block a_round_panel_pages_with_its_arrows:
+  # The arrows at 9 and 3 o'clock turn the page; Close at 6 goes back.
+  listed = entries(20)
+  sent.setLen(0)
+  let scene = newSwitcher(config(480, 480, "pimoroni.hyperpixel2r"), opener = "scene-1")
+  discard scene.draw(newImage(480, 480))
+  let grid = switcherGrid(20, 480, 480, false, round = true)
+  scene.send("tap", %*{"x": grid.x0 + grid.side + grid.gap div 2 + 10, "y": 240, "pointerId": 1, "pointerType": "touch"})
+  doAssert scene.state{"page"}.getInt() == 1, "the arrow at 3 o'clock"
+  discard scene.draw(newImage(480, 480))
+  scene.send("tap", %*{"x": grid.x0 - grid.gap div 2 - 10, "y": 240, "pointerId": 1, "pointerType": "touch"})
+  doAssert scene.state{"page"}.getInt() == 0, "the arrow at 9 o'clock"
+  discard scene.draw(newImage(480, 480))
+  sent.setLen(0)
+  scene.send("tap", %*{"x": 240, "y": grid.y0 + grid.side + grid.gap div 2 + 10, "pointerId": 1, "pointerType": "touch"})
+  doAssert sent.len == 1 and sent[0][0] == evSceneSwitcher, "Close at 6 o'clock: " & $sent
+  # The square grid is no smaller than it must be: a third of the scenes'
+  # tiles on a page at least, each at least a fifth of the circle across.
+  doAssert grid.tileW >= 80 and grid.tileH >= 64, $grid
 
 block it_is_a_built_in_scene:
   doAssert isBuiltInScene(SceneSwitcherId)

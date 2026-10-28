@@ -96,6 +96,15 @@ page, with the page and two arrows in the header.
   `pimoroni.inky*`) gets black on white, thick borders, the highlighted tile
   inverted, and no press feedback: a refresh to show a finger is down would
   be seconds of flashing for nothing. Only its taps count.
+- **A round panel** (`frameos/panel_shape.nim` `panelIsRound`: the HyperPixel
+  2.1" Round, whose 480x480 shows and takes touches only inside its circle)
+  keeps everything `RoundInset` (12 px) in from the rim, where the bezel
+  covers the glass: the tiles fill the square inscribed in that circle, and
+  the four arcs around it hold the title and the page (12 o'clock), the page
+  arrows (9 and 3) and Close (6), each box cut to the chord it sits on. The
+  bottom swipe opens it from the rim there (`input_state.nim` `edgeAt`).
+  `test_scene.nim` checks every hit region and every pixel drawn for 1, 5, 9
+  and 20 scenes, on every page, pressed and highlighted.
 
 ### Pictures
 
