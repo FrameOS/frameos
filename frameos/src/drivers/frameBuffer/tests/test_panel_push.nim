@@ -104,6 +104,18 @@ suite "the framebuffer writes what changed":
     discard shadow.stageImage(image, scratch)
     check shadow.bytes[0 .. 3] == @[30'u8, 20, 10, 0]
 
+  test "a 32 bpp panel with an alpha byte gets alpha, upright and turned":
+    var layout = layout32(2, 2)
+    layout.hasAlpha = true
+    let image = newImage(2, 2)
+    image.fill(rgba(10, 20, 30, 128))
+    for rotation in [0, 90]:
+      var shadow: PanelShadow
+      var scratch: seq[uint8]
+      shadow.prepare(layout)
+      discard shadow.stageImage(image, scratch, rotation)
+      check shadow.bytes[0 .. 3] == @[image.data[0].b, image.data[0].g, image.data[0].r, 128'u8]
+
   test "a 565 canvas on a panel that is 32 bpp now is expanded, not misread":
     var shadow: PanelShadow
     var scratch: seq[uint8]
@@ -119,7 +131,7 @@ suite "the framebuffer writes what changed":
 
 suite "a turned frame is turned on its way in":
   proc numbered(width, height: int): Image =
-    ## Every pixel its own colour, so a pixel in the wrong place shows.
+    ## Every pixel its own color, so a pixel in the wrong place shows.
     result = newImage(width, height)
     for y in 0 ..< height:
       for x in 0 ..< width:
@@ -167,3 +179,15 @@ suite "a turned frame is turned on its way in":
     let source = numbered(5, 2)
     for rotation in [0, 90, 180, 270]:
       check turnedCopy(source, rotation).toContiguousSeq() == source.rotateDegrees(rotation).toContiguousSeq()
+
+  test "frames taller than one block of rows turn the same, partial last block included":
+    let source = numbered(37, 21)
+    for rotation in [90, 180, 270]:
+      let (w, h) = turnedDimensions(source.width, source.height, rotation)
+      var fused, reference: PanelShadow
+      var scratch: seq[uint8]
+      fused.prepare(layout32(w, h))
+      reference.prepare(layout32(w, h))
+      discard fused.stageImage(source, scratch, rotation)
+      discard reference.stageImage(source.rotateDegrees(rotation), scratch)
+      check fused.bytes == reference.bytes

@@ -84,7 +84,7 @@ proc isPanelCanvas*(image: Image): bool =
 
 proc notePanelCanvasWritten*() =
   ## Something other than the scene's render drew into the canvas (an
-  ## overlay, a colour correction): it no longer holds the frame svg_frames
+  ## overlay, a color correction): it no longer holds the frame svg_frames
   ## recorded, so the next render draws whole.
   generation += 1
 

@@ -380,14 +380,19 @@ framebuffer is 16 bpp in pixie's 565 order, the driver says so
 at the panel's own size renders into one `pfRgb565` canvas kept for the
 uptime, stores dithered as on the ESP32. Anything else keeps the fresh RGBX
 canvas, the scaling and the rotation as before. On a 64-bit Pi this trades
-pixie's NEON RGBX kernels for its scalar 565 ones (unmeasured).
+pixie's NEON RGBX kernels for its scalar 565 ones. Measured on a Pi 5 with
+the 565 canvas forced (`FRAMEOS_PANEL_CANVAS=rgb565`, 800x480): a full-frame
+photo pan (Slideshow with motion) renders in 8.7 ms against 7.2 ms on RGBX,
+and the Touch test in 2.0 ms against 4.8 ms, since only its damage is
+redrawn. NEON's ~1.5 ms is about what converting RGBX for a 16 bpp panel
+would cost, so the rule is the same on every Pi.
 
 **The canvas holds the last frame, so a whole-frame SVG repaints what
 changed.** The runner brackets every render into it with
 `beginPanelFrame` / `endPanelFrame` (utils/svg_frames.nim), as the ESP32
-brackets its LCD buffer; anything else that draws into the canvas — the
-control code, the cloud link code, the frame-wide colour correction, the
-local network access code — bumps its generation, and the next frame is
+brackets its LCD buffer; anything else that draws into the canvas (the
+control code, the cloud link code, the frame-wide color correction, the
+local network access code) bumps its generation, and the next frame is
 drawn whole.
 
 **The driver writes the rows that changed** (`drivers/frameBuffer/panel_push.nim`).
@@ -417,6 +422,25 @@ mapping `rotateDegrees` uses, pinned by `test_panel_push.nim`). A driver
 without `frameos_driver_set_render_rotation`, and every statically linked
 one, still gets the frame turned by the host. With it, a turned 565 panel
 keeps the 565 canvas too, at the scene's own size.
+
+**The staging loops run without Nim's checks.** The driver libraries are
+built for size (`-Os`, and one set of C flags for every file of a library,
+so a per-file `localPassC` never reaches them). At `-Os` gcc keeps each
+overflow-checked index sum as a branch inside the loop, which made staging a
+turned 800x480 frame 14 ms on a Pi 5. `panel_push.nim` turns the checks off
+for the module (every index comes from the layout the shadow was prepared
+for) and works out a 32 bpp layout's shifts once per frame, not per pixel.
+On the Pi 5 at `-Os`, every row new: 3.0 ms turned, 2.2 ms upright, 0.18 ms
+for a 720x720 565 canvas.
+
+Measured on Cloud-5 (Pi 5, HyperPixel 4.0 at 32 bpp, a landscape frame
+turned 90 degrees; 30 touch moves, 32 frames each, 2026-10-28):
+
+| Per frame | 2026.10.21 | Turned in the driver |
+| --- | --- | --- |
+| Render | 12.0 ms median | **4.8 ms** |
+| Driver | 12.8 ms | **3.3 ms** |
+| **Together** | **~25 ms** | **~8 ms** |
 
 What is left (`docs/realtime-todo.md`): the push on its own thread, and
 waking on input instead of polling.

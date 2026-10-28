@@ -19,6 +19,13 @@
 
 import pixie
 
+# These loops are the hottest a frame has, and the driver libraries are built
+# for size (-Os, one set of C flags for every file): with Nim's checks on, each
+# index sum is a branch gcc does not hoist at -Os, which made a turned 800x480
+# frame 14 ms on a Pi 5. Every index here comes from the layout the shadow was
+# prepared for, so the checks are off for the module.
+{.push overflowChecks: off, boundChecks: off, rangeChecks: off.}
+
 const FullWriteSeconds* = 60.0
   ## The longest a shadow is trusted between full writes.
 
@@ -66,18 +73,39 @@ proc stageRow(shadow: var PanelShadow, y: int, row: pointer): bool =
   copyMem(dst, row, n)
   true
 
+template pack565(color: ColorRGBX): uint16 =
+  ((uint16(color.r) shr 3) shl 11) or ((uint16(color.g) shr 2) shl 5) or (uint16(color.b) shr 3)
+
+type WordShifts = object
+  ## A 32 bpp layout's byte offsets as bit shifts, worked out once per frame.
+  red, green, blue, alpha: uint32
+  alphaMask: uint32 ## 0 when the panel has no alpha byte: the spare byte is 0
+
+proc wordShifts(layout: PanelLayout): WordShifts =
+  WordShifts(red: uint32(layout.redByte * 8), green: uint32(layout.greenByte * 8),
+    blue: uint32(layout.blueByte * 8), alpha: uint32(layout.alphaByte * 8),
+    alphaMask: if layout.hasAlpha: 0xFF'u32 shl uint32(layout.alphaByte * 8) else: 0'u32)
+
+template packWord(shifts: WordShifts, color: ColorRGBX): uint32 =
+  ## A 32 bpp pixel as one little-endian word (every Pi is little-endian):
+  ## byte k of the pixel is bits 8k of the word.
+  (uint32(color.r) shl shifts.red) or (uint32(color.g) shl shifts.green) or
+    (uint32(color.b) shl shifts.blue) or ((uint32(color.a) shl shifts.alpha) and shifts.alphaMask)
+
 proc convertRow(layout: PanelLayout, pixels: ptr UncheckedArray[ColorRGBX], row: int,
     dst: ptr UncheckedArray[uint8]) =
   ## The old full-frame conversion, one row at a time.
   if layout.bytesPerPixel == 2:
-    var j = 0
+    let words = cast[ptr UncheckedArray[uint16]](dst)
     for x in 0 ..< layout.width:
-      let color = pixels[row + x]
-      let pixel = ((uint16(color.r) shr 3) shl 11) or ((uint16(color.g) shr 2) shl 5) or
-        (uint16(color.b) shr 3)
-      dst[j] = uint8(pixel and 0xff)
-      dst[j + 1] = uint8(pixel shr 8)
-      j += 2
+      words[x] = pack565(pixels[row + x])
+    return
+  if layout.bytesPerPixel == 4:
+    # One store per pixel, not four (the row buffer is word-aligned).
+    let words = cast[ptr UncheckedArray[uint32]](dst)
+    let shifts = layout.wordShifts
+    for x in 0 ..< layout.width:
+      words[x] = shifts.packWord(pixels[row + x])
     return
   # The hottest loop on an HDMI frame (2 M pixels at 1080p): the layout is
   # decided once per row, never per pixel. A 32 bpp framebuffer with no alpha
@@ -96,7 +124,7 @@ proc convertRow(layout: PanelLayout, pixels: ptr UncheckedArray[ColorRGBX], row:
       dst[j + alphaByte] = color.a
       j += step
   elif step == 4:
-    let fillByte = 6 - redByte - greenByte - blueByte # the one offset no colour took
+    let fillByte = 6 - redByte - greenByte - blueByte # the one offset no color took
     for x in 0 ..< layout.width:
       let color = pixels[row + x]
       dst[j + redByte] = color.r
@@ -125,52 +153,114 @@ template sourceIndex(image: Image, rotation, x, y: int): int =
   of 270: image.dataIndex(image.width - 1 - y, x)
   else: image.dataIndex(x, y)
 
+const TurnBlock = 16
+  ## Panel rows gathered together when a frame is turned by 90 or 270: the
+  ## 16 pixels a column of the block needs are neighbours in one source row
+  ## (one 64-byte line at RGBX), where gathering a single panel row would read
+  ## one pixel from each of `height` source rows.
+
+template gatherTurned[S, T](image: Image, src: ptr UncheckedArray[S], rotation, width, y0, n: int,
+    rows: ptr UncheckedArray[T], convert: untyped = it) =
+  ## Fills `n` panel rows from y0 into `rows` (row k at k * width), reading
+  ## the unturned source a row at a time. The mapping is rotateDegrees'.
+  case rotation
+  of 90:
+    # panel (x, y) = source (y, h - 1 - x): row h-1-x, columns y0 ..< y0+n
+    for x in 0 ..< width:
+      let base = image.dataIndex(y0, image.height - 1 - x)
+      for k in 0 ..< n:
+        rows[k * width + x] = (let it {.inject.} = src[base + k]; convert)
+  of 270:
+    # panel (x, y) = source (w - 1 - y, x): row x, columns w-1-y0 down
+    for x in 0 ..< width:
+      let base = image.dataIndex(image.width - 1 - y0, x)
+      for k in 0 ..< n:
+        rows[k * width + x] = (let it {.inject.} = src[base - k]; convert)
+  else:
+    # 180: panel (x, y) = source (w - 1 - x, h - 1 - y), a row read backwards
+    for k in 0 ..< n:
+      let base = image.dataIndex(image.width - 1, image.height - 1 - (y0 + k))
+      for x in 0 ..< width:
+        rows[k * width + x] = (let it {.inject.} = src[base - x]; convert)
+
 proc stageImage*(shadow: var PanelShadow, image: Image, scratch: var seq[uint8],
     rotation = 0): seq[bool] =
   ## Stages a frame into the shadow and returns, per row, whether it changed.
   ## `image` is the layout's size once turned by `rotation` (0, 90, 180 or
-  ## 270): the frame is turned on its way in, a row at a time, instead of by a
-  ## whole-frame pass first. A `pfRgb565` image on a 2-byte layout is taken as
-  ## the panel's own bytes; anything else is converted. `image` is only read
-  ## through raw pointers: the driver may be a library with its own runtime
-  ## (frameBuffer.nim, the note on `render`), so it never owns the host's ref.
+  ## 270): the frame is turned on its way in, a block of rows at a time,
+  ## instead of by a whole-frame pass first. A `pfRgb565` image on a 2-byte
+  ## layout is taken as the panel's own bytes; anything else is converted.
+  ## `image` is only read through raw pointers: the driver may be a library
+  ## with its own runtime (frameBuffer.nim, the note on `render`), so it never
+  ## owns the host's ref.
   let layout = shadow.layout
+  let width = layout.width
   result = newSeq[bool](layout.height)
   if scratch.len < layout.rowBytes:
     scratch.setLen(layout.rowBytes)
   let dst = cast[ptr UncheckedArray[uint8]](scratch[0].addr)
-  if image.isRgb565:
-    if rotation == 0 and layout.bytesPerPixel == 2:
+  if rotation == 0:
+    if image.isRgb565 and layout.bytesPerPixel == 2:
       for y in 0 ..< layout.height:
         result[y] = shadow.stageRow(y, image.data16[image.dataIndex(0, y)].addr)
-    elif layout.bytesPerPixel == 2:
-      let row = cast[ptr UncheckedArray[uint16]](dst)
-      for y in 0 ..< layout.height:
-        for x in 0 ..< layout.width:
-          row[x] = image.data16[image.sourceIndex(rotation, x, y)]
-        result[y] = shadow.stageRow(y, dst)
-    else:
+    elif image.isRgb565:
       # A 565 canvas on a panel that changed mode under it: expand, then convert.
-      var expanded = newSeq[ColorRGBX](layout.width)
+      var expanded = newSeq[ColorRGBX](width)
       let pixels = cast[ptr UncheckedArray[ColorRGBX]](expanded[0].addr)
       for y in 0 ..< layout.height:
-        for x in 0 ..< layout.width:
-          expanded[x] = rgb565ToRgbx(image.data16[image.sourceIndex(rotation, x, y)])
+        let src = image.dataIndex(0, y)
+        for x in 0 ..< width:
+          expanded[x] = rgb565ToRgbx(image.data16[src + x])
         convertRow(layout, pixels, 0, dst)
         result[y] = shadow.stageRow(y, dst)
-  elif rotation == 0:
-    let pixels = cast[ptr UncheckedArray[ColorRGBX]](image.data[image.dataIndex(0, 0)].addr)
-    for y in 0 ..< layout.height:
-      convertRow(layout, pixels, y * image.stride, dst)
-      result[y] = shadow.stageRow(y, dst)
+    else:
+      let pixels = cast[ptr UncheckedArray[ColorRGBX]](image.data[image.dataIndex(0, 0)].addr)
+      for y in 0 ..< layout.height:
+        convertRow(layout, pixels, y * image.stride, dst)
+        result[y] = shadow.stageRow(y, dst)
+  elif image.isRgb565:
+    var turned = newSeq[uint16](TurnBlock * width)
+    let turnedPtr = cast[ptr UncheckedArray[uint16]](turned[0].addr)
+    var expanded: seq[ColorRGBX]
+    if layout.bytesPerPixel != 2:
+      expanded = newSeq[ColorRGBX](width)
+    for y0 in countup(0, layout.height - 1, TurnBlock):
+      let n = min(TurnBlock, layout.height - y0)
+      gatherTurned(image, image.data16, rotation, width, y0, n, turnedPtr)
+      for k in 0 ..< n:
+        if layout.bytesPerPixel == 2:
+          result[y0 + k] = shadow.stageRow(y0 + k, turned[k * width].addr)
+        else:
+          for x in 0 ..< width:
+            expanded[x] = rgb565ToRgbx(turned[k * width + x])
+          convertRow(layout, cast[ptr UncheckedArray[ColorRGBX]](expanded[0].addr), 0, dst)
+          result[y0 + k] = shadow.stageRow(y0 + k, dst)
+  elif layout.bytesPerPixel in [2, 4]:
+    # Converted as it is gathered: the turned rows are the panel's bytes.
+    let src = image.data
+    let shifts = layout.wordShifts
+    let rowBytes = layout.rowBytes
+    var turned = newSeq[uint32](TurnBlock * width) # a block of either width
+    let rows = cast[ptr UncheckedArray[uint8]](turned[0].addr)
+    for y0 in countup(0, layout.height - 1, TurnBlock):
+      let n = min(TurnBlock, layout.height - y0)
+      if layout.bytesPerPixel == 4:
+        gatherTurned(image, src, rotation, width, y0, n,
+          cast[ptr UncheckedArray[uint32]](rows), (shifts.packWord(it)))
+      else:
+        gatherTurned(image, src, rotation, width, y0, n,
+          cast[ptr UncheckedArray[uint16]](rows), (pack565(it)))
+      for k in 0 ..< n:
+        result[y0 + k] = shadow.stageRow(y0 + k, rows[k * rowBytes].addr)
   else:
-    var gathered = newSeq[ColorRGBX](layout.width)
-    let pixels = cast[ptr UncheckedArray[ColorRGBX]](gathered[0].addr)
-    for y in 0 ..< layout.height:
-      for x in 0 ..< layout.width:
-        gathered[x] = image.data[image.sourceIndex(rotation, x, y)]
-      convertRow(layout, pixels, 0, dst)
-      result[y] = shadow.stageRow(y, dst)
+    var turned = newSeq[ColorRGBX](TurnBlock * width)
+    let turnedPtr = cast[ptr UncheckedArray[ColorRGBX]](turned[0].addr)
+    for y0 in countup(0, layout.height - 1, TurnBlock):
+      let n = min(TurnBlock, layout.height - y0)
+      gatherTurned(image, image.data, rotation, width, y0, n, turnedPtr)
+      for k in 0 ..< n:
+        convertRow(layout, turnedPtr, k * width, dst)
+        result[y0 + k] = shadow.stageRow(y0 + k, dst)
   shadow.valid = true
 
 proc turnedCopy*(image: Image, rotation: int): Image =
@@ -197,3 +287,5 @@ proc changedRuns*(changed: openArray[bool]): seq[tuple[first, last: int]] =
       start = -1
   if start >= 0:
     result.add((start, changed.len - 1))
+
+{.pop.}
