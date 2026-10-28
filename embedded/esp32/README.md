@@ -332,7 +332,10 @@ for the two Spectra boards most of the bench work runs on:
   was told. The E1003's GT911 touch
   panel shares the clock's I2C bus (19/20): `fos_i2c.c` lends `fos_touch.c`
   that bus instead of the touch driver opening a second one on the same pins,
-  and a lent bus survives the console's `i2c` rescan. The 8 MB module renders
+  and a lent bus survives the console's `i2c` rescan. Its preset binds the
+  Indicator's edge swipes besides the keys: in from the right the next scene,
+  from the left the previous, up from the bottom the scene switcher
+  (`fos_board.c` `TOUCH_EDGE_SWIPES`). The 8 MB module renders
   on-device in pixie's **8-bit luma canvas** (`pfGray8`; every grey or black-
   and-white panel gets one whatever fits, a colour panel too big for RGBX gets
   565): 2.5 MiB of canvas and 1.25 MiB of packed panel buffer beside the

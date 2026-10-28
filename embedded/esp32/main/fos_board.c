@@ -111,8 +111,20 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
 #define RETERMINAL_VOICE \
     "{\"event\":\"button\",\"match\":{\"label\":\"REFRESH\",\"action\":\"longPress\"}," \
     "\"emit\":\"voiceChat\",\"as\":{}}"
+/* A touch screen's swipes in from an edge (`edgeSwipe`: the scene hears none
+ * of it): from the right the next scene, from the left the previous one, and
+ * up from the bottom the scene switcher (docs/scene-switcher.md). */
+#define TOUCH_EDGE_SWIPES \
+    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"right\"}," \
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
+    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"left\"}," \
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
+    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"bottom\"}," \
+    "\"emit\":\"sceneSwitcher\",\"as\":{}}"
 #define RETERMINAL_EVENT_MAP "[" RETERMINAL_ARROWS "]"
 #define RETERMINAL_VOICE_EVENT_MAP "[" RETERMINAL_ARROWS "," RETERMINAL_VOICE "]"
+/* The E1003 has the E1001's keys and microphone, and a touch screen. */
+#define RETERMINAL_TOUCH_EVENT_MAP "[" RETERMINAL_ARROWS "," RETERMINAL_VOICE "," TOUCH_EDGE_SWIPES "]"
 /* The reTerminal Sticky's three keys: UP and DOWN held walk the scene list,
  * the AI key (Seeed's "AI/Power", GPIO4) held talks to the frame. */
 #define STICKY_EVENT_MAP \
@@ -129,9 +141,7 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     "\"emit\":\"voiceChat\",\"as\":{}}]"
 /* The SenseCAP Indicator: one key and a touch screen, no microphone. The key
  * pressed switches the screen off and on, pressed twice is the next scene and
- * held the previous one; a swipe in from the right edge is the next scene,
- * from the left the previous one, and up from the bottom the scene switcher
- * (`edgeSwipe`: the scene hears none of it). */
+ * held the previous one; the edges swipe (TOUCH_EDGE_SWIPES). */
 #define INDICATOR_EVENT_MAP \
     "[{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"press\"}," \
     "\"emit\":\"toggleScreen\",\"as\":{}}," \
@@ -139,12 +149,7 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"longPress\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
-    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"right\"}," \
-    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
-    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"left\"}," \
-    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
-    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"bottom\"}," \
-    "\"emit\":\"sceneSwitcher\",\"as\":{}}]"
+    TOUCH_EDGE_SWIPES "]"
 
 static const struct {
     const char *preset;
@@ -155,7 +160,7 @@ static const struct {
     {"seeed_reterminal_sticky", STICKY_EVENT_MAP},
     {"seeed_reterminal_e1001", RETERMINAL_VOICE_EVENT_MAP},
     {"seeed_reterminal_e1002", RETERMINAL_VOICE_EVENT_MAP},
-    {"seeed_reterminal_e1003", RETERMINAL_VOICE_EVENT_MAP},
+    {"seeed_reterminal_e1003", RETERMINAL_TOUCH_EVENT_MAP},
     {"seeed_reterminal_e1004", RETERMINAL_EVENT_MAP},
     {"seeed_sensecap_indicator_d1", INDICATOR_EVENT_MAP},
 };

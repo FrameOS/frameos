@@ -273,18 +273,23 @@ EMBEDDED_SEEED_SENSECAP_INDICATOR_PINS = {
     "pwr": -1,
 }
 EMBEDDED_SEEED_SENSECAP_INDICATOR_GPIO_BUTTONS = [{"pin": 38, "label": "BUTTON"}]
+# A touch screen's swipes in from an edge: from the right the next scene, from
+# the left the previous one, and up from the bottom the scene switcher
+# (docs/scene-switcher.md). fos_board.c's TOUCH_EDGE_SWIPES is the device copy.
+EMBEDDED_TOUCH_EDGE_SWIPES = [
+    {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+    {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+    {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
+]
 # The one key pressed switches the screen off and on, pressed twice is the
-# next scene and held the previous one; a swipe in from the right or the left
-# edge is the next or the previous scene, and up from the bottom the scene
-# switcher (docs/scene-switcher.md). fos_board.c's INDICATOR_EVENT_MAP is the
+# next scene and held the previous one; the edges swipe
+# (EMBEDDED_TOUCH_EDGE_SWIPES). fos_board.c's INDICATOR_EVENT_MAP is the
 # device copy.
 EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP = [
     {"event": "button", "match": {"label": "BUTTON", "action": "press"}, "emit": "toggleScreen", "as": {}},
     {"event": "button", "match": {"label": "BUTTON", "action": "doublePress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
     {"event": "button", "match": {"label": "BUTTON", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
-    {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
-    {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
-    {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
+    *EMBEDDED_TOUCH_EDGE_SWIPES,
 ]
 # Parity with fos_board.c's k_touch_pins, nothing provisions it: the FT6336U
 # on the LCD's bus, polled (no INT, no reset, no load switch at the chip).
@@ -444,6 +449,11 @@ EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP = [
 EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP = [
     *EMBEDDED_SEEED_RETERMINAL_E10XX_EVENT_MAP,
     {"event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+]
+# The E1003 has the E1001's keys and microphone, and a touch screen.
+EMBEDDED_SEEED_RETERMINAL_E1003_EVENT_MAP = [
+    *EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP,
+    *EMBEDDED_TOUCH_EDGE_SWIPES,
 ]
 # Battery through a 2:1 divider on GPIO1 (ADC1_CH0), switched on by GPIO21
 # (Seeed's ESPHome cookbook: adc GPIO1, multiply 2.0, output GPIO21 "battery
@@ -776,7 +786,7 @@ EMBEDDED_HARDWARE_PRESETS: dict[str, dict[str, Any]] = {
         "psramMB": 8,
         "pins": EMBEDDED_SEEED_RETERMINAL_E1003_PINS,
         "gpioButtons": EMBEDDED_SEEED_RETERMINAL_E10XX_GPIO_BUTTONS,
-        "eventMap": EMBEDDED_SEEED_RETERMINAL_VOICE_EVENT_MAP,
+        "eventMap": EMBEDDED_SEEED_RETERMINAL_E1003_EVENT_MAP,
         **EMBEDDED_SEEED_RETERMINAL_E1003_BATTERY,
         **EMBEDDED_SEEED_RETERMINAL_E10XX_BUZZER,
         **EMBEDDED_SEEED_RETERMINAL_MIC,

@@ -308,8 +308,9 @@ startY, …}` (`edge` where it began, `direction` the way it went) and the
 frame's: the scene hears no `pointerDown`, `pointerMove`, `pointerUp` or
 gesture of that touch, so the slider it began on stays where it was, and
 the frame's event map can make it a scene switch whatever the scene draws
-(the SenseCAP Indicator's preset: in from the right edge the next scene, from
-the left the previous, up from the bottom the scene switcher). Lifted, held
+(the SenseCAP Indicator's and the reTerminal E1003's presets: in from the
+right edge the next scene, from the left the previous, up from the bottom the
+scene switcher). Lifted, held
 for a `longPress`, or moved along the edge instead, it is the scene's after
 all: its `pointerDown` goes out then,
 late, and the rest as it comes, so a button at the edge still works. A

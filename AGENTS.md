@@ -112,7 +112,8 @@
   `utils/frameEventMap.ts`) binds a key to the frame whatever scene shows —
   a rule with `emit` replaces the press (origin `eventMap`), the scene never
   hears it; every reTerminal preset ships LEFT/RIGHT held = previous/next
-  scene, and the E1001/E1002/E1003 (microphone) REFRESH held = `voiceChat`
+  scene, the E1001/E1002/E1003 (microphone) REFRESH held = `voiceChat`,
+  and the E1003 and the SenseCAP Indicator the edge swipes
   (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset table:
   keep the three alike). A Linux frame never given a map runs its device's:
   every HyperPixel swipes from the left/right edge to the previous/next scene

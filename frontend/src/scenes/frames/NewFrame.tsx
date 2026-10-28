@@ -284,6 +284,16 @@ const SEEED_RETERMINAL_VOICE_EVENT_MAP: EventMapRule[] = [
   ...SEEED_RETERMINAL_EVENT_MAP,
   { event: 'button', match: { label: 'REFRESH', action: 'longPress' }, emit: 'voiceChat', as: {} },
 ]
+// A touch screen's swipes in from an edge: from the right the next scene, from
+// the left the previous one, and up from the bottom the scene switcher
+// (docs/scene-switcher.md). Mirrors EMBEDDED_TOUCH_EDGE_SWIPES and fos_board.c.
+const TOUCH_EDGE_SWIPES: EventMapRule[] = [
+  { event: 'edgeSwipe', match: { edge: 'right' }, emit: 'setCurrentScene', as: { direction: 'next' } },
+  { event: 'edgeSwipe', match: { edge: 'left' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
+  { event: 'edgeSwipe', match: { edge: 'bottom' }, emit: 'sceneSwitcher', as: {} },
+]
+// The E1003 has the E1001's keys and microphone, and a touch screen.
+const SEEED_RETERMINAL_E1003_EVENT_MAP: EventMapRule[] = [...SEEED_RETERMINAL_VOICE_EVENT_MAP, ...TOUCH_EDGE_SWIPES]
 // The reTerminal Sticky's three keys: UP and DOWN held walk the scene list,
 // the AI key held talks. Mirrors EMBEDDED_SEEED_STICKY_EVENT_MAP and fos_board.c.
 const SEEED_STICKY_EVENT_MAP: EventMapRule[] = [
@@ -393,16 +403,13 @@ const SEEED_SENSECAP_INDICATOR_PINS: NonNullable<NonNullable<NewFrameFormType['d
   pwr: -1,
 }
 // The one key pressed switches the screen, pressed twice is the next scene and
-// held the previous one; a swipe in from the right or the left edge is the next
-// or the previous scene, and up from the bottom the scene switcher
-// (EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP).
+// held the previous one; the edges swipe (TOUCH_EDGE_SWIPES). Mirrors
+// EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP.
 const SEEED_SENSECAP_INDICATOR_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'BUTTON', action: 'press' }, emit: 'toggleScreen', as: {} },
   { event: 'button', match: { label: 'BUTTON', action: 'doublePress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
   { event: 'button', match: { label: 'BUTTON', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
-  { event: 'edgeSwipe', match: { edge: 'right' }, emit: 'setCurrentScene', as: { direction: 'next' } },
-  { event: 'edgeSwipe', match: { edge: 'left' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
-  { event: 'edgeSwipe', match: { edge: 'bottom' }, emit: 'sceneSwitcher', as: {} },
+  ...TOUCH_EDGE_SWIPES,
 ]
 const SEEED_RETERMINAL_STICKY_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
   rst: 17,
@@ -652,7 +659,7 @@ const EMBEDDED_HARDWARE_PRESET_CONFIGS: Partial<Record<FrameEmbeddedHardwarePres
       { pin: 4, label: 'LEFT' },
       { pin: 5, label: 'RIGHT' },
     ],
-    eventMap: SEEED_RETERMINAL_VOICE_EVENT_MAP,
+    eventMap: SEEED_RETERMINAL_E1003_EVENT_MAP,
     sdCardAssets: seeedReterminalSdCardAssets('seeed_reterminal_e1003'),
   },
   seeed_reterminal_e1004: {

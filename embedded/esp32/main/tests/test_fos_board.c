@@ -138,8 +138,21 @@ static void test_event_maps(void)
           "REFRESH held talks on the e1001");
     CHECK(strstr(e1004, "voiceChat") == NULL, "the e1004 has no voice key");
     CHECK(strlen(e1001) < 1024, "fits the config slot");
-    /* The E1003 has the E1001's keys and microphone: the same map. */
-    CHECK(strcmp(fos_board_event_map("seeed_reterminal_e1003"), e1001) == 0, "e1003 = e1001 event map");
+    /* The E1003 has the E1001's keys and microphone, and a touch screen: the
+     * E1001's map, then the edge swipes (docs/scene-switcher.md). */
+    const char *e1003 = fos_board_event_map("seeed_reterminal_e1003");
+    CHECK(strncmp(e1003, e1001, strlen(e1001) - 1) == 0, "e1003 starts with the e1001 map");
+    CHECK(strstr(e1003, "\"edge\":\"right\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}") != NULL,
+          "e1003 right edge is next");
+    CHECK(strstr(e1003, "\"edge\":\"left\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}") != NULL,
+          "e1003 left edge is prev");
+    CHECK(strstr(e1003, "\"edge\":\"bottom\"},\"emit\":\"sceneSwitcher\"") != NULL, "e1003 bottom edge is the switcher");
+    CHECK(strstr(e1001, "edgeSwipe") == NULL, "the e1001 has no glass");
+    CHECK(e1003[strlen(e1003) - 1] == ']' && strlen(e1003) < 1024, "a JSON list that fits");
+    /* The Indicator's edges swipe the same way. */
+    CHECK(strstr(fos_board_event_map("seeed_sensecap_indicator_d1"),
+                 "\"edge\":\"bottom\"},\"emit\":\"sceneSwitcher\",\"as\":{}}]") != NULL,
+          "indicator bottom edge is the switcher");
     /* The Sticky: UP and DOWN held walk the scenes, the AI key held talks. */
     const char *sticky = fos_board_event_map("seeed_reterminal_sticky");
     CHECK(strstr(sticky, "\"label\":\"UP\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}") != NULL,

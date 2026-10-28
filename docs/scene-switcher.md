@@ -12,7 +12,7 @@ picks one.
 | The event that opens it, `sceneSwitcher` | `docs/events-contract.json` (a `scene-command`), resolved by `frameos/src/frameos/event_loop.nim` |
 | The scene, `system/sceneSwitcher` (the contract's `scenes.switcher`) | `frameos/src/system/sceneSwitcher/scene.nim`, one module for every host |
 | What it lists, and the pictures | the host's: `frameos/scene_switcher_linux.nim`, `embedded/embedded_runtime.nim`, `wasm/wasm_main.nim` |
-| The default bindings | `frameos/device_event_map.nim` (every HyperPixel), the SenseCAP Indicator's preset (`fos_board.c`, `EMBEDDED_HARDWARE_PRESETS`, the SPA's `NewFrame.tsx`) |
+| The default bindings | `frameos/device_event_map.nim` (every HyperPixel), the SenseCAP Indicator's and the reTerminal E1003's presets (`fos_board.c` `TOUCH_EDGE_SWIPES`, `EMBEDDED_HARDWARE_PRESETS`, the SPA's `NewFrame.tsx`) |
 | "Button actions" | `frontend/src/utils/frameEventMap.ts` (the action "Scene switcher", and the edges of a touch screen as rows) |
 
 ## Opening and closing it
@@ -44,8 +44,9 @@ cloud can still `set_current_scene` it by name.
 
 The defaults bind it to a swipe up from the bottom edge (`edgeSwipe {edge:
 bottom}`) on every touch screen that ships an event map: the HyperPixels
-(when frame.json has no `eventMap`) and the SenseCAP Indicator. Left and
-right stay the previous and the next scene. E-paper ships no binding; the
+(when frame.json has no `eventMap`), the SenseCAP Indicator and the
+reTerminal E1003, whose e-paper has a touch glass. Left and right stay the
+previous and the next scene. E-paper without glass ships no binding; the
 owner adds one under "Button actions" (a REFRESH double press, say), and
 every frame can be sent to it by name.
 

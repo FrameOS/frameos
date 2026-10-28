@@ -943,7 +943,8 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1003():
         "busy": 13, "sck": 7, "mosi": 9, "pwr": 11,
     }
     # The E1001/E1002 key order (Zephyr's board file), and REFRESH held talks:
-    # the E1003 has their microphone.
+    # the E1003 has their microphone. Its glass swipes in from the edges as
+    # the Indicator's does (docs/scene-switcher.md).
     assert frame.gpio_buttons == [
         {"pin": 3, "label": "REFRESH"},
         {"pin": 4, "label": "LEFT"},
@@ -951,6 +952,9 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1003():
     ]
     assert frame.event_map[2:] == [
         {"event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "voiceChat", "as": {}},
+        {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
+        {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+        {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
     ]
     assert frame.device_config["micClkPin"] == 42
     # The 2:1 divider on GPIO1, switched by GPIO40 (GPIO21 is the IT8951's
