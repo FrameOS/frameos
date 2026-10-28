@@ -2945,8 +2945,9 @@ a.stat-tile:hover {
   gap: 12px;
 }
 
-/* Source picker + action row: pinned to the top of the scrolling column so
-   "Apply & render" is reachable however long the form below gets. */
+/* Source picker, action row and the picture: pinned to the top of the
+   scrolling column, so "Apply & render" and what it renders stay in view
+   however long the log and the form below get. */
 .live-preview-panel__header {
   position: sticky;
   top: 0;
@@ -3016,17 +3017,65 @@ a.stat-tile:hover {
   gap: 6px;
 }
 
+.live-preview-panel__picture {
+  display: grid;
+  min-width: 0;
+}
+
 .live-preview-panel .live-preview__stage {
+  align-items: center;
+  min-height: 0;
   padding: 8px;
 }
 
-/* Fitted to the column and at most half the viewport, aspect kept; the
-   lightbox is where the frame shows at full size. */
+/* Fitted to the column and at most 40% of the viewport, aspect kept, so the
+   pinned header leaves room for what scrolls under it; the lightbox is where
+   the frame shows at full size. */
 .live-preview-panel .live-preview__canvas {
   max-width: 100%;
-  max-height: 50vh;
+  max-height: min(40vh, 480px);
   width: auto;
   height: auto;
+}
+
+/* Dragged to a height: the picture fills it, aspect kept. */
+.live-preview-panel .live-preview__stage--sized .live-preview__canvas {
+  max-height: 100%;
+}
+
+/* The picture's handle, the log's look: the whole row drags, the pill says so. */
+.live-preview-panel__resize {
+  position: relative;
+  height: 12px;
+  margin-bottom: -6px;
+  cursor: row-resize;
+  touch-action: none;
+  border-radius: 6px;
+}
+
+.live-preview-panel__resize::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 36px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--line);
+  transform: translate(-50%, -50%);
+}
+
+.live-preview-panel__resize:hover,
+.live-preview-panel__resize:active,
+.live-preview-panel__resize:focus-visible {
+  background: color-mix(in srgb, var(--primary), transparent 88%);
+  outline: none;
+}
+
+.live-preview-panel__resize:hover::after,
+.live-preview-panel__resize:active::after,
+.live-preview-panel__resize:focus-visible::after {
+  background: color-mix(in srgb, var(--primary), var(--line) 40%);
 }
 
 /* Narrower label column than the old full-page preview had. */

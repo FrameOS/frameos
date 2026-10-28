@@ -80,6 +80,7 @@ import { selectFieldOptions } from "../lib/select-options";
 import { ImageLightbox } from "./ImageLightbox";
 import { PreviewAssetsDialog } from "./PreviewAssetsDialog";
 import { PreviewLog } from "./PreviewLog";
+import { useDragHeight } from "./useDragHeight";
 
 type SceneLivePreviewPanelProps = {
   /** The store scene, or null for a scene that is not saved yet (then
@@ -547,6 +548,12 @@ export function SceneLivePreviewPanel({
   // Runtime plumbing: the canvas the worker paints onto, the live preview
   // handle, and what the runtime has reported so far.
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // The picture's height, once its handle has been dragged (null: fitted).
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const { height: stageHeight, handleProps: stageHandle } = useDragHeight(stageRef, {
+    least: () => 120,
+    mostOfWindow: 0.75,
+  });
   const previewRef = useRef<FrameOSPreview | null>(null);
   const [sceneInfo, setSceneInfo] = useState<SceneInfo | null>(null);
   // Which FrameOS version the runtime is. The cloud installs the bundle from
@@ -1336,6 +1343,71 @@ export function SceneLivePreviewPanel({
             ) : null}
           </div>
         ) : null}
+        {/* The picture is pinned with the rows above it, so it stays in view
+            while the log, the settings and the form scroll underneath; its
+            handle drags it taller or shorter. */}
+        <div className="live-preview-panel__picture">
+          {previewGated ? (
+            <div className="live-preview__gate" role="status">
+              {gateReasons.billed.length > 0 ? (
+                <CircleDollarSign aria-hidden className="live-preview__gate-icon" size={28} />
+              ) : (
+                <KeyRound aria-hidden className="live-preview__gate-icon" size={28} />
+              )}
+              <p className="live-preview__gate-title">
+                This preview waits for you to start it
+              </p>
+              <p className="live-preview__gate-copy">
+                {gateReasons.billed.length > 0 && gateReasons.embedded.length > 0
+                  ? `This scene calls ${joinNames(gateReasons.billed)}, which bills every request to your key, and brings its own code for ${joinNames(gateReasons.embedded)}, which decides what it sends where with your stored keys.`
+                  : gateReasons.billed.length > 0
+                    ? `This scene calls ${joinNames(gateReasons.billed)}, which bills every request to your key.`
+                    : `This scene brings its own code for ${joinNames(gateReasons.embedded)}, not the app FrameOS ships, and runs it with your stored keys. That code decides what it sends where.`}{" "}
+                Nothing renders until you ask for it, and every change to the
+                scene needs a fresh go-ahead.
+              </p>
+              <button
+                className="button button-primary"
+                onClick={() => {
+                  setError(null);
+                  setPaidRunJson(editorScenesJson);
+                }}
+                type="button"
+              >
+                <Play aria-hidden size={16} />
+                Run preview
+              </button>
+            </div>
+          ) : null}
+          <div
+            className={`live-preview__stage${stageHeight === null ? "" : " live-preview__stage--sized"}`}
+            hidden={previewGated}
+            ref={stageRef}
+            style={stageHeight === null ? undefined : { height: stageHeight }}
+          >
+            <canvas
+              aria-label="Scene preview"
+              className={`live-preview__canvas${pointerInput ? " live-preview__canvas--interactive" : ""}`}
+              height={viewport.height}
+              ref={canvasRef}
+              role="img"
+              // Focusable: keys go to the scene while the picture has the focus.
+              tabIndex={0}
+              width={viewport.width}
+            />
+          </div>
+          {previewGated ? null : (
+            <div
+              aria-label="Resize the preview"
+              aria-orientation="horizontal"
+              className="live-preview-panel__resize"
+              {...stageHandle}
+              role="separator"
+              tabIndex={0}
+              title="Drag to make the preview taller or shorter, double-click to fit it again"
+            />
+          )}
+        </div>
       </div>
       {fastRenderRequest && !fastRenderRequest.answered ? (
         <div className="notice live-preview__fast" role="status">
@@ -1380,50 +1452,6 @@ export function SceneLivePreviewPanel({
         </label>
       ) : null}
       <div className="live-preview">
-        {previewGated ? (
-          <div className="live-preview__gate" role="status">
-            {gateReasons.billed.length > 0 ? (
-              <CircleDollarSign aria-hidden className="live-preview__gate-icon" size={28} />
-            ) : (
-              <KeyRound aria-hidden className="live-preview__gate-icon" size={28} />
-            )}
-            <p className="live-preview__gate-title">
-              This preview waits for you to start it
-            </p>
-            <p className="live-preview__gate-copy">
-              {gateReasons.billed.length > 0 && gateReasons.embedded.length > 0
-                ? `This scene calls ${joinNames(gateReasons.billed)}, which bills every request to your key, and brings its own code for ${joinNames(gateReasons.embedded)}, which decides what it sends where with your stored keys.`
-                : gateReasons.billed.length > 0
-                  ? `This scene calls ${joinNames(gateReasons.billed)}, which bills every request to your key.`
-                  : `This scene brings its own code for ${joinNames(gateReasons.embedded)}, not the app FrameOS ships, and runs it with your stored keys. That code decides what it sends where.`}{" "}
-              Nothing renders until you ask for it, and every change to the
-              scene needs a fresh go-ahead.
-            </p>
-            <button
-              className="button button-primary"
-              onClick={() => {
-                setError(null);
-                setPaidRunJson(editorScenesJson);
-              }}
-              type="button"
-            >
-              <Play aria-hidden size={16} />
-              Run preview
-            </button>
-          </div>
-        ) : null}
-        <div className="live-preview__stage" hidden={previewGated}>
-          <canvas
-            aria-label="Scene preview"
-            className={`live-preview__canvas${pointerInput ? " live-preview__canvas--interactive" : ""}`}
-            height={viewport.height}
-            ref={canvasRef}
-            role="img"
-            // Focusable: keys go to the scene while the picture has the focus.
-            tabIndex={0}
-            width={viewport.width}
-          />
-        </div>
         {/* Right under the picture: what the runtime says about it. */}
         <PreviewLog lines={logs} />
         <div
