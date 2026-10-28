@@ -289,7 +289,10 @@ button; the raw pointer events never do.
 
 **Edge swipes.** A touch or pen press within `gestures.edgePx` of an edge of
 the screen (on a screen at least four of those across) is held back from the
-scene until it shows what it is. Moved `swipeMinPx` away from that edge, more
+scene until it shows what it is. On a round screen (the HyperPixel 2.1"
+Round shows, and its glass reads, only the circle inside its square:
+`frameos/src/frameos/panel_shape.nim`) the edge is the rim, named for the
+quarter of the circle the press is in. Moved `swipeMinPx` away from that edge, more
 away than along it, it is an `edgeSwipe {edge, direction, x, y, startX,
 startY, …}` (`edge` where it began, `direction` the way it went) and the
 frame's: the scene hears no `pointerDown`, `pointerMove`, `pointerUp` or

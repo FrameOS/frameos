@@ -517,6 +517,45 @@ block test_a_press_at_an_edge_is_the_frames_swipe_or_the_scenes_press:
     output[0].payload["direction"].getStr() == "down", $output.names
   state.touch(evPointerUp, 12, 80, 7100, output)
 
+block test_on_a_round_screen_an_edge_swipe_starts_at_the_rim:
+  # The HyperPixel 2.1" Round shows and reads only the circle inside its
+  # square (panel_shape.nim), so its edges are the rim's, each named for the
+  # quarter of the circle it is in.
+  proc wire(px: int): int = (px * 32768 + 240) div 480
+  proc touch(state: var InputState, name: string, x, y, at: int, output: var seq[InputDelivery]) =
+    let buttons = if name == evPointerUp: 0 else: 1
+    discard state.applyNamedInput(name, %*{"x": wire(x), "y": wire(y), "pointerId": 1,
+      "pointerType": "touch", "button": 0, "buttons": buttons}, eoDriver, t0 + initDuration(milliseconds = at), output)
+  var round = config(480, 480)
+  round.device = "pimoroni.hyperpixel2r"
+  var state = initInputState(round)
+  var output: seq[InputDelivery]
+  # Low on the rim, left of the middle: 12 px in from the rim, 59 px above the
+  # square's bottom. Up from there is the bottom edge's swipe.
+  state.touch(evPointerDown, 100, 420, 0, output)
+  doAssert output.len == 0, "held: " & $output.names
+  state.touch(evPointerMove, 104, 340, 50, output)
+  doAssert output.names == @[evEdgeSwipe] and output[0].payload["edge"].getStr() == "bottom" and
+    output[0].payload["direction"].getStr() == "up", $output.names
+  state.touch(evPointerUp, 104, 330, 80, output)
+  output.setLen(0)
+  # On the rim at the right, inward: the right edge's.
+  state.touch(evPointerDown, 470, 260, 1000, output)
+  state.touch(evPointerMove, 400, 262, 1050, output)
+  doAssert output.names == @[evEdgeSwipe] and output[0].payload["edge"].getStr() == "right" and
+    output[0].payload["direction"].getStr() == "left", $output.names
+  state.touch(evPointerUp, 400, 262, 1080, output)
+  output.setLen(0)
+  # Further in than GestureEdgePx from the rim: the scene's at once.
+  state.touch(evPointerDown, 240, 440, 2000, output)
+  doAssert output.names == @[evPointerDown], $output.names
+  state.touch(evPointerUp, 240, 440, 2050, output)
+  output.setLen(0)
+  # The same low spot on a square screen is nowhere near an edge.
+  var square = initInputState(config(480, 480))
+  square.touch(evPointerDown, 100, 420, 3000, output)
+  doAssert output.names == @[evPointerDown], $output.names
+
 block test_the_corpus:
   # docs/event-fixtures.json `inputState`: the cases every host answers alike.
   const fixturesPath = currentSourcePath().parentDir / ".." / ".." / ".." / ".." / "docs" / "event-fixtures.json"
