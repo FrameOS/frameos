@@ -1106,6 +1106,226 @@
       }
     },
     {
+      "name": "edit an app file, the block fields sent empty",
+      "kind": "edit",
+      "args": {
+        "app": "weatherPanel",
+        "file": "app.ts",
+        "edits": [
+          {
+            "find": "'metric'",
+            "from": "",
+            "to": "",
+            "replace": "'imperial'"
+          }
+        ]
+      },
+      "expected": {
+        "issues": [],
+        "summary": "weatherPanel/app.ts: 1 replacement(s), 62 → 64 chars",
+        "scene": {
+          "id": "s1",
+          "name": "Weather",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "b",
+              "type": "app",
+              "data": {
+                "keyword": "text",
+                "config": {
+                  "text": "Hi"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.a + 1\nreturn state.a + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 1\n"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "render",
+              "target": "a",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "id": "e2",
+              "source": "a",
+              "target": "b",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "source": "c",
+              "target": "b",
+              "sourceHandle": "fieldOutput",
+              "targetHandle": "fieldInput/text"
+            }
+          ],
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "settings": {
+            "refreshInterval": 600
+          },
+          "apps": {
+            "weatherPanel": {
+              "name": "Weather panel",
+              "sources": {
+                "app.ts": "const units = 'imperial'\nexport function get() { return units }\n",
+                "config.json": "{}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "edit an app file, the block fields sent as null",
+      "kind": "edit",
+      "args": {
+        "app": "weatherPanel",
+        "file": "app.ts",
+        "edits": [
+          {
+            "find": "'metric'",
+            "from": null,
+            "to": null,
+            "replace": "'imperial'"
+          }
+        ]
+      },
+      "expected": {
+        "issues": [],
+        "summary": "weatherPanel/app.ts: 1 replacement(s), 62 → 64 chars",
+        "scene": {
+          "id": "s1",
+          "name": "Weather",
+          "nodes": [
+            {
+              "id": "render",
+              "type": "event",
+              "data": {
+                "keyword": "render"
+              }
+            },
+            {
+              "id": "a",
+              "type": "app",
+              "data": {
+                "keyword": "weatherPanel",
+                "config": {
+                  "units": "metric"
+                }
+              }
+            },
+            {
+              "id": "b",
+              "type": "app",
+              "data": {
+                "keyword": "text",
+                "config": {
+                  "text": "Hi"
+                }
+              }
+            },
+            {
+              "id": "c",
+              "type": "code",
+              "data": {
+                "codeJS": "return state.a + 1\nreturn state.a + 1"
+              }
+            },
+            {
+              "id": "d",
+              "type": "app",
+              "data": {
+                "keyword": "inline",
+                "sources": {
+                  "app.ts": "export const x = 1\n"
+                }
+              }
+            }
+          ],
+          "edges": [
+            {
+              "id": "e1",
+              "source": "render",
+              "target": "a",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "id": "e2",
+              "source": "a",
+              "target": "b",
+              "sourceHandle": "next",
+              "targetHandle": "prev"
+            },
+            {
+              "source": "c",
+              "target": "b",
+              "sourceHandle": "fieldOutput",
+              "targetHandle": "fieldInput/text"
+            }
+          ],
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "settings": {
+            "refreshInterval": 600
+          },
+          "apps": {
+            "weatherPanel": {
+              "name": "Weather panel",
+              "sources": {
+                "app.ts": "const units = 'imperial'\nexport function get() { return units }\n",
+                "config.json": "{}"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "name": "edit ambiguous find",
       "kind": "edit",
       "args": {

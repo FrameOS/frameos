@@ -1460,7 +1460,9 @@ export function applySourceEdits(base: JsonObject, args: JsonObject): SourceEdit
   edits.forEach((edit, index) => {
     const find = edit.find;
     const replace = typeof edit.replace === "string" ? edit.replace : "";
-    if (edit.from !== undefined || edit.to !== undefined) {
+    // A model often sends every property, the unused ones empty or null: only
+    // text in from or to makes the edit a block.
+    if ((edit.from ?? "") !== "" || (edit.to ?? "") !== "") {
       // A block by its first and last lines: dead code, an old renderer, a
       // section too long to quote whole.
       const from = edit.from;
