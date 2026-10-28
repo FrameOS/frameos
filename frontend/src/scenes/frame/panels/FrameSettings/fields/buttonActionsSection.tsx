@@ -49,8 +49,9 @@ export function ButtonActionsSection(): JSX.Element {
   const showReported = frameForm.event_map === undefined && reported !== null
   // A frame never given a map runs its device's (a HyperPixel's edge swipes,
   // device_event_map.nim); a cloud frame reports it, a backend frame shows it here.
+  // The form carries the frame's `null` as it came: not set is not a choice.
   const deviceDefault =
-    !cloudProfile && frameForm.event_map === undefined && (frame.event_map ?? null) === null
+    !cloudProfile && (frameForm.event_map ?? null) === null && (frame.event_map ?? null) === null
       ? deviceEventMap(frameForm.device ?? frameDisplayDevice(frame))
       : null
   const rules: EventMapRule[] = frameForm.event_map ?? (cloudProfile ? [] : frame.event_map ?? deviceDefault ?? [])
