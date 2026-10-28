@@ -145,8 +145,13 @@ function createNextConfig(phase: string): NextConfig {
               value: contentSecurityPolicy("'none'"),
             },
             {
+              // Location for our own pages and same-origin frames (the
+              // embedded editor): "Use my location" fills a scene's latitude
+              // and longitude (frontend/src/utils/geolocation.ts). With
+              // geolocation=() the browser refused before asking anyone.
               key: "Permissions-Policy",
-              value: "camera=(), microphone=(), geolocation=(), payment=()",
+              value:
+                "camera=(), microphone=(), geolocation=(self), payment=()",
             },
             {
               key: "Referrer-Policy",
