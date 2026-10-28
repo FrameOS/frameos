@@ -37,7 +37,9 @@ suite "app image helpers":
     check scaledDecodeFitForFrame(FrameConfig(scalingMode: "cover")) == fitCover
     check scaledDecodeFitForFrame(FrameConfig(scalingMode: "contain")) == fitContain
     check scaledDecodeFitForFrame(FrameConfig(scalingMode: "stretch")) == fitStretch
-    check scaledDecodeFitForFrame(FrameConfig(scalingMode: "center")) == fitCover
+    # pixie has a 1:1 fit now (f90d7f2), so "center" no longer rounds to cover.
+    check scaledDecodeFitForFrame(FrameConfig(scalingMode: "center")) == fitCenter
+    check scaledDecodeFitForFrame(FrameConfig(scalingMode: "bottom-right")) == fitBottomRight
     check scaledDecodeFitForFrame(FrameConfig(scalingMode: "")) == fitCover
 
 suite "decode target handshake":
