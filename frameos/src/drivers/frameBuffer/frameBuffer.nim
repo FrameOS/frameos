@@ -386,14 +386,16 @@ proc render*(self: Driver, image: Image) =
   let lineLength = if self.screenInfo.lineLength.int >= rowBytes: self.screenInfo.lineLength.int
     else: rowBytes
 
-  # An RGB565 panel takes the runner's RGB565 canvas as it is: say so, from
-  # the render thread, where the host polls it (frameos/driver_render_hint).
-  if isRgb565(bitsPerPixel, self.screenInfo.redOffset, self.screenInfo.redLength,
+  # An RGB565 panel takes the runner's RGB565 canvas as it is, and every
+  # panel here takes a frame unturned (the turn happens as its rows are
+  # staged): say so, from the render thread, where the host polls it
+  # (frameos/driver_render_hint).
+  let rgb565 = isRgb565(bitsPerPixel, self.screenInfo.redOffset, self.screenInfo.redLength,
       self.screenInfo.greenOffset, self.screenInfo.greenLength,
-      self.screenInfo.blueOffset, self.screenInfo.blueLength):
-    reportPanelCanvas(width, height, PanelCanvasRgb565)
-  else:
-    reportPanelCanvas(0, 0, 0)
+      self.screenInfo.blueOffset, self.screenInfo.blueLength)
+  reportPanelCanvas(width, height, (if rgb565: PanelCanvasRgb565 else: 0), rotates = true)
+  # What the frame still owes: 0 unless the host saw the offer above.
+  let rotation = renderRotation()
 
   # Open the device BEFORE touching `image`, and bail here if it will not
   # open. This driver is a shared library carrying its own ARC runtime: the
@@ -428,14 +430,18 @@ proc render*(self: Driver, image: Image) =
     # through a raw view instead, and only allocate here when the panel
     # geometry forces a resize (that image is ours, so owning it is fine).
     var scaled: Image = nil
-    if image.width != width or image.height != height:
+    var stageRotation = rotation
+    let turned = turnedDimensions(image.width, image.height, rotation)
+    if turned.width != width or turned.height != height:
       if not self.sizeMismatchLogged:
         self.sizeMismatchLogged = true
         logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
             "warning": "Rendered image does not match framebuffer resolution, scaling to fit",
-            "imageWidth": image.width, "imageHeight": image.height,
+            "imageWidth": image.width, "imageHeight": image.height, "rotation": rotation,
             "screenInfo": self.screenInfo})
-      scaled = image.resize(width, height)
+      # Rare (a config that is not this panel): turn it whole, then fit.
+      scaled = image.turnedCopy(rotation).resize(width, height)
+      stageRotation = 0
     let source = if scaled.isNil: image else: scaled
     if source.width * source.height == 0:
       return
@@ -455,7 +461,7 @@ proc render*(self: Driver, image: Image) =
     if now - self.shadow.lastFullWrite >= FullWriteSeconds:
       self.shadow.invalidate()
     let whole = not self.shadow.valid
-    let changed = self.shadow.stageImage(source, self.scratchRow)
+    let changed = self.shadow.stageImage(source, self.scratchRow, stageRotation)
     for run in changedRuns(changed):
       let offset = run.first * lineLength
       let length = (run.last - run.first + 1) * lineLength

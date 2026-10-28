@@ -62,13 +62,15 @@ proc nextDriverRetrySeconds*(requested: float, floor: var float): float =
   floor = min(floor * 2, DRIVER_RETRY_MAX_SECONDS)
   max(requested, floor)
 
-proc pushToPanel(image: Image) =
+proc pushToPanel(image: Image, rotation: int) =
   ## Every push to the display driver. The generation is odd for as long as
   ## the driver has the picture, and `GET /image` caches nothing meanwhile
-  ## (channels.nim).
+  ## (channels.nim). `image` is the frame as the scene drew it, `rotation`
+  ## frame.json's `rotate`: the driver turns it as it stages its rows when it
+  ## can, drivers.render turns it first when it cannot.
   noteDriverRenderStarted()
   try:
-    drivers.render(image)
+    drivers.render(image, rotation)
   finally:
     noteDriverRendered()
 
@@ -358,7 +360,8 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       outImage.flipVertical()
     else:
       discard
-    result = (outImage.rotateDegrees(self.frameConfig.rotate), context.nextSleep)
+    # Unturned: pushToPanel hands `rotate` on with it (drivers.render).
+    result = (outImage, context.nextSleep)
   except Exception as e:
     let errorImage = renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}")
     setLastImage(errorImage)
@@ -480,7 +483,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       self.triggerRenderNext = false # used to debounce render events received while rendering
 
       var renderResult = self.renderSceneImage(exportedScene.get(), currentScene)
-      var lastRotatedImage = renderResult[0]
+      var lastFrameImage = renderResult[0]
       let nextSleep = renderResult[1]
       # Read the interval AFTER the render: a scene that paces itself while
       # drawing (the animated status screen sets `refreshInterval` from the
@@ -543,7 +546,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         if self.localAccessDrawn:
           markLocalAccessCodeOnPanel()
         # TODO: render the driver part in another thread
-        pushToPanel(lastRotatedImage)
+        pushToPanel(lastFrameImage, self.frameConfig.rotate)
         if not self.localAccessDrawn:
           clearLocalAccessCodeOnPanel()
         # The framebuffer's late probe (Pi 5 KMS) reports the real panel
@@ -569,8 +572,8 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         let earlierRenderRequest = takeEarlierRenderRequest()
         if earlierRenderRequest.isSome:
           driverRetrySeconds = max(earlierRenderRequest.get(), DRIVER_RETRY_MIN_SECONDS)
-          driverRetryImage = lastRotatedImage
-        lastRotatedImage = nil
+          driverRetryImage = lastFrameImage
+        lastFrameImage = nil
         renderResult[0] = nil
         # Return decode/render spikes to the OS on every device; e-ink frames
         # otherwise hold tens of MB of dead heap between refreshes. Skipped
@@ -678,7 +681,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
             # The held canvas is the frame rendered above, code and all.
             if self.localAccessDrawn:
               markLocalAccessCodeOnPanel()
-            pushToPanel(driverRetryImage)
+            pushToPanel(driverRetryImage, self.frameConfig.rotate)
             if not self.localAccessDrawn:
               clearLocalAccessCodeOnPanel()
             # This retry is exactly where a late framebuffer probe lands.
@@ -760,7 +763,7 @@ proc presentCursor(self: RunnerThread) =
   try:
     if codeDrawn:
       markLocalAccessCodeOnPanel()
-    pushToPanel(image.rotateDegrees(self.frameConfig.rotate))
+    pushToPanel(image, self.frameConfig.rotate)
     if not codeDrawn:
       clearLocalAccessCodeOnPanel()
   except Exception as e:

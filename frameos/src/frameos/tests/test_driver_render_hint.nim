@@ -66,7 +66,7 @@ suite "the panel canvas hint":
     reportPanelCanvas(0, 0, 0)
     check panelCanvas().format == 0
     unpackPanelCanvas(packed)
-    check panelCanvas() == (width: 720, height: 720, format: PanelCanvasRgb565)
+    check panelCanvas() == (width: 720, height: 720, format: PanelCanvasRgb565, rotates: false)
 
   test "nothing to offer packs as 0, which withdraws an offer":
     reportPanelCanvas(720, 720, PanelCanvasRgb565)
@@ -77,3 +77,22 @@ suite "the panel canvas hint":
   test "a size the packing cannot carry is no offer":
     reportPanelCanvas(70000, 720, PanelCanvasRgb565)
     check panelCanvas().format == 0
+
+  test "a driver that turns frames itself says so, with or without a format":
+    reportPanelCanvas(480, 800, 0, rotates = true)
+    let packed = packPanelCanvas()
+    check packed != 0
+    reportPanelCanvas(0, 0, 0)
+    unpackPanelCanvas(packed)
+    check panelCanvas() == (width: 480, height: 800, format: 0, rotates: true)
+    reportPanelCanvas(720, 720, PanelCanvasRgb565, rotates = true)
+    unpackPanelCanvas(packPanelCanvas())
+    check panelCanvas() == (width: 720, height: 720, format: PanelCanvasRgb565, rotates: true)
+
+  test "the rotation a frame still owes is normalised":
+    setRenderRotation(90)
+    check renderRotation() == 90
+    setRenderRotation(-90)
+    check renderRotation() == 270
+    setRenderRotation(360)
+    check renderRotation() == 0

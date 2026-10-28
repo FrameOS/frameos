@@ -80,14 +80,12 @@ SVG path work. Roughly in order of what each would buy there:
    cache while the LCD scans the front one, and the second core bought 1.3x,
    not 2x. 24 fps for a frame that changes every pixel needs a faster bus
    (120 MHz PSRAM, above) or a draw that touches less memory.
-11. **The Pi.** A 565 panel renders into a 565 canvas kept between frames
-   and the driver writes only the rows that changed
-   (`docs/realtime-rendering.md` "The Pi"). Left: fuse the rotation into the
-   push on a rotated HyperPixel 4.0 (natively portrait; a scalar
-   `rotateDegrees` per frame today, and a rotated frame keeps the RGBX
-   canvas), push to the driver on its own thread, wake on input instead of
-   polling at 200/100 ms, and measure the 565 canvas against NEON RGBX on a
-   64-bit Pi with a 16 bpp panel.
+11. **The Pi.** A 565 panel renders into a 565 canvas kept between frames,
+   the driver writes only the rows that changed, and a turned panel is turned
+   as its rows are staged (`docs/realtime-rendering.md` "The Pi"). Left: push
+   to the driver on its own thread, wake on input instead of polling at
+   200/100 ms, and measure the 565 canvas against NEON RGBX on a 64-bit Pi
+   with a 16 bpp panel (Cloud-5's HyperPixel is 32 bpp).
 12. **A tap's frame after the render.** A JSX home panel's toggle renders in
     ~180 ms in place, and `render:done` comes ~90 ms later: about 30 ms
     between `render:framebuffer`, `render:device` and `render:done` each,

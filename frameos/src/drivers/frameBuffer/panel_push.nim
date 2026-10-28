@@ -112,39 +112,78 @@ proc convertRow(layout: PanelLayout, pixels: ptr UncheckedArray[ColorRGBX], row:
       dst[j + blueByte] = color.b
       j += step
 
-proc stageImage*(shadow: var PanelShadow, image: Image, scratch: var seq[uint8]): seq[bool] =
-  ## Stages a frame of the layout's size into the shadow and returns, per
-  ## row, whether it changed. A `pfRgb565` image on a 2-byte layout is taken
-  ## as the panel's own bytes; an RGBX one is converted. `image` is only read
+proc turnedDimensions*(width, height, rotation: int): tuple[width, height: int] =
+  ## A frame's size once turned by `rotation` degrees.
+  if rotation in [90, 270]: (height, width) else: (width, height)
+
+template sourceIndex(image: Image, rotation, x, y: int): int =
+  ## Where panel pixel (x, y) comes from in the unturned `image`: the same
+  ## mapping as utils/image.nim `rotateDegrees`.
+  case rotation
+  of 90: image.dataIndex(y, image.height - 1 - x)
+  of 180: image.dataIndex(image.width - 1 - x, image.height - 1 - y)
+  of 270: image.dataIndex(image.width - 1 - y, x)
+  else: image.dataIndex(x, y)
+
+proc stageImage*(shadow: var PanelShadow, image: Image, scratch: var seq[uint8],
+    rotation = 0): seq[bool] =
+  ## Stages a frame into the shadow and returns, per row, whether it changed.
+  ## `image` is the layout's size once turned by `rotation` (0, 90, 180 or
+  ## 270): the frame is turned on its way in, a row at a time, instead of by a
+  ## whole-frame pass first. A `pfRgb565` image on a 2-byte layout is taken as
+  ## the panel's own bytes; anything else is converted. `image` is only read
   ## through raw pointers: the driver may be a library with its own runtime
   ## (frameBuffer.nim, the note on `render`), so it never owns the host's ref.
   let layout = shadow.layout
   result = newSeq[bool](layout.height)
-  if image.isRgb565 and layout.bytesPerPixel == 2:
-    for y in 0 ..< layout.height:
-      result[y] = shadow.stageRow(y, image.data16[image.dataIndex(0, y)].addr)
-  elif image.isRgb565:
-    # A 565 canvas on a panel that changed mode under it: expand, then convert.
-    if scratch.len < layout.rowBytes:
-      scratch.setLen(layout.rowBytes)
-    var expanded = newSeq[ColorRGBX](layout.width)
-    let pixels = cast[ptr UncheckedArray[ColorRGBX]](expanded[0].addr)
-    let dst = cast[ptr UncheckedArray[uint8]](scratch[0].addr)
-    for y in 0 ..< layout.height:
-      let src = image.dataIndex(0, y)
-      for x in 0 ..< layout.width:
-        expanded[x] = rgb565ToRgbx(image.data16[src + x])
-      convertRow(layout, pixels, 0, dst)
-      result[y] = shadow.stageRow(y, dst)
-  else:
-    if scratch.len < layout.rowBytes:
-      scratch.setLen(layout.rowBytes)
+  if scratch.len < layout.rowBytes:
+    scratch.setLen(layout.rowBytes)
+  let dst = cast[ptr UncheckedArray[uint8]](scratch[0].addr)
+  if image.isRgb565:
+    if rotation == 0 and layout.bytesPerPixel == 2:
+      for y in 0 ..< layout.height:
+        result[y] = shadow.stageRow(y, image.data16[image.dataIndex(0, y)].addr)
+    elif layout.bytesPerPixel == 2:
+      let row = cast[ptr UncheckedArray[uint16]](dst)
+      for y in 0 ..< layout.height:
+        for x in 0 ..< layout.width:
+          row[x] = image.data16[image.sourceIndex(rotation, x, y)]
+        result[y] = shadow.stageRow(y, dst)
+    else:
+      # A 565 canvas on a panel that changed mode under it: expand, then convert.
+      var expanded = newSeq[ColorRGBX](layout.width)
+      let pixels = cast[ptr UncheckedArray[ColorRGBX]](expanded[0].addr)
+      for y in 0 ..< layout.height:
+        for x in 0 ..< layout.width:
+          expanded[x] = rgb565ToRgbx(image.data16[image.sourceIndex(rotation, x, y)])
+        convertRow(layout, pixels, 0, dst)
+        result[y] = shadow.stageRow(y, dst)
+  elif rotation == 0:
     let pixels = cast[ptr UncheckedArray[ColorRGBX]](image.data[image.dataIndex(0, 0)].addr)
-    let dst = cast[ptr UncheckedArray[uint8]](scratch[0].addr)
     for y in 0 ..< layout.height:
       convertRow(layout, pixels, y * image.stride, dst)
       result[y] = shadow.stageRow(y, dst)
+  else:
+    var gathered = newSeq[ColorRGBX](layout.width)
+    let pixels = cast[ptr UncheckedArray[ColorRGBX]](gathered[0].addr)
+    for y in 0 ..< layout.height:
+      for x in 0 ..< layout.width:
+        gathered[x] = image.data[image.sourceIndex(rotation, x, y)]
+      convertRow(layout, pixels, 0, dst)
+      result[y] = shadow.stageRow(y, dst)
   shadow.valid = true
+
+proc turnedCopy*(image: Image, rotation: int): Image =
+  ## `image` turned by `rotation` degrees into an RGBX image of the driver's
+  ## own, for the rare frame that is not the panel's size (it is fitted
+  ## after). A 565 image comes out as RGBX, which is what a resize takes.
+  let (width, height) = turnedDimensions(image.width, image.height, rotation)
+  result = newImage(width, height)
+  for y in 0 ..< height:
+    for x in 0 ..< width:
+      let i = image.sourceIndex(rotation, x, y)
+      result.data[result.dataIndex(x, y)] =
+        if image.isRgb565: rgb565ToRgbx(image.data16[i]) else: image.data[i]
 
 proc changedRuns*(changed: openArray[bool]): seq[tuple[first, last: int]] =
   ## Consecutive changed rows as inclusive (first, last) runs, top to bottom.

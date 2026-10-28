@@ -8,6 +8,7 @@ import frameos/channels as hostChannels
 import frameos/driver_abi
 import frameos/driver_render_hint
 import frameos/utils/dither
+from frameos/utils/image import rotateDegrees
 
 
 type
@@ -28,6 +29,7 @@ type
     detectedDisplaySize: DriverDetectedDisplaySizeProc
     panelCanvas: DriverPanelCanvasProc
     setRenderPalette: DriverSetRenderPaletteProc
+    setRenderRotation: DriverSetRenderRotationProc
     toPng: DriverToPngProc
     turnOn: DriverActionProc
     turnOff: DriverActionProc
@@ -251,6 +253,11 @@ proc init*(frameOS: FrameOS) =
       # a `.so` from before it keeps the panel's built-in palette.
       loaded.setRenderPalette = loadOptionalSymbol[DriverSetRenderPaletteProc](library,
           "frameos_driver_set_render_palette")
+      # The rotation the frame still owes, for a driver that turns it itself
+      # (frameos/driver_render_hint). Optional: a `.so` from before it is
+      # handed the frame turned by the host, as before.
+      loaded.setRenderRotation = loadOptionalSymbol[DriverSetRenderRotationProc](library,
+          "frameos_driver_set_render_rotation")
     # An input driver that speaks structs (frameos/driver_abi). Optional: a
     # `.so` from before it keeps sending JSON events, which the host still takes.
     loaded.setInputHook = loadOptionalSymbol[DriverSetInputHookProc](library, "frameos_driver_set_input_hook")
@@ -265,7 +272,17 @@ proc init*(frameOS: FrameOS) =
     syncDriverContext(frameOS, driverCtx)
     hostChannels.log(%*{"event": "driver:shared", "driver": spec.name, "path": path, "loaded": true})
 
-proc render*(image: Image) =
+proc render*(image: Image, rotation = 0) =
+  ## `image` as the scene drew it; `rotation` (frame.json `rotate`) is what it
+  ## still owes on its way to the panel. A driver whose panel hint says it
+  ## rotates (frameos/driver_render_hint) is handed it as it is and stages the
+  ## turned rows itself; anything else gets it turned here first, as before.
+  let rotation = ((rotation mod 360) + 360) mod 360
+  var onPanel = rotation != 0 and panelCanvas().rotates
+  for driver in loadedDrivers:
+    if driver.spec.canRender and not driver.render.isNil and driver.setRenderRotation.isNil:
+      onPanel = false
+  let frame = if rotation == 0 or onPanel: image else: image.rotateDegrees(rotation)
   # The host's copy of the palette override (frameos/utils/dither), flattened
   # into ints the library's own copy is set from before every render; a
   # count of 0 clears it. Values only, borrowed for the call.
@@ -280,7 +297,9 @@ proc render*(image: Image) =
       if not driver.setRenderPalette.isNil:
         driver.setRenderPalette(driver.instance,
           (if paletteCount > 0: paletteInts[0].addr else: nil), paletteCount)
-      driver.render(driver.instance, cast[pointer](image))
+      if not driver.setRenderRotation.isNil:
+        driver.setRenderRotation(driver.instance, cint(if onPanel: rotation else: 0))
+      driver.render(driver.instance, cast[pointer](frame))
       # "Call me back sooner than the interval" — the library's own copy of
       # the request (frameos/driver_render_hint), folded into ours. Polled
       # immediately after the call that could have set it.

@@ -14,8 +14,10 @@
 ##   (utils/svg_frames.nim), with `generation` counting every write into the
 ##   canvas that was not that render.
 ##
-## Unrotated, unflipped and at the panel's own size only: anything else goes
-## through the RGBA canvas, the scaling and the rotation as before. Stores
+## Unflipped and at the panel's own size only, and turned only where the
+## driver turns frames itself on their way to the panel (the hint's
+## `rotates`): anything else goes through the RGBA canvas, the scaling and
+## the rotation as before. Stores
 ## are dithered (`ditherStores`) as on the ESP32, so a gradient on the glass
 ## does not step every eight levels.
 
@@ -27,14 +29,20 @@ var
   canvas: Image
   generation: uint32
 
-proc panelCanvasFits*(panel: tuple[width, height, format: int], frameWidth, frameHeight,
-    renderWidth, renderHeight, rotate: int, flip: string): bool =
+proc panelCanvasFits*(panel: tuple[width, height, format: int, rotates: bool], frameWidth,
+    frameHeight, renderWidth, renderHeight, rotate: int, flip: string): bool =
   ## Whether a frame renders into the panel canvas: the driver takes RGB565
-  ## at exactly the size the scene renders at, with nothing to turn or mirror.
-  panel.format == PanelCanvasRgb565 and rotate == 0 and
+  ## for a panel of the frame's size, the scene renders at that size turned by
+  ## `rotate` (apps.nim renderWidth), and the driver does any turning itself.
+  ## Nothing mirrored: a flip is a pass over the canvas the scene drew.
+  let rotate = ((rotate mod 360) + 360) mod 360
+  let (sceneWidth, sceneHeight) =
+    if rotate in [90, 270]: (frameHeight, frameWidth) else: (frameWidth, frameHeight)
+  panel.format == PanelCanvasRgb565 and rotate in [0, 90, 180, 270] and
+    (rotate == 0 or panel.rotates) and
     flip notin ["horizontal", "vertical", "both"] and
     panel.width == frameWidth and panel.height == frameHeight and
-    renderWidth == frameWidth and renderHeight == frameHeight
+    renderWidth == sceneWidth and renderHeight == sceneHeight
 
 proc panelCanvasFor*(frameWidth, frameHeight, renderWidth, renderHeight, rotate: int,
     flip: string): Image =
@@ -47,9 +55,9 @@ proc panelCanvasFor*(frameWidth, frameHeight, renderWidth, renderHeight, rotate:
       canvas = nil
       forgetPanelFrames()
     return nil
-  if canvas.isNil or canvas.width != frameWidth or canvas.height != frameHeight:
+  if canvas.isNil or canvas.width != renderWidth or canvas.height != renderHeight:
     forgetPanelFrames()
-    canvas = newImage565(frameWidth, frameHeight)
+    canvas = newImage565(renderWidth, renderHeight)
     canvas.ditherStores = true
     generation += 1
   canvas

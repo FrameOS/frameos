@@ -1,5 +1,6 @@
 import std/unittest
 import pixie
+import frameos/utils/image
 import ../panel_push
 
 proc layout565(width, height: int, padding = 0): PanelLayout =
@@ -115,3 +116,54 @@ suite "the framebuffer writes what changed":
   test "changedRuns joins neighbours and keeps the last row":
     check changedRuns([true, true, false, true]) == @[(first: 0, last: 1), (first: 3, last: 3)]
     check changedRuns([false, false]).len == 0
+
+suite "a turned frame is turned on its way in":
+  proc numbered(width, height: int): Image =
+    ## Every pixel its own colour, so a pixel in the wrong place shows.
+    result = newImage(width, height)
+    for y in 0 ..< height:
+      for x in 0 ..< width:
+        result.setColor(x, y, rgba(uint8(x * 37 mod 251), uint8(y * 53 mod 251), uint8((x + y) * 11 mod 251), 255).color)
+
+  test "an RGBX frame staged turned matches rotateDegrees then staged upright":
+    let source = numbered(7, 4)
+    for rotation in [90, 180, 270]:
+      let (w, h) = turnedDimensions(source.width, source.height, rotation)
+      var fused, reference: PanelShadow
+      var scratch: seq[uint8]
+      fused.prepare(layout32(w, h))
+      reference.prepare(layout32(w, h))
+      discard fused.stageImage(source, scratch, rotation)
+      discard reference.stageImage(source.rotateDegrees(rotation), scratch)
+      check fused.bytes == reference.bytes
+
+  test "a 565 canvas staged turned matches rotateDegrees then staged upright":
+    let source = newImage565(5, 3)
+    let numberedSource = numbered(5, 3)
+    for y in 0 ..< 3:
+      for x in 0 ..< 5:
+        source.setColor(x, y, numberedSource.getColor(x, y))
+    for rotation in [90, 180, 270]:
+      let (w, h) = turnedDimensions(source.width, source.height, rotation)
+      var fused, reference: PanelShadow
+      var scratch: seq[uint8]
+      fused.prepare(layout565(w, h))
+      reference.prepare(layout565(w, h))
+      discard fused.stageImage(source, scratch, rotation)
+      discard reference.stageImage(source.rotateDegrees(rotation), scratch)
+      check fused.bytes == reference.bytes
+
+  test "only the rows a turned change lands on are written":
+    let source = numbered(6, 4)
+    var shadow: PanelShadow
+    var scratch: seq[uint8]
+    shadow.prepare(layout32(4, 6)) # turned by 90
+    discard shadow.stageImage(source, scratch, 90)
+    source.setColor(2, 0, rgba(1, 2, 3, 255).color) # top row of the scene: a panel column
+    let changed = shadow.stageImage(source, scratch, 90)
+    check changedRows(changed) == @[2] # panel row y comes from scene column y
+
+  test "turnedCopy is rotateDegrees, as RGBX":
+    let source = numbered(5, 2)
+    for rotation in [0, 90, 180, 270]:
+      check turnedCopy(source, rotation).toContiguousSeq() == source.rotateDegrees(rotation).toContiguousSeq()

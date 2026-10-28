@@ -406,9 +406,20 @@ the runtime's own `render:done` / `render:driver` lines):
 | Driver | 99.6 ms | **16.1 ms** (p90 16.8) |
 | **Together** | **~172 ms (~5.8 fps)** | **~49 ms (~20 fps)** |
 
-What is left (`docs/realtime-todo.md`): the rotation fused into the push on a
-rotated panel, the push on its own thread, and waking on input instead of
-polling.
+**A turned panel is turned on the way in.** The HyperPixel 4.0 is natively
+portrait, so a landscape frame owes a 90-degree turn: a scalar
+`rotateDegrees` pass over the whole frame, every frame, before the driver
+converted it again. Now the framebuffer driver says it turns frames itself
+(the panel hint's `rotates`), the runner hands `drivers.render` the frame as
+the scene drew it with `rotate`, and the driver gathers each panel row from
+the unturned frame as it stages it (`panel_push.nim` `stageImage`, the
+mapping `rotateDegrees` uses, pinned by `test_panel_push.nim`). A driver
+without `frameos_driver_set_render_rotation`, and every statically linked
+one, still gets the frame turned by the host. With it, a turned 565 panel
+keeps the 565 canvas too, at the scene's own size.
+
+What is left (`docs/realtime-todo.md`): the push on its own thread, and
+waking on input instead of polling.
 
 ## Measuring
 

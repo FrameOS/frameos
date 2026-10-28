@@ -34,14 +34,27 @@ proc render(canvas: Image, doc: string): int =
 
 suite "the panel canvas":
   test "only an unturned, unmirrored frame at the panel's own size uses it":
-    let panel = (width: 720, height: 720, format: PanelCanvasRgb565)
+    let panel = (width: 720, height: 720, format: PanelCanvasRgb565, rotates: false)
     check panelCanvasFits(panel, 720, 720, 720, 720, 0, "")
     check panelCanvasFits(panel, 720, 720, 720, 720, 0, "none")
-    check not panelCanvasFits(panel, 720, 720, 720, 720, 90, "")
+    check not panelCanvasFits(panel, 720, 720, 720, 720, 90, "") # nobody would turn it
     check not panelCanvasFits(panel, 720, 720, 720, 720, 0, "horizontal")
     check not panelCanvasFits(panel, 720, 720, 360, 360, 0, "") # a scaled render
     check not panelCanvasFits(panel, 800, 480, 800, 480, 0, "") # a config the panel is not
-    check not panelCanvasFits((width: 720, height: 720, format: 0), 720, 720, 720, 720, 0, "")
+    check not panelCanvasFits((width: 720, height: 720, format: 0, rotates: false), 720, 720, 720, 720, 0, "")
+
+  test "a turned frame uses it when the driver turns frames itself":
+    # A HyperPixel 4.0 is a 480x800 panel; turned by 90 the scene is 800x480.
+    let portrait = (width: 480, height: 800, format: PanelCanvasRgb565, rotates: true)
+    check panelCanvasFits(portrait, 480, 800, 800, 480, 90, "")
+    check panelCanvasFits(portrait, 480, 800, 800, 480, 270, "")
+    check panelCanvasFits(portrait, 480, 800, 480, 800, 180, "")
+    check not panelCanvasFits(portrait, 480, 800, 480, 800, 90, "") # not the turned size
+    check not panelCanvasFits(portrait, 480, 800, 800, 480, 45, "")
+    reportPanelCanvas(480, 800, PanelCanvasRgb565, rotates = true)
+    let canvas = panelCanvasFor(480, 800, 800, 480, 90, "")
+    check not canvas.isNil
+    check canvas.width == 800 and canvas.height == 480
 
   test "it is made once, kept, and dropped when the panel stops offering it":
     reportPanelCanvas(W, H, PanelCanvasRgb565)
