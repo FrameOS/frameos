@@ -406,6 +406,20 @@ proc runningUnderFrameosRemote*(): bool =
   except CatchableError:
     result = false
 
+const brcmfmacRoamOffParam* = "brcmfmac.roamoff=1"
+
+proc kernelCmdlineAdditions*(current: string, roamOff: bool): seq[string] =
+  ## What setupSystemHardening appends to the one-line kernel cmdline. A
+  ## `brcmfmac.roamoff=` that is already there, 0 included, is left alone:
+  ## that is somebody's decision about this frame.
+  if "cgroup_enable=memory" notin current:
+    result.add("cgroup_enable=memory cgroup_memory=1")
+  if roamOff:
+    for param in current.splitWhitespace():
+      if param.startsWith("brcmfmac.roamoff="):
+        return
+    result.add(brcmfmacRoamOffParam)
+
 proc setupSystemHardening*(liveApply = true): SetupResult =
   result = setupOk()
   if not commandExists("systemctl"):
@@ -446,8 +460,9 @@ proc setupSystemHardening*(liveApply = true): SetupResult =
   # require the systemd unit before writing config for — and reloading — a
   # service that is not there. The `iw` fallback below still disables power
   # save on those images.
-  if dirExists("/etc/NetworkManager") and
-      commandSucceeds("systemctl cat NetworkManager.service >/dev/null 2>&1"):
+  let networkManagerInstalled = dirExists("/etc/NetworkManager") and
+    commandSucceeds("systemctl cat NetworkManager.service >/dev/null 2>&1")
+  if networkManagerInstalled:
     try:
       const powersaveConfPath = "/etc/NetworkManager/conf.d/wifi-powersave-off.conf"
       const powersaveConf = "[connection]\n# 2 = disable wifi power saving\nwifi.powersave = 2\n"
@@ -479,6 +494,14 @@ proc setupSystemHardening*(liveApply = true): SetupResult =
 
   # The memory clamps in frameos.service need the cgroup memory controller,
   # which Raspberry Pi OS only enables with these kernel cmdline flags.
+  #
+  # Where FrameOS drives the Wi-Fi itself (no NetworkManager: the Pi Zero W
+  # image), brcmfmac's firmware roaming goes as well. A frame never moves,
+  # and on a mesh network the firmware hopped to the other node a minute
+  # after every boot, after which nothing got through (2026-10-27). With it
+  # off, wpa_supplicant only changes access point when it loses this one.
+  # The module reads the flag when it loads, hence the reboot.
+  let roamOff = dirExists("/sys/module/brcmfmac") and not networkManagerInstalled
   for cmdlinePath in ["/boot/firmware/cmdline.txt", "/boot/cmdline.txt"]:
     if not fileExists(cmdlinePath):
       continue
@@ -486,12 +509,14 @@ proc setupSystemHardening*(liveApply = true): SetupResult =
       let current = readFile(cmdlinePath).strip()
       if current.len == 0 or "\n" in current:
         setupLog("FrameOS setup: system hardening: unexpected cmdline format in " & cmdlinePath & ", leaving as is")
-      elif "cgroup_enable=memory" in current:
-        setupLog("FrameOS setup: system hardening: memory cgroup already enabled")
       else:
-        setupLog("FrameOS setup: system hardening: enabling memory cgroup in " & cmdlinePath)
-        writePrivilegedFile(cmdlinePath, current & " cgroup_enable=memory cgroup_memory=1\n")
-        result.rebootRequired = true
+        if "cgroup_enable=memory" in current:
+          setupLog("FrameOS setup: system hardening: memory cgroup already enabled")
+        let additions = kernelCmdlineAdditions(current, roamOff)
+        if additions.len > 0:
+          setupLog("FrameOS setup: system hardening: adding " & additions.join(" ") & " to " & cmdlinePath)
+          writePrivilegedFile(cmdlinePath, current & " " & additions.join(" ") & "\n")
+          result.rebootRequired = true
     except CatchableError as e:
       setupLog("FrameOS setup: system hardening: could not update " & cmdlinePath & ": " & e.msg)
     break

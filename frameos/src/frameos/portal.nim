@@ -1898,6 +1898,94 @@ proc ensureNetworkBackendReady*(frameOS: FrameOS) {.gcsafe.} =
   # The repair clock starts when this join finished, not when the process did.
   lastStationRepair = getMonoTime()
 
+# Link watchdog (supplicant backend; network/supplicant.nim decides, this runs it)
+# ---------------------------------------------------------------------------
+
+var linkWatchdogThread: Thread[RuntimeHandle]
+var linkWatchdogStarted = false
+
+proc quietNetworkContext(): NetworkContext {.gcsafe.} =
+  ## networkContext() without a `portal:exec` line per command, for the
+  ## watchdog's look at the link once a minute: thousands of lines a day
+  ## would bury the rest of the log, and the log leaves the device. What the
+  ## watchdog decides is logged, and its repairs use the ordinary context.
+  result = networkContext()
+  result.run = proc(cmd, loggedCmd: string): NetCmdResult {.gcsafe.} =
+    let (output, rc) = portalRunHook(cmd)
+    (output: output, rc: rc)
+
+proc routerAnswers(router: string): bool {.gcsafe.} =
+  ## One ping, no sudo. A missing `ping` (rc 127) reads as no answer, so the
+  ## router is never armed and only a station that is down gets repaired.
+  if not wpa.isIpv4Literal(router):
+    return false
+  portalRunHook("ping -c 1 -W 2 " & router & " >/dev/null 2>&1")[1] == 0
+
+proc observeLink(frameOS: FrameOS, ctx: NetworkContext, device: string,
+                 probe: NetworkToolProbe): wpa.LinkObservation {.gcsafe.} =
+  if frameOS.network.hotspotStatus in {HotspotStatus.enabled, HotspotStatus.starting, HotspotStatus.stopping}:
+    return wpa.LinkObservation(hotspot: true)
+  result.router = wpa.stationRouter(ctx, device)
+  result.routerAnswered = routerAnswers(result.router)
+  # An answer is proof the station is up; only a miss pays for wpa_cli.
+  result.stationUp = result.routerAnswered or wpa.stationUp(ctx, device, probe)
+  if not result.stationUp:
+    result.noWifiConfig = not wpa.anyWifiConfigured(ctx, device)
+
+proc linkWatchdogLoop(handle: RuntimeHandle) {.thread.} =
+  ## Its own thread for the life of the runtime. It gets the FrameOS as a
+  ## raw handle (see RuntimeHandle) and reads one enum through it; the
+  ## country comes from a fresh frame.json read at repair time, so a country
+  ## changed since boot is the one a restart applies.
+  let frameOS {.cursor.} = frameOSOf(handle)
+  let started = getMonoTime()
+  var state = wpa.LinkWatchdog()
+  while true:
+    let device = supplicantWifiDevice()
+    let probe = networkToolProbe()
+    let seen = observeLink(frameOS, quietNetworkContext(), device, probe)
+    let now = float((getMonoTime() - started).inMilliseconds) / 1000.0
+    case wpa.linkWatchdogStep(state, seen, now)
+    of wpa.lwaNone:
+      discard
+    of wpa.lwaArmed:
+      pLog("portal:linkWatchdog:armed", %*{"device": device, "router": seen.router})
+    of wpa.lwaLost:
+      pLog("portal:linkWatchdog:lost", %*{"device": device, "router": seen.router,
+                                          "stationUp": seen.stationUp})
+    of wpa.lwaRecovered:
+      pLog("portal:linkWatchdog:recovered", %*{"device": device, "router": seen.router})
+    of wpa.lwaRepair:
+      var country = ""
+      # A parse of frame.json this thread owns, never the runtime's config.
+      {.gcsafe.}:
+        country = effectiveWifiCountry(requestConfig(nil))
+      let ctx = networkContext()
+      # Up but cut off needs a fresh join; down gets repairStation, which
+      # asks for a lease first when the association is still there.
+      let res = if seen.stationUp: wpa.restartStation(ctx, device, probe, country)
+                else: wpa.repairStation(ctx, device, probe, country)
+      let failedChecks = state.failures
+      wpa.noteLinkRepair(state, now)
+      pLog("portal:linkWatchdog:repair", %*{
+        "device": device, "router": seen.router, "stationUp": seen.stationUp,
+        "failedChecks": failedChecks, "ok": res.ok, "detail": res.message,
+        "repairs": state.repairs, "nextRepairInSeconds": int(state.nextRepairAt - now)})
+      if res.ok:
+        requestEnrollmentNudge()
+    portalSleepHook(wpa.linkWatchdogIntervalMs)
+
+proc startLinkWatchdog*(frameOS: FrameOS) =
+  ## Once, after the boot network check: its first look then finds the
+  ## router the check just reached, and a link that dies a minute later is
+  ## a miss against a router that answered.
+  if linkWatchdogStarted or activeNetworkBackend() != nbSupplicant:
+    return
+  linkWatchdogStarted = true
+  pLog("portal:linkWatchdog:start", %*{"intervalSeconds": wpa.linkWatchdogIntervalMs div 1000,
+                                        "failuresBeforeRepair": wpa.linkWatchdogFailuresBeforeRepair})
+  createThread(linkWatchdogThread, linkWatchdogLoop, runtimeHandle(frameOS))
+
 proc setPortalHooksForTest*(
   runHook: PortalRunHook = nil,
   nmcliConnectHook: PortalNmcliConnectHook = nil,

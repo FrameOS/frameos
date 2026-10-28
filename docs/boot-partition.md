@@ -21,7 +21,7 @@ carries secrets (Wi-Fi credentials, the root password, cloud claim tokens).
 | File | What it is |
 | --- | --- |
 | `config.txt` | Raspberry Pi firmware config. FrameOS display driver setup appends what the panel needs (e.g. `dtoverlay=spi0-0cs` for manual dual-CS e-ink panels) and enables the memory cgroup marker line's counterpart below. Edits are made in place and require a reboot. |
-| `cmdline.txt` | Kernel command line (single line!). FrameOS setup adds `cgroup_enable=memory` so the memory clamps in `frameos.service` work. Buildroot images also ship `cpufreq.default_governor=ondemand`: the Pi kernel's own default is `powersave`, which pins the CPU at its lowest clock (600 MHz on a Zero 2 W), and unlike Raspberry Pi OS there is no userspace service switching it. |
+| `cmdline.txt` | Kernel command line (single line!). FrameOS setup adds `cgroup_enable=memory` so the memory clamps in `frameos.service` work. Where FrameOS drives the Wi-Fi itself (no NetworkManager: the Pi Zero W image) it also adds `brcmfmac.roamoff=1`: the chip's firmware roaming moved a frame to another mesh node a minute after every boot, after which nothing got through. A `brcmfmac.roamoff=` that is already there, `0` included, is left alone. Either change asks for a reboot, which deploys and updates do. Buildroot images also ship `cpufreq.default_governor=ondemand`: the Pi kernel's own default is `powersave`, which pins the CPU at its lowest clock (600 MHz on a Zero 2 W), and unlike Raspberry Pi OS there is no userspace service switching it. |
 
 ### Provisioning (consumed on first boot, then destroyed)
 
