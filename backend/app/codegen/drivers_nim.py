@@ -462,6 +462,7 @@ type
     render: DriverRenderProc
     earlierRender: DriverEarlierRenderProc
     detectedDisplaySize: DriverDetectedDisplaySizeProc
+    panelCanvas: DriverPanelCanvasProc
     setRenderPalette: DriverSetRenderPaletteProc
     toPng: DriverToPngProc
     turnOn: DriverActionProc
@@ -590,6 +591,10 @@ proc init*(frameOS: FrameOS) =
           "frameos_driver_earlier_render_seconds")
       loaded.detectedDisplaySize = loadOptionalSymbol[DriverDetectedDisplaySizeProc](library,
           "frameos_driver_detected_display_size")
+      # The canvas the panel takes as it is (frameos/driver_render_hint).
+      # Optional: a `.so` from before it is handed an RGBA image, as before.
+      loaded.panelCanvas = loadOptionalSymbol[DriverPanelCanvasProc](library,
+          "frameos_driver_panel_canvas")
       # A photo's own dither palette (frameos/utils/asset_colors). Optional:
       # a `.so` from before it keeps the panel's built-in palette.
       loaded.setRenderPalette = loadOptionalSymbol[DriverSetRenderPaletteProc](library,
@@ -631,6 +636,8 @@ proc render*(image: Image) =
         requestEarlierRender(driver.earlierRender(driver.instance).float)
       if not driver.detectedDisplaySize.isNil:
         foldDetectedDisplaySize(unpackDetectedDisplaySize(driver.detectedDisplaySize(driver.instance)))
+      if not driver.panelCanvas.isNil:
+        unpackPanelCanvas(driver.panelCanvas(driver.instance))
   # Statically linked drivers share this module's hint copy; shared
   # libraries answered through their exported symbol above.
   foldDetectedDisplaySize(takeDetectedDisplaySize())
@@ -736,6 +743,13 @@ proc frameos_driver_detected_display_size*(driver: pointer): uint64 {{.cdecl, ex
   ## frameos/driver_render_hint. Read once, cleared on read, like the
   ## earlier-render request above.
   packDetectedDisplaySize()
+
+proc frameos_driver_panel_canvas*(driver: pointer): uint64 {{.cdecl, exportc, dynlib.}} =
+  ## Driver -> host: the canvas this driver's panel takes as it is
+  ## (format << 32 | width << 16 | height, 0 for an RGBA image to convert),
+  ## from THIS library's copy of frameos/driver_render_hint. Standing state:
+  ## not cleared on read.
+  packPanelCanvas()
 
 proc frameos_driver_set_render_palette*(driver: pointer, colors: ptr cint, count: cint) {{.cdecl, exportc, dynlib.}} =
   ## Host -> driver: the palette the next render dithers against, `count`

@@ -127,3 +127,49 @@ proc unpackDetectedDisplaySize*(packed: uint64): Option[(int, int)] =
   if packed == 0:
     return none((int, int))
   some(((packed shr 32).int, (packed and 0xFFFFFFFF'u64).int))
+
+# driver → host: the canvas the panel takes as it is.
+#
+# A Linux framebuffer at 16 bits per pixel in RGB565 order holds exactly what
+# a pixie `pfRgb565` image holds, row for row. When its driver says so, the
+# runner renders into one RGB565 canvas it keeps for the whole uptime (as an
+# ESP32 LCD does): nothing to convert per frame, and a scene that draws one
+# SVG repaints only what changed (utils/svg_frames.nim). Unlike the detected
+# size this is standing state, not news: the driver reports what its panel
+# takes on every probe, and the host keeps the last answer. Same transport:
+# the generated library exports `frameos_driver_panel_canvas`, packed as
+# format << 32 | width << 16 | height, 0 for "convert as before".
+
+const PanelCanvasRgb565* = 1
+  ## The one format a driver can ask for today.
+
+var
+  panelCanvasFormatValue {.threadvar.}: int
+  panelCanvasWidthValue {.threadvar.}: int
+  panelCanvasHeightValue {.threadvar.}: int
+
+proc reportPanelCanvas*(width, height, format: int) =
+  ## `format` 0 (or a size out of range) withdraws the offer.
+  if format <= 0 or width <= 0 or height <= 0 or width > 0xFFFF or height > 0xFFFF:
+    panelCanvasFormatValue = 0
+    panelCanvasWidthValue = 0
+    panelCanvasHeightValue = 0
+    return
+  panelCanvasFormatValue = format
+  panelCanvasWidthValue = width
+  panelCanvasHeightValue = height
+
+proc panelCanvas*(): tuple[width, height, format: int] =
+  ## What the panel takes as it is; format 0 for "an RGBA image, converted".
+  (panelCanvasWidthValue, panelCanvasHeightValue, panelCanvasFormatValue)
+
+proc packPanelCanvas*(): uint64 =
+  let c = panelCanvas()
+  if c.format <= 0:
+    return 0
+  (c.format.uint64 shl 32) or (c.width.uint64 shl 16) or c.height.uint64
+
+proc unpackPanelCanvas*(packed: uint64) =
+  ## Folds a library's answer into this (the host's) copy.
+  reportPanelCanvas(((packed shr 16) and 0xFFFF'u64).int, (packed and 0xFFFF'u64).int,
+    ((packed shr 32) and 0xFF'u64).int)

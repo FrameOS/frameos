@@ -13,6 +13,7 @@ import frameos/event_log
 import frameos/event_loop
 import frameos/interpreter
 import frameos/display_detect
+import frameos/panel_canvas
 import frameos/driver_render_hint
 import frameos/render_stats
 import frameos/local_access
@@ -263,13 +264,20 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   self.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight,
       "sceneId": scene.id.string})
 
+  # The panel's own RGB565 canvas when the driver takes one (frameos/panel_canvas):
+  # kept between frames, so there is nothing to convert and a whole-frame SVG
+  # repaints only what changed. A fresh RGBA canvas otherwise.
+  let panelCanvas = panelCanvasFor(self.frameConfig.width, self.frameConfig.height,
+    requiredWidth, requiredHeight, self.frameConfig.rotate, self.frameConfig.flip)
   var context = ExecutionContext(
     scene: scene,
     event: "render",
     payload: %*{},
-    image: case self.frameConfig.rotate:
-    of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-    else: newImage(self.frameConfig.width, self.frameConfig.height),
+    image: if not panelCanvas.isNil: panelCanvas
+      else:
+        case self.frameConfig.rotate:
+        of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
+        else: newImage(self.frameConfig.width, self.frameConfig.height),
     hasImage: true,
     loopIndex: 0,
     loopKey: ".",
@@ -279,11 +287,17 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   try:
     # `hostRun`: what the render dispatches is the scene talking to itself, and
     # renders again only by asking (event_loop.nim).
-    self.sceneEvents.hostRun:
-      discard exportedScene.render(scene, context)
+    beginPanelCanvasFrame(context.image)
+    try:
+      self.sceneEvents.hostRun:
+        discard exportedScene.render(scene, context)
+    finally:
+      endPanelCanvasFrame()
     if self.frameConfig.controlCode.enabled:
       render_imageApp.App(self.controlCodeRender).appConfig.image = data_qrApp.App(self.controlCodeData).get(context)
       render_imageApp.App(self.controlCodeRender).run(context)
+      if context.image.isPanelCanvas:
+        notePanelCanvasWritten()
     # A pending FrameOS Cloud link code (cloud/device_flow.nim): the user code
     # plus a QR of the claim URL, drawn over the scene for the same reason as
     # the presence code — reading it off the panel is the ownership proof.
@@ -307,6 +321,8 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
         linkText.add("\n" & linkCode.verificationUri)
       render_textApp.App(self.linkCodeRender).appConfig.text = linkText
       render_textApp.App(self.linkCodeRender).run(context)
+      if context.image.isPanelCanvas:
+        notePanelCanvasWritten()
     let image = context.image
 
     var outImage: Image
@@ -319,6 +335,8 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     # The frame-wide colour correction, on every display, before the image
     # is stored and shown.
     applyGlobalColorCorrection(outImage)
+    if outImage.isPanelCanvas and frameColorSettings.global.hasAdjustments():
+      notePanelCanvasWritten()
     setLastImage(outImage)
     # The local network access code, if one is pending. Drawn AFTER the render is stored
     # (setLastImage copies), so it reaches the panel only: the whole point is
@@ -328,6 +346,8 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     # last so no scene can paint over it.
     self.localAccessShownFor = self.localAccessPanelWanted()
     self.localAccessDrawn = self.drawLocalAccessCode(outImage, self.localAccessShownFor)
+    if self.localAccessDrawn and outImage.isPanelCanvas:
+      notePanelCanvasWritten()
     case self.frameConfig.flip:
     of "horizontal":
       outImage.flipHorizontal()

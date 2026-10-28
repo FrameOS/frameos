@@ -317,7 +317,12 @@
   nothing packed, the blit a buffer switch); a grey or black-and-white panel
   draws in pixie's luma surface. The canvas rule has five copies
   (`frameos_display.h` lists them, `docs/device-limits-fixtures.json` pins
-  two): change them together.
+  two): change them together. A Pi with a 16 bpp RGB565 framebuffer (a
+  HyperPixel 4.0) gets the same idea: one kept `pfRgb565` canvas
+  (`frameos/panel_canvas.nim`, offered by the driver through
+  `frameos_driver_panel_canvas`), and the framebuffer driver writes only the
+  rows that changed (`drivers/frameBuffer/panel_push.nim`). A new write into
+  that canvas that is not the scene's render calls `notePanelCanvasWritten`.
 - **The background is owed, not painted** (`ExecutionContext.backgroundPending`).
   Anything that draws into the canvas other than a flow node calls
   `paintPendingBackground` first; a producer that takes the live canvas gets

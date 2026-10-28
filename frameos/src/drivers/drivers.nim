@@ -26,6 +26,7 @@ type
     render: DriverRenderProc
     earlierRender: DriverEarlierRenderProc
     detectedDisplaySize: DriverDetectedDisplaySizeProc
+    panelCanvas: DriverPanelCanvasProc
     setRenderPalette: DriverSetRenderPaletteProc
     toPng: DriverToPngProc
     turnOn: DriverActionProc
@@ -242,6 +243,10 @@ proc init*(frameOS: FrameOS) =
           "frameos_driver_earlier_render_seconds")
       loaded.detectedDisplaySize = loadOptionalSymbol[DriverDetectedDisplaySizeProc](library,
           "frameos_driver_detected_display_size")
+      # The canvas the panel takes as it is (frameos/driver_render_hint).
+      # Optional: a `.so` from before it is handed an RGBA image, as before.
+      loaded.panelCanvas = loadOptionalSymbol[DriverPanelCanvasProc](library,
+          "frameos_driver_panel_canvas")
       # A photo's own dither palette (frameos/utils/asset_colors). Optional:
       # a `.so` from before it keeps the panel's built-in palette.
       loaded.setRenderPalette = loadOptionalSymbol[DriverSetRenderPaletteProc](library,
@@ -283,6 +288,8 @@ proc render*(image: Image) =
         requestEarlierRender(driver.earlierRender(driver.instance).float)
       if not driver.detectedDisplaySize.isNil:
         foldDetectedDisplaySize(unpackDetectedDisplaySize(driver.detectedDisplaySize(driver.instance)))
+      if not driver.panelCanvas.isNil:
+        unpackPanelCanvas(driver.panelCanvas(driver.instance))
   # Statically linked drivers share this module's hint copy; shared
   # libraries answered through their exported symbol above.
   foldDetectedDisplaySize(takeDetectedDisplaySize())

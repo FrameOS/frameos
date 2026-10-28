@@ -364,16 +364,42 @@ photo change, is in `docs/realtime-todo.md`.
 
 ### The Pi
 
-The interpreter's savings above are the Pi's too. The Linux path's own
-per-frame costs are elsewhere (measured on a laptop, scaled for a Pi Zero 2
-W): a fresh canvas each frame (an mmap and its page faults), a full copy for
-`setLastImage`, a scalar `rotateDegrees` every frame on a rotated HyperPixel
-4.0 (natively portrait), and the framebuffer driver converting the whole
-frame into a staging buffer, `write()`ing it to `/dev/fb0` and closing the
-device, with no vsync. The conversion itself cannot go away while pixie draws
-RGBX and a 32 bpp framebuffer wants BGRX (and on a 16 bpp one a 565 canvas
-would trade NEON blending for scalar 565 code); the staging copy and the
-rotation pass can. `docs/realtime-todo.md` has them.
+The interpreter's savings above are the Pi's too. On a Pi Zero W with a
+HyperPixel 4.0 Square (720x720, a 16 bpp KMS framebuffer, 2026-10-28) a
+touch in the Touch test cost ~70 ms of render and ~100 ms in the driver,
+back to back: the driver converted all 518,400 pixels from RGBX to 565,
+`write()` the megabyte through a fresh 1 MB stdio buffer and closed
+`/dev/fb0` again, every frame. The write itself is cheap (3-11 ms for 1 MB,
+measured with `dd`); the conversion was the cost. The armv6 core has no NEON,
+so pixie runs its scalar code there whatever the format.
+
+**A 565 panel's canvas is 565** (`frameos/panel_canvas.nim`). When the
+framebuffer is 16 bpp in pixie's 565 order, the driver says so
+(`frameos/driver_render_hint` `reportPanelCanvas`, the library symbol
+`frameos_driver_panel_canvas`), and a frame that is unrotated, unflipped and
+at the panel's own size renders into one `pfRgb565` canvas kept for the
+uptime, stores dithered as on the ESP32. Anything else keeps the fresh RGBX
+canvas, the scaling and the rotation as before. On a 64-bit Pi this trades
+pixie's NEON RGBX kernels for its scalar 565 ones (unmeasured).
+
+**The canvas holds the last frame, so a whole-frame SVG repaints what
+changed.** The runner brackets every render into it with
+`beginPanelFrame` / `endPanelFrame` (utils/svg_frames.nim), as the ESP32
+brackets its LCD buffer; anything else that draws into the canvas — the
+control code, the cloud link code, the frame-wide colour correction, the
+local network access code — bumps its generation, and the next frame is
+drawn whole.
+
+**The driver writes the rows that changed** (`drivers/frameBuffer/panel_push.nim`).
+It keeps a copy of what the panel shows in the panel's own layout, stages
+each frame into it a row at a time (a 565 canvas as it is, anything else
+converted), and `pwrite`s only the runs of rows that differ, on a descriptor
+it keeps open. The copy is trusted for a minute at most, and forgotten on an
+unblank or a failed write, so a console that drew over the panel heals.
+
+What is left (`docs/realtime-todo.md`): the rotation fused into the push on a
+rotated panel, the push on its own thread, and waking on input instead of
+polling.
 
 ## Measuring
 

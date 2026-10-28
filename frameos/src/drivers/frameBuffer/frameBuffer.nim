@@ -1,9 +1,10 @@
 import pixie, json, linuxfb, posix, posix/termios, strformat
-import std/exitprocs
+import std/[exitprocs, monotimes]
 import frameos/device_setup
 import frameos/driver_context
 import frameos/driver_render_hint
 import frameos/utils/process
+import ./panel_push
 
 const DEVICE = "/dev/fb0"
 const TTY_DEVICE = "/dev/tty0"
@@ -66,7 +67,15 @@ type Driver* = ref object of FrameOSDriver
   # Seconds to ask the host to wait before the next probe. Doubles on every
   # failed pass up to PROBE_RETRY_MAX_SECONDS, resets once the panel answers.
   probeRetrySeconds*: float
-  renderBuffer: seq[uint8]
+  # What the panel shows (panel_push.nim), the open /dev/fb0 behind it, and
+  # one row of conversion scratch.
+  shadow: PanelShadow
+  fbFd: cint
+  fbOpen: bool
+  scratchRow: seq[uint8]
+
+proc monotonicSeconds(): float =
+  float(getMonoTime().ticks) / 1e9
 
 proc logFrameBuffer(logger: DriverLogger, payload: JsonNode) =
   if not logger.isNil and not logger.log.isNil:
@@ -373,10 +382,18 @@ proc render*(self: Driver, image: Image) =
   let height = self.screenInfo.height.int
   let bytesPerPixel = int(bitsPerPixel) div 8
   let rowBytes = width * bytesPerPixel
-  # The framebuffer can pad each row; skip the padding bytes when writing
+  # The framebuffer can pad each row; the shadow keeps the padding (zeros).
   let lineLength = if self.screenInfo.lineLength.int >= rowBytes: self.screenInfo.lineLength.int
     else: rowBytes
-  let bufferLen = lineLength * height
+
+  # An RGB565 panel takes the runner's RGB565 canvas as it is: say so, from
+  # the render thread, where the host polls it (frameos/driver_render_hint).
+  if isRgb565(bitsPerPixel, self.screenInfo.redOffset, self.screenInfo.redLength,
+      self.screenInfo.greenOffset, self.screenInfo.greenLength,
+      self.screenInfo.blueOffset, self.screenInfo.blueLength):
+    reportPanelCanvas(width, height, PanelCanvasRgb565)
+  else:
+    reportPanelCanvas(0, 0, 0)
 
   # Open the device BEFORE touching `image`, and bail here if it will not
   # open. This driver is a shared library carrying its own ARC runtime: the
@@ -386,16 +403,23 @@ proc render*(self: Driver, image: Image) =
   # unregisterCycle, from a stack that names only runner.nim. A Pi 5 with no
   # writable framebuffer crash-looped on exactly that, fourteen restarts in
   # two minutes. No device, no reference, no crash.
-  var fb: File
-  if not open(fb, DEVICE, fmWrite, bufferLen):
-    if not self.unavailableLogged:
-      self.unavailableLogged = true
-      logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
-          "error": "Cannot open " & DEVICE & " for writing, skipping renders",
-          "device": DEVICE,
-          "hint": "On a Pi 5 the firmware provides no framebuffer of its own " &
-            "(bcm2708_fb is Pi 1-4 only); config.txt needs dtoverlay=vc4-kms-v3d."})
-    return
+  #
+  # The descriptor stays open between frames: opening fb0, a 1 MB stdio
+  # buffer and a close for every frame was part of what a frame cost.
+  if not self.fbOpen:
+    let fd = posix.open(DEVICE, O_WRONLY)
+    if fd < 0:
+      if not self.unavailableLogged:
+        self.unavailableLogged = true
+        logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
+            "error": "Cannot open " & DEVICE & " for writing, skipping renders",
+            "device": DEVICE,
+            "hint": "On a Pi 5 the firmware provides no framebuffer of its own " &
+              "(bcm2708_fb is Pi 1-4 only); config.txt needs dtoverlay=vc4-kms-v3d."})
+      return
+    self.fbFd = fd
+    self.fbOpen = true
+    self.shadow.invalidate()
   self.unavailableLogged = false
 
   try:
@@ -415,81 +439,49 @@ proc render*(self: Driver, image: Image) =
     let source = if scaled.isNil: image else: scaled
     if source.width * source.height == 0:
       return
-    let pixels = cast[ptr UncheckedArray[ColorRGBX]](unsafeAddr source.data[0])
 
-    # The conversion below is the runtime's hottest loop on an HDMI frame
-    # (2 M pixels a frame at 1080p, several frames a second while the status
-    # screen animates), so it runs on raw pointers with the layout decided
-    # once per frame, not per pixel. Every byte of the buffer is written by
-    # the loops (padding included), so no zeroing pass either.
-    if self.renderBuffer.len != bufferLen:
-      self.renderBuffer = newSeq[uint8](bufferLen)
-    let buffer = cast[ptr UncheckedArray[uint8]](addr self.renderBuffer[0])
-    let padding = lineLength - rowBytes
-    if bitsPerPixel == 16:
-      for y in 0 ..< height:
-        var j = y * lineLength
-        let row = y * width
-        for x in 0 ..< width:
-          let color = pixels[row + x]
-          let pixel = ((uint16(color.r) shr 3) shl 11) or ((uint16(
-              color.g) shr 2) shl 5) or (uint16(color.b) shr 3)
-          buffer[j] = uint8(pixel and 0xff)
-          buffer[j + 1] = uint8(pixel shr 8)
-          j += 2
-        if padding > 0:
-          zeroMem(addr buffer[j], padding)
-    else:
-      let redByte = int(self.screenInfo.redOffset) div 8
-      let greenByte = int(self.screenInfo.greenOffset) div 8
-      let blueByte = int(self.screenInfo.blueOffset) div 8
-      let alphaByte = int(self.screenInfo.alphaOffset) div 8
-      # A 32bpp framebuffer with no alpha channel (the common Pi case) still
-      # has a fourth byte per pixel; it is written as 0 rather than left to a
-      # separate zeroing pass over the whole buffer.
-      let hasAlpha = self.screenInfo.alphaLength > 0
-      let fillByte = if bytesPerPixel == 4 and not hasAlpha:
-          6 - redByte - greenByte - blueByte # the one offset not taken by a colour
-        else: -1
-      for y in 0 ..< height:
-        var j = y * lineLength
-        let row = y * width
-        if hasAlpha:
-          for x in 0 ..< width:
-            let color = pixels[row + x]
-            buffer[j + redByte] = color.r
-            buffer[j + greenByte] = color.g
-            buffer[j + blueByte] = color.b
-            buffer[j + alphaByte] = color.a
-            j += bytesPerPixel
-        elif fillByte >= 0:
-          for x in 0 ..< width:
-            let color = pixels[row + x]
-            buffer[j + redByte] = color.r
-            buffer[j + greenByte] = color.g
-            buffer[j + blueByte] = color.b
-            buffer[j + fillByte] = 0
-            j += 4
-        else:
-          for x in 0 ..< width:
-            let color = pixels[row + x]
-            buffer[j + redByte] = color.r
-            buffer[j + greenByte] = color.g
-            buffer[j + blueByte] = color.b
-            j += bytesPerPixel
-        if padding > 0:
-          zeroMem(addr buffer[j], padding)
-
-    discard fb.writeBuffer(addr self.renderBuffer[0], self.renderBuffer.len)
-    fb.flushFile()
+    # Stage the frame into the copy of what the panel shows and write only
+    # the rows that changed (panel_push.nim). The conversion, when there is
+    # one, is the runtime's hottest loop on an HDMI frame; on an RGB565 panel
+    # fed the runner's RGB565 canvas there is none.
+    self.shadow.prepare(PanelLayout(
+      width: width, height: height, bytesPerPixel: bytesPerPixel, lineLength: lineLength,
+      redByte: int(self.screenInfo.redOffset) div 8,
+      greenByte: int(self.screenInfo.greenOffset) div 8,
+      blueByte: int(self.screenInfo.blueOffset) div 8,
+      alphaByte: int(self.screenInfo.alphaOffset) div 8,
+      hasAlpha: self.screenInfo.alphaLength > 0))
+    let now = monotonicSeconds()
+    if now - self.shadow.lastFullWrite >= FullWriteSeconds:
+      self.shadow.invalidate()
+    let whole = not self.shadow.valid
+    let changed = self.shadow.stageImage(source, self.scratchRow)
+    for run in changedRuns(changed):
+      let offset = run.first * lineLength
+      let length = (run.last - run.first + 1) * lineLength
+      if pwrite(self.fbFd, addr self.shadow.bytes[offset], length, Off(offset)) != length:
+        raise newException(IOError, "short write to " & DEVICE)
+    if whole:
+      self.shadow.lastFullWrite = now
     claimConsoleAfterSuccessfulRender(self.logger)
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to write image to " & DEVICE})
-  finally:
-    fb.close()
+    # What the panel shows is unknown now: write everything next time, on a
+    # fresh descriptor.
+    self.shadow.invalidate()
+    discard posix.close(self.fbFd)
+    self.fbOpen = false
+
+proc forgetPanelContents*(self: Driver) =
+  ## The next render writes every row: something other than this driver may
+  ## have changed what the panel shows (a blank, a mode change).
+  if not self.isNil:
+    self.shadow.invalidate()
 
 proc turnOn*(self: Driver) =
+  # Back from a blank, the panel may not show what the shadow says.
+  self.forgetPanelContents()
   try:
     let response = runDisplayCommand("vcgencmd display_power 1")
     if response != 0:
