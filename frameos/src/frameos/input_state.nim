@@ -27,8 +27,9 @@
 import std/[json, monotimes, strutils, tables, times]
 import ./driver_abi
 import ./events
-import ./panel_shape
 import ./types
+when not defined(frameosEmbedded):
+  import ./panel_shape
 import ./utils/image
 when not defined(frameosEmbedded):
   import std/unicode
@@ -90,13 +91,13 @@ type
     buttonRoles: seq[(int, string)] ## pin -> the role the frame configured
     buttons: seq[ButtonKey]         ## held, or a short press in its double-press window
     width, height: int             ## scene pixels
-    round: bool                    ## only the inscribed circle shows and takes touches (panel_shape.nim)
     panelWidth, panelHeight, rotate: int
     flip: string
     cursorX*, cursorY*: int        ## pointer 0: the one cursor every mouse moves
     pointers: seq[PointerRecord]   ## a handful at most: a search beats a table's code
     pointerInputLost*: bool        ## a queue dropped pointer input: what is down gets a cancel
     when not defined(frameosEmbedded):
+      round: bool                    ## only the inscribed circle shows and takes touches (panel_shape.nim)
       # A relative mouse (its drawn cursor, the wheel) and a keyboard: Linux
       # and the preview have them, no ESP32 board does.
       cursorMovedAt: MonoTime
@@ -115,7 +116,8 @@ proc initInputState*(config: FrameConfig): InputState =
   for button in config.gpioButtons:
     if not button.isNil and button.role.len > 0:
       result.buttonRoles.add((button.pin, button.role))
-  result.round = panelIsRound(config.device)
+  when not defined(frameosEmbedded):
+    result.round = panelIsRound(config.device) # no ESP32 board is round
   result.panelWidth = config.width
   result.panelHeight = config.height
   result.rotate = config.rotate
@@ -398,14 +400,15 @@ proc edgeAt(state: InputState, x, y: int): string =
   ## named for the quarter it is in: a finger cannot reach the square's.
   if state.width < 4 * GestureEdgePx or state.height < 4 * GestureEdgePx:
     return ""
-  if state.round:
-    if insideRound(state.width, state.height, x, y, GestureEdgePx):
-      return ""
-    let dx = 2 * x + 1 - state.width
-    let dy = 2 * y + 1 - state.height
-    if abs(dx) > abs(dy):
-      return (if dx < 0: "left" else: "right")
-    return (if dy < 0: "top" else: "bottom")
+  when not defined(frameosEmbedded):
+    if state.round:
+      if insideRound(state.width, state.height, x, y, GestureEdgePx):
+        return ""
+      let dx = 2 * x + 1 - state.width
+      let dy = 2 * y + 1 - state.height
+      if abs(dx) > abs(dy):
+        return (if dx < 0: "left" else: "right")
+      return (if dy < 0: "top" else: "bottom")
   var best = GestureEdgePx
   for (edge, distance) in [("left", x), ("right", state.width - 1 - x), ("top", y),
                            ("bottom", state.height - 1 - y)]:
