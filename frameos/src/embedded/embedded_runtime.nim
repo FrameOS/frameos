@@ -23,6 +23,9 @@ import frameos/planner
 import frameos/js_runtime/runtime as jsRuntime
 import frameos/js_runtime/app_runtime
 import frameos/utils/svg_frames
+# The loading mark's C entry points (fos_nim_loading_mark_*_impl), drawn by
+# the RGB LCD's own task while a scene switch loads (lcd_st7701s_rgb.c).
+import frameos/loading_mark
 
 # ------------------------------------------------------------------ C hooks
 

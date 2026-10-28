@@ -30,6 +30,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "lcd_loading.h"
 #include "lcd_splash.h"
 
 #define FOS_LCD_ST7701S_WIDTH 480
@@ -79,6 +80,20 @@ esp_err_t fos_lcd_st7701s_i2c_bus(int sda, int scl, void **bus);
 
 /* Backlight on or off (the Indicator's GPIO45). ESP_ERR_INVALID_STATE before init. */
 esp_err_t fos_lcd_st7701s_backlight(bool on);
+
+/* The loading mark (lcd_loading.h) while a scene switch loads, drawn by a
+ * task of its own on core 0 into the buffer being scanned. `rect` and `draw`
+ * are the runtime's (set once); the style and the frame's rotation as
+ * configured. Begin on the render task when it starts a switch, with when the
+ * switch was asked for; the next picture presented puts the mark away, and
+ * so does `end` (a switch that came to nothing, a render that failed).
+ * Nothing before the first picture: the boot splash owns the panel then. */
+void fos_lcd_st7701s_set_loading_mark(fos_loading_mark_rect_fn rect, fos_loading_mark_draw_fn draw);
+void fos_lcd_st7701s_loading_style(int style, int rotation);
+void fos_lcd_st7701s_loading_begin(int64_t since_us);
+void fos_lcd_st7701s_loading_end(void);
+/* How long the last switch that showed the mark took, in ms, once; -1. */
+int32_t fos_lcd_st7701s_loading_take_shown_ms(void);
 
 /* What the boot splash says it is waiting for (lcd_splash.h), from whichever
  * task is booting. It shows once it has lasted FOS_LCD_SPLASH_STATUS_DELAY_MS,

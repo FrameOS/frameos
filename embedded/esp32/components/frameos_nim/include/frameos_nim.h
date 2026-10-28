@@ -61,6 +61,16 @@ void frameos_nim_set_quiet(bool quiet);
 void frameos_nim_set_keep_js(bool keep);
 /* What the live JS app interpreters hold (walks their heaps: not per frame). */
 size_t frameos_nim_js_runtime_bytes(void);
+/* The loading mark (frameos/loading_mark.nim; lcd_loading.h's
+ * fos_loading_mark_rect_fn and fos_loading_mark_draw_fn): where a style's
+ * mark goes on an RGB565 panel, and one frame of it. Pure: no runtime lock,
+ * any task, any time (the LCD's mark task draws with it on core 0 while the
+ * render task holds the runtime). Without the runtime, an empty rect. */
+void frameos_nim_loading_mark_rect(int32_t panel_w, int32_t panel_h, int32_t rotation, int32_t style,
+                                   int32_t *rect);
+void frameos_nim_loading_mark_draw(int32_t panel_w, int32_t panel_h, int32_t rotation, int32_t style,
+                                   int32_t t_ms, const int32_t *rect, const void *src, int32_t src_stride,
+                                   void *dst, int32_t dst_stride);
 /* Backward-compatible 1bpp entrypoint used by older builds/tests. */
 int frameos_nim_render_1bpp(uint8_t *buf, size_t len);
 /* Free-form info string (Nim/runtime versions, render counter). */

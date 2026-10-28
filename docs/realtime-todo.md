@@ -103,3 +103,12 @@ SVG path work. Roughly in order of what each would buy there:
     Next: measure a rounded box's bounds from its corners instead of
     flattening its arcs, and keep a rebuilt box's own background node when
     its paint did not change.
+14. **The loading mark** (`docs/realtime-rendering.md` "A switch that takes
+    a while"). Not yet on a device: bench it on a HyperPixel (565 and 32
+    bpp, turned), an HDMI panel and the SenseCAP Indicator, with `lcd`
+    running to see that the core-0 task leaves the scan-out alone. Then: the
+    style as a frame setting on both control planes (frame.json
+    `loadingIndicator` is read on a Pi but nothing writes it; the ESP32 has
+    only `set loading_indicator` on the console, so it needs a contract
+    key), a snapshot taken mid-switch on an ESP32 that does not carry the
+    mark, and the SSD1306 OLED, which redraws fast too but has no mark.

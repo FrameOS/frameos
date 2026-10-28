@@ -709,6 +709,24 @@ static void current_scene_details(char *scene_id, size_t scene_id_len,
 /* Defined below, next to the other render helpers. */
 static void render_failure_recover(const char *scene_name);
 
+/* A switch slow enough to show the loading mark says so, once, with how long
+ * it took from being asked for to its first picture (the Pi's line too). */
+static void log_loading_mark(void)
+{
+    int32_t ms = fos_display_loading_take_shown_ms();
+    if (ms < 0) return;
+    char scene_id[128];
+    char scene_name[128];
+    char id_esc[256];
+    current_scene_details(scene_id, sizeof(scene_id), scene_name, sizeof(scene_name));
+    json_escape_value(scene_id, id_esc, sizeof(id_esc));
+    char line[384];
+    snprintf(line, sizeof(line),
+             "{\"event\":\"render:loadingMark\",\"source\":\"esp32\",\"sceneId\":\"%s\",\"ms\":%ld}",
+             id_esc, (long)ms);
+    frameos_nim_log_hook(line);
+}
+
 static void log_render_event(const char *event, const char *scene_id,
                              const char *scene_name, const char *status,
                              const char *stage, const char *mode,
@@ -2228,6 +2246,8 @@ static void client_task(void *arg)
              * switched on over the console mid-flight, without a rebuild. */
             frameos_nim_set_debug(config->debug_logging ? 1 : 0);
             frameos_nim_set_fusion(config->image_fusion ? 1 : 0);
+            /* The LCD's loading mark: the style, and the turn it is drawn at. */
+            fos_display_set_loading_style(config->loading_indicator, config->rotate);
             /* Fallback fit for consumers without their own placement — settings
              * sync, cloud set_settings and the console all write it live. */
             frameos_nim_set_scaling_mode(config->scaling_mode);
@@ -2404,6 +2424,10 @@ static void client_task(void *arg)
                 s_render_in_flight = true;
                 render_once(quiet);
                 s_render_in_flight = false;
+                /* A picture shown put a switch's loading mark away; a render
+                 * that showed none (it failed) ends it here. */
+                fos_display_loading_end();
+                log_loading_mark();
                 rendered = true;
                 fos_animation_frame_done(&s_anim, cycle_start, esp_timer_get_time());
                 if (scene_render) {
@@ -2804,6 +2828,9 @@ void fos_client_start(void)
     frameos_nim_set_display_power_hook(display_power);
     fos_framebuffer_set_lend_hook(snapshot_before_lend);
     fos_display_set_before_write_hook(snapshot_before_panel_write);
+    /* The runtime draws the loading mark (frameos/loading_mark.nim). */
+    fos_display_set_loading_mark(frameos_nim_loading_mark_rect, frameos_nim_loading_mark_draw);
+    fos_display_set_loading_style(fos_config()->loading_indicator, fos_config()->rotate);
     const esp_timer_create_args_t frame_timer_args = {
         .callback = frame_timer_fired,
         .name = "fos_frame",

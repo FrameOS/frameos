@@ -51,6 +51,7 @@ static void load_defaults(void)
     /* Fusion is the normal path; the flag exists so a render can be repeated
      * with every image edge materialized and the two panels compared. */
     s_config.image_fusion = true;
+    s_config.loading_indicator = 1; /* the dots */
     s_config.allow_local_network = FRAMEOS_DEFAULT_ALLOW_LOCAL_NETWORK;
     s_config.tls_enable = FRAMEOS_DEFAULT_TLS_ENABLE;
     s_config.tls_port = FRAMEOS_DEFAULT_TLS_PORT;
@@ -220,6 +221,7 @@ esp_err_t fos_config_init(void)
     if (nvs_get_u8(nvs, "send_logs", &u8) == ESP_OK) s_config.server_send_logs = u8 != 0;
     if (nvs_get_u8(nvs, "debug", &u8) == ESP_OK) s_config.debug_logging = u8 != 0;
     if (nvs_get_u8(nvs, "fusion", &u8) == ESP_OK) s_config.image_fusion = u8 != 0;
+    if (nvs_get_u8(nvs, "loading_ind", &u8) == ESP_OK && u8 <= 4) s_config.loading_indicator = u8;
     if (nvs_get_u8(nvs, "allow_lan", &u8) == ESP_OK) s_config.allow_local_network = u8 != 0;
     if (nvs_get_u8(nvs, "tls_enable", &u8) == ESP_OK) s_config.tls_enable = u8 != 0;
     if (nvs_get_u8(nvs, "admin_auth", &u8) == ESP_OK) s_config.admin_auth_enabled = u8 != 0;
@@ -398,6 +400,7 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u8(nvs, "send_logs", s_config.server_send_logs ? 1 : 0), "send_logs");
     FOS_NVS_SET(nvs_set_u8(nvs, "debug", s_config.debug_logging ? 1 : 0), "debug");
     FOS_NVS_SET(nvs_set_u8(nvs, "fusion", s_config.image_fusion ? 1 : 0), "fusion");
+    FOS_NVS_SET(nvs_set_u8(nvs, "loading_ind", s_config.loading_indicator), "loading_ind");
     FOS_NVS_SET(nvs_set_u8(nvs, "allow_lan", s_config.allow_local_network ? 1 : 0), "allow_lan");
     FOS_NVS_SET(nvs_set_u8(nvs, "tls_enable", s_config.tls_enable ? 1 : 0), "tls_enable");
     FOS_NVS_SET(nvs_set_u8(nvs, "admin_auth", s_config.admin_auth_enabled ? 1 : 0), "admin_auth");

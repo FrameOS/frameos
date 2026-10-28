@@ -82,7 +82,8 @@ build_nim.sh              nim c --compileOnly --os:freertos --cpu:esp → nimcac
 main/tests/               host tests for the IDF-free modules (plain `cc`, no IDF; each file's
                           header carries its command line). The netguard, local network access code
                           (test_esp32_lan_access.py: fos_lan_access + fos_panel_draw), SD probe, board,
-                          power, wake, battery-filter, version, OTA download and scene-event (contract table +
+                          power, wake, battery-filter, version, OTA download, LCD splash and loading mark
+                          (lcd_loading.c) and scene-event (contract table +
                           fos_events.c dispatch) tests run from the backend's
                           pytest suite (backend/app/tasks/tests/test_esp32_*.py, which also
                           checks that every frameos_nim.h function has a frameos_nim_stub.c
@@ -374,7 +375,13 @@ for the two Spectra boards most of the bench work runs on:
   `frameos_mark.svg` by `frameos/tools/gen_splash_mark.nim`), at priority 1
   so the boot under it is not slower, and under it what the boot is waiting
   for once that has lasted a second: "Connecting to Wi-Fi", "Updating
-  firmware", "Starting" (`fos_display_boot_status`). An LCD does not wait
+  firmware", "Starting" (`fos_display_boot_status`). A scene switch that has
+  not put its first picture up within 200 ms gets the loading mark over the
+  picture still showing, drawn by a task on core 0 until the next picture
+  (`components/frameos_display/lcd_loading.c`, host-tested; the look is the
+  runtime's `frameos/loading_mark.nim`; `set loading_indicator
+  dots|spinner|squares|bar|off`; `docs/realtime-rendering.md` "A switch that
+  takes a while"). An LCD does not wait
   for the clock: it renders once Wi-Fi is up and again when SNTP answers
   (`fos_wifi_set_late_time_hook`); the boot used to wait up to 10 s for it.
   An LCD board runs its CPU at 240 MHz (the generic image boots at 160 for

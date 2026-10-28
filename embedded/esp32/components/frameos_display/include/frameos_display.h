@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "lcd_loading.h"
 #include "lcd_splash.h"
 
 typedef enum {
@@ -83,6 +84,21 @@ int64_t fos_display_buffer_generation(const uint8_t *buf);
 /* Called with a panel buffer just before it is written to: a snapshot that
  * points at the last picture shown lets go of it (fos_client.c). */
 void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf));
+/* The loading mark (lcd_loading.h, docs/realtime-rendering.md "A switch that
+ * takes a while"): on an LCD, a small animated mark over the picture shown
+ * while a scene switch loads, once it has taken FOS_LCD_LOADING_DELAY_MS.
+ * The runtime draws it (`rect`, `draw`: frameos_nim_loading_mark_*); the
+ * style (0 none, 1 dots, 2 spinner, 3 squares, 4 bar) and the frame's
+ * rotation come from the config. `begin` on the render task as a switch
+ * starts, with when it was asked for (esp_timer time); the next picture
+ * shown ends it, and `end` does for a switch that shows none. Nothing on
+ * any other panel. */
+void fos_display_set_loading_mark(fos_loading_mark_rect_fn rect, fos_loading_mark_draw_fn draw);
+void fos_display_set_loading_style(int style, int rotation);
+void fos_display_loading_begin(int64_t since_us);
+void fos_display_loading_end(void);
+/* How long the last switch that showed the mark took, in ms, once; -1. */
+int32_t fos_display_loading_take_shown_ms(void);
 /* The selected panel's own I2C bus when it runs one on exactly these pins
  * (the SenseCAP Indicator's LCD shares SDA39/SCL40 with its touch
  * controller): the handle (an `i2c_master_bus_handle_t`) for another device

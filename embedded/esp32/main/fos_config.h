@@ -182,6 +182,11 @@ typedef struct {
     bool image_fusion;             /* debug: 0 materializes every image edge so
                                     * the panel can be compared against the
                                     * fused render (docs/value-pipeline.md) */
+    uint8_t loading_indicator;     /* what an LCD shows while a scene switch loads
+                                    * (lcd_loading.h): 0 nothing, 1 dots (default),
+                                    * 2 spinner, 3 squares, 4 bar. Console-only for
+                                    * now (`set loading_indicator`); frame.json
+                                    * `loadingIndicator` on a Pi */
     bool debug_logging;            /* debug: per-node memory profile from the
                                     * interpreter (value bytes, heap delta,
                                     * fusion tier) — see docs/value-pipeline.md */

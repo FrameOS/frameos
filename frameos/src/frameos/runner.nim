@@ -17,6 +17,7 @@ import frameos/panel_canvas
 import frameos/driver_render_hint
 import frameos/render_stats
 import frameos/local_access
+import frameos/loading_mark_panel
 import frameos/cloud/device_flow
 import frameos/cloud/link_state
 import frameos/logger
@@ -62,17 +63,28 @@ proc nextDriverRetrySeconds*(requested: float, floor: var float): float =
   floor = min(floor * 2, DRIVER_RETRY_MAX_SECONDS)
   max(requested, floor)
 
-proc pushToPanel(image: Image, rotation: int) =
+proc pushToPanel(image: Image, rotation: int, markSwitch = -1) =
   ## Every push to the display driver. The generation is odd for as long as
   ## the driver has the picture, and `GET /image` caches nothing meanwhile
   ## (channels.nim). `image` is the frame as the scene drew it, `rotation`
   ## frame.json's `rotate`: the driver turns it as it stages its rows when it
-  ## can, drivers.render turns it first when it cannot.
+  ## can, drivers.render turns it first when it cannot. The loading mark is
+  ## off the panel while the driver writes, and a frame rendered for the
+  ## newest scene switch (`markSwitch`) ends it (frameos/loading_mark_panel).
   noteDriverRenderStarted()
   try:
-    drivers.render(image, rotation)
+    withLoadingMarkAway(markSwitch):
+      drivers.render(image, rotation)
   finally:
     noteDriverRendered()
+
+proc beginSceneLoading(self: RunnerThread) =
+  ## The scene shown is going away and the next one is being built: on a
+  ## fast panel the loading mark shows if that takes a while
+  ## (frameos/loading_mark). Called before the new scene's init, which is
+  ## part of the wait.
+  discard beginLoadingMark(self.frameConfig.device, self.frameConfig.rotate, self.frameConfig.flip,
+    parseLoadingMarkStyle(self.frameConfig.loadingIndicator))
 
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0
@@ -420,6 +432,8 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
     try:
       timer = getMonoTime()
       self.isRendering = true
+      # The newest scene switch: this pass's frame lands it (the loading mark).
+      let markSwitch = loadingMarkSwitches()
       # Re-enable scene render logs once the fast-render pause window elapses,
       # regardless of which render path this iteration takes. Otherwise switching
       # to a slow scene after a fast burst (when the block below is skipped) would
@@ -546,9 +560,13 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         if self.localAccessDrawn:
           markLocalAccessCodeOnPanel()
         # TODO: render the driver part in another thread
-        pushToPanel(lastFrameImage, self.frameConfig.rotate)
+        pushToPanel(lastFrameImage, self.frameConfig.rotate, markSwitch)
         if not self.localAccessDrawn:
           clearLocalAccessCodeOnPanel()
+        let markShownMs = takeLoadingMarkShown()
+        if markShownMs >= 0:
+          self.logSignal(%*{"event": "render:loadingMark", "sceneId": currentScene.id.string,
+            "ms": markShownMs})
         # The framebuffer's late probe (Pi 5 KMS) reports the real panel
         # size through the driver context; persist it the first time it
         # differs from the file, so scenes, the cloud and the next boot agree.
@@ -816,6 +834,7 @@ proc selectScene(self: RunnerThread, payload: JsonNode): bool =
         "contextEvent": "setCurrentScene", "payload": payload})
     return false
   if sceneId != self.currentSceneId:
+    self.beginSceneLoading()
     # "close" carries nothing: it used to be handed this payload,
     # which names the NEXT scene and holds that scene's state. The
     # new scene's "open" follows from the render loop, once it is
@@ -849,6 +868,7 @@ proc runtimeCommand(self: RunnerThread, command: RuntimeCommand, payload: JsonNo
     logMetricsNow()
   of rcReload:
     self.logger.log(%*{"event": "reload", "message": "Reloading config and interpreted scenes"})
+    self.beginSceneLoading()
     try:
       updateFrameConfigFrom(self.frameConfig, loadConfig())
       # The logger and metrics threads run on copies, not on this ref.
@@ -886,6 +906,7 @@ proc runtimeCommand(self: RunnerThread, command: RuntimeCommand, payload: JsonNo
     if mainSceneId.isNone:
       self.logger.log(%*{"event": "uploadScenes:error", "error": "No scenes provided"})
       return
+    self.beginSceneLoading()
     if payload.hasKey("state") and payload["state"].kind == JObject:
       setPersistedStateFromPayload(mainSceneId.get(), payload["state"])
     for sceneId in sceneIds:

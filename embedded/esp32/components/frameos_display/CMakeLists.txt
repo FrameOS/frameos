@@ -57,6 +57,7 @@ idf_component_register(
         "it8951.c"
         "lcd_st7701s_rgb.c"
         "lcd_splash.c"
+        "lcd_loading.c"
         "${FRAMEOS_GENERATED_DIR}/frameos_panel_table.c"
         ${vendor_srcs}
     INCLUDE_DIRS

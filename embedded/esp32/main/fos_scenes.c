@@ -12,6 +12,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -21,6 +22,7 @@
 #include "fos_config.h"
 #include "fos_mem.h"
 #include "fos_wifi.h"
+#include "frameos_display.h"
 #include "frameos_nim.h"
 #include "nvs.h"
 
@@ -72,6 +74,10 @@ static volatile bool s_scene_select_pending = false;
 static int s_loaded = 0;
 static char s_etag[ETAG_LEN] = "";
 static char s_pending_scene_id[SCENE_ID_LEN] = "";
+/* When the queued selection was first asked for (esp_timer time): the wait
+ * the LCD's loading mark counts from (fos_display_loading_begin). A newer
+ * selection replacing a queued one keeps it: the wait began with the first. */
+static int64_t s_pending_since_us = 0;
 static char s_last_error[SCENE_ERROR_LEN] = "";
 static portMUX_TYPE s_scene_select_lock = portMUX_INITIALIZER_UNLOCKED;
 /* The render task switched the resident scene (or applied a payload that
@@ -997,11 +1003,14 @@ bool fos_scenes_apply_pending(void)
     /* A new payload invalidates whatever is parsed, even if the id matches. */
     s_resident_scene_id[0] = '\0';
     s_pending = false;
+    bool pushed = s_payload_stored_since_boot;
     if (s_payload_stored_since_boot) {
         /* Not the cached store init re-applies on every boot: a deploy that
          * landed while the frame was up. What it shows is stale now. */
         s_payload_stored_since_boot = false;
         s_scene_switched = true;
+        /* A new scene set, from here to its first picture: as a switch. */
+        fos_display_loading_begin(esp_timer_get_time());
     }
     bool ok = false;
     size_t len = 0;
@@ -1033,6 +1042,7 @@ bool fos_scenes_apply_pending(void)
         json = NULL;
     }
     free(json);
+    if (pushed && !ok) fos_display_loading_end();
     /* Publish the outcome before the generation, so a poller that sees a new
      * generation always reads the matching result. */
     s_apply_ok = ok;
@@ -1102,8 +1112,10 @@ char *fos_scenes_json_copy(size_t *out_len)
 esp_err_t fos_scenes_select(const char *scene_id)
 {
     if (scene_id == NULL || scene_id[0] == '\0') return ESP_ERR_INVALID_ARG;
+    int64_t now_us = esp_timer_get_time();
     portENTER_CRITICAL(&s_scene_select_lock);
     snprintf(s_pending_scene_id, sizeof(s_pending_scene_id), "%s", scene_id);
+    if (!s_scene_select_pending) s_pending_since_us = now_us;
     s_scene_select_pending = true;
     portEXIT_CRITICAL(&s_scene_select_lock);
     /* Outlive a deep sleep that cuts in before the render task gets to it
@@ -1136,11 +1148,13 @@ bool fos_scenes_apply_pending_selection(void)
 {
     char scene_id[SCENE_ID_LEN];
     bool pending;
+    int64_t asked_at_us = 0;
 
     portENTER_CRITICAL(&s_scene_select_lock);
     pending = s_scene_select_pending;
     if (pending) {
         snprintf(scene_id, sizeof(scene_id), "%s", s_pending_scene_id);
+        asked_at_us = s_pending_since_us;
         s_scene_select_pending = false;
         s_pending_scene_id[0] = '\0';
     }
@@ -1185,17 +1199,23 @@ bool fos_scenes_apply_pending_selection(void)
         s_last_scene_settled = true;
         return true;
     }
+    /* Another scene, from here to its first picture: on an LCD the loading
+     * mark shows if that takes a while, counted from when it was asked for.
+     * Before the load below, which is part of the wait. */
+    fos_display_loading_begin(asked_at_us);
     if (s_slot_count > 0) {
         if (!activate_scene_id(scene_id)) {
             ESP_LOGW(TAG, "scene selection failed: %s", scene_id);
             log_scene_event("scenes:select", "error", "queued", scene_id,
                             "apply-failed", 0, 0, 0, ESP_FAIL);
+            fos_display_loading_end();
             return false;
         }
     } else if (!frameos_nim_set_scene(scene_id)) {
         ESP_LOGW(TAG, "scene selection failed: %s", scene_id);
         log_scene_event("scenes:select", "error", "queued", scene_id,
                         "apply-failed", 0, 0, 0, ESP_FAIL);
+        fos_display_loading_end();
         return false;
     }
     persist_last_scene(scene_id);
@@ -1278,6 +1298,7 @@ esp_err_t fos_scenes_init(void)
         if (read_pending_scene(pending_id, sizeof(pending_id))) {
             portENTER_CRITICAL(&s_scene_select_lock);
             snprintf(s_pending_scene_id, sizeof(s_pending_scene_id), "%s", pending_id);
+            s_pending_since_us = 0;
             s_scene_select_pending = true;
             portEXIT_CRITICAL(&s_scene_select_lock);
             s_boot_pending_selection = true;

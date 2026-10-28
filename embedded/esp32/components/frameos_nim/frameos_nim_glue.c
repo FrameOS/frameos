@@ -56,6 +56,11 @@ extern int fos_nim_render_panel_impl(uint8_t *buf, size_t len, int pixel_format,
 extern void fos_nim_set_quiet_impl(int quiet);
 extern void fos_nim_set_keep_js_impl(int keep);
 extern size_t fos_nim_js_runtime_bytes_impl(void);
+extern void fos_nim_loading_mark_rect_impl(int32_t panel_w, int32_t panel_h, int32_t rotation, int32_t style,
+                                           int32_t *rect);
+extern void fos_nim_loading_mark_draw_impl(int32_t panel_w, int32_t panel_h, int32_t rotation, int32_t style,
+                                           int32_t t_ms, const int32_t *rect, const void *src,
+                                           int32_t src_stride, void *dst, int32_t dst_stride);
 extern int fos_nim_render_alloc_impl(uint8_t **buf, size_t *len, int pixel_format);
 extern int fos_nim_render_1bpp_impl(uint8_t *buf, size_t len);
 extern const char *fos_nim_info_impl(void);
@@ -765,6 +770,23 @@ size_t frameos_nim_js_runtime_bytes(void)
     size_t bytes = fos_nim_js_runtime_bytes_impl();
     nim_lock_give();
     return bytes;
+}
+
+/* No lock and no readiness check: plain values and pointers in, pixels out
+ * (loading_mark.nim allocates nothing and raises nothing), on the LCD's mark
+ * task while the render task may hold the runtime for seconds. */
+void frameos_nim_loading_mark_rect(int32_t panel_w, int32_t panel_h, int32_t rotation, int32_t style,
+                                   int32_t *rect)
+{
+    fos_nim_loading_mark_rect_impl(panel_w, panel_h, rotation, style, rect);
+}
+
+void frameos_nim_loading_mark_draw(int32_t panel_w, int32_t panel_h, int32_t rotation, int32_t style,
+                                   int32_t t_ms, const int32_t *rect, const void *src, int32_t src_stride,
+                                   void *dst, int32_t dst_stride)
+{
+    fos_nim_loading_mark_draw_impl(panel_w, panel_h, rotation, style, t_ms, rect, src, src_stride, dst,
+                                   dst_stride);
 }
 
 int frameos_nim_render_alloc(uint8_t **buf, size_t *len, int pixel_format)

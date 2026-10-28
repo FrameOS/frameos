@@ -445,6 +445,66 @@ turned 90 degrees; 30 touch moves, 32 frames each, 2026-10-28):
 What is left (`docs/realtime-todo.md`): the push on its own thread, and
 waking on input instead of polling.
 
+### A switch that takes a while: the loading mark
+
+On a fast panel a scene switch used to give no sign of life while the next
+scene was built and rendered, which can be seconds (QuickJS compiling a
+scene's apps, its HTTP fetches). Now, when the new scene has not put its
+first frame on the panel within **200 ms** of the switch being asked for, a
+small animated mark is drawn over the picture still showing, and it goes the
+moment the new frame lands. Up to ~100 ms a change reads as instant and from
+~250 ms a pause reads as "did it hear me": 200 ms leaves a quick switch
+(most scenes on a Pi) exactly as it was, with room to spare, and answers
+before the pause starts to read as one.
+
+Every switch counts, whoever asked: the frame's event map (an edge swipe, a
+held button), the cloud's `set_current_scene`, the HTTP API, the schedule,
+a scene's own dispatch, and a pushed scene set (a preview, a deploy). A
+switch begun while another still loads keeps the first one's start, and its
+mark if one is up. A frame rendered for an older switch ends nothing.
+
+**The mark** is `frameos/loading_mark.nim`, one drawing for both runtimes:
+it composes a rectangle of the panel's own pixels from a copy of what was
+there, so a host puts it away by writing the copy back, and it allocates,
+raises and refs nothing, because it runs beside the busy render path, not on
+it. It sits in the viewer's top right (top middle on the round HyperPixel),
+through frame.json's `flip` and `rotate`, and scales with the panel's
+shorter side. Four styles, `loadingIndicator` in frame.json on a Pi, `set
+loading_indicator` on an ESP32's console: `dots` (the default: three dots in
+a small dark pill, pulsing in turn), `spinner`, `squares` (a 3x3 grid
+inverted in a ring, no backdrop), `bar` (a bright stretch sweeping a thin
+bar along the top edge), and `off`. A frame is drawn every 50 ms.
+
+**On a Pi** (`frameos/loading_mark_panel.nim`, the framebuffer family only:
+HDMI, DPI, the HyperPixels) a thread of its own draws the mark straight into
+`/dev/fb0`, from `beginLoadingMark` in the runner's switch (before the new
+scene's init, which is part of the wait). The driver writes only the rows
+that differ from its copy of the panel, so the mark is never on the panel
+while the driver writes: every push goes through `withLoadingMarkAway`,
+which holds the mark's lock across the driver's render and first writes back
+what the mark covered. The render loop tags each frame with the newest
+switch when its render began, and only a frame tagged with it lands it.
+The stored image (`GET /image`, snapshots) never has the mark: it only ever
+reaches fb0.
+
+**On an ESP32 RGB LCD** (`components/frameos_display/lcd_loading.c`,
+host-tested, and its task in `lcd_st7701s_rgb.c`) the render task begins the
+mark when it applies a switch (`fos_scenes.c`, counted from when the switch
+was queued), and a task on core 0 draws it into the frame buffer being
+scanned, through `frameos_nim_loading_mark_draw` (no runtime lock: the render
+task holds the runtime for the whole load). `present_back` puts it away
+before the next picture is handed over, so it never reaches the new scene's
+buffer, and a render that shows nothing ends it after the fact. Each frame
+of it is ~1,000 pixels in PSRAM, tens of microseconds; the buffers it wrote
+into count a write (`s_generation`), so a damage repaint never takes them for
+a frame of its own. A snapshot (`/image`) taken while a switch loads can
+carry the mark: the front buffer is the snapshot.
+
+Either way a switch slow enough to show the mark logs it once it lands:
+`render:loadingMark` with the scene and `ms`, from the switch being asked
+for to its first frame. A switch that never lands stops showing it after two
+minutes, past every render's own deadline.
+
 ## Measuring
 
 - `set debug 1` on the console logs a profile line per node per render.

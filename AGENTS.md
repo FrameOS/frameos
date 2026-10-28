@@ -344,6 +344,17 @@
   pixie's damage box (`utils/svg_frames.nim`, keyed on the firmware's write
   count per buffer): a new writer into an LCD buffer that is not a render in
   place calls `fos_display_mark_written`.
+- **A slow scene switch shows the loading mark** (`frameos/loading_mark.nim`,
+  one drawing for both runtimes; doc section "A switch that takes a while"):
+  after 200 ms without the new scene's first frame, a thread (Pi,
+  `loading_mark_panel.nim`, straight into /dev/fb0) or a core-0 task (ESP32,
+  `lcd_loading.c` + `lcd_st7701s_rgb.c`) draws it over the picture showing,
+  and the next frame put on the panel ends it. A host's switch begins it
+  (runner.nim `beginSceneLoading`, fos_scenes.c at apply), never the
+  dispatcher. The mark writes behind the driver, so on a Pi every push to the
+  driver goes through `withLoadingMarkAway`, and on the ESP32 every present
+  runs `present_back` (which puts it away): a new push or present path keeps
+  that, or the driver's row diff and the damage repaint go wrong.
 - **A pixel loop can use both cores** (`components/frameos_nim/fos_rows.c`):
   `fos_rows_run` hands a job's rows out in blocks to the render task and a
   helper on the other core (resample.nim's draw is the first job). The job
