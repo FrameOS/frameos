@@ -21,6 +21,7 @@
 ## are dithered (`ditherStores`) as on the ESP32, so a gradient on the glass
 ## does not step every eight levels.
 
+import std/os
 import pixie
 import frameos/driver_render_hint
 import frameos/utils/svg_frames
@@ -28,6 +29,22 @@ import frameos/utils/svg_frames
 var
   canvas: Image
   generation: uint32
+
+proc canvasOverride*(): string =
+  ## FRAMEOS_PANEL_CANVAS, for A/B measurement (as the ESP32's
+  ## -d:frameosCanvasRgbx): `rgbx` keeps every panel on the RGBA canvas,
+  ## `rgb565` puts any panel whose driver describes it on the 565 one, a
+  ## 32 bpp panel included (the driver expands it). Anything else: the rule.
+  getEnv("FRAMEOS_PANEL_CANVAS")
+
+proc effectivePanel*(panel: tuple[width, height, format: int, rotates: bool],
+    override: string): tuple[width, height, format: int, rotates: bool] =
+  result = panel
+  case override
+  of "rgbx": result.format = 0
+  of "rgb565":
+    if panel.width > 0: result.format = PanelCanvasRgb565
+  else: discard
 
 proc panelCanvasFits*(panel: tuple[width, height, format: int, rotates: bool], frameWidth,
     frameHeight, renderWidth, renderHeight, rotate: int, flip: string): bool =
@@ -49,8 +66,8 @@ proc panelCanvasFor*(frameWidth, frameHeight, renderWidth, renderHeight, rotate:
   ## The canvas this render draws into, or nil for "a fresh RGBA one". Made
   ## on first use and kept; dropped (with everything svg_frames held about
   ## it) once it no longer fits.
-  if not panelCanvasFits(panelCanvas(), frameWidth, frameHeight, renderWidth, renderHeight,
-      rotate, flip):
+  if not panelCanvasFits(effectivePanel(panelCanvas(), canvasOverride()), frameWidth, frameHeight,
+      renderWidth, renderHeight, rotate, flip):
     if not canvas.isNil:
       canvas = nil
       forgetPanelFrames()

@@ -94,3 +94,11 @@ suite "the panel canvas":
     notePanelCanvasWritten()
     check render(canvas, touchFrame(50, 30)) == W * H
     check render(canvas, touchFrame(60, 30)) < W * H div 4
+
+  test "FRAMEOS_PANEL_CANVAS forces one canvas or the other, for A/B":
+    let hdmi = (width: 480, height: 800, format: 0, rotates: true)
+    check effectivePanel(hdmi, "rgb565").format == PanelCanvasRgb565
+    check effectivePanel(hdmi, "").format == 0
+    let lcd = (width: 720, height: 720, format: PanelCanvasRgb565, rotates: true)
+    check effectivePanel(lcd, "rgbx").format == 0
+    check effectivePanel((width: 0, height: 0, format: 0, rotates: false), "rgb565").format == 0
