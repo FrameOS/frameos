@@ -289,7 +289,10 @@ button; the raw pointer events never do.
 
 **Edge swipes.** A touch or pen press within `gestures.edgePx` of an edge of
 the screen (on a screen at least four of those across) is held back from the
-scene until it shows what it is. Moved `swipeMinPx` away from that edge, more
+scene until it shows what it is. On a round screen (the HyperPixel 2.1"
+Round shows, and its glass reads, only the circle inside its square:
+`frameos/src/frameos/panel_shape.nim`) the edge is the rim, named for the
+quarter of the circle the press is in. Moved `swipeMinPx` away from that edge, more
 away than along it, it is an `edgeSwipe {edge, direction, x, y, startX,
 startY, …}` (`edge` where it began, `direction` the way it went) and the
 frame's: the scene hears no `pointerDown`, `pointerMove`, `pointerUp` or
@@ -536,8 +539,14 @@ the preview alike. There are two, applied in this order:
   panel's "Button actions"): what a button does on this frame, whatever scene
   is showing. A long press of LEFT is the previous scene and of RIGHT the next
   on every reTerminal preset (the backend's `EMBEDDED_HARDWARE_PRESETS`, the
-  firmware's board table), and the owner may add, change or clear it. It needs
-  no scene: it is checked before the scene is looked up.
+  firmware's board table), and the owner may add, change or clear it. A frame
+  never given one runs its device's: every HyperPixel (`pimoroni.hyperpixel*`)
+  takes an edge swipe in from the right as the next scene and from the left
+  as the previous (`frameos/device_event_map.nim`, applied when frame.json has
+  no `eventMap`; the backend leaves the key out until the owner saves one,
+  the frame API reports it as `null`, and the cloud sees it in what the frame
+  reports). An empty list is a choice and stays empty. It needs no scene: it
+  is checked before the scene is looked up.
 - **The installed scene's** (`eventMap` next to `nodes` in what a frame
   receives; the backend keeps it on the installed entry of `frame.scenes`, the
   cloud on the assignment row): how one installed copy of a scene is told that

@@ -51,6 +51,15 @@ type
   ## OPTIONAL symbol, same rules as above: the display geometry a driver found
   ## after init (frameos/driver_render_hint), width << 32 | height, 0 = none.
   DriverDetectedDisplaySizeProc* = proc(driver: pointer): uint64 {.cdecl.}
+  ## OPTIONAL symbol, same rules: the canvas the panel takes as it is
+  ## (frameos/driver_render_hint `packPanelCanvas`), 0 = an RGBA image to
+  ## convert, which is also what a `.so` from before it gets.
+  DriverPanelCanvasProc* = proc(driver: pointer): uint64 {.cdecl.}
+  ## OPTIONAL symbol, host → driver: the rotation still owed to the frame the
+  ## next render hands over (frameos/driver_render_hint `setRenderRotation`),
+  ## for a driver whose panel hint says it rotates. Without it the host turns
+  ## the frame itself, as before.
+  DriverSetRenderRotationProc* = proc(driver: pointer, degrees: cint) {.cdecl.}
   ## OPTIONAL symbol, host → driver: the palette the next render dithers
   ## against (frameos/utils/dither `renderPaletteOverride`), `count` colours
   ## as `count * 3` ints borrowed for the call, 0 to go back to the panel's

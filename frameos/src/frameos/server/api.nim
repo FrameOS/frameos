@@ -1026,6 +1026,10 @@ proc frameApiPayload*(connectionsState: ConnectionsState, exposeSecrets = false)
   result["https_proxy"] = apiHttpsProxy(live{"httpsProxy"}, exposeSecrets)
   result["error_behavior"] = apiErrorBehavior(live{"errorBehavior"})
   result["device_config"] = apiDeviceConfig(configJson{"deviceConfig"}, live{"deviceConfig"})
+  # The map frame.json holds, not the device's default the runtime runs with
+  # when it holds none (device_event_map.nim): a control plane compares this
+  # with what it wrote, and "never given one" must read back as null.
+  result["event_map"] = storedConfigValue(configJson, "eventMap", newJNull())
   # The stored palette carries the SPA's name/colorNames next to the colours.
   if configJson{"palette"} != nil and configJson["palette"].kind == JObject:
     result["palette"] = copy(configJson["palette"])

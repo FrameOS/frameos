@@ -9,6 +9,7 @@ import {
   type ButtonBinding,
   type FrameActionOffer,
   bindingConflicts,
+  deviceEventMap,
   frameActionKindsFor,
   frameActionTitle,
   frameActionUnavailableReason,
@@ -46,7 +47,14 @@ export function ButtonActionsSection(): JSX.Element {
   const scenes = (frameForm.scenes ?? frame.scenes ?? []).map((scene) => ({ id: scene.id, name: scene.name }))
   const reported = cloudProfile ? reportedEventMapOf(frame.hardware?.eventMap) : null
   const showReported = frameForm.event_map === undefined && reported !== null
-  const rules: EventMapRule[] = frameForm.event_map ?? (cloudProfile ? [] : frame.event_map ?? [])
+  // A frame never given a map runs its device's (a HyperPixel's edge swipes,
+  // device_event_map.nim); a cloud frame reports it, a backend frame shows it here.
+  // The form carries the frame's `null` as it came: not set is not a choice.
+  const deviceDefault =
+    !cloudProfile && (frameForm.event_map ?? null) === null && (frame.event_map ?? null) === null
+      ? deviceEventMap(frameForm.device ?? frameDisplayDevice(frame))
+      : null
+  const rules: EventMapRule[] = frameForm.event_map ?? (cloudProfile ? [] : frame.event_map ?? deviceDefault ?? [])
   const { bindings, others } = frameBindings(rules)
   // What this frame can do with a press: Display on / off only where the
   // device switches the panel (not e-paper), Voice chat only on a frame with a
@@ -145,7 +153,10 @@ export function ButtonActionsSection(): JSX.Element {
             ) : null}
           </>
         ) : (
-          addButton
+          <>
+            {deviceDefault ? <Tag color="gray">Device default</Tag> : null}
+            {addButton}
+          </>
         )}
       </H6>
       <div className="pl-2 @md:pl-8 space-y-2">

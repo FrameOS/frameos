@@ -258,6 +258,22 @@ suite "jsx events":
     check ui.scene.state{"over"}.getStr() == "20,20"
     check ui.scene.state{"level"}.getInt() == 20
 
+  test "a handler hears its element's size, so a slider needs no width of its own":
+    let ui = newUi("""
+      const put = (e) => frameos.setState('at', `${e.localX}/${e.width} ${e.localY}/${e.height}`)
+      export const get = () => (
+        <div className="flex p-10 bg-white">
+          <div className="flex-1 h-4 bg-black" onPointerDown={put} onPointerMove={put} />
+        </div>
+      )
+    """, "tests/jsx-size")
+    discard ui.render() # a 200x100 frame: the track fills 120 of it, at 40,40
+    check dispatchUiEvent("tests/jsx-size", "pointerDown", at(55, 42))
+    check ui.scene.state{"at"}.getStr() == "15/120 2/16"
+    # Captured, past its end: the size stays the element's.
+    check dispatchUiEvent("tests/jsx-size", "pointerMove", at(250, 70))
+    check ui.scene.state{"at"}.getStr() == "210/120 30/16"
+
   test "two fingers hold two presses":
     let ui = newUi("""
       export const get = () => (

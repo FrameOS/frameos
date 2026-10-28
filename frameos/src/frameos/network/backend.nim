@@ -44,6 +44,9 @@ type
     hasDnsmasq*: bool
     hasUdhcpd*: bool
     dhcpClients*: seq[string]
+    ## systemd-run: the station's daemons start in a scope of their own, so a
+    ## restart of frameos.service does not take Wi-Fi down with it.
+    hasSystemdRun*: bool
 
   NetworkBackendChoice* = object
     kind*: NetworkBackendKind
@@ -57,7 +60,7 @@ const
   ## Probed in one shell round-trip; keep in sync with parseToolProbe.
   networkToolNames* = [
     "nmcli", "wpa_supplicant", "wpa_cli", "wpa_passphrase", "hostapd", "iw",
-    "dnsmasq", "udhcpd", "udhcpc", "dhcpcd", "dhclient",
+    "dnsmasq", "udhcpd", "udhcpc", "dhcpcd", "dhclient", "systemd-run",
   ]
   ## Preference order: udhcpc is what busybox images have, dhcpcd is the
   ## Raspberry Pi OS default, dhclient is the Debian fallback.
@@ -83,6 +86,7 @@ proc parseToolProbe*(output: string): NetworkToolProbe =
     of "iw": result.hasIw = true
     of "dnsmasq": result.hasDnsmasq = true
     of "udhcpd": result.hasUdhcpd = true
+    of "systemd-run": result.hasSystemdRun = true
     of "udhcpc", "dhcpcd", "dhclient":
       let name = rawLine.strip()
       if name notin result.dhcpClients:

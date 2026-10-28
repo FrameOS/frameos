@@ -210,7 +210,8 @@ proc renderBootScreen*(self: FrameOS, status: string, log = true) =
       bootCanvas = newImage(width, height)
     let drawTimer = getMonoTime()
     drawStatusScreen(bootCanvas, bootScreen(config, status, bootMarkPhase(epochTime())))
-    # rotateDegrees/flip copy, so the canvas itself is never rotated twice.
+    # A flip works on a copy, and the rotation happens on the way to the panel
+    # (drivers.render), so the canvas itself is never turned twice.
     var image = bootCanvas
     case config.flip:
     of "horizontal":
@@ -224,10 +225,10 @@ proc renderBootScreen*(self: FrameOS, status: string, log = true) =
       image.flipHorizontal()
       image.flipVertical()
     else: discard
-    let rotated = if config.rotate == 0: image else: image.rotateDegrees(config.rotate)
     lastBootDrawSeconds = durationToSeconds(getMonoTime() - drawTimer)
     let driverTimer = getMonoTime()
-    drivers.render(rotated)
+    # Unturned: the driver turns it as it stages its rows when it can.
+    drivers.render(image, config.rotate)
     noteDriverRenderSeconds(durationToSeconds(getMonoTime() - driverTimer))
     if log:
       self.logger.log(%*{"event": "boot:screen", "status": status})

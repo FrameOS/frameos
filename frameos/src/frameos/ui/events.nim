@@ -13,14 +13,17 @@
 ## and its release until it lifts, wherever they land (`captures`), with
 ## localX / localY still from its corner, so a slider follows a finger that
 ## slides off its end. A move with no press goes to the element under it.
+## Every call also says how big the element is (`width`, `height`), so a
+## slider works out how far along it a finger is at any frame size.
 
 import std/json
 import frameos/ui/layout
 
 type
-  UiHandlerCall* = proc(handler: int, name: string, event: JsonNode, localX, localY: float32) {.closure, raises: [].}
+  UiHandlerCall* = proc(handler: int, name: string, event: JsonNode,
+      localX, localY, width, height: float32) {.closure, raises: [].}
     ## Runs handler number `handler` of the UI's last render, in its app,
-    ## with the event and where in the element it landed.
+    ## with the event, where in the element it landed and the element's size.
 
   UiTarget* = ref object
     sceneId*: string
@@ -187,7 +190,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           if r.key == captured:
             let handler = r.handlers[UiEvent(kind)]
             if handler > 0:
-              target.call(handler - 1, event, payload, lx - r.x, ly - r.y)
+              target.call(handler - 1, event, payload, lx - r.x, ly - r.y, r.w, r.h)
               target.inputOnly = false # whatever the handler changed, get() shows it
               handled = true
               result = true
@@ -198,7 +201,7 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       let r = target.regions[i]
       let handler = r.handlers[UiEvent(kind)]
       if handler > 0 and lx >= r.x and ly >= r.y and lx < r.x + r.w and ly < r.y + r.h:
-        target.call(handler - 1, event, payload, lx - r.x, ly - r.y)
+        target.call(handler - 1, event, payload, lx - r.x, ly - r.y, r.w, r.h)
         target.inputOnly = false # whatever the handler changed, get() shows it
         handled = true
         result = true

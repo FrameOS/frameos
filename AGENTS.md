@@ -114,7 +114,10 @@
   hears it; every reTerminal preset ships LEFT/RIGHT held = previous/next
   scene, and the E1001/E1002/E1003 (microphone) REFRESH held = `voiceChat`
   (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset table:
-  keep the three alike). `setCurrentScene {direction}` is resolved by the
+  keep the three alike). A Linux frame never given a map runs its device's:
+  every HyperPixel swipes from the left/right edge to the previous/next scene
+  (`frameos/device_event_map.nim` and the SPA's `deviceEventMap`, pinned
+  together by `device-event-map.test.ts`). `setCurrentScene {direction}` is resolved by the
   dispatcher from the host's `sceneOrder`, never by a host. **An installed
   scene's** map is the install's, never the scene's: `eventMap` beside
   `nodes`, the backend keeps it on the `frame.scenes` entry (the MCP
@@ -317,7 +320,12 @@
   nothing packed, the blit a buffer switch); a grey or black-and-white panel
   draws in pixie's luma surface. The canvas rule has five copies
   (`frameos_display.h` lists them, `docs/device-limits-fixtures.json` pins
-  two): change them together.
+  two): change them together. A Pi with a 16 bpp RGB565 framebuffer (a
+  HyperPixel 4.0) gets the same idea: one kept `pfRgb565` canvas
+  (`frameos/panel_canvas.nim`, offered by the driver through
+  `frameos_driver_panel_canvas`), and the framebuffer driver writes only the
+  rows that changed (`drivers/frameBuffer/panel_push.nim`). A new write into
+  that canvas that is not the scene's render calls `notePanelCanvasWritten`.
 - **The background is owed, not painted** (`ExecutionContext.backgroundPending`).
   Anything that draws into the canvas other than a flow node calls
   `paintPendingBackground` first; a producer that takes the live canvas gets

@@ -364,16 +364,86 @@ photo change, is in `docs/realtime-todo.md`.
 
 ### The Pi
 
-The interpreter's savings above are the Pi's too. The Linux path's own
-per-frame costs are elsewhere (measured on a laptop, scaled for a Pi Zero 2
-W): a fresh canvas each frame (an mmap and its page faults), a full copy for
-`setLastImage`, a scalar `rotateDegrees` every frame on a rotated HyperPixel
-4.0 (natively portrait), and the framebuffer driver converting the whole
-frame into a staging buffer, `write()`ing it to `/dev/fb0` and closing the
-device, with no vsync. The conversion itself cannot go away while pixie draws
-RGBX and a 32 bpp framebuffer wants BGRX (and on a 16 bpp one a 565 canvas
-would trade NEON blending for scalar 565 code); the staging copy and the
-rotation pass can. `docs/realtime-todo.md` has them.
+The interpreter's savings above are the Pi's too. On a Pi Zero W with a
+HyperPixel 4.0 Square (720x720, a 16 bpp KMS framebuffer, 2026-10-28) a
+touch in the Touch test cost ~70 ms of render and ~100 ms in the driver,
+back to back: the driver converted all 518,400 pixels from RGBX to 565,
+`write()` the megabyte through a fresh 1 MB stdio buffer and closed
+`/dev/fb0` again, every frame. The write itself is cheap (3-11 ms for 1 MB,
+measured with `dd`); the conversion was the cost. The armv6 core has no NEON,
+so pixie runs its scalar code there whatever the format.
+
+**A 565 panel's canvas is 565** (`frameos/panel_canvas.nim`). When the
+framebuffer is 16 bpp in pixie's 565 order, the driver says so
+(`frameos/driver_render_hint` `reportPanelCanvas`, the library symbol
+`frameos_driver_panel_canvas`), and a frame that is unrotated, unflipped and
+at the panel's own size renders into one `pfRgb565` canvas kept for the
+uptime, stores dithered as on the ESP32. Anything else keeps the fresh RGBX
+canvas, the scaling and the rotation as before. On a 64-bit Pi this trades
+pixie's NEON RGBX kernels for its scalar 565 ones. Measured on a Pi 5 with
+the 565 canvas forced (`FRAMEOS_PANEL_CANVAS=rgb565`, 800x480): a full-frame
+photo pan (Slideshow with motion) renders in 8.7 ms against 7.2 ms on RGBX,
+and the Touch test in 2.0 ms against 4.8 ms, since only its damage is
+redrawn. NEON's ~1.5 ms is about what converting RGBX for a 16 bpp panel
+would cost, so the rule is the same on every Pi.
+
+**The canvas holds the last frame, so a whole-frame SVG repaints what
+changed.** The runner brackets every render into it with
+`beginPanelFrame` / `endPanelFrame` (utils/svg_frames.nim), as the ESP32
+brackets its LCD buffer; anything else that draws into the canvas (the
+control code, the cloud link code, the frame-wide color correction, the
+local network access code) bumps its generation, and the next frame is
+drawn whole.
+
+**The driver writes the rows that changed** (`drivers/frameBuffer/panel_push.nim`).
+It keeps a copy of what the panel shows in the panel's own layout, stages
+each frame into it a row at a time (a 565 canvas as it is, anything else
+converted), and `pwrite`s only the runs of rows that differ, on a descriptor
+it keeps open. The copy is trusted for a minute at most, and forgotten on an
+unblank or a failed write, so a console that drew over the panel heals.
+
+Measured on that frame (2026-10-28, a finger dragged across the Touch test,
+the runtime's own `render:done` / `render:driver` lines):
+
+| Per frame | Before (2026.10.21, 33 frames) | After (300 frames) |
+| --- | --- | --- |
+| Render | 71.9 ms median | **33.0 ms** (p90 36.2) |
+| Driver | 99.6 ms | **16.1 ms** (p90 16.8) |
+| **Together** | **~172 ms (~5.8 fps)** | **~49 ms (~20 fps)** |
+
+**A turned panel is turned on the way in.** The HyperPixel 4.0 is natively
+portrait, so a landscape frame owes a 90-degree turn: a scalar
+`rotateDegrees` pass over the whole frame, every frame, before the driver
+converted it again. Now the framebuffer driver says it turns frames itself
+(the panel hint's `rotates`), the runner hands `drivers.render` the frame as
+the scene drew it with `rotate`, and the driver gathers each panel row from
+the unturned frame as it stages it (`panel_push.nim` `stageImage`, the
+mapping `rotateDegrees` uses, pinned by `test_panel_push.nim`). A driver
+without `frameos_driver_set_render_rotation`, and every statically linked
+one, still gets the frame turned by the host. With it, a turned 565 panel
+keeps the 565 canvas too, at the scene's own size.
+
+**The staging loops run without Nim's checks.** The driver libraries are
+built for size (`-Os`, and one set of C flags for every file of a library,
+so a per-file `localPassC` never reaches them). At `-Os` gcc keeps each
+overflow-checked index sum as a branch inside the loop, which made staging a
+turned 800x480 frame 14 ms on a Pi 5. `panel_push.nim` turns the checks off
+for the module (every index comes from the layout the shadow was prepared
+for) and works out a 32 bpp layout's shifts once per frame, not per pixel.
+On the Pi 5 at `-Os`, every row new: 3.0 ms turned, 2.2 ms upright, 0.18 ms
+for a 720x720 565 canvas.
+
+Measured on Cloud-5 (Pi 5, HyperPixel 4.0 at 32 bpp, a landscape frame
+turned 90 degrees; 30 touch moves, 32 frames each, 2026-10-28):
+
+| Per frame | 2026.10.21 | Turned in the driver |
+| --- | --- | --- |
+| Render | 12.0 ms median | **4.8 ms** |
+| Driver | 12.8 ms | **3.3 ms** |
+| **Together** | **~25 ms** | **~8 ms** |
+
+What is left (`docs/realtime-todo.md`): the push on its own thread, and
+waking on input instead of polling.
 
 ## Measuring
 

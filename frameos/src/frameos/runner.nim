@@ -13,6 +13,7 @@ import frameos/event_log
 import frameos/event_loop
 import frameos/interpreter
 import frameos/display_detect
+import frameos/panel_canvas
 import frameos/driver_render_hint
 import frameos/render_stats
 import frameos/local_access
@@ -61,13 +62,15 @@ proc nextDriverRetrySeconds*(requested: float, floor: var float): float =
   floor = min(floor * 2, DRIVER_RETRY_MAX_SECONDS)
   max(requested, floor)
 
-proc pushToPanel(image: Image) =
+proc pushToPanel(image: Image, rotation: int) =
   ## Every push to the display driver. The generation is odd for as long as
   ## the driver has the picture, and `GET /image` caches nothing meanwhile
-  ## (channels.nim).
+  ## (channels.nim). `image` is the frame as the scene drew it, `rotation`
+  ## frame.json's `rotate`: the driver turns it as it stages its rows when it
+  ## can, drivers.render turns it first when it cannot.
   noteDriverRenderStarted()
   try:
-    drivers.render(image)
+    drivers.render(image, rotation)
   finally:
     noteDriverRendered()
 
@@ -263,13 +266,20 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   self.logger.log(%*{"event": "render:scene", "width": requiredWidth, "height": requiredHeight,
       "sceneId": scene.id.string})
 
+  # The panel's own RGB565 canvas when the driver takes one (frameos/panel_canvas):
+  # kept between frames, so there is nothing to convert and a whole-frame SVG
+  # repaints only what changed. A fresh RGBA canvas otherwise.
+  let panelCanvas = panelCanvasFor(self.frameConfig.width, self.frameConfig.height,
+    requiredWidth, requiredHeight, self.frameConfig.rotate, self.frameConfig.flip)
   var context = ExecutionContext(
     scene: scene,
     event: "render",
     payload: %*{},
-    image: case self.frameConfig.rotate:
-    of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
-    else: newImage(self.frameConfig.width, self.frameConfig.height),
+    image: if not panelCanvas.isNil: panelCanvas
+      else:
+        case self.frameConfig.rotate:
+        of 90, 270: newImage(self.frameConfig.height, self.frameConfig.width)
+        else: newImage(self.frameConfig.width, self.frameConfig.height),
     hasImage: true,
     loopIndex: 0,
     loopKey: ".",
@@ -279,11 +289,17 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
   try:
     # `hostRun`: what the render dispatches is the scene talking to itself, and
     # renders again only by asking (event_loop.nim).
-    self.sceneEvents.hostRun:
-      discard exportedScene.render(scene, context)
+    beginPanelCanvasFrame(context.image)
+    try:
+      self.sceneEvents.hostRun:
+        discard exportedScene.render(scene, context)
+    finally:
+      endPanelCanvasFrame()
     if self.frameConfig.controlCode.enabled:
       render_imageApp.App(self.controlCodeRender).appConfig.image = data_qrApp.App(self.controlCodeData).get(context)
       render_imageApp.App(self.controlCodeRender).run(context)
+      if context.image.isPanelCanvas:
+        notePanelCanvasWritten()
     # A pending FrameOS Cloud link code (cloud/device_flow.nim): the user code
     # plus a QR of the claim URL, drawn over the scene for the same reason as
     # the presence code — reading it off the panel is the ownership proof.
@@ -307,6 +323,8 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
         linkText.add("\n" & linkCode.verificationUri)
       render_textApp.App(self.linkCodeRender).appConfig.text = linkText
       render_textApp.App(self.linkCodeRender).run(context)
+      if context.image.isPanelCanvas:
+        notePanelCanvasWritten()
     let image = context.image
 
     var outImage: Image
@@ -319,6 +337,8 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     # The frame-wide colour correction, on every display, before the image
     # is stored and shown.
     applyGlobalColorCorrection(outImage)
+    if outImage.isPanelCanvas and frameColorSettings.global.hasAdjustments():
+      notePanelCanvasWritten()
     setLastImage(outImage)
     # The local network access code, if one is pending. Drawn AFTER the render is stored
     # (setLastImage copies), so it reaches the panel only: the whole point is
@@ -328,6 +348,8 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
     # last so no scene can paint over it.
     self.localAccessShownFor = self.localAccessPanelWanted()
     self.localAccessDrawn = self.drawLocalAccessCode(outImage, self.localAccessShownFor)
+    if self.localAccessDrawn and outImage.isPanelCanvas:
+      notePanelCanvasWritten()
     case self.frameConfig.flip:
     of "horizontal":
       outImage.flipHorizontal()
@@ -338,7 +360,8 @@ proc renderSceneImage*(self: RunnerThread, exportedScene: ExportedScene, scene: 
       outImage.flipVertical()
     else:
       discard
-    result = (outImage.rotateDegrees(self.frameConfig.rotate), context.nextSleep)
+    # Unturned: pushToPanel hands `rotate` on with it (drivers.render).
+    result = (outImage, context.nextSleep)
   except Exception as e:
     let errorImage = renderError(requiredWidth, requiredHeight, &"Error: {$e.msg}\n{$e.getStackTrace()}")
     setLastImage(errorImage)
@@ -460,7 +483,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
       self.triggerRenderNext = false # used to debounce render events received while rendering
 
       var renderResult = self.renderSceneImage(exportedScene.get(), currentScene)
-      var lastRotatedImage = renderResult[0]
+      var lastFrameImage = renderResult[0]
       let nextSleep = renderResult[1]
       # Read the interval AFTER the render: a scene that paces itself while
       # drawing (the animated status screen sets `refreshInterval` from the
@@ -523,7 +546,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         if self.localAccessDrawn:
           markLocalAccessCodeOnPanel()
         # TODO: render the driver part in another thread
-        pushToPanel(lastRotatedImage)
+        pushToPanel(lastFrameImage, self.frameConfig.rotate)
         if not self.localAccessDrawn:
           clearLocalAccessCodeOnPanel()
         # The framebuffer's late probe (Pi 5 KMS) reports the real panel
@@ -549,8 +572,8 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
         let earlierRenderRequest = takeEarlierRenderRequest()
         if earlierRenderRequest.isSome:
           driverRetrySeconds = max(earlierRenderRequest.get(), DRIVER_RETRY_MIN_SECONDS)
-          driverRetryImage = lastRotatedImage
-        lastRotatedImage = nil
+          driverRetryImage = lastFrameImage
+        lastFrameImage = nil
         renderResult[0] = nil
         # Return decode/render spikes to the OS on every device; e-ink frames
         # otherwise hold tens of MB of dead heap between refreshes. Skipped
@@ -658,7 +681,7 @@ proc startRenderLoop*(self: RunnerThread, maxCycles = -1): Future[void] {.async.
             # The held canvas is the frame rendered above, code and all.
             if self.localAccessDrawn:
               markLocalAccessCodeOnPanel()
-            pushToPanel(driverRetryImage)
+            pushToPanel(driverRetryImage, self.frameConfig.rotate)
             if not self.localAccessDrawn:
               clearLocalAccessCodeOnPanel()
             # This retry is exactly where a late framebuffer probe lands.
@@ -740,7 +763,7 @@ proc presentCursor(self: RunnerThread) =
   try:
     if codeDrawn:
       markLocalAccessCodeOnPanel()
-    pushToPanel(image.rotateDegrees(self.frameConfig.rotate))
+    pushToPanel(image, self.frameConfig.rotate)
     if not codeDrawn:
       clearLocalAccessCodeOnPanel()
   except Exception as e:

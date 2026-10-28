@@ -127,3 +127,74 @@ proc unpackDetectedDisplaySize*(packed: uint64): Option[(int, int)] =
   if packed == 0:
     return none((int, int))
   some(((packed shr 32).int, (packed and 0xFFFFFFFF'u64).int))
+
+# driver → host: the canvas the panel takes as it is.
+#
+# A Linux framebuffer at 16 bits per pixel in RGB565 order holds exactly what
+# a pixie `pfRgb565` image holds, row for row. When its driver says so, the
+# runner renders into one RGB565 canvas it keeps for the whole uptime (as an
+# ESP32 LCD does): nothing to convert per frame, and a scene that draws one
+# SVG repaints only what changed (utils/svg_frames.nim). Unlike the detected
+# size this is standing state, not news: the driver reports what its panel
+# takes on every probe, and the host keeps the last answer. Same transport:
+# the generated library exports `frameos_driver_panel_canvas`, packed as
+# format << 32 | width << 16 | height, 0 for "convert as before".
+
+const PanelCanvasRgb565* = 1
+  ## The one format a driver can ask for today.
+
+var
+  panelCanvasFormatValue {.threadvar.}: int
+  panelCanvasWidthValue {.threadvar.}: int
+  panelCanvasHeightValue {.threadvar.}: int
+  panelCanvasRotatesValue {.threadvar.}: bool
+
+proc reportPanelCanvas*(width, height, format: int, rotates = false) =
+  ## The panel's own size and what it takes: `format` 0 for an RGBA image to
+  ## convert, `rotates` when the driver turns the frame itself on its way in
+  ## (`renderRotation` below), so the host hands it over as the scene drew it.
+  ## A size out of range withdraws the whole offer.
+  if width <= 0 or height <= 0 or width > 0xFFFF or height > 0xFFFF or
+      (format <= 0 and not rotates):
+    panelCanvasFormatValue = 0
+    panelCanvasWidthValue = 0
+    panelCanvasHeightValue = 0
+    panelCanvasRotatesValue = false
+    return
+  panelCanvasFormatValue = max(format, 0)
+  panelCanvasWidthValue = width
+  panelCanvasHeightValue = height
+  panelCanvasRotatesValue = rotates
+
+proc panelCanvas*(): tuple[width, height, format: int, rotates: bool] =
+  ## What the panel takes as it is; format 0 for "an RGBA image, converted".
+  (panelCanvasWidthValue, panelCanvasHeightValue, panelCanvasFormatValue, panelCanvasRotatesValue)
+
+proc packPanelCanvas*(): uint64 =
+  ## rotates << 40 | format << 32 | width << 16 | height, 0 for no offer.
+  let c = panelCanvas()
+  if c.width <= 0:
+    return 0
+  (if c.rotates: 1'u64 shl 40 else: 0'u64) or (c.format.uint64 shl 32) or
+    (c.width.uint64 shl 16) or c.height.uint64
+
+proc unpackPanelCanvas*(packed: uint64) =
+  ## Folds a library's answer into this (the host's) copy.
+  reportPanelCanvas(((packed shr 16) and 0xFFFF'u64).int, (packed and 0xFFFF'u64).int,
+    ((packed shr 32) and 0xFF'u64).int, ((packed shr 40) and 1'u64) == 1)
+
+# host → driver: the rotation still owed to the frame it is handed.
+#
+# frame.json `rotate`, for a driver that said it turns frames itself (the
+# panel canvas hint's `rotates`): the host skips its own pass and the driver
+# stages the turned rows straight into what it writes. Set before every
+# render, through `frameos_driver_set_render_rotation` for a library; 0 for a
+# frame that arrives turned already.
+
+var renderRotationValue {.threadvar.}: int
+
+proc setRenderRotation*(degrees: int) =
+  renderRotationValue = ((degrees mod 360) + 360) mod 360
+
+proc renderRotation*(): int =
+  renderRotationValue

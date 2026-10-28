@@ -365,6 +365,7 @@ import frameos/types
 import frameos/driver_context as driverContext
 import frameos/device_setup
 import frameos/driver_render_hint
+from frameos/utils/image import rotateDegrees
 {newline.join(imports)}
 {newline.join(setup_imports)}
 {newline.join(vars)}
@@ -376,7 +377,9 @@ proc init*(frameOS: FrameOS) =
   {(newline + '  ').join(init_drivers or ["discard"])}
   syncDriverContext(frameOS, driverCtx)
 
-proc render*(image: Image) =
+proc render*(image: Image, rotation = 0) =
+  # Statically linked drivers are handed the frame turned here.
+  let image = if ((rotation mod 360) + 360) mod 360 == 0: image else: image.rotateDegrees(rotation)
   {(newline + '  ').join(render_drivers or ["discard"])}
   # Statically linked drivers share this module's hint copy; shared
   # libraries answered through their exported symbol above.
@@ -444,6 +447,7 @@ import frameos/channels as hostChannels
 import frameos/driver_abi
 import frameos/driver_render_hint
 import frameos/utils/dither
+from frameos/utils/image import rotateDegrees
 {newline.join(setup_imports)}
 
 type
@@ -462,7 +466,9 @@ type
     render: DriverRenderProc
     earlierRender: DriverEarlierRenderProc
     detectedDisplaySize: DriverDetectedDisplaySizeProc
+    panelCanvas: DriverPanelCanvasProc
     setRenderPalette: DriverSetRenderPaletteProc
+    setRenderRotation: DriverSetRenderRotationProc
     toPng: DriverToPngProc
     turnOn: DriverActionProc
     turnOff: DriverActionProc
@@ -590,10 +596,19 @@ proc init*(frameOS: FrameOS) =
           "frameos_driver_earlier_render_seconds")
       loaded.detectedDisplaySize = loadOptionalSymbol[DriverDetectedDisplaySizeProc](library,
           "frameos_driver_detected_display_size")
+      # The canvas the panel takes as it is (frameos/driver_render_hint).
+      # Optional: a `.so` from before it is handed an RGBA image, as before.
+      loaded.panelCanvas = loadOptionalSymbol[DriverPanelCanvasProc](library,
+          "frameos_driver_panel_canvas")
       # A photo's own dither palette (frameos/utils/asset_colors). Optional:
       # a `.so` from before it keeps the panel's built-in palette.
       loaded.setRenderPalette = loadOptionalSymbol[DriverSetRenderPaletteProc](library,
           "frameos_driver_set_render_palette")
+      # The rotation the frame still owes, for a driver that turns it itself
+      # (frameos/driver_render_hint). Optional: a `.so` from before it is
+      # handed the frame turned by the host, as before.
+      loaded.setRenderRotation = loadOptionalSymbol[DriverSetRenderRotationProc](library,
+          "frameos_driver_set_render_rotation")
     # An input driver that speaks structs (frameos/driver_abi). Optional: a
     # `.so` from before it keeps sending JSON events, which the host still takes.
     loaded.setInputHook = loadOptionalSymbol[DriverSetInputHookProc](library, "frameos_driver_set_input_hook")
@@ -608,7 +623,17 @@ proc init*(frameOS: FrameOS) =
     syncDriverContext(frameOS, driverCtx)
     hostChannels.log(%*{{"event": "driver:shared", "driver": spec.name, "path": path, "loaded": true}})
 
-proc render*(image: Image) =
+proc render*(image: Image, rotation = 0) =
+  ## `image` as the scene drew it; `rotation` (frame.json `rotate`) is what it
+  ## still owes on its way to the panel. A driver whose panel hint says it
+  ## rotates (frameos/driver_render_hint) is handed it as it is and stages the
+  ## turned rows itself; anything else gets it turned here first, as before.
+  let rotation = ((rotation mod 360) + 360) mod 360
+  var onPanel = rotation != 0 and panelCanvas().rotates
+  for driver in loadedDrivers:
+    if driver.spec.canRender and not driver.render.isNil and driver.setRenderRotation.isNil:
+      onPanel = false
+  let frame = if rotation == 0 or onPanel: image else: image.rotateDegrees(rotation)
   # The host's copy of the palette override (frameos/utils/dither), flattened
   # into ints the library's own copy is set from before every render; a
   # count of 0 clears it. Values only, borrowed for the call.
@@ -623,7 +648,9 @@ proc render*(image: Image) =
       if not driver.setRenderPalette.isNil:
         driver.setRenderPalette(driver.instance,
           (if paletteCount > 0: paletteInts[0].addr else: nil), paletteCount)
-      driver.render(driver.instance, cast[pointer](image))
+      if not driver.setRenderRotation.isNil:
+        driver.setRenderRotation(driver.instance, cint(if onPanel: rotation else: 0))
+      driver.render(driver.instance, cast[pointer](frame))
       # "Call me back sooner than the interval" — the library's own copy of
       # the request (frameos/driver_render_hint), folded into ours. Polled
       # immediately after the call that could have set it.
@@ -631,6 +658,8 @@ proc render*(image: Image) =
         requestEarlierRender(driver.earlierRender(driver.instance).float)
       if not driver.detectedDisplaySize.isNil:
         foldDetectedDisplaySize(unpackDetectedDisplaySize(driver.detectedDisplaySize(driver.instance)))
+      if not driver.panelCanvas.isNil:
+        unpackPanelCanvas(driver.panelCanvas(driver.instance))
   # Statically linked drivers share this module's hint copy; shared
   # libraries answered through their exported symbol above.
   foldDetectedDisplaySize(takeDetectedDisplaySize())
@@ -736,6 +765,19 @@ proc frameos_driver_detected_display_size*(driver: pointer): uint64 {{.cdecl, ex
   ## frameos/driver_render_hint. Read once, cleared on read, like the
   ## earlier-render request above.
   packDetectedDisplaySize()
+
+proc frameos_driver_set_render_rotation*(driver: pointer, degrees: cint) {{.cdecl, exportc, dynlib.}} =
+  ## Host -> driver: the rotation still owed to the frame the next render
+  ## hands over, into THIS library's copy of frameos/driver_render_hint. Only
+  ## acted on by a driver whose panel hint says it rotates.
+  setRenderRotation(degrees.int)
+
+proc frameos_driver_panel_canvas*(driver: pointer): uint64 {{.cdecl, exportc, dynlib.}} =
+  ## Driver -> host: the canvas this driver's panel takes as it is
+  ## (format << 32 | width << 16 | height, 0 for an RGBA image to convert),
+  ## from THIS library's copy of frameos/driver_render_hint. Standing state:
+  ## not cleared on read.
+  packPanelCanvas()
 
 proc frameos_driver_set_render_palette*(driver: pointer, colors: ptr cint, count: cint) {{.cdecl, exportc, dynlib.}} =
   ## Host -> driver: the palette the next render dithers against, `count`

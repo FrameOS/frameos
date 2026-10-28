@@ -25,6 +25,7 @@
 import json, jsony, pixie, os, strutils, parseutils, locks
 import std/atomics
 import zippy
+import frameos/device_event_map
 import frameos/hal/files
 import frameos/hotspot_credentials
 import frameos/local_access
@@ -345,6 +346,10 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.width == 0: config.width = 1920
   if config.height == 0: config.height = 1080
   if config.device == "": config.device = "web_only"
+  # A frame never given an event map takes its device's (a HyperPixel's edge
+  # swipes); an empty list is a choice and stays empty.
+  if config.eventMap.isNil or config.eventMap.kind == JNull:
+    config.eventMap = deviceEventMap(config.device)
   # 0 means "metrics disabled" (metrics.nim); only a negative value — never a
   # real period — falls back to the default. An absent key defaults in newHook.
   if config.metricsInterval < 0: config.metricsInterval = 60

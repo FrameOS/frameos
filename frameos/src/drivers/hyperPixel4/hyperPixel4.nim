@@ -63,6 +63,7 @@ proc setPower(self: Driver; on: bool) =
 
 proc turnOn*(self: Driver) =
   self.setPower(true)
+  self.forgetPanelContents()
 
 proc turnOff*(self: Driver) =
   self.setPower(false)
