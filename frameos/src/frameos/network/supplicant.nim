@@ -1132,6 +1132,12 @@ proc startSupplicant(ctx: NetworkContext, device, confPath: string,
   ## working on Debian frames too - no image-side unit is required.
   discard ctx.run("sudo rfkill unblock wifi 2>/dev/null || true", "")
   discard ctx.run("sudo ip link set " & shq(device) & " up 2>/dev/null || true", "")
+  # brcmfmac switches power save on with the link, and a frame is always
+  # plugged in: on a Pi Zero W it only buys dropped and late packets.
+  # `frameos setup` turns it off too, but only until the next boot; the
+  # driver keeps this setting across link changes until it reloads.
+  if probe.hasIw:
+    discard ctx.run("sudo iw dev " & shq(device) & " set power_save off 2>/dev/null || true", "")
   # nl80211 only: the shipped wpa_supplicant has no wext driver compiled in,
   # and naming a missing driver makes it exit instead of falling back.
   let startCmd = "sudo wpa_supplicant -B -i " & shq(device) & " -c " & shq(confPath) &
@@ -1397,6 +1403,16 @@ proc ensureStation*(ctx: NetworkContext, device: string, probe: NetworkToolProbe
   let address = requestDhcpLease(ctx, device, probe)
   SupplicantOpResult(ok: address.len > 0, message: address)
 
+proc stopStationAndWait(ctx: NetworkContext, device: string, probe: NetworkToolProbe) =
+  ## stopStationMode, then give the old supplicant a few seconds to go:
+  ## `terminate` only asks, and ensureStation takes one that still answers
+  ## for a healthy station and leaves it be.
+  stopStationMode(ctx, device)
+  for attempt in 1 .. 5:
+    if not supplicantRunning(ctx, device, probe):
+      return
+    ctx.sleep(associateDelayMs)
+
 proc stationUp*(ctx: NetworkContext, device: string, probe: NetworkToolProbe): bool =
   ## Associated and holding an IPv4 address - the state the boot network
   ## check assumes and that ensureStation only reaches once.
@@ -1427,8 +1443,133 @@ proc repairStation*(ctx: NetworkContext, device: string, probe: NetworkToolProbe
       if address.len > 0:
         return SupplicantOpResult(ok: true, message: address)
       return SupplicantOpResult(ok: false, message: "Associated but no DHCP lease was offered.")
-    stopStationMode(ctx, device)
+    stopStationAndWait(ctx, device, probe)
   ensureStation(ctx, device, probe, countryCode)
+
+proc restartStation*(ctx: NetworkContext, device: string, probe: NetworkToolProbe,
+                     countryCode = ""): SupplicantOpResult =
+  ## For a station that looks up (associated, holding an address) while
+  ## nothing reaches the router, which repairStation calls healthy. A Pi Zero
+  ## W whose firmware roamed to another mesh node stayed exactly like that
+  ## until a reboot (2026-10-27). Drop our supplicant and DHCP client and
+  ## join from scratch.
+  if hotspotRunning(ctx):
+    return SupplicantOpResult(ok: true, message: "hotspot")
+  stopStationAndWait(ctx, device, probe)
+  ensureStation(ctx, device, probe, countryCode)
+
+proc isIpv4Literal*(value: string): bool =
+  ## Dotted quad only. The router address comes from the DHCP server and ends
+  ## up in a shell command, so nothing else gets through.
+  let parts = value.split('.')
+  if parts.len != 4:
+    return false
+  for part in parts:
+    if part.len == 0 or part.len > 3:
+      return false
+    for c in part:
+      if c notin {'0'..'9'}:
+        return false
+    if parseInt(part) > 255:
+      return false
+  true
+
+proc parseDefaultGateway*(output: string): string =
+  ## `ip -4 route show default` -> the first `default via <ip>` address.
+  for line in output.splitLines():
+    let fields = line.splitWhitespace()
+    if fields.len >= 3 and fields[0] == "default" and fields[1] == "via" and isIpv4Literal(fields[2]):
+      return fields[2]
+
+proc stationRouter*(ctx: NetworkContext, device: string): string =
+  ## The default gateway: what our lease handler recorded, else the routing
+  ## table (dhcpcd, dhclient and busybox's own script record nothing).
+  for router in readLeaseInfo(ctx, device).router.splitWhitespace():
+    if isIpv4Literal(router):
+      return router
+  let (output, _) = ctx.run("ip -4 route show default dev " & shq(device) & " 2>/dev/null || true", "")
+  parseDefaultGateway(output)
+
+# Link watchdog
+#
+# The boot join and the network check's repairs end once the frame is up;
+# NetworkManager images have NetworkManager for everything after that, this
+# backend had nothing. So a station that dropped later, or stayed associated
+# while no packet got through, was offline until somebody rebooted the frame.
+# portal.nim runs linkWatchdogStep once a minute on its own thread and does
+# what it decides.
+# ---------------------------------------------------------------------------
+
+const
+  linkWatchdogIntervalMs* = 60_000
+  ## Checks in a row without the router before the watchdog acts: three
+  ## minutes. A router reboot or a busy channel can cost a minute or two, and
+  ## a restart costs the frame its network for another twenty seconds.
+  linkWatchdogFailuresBeforeRepair* = 3
+  ## Minutes to wait after each restart that did not bring the router back,
+  ## the last one repeating, so a network that is really down does not have
+  ## the frame restarting its radio every few minutes.
+  linkWatchdogBackoffMinutes* = [5, 10, 20, 30]
+
+type
+  LinkObservation* = object
+    hotspot*: bool         ## the setup hotspot owns the radio
+    noWifiConfig*: bool    ## no saved network, so nothing to rejoin
+    stationUp*: bool       ## associated and holding an address
+    router*: string        ## the default gateway, "" when there is none
+    routerAnswered*: bool  ## it answered a ping just now
+
+  LinkWatchdogAction* = enum
+    lwaNone
+    lwaArmed      ## a router answered for the first time: misses count from now
+    lwaLost       ## the first miss of a run
+    lwaRecovered  ## it answers again after misses or restarts
+    lwaRepair     ## restart the station now, then call noteLinkRepair
+
+  LinkWatchdog* = object
+    ## The router that has answered a ping. Misses only count against a
+    ## router that answered once: one that drops ICMP must not have the frame
+    ## restarting its Wi-Fi forever on a network that works.
+    armedRouter*: string
+    failures*: int
+    ## Restarts since the router last answered; picks the backoff.
+    repairs*: int
+    ## Seconds on the caller's monotonic clock.
+    nextRepairAt*: float
+
+proc linkWatchdogStep*(state: var LinkWatchdog, seen: LinkObservation,
+                       nowSeconds: float): LinkWatchdogAction =
+  if seen.hotspot or seen.noWifiConfig:
+    state.failures = 0
+    return lwaNone
+  if seen.stationUp and seen.routerAnswered and seen.router.len > 0:
+    let firstAnswer = seen.router != state.armedRouter
+    let wasFailing = state.failures > 0 or state.repairs > 0
+    state.armedRouter = seen.router
+    state.failures = 0
+    state.repairs = 0
+    state.nextRepairAt = 0
+    if firstAnswer:
+      return lwaArmed
+    if wasFailing:
+      return lwaRecovered
+    return lwaNone
+  # An associated station on a router that never answered tells us nothing.
+  # A station that is not up at all is always worth a repair.
+  if seen.stationUp and (state.armedRouter.len == 0 or seen.router != state.armedRouter):
+    return lwaNone
+  state.failures += 1
+  if state.failures >= linkWatchdogFailuresBeforeRepair and nowSeconds >= state.nextRepairAt:
+    return lwaRepair
+  if state.failures == 1:
+    return lwaLost
+  lwaNone
+
+proc noteLinkRepair*(state: var LinkWatchdog, nowSeconds: float) =
+  let wait = linkWatchdogBackoffMinutes[min(state.repairs, linkWatchdogBackoffMinutes.high)]
+  state.repairs += 1
+  state.failures = 0
+  state.nextRepairAt = nowSeconds + float(wait * 60)
 
 proc logJson*(status: WifiStatus): JsonNode =
   %*{"connected": status.connected, "ssid": status.ssid,

@@ -91,6 +91,13 @@ TypeScript (`src/lib/ai/loop.ts`, `openai.ts`), the backend's a port of it
 placeholders before anything reaches the model on both
 (`share-links-in-scenes.ts`, `photo_share_links.py`).
 
+A reply may take 40 rounds (`MAX_TOOL_ROUNDS` on both; on the cloud the
+account's daily AI line, checked after every round, is what stops a runaway).
+A reply that uses them all gets one more round with `tool_choice: "none"`
+and a note asking the model what it did and what is left, so it ends on its
+own summary and the user can say "continue" (`outOfStepsNote` /
+`out_of_steps_note`).
+
 ## The tools: the MCP server's, plus the editor's
 
 The chat has every tool its plane's MCP server has (`docs/mcp.md`,
@@ -111,7 +118,12 @@ Next to them, the editor tools: `create_scenes`, `update_scene`,
 `patch_scene`, `edit_app_source` (deliver to the editor, after validation) and
 `render_scene` (look at a scene: the cloud's headless wasm renderer,
 `scene-render.ts`; the backend's `embedded_render.py`, when Node and the wasm
-build are present). With `editor: false`, `create_scenes` points the model at
+build are present). It draws at the request's `renderSize`, the size the
+user's preview draws at (the store editor's Preview panel after a Resize or a
+rotate, a frame's rotated resolution), and the turn's context names that size
+(`renderSizeContext` / `render_size_context`, the same sentence on both);
+`width` and `height` render at any other size, one call per size when a scene
+must work at several. With `editor: false`, `create_scenes` points the model at
 `scene_create` / `frame_scene_install` instead. The cloud keeps its own extra
 tools too (catalog and doc search, store, `save_scene`, `add_scene_to_frame`).
 
@@ -156,6 +168,13 @@ between) once the chat has messages, dropped on the History list and on a new
 chat. A reload or the Back button opens that chat again, also one older than
 the history's first page: `GET …/ai/chats/{id}` returns its summary with the
 messages (`chatLogic.openChat`).
+
+A reply that delivers a scene to a frame's editor is followed by the render
+check (`renderSceneCheck`, in the browser's wasm runtime, in the frame's memory
+on an ESP32): the frame it drew is shown under the reply, errors or not, and
+when the check passes it becomes the scene's image (`assignSceneImages`, the
+scene tile) until the frame renders the scene itself. The picture is the
+session's own (an object URL); a chat reopened from history has none.
 
 ## Links
 

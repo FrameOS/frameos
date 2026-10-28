@@ -161,10 +161,14 @@ describe("store repository indexes", () => {
     const payload = await readJson(
       await getRepositoryJson(request("/api/store/repository.json")),
     );
-    const [template] = payload.templates as { zip: string }[];
+    const [template] = payload.templates as { zip: string; created: string; updated: string }[];
     expect(templateNames(payload)).toEqual(["From the future"]);
     // Unchanged contract for installs already subscribed to this URL.
     expect(template!.zip).toBe(`./scenes/${scene.id}/download`);
+    // When it was added (the frames home's latest additions) beside its
+    // last change.
+    expect(Number.isNaN(Date.parse(template!.created))).toBe(false);
+    expect(Number.isNaN(Date.parse(template!.updated))).toBe(false);
   });
 
   it("makes versioned URLs absolute so they resolve outside the version folder", async () => {

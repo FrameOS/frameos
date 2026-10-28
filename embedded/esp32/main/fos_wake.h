@@ -69,3 +69,13 @@ int64_t fos_wake_aligned_sleep_ms(int64_t utc_now_ms, uint32_t interval_sec,
  * happened to take that long (minutes, the task watchdog's IDLE1, a clock
  * that stopped). A `tick_ms` of 0 counts as 1. */
 uint32_t fos_wake_slice_ticks(int64_t left_us, uint32_t max_slice_ms, uint32_t tick_ms);
+
+/* A deep-sleeping frame's rest after a pass that rendered. The schedule
+ * counts the interval from when the render was due, so a pass (the render,
+ * then the panel's refresh) that outlasts the interval leaves the next render
+ * already due: the frame slept the one-second minimum, rebooted and rendered
+ * again, around the clock, on a battery (a 13.3" rainbow clock: a 60 s
+ * interval, 4.3 minute passes, 2026-10-27). Such a frame rests at least as
+ * long as the pass took, so it works at most half the time. `left_ms` is what
+ * the schedule asked for, `pass_ms` how long the pass ran. At least 1. */
+uint32_t fos_wake_rest_ms(int64_t left_ms, int64_t pass_ms);

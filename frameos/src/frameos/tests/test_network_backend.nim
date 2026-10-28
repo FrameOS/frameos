@@ -935,3 +935,217 @@ suite "repairing the boot-time station":
     let res = repairStation(ctx, "wlan0", parseToolProbe(fullProbeTools))
     check ranCommand(stub, "wpa_supplicant -B -i 'wlan0'")
     check res.message == "not associated"
+
+proc cutOffContext(stub: StubNetwork, exitPings = 0): NetworkContext =
+  ## Associated and holding an address, so every status check says "up",
+  ## while (in the real failure) nothing gets past the access point. After
+  ## `terminate` the old supplicant still answers `exitPings` pings.
+  let base = stubContext(stub)
+  let alive = new bool
+  alive[] = true
+  let pingsLeft = new int
+  NetworkContext(
+    run: proc(cmd, loggedCmd: string): NetCmdResult {.gcsafe.} =
+      if cmd.contains("wpa_cli") and cmd.contains(" terminate"):
+        stub.commands.add(cmd)
+        alive[] = false
+        pingsLeft[] = exitPings
+        return (output: "", rc: 0)
+      if cmd.contains("wpa_supplicant -B"):
+        stub.commands.add(cmd)
+        alive[] = true
+        return (output: "", rc: 0)
+      if cmd.contains("wpa_cli") and cmd.contains(" ping"):
+        stub.commands.add(cmd)
+        if alive[] or pingsLeft[] > 0:
+          if not alive[]:
+            dec pingsLeft[]
+          return (output: "PONG\n", rc: 0)
+        return (output: "", rc: 0)
+      if cmd.contains("wpa_cli") and cmd.contains(" status"):
+        stub.commands.add(cmd)
+        return (output: "wpa_state=COMPLETED\nssid=Home\nip_address=10.8.0.171\n", rc: 0)
+      base.run(cmd, loggedCmd),
+    sleep: base.sleep, log: base.log, writeFile: base.writeFile,
+    readFile: base.readFile, pathExists: base.pathExists)
+
+proc commandIndex(stub: StubNetwork, fragment: string): int =
+  for i, cmd in stub.commands:
+    if cmd.contains(fragment):
+      return i
+  -1
+
+proc hotspotUpContext(stub: StubNetwork): NetworkContext =
+  ## hostapd's pid answers `kill -0`: the setup hotspot owns the radio.
+  let base = stubContext(stub)
+  NetworkContext(
+    run: proc(cmd, loggedCmd: string): NetCmdResult {.gcsafe.} =
+      if cmd.contains("kill -0"):
+        stub.commands.add(cmd)
+        return (output: "", rc: 0)
+      base.run(cmd, loggedCmd),
+    sleep: base.sleep, log: base.log, writeFile: base.writeFile,
+    readFile: base.readFile, pathExists: base.pathExists)
+
+proc routedContext(stub: StubNetwork, routes: string): NetworkContext =
+  ## `ip -4 route show default` prints `routes`.
+  let base = stubContext(stub)
+  NetworkContext(
+    run: proc(cmd, loggedCmd: string): NetCmdResult {.gcsafe.} =
+      if cmd.contains("ip -4 route show default"):
+        stub.commands.add(cmd)
+        return (output: routes, rc: 0)
+      base.run(cmd, loggedCmd),
+    sleep: base.sleep, log: base.log, writeFile: base.writeFile,
+    readFile: base.readFile, pathExists: base.pathExists)
+
+suite "station power save and restarts":
+  test "every join switches power save off once the link is up, before the supplicant starts":
+    let stub = newStubNetwork()
+    stub.files[importedConfPath] = wpaSupplicantHeader() & buildWpaNetworkBlock("Home", "").conf
+    discard ensureStation(stubContext(stub), "wlan0", parseToolProbe(fullProbeTools))
+    let linkUp = commandIndex(stub, "ip link set 'wlan0' up")
+    let powerSave = commandIndex(stub, "iw dev 'wlan0' set power_save off")
+    let start = commandIndex(stub, "wpa_supplicant -B -i 'wlan0'")
+    check linkUp >= 0
+    check powerSave > linkUp
+    check start > powerSave
+
+  test "no iw means no power save command":
+    let stub = newStubNetwork()
+    stub.files[importedConfPath] = wpaSupplicantHeader() & buildWpaNetworkBlock("Home", "").conf
+    discard ensureStation(stubContext(stub), "wlan0",
+                          parseToolProbe("wpa_supplicant\nwpa_cli\nhostapd\ndnsmasq\nudhcpc\n"))
+    check ranCommand(stub, "wpa_supplicant -B -i 'wlan0'")
+    check not ranCommand(stub, "power_save")
+
+  test "repairStation calls a cut-off station healthy; restartStation joins it again":
+    let stub = newStubNetwork()
+    stub.files[importedConfPath] = wpaSupplicantHeader() & buildWpaNetworkBlock("Home", "").conf
+    let ctx = cutOffContext(stub)
+    let probe = parseToolProbe(fullProbeTools)
+    check stationUp(ctx, "wlan0", probe)
+    check repairStation(ctx, "wlan0", probe).message == "up"
+    check not ranCommand(stub, "terminate")
+
+    discard restartStation(ctx, "wlan0", probe, "gb")
+    let terminate = commandIndex(stub, "terminate")
+    check terminate >= 0
+    check commandIndex(stub, "pkill -f 'udhcpc.*wlan0'") > terminate
+    check commandIndex(stub, "wpa_supplicant -B -i 'wlan0'") > terminate
+    check stub.files[importedConfPath].contains("country=GB")
+
+  test "restartStation waits for a supplicant that is slow to exit":
+    let stub = newStubNetwork()
+    stub.files[importedConfPath] = wpaSupplicantHeader() & buildWpaNetworkBlock("Home", "").conf
+    let res = restartStation(cutOffContext(stub, exitPings = 2), "wlan0", parseToolProbe(fullProbeTools))
+    check res.message != "already running"
+    check ranCommand(stub, "wpa_supplicant -B -i 'wlan0'")
+
+  test "restartStation leaves the setup hotspot alone":
+    let stub = newStubNetwork()
+    let ctx = hotspotUpContext(stub)
+    check restartStation(ctx, "wlan0", parseToolProbe(fullProbeTools)).message == "hotspot"
+    check not ranCommand(stub, "terminate")
+
+suite "the station's router":
+  test "isIpv4Literal takes a dotted quad and nothing else":
+    check isIpv4Literal("10.8.0.1")
+    check isIpv4Literal("255.255.255.255")
+    check not isIpv4Literal("256.1.1.1")
+    check not isIpv4Literal("10.8.0")
+    check not isIpv4Literal("10.8.0.1.5")
+    check not isIpv4Literal("10.8.0.1;reboot")
+    check not isIpv4Literal("10.8.0.-1")
+    check not isIpv4Literal("")
+
+  test "parseDefaultGateway reads the first default route":
+    check parseDefaultGateway("default via 10.8.0.1 dev wlan0 \n10.8.0.0/24 dev wlan0 proto kernel\n") == "10.8.0.1"
+    check parseDefaultGateway("10.8.0.0/24 dev wlan0 proto kernel scope link\n") == ""
+    check parseDefaultGateway("default via $(reboot) dev wlan0\n") == ""
+
+  test "stationRouter prefers the lease, then the routing table, and drops junk from DHCP":
+    let stub = newStubNetwork()
+    stub.files[leaseInfoPath("wlan0")] = "action=bound\nip=10.8.0.171\nrouter=10.8.0.1 10.8.0.2\n"
+    let ctx = stubContext(stub)
+    check stationRouter(ctx, "wlan0") == "10.8.0.1"
+    check not ranCommand(stub, "ip -4 route")
+
+    let routed = newStubNetwork()
+    routed.files[leaseInfoPath("wlan0")] = "action=bound\nrouter=1.1.1.1;reboot\n"
+    let routedCtx = routedContext(routed, "default via 192.168.1.1 dev wlan0\n")
+    check stationRouter(routedCtx, "wlan0") == "192.168.1.1"
+
+suite "link watchdog":
+  proc answering(router = "10.8.0.1"): LinkObservation =
+    LinkObservation(stationUp: true, router: router, routerAnswered: true)
+  proc silent(router = "10.8.0.1"): LinkObservation =
+    LinkObservation(stationUp: true, router: router)
+  proc down(): LinkObservation =
+    LinkObservation(stationUp: false)
+
+  test "a router that never answered is never held against the network":
+    var state = LinkWatchdog()
+    for minute in 0 ..< 60:
+      check linkWatchdogStep(state, silent(), float(minute * 60)) == lwaNone
+    check state.failures == 0
+
+  test "three minutes without an answering router restart the station":
+    var state = LinkWatchdog()
+    check linkWatchdogStep(state, answering(), 0) == lwaArmed
+    check linkWatchdogStep(state, answering(), 60) == lwaNone
+    check linkWatchdogStep(state, silent(), 120) == lwaLost
+    check linkWatchdogStep(state, silent(), 180) == lwaNone
+    check linkWatchdogStep(state, silent(), 240) == lwaRepair
+
+  test "a station that is down is repaired without any router having answered":
+    var state = LinkWatchdog()
+    check linkWatchdogStep(state, down(), 0) == lwaLost
+    check linkWatchdogStep(state, down(), 60) == lwaNone
+    check linkWatchdogStep(state, down(), 120) == lwaRepair
+
+  test "restarts that do not help back off to 5, 10, 20 and then every 30 minutes":
+    var state = LinkWatchdog()
+    discard linkWatchdogStep(state, answering(), 0)
+    var now = 0.0
+    var repairsAt: seq[float] = @[]
+    while repairsAt.len < 6:
+      now += 60
+      if linkWatchdogStep(state, silent(), now) == lwaRepair:
+        repairsAt.add(now)
+        noteLinkRepair(state, now)
+    var gaps: seq[int] = @[]
+    for i in 1 ..< repairsAt.len:
+      gaps.add(int(repairsAt[i] - repairsAt[i - 1]) div 60)
+    check gaps == @[5, 10, 20, 30, 30]
+
+  test "an answer after misses or restarts is a recovery and resets the backoff":
+    var state = LinkWatchdog()
+    discard linkWatchdogStep(state, answering(), 0)
+    discard linkWatchdogStep(state, silent(), 60)
+    check linkWatchdogStep(state, answering(), 120) == lwaRecovered
+    for t in [180.0, 240.0]:
+      discard linkWatchdogStep(state, silent(), t)
+    check linkWatchdogStep(state, silent(), 300) == lwaRepair
+    noteLinkRepair(state, 300)
+    check state.nextRepairAt == 600
+    check linkWatchdogStep(state, answering(), 360) == lwaRecovered
+    check state.repairs == 0
+    check state.nextRepairAt == 0
+    check linkWatchdogStep(state, answering(), 420) == lwaNone
+
+  test "the hotspot and a frame with no saved network are left alone":
+    var state = LinkWatchdog()
+    discard linkWatchdogStep(state, answering(), 0)
+    discard linkWatchdogStep(state, silent(), 60)
+    check linkWatchdogStep(state, LinkObservation(hotspot: true), 120) == lwaNone
+    check state.failures == 0
+    for minute in 3 ..< 30:
+      check linkWatchdogStep(state, LinkObservation(noWifiConfig: true), float(minute * 60)) == lwaNone
+
+  test "a router on another network has to answer before its silence counts":
+    var state = LinkWatchdog()
+    discard linkWatchdogStep(state, answering("10.8.0.1"), 0)
+    for minute in 1 ..< 10:
+      check linkWatchdogStep(state, silent("192.168.1.1"), float(minute * 60)) == lwaNone
+    check linkWatchdogStep(state, answering("192.168.1.1"), 600) == lwaArmed

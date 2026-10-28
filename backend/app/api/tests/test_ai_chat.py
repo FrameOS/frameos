@@ -63,6 +63,7 @@ class ScriptedOpenAi:
             "input": json.loads(json.dumps(kwargs["input_items"])),
             "tools": kwargs["tools"],
             "instructions": kwargs["instructions"],
+            "tool_choice": kwargs.get("tool_choice"),
         })
         text, calls = self.rounds[len(self.requests) - 1]
         if text:
@@ -214,6 +215,62 @@ async def test_scenes_are_delivered_to_the_editor_and_patched(async_client, db, 
     # The open scene is context for the model, inside the untrusted frame.
     context = openai.requests[0]["input"][0]["content"][0]["text"]
     assert "Kitchen" in context and '<untrusted_data source="open_scene">' in context
+
+
+@pytest.mark.asyncio
+async def test_render_scene_renders_at_the_preview_size_or_any_size_the_model_asks_for(
+    async_client, db, redis, monkeypatch
+):
+    """The model is told the size of the user's preview and renders there by
+    default, and checks other sizes (portrait, another panel) by asking for
+    them: one call per size, in the same round."""
+    from app.utils import embedded_render
+    from app.utils.embedded_render import SceneRender
+
+    frame = await _setup(db, redis)
+    asked: list[tuple[int, int]] = []
+
+    async def fake_render(_frame, width, height, **kwargs):
+        asked.append((width, height))
+        return SceneRender(b"\x00" * (width * height * 4))
+
+    monkeypatch.setattr(embedded_render, "render_scene", fake_render)
+    monkeypatch.setattr(embedded_render, "thin_client_renderer_available", lambda: True)
+    scene = {
+        "id": "clock",
+        "name": "Clock",
+        "nodes": [{"id": "render", "type": "event", "data": {"keyword": "render"}}],
+        "edges": [],
+    }
+    openai = ScriptedOpenAi([
+        ("", [call("render_scene", {}, "c1"), call("render_scene", {"width": 80, "height": 48}, "c2")]),
+        ("It works in both.", []),
+    ])
+    monkeypatch.setattr(ai_chat_agent, "stream_response", openai)
+    response = await async_client.post(
+        f"/api/projects/{frame.project_id}/ai/chat",
+        json={
+            "prompt": "does it look right in portrait and on a small panel?",
+            "frameId": frame.id,
+            "sceneId": "clock",
+            "scene": scene,
+            "renderSize": {"width": 120, "height": 160},
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    assert asked == [(120, 160), (80, 48)]
+    context = openai.requests[0]["input"][0]["content"][0]["text"]
+    # The same words as the cloud's renderSizeContext (render-scene.test.ts).
+    assert (
+        "The user's preview draws scenes at 120x160 pixels: render_scene renders at that size unless you pass "
+        "width and height."
+    ) in context
+    outputs = tool_outputs(openai.requests[1])
+    # An output with an image is a list: the result's text, then the frame.
+    results = [json.loads(outputs[call_id][0]["text"].split("\n", 1)[0]) for call_id in ("c1", "c2")]
+    assert [(result["width"], result["height"]) for result in results] == [(120, 160), (80, 48)]
+    assert [part["type"] for part in outputs["c2"]] == ["input_text", "input_image"]
 
 
 @pytest.mark.asyncio
@@ -381,3 +438,44 @@ def test_mcp_images_reach_the_model():
 
     failed = mcp_result_output("frame_screenshot", {"isError": True, "content": [{"type": "text", "text": "offline"}]})
     assert json.loads(failed.text) == {"ok": False, "error": "offline"}
+
+
+@pytest.mark.asyncio
+async def test_out_of_rounds_ends_with_the_models_own_summary():
+    """A reply that used every round used to end on a canned line asking for
+    "a narrower request" after work that was going fine. One more round, with
+    the tools off, has the model say where it stopped; the cloud's loop.ts
+    does the same (loop.test.ts)."""
+
+    class Tools(ai_chat_agent.ToolBox):
+        def definitions(self):
+            return [{"type": "function", "name": "render_scene", "parameters": {"type": "object"}}]
+
+        async def call(self, name, args):
+            return ai_chat_agent.ToolOutput(text="{}")
+
+    calls = [{"type": "function_call", "call_id": f"c{i}", "name": "render_scene", "arguments": "{}"} for i in range(3)]
+    openai = ScriptedOpenAi([
+        ("", [calls[0]]),
+        ("", [calls[1]]),
+        ("Rendered it twice; the list still overflows. Say continue.", []),
+    ])
+    events: list[dict] = []
+
+    async def emit(event):
+        events.append(event)
+
+    original = ai_chat_agent.stream_response
+    ai_chat_agent.stream_response = openai
+    try:
+        result = await ai_chat_agent.run_agent_loop(
+            api_key="sk-test", model="gpt-test", reasoning_effort="low", instructions="",
+            input_items=[], tools=Tools(), emit=emit, max_rounds=2,
+        )
+    finally:
+        ai_chat_agent.stream_response = original
+
+    assert [request["tool_choice"] for request in openai.requests] == [None, None, "none"]
+    assert "You have used all 2 steps" in json.dumps(openai.requests[2]["input"][-1])
+    assert result.reply == "Rendered it twice; the list still overflows. Say continue."
+    assert result.rounds == 3

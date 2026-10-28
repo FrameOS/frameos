@@ -90,6 +90,7 @@ vi.mock("next/dynamic", () => ({ default: () => StubEditor }));
 type PanelProps = {
   scenes: readonly unknown[];
   editorSceneId?: string | null | undefined;
+  onViewportChange?: ((size: { width: number; height: number }) => void) | undefined;
 };
 vi.mock("./SceneLivePreview", () => ({
   SceneLivePreviewPanel: (props: PanelProps) => (
@@ -98,16 +99,22 @@ vi.mock("./SceneLivePreview", () => ({
       data-props={JSON.stringify(Object.keys(props).sort())}
       data-scenes={JSON.stringify(props.scenes)}
       data-testid="preview-panel"
-    />
+    >
+      <button onClick={() => props.onViewportChange?.({ height: 1600, width: 1200 })} type="button">
+        rotate preview
+      </button>
+    </div>
   ),
 }));
 type AiPanelProps = {
   initialPrompt?: string | undefined;
+  width: number;
+  height: number;
   onScenes: (event: { type: "scenes"; tool: "modify_scene"; title?: string; scenes: unknown[] }) => unknown;
 };
 vi.mock("./SceneAiPanel", () => ({
   SceneAiPanel: (props: AiPanelProps) => (
-    <div data-prompt={props.initialPrompt ?? ""} data-testid="ai-panel">
+    <div data-prompt={props.initialPrompt ?? ""} data-size={`${props.width}x${props.height}`} data-testid="ai-panel">
       <button
         onClick={() =>
           props.onScenes({
@@ -337,6 +344,7 @@ describe("SceneEditorModal landing", () => {
       "editorSceneId",
       "height",
       "onImageRegistered",
+      "onViewportChange",
       "sceneId",
       "scenes",
       "settingsUrl",
@@ -559,6 +567,15 @@ describe("SceneEditorModal panel toggles", () => {
     fireEvent.click(panelToggle("Preview"));
     const panel = await screen.findByTestId("preview-panel");
     expect(panel.dataset.scenes).toBe(JSON.stringify([{ id: "s1", name: "Edited" }]));
+  });
+
+  it("hands the AI panel the size the Preview draws at, a rotate or Resize included", async () => {
+    remember({ ai: true, editor: false, info: false, preview: true });
+    render(<SceneEditorModal height={1200} sceneId="scene-1" width={1600} />);
+    await screen.findByTestId("preview-panel");
+    expect(screen.getByTestId("ai-panel").dataset.size).toBe("1600x1200");
+    fireEvent.click(screen.getByRole("button", { name: "rotate preview" }));
+    expect(screen.getByTestId("ai-panel").dataset.size).toBe("1200x1600");
   });
 
 });

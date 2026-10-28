@@ -15,7 +15,7 @@ vi.mock("../rate-limit", () => ({ checkIdentityRateLimit }));
 
 const { SceneRenderError } = await import("../scene-render");
 const { esp32DeviceLimits } = await import("frameos-wasm");
-const { MAX_RENDERS_PER_TURN, runTool, scenesToRender } = await import("./tools");
+const { MAX_RENDERS_PER_TURN, renderSizeContext, runTool, scenesToRender } = await import("./tools");
 type ToolContext = import("./tools").ToolContext;
 
 function scene(id: string, extra: Record<string, unknown> = {}) {
@@ -117,6 +117,31 @@ describe("render_scene", () => {
     expect(renderScenes.mock.calls[0]![0]).toMatchObject({ height: 480, timeZone: "UTC", width: 800 });
     await runTool("render_scene", { height: 800, width: 480 }, context());
     expect(renderScenes.mock.calls[1]![0]).toMatchObject({ height: 800, width: 480 });
+  });
+
+  it("renders one scene at several sizes in a turn, whatever the preview's size", async () => {
+    renderScenes.mockImplementation(async (options: { width: number; height: number }) =>
+      rendered({ height: options.height, width: options.width }),
+    );
+    const ctx = context({ renderSize: { height: 1200, width: 1600 } });
+    const sizes = [
+      {},
+      { height: 1600, width: 1200 },
+      { height: 480, width: 800 },
+    ];
+    const results = await Promise.all(sizes.map((size) => runTool("render_scene", size, ctx)));
+    expect(results.map((result) => JSON.parse(result.text))).toMatchObject([
+      { height: 1200, ok: true, width: 1600 },
+      { height: 1600, ok: true, width: 1200 },
+      { height: 480, ok: true, width: 800 },
+    ]);
+    expect(ctx.rendersThisTurn).toBe(3);
+  });
+
+  it("tells the model the size it renders at, in the same words as the backend", () => {
+    expect(renderSizeContext({ height: 1600, width: 1200 })).toBe(
+      "The user's preview draws scenes at 1200x1600 pixels: render_scene renders at that size unless you pass width and height.",
+    );
   });
 
   it("frames what the scene printed as untrusted output", async () => {

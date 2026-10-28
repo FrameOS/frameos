@@ -166,7 +166,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
   of "data/localImage":
     AppCapabilities(
       providesTarget: @[],
-      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
+      intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch", "center", "top-left", "top-center", "top-right", "center-left", "center-right", "bottom-left", "bottom-center", "bottom-right"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       forwardsBounds: @[],
       requestsBounds: @[],
@@ -213,7 +213,7 @@ proc appCapabilities*(keyword: string): AppCapabilities =
       fieldDefaults: @[FieldMatch(field: "inputImage", value: ""), FieldMatch(field: "startColor", value: "#800080"), FieldMatch(field: "endColor", value: "#ffc0cb")])
   of "render/image":
     AppCapabilities(
-      providesTarget: @[ProvidesTargetSpec(input: "image", fitFrom: "placement", fits: @["cover", "contain", "stretch"], requireStatic: @[FieldConstraint(field: "offsetX", allowed: @["0"]), FieldConstraint(field: "offsetY", allowed: @["0"]), FieldConstraint(field: "blendMode", allowed: @["normal", "overwrite"])], compositingRequireStatic: @[FieldConstraint(field: "blendMode", allowed: @["normal"])], requireUnset: @["inputImage"], ownedTargetExcludes: @[@[FieldMatch(field: "placement", value: "contain"), FieldMatch(field: "blendMode", value: "overwrite")]])],
+      providesTarget: @[ProvidesTargetSpec(input: "image", fitFrom: "placement", fits: @["cover", "contain", "stretch", "center", "top-left", "top-center", "top-right", "center-left", "center-right", "bottom-left", "bottom-center", "bottom-right"], requireStatic: @[FieldConstraint(field: "offsetX", allowed: @["0"]), FieldConstraint(field: "offsetY", allowed: @["0"]), FieldConstraint(field: "blendMode", allowed: @["normal", "overwrite"])], compositingRequireStatic: @[FieldConstraint(field: "blendMode", allowed: @["normal"])], requireUnset: @["inputImage"], ownedTargetExcludes: @[@[FieldMatch(field: "placement", value: "contain"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "center"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "top-left"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "top-center"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "top-right"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "center-left"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "center-right"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "bottom-left"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "bottom-center"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "bottom-right"), FieldMatch(field: "blendMode", value: "overwrite")]])],
       intoTarget: @[],
       forwardsTarget: @[],
       forwardsBounds: @[],

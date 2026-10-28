@@ -22,6 +22,12 @@ import {
 import { ColorAdjustmentControls } from "../../../../../frontend/src/scenes/frame/panels/Assets/ColorAdjustmentControls";
 import { applyAssetColors, autoEndPoints } from "../../../../../frontend/src/utils/assetColors/adjust";
 import {
+  currentLocation,
+  locatedValues,
+  locationFieldPair,
+  type GeoLocation,
+} from "../../../../../frontend/src/utils/geolocation";
+import {
   defaultAssetColorProfile,
   parseAssetColorProfile,
   profileHasAdjustments,
@@ -35,6 +41,8 @@ import {
   FolderOpen,
   ImageDown,
   KeyRound,
+  Loader2,
+  MapPin,
   Maximize2,
   Play,
   RectangleHorizontal,
@@ -61,6 +69,12 @@ import {
   type PreviewSettingsGroup,
 } from "../lib/preview-settings";
 import type { PreviewLogLine } from "../lib/preview-log";
+import {
+  previewDeviceFor,
+  previewDevices,
+  previewDeviceSize,
+  previewShowsDevice,
+} from "../lib/preview-devices";
 import { isReauthRequired, reauthHref } from "../lib/reauth-client";
 import { selectFieldOptions } from "../lib/select-options";
 import { ImageLightbox } from "./ImageLightbox";
@@ -88,6 +102,9 @@ type SceneLivePreviewPanelProps = {
   /** The account's settings page (where service keys are saved), linked from
    * the credentials hint when a scene needs keys. */
   settingsUrl?: string | undefined;
+  /** The size the preview draws at, on mount and after every Resize or
+   * rotate: the workspace's AI panel renders at it. */
+  onViewportChange?: ((size: { width: number; height: number }) => void) | undefined;
 };
 
 type SceneJsonLike = { id: string } & Record<string, unknown>;
@@ -262,6 +279,7 @@ export function SceneLivePreviewPanel({
   canSaveToGallery = false,
   onImageRegistered,
   settingsUrl,
+  onViewportChange,
 }: SceneLivePreviewPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -317,6 +335,11 @@ export function SceneLivePreviewPanel({
     width: width || 800,
   });
   const [viewportForm, setViewportForm] = useState(viewport);
+  const onViewportChangeRef = useRef(onViewportChange);
+  onViewportChangeRef.current = onViewportChange;
+  useEffect(() => {
+    onViewportChangeRef.current?.(viewport);
+  }, [viewport]);
 
   // Bumped by the Restart button; recreates the whole wasm runtime.
   const [restartCount, setRestartCount] = useState(0);
@@ -893,6 +916,15 @@ export function SceneLivePreviewPanel({
     setEdits((previous) => ({ ...previous, [field.name]: value }));
   }
 
+  // A scene with latitude and longitude fields gets a locate button on the
+  // first of them: the browser's location fills both.
+  const locationFields = locationFieldPair(visibleFields);
+  function editLocation(location: GeoLocation) {
+    if (locationFields) {
+      setEdits((previous) => ({ ...previous, ...locatedValues(locationFields, location) }));
+    }
+  }
+
   function applyState() {
     const state: Record<string, unknown> = {};
     for (const field of visibleFields) {
@@ -945,6 +977,27 @@ export function SceneLivePreviewPanel({
     setEdits({});
     setCurrentSceneId(id);
     previewRef.current?.selectScene(id);
+  }
+
+  // A device from the Device menu: its panel's size, in the orientation the
+  // preview is in, and its inks (a screen turns the dither off). The menu
+  // shows it while the preview stays at its size, Rotate included.
+  // (Not the memory limit's `device`: that one is a board's memory, this
+  // one a panel.)
+  const [panelDeviceKey, setPanelDeviceKey] = useState<string | null>(null);
+  const panelDevice = previewDeviceFor(panelDeviceKey);
+  const shownDeviceKey =
+    panelDevice && previewShowsDevice(panelDevice, viewport) ? panelDevice.key : "";
+  function choosePanelDevice(key: string) {
+    const next = previewDeviceFor(key);
+    setPanelDeviceKey(next?.key ?? null);
+    if (!next) {
+      return;
+    }
+    const size = previewDeviceSize(next, viewport);
+    setViewportForm(size);
+    setViewport(size);
+    choosePanel(next.panel);
   }
 
   // Portrait <-> landscape: swaps the two sizes and applies at once (the
@@ -1329,7 +1382,11 @@ export function SceneLivePreviewPanel({
       <div className="live-preview">
         {previewGated ? (
           <div className="live-preview__gate" role="status">
-            <CircleDollarSign aria-hidden className="live-preview__gate-icon" size={28} />
+            {gateReasons.billed.length > 0 ? (
+              <CircleDollarSign aria-hidden className="live-preview__gate-icon" size={28} />
+            ) : (
+              <KeyRound aria-hidden className="live-preview__gate-icon" size={28} />
+            )}
             <p className="live-preview__gate-title">
               This preview waits for you to start it
             </p>
@@ -1338,7 +1395,7 @@ export function SceneLivePreviewPanel({
                 ? `This scene calls ${joinNames(gateReasons.billed)}, which bills every request to your key, and brings its own code for ${joinNames(gateReasons.embedded)}, which decides what it sends where with your stored keys.`
                 : gateReasons.billed.length > 0
                   ? `This scene calls ${joinNames(gateReasons.billed)}, which bills every request to your key.`
-                  : `This scene brings its own code for ${joinNames(gateReasons.embedded)} and runs it with your stored keys. That code decides what it sends where.`}{" "}
+                  : `This scene brings its own code for ${joinNames(gateReasons.embedded)}, not the app FrameOS ships, and runs it with your stored keys. That code decides what it sends where.`}{" "}
               Nothing renders until you ask for it, and every change to the
               scene needs a fresh go-ahead.
             </p>
@@ -1411,6 +1468,31 @@ export function SceneLivePreviewPanel({
           </button>
         </p>
       ) : null}
+      <div className="viewport-controls viewport-controls--device">
+        <label className="viewport-controls__label" htmlFor={`${fieldIdPrefix}-device`}>
+          Device
+        </label>
+        <select
+          className="viewport-controls__select viewport-controls__select--device"
+          id={`${fieldIdPrefix}-device`}
+          onChange={(event) => choosePanelDevice(event.target.value)}
+          title="Resize the preview to a device's panel and dither it to that panel's colors"
+          value={shownDeviceKey}
+        >
+          <option value="">Custom size</option>
+          {(["E-paper", "Screens"] as const).map((group) => (
+            <optgroup key={group} label={group}>
+              {previewDevices
+                .filter((entry) => entry.group === group)
+                .map((entry) => (
+                  <option key={entry.key} value={entry.key}>
+                    {entry.label} ({entry.width}×{entry.height})
+                  </option>
+                ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
       <div className="viewport-controls">
         <label className="viewport-controls__label" htmlFor={`${fieldIdPrefix}-width`}>
           Resolution
@@ -1724,6 +1806,7 @@ export function SceneLivePreviewPanel({
                 id={`${fieldIdPrefix}-${field.name}`}
                 key={field.name}
                 onChange={(value) => editField(field, value)}
+                onLocate={field.name === locationFields?.first ? editLocation : undefined}
                 value={
                   field.name in edits ? edits[field.name] : fieldValues[field.name]
                 }
@@ -1802,11 +1885,66 @@ type StateFieldRowProps = {
   id: string;
   value: unknown;
   onChange: (value: unknown) => void;
+  /** The first of the scene's latitude and longitude fields: a locate
+   * button at the input's end. */
+  onLocate?: ((location: GeoLocation) => void) | undefined;
 };
+
+// The input with a square "use my location" button at its end. The
+// browser asks for permission the first time.
+function LocateControl({
+  children,
+  onLocate,
+}: {
+  children: ReactNode;
+  onLocate: (location: GeoLocation) => void;
+}) {
+  const [locating, setLocating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function locate() {
+    setLocating(true);
+    setError(null);
+    try {
+      onLocate(await currentLocation());
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setLocating(false);
+    }
+  }
+
+  return (
+    <div className="live-preview__locate">
+      <div className="live-preview__locate-row">
+        {children}
+        <button
+          aria-label="Use my location"
+          className="live-preview__locate-button"
+          disabled={locating}
+          onClick={() => void locate()}
+          title="Use my location: set the latitude and longitude to where this device is"
+          type="button"
+        >
+          {locating ? (
+            <Loader2 aria-hidden className="live-preview__locate-spin" size={16} />
+          ) : (
+            <MapPin aria-hidden size={16} />
+          )}
+        </button>
+      </div>
+      {error ? (
+        <span className="live-preview__locate-error" role="alert">
+          {error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 // One row of the state form: a label and the control for the field's type.
 // Textareas (text, json) take the full width with the label above.
-function StateFieldRow({ field, id, value, onChange }: StateFieldRowProps) {
+function StateFieldRow({ field, id, value, onChange, onLocate }: StateFieldRowProps) {
   const label = field.label || field.name;
   const type = field.type ?? "string";
 
@@ -1925,7 +2063,7 @@ function StateFieldRow({ field, id, value, onChange }: StateFieldRowProps) {
           {label}
         </label>
       )}
-      {control}
+      {onLocate ? <LocateControl onLocate={onLocate}>{control}</LocateControl> : control}
     </div>
   );
 }

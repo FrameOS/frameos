@@ -51,7 +51,15 @@
     {
       "name": "image",
       "type": "image",
-      "capabilities": { "intoTarget": {} }
+      "capabilities": {
+        "intoTarget": {
+          "fits": [
+            "cover", "contain", "stretch", "center",
+            "top-left", "top-center", "top-right", "center-left", "center-right",
+            "bottom-left", "bottom-center", "bottom-right"
+          ]
+        }
+      }
     }
   ],
   "cache": {

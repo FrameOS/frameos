@@ -20,6 +20,7 @@ import { StateFieldEdit } from '../frame/panels/Scenes/StateFieldEdit'
 import { assignSceneImages } from '../../utils/sceneImages'
 import { buildSplitScreenThumbnail } from '../../utils/splitScreenThumbnail'
 import { visiblePublicStateFields } from '../../utils/showIf'
+import { coordinateValue, locationFieldPair } from '../../utils/geolocation'
 import {
   assignSceneToSplitLayoutLeaf,
   canRemoveSplitLayoutLeaf,
@@ -791,6 +792,7 @@ function SplitSceneOptionsPanel({
   const state = leaf.state ?? {}
   // Each panel's scene keeps its own refresh interval, like any scene
   const fields = scene ? visiblePublicStateFields(sceneStateFields(scene), state) : []
+  const locationFields = locationFieldPair(fields)
 
   let body: JSX.Element
   if (!leaf.sceneId) {
@@ -820,6 +822,15 @@ function SplitSceneOptionsPanel({
                   currentState={{}}
                   stateChanges={state}
                   frameId={frameId}
+                  onLocate={
+                    locationFields && field.name === locationFields.first
+                      ? ({ latitude, longitude }) => {
+                          const { latitude: latitudeField, longitude: longitudeField } = locationFields
+                          onSetSceneStateValue(leaf.id, latitudeField, coordinateValue(latitudeField, latitude))
+                          onSetSceneStateValue(leaf.id, longitudeField, coordinateValue(longitudeField, longitude))
+                        }
+                      : undefined
+                  }
                 />
               </div>
             </div>

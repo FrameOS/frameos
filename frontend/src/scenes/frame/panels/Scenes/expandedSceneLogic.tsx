@@ -1,4 +1,4 @@
-import { MakeLogicType, connect, kea, key, path, props, selectors } from 'kea'
+import { MakeLogicType, actions, connect, kea, key, listeners, path, props, selectors } from 'kea'
 
 import { forms } from 'kea-forms'
 import { apiFetch } from '../../../../utils/apiFetch'
@@ -14,6 +14,7 @@ import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from
 import type { StateField } from '../../../../types'
 import type { TemplateType } from '../../../../types'
 import { sceneStateFields } from '../../../../utils/refreshInterval'
+import { type GeoLocation, locatedValues, locationFieldPair } from '../../../../utils/geolocation'
 
 export interface ExpandedSceneLogicProps {
   frameId: FrameId
@@ -31,6 +32,11 @@ export interface expandedSceneLogicValues {
   hasStateChanges: boolean
   isStateChangesSubmitting: boolean
   isStateChangesValid: boolean
+  locationFields: {
+    first: string
+    latitude: StateField
+    longitude: StateField
+  } | null
   scene: FrameScene | null
   scenes: FrameScene[] | undefined
   scenesAsOptions: {
@@ -70,6 +76,9 @@ export interface expandedSceneLogicActions {
   } // frameLogic
   resetStateChanges: (values?: Record<string, any>) => {
     values?: Record<string, any>
+  }
+  setLocation: (location: GeoLocation) => {
+    location: GeoLocation
   }
   setStateChangesManualErrors: (errors: Record<string, any>) => {
     errors: Record<string, any>
@@ -118,6 +127,11 @@ export interface expandedSceneLogicMeta {
       stateChanges: Record<string, any>,
       arg: any
     ) => StateField[]
+    locationFields: (visibleFields: StateField[]) => {
+      first: string
+      latitude: StateField
+      longitude: StateField
+    } | null
     scenesAsOptions: (scenes: FrameScene[] | undefined) => {
       label: string
       value: string
@@ -147,6 +161,10 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
     values: [frameLogic({ frameId }), ['frame', 'frameForm'], controlLogic({ frameId }), ['states', 'loading']],
     actions: [frameLogic({ frameId }), ['updateScene', 'applyTemplate']],
   })),
+  actions({
+    /** The locate button's answer: both coordinates into the form. */
+    setLocation: (location: GeoLocation) => ({ location }),
+  }),
   forms(({ values, props }) => ({
     stateChanges: {
       defaults: {} as Record<string, any>,
@@ -248,6 +266,12 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
         sceneId
       ) => visiblePublicStateFields(fields, states[sceneId] ?? {}, stateChanges),
     ],
+    // The latitude and longitude fields, when the scene shows both: the
+    // first of them carries the locate button.
+    locationFields: [
+      (s) => [s.visibleFields],
+      (visibleFields: expandedSceneLogicValues['visibleFields']) => locationFieldPair(visibleFields),
+    ],
     scenesAsOptions: [
       (s) => [s.scenes],
       (scenes: expandedSceneLogicValues['scenes']): { label: string; value: string }[] =>
@@ -272,4 +296,11 @@ export const expandedSceneLogic = kea<expandedSceneLogicType>([
       },
     ],
   }),
+  listeners(({ actions, values }) => ({
+    setLocation: ({ location }) => {
+      if (values.locationFields) {
+        actions.setStateChangesValues(locatedValues(values.locationFields, location))
+      }
+    },
+  })),
 ])

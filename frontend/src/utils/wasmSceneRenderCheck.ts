@@ -8,12 +8,13 @@ import type { FrameId, FrameScene } from '../types'
 
 // Headless render check for AI-delivered scenes: run the scene once in the
 // frameos-wasm worker (the same runtime the device runs) and collect what it
-// logs instead of what it draws. The chat uses the result to feed runtime
+// logs, and the last frame it drew. The chat uses the result to feed runtime
 // errors back to the AI agent for another pass — a scene that validates as
 // JSON can still fail at render time (unsupported SVG, missing fields, app
-// errors), and the device is too far away to tell us quickly. On a frame
-// with little memory (an ESP32) it renders under that frame's ceiling, so a
-// scene that would run the device out of memory fails here first.
+// errors), and the device is too far away to tell us quickly — and shows the
+// frame under the reply. On a frame with little memory (an ESP32) it renders
+// under that frame's ceiling, so a scene that would run the device out of
+// memory fails here first.
 
 const RENDER_CHECK_SETTLE_MS = 2000
 const RENDER_CHECK_TIMEOUT_MS = 30_000
@@ -46,6 +47,49 @@ export interface SceneRenderCheckResult {
   /** The render ran out of the device's memory (`frame.device`); the
    * reason is in `errors`. */
   outOfMemory?: boolean
+  /** The last frame drawn, as a PNG flattened onto white; null when nothing
+   * was drawn or the browser cannot encode it. */
+  image: { blob: Blob; width: number; height: number } | null
+}
+
+interface RawFrame {
+  width: number
+  height: number
+  buffer: ArrayBuffer
+}
+
+function frameFromMessage(msg: { width?: unknown; height?: unknown; buffer?: unknown }): RawFrame | null {
+  const { width, height, buffer } = msg
+  if (typeof width !== 'number' || typeof height !== 'number' || !(buffer instanceof ArrayBuffer)) {
+    return null
+  }
+  return buffer.byteLength === width * height * 4 && width > 0 && height > 0 ? { width, height, buffer } : null
+}
+
+// RGBA pixels → PNG, flattened onto white: the runtime can leave transparent
+// pixels, and a transparent PNG shows the chat bubble (or the scene tile)
+// through them.
+async function framePng({ width, height, buffer }: RawFrame): Promise<Blob | null> {
+  try {
+    const pixels = document.createElement('canvas')
+    pixels.width = width
+    pixels.height = height
+    const flattened = document.createElement('canvas')
+    flattened.width = width
+    flattened.height = height
+    const pixelContext = pixels.getContext('2d')
+    const context = flattened.getContext('2d')
+    if (!pixelContext || !context) {
+      return null
+    }
+    pixelContext.putImageData(new ImageData(new Uint8ClampedArray(buffer), width, height), 0, 0)
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, width, height)
+    context.drawImage(pixels, 0, 0)
+    return await new Promise<Blob | null>((resolve) => flattened.toBlob(resolve, 'image/png'))
+  } catch {
+    return null
+  }
 }
 
 function pushCapped(list: string[], entry: string, cap: number): void {
@@ -81,7 +125,7 @@ export async function renderSceneCheck(
 ): Promise<SceneRenderCheckResult> {
   const scene = scenes.find((item) => item.id === sceneId)
   if (!scene) {
-    return { rendered: false, renderMs: null, errors: [`Scene ${sceneId} not found`], logs: [] }
+    return { rendered: false, renderMs: null, errors: [`Scene ${sceneId} not found`], logs: [], image: null }
   }
   const payloadScenes = collectScenePreviewPayloadScenes(scene, scenes, null)
   const { width, height } = wasmPreviewDimensions({
@@ -99,6 +143,7 @@ export async function renderSceneCheck(
   let workerSpoke = false
   let unavailable = false
   let outOfMemory = false
+  let lastFrame: RawFrame | null = null
 
   const worker = new Worker(assetUrl('/frameos-wasm/preview-worker.js'), { type: 'module' })
   await new Promise<void>((resolve) => {
@@ -130,6 +175,8 @@ export async function renderSceneCheck(
       if (msg.type === 'frame') {
         const firstFrame = !rendered
         rendered = true
+        // Keep the newest frame: data apps often draw a placeholder first.
+        lastFrame = frameFromMessage(msg) ?? lastFrame
         renderMs = typeof msg.renderMs === 'number' ? msg.renderMs : renderMs
         if (firstFrame) {
           // Let immediate re-renders and async data apps settle so their
@@ -176,5 +223,8 @@ export async function renderSceneCheck(
       embedded: Boolean(frame.device?.limits.embedded),
     })
   })
-  return { rendered, renderMs, errors, logs, unavailable, outOfMemory }
+  const drawn = lastFrame as RawFrame | null
+  const blob = drawn ? await framePng(drawn) : null
+  const image = drawn && blob ? { blob, width: drawn.width, height: drawn.height } : null
+  return { rendered, renderMs, errors, logs, unavailable, outOfMemory, image }
 }

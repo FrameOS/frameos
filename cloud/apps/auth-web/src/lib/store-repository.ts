@@ -37,6 +37,7 @@ export async function buildStoreRepository(
     .select({
       authorName: accounts.displayName,
       category: storeScenes.category,
+      createdAt: storeScenes.createdAt,
       description: storeScenes.description,
       downloadCount: storeScenes.downloadCount,
       featuredAt: storeScenes.featuredAt,
@@ -84,6 +85,10 @@ export async function buildStoreRepository(
       // Extra fields (author, flags) are ignored by older frameos installs.
       author: scene.authorName ?? undefined,
       category: scene.category ?? undefined,
+      // When the scene was first added, so a client can show the store's
+      // latest additions (the frames home); `updated` below is its last
+      // change. Older frameos installs ignore extra fields.
+      created: scene.createdAt.toISOString(),
       description: scene.description ?? undefined,
       // How many times the scene was installed, so the store pages can show
       // it and sort by it (the index itself comes featured first, then by

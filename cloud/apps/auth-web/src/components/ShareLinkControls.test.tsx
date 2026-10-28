@@ -34,7 +34,7 @@ describe("ShareLinkControls", () => {
     Object.assign(navigator, { clipboard: { writeText } });
     render(<ShareLinkControls sceneId="scene-1" shareUrl={shareUrl} />);
 
-    expect(screen.getByTestId("share-link-url").textContent).toBe(shareUrl);
+    expect((screen.getByTestId("share-link-url") as HTMLInputElement).value).toBe(shareUrl);
     fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
     await screen.findByRole("button", { name: "Copied" });
     expect(writeText).toHaveBeenCalledWith(shareUrl);

@@ -124,10 +124,13 @@ export function DropdownMenu({
               leaveFrom="opacity-100"
               leaveTo="opacity-0"
             >
+              {/* Above the Modal (z-[120]/z-[130]): portaled to the body, a menu
+                  opened inside one, like the app editor's file "…", sat behind
+                  the dialog. A menu closes when an item opens a modal. */}
               <Menu.Items
                 static
                 className={clsx(
-                  'frameos-dropdown-menu z-[100] origin-top-right divide-y divide-slate-200/60 rounded-md focus:outline-none',
+                  'frameos-dropdown-menu z-[140] origin-top-right divide-y divide-slate-200/60 rounded-md focus:outline-none',
                   menuClassName
                 )}
                 ref={setPopperElement}

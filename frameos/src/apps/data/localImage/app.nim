@@ -228,9 +228,10 @@ proc get*(self: App, context: ExecutionContext): Image =
   # instead of canvas + full decoded copy + compressed file.
   #
   # With a colour profile to apply, only a fit that covers the whole target
-  # goes this way: `contain` leaves earlier canvas content around the photo,
-  # and the adjustments must not touch that.
-  if not decodeTarget.isNil and not (adjustColors and decodeScalingMode == "contain"):
+  # goes this way: `contain`, `center` and the anchored placements leave
+  # earlier canvas content around the photo, and the adjustments must not
+  # touch that.
+  if not decodeTarget.isNil and not (adjustColors and decodeScalingMode notin ["cover", "stretch"]):
     try:
       if readImageIntoTarget(path, decodeTarget, decodeScalingMode):
         nextImage = some(decodeTarget)

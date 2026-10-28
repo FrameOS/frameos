@@ -181,6 +181,15 @@ plan is not the claim; now one log field says which you have.
   dimension-preserving rotation), where two in-place flips *are* the
   rotation; 90°/270° change the output's dimensions and stay on the
   allocating path.
+- **1:1 placements stream too.** `render/image` offers its canvas under
+  `center` and the eight anchored placements (`top-left` ... `bottom-right`),
+  and `data/localImage` takes it: pixie's `OneToOneFits` decode only the
+  window of the photo that shows, at scale 1, into the canvas. Before, a
+  4032x3024 JPEG centered on an E1004 (2.4 MB left beside its 1600x1200
+  canvas) fell back to a full-size decode, then to reading the 2.8 MB file in
+  one block, and both were refused. They take no degrade rung (a half-size
+  1:1 decode would show less of the photo, not a softer one). `tiled` stays
+  off the list: a smaller image repeats, which one decode cannot do.
 - **JS apps are natural-size producers, not opaque walls.** A JS app asks the
   runtime for an image whose default size is the context's and draws into it;
   handing it the target instead is `intoTarget` with a natural fit. It is
@@ -315,6 +324,15 @@ mounted card read as "no storage". Every refusal,
 offer-time and store-time, is a log line with its reason and numbers — the
 same rule the planner's refusals follow, and how both of those bugs were
 found.
+
+The editor's preview running as an ESP32 (`frameos_wasm_set_embedded`, the
+memory limit's ESP32 boards, a preview of an ESP32 frame) takes the device's
+1 MB memory-cache limit too (`cachedImageMemoryLimit` follows
+`runsAsEmbedded`). It is not built with `-d:frameosEmbedded`, and through
+2026.10.21 it kept a host's unlimited cache, so a cached producer on a
+1600×1200 frame (Flights Above Me: a JS app's JSX into `render/image`) was
+always handed a 7.68 MB scratch and the preview ran out of memory where the
+E1004 upgrades to the live canvas and renders.
 
 What a hit costs: one canvas-sized allocation for the length of the consumer's
 draw (freed with the render), against a re-download, a decode and its

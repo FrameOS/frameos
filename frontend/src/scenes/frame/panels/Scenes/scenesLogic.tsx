@@ -212,6 +212,9 @@ export interface scenesLogicActions {
   disableMultiSelect: () => {
     value: true
   }
+  discardPreview: () => {
+    value: true
+  }
   duplicateScene: (sceneId: string) => {
     sceneId: string
   }
@@ -240,6 +243,9 @@ export interface scenesLogicActions {
     value: true
   }
   installMissingActiveSceneSuccess: () => {
+    value: true
+  }
+  installPreviewScene: () => {
     value: true
   }
   openAiScene: (location: string) => {
@@ -378,12 +384,6 @@ export interface scenesLogicActions {
     value: true
   }
   toggleMissingActiveExpanded: () => {
-    value: true
-  }
-  discardPreview: () => {
-    value: true
-  }
-  installPreviewScene: () => {
     value: true
   }
   toggleSceneSelection: (sceneId: string) => {
@@ -1148,7 +1148,9 @@ export const scenesLogic = kea<scenesLogicType>([
           `/api/frames/${props.frameId}/${isCloudMode() ? 'scene-preview' : 'scene_preview'}`
         )
         if (!response.ok) {
-          throw new Error(response.status === 404 ? 'The frame shows no preview any more' : 'Failed to load the preview')
+          throw new Error(
+            response.status === 404 ? 'The frame shows no preview any more' : 'Failed to load the preview'
+          )
         }
         const { scene } = (await response.json()) as { scene: FrameScene }
         if (!scene?.id) {

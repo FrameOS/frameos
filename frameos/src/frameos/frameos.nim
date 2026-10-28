@@ -357,6 +357,9 @@ proc start*(self: FrameOS) {.async.} =
                              "status": $self.network.hotspotStatus})
   else:
     self.logger.log(%*{"event": "networkCheck", "status": "skipped"})
+  # The supplicant backend's join ends here; from now on the watchdog rejoins
+  # a link that drops or stops passing traffic. NetworkManager needs none.
+  netportal.startLinkWatchdog(self)
 
   let bootCrashCount = registerBootCrash()
   self.logger.log(%*{"event": "boot:guard", "crashesWithoutRender": bootCrashCount})

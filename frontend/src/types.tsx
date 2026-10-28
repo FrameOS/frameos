@@ -742,6 +742,8 @@ export interface TemplateType {
   author?: string
   /** When the scene last changed, ISO 8601 (FrameOS Cloud store scenes). */
   updated?: string
+  /** When the scene was first added, ISO 8601 (FrameOS Cloud store scenes). */
+  created?: string
   /** How many times the scene was installed (FrameOS Cloud store scenes). */
   downloads?: number
   /** FrameOS version the scene was exported with (FrameOS Cloud store scenes). */

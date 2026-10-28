@@ -673,9 +673,12 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
       "Edit source code inside the user's CURRENT scene with exact find/replace, without resending the file. " +
       "Targets an app's source file (app + file, e.g. weatherPanel / app.ts), a node's inline sources " +
       "(node_id + file), or a code node's snippet (node_id alone). Each `find` must match exactly once " +
-      "(set all: true to replace every occurrence); a miss reports the problem and changes nothing. The " +
-      "edited scene is validated and delivered to the editor. Cheapest way to change a few lines; for a " +
-      "rewrite of most of a file use patch_scene with the full new source instead.",
+      "(set all: true to replace every occurrence); a miss reports the problem and changes nothing. To delete " +
+      "or rewrite a long block (dead code, an old renderer) without quoting it, give `from` and `to` instead of " +
+      "`find`: the block's first line and its last line, each exact. Everything from the start of `from` through " +
+      "the end of the first `to` after it is replaced, however long it is. The edited scene is validated and " +
+      "delivered to the editor. Cheapest way to change a few lines or drop a block; for a rewrite of most of a " +
+      "file use patch_scene with the full new source instead.",
     name: "edit_app_source",
     parameters: {
       additionalProperties: false,
@@ -688,9 +691,17 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
             properties: {
               all: { description: "Replace every occurrence instead of requiring exactly one.", type: "boolean" },
               find: { description: "Exact text to find (whitespace included).", type: "string" },
+              from: {
+                description: "Instead of find: the exact start of a block to replace (its first line); must match once.",
+                type: "string",
+              },
               replace: { description: "Replacement text (empty string deletes).", type: "string" },
+              to: {
+                description: "With from: the exact end of the block (its last line), the first match after from.",
+                type: "string",
+              },
             },
-            required: ["find", "replace"],
+            required: ["replace"],
             type: "object",
           },
           type: "array",
@@ -711,18 +722,27 @@ export const toolDefinitions: ResponsesToolDefinition[] = [
     description:
       "Look at a scene: render it once with the real FrameOS runtime and get the frame back as an image, " +
       "with the errors it logged. Renders what you delivered this turn, otherwise the user's current scene " +
-      "as the editor holds it, at the size the user's preview uses. This is the only way to see a scene: " +
-      "use it whenever the user talks about how it looks, and to check a visual change before you finish.",
+      "as the editor holds it. It draws at the size the user's preview uses unless you pass width and height: " +
+      "pass both to see the scene at any other size (portrait instead of landscape, another frame's panel). " +
+      "When the scene must look right at several sizes, render it once per size (several calls in one round " +
+      "are fine) and fix what breaks at any of them. This is the only way to see a scene: use it whenever the " +
+      "user talks about how it looks, and to check a visual change before you finish.",
     name: "render_scene",
     parameters: {
       additionalProperties: false,
       properties: {
-        height: { description: "Frame height in pixels (omit for the preview's size).", type: "integer" },
+        height: {
+          description: "Height in pixels to render at, with width (omit both for the preview's size).",
+          type: "integer",
+        },
         scene_id: {
           description: "Which scene to render when the editor holds several (omit for the one being edited).",
           type: "string",
         },
-        width: { description: "Frame width in pixels (omit for the preview's size).", type: "integer" },
+        width: {
+          description: "Width in pixels to render at, with height (omit both for the preview's size).",
+          type: "integer",
+        },
       },
       type: "object",
     },
@@ -1360,7 +1380,7 @@ export function applySourceEdits(base: JsonObject, args: JsonObject): SourceEdit
   const nodeId = typeof args.node_id === "string" ? args.node_id : undefined;
   const file = typeof args.file === "string" ? args.file : undefined;
   if (edits.length === 0) {
-    return { issues: ["edits: send at least one { find, replace }."], scene, summary: "" };
+    return { issues: ["edits: send at least one { find, replace } or { from, to, replace }."], scene, summary: "" };
   }
   if (!app && !nodeId) {
     return { issues: ["Name the target: `app` (+ `file`) for a bundled app, or `node_id` for a node."], scene, summary: "" };
@@ -1433,19 +1453,54 @@ export function applySourceEdits(base: JsonObject, args: JsonObject): SourceEdit
 
   let working = current;
   let replacements = 0;
+  const notFound = (index: number, label: string, text: string) => {
+    const firstLine = text.split("\n")[0] ?? text;
+    return `edits[${index}]: ${label} in ${where}: ${JSON.stringify(firstLine.slice(0, 80))}${text.includes("\n") ? " (first line shown)" : ""}. Check whitespace and quote the text exactly as it appears.`;
+  };
   edits.forEach((edit, index) => {
     const find = edit.find;
     const replace = typeof edit.replace === "string" ? edit.replace : "";
+    if (edit.from !== undefined || edit.to !== undefined) {
+      // A block by its first and last lines: dead code, an old renderer, a
+      // section too long to quote whole.
+      const from = edit.from;
+      const to = edit.to;
+      if (typeof find === "string" && find) {
+        issues.push(`edits[${index}]: give either find, or from and to, not both.`);
+        return;
+      }
+      if (typeof from !== "string" || !from || typeof to !== "string" || !to) {
+        issues.push(`edits[${index}]: a block needs both from and to, each a non-empty string.`);
+        return;
+      }
+      const starts = working.split(from).length - 1;
+      if (starts === 0) {
+        issues.push(notFound(index, "from not found", from));
+        return;
+      }
+      if (starts > 1) {
+        issues.push(`edits[${index}]: from matches ${starts} times in ${where}; include more of the block's first lines.`);
+        return;
+      }
+      const start = working.indexOf(from);
+      // The first `to` that ends at or after the end of `from`, so a block
+      // of one line may name the same text twice.
+      const end = working.indexOf(to, Math.max(start, start + from.length - to.length));
+      if (end < 0) {
+        issues.push(notFound(index, "to not found after from", to));
+        return;
+      }
+      working = working.slice(0, start) + replace + working.slice(end + to.length);
+      replacements += 1;
+      return;
+    }
     if (typeof find !== "string" || !find) {
       issues.push(`edits[${index}]: find must be a non-empty string.`);
       return;
     }
     const count = working.split(find).length - 1;
     if (count === 0) {
-      const firstLine = find.split("\n")[0] ?? find;
-      issues.push(
-        `edits[${index}]: not found in ${where}: ${JSON.stringify(firstLine.slice(0, 80))}${find.includes("\n") ? " (first line shown)" : ""}. Check whitespace and quote the text exactly as it appears.`,
-      );
+      issues.push(notFound(index, "not found", find));
       return;
     }
     if (count > 1 && edit.all !== true) {
@@ -1645,9 +1700,20 @@ export type ToolImage = { dataUrl: string };
 export type ToolOutput = { images: ToolImage[]; text: string };
 
 // A render holds a wasm worker for up to 30 s and its image rides in every
-// later round of the turn: a look, a fix and a check, with one to spare.
-export const MAX_RENDERS_PER_TURN = 4;
+// later round of the turn: a look and a check after a fix at two sizes
+// (portrait and landscape), with two to spare.
+export const MAX_RENDERS_PER_TURN = 6;
 const defaultRenderSize = { height: 480, width: 800 };
+
+// The turn's context line naming the size render_scene draws at, so "it
+// looks wrong in portrait" can be checked at the size the user means. The
+// backend's render_size_context says the same.
+export function renderSizeContext(size: { width: number; height: number }): string {
+  return (
+    `The user's preview draws scenes at ${size.width}x${size.height} pixels: render_scene renders at that ` +
+    "size unless you pass width and height."
+  );
+}
 const maxRenderLogLines = 20;
 
 const renderFailureNotes: Record<SceneRenderError["code"], string> = {

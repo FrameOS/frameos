@@ -46,11 +46,13 @@ export function ExpandedScene({
   isUndeployed,
   actionsContainer,
 }: ExpandedSceneProps) {
-  const { stateChanges, visibleFields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
+  const { stateChanges, visibleFields, locationFields } = useValues(expandedSceneLogic({ frameId, sceneId, scene }))
   const { states, sceneId: currentSceneId, activatingSceneId } = useValues(controlLogic({ frameId }))
   const { changedScenes } = useValues(frameLogic({ frameId }))
   const { undeployedSceneIds, unsavedSceneIds, scenePushIds } = useValues(scenesLogic({ frameId }))
-  const { submitStateChanges, resetStateChanges } = useActions(expandedSceneLogic({ frameId, sceneId, scene }))
+  const { submitStateChanges, resetStateChanges, setLocation } = useActions(
+    expandedSceneLogic({ frameId, sceneId, scene })
+  )
   const { previewScene, deleteScene, pushScene } = useActions(scenesLogic({ frameId }))
   const { openLivePreview } = useActions(livePreviewLogic({ frameId }))
   const { livePreviewSceneId } = useValues(livePreviewLogic({ frameId }))
@@ -246,6 +248,7 @@ export function ExpandedScene({
                   currentState={currentState}
                   stateChanges={stateChanges}
                   frameId={frameId}
+                  onLocate={field.name === locationFields?.first ? setLocation : undefined}
                 />
               )}
             </Field>

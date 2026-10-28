@@ -2,7 +2,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { RETIRED_APPS } from "./retired-apps.gen";
+import { keyedRepoAppSources } from "../../../../../frontend/src/generated/keyedRepoApps";
 import {
+  gatedServicesForScenes,
+  isUnchangedRepoApp,
   paidServicesForScenes,
   previewSettingsGroups,
   requiredSettingsForScenes,
@@ -262,5 +265,67 @@ describe("the keyword table vs the apps' own config.json files", () => {
         ).toBe(true);
       }
     }
+  });
+});
+
+describe("the preview's gate and FrameOS's own repo apps", () => {
+  const immichDir = join(repoRoot, "repo", "apps", "image", "immich");
+  const repoFile = (name: string) => readFileSync(join(immichDir, name), "utf8");
+  // What the store's Immich scene carries: the repo's code, its config with
+  // `"permissions": []` added.
+  const storeSources = () => ({
+    "app.ts": repoFile("app.ts"),
+    "config.json": JSON.stringify({ ...JSON.parse(repoFile("config.json")), permissions: [] }),
+  });
+  const sceneWith = (sources: Record<string, string>) => [
+    {
+      apps: { immich: { origin: "repo/apps/image/immich", sources } },
+      id: "s",
+      nodes: [{ data: { keyword: "immich" }, id: "a", type: "app" }],
+    },
+  ];
+  const gated = (sources: Record<string, string>) =>
+    gatedServicesForScenes(sceneWith(sources)).map((group) => group.key);
+
+  it("runs the Immich app FrameOS ships without a go-ahead: it is free software, and ours", () => {
+    expect(isUnchangedRepoApp(storeSources())).toBe(true);
+    expect(gated(storeSources())).toEqual([]);
+    // The settings form still asks for the server and key it needs.
+    expect(groupKeys(sceneWith(storeSources()))).toEqual(["immich"]);
+  });
+
+  it("still waits for code that is not ours, or a config that asks for more", () => {
+    const edited = { ...storeSources(), "app.ts": `${repoFile("app.ts")}\nfetch("https://elsewhere.example")` };
+    expect(gated(edited)).toEqual(["immich"]);
+    const extraFile = { ...storeSources(), "lib/send.ts": "export {}" };
+    expect(gated(extraFile)).toEqual(["immich"]);
+    const config = JSON.parse(repoFile("config.json"));
+    const moreKeys = { ...storeSources(), "config.json": JSON.stringify({ ...config, settings: ["immich", "openAI"] }) };
+    // OpenAI first: a paid service waits on its own.
+    expect(gated(moreKeys)).toEqual(["openAI", "immich"]);
+    const morePermissions = { ...storeSources(), "config.json": JSON.stringify({ ...config, permissions: ["files"] }) };
+    expect(gated(morePermissions)).toEqual(["immich"]);
+  });
+
+  it("knows every repo app that reads a key, as it is on disk", () => {
+    const appsRoot = join(repoRoot, "repo", "apps");
+    const onDisk: Record<string, Record<string, string>> = {};
+    for (const folder of readdirSync(appsRoot)) {
+      for (const app of readdirSync(join(appsRoot, folder))) {
+        const dir = join(appsRoot, folder, app);
+        const config = JSON.parse(readFileSync(join(dir, "config.json"), "utf8")) as { settings?: string[] };
+        if ((config.settings ?? []).length === 0) {
+          continue;
+        }
+        onDisk[`repo/apps/${folder}/${app}`] = Object.fromEntries(
+          readdirSync(dir)
+            .filter((file) => file !== "app_loader.nim" && file !== "app.nim")
+            .sort()
+            .map((file) => [file, readFileSync(join(dir, file), "utf8")]),
+        );
+      }
+    }
+    // Regenerate with `node frontend/scripts/generateRepoApps.mjs`.
+    expect(keyedRepoAppSources).toEqual(onDisk);
   });
 });

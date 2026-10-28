@@ -92,11 +92,10 @@ export function SceneDescriptionEditor({
               setEditorTab("write");
               setEditing(true);
             }}
-            title="Edit description"
             type="button"
           >
             <Pencil aria-hidden size={14} />
-            Edit
+            {description ? "Edit description" : "Add a description"}
           </button>
         </div>
       </div>

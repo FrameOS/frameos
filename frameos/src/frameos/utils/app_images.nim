@@ -201,6 +201,15 @@ proc scaledDecodeFit*(scalingMode: string): ScaledDecodeFit =
   case scalingMode
   of "contain": fitContain
   of "stretch": fitStretch
+  of "center": fitCenter
+  of "top-left": fitTopLeft
+  of "top-center": fitTopCenter
+  of "top-right": fitTopRight
+  of "center-left": fitCenterLeft
+  of "center-right": fitCenterRight
+  of "bottom-left": fitBottomLeft
+  of "bottom-center": fitBottomCenter
+  of "bottom-right": fitBottomRight
   else: fitCover
 
 proc scaledDecodeFitForFrame*(frameConfig: FrameConfig): ScaledDecodeFit =

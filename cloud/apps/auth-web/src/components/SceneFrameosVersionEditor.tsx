@@ -2,10 +2,18 @@
 
 import { Check, Pencil, X } from "lucide-react";
 import { useState } from "react";
+import versions from "../../../../../versions.json";
 
 // FrameOS uses CalVer like 2026.7.3; the server's normalizeFrameosVersion
 // accepts the same shape.
 const versionPattern = /^\d{4}\.\d{1,2}\.\d{1,3}$/;
+
+// The release this cloud was built with (versions.json, a build input of
+// auth-web): what "Use current version" sets. Null on a dev checkout.
+const currentFrameosVersion = ((): string | null => {
+  const version = versions.frameos.split("+")[0] ?? "";
+  return versionPattern.test(version) ? version : null;
+})();
 
 // Owner override for compatibility metadata, in the workspace's draft: the
 // oldest FrameOS release that can run the scene. Save publishes it into
@@ -33,8 +41,12 @@ export function SceneFrameosVersionEditor({
   }
 
   if (!editing) {
+    // The value in the Info panel's FrameOS row, as visitors read it there,
+    // and the owner's button to change it.
+    const shown = frameosVersion ? `${frameosVersion} or newer` : "Any version";
     return (
       <button
+        aria-label={`Minimum FrameOS version: ${shown}`}
         className="tag-edit-button"
         onClick={() => {
           setValue(frameosVersion ?? "");
@@ -43,8 +55,8 @@ export function SceneFrameosVersionEditor({
         title="Set the oldest FrameOS release that can run this scene"
         type="button"
       >
-        <Pencil aria-hidden size={14} />
-        {frameosVersion ? "Edit minimum FrameOS version" : "Set minimum FrameOS version"}
+        {shown}
+        <Pencil aria-hidden size={12} />
       </button>
     );
   }
@@ -65,15 +77,30 @@ export function SceneFrameosVersionEditor({
             setError(null);
           }
         }}
-        placeholder="2026.7.5"
+        placeholder={currentFrameosVersion ?? "2026.7.5"}
         value={value}
       />
-      <button className="button" onClick={commit} type="button">
+      <button className="button button--small" onClick={commit} type="button">
         <Check aria-hidden size={14} />
         Done
       </button>
+      {currentFrameosVersion && value.trim() !== currentFrameosVersion ? (
+        <button
+          className="button button--small button--subtle"
+          onClick={() => {
+            setError(null);
+            setEditing(false);
+            onChange(currentFrameosVersion);
+          }}
+          title={`Set FrameOS ${currentFrameosVersion}, the current release, as the minimum`}
+          type="button"
+        >
+          Use current version ({currentFrameosVersion})
+        </button>
+      ) : null}
       <button
-        className="button button--subtle"
+        aria-label="Cancel"
+        className="button button--small button--subtle"
         onClick={() => {
           setEditing(false);
           setError(null);

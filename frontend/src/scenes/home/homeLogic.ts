@@ -8,6 +8,7 @@ import { repositoriesModel } from '../../models/repositoriesModel'
 import type { RepositoryType, TemplateType } from '../../types'
 import { cloudDriveLogic } from '../frame/panels/Templates/cloudDriveLogic'
 import { storeTemplatesOf } from '../store/storeCatalog'
+import { latestStoreAdditions } from '../../utils/storeSort'
 import type { FrameType } from '../../types'
 import { fetchPhotoFolder, type PhotoEntry } from '../photos/photosApi'
 
@@ -156,21 +157,10 @@ export const homeLogic = kea<homeLogicType>([
       (s) => [s.repositories],
       (repositories: RepositoryType[]): TemplateType[] => storeTemplatesOf(repositories),
     ],
-    // The latest additions to the store: by the `updated` stamp the index
-    // carries (a scene without one sorts last, in the index's own order).
     recentStoreScenes: [
       (s) => [s.storeTemplates],
       (storeTemplates: TemplateType[]): TemplateType[] =>
-        storeTemplates
-          .map((template, index) => ({ template, index, at: template.updated ? Date.parse(template.updated) : NaN }))
-          .toSorted((a, b) => {
-            if (Number.isNaN(a.at) !== Number.isNaN(b.at)) {
-              return Number.isNaN(a.at) ? 1 : -1
-            }
-            return (Number.isNaN(b.at) ? 0 : b.at) - (Number.isNaN(a.at) ? 0 : a.at) || a.index - b.index
-          })
-          .map(({ template }) => template)
-          .slice(0, HOME_SECTION_LIMIT),
+        latestStoreAdditions(storeTemplates).slice(0, HOME_SECTION_LIMIT),
     ],
     recentPrivateScenes: [
       (s) => [s.driveTemplates],

@@ -307,6 +307,18 @@ block test_running_under_frameos_remote_honors_setup_env:
     else:
       delEnv("FRAMEOS_SETUP_UNDER_AGENT")
 
+block test_kernel_cmdline_additions:
+  const stock = "root=/dev/mmcblk0p2 rootwait console=tty1"
+  doAssert kernelCmdlineAdditions(stock, roamOff = false) == @["cgroup_enable=memory cgroup_memory=1"]
+  doAssert kernelCmdlineAdditions(stock, roamOff = true) ==
+    @["cgroup_enable=memory cgroup_memory=1", "brcmfmac.roamoff=1"]
+  let hardened = stock & " cgroup_enable=memory cgroup_memory=1"
+  doAssert kernelCmdlineAdditions(hardened, roamOff = false).len == 0
+  doAssert kernelCmdlineAdditions(hardened, roamOff = true) == @["brcmfmac.roamoff=1"]
+  doAssert kernelCmdlineAdditions(hardened & " brcmfmac.roamoff=1", roamOff = true).len == 0
+  # Somebody turned firmware roaming back on for this frame: leave it on.
+  doAssert kernelCmdlineAdditions(hardened & " brcmfmac.roamoff=0", roamOff = true).len == 0
+
 block test_system_hardening_defers_live_changes_when_not_live_applying:
   var commands: seq[string] = @[]
   setSetupCommandRunnerForTest(proc(command: string): SetupCommandResult =

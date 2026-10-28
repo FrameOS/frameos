@@ -15,6 +15,8 @@ import type { FrameType } from '../../../../types'
 import type { DeepPartial } from 'kea-forms/lib/types'
 import type { FrameScene, FrameSchedule } from '../../../../types'
 import { sceneStateFields } from '../../../../utils/refreshInterval'
+import { visiblePublicStateFields } from '../../../../utils/showIf'
+import { type GeoLocation, locatedValues, locationFieldPair } from '../../../../utils/geolocation'
 
 export interface ScheduleLogicProps {
   frameId: FrameId
@@ -73,6 +75,13 @@ export interface scheduleLogicActions {
   setDropIndex: (dropIndex: number | null) => {
     dropIndex: number | null
   }
+  setEventLocation: (
+    id: string,
+    location: GeoLocation
+  ) => {
+    id: string
+    location: GeoLocation
+  }
   setEventType: (
     id: string,
     eventType: string
@@ -130,6 +139,8 @@ export const scheduleLogic = kea<scheduleLogicType>([
     }),
     /** Switch an existing entry between showing a scene, a system action and a scene's custom event. */
     setEventType: (id: string, eventType: string) => ({ id, eventType }),
+    /** The locate button on a scene change's latitude/longitude fields. */
+    setEventLocation: (id: string, location: GeoLocation) => ({ id, location }),
     editEvent: (id: string) => ({ id }),
     closeEvent: (id: string) => ({ id }),
     deleteEvent: (id: string) => ({ id }),
@@ -276,6 +287,28 @@ export const scheduleLogic = kea<scheduleLogicType>([
         schedule: {
           ...values.schedule,
           events: values.events.map((event) => (event.id === id ? withEventType(event, eventType) : event)),
+        },
+      })
+    },
+    setEventLocation: ({ id, location }) => {
+      const event = values.events.find((event) => event.id === id)
+      const sceneId = event?.payload?.sceneId
+      const state = event?.payload?.state ?? {}
+      const pair = sceneId
+        ? locationFieldPair(visiblePublicStateFields(values.fieldsForScene[sceneId] ?? [], state))
+        : null
+      if (!event || !pair) {
+        return
+      }
+      actions.setFrameFormValues({
+        ...values.frameForm,
+        schedule: {
+          ...values.schedule,
+          events: values.events.map((entry) =>
+            entry.id === id
+              ? { ...entry, payload: { ...entry.payload, state: { ...state, ...locatedValues(pair, location) } } }
+              : entry
+          ),
         },
       })
     },

@@ -968,6 +968,22 @@ html.theme-dark .button-primary {
   font-weight: 600;
 }
 
+/* The owner's category pill opens the category editor (SceneCategoryEditor). */
+button.tag-pill--editable {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.tag-pill--editable:hover {
+  background: var(--bg-soft);
+}
+
 a.tag-pill--active:hover {
   background: var(--accent, #888);
   color: var(--surface, #fff);
@@ -1284,17 +1300,63 @@ a.tag-pill--active:hover {
   gap: 10px;
 }
 
-/* A private scene's sharing link with its owner controls (ShareLinkControls). */
+/* A private scene's sharing link with its owner controls (ShareLinkControls):
+   the link on one line with Copy beside it, the rarer actions as small text
+   buttons under it. */
 .share-link {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+.share-link__intro {
+  margin: 0;
+  color: var(--muted);
+}
+
+.share-link__field {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
 .share-link__url {
-  display: block;
-  overflow-wrap: anywhere;
-  font-size: 13px;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 8px;
+  min-height: 30px;
+  background: var(--bg-soft);
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.share-link__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.share-link__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.share-link__action:hover:not(:disabled) {
+  color: inherit;
+  text-decoration: underline;
 }
 
 .copy-field {
@@ -1435,6 +1497,21 @@ a.tag-pill--active:hover {
   color: var(--text);
   font: inherit;
   font-size: 13px;
+}
+
+/* The Device menu's names are long: its row takes the column's width and
+   the menu shrinks inside it rather than pushing the panel wider. */
+.viewport-controls--device {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.viewport-controls__select--device {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
 }
 
 .viewport-controls__select:disabled {
@@ -2123,6 +2200,47 @@ canvas.lightbox__image {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.live-preview__locate {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.live-preview__locate-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-preview__locate-button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.live-preview__locate-button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.live-preview__locate-spin {
+  animation: ai-panel-spin 1s linear infinite;
+}
+
+.live-preview__locate-error {
+  color: var(--danger);
+  font-size: 12px;
 }
 
 .live-preview__swatch {
@@ -3050,6 +3168,95 @@ a.stat-tile:hover {
 
 .scene-info > .section-block {
   margin-top: 12px;
+}
+
+/* The scene's facts (category, the FrameOS it needs, the owner's view of its
+   visibility): a label column and a value column. In the owner's draft each
+   value is its own edit button. */
+.scene-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.scene-facts__row {
+  display: contents;
+}
+
+.scene-facts dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.scene-facts dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+
+.scene-facts .tag-edit-button {
+  padding-left: 0;
+  color: inherit;
+}
+
+.scene-facts .tag-edit-button svg {
+  color: var(--muted);
+}
+
+.scene-facts .tag-editor {
+  flex-wrap: wrap;
+}
+
+.scene-facts .tag-editor__input {
+  width: 8em;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+/* The category's select in the facts list: a control the size of the small
+   buttons beside it, not a full-width form field. */
+.tag-editor__select {
+  min-height: 30px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 6px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+
+.scene-info__note {
+  color: var(--muted);
+}
+
+.scene-info__section {
+  display: grid;
+  gap: 8px;
+}
+
+.scene-info--panel .scene-info__section-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* The owner's actions on the whole scene, last in the column. */
+.scene-info__owner-actions {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
 }
 
 .scene-info--panel {

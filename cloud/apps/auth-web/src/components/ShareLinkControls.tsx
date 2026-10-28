@@ -62,7 +62,7 @@ export function ShareLinkControls({ sceneId, shareUrl }: ShareLinkControlsProps)
       await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
     } catch {
-      setError("Could not copy — select the link and copy it by hand");
+      setError("Could not copy. Select the link and copy it by hand.");
     }
   }
 
@@ -88,42 +88,55 @@ export function ShareLinkControls({ sceneId, shareUrl }: ShareLinkControlsProps)
 
   return (
     <div className="share-link" data-testid="share-link-controls">
+      <p className="share-link__intro">
+        {shareUrl
+          ? "Anyone with this link can view and install the scene."
+          : "Sharing is off: no link works, only you can see the scene."}
+      </p>
       {shareUrl ? (
-        <code className="share-link__url" data-testid="share-link-url">
-          {shareUrl}
-        </code>
-      ) : (
-        <span className="share-link__url">Sharing is off — no link works right now.</span>
-      )}
-      <div className="inline-actions">
+        <div className="share-link__field">
+          {/* One line, selected whole on focus: the link is long and only
+              ever copied. */}
+          <input
+            aria-label="Sharing link"
+            className="share-link__url"
+            data-testid="share-link-url"
+            onFocus={(event) => event.currentTarget.select()}
+            readOnly
+            value={shareUrl}
+          />
+          <button
+            aria-label={copied ? "Copied" : "Copy link"}
+            className="button button--small"
+            disabled={busy}
+            onClick={() => void copyLink()}
+            type="button"
+          >
+            <Copy aria-hidden size={14} />
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      ) : null}
+      <div className="share-link__actions">
         {shareUrl ? (
           <>
             <button
-              className="button button--small"
-              disabled={busy}
-              onClick={() => void copyLink()}
-              type="button"
-            >
-              <Copy aria-hidden size={16} />
-              {copied ? "Copied" : "Copy link"}
-            </button>
-            <button
-              className="button button--small"
+              className="share-link__action"
               disabled={busy}
               onClick={confirmRotate}
               title="Mint a new link; the current one stops working"
               type="button"
             >
-              <RefreshCw aria-hidden size={16} />
+              <RefreshCw aria-hidden size={12} />
               Replace link
             </button>
             <button
-              className="button button--small"
+              className="share-link__action"
               disabled={busy}
               onClick={confirmDisable}
               type="button"
             >
-              <Link2Off aria-hidden size={16} />
+              <Link2Off aria-hidden size={12} />
               Turn sharing off
             </button>
           </>
@@ -134,7 +147,7 @@ export function ShareLinkControls({ sceneId, shareUrl }: ShareLinkControlsProps)
             onClick={() => void change("rotate")}
             type="button"
           >
-            <Link2 aria-hidden size={16} />
+            <Link2 aria-hidden size={14} />
             Turn sharing on
           </button>
         )}
