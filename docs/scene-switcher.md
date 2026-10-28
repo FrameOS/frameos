@@ -28,11 +28,13 @@ like `setCurrentScene {direction}`:
   the switcher's own Close, a key with the role `back`, and its idle timeout
   all dispatch `sceneSwitcher` to go back.
 
-A `setCurrentScene {sceneId: "system/sceneSwitcher"}` from another scene
-without `state` gets `state.from` added the same way, so the HTTP API and a
-schedule can open it by name. While it shows, `setCurrentScene {direction}`
-walks the list from `state.from`: on a reTerminal, RIGHT held in the
-switcher is the scene after the one it was opened from.
+A `setCurrentScene {sceneId: "system/sceneSwitcher"}` opens it by name (the
+HTTP API, a schedule) without `state.from`: it highlights the list's first
+scene and goes back there, and so does a switcher whose `from` has left the
+list (it forgets `from` then, and when it is left). While it shows,
+`setCurrentScene {direction}` walks the list from `state.from`: on a
+reTerminal, RIGHT held in the switcher is the scene after the one it was
+opened from.
 
 Who may say it (`origins`): the frame's event map, a scene (a "Scenes" button
 in a scene's own UI), a schedule, the HTTP API with the frame access key or
@@ -90,7 +92,7 @@ page, with the page and two arrows in the header.
 
 - **A fast panel** (an LCD: an RGB565 canvas, the framebuffer, a HyperPixel)
   gets a dark grid: each tile its picture when the host has one, its number
-  and title under it, the highlighted tile ringed, and a tile darker while a
+  and title under it, the highlighted tile ringed, and a tile lighter while a
   finger is on it (`active:`).
 - **E-paper** (an ESP32 that is not an LCD, `waveshare.*`, `inky*`,
   `pimoroni.inky*`) gets black on white, thick borders, the highlighted tile
@@ -152,10 +154,25 @@ showing.
 
 ## Flash
 
-No new layout code: the JSX layer it draws with is already in the image.
-The module itself is about 14 KB of code and 4 KB of strings (its class
-names) on the ESP32-S3 at `-Os`, estimated from its object file, with the
-keyboard and the pictures compiled out of the firmware (`frameosEmbedded`);
-the firmware gains the scene id, the slot-less select in `fos_scenes.c` and
-one preset rule besides. Class names are appended in place, one call each:
-the first version, written with `&`, was half as big again.
+The generic ESP32-S3 image (`embedded/esp32/ci_build_image.sh`) is 13.6 KB
+bigger with it than without: the module's code 8.6 KB and its strings
+2.5 KB, the dispatcher's (`sceneSwitcher`, and the walk from `state.from`)
+1.0 KB, the firmware's listing and slot-less select (`embedded_runtime.nim`,
+`fos_scenes.c`) 0.8 KB. The first version was 20.8 KB. What keeps it there:
+
+- No new layout code: the JSX layer it draws with is already in the image.
+- The firmware gets the names alone: no keyboard, no pictures, no round
+  panel (`frameosEmbedded`; no ESP32 board is round), integer arithmetic, and
+  no Nim checks in the module (every index is guarded by the loop or the test
+  that reaches it).
+- Class names are appended in place, one call each, and a class that
+  depends on something in a branch of its own: every `&`, and every `if`
+  that yields a string, is a temporary with its own clean-up at each call
+  site. Nodes are handed on (`sink`), never copied, and a proc has one way
+  out: each early `return` repeats the clean-up of everything live.
+- No class that restates a default: e-paper's white page and black text are
+  the canvas's own (only an LCD's dark page, which covers every pixel and so
+  lets a press repaint only what changed, is drawn).
+- What raises is reported where any scene's is (the dispatcher, the render
+  pass), and opened by name the switcher knows no scene it came from, so the
+  dispatcher has nothing to add to a `setCurrentScene`.

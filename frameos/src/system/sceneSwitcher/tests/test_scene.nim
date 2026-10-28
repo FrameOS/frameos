@@ -112,6 +112,12 @@ block it_opens_on_the_scene_it_was_opened_from:
   # Opened from nowhere it knows (a raw setCurrentScene, a scene gone since): the first.
   let fresh = newSwitcher(config(720, 720), opener = "elsewhere")
   doAssert fresh.highlightedId == "scene-1"
+  doAssert fresh.state{"from"}.getStr() == "", "a scene not on the list is forgotten: Close goes to the first"
+  # Left, and opened again by name (a setCurrentScene to it, no state): it
+  # knows no scene it came from, whatever it was opened from before.
+  scene.send("close", %*{})
+  scene.send("open", %*{})
+  doAssert scene.highlightedId == "scene-1" and scene.state{"from"}.getStr() == "", $scene.state
 
 block the_keys_walk_the_tiles_and_every_press_counts:
   listed = entries(6)
@@ -125,7 +131,7 @@ block the_keys_walk_the_tiles_and_every_press_counts:
   scene.send("button", %*{"label": "RIGHT", "role": "next", "action": "press"})
   scene.send("button", %*{"label": "RIGHT", "role": "next", "action": "press"})
   doAssert scene.highlightedId == "scene-1", "wraps around: " & scene.highlightedId
-  scene.send("button", %*{"label": "LEFT", "action": "press"}) # LEFT is `prev` by its label
+  scene.send("button", %*{"label": "LEFT", "role": "prev", "action": "press"}) # the input state gives every button its role
   doAssert scene.highlightedId == "scene-6"
   # A long press is the frame's (LEFT held: the previous scene), not a step.
   scene.send("button", %*{"label": "LEFT", "role": "prev", "action": "longPress"})
@@ -137,7 +143,7 @@ block the_keys_walk_the_tiles_and_every_press_counts:
   doAssert sent.len == 2 and sent[1][0] == evSceneSwitcher, "back is the dispatcher's toggle: " & $sent
   # Up and down are a step too (the reTerminal Sticky's keys); a keyboard's
   # arrows walk the grid's rows.
-  scene.send("button", %*{"label": "UP", "action": "press"})
+  scene.send("button", %*{"label": "UP", "role": "up", "action": "press"})
   doAssert scene.highlightedId == "scene-5"
   let cols = switcherGrid(6, 800, 480, thumbnails = false).cols
   scene.send("keyDown", %*{"code": "ArrowDown", "key": "ArrowDown"})

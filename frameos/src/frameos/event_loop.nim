@@ -332,11 +332,8 @@ proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): boo
 
 proc switcherOpener(scene: FrameScene): string =
   ## The scene the scene switcher (`SceneSwitcherId`) was opened from, its
-  ## `state.from`; "" for any other scene.
-  if scene.isNil or scene.id.string != SceneSwitcherId or scene.state.isNil or
-      scene.state.kind != JObject:
-    return ""
-  scene.state{"from"}.getStr()
+  ## `state.from`; "" for any other scene (`{}` is nil-safe).
+  if scene.isNil or scene.id.string != SceneSwitcherId: "" else: scene.state{"from"}.getStr()
 
 proc sceneOrderOf(loop: EventLoop): seq[SceneId] =
   if loop.host.sceneOrder.isNil: newSeq[SceneId]() else: loop.host.sceneOrder()
@@ -368,29 +365,32 @@ proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
         index = if index < 0: order.len - 1 else: (index + order.len - 1) mod order.len
       payload = if payload.isNil or payload.kind != JObject: newJObject() else: copy(payload)
       payload["sceneId"] = %order[index].string
-  elif payload{"sceneId"}.getStr() == SceneSwitcherId and not hasStatePayload(payload):
-    # The switcher opened by name: it is told where from, as `sceneSwitcher`
-    # tells it, so it starts on that scene and goes back to it.
-    let current = loop.host.sceneFor(none(SceneId))
-    if not current.isNil and current.id.string != SceneSwitcherId:
-      payload = copy(payload)
-      payload["state"] = %*{"from": current.id.string}
   loop.host.selectScene(payload)
 
 proc sceneSwitcher(loop: EventLoop, envelope: EventEnvelope): bool =
   ## `sceneSwitcher`: the scene switcher, told which scene it was opened from;
-  ## while it shows, that scene again (the list's first when it is gone).
+  ## while it shows, that scene again. The switcher forgets a scene that left
+  ## the list, and one opened by name knows none: then the list's first.
+  # One way out (no early `return`): on the ESP32 every one repeats the
+  # clean-up of what was made so far, in flash.
   let current = loop.host.sceneFor(none(SceneId))
-  if not current.isNil and current.id.string == SceneSwitcherId:
-    let order = loop.sceneOrderOf()
-    var back = switcherOpener(current)
-    if back.len == 0 or SceneId(back) notin order:
-      if order.len == 0:
-        return loop.refused(envelope, "noSceneOrder")
-      back = order[0].string
-    return loop.host.selectScene(%*{"sceneId": back})
-  loop.host.selectScene(%*{"sceneId": SceneSwitcherId,
-    "state": {"from": (if current.isNil: "" else: current.id.string)}})
+  let payload = newJObject()
+  var next = SceneSwitcherId
+  if current.isNil or current.id.string != SceneSwitcherId:
+    let state = newJObject()
+    state["from"] = newJString(if current.isNil: "" else: current.id.string)
+    payload["state"] = state
+  else:
+    next = current.state{"from"}.getStr()
+    if next.len == 0:
+      let order = loop.sceneOrderOf()
+      if order.len > 0:
+        next = order[0].string
+  if next.len == 0:
+    result = loop.refused(envelope, "noSceneOrder")
+  else:
+    payload["sceneId"] = newJString(next)
+    result = loop.host.selectScene(payload)
 
 proc listens(loop: EventLoop, scene: FrameScene, name: string): bool =
   loop.host.sceneListens.isNil or loop.host.sceneListens(scene, name)

@@ -3695,7 +3695,7 @@
    },
    {
     "name": "the scene switcher opens from the scene showing, and the same again goes back",
-    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` walks the list from the scene it was opened from, and a `setCurrentScene` to the switcher by name carries `state.from` too. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The switcher is in no scene list.",
+    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` walks the list from the scene it was opened from. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The switcher is in no scene list.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/switcherA",
@@ -3946,13 +3946,13 @@
       "trace": [
        "select system/sceneSwitcher",
        "run switcherB close",
-       "run sceneSwitcher setCurrentScene",
        "run sceneSwitcher open",
        "render"
       ],
       "current": "system/sceneSwitcher",
       "state": {
-       "from": "fixtures/dispatcher/switcherB"
+       "from": "",
+       "highlight": "fixtures/dispatcher/switcherA"
       }
      },
      {
@@ -3973,7 +3973,7 @@
       ],
       "current": "system/sceneSwitcher",
       "state": {
-       "highlight": "fixtures/dispatcher/switcherC"
+       "highlight": "fixtures/dispatcher/switcherB"
       }
      },
      {
@@ -3990,12 +3990,12 @@
       ],
       "trace": [
        "run sceneSwitcher button",
-       "select fixtures/dispatcher/switcherC",
+       "select fixtures/dispatcher/switcherB",
        "run sceneSwitcher close",
-       "run switcherC open",
+       "run switcherB open",
        "render"
       ],
-      "current": "fixtures/dispatcher/switcherC"
+      "current": "fixtures/dispatcher/switcherB"
      },
      {
       "send": [
@@ -4007,7 +4007,7 @@
       "trace": [
        "refused sceneSwitcher driver origin"
       ],
-      "current": "fixtures/dispatcher/switcherC"
+      "current": "fixtures/dispatcher/switcherB"
      }
     ]
    }

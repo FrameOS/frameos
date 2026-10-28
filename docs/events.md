@@ -222,10 +222,10 @@ no filter on a field hears every value of it.
 - `sceneSwitcher {}` — shows the scene switcher (`system/sceneSwitcher`, the
   contract's `scenes.switcher`; [scene-switcher.md](scene-switcher.md)): the
   dispatcher selects it with `state.from`, the scene showing, and while it
-  shows selects that scene again, so one binding opens and closes it. A
-  `setCurrentScene` to the switcher by name, without `state`, gets the same
-  `state.from`. The switcher is built into every runtime and is in no scene
-  list; nothing persists it.
+  shows selects that scene again, so one binding opens and closes it. Opened
+  by name (`setCurrentScene` to it) it knows no scene it came from, and goes
+  back to the list's first. The switcher is built into every runtime and is
+  in no scene list; nothing persists it.
 - The input payloads are under [Input](#input).
 
 ### Input

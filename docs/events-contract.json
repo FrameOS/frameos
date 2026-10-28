@@ -719,7 +719,7 @@
   "scenes": {
     "$comment": "`setCurrentScene` with a `direction` instead of a `sceneId`: the frame's scene list is the control plane's order (scenes.json; a pushed set first, then the deployed scenes it does not name), `next` and `prev` wrap around, and a frame with one scene switches nowhere. The dispatcher resolves it on every host from the host's `sceneOrder`.",
     "directions": ["next", "prev"],
-    "$switcherComment": "The scene `sceneSwitcher` shows: built into every runtime (docs/scene-switcher.md), never in a scene list, never the scene a reboot comes back to. A `setCurrentScene` to it from another scene, without `state`, carries `state.from` (the scene it was opened from), like `sceneSwitcher` does; while it shows, `direction` walks the list from that scene.",
+    "$switcherComment": "The scene `sceneSwitcher` shows: built into every runtime (docs/scene-switcher.md), never in a scene list, never the scene a reboot comes back to. `sceneSwitcher` hands it `state.from` (the scene it was opened from); opened by name with `setCurrentScene` it has none and goes back to the list's first. While it shows, `direction` walks the list from `state.from`.",
     "switcher": "system/sceneSwitcher"
   },
   "gestures": {

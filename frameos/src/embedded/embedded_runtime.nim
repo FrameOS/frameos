@@ -740,11 +740,9 @@ proc selectScene*(sceneIdText: string): bool =
     # The scene switcher (fos_scenes.c applies it without a slot): the scene
     # it covers goes, its parsed payload stays in the cache for the way back.
     # Asked again while it shows (a reconnect re-announcing it), it keeps
-    # what it was opened from.
-    if host.sceneId.isSome and host.sceneId.get() == sceneId:
-      return true
-    host.makeCurrent(sceneId)
-    log("selectScene: " & sceneIdText)
+    # what it was opened from. fos_scenes.c logs the switch.
+    if host.sceneId != some(sceneId):
+      host.makeCurrent(sceneId)
     return true
   let scenes = getInterpretedScenes()
   # On the lazy path the scene is on flash, not in the cache: record the
