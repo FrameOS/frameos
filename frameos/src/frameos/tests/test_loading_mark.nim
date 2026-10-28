@@ -6,6 +6,7 @@
 import std/[os, unittest]
 import frameos/loading_mark
 import frameos/loading_mark_panel
+import frameos/panel_shape
 
 const
   PanelW = 96
@@ -116,11 +117,42 @@ suite "the loading mark":
                   " drew at frame " & $fx & "," & $fy
                 fail()
 
-  test "on a round panel the corner styles sit at the top middle":
-    let view = MarkView(panelWidth: 480, panelHeight: 480, round: true)
-    let rect = loadingMarkRect(view, lmDots)
-    check abs((rect.x + rect.w div 2) - 240) <= 2
-    check rect.y < 40
+  test "on a round panel every pixel of every style is on the glass, 12 px in from the rim":
+    # The HyperPixel 2.1 Round shows the circle inside its 480x480 square:
+    # a mark in the corner, or along the top edge, would never be seen.
+    const Side = 480
+    for rotation in [0, 90, 180, 270]:
+      for style in [lmDots, lmSpinner, lmSquares, lmBar]:
+        let panel = fakePanel(Side, Side, rotation = rotation)
+        var view = panel.view
+        view.round = true
+        let rect = loadingMarkRect(view, style)
+        check rect.w > 0 and rect.h > 0
+        var touched = 0
+        for t in [0'i32, 160, 420, 900, 1300]:
+          paintPanel(int(t))
+          let before = snapshot()
+          let rows = cast[ptr UncheckedArray[uint8]](fakeBytes[rect.y * int32(fakeLine) + rect.x * 4].addr)
+          drawLoadingMark(view, style, t, rect, panel.pixels, rows, int32(fakeLine), rows,
+            int32(fakeLine))
+          for y in rect.y ..< rect.y + rect.h:
+            for x in rect.x ..< rect.x + rect.w:
+              let at = (y * int32(fakeLine) + x * 4).int
+              if fakeBytes[at] == before[at] and fakeBytes[at + 1] == before[at + 1] and
+                  fakeBytes[at + 2] == before[at + 2]:
+                continue
+              inc touched
+              if not insideRound(Side, Side, x, y, inset = 12):
+                checkpoint "style " & $style & " rotation " & $rotation & " t " & $t &
+                  " touched " & $x & "," & $y & ", off the glass"
+                fail()
+              # Where the viewer sees it: the upper right, or the top for the bar.
+              let (fx, fy) = turnBack(x, y, rotation, Side, Side)
+              if fy >= Side div 2 or (style != lmBar and fx < Side div 2):
+                checkpoint "style " & $style & " rotation " & $rotation & " at frame " &
+                  $fx & "," & $fy
+                fail()
+        check touched > 0
 
   test "the mark scales with the panel":
     let small = loadingMarkRect(MarkView(panelWidth: 480, panelHeight: 480), lmDots)

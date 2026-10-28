@@ -27,6 +27,7 @@ import ./loading_mark
 when defined(linux):
   import posix
   import linuxfb
+  import ./panel_shape
 
 export loading_mark
 
@@ -262,7 +263,7 @@ proc beginLoadingMark*(device: string, rotation: int, flip: string, style: Loadi
     if not loadingMarkTestPanel.io.write.isNil:
       return beginLoadingMarkOn(loadingMarkTestPanel, style)
   when defined(linux):
-    let panel = framebufferPanel(rotation, flip, device == "pimoroni.hyperpixel2r")
+    let panel = framebufferPanel(rotation, flip, panelIsRound(device))
     if panel.io.write.isNil:
       return 0
     beginLoadingMarkOn(panel, style)

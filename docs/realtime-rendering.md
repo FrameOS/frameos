@@ -467,13 +467,21 @@ mark if one is up. A frame rendered for an older switch ends nothing.
 it composes a rectangle of the panel's own pixels from a copy of what was
 there, so a host puts it away by writing the copy back, and it allocates,
 raises and refs nothing, because it runs beside the busy render path, not on
-it. It sits in the viewer's top right (top middle on the round HyperPixel),
-through frame.json's `flip` and `rotate`, and scales with the panel's
-shorter side. Four styles, `loadingIndicator` in frame.json on a Pi, `set
-loading_indicator` on an ESP32's console: `dots` (the default: three dots in
-a small dark pill, pulsing in turn), `spinner`, `squares` (a 3x3 grid
-inverted in a ring, no backdrop), `bar` (a bright stretch sweeping a thin
-bar along the top edge), and `off`. A frame is drawn every 50 ms.
+it. It sits in the viewer's top right, through frame.json's `flip` and
+`rotate`, and scales with the panel's shorter side. Four styles,
+`loadingIndicator` in frame.json on a Pi, `set loading_indicator` on an
+ESP32's console: `dots` (the default: three dots in a small dark pill,
+pulsing in turn), `spinner`, `squares` (a 3x3 grid inverted in a ring, no
+backdrop), `bar` (a bright stretch sweeping a thin bar along the top edge),
+and `off`. A frame is drawn every 50 ms.
+
+On the HyperPixel 2.1 Round (`frameos/panel_shape.nim` `panelIsRound`) only
+the circle inside the 480x480 square is glass, so the corner styles sit up
+and to the right along the rim, 45 degrees from twelve o'clock with their
+outer corner 14 px inside it, and the bar becomes an arc along the top of
+the rim, 38 degrees either side. `test_loading_mark.nim` checks every pixel
+every style touches there is 12 px inside the circle, at every turn. No
+ESP32 board is round, so none of that is built there.
 
 **On a Pi** (`frameos/loading_mark_panel.nim`, the framebuffer family only:
 HDMI, DPI, the HyperPixels) a thread of its own draws the mark straight into

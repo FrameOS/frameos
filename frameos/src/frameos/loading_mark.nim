@@ -48,7 +48,7 @@ type
     panelWidth*, panelHeight*: int32
     rotation*: int32 ## frame.json `rotate`: 0, 90, 180 or 270
     flipX*, flipY*: bool ## frame.json `flip`, applied to the frame before the turn
-    round*: bool ## a round panel (the HyperPixel 2.1 Round): the corners are not on the glass
+    round*: bool ## only the inscribed circle shows (panel_shape.nim `panelIsRound`: the HyperPixel 2.1 Round)
 
 const
   LoadingMarkDelayMs* = 200
@@ -94,15 +94,42 @@ proc markUnit(fw, fh: int32): float32 =
   max(2'f32, float32(min(fw, fh)) / 105'f32)
 
 type Shape = object
-  ## Where a style sits, in the viewer's frame coordinates.
+  ## Where a style sits, in the viewer's frame coordinates: its box, and for
+  ## the bar on a round panel the arc it runs along.
   x, y, w, h: float32
+  arc: bool
+  cx, cy, rIn, rOut: float32
+
+const
+  RoundPanels = not defined(freertos)
+    ## No ESP32 board is round: the round placement is not built there.
+  ArcSin = 0.61566'f32 ## the bar's arc on a round panel: 38 degrees either
+  ArcCos = 0.78801'f32 ## side of twelve o'clock
+  ArcHalfSpan = 0.66323'f32 ## the same in radians
+
+proc roundInset(u: float32): float32 =
+  ## How far in from the rim of a round panel the mark keeps (the glass's
+  ## edge is not a place to look for it): 14 px on the 480 px Round.
+  max(14'f32, 3'f32 * u)
 
 proc markShape(style: LoadingMarkStyle, fw, fh: int32, round: bool): Shape =
   let u = markUnit(fw, fh)
   let margin = 3'f32 * u
+  # A round panel shows only the circle inside its square (the HyperPixel
+  # 2.1 Round): the corners and most of the top edge are not on the glass.
+  let circle = RoundPanels and round
+  let (cx, cy, radius) = (float32(fw) / 2, float32(fh) / 2, float32(min(fw, fh)) / 2)
   case style
   of lmBar:
-    Shape(x: 0, y: 0, w: float32(fw), h: max(2'f32, float32(int(0.75'f32 * u + 0.5'f32))))
+    let thick = max(2'f32, float32(int(0.75'f32 * u + 0.5'f32)))
+    if circle:
+      # An arc along the top of the rim instead of the top edge.
+      let rOut = radius - roundInset(u)
+      let rIn = rOut - thick
+      Shape(x: cx - rOut * ArcSin, y: cy - rOut, w: 2 * rOut * ArcSin, h: rOut - rIn * ArcCos,
+        arc: true, cx: cx, cy: cy, rIn: rIn, rOut: rOut)
+    else:
+      Shape(x: 0, y: 0, w: float32(fw), h: thick)
   of lmOff:
     Shape()
   else:
@@ -111,9 +138,15 @@ proc markShape(style: LoadingMarkStyle, fw, fh: int32, round: bool): Shape =
       of lmDots: (10.8'f32 * u, 4.4'f32 * u)
       of lmSpinner: (7'f32 * u, 7'f32 * u)
       else: (6.2'f32 * u, 6.2'f32 * u)
-    # A round panel has no top-right corner on the glass: top middle there.
-    let x = if round: (float32(fw) - w) / 2 else: float32(fw) - margin - w
-    Shape(x: x, y: margin, w: w, h: h)
+    if circle:
+      # Up and to the right along the rim, 45 degrees, with the box's far
+      # corner `roundInset` inside the circle: its centre is (cx + a, cy - a)
+      # for the `a` that puts (a + w/2, a + h/2) at that distance.
+      let reach = radius - roundInset(u)
+      let a = (sqrt((w + h) * (w + h) - 8 * ((w * w + h * h) / 4 - reach * reach)) - (w + h)) / 4
+      Shape(x: cx + a - w / 2, y: cy - a - h / 2, w: w, h: h)
+    else:
+      Shape(x: float32(fw) - margin - w, y: margin, w: w, h: h)
 
 proc loadingMarkRect*(view: MarkView, style: LoadingMarkStyle): MarkRect =
   ## The panel rectangle the mark draws in, clipped to the panel. The host
@@ -244,12 +277,32 @@ proc paintAt(style: LoadingMarkStyle, shape: Shape, u: float32, tMs: int32, x, y
           else: 0.14'f32
         result.invert = amount * inside
   of lmBar:
-    if y >= shape.y + shape.h:
-      return
-    result.dark = 0.35'f32
     let cycle = 1500'i32
     let q = float32(tMs mod cycle) / float32(cycle)
     let ease = q * q * (3 - 2 * q)
+    if RoundPanels and shape.arc:
+      # Along the arc: the band between the radii, `p` 0..1 from its left
+      # end to its right (by the sine of the angle from twelve o'clock).
+      let (dx, dy) = (x - shape.cx, y - shape.cy)
+      if dy >= 0:
+        return
+      let r = sqrt(dx * dx + dy * dy)
+      let band = cover(abs(r - (shape.rIn + shape.rOut) / 2) - (shape.rOut - shape.rIn) / 2)
+      if band <= 0:
+        return
+      let arcLength = 2 * ArcHalfSpan * (shape.rIn + shape.rOut) / 2
+      let p = (dx / r / ArcSin + 1) / 2
+      let ends = clamp(min(p, 1 - p) * arcLength / u, 0'f32, 1'f32)
+      if ends <= 0:
+        return
+      result.dark = 0.35'f32 * band * ends
+      let head = -0.3'f32 + ease * 1.3'f32
+      let along = min(p - head, head + 0.3'f32 - p) * arcLength
+      result.light = 0.95'f32 * band * ends * clamp(along / (2 * u), 0'f32, 1'f32)
+      return
+    if y >= shape.y + shape.h:
+      return
+    result.dark = 0.35'f32
     let length = 0.3'f32 * shape.w
     let head = -length + ease * (shape.w + length)
     let along = min(x - head, head + length - x)
