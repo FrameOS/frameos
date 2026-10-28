@@ -345,6 +345,10 @@ async def test_get_frame_json_event_map_carries_rules_only(_mock_publish, db, re
     # docs/events.md "Event map": the frame's own map rides frame.json as
     # `eventMap`, rules in order; what is not a rule is dropped, never fatal.
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    # Never given one: left out, for the runtime's device default
+    # (device_event_map.nim). An empty list is a choice and goes as it is.
+    assert "eventMap" not in get_frame_json(db, frame)
+    frame.event_map = []
     assert get_frame_json(db, frame)["eventMap"] == []
     frame.event_map = [
         {"event": "button", "match": {"label": "LEFT", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},

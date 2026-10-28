@@ -1052,7 +1052,6 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             for button in gpio_buttons
             if int(button.get("pin", 0)) > 0
         ],
-        "eventMap": normalize_event_map(getattr(frame, "event_map", None)),
         "palette": frame.palette or {},
         "colors": frame.colors or {},
         # "nix": frame.nix or {}, # We don't need this in the json. It's only used for building the system.
@@ -1144,6 +1143,15 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
             "frame_sync_current_revision": frame_sync_deploy_revision,
             "frame_sync_deployed_revision": frame_sync_deploy_revision,
         }
+
+    # The frame's event map, when it has one. A frame never given one (None)
+    # leaves it out, so the runtime takes its device's own
+    # (frameos/device_event_map.nim: a HyperPixel's edge swipes), as the
+    # embedded settings route leaves it to the firmware's board map. An empty
+    # list is somebody's choice and is sent as it is.
+    event_map = getattr(frame, "event_map", None)
+    if event_map is not None:
+        frame_json["eventMap"] = normalize_event_map(event_map)
 
     frame_json['settings'] = final_settings
     return frame_json

@@ -191,6 +191,29 @@ suite "Server API helpers":
     check invalidScenesPayload{"scenes"}.kind == JArray
     check invalidScenesPayload{"scenes"}.len == 0
 
+suite "the event map a frame reports":
+  test "a HyperPixel never given one runs its edge swipes and reports null":
+    # device_event_map.nim: the default is what the runtime runs with, but a
+    # control plane compares the frame API with what it wrote, so the map
+    # frame.json does not hold reads back as null, and an empty one as [].
+    let tempRoot = getTempDir() / "frameos-api-event-map"
+    createDir(tempRoot)
+    let configPath = tempRoot / "frame.json"
+    putEnv("FRAMEOS_CONFIG", configPath)
+    let state = initConnectionsState()
+    let raw = %*{"name": "Unit Frame", "device": "pimoroni.hyperpixel4sq_touch",
+                 "frameAccessKey": "test-key", "assetsPath": tempRoot}
+    writeFile(configPath, $raw)
+    globalFrameConfig = parseFrameConfig($raw)
+    check globalFrameConfig.eventMap.len == 2
+    check frameApiPayload(state){"event_map"}.kind == JNull
+
+    raw["eventMap"] = %*[]
+    writeFile(configPath, $raw)
+    globalFrameConfig = parseFrameConfig($raw)
+    check globalFrameConfig.eventMap.len == 0
+    check frameApiPayload(state){"event_map"} == %*[]
+
 suite "the scenes a frame reports to a provider (scenes_get)":
   test "uploaded scenes first, disk scenes after, compiled ones counted not sent":
     let tempRoot = getTempDir() / "frameos-api-device-scenes"

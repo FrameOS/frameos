@@ -114,7 +114,10 @@
   hears it; every reTerminal preset ships LEFT/RIGHT held = previous/next
   scene, and the E1001/E1002/E1003 (microphone) REFRESH held = `voiceChat`
   (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset table:
-  keep the three alike). `setCurrentScene {direction}` is resolved by the
+  keep the three alike). A Linux frame never given a map runs its device's:
+  every HyperPixel swipes from the left/right edge to the previous/next scene
+  (`frameos/device_event_map.nim` and the SPA's `deviceEventMap`, pinned
+  together by `device-event-map.test.ts`). `setCurrentScene {direction}` is resolved by the
   dispatcher from the host's `sceneOrder`, never by a host. **An installed
   scene's** map is the install's, never the scene's: `eventMap` beside
   `nodes`, the backend keeps it on the `frame.scenes` entry (the MCP

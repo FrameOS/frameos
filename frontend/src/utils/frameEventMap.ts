@@ -272,3 +272,18 @@ export function reportedEventMapOf(value: unknown): EventMapRule[] | null {
   }
   return value.filter(isEventMapRule)
 }
+
+/** The event map a device comes with, which a frame never given one (no
+ * stored `event_map`) runs with: a HyperPixel's edge swipes, in from the right
+ * the next scene and in from the left the previous. Keep in step with
+ * frameos/src/frameos/device_event_map.nim (frame-event-map.test.ts reads it).
+ * null for a device that comes with none. */
+export function deviceEventMap(device: string | null | undefined): EventMapRule[] | null {
+  if (!device?.startsWith('pimoroni.hyperpixel')) {
+    return null
+  }
+  return [
+    { event: 'edgeSwipe', match: { edge: 'right' }, emit: 'setCurrentScene', as: { direction: 'next' } },
+    { event: 'edgeSwipe', match: { edge: 'left' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
+  ]
+}

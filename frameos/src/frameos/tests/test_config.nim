@@ -177,3 +177,25 @@ block test_read_config_has_no_side_effects_on_the_loaded_object:
         doAssert cast[pointer](first.network) != cast[pointer](second.network)
         doAssert loadConfig().name == "Read Me"
     )
+
+block test_a_hyperpixel_never_given_an_event_map_swipes_between_scenes:
+    # docs/events.md "Event map": the device's own map (device_event_map.nim)
+    # for a frame that has none; the owner's, an empty one included, wins.
+    for device in ["pimoroni.hyperpixel4sq_touch", "pimoroni.hyperpixel4_touch", "pimoroni.hyperpixel2r"]:
+        let config = parseFrameConfig($(%*{"device": device}))
+        doAssert config.eventMap.kind == JArray
+        doAssert config.eventMap.len == 2
+        doAssert config.eventMap[0]["event"].getStr == "edgeSwipe"
+        doAssert config.eventMap[0]["match"]["edge"].getStr == "right"
+        doAssert config.eventMap[0]["emit"].getStr == "setCurrentScene"
+        doAssert config.eventMap[0]["as"]["direction"].getStr == "next"
+        doAssert config.eventMap[1]["match"]["edge"].getStr == "left"
+        doAssert config.eventMap[1]["as"]["direction"].getStr == "prev"
+    let explicitNull = parseFrameConfig($(%*{"device": "pimoroni.hyperpixel4sq_touch", "eventMap": nil}))
+    doAssert explicitNull.eventMap.len == 2
+    let cleared = parseFrameConfig($(%*{"device": "pimoroni.hyperpixel4sq_touch", "eventMap": []}))
+    doAssert cleared.eventMap.kind == JArray and cleared.eventMap.len == 0
+    let own = parseFrameConfig($(%*{"device": "pimoroni.hyperpixel4sq_touch", "eventMap": [
+        {"event": "tap", "emit": "render", "as": {}}]}))
+    doAssert own.eventMap.len == 1 and own.eventMap[0]["event"].getStr == "tap"
+    doAssert parseFrameConfig($(%*{"device": "framebuffer"})).eventMap.isNil
