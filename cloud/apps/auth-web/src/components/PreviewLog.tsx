@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  Fragment,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type PointerEvent,
-  type ReactNode,
-} from "react";
+import { Fragment, useMemo, useRef, type ReactNode } from "react";
 import { Virtuoso } from "react-virtuoso";
 import {
   formatLogTimestamp,
@@ -16,6 +8,7 @@ import {
   type PreviewLogEntry,
   type PreviewLogLine,
 } from "../lib/preview-log";
+import { useDragHeight } from "./useDragHeight";
 
 type PreviewLogProps = {
   lines: readonly PreviewLogLine[];
@@ -23,8 +16,6 @@ type PreviewLogProps = {
 
 /** How close to the end (px) still counts as "at the bottom". */
 const STICK_THRESHOLD_PX = 80;
-/** How far one arrow key moves the bottom edge: about a line. */
-const KEY_STEP_PX = 20;
 
 // The scene preview's log list: one virtualised row per runtime line, the
 // same shape as the frame Logs panel in the shared SPA — a timestamp
@@ -34,47 +25,13 @@ const KEY_STEP_PX = 20;
 // that drags the box taller, and a double click on it brings it back.
 export function PreviewLog({ lines }: PreviewLogProps) {
   const boxRef = useRef<HTMLDivElement | null>(null);
-  // null: the three-line height from the CSS, which is also the least.
-  const [height, setHeight] = useState<number | null>(null);
-  const minHeightRef = useRef<number | null>(null);
-  const dragRef = useRef<{ pointerId: number; startY: number; startHeight: number } | null>(null);
-  const currentHeight = () => {
-    const box = boxRef.current;
-    const measured = box ? box.getBoundingClientRect().height : 0;
-    if (height === null && minHeightRef.current === null) {
-      minHeightRef.current = measured;
-    }
-    return measured;
-  };
-  const resizeTo = (next: number) => {
-    const least = minHeightRef.current ?? 0;
-    const most = Math.max(least, window.innerHeight * 0.8);
-    setHeight(Math.round(Math.min(most, Math.max(least, next))));
-  };
-  const onResizeStart = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) {
-      return;
-    }
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = { pointerId: event.pointerId, startY: event.clientY, startHeight: currentHeight() };
-  };
-  const onResizeMove = (event: PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
-    if (drag && drag.pointerId === event.pointerId) {
-      resizeTo(drag.startHeight + event.clientY - drag.startY);
-    }
-  };
-  const onResizeEnd = () => {
-    dragRef.current = null;
-  };
-  const onResizeKey = (event: KeyboardEvent<HTMLDivElement>) => {
-    const step = event.key === "ArrowDown" ? KEY_STEP_PX : event.key === "ArrowUp" ? -KEY_STEP_PX : 0;
-    if (step !== 0) {
-      event.preventDefault();
-      resizeTo(currentHeight() + step);
-    }
-  };
+  // The three-line height from the CSS, measured before the first drag, is
+  // also the least.
+  const leastRef = useRef<number | null>(null);
+  const { height, handleProps } = useDragHeight(boxRef, {
+    least: () => (leastRef.current ??= boxRef.current?.getBoundingClientRect().height ?? 0),
+    mostOfWindow: 0.8,
+  });
   const entries = useMemo(
     () => lines.map((item) => parsePreviewLogLine(item.line, item.id, item.receivedAt)),
     [lines],
@@ -126,13 +83,7 @@ export function PreviewLog({ lines }: PreviewLogProps) {
         aria-label="Resize the log"
         aria-orientation="horizontal"
         className="preview-log__resize"
-        onDoubleClick={() => setHeight(null)}
-        onKeyDown={onResizeKey}
-        onLostPointerCapture={onResizeEnd}
-        onPointerCancel={onResizeEnd}
-        onPointerDown={onResizeStart}
-        onPointerMove={onResizeMove}
-        onPointerUp={onResizeEnd}
+        {...handleProps}
         role="separator"
         tabIndex={0}
         title="Drag down for a taller log, double-click for three lines"
