@@ -122,6 +122,9 @@ interface FrameOSUiEvent {
   y: number;
   localX: number;
   localY: number;
+  /** The element's size, in scene pixels: localX / width is how far along it the pointer is, at any frame size. Absent before 2026.10.22. */
+  width?: number;
+  height?: number;
   pointerId?: number;
   pointerType?: "mouse" | "touch" | "pen";
   /** A swipe's way: "left", "right", "up" or "down". */

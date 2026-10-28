@@ -1936,9 +1936,9 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   // without the one its node needs does nothing, so say so, once.
   const __frameosMissing = {};
   // A JSX UI's onClick (and friends), numbered by the walker (js_runtime/jsx.nim).
-  globalThis.__frameosHandle = (id, event, localX, localY, type) => {
+  globalThis.__frameosHandle = (id, event, localX, localY, type, width, height) => {
     const handler = (globalThis.__frameosHandlers || [])[id];
-    if (typeof handler === "function") handler({ ...JSON.parse(event), type, localX, localY });
+    if (typeof handler === "function") handler({ ...JSON.parse(event), type, localX, localY, width, height });
   };
   function __frameosInvoke(name) {
     const mod = __frameosExports();
@@ -2187,7 +2187,7 @@ proc imageFromSpec(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionCont
     return nil
 
 proc callJsxHandler(runtime: JsAppRuntime, owner: AppRoot, handler: int, name: string,
-    event: JsonNode, localX, localY: float32) =
+    event: JsonNode, localX, localY, width, height: float32) =
   ## Runs an onClick (onLongPress, ...) of the UI's last render in its app,
   ## with the bridge set up as for get(). An interpreter released since then
   ## took its handlers with it: nothing runs, and the render that follows
@@ -2201,7 +2201,8 @@ proc callJsxHandler(runtime: JsAppRuntime, owner: AppRoot, handler: int, name: s
     jsAppEnvByCtx[ctx] = JsAppEvalEnv(runtime: runtime, owner: owner, configJson: configJson,
       context: ExecutionContext(scene: owner.scene, event: name, payload: event, loopKey: ".", nextSleep: -1))
     let args = [JS_NewInt32(ctx, handler.int32), nimStringToJS(ctx, $event),
-      JS_NewFloat64(ctx, localX), JS_NewFloat64(ctx, localY), nimStringToJS(ctx, name)]
+      JS_NewFloat64(ctx, localX), JS_NewFloat64(ctx, localY), nimStringToJS(ctx, name),
+      JS_NewFloat64(ctx, width), JS_NewFloat64(ctx, height)]
     let returned = callGlobalFunction(ctx, "__frameosHandle", args)
     for arg in args:
       JS_FreeValue(ctx, arg)
@@ -2219,9 +2220,10 @@ proc keepUiRegions(runtime: JsAppRuntime, owner: AppRoot, sceneId: string,
   target.offsetY = y.float32
   # Into the app that drew these regions, every render: the scene can be
   # loaded again since the last one (a switch away and back), with a new app.
-  target.call = proc(handler: int, name: string, event: JsonNode, localX, localY: float32) {.closure, raises: [].} =
+  target.call = proc(handler: int, name: string, event: JsonNode,
+      localX, localY, width, height: float32) {.closure, raises: [].} =
     try:
-      runtime.callJsxHandler(owner, handler, name, event, localX, localY)
+      runtime.callJsxHandler(owner, handler, name, event, localX, localY, width, height)
     except Exception:
       discard # a handler's failure is logged; one in the logging has nowhere to go
 

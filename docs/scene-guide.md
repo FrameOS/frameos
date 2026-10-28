@@ -460,7 +460,8 @@ export function get(app, context) {
   indenting children adds nothing.
 - Handlers: `onClick` (a tap, by finger or mouse), `onDoubleClick`,
   `onLongPress`, `onPointerDown`, `onPointerUp`, given `{x, y, localX,
-  localY, type}`. Change what the next `get()` returns (a module variable,
+  localY, width, height, type}`: `width` / `height` are the element's
+  size, so a slider is `localX / width` along at any frame size. Change what the next `get()` returns (a module variable,
   `frameos.setState`) and the frame renders again by itself. `hover:`,
   `active:` and `group-hover:` (inside a `group`) follow the pointer. Each is
   a render: on e-paper a tap answers in a refresh, so keep hover: and
@@ -638,6 +639,9 @@ interface FrameOSUiEvent {
   y: number;
   localX: number;
   localY: number;
+  /** The element's size, in scene pixels: localX / width is how far along it the pointer is, at any frame size. Absent before 2026.10.22. */
+  width?: number;
+  height?: number;
   pointerId?: number;
   pointerType?: "mouse" | "touch" | "pen";
   /** A swipe's way: "left", "right", "up" or "down". */

@@ -365,7 +365,8 @@ export const get = () => (
   wherever it lifted). A swipe in from the screen's edge is the frame's
   (`edgeSwipe`, docs/events.md "Edge swipes"): no element hears any of that
   touch, so a slider at the edge of a page is safe from it. The handler gets the event's payload plus `type`, `localX` and `localY`
-  (from the element's corner): `onClick={(e) => ...}`. The innermost element
+  (from the element's corner) and `width` / `height` (the element's size,
+  2026.10.22+): `onClick={(e) => ...}`. The innermost element
   with a handler for the event takes it, so a tap on a label inside a card
   runs the card's `onClick`.
 - **A press is captured**, as a browser captures a touch: the innermost
@@ -373,14 +374,15 @@ export const get = () => (
   that pointer's `pointerMove`s and its `pointerUp` until it lifts, inside
   its box or not, and no other element hears them. `localX` / `localY` stay
   from its corner, so they go negative or past its width: a slider clamps
-  them. A move with no press goes to the element under it. A drag renders at
+  them. `localX / width` is how far along it the finger is, so a slider
+  needs no width of its own and works on any frame. A move with no press goes to the element under it. A drag renders at
   the frame's render rate, with the newest position (the ESP32 coalesces a
   finger's moves while a render runs).
 
   ```tsx
-  const setLevel = (e) => { level = Math.max(0, Math.min(100, Math.round(e.localX / 4))) }
-  <div className="h-8 w-[400px] rounded-full bg-white/10" onPointerDown={setLevel} onPointerMove={setLevel}>
-    <div className={`h-8 w-[${level * 4}px] rounded-full bg-sky-500`} />
+  const setLevel = (e) => { level = Math.max(0, Math.min(100, Math.round((e.localX / e.width) * 100))) }
+  <div className="h-8 rounded-full bg-white/10" onPointerDown={setLevel} onPointerMove={setLevel}>
+    <div className={`h-8 w-[${level}%] rounded-full bg-sky-500`} />
   </div>
   ```
 - **The frame renders again after a handler**, whatever it did: a handler
