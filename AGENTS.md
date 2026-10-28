@@ -116,6 +116,7 @@
   (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset table:
   keep the three alike). A Linux frame never given a map runs its device's:
   every HyperPixel swipes from the left/right edge to the previous/next scene
+  and up from the bottom to the scene switcher (as the SenseCAP preset does)
   (`frameos/device_event_map.nim` and the SPA's `deviceEventMap`, pinned
   together by `device-event-map.test.ts`). `setCurrentScene {direction}` is resolved by the
   dispatcher from the host's `sceneOrder`, never by a host. **An installed
@@ -127,6 +128,25 @@
   (`cloudFrameScenesSave.ts`) and templates never carry it; the dialog is
   "Map buttons" in the scene menu (`buttonMapLogic.ts`,
   `utils/sceneEventMap.ts`). A scene update must keep it on both planes.
+
+## The scene switcher: `docs/scene-switcher.md`
+
+- `system/sceneSwitcher` (the contract's `scenes.switcher`) is a scene built
+  into every runtime, `frameos/src/system/sceneSwitcher/scene.nim`: every
+  scene on the frame as a tile. The `sceneSwitcher` scene command opens it
+  and the dispatcher resolves it (`event_loop.nim` hands it `state.from`; the
+  same event while it shows goes back there), never a host. It is drawn
+  with the JSX layout from a tree built in Nim (no QuickJS), lists the
+  host's scene order through `sceneSwitcherListing`, and on Linux shows each
+  scene's last snapshot (`sceneSwitcherThumbnail`,
+  `frameos/scene_switcher_linux.nim`); fast panels get a dark grid, e-paper
+  black on white with the keys walking an inverted highlight.
+- It is never persisted on any host (no `scene.json`, no ESP32 `last_scene`
+  or `pending_scene`, no state file) and is in no scene list: test with
+  `isBuiltInScene`. `single_scene_host` runs every scene through its export
+  (`init` / `runEvent` / `render`), so a built-in scene needs nothing more
+  from the ESP32 or the preview, and `fos_scenes.c` applies one without a
+  slot. A new built-in scene goes the same way, not into a host.
 
 ## Scene previews on a frame: `docs/scene-previews.md`
 

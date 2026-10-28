@@ -28,6 +28,7 @@ import frameos/utils/dither
 import frameos/utils/image
 import frameos/utils/time
 import frameos/scenes
+import frameos/scene_switcher_linux
 import frameos/boot_guard
 import frameos/runtime_diagnostics
 from frameos/upgrade import UpgradeLogWatcher, initUpgradeLogWatcher, poll
@@ -1026,6 +1027,8 @@ proc createRunnerThread*(args: (FrameConfig, Logger, Option[SceneId])) =
     runnerThread.configureControlCode()
     runnerThread.configureLocalAccessOverlay()
     runnerThread.configureLinkCodeOverlay()
+    # The scene switcher's list and pictures (system/sceneSwitcher).
+    installSceneSwitcherHooks()
 
     waitFor runnerThread.startRenderLoop() and runnerThread.startMessageLoop()
 

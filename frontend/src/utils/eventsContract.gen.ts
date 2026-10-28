@@ -5,6 +5,8 @@
 export const EVENTS_CONTRACT_VERSION = 1
 export const POINTER_WIRE_MAX = 32767
 export const CUSTOM_EVENT_MAX_NAME_LENGTH = 63
+/** The built-in scene `sceneSwitcher` shows (docs/scene-switcher.md). */
+export const SCENE_SWITCHER_ID = 'system/sceneSwitcher'
 
 export type EventOrigin = 'driver' | 'preview' | 'scene' | 'schedule' | 'http:write' | 'http:admin' | 'cloud' | 'system' | 'eventMap'
 export type EventClass = 'lifecycle' | 'input' | 'scene-command' | 'device-command'
@@ -40,6 +42,7 @@ export type ContractEventName =
   | 'button'
   | 'setSceneState'
   | 'setCurrentScene'
+  | 'sceneSwitcher'
   | 'metrics'
   | 'reload'
   | 'restart'
@@ -740,6 +743,29 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
       "verb": "set_current_scene"
     }
   },
+  "sceneSwitcher": {
+    "class": "scene-command",
+    "listen": false,
+    "dispatch": true,
+    "origins": [
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system",
+      "eventMap"
+    ],
+    "renderAfter": "always",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": true,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.10.22"
+  },
   "metrics": {
     "class": "device-command",
     "listen": false,
@@ -932,6 +958,8 @@ export const buttonRoleByLabel: Record<string, string> = {
 }
 export const buttonActions: readonly string[] = ["press", "doublePress", "longPress"]
 export const gpioActions: readonly string[] = ["down", "up"]
+/** The edges of a touch screen an `edgeSwipe` starts from (`gestures.edges`). */
+export const screenEdges: readonly string[] = ["left", "right", "top", "bottom"]
 
 /** Keyboard layouts a frame's `keyboardLayout` setting can name. */
 export const keyboardLayouts: readonly { id: string; label: string }[] = [
@@ -1035,6 +1063,8 @@ interface FrameOSEventPayloads {
   setSceneState: { state?: any; render?: boolean };
   /** Switch the frame to another scene: the one \`sceneId\` names, or with \`direction\` the \`next\` / \`prev\` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). An optional \`state\` object is applied to that scene's public state. */
   setCurrentScene: { sceneId?: string; direction?: string; state?: any };
+  /** Show the scene switcher (\`scenes.switcher\`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. While it is showing, go back to the scene it was opened from instead. The frame's event map binds it to a swipe in from the bottom edge on a touch screen. */
+  sceneSwitcher: Record<string, never>;
 }
 `
 

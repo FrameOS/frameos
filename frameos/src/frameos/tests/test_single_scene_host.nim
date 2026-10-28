@@ -8,6 +8,8 @@ import ../js_runtime/run_budget
 import ../js_runtime/runtime as jsRuntime
 import ../utils/http_client
 import ../utils/memory
+import pixie
+import system/sceneSwitcher/scene as sceneSwitcher
 
 # The ESP32 and the wasm preview hold one scene, built on first use. A battery
 # ESP32 reads the button that woke it before its first render, so the press is
@@ -307,4 +309,61 @@ discard tapHost.renderScene(ExecutionContext(scene: tapHost.scene, event: "rende
 doAssert tapHost.tick(), "the tick makes the long press"
 doAssert count("heard longPress") == 1, $logLines
 tapHost.dropScene()
+
+# The scene switcher (docs/scene-switcher.md) on a one-scene host: built by
+# the host like any scene but from its own export, with nothing to parse,
+# told which scene it was opened from, and the tile tapped is the next scene.
+block scene_switcher_on_one_scene:
+  let switcherConfig = FrameConfig(width: 320, height: 240, rotate: 0, scalingMode: "cover",
+    device: "embedded", debug: false, saveAssets: %*false)
+  let order = @["fixtures/dispatcher/switchFrom".SceneId, "fixtures/dispatcher/switchTo".SceneId]
+  let switchHost = SingleSceneHost(frameConfig: switcherConfig, logger: logger)
+  var picked: seq[string]
+  switchHost.requestSelect = proc (sceneId: string): bool =
+    picked.add(sceneId)
+    switchHost.makeCurrent(SceneId(sceneId)) # the preview's way: at once
+    true
+  switchHost.sceneOrder = proc (): seq[SceneId] = order
+  switchHost.start()
+  sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+    @[SwitcherEntry(id: "fixtures/dispatcher/switchFrom", name: "From"),
+      SwitcherEntry(id: "fixtures/dispatcher/switchTo", name: "To")]
+  localEventSink = proc (scene: Option[SceneId], event: string, payload: JsonNode, origin: EventOrigin) {.gcsafe.} =
+    {.cast(gcsafe).}:
+      switchHost.queue(origin, event, payload, scene)
+  switchHost.makeCurrent(order[0])
+  doAssert switchHost.ensureScene()
+  doAssert switchHost.send(eoEventMap, "sceneSwitcher", %*{})
+  doAssert picked == @[SceneSwitcherId], $picked
+  doAssert switchHost.ensureScene() and switchHost.scene of SceneSwitcherScene
+  doAssert switchHost.scene.state{"from"}.getStr() == order[0].string
+  doAssert switchHost.sceneName == "Scene switcher"
+  let canvas = newImageGray8(320, 240) # an ESP32 e-paper's luma canvas
+  let drawn = switchHost.renderScene(ExecutionContext(scene: switchHost.scene, event: "render",
+    payload: %*{}, image: canvas, hasImage: true, loopIndex: 0, loopKey: "."))
+  doAssert not drawn.isNil and SceneSwitcherScene(switchHost.scene).paper, "a luma canvas is e-paper"
+  # A key with the role `next`, then OK: the scene after the one it came from.
+  doAssert switchHost.send(eoHttpWrite, "button", %*{"label": "RIGHT", "role": "next", "action": "press"})
+  doAssert switchHost.scene.state{"highlight"}.getStr() == order[1].string
+  doAssert switchHost.send(eoHttpWrite, "button", %*{"label": "OK", "role": "primary", "action": "press"})
+  doAssert picked == @[SceneSwitcherId, order[1].string], $picked
+  # Back on the switcher, a tap on the first tile picks it, through the
+  # input state's gestures, as a finger on an ESP32's glass does.
+  doAssert switchHost.send(eoEventMap, "sceneSwitcher", %*{})
+  doAssert switchHost.ensureScene() and switchHost.scene.state{"from"}.getStr() == order[1].string
+  discard switchHost.renderScene(ExecutionContext(scene: switchHost.scene, event: "render",
+    payload: %*{}, image: newImage565(320, 240), hasImage: true, loopIndex: 0, loopKey: "."))
+  let grid = switcherGrid(2, 320, 240, thumbnails = false)
+  let wireX = (grid.x0 + grid.tileW div 2) * 32767 div 320
+  let wireY = (grid.y0 + grid.tileH div 2) * 32767 div 240
+  let at = getMonoTime().ticks div 1_000_000
+  discard switchHost.send(eoDriver, "pointerDown", %*{"x": wireX, "y": wireY, "pointerId": 1,
+    "pointerType": "touch", "button": 0, "buttons": 1, "atMs": at - 120})
+  discard switchHost.send(eoDriver, "pointerUp", %*{"x": wireX, "y": wireY, "pointerId": 1,
+    "pointerType": "touch", "button": 0, "buttons": 0, "atMs": at - 60})
+  doAssert picked[^1] == order[0].string, "the tap picked " & $picked
+  # Its state is nobody's file: the switcher is never the scene a boot comes back to.
+  doAssert switchHost.scene.isNil or switchHost.sceneId.get() == order[0]
+  switchHost.dropScene()
+  sceneSwitcherListing = nil
 echo "ok"

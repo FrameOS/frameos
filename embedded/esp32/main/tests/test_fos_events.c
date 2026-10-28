@@ -19,6 +19,7 @@ static int origin_of(const char *name, fos_event_origin_t *out)
         {"scene", FOS_ORIGIN_SCENE},         {"schedule", FOS_ORIGIN_SCHEDULE},
         {"http:write", FOS_ORIGIN_HTTP_WRITE}, {"http:admin", FOS_ORIGIN_HTTP_ADMIN},
         {"cloud", FOS_ORIGIN_CLOUD},         {"system", FOS_ORIGIN_SYSTEM},
+        {"eventMap", FOS_ORIGIN_EVENT_MAP},
     };
     for (size_t i = 0; i < sizeof(origins) / sizeof(origins[0]); i++) {
         if (strcmp(origins[i].name, name) == 0) {

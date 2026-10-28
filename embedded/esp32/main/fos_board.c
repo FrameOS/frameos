@@ -129,8 +129,9 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     "\"emit\":\"voiceChat\",\"as\":{}}]"
 /* The SenseCAP Indicator: one key and a touch screen, no microphone. The key
  * pressed switches the screen off and on, pressed twice is the next scene and
- * held the previous one; a swipe in from the right edge is the next scene and
- * from the left the previous one (`edgeSwipe`: the scene hears none of it). */
+ * held the previous one; a swipe in from the right edge is the next scene,
+ * from the left the previous one, and up from the bottom the scene switcher
+ * (`edgeSwipe`: the scene hears none of it). */
 #define INDICATOR_EVENT_MAP \
     "[{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"press\"}," \
     "\"emit\":\"toggleScreen\",\"as\":{}}," \
@@ -141,7 +142,9 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"right\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
     "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"left\"}," \
-    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}]"
+    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
+    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"bottom\"}," \
+    "\"emit\":\"sceneSwitcher\",\"as\":{}}]"
 
 static const struct {
     const char *preset;

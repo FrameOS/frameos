@@ -569,6 +569,7 @@ schedule or the cloud may send one only when its declaration lists them in
 | `button` | yes |  | `pin` integer, `label` string, `role` string, `action` string, `durationMs`? integer, `wake`? boolean, `atMs`? integer | all | A GPIO button pressed: a `press`, a `doublePress` or a `longPress`, one event per press. |
 | `setSceneState` |  | yes | `state`? json, `render`? boolean | all | Set the scene's public state. |
 | `setCurrentScene` |  | yes | `sceneId`? scene, `direction`? string, `state`? json | all | Switch the frame to another scene: the one `sceneId` names, or with `direction` the `next` / `prev` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). |
+| `sceneSwitcher` |  | yes |  | all | Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. |
 <!-- END GENERATED: events -->
 
 ## JS API reference
@@ -757,6 +758,8 @@ interface FrameOSEventPayloads {
   setSceneState: { state?: any; render?: boolean };
   /** Switch the frame to another scene: the one `sceneId` names, or with `direction` the `next` / `prev` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). An optional `state` object is applied to that scene's public state. */
   setCurrentScene: { sceneId?: string; direction?: string; state?: any };
+  /** Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. While it is showing, go back to the scene it was opened from instead. The frame's event map binds it to a swipe in from the bottom edge on a touch screen. */
+  sceneSwitcher: Record<string, never>;
 }
 
 interface FrameOSContext {

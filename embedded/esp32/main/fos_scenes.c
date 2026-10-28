@@ -20,6 +20,7 @@
 #include "fos_backend_http.h"
 #include "fos_client.h"
 #include "fos_config.h"
+#include "fos_events_gen.h"
 #include "fos_mem.h"
 #include "fos_wifi.h"
 #include "frameos_display.h"
@@ -89,6 +90,21 @@ static bool s_scene_switched = false;
 static bool s_boot_pending_selection = false;
 /* A payload was stored since boot (not the cached one init re-applies). */
 static bool s_payload_stored_since_boot = false;
+/* The runtime shows a scene of its own (the scene switcher) over the
+ * resident one, which stays loaded for the way back. */
+static bool s_built_in_shown = false;
+/* How long a frame that deep-sleeps stays up with the switcher on its panel:
+ * the switcher's own idle timeout on e-paper (system/sceneSwitcher), so the
+ * keys that walk it are heard, and it goes back before the frame sleeps. */
+#define BUILT_IN_SCENE_AWAKE_MS (5 * 60 * 1000)
+
+/* A scene the runtime draws itself (docs/events-contract.json
+ * `scenes.switcher`): no slot on flash, never the scene a reboot or a deep
+ * sleep comes back to. */
+static bool is_built_in_scene(const char *scene_id)
+{
+    return scene_id != NULL && strcmp(scene_id, FOS_SCENE_SWITCHER_ID) == 0;
+}
 /* Serializes writers of /state/scenes.json: the USB upload (console task)
  * and the backend sync (fos_client task) share one tmp path, and two
  * concurrent write+rename dances delete each other's tmp file (rename then
@@ -1120,8 +1136,9 @@ esp_err_t fos_scenes_select(const char *scene_id)
     portEXIT_CRITICAL(&s_scene_select_lock);
     /* Outlive a deep sleep that cuts in before the render task gets to it
      * (PENDING_SCENE_NVS_KEY). Same value, no write: the cloud re-announces
-     * the current scene on every reconnect. */
-    persist_pending_scene(scene_id);
+     * the current scene on every reconnect. The scene switcher does not
+     * outlive one: a frame wakes on the scene it was opened from. */
+    if (!is_built_in_scene(scene_id)) persist_pending_scene(scene_id);
     ESP_LOGI(TAG, "scene selection queued: %s", scene_id);
     return ESP_OK;
 }
@@ -1169,6 +1186,33 @@ bool fos_scenes_apply_pending_selection(void)
          * scene from before, even when the boot restore already made this
          * one resident (activate_from_index). */
         s_boot_pending_selection = false;
+        s_scene_switched = true;
+    }
+    if (is_built_in_scene(scene_id)) {
+        /* The scene switcher (system/sceneSwitcher): the runtime draws it,
+         * so there is no slot to load, and the resident scene stays parsed
+         * for the way back. Not persisted: a reboot or a deep sleep comes
+         * back on the scene it covers. A frame that deep-sleeps stays up a
+         * while for the keys that walk it. */
+        if (!frameos_nim_set_scene(scene_id)) {
+            log_scene_event("scenes:select", "error", "queued", scene_id,
+                            "apply-failed", 0, 0, 0, ESP_FAIL);
+            return false;
+        }
+        s_built_in_shown = true;
+        s_scene_switched = true;
+        fos_client_keep_awake_ms(BUILT_IN_SCENE_AWAKE_MS);
+        ESP_LOGI(TAG, "scene selected: %s", scene_id);
+        printf("scene changed: %s\n", scene_id); /* visible on the USB serial stream */
+        log_scene_event("event:setCurrentScene", "ok", "queued", scene_id,
+                        "selected", 0, 0, 0, ESP_OK);
+        log_scene_event("render:sceneChange", "ok", "queued", scene_id,
+                        "selected", 0, 0, 0, ESP_OK);
+        return true;
+    }
+    if (s_built_in_shown) {
+        /* Back from the switcher: whatever is chosen, the panel changes. */
+        s_built_in_shown = false;
         s_scene_switched = true;
     }
     /* Already the resident scene: nothing to load. Re-parsing it would throw

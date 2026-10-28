@@ -613,6 +613,20 @@
       "hosts": {"linux": true, "esp32": true, "wasm": true}
     },
     {
+      "name": "sceneSwitcher",
+      "class": "scene-command",
+      "description": "Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. While it is showing, go back to the scene it was opened from instead. The frame's event map binds it to a swipe in from the bottom edge on a touch screen.",
+      "listen": false,
+      "dispatch": true,
+      "payload": [],
+      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap"],
+      "renderAfter": "always",
+      "coalesce": "none",
+      "log": "full",
+      "hosts": {"linux": true, "esp32": true, "wasm": true},
+      "since": "2026.10.22"
+    },
+    {
       "name": "metrics",
       "class": "device-command",
       "description": "Log the frame's metrics now.",
@@ -704,7 +718,9 @@
   ],
   "scenes": {
     "$comment": "`setCurrentScene` with a `direction` instead of a `sceneId`: the frame's scene list is the control plane's order (scenes.json; a pushed set first, then the deployed scenes it does not name), `next` and `prev` wrap around, and a frame with one scene switches nowhere. The dispatcher resolves it on every host from the host's `sceneOrder`.",
-    "directions": ["next", "prev"]
+    "directions": ["next", "prev"],
+    "$switcherComment": "The scene `sceneSwitcher` shows: built into every runtime (docs/scene-switcher.md), never in a scene list, never the scene a reboot comes back to. A `setCurrentScene` to it from another scene, without `state`, carries `state.from` (the scene it was opened from), like `sceneSwitcher` does; while it shows, `direction` walks the list from that scene.",
+    "switcher": "system/sceneSwitcher"
   },
   "gestures": {
     "$comment": "How the dispatcher makes tap, doubleTap, longPress and swipe out of pointerDown / pointerUp, in scene pixels and milliseconds. The same numbers on every host.",

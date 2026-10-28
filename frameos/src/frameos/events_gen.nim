@@ -76,6 +76,8 @@ const
   PointerTypes*: array[3, string] = ["mouse", "touch", "pen"]
   ## `setCurrentScene {direction}`: the ways through the frame's scene list (docs/events.md).
   SceneDirections*: array[2, string] = ["next", "prev"]
+  ## The built-in scene `sceneSwitcher` shows (docs/scene-switcher.md).
+  SceneSwitcherId* = "system/sceneSwitcher"
   ## Origins a scene opts into per custom event (`origins` on its declaration).
   CustomEventDeclarableOrigins*: set[EventOrigin] = {eoSchedule, eoCloud}
 
@@ -106,6 +108,7 @@ const
   evButton* = "button"
   evSetSceneState* = "setSceneState"
   evSetCurrentScene* = "setCurrentScene"
+  evSceneSwitcher* = "sceneSwitcher"
   evMetrics* = "metrics"
   evReload* = "reload"
   evRestart* = "restart"
@@ -113,7 +116,7 @@ const
   evUploadScenes* = "uploadScenes"
   evVoiceChat* = "voiceChat"
 
-  ContractEventNames*: array[33, string] = [
+  ContractEventNames*: array[34, string] = [
     evInit,
     evRender,
     evOpen,
@@ -141,6 +144,7 @@ const
     evButton,
     evSetSceneState,
     evSetCurrentScene,
+    evSceneSwitcher,
     evMetrics,
     evReload,
     evRestart,
@@ -149,7 +153,7 @@ const
     evVoiceChat,
   ]
 
-  ContractEventPolicies*: array[33, EventPolicy] = [
+  ContractEventPolicies*: array[34, EventPolicy] = [
     EventPolicy( # init
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
@@ -318,6 +322,12 @@ const
       renderAfter: raAlways, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
+    EventPolicy( # sceneSwitcher
+      class: ecSceneCommand, device: edNone, listen: false, dispatch: true,
+      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap},
+      renderAfter: raAlways, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
+      linux: true, esp32: true, wasm: true),
     EventPolicy( # metrics
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
       origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
@@ -399,12 +409,13 @@ proc contractEventIndex*(name: string): int =
   of evButton: 24
   of evSetSceneState: 25
   of evSetCurrentScene: 26
-  of evMetrics: 27
-  of evReload: 28
-  of evRestart: 29
-  of evReboot: 30
-  of evUploadScenes: 31
-  of evVoiceChat: 32
+  of evSceneSwitcher: 27
+  of evMetrics: 28
+  of evReload: 29
+  of evRestart: 30
+  of evReboot: 31
+  of evUploadScenes: 32
+  of evVoiceChat: 33
   else: -1
 
 proc eventAliasCount*(name: string): int =

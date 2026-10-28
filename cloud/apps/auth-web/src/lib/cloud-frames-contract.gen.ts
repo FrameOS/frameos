@@ -633,7 +633,10 @@ export const cloudFramesContract = {
                 "setCurrentScene",
                 "setSceneState",
                 "turnOn",
-                "turnOff"
+                "turnOff",
+                "toggleScreen",
+                "sceneSwitcher",
+                "voiceChat"
               ]
             }
           },
@@ -674,7 +677,10 @@ export const cloudFramesContract = {
                     "setCurrentScene",
                     "setSceneState",
                     "turnOn",
-                    "turnOff"
+                    "turnOff",
+                    "toggleScreen",
+                    "sceneSwitcher",
+                    "voiceChat"
                   ]
                 }
               },

@@ -8,25 +8,26 @@ import { cloudFrameSupportsEventMap, eventMapCloudFrameSettingsMinVersion } from
 import {
   type ButtonBinding,
   type FrameActionOffer,
+  type FrameGesture,
   bindingConflicts,
   deviceEventMap,
+  edgeGestures,
   frameActionKindsFor,
   frameActionTitle,
   frameActionUnavailableReason,
   frameActionValue,
   frameBindings,
   frameEventMapRules,
+  frameGestureTitle,
+  frameGestureValue,
+  frameOffersEdgeGestures,
+  frameSupportsSceneSwitcher,
   gestureCanVoiceChat,
   parseFrameActionValue,
+  parseFrameGestureValue,
   reportedEventMapOf,
 } from '../../../../../utils/frameEventMap'
-import {
-  buttonGestures,
-  frameButtons,
-  gestureTitle,
-  gestureValue,
-  parseGestureValue,
-} from '../../../../../utils/sceneEventMap'
+import { buttonGestures, frameButtons } from '../../../../../utils/sceneEventMap'
 import { deviceSwitchesDisplay, frameDisplayDevice } from '../../../../workspace/workspaceSurfaces'
 import { useFrameSettings } from '../frameSettingsContext'
 
@@ -43,7 +44,7 @@ export function ButtonActionsSection(): JSX.Element {
   const cloudProfile = surface === 'cloudLinux' || surface === 'cloudEsp32'
   const supported = !cloudProfile || cloudFrameSupportsEventMap(frame.frameos_version)
   const buttons = frameButtons(frame, frameForm)
-  const gestures = buttonGestures(buttons)
+  const device = frameForm.device ?? frameDisplayDevice(frame)
   const scenes = (frameForm.scenes ?? frame.scenes ?? []).map((scene) => ({ id: scene.id, name: scene.name }))
   const reported = cloudProfile ? reportedEventMapOf(frame.hardware?.eventMap) : null
   const showReported = frameForm.event_map === undefined && reported !== null
@@ -52,16 +53,21 @@ export function ButtonActionsSection(): JSX.Element {
   // The form carries the frame's `null` as it came: not set is not a choice.
   const deviceDefault =
     !cloudProfile && (frameForm.event_map ?? null) === null && (frame.event_map ?? null) === null
-      ? deviceEventMap(frameForm.device ?? frameDisplayDevice(frame))
+      ? deviceEventMap(device)
       : null
   const rules: EventMapRule[] = frameForm.event_map ?? (cloudProfile ? [] : frame.event_map ?? deviceDefault ?? [])
   const { bindings, others } = frameBindings(rules)
+  // A touch screen's rows include the swipes in from its edges.
+  const touch = frameOffersEdgeGestures(frame.hardware?.touch, device, [...rules, ...(reported ?? [])])
+  const gestures: FrameGesture[] = [...buttonGestures(buttons), ...(touch ? edgeGestures() : [])]
   // What this frame can do with a press: Display on / off only where the
   // device switches the panel (not e-paper), Voice chat only on a frame with a
-  // microphone, and then for a long press alone.
+  // microphone, and then for a long press alone, the scene switcher from the
+  // FrameOS that has it.
   const offer: FrameActionOffer = {
     voiceChat: voiceChat !== null,
-    displayPower: deviceSwitchesDisplay(frameForm.device ?? frameDisplayDevice(frame)),
+    displayPower: deviceSwitchesDisplay(device),
+    sceneSwitcher: frameSupportsSceneSwitcher(frame.frameos_version, cloudProfile),
   }
   const conflicts = bindingConflicts(bindings, offer)
 
@@ -70,26 +76,25 @@ export function ButtonActionsSection(): JSX.Element {
   }
   const addBinding = (): void => {
     const gesture = gestures.find(
-      (candidate) =>
-        !bindings.some((b) => b.gesture.label === candidate.label && b.gesture.action === candidate.action)
+      (candidate) => !bindings.some((b) => frameGestureValue(b.gesture) === frameGestureValue(candidate))
     ) ??
       gestures[0] ?? { label: buttons[0]?.label ?? 'A', action: 'longPress' }
     write([...bindings, { gesture, action: { kind: 'nextScene' } }])
   }
   const gestureOptions = (binding: ButtonBinding): SelectOptionEntry[] => {
-    const byButton = new Map<string, { value: string; label: string }[]>()
+    const groups = new Map<string, { value: string; label: string }[]>()
     for (const gesture of gestures) {
-      const entry = { value: gestureValue(gesture), label: gestureTitle(gesture) }
-      byButton.set(gesture.label, [...(byButton.get(gesture.label) ?? []), entry])
+      const group = 'edge' in gesture ? 'Touch screen' : gesture.label
+      const entry = { value: frameGestureValue(gesture), label: frameGestureTitle(gesture) }
+      groups.set(group, [...(groups.get(group) ?? []), entry])
     }
     // A binding for a button this frame no longer has stays selectable, so
     // the row shows what is saved instead of silently picking the first entry.
-    const stale = gestures.some(
-      (gesture) => gesture.label === binding.gesture.label && gesture.action === binding.gesture.action
-    )
+    const value = frameGestureValue(binding.gesture)
+    const stale = gestures.some((gesture) => frameGestureValue(gesture) === value)
       ? []
-      : [{ value: gestureValue(binding.gesture), label: `${gestureTitle(binding.gesture)} (not on this frame)` }]
-    return [...stale, ...Array.from(byButton, ([label, options]) => ({ label, options }))]
+      : [{ value, label: `${frameGestureTitle(binding.gesture)} (not on this frame)` }]
+    return [...stale, ...Array.from(groups, ([label, options]) => ({ label, options }))]
   }
   const actionOptions = (binding: ButtonBinding): SelectOptionEntry[] => [
     // A saved action the row would not offer stays selectable, named with
@@ -170,6 +175,7 @@ export function ButtonActionsSection(): JSX.Element {
         <p className="frameos-muted text-xs">
           What a press does on this frame, whatever scene is showing. A press bound here never reaches the scene;
           a scene&apos;s own buttons are mapped from its menu, under Map buttons.
+          {touch ? ' A swipe in from an edge of the screen is bound the same way.' : ''}
           {offer.voiceChat
             ? ' Voice chat goes on a long press: the frame listens while the key is held and stops when it is let go, so a press or a double press has no end to it.'
             : ''}
@@ -180,7 +186,7 @@ export function ButtonActionsSection(): JSX.Element {
               <ul className="list-disc pl-5 text-sm space-y-1">
                 {frameBindings(reported).bindings.map((binding, index) => (
                   <li key={index}>
-                    {gestureTitle(binding.gesture)}: {frameActionTitle(binding.action, scenes)}
+                    {frameGestureTitle(binding.gesture)}: {frameActionTitle(binding.action, scenes)}
                   </li>
                 ))}
                 {frameBindings(reported).others.map((rule, index) => (
@@ -206,11 +212,11 @@ export function ButtonActionsSection(): JSX.Element {
               >
                 <Select
                   name={`event_map.${index}.gesture`}
-                  value={gestureValue(binding.gesture)}
+                  value={frameGestureValue(binding.gesture)}
                   options={gestureOptions(binding)}
                   disabled={!supported}
                   onChange={(value) => {
-                    const gesture = parseGestureValue(value)
+                    const gesture = parseFrameGestureValue(value)
                     if (gesture) {
                       write(bindings.map((b, i) => (i === index ? { ...b, gesture } : b)))
                     }
@@ -261,7 +267,7 @@ export function ButtonActionsSection(): JSX.Element {
                 </ul>
               </div>
             ) : null}
-            {buttons.length === 0 ? (
+            {buttons.length === 0 && !touch ? (
               <p className="frameos-muted text-xs">
                 This frame has no buttons yet; add them under GPIO buttons and the presses appear here.
               </p>

@@ -184,15 +184,18 @@ block test_a_hyperpixel_never_given_an_event_map_swipes_between_scenes:
     for device in ["pimoroni.hyperpixel4sq_touch", "pimoroni.hyperpixel4_touch", "pimoroni.hyperpixel2r"]:
         let config = parseFrameConfig($(%*{"device": device}))
         doAssert config.eventMap.kind == JArray
-        doAssert config.eventMap.len == 2
+        doAssert config.eventMap.len == 3
         doAssert config.eventMap[0]["event"].getStr == "edgeSwipe"
         doAssert config.eventMap[0]["match"]["edge"].getStr == "right"
         doAssert config.eventMap[0]["emit"].getStr == "setCurrentScene"
         doAssert config.eventMap[0]["as"]["direction"].getStr == "next"
         doAssert config.eventMap[1]["match"]["edge"].getStr == "left"
         doAssert config.eventMap[1]["as"]["direction"].getStr == "prev"
+        # Up from the bottom: the scene switcher (docs/scene-switcher.md).
+        doAssert config.eventMap[2]["match"]["edge"].getStr == "bottom"
+        doAssert config.eventMap[2]["emit"].getStr == "sceneSwitcher"
     let explicitNull = parseFrameConfig($(%*{"device": "pimoroni.hyperpixel4sq_touch", "eventMap": nil}))
-    doAssert explicitNull.eventMap.len == 2
+    doAssert explicitNull.eventMap.len == 3
     let cleared = parseFrameConfig($(%*{"device": "pimoroni.hyperpixel4sq_touch", "eventMap": []}))
     doAssert cleared.eventMap.kind == JArray and cleared.eventMap.len == 0
     let own = parseFrameConfig($(%*{"device": "pimoroni.hyperpixel4sq_touch", "eventMap": [

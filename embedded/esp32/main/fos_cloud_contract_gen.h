@@ -85,7 +85,7 @@ static const fos_rule_t k_fos_rules[] = {
     {FOS_RULE_STRING, 0, 0, 0, 0, 0, 1, 63, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_OBJECT, 0, 0, 0, 1, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_OBJECT, 0, 0, 0, 1, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
-    {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 7, 5, 0, 0, 0, 0, 0.0f, 0.0f},
+    {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 7, 8, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 86400.0f},
@@ -99,7 +99,7 @@ static const fos_rule_t k_fos_rules[] = {
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
-    {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 12, 3, 0, 0, 0, 0, 0.0f, 0.0f},
+    {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 15, 3, 0, 0, 0, 0, 0.0f, 0.0f},
 };
 static const fos_rule_key_t k_fos_rule_keys[] = {
     {"name", 11, 0},
@@ -140,7 +140,7 @@ static const fos_rule_key_t k_fos_rule_keys[] = {
 };
 static const int16_t k_fos_rule_children[] = {6, 7, 13, 15, 40, 45, 49, };
 static const int32_t k_fos_rule_int_enums[] = {0, 90, 180, 270, };
-static const char *const k_fos_rule_str_enums[] = {"contain", "cover", "stretch", "center", "default", "on", "off", "render", "setCurrentScene", "setSceneState", "turnOn", "turnOff", "gpio", "gpio_inverted", "ws2812", };
+static const char *const k_fos_rule_str_enums[] = {"contain", "cover", "stretch", "center", "default", "on", "off", "render", "setCurrentScene", "setSceneState", "turnOn", "turnOff", "toggleScreen", "sceneSwitcher", "voiceChat", "gpio", "gpio_inverted", "ws2812", };
 
 static const fos_contract_setting_t k_fos_contract_settings[] = {
     {"name", 0, 0, NULL},

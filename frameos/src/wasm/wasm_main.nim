@@ -15,6 +15,7 @@ import pixie
 import frameos/types
 import frameos/channels
 import frameos/single_scene_host
+import system/sceneSwitcher/scene as sceneSwitcher
 import frameos/relayed_input
 import frameos/interpreter
 import frameos/planner
@@ -67,9 +68,19 @@ proc setLastError(msg: string) =
 
 # ------------------------------------------------------------------- scenes
 
+proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+  ## The scene switcher's tiles: the loaded payload, in its order.
+  {.cast(gcsafe).}:
+    let scenes = getInterpretedScenes()
+    for sceneId in loadedSceneOrder:
+      result.add SwitcherEntry(id: sceneId.string,
+        name: if scenes.hasKey(sceneId): scenes[sceneId].name else: "")
+
+sceneSwitcherListing = switcherListing
+
 proc selectSceneById(sceneIdText: string): bool =
   let sceneId = SceneId(sceneIdText)
-  if not getInterpretedScenes().hasKey(sceneId):
+  if not getInterpretedScenes().hasKey(sceneId) and not isBuiltInScene(sceneIdText):
     setLastError("scene not found: " & sceneIdText)
     return false
   host.makeCurrent(sceneId)
