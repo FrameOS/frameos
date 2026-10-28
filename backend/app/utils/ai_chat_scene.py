@@ -341,7 +341,9 @@ def apply_source_edits(base: JsonObject, args: JsonObject) -> tuple[JsonObject, 
         find = edit.get("find")
         replace_value = edit.get("replace")
         replace = replace_value if isinstance(replace_value, str) else ""
-        if "from" in edit or "to" in edit:
+        # A model often sends every property, the unused ones empty or null:
+        # only text in from or to makes the edit a block.
+        if edit.get("from") not in (None, "") or edit.get("to") not in (None, ""):
             # A block by its first and last lines: dead code, an old renderer,
             # a section too long to quote whole.
             start_text = edit.get("from")
