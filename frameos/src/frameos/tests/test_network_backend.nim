@@ -778,6 +778,7 @@ proc associatedWithoutLeaseContext(stub: StubNetwork, leaseRequests: ref int): N
       if cmd.contains("wpa_cli") and cmd.contains(" status"):
         return (output: "wpa_state=COMPLETED\nssid=Home\n", rc: 0)
       if cmd.contains("udhcpc -i 'wlan0' -f -n -q"):
+        stub.commands.add(cmd)
         inc leaseRequests[]
         return (output: "", rc: 0)
       if cmd.contains("ip -4 addr show"):
@@ -1149,3 +1150,36 @@ suite "link watchdog":
     for minute in 1 ..< 10:
       check linkWatchdogStep(state, silent("192.168.1.1"), float(minute * 60)) == lwaNone
     check linkWatchdogStep(state, answering("192.168.1.1"), 600) == lwaArmed
+
+suite "the station outlives a runtime restart":
+  test "systemd-run is probed":
+    check parseToolProbe("wpa_supplicant\nsystemd-run\n").hasSystemdRun
+    check not parseToolProbe(fullProbeTools).hasSystemdRun
+    check toolProbeCommand().contains("command -v systemd-run")
+
+  test "with systemd-run, wpa_supplicant and the DHCP clients start in scopes of their own":
+    let stub = newStubNetwork()
+    stub.files[importedConfPath] = wpaSupplicantHeader() & buildWpaNetworkBlock("Home", "").conf
+    discard ensureStation(stubContext(stub), "wlan0", parseToolProbe(fullProbeTools & "systemd-run\n"))
+    let start = commandIndex(stub, "wpa_supplicant -B -i 'wlan0'")
+    check start >= 0
+    check stub.commands[start].startsWith("sudo systemd-run --scope --quiet --description=")
+    check stub.commands[start].contains(" wpa_supplicant -B -i 'wlan0'")
+    check not stub.commands[start].contains("sudo wpa_supplicant")
+
+  test "the lease and its renewing daemon go the same way":
+    let stub = newStubNetwork()
+    var leaseRequests = new int
+    stub.files[importedConfPath] = wpaSupplicantHeader() & buildWpaNetworkBlock("Home", "").conf
+    let ctx = associatedWithoutLeaseContext(stub, leaseRequests)
+    discard repairStation(ctx, "wlan0", parseToolProbe(fullProbeTools & "systemd-run\n"))
+    var scoped = 0
+    for cmd in stub.commands:
+      if cmd.contains("udhcpc -i 'wlan0'"):
+        check cmd.startsWith("sudo systemd-run --scope")
+        inc scoped
+    check scoped == 2 # the one-shot lease and the daemon that renews it
+
+  test "without systemd-run nothing changes":
+    check outsideTheService(parseToolProbe(fullProbeTools), "x", "sudo wpa_supplicant -B") == "sudo wpa_supplicant -B"
+    check outsideTheService(parseToolProbe("systemd-run\n"), "x", "wpa_cli ping") == "wpa_cli ping"

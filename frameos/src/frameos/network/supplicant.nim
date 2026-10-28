@@ -1014,6 +1014,20 @@ proc detectWifiDevice*(ctx: NetworkContext): string =
       return name
   "wlan0"
 
+proc outsideTheService*(probe: NetworkToolProbe, description, command: string): string =
+  ## `command` (a `sudo ...` line), in a systemd scope of its own where the
+  ## image has systemd-run. The station's daemons (wpa_supplicant, the DHCP
+  ## client) fork from the runtime, so they lived in frameos.service's cgroup
+  ## and every `systemctl restart frameos` (an update, a runtime restart)
+  ## killed Wi-Fi with the runtime until the new one rejoined. A scope runs the
+  ## command right here, exit code and output included, in a cgroup the
+  ## service's stop does not reach; the new runtime finds the supplicant
+  ## answering and keeps it (ensureStation).
+  if not probe.hasSystemdRun or not command.startsWith("sudo "):
+    return command
+  "sudo systemd-run --scope --quiet --description=" & shq(description) & " " &
+    command["sudo ".len .. ^1]
+
 proc wpaCli(device, args: string): string =
   ## -p is explicit: the stock image runs wpa_supplicant D-Bus-only, so the
   ## control socket only exists because our own instance creates it there.
@@ -1140,9 +1154,10 @@ proc startSupplicant(ctx: NetworkContext, device, confPath: string,
     discard ctx.run("sudo iw dev " & shq(device) & " set power_save off 2>/dev/null || true", "")
   # nl80211 only: the shipped wpa_supplicant has no wext driver compiled in,
   # and naming a missing driver makes it exit instead of falling back.
-  let startCmd = "sudo wpa_supplicant -B -i " & shq(device) & " -c " & shq(confPath) &
+  let startCmd = outsideTheService(probe, "FrameOS Wi-Fi: wpa_supplicant on " & device,
+                 "sudo wpa_supplicant -B -i " & shq(device) & " -c " & shq(confPath) &
                  " -D nl80211" &
-                 (if probe.hasWpaCli: " -O " & shq(wpaCtrlDir) else: "") & " 2>&1"
+                 (if probe.hasWpaCli: " -O " & shq(wpaCtrlDir) else: "")) & " 2>&1"
   let (output, rc) = ctx.run(startCmd, "")
   if rc == 0:
     return true
@@ -1212,7 +1227,8 @@ proc requestDhcpLease(ctx: NetworkContext, device: string, probe: NetworkToolPro
     return ""
   let script = if client == "udhcpc": ensureUdhcpcScript(ctx) else: ""
   let hostname = dhcpHostname(ctx)
-  discard ctx.run(dhcpClientCommand(client, device, script, hostname) & " 2>&1 || true", "")
+  discard ctx.run(outsideTheService(probe, "FrameOS Wi-Fi: " & client & " on " & device,
+    dhcpClientCommand(client, device, script, hostname)) & " 2>&1 || true", "")
   let (output, _) = ctx.run("ip -4 addr show dev " & shq(device) & " 2>/dev/null || true", "")
   result = parseIpv4Address(output)
   # One line that says whether DNS actually went anywhere; "connected but
@@ -1228,7 +1244,8 @@ proc requestDhcpLease(ctx: NetworkContext, device: string, probe: NetworkToolPro
   let renew = dhcpRenewCommand(client, device, script, hostname)
   if renew.len > 0:
     # Fire and forget: it daemonises immediately and keeps the lease alive.
-    discard ctx.run(renew & " >/dev/null 2>&1 || true", "")
+    discard ctx.run(outsideTheService(probe, "FrameOS Wi-Fi: " & client & " renewing on " & device,
+      renew) & " >/dev/null 2>&1 || true", "")
 
 proc connect*(ctx: NetworkContext, device, ssid, password, countryCode: string,
               probe: NetworkToolProbe): SupplicantOpResult =
