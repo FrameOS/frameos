@@ -397,6 +397,15 @@ converted), and `pwrite`s only the runs of rows that differ, on a descriptor
 it keeps open. The copy is trusted for a minute at most, and forgotten on an
 unblank or a failed write, so a console that drew over the panel heals.
 
+Measured on that frame (2026-10-28, a finger dragged across the Touch test,
+the runtime's own `render:done` / `render:driver` lines):
+
+| Per frame | Before (2026.10.21, 33 frames) | After (300 frames) |
+| --- | --- | --- |
+| Render | 71.9 ms median | **33.0 ms** (p90 36.2) |
+| Driver | 99.6 ms | **16.1 ms** (p90 16.8) |
+| **Together** | **~172 ms (~5.8 fps)** | **~49 ms (~20 fps)** |
+
 What is left (`docs/realtime-todo.md`): the rotation fused into the push on a
 rotated panel, the push on its own thread, and waking on input instead of
 polling.
