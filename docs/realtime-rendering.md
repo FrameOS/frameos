@@ -468,12 +468,11 @@ it composes a rectangle of the panel's own pixels from a copy of what was
 there, so a host puts it away by writing the copy back, and it allocates,
 raises and refs nothing, because it runs beside the busy render path, not on
 it. It sits in the viewer's top right, through frame.json's `flip` and
-`rotate`, and scales with the panel's shorter side. Four styles,
-`loadingIndicator` in frame.json on a Pi, `set loading_indicator` on an
-ESP32's console: `dots` (the default: three dots in a small dark pill,
-pulsing in turn), `spinner`, `squares` (a 3x3 grid inverted in a ring, no
-backdrop), `bar` (a bright stretch sweeping a thin bar along the top edge),
-and `off`. A frame is drawn every 50 ms.
+`rotate`, and scales with the panel's shorter side. On a Pi, four styles,
+picked by frame.json `loadingIndicator`: `dots` (the default: three dots in
+a small dark pill, pulsing in turn), `spinner`, `squares` (a 3x3 grid
+inverted in a ring, no backdrop), `bar` (a bright stretch sweeping a thin
+bar along the top edge), and `off`. A frame is drawn every 50 ms.
 
 On the HyperPixel 2.1 Round (`frameos/panel_shape.nim` `panelIsRound`) only
 the circle inside the 480x480 square is glass, so the corner styles sit up
@@ -508,10 +507,20 @@ into count a write (`s_generation`), so a damage repaint never takes them for
 a frame of its own. A snapshot (`/image`) taken while a switch loads can
 carry the mark: the front buffer is the snapshot.
 
-Either way a switch slow enough to show the mark logs it once it lands:
+Flash is the ESP32's budget, so the firmware builds only what its one LCD
+needs (`loading_mark.nim` `AllStyles`, `Flips`, `RoundPanels`, `Only565`):
+the dots alone, with no setting to pick another or turn it off, RGB565
+only, no flip, no round panel, and no log line. A style picked for the
+fleet later becomes the one the ESP32 builds. That costs 2,608 bytes of the
+S3 image (2026-10-28, against #642). The mark's own symbols are 1.8 KB of
+Nim drawing (1 KB of it the per-pixel loop) and 1.3 KB of C state, task
+and hooks; the compiler's inlining elsewhere moves by a few hundred bytes
+either way. With all four styles, the setting and the log line it was 5,584.
+
+On a Pi a switch slow enough to show the mark logs it once it lands:
 `render:loadingMark` with the scene and `ms`, from the switch being asked
 for to its first frame. A switch that never lands stops showing it after two
-minutes, past every render's own deadline.
+minutes, past every render's own deadline, on both.
 
 ## Measuring
 

@@ -55,23 +55,20 @@ int frameos_nim_render_panel(uint8_t *buf, size_t len, int pixel_format, uint32_
 void frameos_nim_set_quiet(bool quiet) { (void)quiet; }
 void frameos_nim_set_keep_js(bool keep) { (void)keep; }
 size_t frameos_nim_js_runtime_bytes(void) { return 0; }
-void frameos_nim_loading_mark_rect(int32_t panel_w, int32_t panel_h, int32_t rotation, int32_t style,
-                                   int32_t *rect)
+void frameos_nim_loading_mark_rect(int32_t panel_w, int32_t panel_h, int32_t rotation, int32_t *rect)
 {
     (void)panel_w;
     (void)panel_h;
     (void)rotation;
-    (void)style;
     if (rect) rect[0] = rect[1] = rect[2] = rect[3] = 0;
 }
-void frameos_nim_loading_mark_draw(int32_t panel_w, int32_t panel_h, int32_t rotation, int32_t style,
-                                   int32_t t_ms, const int32_t *rect, const void *src, int32_t src_stride,
-                                   void *dst, int32_t dst_stride)
+void frameos_nim_loading_mark_draw(int32_t panel_w, int32_t panel_h, int32_t rotation, int32_t t_ms,
+                                   const int32_t *rect, const void *src, int32_t src_stride, void *dst,
+                                   int32_t dst_stride)
 {
     (void)panel_w;
     (void)panel_h;
     (void)rotation;
-    (void)style;
     (void)t_ms;
     (void)rect;
     (void)src;

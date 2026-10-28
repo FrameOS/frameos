@@ -157,9 +157,8 @@ static int buffer_index(const uint8_t *buf)
  * handed over was handed over, to tell when the glass shows it. */
 static SemaphoreHandle_t s_mark_lock = NULL;
 static TaskHandle_t s_mark_task = NULL;
-static fos_lcd_loading_t s_mark = {.shown_ms = -1};
+static fos_lcd_loading_t s_mark;
 static volatile uint32_t s_presented_at = 0;
-static void mark_put_away(void);
 static volatile int64_t s_last_frame_at_us = 0;
 static volatile uint32_t s_frames = 0;
 static volatile uint32_t s_glitches = 0;
@@ -612,7 +611,7 @@ static void present_back(void)
     settle_front();
     /* A picture after a switch began is that switch's: the loading mark
      * goes, from whichever buffer holds it, before this one is on the way. */
-    mark_put_away();
+    fos_lcd_st7701s_loading_end();
     int back = s_drawing;
     esp_lcd_panel_draw_bitmap(s_panel, 0, 0, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, s_fbs[back]);
     /* A frame that ended before the call above may have given already:
@@ -713,24 +712,9 @@ void fos_lcd_st7701s_splash_status(fos_lcd_splash_status_t status)
  * scan-out's refill interrupt on core 1 never waits for it. */
 #define LCD_MARK_CORE 0
 #define LCD_MARK_PRIORITY 2
-/* Room for the pixels under the largest style at 480x480 (the bar, 480x5). */
-#define LCD_MARK_SAVED_WORDS 4096u
+/* Room for the pixels under the mark: the dots take ~1,200 at 480x480. */
+#define LCD_MARK_SAVED_WORDS 2048u
 static fos_loading_mark_rect_fn s_mark_rect = NULL;
-static fos_loading_mark_draw_fn s_mark_draw = NULL;
-static volatile int s_mark_style = 1;
-static volatile int s_mark_rotation = 0;
-/* The style and rotation the showing mark was begun with. */
-static int s_mark_begun_style = 1;
-static int s_mark_begun_rotation = 0;
-
-static void mark_draw(int32_t t_ms, const fos_lcd_loading_rect_t *rect, const uint16_t *src,
-                      int32_t src_stride, uint16_t *dst, int32_t dst_stride)
-{
-    if (s_mark_draw) {
-        s_mark_draw(FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, s_mark_begun_rotation, s_mark_begun_style,
-                    t_ms, (const int32_t *)rect, src, src_stride, dst, dst_stride);
-    }
-}
 
 /* The buffer on the glass: the one handed over last once a frame boundary
  * has certainly passed since (two completions), the front one before. */
@@ -741,6 +725,7 @@ static uint16_t *scanned_buffer(void)
     return (uint16_t *)s_fbs[index];
 }
 
+/* A buffer the mark wrote into holds more than a render left there. */
 static void count_write(uint16_t *buf)
 {
     int index = buf ? buffer_index((const uint8_t *)buf) : -1;
@@ -752,12 +737,10 @@ static void mark_task(void *arg)
     (void)arg;
     while (true) {
         xSemaphoreTake(s_mark_lock, portMAX_DELAY);
-        uint16_t *wrote = NULL;
-        uint16_t *restored = NULL;
-        int64_t wait_us = fos_lcd_loading_step(&s_mark, scanned_buffer(), esp_timer_get_time(), &wrote, &restored);
-        /* Neither buffer holds only what a render left there any more. */
-        count_write(wrote);
-        count_write(restored);
+        uint16_t *before = s_mark.drawn_in;
+        int64_t wait_us = fos_lcd_loading_step(&s_mark, scanned_buffer(), esp_timer_get_time());
+        count_write(before);
+        count_write(s_mark.drawn_in);
         xSemaphoreGive(s_mark_lock);
         TickType_t ticks = portMAX_DELAY;
         if (wait_us >= 0) {
@@ -771,77 +754,49 @@ static void mark_task(void *arg)
 void fos_lcd_st7701s_set_loading_mark(fos_loading_mark_rect_fn rect, fos_loading_mark_draw_fn draw)
 {
     s_mark_rect = rect;
-    s_mark_draw = draw;
+    s_mark.draw = draw;
 }
 
-void fos_lcd_st7701s_loading_style(int style, int rotation)
+void fos_lcd_st7701s_loading_begin(int64_t since_us, int rotation)
 {
-    s_mark_style = style;
-    s_mark_rotation = rotation;
-}
-
-static bool mark_start(void)
-{
-    if (s_mark_task) return true;
-    s_mark.saved = heap_caps_malloc(LCD_MARK_SAVED_WORDS * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    s_mark_lock = xSemaphoreCreateMutex();
-    if (!s_mark.saved || !s_mark_lock) {
-        ESP_LOGW(TAG, "no room for the loading mark");
-        return false;
+    if (!s_ready || s_splash_on || !s_mark_rect || !s_mark.draw) return;
+    if (!s_mark_task) {
+        /* The first switch: room for the pixels, the lock and the task. */
+        if (!s_mark.saved) {
+            s_mark.saved = heap_caps_malloc(LCD_MARK_SAVED_WORDS * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
+        if (!s_mark_lock) s_mark_lock = xSemaphoreCreateMutex();
+        if (!s_mark.saved || !s_mark_lock ||
+            xTaskCreatePinnedToCore(mark_task, "fos_mark", 3072, NULL, LCD_MARK_PRIORITY, &s_mark_task,
+                                    LCD_MARK_CORE) != pdPASS) {
+            s_mark_task = NULL;
+            return;
+        }
+        s_mark.saved_words = LCD_MARK_SAVED_WORDS;
+        s_mark.width = FOS_LCD_ST7701S_WIDTH;
+        s_mark.height = FOS_LCD_ST7701S_HEIGHT;
     }
-    s_mark.saved_words = LCD_MARK_SAVED_WORDS;
-    s_mark.width = FOS_LCD_ST7701S_WIDTH;
-    s_mark.height = FOS_LCD_ST7701S_HEIGHT;
-    s_mark.draw = mark_draw;
-    if (xTaskCreatePinnedToCore(mark_task, "fos_mark", 3072, NULL, LCD_MARK_PRIORITY, &s_mark_task,
-                                LCD_MARK_CORE) != pdPASS) {
-        s_mark_task = NULL;
-        ESP_LOGW(TAG, "loading mark task not started");
-        return false;
-    }
-    return true;
-}
-
-void fos_lcd_st7701s_loading_begin(int64_t since_us)
-{
-    int style = s_mark_style;
-    int rotation = s_mark_rotation;
-    if (!s_ready || s_splash_on || !s_mark_rect || !s_mark_draw || style <= 0) return;
-    if (!s_mark_task && !mark_start()) return;
     if (since_us <= 0) since_us = esp_timer_get_time();
     fos_lcd_loading_rect_t rect = {0, 0, 0, 0};
-    s_mark_rect(FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, rotation, style, (int32_t *)&rect);
+    s_mark_rect(FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, rotation, (int32_t *)&rect);
     xSemaphoreTake(s_mark_lock, portMAX_DELAY);
-    s_mark_begun_style = style;
-    s_mark_begun_rotation = rotation;
+    s_mark.rotation = rotation;
     bool begun = fos_lcd_loading_begin(&s_mark, &rect, since_us);
     xSemaphoreGive(s_mark_lock);
     if (begun) xTaskNotifyGive(s_mark_task);
 }
 
-/* The writer's side: present_back, and a switch that ends without one. Only
- * the render task begins a mark, so a mark that is neither loading nor up is
- * not about to be either, and the lock is left alone on every other frame. */
-static void mark_put_away(void)
+/* present_back, and a switch that ends without a picture. Only the render
+ * task begins a mark, so one that is neither loading nor up is not about to
+ * be either, and the lock is left alone on every other frame. */
+void fos_lcd_st7701s_loading_end(void)
 {
     if (!s_mark_lock || (!s_mark.active && !s_mark.drawn_in)) return;
     xSemaphoreTake(s_mark_lock, portMAX_DELAY);
-    count_write(fos_lcd_loading_end(&s_mark, esp_timer_get_time()));
+    uint16_t *before = s_mark.drawn_in;
+    fos_lcd_loading_end(&s_mark);
+    count_write(before);
     xSemaphoreGive(s_mark_lock);
-}
-
-void fos_lcd_st7701s_loading_end(void)
-{
-    mark_put_away();
-}
-
-int32_t fos_lcd_st7701s_loading_take_shown_ms(void)
-{
-    if (!s_mark_lock) return -1;
-    xSemaphoreTake(s_mark_lock, portMAX_DELAY);
-    int32_t ms = fos_lcd_loading_take_shown_ms(&s_mark);
-    xSemaphoreGive(s_mark_lock);
-    return ms;
 }
 
 int fos_lcd_st7701s_init(void)
@@ -1032,14 +987,12 @@ void fos_lcd_st7701s_set_loading_mark(fos_loading_mark_rect_fn rect, fos_loading
     (void)rect;
     (void)draw;
 }
-void fos_lcd_st7701s_loading_style(int style, int rotation)
+void fos_lcd_st7701s_loading_begin(int64_t since_us, int rotation)
 {
-    (void)style;
+    (void)since_us;
     (void)rotation;
 }
-void fos_lcd_st7701s_loading_begin(int64_t since_us) { (void)since_us; }
 void fos_lcd_st7701s_loading_end(void) {}
-int32_t fos_lcd_st7701s_loading_take_shown_ms(void) { return -1; }
 esp_err_t fos_lcd_st7701s_backlight(bool on)
 {
     (void)on;

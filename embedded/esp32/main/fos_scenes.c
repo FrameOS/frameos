@@ -1010,7 +1010,7 @@ bool fos_scenes_apply_pending(void)
         s_payload_stored_since_boot = false;
         s_scene_switched = true;
         /* A new scene set, from here to its first picture: as a switch. */
-        fos_display_loading_begin(esp_timer_get_time());
+        fos_display_loading_begin(esp_timer_get_time(), fos_config()->rotate);
     }
     bool ok = false;
     size_t len = 0;
@@ -1202,7 +1202,7 @@ bool fos_scenes_apply_pending_selection(void)
     /* Another scene, from here to its first picture: on an LCD the loading
      * mark shows if that takes a while, counted from when it was asked for.
      * Before the load below, which is part of the wait. */
-    fos_display_loading_begin(asked_at_us);
+    fos_display_loading_begin(asked_at_us, fos_config()->rotate);
     if (s_slot_count > 0) {
         if (!activate_scene_id(scene_id)) {
             ESP_LOGW(TAG, "scene selection failed: %s", scene_id);

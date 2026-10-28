@@ -226,31 +226,6 @@ void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf))
     fos_lcd_st7701s_set_before_write_hook(hook);
 }
 
-void fos_display_set_loading_mark(fos_loading_mark_rect_fn rect, fos_loading_mark_draw_fn draw)
-{
-    fos_lcd_st7701s_set_loading_mark(rect, draw);
-}
-
-void fos_display_set_loading_style(int style, int rotation)
-{
-    fos_lcd_st7701s_loading_style(style, rotation);
-}
-
-void fos_display_loading_begin(int64_t since_us)
-{
-    if (fos_display_is_lcd()) fos_lcd_st7701s_loading_begin(since_us);
-}
-
-void fos_display_loading_end(void)
-{
-    if (fos_display_is_lcd()) fos_lcd_st7701s_loading_end();
-}
-
-int32_t fos_display_loading_take_shown_ms(void)
-{
-    return fos_display_is_lcd() ? fos_lcd_st7701s_loading_take_shown_ms() : -1;
-}
-
 esp_err_t fos_display_shared_i2c_bus(int sda, int scl, void **bus)
 {
     if (bus) *bus = NULL;

@@ -379,9 +379,9 @@ for the two Spectra boards most of the bench work runs on:
   not put its first picture up within 200 ms gets the loading mark over the
   picture still showing, drawn by a task on core 0 until the next picture
   (`components/frameos_display/lcd_loading.c`, host-tested; the look is the
-  runtime's `frameos/loading_mark.nim`; `set loading_indicator
-  dots|spinner|squares|bar|off`; `docs/realtime-rendering.md` "A switch that
-  takes a while"). An LCD does not wait
+  runtime's `frameos/loading_mark.nim`, the dots alone in the firmware;
+  `docs/realtime-rendering.md` "A switch that takes a while"). An LCD does
+  not wait
   for the clock: it renders once Wi-Fi is up and again when SNTP answers
   (`fos_wifi_set_late_time_hook`); the boot used to wait up to 10 s for it.
   An LCD board runs its CPU at 240 MHz (the generic image boots at 160 for

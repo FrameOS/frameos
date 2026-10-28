@@ -354,7 +354,10 @@
   dispatcher. The mark writes behind the driver, so on a Pi every push to the
   driver goes through `withLoadingMarkAway`, and on the ESP32 every present
   runs `present_back` (which puts it away): a new push or present path keeps
-  that, or the driver's row diff and the damage repaint go wrong.
+  that, or the driver's row diff and the damage repaint go wrong. The
+  firmware builds the default style alone, with no setting, flip or log
+  line (`AllStyles` and friends, for flash): a new style or option is the
+  Pi's unless it replaces what the ESP32 builds.
 - **A pixel loop can use both cores** (`components/frameos_nim/fos_rows.c`):
   `fos_rows_run` hands a job's rows out in blocks to the render task and a
   helper on the other core (resample.nim's draw is the first job). The job

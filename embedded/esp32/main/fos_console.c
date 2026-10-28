@@ -168,13 +168,6 @@ static const char *auth_mode_name(wifi_auth_mode_t authmode)
     }
 }
 
-/* fos_config_t loading_indicator, by name (frame.json `loadingIndicator`). */
-static const char *loading_indicator_name(uint8_t style)
-{
-    static const char *const names[] = {"off", "dots", "spinner", "squares", "bar"};
-    return style < sizeof(names) / sizeof(names[0]) ? names[style] : "dots";
-}
-
 static int cmd_status(int argc, char **argv)
 {
     fos_config_t *config = fos_config();
@@ -250,7 +243,6 @@ static int cmd_status(int argc, char **argv)
     printf("send_logs:   %d\n", (int)config->server_send_logs);
     printf("debug:       %d\n", (int)config->debug_logging);
     printf("fusion:      %d\n", (int)config->image_fusion);
-    printf("loading:     %s\n", loading_indicator_name(config->loading_indicator));
     printf("assets:      path=%s sd=%d mounted=%d pins=%s freq=%lu kHz autoformat=%d\n",
            config->assets_path, (int)config->assets_sd.enabled,
            (int)fos_assets_sd_mounted(), sd_pins,
@@ -516,7 +508,7 @@ static int cmd_set(int argc, char **argv)
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
                "hostname|cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|time_zone|"
-               "interval|max_http_response_bytes|spill_force|debug|fusion|loading_indicator|server_send_logs|"
+               "interval|max_http_response_bytes|spill_force|debug|fusion|server_send_logs|"
                "allow_local_network|admin_auth|admin_user|admin_pass|tls_enable|tls_port|"
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
                "assets_sd_autoformat|"
@@ -901,19 +893,6 @@ static int cmd_set(int argc, char **argv)
     else if (strcmp(key, "server_send_logs") == 0) config->server_send_logs = atoi(value) != 0;
     else if (strcmp(key, "debug") == 0) config->debug_logging = atoi(value) != 0;
     else if (strcmp(key, "fusion") == 0) config->image_fusion = atoi(value) != 0;
-    /* What an LCD shows while a scene switch loads (lcd_loading.h); applies
-     * to the next switch. */
-    else if (strcmp(key, "loading_indicator") == 0) {
-        int style = -1;
-        for (int i = 0; i <= 4; i++) {
-            if (strcmp(value, loading_indicator_name((uint8_t)i)) == 0) style = i;
-        }
-        if (style < 0) {
-            printf("want off, dots, spinner, squares or bar\n");
-            return 1;
-        }
-        config->loading_indicator = (uint8_t)style;
-    }
     /* 0 (default): while this frame is enrolled with a cloud provider, scene
      * HTTP to private/link-local addresses is denied — the provider installs
      * the scenes and the frame sits inside the owner's LAN. 1 lifts that, for

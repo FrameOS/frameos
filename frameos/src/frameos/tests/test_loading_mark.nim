@@ -177,6 +177,19 @@ suite "the loading mark":
         elif (word shr 11) < 20: inc darker
     check darker > 100 # the pill, at half strength over white
     check white > 0    # its corners, and the dots at full
+    # The squares invert in the panel's own steps: white goes black whole.
+    for i in 0 ..< fakeLen:
+      fakeBytes[i] = 0xFF
+    let squares = loadingMarkRect(panel.view, lmSquares)
+    let at = cast[ptr UncheckedArray[uint8]](fakeBytes[squares.y * int32(fakeLine) + squares.x * 2].addr)
+    drawLoadingMark(panel.view, lmSquares, 0, squares, panel.pixels, at, int32(fakeLine), at,
+      int32(fakeLine))
+    var black = 0
+    for y in squares.y ..< squares.y + squares.h:
+      for x in squares.x ..< squares.x + squares.w:
+        let i = y * int32(fakeLine) + x * 2
+        if fakeBytes[i] == 0 and fakeBytes[i + 1] == 0: inc black
+    check black > 0
 
 suite "the loading mark on a panel":
   test "nothing before the delay, the mark after it, the picture back when it goes":

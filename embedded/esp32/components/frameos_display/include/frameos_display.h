@@ -15,6 +15,7 @@
 #include "esp_err.h"
 #include "lcd_loading.h"
 #include "lcd_splash.h"
+#include "lcd_st7701s_rgb.h"
 
 typedef enum {
     FOS_PIXEL_1BPP = 1, /* packed 1 bit/pixel, MSB first, white=1 */
@@ -87,18 +88,24 @@ void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf));
 /* The loading mark (lcd_loading.h, docs/realtime-rendering.md "A switch that
  * takes a while"): on an LCD, a small animated mark over the picture shown
  * while a scene switch loads, once it has taken FOS_LCD_LOADING_DELAY_MS.
- * The runtime draws it (`rect`, `draw`: frameos_nim_loading_mark_*); the
- * style (0 none, 1 dots, 2 spinner, 3 squares, 4 bar) and the frame's
- * rotation come from the config. `begin` on the render task as a switch
- * starts, with when it was asked for (esp_timer time); the next picture
- * shown ends it, and `end` does for a switch that shows none. Nothing on
- * any other panel. */
-void fos_display_set_loading_mark(fos_loading_mark_rect_fn rect, fos_loading_mark_draw_fn draw);
-void fos_display_set_loading_style(int style, int rotation);
-void fos_display_loading_begin(int64_t since_us);
-void fos_display_loading_end(void);
-/* How long the last switch that showed the mark took, in ms, once; -1. */
-int32_t fos_display_loading_take_shown_ms(void);
+ * The runtime draws it (`rect`, `draw`: frameos_nim_loading_mark_*). `begin`
+ * on the render task as a switch starts, with when it was asked for
+ * (esp_timer time) and the frame's rotation; the next picture shown ends it,
+ * and `end` does for a switch that shows none. The one panel that shows it
+ * is the RGB LCD, whose driver does nothing before its init, so these go
+ * straight there: every other panel leaves them alone. */
+static inline void fos_display_set_loading_mark(fos_loading_mark_rect_fn rect, fos_loading_mark_draw_fn draw)
+{
+    fos_lcd_st7701s_set_loading_mark(rect, draw);
+}
+static inline void fos_display_loading_begin(int64_t since_us, int rotation)
+{
+    fos_lcd_st7701s_loading_begin(since_us, rotation);
+}
+static inline void fos_display_loading_end(void)
+{
+    fos_lcd_st7701s_loading_end();
+}
 /* The selected panel's own I2C bus when it runs one on exactly these pins
  * (the SenseCAP Indicator's LCD shares SDA39/SCL40 with its touch
  * controller): the handle (an `i2c_master_bus_handle_t`) for another device

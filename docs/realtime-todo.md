@@ -108,7 +108,9 @@ SVG path work. Roughly in order of what each would buy there:
     bpp, turned), an HDMI panel and the SenseCAP Indicator, with `lcd`
     running to see that the core-0 task leaves the scan-out alone. Then: the
     style as a frame setting on both control planes (frame.json
-    `loadingIndicator` is read on a Pi but nothing writes it; the ESP32 has
-    only `set loading_indicator` on the console, so it needs a contract
-    key), a snapshot taken mid-switch on an ESP32 that does not carry the
-    mark, and the SSD1306 OLED, which redraws fast too but has no mark.
+    `loadingIndicator` is read on a Pi but nothing writes it; the ESP32
+    builds the dots alone, so a style picked for it replaces the dots
+    there rather than joining them), a snapshot taken mid-switch on an
+    ESP32 that does not carry the mark, and the SSD1306 OLED, which redraws
+    fast too but has no mark. The mark's task could be an `esp_timer`
+    callback instead: no flash saved, but its 3 KB internal-RAM stack.
