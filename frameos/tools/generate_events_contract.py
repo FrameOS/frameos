@@ -196,6 +196,8 @@ def load():
         for key in keys:
             if not isinstance(doc[section].get(key), int) or doc[section][key] <= 0:
                 fail(f"{section}.{key}: a positive integer")
+    if not re.fullmatch(r"system/[a-zA-Z]+", doc["scenes"].get("switcher", "")):
+        fail("scenes.switcher: the built-in scene `sceneSwitcher` shows, `system/<name>`")
     if doc["gestures"].get("directions") != ["left", "right", "up", "down"]:
         fail("gestures.directions: left, right, up, down")
     if doc["gestures"].get("edges") != ["left", "right", "top", "bottom"]:
@@ -395,6 +397,8 @@ def gen_nim(doc):
         f"  PointerTypes*: array[{len(doc['pointer']['types'])}, string] = [{', '.join(nim_str(t) for t in doc['pointer']['types'])}]",
         "  ## `setCurrentScene {direction}`: the ways through the frame's scene list (docs/events.md).",
         f"  SceneDirections*: array[{len(doc['scenes']['directions'])}, string] = [{', '.join(nim_str(d) for d in doc['scenes']['directions'])}]",
+        "  ## The built-in scene `sceneSwitcher` shows (docs/scene-switcher.md).",
+        f"  SceneSwitcherId* = {nim_str(doc['scenes']['switcher'])}",
         "  ## Origins a scene opts into per custom event (`origins` on its declaration).",
         f"  CustomEventDeclarableOrigins*: set[EventOrigin] = {{{', '.join(nim_origin(o) for o in doc['customEvents'].get('declarableOrigins', []))}}}",
         "",
@@ -597,6 +601,8 @@ def gen_c(doc):
         f"#define FOS_EVENTS_CONTRACT_VERSION {int(doc['version'])}",
         f"#define FOS_POINTER_WIRE_MAX {int(doc['pointer']['wireMax'])}",
         f"#define FOS_CUSTOM_EVENT_MAX_NAME_LENGTH {int(doc['customEvents']['maxNameLength'])}",
+        "/* The built-in scene `sceneSwitcher` shows: no slot on flash, never persisted. */",
+        f"#define FOS_SCENE_SWITCHER_ID {c_str(doc['scenes']['switcher'])}",
         "",
         "/* `gpio {action}`: the firmware reports the edges, each with `atMs` (when it saw",
         " * it); `button {action}` (press, doublePress, longPress) is the Nim dispatcher's",
@@ -772,6 +778,8 @@ def gen_ts_frontend(doc):
     out.append(f"export const EVENTS_CONTRACT_VERSION = {int(doc['version'])}")
     out.append(f"export const POINTER_WIRE_MAX = {int(doc['pointer']['wireMax'])}")
     out.append(f"export const CUSTOM_EVENT_MAX_NAME_LENGTH = {int(doc['customEvents']['maxNameLength'])}")
+    out.append("/** The built-in scene `sceneSwitcher` shows (docs/scene-switcher.md). */")
+    out.append(f"export const SCENE_SWITCHER_ID = '{doc['scenes']['switcher']}'")
     out.append("")
     out.append("export type EventOrigin = " + " | ".join(f"'{o}'" for o in origins))
     out.append("export type EventClass = " + " | ".join(f"'{c}'" for c in CLASSES))
@@ -833,6 +841,8 @@ def gen_ts_frontend(doc):
     out.append(f"export const buttonRoleByLabel: Record<string, string> = {ts_json(doc['buttons']['roleByLabel'])}")
     out.append(f"export const buttonActions: readonly string[] = {ts_json(doc['buttons']['actions'], None)}")
     out.append(f"export const gpioActions: readonly string[] = {ts_json(doc['buttons']['edges'], None)}")
+    out.append("/** The edges of a touch screen an `edgeSwipe` starts from (`gestures.edges`). */")
+    out.append(f"export const screenEdges: readonly string[] = {ts_json(doc['gestures']['edges'], None)}")
     out.append("")
     out.append("/** Keyboard layouts a frame's `keyboardLayout` setting can name. */")
     out.append("export const keyboardLayouts: readonly { id: string; label: string }[] = "

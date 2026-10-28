@@ -26,6 +26,7 @@ import ./utils/memory
 import ./js_runtime/app_runtime
 import ./js_runtime/run_budget
 import ./js_runtime/runtime as jsRuntime
+import system/sceneSwitcher/scene as sceneSwitcher
 when defined(memProbe): import ./utils/memory
 
 export event_loop
@@ -36,6 +37,9 @@ type
     logger*: Logger
     scene*: FrameScene                    ## the resident instance, nil until its first render
     exported*: ExportedInterpretedScene
+      ## How the resident scene runs: an interpreted scene's, or a built-in
+      ## one's (the scene switcher, system/sceneSwitcher/scene.nim), which
+      ## draws itself through the same three procs.
     sceneId*: Option[SceneId]             ## the current scene, resident or not
     renderRequested*: bool
     keepJsRuntimes*: bool
@@ -149,9 +153,17 @@ proc dropScene*(host: SingleSceneHost) =
     host.scene = nil
     host.exported = nil
 
+proc runOn(host: SingleSceneHost, scene: FrameScene, event: string, payload: JsonNode) =
+  ## One run of the resident scene, through its export: the interpreter's for
+  ## a scene off the list, the switcher's own for the switcher.
+  let context = ExecutionContext(scene: scene, event: event, payload: payload, loopIndex: 0, loopKey: ".")
+  if not host.exported.isNil and scene == host.scene:
+    host.exported.runEvent(scene, context)
+  else:
+    runEvent(scene, context)
+
 proc runNow(host: SingleSceneHost, event: string, payload: JsonNode) =
-  runEvent(host.scene, ExecutionContext(scene: host.scene, event: event, payload: payload,
-    loopIndex: 0, loopKey: "."))
+  host.runOn(host.scene, event, payload)
 
 proc lifecycle*(host: SingleSceneHost, event: string, payload: JsonNode) =
   ## "open" and "close", sent the way runner.nim sends them: "open" when a
@@ -184,17 +196,23 @@ proc ensureScene*(host: SingleSceneHost): bool =
   if host.sceneId.isNone:
     return false
   let sceneId = host.sceneId.get()
-  let scenes = getInterpretedScenes()
-  if not scenes.hasKey(sceneId):
-    host.say("scene not found: " & sceneId.string)
-    return false
-  host.exported = scenes[sceneId]
+  let builtIn = isBuiltInScene(sceneId.string)
+  if builtIn:
+    # The scene switcher: drawn by the runtime, nothing to parse, no state
+    # of its own to start from.
+    host.exported = sceneSwitcher.exportedScene
+  else:
+    let scenes = getInterpretedScenes()
+    if not scenes.hasKey(sceneId):
+      host.say("scene not found: " & sceneId.string)
+      return false
+    host.exported = scenes[sceneId]
   when defined(memProbe): memProbe("  SCENE INIT " & sceneId.string)
-  var persisted = if host.initialState.isNil: nil else: host.initialState(sceneId)
+  var persisted = if host.initialState.isNil or builtIn: nil else: host.initialState(sceneId)
   if persisted.isNil:
     persisted = %*{}
   host.events.hostRun:
-    host.scene = interpreter.init(sceneId, host.frameConfig, host.logger, persisted)
+    host.scene = host.exported.init(sceneId, host.frameConfig, host.logger, persisted)
   when defined(memProbe): memProbe("  ensureScene: init done")
   host.say("scene \"" & host.sceneName & "\" initialized")
   # The order runner.nim keeps: the switch's state is applied (public fields
@@ -251,8 +269,7 @@ proc start*(host: SingleSceneHost) =
         return nil
       host.scene,
     runScene: proc (scene: FrameScene, event: string, payload: JsonNode) =
-      runEvent(scene, ExecutionContext(scene: scene, event: event, payload: payload,
-        loopIndex: 0, loopKey: ".")),
+      host.runOn(scene, event, payload),
     sceneListens: proc (scene: FrameScene, event: string): bool = sceneListensTo(scene, event),
     sceneOrder: host.sceneOrder,
     log: proc (entry: JsonNode) =
@@ -305,7 +322,8 @@ proc renderScene*(host: SingleSceneHost, context: ExecutionContext): Image =
   ## `open` before it) dispatched: delivered now that the run is over. A
   ## `render` among it is one more pass.
   host.events.hostRun:
-    result = interpreter.render(host.scene, context)
+    result = if host.exported.isNil: interpreter.render(host.scene, context)
+      else: host.exported.render(host.scene, context)
   # No tick here either: a finger that went down before this render and
   # lifted during it has its release still in the platform's queue (the
   # ESP32's touch queue, the preview worker's messages), so ticking to now

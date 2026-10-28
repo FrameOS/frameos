@@ -5,13 +5,15 @@ import ../scenes
 
 suite "system scene registry":
   test "scene options expose expected ids and labels":
-    check sceneOptions.len == 3
+    check sceneOptions.len == 4
     check sceneOptions[0].id.string == "system/index"
     check sceneOptions[1].id.string == "system/wifiHotspot"
     check sceneOptions[2].id.string == "system/bootGuard"
+    check sceneOptions[3].id.string == "system/sceneSwitcher"
     check sceneOptions[0].name == "Index"
     check sceneOptions[1].name == "Wifi Captive Portal"
     check sceneOptions[2].name == "Boot Guard"
+    check sceneOptions[3].name == "Scene switcher"
 
   test "getSystemScenes contains all option ids":
     let scenes = getSystemScenes()

@@ -9,7 +9,8 @@
 ## its map (cloud/enrollment.nim), and the Settings panel shows it.
 ##
 ## A HyperPixel is a touch screen with no keys: in from its right edge is the
-## next scene and in from its left the previous, as on the SenseCAP Indicator
+## next scene, in from its left the previous, and up from the bottom the
+## scene switcher (docs/scene-switcher.md), as on the SenseCAP Indicator
 ## (`edgeSwipe`: the scene hears none of that touch). Keep in step with
 ## `deviceEventMap` in frontend/src/utils/frameEventMap.ts.
 
@@ -19,7 +20,8 @@ const hyperPixelEventMap = """[
   {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene",
    "as": {"direction": "next"}},
   {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene",
-   "as": {"direction": "prev"}}
+   "as": {"direction": "prev"}},
+  {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}}
 ]"""
 
 proc deviceEventMap*(device: string): JsonNode =

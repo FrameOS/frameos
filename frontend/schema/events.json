@@ -850,5 +850,11 @@
         ]
       }
     ]
+  },
+  {
+    "name": "sceneSwitcher",
+    "description": "Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. While it is showing, go back to the scene it was opened from instead. The frame's event map binds it to a swipe in from the bottom edge on a touch screen.",
+    "canDispatch": true,
+    "fields": []
   }
 ]

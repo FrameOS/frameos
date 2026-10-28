@@ -630,7 +630,7 @@ def test_embedded_hardware_preset_for_seeed_sensecap_indicator():
     assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
     # The top button: pressed it switches the screen, twice the next scene,
     # held the previous one; swiped in from the right or left edge, the next
-    # or the previous scene.
+    # or the previous scene, and up from the bottom the scene switcher.
     assert embedded_gpio_buttons_for_frame(frame) == [(38, "BUTTON")]
     assert frame.event_map == [
         {"event": "button", "match": {"label": "BUTTON", "action": "press"}, "emit": "toggleScreen", "as": {}},
@@ -638,6 +638,7 @@ def test_embedded_hardware_preset_for_seeed_sensecap_indicator():
         {"event": "button", "match": {"label": "BUTTON", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
         {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
         {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+        {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
     ]
     # No battery, no buzzer, no microphone, no TF socket the chip can reach
     # (the card slot is the RP2040's).

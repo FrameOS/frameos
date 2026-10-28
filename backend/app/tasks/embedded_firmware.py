@@ -275,14 +275,16 @@ EMBEDDED_SEEED_SENSECAP_INDICATOR_PINS = {
 EMBEDDED_SEEED_SENSECAP_INDICATOR_GPIO_BUTTONS = [{"pin": 38, "label": "BUTTON"}]
 # The one key pressed switches the screen off and on, pressed twice is the
 # next scene and held the previous one; a swipe in from the right or the left
-# edge is the next or the previous scene. fos_board.c's INDICATOR_EVENT_MAP is
-# the device copy.
+# edge is the next or the previous scene, and up from the bottom the scene
+# switcher (docs/scene-switcher.md). fos_board.c's INDICATOR_EVENT_MAP is the
+# device copy.
 EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP = [
     {"event": "button", "match": {"label": "BUTTON", "action": "press"}, "emit": "toggleScreen", "as": {}},
     {"event": "button", "match": {"label": "BUTTON", "action": "doublePress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
     {"event": "button", "match": {"label": "BUTTON", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
     {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
     {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+    {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
 ]
 # Parity with fos_board.c's k_touch_pins, nothing provisions it: the FT6336U
 # on the LCD's bus, polled (no INT, no reset, no load switch at the chip).

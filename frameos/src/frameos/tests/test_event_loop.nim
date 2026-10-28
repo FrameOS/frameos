@@ -3,6 +3,7 @@ import ../channels
 import ../event_loop
 import ../interpreter
 import ../types
+import system/sceneSwitcher/scene as sceneSwitcher
 
 # The runner of docs/event-fixtures.json's `dispatcher` section: the shared
 # dispatcher (event_loop.nim) with a recording host around the real
@@ -52,8 +53,26 @@ proc sceneName(scene: FrameScene): string =
 proc sceneInstance(host: RecordingHost, sceneId: SceneId): FrameScene =
   if not host.scenes.hasKey(sceneId):
     host.loop.hostRun:
-      host.scenes[sceneId] = init(sceneId, host.config, host.logger, %*{})
+      # The scene switcher is the runtime's own, built by its export as every
+      # host builds it (scenes.nim's system scenes, single_scene_host).
+      host.scenes[sceneId] =
+        if isBuiltInScene(sceneId.string): sceneSwitcher.exportedScene.init(sceneId, host.config, host.logger, %*{})
+        else: init(sceneId, host.config, host.logger, %*{})
   host.scenes[sceneId]
+
+proc runOn(scene: FrameScene, event: string, payload: JsonNode) =
+  let context = ExecutionContext(scene: scene, event: event, payload: payload,
+    hasImage: false, loopIndex: 0, loopKey: ".")
+  if isBuiltInScene(scene.id.string): sceneSwitcher.exportedScene.runEvent(scene, context)
+  else: runEvent(scene, context)
+
+# The scene switcher's tiles: the running case's scene list, as each host
+# lists the scenes `setCurrentScene {direction}` walks.
+var caseOrder: seq[SceneId]
+sceneSwitcherListing = proc (): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+  {.cast(gcsafe).}:
+    for sceneId in caseOrder:
+      result.add SwitcherEntry(id: sceneId.string, name: sceneId.string)
 
 proc newRecordingHost(sceneId: SceneId, logs: ref seq[JsonNode]): RecordingHost =
   let host = RecordingHost(config: testConfig(), current: sceneId, scenes: initTable[SceneId, FrameScene]())
@@ -62,7 +81,8 @@ proc newRecordingHost(sceneId: SceneId, logs: ref seq[JsonNode]): RecordingHost 
     requestRender: proc () = host.trace.add("render"),
     selectScene: proc (payload: JsonNode): bool =
       let next = payload{"sceneId"}.getStr().SceneId
-      if not getInterpretedScenes().hasKey(next) and not getUploadedInterpretedScenes().hasKey(next):
+      if not getInterpretedScenes().hasKey(next) and not getUploadedInterpretedScenes().hasKey(next) and
+          not isBuiltInScene(next.string):
         host.trace.add("select " & next.string & " failed")
         return false
       if next == host.current:
@@ -70,6 +90,10 @@ proc newRecordingHost(sceneId: SceneId, logs: ref seq[JsonNode]): RecordingHost 
       host.trace.add("select " & next.string)
       host.loop.deliverLifecycle(host.sceneInstance(host.current), "close", %*{})
       host.current = next
+      # The switch's `state`, before "open", as runner.nim and
+      # single_scene_host.nim hand it over.
+      if hasStatePayload(payload):
+        host.loop.host.runScene(host.sceneInstance(next), "setCurrentScene", payload)
       host.loop.deliverLifecycle(host.sceneInstance(next), "open", %*{"sceneId": next.string})
       true,
     displayPower: proc (on: bool) = host.trace.add("power " & (if on: "on" else: "off")),
@@ -80,8 +104,7 @@ proc newRecordingHost(sceneId: SceneId, logs: ref seq[JsonNode]): RecordingHost 
       let line = "run " & sceneName(scene) & " " & event
       let pinned = line & " " & $payload
       host.trace.add(if pinned in host.pinned: pinned else: line)
-      runEvent(scene, ExecutionContext(scene: scene, event: event, payload: payload,
-        hasImage: false, loopIndex: 0, loopKey: ".")),
+      runOn(scene, event, payload),
     # Input reaches a scene only under the names it listens for (runner.nim and
     # single_scene_host.nim answer the same way): a `run` line is a listener.
     sceneListens: proc (scene: FrameScene, event: string): bool = sceneListensTo(scene, event),
@@ -120,6 +143,7 @@ block dispatcher:
     let host = newRecordingHost(c["scene"].getStr().SceneId, logs)
     for scene in c["scenes"]:
       host.order.add(scene["id"].getStr().SceneId)
+    caseOrder = host.order
     # The frame's own event map (frame.json `eventMap`), when the case has one.
     host.config.eventMap = c{"frameEventMap"}
     discard host.sceneInstance(host.current)

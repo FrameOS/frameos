@@ -205,7 +205,7 @@ suite "the event map a frame reports":
                  "frameAccessKey": "test-key", "assetsPath": tempRoot}
     writeFile(configPath, $raw)
     globalFrameConfig = parseFrameConfig($raw)
-    check globalFrameConfig.eventMap.len == 2
+    check globalFrameConfig.eventMap.len == 3
     check frameApiPayload(state){"event_map"}.kind == JNull
 
     raw["eventMap"] = %*[]

@@ -234,6 +234,36 @@
     "allowed": false
    },
    {
+    "origin": "eventMap",
+    "event": "sceneSwitcher",
+    "allowed": true
+   },
+   {
+    "origin": "scene",
+    "event": "sceneSwitcher",
+    "allowed": true
+   },
+   {
+    "origin": "http:write",
+    "event": "sceneSwitcher",
+    "allowed": true
+   },
+   {
+    "origin": "driver",
+    "event": "sceneSwitcher",
+    "allowed": false
+   },
+   {
+    "origin": "cloud",
+    "event": "sceneSwitcher",
+    "allowed": false
+   },
+   {
+    "origin": "schedule",
+    "event": "sceneSwitcher",
+    "allowed": true
+   },
+   {
     "origin": "preview",
     "event": "button",
     "allowed": true
@@ -3660,6 +3690,324 @@
       "trace": [],
       "handled": 1,
       "current": "fixtures/dispatcher/lonely"
+     }
+    ]
+   },
+   {
+    "name": "the scene switcher opens from the scene showing, and the same again goes back",
+    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` walks the list from the scene it was opened from. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The switcher is in no scene list.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/switcherA",
+      "name": "switcherA",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardButton",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "xe1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     },
+     {
+      "id": "fixtures/dispatcher/switcherB",
+      "name": "switcherB",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardButton",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "xe1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     },
+     {
+      "id": "fixtures/dispatcher/switcherC",
+      "name": "switcherC",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardButton",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "xe1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     }
+    ],
+    "frameEventMap": [
+     {
+      "event": "edgeSwipe",
+      "match": {
+       "edge": "bottom"
+      },
+      "emit": "sceneSwitcher"
+     },
+     {
+      "event": "button",
+      "match": {
+       "label": "RIGHT",
+       "action": "longPress"
+      },
+      "emit": "setCurrentScene",
+      "as": {
+       "direction": "next"
+      }
+     }
+    ],
+    "scene": "fixtures/dispatcher/switcherA",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "bottom",
+         "direction": "up",
+         "x": 2,
+         "y": 0,
+         "startX": 2,
+         "startY": 2,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> sceneSwitcher",
+       "select system/sceneSwitcher",
+       "run switcherA close",
+       "run sceneSwitcher setCurrentScene",
+       "run sceneSwitcher open",
+       "render"
+      ],
+      "handled": 2,
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/switcherA",
+       "highlight": "fixtures/dispatcher/switcherA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "RIGHT",
+         "action": "longPress",
+         "durationMs": 1500
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame button -> setCurrentScene",
+       "select fixtures/dispatcher/switcherB",
+       "run sceneSwitcher close",
+       "run switcherB open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/switcherB"
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "trace": [
+       "select system/sceneSwitcher",
+       "run switcherB close",
+       "run sceneSwitcher setCurrentScene",
+       "run sceneSwitcher open",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/switcherB",
+       "highlight": "fixtures/dispatcher/switcherB"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "bottom",
+         "direction": "up",
+         "x": 2,
+         "y": 0,
+         "startX": 2,
+         "startY": 2,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> sceneSwitcher",
+       "select fixtures/dispatcher/switcherB",
+       "run sceneSwitcher close",
+       "run switcherB open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/switcherB"
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "setCurrentScene",
+        "payload": {
+         "sceneId": "system/sceneSwitcher"
+        }
+       }
+      ],
+      "trace": [
+       "select system/sceneSwitcher",
+       "run switcherB close",
+       "run sceneSwitcher open",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "",
+       "highlight": "fixtures/dispatcher/switcherA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "RIGHT",
+         "role": "next",
+         "action": "press"
+        }
+       }
+      ],
+      "trace": [
+       "run sceneSwitcher button",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "highlight": "fixtures/dispatcher/switcherB"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "REFRESH",
+         "role": "refresh",
+         "action": "press"
+        }
+       }
+      ],
+      "trace": [
+       "run sceneSwitcher button",
+       "select fixtures/dispatcher/switcherB",
+       "run sceneSwitcher close",
+       "run switcherB open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/switcherB"
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "trace": [
+       "refused sceneSwitcher driver origin"
+      ],
+      "current": "fixtures/dispatcher/switcherB"
      }
     ]
    }

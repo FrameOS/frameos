@@ -74,7 +74,9 @@ One dispatcher per runtime takes envelopes off a queue and, for each:
 2. logs it by the contract's `log` policy, with its origin;
 3. routes it. A **device command** becomes a `RuntimeCommand` for the host and
    is never delivered to a scene. `render` is a request for a render pass.
-   `setCurrentScene` asks the host to select a scene. `turnOn` / `turnOff` ask
+   `setCurrentScene` asks the host to select a scene, and `sceneSwitcher` to
+   select the scene switcher (or, while it shows, the scene it was opened
+   from: [the scene switcher](scene-switcher.md)). `turnOn` / `turnOff` ask
    the host for display power, and then the scene hears them. Everything else
    is delivered to the scene.
 4. when the queue is empty, applies the render rule (`renderAfter`, below):
@@ -114,7 +116,7 @@ spellings never stop working: store scenes are versioned and immutable.
 |---|---|---|
 | `lifecycle` | `init`, `open`, `render`, `close` | The host tells a scene where it is in its life. |
 | `input` | `pointerMove`, `pointerDown`, `pointerUp`, `pointerCancel`, `wheel`, `tap`, `doubleTap`, `longPress`, `swipe`, `keyDown`, `keyUp`, `textInput`, `gpio`, `button` — and the old names `mouseMove`, `mouseDown`, `mouseUp` | Something a person did. `device` says with what: `keyboard`, `pointer`, `button`. See [Input](#input). |
-| `scene-command` | `setSceneState`, `setCurrentScene`, `turnOn`, `turnOff` | Asks the host to do something for the scene; a scene may dispatch it. |
+| `scene-command` | `setSceneState`, `setCurrentScene`, `sceneSwitcher`, `turnOn`, `turnOff`, `toggleScreen` | Asks the host to do something for the scene; a scene may dispatch it. |
 | `device-command` | `metrics`, `reload`, `restart`, `reboot`, `uploadScenes` | Asks the runtime to do something to the device. Never delivered to a scene, never offered by the editor. |
 
 ### Lifecycle
@@ -215,7 +217,15 @@ no filter on a field hears every value of it.
   control plane's order (a pushed set first, then the deployed scenes it does
   not name), wrapping around; the dispatcher resolves it from the host's
   `sceneOrder` on every host, so a frame with one scene switches nowhere and
-  anything else is refused (`reason: "direction"`).
+  anything else is refused (`reason: "direction"`). While the scene switcher
+  shows, a direction walks from the scene it was opened from.
+- `sceneSwitcher {}` — shows the scene switcher (`system/sceneSwitcher`, the
+  contract's `scenes.switcher`; [scene-switcher.md](scene-switcher.md)): the
+  dispatcher selects it with `state.from`, the scene showing, and while it
+  shows selects that scene again, so one binding opens and closes it. Opened
+  by name (`setCurrentScene` to it) it knows no scene it came from, and goes
+  back to the list's first. The switcher is built into every runtime and is
+  in no scene list; nothing persists it.
 - The input payloads are under [Input](#input).
 
 ### Input
@@ -299,8 +309,9 @@ frame's: the scene hears no `pointerDown`, `pointerMove`, `pointerUp` or
 gesture of that touch, so the slider it began on stays where it was, and
 the frame's event map can make it a scene switch whatever the scene draws
 (the SenseCAP Indicator's preset: in from the right edge the next scene, from
-the left the previous). Lifted, held for a `longPress`, or moved along the
-edge instead, it is the scene's after all: its `pointerDown` goes out then,
+the left the previous, up from the bottom the scene switcher). Lifted, held
+for a `longPress`, or moved along the edge instead, it is the scene's after
+all: its `pointerDown` goes out then,
 late, and the rest as it comes, so a button at the edge still works. A
 mouse is never held.
 
@@ -541,8 +552,9 @@ the preview alike. There are two, applied in this order:
   on every reTerminal preset (the backend's `EMBEDDED_HARDWARE_PRESETS`, the
   firmware's board table), and the owner may add, change or clear it. A frame
   never given one runs its device's: every HyperPixel (`pimoroni.hyperpixel*`)
-  takes an edge swipe in from the right as the next scene and from the left
-  as the previous (`frameos/device_event_map.nim`, applied when frame.json has
+  takes an edge swipe in from the right as the next scene, from the left as
+  the previous and up from the bottom as the scene switcher
+  (`frameos/device_event_map.nim`, applied when frame.json has
   no `eventMap`; the backend leaves the key out until the owner saves one,
   the frame API reports it as `null`, and the cloud sees it in what the frame
   reports). An empty list is a choice and stays empty. It needs no scene: it
@@ -581,10 +593,11 @@ came. A rule does one of two things:
   its whole payload, from the origin `eventMap`, and the matched event goes no
   further — the scene never hears the press, not even a `button` listener
   with no filter. That is how "Button actions" binds a key to the frame
-  (`setCurrentScene {direction}`, `render`, `turnOn`, `turnOff` — offered
-  only where the display's driver powers the panel, see the host table below —
-  `setSceneState`), and an installed scene's rule may do the same (a double
-  press of REFRESH is this scene's page 2). The emitted event is a normal
+  (`setCurrentScene {direction}`, `sceneSwitcher`, `render`, `turnOn`,
+  `turnOff` — offered only where the display's driver powers the panel, see
+  the host table below — `setSceneState`; a touch screen's rows are its edges'
+  swipes too, `edgeSwipe {edge}`), and an installed scene's rule may do the
+  same (a double press of REFRESH is this scene's page 2). The emitted event is a normal
   envelope: the allow-list is asked of `eventMap` like any origin, and what the
   map emits is never mapped again, so a rule cannot feed itself.
 
@@ -635,6 +648,7 @@ an event means:
 | Input devices | pointers and keyboards (evdev), GPIO buttons | GPIO buttons and a touch panel (`fos_touch.c`); no keyboard, so `keyDown` / `keyUp` / `textInput` / `wheel` have no producer and the keyboard tables are not compiled | the browser's pointer and keyboard |
 | The old pointer names (`mouseMove`, `mouseDown`, `mouseUp`) | delivered to a scene that listens for them | delivered to a scene that listens for them (since 2026-10-25: store scenes are immutable, and the Touch test listens for the old names) | delivered |
 | `close` on `reload` / `uploadScenes` | not sent | not sent | — |
+| The scene switcher (`sceneSwitcher`) | each tile the scene's last snapshot (`scene_images/`) | names only; selected without a slot (`fos_scenes.c`), the frame kept awake its idle time, never `last_scene` | names only |
 
 A frame on firmware older than `cloud.since` does not know `scene_event`: the
 cloud sends it `cloud.before` where the contract has one (`setSceneState` rides

@@ -14,6 +14,7 @@ import {
   bindingConflicts,
   bindingOfRule,
   bindingRule,
+  edgeGestures,
   frameActionKinds,
   frameActionKindsFor,
   frameActionTitle,
@@ -21,9 +22,15 @@ import {
   frameActionValue,
   frameBindings,
   frameEventMapRules,
+  frameGestureTitle,
+  frameGestureValue,
+  frameOffersEdgeGestures,
+  frameSupportsSceneSwitcher,
   gestureCanVoiceChat,
   parseFrameActionValue,
+  parseFrameGestureValue,
   reportedEventMapOf,
+  sceneSwitcherMinVersion,
 } from "../../../../../../frontend/src/utils/frameEventMap";
 
 // The reTerminal preset: the arrows held walk the scenes.
@@ -64,9 +71,10 @@ describe("bindings and rules", () => {
     // Offered for a long press when the frame has voice chat, never for a press
     // or a double press: the release is what ends a sentence.
     const doublePress = { label: "REFRESH", action: "doublePress" };
-    expect(frameActionKindsFor(refreshHeld, { voiceChat: true, displayPower: true })).toEqual([...frameActionKinds, "voiceChat"]);
-    expect(frameActionKindsFor(refreshHeld, { voiceChat: false, displayPower: true })).toEqual(frameActionKinds);
-    expect(frameActionKindsFor(doublePress, { voiceChat: true, displayPower: true })).toEqual(frameActionKinds);
+    const all = { voiceChat: true, displayPower: true, sceneSwitcher: true };
+    expect(frameActionKindsFor(refreshHeld, all)).toEqual([...frameActionKinds, "voiceChat"]);
+    expect(frameActionKindsFor(refreshHeld, { ...all, voiceChat: false })).toEqual(frameActionKinds);
+    expect(frameActionKindsFor(doublePress, all)).toEqual(frameActionKinds);
     expect(gestureCanVoiceChat(refreshHeld)).toBe(true);
     expect(gestureCanVoiceChat(doublePress)).toBe(false);
     expect(frameActionKinds).not.toContain("voiceChat");
@@ -124,6 +132,62 @@ describe("bindings and rules", () => {
     expect(frameActionTitle({ kind: "showScene", sceneId: "gone" }, [])).toBe("Show scene: gone");
   });
 
+  it("binds a press or a swipe in from an edge to the scene switcher, on a FrameOS that has it", () => {
+    // docs/scene-switcher.md: up from the bottom of a touch screen, on every
+    // touch preset; a key's press on any frame that wants one.
+    const bottom = { edge: "bottom" };
+    const rule: EventMapRule = { event: "edgeSwipe", match: bottom, emit: "sceneSwitcher", as: {} };
+    expect(bindingRule({ gesture: bottom, action: { kind: "sceneSwitcher" } })).toEqual(rule);
+    expect(bindingOfRule(rule)).toEqual({ gesture: bottom, action: { kind: "sceneSwitcher" } });
+    expect(isEventMapRule(rule)).toBe(true);
+    const refreshTwice = { label: "REFRESH", action: "doublePress" };
+    expect(bindingRule({ gesture: refreshTwice, action: { kind: "sceneSwitcher" } })).toEqual({
+      event: "button", match: refreshTwice, emit: "sceneSwitcher", as: {},
+    });
+    expect(frameActionTitle({ kind: "sceneSwitcher" })).toBe("Scene switcher");
+    expect(parseFrameActionValue(frameActionValue({ kind: "sceneSwitcher" }))).toEqual({ kind: "sceneSwitcher" });
+    // The edges' own swipes: next and previous scene, and the switcher.
+    const right: EventMapRule = { event: "edgeSwipe", match: { edge: "right" }, emit: "setCurrentScene", as: { direction: "next" } };
+    expect(bindingOfRule(right)).toEqual({ gesture: { edge: "right" }, action: { kind: "nextScene" } });
+    expect(bindingOfRule({ event: "edgeSwipe", match: { edge: "middle" }, emit: "render", as: {} })).toBeNull();
+    expect(bindingOfRule({ event: "edgeSwipe", match: { edge: "left", direction: "right" }, emit: "render", as: {} })).toBeNull();
+    // Offered only where the frame's FrameOS shows it.
+    const old = { voiceChat: false, displayPower: false, sceneSwitcher: false };
+    expect(frameActionKindsFor(bottom, old)).not.toContain("sceneSwitcher");
+    expect(frameActionKindsFor(bottom, { ...old, sceneSwitcher: true })).toContain("sceneSwitcher");
+    expect(frameActionUnavailableReason({ gesture: bottom, action: { kind: "sceneSwitcher" } }, old)).toBe(
+      `needs FrameOS ${sceneSwitcherMinVersion}`,
+    );
+    expect(frameSupportsSceneSwitcher(sceneSwitcherMinVersion, true)).toBe(true);
+    expect(frameSupportsSceneSwitcher("2026.10.20", true)).toBe(false);
+    expect(frameSupportsSceneSwitcher(null, true)).toBe(false);
+    expect(frameSupportsSceneSwitcher(null, false)).toBe(true);
+    // A swipe is never a voice key.
+    expect(gestureCanVoiceChat(bottom)).toBe(false);
+  });
+
+  it("offers the edges as rows on a touch screen, by select value and title", () => {
+    expect(edgeGestures()).toEqual([{ edge: "left" }, { edge: "right" }, { edge: "top" }, { edge: "bottom" }]);
+    for (const gesture of [...edgeGestures(), leftHeld]) {
+      expect(parseFrameGestureValue(frameGestureValue(gesture))).toEqual(gesture);
+    }
+    expect(parseFrameGestureValue(JSON.stringify({ edge: "middle" }))).toBeNull();
+    expect(frameGestureTitle({ edge: "bottom" })).toBe("Swipe up from the bottom");
+    expect(frameGestureTitle(leftHeld)).toBe("LEFT · long press");
+    expect(frameOffersEdgeGestures(true, "embedded", [])).toBe(true);
+    expect(frameOffersEdgeGestures(null, "pimoroni.hyperpixel4sq_touch", [])).toBe(true);
+    expect(frameOffersEdgeGestures(null, "lcd.st7701s_480x480", [])).toBe(true);
+    expect(frameOffersEdgeGestures(null, "waveshare.EPD_7in5_V2", presetRules)).toBe(false);
+    // A map that binds an edge already shows it as a row, whatever the device.
+    expect(frameOffersEdgeGestures(null, null, [{ event: "edgeSwipe", match: { edge: "left" }, emit: "render", as: {} }])).toBe(true);
+    // The same swipe twice is a conflict, as a press is.
+    const twice = frameBindings([
+      { event: "edgeSwipe", match: { edge: "bottom" }, emit: "sceneSwitcher", as: {} },
+      { event: "edgeSwipe", match: { edge: "bottom" }, emit: "render", as: {} },
+    ]).bindings;
+    expect(bindingConflicts(twice)).toEqual(["Swipe up from the bottom is bound twice; only the first binding counts"]);
+  });
+
   it("names a press bound twice", () => {
     const { bindings } = frameBindings([...presetRules, { event: "button", match: leftHeld, emit: "render", as: {} }]);
     expect(bindingConflicts(bindings)).toEqual(["LEFT · long press is bound twice; only the first binding counts"]);
@@ -143,7 +207,7 @@ describe("the rules a device or a push carries", () => {
     expect(isEventMapRule("nonsense")).toBe(false);
     // The emits are the contract's: what the eventMap origin may say.
     expect([...eventMapEmits].sort()).toEqual([
-      "render", "setCurrentScene", "setSceneState", "toggleScreen", "turnOff", "turnOn", "voiceChat",
+      "render", "sceneSwitcher", "setCurrentScene", "setSceneState", "toggleScreen", "turnOff", "turnOn", "voiceChat",
     ]);
   });
 

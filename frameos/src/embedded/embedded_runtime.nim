@@ -16,6 +16,7 @@ import lib/tz
 import std/times
 import frameos/channels
 import frameos/single_scene_host
+import system/sceneSwitcher/scene as sceneSwitcher
 when defined(memProbe): import frameos/utils/memory
 import frameos/interpreter
 import frameos/values
@@ -215,7 +216,8 @@ proc persistableSceneState(): JsonNode =
 
 proc persistSceneState*() =
   ## Write the resident scene's state when it differs from what was written.
-  if host.scene.isNil or host.sceneId.isNone:
+  ## The scene switcher keeps none: a reboot never comes back to it.
+  if host.scene.isNil or host.sceneId.isNone or isBuiltInScene(host.sceneId.get().string):
     return
   saveSceneState(host.sceneId.get().string, persistableSceneState())
 
@@ -294,7 +296,8 @@ proc fos_nim_send_event_impl*(originMask: cuint, eventName: cstring, payloadJson
         if event == "setCurrentScene": payload{"sceneId"}.getStr()
         elif event == "setSceneState" and host.sceneId.isSome: host.sceneId.get().string
         else: ""
-      if target.len > 0 and (host.scene.isNil or host.sceneId.get().string != target):
+      if target.len > 0 and not isBuiltInScene(target) and
+          (host.scene.isNil or host.sceneId.get().string != target):
         mergePersistedSceneState(target, state)
         host.renderRequested = true
         persisted = true
@@ -714,9 +717,33 @@ proc loadEmbeddedScene(sceneId: SceneId): bool {.nimcall.} =
 
 sceneLoader = loadEmbeddedScene
 
+proc switcherListing(): seq[SwitcherEntry] {.nimcall, gcsafe.} =
+  ## The scene switcher's tiles: the catalog (names and ids off flash, in
+  ## scenes.json order) on the lazy path, the parsed payload's otherwise —
+  ## the same list `setCurrentScene {direction}` walks (host.sceneOrder).
+  {.cast(gcsafe).}:
+    if sceneCatalog.len > 0:
+      for entry in sceneCatalog:
+        result.add SwitcherEntry(id: entry.id, name: entry.name)
+    else:
+      let scenes = getInterpretedScenes()
+      for sceneId in loadedSceneOrder:
+        result.add SwitcherEntry(id: sceneId.string,
+          name: if scenes.hasKey(sceneId): scenes[sceneId].name else: "")
+
+sceneSwitcherListing = switcherListing
+
 proc selectScene*(sceneIdText: string): bool =
   when defined(memProbe): memProbe("  >>> selectScene " & sceneIdText)
   let sceneId = SceneId(sceneIdText)
+  if isBuiltInScene(sceneIdText):
+    # The scene switcher (fos_scenes.c applies it without a slot): the scene
+    # it covers goes, its parsed payload stays in the cache for the way back.
+    # Asked again while it shows (a reconnect re-announcing it), it keeps
+    # what it was opened from. fos_scenes.c logs the switch.
+    if host.sceneId != some(sceneId):
+      host.makeCurrent(sceneId)
+    return true
   let scenes = getInterpretedScenes()
   # On the lazy path the scene is on flash, not in the cache: record the
   # choice and let the firmware feed the payload through loadScene. Returning

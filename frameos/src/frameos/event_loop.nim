@@ -9,7 +9,8 @@
 ##   contract's allow-list is asked here, of every origin, once;
 ## - the **command/event split**: a device command becomes a `RuntimeCommand`
 ##   for the host and is never delivered to a scene; `render`,
-##   `setCurrentScene`, `turnOn` / `turnOff` are asked of the host;
+##   `setCurrentScene`, `sceneSwitcher`, `turnOn` / `turnOff` are asked of
+##   the host;
 ## - **queued delivery**: what a handler dispatches is appended and delivered
 ##   after the run that dispatched it, on every host;
 ## - the **render rule**: the contract's `renderAfter`, applied once the queue
@@ -329,22 +330,35 @@ proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): boo
   loop.runOnScene(scene, envelope.name, payload, policy, envelope.fromRender)
   true
 
+proc switcherOpener(scene: FrameScene): string =
+  ## The scene the scene switcher (`SceneSwitcherId`) was opened from, its
+  ## `state.from`; "" for any other scene (`{}` is nil-safe).
+  if scene.isNil or scene.id.string != SceneSwitcherId: "" else: scene.state{"from"}.getStr()
+
+proc sceneOrderOf(loop: EventLoop): seq[SceneId] =
+  if loop.host.sceneOrder.isNil: newSeq[SceneId]() else: loop.host.sceneOrder()
+
 proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
   ## `setCurrentScene`: by `sceneId`, or by `direction` through the host's
   ## scene order (`next` / `prev` of the scene showing, wrapping around; the
-  ## list's first or last when nothing is). False when nothing could switch:
-  ## a direction the contract does not know, or a frame with no scene list.
+  ## list's first or last when nothing is). While the scene switcher shows,
+  ## the scene it was opened from is the one a direction walks from. False
+  ## when nothing could switch: a direction the contract does not know, or a
+  ## frame with no scene list.
   var payload = envelope.payload
   if payload{"sceneId"}.getStr().len == 0:
     let direction = payload{"direction"}.getStr()
     if direction.len > 0:
       if direction notin SceneDirections:
         return loop.refused(envelope, "direction")
-      let order = if loop.host.sceneOrder.isNil: newSeq[SceneId]() else: loop.host.sceneOrder()
+      let order = loop.sceneOrderOf()
       if order.len == 0:
         return loop.refused(envelope, "noSceneOrder")
       let current = loop.host.sceneFor(none(SceneId))
-      var index = if current.isNil: -1 else: order.find(current.id)
+      let opener = switcherOpener(current)
+      var index = if opener.len > 0: order.find(SceneId(opener))
+        elif current.isNil: -1
+        else: order.find(current.id)
       if direction == "next":
         index = if index < 0: 0 else: (index + 1) mod order.len
       else:
@@ -352,6 +366,31 @@ proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
       payload = if payload.isNil or payload.kind != JObject: newJObject() else: copy(payload)
       payload["sceneId"] = %order[index].string
   loop.host.selectScene(payload)
+
+proc sceneSwitcher(loop: EventLoop, envelope: EventEnvelope): bool =
+  ## `sceneSwitcher`: the scene switcher, told which scene it was opened from;
+  ## while it shows, that scene again. The switcher forgets a scene that left
+  ## the list, and one opened by name knows none: then the list's first.
+  # One way out (no early `return`): on the ESP32 every one repeats the
+  # clean-up of what was made so far, in flash.
+  let current = loop.host.sceneFor(none(SceneId))
+  let payload = newJObject()
+  var next = SceneSwitcherId
+  if current.isNil or current.id.string != SceneSwitcherId:
+    let state = newJObject()
+    state["from"] = newJString(if current.isNil: "" else: current.id.string)
+    payload["state"] = state
+  else:
+    next = current.state{"from"}.getStr()
+    if next.len == 0:
+      let order = loop.sceneOrderOf()
+      if order.len > 0:
+        next = order[0].string
+  if next.len == 0:
+    result = loop.refused(envelope, "noSceneOrder")
+  else:
+    payload["sceneId"] = newJString(next)
+    result = loop.host.selectScene(payload)
 
 proc listens(loop: EventLoop, scene: FrameScene, name: string): bool =
   loop.host.sceneListens.isNil or loop.host.sceneListens(scene, name)
@@ -478,6 +517,10 @@ proc process(loop: EventLoop, envelope: EventEnvelope): bool =
     result = true
   of evSetCurrentScene:
     result = loop.selectScene(envelope)
+    if result:
+      loop.renderWanted = true
+  of evSceneSwitcher:
+    result = loop.sceneSwitcher(envelope)
     if result:
       loop.renderWanted = true
   of evTurnOn, evTurnOff:
