@@ -52,7 +52,6 @@ type
 
   MarkState* = object
     panel*: MarkPanel
-    style*: LoadingMarkStyle
     rect*: MarkRect
     asked*: int    ## switches begun, ever: a push says which one it rendered for
     active*: bool  ## a switch is loading
@@ -102,19 +101,18 @@ proc reserve(s: var MarkState, bytes: int) =
   s.work = cast[ptr UncheckedArray[uint8]](allocShared0(bytes))
   s.capacity = bytes
 
-proc markBegin*(s: var MarkState, panel: MarkPanel, style: LoadingMarkStyle, nowMs: int64): int =
+proc markBegin*(s: var MarkState, panel: MarkPanel, nowMs: int64): int =
   ## A switch begins, now. Returns its number, for the push that lands it. A
   ## switch begun while another still loads keeps the first one's start (the
   ## person has been waiting since then) and its mark, if one is showing.
-  let rect = loadingMarkRect(panel.view, style)
-  if s.drawn and (rect != s.rect or panel != s.panel or style != s.style):
+  let rect = loadingMarkRect(panel.view)
+  if s.drawn and (rect != s.rect or panel != s.panel):
     discard s.markClear()
   inc s.asked
-  if style == lmOff or rect.w <= 0 or rect.h <= 0 or panel.io.write.isNil:
+  if rect.w <= 0 or rect.h <= 0 or panel.io.write.isNil:
     s.active = false
     return s.asked
   s.panel = panel
-  s.style = style
   s.rect = rect
   s.reserve(int(rect.w) * int(rect.h) * int(panel.pixels.bytesPerPixel))
   if not s.active:
@@ -145,7 +143,7 @@ proc markStep*(s: var MarkState, nowMs: int64): int =
       s.active = false
       return -1
   let stride = int32(s.rowBytes)
-  drawLoadingMark(s.panel.view, s.style, t, s.rect, s.panel.pixels, s.saved, stride, s.work, stride)
+  drawLoadingMark(s.panel.view, t, s.rect, s.panel.pixels, s.saved, stride, s.work, stride)
   s.drawn = true
   if not s.transfer(s.work, write = true):
     discard s.markClear()
@@ -240,33 +238,33 @@ when defined(linux):
         rotation: int32(((rotation mod 360) + 360) mod 360),
         flipX: flip in ["horizontal", "both"], flipY: flip in ["vertical", "both"], round: round))
 
-proc beginLoadingMarkOn*(panel: MarkPanel, style: LoadingMarkStyle): int =
+proc beginLoadingMarkOn*(panel: MarkPanel): int =
   ## `beginLoadingMark` on a panel of the caller's (the tests'). Runner thread.
   startMarkThread()
   withLock markLock:
     {.cast(gcsafe).}:
-      result = markBegin(markState, panel, style, monoMs())
+      result = markBegin(markState, panel, monoMs())
   markWake.send(1)
 
 when defined(testing):
   var loadingMarkTestPanel*: MarkPanel
     ## A panel the tests hand the runner in place of /dev/fb0.
 
-proc beginLoadingMark*(device: string, rotation: int, flip: string, style: LoadingMarkStyle): int =
+proc beginLoadingMark*(device: string, rotation: int, flip: string): int =
   ## A switch begins on this frame: the scene shown is going away, the next
   ## one is being built. Returns the switch's number for the render that
   ## lands it (`withLoadingMarkAway`), 0 on a frame that has no mark.
   ## Runner thread.
-  if style == lmOff or not loadingMarkDevice(device):
+  if not loadingMarkDevice(device):
     return 0
   when defined(testing):
     if not loadingMarkTestPanel.io.write.isNil:
-      return beginLoadingMarkOn(loadingMarkTestPanel, style)
+      return beginLoadingMarkOn(loadingMarkTestPanel)
   when defined(linux):
     let panel = framebufferPanel(rotation, flip, panelIsRound(device))
     if panel.io.write.isNil:
       return 0
-    beginLoadingMarkOn(panel, style)
+    beginLoadingMarkOn(panel)
   else:
     0
 

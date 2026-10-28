@@ -355,9 +355,9 @@
   driver goes through `withLoadingMarkAway`, and on the ESP32 every present
   runs `present_back` (which puts it away): a new push or present path keeps
   that, or the driver's row diff and the damage repaint go wrong. The
-  firmware builds the default style alone, with no setting, flip or log
-  line (`AllStyles` and friends, for flash): a new style or option is the
-  Pi's unless it replaces what the ESP32 builds.
+  firmware builds RGB565 alone, with no flip, round panel or log line
+  (`Only565`, `Flips`, `RoundPanels`, for flash): an option added later is
+  the Pi's unless the ESP32 needs it, and the PR says what it cost there.
 - **A pixel loop can use both cores** (`components/frameos_nim/fos_rows.c`):
   `fos_rows_run` hands a job's rows out in blocks to the render task and a
   helper on the other core (resample.nim's draw is the first job). The job

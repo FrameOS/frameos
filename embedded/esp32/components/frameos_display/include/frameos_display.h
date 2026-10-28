@@ -86,21 +86,17 @@ int64_t fos_display_buffer_generation(const uint8_t *buf);
  * points at the last picture shown lets go of it (fos_client.c). */
 void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf));
 /* The loading mark (lcd_loading.h, docs/realtime-rendering.md "A switch that
- * takes a while"): on an LCD, a small animated mark over the picture shown
- * while a scene switch loads, once it has taken FOS_LCD_LOADING_DELAY_MS.
- * The runtime draws it (`rect`, `draw`: frameos_nim_loading_mark_*). `begin`
- * on the render task as a switch starts, with when it was asked for
- * (esp_timer time) and the frame's rotation; the next picture shown ends it,
- * and `end` does for a switch that shows none. The one panel that shows it
+ * takes a while"): on an LCD, three pulsing dots over the picture shown
+ * while a scene switch loads, once it has taken FOS_LCD_LOADING_DELAY_MS,
+ * drawn by the runtime (frameos/loading_mark.nim). `begin` on the render
+ * task as a switch starts, with when it was asked for (a FreeRTOS tick) and
+ * the frame's rotation; the next picture shown ends it, and `end` does for a
+ * switch that shows none. The one panel that shows it
  * is the RGB LCD, whose driver does nothing before its init, so these go
  * straight there: every other panel leaves them alone. */
-static inline void fos_display_set_loading_mark(fos_loading_mark_rect_fn rect, fos_loading_mark_draw_fn draw)
+static inline void fos_display_loading_begin(uint32_t since_tick, int rotation)
 {
-    fos_lcd_st7701s_set_loading_mark(rect, draw);
-}
-static inline void fos_display_loading_begin(int64_t since_us, int rotation)
-{
-    fos_lcd_st7701s_loading_begin(since_us, rotation);
+    fos_lcd_st7701s_loading_begin(since_tick, rotation);
 }
 static inline void fos_display_loading_end(void)
 {

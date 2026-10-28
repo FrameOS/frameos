@@ -75,88 +75,104 @@ suite "the loading mark":
     check loadingMarkTime(LoadingMarkDelayMs + 1000) == 1000
     check LoadingMarkDelayMs in 150 .. 250
 
-  test "frame.json names a style; anything else is the dots":
-    check parseLoadingMarkStyle("") == lmDots
-    check parseLoadingMarkStyle("dots") == lmDots
-    check parseLoadingMarkStyle("spinner") == lmSpinner
-    check parseLoadingMarkStyle("squares") == lmSquares
-    check parseLoadingMarkStyle("bar") == lmBar
-    check parseLoadingMarkStyle("off") == lmOff
-    check parseLoadingMarkStyle("none") == lmOff
-    check parseLoadingMarkStyle("sparkles") == lmDots
-
-  test "every style sits in the viewer's top right, or along the top, at every turn and flip":
+  test "the mark sits in the viewer's top right at every turn and flip":
     for rotation in [0, 90, 180, 270]:
       for flip in ["", "horizontal", "vertical", "both"]:
-        for style in [lmDots, lmSpinner, lmSquares, lmBar]:
-          let (pw, ph) = if rotation in [90, 270]: (PanelH, PanelW) else: (PanelW, PanelH)
-          var panel = fakePanel(pw, ph, rotation = rotation)
-          panel.view.flipX = flip in ["horizontal", "both"]
-          panel.view.flipY = flip in ["vertical", "both"]
-          paintPanel(1)
-          let before = snapshot()
-          let rect = loadingMarkRect(panel.view, style)
-          check rect.w > 0 and rect.h > 0
-          check rect.x >= 0 and rect.y >= 0 and rect.x + rect.w <= pw and rect.y + rect.h <= ph
-          let origin = fakeBytes[(rect.y * int32(fakeLine)) + rect.x * 4].addr
-          let rows = cast[ptr UncheckedArray[uint8]](origin)
-          drawLoadingMark(panel.view, style, 400, rect, panel.pixels, rows, int32(fakeLine),
-            rows, int32(fakeLine))
-          let changed = changedPixels(before)
-          check changed.len > 0
-          for (x, y) in changed:
-            check x >= rect.x and x < rect.x + rect.w and y >= rect.y and y < rect.y + rect.h
-            var (fx, fy) = turnBack(x, y, rotation, pw, ph)
-            if panel.view.flipX: fx = PanelW - 1 - fx
-            if panel.view.flipY: fy = PanelH - 1 - fy
-            if style == lmBar:
-              check fy < 6
-            else:
-              if not (fx >= PanelW div 2 and fy < PanelH div 2):
-                checkpoint "style " & $style & " rotation " & $rotation & " flip " & flip &
-                  " drew at frame " & $fx & "," & $fy
-                fail()
+        let (pw, ph) = if rotation in [90, 270]: (PanelH, PanelW) else: (PanelW, PanelH)
+        var panel = fakePanel(pw, ph, rotation = rotation)
+        panel.view.flipX = flip in ["horizontal", "both"]
+        panel.view.flipY = flip in ["vertical", "both"]
+        paintPanel(1)
+        let before = snapshot()
+        let rect = loadingMarkRect(panel.view)
+        check rect.w > 0 and rect.h > 0
+        check rect.x >= 0 and rect.y >= 0 and rect.x + rect.w <= pw and rect.y + rect.h <= ph
+        let origin = fakeBytes[(rect.y * int32(fakeLine)) + rect.x * 4].addr
+        let rows = cast[ptr UncheckedArray[uint8]](origin)
+        drawLoadingMark(panel.view, 400, rect, panel.pixels, rows, int32(fakeLine), rows,
+          int32(fakeLine))
+        let changed = changedPixels(before)
+        check changed.len > 0
+        for (x, y) in changed:
+          check x >= rect.x and x < rect.x + rect.w and y >= rect.y and y < rect.y + rect.h
+          var (fx, fy) = turnBack(x, y, rotation, pw, ph)
+          if panel.view.flipX: fx = PanelW - 1 - fx
+          if panel.view.flipY: fy = PanelH - 1 - fy
+          if not (fx >= PanelW div 2 and fy < PanelH div 2):
+            checkpoint "rotation " & $rotation & " flip " & flip & " drew at frame " & $fx & "," & $fy
+            fail()
 
-  test "on a round panel every pixel of every style is on the glass, 12 px in from the rim":
-    # The HyperPixel 2.1 Round shows the circle inside its 480x480 square:
-    # a mark in the corner, or along the top edge, would never be seen.
+  test "the dots light up left to right as the viewer sees them, at every turn and flip":
+    for rotation in [0, 90, 180, 270]:
+      for flip in ["", "horizontal", "vertical", "both"]:
+        let (pw, ph) = if rotation in [90, 270]: (PanelH, PanelW) else: (PanelW, PanelH)
+        var panel = fakePanel(pw, ph, rotation = rotation)
+        panel.view.flipX = flip in ["horizontal", "both"]
+        panel.view.flipY = flip in ["vertical", "both"]
+        let rect = loadingMarkRect(panel.view)
+        let rows = cast[ptr UncheckedArray[uint8]](fakeBytes[rect.y * int32(fakeLine) + rect.x * 4].addr)
+        proc brightest(t: int32): int =
+          ## Where the brightest pixel is, along the viewer's x, on black.
+          for i in 0 ..< fakeLen:
+            fakeBytes[i] = 0
+          drawLoadingMark(panel.view, t, rect, panel.pixels, rows, int32(fakeLine), rows, int32(fakeLine))
+          var best = -1
+          for y in 0 ..< ph:
+            for x in 0 ..< pw:
+              let level = int(fakeBytes[y * fakeLine + x * 4])
+              if level > best:
+                best = level
+                var (fx, _) = turnBack(x, y, rotation, pw, ph)
+                if panel.view.flipX: fx = PanelW - 1 - fx
+                result = fx
+        # At 270 ms the first dot is at its brightest, 360 ms later the last.
+        let (first, last) = (brightest(270), brightest(630))
+        if not (first < last):
+          checkpoint "rotation " & $rotation & " flip " & flip & ": first dot at " & $first &
+            ", last at " & $last
+          fail()
+
+  test "on a round panel the mark is at the top middle, on the glass 12 px in from the rim":
+    # The HyperPixel 2.1 Round shows the circle inside its 480x480 square: a
+    # mark in the corner would never be seen.
     const Side = 480
     for rotation in [0, 90, 180, 270]:
-      for style in [lmDots, lmSpinner, lmSquares, lmBar]:
-        let panel = fakePanel(Side, Side, rotation = rotation)
-        var view = panel.view
-        view.round = true
-        let rect = loadingMarkRect(view, style)
-        check rect.w > 0 and rect.h > 0
-        var touched = 0
-        for t in [0'i32, 160, 420, 900, 1300]:
-          paintPanel(int(t))
-          let before = snapshot()
-          let rows = cast[ptr UncheckedArray[uint8]](fakeBytes[rect.y * int32(fakeLine) + rect.x * 4].addr)
-          drawLoadingMark(view, style, t, rect, panel.pixels, rows, int32(fakeLine), rows,
-            int32(fakeLine))
-          for y in rect.y ..< rect.y + rect.h:
-            for x in rect.x ..< rect.x + rect.w:
-              let at = (y * int32(fakeLine) + x * 4).int
-              if fakeBytes[at] == before[at] and fakeBytes[at + 1] == before[at + 1] and
-                  fakeBytes[at + 2] == before[at + 2]:
-                continue
-              inc touched
-              if not insideRound(Side, Side, x, y, inset = 12):
-                checkpoint "style " & $style & " rotation " & $rotation & " t " & $t &
-                  " touched " & $x & "," & $y & ", off the glass"
-                fail()
-              # Where the viewer sees it: the upper right, or the top for the bar.
-              let (fx, fy) = turnBack(x, y, rotation, Side, Side)
-              if fy >= Side div 2 or (style != lmBar and fx < Side div 2):
-                checkpoint "style " & $style & " rotation " & $rotation & " at frame " &
-                  $fx & "," & $fy
-                fail()
-        check touched > 0
+      let panel = fakePanel(Side, Side, rotation = rotation)
+      var view = panel.view
+      view.round = true
+      let rect = loadingMarkRect(view)
+      check rect.w > 0 and rect.h > 0
+      var touched = 0
+      var (left, right, top) = (Side, 0, Side)
+      for t in [0'i32, 160, 420, 900, 1300]:
+        paintPanel(int(t))
+        let before = snapshot()
+        let rows = cast[ptr UncheckedArray[uint8]](fakeBytes[rect.y * int32(fakeLine) + rect.x * 4].addr)
+        drawLoadingMark(view, t, rect, panel.pixels, rows, int32(fakeLine), rows, int32(fakeLine))
+        for y in rect.y ..< rect.y + rect.h:
+          for x in rect.x ..< rect.x + rect.w:
+            let at = (y * int32(fakeLine) + x * 4).int
+            if fakeBytes[at] == before[at] and fakeBytes[at + 1] == before[at + 1] and
+                fakeBytes[at + 2] == before[at + 2]:
+              continue
+            inc touched
+            if not insideRound(Side, Side, x, y, inset = 12):
+              checkpoint "rotation " & $rotation & " t " & $t & " touched " & $x & "," & $y &
+                ", off the glass"
+              fail()
+            let (fx, fy) = turnBack(x, y, rotation, Side, Side)
+            left = min(left, fx)
+            right = max(right, fx)
+            top = min(top, fy)
+      check touched > 0
+      # Where the viewer sees it: centered, near the top.
+      checkpoint "rotation " & $rotation & ": x " & $left & ".." & $right & ", top " & $top
+      check abs((left + right) - (Side - 1)) <= 2
+      check top < Side div 6
 
   test "the mark scales with the panel":
-    let small = loadingMarkRect(MarkView(panelWidth: 480, panelHeight: 480), lmDots)
-    let large = loadingMarkRect(MarkView(panelWidth: 1920, panelHeight: 1080), lmDots)
+    let small = loadingMarkRect(MarkView(panelWidth: 480, panelHeight: 480))
+    let large = loadingMarkRect(MarkView(panelWidth: 1920, panelHeight: 1080))
     check large.w > small.w * 2
     check small.w >= 40 and small.w <= 60
 
@@ -164,32 +180,23 @@ suite "the loading mark":
     let panel = fakePanel(bytesPerPixel = 2)
     for i in 0 ..< fakeLen:
       fakeBytes[i] = 0xFF # white
-    let rect = loadingMarkRect(panel.view, lmDots)
+    let rect = loadingMarkRect(panel.view)
     let rows = cast[ptr UncheckedArray[uint8]](fakeBytes[rect.y * int32(fakeLine) + rect.x * 2].addr)
-    drawLoadingMark(panel.view, lmDots, 0, rect, panel.pixels, rows, int32(fakeLine), rows,
-      int32(fakeLine))
-    var darker, white = 0
+    drawLoadingMark(panel.view, 0, rect, panel.pixels, rows, int32(fakeLine), rows, int32(fakeLine))
+    var darker, white, other = 0
     for y in rect.y ..< rect.y + rect.h:
       for x in rect.x ..< rect.x + rect.w:
         let at = y * int32(fakeLine) + x * 2
         let word = uint16(fakeBytes[at]) or (uint16(fakeBytes[at + 1]) shl 8)
+        let (r, g, b) = (word shr 11, (word shr 5) and 63, word and 31)
         if word == 0xFFFF: inc white
-        elif (word shr 11) < 20: inc darker
+        elif r < 20:
+          inc darker
+          # A grey: the channels move together, none spilling into the next.
+          if abs(int(r) * 2 - int(g)) > 2 or r != b: inc other
     check darker > 100 # the pill, at half strength over white
     check white > 0    # its corners, and the dots at full
-    # The squares invert in the panel's own steps: white goes black whole.
-    for i in 0 ..< fakeLen:
-      fakeBytes[i] = 0xFF
-    let squares = loadingMarkRect(panel.view, lmSquares)
-    let at = cast[ptr UncheckedArray[uint8]](fakeBytes[squares.y * int32(fakeLine) + squares.x * 2].addr)
-    drawLoadingMark(panel.view, lmSquares, 0, squares, panel.pixels, at, int32(fakeLine), at,
-      int32(fakeLine))
-    var black = 0
-    for y in squares.y ..< squares.y + squares.h:
-      for x in squares.x ..< squares.x + squares.w:
-        let i = y * int32(fakeLine) + x * 2
-        if fakeBytes[i] == 0 and fakeBytes[i + 1] == 0: inc black
-    check black > 0
+    check other == 0
 
 suite "the loading mark on a panel":
   test "nothing before the delay, the mark after it, the picture back when it goes":
@@ -197,7 +204,7 @@ suite "the loading mark on a panel":
     paintPanel(2)
     let picture = snapshot()
     var state: MarkState
-    let switch = markBegin(state, panel, lmDots, 1000)
+    let switch = markBegin(state, panel, 1000)
     check switch == 1
     check state.active
     check markStep(state, 1000) == LoadingMarkDelayMs
@@ -221,7 +228,7 @@ suite "the loading mark on a panel":
     let panel = fakePanel()
     paintPanel(3)
     var state: MarkState
-    let switch = markBegin(state, panel, lmSpinner, 0)
+    let switch = markBegin(state, panel, 0)
     discard markStep(state, 300)
     check state.drawn
     # The runner pushes (a driver retry): mark away, the driver writes.
@@ -247,8 +254,8 @@ suite "the loading mark on a panel":
     paintPanel(6)
     var state: MarkState
     state.shownMs = -1
-    let first = markBegin(state, panel, lmDots, 0)
-    let second = markBegin(state, panel, lmDots, 100)
+    let first = markBegin(state, panel, 0)
+    let second = markBegin(state, panel, 100)
     check second == first + 1
     check state.sinceMs == 0 # the wait started with the first
     markLanded(state, first, 150)
@@ -263,7 +270,7 @@ suite "the loading mark on a panel":
     let picture = snapshot()
     var state: MarkState
     state.shownMs = -1
-    let switch = markBegin(state, panel, lmDots, 0)
+    let switch = markBegin(state, panel, 0)
     check markStep(state, 120) > 0
     markLanded(state, switch, 150)
     check not state.active
@@ -271,15 +278,12 @@ suite "the loading mark on a panel":
     check markStep(state, 400) == -1
     check snapshot() == picture
 
-  test "off is no mark, and a panel that refuses a write ends it with the picture back":
+  test "a panel that refuses a write ends it with the picture back":
     let panel = fakePanel()
     paintPanel(8)
     let picture = snapshot()
     var state: MarkState
-    discard markBegin(state, panel, lmOff, 0)
-    check not state.active
-    check markStep(state, 500) == -1
-    discard markBegin(state, panel, lmBar, 0)
+    discard markBegin(state, panel, 0)
     fakeFailWrites = true
     check markStep(state, 500) == -1
     fakeFailWrites = false
@@ -291,7 +295,7 @@ suite "the loading mark on a panel":
     paintPanel(9)
     let picture = snapshot()
     var state: MarkState
-    discard markBegin(state, panel, lmSquares, 0)
+    discard markBegin(state, panel, 0)
     discard markStep(state, 1000)
     check state.drawn
     check markStep(state, LoadingMarkMaxMs + 1) == -1
@@ -304,7 +308,7 @@ suite "the loading mark on a panel":
     let panel = fakePanel(240, 160)
     paintPanel(10)
     var last = snapshot()
-    let switch = beginLoadingMarkOn(panel, lmDots)
+    let switch = beginLoadingMarkOn(panel)
     check switch == loadingMarkSwitches()
     proc markShows(last: seq[uint8]): bool =
       # Drawn over what was pushed, between pushes, within a couple of

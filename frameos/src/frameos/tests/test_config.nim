@@ -110,12 +110,6 @@ block test_load_config:
         doAssert config.mountpoints.items[0].target == "/mnt/photos"
         doAssert config.mountpoints.items[0].username == "frame"
 
-block test_loading_indicator:
-    # What a fast panel shows while a scene switch loads (frameos/loading_mark):
-    # absent is "", which the runner reads as the dots.
-    doAssert parseFrameConfig($(%*{"serverHost": "b"})).loadingIndicator == ""
-    doAssert parseFrameConfig($(%*{"loadingIndicator": "spinner"})).loadingIndicator == "spinner"
-
 block test_server_scheme_defaults:
     # A frame.json from before `serverScheme` existed: the old port guess.
     doAssert parseFrameConfig($(%*{"serverHost": "b", "serverPort": 8443})).serverScheme == "https"

@@ -35,7 +35,7 @@ static int g_checks = 0;
 
 #define W 64
 #define H 48
-#define MS 1000LL
+#define MS 1
 
 static uint16_t g_fb[3][W * H];
 static uint16_t g_saved[32 * 32];
@@ -43,15 +43,23 @@ static int g_draws = 0;
 static int32_t g_last_t = -1;
 static int32_t g_last_rotation = -1;
 
-/* A stand-in for the runtime's drawer (frameos_nim_loading_mark_draw): every
- * pixel of the rect becomes a function of the frame's time and what was
- * under it. */
-static void fake_draw(int32_t panel_w, int32_t panel_h, int32_t rotation, int32_t t_ms,
-                      const int32_t *rect, const void *src, int32_t src_stride, void *dst,
-                      int32_t dst_stride)
+/* Where the runtime puts the mark: this rect, or `g_moved` at a quarter turn. */
+static const fos_lcd_loading_rect_t k_rect = {40, 4, 20, 10};
+static fos_lcd_loading_rect_t g_moved = {2, 30, 10, 10};
+static fos_lcd_loading_rect_t g_rect;
+
+/* A stand-in for the runtime's mark (loading_mark.nim): the rect it is asked
+ * for, and frames in which every pixel of the rect becomes a function of the
+ * frame's time and what was under it. */
+static void fake_mark(int32_t panel_w, int32_t panel_h, int32_t rotation, int32_t t_ms, int32_t *rect,
+                      const void *src, int32_t src_stride, void *dst, int32_t dst_stride)
 {
-    (void)panel_w;
-    (void)panel_h;
+    CHECK(panel_w == W && panel_h == H, "asked about the panel");
+    if (!src) {
+        fos_lcd_loading_rect_t where = rotation == 270 ? g_moved : g_rect;
+        memcpy(rect, &where, sizeof(where));
+        return;
+    }
     g_draws++;
     g_last_t = t_ms;
     g_last_rotation = rotation;
@@ -73,15 +81,13 @@ static fos_lcd_loading_t fresh(void)
     memset(&m, 0, sizeof(m));
     m.width = W;
     m.height = H;
-    m.rotation = 90;
     m.saved = g_saved;
     m.saved_words = sizeof(g_saved) / sizeof(g_saved[0]);
-    m.draw = fake_draw;
+    m.draw = fake_mark;
     g_draws = 0;
+    g_rect = k_rect;
     return m;
 }
-
-static const fos_lcd_loading_rect_t k_rect = {40, 4, 20, 10};
 
 /* Pixels that differ from `before`, and whether they are all inside the rect. */
 static int changed(const uint16_t *fb, const uint16_t *before, bool *inside)
@@ -106,8 +112,8 @@ static void test_nothing_before_the_delay_then_the_mark_then_the_picture_back(vo
     paint(0, 1);
     uint16_t before[W * H];
     memcpy(before, g_fb[0], sizeof(before));
-    CHECK(fos_lcd_loading_begin(&m, &k_rect, 1000 * MS), "begins");
-    int64_t wait = fos_lcd_loading_step(&m, g_fb[0], 1000 * MS);
+    CHECK(fos_lcd_loading_begin(&m, 90, 1000 * MS), "begins");
+    int32_t wait = fos_lcd_loading_step(&m, g_fb[0], 1000 * MS);
     CHECK(wait == FOS_LCD_LOADING_DELAY_MS * MS, "waits out the delay: %lld", (long long)wait);
     wait = fos_lcd_loading_step(&m, g_fb[0], 1150 * MS);
     CHECK(wait == 50 * MS, "the rest of it: %lld", (long long)wait);
@@ -134,7 +140,7 @@ static void test_a_quick_switch_shows_nothing(void)
     paint(0, 2);
     uint16_t before[W * H];
     memcpy(before, g_fb[0], sizeof(before));
-    fos_lcd_loading_begin(&m, &k_rect, 0);
+    fos_lcd_loading_begin(&m, 0, 0);
     fos_lcd_loading_step(&m, g_fb[0], 120 * MS);
     fos_lcd_loading_end(&m);
     CHECK(g_draws == 0 && memcmp(before, g_fb[0], sizeof(before)) == 0, "the picture untouched");
@@ -148,7 +154,7 @@ static void test_the_mark_follows_the_buffer_on_the_glass(void)
     uint16_t before0[W * H], before1[W * H];
     memcpy(before0, g_fb[0], sizeof(before0));
     memcpy(before1, g_fb[1], sizeof(before1));
-    fos_lcd_loading_begin(&m, &k_rect, 0);
+    fos_lcd_loading_begin(&m, 0, 0);
     fos_lcd_loading_step(&m, g_fb[0], 300 * MS);
     CHECK(m.drawn_in == g_fb[0], "in the first buffer");
     /* Another buffer went up (a frame of the scene being left, before the
@@ -168,30 +174,42 @@ static void test_a_switch_during_another_keeps_its_start(void)
     paint(0, 5);
     uint16_t before[W * H];
     memcpy(before, g_fb[0], sizeof(before));
-    fos_lcd_loading_begin(&m, &k_rect, 0);
+    fos_lcd_loading_begin(&m, 0, 0);
     fos_lcd_loading_step(&m, g_fb[0], 250 * MS);
-    CHECK(fos_lcd_loading_begin(&m, &k_rect, 240 * MS), "a second switch");
-    CHECK(m.since_us == 0, "still counted from the first");
+    CHECK(fos_lcd_loading_begin(&m, 0, 240 * MS), "a second switch");
+    CHECK(m.since_ms == 0, "still counted from the first");
     CHECK(m.drawn_in == g_fb[0], "the mark stays up");
     fos_lcd_loading_step(&m, g_fb[0], 300 * MS);
     CHECK(g_last_t == 100, "and keeps its time: %d", (int)g_last_t);
     /* A switch at another turn: the mark moves, put back where it was first. */
-    fos_lcd_loading_rect_t moved = {2, 30, 10, 10};
-    CHECK(fos_lcd_loading_begin(&m, &moved, 260 * MS), "begun at another rect");
+    CHECK(fos_lcd_loading_begin(&m, 270, 260 * MS), "begun at another turn");
     CHECK(m.drawn_in == NULL && memcmp(before, g_fb[0], sizeof(before)) == 0, "the old one put back first");
+    CHECK(m.rect.x == g_moved.x && m.rect.y == g_moved.y, "and goes where the runtime says");
+    fos_lcd_loading_step(&m, g_fb[0], 320 * MS);
+    CHECK(g_last_rotation == 270 && m.drawn_in == g_fb[0], "drawn at the new turn");
 }
 
 static void test_a_rect_it_cannot_hold_is_no_mark(void)
 {
     fos_lcd_loading_t m = fresh();
-    fos_lcd_loading_rect_t huge = {0, 0, W, H};
-    CHECK(!fos_lcd_loading_begin(&m, &huge, 0), "too big for the saved pixels");
-    fos_lcd_loading_rect_t outside = {W - 4, 0, 10, 4};
-    CHECK(!fos_lcd_loading_begin(&m, &outside, 0), "off the panel");
-    fos_lcd_loading_rect_t empty = {0, 0, 0, 0};
-    CHECK(!fos_lcd_loading_begin(&m, &empty, 0), "empty: no runtime to say where");
+    g_rect = (fos_lcd_loading_rect_t){0, 0, W, H};
+    CHECK(!fos_lcd_loading_begin(&m, 0, 0), "too big for the saved pixels");
+    g_rect = (fos_lcd_loading_rect_t){0, 0, 0, 0};
+    CHECK(!fos_lcd_loading_begin(&m, 0, 0), "empty: nowhere to go");
     CHECK(!m.active, "nothing loading");
     CHECK(fos_lcd_loading_step(&m, g_fb[0], 500 * MS) == -1, "nothing to do");
+}
+
+static void test_the_clock_may_wrap(void)
+{
+    /* The tick count in milliseconds wraps every 49.7 days. */
+    fos_lcd_loading_t m = fresh();
+    uint32_t since = UINT32_MAX - 100;
+    CHECK(fos_lcd_loading_begin(&m, 0, since), "begins just before the wrap");
+    CHECK(fos_lcd_loading_step(&m, g_fb[0], since + 50) == 150, "waits out the rest of the delay");
+    CHECK(fos_lcd_loading_step(&m, g_fb[0], since + 250) == FOS_LCD_LOADING_FRAME_MS && g_last_t == 50,
+          "then draws, past the wrap: t %d", (int)g_last_t);
+    fos_lcd_loading_end(&m);
 }
 
 static void test_a_switch_that_never_lands_stops_by_itself(void)
@@ -200,9 +218,9 @@ static void test_a_switch_that_never_lands_stops_by_itself(void)
     paint(2, 6);
     uint16_t before[W * H];
     memcpy(before, g_fb[2], sizeof(before));
-    fos_lcd_loading_begin(&m, &k_rect, 0);
+    fos_lcd_loading_begin(&m, 0, 0);
     fos_lcd_loading_step(&m, g_fb[2], 1000 * MS);
-    int64_t wait = fos_lcd_loading_step(&m, g_fb[2], (int64_t)FOS_LCD_LOADING_MAX_MS * MS);
+    int32_t wait = fos_lcd_loading_step(&m, g_fb[2], FOS_LCD_LOADING_MAX_MS * MS);
     CHECK(wait == -1 && !m.active, "stopped");
     CHECK(m.drawn_in == NULL && memcmp(before, g_fb[2], sizeof(before)) == 0, "with the picture back");
 }
@@ -214,6 +232,7 @@ int main(void)
     test_the_mark_follows_the_buffer_on_the_glass();
     test_a_switch_during_another_keeps_its_start();
     test_a_rect_it_cannot_hold_is_no_mark();
+    test_the_clock_may_wrap();
     test_a_switch_that_never_lands_stops_by_itself();
     if (g_failures) {
         printf("%d of %d checks failed\n", g_failures, g_checks);

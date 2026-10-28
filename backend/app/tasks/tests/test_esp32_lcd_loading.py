@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 # Runs embedded/esp32/main/tests/test_fos_lcd_loading.c: the RGB LCD's
-# loading mark (components/frameos_display/lcd_loading.c) — when it shows
+# loading mark (components/frameos_display/lcd_loading.c): when it shows
 # during a scene switch, which buffer it is drawn in and that the pixels
 # under it go back exactly. The module is pure, so a laptop compiler is all
 # this needs. The look of the mark is the runtime's (frameos/loading_mark.nim,

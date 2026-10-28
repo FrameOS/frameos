@@ -2807,8 +2807,6 @@ void fos_client_start(void)
     frameos_nim_set_display_power_hook(display_power);
     fos_framebuffer_set_lend_hook(snapshot_before_lend);
     fos_display_set_before_write_hook(snapshot_before_panel_write);
-    /* The runtime draws the loading mark (frameos/loading_mark.nim). */
-    fos_display_set_loading_mark(frameos_nim_loading_mark_rect, frameos_nim_loading_mark_draw);
     const esp_timer_create_args_t frame_timer_args = {
         .callback = frame_timer_fired,
         .name = "fos_frame",

@@ -450,12 +450,12 @@ waking on input instead of polling.
 On a fast panel a scene switch used to give no sign of life while the next
 scene was built and rendered, which can be seconds (QuickJS compiling a
 scene's apps, its HTTP fetches). Now, when the new scene has not put its
-first frame on the panel within **200 ms** of the switch being asked for, a
-small animated mark is drawn over the picture still showing, and it goes the
-moment the new frame lands. Up to ~100 ms a change reads as instant and from
-~250 ms a pause reads as "did it hear me": 200 ms leaves a quick switch
-(most scenes on a Pi) exactly as it was, with room to spare, and answers
-before the pause starts to read as one.
+first frame on the panel within **200 ms** of the switch being asked for,
+three dots in a small dark pill, pulsing in turn, are drawn over the picture
+still showing, and they go the moment the new frame lands. Up to ~100 ms a
+change reads as instant and from ~250 ms a pause reads as "did it hear me":
+200 ms leaves a quick switch (most scenes on a Pi) exactly as it was, with
+room to spare, and answers before the pause starts to read as one.
 
 Every switch counts, whoever asked: the frame's event map (an edge swipe, a
 held button), the cloud's `set_current_scene`, the HTTP API, the schedule,
@@ -463,24 +463,20 @@ a scene's own dispatch, and a pushed scene set (a preview, a deploy). A
 switch begun while another still loads keeps the first one's start, and its
 mark if one is up. A frame rendered for an older switch ends nothing.
 
-**The mark** is `frameos/loading_mark.nim`, one drawing for both runtimes:
-it composes a rectangle of the panel's own pixels from a copy of what was
-there, so a host puts it away by writing the copy back, and it allocates,
-raises and refs nothing, because it runs beside the busy render path, not on
-it. It sits in the viewer's top right, through frame.json's `flip` and
-`rotate`, and scales with the panel's shorter side. On a Pi, four styles,
-picked by frame.json `loadingIndicator`: `dots` (the default: three dots in
-a small dark pill, pulsing in turn), `spinner`, `squares` (a 3x3 grid
-inverted in a ring, no backdrop), `bar` (a bright stretch sweeping a thin
-bar along the top edge), and `off`. A frame is drawn every 50 ms.
+**The mark** is `frameos/loading_mark.nim`, one drawing for both runtimes,
+a frame of it every 50 ms. It composes a rectangle of the panel's own pixels
+from a copy of what was there, so a host puts it away by writing the copy
+back, and it allocates, raises and refs nothing, because it runs beside the
+busy render path, not on it. It sits in the viewer's top right, through
+frame.json's `flip` and `rotate`, and scales with the panel's shorter side.
+There is no setting: a switch to turn it off would be one boolean.
 
 On the HyperPixel 2.1 Round (`frameos/panel_shape.nim` `panelIsRound`) only
-the circle inside the 480x480 square is glass, so the corner styles sit up
-and to the right along the rim, 45 degrees from twelve o'clock with their
-outer corner 14 px inside it, and the bar becomes an arc along the top of
-the rim, 38 degrees either side. `test_loading_mark.nim` checks every pixel
-every style touches there is 12 px inside the circle, at every turn. No
-ESP32 board is round, so none of that is built there.
+the circle inside the 480x480 square is glass, so the pill sits at the top
+middle instead, as high as its top corners stay 14 px inside the rim.
+`test_loading_mark.nim` checks that every pixel it touches there is 12 px
+inside the circle, at every turn. No ESP32 board is round, so that is not
+built there.
 
 **On a Pi** (`frameos/loading_mark_panel.nim`, the framebuffer family only:
 HDMI, DPI, the HyperPixels) a thread of its own draws the mark straight into
@@ -498,24 +494,26 @@ reaches fb0.
 host-tested, and its task in `lcd_st7701s_rgb.c`) the render task begins the
 mark when it applies a switch (`fos_scenes.c`, counted from when the switch
 was queued), and a task on core 0 draws it into the frame buffer being
-scanned, through `frameos_nim_loading_mark_draw` (no runtime lock: the render
-task holds the runtime for the whole load). `present_back` puts it away
+scanned, through the one C entry `loading_mark.nim` hands the driver as the
+runtime starts (`fos_lcd_st7701s_set_loading_mark`; no runtime lock: the
+render task holds the runtime for the whole load). `present_back` puts it away
 before the next picture is handed over, so it never reaches the new scene's
 buffer, and a render that shows nothing ends it after the fact. Each frame
-of it is ~1,000 pixels in PSRAM, tens of microseconds; the buffers it wrote
-into count a write (`s_generation`), so a damage repaint never takes them for
-a frame of its own. A snapshot (`/image`) taken while a switch loads can
+of it is ~1,000 pixels in PSRAM, tens of microseconds; a buffer it goes into
+counts a write (`s_generation`), so a damage repaint never takes it for a
+frame of its own, not even once the mark is put back. A snapshot (`/image`) taken while a switch loads can
 carry the mark: the front buffer is the snapshot.
 
 Flash is the ESP32's budget, so the firmware builds only what its one LCD
-needs (`loading_mark.nim` `AllStyles`, `Flips`, `RoundPanels`, `Only565`):
-the dots alone, with no setting to pick another or turn it off, RGB565
-only, no flip, no round panel, and no log line. A style picked for the
-fleet later becomes the one the ESP32 builds. That costs 2,608 bytes of the
-S3 image (2026-10-28, against #642). The mark's own symbols are 1.8 KB of
-Nim drawing (1 KB of it the per-pixel loop) and 1.3 KB of C state, task
-and hooks; the compiler's inlining elsewhere moves by a few hundred bytes
-either way. With all four styles, the setting and the log line it was 5,584.
+needs (`loading_mark.nim` `Only565`, `Flips`, `RoundPanels`): RGB565 only,
+no flip, no round panel, and no log line. The 565 pixel is darkened and
+lit with its channels spread out in one word, one integer multiply each.
+The pill is worked out once a frame in panel pixels (a half turn is both
+flips, a quarter turn a swap of axes), the C side keeps 32-bit milliseconds
+of the tick count, and the runtime hands the driver its one entry itself.
+That costs 2,192 bytes of the S3 image (2026-10-28, against #642): 1.3 KB of
+Nim drawing (0.7 KB of it the per-pixel loop) and 0.9 KB of C state, task
+and the calls at a switch.
 
 On a Pi a switch slow enough to show the mark logs it once it lands:
 `render:loadingMark` with the scene and `ms`, from the switch being asked

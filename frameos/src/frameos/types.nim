@@ -53,10 +53,6 @@ type
     rotate*: int
     flip*: string
     scalingMode*: string
-    ## What a fast panel shows while a scene switch loads
-    ## (frameos/loading_mark.nim): "dots" (also when empty), "spinner",
-    ## "squares", "bar", or "off".
-    loadingIndicator*: string
     settings*: JsonNode
     assetsPath*: string
     saveAssets*: JsonNode

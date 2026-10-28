@@ -83,8 +83,7 @@ proc beginSceneLoading(self: RunnerThread) =
   ## fast panel the loading mark shows if that takes a while
   ## (frameos/loading_mark). Called before the new scene's init, which is
   ## part of the wait.
-  discard beginLoadingMark(self.frameConfig.device, self.frameConfig.rotate, self.frameConfig.flip,
-    parseLoadingMarkStyle(self.frameConfig.loadingIndicator))
+  discard beginLoadingMark(self.frameConfig.device, self.frameConfig.rotate, self.frameConfig.flip)
 
 # How frequently we announce a new render via websockets
 const SERVER_RENDER_DELAY_SECONDS = 1.0

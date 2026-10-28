@@ -82,14 +82,14 @@ esp_err_t fos_lcd_st7701s_i2c_bus(int sda, int scl, void **bus);
 esp_err_t fos_lcd_st7701s_backlight(bool on);
 
 /* The loading mark (lcd_loading.h) while a scene switch loads, drawn by a
- * task of its own on core 0 into the buffer being scanned. `rect` and `draw`
- * are the runtime's (set once). Begin on the render task when it starts a
+ * task of its own on core 0 into the buffer being scanned. `mark` is the
+ * runtime's (frameos/loading_mark.nim sets it as it starts). Begin on the render task when it starts a
  * switch, with when the switch was asked for and the frame's rotation; the
  * next picture presented puts the mark away, and so does `end` (a switch
  * that came to nothing, a render that failed). Nothing before the first
  * picture: the boot splash owns the panel then. */
-void fos_lcd_st7701s_set_loading_mark(fos_loading_mark_rect_fn rect, fos_loading_mark_draw_fn draw);
-void fos_lcd_st7701s_loading_begin(int64_t since_us, int rotation);
+void fos_lcd_st7701s_set_loading_mark(fos_loading_mark_fn mark);
+void fos_lcd_st7701s_loading_begin(uint32_t since_tick, int rotation);
 void fos_lcd_st7701s_loading_end(void);
 
 /* What the boot splash says it is waiting for (lcd_splash.h), from whichever
