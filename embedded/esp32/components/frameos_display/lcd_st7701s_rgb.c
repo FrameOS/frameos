@@ -88,6 +88,7 @@ void fos_lcd_st7701s_select_board(const char *hardware_preset)
 
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
+#include "esp_heap_caps.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_rgb.h"
 #include "esp_rom_sys.h"
@@ -151,6 +152,13 @@ static int buffer_index(const uint8_t *buf)
     }
     return -1;
 }
+/* The loading mark (lcd_loading.h): its state and the lock its task and the
+ * writer share; `s_presented_at` is the frame count when the buffer last
+ * handed over was handed over, to tell when the glass shows it. */
+static SemaphoreHandle_t s_mark_lock = NULL;
+static TaskHandle_t s_mark_task = NULL;
+static fos_lcd_loading_t s_mark;
+static volatile uint32_t s_presented_at = 0;
 static volatile int64_t s_last_frame_at_us = 0;
 static volatile uint32_t s_frames = 0;
 static volatile uint32_t s_glitches = 0;
@@ -601,11 +609,15 @@ static uint8_t *writable_back(void)
 static void present_back(void)
 {
     settle_front();
+    /* A picture after a switch began is that switch's: the loading mark
+     * goes, from whichever buffer holds it, before this one is on the way. */
+    fos_lcd_st7701s_loading_end();
     int back = s_drawing;
     esp_lcd_panel_draw_bitmap(s_panel, 0, 0, FOS_LCD_ST7701S_WIDTH, FOS_LCD_ST7701S_HEIGHT, s_fbs[back]);
     /* A frame that ended before the call above may have given already:
      * clear it, so the wait in settle_front is for one that ends after it. */
     xSemaphoreTake(s_frame_done, 0);
+    s_presented_at = s_frames;
     s_pending_front = back;
     s_last_drawn = back;
     s_drawing = -1;
@@ -689,6 +701,89 @@ void fos_lcd_st7701s_splash_status(fos_lcd_splash_status_t status)
 {
     s_splash_status_at_us = esp_timer_get_time();
     s_splash_status = (int)status;
+}
+
+/* ------------------------------------------------------ the loading mark */
+
+/* The mark (lcd_loading.h) is drawn by a task on core 0, where Wi-Fi mostly
+ * waits, while the render task on core 1 builds the next scene. A frame of
+ * it is ~1,000 pixels composed in PSRAM (tens of microseconds), the lock
+ * held only for that: nothing here runs long on either core, and the
+ * scan-out's refill interrupt on core 1 never waits for it. */
+#define LCD_MARK_CORE 0
+#define LCD_MARK_PRIORITY 2
+/* Room for the pixels under the mark: the dots take ~1,200 at 480x480. */
+#define LCD_MARK_SAVED_WORDS 2048u
+
+/* The buffer on the glass: the one handed over last once a frame boundary
+ * has certainly passed since (two completions), the front one before. */
+static uint16_t *scanned_buffer(void)
+{
+    int pending = s_pending_front;
+    int index = pending >= 0 && (uint32_t)(s_frames - s_presented_at) >= 2u ? pending : s_front;
+    return (uint16_t *)s_fbs[index];
+}
+
+static void mark_task(void *arg)
+{
+    (void)arg;
+    while (true) {
+        xSemaphoreTake(s_mark_lock, portMAX_DELAY);
+        uint16_t *before = s_mark.drawn_in;
+        uint32_t now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+        int32_t wait_ms = fos_lcd_loading_step(&s_mark, scanned_buffer(), now_ms);
+        /* A buffer the mark went into holds more than a render left there,
+         * for good: once it is put back the count stays moved, so the damage
+         * repaint draws it whole rather than trust it. */
+        int index = s_mark.drawn_in != before ? buffer_index((const uint8_t *)s_mark.drawn_in) : -1;
+        if (index >= 0) s_generation[index]++;
+        xSemaphoreGive(s_mark_lock);
+        /* Rounded up: a wait of at least 1 ms is at least a tick, never the
+         * 0-tick wait that spins. */
+        ulTaskNotifyTake(pdTRUE, wait_ms < 0 ? portMAX_DELAY
+                                             : (TickType_t)(wait_ms + portTICK_PERIOD_MS - 1) / portTICK_PERIOD_MS);
+    }
+}
+
+void fos_lcd_st7701s_set_loading_mark(fos_loading_mark_fn mark)
+{
+    s_mark.draw = mark;
+}
+
+void fos_lcd_st7701s_loading_begin(uint32_t since_tick, int rotation)
+{
+    if (!s_ready || s_splash_on || !s_mark.draw) return;
+    if (!s_mark_task) {
+        /* The first switch: room for the pixels, the lock and the task. */
+        if (!s_mark.saved) {
+            s_mark.saved = heap_caps_malloc(LCD_MARK_SAVED_WORDS * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
+        if (!s_mark_lock) s_mark_lock = xSemaphoreCreateMutex();
+        if (!s_mark.saved || !s_mark_lock ||
+            xTaskCreatePinnedToCore(mark_task, "fos_mark", 3072, NULL, LCD_MARK_PRIORITY, &s_mark_task,
+                                    LCD_MARK_CORE) != pdPASS) {
+            s_mark_task = NULL;
+            return;
+        }
+        s_mark.saved_words = LCD_MARK_SAVED_WORDS;
+        s_mark.width = FOS_LCD_ST7701S_WIDTH;
+        s_mark.height = FOS_LCD_ST7701S_HEIGHT;
+    }
+    xSemaphoreTake(s_mark_lock, portMAX_DELAY);
+    bool begun = fos_lcd_loading_begin(&s_mark, rotation, since_tick * portTICK_PERIOD_MS);
+    xSemaphoreGive(s_mark_lock);
+    if (begun) xTaskNotifyGive(s_mark_task);
+}
+
+/* present_back, and a switch that ends without a picture. Only the render
+ * task begins a mark, so one that is neither loading nor up is not about to
+ * be either, and the lock is left alone on every other frame. */
+void fos_lcd_st7701s_loading_end(void)
+{
+    if (!s_mark_lock || (!s_mark.active && !s_mark.drawn_in)) return;
+    xSemaphoreTake(s_mark_lock, portMAX_DELAY);
+    fos_lcd_loading_end(&s_mark);
+    xSemaphoreGive(s_mark_lock);
 }
 
 int fos_lcd_st7701s_init(void)
@@ -874,6 +969,13 @@ esp_err_t fos_lcd_st7701s_i2c_bus(int sda, int scl, void **bus)
     return ESP_ERR_NOT_SUPPORTED;
 }
 void fos_lcd_st7701s_splash_status(fos_lcd_splash_status_t status) { (void)status; }
+void fos_lcd_st7701s_set_loading_mark(fos_loading_mark_fn mark) { (void)mark; }
+void fos_lcd_st7701s_loading_begin(uint32_t since_tick, int rotation)
+{
+    (void)since_tick;
+    (void)rotation;
+}
+void fos_lcd_st7701s_loading_end(void) {}
 esp_err_t fos_lcd_st7701s_backlight(bool on)
 {
     (void)on;

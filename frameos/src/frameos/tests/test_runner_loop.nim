@@ -9,6 +9,7 @@ import ../scenes
 import ../types
 import ../channels
 import ../local_access
+import ../loading_mark_panel
 
 
 type LogStore = ref object
@@ -103,6 +104,33 @@ proc sixtySecondInit(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     refreshInterval: 60.0,
     backgroundColor: parseHtmlColor("#ffffff")
   )
+
+# The panel the loading mark draws on, in place of /dev/fb0
+# (frameos/loading_mark_panel): the mark thread writes it too.
+const MarkPanelSide = 64
+var markPanelBytes: array[MarkPanelSide * MarkPanelSide * 4, uint8]
+var markPanelWrites = 0
+
+proc slowInit(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
+  ## A scene that takes a while to build: until the loading mark has drawn
+  ## (five seconds at most), so the test does not race the mark thread.
+  sleep(LoadingMarkDelayMs)
+  for _ in 0 ..< 500:
+    if atomicLoadN(markPanelWrites.addr, ATOMIC_SEQ_CST) > 0:
+      break
+    sleep(10)
+  fastInit(sceneId, frameConfig, logger, persistedState)
+
+proc markPanelRead(handle: cint, offset: int, dst: pointer, len: int): bool {.nimcall, gcsafe, raises: [].} =
+  {.cast(gcsafe).}:
+    copyMem(dst, markPanelBytes[offset].addr, len)
+    true
+
+proc markPanelWrite(handle: cint, offset: int, src: pointer, len: int): bool {.nimcall, gcsafe, raises: [].} =
+  {.cast(gcsafe).}:
+    copyMem(markPanelBytes[offset].addr, src, len)
+    discard atomicInc(markPanelWrites)
+    true
 
 proc unusedRender(scene: FrameScene, context: ExecutionContext): Image =
   context.image
@@ -630,6 +658,62 @@ suite "runner loop safety":
         (sceneA.string, "open", $(%*{"sceneId": sceneA.string})),
       ]
     finally:
+      updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
+
+  test "a slow scene switch on a framebuffer shows the loading mark until its frame is pushed":
+    clearEventChannel()
+    let sceneA = "tests/runner/mark-a".SceneId
+    let sceneB = "tests/runner/mark-b".SceneId
+    let sceneC = "tests/runner/mark-c".SceneId
+    for i in 0 ..< markPanelBytes.len:
+      markPanelBytes[i] = uint8(i mod 251)
+    let picture = markPanelBytes
+    markPanelWrites = 0
+    loadingMarkTestPanel = MarkPanel(io: MarkPanelIo(read: markPanelRead, write: markPanelWrite),
+      lineLength: MarkPanelSide * 4, pixels: RgbMarkPixels,
+      view: MarkView(panelWidth: MarkPanelSide, panelHeight: MarkPanelSide))
+    try:
+      var uploaded = initTable[SceneId, ExportedInterpretedScene]()
+      for sceneId in [sceneA, sceneB, sceneC]:
+        uploaded[sceneId] = ExportedInterpretedScene(name: sceneId.string, publicStateFields: @[],
+          persistedStateKeys: @[], init: (if sceneId == sceneB: slowInit else: fastInit),
+          render: fastRender, runEvent: proc (self: FrameScene, context: ExecutionContext): void = discard)
+      updateUploadedScenes(uploaded)
+      var config = loadConfig()
+      config.device = "framebuffer"
+      config.controlCode = ControlCode(enabled: false, position: "center",
+        qrCodeColor: parseHtmlColor("#000000"), backgroundColor: parseHtmlColor("#ffffff"))
+      let store = LogStore(entries: @[])
+      var runnerThread = RunnerThread(frameConfig: config, scenes: initTable[SceneId, FrameScene](),
+        currentSceneId: sceneA, lastRenderAt: 0.0, sleepFuture: none(Future[void]),
+        isRendering: false, triggerRenderNext: false, logger: testLogger(config, store))
+      let renderLoop = runnerThread.startRenderLoop(maxCycles = 30)
+      let messageLoop = runnerThread.startMessageLoop(maxIterations = 400)
+      check waitUntil(proc(): bool = runnerThread.scenes.hasKey(sceneA))
+      # The scene's init holds the runner thread until the mark thread has
+      # drawn (slowInit), and the push of B's first frame puts the picture
+      # back and says how long the switch took. (When a quick switch shows
+      # nothing is test_loading_mark.nim's, on a clock of its own.)
+      sendEvent("setCurrentScene", %*{"sceneId": sceneB.string}, eoHttpAdmin)
+      check waitUntil(proc(): bool = store.hasEvent("render:loadingMark"))
+      check loadingMarkSwitches() == 1
+      check markPanelWrites > 0
+      check markPanelBytes == picture
+      # Back to a scene with nothing to wait for: it lands its switch too.
+      sendEvent("setCurrentScene", %*{"sceneId": sceneC.string}, eoHttpAdmin)
+      check waitUntil(proc(): bool = runnerThread.scenes.hasKey(sceneC) and
+        runnerThread.currentSceneId == sceneC)
+      check loadingMarkSwitches() == 2
+      for entry in store.entries:
+        if entry{"event"}.getStr() == "render:loadingMark":
+          check entry{"sceneId"}.getStr() == sceneB.string
+          check entry{"ms"}.getInt() >= LoadingMarkDelayMs
+      check store.countEvent("render:loadingMark") == 1
+      waitFor renderLoop
+      runnerThread.stopMessageLoop = true
+      waitFor messageLoop
+    finally:
+      loadingMarkTestPanel = MarkPanel()
       updateUploadedScenes(initTable[SceneId, ExportedInterpretedScene]())
 
   test "a key event is logged by name, never with what was typed":

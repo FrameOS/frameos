@@ -2404,6 +2404,9 @@ static void client_task(void *arg)
                 s_render_in_flight = true;
                 render_once(quiet);
                 s_render_in_flight = false;
+                /* A picture shown put a switch's loading mark away; a render
+                 * that showed none (it failed) ends it here. */
+                fos_display_loading_end();
                 rendered = true;
                 fos_animation_frame_done(&s_anim, cycle_start, esp_timer_get_time());
                 if (scene_render) {

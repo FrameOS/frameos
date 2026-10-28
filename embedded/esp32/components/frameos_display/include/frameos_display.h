@@ -13,7 +13,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "lcd_loading.h"
 #include "lcd_splash.h"
+#include "lcd_st7701s_rgb.h"
 
 typedef enum {
     FOS_PIXEL_1BPP = 1, /* packed 1 bit/pixel, MSB first, white=1 */
@@ -83,6 +85,23 @@ int64_t fos_display_buffer_generation(const uint8_t *buf);
 /* Called with a panel buffer just before it is written to: a snapshot that
  * points at the last picture shown lets go of it (fos_client.c). */
 void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf));
+/* The loading mark (lcd_loading.h, docs/realtime-rendering.md "A switch that
+ * takes a while"): on an LCD, three pulsing dots over the picture shown
+ * while a scene switch loads, once it has taken FOS_LCD_LOADING_DELAY_MS,
+ * drawn by the runtime (frameos/loading_mark.nim). `begin` on the render
+ * task as a switch starts, with when it was asked for (a FreeRTOS tick) and
+ * the frame's rotation; the next picture shown ends it, and `end` does for a
+ * switch that shows none. The one panel that shows it
+ * is the RGB LCD, whose driver does nothing before its init, so these go
+ * straight there: every other panel leaves them alone. */
+static inline void fos_display_loading_begin(uint32_t since_tick, int rotation)
+{
+    fos_lcd_st7701s_loading_begin(since_tick, rotation);
+}
+static inline void fos_display_loading_end(void)
+{
+    fos_lcd_st7701s_loading_end();
+}
 /* The selected panel's own I2C bus when it runs one on exactly these pins
  * (the SenseCAP Indicator's LCD shares SDA39/SCL40 with its touch
  * controller): the handle (an `i2c_master_bus_handle_t`) for another device
