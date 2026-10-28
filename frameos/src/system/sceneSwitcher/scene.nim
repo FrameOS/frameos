@@ -618,8 +618,7 @@ const
 proc background(paper: bool): Color =
   if paper: PaperWhite else: Zinc950
 
-proc onTap(handler: int, name: string, event: JsonNode,
-    localX, localY, width, height: float32) {.raises: [].} =
+proc onTap(handler: int, name: string, event: JsonNode, hit: UiHit) {.raises: [].} =
   ## The tiles' one handler, run by the hit test (ui/events.nim): what it
   ## hit, for `pointer` to act on once the hit test is done.
   tapped = handler
