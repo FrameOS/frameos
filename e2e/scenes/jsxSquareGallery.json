@@ -1,0 +1,100 @@
+{
+  "id": "jsxSquareGallery",
+  "name": "JSX: Gallery (480x480, touch)",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600.0,
+    "backgroundColor": "#000000"
+  },
+  "e2eFrame": {
+    "width": 480,
+    "height": 480
+  },
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: Gallery",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [
+        {
+          "name": "url",
+          "label": "Photo to show (empty: the FrameOS Gallery)",
+          "type": "string",
+          "value": ""
+        }
+      ],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: Gallery\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"url\",\n      \"label\": \"Photo to show (empty: the FrameOS Gallery)\",\n      \"type\": \"string\",\n      \"value\": \"\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// @name JSX: Gallery\n// @background #000000\n// @refresh 3600\n// Photos from the FrameOS Gallery (gallery.frameos.net), full screen: swipe\n// left (or tap the right half) for the next one, swipe right (or tap the left\n// half) for the one before, and a category at the bottom for another gallery.\n// A swipe in from the screen's edge is the frame's scene switch, not this.\n//\n// The photo on screen is kept (fetchImage's `keep`), decoded once at the\n// panel's size: a tap that only changes the caption, a hover or the scene's\n// interval draws it again without a download. The gallery hands out a random\n// photo per request, so \"back\" is the one photo kept before this one; past\n// it there is nothing to go back to. Each kept photo is the interpreter's: an\n// ESP32 short of memory lets the interpreter go and the photos with it, and\n// the next render fetches again.\nconst W = 480, H = 480\nconst KEPT = 2 // the photo on screen and the one before it\nconst CATEGORIES = [\n  ['cute', 'Cute'],\n  ['space-gallery', 'Space'],\n  ['masterpieces', 'Buildings'],\n  ['low-poly-animals', 'Low poly'],\n]\n\n// What lasts the interpreter: the kept photos, newest last, and where we are.\nlet shown = [] // [{ ref, category, n }]\nlet at = -1    // index into shown\nlet want = 0   // +1: a new photo on the next render\nlet failed = ''\n\n// What lasts the scene: the category and how many photos it has fetched.\nlet S = null\nconst load = () => {\n  if (S === null) S = Object.assign({ category: 'cute', count: 0 }, frameos.recall('gallery') ?? {})\n}\nconst save = () => frameos.remember('gallery', S)\n\n// `fixed` (the `url` field) is one photo every time, for a snapshot; empty, the gallery.\nconst fetchNext = (fixed) => {\n  const url = fixed || `https://gallery.frameos.net/image?category=${encodeURIComponent(S.category)}` +\n    `&width=${W}&height=${H}&fit=cover&format=jpg`\n  const photo = frameos.fetchImage(url, { keep: true, width: W, height: H })\n  if (!photo.image) {\n    failed = photo.error ?? 'the gallery sent nothing'\n    return\n  }\n  failed = ''\n  S.count += 1\n  save()\n  // Past the end of what is kept: the oldest goes.\n  shown = shown.slice(0, at + 1)\n  shown.push({ ref: photo.image, category: S.category, n: S.count })\n  while (shown.length > KEPT) frameos.releaseImage(shown.shift().ref)\n  at = shown.length - 1\n}\n\n// +1 the next photo (a new one, or the one we came back from), -1 the one before.\nconst go = (step) => {\n  if (step < 0 && at > 0) at -= 1\n  else if (step > 0 && at < shown.length - 1) at += 1\n  else if (step > 0) want = 1\n}\n\nconst pick = (category) => {\n  if (category === S.category) return\n  S.category = category\n  save()\n  want = 1\n}\n\nexport function get(app) {\n  load()\n  if (want > 0 || shown.length === 0) {\n    want = 0\n    fetchNext(app.config.url)\n  }\n  const photo = shown[at]\n  const label = CATEGORIES.find(([id]) => id === (photo?.category ?? S.category))?.[1] ?? S.category\n  return (\n    <div className=\"w-full h-full bg-black text-white\"\n      onSwipe={(e) => go(e.direction === 'left' ? 1 : e.direction === 'right' ? -1 : 0)}>\n      {photo ? <img className=\"absolute inset-0 w-full h-full object-cover\" src={photo.ref} /> : null}\n      <div className=\"absolute inset-y-0 left-0 w-[240px]\" onClick={() => go(-1)} />\n      <div className=\"absolute inset-y-0 right-0 w-[240px]\" onClick={() => go(1)} />\n      <div className=\"absolute top-3 left-3 right-3 flex items-center justify-between\">\n        <span className=\"rounded-full bg-black/60 px-3 py-1 text-sm font-semibold\">{label}</span>\n        <span className=\"rounded-full bg-black/60 px-3 py-1 text-sm\">\n          {photo ? `Photo ${photo.n}${at < shown.length - 1 ? ' (back)' : ''}` : 'No photo'}\n        </span>\n      </div>\n      {failed ? (\n        <div className=\"absolute inset-x-6 top-[200px] rounded-xl bg-red-900/80 p-3\">\n          <span className=\"text-sm\">{`Could not load a photo: ${failed}`}</span>\n        </div>\n      ) : null}\n      <div className=\"absolute bottom-3 left-3 right-3 flex gap-2\">\n        {CATEGORIES.map(([id, name]) => (\n          <div className={`flex-1 flex items-center justify-center h-10 rounded-full ${id === S.category ? 'bg-white text-black' : 'bg-black/60 text-white active:bg-white/30'}`}\n            onClick={() => pick(id)}>\n            <span className=\"text-sm font-semibold\">{name}</span>\n          </div>\n        ))}\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {
+          "url": "https://frameos.net/img/logo_in_ci_tests.png"
+        }
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}
