@@ -12,33 +12,55 @@
 ## equal-column grids; `absolute` places a child against its parent's padding
 ## box. Text is set with pixie's typesetter and drawn as its outlines.
 
-import std/[math, strutils]
+import std/[math, strutils, unicode]
 import pixie
 import pixie/fileformats/svg
 import frameos/ui/tailwind
+import frameos/ui/keyboard
+
+export keyboard.KeyboardPage
 
 type
   UiKind = enum
     ukBox, ukText, ukImage, ukSvg
 
   UiEvent* = enum
-    ## The handlers an element can have, by the event that runs them.
+    ## The handlers an element can have, by the event that runs them; a
+    ## field's change and keys (onChange, onKeyDown) come from its edits.
     ueClick = "tap", ueDoubleClick = "doubleTap", ueLongPress = "longPress",
     uePointerDown = "pointerDown", uePointerUp = "pointerUp", uePointerMove = "pointerMove",
-    ueSwipe = "swipe"
+    ueSwipe = "swipe", ueChange = "change", ueKeyDown = "keyDown"
 
   UiRegion* = object
     ## An element the pointer can do something to, where the layout put it:
-    ## one with a handler, or with `hover:` / `active:` classes, or a `group`.
+    ## one with a handler, or with `hover:` / `active:` classes, or a `group`,
+    ## a field, or a box that scrolls.
     x*, y*, w*, h*: float32
+    visible*: array[4, float32]      ## the part of it no scrolling box cut off: x0, y0, x1, y1
     key*: int                        ## its place in the tree, the same next render
     handlers*: array[UiEvent, int]   ## a handler's number + 1, 0 for none
     hover*, active*, group*: bool
+    field*: uint8                    ## 1 an <input>, 2 a <textarea>, 3 a number input
+    value*: string                   ## a field's text
+    scrollX*, scrollY*: float32      ## how far a box can scroll each way; 0: not that way
 
   UiInput* = object
     ## What the pointer was doing when this layout was asked for: the keys of
-    ## the elements it is over and of those it is pressing.
+    ## the elements it is over and of those it is pressing. And the keyboard:
+    ## the field it types into, where, and the on-screen keyboard's keys;
+    ## how far each box is scrolled.
     hovered*, pressed*: seq[int]
+    focus*: int          ## the focused field's key + 1; 0 for none
+    caret*: int          ## where in its text the next character goes, in bytes
+    text*: string        ## its text as the last layout found it, with the edits since
+    place*: bool         ## a tap focused it: the caret goes to placeX, placeY ...
+    placeX*, placeY*: float32 ## ... from the field's corner
+    keyboard*: bool      ## the on-screen keyboard is up (the frame has none of its own)
+    page*: KeyboardPage  ## which keys it shows ...
+    shift*: int          ## ... letters in capitals: 1 the next one, 2 all of them
+    reveal*: bool        ## scroll the focused field into view at the next layout
+    paper*: bool         ## e-paper: the keyboard shows no press
+    scrolls*: seq[(int, float32, float32)] ## how far each box that scrolled is, by key
 
   TextMemo = object
     key: string          ## the runs, their styles, the width and alignment
@@ -58,6 +80,7 @@ type
     gen: int             ## this layout's number: a node's `memo` holds for it only
     root: UiNode         ## the last layout's tree, taken back where it did not change
     rootW, rootH: float32
+    keyboard: UiNode     ## the on-screen keyboard's, likewise
 
   UiNode {.acyclic.} = ref object
     kind: UiKind
@@ -105,22 +128,45 @@ type
     # and first gradient number: the same again is the same nodes again.
     emitted: seq[SvgNode]
     emittedRegions: seq[UiRegion]
-    emittedAt: array[5, float32]
+    emittedAt: array[7, float32]
     emittedFor: (int, float32, float32)
     emittedGradients: (int, int)
     # What the pointer can do to it (UiRegion).
     key: int
     handlers: array[UiEvent, int]
     hover, active, group: bool
+    field: uint8          # an <input> or a <textarea> (UiRegion.field) ...
+    value: string         # ... and its text
+    keep: bool            # ukText: a field's text, its spaces kept as typed
+    maxX, maxY: float32   # a box that clips: how much of it is out of sight ...
+    scrollAt: (float32, float32) # ... and how far it was scrolled when built, then emitted
 
 const
   # The attributes the JSX walker turns onClick, onLongPress, ... into.
   handlerAttrs: array[UiEvent, string] = ["on-click", "on-double-click",
-    "on-long-press", "on-pointer-down", "on-pointer-up", "on-pointer-move", "on-swipe"]
+    "on-long-press", "on-pointer-down", "on-pointer-up", "on-pointer-move", "on-swipe",
+    "on-change", "on-key-down"]
+  KeyboardKey = 1 shl 21 ## the on-screen keyboard's root, far from the UI's keys
   Unbounded = 1e9'f32
   MaxDepth = 64
 
 {.push boundChecks: off, overflowChecks: off, rangeChecks: off, raises: [].}
+
+proc scrolled*(input: UiInput, key: int): (float32, float32) =
+  ## How far the box at `key` is scrolled: (0, 0) until something scrolls it.
+  for (k, x, y) in input.scrolls:
+    if k == key:
+      return (x, y)
+
+proc scrollTo*(input: var UiInput, key: int, x, y: float32) =
+  ## The box at `key` scrolled to (x, y); the next layout keeps it in range.
+  for i in 0 ..< input.scrolls.len:
+    if input.scrolls[i][0] == key:
+      input.scrolls[i] = (key, x, y)
+      return
+  if x != 0 or y != 0:
+    input.scrolls.add((key, x, y))
+
 
 proc isText(n: SvgNode): bool {.inline.} =
   n.tag.len == 0 or n.tag == "&"
@@ -161,8 +207,10 @@ proc hasClass(classes, name: string): bool =
     at = classes.find(name, at + 1)
 
 proc pointerClasses(classes: string): bool {.inline.} =
-  ## Classes the pointer can change: hover:, active:, group and group-hover:.
-  classes.contains("hover:") or classes.contains("active:") or classes.contains("group")
+  ## Classes the pointer can change: hover:, active:, group and group-hover:;
+  ## and focus:, which a tap on a field changes.
+  classes.contains("hover:") or classes.contains("active:") or classes.contains("group") or
+    classes.contains("focus:")
 
 proc addRuns(n: SvgNode, style: Text, into: UiNode, rootW, rootH: float32, depth: int,
     states: set[UiState]) =
@@ -206,11 +254,19 @@ proc statesOf(n: UiNode, input: UiInput, groupHover: bool): set[UiState] =
   if groupHover: result.incl usGroupHover
   if n.hover and n.key in input.hovered: result.incl usHover
   if n.active and n.key in input.pressed: result.incl usActive
+  if n.key == input.focus - 1: result.incl usFocus
 
 proc samePointer(n: UiNode, input: UiInput, groupHover: bool): bool =
-  ## Whether the pointer leaves `n` and what is in it as they were built.
+  ## Whether the pointer leaves `n` and what is in it as they were built:
+  ## the focused field never (its text and caret), and a box that clips
+  ## when it scrolled since.
   if not n.pointer:
     return true
+  if n.field > 0 and n.key == input.focus - 1:
+    return false
+  if (n.box.overflowX != ovVisible or n.box.overflowY != ovVisible) and
+      input.scrolled(n.key) != n.scrollAt:
+    return false
   if n.inGroup != groupHover or (n.kind != ukText and n.statesOf(input, groupHover) != n.states):
     return false
   let childGroup = groupHover or (n.group and n.key in input.hovered)
@@ -219,13 +275,64 @@ proc samePointer(n: UiNode, input: UiInput, groupHover: bool): bool =
       return false
   true
 
+proc buildField(result: UiNode, n: SvgNode, text: Text, classes: string, rootW, rootH: float32,
+    input: UiInput) =
+  ## An <input> or a <textarea>: a box that clips the one run of text it
+  ## holds, its `value` (the edits since the last layout while it has the
+  ## keyboard and no `value` of its own), dots for a password, else the
+  ## placeholder in its `placeholder:` style (half its color without one).
+  ## Its spaces are kept as typed, and an empty field is a line tall.
+  let kind = n.attr("type")
+  result.pointer = true
+  result.field = if n.tag == "textarea": 2 elif kind == "number": 3 else: 1
+  result.box.overflowX = max(result.box.overflowX, ovHidden)
+  result.box.overflowY = max(result.box.overflowY, ovHidden)
+  result.scrollAt = input.scrolled(result.key)
+  result.value = n.attr("value")
+  var controlled = false
+  for attr in n.attrs:
+    if attr[0] == "value":
+      controlled = true
+  if result.key == input.focus - 1 and not controlled:
+    result.value = input.text
+  var
+    style = result.text
+    shown = result.value
+  if kind == "password":
+    shown.setLen(0)
+    for _ in 0 ..< result.value.runeLen:
+      shown.add "\u2022"
+  if shown.len == 0:
+    shown = n.attr("placeholder")
+    var scratch = initBox()
+    style = text
+    scratch.applyClasses(style, classes, rootW, rootH, result.states + {usPlaceholder})
+    if style.color == result.text.color:
+      style.color.a = style.color.a div 2
+  if shown.len == 0 or shown[^1] == '\n':
+    shown.add ' ' # a line to measure, and to put the caret on
+  if result.field != 2:
+    # One line, centered in the field's height as a browser centers it.
+    style.nowrap = true
+    result.box.display = diFlex
+    result.box.items = alCenter
+  let run = newUiNode(ukText, style)
+  run.box.grow = 1
+  run.keep = true
+  run.runs.add SvgNode(tag: "&", text: shown)
+  run.styles.add style
+  result.children.add run
+
 proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
     key: int, input: UiInput, groupHover: bool, prev: UiNode): UiNode =
   ## `n` as a node to lay out. `prev`, the node the last layout built at this
   ## place, is taken back as it is, laid out and emitted, when nothing it was
   ## built from changed: React's diff, without its API.
+  # The focused field is built again every time: its text can be the edits
+  # since, and its caret moves.
   if not prev.isNil and prev.kind != ukText and prev.key == key and prev.inherited == inherited and
-      sameTree(prev.src, n) and prev.samePointer(input, groupHover):
+      sameTree(prev.src, n) and prev.samePointer(input, groupHover) and
+      (prev.field == 0 or key != input.focus - 1):
     return prev
   var text = inherited
   tagStyle(n.tag, text)
@@ -241,19 +348,27 @@ proc build(n: SvgNode, inherited: Text, rootW, rootH: float32, depth: int,
   result.group = classes.hasClass("group")
   for event in UiEvent:
     var id: float32
-    let value = n.attr(handlerAttrs[event])
+    # onInput is a field's onChange by another name, as in React.
+    let value = n.attr(if event == ueChange and n.attr("on-input").len > 0: "on-input" else: handlerAttrs[event])
     if value.len > 0 and number(value, 0, value.len, id):
       result.handlers[event] = int(id) + 1
   var states: set[UiState]
   if groupHover: states.incl usGroupHover
   if result.hover and key in input.hovered: states.incl usHover
   if result.active and key in input.pressed: states.incl usActive
+  if key == input.focus - 1: states.incl usFocus
   result.states = states
   result.box.applyClasses(result.text, classes, rootW, rootH, states)
+  if result.box.overflowX != ovVisible or result.box.overflowY != ovVisible:
+    result.pointer = true # a scroll builds it again (samePointer)
+    result.scrollAt = input.scrolled(key)
   # A hovered `group` lights its descendants' group-hover: classes.
   let childGroup = groupHover or (result.group and key in input.hovered)
   if n.tag == "img" or n.tag == "svg":
     result.kind = if n.tag == "img": ukImage else: ukSvg
+    return
+  if n.tag == "input" or n.tag == "textarea":
+    result.buildField(n, text, classes, rootW, rootH, input)
     return
   if depth > MaxDepth:
     return
@@ -357,7 +472,7 @@ proc ensureSpans(n: UiNode) =
       if style.weight >= 600 and face == typefaceFor(style, 400):
         n.bold.add font
     n.spans.add newSpan(text, font)
-  if n.spans.len > 0 and n.spans[^1].text.endsWith(' '):
+  if n.spans.len > 0 and n.spans[^1].text.endsWith(' ') and not n.keep:
     n.spans[^1].text.setLen(n.spans[^1].text.len - 1)
 
 proc cutSpans(spans: seq[Span], keep: int): seq[Span] =
@@ -376,7 +491,13 @@ proc cutSpans(spans: seq[Span], keep: int): seq[Span] =
   if result.len > 0:
     result[^1] = newSpan(result[^1].text.strip(leading = false) & "…", result[^1].font)
 
-var memo {.threadvar.}: UiMemo ## the layout's, while layoutUi runs
+var
+  memo {.threadvar.}: UiMemo ## the layout's, while layoutUi runs
+  ui {.threadvar.}: ptr UiInput ## and the input it was asked for
+  focusSeen {.threadvar.}: bool ## the focused field was laid out
+
+template scrollOf(key: int): (float32, float32) = ui[].scrolled(key)
+template setScroll(key: int, x, y: float32) = ui[].scrollTo(key, x, y)
 
 proc textKey(n: UiNode, width: float32, align: HorizontalAlignment): string =
   template addBytes(v: untyped) =
@@ -797,10 +918,15 @@ proc layout(n: UiNode, w, h: float32, fixW, fixH: bool, force = false): Vec2 =
       let width = min(own.x, max(w - px, 0))
       content = vec2(width, width / aspect)
   of ukBox:
+    # A box that scrolls lays its children out at their own heights, however
+    # tall (nothing shrinks to fit it), and is no taller than it may be.
     let
+      clipsY = b.overflowY == ovScroll
       innerW = max(w - px, 0)
-      innerH = if h >= Unbounded: Unbounded else: max(h - py, 0)
-    content = n.layoutFlex(innerW, innerH, fixW, fixH)
+      innerH = if h >= Unbounded or clipsY: Unbounded else: max(h - py, 0)
+    content = n.layoutFlex(innerW, innerH, fixW, fixH and not clipsY)
+    if clipsY and not fixH and h < Unbounded:
+      content.y = min(content.y, max(h - py, 0))
   result.x = if fixW: w else: min(content.x + px, max(w, 0))
   result.y = if fixH: h else: content.y + py
   if n.kind == ukBox and b.aspect > 0 and fixW != fixH:
@@ -808,6 +934,15 @@ proc layout(n: UiNode, w, h: float32, fixW, fixH: bool, force = false): Vec2 =
     else: result.x = result.y * b.aspect
   if n.kind == ukBox:
     n.layoutAbsolute(result)
+    if b.overflowX != ovVisible or b.overflowY != ovVisible:
+      # How much of what it holds is out of sight, its padding included.
+      var right, bottom = 0'f32
+      for c in n.children:
+        if c.box.display != diNone:
+          right = max(right, c.x + c.size.x)
+          bottom = max(bottom, c.y + c.size.y)
+      n.maxX = max(right + b.pad[1] + b.border[1] - result.x, 0)
+      n.maxY = max(bottom + b.pad[2] + b.border[2] - result.y, 0)
   n.prevW = n.lastW
   n.prevH = n.lastH
   n.prevFix = n.lastFix
@@ -1013,6 +1148,62 @@ proc emitText(n: UiNode, x, y, w, opacity: float32, drawn: var seq[SvgNode]) =
     for node in entry.drawn:
       node.path.share() # never changed again: its bounds and shapes are kept
 
+proc caretAt(arrangement: Arrangement, x, y: float32): int =
+  ## The rune a tap at (x, y) in the text puts the caret before: the nearest
+  ## edge of a glyph on the line under it.
+  var best = Unbounded
+  for i in 0 .. arrangement.runes.len:
+    let r =
+      if i < arrangement.runes.len: arrangement.selectionRects[i]
+      else: arrangement.selectionRects[^1]
+    let
+      edge = if i < arrangement.runes.len: r.x else: r.x + r.w
+      off = if y < r.y: r.y - y elif y > r.y + r.h: y - r.y - r.h else: 0
+      d = abs(x - edge) + off * 1000
+    if d < best:
+      best = d
+      result = i
+
+proc runeOffset(text: string, rune: int): int =
+  ## The byte where rune number `rune` starts (the length past the last).
+  var n = 0
+  while result < text.len and n < rune:
+    inc result
+    while result < text.len and (ord(text[result]) and 0xC0) == 0x80:
+      inc result
+    inc n
+
+proc emitField(n: UiNode, x, y, w, h: float32, sx, sy: var float32): array[4, float32] =
+  ## The focused field's caret, where it is in the text: placed where a tap
+  ## landed, and the field scrolled so it shows. Its box, unscrolled.
+  template b: untyped = n.box
+  let t = n.children[0] # the field's one run of text
+  let
+    tx = round(x + t.x)
+    ty = round(y + t.y)
+    arrangement = t.arrange(round(x + t.x + t.size.x) - tx, t.text.align)
+  if arrangement.runes.len == 0:
+    return
+  if ui.place:
+    ui.place = false
+    ui.caret = n.value.runeOffset(arrangement.caretAt(ui.placeX - (tx - x) + sx, ui.placeY - (ty - y) + sy))
+  ui.caret = clamp(ui.caret, 0, n.value.len)
+  let
+    i = min(n.value.toOpenArray(0, ui.caret - 1).runeLen, arrangement.runes.len)
+    r = arrangement.selectionRects[min(i, arrangement.runes.high)]
+    cw = max(1'f32, round(t.text.size / 16))
+  result = [tx + (if i < arrangement.runes.len: r.x else: r.x + r.w), ty + r.y, cw, r.h]
+  # In sight: inside the content box, the caret's width to spare.
+  let
+    left = x + b.border[3] + b.pad[3]
+    right = x + w - b.border[1] - b.pad[1] - cw
+    top = y + b.border[0] + b.pad[0]
+    bottom = y + h - b.border[2] - b.pad[2]
+  if result[0] - sx > right: sx = result[0] - right
+  if result[0] - sx < left: sx = max(result[0] - left, 0)
+  if result[1] + r.h - sy > bottom: sy = result[1] + r.h - bottom
+  if result[1] - sy < top: sy = max(result[1] - top, 0)
+
 proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradients: var int,
     regions: var seq[UiRegion]) =
   template b: untyped = n.box
@@ -1029,9 +1220,27 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     cy = y + b.pad[0] + b.border[0]
     cw = w - b.padX
     ch = h - b.padY
-    at = [x, y, w, h, op]
+    clips = n.kind == ukBox and (b.overflowX != ovVisible or b.overflowY != ovVisible)
   n.placed()
-  let call = (n.lastFix, n.lastW, n.lastH)
+  # How far a box that clips is scrolled; a focused field, so its caret shows.
+  var
+    (sx, sy) = scrollOf(n.key)
+    caret: array[4, float32]
+  if clips:
+    sx = clamp(sx, 0, n.maxX)
+    sy = clamp(sy, 0, n.maxY)
+    if n.field > 0 and n.key == ui.focus - 1 and n.children.len > 0:
+      focusSeen = true
+      caret = n.emitField(x, y, w, h, sx, sy)
+    elif n.field > 0:
+      # A field that lets go of the keyboard shows its text from the start.
+      sx = 0
+      sy = 0
+    setScroll(n.key, sx, sy)
+    n.scrollAt = (sx, sy)
+  let
+    at = [x, y, w, h, op, sx, sy]
+    call = (n.lastFix, n.lastW, n.lastH)
   if n.kind == ukBox and n.emittedAt == at and n.emittedFor == call and n.emittedGradients[0] == gradients:
     # Taken back unchanged (build), laid out by the same call and placed
     # where it was: what it emitted then, the same nodes for pixie to keep.
@@ -1045,11 +1254,15 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     first = drawn.len
     firstRegion = regions.len
     firstGradient = gradients
+    scrolls = b.overflowX == ovScroll and n.maxX > 0 or b.overflowY == ovScroll and n.maxY > 0
   n.emitPaint(x, y, w, h, op, drawn, gradients)
-  if n.hover or n.active or n.group or n.handlers != default(array[UiEvent, int]):
+  if n.hover or n.active or n.group or n.handlers != default(array[UiEvent, int]) or
+      n.field > 0 or scrolls:
     # In paint order: whatever comes later is on top.
-    regions.add UiRegion(x: x, y: y, w: w, h: h, key: n.key, handlers: n.handlers,
-      hover: n.hover, active: n.active, group: n.group)
+    regions.add UiRegion(x: x, y: y, w: w, h: h, visible: [x, y, x + w, y + h], key: n.key,
+      handlers: n.handlers, hover: n.hover, active: n.active, group: n.group, field: n.field,
+      value: n.value, scrollX: (if b.overflowX == ovScroll: n.maxX else: 0),
+      scrollY: (if b.overflowY == ovScroll: n.maxY else: 0))
   case n.kind
   of ukText:
     n.emitText(cx, cy, cw, op, drawn)
@@ -1064,53 +1277,156 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
   of ukSvg:
     n.emitSvg(cx, cy, cw, ch, op, drawn)
   of ukBox:
-    # In-flow children, then the absolute ones on top, as CSS paints them.
+    # In-flow children, then the absolute ones on top, as CSS paints them;
+    # in a box that clips, inside a viewport of its padding box that its
+    # scroll moves them in (pixie's nested <svg>).
+    let
+      vx = x + b.border[3]
+      vy = y + b.border[0]
+      vw = w - b.border[1] - b.border[3]
+      vh = h - b.border[0] - b.border[2]
+      kids = regions.len
+    var view: SvgNode
+    if clips:
+      if vw <= 0 or vh <= 0:
+        return
+      view = SvgNode(tag: "svg", attrs: @[("x", num(vx)), ("y", num(vy)), ("width", num(vw)),
+        ("height", num(vh)), ("viewBox", num(vx + sx) & " " & num(vy + sy) & " " & num(vw) & " " & num(vh))])
     for pass in [false, true]:
       for c in n.children:
         if c.box.absolute == pass:
-          c.emit(x, y, op, drawn, gradients, regions)
+          if clips: c.emit(x, y, op, view.children, gradients, regions)
+          else: c.emit(x, y, op, drawn, gradients, regions)
+    if clips:
+      if caret[2] > 0:
+        let bar = SvgNode(tag: "rect", attrs: @[("x", num(caret[0])), ("y", num(caret[1])),
+          ("width", num(caret[2])), ("height", num(caret[3]))])
+        bar.paint(n.text.color, op)
+        view.children.add bar
+      drawn.add view
+      # What is inside answers the pointer where it shows, scrolled.
+      var k = kids
+      for i in kids ..< regions.len:
+        var r = regions[i]
+        r.x -= sx
+        r.y -= sy
+        r.visible = [max(r.visible[0] - sx, vx), max(r.visible[1] - sy, vy),
+          min(r.visible[2] - sx, vx + vw), min(r.visible[3] - sy, vy + vh)]
+        if r.visible[2] > r.visible[0] and r.visible[3] > r.visible[1]:
+          regions[k] = r
+          inc k
+      regions.setLen(k)
+      if b.overflowY == ovScroll and n.maxY > 0:
+        # Where in what it holds it shows: a thin bar at its right edge.
+        let
+          barH = max(vh * vh / (vh + n.maxY), min(vh, 16))
+          bar = SvgNode(tag: "path", path: newPath())
+        bar.path.roundedRect(vx + vw - 5, vy + (vh - barH) * sy / n.maxY, 3, barH, 1.5, 1.5, 1.5, 1.5)
+        bar.paint(n.text.color, op * 0.35)
+        drawn.add bar
     n.emitted = drawn[first .. ^1]
     n.emittedRegions = regions[firstRegion .. ^1]
     n.emittedAt = at
     n.emittedFor = call
     n.emittedGradients = (firstGradient, gradients - firstGradient)
 
-proc layoutUi*(root: SvgNode, width, height: int, input: UiInput,
+proc reveal(n: UiNode, key: int, r: var array[4, float32]): bool =
+  ## Whether the field at `key` is in `n`: then `r` is its box from n's
+  ## corner as n shows it, every box on the way that scrolls scrolled so it
+  ## is in sight, a little room around it.
+  if n.key == key and n.field > 0:
+    r = [0'f32, 0, n.size.x, n.size.y]
+    return true
+  if n.kind != ukBox:
+    return false
+  for c in n.children:
+    if c.reveal(key, r):
+      template b: untyped = n.box
+      r[0] += c.x
+      r[1] += c.y
+      if b.overflowX == ovScroll or b.overflowY == ovScroll:
+        var (sx, sy) = scrollOf(n.key)
+        const room = 8'f32
+        if b.overflowY == ovScroll:
+          if r[1] + r[3] - sy > n.size.y - b.border[2]: sy = r[1] + r[3] - n.size.y + b.border[2] + room
+          if r[1] - sy < b.border[0]: sy = r[1] - b.border[0] - room
+          sy = clamp(sy, 0, n.maxY)
+        if b.overflowX == ovScroll:
+          if r[0] + r[2] - sx > n.size.x - b.border[1]: sx = r[0] + r[2] - n.size.x + b.border[1] + room
+          if r[0] - sx < b.border[3]: sx = r[0] - b.border[3] - room
+          sx = clamp(sx, 0, n.maxX)
+        setScroll(n.key, sx, sy)
+        r[0] -= sx
+        r[1] -= sy
+      return true
+  false
+
+proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     regions: var seq[UiRegion], textMemo: UiMemo = nil): SvgNode =
   ## A UI tree laid out into a `width` x `height` image, as the SVG that
   ## draws it there. The outermost element fills the image unless its own
   ## classes size it. `input` is what the pointer is doing; `regions` gets
-  ## the elements it can do something to, for the next event.
+  ## the elements it can do something to, for the next event. With the
+  ## on-screen keyboard up (`input.keyboard`), the UI is laid out above it,
+  ## its focused field scrolled into sight, and the keyboard drawn below.
   memo = textMemo
+  ui = addr input
+  focusSeen = false
   let
+    kb = if input.keyboard and input.focus > 0: keyboardHeight(height) else: 0
     w = width.float32
-    h = height.float32
+    h = float32(height - kb)
   var before: UiNode
   if not memo.isNil:
     inc memo.gen
     if memo.rootW == w and memo.rootH == h:
       before = memo.root
-  let ui = root.build(initText(), w, h, 0, 0, input, false, before)
+  let top = root.build(initText(), w, h, 0, 0, input, false, before)
   var
-    rw = ui.box.w.resolve(w)
-    rh = ui.box.h.resolve(h)
+    rw = top.box.w.resolve(w)
+    rh = top.box.h.resolve(h)
   if rw < 0: rw = w
   if rh < 0: rh = h
-  ui.size = ui.layout(rw, rh, true, true)
-  ui.x = max(ui.box.margin[3].resolve(w), 0)
-  ui.y = max(ui.box.margin[0].resolve(h), 0)
+  top.size = top.layout(rw, rh, true, true)
+  top.x = max(top.box.margin[3].resolve(w), 0)
+  top.y = max(top.box.margin[0].resolve(h), 0)
+  if input.reveal and input.focus > 0:
+    var r: array[4, float32]
+    discard top.reveal(input.focus - 1, r)
+  input.reveal = false
   result = SvgNode(tag: "svg", attrs: @[("width", $width), ("height", $height)])
+  if kb > 0 and top.box.bg.a == 255 and top.box.gradient == 0:
+    # The UI's page under the keyboard too: an opaque first paint over the
+    # whole image, so a key repaints only what it changed.
+    let page = SvgNode(tag: "rect", attrs: @[("width", $width), ("height", $height)])
+    page.paint(top.box.bg, 1)
+    result.children.add page
   var gradients = 0
-  ui.emit(0, 0, 1, result.children, gradients, regions)
+  top.emit(0, 0, 1, result.children, gradients, regions)
+  if kb > 0:
+    let keys = keyboardTree(width, kb, input.page, input.shift, input.paper).build(initText(),
+      w, kb.float32, 0, KeyboardKey, input, false, if memo.isNil: nil else: memo.keyboard)
+    keys.size = keys.layout(w, kb.float32, true, true)
+    keys.y = h
+    keys.emit(0, 0, 1, result.children, gradients, regions)
+    if not memo.isNil:
+      memo.keyboard = keys
+  if input.focus > 0 and not focusSeen:
+    # The field is gone: nothing has the keyboard.
+    input.focus = 0
+    input.keyboard = false
   if not memo.isNil:
     memo.last = move(memo.kept) # what this layout did not use is let go
-    memo.root = ui
+    memo.root = top
     memo.rootW = w
     memo.rootH = h
     memo = nil
+  ui = nil
 
 proc layoutUi*(root: SvgNode, width, height: int): SvgNode =
-  var regions: seq[UiRegion]
-  layoutUi(root, width, height, UiInput(), regions)
+  var
+    regions: seq[UiRegion]
+    input: UiInput
+  layoutUi(root, width, height, input, regions)
 
 {.pop.}

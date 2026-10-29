@@ -117,7 +117,7 @@ interface FrameOSStreamRef { __frameosType: "streamRef"; id: number; }
 interface FrameOSElement { type: string; props: Record<string, any>; }
 /** What a handler gets: the pointer event, and where in the element it was. */
 interface FrameOSUiEvent {
-  type: "tap" | "doubleTap" | "longPress" | "swipe" | "pointerDown" | "pointerUp" | "pointerMove";
+  type: "tap" | "doubleTap" | "longPress" | "swipe" | "pointerDown" | "pointerUp" | "pointerMove" | "change" | "keyDown";
   x: number;
   y: number;
   localX: number;
@@ -129,6 +129,11 @@ interface FrameOSUiEvent {
   pointerType?: "mouse" | "touch" | "pen";
   /** A swipe's way: "left", "right", "up" or "down". */
   direction?: "left" | "right" | "up" | "down";
+  /** onChange of an <input> or <textarea>: its text now (also as target.value, as in React). */
+  value?: string;
+  target?: { value: string };
+  /** onKeyDown of a field: the key ("a", "Enter", "Backspace"). */
+  key?: string;
   [key: string]: any;
 }
 interface FrameOSElementProps {
@@ -145,6 +150,15 @@ interface FrameOSElementProps {
   onPointerMove?: (event: FrameOSUiEvent) => void;
   /** A swipe that began on the element, with its direction; one in from the screen edge is the frame's. */
   onSwipe?: (event: FrameOSUiEvent) => void;
+  /** <input> and <textarea>: the text shown (keep it in a variable, set it in onChange), a hint while empty, and the kind of field. */
+  value?: string | number;
+  placeholder?: string;
+  type?: "text" | "password" | "number";
+  /** Every edit of a field, with its text now: e.value, or e.target.value. onInput is the same. Absent before 2026.10.22. */
+  onChange?: (event: FrameOSUiEvent) => void;
+  onInput?: (event: FrameOSUiEvent) => void;
+  /** A key typed into a field (on the screen's keyboard or a real one), before it is applied: e.key. */
+  onKeyDown?: (event: FrameOSUiEvent) => void;
   [attribute: string]: any;
 }
 declare namespace JSX {

@@ -27,7 +27,10 @@ fixture's `e2eEvents` list is POSTed to the frame's `/event/<name>` after the
 first render, so an input scene (`inputTouch`, `inputKeyboard`) is snapshotted
 showing what it heard: the last upload of the burst, taken once nothing more
 arrives for `FRAMEOS_E2E_EVENT_SETTLE` seconds (3), never the first render,
-which on a slow runner shows the first key alone. The reset scene drawn
+which on a slow runner shows the first key alone. An entry `{"wait":
+"render"}` instead of an event waits for that settled render before the
+events after it are sent: a tap on the keyboard on the screen comes after
+the render that drew it (`jsxSquareForm`). The reset scene drawn
 between two fixtures is waited for as well, so its late upload is never
 mistaken for the next scene's.
 

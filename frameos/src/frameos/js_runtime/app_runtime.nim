@@ -23,6 +23,7 @@ import frameos/js_runtime/jsx
 import frameos/ui/layout
 import frameos/ui/events
 import frameos/render_scale
+import frameos/panel_shape
 
 type
   JsAssetGrant* = enum
@@ -1958,7 +1959,10 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   // A JSX UI's onClick (and friends), numbered by the walker (js_runtime/jsx.nim).
   globalThis.__frameosHandle = (id, event, type, localX, localY, width, height) => {
     const handler = (globalThis.__frameosHandlers || [])[id];
-    if (typeof handler === "function") handler({ ...JSON.parse(event), type, localX, localY, width, height });
+    if (typeof handler !== "function") return;
+    const e = { ...JSON.parse(event), type, localX, localY, width, height };
+    if (type === "change") e.target = { value: e.value }; // React's e.target.value
+    handler(e);
   };
   function __frameosInvoke(name) {
     const mod = __frameosExports();
@@ -2283,6 +2287,9 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
     regions: seq[UiRegion]
   let target = uiTarget(sceneId, owner.nodeId.int, create = root.tag != "svg")
   if root.tag != "svg":
+    # E-paper's on-screen keyboard shows no press (ui/keyboard.nim).
+    target.input.paper = panelIsPaper(if owner.frameConfig.isNil: "" else: owner.frameConfig.device,
+      context.hasImage and not context.image.isNil and context.image.format == pfRgb565)
     try:
       svg = layoutUi(root, layoutWidth, layoutHeight, target.input, regions, target.memo)
     except CatchableError as error:

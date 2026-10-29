@@ -180,10 +180,12 @@ block:
     bufs[b] = newImage565Over(W, H, addr store[b][0])
     bufs[b].ditherStores = true
   for i in 0 ..< 24:
-    var regions: seq[UiRegion]
+    var
+      regions: seq[UiRegion]
+      input: UiInput
     let
       target = bufs[i mod 3]
-      root = layoutUi(ui(i), W, H, UiInput(), regions, memo)
+      root = layoutUi(ui(i), W, H, input, regions, memo)
     beginPanelFrame(target.bufferPointer, 0)
     var owed = some(color(0, 0, 0, 1))
     doAssert renderSvgFrame(root, target, owed, true, reuse = true)

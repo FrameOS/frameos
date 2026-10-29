@@ -1,0 +1,229 @@
+{
+  "id": "jsxSquareForm",
+  "name": "JSX: Form (480x480, touch)",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600.0,
+    "backgroundColor": "#0f172a"
+  },
+  "e2eFrame": {
+    "width": 480,
+    "height": 480
+  },
+  "e2eEvents": [
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 16384,
+        "y": 14063,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 16384,
+        "y": 14063,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "wait": "render"
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 2799,
+        "y": 27375,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 2799,
+        "y": 27375,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 27580,
+        "y": 20412,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 27580,
+        "y": 20412,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 6758,
+        "y": 23893,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 6758,
+        "y": 23893,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 29218,
+        "y": 23893,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 29218,
+        "y": 23893,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    },
+    {
+      "event": "pointerDown",
+      "payload": {
+        "x": 27580,
+        "y": 20412,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 1
+      }
+    },
+    {
+      "event": "pointerUp",
+      "payload": {
+        "x": 27580,
+        "y": 20412,
+        "pointerId": 1,
+        "pointerType": "touch",
+        "button": 0,
+        "buttons": 0
+      }
+    }
+  ],
+  "fields": [],
+  "apps": {
+    "jsxUi": {
+      "origin": "jsxUi",
+      "name": "JSX: Form",
+      "category": "data",
+      "description": "A JSX interface (docs/jsx-ui.md).",
+      "version": "1.0.0",
+      "fields": [],
+      "output": [
+        {
+          "name": "image",
+          "type": "image"
+        }
+      ],
+      "sources": {
+        "config.json": "{\n  \"name\": \"JSX: Form\",\n  \"category\": \"data\",\n  \"description\": \"A JSX interface (docs/jsx-ui.md).\",\n  \"version\": \"1.0.0\",\n  \"fields\": [],\n  \"output\": [\n    {\n      \"name\": \"image\",\n      \"type\": \"image\"\n    }\n  ],\n  \"permissions\": []\n}\n",
+        "app.tsx": "// @name JSX: Form\n// @background #0f172a\n// @refresh 3600\n// A form on a touch screen: fields to type into with the keyboard on the\n// screen, a switch, and the list scrolling under the keyboard.\nlet name = 'Living room'\nlet city = ''\nlet seconds = '60'\nlet notes = ''\nlet dark = true\n\nconst Row = ({ label, children }) => (\n  <div className=\"flex flex-col gap-1\">\n    <span className=\"text-sm text-slate-400\">{label}</span>\n    {children}\n  </div>\n)\n\nexport function get(app) {\n  const field = 'h-11 px-3 rounded-lg bg-slate-800 text-lg text-white focus:bg-slate-700 placeholder:text-slate-500'\n  return (\n    <div className=\"flex flex-col h-full bg-slate-900 text-white\">\n      <div className=\"flex items-center justify-between h-14 px-5 shrink-0 border-b border-slate-800\">\n        <span className=\"text-xl font-bold\">Settings</span>\n        <span className=\"text-sm text-slate-400 truncate\">{city ? `${name}, ${city}` : name}</span>\n      </div>\n      <div className=\"flex-1 overflow-y-auto\">\n        <div className=\"flex flex-col gap-4 p-5\">\n          <Row label=\"Name\">\n            <input className={field} value={name} onChange={(e) => { name = e.target.value }} />\n          </Row>\n          <Row label=\"City\">\n            <input className={field} value={city} placeholder=\"Where is the frame?\"\n              onChange={(e) => { city = e.target.value }} />\n          </Row>\n          <Row label=\"Seconds between pictures\">\n            <input type=\"number\" className={field} value={seconds} onChange={(e) => { seconds = e.target.value }} />\n          </Row>\n          <div className=\"flex items-center justify-between h-11\" onClick={() => { dark = !dark }}>\n            <span className=\"text-lg\">Dark mode</span>\n            <div className={`w-12 h-7 rounded-full p-1 flex ${dark ? 'bg-sky-500 justify-end' : 'bg-slate-700'}`}>\n              <div className=\"w-5 h-5 rounded-full bg-white\" />\n            </div>\n          </div>\n          <Row label=\"Notes\">\n            <textarea className={`${field} h-24 py-2`} value={notes} placeholder=\"Anything else\"\n              onChange={(e) => { notes = e.target.value }} />\n          </Row>\n        </div>\n      </div>\n    </div>\n  )\n}\n"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    },
+    {
+      "id": "ui",
+      "type": "app",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "keyword": "jsxUi",
+        "config": {},
+        "name": "JSX: Form"
+      }
+    },
+    {
+      "id": "image",
+      "type": "app",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render/image",
+        "config": {
+          "placement": "stretch"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "render-image",
+      "type": "appNodeEdge",
+      "source": "render",
+      "target": "image",
+      "sourceHandle": "next",
+      "targetHandle": "prev"
+    },
+    {
+      "id": "ui-image",
+      "type": "codeNodeEdge",
+      "source": "ui",
+      "target": "image",
+      "sourceHandle": "fieldOutput",
+      "targetHandle": "fieldInput/image"
+    }
+  ]
+}
