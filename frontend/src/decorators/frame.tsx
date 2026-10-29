@@ -395,6 +395,11 @@ const deployProgressDoneWords: Partial<Record<DeployProgressKind, string>> = {
   virtual: 'rendered',
 }
 
+// A device's refusal token, in words. The rest are shown as the device said them.
+const deployProgressErrorWords = new Map<string, string>([
+  ['backend_managed', 'a self-hosted backend controls this frame'],
+])
+
 /**
  * The deploy / update / restart in flight, as the control plane recorded it
  * in `deploy_progress` (docs/deploy-progress-contract.json: the stage order,
@@ -445,7 +450,8 @@ export function frameDeployProgress(frame: FrameType, now: number = Date.now()):
     return null
   }
   const detail = typeof record.detail === 'string' && record.detail ? record.detail : null
-  const error = typeof record.error === 'string' && record.error ? record.error : null
+  const error =
+    typeof record.error === 'string' && record.error ? deployProgressErrorWords.get(record.error) ?? record.error : null
   let percent = 0
   if (status === 'done') {
     percent = 100

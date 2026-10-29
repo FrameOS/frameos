@@ -76,6 +76,8 @@ import {
 import { previewWatchGraceMs } from "../../auth-web/src/lib/frame-sleep";
 import { keywordsRuntimeLacks } from "../../auth-web/src/lib/retired-apps";
 import { safeLocalOrigin } from "../../auth-web/src/lib/local-origin";
+import { frameOwningBackend } from "../../auth-web/src/lib/frame-backend-owner";
+import { replayCloudContentToFrame } from "../../auth-web/src/lib/frame-backend-release";
 import {
   allowsPrivateNetworkOrigins,
   getAllowedBrowserOrigins,
@@ -1046,15 +1048,29 @@ export async function startFrameHub(
       return;
     }
 
-    await resyncEmptyStore(session, hello);
-    // Ahead of the pending count below, like the empty-store resync: an
-    // ESP32's first render waits for what `ready` says is coming (#534).
-    if (hello.scenes_checksum !== "") {
-      await resyncScenesForFirmwareChange(
-        session,
-        session.frame.frameosVersion,
-        typeof hello.frameos_version === "string" ? hello.frameos_version.slice(0, 64) : undefined,
-      );
+    // A self-hosted backend set on the device holds its content and it
+    // refuses every content verb (frame-backend-owner.ts), so nothing is
+    // queued for it on its behalf. The first hello without one gets back
+    // what the cloud holds. Ahead of the pending count below: an ESP32's
+    // first render waits for what `ready` says is coming (#534).
+    const backendBefore = frameOwningBackend(session.frame.hardware);
+    const backendNow = isRecord(hello.hardware) ? frameOwningBackend(hello.hardware) : backendBefore;
+    if (backendNow) {
+      if (backendNow !== backendBefore) {
+        await recordFrameAudit(session.frame, "frame.backend_attached", { backend: backendNow });
+      }
+      logInfo("device.backend_managed", { backend: backendNow, frameId });
+    } else if (backendBefore) {
+      await replayAfterBackendRelease(session, backendBefore);
+    } else {
+      await resyncEmptyStore(session, hello);
+      if (hello.scenes_checksum !== "") {
+        await resyncScenesForFirmwareChange(
+          session,
+          session.frame.frameosVersion,
+          typeof hello.frameos_version === "string" ? hello.frameos_version.slice(0, 64) : undefined,
+        );
+      }
     }
     await requestDeviceScenes(session, hello);
     await expireStaleCommands(frameId);
@@ -1260,6 +1276,42 @@ export async function startFrameHub(
         error: error instanceof Error ? error.message : String(error),
         frameId,
       });
+    }
+  }
+
+  // The backend that refused this frame's content is gone (docs/cloud-frames.md
+  // "While managed"): its settings, schedule and scenes go back into the queue.
+  async function replayAfterBackendRelease(session: DeviceSession, backend: string) {
+    session.storeResyncRequested = true;
+    const frameId = session.frame.id;
+    const [row] = await db
+      .select()
+      .from(frames)
+      .where(eq(frames.id, frameId))
+      .limit(1);
+    if (!row) {
+      return;
+    }
+    try {
+      const replay = await replayCloudContentToFrame(db, row);
+      if (replay.scenes && !replay.scenes.ok) {
+        logWarn("device.backend_release_scenes_failed", { error: replay.scenes.error, frameId });
+      }
+      logInfo("device.backend_released", {
+        backend,
+        frameId,
+        schedule: replay.schedule,
+        settings: replay.settings,
+        settingsRefusal: replay.settingsRefusal,
+      });
+      await recordFrameAudit(row, "frame.backend_released", {
+        backend,
+        schedule: replay.schedule,
+        settings: replay.settings,
+        ...(replay.scenes?.ok ? { checksum: replay.scenes.checksum } : {}),
+      });
+    } catch (error) {
+      logError("device.backend_release_failed", { error: errorField(error), frameId });
     }
   }
 

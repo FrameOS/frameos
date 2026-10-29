@@ -223,6 +223,14 @@ describe("frameDeployProgressSteps", () => {
       now,
     );
     expect(failed.find((step) => step.state === "error")).toMatchObject({ stage: "receiving", detail: "scene store full" });
+    // A refusal token the owner should not have to decode.
+    const refused = frame(
+      record({ kind: "cloud_scenes", stage: "sending", status: "error", error: "backend_managed", at: at(1) }),
+    );
+    expect(frameDeployProgress(refused, now)?.caption).toBe("failed: a self-hosted backend controls this frame");
+    expect(frameDeployProgressSteps(refused, now).find((step) => step.state === "error")?.detail).toBe(
+      "a self-hosted backend controls this frame",
+    );
     const done = frameDeployProgressSteps(frame(record({ kind: "reboot", stage: "done", status: "done", at: at(1) })), now);
     expect(done.every((step) => step.state === "done")).toBe(true);
     expect(frameDeployProgressSteps(frame(null), now)).toEqual([]);

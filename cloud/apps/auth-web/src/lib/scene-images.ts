@@ -31,7 +31,9 @@ import { imageSetForVersion } from "./store-images";
 import {
   extractScenesJson,
   frameForAccount,
+  scheduleDevicePayload,
   storeFrameAssetFile,
+  type FrameSchedule,
   type FramesDatabase,
 } from "./frames";
 import {
@@ -252,6 +254,33 @@ export async function deviceSceneIdsForFrame(
     out.set(sceneId, runtimeId ?? sceneId);
   }
   return out;
+}
+
+// The schedule a set_schedule push carries: its scenes named by the runtime
+// ids the device holds, its disabled events resolved away. The stored
+// schedule keeps the workspace's store scene uuids (the Schedule panel
+// round-trips them).
+export async function deviceSchedulePayload(
+  db: FramesDatabase,
+  frameId: string,
+  schedule: FrameSchedule,
+): Promise<ReturnType<typeof scheduleDevicePayload>> {
+  const sceneIds = schedule.events.flatMap((event) => {
+    const sceneId = event.payload?.sceneId;
+    return typeof sceneId === "string" && sceneId ? [sceneId] : [];
+  });
+  const deviceSceneIds = await deviceSceneIdsForFrame(db, frameId, sceneIds);
+  return scheduleDevicePayload({
+    ...schedule,
+    events: schedule.events.map((event) => {
+      const sceneId = event.payload?.sceneId;
+      const deviceSceneId =
+        typeof sceneId === "string" ? deviceSceneIds.get(sceneId) : undefined;
+      return deviceSceneId === undefined
+        ? event
+        : { ...event, payload: { ...event.payload, sceneId: deviceSceneId } };
+    }),
+  });
 }
 
 // Single-id form of deviceSceneIdsForFrame (the setCurrentScene event).

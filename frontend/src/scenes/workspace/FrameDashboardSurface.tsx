@@ -44,6 +44,7 @@ import { AiPromptBox } from './AiPromptBox'
 import { sceneUpdatesLogic } from '../frame/panels/Scenes/sceneUpdatesLogic'
 import { SceneUpdateBanner } from './SceneUpdateBanner'
 import { CloudDeviceScenesBanner } from './CloudDeviceScenesBanner'
+import { CloudBackendOwnerBanner } from './CloudBackendOwnerBanner'
 import { templatesLogic } from '../frame/panels/Templates/templatesLogic'
 import { newFrameForm } from '../frames/newFrameForm'
 import { FrameActionsMenu } from './FrameActionsMenu'
@@ -1069,6 +1070,7 @@ export function FrameDashboardSurface({
       ) : null}
       <FrameDashboardHeader frame={frame} archived={archived} />
       <CloudPendingFrameBanner frame={frame} />
+      <CloudBackendOwnerBanner frame={frame} />
       <CloudDeviceScenesBanner frame={frame} />
       <div className="grid gap-5 @2xl:grid-cols-[minmax(0,19rem)_minmax(19rem,1fr)] @2xl:items-start">
         <FramePreviewPanel frame={frame} scenes={scenes} />
