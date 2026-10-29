@@ -135,6 +135,39 @@ proc uiListens*(sceneId, event: string): bool =
         if r.wants(event):
           return true
 
+proc keyboardAt*(sceneId: string, x, y: float32): bool =
+  ## Whether the scene's keyboard on the screen is under (x, y), in its
+  ## canvas's pixels, as the last render drew it. The dispatcher asks of a
+  ## press (input_state.nim): the keyboard's outer keys reach the screen's
+  ## edges, and a finger there is a key, never an edge swipe.
+  for target in targets:
+    if target.sceneId == sceneId and target.input.keyboard:
+      let
+        scale = if target.scale > 0: target.scale else: 1'f32
+        lx = (x - target.offsetX) / scale
+        ly = (y - target.offsetY) / scale
+      for r in target.regions:
+        # The keyboard's own box: its handler is the one between the keys.
+        if r.handlers[ueClick] - 1 == KeyBase and r.inside(lx, ly):
+          return true
+
+proc nearestKey(target: UiTarget, lx, ly: float32): int =
+  ## The key of the keyboard on the screen nearest (lx, ly), by its byte; -1
+  ## when none was drawn. A tap between the keys, or in the keyboard's margin
+  ## at the very edge of the screen, is the key beside it, as on a phone.
+  result = -1
+  var best = high(float32)
+  for r in target.regions:
+    let code = r.handlers[ueClick] - 1 - KeyBase
+    if code <= 0:
+      continue # not a key: the app's, or the keyboard's own box
+    let
+      dx = max(max(r.visible[0] - lx, lx - r.visible[2]), 0)
+      dy = max(max(r.visible[1] - ly, ly - r.visible[3]), 0)
+    if dx * dx + dy * dy < best:
+      best = dx * dx + dy * dy
+      result = code
+
 proc keysOver(target: UiTarget, lx, ly: float32, active: bool): seq[int] =
   ## The elements under the point: hover ones (and groups), or active ones.
   for r in target.regions:
@@ -482,7 +515,13 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       if handler > 0 and r.inside(lx, ly):
         handled = true
         if handler - 1 == KeyBase:
-          break # between the keys: the keyboard's, and nothing to draw
+          # Between the keys or around them: the nearest key. The field keeps
+          # the keyboard either way.
+          let code = target.nearestKey(lx, ly)
+          if code > 0:
+            target.pressKey(code)
+            result = true
+          break
         if handler > KeyBase:
           target.pressKey(handler - 1 - KeyBase)
         else:

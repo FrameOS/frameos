@@ -517,6 +517,47 @@ block test_a_press_at_an_edge_is_the_frames_swipe_or_the_scenes_press:
     output[0].payload["direction"].getStr() == "down", $output.names
   state.touch(evPointerUp, 12, 80, 7100, output)
 
+block test_a_press_on_the_keyboard_on_the_screen_is_a_key:
+  # A JSX field's keyboard reaches the screen's edges (the SenseCAP
+  # Indicator's 480 px: its outer keys are half in the edge band). A press on
+  # it is never held for an edge swipe, and a finger that rolls while it lands
+  # and lifts still types the key it lifts on.
+  var state = initInputState(config(480, 480))
+  state.keyboardAt = proc (x, y: int): bool = y >= 270
+  var output: seq[InputDelivery]
+  proc wire(px: int): int = (px * 32768 + 240) div 480
+  proc touch(state: var InputState, name: string, x, y, at: int, output: var seq[InputDelivery]) =
+    let buttons = if name == evPointerUp: 0 else: 1
+    discard state.applyNamedInput(name, %*{"x": wire(x), "y": wire(y), "pointerId": 1,
+      "pointerType": "touch", "button": 0, "buttons": buttons}, eoDriver, t0 + initDuration(milliseconds = at), output)
+  # The rightmost key, moved left further than an edge swipe goes: the key,
+  # lit as it went down, and typed where the finger lifted.
+  state.touch(evPointerDown, 470, 300, 0, output)
+  doAssert output.names == @[evPointerDown], "not held: " & $output.names
+  state.touch(evPointerMove, 410, 302, 40, output)
+  doAssert output.names == @[evPointerDown, evPointerMove], $output.names
+  output.setLen(0)
+  state.touch(evPointerUp, 410, 302, 80, output)
+  doAssert output.names == @[evPointerUp, evTap], $output.names
+  doAssert output[1].payload["x"].getInt() == 410
+  output.setLen(0)
+  # The leftmost one, rolled past the tap's slop: still a tap.
+  state.touch(evPointerDown, 5, 400, 1000, output)
+  state.touch(evPointerMove, 30, 400, 1040, output)
+  state.touch(evPointerUp, 30, 400, 1080, output)
+  doAssert output.names == @[evPointerDown, evPointerMove, evPointerUp, evTap], $output.names
+  output.setLen(0)
+  # Off the keyboard before it lifts: no key, a swipe.
+  state.touch(evPointerDown, 240, 300, 2000, output)
+  state.touch(evPointerUp, 240, 200, 2080, output)
+  doAssert output.names == @[evPointerDown, evPointerUp, evSwipe], $output.names
+  output.setLen(0)
+  # Above the keyboard the right edge is the frame's as ever.
+  state.touch(evPointerDown, 470, 100, 3000, output)
+  state.touch(evPointerMove, 410, 102, 3040, output)
+  doAssert output.names == @[evEdgeSwipe], $output.names
+  state.touch(evPointerUp, 410, 102, 3080, output)
+
 block test_on_a_round_screen_an_edge_swipe_starts_at_the_rim:
   # The HyperPixel 2.1" Round shows and reads only the circle inside its
   # square (panel_shape.nim), so its edges are the rim's, each named for the

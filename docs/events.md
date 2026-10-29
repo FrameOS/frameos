@@ -324,7 +324,13 @@ scene switcher, down from the top the scene's settings). Lifted, held
 for a `longPress`, or moved along the edge instead, it is the scene's after
 all: its `pointerDown` goes out then,
 late, and the rest as it comes, so a button at the edge still works. A
-mouse is never held.
+mouse is never held, and neither is a press on the keyboard on the screen
+(a JSX field's, [`jsx-ui.md`](jsx-ui.md) "Fields and the keyboard"), whose
+outer keys reach the edges: it is a key, its `pointerDown` delivered at once,
+and its `tap` comes however far the finger rolled on the glass, as long as
+it lifts on the keyboard (a finger at the very edge of the glass wanders
+further than `tapSlopPx` as it lands and lifts). The host says where the
+keyboard is (`EventHost.keyboardAt`, from `ui/events.nim`).
 
 **Display power.** `turnOn` and `turnOff` ask the host to switch the panel,
 and `toggleScreen` switches it to what it is not; the dispatcher keeps which

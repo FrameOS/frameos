@@ -85,6 +85,7 @@ type PointerRecord = object
   edge: string
   edgeHeld: seq[InputDelivery]
   edgeTaken: bool
+  onKeys: bool ## went down on the keyboard on the screen (`keyboardAt`)
 
 type
   InputState* = object
@@ -96,6 +97,11 @@ type
     cursorX*, cursorY*: int        ## pointer 0: the one cursor every mouse moves
     pointers: seq[PointerRecord]   ## a handful at most: a search beats a table's code
     pointerInputLost*: bool        ## a queue dropped pointer input: what is down gets a cancel
+    keyboardAt*: proc (x, y: int): bool
+      ## Whether the keyboard on the screen (a JSX field's, ui/keyboard.nim) is
+      ## under (x, y), from the host (event_loop.nim's EventHost); nil: none.
+      ## A press there is a key: never an edge swipe, and a tap however the
+      ## finger rolled, as long as it lifts on the keyboard.
     when not defined(frameosEmbedded):
       round: bool                    ## only the inscribed circle shows and takes touches (panel_shape.nim)
       # A relative mouse (its drawn cursor, the wheel) and a keyboard: Linux
@@ -416,6 +422,9 @@ proc edgeAt(state: InputState, x, y: int): string =
       best = distance
       result = edge
 
+proc onKeyboard(state: InputState, x, y: int): bool =
+  not state.keyboardAt.isNil and state.keyboardAt(x, y)
+
 proc edgeTravel(rec: PointerRecord): tuple[inward, along: int] =
   ## How far a held edge press went away from its edge, and along it.
   case rec.edge
@@ -484,7 +493,10 @@ proc pointerDown(state: var InputState, id: int, pointerType: string, button: in
     rec.longPressed = false
     rec.edgeTaken = false
     rec.edgeHeld.setLen(0)
-    rec.edge = if rec.pointerType == "mouse": "" else: state.edgeAt(rec.x, rec.y)
+    # The keyboard on the screen reaches the screen's edges: a finger on its
+    # outer keys is typing, not swiping, and the key lights up as it goes down.
+    rec.onKeys = state.onKeyboard(rec.x, rec.y)
+    rec.edge = if rec.pointerType == "mouse" or rec.onKeys: "" else: state.edgeAt(rec.x, rec.y)
     pressed = true
   let down = pressEvent(rec[], evPointerDown, origin, button)
   if rec.edgeTaken:
@@ -521,7 +533,10 @@ proc pointerUp(state: var InputState, id: int, pointerType: string, button: int,
   if rec.longPressed:
     # Delivered while held (a host that ticks) or now (one that does not).
     return
-  if not rec.moved:
+  # A key of the keyboard on the screen is typed where the finger lifts, however
+  # it rolled on the way, as on a phone: at the glass's edge a finger's reported
+  # position wanders further than a tap's slop while it lands and lifts.
+  if not rec.moved or rec.onKeys and state.onKeyboard(rec.x, rec.y):
     if held >= GestureLongPressMs:
       var press = pointerEvent(rec[], evLongPress, origin)
       press.payload["durationMs"] = %held

@@ -37,9 +37,8 @@ cd "$FRAMEOS_DIR"
 if [[ ! -d quickjs ]]; then
     nimble build_quickjs --silent
 fi
-if [[ ! -f nimble.paths ]]; then
-    nimble setup --silent
-fi
+# Missing, or written before nimble.lock last moved: nimble setup again.
+python3 tools/nimble_paths.py
 FRAMEOS_ROOT_DIR="$FRAMEOS_DIR" python3 tools/makeapploaders.py
 python3 tools/prepare_assets.py
 

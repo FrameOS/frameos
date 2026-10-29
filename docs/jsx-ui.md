@@ -507,6 +507,11 @@ export function get(app) {
   with a finger, a pen or the mouse over the preview, and on e-paper too, a
   refresh a key (it shows no press there). An ESP32 board has no keyboard of
   its own, ever.
+- **The keyboard reaches the screen's edges**, so a press on it is a key and
+  never an edge swipe (docs/events.md "Edge swipes"): a finger on its outer
+  keys types instead of changing the scene. A key is typed where the finger
+  lifts, however it rolled on the way, and a tap between the keys or in the
+  keyboard's margin at the very edge is the nearest key, as on a phone.
 - **A real keyboard** (a Pi's, the computer's over the preview) types into
   the field instead: once a key has been typed on one, fields get no
   keyboard on the screen. Left and right, Home, End, Backspace and Delete

@@ -91,8 +91,8 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
   # without clearing it, and the next `c = ...` in the loop frees what the
   # node holds.
   result = el("div", move c)
-  # A tap between the keys is the keyboard's too: it does nothing, and the
-  # field keeps the keyboard.
+  # A tap between the keys is the keyboard's too: the nearest key (ui/events.nim),
+  # and the field keeps the keyboard.
   result.attrs.add(("on-click", $KeyBase))
   var row: SvgNode
   for i in -1 ..< text.len:

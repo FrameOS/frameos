@@ -28,7 +28,7 @@ build: apploaders drivers maybe-driver-libraries
 	@# at this checkout's pin and refuses any other. A quickjs/ left from
 	@# before a pin change otherwise builds the old quickts without a word.
 	@nimble build_quickjs --silent
-	@if [ ! -f nimble.paths ]; then nimble setup --silent; fi
+	@python3 tools/nimble_paths.py
 	mkdir -p build
 	$(NIM) c $(NIM_BUILD_FLAGS) src/frameos.nim
 
@@ -48,7 +48,7 @@ driver-libraries: drivers
 debug: apploaders drivers maybe-driver-libraries
 	python3 tools/prepare_assets.py
 	@nimble build_quickjs --silent
-	@if [ ! -f nimble.paths ]; then nimble setup --silent; fi
+	@python3 tools/nimble_paths.py
 	mkdir -p build
 	$(NIM) c $(NIM_BUILD_FLAGS) --debugger:native src/frameos.nim
 	lldb ./build/frameos
@@ -69,8 +69,10 @@ release-all: apploaders
 	python3 ../backend/bin/cross release --all-targets --frameos-root $(CURDIR) --artifacts-dir $(PREBUILT_OUT) $(RELEASE_ARGS)
 
 test:
+	@python3 tools/nimble_paths.py
 	nimble test
 
 test-shard:
 	@test -n "$(SHARD)" || (echo "SHARD is required, e.g. make test-shard SHARD=1..4" >&2; exit 1)
+	@python3 tools/nimble_paths.py
 	bash ./tools/run_test_shard.sh "$(SHARD)"

@@ -84,6 +84,10 @@ type
       ## The frame's scene list in the control plane's order, for a
       ## `setCurrentScene` that says `direction` (`next` / `prev`) instead of
       ## a `sceneId`. nil, or an empty list: no such switch is possible here.
+    keyboardAt*: proc (x, y: int): bool
+      ## Whether the showing scene's keyboard on the screen is under (x, y),
+      ## in scene pixels: a press there is a key, never an edge swipe
+      ## (input_state.nim). nil: no keyboard, ever.
     log*: proc (entry: JsonNode)
 
   EventLoop* = ref object of RootObj
@@ -132,9 +136,10 @@ proc hasStatePayload*(payload: JsonNode): bool =
 
 proc newEventLoop*(host: EventHost, frameConfig: FrameConfig,
                    laneCapacity = DefaultLaneCapacity): EventLoop =
-  EventLoop(host: host, frameConfig: frameConfig, laneCapacity: laneCapacity,
+  result = EventLoop(host: host, frameConfig: frameConfig, laneCapacity: laneCapacity,
     main: initDeque[EventEnvelope](), input: initDeque[EventEnvelope](),
     inputState: initInputState(frameConfig), displayOn: true)
+  result.inputState.keyboardAt = host.keyboardAt
 
 proc pending*(loop: EventLoop): int =
   loop.main.len + loop.input.len

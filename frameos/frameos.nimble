@@ -16,7 +16,7 @@ bin           = @["frameos"]
 requires "chrono >= 0.3.1"
 requires "checksums >= 0.2.1"
 requires "nim >= 2.2.4"
-requires "https://github.com/FrameOS/pixie#28a9cc32e013b4d7dd72c830f4a25008cb7259d4"
+requires "https://github.com/FrameOS/pixie#930bee304df0bfd73849f73a64c4d5c20ef2e3c5"
 # FrameOS/mummy: upstream mummy plus TLS listeners (OpenSSL inside the epoll
 # loop), listeners added/removed while serving, and Request.secure. HTTPS on
 # Linux frames terminates here; see docs/native-https.md.
