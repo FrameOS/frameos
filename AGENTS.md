@@ -135,8 +135,9 @@
 - `system/sceneSwitcher` (the contract's `scenes.switcher`) is a scene built
   into every runtime, `frameos/src/system/sceneSwitcher/scene.nim`: every
   scene on the frame as a tile. The `sceneSwitcher` scene command opens it
-  and the dispatcher resolves it (`event_loop.nim` hands it `state.from`; the
-  same event while it shows goes back there), never a host. It is drawn
+  and the dispatcher resolves it (`event_loop.nim` hands it `state.from`;
+  while it or the scene settings show, either command goes back there),
+  never a host. It is drawn
   with the JSX layout from a tree built in Nim (no QuickJS), lists the
   host's scene order through `sceneSwitcherListing`, and on Linux shows each
   scene's last snapshot (`sceneSwitcherThumbnail`,
@@ -159,7 +160,8 @@
   switcher's, handing it `state.from` plus that scene's `fields` and `values`
   read BEFORE the switch (an ESP32 lets the scene go while the panel shows).
   Save is `setCurrentScene {sceneId: from, state}`, which every host already
-  applies to public fields; the same command again goes back unsaved.
+  applies to public fields; the same command again, or `sceneSwitcher`,
+  goes back unsaved.
 - Bound to a swipe down from the top in every touch preset (`TOUCH_EDGE_SWIPES`
   and its two copies, `device_event_map.nim`): keep the presets alike. Both
   built-in scenes go through `isBuiltInScene`; a third goes the same way.

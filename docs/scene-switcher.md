@@ -26,7 +26,9 @@ like `setCurrentScene {direction}`:
 - While the switcher shows, it selects `state.from` again (the list's first
   scene when that one is gone). So the same swipe opens and closes it, and
   the switcher's own Close, a key with the role `back`, and its idle timeout
-  all dispatch `sceneSwitcher` to go back.
+  all dispatch `sceneSwitcher` to go back. `sceneSettings` (a swipe down
+  from the top) goes back the same way, and `sceneSwitcher` over the scene
+  settings closes them unsaved ([scene-settings.md](scene-settings.md)).
 
 A `setCurrentScene {sceneId: "system/sceneSwitcher"}` opens it by name (the
 HTTP API, a schedule) without `state.from`: it highlights the list's first

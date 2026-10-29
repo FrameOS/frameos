@@ -10,7 +10,8 @@
 ## one the panel covers is gone while it shows. Save is a `setCurrentScene`
 ## back to `from` with the values as its state, which every host applies to
 ## the scene's public fields when it is back. Cancel, the swipe again and
-## the idle timeout dispatch `sceneSettings`, which goes back without them.
+## the idle timeout dispatch `sceneSettings`, which goes back without them,
+## as `sceneSwitcher` (a swipe up from the bottom) does.
 ##
 ## Drawn with the JSX layout (ui/layout.nim) from a tree built here in Nim,
 ## with the layout's fields, the keyboard on the screen and a list that

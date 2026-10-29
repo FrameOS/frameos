@@ -330,11 +330,14 @@ proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): boo
   loop.runOnScene(scene, envelope.name, payload, policy, envelope.fromRender)
   true
 
+proc isBuiltIn(scene: FrameScene): bool =
+  not scene.isNil and (scene.id.string == SceneSwitcherId or scene.id.string == SceneSettingsId)
+
 proc switcherOpener(scene: FrameScene): string =
   ## The scene a built-in scene (the switcher, the settings) was opened from,
   ## its `state.from`; "" for any other scene (`{}` is nil-safe).
-  if scene.isNil or (scene.id.string != SceneSwitcherId and scene.id.string != SceneSettingsId): ""
-  else: scene.state{"from"}.getStr()
+  if scene.isBuiltIn: scene.state{"from"}.getStr()
+  else: ""
 
 proc sceneOrderOf(loop: EventLoop): seq[SceneId] =
   if loop.host.sceneOrder.isNil: newSeq[SceneId]() else: loop.host.sceneOrder()
@@ -400,21 +403,19 @@ proc settingsOf(scene: FrameScene, state: JsonNode) =
 
 proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bool =
   ## `sceneSwitcher` and `sceneSettings`: the built-in scene, told which scene
-  ## it was opened from (the one under a built-in scene when one shows: they
-  ## are both about the frame's scenes); while it shows, that scene again.
-  ## The switcher forgets a scene that left the list, and one opened by name
-  ## knows none: then the list's first. The settings get the scene's fields.
+  ## it was opened from. While either shows, either command goes back to that
+  ## scene (the settings unsaved): the swipe that opened one closes it, and
+  ## so does the other edge's. The switcher forgets a scene that left the
+  ## list, and one opened by name knows none: then the list's first. The
+  ## settings get the scene's fields.
   # One way out (no early `return`): on the ESP32 every one repeats the
   # clean-up of what was made so far, in flash.
   let current = loop.host.sceneFor(none(SceneId))
   let payload = newJObject()
   var next = sceneId
-  if current.isNil or current.id.string != sceneId:
+  if not current.isBuiltIn:
     let state = newJObject()
-    var opener = switcherOpener(current)
-    if opener.len == 0 and not current.isNil:
-      opener = current.id.string
-    state["from"] = newJString(opener)
+    state["from"] = newJString(if current.isNil: "" else: current.id.string)
     if sceneId == SceneSettingsId:
       current.settingsOf(state)
     payload["state"] = state

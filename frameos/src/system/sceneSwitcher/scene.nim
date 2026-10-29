@@ -7,7 +7,8 @@
 ## and shown like any scene. `sceneSwitcher` (docs/events-contract.json) opens
 ## it, and the dispatcher (event_loop.nim) hands it `state.from`, the scene it
 ## was opened from; the same event while it shows goes back there, which is
-## what its Close button, a `back` key and its idle timeout dispatch.
+## what its Close button, a `back` key and its idle timeout dispatch, and so
+## does `sceneSettings`.
 ##
 ## It is drawn with the JSX layout (ui/layout.nim): the tree is built here, in
 ## Nim, so it needs no QuickJS, and its taps are hit-tested by ui/events.nim

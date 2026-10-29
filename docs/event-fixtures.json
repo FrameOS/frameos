@@ -4013,7 +4013,7 @@
    },
    {
     "name": "the scene settings open from the scene showing, with its fields; Save is a switch back with state",
-    "why": "`sceneSettings` is the dispatcher's to resolve, like `sceneSwitcher`: it selects the built-in scene `scenes.settings` with `state.from`, the scene showing, and that scene's public fields and their values read before the switch (`state.fields`, `state.values`: a host that holds one scene lets the scene go). While it shows, the same event goes back without saving. Opened over the scene switcher, it is the settings of the scene the switcher was opened from, as both built-in scenes are about the frame's scenes. A touch screen's event map binds it to a swipe in from the top edge. Save is a `setCurrentScene` back with the values as its state, which the scene applies to its public fields.",
+    "why": "`sceneSettings` is the dispatcher's to resolve, like `sceneSwitcher`: it selects the built-in scene `scenes.settings` with `state.from`, the scene showing, and that scene's public fields and their values read before the switch (`state.fields`, `state.values`: a host that holds one scene lets the scene go). While it shows, the same event goes back without saving, and so does `sceneSwitcher`; over the switcher, `sceneSettings` goes back to the scene too. A touch screen's event map binds the two to swipes in from the top and the bottom edge, so the swipe that opened one built-in scene closes it, and the other edge's does as well. Save is a `setCurrentScene` back with the values as its state, which the scene applies to its public fields.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/settingsA",
@@ -4078,6 +4078,13 @@
        "edge": "top"
       },
       "emit": "sceneSettings"
+     },
+     {
+      "event": "edgeSwipe",
+      "match": {
+       "edge": "bottom"
+      },
+      "emit": "sceneSwitcher"
      }
     ],
     "scene": "fixtures/dispatcher/settingsA",
@@ -4155,8 +4162,75 @@
        }
       ],
       "trace": [
-       "select system/sceneSettings",
+       "select fixtures/dispatcher/settingsA",
        "run sceneSwitcher close",
+       "run settingsA open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/settingsA",
+      "state": {
+       "name": "Ann"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "select system/sceneSettings",
+       "run settingsA close",
+       "run sceneSettings setCurrentScene",
+       "run sceneSettings open",
+       "render"
+      ],
+      "current": "system/sceneSettings",
+      "state": {
+       "from": "fixtures/dispatcher/settingsA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "bottom",
+         "direction": "up",
+         "x": 2,
+         "y": 100,
+         "startX": 2,
+         "startY": 110,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> sceneSwitcher",
+       "select fixtures/dispatcher/settingsA",
+       "run sceneSettings close",
+       "run settingsA open",
+       "render"
+      ],
+      "handled": 2,
+      "current": "fixtures/dispatcher/settingsA",
+      "state": {
+       "name": "Ann"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "select system/sceneSettings",
+       "run settingsA close",
        "run sceneSettings setCurrentScene",
        "run sceneSettings open",
        "render"

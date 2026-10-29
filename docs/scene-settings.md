@@ -4,7 +4,8 @@
 
 Swipe down from the top of a touch screen and the frame shows the settings
 of the scene showing: its public fields as a form, to change on the frame
-itself and save. Cancel (or the same swipe) goes back as it was.
+itself and save. Cancel, the same swipe or one up from the bottom goes back
+as it was.
 
 | Piece | Where |
 |---|---|
@@ -29,10 +30,10 @@ as it resolves `sceneSwitcher`:
   saved. So the same swipe opens and closes it, and the panel's Cancel, a
   key with the role `back` and its idle timeout (five minutes without a
   touch or a key) dispatch it to go back.
-- Over the scene switcher, it is the settings of the scene the switcher was
-  opened from (and the switcher over the panel is the switcher of that
-  scene): both built-in scenes are about the frame's scenes, never about
-  each other.
+- `sceneSwitcher` while the panel shows goes back the same way, and
+  `sceneSettings` while the switcher shows goes back to the scene: a swipe
+  from the other edge closes either built-in scene, so the frame never stacks
+  one over the other.
 
 Who may say it (`origins`) is the switcher's list: the frame's event map, a
 scene, a schedule, the HTTP API with the frame access key or an admin
