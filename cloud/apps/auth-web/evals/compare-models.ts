@@ -1,7 +1,7 @@
 // Model comparison for the AI scene evals.
 //
 //   pnpm --filter @frameos-cloud/auth-web ai:eval:models
-//       [--models gpt-5.5,gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna]
+//       [--models gpt-5.6-terra,gpt-6.1-terra,gpt-6.1-sol,gpt-6-luna]
 //       [--only id,id] [--filter tag,tag] [--all] [--no-render] [--no-judge]
 //       [--concurrency 3] [--effort low] [--out evals/results/models-<runId>]
 //
@@ -27,7 +27,8 @@ import { runCase, type RunnerContext } from "./lib/runner";
 import { evalAccountId } from "./lib/store";
 import type { EvalResult, EvalRun } from "./lib/types";
 
-export const DEFAULT_MODELS = ["gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+// The default chat model, the one it replaced, and the tiers either side.
+export const DEFAULT_MODELS = ["gpt-6.1-terra", "gpt-5.6-terra", "gpt-6.1-sol", "gpt-6-luna"];
 
 // One case per capability the chat leans on, instead of the whole suite:
 // simple create, code-heavy create, network/data, svg+portrait, fields,

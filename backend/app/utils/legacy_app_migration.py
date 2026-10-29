@@ -55,7 +55,7 @@ _LEGACY_DEFAULTS = {
     },
     "legacy/openaiText": {
         "system": "You're a smart e-ink frame running FrameOS. Reply with plain text only. Space is very limited.",
-        "user": "", "model": "gpt-5.5", "stateKey": "reply", "cacheSeconds": "3600",
+        "user": "", "model": "gpt-6.1-terra", "stateKey": "reply", "cacheSeconds": "3600",
     },
     "legacy/qr": {
         "codeType": "Frame Control URL", "code": "", "size": "2", "sizeUnit": "pixels per dot",

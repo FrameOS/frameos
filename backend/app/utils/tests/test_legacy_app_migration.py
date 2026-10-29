@@ -142,7 +142,7 @@ def test_openai_text_becomes_set_as_state_with_value_string():
 
     data_node = nodes_by_keyword(scene)["data/openaiText"]
     assert data_node["data"]["config"]["user"] == "haiku please"
-    assert data_node["data"]["config"]["model"] == "gpt-5.5"
+    assert data_node["data"]["config"]["model"] == "gpt-6.1-terra"
 
     [edge] = field_edges(scene)
     assert edge["targetHandle"] == "fieldInput/valueString"

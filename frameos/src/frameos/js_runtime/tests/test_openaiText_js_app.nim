@@ -161,7 +161,7 @@ suite "openaiText code app":
     let defaults = newHarness()
     check defaults.render(%*{"user": "hi"}).asString() == "A quiet morning."
     let body = parseJson(requests[0].body)
-    check body["model"].getStr() == "gpt-5.5"
+    check body["model"].getStr() == "gpt-6.1-terra"
     check body["messages"][0]["content"].getStr() == DefaultSystem
 
   test "a reply without a message is an empty string":

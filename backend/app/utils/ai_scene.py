@@ -11,9 +11,12 @@ from app.utils.ai_catalog import AiCatalogItem
 from app.utils.scene_guide_gen import SCENE_GUIDE
 from app.utils.posthog import get_posthog_client, llm_analytics_enabled
 
-SCENE_MODEL = "gpt-5.5"
-CHAT_MODEL = "gpt-5.5"
-SCENE_REVIEW_MODEL = "gpt-5.5"
+# The cloud's default too (cloud/apps/auth-web/src/lib/ai/openai.ts): the chat
+# loop is one on both planes, and gpt-6.1-terra beat gpt-5.5 and gpt-5.6-terra
+# on the cloud's scene evals at a fraction of the price (2026-10-29).
+SCENE_MODEL = "gpt-6.1-terra"
+CHAT_MODEL = "gpt-6.1-terra"
+SCENE_REVIEW_MODEL = "gpt-6.1-terra"
 AI_REQUEST_TIMEOUT = 600
 
 

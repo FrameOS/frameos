@@ -113,7 +113,7 @@ export function ServicesSettingsForm({ divider = true }: { divider?: boolean }):
                         label="Chat model"
                         tooltip="OpenAI model the workspace chat runs on. Leave empty for the default."
                       >
-                        <TextInput name="chatModel" placeholder="gpt-5.6-terra" />
+                        <TextInput name="chatModel" placeholder="gpt-6.1-terra" />
                       </Field>
                       <Field
                         name="chatReasoningEffort"
@@ -148,7 +148,7 @@ export function ServicesSettingsForm({ divider = true }: { divider?: boolean }):
                     <TextInput name="backendApiKey" />
                   </Field>
                   <Field name="model" label="Model">
-                    <TextInput name="model" placeholder="gpt-5.5" />
+                    <TextInput name="model" placeholder="gpt-6.1-terra" />
                   </Field>
                   <div className="pt-1">
                     <Button size="small" color="secondary" onClick={toggleOpenAiModelOverrides}>

@@ -55,8 +55,8 @@ moved.
   scene with the render as preview.
 
 `ai:eval:models` runs the same cases against several models (default:
-gpt-5.5 vs the three gpt-5.6 tiers) with the judge pinned to one model, and
-writes `evals/results/models-<runId>/compare.md` — a metric × model table
+gpt-6.1-terra, the gpt-5.6-terra it replaced, gpt-6.1-sol and gpt-6-luna)
+with the judge pinned to one model, and writes `evals/results/models-<runId>/compare.md` — a metric × model table
 with estimated cost — plus a full per-model report each. It defaults to
 `QUICK_SET` (9 cases, one per capability) to keep a 4-model run affordable;
 `--all` runs the whole suite.

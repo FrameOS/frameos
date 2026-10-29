@@ -29,6 +29,11 @@ export type ModelResult = {
 
 export type ModelPort = (request: ModelRequest, signal?: AbortSignal) => Promise<ModelResult>;
 
+// Not the chat's gpt-6.1-terra: ported the twelve retired Nim apps, gpt-5.5
+// converted 11 of 12, while gpt-6.1-terra (0) and gpt-6.1-sol (2) took the
+// prompt's "no faithful port" exit over details the hand ports dropped (debug
+// logging, response byte limits, decode hints) — 2026-10-29. A newer model
+// needs that exit re-tuned first.
 export const DEFAULT_CONVERT_MODEL = "gpt-5.5";
 export const DEFAULT_CONVERT_REASONING_EFFORT = "medium";
 export const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";

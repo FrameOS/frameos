@@ -22,7 +22,7 @@
       "label": "User Prompt",
       "placeholder": "Write your prompt here. Keep it short and clear."
     },
-    { "name": "model", "type": "string", "value": "gpt-5.5", "required": true, "label": "Model" }
+    { "name": "model", "type": "string", "value": "gpt-6.1-terra", "required": true, "label": "Model" }
   ],
   "output": [{ "name": "reply", "type": "string" }],
   "cache": { "enabled": true, "inputEnabled": true, "durationEnabled": true, "duration": "600" }
