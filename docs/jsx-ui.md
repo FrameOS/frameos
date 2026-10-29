@@ -133,10 +133,16 @@ straightforward versions were twice the size; what would shrink it further
 is dropping a feature (gradients ~1.5 KB, icons ~2 KB, truncation ~1.3 KB).
 Nothing is allocated for a scene that returns no JSX.
 
-Fields, the keyboard on the screen, scrolling and clipping added +21.3 KB
+Fields, the keyboard on the screen, scrolling and clipping added +18.8 KB
 (2026-10-29, against main built at the same paths): the layout's part
-6.1 KB, pixie's nested viewport 3.4 KB, the events 2.9 KB, the keyboard's
-tree 2.4 KB, and link drift.
+5.8 KB, pixie's nested viewport 2.6 KB, the events 2.4 KB, the keyboard's
+tree 2.4 KB and its strings 1.5 KB, and 2.4 KB of link drift (the
+interpreter's `runNode`, the same object code, with fewer of its calls
+relaxed to short ones once more code sits between it and its callees).
+What kept it there: `UiRegion` holds plain values only (a field's text is
+`fieldText`, read off the last layout's tree), `events.nim` runs without
+checks and raises nothing, a viewport's transform is written out in pixie,
+and the ESP32 build leaves out the key and wheel events it never gets.
 
 ## Elements
 

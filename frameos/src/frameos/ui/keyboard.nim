@@ -62,8 +62,7 @@ proc el(classes: sink string, child: sink SvgNode = nil): SvgNode =
 
 proc icon(d: string, filled: bool, size: int): SvgNode =
   var c = "shrink-0"
-  c.px("w", size)
-  c.px("h", size)
+  c.px("size", size)
   result = SvgNode(tag: "svg", attrs: @[("viewBox", "0 0 24 24"), ("class", c)])
   result.children.add SvgNode(tag: "path", attrs: @[("d", d),
     ("fill", if filled: "currentColor" else: "none"), ("stroke", "currentColor"),

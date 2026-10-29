@@ -425,8 +425,9 @@ suite "fields, clipping and scrolling":
     var
       regions: seq[UiRegion]
       state: UiInput
-    discard layout.layoutUi(el("div", "bg-white", field), 240, 60, state, regions)
-    check regions.len == 1 and regions[0].field == 1 and regions[0].value == "Hello"
+    let memo = UiMemo()
+    discard layout.layoutUi(el("div", "bg-white", field), 240, 60, state, regions, memo)
+    check regions.len == 1 and regions[0].field == 1 and memo.fieldText(regions[0].key) == "Hello"
     # Focused, with a tap at its left edge: the caret before the H.
     state.focus = regions[0].key + 1
     state.text = "Hello"
@@ -455,8 +456,8 @@ suite "fields, clipping and scrolling":
     check grey
     let secret = input("input", "w-[200px] text-black", {"value": "abc", "type": "password"})
     regions.setLen(0)
-    discard layout.layoutUi(el("div", "", secret), 240, 60, state, regions)
-    check regions[0].value == "abc"
+    discard layout.layoutUi(el("div", "", secret), 240, 60, state, regions, memo)
+    check memo.fieldText(regions[0].key) == "abc"
 
   test "the on-screen keyboard: under the UI, its keys regions":
     let field = input("input", "w-full h-[30px] bg-white", {"value": ""})

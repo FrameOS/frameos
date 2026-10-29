@@ -25,9 +25,10 @@ shows them.
   wheel scrolls it; what is inside answers the pointer where it shows.
   **Clipping** (`overflow-hidden`) at the padding box. Both through pixie's
   nested `<svg>` viewport (FrameOS/pixie, `clip` on every element inside).
-- Cost on the ESP32-S3 image: +21.3 KB (2026-10-29, A/B against main at the
-  same paths): the layout 6.1 KB, pixie's viewport 3.4 KB, the events 2.9 KB,
-  the keyboard 2.4 KB, the rest link drift.
+- Cost on the ESP32-S3 image: +18.8 KB (2026-10-29, A/B against main at the
+  same paths): the layout 5.8 KB, pixie's viewport 2.6 KB, the events 2.4 KB,
+  the keyboard 2.4 KB and its strings 1.5 KB, the rest link drift (2.4 KB of
+  it the interpreter's unchanged `runNode`).
 
 ## Next: the scene settings panel
 

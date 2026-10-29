@@ -41,8 +41,9 @@ type
     handlers*: array[UiEvent, int]   ## a handler's number + 1, 0 for none
     hover*, active*, group*: bool
     field*: uint8                    ## 1 an <input>, 2 a <textarea>, 3 a number input
-    value*: string                   ## a field's text
     scrollX*, scrollY*: float32      ## how far a box can scroll each way; 0: not that way
+    # Plain values only: regions are copied by the dozen on every layout
+    # and every event (a field's text is `fieldText`).
 
   UiInput* = object
     ## What the pointer was doing when this layout was asked for: the keys of
@@ -978,6 +979,14 @@ proc num(v: float32): string =
       frac = frac mod digit
       digit = digit div 10
 
+proc nums(values: openArray[float32]): string =
+  ## Numbers for an attribute that lists them (a viewBox, a translate):
+  ## one append each, not a string made and copied per `&`.
+  for i, v in values:
+    if i > 0:
+      result.add ' '
+    result.add num(v)
+
 proc hex(c: ColorRGBA): string =
   const digits = "0123456789abcdef"
   result = "#000000"
@@ -1099,8 +1108,12 @@ proc emitSvg(n: UiNode, x, y, w, h, opacity: float32, drawn: var seq[SvgNode]) =
   for attr in n.src.attrs:
     if attr[0] notin ["width", "height", "viewBox", "xmlns", "class", "preserveAspectRatio", "transform"]:
       group.attrs.add(attr)
-  group.attrs.add(("transform", "translate(" & num(tx) & " " & num(ty) & ") scale(" &
-    num(sx) & " " & num(sy) & ")"))
+  var transform = "translate("
+  transform.add nums([tx, ty])
+  transform.add ") scale("
+  transform.add nums([sx, sy])
+  transform.add ')'
+  group.attrs.add(("transform", transform))
   if opacity < 1:
     group.attrs.add(("opacity", num(opacity)))
   group.children = n.src.children
@@ -1261,7 +1274,7 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
     # In paint order: whatever comes later is on top.
     regions.add UiRegion(x: x, y: y, w: w, h: h, visible: [x, y, x + w, y + h], key: n.key,
       handlers: n.handlers, hover: n.hover, active: n.active, group: n.group, field: n.field,
-      value: n.value, scrollX: (if b.overflowX == ovScroll: n.maxX else: 0),
+      scrollX: (if b.overflowX == ovScroll: n.maxX else: 0),
       scrollY: (if b.overflowY == ovScroll: n.maxY else: 0))
   case n.kind
   of ukText:
@@ -1291,7 +1304,7 @@ proc emit(n: UiNode, ox, oy, opacity: float32, drawn: var seq[SvgNode], gradient
       if vw <= 0 or vh <= 0:
         return
       view = SvgNode(tag: "svg", attrs: @[("x", num(vx)), ("y", num(vy)), ("width", num(vw)),
-        ("height", num(vh)), ("viewBox", num(vx + sx) & " " & num(vy + sy) & " " & num(vw) & " " & num(vh))])
+        ("height", num(vh)), ("viewBox", nums([vx + sx, vy + sy, vw, vh]))])
     for pass in [false, true]:
       for c in n.children:
         if c.box.absolute == pass:
@@ -1360,6 +1373,21 @@ proc reveal(n: UiNode, key: int, r: var array[4, float32]): bool =
         r[1] -= sy
       return true
   false
+
+proc fieldIn(n: UiNode, key: int): UiNode =
+  if n.isNil or n.key == key:
+    return n
+  for c in n.children:
+    result = c.fieldIn(key)
+    if not result.isNil:
+      return
+
+proc fieldText*(memo: UiMemo, key: int): string =
+  ## The text the last layout gave the field at `key` ("" for none).
+  if not memo.isNil:
+    let n = memo.root.fieldIn(key)
+    if not n.isNil:
+      result = n.value
 
 proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
     regions: var seq[UiRegion], textMemo: UiMemo = nil): SvgNode =

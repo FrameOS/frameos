@@ -53,6 +53,10 @@ type
 
 const MaxTargets = 16
 
+# Flash on an ESP32: no checks the code above them already makes, and
+# nothing raises (see ui/layout.nim).
+{.push boundChecks: off, overflowChecks: off, rangeChecks: off, raises: [].}
+
 var
   targets {.threadvar.}: seq[UiTarget]
   physicalKeyboard {.threadvar.}: bool
@@ -165,10 +169,10 @@ proc focusField(target: UiTarget, r: UiRegion, lx, ly: float32) =
   template i: untyped = target.input
   if i.focus != r.key + 1:
     i.focus = r.key + 1
-    i.text = r.value
+    i.text = target.memo.fieldText(r.key)
     i.page = if r.field == 3: kpNumbers else: kpLetters
     i.shift = 0
-  i.caret = r.value.len
+  i.caret = i.text.len
   i.place = true
   i.placeX = lx - r.x
   i.placeY = ly - r.y
@@ -318,15 +322,17 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
   ## the picture is the UI's), what the pointer is over or pressing changed,
   ## a field's text or caret moved, or a box scrolled.
   let
+    # The event as its handler kind, compared as a number from here on.
+    kind = handlerKind(event)
+    down = kind == ord(uePointerDown)
     released = event in ["pointerUp", "pointerCancel"]
     placed = not payload.isNil and payload.kind == JObject and payload.hasKey("x") and payload.hasKey("y")
     # A swipe belongs to where it began: a card swiped is the card the finger
     # went down on, wherever it lifted.
-    starts = placed and event == "swipe" and payload.hasKey("startX") and payload.hasKey("startY")
-    x = if starts: payload["startX"].getFloat() elif placed: payload["x"].getFloat() else: 0
-    y = if starts: payload["startY"].getFloat() elif placed: payload["y"].getFloat() else: 0
+    starts = placed and kind == ord(ueSwipe) and payload.hasKey("startX") and payload.hasKey("startY")
+    x = if starts: payload{"startX"}.getFloat() elif placed: payload{"x"}.getFloat() else: 0
+    y = if starts: payload{"startY"}.getFloat() elif placed: payload{"y"}.getFloat() else: 0
     touch = placed and payload{"pointerType"}.getStr() == "touch"
-    kind = handlerKind(event)
     pointer = if payload.isNil or payload.kind != JObject: 0 else: payload{"pointerId"}.getInt(0)
     follows = event in ["pointerMove", "pointerUp", "pointerCancel"]
   var
@@ -356,11 +362,11 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       ly = (y - target.offsetY) / scale
     # A press on a box that scrolls drags it once it moves: from then on the
     # moves scroll it and press nothing.
-    if target.dragKey >= 0 and target.dragPointer == pointer and (follows or event == "pointerDown"):
+    if target.dragKey >= 0 and target.dragPointer == pointer and (follows or down):
       let r = target.regionOf(target.dragKey)
-      if r < 0 or event == "pointerDown":
+      if r < 0 or down:
         target.dragKey = -1
-      elif event == "pointerMove" and placed:
+      elif kind == ord(uePointerMove) and placed:
         let
           dx = x - target.dragX
           dy = y - target.dragY
@@ -393,12 +399,12 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       if touch and target.input.hovered.len > 0:
         target.input.hovered.setLen(0)
         moved = true
-    if placed and event in ["pointerMove", "pointerDown"]:
+    if placed and (down or kind == ord(uePointerMove)):
       let hovered = target.keysOver(lx, ly, false)
       if hovered != target.input.hovered:
         target.input.hovered = hovered
         moved = true
-      if event == "pointerDown":
+      if down:
         let pressed = target.keysOver(lx, ly, true)
         if pressed != target.input.pressed:
           target.input.pressed = pressed
@@ -430,11 +436,11 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
             target.wheel(target.regions[i], payload)
             result = true
             break
-    if event == "swipe" and target.dragged:
+    if kind == ord(ueSwipe) and target.dragged:
       # The swipe a drag made scrolled the box: nothing else hears it.
       target.dragged = false
       continue
-    if event == "tap" and placed:
+    if kind == ord(ueClick) and placed:
       # A tap on a field gives it the keyboard; one anywhere else but the
       # keyboard takes it away, and then does what it does.
       var hit = -1
@@ -484,3 +490,5 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
           target.inputOnly = false # whatever the handler changed, get() shows it
         result = true
         break
+
+{.pop.}
