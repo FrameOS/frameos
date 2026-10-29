@@ -14,6 +14,7 @@ import {
   MaxHttpResponseBytesField,
   MetricsIntervalField,
   PaletteField,
+  RenderScaleField,
   SaveAssetsField,
   TimezoneUpdaterFields,
 } from '../fields/sharedFields'
@@ -305,6 +306,7 @@ export function DefaultsSection(): JSX.Element {
             ]}
           />
         </Field>
+        <RenderScaleField />
       </SectionBody>
     </>
   )

@@ -583,6 +583,20 @@ function applyDeviceLimits(limits) {
   }
 }
 
+// The frame's render scale (frame.json renderScale): what a .tsx app's JSX is
+// laid out for. 0 or none is automatic from the preview's size, as on the frame.
+function applyRenderScale(scale) {
+  if (!(typeof scale === 'number' && scale > 0)) {
+    return
+  }
+  try {
+    call('frameos_wasm_set_render_scale', null, ['number'], [scale])
+  } catch (e) {
+    // older bundle without the export: the automatic scale
+    post({ type: 'log', message: 'a render scale is unavailable in this runtime build' })
+  }
+}
+
 // Run as an ESP32 (memory.runsAsEmbedded in the runtime): a JS app's
 // interpreter lasts one render, `app.frame.embedded` is true and downloads
 // decode into the canvas. The device picker's ESP32 presets ask for it, and so
@@ -772,6 +786,7 @@ async function init(msg) {
     // lives in a frame's flash, not in its render budget.
     applyDeviceLimits(msg.deviceLimits)
     applyEmbedded(msg.embedded === true || Boolean(msg.deviceLimits && msg.deviceLimits.embedded))
+    applyRenderScale(msg.renderScale)
     // Apps may save into the browser folder (a device's saveAssets setting;
     // on by default here — it's the visitor's own browser storage). Pass
     // `saveAssets: false` or a {nodeName: bool} map to mirror a frame.

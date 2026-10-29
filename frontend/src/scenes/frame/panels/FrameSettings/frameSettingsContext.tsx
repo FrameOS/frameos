@@ -22,6 +22,11 @@ import {
   esp32VoiceChatCloudFrameSettingsMinVersion,
   esp32LedCloudFrameSettingsMinVersion,
 } from '../../../../utils/cloudFrameApi'
+import {
+  cloudFrameSupportsRenderScale,
+  renderScaleCloudFrameSettingsMinVersion,
+} from '../../../../utils/cloudFrameSettings'
+import { frameRenderScaleOptions, type RenderScaleOption } from '../../../../utils/renderScale'
 import { appsLogic } from '../Apps/appsLogic'
 import { logsLogic } from '../Logs/logsLogic'
 import { frameSettingsLogic } from './frameSettingsLogic'
@@ -130,6 +135,10 @@ export interface FrameSettingsContextValue extends FrameSettingsProps {
   cloudEsp32ExtendedSettingsSupported: boolean
   cloudEsp32TimeZoneSupported: boolean
   cloudBatteryEnablePinDisabledReason: string | undefined
+  /** Why a cloud frame cannot take the render scale yet (older firmware); undefined when it can. */
+  renderScaleDisabledReason: string | undefined
+  /** The Scale select: "Automatic (N× on this panel)" and the steps (utils/renderScale.ts). */
+  renderScaleOptions: RenderScaleOption[]
 
   /** The panel this frame drives: the device reported it on the cloud, the form holds it elsewhere. */
   paletteDevice: string
@@ -388,6 +397,22 @@ export function FrameSettingsProvider({
     : frame.frameos_version
     ? `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
     : `The battery enable GPIO needs FrameOS ${esp32BatteryEnablePinCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+
+  // 2026.10.22: the render scale, both cloud profiles. A backend frame takes
+  // it with its next deploy whatever it runs (an older runtime ignores it).
+  const renderScaleDisabledReason =
+    !cloudProfile || cloudFrameSupportsRenderScale(frame.frameos_version)
+      ? undefined
+      : frame.frameos_version
+      ? `The scale needs FrameOS ${renderScaleCloudFrameSettingsMinVersion} or newer on the frame (this one reports ${frame.frameos_version}). Update the frame to set it here.`
+      : `The scale needs FrameOS ${renderScaleCloudFrameSettingsMinVersion} or newer on the frame. It unlocks once the frame connects and reports its version.`
+  // "Automatic" names the scale this panel gets: a cloud frame's size is the
+  // one its device reported.
+  const renderScaleOptions = frameRenderScaleOptions(
+    frameForm.width ?? frame.width ?? frame.hardware?.width,
+    frameForm.height ?? frame.height ?? frame.hardware?.height,
+    frameForm.render_scale
+  )
 
   const cloudDevice = cloudProfile ? frame.hardware?.device ?? '' : ''
   const embeddedHardwarePreset = normalizeEsp32HardwarePreset(
@@ -884,6 +909,8 @@ export function FrameSettingsProvider({
     cloudEsp32ExtendedSettingsSupported,
     cloudEsp32TimeZoneSupported,
     cloudBatteryEnablePinDisabledReason,
+    renderScaleDisabledReason,
+    renderScaleOptions,
 
     paletteDevice,
     palette: withCustomPalette[paletteDevice],

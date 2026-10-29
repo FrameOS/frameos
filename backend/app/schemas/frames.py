@@ -1,3 +1,5 @@
+import math
+
 from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 from typing import Any, Dict, List, Literal, Optional
 
@@ -5,6 +7,7 @@ from .common import ImageTokenResponse
 from datetime import datetime
 
 from app.utils.events_contract_gen import KEYBOARD_LAYOUTS
+from app.utils.render_scale import MAX_RENDER_SCALE
 
 
 def _validate_input_settings(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -111,6 +114,7 @@ class FrameBase(BaseModel):
     metrics_interval: float
     max_http_response_bytes: Optional[int] = None
     scaling_mode: Optional[str]
+    render_scale: float = 0
     rotate: Optional[int]
     flip: Optional[str]
     background_color: Optional[str]
@@ -243,6 +247,8 @@ class FrameUpdateRequest(BaseModel):
     save_assets: Any = None
     upload_fonts: Optional[str] = None
     scaling_mode: Optional[str] = None
+    # 0 = automatic; the contract's rule (docs/cloud-frames-contract.json).
+    render_scale: Optional[float] = None
     device: Optional[str] = None
     device_config: Optional[Dict[str, Any]] = None
     debug: Optional[bool] = None
@@ -276,6 +282,16 @@ class FrameUpdateRequest(BaseModel):
     @classmethod
     def validate_input_settings(cls, value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return _validate_input_settings(value)
+
+    @field_validator('render_scale')
+    @classmethod
+    def validate_render_scale(cls, value: Optional[float]) -> Optional[float]:
+        # The column is not nullable: an explicit null is "automatic".
+        if value is None:
+            return 0.0
+        if not math.isfinite(value) or value < 0 or value > MAX_RENDER_SCALE:
+            raise ValueError(f'Scale must be 0 (automatic) or a number up to {MAX_RENDER_SCALE:g}')
+        return float(value)
 
     @field_validator('frame_admin_auth')
     @classmethod

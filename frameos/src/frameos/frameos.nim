@@ -284,6 +284,7 @@ proc start*(self: FrameOS) {.async.} =
     "deviceConfig": self.frameConfig.deviceConfig,
     "metricsInterval": self.frameConfig.metricsInterval,
     "scalingMode": self.frameConfig.scalingMode,
+    "renderScale": self.frameConfig.renderScale,
     "rotate": self.frameConfig.rotate,
     "flip": self.frameConfig.flip,
     "assetsPath": self.frameConfig.assetsPath,

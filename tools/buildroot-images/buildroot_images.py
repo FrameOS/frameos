@@ -340,6 +340,7 @@ class ReleaseImageFrame:
     metrics_interval: float = 60.0
     max_http_response_bytes: int = DEFAULT_MAX_HTTP_RESPONSE_BYTES
     scaling_mode: str = "contain"
+    render_scale: float = 0.0
     rotate: int = 0
     flip: str | None = None
     background_color: str | None = None

@@ -236,6 +236,8 @@ static int cmd_status(int argc, char **argv)
     printf("render_mode: %s\n", config->render_mode == FOS_RENDER_LOCAL ? "local" : "remote");
     printf("rotate:      %u\n", (unsigned)config->rotate);
     printf("scaling_mode: %s\n", config->scaling_mode);
+    printf("render_scale: %g%s\n", config->render_scale_milli / 1000.0,
+           config->render_scale_milli == 0 ? " (automatic)" : "");
     printf("time_zone:   %s\n", config->time_zone[0] ? config->time_zone : "(UTC)");
     printf("tz_data:     %s\n", !config->time_zone[0] ? "UTC0"
                                   : fos_tz_slice_missing() ? "(no slice yet; fetched from tz.frameos.net when online)"
@@ -507,7 +509,7 @@ static int cmd_set(int argc, char **argv)
 {
     if (argc < 3) {
         printf("usage: set <wifi_ssid|wifi_pass|backend|api_key|cloud_url|claim_token|frame_id|"
-               "hostname|cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|time_zone|"
+               "hostname|cloud_wsurl|hardware|panel|render_mode|rotate|scaling_mode|render_scale|time_zone|"
                "interval|max_http_response_bytes|spill_force|debug|fusion|server_send_logs|"
                "allow_local_network|admin_auth|admin_user|admin_pass|tls_enable|tls_port|"
                "assets_path|assets_sd|assets_sd_pins|assets_sd_freq|"
@@ -870,6 +872,15 @@ static int cmd_set(int argc, char **argv)
             return 1;
         }
         strlcpy(config->scaling_mode, mode, sizeof(config->scaling_mode));
+    }
+    else if (strcmp(key, "render_scale") == 0) {
+        /* Live like scaling_mode: fos_client pushes it on the next pass. */
+        uint16_t milli = 0;
+        if (!fos_config_parse_render_scale(value, &milli)) {
+            printf("bad render_scale value, want 0 (automatic) or a number up to 4, e.g. 1.5\n");
+            return 1;
+        }
+        config->render_scale_milli = milli;
     }
     else if (strcmp(key, "time_zone") == 0) {
         /* IANA name ("Europe/Brussels"); "" or UTC clears it. The zone's

@@ -168,7 +168,9 @@ interface FrameOSApp {
   config: FrameOSAppConfig;
   state: Record<string, any>;
   frame: {
+    /** The panel's width; for a .tsx or .jsx app, divided by the render scale. */
     width: number;
+    /** The panel's height; for a .tsx or .jsx app, divided by the render scale. */
     height: number;
     rotate: number;
     assetsPath: string;
@@ -177,6 +179,9 @@ interface FrameOSApp {
     debug?: boolean;
     /** An ESP32-class runtime, or the preview running as one (FrameOS 2026.10.13+; undefined before). */
     embedded?: boolean;
+    /** The render scale that applies to the scene. A .tsx or .jsx app's sizes are the panel's
+     * divided by it, and its JSX is drawn that many times larger (FrameOS 2026.10.22+; undefined before). */
+    scale?: number;
   };
   initialized?: boolean;
   log(...args: any[]): void;

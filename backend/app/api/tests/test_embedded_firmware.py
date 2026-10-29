@@ -502,6 +502,14 @@ def test_embedded_hardware_preset_for_waveshare_13in3e6():
     frame.scaling_mode = "diagonal"
     assert _provisioned(embedded_provisioning_plan(frame))["scaling_mode"] == "cover"
     frame.scaling_mode = None
+    # Render scale: automatic is the firmware's default and is not sent (an
+    # image from before the key would refuse it); a chosen one is.
+    assert "render_scale" not in settings
+    frame.render_scale = 1.5
+    assert _provisioned(embedded_provisioning_plan(frame))["render_scale"] == "1.5"
+    frame.render_scale = 2
+    assert _provisioned(embedded_provisioning_plan(frame))["render_scale"] == "2"
+    frame.render_scale = None
 
 
 def test_embedded_hardware_preset_for_waveshare_photopainter():

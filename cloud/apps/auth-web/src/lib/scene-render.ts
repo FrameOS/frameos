@@ -32,6 +32,13 @@ export type SceneRenderOptions = {
   deviceLimits?: DeviceLimits | null | undefined;
   height: number;
   /**
+   * The frame's own render scale (its `render_scale` setting, docs/jsx-ui.md
+   * "Scale"): what a UI from a .tsx/.jsx app is laid out for. Omitted, null
+   * or 0 leaves the runtime on automatic, worked out from width and height:
+   * a render with no frame behind it, or a frame that never set one.
+   */
+  renderScale?: number | null | undefined;
+  /**
    * Who the render is for (an account id, or a client key for anonymous
    * callers). At most one render per owner runs at a time and only a
    * couple more may wait, so a single caller cannot hold every global slot.
@@ -284,6 +291,7 @@ function runWorker(options: SceneRenderOptions): Promise<SceneRenderResult> {
         deviceLimits: options.deviceLimits ?? null,
         height: options.height,
         maxLogs: maxCollectedLogs,
+        renderScale: options.renderScale && options.renderScale > 0 ? options.renderScale : 0,
         sceneId: options.sceneId ?? "",
         scenesJson: JSON.stringify(options.scenes),
         settingsJson: JSON.stringify(options.settings ?? {}),
@@ -560,6 +568,15 @@ async function main() {
       }
     } catch (error) {
       pushLog("device simulation unavailable in this runtime build: " + error);
+    }
+  }
+  // The frame's own render scale, when it set one; otherwise the runtime is
+  // automatic. Old bundles predate the export and render at 1.
+  if (workerData.renderScale > 0) {
+    try {
+      call("frameos_wasm_set_render_scale", null, ["number"], [workerData.renderScale]);
+    } catch (error) {
+      pushLog("render scale unavailable in this runtime build: " + error);
     }
   }
   const memoryStat = (name) => {

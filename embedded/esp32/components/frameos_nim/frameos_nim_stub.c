@@ -81,6 +81,7 @@ int frameos_nim_load_scenes(const char *json)
 void frameos_nim_set_debug(int enabled) { (void)enabled; }
 void frameos_nim_set_fusion(int enabled) { (void)enabled; }
 void frameos_nim_set_scaling_mode(const char *mode) { (void)mode; }
+void frameos_nim_set_render_scale(double scale) { (void)scale; }
 void frameos_nim_set_colors(const char *json) { (void)json; }
 void frameos_nim_set_palette(const char *json) { (void)json; }
 void frameos_nim_set_event_map(const char *json) { (void)json; }

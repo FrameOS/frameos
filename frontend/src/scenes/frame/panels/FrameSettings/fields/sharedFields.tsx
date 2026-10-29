@@ -22,6 +22,12 @@ import type { GPIOButton, Palette } from '../../../../../types'
 import { buttonRoleByLabel, buttonRoles, keyboardLayouts } from '../../../../../utils/eventsContract.gen'
 import { useFrameSettings, type StatusLedType } from '../frameSettingsContext'
 import { microphonePinPlaceholder } from '../../../../../utils/voiceChat'
+import {
+  RENDER_SCALE_HELP,
+  RENDER_SCALE_LABEL,
+  frameRenderScaleSelectValue,
+  parseRenderScale,
+} from '../../../../../utils/renderScale'
 
 /**
  * The field blocks more than one section renders.
@@ -652,6 +658,34 @@ export function FlipField(): JSX.Element {
         />
       )}
     </Field>
+  )
+}
+
+/**
+ * The frame's render scale (`render_scale`, frame.json `renderScale`): what a
+ * UI from a .tsx/.jsx app is laid out for. Disabled with the reason on a
+ * cloud frame whose firmware predates the key (the push would be refused).
+ */
+export function RenderScaleField(): JSX.Element {
+  const { renderScaleOptions, renderScaleDisabledReason } = useFrameSettings()
+  return (
+    <fieldset disabled={!!renderScaleDisabledReason} className="min-w-0">
+      <Field
+        name="render_scale"
+        label={RENDER_SCALE_LABEL}
+        tooltip={RENDER_SCALE_HELP}
+        hint={renderScaleDisabledReason ? <span className="frameos-muted">{renderScaleDisabledReason}</span> : undefined}
+      >
+        {({ value, onChange }) => (
+          <Select
+            name="render_scale"
+            value={frameRenderScaleSelectValue(value)}
+            onChange={(v) => onChange(parseRenderScale(v))}
+            options={renderScaleOptions}
+          />
+        )}
+      </Field>
+    </fieldset>
   )
 }
 

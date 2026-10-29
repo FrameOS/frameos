@@ -1,7 +1,7 @@
 import type { DeviceLimits } from "frameos-wasm";
 import type { createDb } from "@frameos-cloud/db";
 import type { InProcessMcp } from "@frameos-cloud/mcp";
-import { frameForAccount } from "../frames";
+import { frameForAccount, frameRenderScale } from "../frames";
 import { checkIdentityRateLimit } from "../rate-limit";
 import { withRetiredAppsReplaced } from "../retired-apps";
 import { accountRenderRateLimit, maxRenderPixels, renderScenes, SceneRenderError } from "../scene-render";
@@ -28,8 +28,11 @@ export const installOutOfMemoryNote =
 type JsonObject = Record<string, unknown>;
 
 export type InstallMemoryCheck = {
-  /** The device a frame renders on and its panel size; null renders unlimited. */
-  frameDevice(frameId: string): Promise<{ device: RenderDevice; height: number; width: number } | null>;
+  /** The device a frame renders on, its panel size and its own render scale
+   * (null = automatic); null renders unlimited. */
+  frameDevice(
+    frameId: string,
+  ): Promise<{ device: RenderDevice; height: number; renderScale?: number | null; width: number } | null>;
   /** Renders `sceneId`: the out-of-memory sentence when the ceiling refused an
    * allocation, null for anything else. */
   outOfMemory(
@@ -38,6 +41,7 @@ export type InstallMemoryCheck = {
     width: number,
     height: number,
     limits: DeviceLimits,
+    renderScale?: number | null,
   ): Promise<string | null>;
 };
 
@@ -123,7 +127,14 @@ export async function installRefusal(
   for (const scenes of await scenesToInstall(mcp, name, args)) {
     const main = scenes.find((scene) => scene.default === true) ?? scenes[0]!;
     const sceneId = typeof main.id === "string" ? main.id : null;
-    const outOfMemory = await check.outOfMemory(scenes, sceneId, target.width, target.height, limits);
+    const outOfMemory = await check.outOfMemory(
+      scenes,
+      sceneId,
+      target.width,
+      target.height,
+      limits,
+      target.renderScale ?? null,
+    );
     if (outOfMemory) {
       return {
         images: [],
@@ -153,12 +164,12 @@ export function accountInstallMemoryCheck(options: {
       const device = frame ? frameRenderDevice(frame) : null;
       const hardware = (frame?.hardware ?? {}) as { height?: unknown; width?: unknown };
       const { height, width } = hardware;
-      if (!device || typeof width !== "number" || typeof height !== "number" || width <= 0 || height <= 0) {
+      if (!frame || !device || typeof width !== "number" || typeof height !== "number" || width <= 0 || height <= 0) {
         return null;
       }
-      return { device, height, width };
+      return { device, height, renderScale: frameRenderScale(frame), width };
     },
-    async outOfMemory(scenes, sceneId, width, height, limits) {
+    async outOfMemory(scenes, sceneId, width, height, limits, renderScale) {
       if (width * height > maxRenderPixels) {
         return null;
       }
@@ -171,6 +182,7 @@ export function accountInstallMemoryCheck(options: {
           deviceLimits: limits,
           height,
           owner: options.accountId,
+          renderScale: renderScale ?? null,
           sceneId: sceneId ?? undefined,
           // A scene from before a Nim app was retired renders with its
           // replacement, as the frame gets it.

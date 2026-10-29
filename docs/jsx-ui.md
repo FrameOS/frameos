@@ -299,6 +299,43 @@ of its own.
   `full`, `screen`, `auto`, and brackets: `w-[37px]`, `[2rem]`, `[50%]`,
   `[10vw]` / `[10vh]` (of the image).
 
+## Scale
+
+A frame has a **render scale** (`frameos/src/frameos/render_scale.nim`): a
+.tsx or .jsx app on a frame at scale 2 is told its canvas is half the
+panel's width and height, lays its UI out at that size, and what it returns
+is drawn at the panel's full size. pixie stretches the root `<svg width
+height>` (or `viewBox`) to the target as vectors, so it stays sharp. A scene
+made for an 800x480 screen fills a 1600x960 one with the same layout instead
+of sitting small in whitespace, and an app that fetches for its size (the
+Map scene's lines) fetches a quarter of the data.
+
+- **Which scale.** A field with `role: "renderScale"` whose state holds a
+  number, else the scene's `settings.renderScale`, else the frame's
+  (frame.json `renderScale`, the control planes' `render_scale`). The
+  frame's 0 is automatic: the panel's shorter edge over 600 px, rounded down
+  to a quarter, never below 1 (800x480 and 720x720 are 1, 1200x1600 is 2,
+  1872x1404 is 2.25), so a scaled layout keeps at least 600 px on its
+  shorter edge.
+  Out-of-range values (above 4) are ignored.
+- **What a scaled app sees.** `context.imageWidth` / `imageHeight`,
+  `targetWidth` / `targetHeight` and `app.frame.width` / `height`, divided by
+  the scale and rounded. Every app, scaled or not, reads the scale as
+  `app.frame.scale`. A plain .js or .ts app keeps the panel's pixels: one
+  that fetches a photo for its size wants every one of them.
+- **Raster stays raster.** Pixels the app hands over are drawn stretched
+  (soft): an image spec or `frameos.canvas` made at the app's size, or an
+  image returned instead of JSX. Drawing into `context.image` with
+  `frameos.draw` is in the canvas's own pixels; multiply by
+  `app.frame.scale`.
+- **The pointer** is divided by the scale before it meets the UI's regions,
+  so handlers get `localX` / `width` in the UI's own pixels.
+- **Repainting** an LCD's damage still works: pixie measures each element's
+  box through its transform, the root's stretch included.
+- The browser preview renders at the frame's size, so the automatic scale
+  matches the frame's; a frame's own setting reaches it through
+  `frameos_wasm_set_render_scale`.
+
 ## Classes
 
 - **Display and flex**: `block`, `flex`, `inline-flex`, `grid`, `hidden`,

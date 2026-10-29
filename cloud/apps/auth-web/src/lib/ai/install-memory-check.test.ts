@@ -93,6 +93,21 @@ describe("installing on a frame that renders in a few megabytes", () => {
     await tools.close();
   });
 
+  it("renders at the frame's own render scale when it set one", async () => {
+    const scales: (number | null | undefined)[] = [];
+    const check: InstallMemoryCheck = {
+      frameDevice: async () => ({ ...e1004, renderScale: 2 }),
+      outOfMemory: async (_scenes, _sceneId, _width, _height, _limits, renderScale) => {
+        scales.push(renderScale);
+        return null;
+      },
+    };
+    const tools = await connect(check);
+    await tools.call("frame_scene_install", { confirm: true, frame_id: frameId, scenes: clock });
+    expect(scales).toEqual([2]);
+    await tools.close();
+  });
+
   it("lets a scene that fits through to the install", async () => {
     const { check, renders } = installCheck(null);
     const tools = await connect(check);

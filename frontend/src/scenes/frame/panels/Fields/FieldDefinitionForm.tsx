@@ -13,6 +13,8 @@ import {
   REFRESH_INTERVAL_ROLE,
   refreshIntervalFieldIndex,
 } from '../../../../utils/refreshInterval'
+import { RENDER_SCALE_ROLE, renderScaleFieldIndex } from '../../../../utils/renderScale'
+import { withStateFieldRole } from '../../../../utils/fieldTypes'
 
 /**
  * "Use as refresh interval": at most one state field carries the role. A
@@ -49,14 +51,46 @@ function RefreshIntervalRoleField<T extends AppConfigField>({
           aria-label="Use as refresh interval"
           value={active}
           disabled={byName}
-          onChange={(enabled) =>
-            setFields(
-              fields.map((other, i) => {
-                const { role: _role, ...rest } = other as StateField
-                return (i === index && enabled ? { ...rest, role: REFRESH_INTERVAL_ROLE } : rest) as T
-              })
-            )
-          }
+          onChange={(enabled) => setFields(withStateFieldRole(fields, index, REFRESH_INTERVAL_ROLE, enabled))}
+        />
+      )}
+    </Field>
+  )
+}
+
+/**
+ * "Use as scale": the field's value is the scene's render scale, over its
+ * Scale setting (utils/renderScale.ts), so a control panel can change it. At
+ * most one state field carries the role; a field named anything gets it only
+ * by choice.
+ */
+function RenderScaleRoleField<T extends AppConfigField>({
+  fields,
+  index,
+  setFields,
+}: {
+  fields: T[]
+  index: number
+  setFields: (fields: T[]) => void
+}): JSX.Element {
+  const active = renderScaleFieldIndex(fields as StateField[]) === index
+  return (
+    <Field
+      name="role"
+      label="Use as scale"
+      tooltip={
+        <>
+          The value of this field is the scene's scale: scenes built with JSX are laid out for a screen this many times
+          smaller and drawn sharp at full size. It wins over the Scale in the scene's settings while it holds a number
+          up to 4; leave it empty or 0 to use the setting, or the frame's. Only one field per scene can have this role.
+        </>
+      }
+    >
+      {() => (
+        <Switch
+          aria-label="Use as scale"
+          value={active}
+          onChange={(enabled) => setFields(withStateFieldRole(fields, index, RENDER_SCALE_ROLE, enabled))}
         />
       )}
     </Field>
@@ -253,6 +287,7 @@ export function FieldDefinitionForm<T extends AppConfigField>({
             )}
           </Field>
           <RefreshIntervalRoleField fields={fields} index={index} setFields={setFields} />
+          <RenderScaleRoleField fields={fields} index={index} setFields={setFields} />
         </>
       ) : null}
       <div className="flex w-full items-center justify-between gap-2">

@@ -26,6 +26,9 @@
  * well inside them. */
 #define FOS_BUZZER_TONE_HZ_MIN 100
 #define FOS_BUZZER_TONE_HZ_MAX 10000
+/* `render_scale`'s ceiling, the contract's rule (0..4), in the thousandths
+ * the config keeps it in. */
+#define FOS_RENDER_SCALE_MILLI_MAX 4000
 #define FOS_ASSETS_PATH_LEN 128
 /* frame.json's `colors` block as compact JSON (docs/asset-color-profiles.md):
  * the automatic fit switch and the frame-wide correction. Big enough for
@@ -166,6 +169,16 @@ typedef struct {
                                     * fit for image consumers that do not place
                                     * the image themselves (since #321 a node's
                                     * own placement wins); "cover" by default */
+    uint16_t render_scale_milli;   /* frame.json `renderScale` (the contract's
+                                    * `render_scale`) in thousandths, 1500 =
+                                    * 1.5: JSX from .tsx/.jsx apps is laid out
+                                    * for a panel this many times smaller and
+                                    * drawn sharp at full size. 0 = automatic
+                                    * (the Nim runtime's, from the panel size),
+                                    * at most FOS_RENDER_SCALE_MILLI_MAX. NVS
+                                    * `render_scale_m` (u16), absent = 0; pushed
+                                    * into the Nim runtime every pass like
+                                    * scaling_mode, so it applies live */
     char colors[FOS_COLORS_LEN];   /* `{"autoFit":"off","global":{...}}`, "" = defaults;
                                     * pushed into the Nim runtime every pass like
                                     * scaling_mode, so it applies live */
@@ -270,6 +283,15 @@ bool fos_config_normalize_rotate(double value, uint16_t *out);
  * normalize_rotate: every writer — USB console, backend settings poll,
  * cloud set_settings — goes through this so they cannot drift apart. */
 bool fos_config_normalize_scaling_mode(const char *value, char *out, size_t out_len);
+/* Normalize a render scale (0 = automatic, else up to 4, fractions allowed)
+ * onto the thousandths `render_scale_milli` keeps, rounded to the nearest.
+ * NaN, infinities, negatives and anything over 4 are refused with `out`
+ * untouched. Same contract as normalize_rotate: every writer — USB console,
+ * backend settings poll, cloud set_settings — goes through this. */
+bool fos_config_normalize_render_scale(double value, uint16_t *out_milli);
+/* The console's spelling of the same: the whole of `text` is one number
+ * ("1.5", "2", "0"); anything else, trailing junk included, is refused. */
+bool fos_config_parse_render_scale(const char *text, uint16_t *out_milli);
 /* "rst=5,dc=4,cs=3,cs2=-1,busy=6,sck=7,mosi=9,pwr=-1" (any subset) */
 esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins);
 void fos_config_format_pins(const fos_pins_t *pins, char *out, size_t out_len);

@@ -22,6 +22,7 @@ import frameos/js_runtime/burrito
 import frameos/js_runtime/jsx
 import frameos/ui/layout
 import frameos/ui/events
+import frameos/render_scale
 
 type
   JsAssetGrant* = enum
@@ -1102,6 +1103,15 @@ proc jsGetAppState(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     return jsonToJS(ctx, state[keyStr])
   return jsUndefSentinel(ctx)
 
+proc jsxScale(runtime: JsAppRuntime, owner: AppRoot): float =
+  ## The render scale a .tsx or .jsx app lays out for: the scene's or the
+  ## frame's (render_scale.nim). 1 for any other app, which keeps the panel's
+  ## pixels (a photo fetched for its size wants every one).
+  if runtime.isNil or owner.isNil or not (runtime.sourceName.endsWith(".tsx") or
+      runtime.sourceName.endsWith(".jsx")):
+    return 1.0
+  effectiveRenderScale(owner.scene, owner.frameConfig)
+
 proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
   if e == nil:
@@ -1109,9 +1119,13 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
 
   case toNimString(ctx, key)
   of "width":
-    return nimIntToJS(ctx, e.owner.frameConfig.width.int32)
+    # A .tsx app at render scale 2 is on a panel half the size (render_scale.nim).
+    return nimIntToJS(ctx, scaledLength(e.owner.frameConfig.width, e.runtime.jsxScale(e.owner)).int32)
   of "height":
-    return nimIntToJS(ctx, e.owner.frameConfig.height.int32)
+    return nimIntToJS(ctx, scaledLength(e.owner.frameConfig.height, e.runtime.jsxScale(e.owner)).int32)
+  of "scale":
+    # The render scale in effect for the scene, whatever kind of app asks.
+    return nimFloatToJS(ctx, effectiveRenderScale(e.owner.scene, e.owner.frameConfig))
   of "rotate":
     return nimIntToJS(ctx, e.owner.frameConfig.rotate.int32)
   of "assetsPath":
@@ -1159,18 +1173,18 @@ proc jsGetAppContext(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     return jsUndefSentinel(ctx)
   of "imageWidth":
     if e.context.hasImage and not e.context.image.isNil:
-      return nimIntToJS(ctx, e.context.image.width.int32)
+      return nimIntToJS(ctx, scaledLength(e.context.image.width, e.runtime.jsxScale(e.owner)).int32)
     return jsUndefSentinel(ctx)
   of "imageHeight":
     if e.context.hasImage and not e.context.image.isNil:
-      return nimIntToJS(ctx, e.context.image.height.int32)
+      return nimIntToJS(ctx, scaledLength(e.context.image.height, e.runtime.jsxScale(e.owner)).int32)
     return jsUndefSentinel(ctx)
   of "targetWidth", "targetHeight", "targetFit":
     let target = e.owner.addressedTarget(e.context)
     if target.width > 0:
       case keyStr
-      of "targetWidth": return nimIntToJS(ctx, target.width.int32)
-      of "targetHeight": return nimIntToJS(ctx, target.height.int32)
+      of "targetWidth": return nimIntToJS(ctx, scaledLength(target.width, e.runtime.jsxScale(e.owner)).int32)
+      of "targetHeight": return nimIntToJS(ctx, scaledLength(target.height, e.runtime.jsxScale(e.owner)).int32)
       else:
         if target.fit.len > 0:
           return nimStringToJS(ctx, target.fit)
@@ -1196,7 +1210,7 @@ proc jsGetAppKeys(ctx: ptr JSContext, scope: JSValue): JSValue {.nimcall.} =
       for key in state.keys:
         keys.add(key)
   of "frame":
-    keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded"]
+    keys = @["width", "height", "rotate", "assetsPath", "timeZone", "debug", "embedded", "scale"]
   of "context":
     keys = @["event", "hasImage", "payload", "loopIndex", "loopKey", "nextSleep"]
     if e.context.hasImage and not e.context.image.isNil:
@@ -2217,12 +2231,14 @@ proc callJsxHandler(runtime: JsAppRuntime, owner: AppRoot, handler: int, name: s
     JS_FreeValue(ctx, returned)
 
 proc keepUiRegions(runtime: JsAppRuntime, owner: AppRoot, sceneId: string,
-    regions: var seq[UiRegion], x, y: int) =
-  ## What the pointer can do to the UI just drawn with its corner at x, y.
+    regions: var seq[UiRegion], x, y: int, scale: float) =
+  ## What the pointer can do to the UI just drawn with its corner at x, y,
+  ## `scale` canvas pixels to each of its own.
   let target = uiTarget(sceneId, owner.nodeId.int)
   target.regions = move(regions)
   target.offsetX = x.float32
   target.offsetY = y.float32
+  target.scale = scale.float32
   # Into the app that drew these regions, every render: the scene can be
   # loaded again since the last one (a switch away and back), with a new app.
   target.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) {.closure, raises: [].} =
@@ -2241,9 +2257,19 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
   ## A UI's handlers, hover: and active: classes leave regions behind for the
   ## pointer (ui/events.nim), placed where the UI lands in the canvas: the
   ## offered cell's corner, or the canvas's when the UI is the canvas's size.
+  ##
+  ## At render scale 2 (render_scale.nim) a UI is laid out at half the size
+  ## and the `<svg width height>` that makes is drawn at the full size: pixie
+  ## stretches the root to the target as vectors. An app's own `<svg>` was
+  ## made for the size the app was told, so it is stretched the same way.
   let
     requestedWidth = defaultImageWidth(owner, context, %*{})
     requestedHeight = defaultImageHeight(owner, context, %*{})
+    scale = runtime.jsxScale(owner)
+    layoutWidth = scaledLength(requestedWidth, scale)
+    layoutHeight = scaledLength(requestedHeight, scale)
+    # What the pointer is divided by: the layout's rounded size, exactly.
+    regionScale = requestedWidth.float / max(layoutWidth, 1).float
     sceneId = if owner.scene.isNil: "" else: owner.scene.id.string
   var
     svg = root
@@ -2251,7 +2277,7 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
   let target = uiTarget(sceneId, owner.nodeId.int, create = root.tag != "svg")
   if root.tag != "svg":
     try:
-      svg = layoutUi(root, requestedWidth, requestedHeight, target.input, regions, target.memo)
+      svg = layoutUi(root, layoutWidth, layoutHeight, target.input, regions, target.memo)
     except CatchableError as error:
       frameos_apps.logError(owner, "JS app returned a UI that failed to lay out: " & error.msg)
       return nil
@@ -2262,7 +2288,7 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
     if intoTarget.width == requestedWidth and intoTarget.height == requestedHeight:
       if regions.len > 0 or not target.isNil:
         runtime.keepUiRegions(owner, sceneId, regions, intoTarget.origin mod max(intoTarget.stride, 1),
-          intoTarget.origin div max(intoTarget.stride, 1))
+          intoTarget.origin div max(intoTarget.stride, 1), regionScale)
     return intoTarget
   let (svgWidth, svgHeight) = boundedRequestedDimensions(requestedWidth, requestedHeight)
   let image = decodeSvgWithFallback(svg, svgWidth, svgHeight)
@@ -2271,7 +2297,7 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
       if context.hasImage and not context.image.isNil: (context.image.width, context.image.height)
       else: (frameos_apps.renderWidth(owner.frameConfig), frameos_apps.renderHeight(owner.frameConfig))
     if svgWidth == canvasWidth and svgHeight == canvasHeight and (regions.len > 0 or not target.isNil):
-      runtime.keepUiRegions(owner, sceneId, regions, 0, 0)
+      runtime.keepUiRegions(owner, sceneId, regions, 0, 0, regionScale)
     return image.get()
   frameos_apps.logError(owner, "JS app returned JSX that failed to render: " &
     svgDecodeError(svg, svgWidth, svgHeight))

@@ -54,6 +54,10 @@ import {
   extendedCloudFrameSettingsMinVersion,
   hardwareCloudFrameSettingKeys,
   hardwareCloudFrameSettingsMinVersion,
+  cloudFrameSupportsRenderScale,
+  esp32RenderScaleCloudFrameSettingKeys,
+  renderScaleCloudFrameSettingKeys,
+  renderScaleCloudFrameSettingsMinVersion,
 } from "../../../../../../frontend/src/utils/cloudFrameSettings";
 import {
   allowedFrameCommandTypes,
@@ -95,6 +99,10 @@ import {
   esp32PaletteFrameSettingKeys,
   esp32PaletteFrameSettingsMinVersion,
   esp32ColorsFrameSettingsMinVersion,
+  esp32RenderScaleFrameSettingKeys,
+  frameSupportsRenderScaleSettings,
+  renderScaleFrameSettingKeys,
+  renderScaleFrameSettingsMinVersion,
 } from "../../lib/frames";
 
 // Save and Render in the shared SPA used to POST /api/frames/{id} and
@@ -153,6 +161,7 @@ describe("cloud settings push", () => {
         !esp32BatteryEnablePinFrameSettingKeys.has(key) &&
         !esp32ColorsFrameSettingKeys.has(key) &&
         !esp32EventMapFrameSettingKeys.has(key) &&
+        !esp32RenderScaleFrameSettingKeys.has(key) &&
         !esp32PaletteFrameSettingKeys.has(key) &&
         !esp32BuzzerFrameSettingKeys.has(key) &&
         !esp32VoiceChatFrameSettingKeys.has(key) &&
@@ -592,6 +601,40 @@ describe("cloud settings push", () => {
     expect(allowedFrameSettings.get("event_map")?.({ event: "button" })).toBe(false);
     // An empty list is a value (it clears the bindings), not "unset".
     expect(cloudFrameSettingsPayload({ event_map: [] } as never, cloudFrameSettingKeysForVersion("2026.10.20")).event_map).toEqual([]);
+  });
+
+  it("gates the render scale on its floor, both profiles", () => {
+    // 2026.10.22: `render_scale`, what a UI from a .tsx/.jsx app is laid out
+    // for (0 = automatic). One floor for the Pi runtime and the ESP32
+    // firmware; both apply it on the next render.
+    expect([...renderScaleCloudFrameSettingKeys]).toEqual(["render_scale"]);
+    expect(new Set(renderScaleCloudFrameSettingKeys)).toEqual(renderScaleFrameSettingKeys);
+    expect(renderScaleCloudFrameSettingsMinVersion).toBe("2026.10.22");
+    expect(renderScaleFrameSettingsMinVersion).toBe(renderScaleCloudFrameSettingsMinVersion);
+    expect(esp32SettableKeys.has("render_scale")).toBe(true);
+    expect([...esp32RenderScaleCloudFrameSettingKeys]).toEqual(["render_scale"]);
+    expect(new Set(esp32RenderScaleCloudFrameSettingKeys)).toEqual(esp32RenderScaleFrameSettingKeys);
+    for (const version of ["2026.10.21", "2026.10.22", "2026.11.0", "unknown", null, ""]) {
+      expect(cloudFrameSupportsRenderScale(version), `${version}`).toBe(frameSupportsRenderScaleSettings(version));
+    }
+    expect(cloudFrameSettingKeysForVersion("2026.10.21")).not.toContain("render_scale");
+    expect(cloudFrameSettingKeysForVersion("2026.10.22")).toContain("render_scale");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.10.21")).not.toContain("render_scale");
+    expect(esp32CloudFrameSettingKeysForVersion("2026.10.22")).toContain("render_scale");
+    // The form keeps the select's value as a string; the push sends a number,
+    // fractions and 0 (automatic) included.
+    for (const [form, sent] of [["1.5", 1.5], ["0", 0], [2, 2]] as const) {
+      const payload = cloudFrameSettingsPayload({ render_scale: form } as never, cloudFrameSettingKeysForVersion("2026.10.22"));
+      expect(payload.render_scale).toBe(sent);
+      expect(allowedFrameSettings.get("render_scale")?.(payload.render_scale)).toBe(true);
+    }
+    expect(allowedFrameSettings.get("render_scale")?.(5)).toBe(false);
+    expect(allowedFrameSettings.get("render_scale")?.("auto")).toBe(false);
+    expect(frameSettingsRefusal({ frameosVersion: "2026.10.21", hardware: null }, { render_scale: 2 })).toEqual({
+      error: "settings_need_newer_firmware",
+      minFrameosVersion: "2026.10.22",
+    });
+    expect(frameSettingsRefusal({ frameosVersion: "2026.10.22", hardware: { platform: "esp32-s3" } }, { render_scale: 1.25 })).toBeNull();
   });
 
   it("gates the input batch and button roles on their floor, Pi/Linux only", () => {

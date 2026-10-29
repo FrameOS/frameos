@@ -2231,6 +2231,9 @@ static void client_task(void *arg)
             /* Fallback fit for consumers without their own placement — settings
              * sync, cloud set_settings and the console all write it live. */
             frameos_nim_set_scaling_mode(config->scaling_mode);
+            /* What JSX from .tsx/.jsx apps is laid out for (0 = automatic),
+             * the same way: the apps read it off the config every render. */
+            frameos_nim_set_render_scale(config->render_scale_milli / 1000.0);
             /* The colours block (automatic fit switch, frame-wide correction):
              * same contract, the Nim side re-parses only when the text changed. */
             frameos_nim_set_colors(config->colors);

@@ -70,6 +70,7 @@ extern void fos_nim_apply_service_settings_impl(const char *json);
 extern void fos_nim_set_debug_impl(int enabled);
 extern void fos_nim_set_fusion_impl(int enabled);
 extern void fos_nim_set_scaling_mode_impl(const char *mode);
+extern void fos_nim_set_render_scale_impl(double scale);
 extern void fos_nim_set_colors_impl(const char *json);
 extern void fos_nim_set_palette_impl(const char *json);
 extern void fos_nim_set_event_map_impl(const char *json);
@@ -938,6 +939,14 @@ void frameos_nim_set_scaling_mode(const char *mode)
     if (!s_nim_ready || mode == NULL || mode[0] == '\0') return;
     if (!nim_lock_take()) return;
     fos_nim_set_scaling_mode_impl(mode);
+    nim_lock_give();
+}
+
+void frameos_nim_set_render_scale(double scale)
+{
+    if (!s_nim_ready) return;
+    if (!nim_lock_take()) return;
+    fos_nim_set_render_scale_impl(scale);
     nim_lock_give();
 }
 

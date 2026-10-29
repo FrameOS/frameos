@@ -57,6 +57,11 @@
  * this config path does not change how existing embedded frames render. */
 #define FRAMEOS_DEFAULT_SCALING_MODE "cover"
 #endif
+#ifndef FRAMEOS_DEFAULT_RENDER_SCALE_MILLI
+/* frame.json `renderScale` in thousandths (fos_config.h); 0 = automatic, the
+ * Nim runtime's scale for the panel's size, as on the Pi. */
+#define FRAMEOS_DEFAULT_RENDER_SCALE_MILLI 0
+#endif
 #ifndef FRAMEOS_DEFAULT_TIME_ZONE
 /* IANA name; "" keeps the pre-2026.8.34 behaviour (UTC). See fos_tz.h. */
 #define FRAMEOS_DEFAULT_TIME_ZONE ""

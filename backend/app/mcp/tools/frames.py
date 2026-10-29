@@ -40,7 +40,7 @@ DEPLOY = {
 FRAME_SETTING_KEYS = (
     "name", "archived", "width", "height", "rotate", "flip", "color", "timezone", "timezone_updater",
     "interval", "metrics_interval", "max_http_response_bytes", "log_to_file", "assets_path", "save_assets",
-    "upload_fonts", "scaling_mode", "device", "device_config", "debug", "reboot", "control_code", "schedule",
+    "upload_fonts", "scaling_mode", "render_scale", "device", "device_config", "debug", "reboot", "control_code", "schedule",
     "gpio_buttons", "event_map", "error_behavior", "input_settings", "palette", "colors", "service_setting_groups",
     "frame_host", "frame_port", "ssh_user", "ssh_port", "server_host", "server_port", "server_scheme",
     "server_send_logs", "mountpoints",

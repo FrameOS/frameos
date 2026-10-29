@@ -23,6 +23,7 @@ from app.models.apps import get_app_configs
 from app.utils.retired_apps import retired_app_config
 from app.models.settings import get_settings_dict
 from app.utils.events_contract_gen import BUTTON_ROLES, DEFAULT_KEYBOARD_LAYOUT, KEYBOARD_LAYOUTS
+from app.utils.render_scale import normalize_render_scale
 from app.utils.timezone import frame_timezone, stored_timezone
 from app.utils.frame_secrets import (
     deploy_snapshot,
@@ -444,6 +445,10 @@ class Frame(Base):
     metrics_interval = mapped_column(Double, default=60)
     max_http_response_bytes = mapped_column(Integer, default=DEFAULT_MAX_HTTP_RESPONSE_BYTES)
     scaling_mode = mapped_column(String(64), nullable=True)  # contain (default), cover, stretch, center
+    # frame.json `renderScale`: what a UI from a .tsx/.jsx app is laid out for,
+    # a panel this many times smaller, drawn sharp at full size. 0 = automatic
+    # from the panel's size (app/utils/render_scale.py).
+    render_scale = mapped_column(Double, nullable=False, default=0)
     rotate = mapped_column(Integer, nullable=True)
     flip = mapped_column(String(32), nullable=True)
     log_to_file = mapped_column(Text, nullable=True)
@@ -553,6 +558,7 @@ class Frame(Base):
             'metrics_interval': self.metrics_interval,
             'max_http_response_bytes': self.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
             'scaling_mode': self.scaling_mode,
+            'render_scale': normalize_render_scale(self.render_scale),
             'rotate': self.rotate,
             'flip': self.flip,
             'background_color': self.background_color,
@@ -735,6 +741,7 @@ async def new_frame(
         scenes=[],
         apps=[],
         scaling_mode="contain",
+        render_scale=0,
         rotate=0,
         device=device or "web_only",
         timezone=None,
@@ -1041,6 +1048,8 @@ def get_frame_json(db: Session, frame: Frame) -> dict:
         "maxHttpResponseBytes": frame.max_http_response_bytes or DEFAULT_MAX_HTTP_RESPONSE_BYTES,
         "debug": frame.debug or False,
         "scalingMode": frame.scaling_mode or "contain",
+        # 0 = automatic from the panel's size; a scene's own setting wins.
+        "renderScale": normalize_render_scale(frame.render_scale),
         "rotate": frame.rotate or 0,
         "flip": frame.flip,
         "logToFile": frame.log_to_file,

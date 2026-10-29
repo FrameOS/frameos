@@ -12,6 +12,7 @@ import pixie
 
 import frameos/types
 import frameos/utils/asset_colors
+from frameos/render_scale import MaxRenderScale
 import lib/tz
 import std/times
 import frameos/channels
@@ -321,6 +322,16 @@ proc fos_nim_set_scaling_mode_impl(mode: cstring) {.exportc, cdecl.} =
   if not frameConfig.isNil and mode != nil and mode.len > 0:
     frameConfig.scalingMode = $mode
 
+proc fos_nim_set_render_scale_impl(scale: cdouble) {.exportc, cdecl.} =
+  ## frame.json's `renderScale` (frameos/render_scale.nim): what JSX from a
+  ## .tsx or .jsx app is laid out for, 0 = automatic from the panel's size.
+  ## fos_client pushes the config value every render pass like scaling_mode,
+  ## and apps read the scale off the FrameConfig on every render, so a
+  ## console/settings/cloud change applies on the next one. The C side
+  ## normalizes to 0..4; anything else (NaN included) keeps the current one.
+  if not frameConfig.isNil and scale >= 0.0 and scale <= MaxRenderScale:
+    frameConfig.renderScale = float(scale)
+
 var lastColorsJson: string
 
 proc fos_nim_set_colors_impl(json: cstring) {.exportc, cdecl.} =
@@ -495,6 +506,8 @@ proc initRuntime*(width, height: int, name: string, maxHttpResponseBytes: int,
     rotate: (rotate + 1080) mod 360,
     flip: "",
     scalingMode: "cover",
+    # Automatic until fos_client's first push (frameos_nim_set_render_scale).
+    renderScale: 0.0,
     settings: settings,
     assetsPath: "/srv/assets",
     saveAssets: %*false,

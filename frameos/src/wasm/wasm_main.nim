@@ -289,6 +289,13 @@ proc frameos_wasm_set_embedded(enabled: bool) {.exportc, cdecl.} =
   ## canvas. Off by default, as a Pi; every frameos_wasm_init turns it off.
   setSimulatedEmbedded(enabled)
 
+proc frameos_wasm_set_render_scale(scale: cdouble) {.exportc, cdecl.} =
+  ## The frame's render scale (frame.json renderScale, render_scale.nim): what
+  ## a .tsx app's JSX is laid out for. 0, the default every frameos_wasm_init
+  ## restores, is automatic from the preview's size, as on the frame.
+  if not frameConfig.isNil:
+    frameConfig.renderScale = if scale > 0.0 and scale <= 4.0: scale.float else: 0.0
+
 proc frameos_wasm_select_scene(sceneId: cstring): bool {.exportc, cdecl.} =
   try:
     selectSceneById($sceneId)

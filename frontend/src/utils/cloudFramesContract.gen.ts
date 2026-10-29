@@ -20,6 +20,9 @@ export const cloudFramesContractSettings = {
     "scaling_mode": {
       "since": null
     },
+    "render_scale": {
+      "since": "2026.10.22"
+    },
     "timezone": {
       "since": null
     },
@@ -87,6 +90,9 @@ export const cloudFramesContractSettings = {
     },
     "scaling_mode": {
       "since": null
+    },
+    "render_scale": {
+      "since": "2026.10.22"
     },
     "timezone": {
       "since": "2026.8.34"

@@ -315,6 +315,7 @@ const frameApiKeyMap* = [
   ("rotate", "rotate"),
   ("flip", "flip"),
   ("scaling_mode", "scalingMode"),
+  ("render_scale", "renderScale"),
   ("settings", "settings"),
   ("assets_path", "assetsPath"),
   ("save_assets", "saveAssets"),

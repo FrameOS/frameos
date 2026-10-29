@@ -86,6 +86,10 @@ export interface FrameOSPreviewOptions {
    * device fails here instead of on hardware (see ./devices). Null or
    * omitted renders with the browser's own memory. */
   deviceLimits?: DeviceLimits | null
+  /** The frame's render scale (frame.json `renderScale`): what JSX from a
+   * .tsx app is laid out for, as a screen this many times smaller, drawn at
+   * full size. 0 or omitted is automatic from the size, as on a frame. */
+  renderScale?: number
   /** Show frames the way an e-ink panel would: dithered to that panel's
    * inks or greys (see ./dither). Display only — the scene renders in full
    * colour either way. Null (the default) paints the frame as rendered. */
@@ -189,6 +193,7 @@ export class FrameOSPreview {
       saveAssets: options.saveAssets === undefined ? true : options.saveAssets,
       browserAssets: options.browserAssets === undefined ? true : options.browserAssets,
       deviceLimits: options.deviceLimits ?? null,
+      renderScale: options.renderScale ?? 0,
     })
   }
 

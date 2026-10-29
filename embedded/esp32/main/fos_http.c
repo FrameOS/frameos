@@ -1678,6 +1678,8 @@ static cJSON *frame_api_frame_json(void)
     cJSON_AddNumberToObject(frame, "metrics_interval", 60);
     cJSON_AddNumberToObject(frame, "max_http_response_bytes", config->max_http_response_bytes);
     cJSON_AddStringToObject(frame, "scaling_mode", config->scaling_mode);
+    /* Thousandths in the config; 0 = automatic. */
+    cJSON_AddNumberToObject(frame, "render_scale", config->render_scale_milli / 1000.0);
     cJSON_AddNumberToObject(frame, "rotate", fos_config()->rotate);
     cJSON_AddStringToObject(frame, "flip", "");
     cJSON_AddStringToObject(frame, "background_color", "#000000");

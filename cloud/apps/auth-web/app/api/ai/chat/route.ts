@@ -370,6 +370,7 @@ export async function POST(request: NextRequest) {
     block: frameBlock,
     frameId,
     renderDevice,
+    renderScale,
     resolution: frameResolution,
   } = await frameContextBlock(
     db,
@@ -544,6 +545,7 @@ export async function POST(request: NextRequest) {
     renderSize,
     renderTimeZone: timeZoneFrom(body.timeZone),
     renderDevice: renderDevice ?? null,
+    renderScale: renderScale ?? null,
     storeSceneId,
     // The frames home's AI box has no editor to deliver into.
     editorAvailable: body.editor !== false,

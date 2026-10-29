@@ -53,6 +53,10 @@ type
     rotate*: int
     flip*: string
     scalingMode*: string
+    ## What JSX from a .tsx or .jsx app is laid out for: a panel this many
+    ## times smaller, drawn sharp at full size (render_scale.nim). 0 =
+    ## automatic from the panel's size; a scene's own setting wins.
+    renderScale*: float
     settings*: JsonNode
     assetsPath*: string
     saveAssets*: JsonNode
@@ -336,6 +340,11 @@ type
     ## no usable number. "" = the scene has no such field.
     refreshIntervalKey*: string
     refreshIntervalDefault*: float
+    ## The scene's own render scale (render_scale.nim): the state key of a
+    ## field with role renderScale ("" = none), and `settings.renderScale`
+    ## (0 = none). Without either the frame's applies.
+    renderScaleKey*: string
+    renderScaleSetting*: float
     backgroundColor*: Color
     execNode*: proc(nodeId: NodeId, context: ExecutionContext)
     getDataNode*: proc(nodeId: NodeId, context: ExecutionContext): Value
@@ -426,6 +435,8 @@ type
     customEventOrigins*: Table[string, set[EventOrigin]] ## see FrameScene.customEventOrigins
     eventMap*: JsonNode ## see FrameScene.eventMap
     refreshFollowsChildren*: bool ## see FrameScene.refreshFollowsChildren
+    renderScaleKey*: string ## see FrameScene.renderScaleKey
+    renderScaleSetting*: float ## see FrameScene.renderScaleSetting
 
   # Imported node from scenes.json
   DiagramNode* = ref object of RootObj
@@ -447,6 +458,9 @@ type
   FrameSceneSettings* = ref object
     backgroundColor*: Color
     refreshInterval*: float
+    ## What the scene's JSX is laid out for, over the frame's (render_scale.nim);
+    ## 0 or absent = the frame's.
+    renderScale*: float
     ## Present on the scenes the split-screen drawer generates. The runtime
     ## only asks whether it is there, so the value is skipped, not parsed
     ## (interpreter.nim's parseHook).
