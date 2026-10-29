@@ -17,7 +17,9 @@
 ## with the layout's fields, the keyboard on the screen and a list that
 ## scrolls: no QuickJS. Flash is the budget on an ESP32 (AGENTS.md): one
 ## handler for everything (numbered), classes appended in place, and no Nim
-## checks in this module (every index is guarded by its loop).
+## checks in this module (every index is guarded by its loop): JSON arrays
+## are read through `elems` once their kind is known, since json's `[]` and
+## `items` bring their own asserts in with them.
 
 import std/[json, options, parseutils, strutils, tables, times]
 import pixie
@@ -27,6 +29,7 @@ import frameos/channels
 import frameos/events_gen
 import frameos/ui/layout
 import frameos/ui/events
+import frameos/ui/tree
 import frameos/utils/image
 import frameos/utils/svg_frames
 import system/sceneSwitcher/scene as switcher
@@ -35,8 +38,9 @@ import system/sceneSwitcher/scene as switcher
   lineTrace: off.}
 
 type
-  SceneSettingsScene* = ref object of FrameScene
-    paper*: bool ## drawn for e-paper last time (switcher.paperPanel)
+  SceneSettingsScene* = SceneSwitcherScene
+    ## The switcher's own type, its `entries` unused and `paper` the panel's:
+    ## one set of destroy and trace hooks in flash for the two built-in scenes.
 
 const
   SettingsNode = 1 ## the ui/events target its form lives in
@@ -110,10 +114,6 @@ proc saved(field, value: JsonNode): JsonNode =
 proc opener(self: SceneSettingsScene): string =
   self.state{"from"}.getStr()
 
-proc touch(self: SceneSettingsScene) =
-  ## Somebody did something: the idle timeout starts over.
-  self.state.put("touchedAt", newJFloat(epochTime()))
-
 proc leave() =
   ## Back to the scene it was opened from, nothing saved: the dispatcher
   ## knows which.
@@ -127,7 +127,9 @@ proc save(self: SceneSettingsScene) =
   let
     state = newJObject()
     values = self.valueMap()
-  for field in self.fieldList():
+    fields = self.fieldList()
+  for i in 0 ..< fields.elems.len:
+    let field = fields.elems[i]
     let name = field{"name"}.getStr()
     let value = field.saved(values{name})
     if not value.isNil:
@@ -149,15 +151,15 @@ proc acting(self: SceneSettingsScene) =
     let
       index = if handler >= HChoice: (handler - HChoice) div 100 elif handler >= HToggle: handler - HToggle
         else: handler - HText
-    if index >= 0 and index < fields.len:
-      let field = fields[index]
+    if index >= 0 and index < fields.elems.len:
+      let field = fields.elems[index]
       let name = field{"name"}.getStr()
       let values = self.valueMap()
       if handler >= HChoice:
         let choice = (handler - HChoice) mod 100
         let options = field{"options"}
-        if not options.isNil and choice < options.len:
-          values.put(name, newJString(options[choice]{"value"}.getStr()))
+        if not options.isNil and options.kind == JArray and choice < options.elems.len:
+          values.put(name, newJString(options.elems[choice]{"value"}.getStr()))
       elif handler >= HToggle:
         values.put(name, newJBool(not values{name}.isOn))
       else:
@@ -176,18 +178,6 @@ proc onHandler(handler: int, name: string, event: JsonNode, hit: UiHit) {.raises
 # a class that depends on something in a branch of its own. `move` hands a
 # string on: Nim 2.2.4 passes a plain one to a sink without clearing it, and
 # the next assignment would free what the node holds.
-
-proc el(tag: string, classes: sink string, child: sink SvgNode = nil): SvgNode =
-  result = SvgNode(tag: tag, attrs: @[("class", classes)])
-  if not child.isNil:
-    result.children.add child
-
-proc px(c: var string, name: string, v: int) =
-  c.add ' '
-  c.add name
-  c.add "-["
-  c.addInt v
-  c.add "px]"
 
 proc on(node: sink SvgNode, attr: string, handler: int): SvgNode =
   node.attrs.add((attr, $handler))
@@ -246,14 +236,14 @@ proc row(look: Look, field: JsonNode, value: JsonNode, index: int): SvgNode =
   if look.paper: c = ""
   c.px("text", look.size * 4 div 5)
   result.children.add el("span", move c, SvgNode(text: label))
-  if not options.isNil and options.kind == JArray and options.len > 0:
+  if not options.isNil and options.kind == JArray and options.elems.len > 0:
     # Choices: one tap picks one.
     c = "flex flex-wrap"
     c.px("gap", look.gap div 2)
     let chips = el("div", move c)
     let current = value.text
-    for j in 0 ..< min(options.len, 100):
-      let option = options[j]
+    for j in 0 ..< min(options.elems.len, 100):
+      let option = options.elems[j]
       var name = option{"label"}.getStr()
       if name.len == 0:
         name = option{"value"}.getStr()
@@ -314,8 +304,8 @@ proc tree*(self: SceneSettingsScene, width, height: int, paper: bool, title: str
   let
     fields = self.fieldList()
     values = self.valueMap()
-  for i in 0 ..< fields.len:
-    let field = fields[i]
+  for i in 0 ..< fields.elems.len:
+    let field = fields.elems[i]
     if field.kind == JObject and field{"type"}.getStr() notin Unedited:
       list.children.add look.row(field, values{field{"name"}.getStr()}, i)
   if list.children.len == 0:
@@ -329,42 +319,21 @@ proc title(self: SceneSettingsScene): string =
   result = self.opener()
   if not sceneSwitcherListing.isNil:
     try:
-      for entry in sceneSwitcherListing():
-        if entry.id == result and entry.name.len > 0:
-          return entry.name
+      let entries = sceneSwitcherListing()
+      for i in 0 ..< entries.len:
+        if entries[i].id == result and entries[i].name.len > 0:
+          return entries[i].name
     except Exception:
       discard
 
-proc draw*(self: SceneSettingsScene, image: Image) =
+proc drawForm*(self: SceneSettingsScene, image: Image) =
   ## One render: laid out, drawn into `image`, and the form left behind for
-  ## the pointer and the keyboard.
+  ## the pointer and the keyboard; back by itself once nobody has touched it
+  ## for a while (the switcher's `drawUi`).
   self.paper = paperPanel(self.frameConfig, image)
-  let target = uiTarget(SceneSettingsId, SettingsNode)
-  target.input.paper = self.paper
-  var regions: seq[UiRegion]
-  let svg = layoutUi(self.tree(image.width, image.height, self.paper, self.title()),
-    image.width, image.height, target.input, regions, target.memo)
-  let bg = if self.paper: color(1, 1, 1, 1) else: color(0.035, 0.035, 0.043, 1)
-  var owed = some(bg)
-  if not renderSvgFrame(svg, image, owed, wholeFrame = true, reuse = true):
-    discard renderSvgIntoTarget(svg, image, owed)
-  if owed.isSome:
-    image.fill(bg)
-  target.regions = move(regions)
-  target.offsetX = 0
-  target.offsetY = 0
-  target.call = onHandler
-  # Back by itself once nobody has touched it for a while; until then, a
-  # render when that time is up.
-  let
-    idle = IdleSeconds
-    now = epochTime()
-    since = now - self.state{"touchedAt"}.getFloat(now)
-  if since >= idle:
+  if self.drawUi(SceneSettingsId, self.tree(image.width, image.height, self.paper, self.title()), image,
+      self.paper, onHandler, IdleSeconds):
     leave()
-    self.refreshInterval = idle
-  else:
-    self.refreshInterval = max(idle - since, 1.0)
 
 # ------------------------------------------------------------ the scene
 
@@ -389,7 +358,7 @@ proc runSettings(self: FrameScene, context: ExecutionContext) =
     self.state = newJObject()
   of "render":
     if context.hasImage and not context.image.isNil:
-      self.draw(context.image)
+      self.drawForm(context.image)
   of "button":
     if payload{"role"}.getStr() == "back" and payload{"action"}.getStr() == "press":
       leave()
@@ -406,12 +375,7 @@ proc runSettings(self: FrameScene, context: ExecutionContext) =
         sendEvent(evRender, newJObject(), eoScene)
 
 proc renderSettings(self: FrameScene, context: ExecutionContext): Image =
-  if not context.hasImage or context.image.isNil:
-    let (w, h) =
-      if self.frameConfig.rotate == 90 or self.frameConfig.rotate == 270: (self.frameConfig.height, self.frameConfig.width)
-      else: (self.frameConfig.width, self.frameConfig.height)
-    context.image = newImage(max(w, 1), max(h, 1))
-    context.hasImage = true
+  self.ensureCanvas(context)
   runSettings(self, context)
   context.image
 
@@ -419,13 +383,12 @@ proc initSettings(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, pe
   ## Nothing persisted to start from: what it shows comes with the switch.
   let paper = paperPanel(frameConfig)
   SceneSettingsScene(id: sceneId, frameConfig: frameConfig, logger: logger, state: newJObject(),
-    refreshInterval: IdleSeconds, backgroundColor: if paper: color(1, 1, 1, 1) else: color(0.035, 0.035, 0.043, 1),
-    paper: paper)
+    refreshInterval: IdleSeconds, backgroundColor: background(paper), paper: paper)
 
 var exportedScene* = ExportedInterpretedScene(
   name: "Scene settings",
   refreshInterval: IdleSeconds,
-  backgroundColor: color(0.035, 0.035, 0.043, 1),
+  backgroundColor: background(false),
   init: initSettings,
   runEvent: runSettings,
   render: renderSettings,

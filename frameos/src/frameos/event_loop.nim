@@ -371,6 +371,13 @@ proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
       payload["sceneId"] = %order[index].string
   loop.host.selectScene(payload)
 
+{.push boundChecks: off, fieldChecks: off.}
+
+proc put(node: JsonNode, key: string, value: JsonNode) =
+  ## `node[key] = value` for an object node, without the assert json's
+  ## inline `[]=` brings into every caller.
+  node.fields[key] = value
+
 proc settingsOf(scene: FrameScene, state: JsonNode) =
   ## What the settings panel shows of `scene`: its public fields (`fields`)
   ## and their values now (`values`), read before the switch, which on a
@@ -379,27 +386,31 @@ proc settingsOf(scene: FrameScene, state: JsonNode) =
     fields = newJArray()
     values = newJObject()
   if scene of InterpretedFrameScene:
-    for field in InterpretedFrameScene(scene).publicStateFields:
+    let all = InterpretedFrameScene(scene).publicStateFields
+    for i in 0 ..< all.len:
+      let field = all[i]
       let f = newJObject()
-      f["name"] = newJString(field.name)
-      f["label"] = newJString(field.label)
-      f["type"] = newJString(field.fieldType)
-      f["placeholder"] = newJString(field.placeholder)
-      f["secret"] = newJBool(field.secret)
+      f.put("name", newJString(field.name))
+      f.put("label", newJString(field.label))
+      f.put("type", newJString(field.fieldType))
+      f.put("placeholder", newJString(field.placeholder))
+      f.put("secret", newJBool(field.secret))
       if field.options.len > 0:
         let options = newJArray()
-        for option in field.options:
+        for j in 0 ..< field.options.len:
           let o = newJObject()
-          o["value"] = newJString(option.value)
-          o["label"] = newJString(option.label)
-          options.add o
-        f["options"] = options
-      fields.add f
+          o.put("value", newJString(field.options[j].value))
+          o.put("label", newJString(field.options[j].label))
+          options.elems.add o
+        f.put("options", options)
+      fields.elems.add f
       let value = scene.state{field.name}
       if not value.isNil:
-        values[field.name] = copy(value)
-  state["fields"] = fields
-  state["values"] = values
+        values.put(field.name, copy(value))
+  state.put("fields", fields)
+  state.put("values", values)
+
+{.pop.}
 
 proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bool =
   ## `sceneSwitcher` and `sceneSettings`: the built-in scene, told which scene
@@ -415,10 +426,10 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
   var next = sceneId
   if not current.isBuiltIn:
     let state = newJObject()
-    state["from"] = newJString(if current.isNil: "" else: current.id.string)
+    state.put("from", newJString(if current.isNil: "" else: current.id.string))
     if sceneId == SceneSettingsId:
       current.settingsOf(state)
-    payload["state"] = state
+    payload.put("state", state)
   else:
     next = current.state{"from"}.getStr()
     if next.len == 0:
@@ -428,7 +439,7 @@ proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bo
   if next.len == 0:
     result = loop.refused(envelope, "noSceneOrder")
   else:
-    payload["sceneId"] = newJString(next)
+    payload.put("sceneId", newJString(next))
     result = loop.host.selectScene(payload)
 
 proc listens(loop: EventLoop, scene: FrameScene, name: string): bool =
