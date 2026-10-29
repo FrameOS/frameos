@@ -4,9 +4,29 @@ when withDir(thisDir(), system.fileExists("nimble.paths")):
   include "nimble.paths"
 # end Nimble config
 
-import std/os
+import std/[json, os, strutils]
 
 let frameosPixiePath = getEnv("FRAMEOS_PIXIE_PATH")
+let frameosZippyPath = getEnv("FRAMEOS_ZIPPY_PATH")
+
+# nimble.paths is what `nimble setup` made of nimble.lock the day it last ran:
+# a checkout set up before a pixie bump compiled against the old pixie without
+# a word (2026-10-29). A locked package missing from it at the lock's checksum
+# stops the build here; tools/nimble_paths.py refreshes it, and the Makefile,
+# build_wasm.sh and the ESP32's build_nim.sh run that first.
+if fileExists(thisDir() / "nimble.paths") and fileExists(thisDir() / "nimble.lock"):
+  let nimblePaths = readFile(thisDir() / "nimble.paths")
+  var stalePackages: seq[string]
+  for name, package in parseJson(readFile(thisDir() / "nimble.lock"))["packages"].pairs:
+    if name == "pixie" and frameosPixiePath.len > 0 or name == "zippy" and frameosZippyPath.len > 0:
+      continue # a checkout of its own, below
+    let packageDir = name & "-" & package["version"].getStr() & "-" & package["checksums"]["sha1"].getStr()
+    if ("/" & packageDir & "\"") notin nimblePaths:
+      stalePackages.add(name)
+  if stalePackages.len > 0:
+    quit("frameos/nimble.paths does not match nimble.lock (" & stalePackages.join(", ") &
+      "): run `python3 tools/nimble_paths.py` in frameos/", QuitFailure)
+
 if frameosPixiePath.len > 0:
   let frameosPixieSrc = frameosPixiePath / "src"
   if not dirExists(frameosPixieSrc / "pixie"):
@@ -15,7 +35,6 @@ if frameosPixiePath.len > 0:
   # Nim resolves later paths first, so this must come after nimble.paths.
   switch("path", frameosPixieSrc)
 
-let frameosZippyPath = getEnv("FRAMEOS_ZIPPY_PATH")
 if frameosZippyPath.len > 0:
   let frameosZippySrc = frameosZippyPath / "src"
   if not dirExists(frameosZippySrc / "zippy"):
