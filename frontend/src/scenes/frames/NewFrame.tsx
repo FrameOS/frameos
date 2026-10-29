@@ -402,13 +402,12 @@ const SEEED_SENSECAP_INDICATOR_PINS: NonNullable<NonNullable<NewFrameFormType['d
   mosi: -1,
   pwr: -1,
 }
-// The one key pressed switches the screen, pressed twice is the next scene and
-// held the previous one; the edges swipe (TOUCH_EDGE_SWIPES). Mirrors
+// The one key pressed switches the screen and pressed twice opens the scene
+// switcher; held it does nothing. The edges swipe (TOUCH_EDGE_SWIPES). Mirrors
 // EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP.
 const SEEED_SENSECAP_INDICATOR_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'BUTTON', action: 'press' }, emit: 'toggleScreen', as: {} },
-  { event: 'button', match: { label: 'BUTTON', action: 'doublePress' }, emit: 'setCurrentScene', as: { direction: 'next' } },
-  { event: 'button', match: { label: 'BUTTON', action: 'longPress' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
+  { event: 'button', match: { label: 'BUTTON', action: 'doublePress' }, emit: 'sceneSwitcher', as: {} },
   ...TOUCH_EDGE_SWIPES,
 ]
 const SEEED_RETERMINAL_STICKY_PINS: NonNullable<NonNullable<NewFrameFormType['device_config']>['pins']> = {
