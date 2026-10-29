@@ -158,6 +158,9 @@ static int buffer_index(const uint8_t *buf)
 static SemaphoreHandle_t s_mark_lock = NULL;
 static TaskHandle_t s_mark_task = NULL;
 static fos_lcd_loading_t s_mark;
+/* The buffer the mark is in, and the write count it gave that buffer. */
+static int s_mark_index = -1;
+static uint32_t s_mark_generation = 0;
 static volatile uint32_t s_presented_at = 0;
 static volatile int64_t s_last_frame_at_us = 0;
 static volatile uint32_t s_frames = 0;
@@ -724,6 +727,23 @@ static uint16_t *scanned_buffer(void)
     return (uint16_t *)s_fbs[index];
 }
 
+/* After anything that may have moved the mark, with s_mark_lock held. A
+ * buffer the mark is in holds more than a render left there, so it counts a
+ * write and a damage repaint will not take it for a frame of its own. Put
+ * back, it holds exactly what it held again, and the count goes back with it
+ * unless something else wrote there since. Nothing should: the mark is only
+ * ever in the scanned buffer, and every other writer writes the back one.
+ * Kept moved, the count cost the scene switcher its damage repaint: the way
+ * back from it put the mark over the switcher's own frame, and every opening
+ * after that drew all of it (1.8 s instead of 0.3 s on the SenseCAP). */
+static void count_mark_move(const uint16_t *before)
+{
+    if (s_mark.drawn_in == before) return;
+    if (s_mark_index >= 0 && s_generation[s_mark_index] == s_mark_generation) s_generation[s_mark_index]--;
+    s_mark_index = s_mark.drawn_in ? buffer_index((const uint8_t *)s_mark.drawn_in) : -1;
+    if (s_mark_index >= 0) s_mark_generation = ++s_generation[s_mark_index];
+}
+
 static void mark_task(void *arg)
 {
     (void)arg;
@@ -732,11 +752,7 @@ static void mark_task(void *arg)
         uint16_t *before = s_mark.drawn_in;
         uint32_t now_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
         int32_t wait_ms = fos_lcd_loading_step(&s_mark, scanned_buffer(), now_ms);
-        /* A buffer the mark went into holds more than a render left there,
-         * for good: once it is put back the count stays moved, so the damage
-         * repaint draws it whole rather than trust it. */
-        int index = s_mark.drawn_in != before ? buffer_index((const uint8_t *)s_mark.drawn_in) : -1;
-        if (index >= 0) s_generation[index]++;
+        count_mark_move(before);
         xSemaphoreGive(s_mark_lock);
         /* Rounded up: a wait of at least 1 ms is at least a tick, never the
          * 0-tick wait that spins. */
@@ -770,7 +786,9 @@ void fos_lcd_st7701s_loading_begin(uint32_t since_tick, int rotation)
         s_mark.height = FOS_LCD_ST7701S_HEIGHT;
     }
     xSemaphoreTake(s_mark_lock, portMAX_DELAY);
+    uint16_t *before = s_mark.drawn_in;
     bool begun = fos_lcd_loading_begin(&s_mark, rotation, since_tick * portTICK_PERIOD_MS);
+    count_mark_move(before);
     xSemaphoreGive(s_mark_lock);
     if (begun) xTaskNotifyGive(s_mark_task);
 }
@@ -782,7 +800,9 @@ void fos_lcd_st7701s_loading_end(void)
 {
     if (!s_mark_lock || (!s_mark.active && !s_mark.drawn_in)) return;
     xSemaphoreTake(s_mark_lock, portMAX_DELAY);
+    uint16_t *before = s_mark.drawn_in;
     fos_lcd_loading_end(&s_mark);
+    count_mark_move(before);
     xSemaphoreGive(s_mark_lock);
 }
 
