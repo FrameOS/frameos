@@ -106,6 +106,25 @@ def test_cross_compiler_canonicalizes_ubuntu_codename(tmp_path, monkeypatch: pyt
     assert compiler._docker_image() == "ubuntu:24.04"
 
 
+@pytest.mark.parametrize("arch", ["armhf", "armv7l", "armv7"])
+def test_cross_compiler_turns_rtl_dce_off_for_armv7(tmp_path, monkeypatch: pytest.MonkeyPatch, arch: str):
+    # gcc 14's RTL DCE leaves a Thumb-2 PIC load naming a deleted label, and
+    # the assembler refuses the file (DEFAULT_FEATURE_CFLAGS).
+    monkeypatch.setenv("FRAMEOS_CROSS_CACHE", str(tmp_path / "cross-cache"))
+    monkeypatch.delenv("FRAMEOS_CROSS_FEATURE_CFLAGS", raising=False)
+    compiler = CrossCompiler(
+        db=None,
+        redis=None,
+        frame=SimpleNamespace(id=1),
+        deployer=SimpleNamespace(build_id="build12345678"),
+        target=TargetMetadata(arch=arch, distro="debian", version="trixie"),
+        temp_dir=str(tmp_path / "tmp"),
+        prebuilt_entry=None,
+    )
+
+    assert compiler._cpu_feature_cflags() == ["-fno-dce"]
+
+
 def test_cross_compiler_bakes_target_cross_packages_into_amd64_toolchain_image(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

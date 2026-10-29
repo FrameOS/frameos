@@ -66,6 +66,15 @@ DEFAULT_FEATURE_CFLAGS = {
     # SIGILLs on device.
     "armv6l": ["-march=armv6zk", "-mtune=arm1176jzf-s", "-mfpu=vfp", "-mfloat-abi=hard"],
     "armv6": ["-march=armv6zk", "-mtune=arm1176jzf-s", "-mfpu=vfp", "-mfloat-abi=hard"],
+    # ARMv7 hard-float is Thumb-2 PIE: a PIC address is a pool load plus an
+    # `add pc` that defines the pool entry's label. gcc 14's late RTL DCE can
+    # delete the add and keep the dead load, whose label then exists nowhere
+    # ("invalid operands (.text and *UND* sections)" from the assembler;
+    # network/supplicant.nim on debian-trixie-armhf, 2026-10-28). -fno-dce
+    # turns off RTL DCE only, -ftree-dce stays: +0.04% text.
+    "armhf": ["-fno-dce"],
+    "armv7l": ["-fno-dce"],
+    "armv7": ["-fno-dce"],
 }
 CROSS_TOOLCHAIN_IMAGE = os.environ.get("FRAMEOS_CROSS_TOOLCHAIN_IMAGE")
 TOOLCHAIN_IMAGE_REPO = os.environ.get(
