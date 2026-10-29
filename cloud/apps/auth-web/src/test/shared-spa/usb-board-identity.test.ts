@@ -52,6 +52,18 @@ describe("classifyUsbBoard on the self-hosted backend", () => {
     expect(identity.kind === "other-frame" && identity.label).toContain("cloud-managed");
   });
 
+  it("says when a board it holds or would take is also linked to FrameOS Cloud", () => {
+    const linked = { cloud: { frameId: cloudFrame.id }, config: { frameId: 66, backendUrl: "http://10.0.0.5:8989" } };
+    expect(classifyUsbBoard(backendFrame, linked, "backend", "http://10.0.0.5:8989")).toMatchObject({
+      kind: "this-frame",
+      cloudLinked: true,
+    });
+    const cloudOnly = { config: { frameId: 0, backendUrl: "" }, cloud: { frameId: cloudFrame.id } };
+    expect(classifyUsbBoard(backendFrame, cloudOnly, "backend")).toMatchObject({ kind: "other-frame", cloudLinked: true });
+    const plain = classifyUsbBoard(backendFrame, { config: { frameId: 66, backendUrl: "http://10.0.0.5:8989" } }, "backend");
+    expect(plain.kind === "this-frame" && plain.cloudLinked).toBeFalsy();
+  });
+
   it("frame ids compare as numbers, not strings with padding", () => {
     const status = { config: { frameId: 660, backendUrl: "http://10.0.0.5:8989" } };
     expect(classifyUsbBoard(backendFrame, status, "backend").kind).toBe("other-frame");
@@ -69,6 +81,19 @@ describe("classifyUsbBoard on the cloud", () => {
     const identity = classifyUsbBoard(cloudFrame, status, "cloud");
     expect(identity.kind).toBe("other-frame");
     expect(identity.kind === "other-frame" && identity.label).toContain("11111111");
+  });
+
+  it("this frame with a self-hosted backend also set on it names that backend", () => {
+    const status = {
+      cloud: { frameId: cloudFrame.id },
+      config: { frameId: 1, backendUrl: "http://10.4.0.47:8991" },
+    };
+    expect(classifyUsbBoard(cloudFrame, status, "cloud")).toMatchObject({
+      kind: "this-frame",
+      strayBackend: "10.4.0.47:8991",
+    });
+    const clean = classifyUsbBoard(cloudFrame, { cloud: { frameId: cloudFrame.id }, config: { backendUrl: "" } }, "cloud");
+    expect(clean.kind === "this-frame" && clean.strayBackend).toBeFalsy();
   });
 
   it("a backend-provisioned board is another frame from the cloud's point of view", () => {

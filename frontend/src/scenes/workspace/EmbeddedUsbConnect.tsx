@@ -3,6 +3,7 @@ import clsx from 'clsx'
 import {
   ArrowDownOnSquareIcon,
   ArrowPathIcon,
+  ArrowUturnLeftIcon,
   CheckCircleIcon,
   ClipboardDocumentIcon,
   Cog6ToothIcon,
@@ -228,6 +229,26 @@ function ApplySettingsButton({
   )
 }
 
+// This board is the cloud frame, but a self-hosted backend is also set on it,
+// so it turns down the cloud's scenes and settings (`strayBackend`).
+function HandBackSection({ frame, backend }: { frame: FrameType; backend: string }): JSX.Element {
+  const logic = embeddedUsbConnectLogic({ frameId: frame.id, frame })
+  const { busy, settingsBusy } = useValues(logic)
+  const { handBackToCloud } = useActions(logic)
+  return (
+    <div className="frameos-warning-button space-y-2 rounded-xl border px-3 py-2 text-sm leading-5">
+      <div>
+        <span className="font-semibold">A self-hosted backend at {backend} also controls this board.</span> It turns
+        down the scenes and settings sent from here until the backend is removed.
+      </div>
+      <button type="button" onClick={handBackToCloud} disabled={busy} className={primaryButtonClass}>
+        {settingsBusy ? <Spinner color="white" /> : <ArrowUturnLeftIcon className="h-4 w-4" />}
+        {settingsBusy ? 'Handing back' : 'Hand back to the cloud'}
+      </button>
+    </div>
+  )
+}
+
 function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
   const logic = embeddedUsbConnectLogic({ frameId: frame.id, frame })
   const {
@@ -363,7 +384,9 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
             This board is {identity.label}, not “{frameName}”.
           </span>{' '}
           {canProvision
-            ? 'Nothing changes unless you set it up as this frame. The other frame then loses it.'
+            ? identity.cloudLinked
+              ? 'Nothing changes unless you set it up as this frame. It then stays linked to FrameOS Cloud, but the cloud can no longer change its scenes or settings.'
+              : 'Nothing changes unless you set it up as this frame. The other frame then loses it.'
             : cloudManaged
             ? 'To use it as this frame, use “Redeploy to this board” below. The other frame then loses it.'
             : ''}
@@ -407,6 +430,14 @@ function BoardIdentity({ frame }: { frame: FrameType }): JSX.Element {
         {wifi?.ip ? <StatusRow label="IP address" value={wifi.ip} /> : null}
         {config?.panel ? <StatusRow label="Panel" value={config.panel} /> : null}
       </div>
+
+      {identity.strayBackend ? <HandBackSection frame={frame} backend={identity.strayBackend} /> : null}
+      {identity.cloudLinked ? (
+        <div className="frame-tool-muted text-xs leading-4">
+          This board is also linked to FrameOS Cloud. The cloud can no longer change its scenes or settings while this
+          backend controls it.
+        </div>
+      ) : null}
 
       {firmwareOutdated ? <FirmwareUpdateSection frame={frame} label="Firmware update available" /> : null}
 

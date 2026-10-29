@@ -19,10 +19,14 @@ export type UsbBoardIdentity =
   | { kind: 'silent'; detail: string }
   /** Runs FrameOS but is set up for no frame on any control plane. */
   | { kind: 'unprovisioned'; status: EmbeddedUsbStatus }
-  /** Runs FrameOS as the frame this drawer belongs to. */
-  | { kind: 'this-frame'; status: EmbeddedUsbStatus }
-  /** Runs FrameOS as a different frame (another row, another backend, or a cloud enrollment). */
-  | { kind: 'other-frame'; status: EmbeddedUsbStatus; label: string }
+  /** Runs FrameOS as the frame this drawer belongs to. On the cloud, a
+   * self-hosted backend may also be set on it (`strayBackend`, host:port),
+   * which turns down every scene and settings push from the cloud; on a
+   * backend, it may also be linked to FrameOS Cloud (`cloudLinked`). */
+  | { kind: 'this-frame'; status: EmbeddedUsbStatus; strayBackend?: string; cloudLinked?: boolean }
+  /** Runs FrameOS as a different frame (another row, another backend, or a cloud
+   * enrollment, which `cloudLinked` says: provisioning it here keeps that link). */
+  | { kind: 'other-frame'; status: EmbeddedUsbStatus; label: string; cloudLinked?: boolean }
 
 /** `host:port` of a backend URL as the device stores it, so two spellings of
  * the same backend ("http://10.0.0.5:8989" vs "10.0.0.5:8989/") compare equal.
@@ -63,7 +67,8 @@ export function classifyUsbBoard(
 
   if (mode === 'cloud') {
     if (cloudFrameId && cloudFrameId === String(frame.id)) {
-      return { kind: 'this-frame', status }
+      const strayBackend = backendUrl ? backendHostPort(backendUrl) || backendUrl : ''
+      return strayBackend ? { kind: 'this-frame', status, strayBackend } : { kind: 'this-frame', status }
     }
     if (cloudFrameId) {
       return { kind: 'other-frame', status, label: `a different cloud frame (${cloudFrameId.slice(0, 8)}…)` }
@@ -82,18 +87,25 @@ export function classifyUsbBoard(
   const idMatches = configFrameId !== 0 && String(configFrameId) === String(frame.id)
   const expected = backendHostPort(expectedBackendUrl)
   const backendMatches = !expected || !backendUrl || backendHostPort(backendUrl) === expected
+  const cloudLinked = cloudFrameId ? { cloudLinked: true } : {}
   if (idMatches && backendMatches && (backendUrl || !expected)) {
-    return { kind: 'this-frame', status }
+    return { kind: 'this-frame', status, ...cloudLinked }
   }
   if (configFrameId || backendUrl) {
     return {
       kind: 'other-frame',
       status,
       label: `frame #${configFrameId || '?'} on ${backendHostPort(backendUrl) || backendUrl || 'an unknown backend'}`,
+      ...cloudLinked,
     }
   }
   if (cloudFrameId) {
-    return { kind: 'other-frame', status, label: `a cloud-managed frame (${cloudFrameId.slice(0, 8)}…)` }
+    return {
+      kind: 'other-frame',
+      status,
+      label: `a cloud-managed frame (${cloudFrameId.slice(0, 8)}…)`,
+      cloudLinked: true,
+    }
   }
   return { kind: 'unprovisioned', status }
 }
