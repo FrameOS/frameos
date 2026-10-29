@@ -33,7 +33,7 @@ describe("the plan cards", () => {
   });
 
   it("follows the slider and keeps it on the stops", () => {
-    const cards = planCardsFor(catalog, { business: 99, private: 1 }, null);
+    const cards = planCardsFor(catalog, { business: 99, private: 2 }, null);
     expect(wholeDollars(cards[1]!.stop.price_micros)).toBe("$9");
     expect(cards[2]!.stopIndex).toBe(catalog.groups[2]!.stops.length - 1);
     expect(wholeDollars(cards[2]!.stop.price_micros)).toBe("$499");
@@ -52,7 +52,7 @@ describe("the plan cards", () => {
   });
 
   it("asks support to activate the paid plans, naming the stop", () => {
-    const cards = planCardsFor(catalog, { private: 2 }, "support@example.com");
+    const cards = planCardsFor(catalog, { private: 3 }, "support@example.com");
     expect(cards[0]!.contactHref).toBeNull();
     expect(cards[1]!.contactHref).toBe(
       `mailto:support@example.com?subject=${encodeURIComponent("Activate Private at $29/month")}`,

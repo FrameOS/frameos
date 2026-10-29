@@ -49,6 +49,7 @@ export const planGroups: PlanGroupDefinition[] = [
     name: "Private",
     stops: [
       { frames: 40, usd: 2 },
+      { frames: 60, usd: 5 },
       { frames: 80, usd: 9 },
       { frames: 160, usd: 29 },
     ],

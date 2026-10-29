@@ -4,7 +4,6 @@ export app_capabilities
 import apps/data/clock/app_loader as data_clock_loader
 import apps/data/downloadImage/app_loader as data_downloadImage_loader
 import apps/data/downloadUrl/app_loader as data_downloadUrl_loader
-import apps/data/eventsToAgenda/app_loader as data_eventsToAgenda_loader
 import apps/data/icalJson/app_loader as data_icalJson_loader
 import apps/data/localImage/app_loader as data_localImage_loader
 import apps/data/log/app_loader as data_log_loader
@@ -48,7 +47,6 @@ when defined(frameosEmbedded) or defined(frameosWasm):
     AppEntry(keyword: "data/clock", initProc: data_clock_loader.init, setFieldProc: data_clock_loader.setField, getProc: data_clock_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadImage", initProc: data_downloadImage_loader.init, setFieldProc: data_downloadImage_loader.setField, getProc: data_downloadImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadUrl", initProc: data_downloadUrl_loader.init, setFieldProc: data_downloadUrl_loader.setField, getProc: data_downloadUrl_loader.get, runProc: nil),
-    AppEntry(keyword: "data/eventsToAgenda", initProc: data_eventsToAgenda_loader.init, setFieldProc: data_eventsToAgenda_loader.setField, getProc: data_eventsToAgenda_loader.get, runProc: nil),
     AppEntry(keyword: "data/icalJson", initProc: data_icalJson_loader.init, setFieldProc: data_icalJson_loader.setField, getProc: data_icalJson_loader.get, runProc: nil),
     AppEntry(keyword: "data/localImage", initProc: data_localImage_loader.init, setFieldProc: data_localImage_loader.setField, getProc: data_localImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/log", initProc: data_log_loader.init, setFieldProc: data_log_loader.setField, getProc: data_log_loader.get, runProc: nil),
@@ -79,7 +77,6 @@ else:
     AppEntry(keyword: "data/clock", initProc: data_clock_loader.init, setFieldProc: data_clock_loader.setField, getProc: data_clock_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadImage", initProc: data_downloadImage_loader.init, setFieldProc: data_downloadImage_loader.setField, getProc: data_downloadImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/downloadUrl", initProc: data_downloadUrl_loader.init, setFieldProc: data_downloadUrl_loader.setField, getProc: data_downloadUrl_loader.get, runProc: nil),
-    AppEntry(keyword: "data/eventsToAgenda", initProc: data_eventsToAgenda_loader.init, setFieldProc: data_eventsToAgenda_loader.setField, getProc: data_eventsToAgenda_loader.get, runProc: nil),
     AppEntry(keyword: "data/icalJson", initProc: data_icalJson_loader.init, setFieldProc: data_icalJson_loader.setField, getProc: data_icalJson_loader.get, runProc: nil),
     AppEntry(keyword: "data/localImage", initProc: data_localImage_loader.init, setFieldProc: data_localImage_loader.setField, getProc: data_localImage_loader.get, runProc: nil),
     AppEntry(keyword: "data/log", initProc: data_log_loader.init, setFieldProc: data_log_loader.setField, getProc: data_log_loader.get, runProc: nil),

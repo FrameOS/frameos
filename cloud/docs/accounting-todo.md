@@ -81,14 +81,14 @@ Three cards on `/account/usage`, built from one module,
 | | **Free** — $0 | **Private** — $2 to $29/mo | **Business** — $49 to $499/mo |
 |---|---|---|---|
 | People | 1 | N | N |
-| Frames (your own hardware) | 20 | 40, 80, 160 | 199, 299, 499, 999 |
+| Frames (your own hardware) | 20 | 40, 60, 80, 160 | 199, 299, 499, 999 |
 | Virtual frames, thin clients (§0.2) | 0 | N | N |
 | Photos | 250 MB | 250 MB × N | 250 MB × N |
 | Private scenes, backups, frame logs | 100 MB each | 100 MB × N each | 100 MB × N each |
 | Features | | sharing frames, virtual frames | Private's, SSO (SAML), priority support; dedicated support at $499 |
 
 N is the monthly price in dollars, so $2 is two people and twice the free
-plan's storage, and a slider picks the stop (Private 2, 9, 29; Business
+plan's storage, and a slider picks the stop (Private 2, 5, 9, 29; Business
 49, 99, 199, 499). Frames grow slower than the price: each stop names its
 own count, never below the free plan's (N times the free plan would be
 980 at $49). The free column is whatever the deployment's free plan comes

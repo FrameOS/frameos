@@ -74,11 +74,14 @@ describe("retired apps (docs/retired-apps-fixtures.json)", () => {
   });
 
   it("knows which runtimes lack the replacement", () => {
-    expect(keywordsRuntimeLacks("2026.10.10")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart"]);
-    expect(keywordsRuntimeLacks("v2026.10.10+abc")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart"]);
-    expect(keywordsRuntimeLacks("2026.10.12")).toEqual(["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart"]);
-    expect(keywordsRuntimeLacks("2026.10.11")).toEqual(["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart"]);
-    expect(keywordsRuntimeLacks("2026.10.13")).toEqual([]);
+    expect(keywordsRuntimeLacks("2026.10.10")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart", "data/eventsToAgenda"]);
+    expect(keywordsRuntimeLacks("v2026.10.10+abc")).toEqual(["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart", "data/eventsToAgenda"]);
+    expect(keywordsRuntimeLacks("2026.10.12")).toEqual(["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart", "data/eventsToAgenda"]);
+    expect(keywordsRuntimeLacks("2026.10.11")).toEqual(["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart", "data/eventsToAgenda"]);
+    // 2026.10.22 is the first release without the Nim agenda.
+    expect(keywordsRuntimeLacks("2026.10.13")).toEqual(["data/eventsToAgenda"]);
+    expect(keywordsRuntimeLacks("2026.10.21")).toEqual(["data/eventsToAgenda"]);
+    expect(keywordsRuntimeLacks("2026.10.22")).toEqual([]);
     expect(keywordsRuntimeLacks(null)).toEqual([]);
     expect(keywordsRuntimeLacks("nightly")).toEqual([]);
   });

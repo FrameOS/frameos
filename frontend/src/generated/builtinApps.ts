@@ -179,68 +179,6 @@ export const embeddedBuiltinAppConfigs = {
       "duration": "900"
     }
   },
-  "data/eventsToAgenda": {
-    "name": "Events to Agenda",
-    "description": "Convert events to an basic-caret formatted agenda string",
-    "category": "data",
-    "version": "1.0.0",
-    "fields": [
-      {
-        "name": "events",
-        "type": "json",
-        "required": true,
-        "label": "Events"
-      },
-      {
-        "name": "baseFontSize",
-        "type": "float",
-        "value": "24",
-        "required": true,
-        "label": "Base font size"
-      },
-      {
-        "name": "titleFontSize",
-        "type": "float",
-        "value": "48",
-        "required": true,
-        "label": "Title font size"
-      },
-      {
-        "name": "titleColor",
-        "type": "color",
-        "value": "#FFFFFF",
-        "required": true,
-        "label": "Day title color"
-      },
-      {
-        "name": "textColor",
-        "type": "color",
-        "value": "#FFFFFF",
-        "required": true,
-        "label": "Base text color"
-      },
-      {
-        "name": "timeColor",
-        "type": "color",
-        "value": "#FF0000",
-        "required": true,
-        "label": "Time color"
-      },
-      {
-        "name": "startWithToday",
-        "type": "boolean",
-        "value": "true",
-        "required": true,
-        "label": "Always start with today's date"
-      }
-    ],
-    "output": [
-      {
-        "name": "result",
-        "type": "string"
-      }
-    ]
-  },
   "data/icalJson": {
     "name": "iCal to Events JSON",
     "description": "Convert an iCal file into a JSON event list",
@@ -2375,11 +2313,6 @@ export const embeddedBuiltinAppSources: Record<string, Record<string, string>> =
     "app.nim": "import std/json\nimport frameos/apps\nimport frameos/spool\nimport frameos/types\nimport frameos/utils/http_client\n\ntype\n  AppConfig* = object\n    url*: string\n\n  App* = ref object of AppRoot\n    appConfig*: AppConfig\n\nproc get*(self: App, context: ExecutionContext): Spool =\n  let url = self.appConfig.url\n  try:\n    # The body never exists whole in memory on the way in: on hosts it streams\n    # off the socket into the spool writer, on embedded a body the C side\n    # already spilled to storage is adopted as the spool's backing file, and\n    # PSRAM-chunked bodies window into the writer. A consumer that folds\n    # (icalJson) then never needs the document resident; peak memory on this\n    # edge is the window, not the download.\n    let threshold = spoolThreshold()\n    let spooled = boundedGetSpool(url,\n      maxBytes = self.maxHttpResponseBytes(),\n      spoolThresholdBytes = threshold,\n      spoolDir = self.spoolDir(),\n      spoolName = \"downloadUrl-\" & $self.nodeId.int & \".tmp\")\n    if spooled.isFileBacked() or (threshold > 0 and spooled.len > threshold):\n      self.log(%*{\n        \"event\": \"spool\",\n        \"bytes\": spooled.len,\n        \"thresholdBytes\": threshold,\n        # The tier that was actually reached. A storage probe can fail — no SD\n        # card, a full filesystem — and the honest answer is then \"memory\",\n        # which is what this app always did.\n        \"tier\": (if spooled.isFileBacked(): \"storage\" else: \"memory\"),\n        \"path\": spooled.path()\n      })\n    spooled\n  except CatchableError as e:\n    self.logError e.msg\n    newMemorySpool(e.msg)\n",
     "app_loader.nim": "{.warning[UnusedImport]: off.}\nimport json\nimport options\nimport strutils\nimport pixie\nimport frameos/app_config\nimport frameos/values\nimport frameos/types\nimport ./app as app_module\n\nconst configFields = [\n  cfgFieldStr(app_module.AppConfig, url),\n]\n\nproc init*(\n    node: DiagramNode,\n    scene: FrameScene,\n): AppRoot =\n  let params = node.data[\"config\"]\n  if params.kind != JObject:\n    raise newException(Exception, \"Invalid config format\")\n  var config = app_module.AppConfig(\n    url: \"\",\n  )\n  applyConfigParams(addr config, configFields, params)\n\n  result = app_module.App(\n    appConfig: config,\n    nodeName: node.data{\"name\"}.getStr(),\n    nodeId: node.id,\n    scene: scene,\n    frameConfig: scene.frameConfig,\n  )\n\n\nproc setField*(self: AppRoot, field: string, value: Value) =\n  let app = app_module.App(self)\n  if not setConfigField(addr app.appConfig, configFields, field, value):\n    raise newException(ValueError, \"Unknown field: \" & field)\n\nproc get*(self: AppRoot, context: ExecutionContext): Value =\n  return app_module.get(app_module.App(self), context)\n",
     "config.json": "{\n  \"name\": \"Download URL\",\n  \"description\": \"Download a URL into a string\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"url\",\n      \"type\": \"text\",\n      \"value\": \"\",\n      \"required\": true,\n      \"label\": \"URL\",\n      \"placeholder\": \"https://domain/content\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"result\",\n      \"type\": \"string\",\n      \"capabilities\": { \"byteIter\": {} }\n    }\n  ],\n  \"cache\": {\n    \"enabled\": true,\n    \"inputEnabled\": true,\n    \"durationEnabled\": true,\n    \"duration\": \"900\"\n  }\n}\n"
-  },
-  "data/eventsToAgenda": {
-    "app.nim": "import frameos/types\nimport json\nimport strformat\nimport strutils\nimport algorithm\nimport chrono\nimport times\nimport pixie\n\ntype\n  AppConfig* = object\n    events*: JsonNode\n    baseFontSize*: float\n    titleFontSize*: float\n    textColor*: Color\n    timeColor*: Color\n    titleColor*: Color\n    startWithToday*: bool\n\n  App* = ref object of AppRoot\n    appConfig*: AppConfig\n    testOverrideToday*: string\n\nconst titleFormat = \"{weekday}, {month/n} {day}\"\n\nproc getTimezone*(self: App, json: JsonNode): string =\n  result = \"UTC\"\n  if json.kind == JArray:\n    for result in json.items():\n      if result{\"timezone\"}.getStr() != \"\":\n        return result{\"timezone\"}.getStr()\n  if self.frameConfig.timeZone != \"\":\n    return self.frameConfig.timeZone\n\nproc formatFontSize(value: float): string =\n  var formatted = value.formatFloat(ffDecimal, 6)\n  while formatted.len > 0 and formatted[^1] == '0':\n    formatted.setLen(formatted.len - 1)\n  if formatted.len > 0 and formatted[^1] == '.':\n    formatted.setLen(formatted.len - 1)\n  if formatted.len == 0:\n    return \"0\"\n  result = formatted\n\nproc get*(self: App, context: ExecutionContext): string =\n  let title = &\"^({formatFontSize(self.appConfig.titleFontSize)},{self.appConfig.titleColor.toHtmlHex()})\"\n  let normal = &\"^({formatFontSize(self.appConfig.baseFontSize)},{self.appConfig.textColor.toHtmlHex()})\"\n  let time = &\"^({formatFontSize(self.appConfig.baseFontSize)},{self.appConfig.timeColor.toHtmlHex()})\"\n  let events = self.appConfig.events\n  let timezone = self.getTimezone(events)\n  let todayTs =\n    if self.testOverrideToday.len > 0:\n      parseTs(\"{year/4}-{month/2}-{day/2}\", self.testOverrideToday)\n    else:\n      epochTime().Timestamp\n\n  proc h1(text: string): string = &\"{title}{text}\\n{normal}\\n\"\n  proc formatDay(day: string): string = format(parseTs(\"{year/4}-{month/2}-{day/2}\", day), titleFormat)\n\n  let noEvents = events == nil or events.kind != JArray or events.len == 0\n\n  result = \"\"\n\n  var currentDay = \"\"\n  if self.appConfig.startWithToday or noEvents:\n    result &= h1(format(todayTs, titleFormat, tzName = timezone))\n    currentDay = format(todayTs, \"{year/4}-{month/2}-{day/2}\", tzName = timezone)\n\n  if noEvents:\n    result &= &\"No events found\\n\"\n    return\n\n  let sortedEvents = events.elems.sorted(\n    proc (a, b: JsonNode): int = cmp(a[\"startTime\"].getStr(), b[\"startTime\"].getStr())\n  )\n  var hasAny = false\n  for obj in sortedEvents:\n    let summary = obj{\"summary\"}.getStr()\n    let startDay = obj{\"startTime\"}.getStr()\n    let endDay = obj{\"endTime\"}.getStr()\n    let withTime = \"T\" in startDay\n    let startDate = startDay.split(\"T\")[0]\n    let endDate = endDay.split(\"T\")[0]\n    var displayDay = startDate\n\n    if self.appConfig.startWithToday and currentDay != \"\" and\n        startDate <= currentDay and currentDay <= endDate:\n      displayDay = currentDay\n\n    if displayDay != currentDay: # new day, past or future\n      if not hasAny and displayDay != currentDay and self.appConfig.startWithToday:\n        result &= \"No events today\\n\"\n      result &= \"\\n\" & h1(formatDay(displayDay))\n      currentDay = displayDay\n\n    hasAny = true\n\n    if withTime:\n      let startTime = if \"T\" in startDay: startDay.split(\"T\")[1][0 .. 4] else: \"\"\n      let endTime = if \"T\" in endDay: endDay.split(\"T\")[1][0 .. 4] else: \"\"\n      result &= &\"{time}{startTime} - {endTime}  {normal}{summary}\\n\"\n    else:\n      if startDay == currentDay and endDay == currentDay:\n        result &= &\"{time}All day  {normal}{summary}\\n\"\n      else:\n        result &= &\"{time}Until {formatDay(endDay)}  {normal}{summary}\\n\"\n",
-    "app_loader.nim": "{.warning[UnusedImport]: off.}\nimport json\nimport options\nimport strutils\nimport pixie\nimport frameos/app_config\nimport frameos/values\nimport frameos/types\nimport ./app as app_module\n\nconst configFields = [\n  cfgFieldFloat(app_module.AppConfig, baseFontSize),\n  cfgFieldFloat(app_module.AppConfig, titleFontSize),\n  cfgFieldColor(app_module.AppConfig, titleColor),\n  cfgFieldColor(app_module.AppConfig, textColor),\n  cfgFieldColor(app_module.AppConfig, timeColor),\n  cfgFieldBool(app_module.AppConfig, startWithToday),\n]\n\nproc init*(\n    node: DiagramNode,\n    scene: FrameScene,\n): AppRoot =\n  let params = node.data[\"config\"]\n  if params.kind != JObject:\n    raise newException(Exception, \"Invalid config format\")\n  var config = app_module.AppConfig(\n    events: params{\"events\"},\n    baseFontSize: 24.0,\n    titleFontSize: 48.0,\n    titleColor: Color(r: 1, g: 1, b: 1, a: 1),\n    textColor: Color(r: 1, g: 1, b: 1, a: 1),\n    timeColor: Color(r: 1, g: 0, b: 0, a: 1),\n    startWithToday: true,\n  )\n  applyConfigParams(addr config, configFields, params)\n\n  result = app_module.App(\n    appConfig: config,\n    nodeName: node.data{\"name\"}.getStr(),\n    nodeId: node.id,\n    scene: scene,\n    frameConfig: scene.frameConfig,\n  )\n\n\nproc setField*(self: AppRoot, field: string, value: Value) =\n  let app = app_module.App(self)\n  case field:\n  of \"events\":\n    app.appConfig.events = value.asJson()\n  else:\n    if not setConfigField(addr app.appConfig, configFields, field, value):\n      raise newException(ValueError, \"Unknown field: \" & field)\n\nproc get*(self: AppRoot, context: ExecutionContext): Value =\n  return app_module.get(app_module.App(self), context)\n",
-    "config.json": "{\n  \"name\": \"Events to Agenda\",\n  \"description\": \"Convert events to an basic-caret formatted agenda string\",\n  \"category\": \"data\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    {\n      \"name\": \"events\",\n      \"type\": \"json\",\n      \"required\": true,\n      \"label\": \"Events\"\n    },\n    {\n      \"name\": \"baseFontSize\",\n      \"type\": \"float\",\n      \"value\": \"24\",\n      \"required\": true,\n      \"label\": \"Base font size\"\n    },\n    {\n      \"name\": \"titleFontSize\",\n      \"type\": \"float\",\n      \"value\": \"48\",\n      \"required\": true,\n      \"label\": \"Title font size\"\n    },\n    {\n      \"name\": \"titleColor\",\n      \"type\": \"color\",\n      \"value\": \"#FFFFFF\",\n      \"required\": true,\n      \"label\": \"Day title color\"\n    },\n    {\n      \"name\": \"textColor\",\n      \"type\": \"color\",\n      \"value\": \"#FFFFFF\",\n      \"required\": true,\n      \"label\": \"Base text color\"\n    },\n    {\n      \"name\": \"timeColor\",\n      \"type\": \"color\",\n      \"value\": \"#FF0000\",\n      \"required\": true,\n      \"label\": \"Time color\"\n    },\n    {\n      \"name\": \"startWithToday\",\n      \"type\": \"boolean\",\n      \"value\": \"true\",\n      \"required\": true,\n      \"label\": \"Always start with today's date\"\n    }\n  ],\n  \"output\": [\n    {\n      \"name\": \"result\",\n      \"type\": \"string\"\n    }\n  ]\n}\n"
   },
   "data/icalJson": {
     "app.nim": "import pixie\nimport times\nimport options\nimport json\nimport strutils\nimport frameos/apps\nimport frameos/types\nimport chrono\nimport frameos/utils/period\n\nimport ./ical\n\ntype\n  AppConfig* = object\n    ## `ical` is a Spool, not a string: an ICS feed is the one input in the\n    ## app library that is routinely multi-MB while its output is a handful of\n    ## events. Declaring `byteIter` in config.json is what makes the loader\n    ## hand it over without materializing (docs/value-pipeline.md, phase 2).\n    ical*: Spool\n    exportFrom*: string\n    exportUntil*: string\n    exportCount*: int\n    search*: string\n    addLocation*: bool\n    addUrl*: bool\n    addDescription*: bool\n    addTimezone*: bool\n\n  App* = ref object of AppRoot\n    appConfig*: AppConfig\n\nproc get*(self: App; context: ExecutionContext): JsonNode =\n  result = %*[]\n  if self.appConfig.iCal.len == 0:\n    self.logError \"No iCal data provided.\"\n    return\n  # A URL instead of a document is the classic misconfiguration; catching it\n  # needs the first few bytes, never the whole body.\n  if self.appConfig.iCal.startsWithBytes(\"http\"):\n    self.logError \"Pass in iCal data as a string, not a URL.\"\n    return\n\n  let timezone = if self.frameConfig.timeZone != \"\": self.frameConfig.timeZone else: \"UTC\"\n\n  let startTs =\n    if self.appConfig.exportFrom == \"\":\n      epochTime().Timestamp\n    else:\n      parsePeriodBoundary(self.appConfig.exportFrom, timezone, true)\n\n  let endTs =\n    if self.appConfig.exportUntil == \"\":\n      (epochTime() + 366.0 * 24.0 * 60.0 * 60.0).Timestamp\n    else:\n      parsePeriodBoundary(self.appConfig.exportUntil, timezone, false)\n\n  var parsedCalendar: ParsedCalendar\n  try:\n    # The export window doubles as the fold's keep-window: a multi-year feed\n    # keeps only the window's events (plus recurring masters) resident.\n    parsedCalendar = parseICalendar(self.appConfig.iCal, timezone,\n      keepFrom = startTs, keepUntil = endTs)\n  except CatchableError as e:\n    self.logError \"Error parsing iCal: \" & $e.msg\n    return\n\n  let matchedEvents = getEvents(parsedCalendar, startTs, endTs, self.appConfig.search, self.appConfig.exportCount)\n  var eventsReply: JsonNode = %[]\n  for (time, event) in matchedEvents:\n    let startTime = if event.fullDay: time.format(\"{year/4}-{month/2}-{day/2}\", parsedCalendar.timeZone)\n                    else: time.format(\"{year/4}-{month/2}-{day/2}T{hour/2}:{minute/2}:{second/2}\",\n                        parsedCalendar.timeZone)\n    let endTimeFloat = time.float + (event.endTs.float - event.startTs.float) - (if event.fullDay: 0.001 else: 0.0) + (\n        if event.fullDay and event.startTs == event.endTs: 86400.0 else: 0.0)\n    let endTime = if event.fullDay: endTimeFloat.Timestamp.format(\"{year/4}-{month/2}-{day/2}\", parsedCalendar.timeZone)\n                  else: endTimeFloat.Timestamp.format(\"{year/4}-{month/2}-{day/2}T{hour/2}:{minute/2}:{second/2}\",\n                        parsedCalendar.timeZone)\n    let jsonEvent = %*{\n      \"summary\": event.summary,\n      \"startTime\": startTime,\n      \"endTime\": endTime,\n    }\n    if event.location != \"\" and self.appConfig.addLocation:\n      jsonEvent[\"location\"] = %*event.location\n    if event.url != \"\" and self.appConfig.addUrl:\n      jsonEvent[\"url\"] = %*event.url\n    if event.description != \"\" and self.appConfig.addDescription:\n      jsonEvent[\"description\"] = %*event.description\n    if self.appConfig.addTimezone:\n      jsonEvent[\"timezone\"] = %*(if event.timeZone == \"\": parsedCalendar.timeZone else: event.timeZone)\n    eventsReply.add(jsonEvent)\n  self.log(%*{\"event\": \"reply\", \"eventsInRange\": len(eventsReply)})\n  return eventsReply\n",

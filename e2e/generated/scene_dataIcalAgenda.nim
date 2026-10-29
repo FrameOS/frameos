@@ -7,25 +7,28 @@ import std/monotimes
 import frameos/values
 import frameos/types
 import frameos/channels
+import frameos/refresh_interval
 import frameos/utils/image
 import frameos/utils/url
 import frameos/utils/time
 import apps/render/split/app as render_splitApp
 import apps/data/icalJson/app as data_icalJsonApp
-import apps/data/eventsToAgenda/app as data_eventsToAgendaApp
+import frameos/js_app_runtime as js_app_runtime
 import apps/render/text/app as render_textApp
 import apps/render/calendar/app as render_calendarApp
 
 const DEBUG = false
-let PUBLIC_STATE_FIELDS*: seq[StateField] = @[]
-let PERSISTED_STATE_KEYS*: seq[string] = @[]
+let PUBLIC_STATE_FIELDS*: seq[StateField] = @[
+  StateField(name: "refreshInterval", label: "Refresh interval (seconds)", fieldType: "float", options: @[], placeholder: "", required: false, secret: false, value: %*(3600.0), role: "refreshInterval")
+]
+let PERSISTED_STATE_KEYS*: seq[string] = @["refreshInterval"]
 
 type Scene* = ref object of FrameScene
   node1: render_splitApp.App
   node2: render_textApp.App
   node3: render_calendarApp.App
   node4: data_icalJsonApp.App
-  node5: data_eventsToAgendaApp.App
+  node5: AppRoot
 
 {.push hint[XDeclaredButNotUsed]: off.}
 var cache0: Option[JsonNode] = none(JsonNode)
@@ -48,13 +51,17 @@ proc runNode*(self: Scene, nodeId: NodeId, context: ExecutionContext, asDataNode
       nextNode = -1.NodeId
     of 2.NodeId: # render/text
       self.node2.appConfig.text = block:
-        self.node5.appConfig.events = block:
-          if cache0.isNone() or epochTime() > cache0Time + 900.0:
-            cache0 = some(block:
-              self.node4.get(context))
-            cache0Time = epochTime()
-          cache0.get()
-        self.node5.get(context)
+        let frameosValue = block:
+          js_app_runtime.setDynamicJsAppField(self.node5, "events", block:
+            let fieldValue = block:
+              if cache0.isNone() or epochTime() > cache0Time + 900.0:
+                cache0 = some(block:
+                  self.node4.get(context))
+                cache0Time = epochTime()
+              cache0.get()
+            VJson(fieldValue))
+          js_app_runtime.getDynamicJsApp(self.node5, context)
+        frameosValue.asString()
       self.node2.run(context)
       nextNode = -1.NodeId
     of 3.NodeId: # render/calendar
@@ -86,7 +93,7 @@ proc runEvent*(self: Scene, context: ExecutionContext) =
         if payload.hasKey(key) and payload[key] != self.state{key}:
           self.state[key] = copy(payload[key])
     if context.payload.hasKey("render"):
-      sendEvent("render", %*{})
+      sendEvent("render", %*{}, eoScene)
   of "setCurrentScene":
     if context.payload.hasKey("state") and context.payload["state"].kind == JObject:
       let payload = context.payload["state"]
@@ -98,23 +105,25 @@ proc runEvent*(self: Scene, context: ExecutionContext) =
 
 proc runEvent*(self: FrameScene, context: ExecutionContext) =
   runEvent(Scene(self), context)
+  # The interval is a state field: read it back after every run
+  self.syncRefreshInterval()
 
 proc render*(self: FrameScene, context: ExecutionContext): Image =
   runEvent(self, context)
   return context.image
 
 proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persistedState: JsonNode): FrameScene =
-  var state = %*{}
+  var state = %*{"refreshInterval": %*(3600.0)}
   if persistedState.kind == JObject:
     for key in persistedState.keys:
       state[key] = persistedState[key]
-  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 3600.0, backgroundColor: parseHtmlColor("#000000"))
+  let scene = Scene(id: sceneId, frameConfig: frameConfig, state: state, logger: logger, refreshInterval: 3600.0, refreshIntervalKey: "refreshInterval", refreshIntervalDefault: 3600.0, backgroundColor: parseHtmlColor("#000000"))
   let self = scene
   result = scene
   var context = ExecutionContext(scene: scene, event: "init", payload: state, hasImage: false, loopIndex: 0, loopKey: ".")
   scene.execNode = (proc(nodeId: NodeId, context: ExecutionContext) = discard scene.runNode(nodeId, context))
   scene.getDataNode = (proc(nodeId: NodeId, context: ExecutionContext): Value = scene.getDataNode(nodeId, context))
-  scene.node1 = render_splitApp.App(nodeName: "render/split", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
+  scene.node1 = render_splitApp.App(nodeName: "render/split", appKeyword: "render/split", nodeId: 1.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_splitApp.AppConfig(
     rows: 2,
     inputImage: none(Image),
     columns: 1,
@@ -129,7 +138,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     ],
     render_function: 0.NodeId,
   ))
-  scene.node4 = data_icalJsonApp.App(nodeName: "data/icalJson", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_icalJsonApp.AppConfig(
+  scene.node4 = data_icalJsonApp.App(nodeName: "data/icalJson", appKeyword: "data/icalJson", nodeId: 4.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_icalJsonApp.AppConfig(
     ical: newMemorySpool("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//FrameOS//e2e//EN\r\nBEGIN:VEVENT\r\nUID:e2e-1\r\nDTSTAMP:20240201T000000Z\r\nDTSTART:20240304T083000Z\r\nDTEND:20240304T091500Z\r\nSUMMARY:Standup\r\nRRULE:FREQ=WEEKLY;COUNT=3\r\nLOCATION:Room 1\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:e2e-2\r\nDTSTAMP:20240201T000000Z\r\nDTSTART;VALUE=DATE:20240312\r\nDTEND;VALUE=DATE:20240315\r\nSUMMARY:Conference\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:e2e-3\r\nDTSTAMP:20240201T000000Z\r\nDTSTART:20240320T120000Z\r\nDTEND:20240320T130000Z\r\nSUMMARY:Lunch with Ada\r\nURL:https://example.com/lunch\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:e2e-4\r\nDTSTAMP:20240201T000000Z\r\nDTSTART;VALUE=DATE:20240328\r\nSUMMARY:Birthday\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"),
     exportFrom: "2024-03-01",
     exportUntil: "2024-03-31",
@@ -140,15 +149,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     addDescription: false,
     addTimezone: false,
   ))
-  scene.node5 = data_eventsToAgendaApp.App(nodeName: "data/eventsToAgenda", nodeId: 5.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: data_eventsToAgendaApp.AppConfig(
-    baseFontSize: 14.0,
-    titleFontSize: 20.0,
-    startWithToday: false,
-    timeColor: parseHtmlColor("#f6ad55"),
-    titleColor: parseHtmlColor("#FFFFFF"),
-    textColor: parseHtmlColor("#FFFFFF"),
-  ))
-  scene.node2 = render_textApp.App(nodeName: "render/text", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
+  scene.node5 = js_app_runtime.initDynamicJsApp("eventsToAgenda", DiagramNode(id: 5.NodeId, nodeType: "app", data: parseJson("{\"config\":{\"baseFontSize\":\"14\",\"startWithToday\":\"false\",\"textColor\":\"#FFFFFF\",\"timeColor\":\"#f6ad55\",\"titleColor\":\"#FFFFFF\",\"titleFontSize\":\"20\"},\"keyword\":\"eventsToAgenda\",\"name\":\"eventsToAgenda\"}")), scene.FrameScene, parseJson("{\"app.test.ts\":\"import { get } from './app'\\n\\nconst config = {\\n  baseFontSize: 24,\\n  titleFontSize: 48,\\n  textColor: '#445566',\\n  timeColor: '#778899',\\n  titleColor: '#112233',\\n  startWithToday: false,\\n}\\n\\nfunction agenda(events: unknown, extra: Record<string, unknown> = {}, timeZone = 'UTC') {\\n  return get(makeApp({ config: { ...config, ...extra, events }, frame: { timeZone } })) as string\\n}\\n\\n// The clock at noon UTC on `day` for the length of `run`.\\nfunction onDay<T>(day: string, run: () => T): T {\\n  const real = Date.now\\n  Date.now = () => Date.parse(`${day}T12:00:00Z`)\\n  try {\\n    return run()\\n  } finally {\\n    Date.now = real\\n  }\\n}\\n\\ndescribe('eventsToAgenda', () => {\\n  it('formats and sorts events across days', () => {\\n    const output = agenda([\\n      { summary: 'Holiday', startTime: '2024-12-25', endTime: '2024-12-25' },\\n      { summary: 'Breakfast', startTime: '2024-12-24T08:00:00', endTime: '2024-12-24T09:00:00' },\\n    ])\\n    expect(output).toBe(\\n      '\\\\n^(48,#112233)Tuesday, December 24\\\\n^(24,#445566)\\\\n' +\\n        '^(24,#778899)08:00 - 09:00  ^(24,#445566)Breakfast\\\\n' +\\n        '\\\\n^(48,#112233)Wednesday, December 25\\\\n^(24,#445566)\\\\n' +\\n        '^(24,#778899)All day  ^(24,#445566)Holiday\\\\n',\\n    )\\n  })\\n\\n  it('shows until text for multi-day events', () => {\\n    const output = agenda([{ summary: 'Conference', startTime: '2024-12-25', endTime: '2024-12-27' }])\\n    expect(output).toContain('^(48,#112233)Wednesday, December 25')\\n    expect(output).toContain('^(24,#778899)Until Friday, December 27  ^(24,#445566)Conference')\\n  })\\n\\n  it('shows an ongoing multi-day event under today when starting with today', () => {\\n    const output = onDay('2024-12-26', () =>\\n      agenda([{ summary: 'Retreat', startTime: '2024-12-23', endTime: '2024-12-27' }], { startWithToday: true }),\\n    )\\n    expect(output).not.toContain('No events today')\\n    expect(output.split('^(48,#112233)Thursday, December 26').length).toBe(2)\\n    expect(output).toContain('^(24,#778899)Until Friday, December 27  ^(24,#445566)Retreat')\\n  })\\n\\n  it('says when today has nothing before the days that do', () => {\\n    const output = onDay('2024-12-26', () =>\\n      agenda([{ summary: 'Dinner', startTime: '2024-12-28T19:00:00', endTime: '2024-12-28T21:00:00' }], {\\n        startWithToday: true,\\n      }),\\n    )\\n    expect(output).toBe(\\n      '^(48,#112233)Thursday, December 26\\\\n^(24,#445566)\\\\nNo events today\\\\n' +\\n        '\\\\n^(48,#112233)Saturday, December 28\\\\n^(24,#445566)\\\\n' +\\n        '^(24,#778899)19:00 - 21:00  ^(24,#445566)Dinner\\\\n',\\n    )\\n  })\\n\\n  it('titles today over \\\"No events found\\\" without events', () => {\\n    for (const events of [[], null, undefined, 'nope']) {\\n      expect(onDay('2024-12-26', () => agenda(events))).toBe(\\n        '^(48,#112233)Thursday, December 26\\\\n^(24,#445566)\\\\nNo events found\\\\n',\\n      )\\n    }\\n  })\\n\\n  it('writes a font size without trailing zeros', () => {\\n    const output = agenda([{ summary: 'A', startTime: '2024-12-25', endTime: '2024-12-25' }], {\\n      baseFontSize: 24.5,\\n      titleFontSize: 0.1 + 0.2,\\n    })\\n    expect(output).toContain('^(0.3,#112233)Wednesday, December 25')\\n    expect(output).toContain('^(24.5,#778899)All day')\\n  })\\n\\n  it('fails the node on a date it cannot read', () => {\\n    expect(() => agenda([{ summary: 'A', startTime: 'soon', endTime: 'later' }])).toThrow('Invalid date: soon')\\n  })\\n})\\n\",\"app.ts\":\"// Events to Agenda: calendar events (as the iCal JSON app gives them) as an\\n// agenda in basic-caret text, a day title over each day's events.\\nconst WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']\\nconst MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September',\\n  'October', 'November', 'December']\\n\\nconst str = (value) => (typeof value === 'string' ? value : '')\\n\\n// A font size as caret text writes it: 24, 24.5, never 24.000000.\\nconst size = (value) => String(Number((Number(value) || 0).toFixed(6)))\\n\\n// \\\"Tuesday, December 24\\\" for \\\"2024-12-24\\\": the date as written, in no zone.\\nfunction dayTitle(day) {\\n  const match = /^(\\\\d{4})-(\\\\d{2})-(\\\\d{2})/.exec(day)\\n  if (!match) throw new Error(`Invalid date: ${day}`)\\n  const [year, month, date] = [Number(match[1]), Number(match[2]), Number(match[3])]\\n  const weekday = new Date(Date.UTC(year, month - 1, date)).getUTCDay()\\n  return `${WEEKDAYS[weekday]}, ${MONTHS[month - 1]} ${date}`\\n}\\n\\n// Today as YYYY-MM-DD in `zone`. JavaScript's clock is in the frame's zone,\\n// as the Nim runtime's is, and knows no other, so a calendar in a third zone\\n// gets the frame's day: the two differ only between their midnights.\\nfunction today(zone) {\\n  const now = new Date(Date.now())\\n  const utc = zone === 'UTC' || zone === 'Etc/UTC' || zone === 'GMT'\\n  const parts = utc\\n    ? [now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate()]\\n    : [now.getFullYear(), now.getMonth() + 1, now.getDate()]\\n  return parts.map((part, i) => String(part).padStart(i === 0 ? 4 : 2, '0')).join('-')\\n}\\n\\nexport function get(app) {\\n  const c = app.config\\n  const title = `^(${size(c.titleFontSize)},${c.titleColor})`\\n  const normal = `^(${size(c.baseFontSize)},${c.textColor})`\\n  const time = `^(${size(c.baseFontSize)},${c.timeColor})`\\n  const events = c.events\\n  const noEvents = !Array.isArray(events) || events.length === 0\\n  // The first event that names its zone, else the frame's.\\n  const zone = (noEvents ? '' : str(events.find((event) => str(event?.timezone))?.timezone)) ||\\n    app.frame.timeZone || 'UTC'\\n  const h1 = (text) => `${title}${text}\\\\n${normal}\\\\n`\\n\\n  let result = ''\\n  let currentDay = ''\\n  if (c.startWithToday || noEvents) {\\n    currentDay = today(zone)\\n    result += h1(dayTitle(currentDay))\\n  }\\n  if (noEvents) return result + 'No events found\\\\n'\\n\\n  const sorted = [...events].sort((a, b) => {\\n    const x = str(a?.startTime)\\n    const y = str(b?.startTime)\\n    return x < y ? -1 : x > y ? 1 : 0\\n  })\\n  let hasAny = false\\n  for (const event of sorted) {\\n    const summary = str(event?.summary)\\n    const startDay = str(event?.startTime)\\n    const endDay = str(event?.endTime)\\n    const withTime = startDay.includes('T')\\n    const startDate = startDay.split('T')[0]\\n    const endDate = endDay.split('T')[0]\\n    let displayDay = startDate\\n    // A day that is on now shows under today.\\n    if (c.startWithToday && currentDay && startDate <= currentDay && currentDay <= endDate) displayDay = currentDay\\n\\n    if (displayDay !== currentDay) {\\n      if (!hasAny && c.startWithToday) result += 'No events today\\\\n'\\n      result += '\\\\n' + h1(dayTitle(displayDay))\\n      currentDay = displayDay\\n    }\\n    hasAny = true\\n\\n    if (withTime) {\\n      const startTime = startDay.split('T')[1].slice(0, 5)\\n      const endTime = endDay.includes('T') ? endDay.split('T')[1].slice(0, 5) : ''\\n      result += `${time}${startTime} - ${endTime}  ${normal}${summary}\\\\n`\\n    } else if (startDay === currentDay && endDay === currentDay) {\\n      result += `${time}All day  ${normal}${summary}\\\\n`\\n    } else {\\n      result += `${time}Until ${dayTitle(endDay)}  ${normal}${summary}\\\\n`\\n    }\\n  }\\n  return result\\n}\\n\",\"config.json\":\"{\\n  \\\"name\\\": \\\"Events to Agenda\\\",\\n  \\\"description\\\": \\\"Convert events to a basic-caret formatted agenda string\\\",\\n  \\\"category\\\": \\\"data\\\",\\n  \\\"version\\\": \\\"1.0.0\\\",\\n  \\\"fields\\\": [\\n    {\\n      \\\"name\\\": \\\"events\\\",\\n      \\\"type\\\": \\\"json\\\",\\n      \\\"required\\\": true,\\n      \\\"label\\\": \\\"Events\\\"\\n    },\\n    {\\n      \\\"name\\\": \\\"baseFontSize\\\",\\n      \\\"type\\\": \\\"float\\\",\\n      \\\"value\\\": \\\"24\\\",\\n      \\\"required\\\": true,\\n      \\\"label\\\": \\\"Base font size\\\"\\n    },\\n    {\\n      \\\"name\\\": \\\"titleFontSize\\\",\\n      \\\"type\\\": \\\"float\\\",\\n      \\\"value\\\": \\\"48\\\",\\n      \\\"required\\\": true,\\n      \\\"label\\\": \\\"Title font size\\\"\\n    },\\n    {\\n      \\\"name\\\": \\\"titleColor\\\",\\n      \\\"type\\\": \\\"color\\\",\\n      \\\"value\\\": \\\"#FFFFFF\\\",\\n      \\\"required\\\": true,\\n      \\\"label\\\": \\\"Day title color\\\"\\n    },\\n    {\\n      \\\"name\\\": \\\"textColor\\\",\\n      \\\"type\\\": \\\"color\\\",\\n      \\\"value\\\": \\\"#FFFFFF\\\",\\n      \\\"required\\\": true,\\n      \\\"label\\\": \\\"Base text color\\\"\\n    },\\n    {\\n      \\\"name\\\": \\\"timeColor\\\",\\n      \\\"type\\\": \\\"color\\\",\\n      \\\"value\\\": \\\"#FF0000\\\",\\n      \\\"required\\\": true,\\n      \\\"label\\\": \\\"Time color\\\"\\n    },\\n    {\\n      \\\"name\\\": \\\"startWithToday\\\",\\n      \\\"type\\\": \\\"boolean\\\",\\n      \\\"value\\\": \\\"true\\\",\\n      \\\"required\\\": true,\\n      \\\"label\\\": \\\"Always start with today's date\\\"\\n    }\\n  ],\\n  \\\"output\\\": [\\n    {\\n      \\\"name\\\": \\\"result\\\",\\n      \\\"type\\\": \\\"string\\\"\\n    }\\n  ]\\n}\\n\"}"))
+  scene.node2 = render_textApp.App(nodeName: "render/text", appKeyword: "render/text", nodeId: 2.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_textApp.AppConfig(
     position: "left",
     vAlign: "top",
     padding: 8.0,
@@ -156,13 +158,17 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     richText: "basic-caret",
     inputImage: none(Image),
     text: block:
-      self.node5.appConfig.events = block:
-        if cache0.isNone() or epochTime() > cache0Time + 900.0:
-          cache0 = some(block:
-            self.node4.get(context))
-          cache0Time = epochTime()
-        cache0.get()
-      self.node5.get(context),
+      let frameosValue = block:
+        js_app_runtime.setDynamicJsAppField(self.node5, "events", block:
+          let fieldValue = block:
+            if cache0.isNone() or epochTime() > cache0Time + 900.0:
+              cache0 = some(block:
+                self.node4.get(context))
+              cache0Time = epochTime()
+            cache0.get()
+          VJson(fieldValue))
+        js_app_runtime.getDynamicJsApp(self.node5, context)
+      frameosValue.asString(),
     offsetX: 0.0,
     offsetY: 0.0,
     fontColor: parseHtmlColor("#ffffff"),
@@ -170,7 +176,7 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
     borderColor: parseHtmlColor("#000000"),
     overflow: "fit-bounds",
   ))
-  scene.node3 = render_calendarApp.App(nodeName: "render/calendar", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_calendarApp.AppConfig(
+  scene.node3 = render_calendarApp.App(nodeName: "render/calendar", appKeyword: "render/calendar", nodeId: 3.NodeId, scene: scene.FrameScene, frameConfig: scene.frameConfig, appConfig: render_calendarApp.AppConfig(
     year: 2024,
     month: 3,
     scale: 60,
@@ -219,11 +225,15 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger, persisted
   ))
   runEvent(self, context)
   
+  scene.syncRefreshInterval()
 {.pop.}
 
 var exportedScene* = ExportedScene(
   publicStateFields: PUBLIC_STATE_FIELDS,
   persistedStateKeys: PERSISTED_STATE_KEYS,
+  refreshIntervalKey: "refreshInterval",
+  refreshIntervalDefault: 3600.0,
+  refreshIntervalImplicit: true,
   init: init,
   runEvent: runEvent,
   render: render
