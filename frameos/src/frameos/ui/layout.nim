@@ -61,6 +61,7 @@ type
     shift*: int          ## ... letters in capitals: 1 the next one, 2 all of them
     reveal*: bool        ## scroll the focused field into view at the next layout
     paper*: bool         ## e-paper: the keyboard shows no press
+    round*: bool         ## a round panel's whole canvas: the keyboard stays inside its circle
     scrolls*: seq[(int, float32, float32)] ## how far each box that scrolled is, by key
 
   TextMemo = object
@@ -1400,10 +1401,12 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
   memo = textMemo
   ui = addr input
   focusSeen = false
+  var kbTop, kb: int
+  if input.keyboard and input.focus > 0: (kbTop, kb) = keyboardBox(width, height, input.round)
+  else: kbTop = height
   let
-    kb = if input.keyboard and input.focus > 0: keyboardHeight(height) else: 0
     w = width.float32
-    h = float32(height - kb)
+    h = float32(kbTop)
   var before: UiNode
   if not memo.isNil:
     inc memo.gen
@@ -1432,8 +1435,9 @@ proc layoutUi*(root: SvgNode, width, height: int, input: var UiInput,
   var gradients = 0
   top.emit(0, 0, 1, result.children, gradients, regions)
   if kb > 0:
-    let keys = keyboardTree(width, kb, input.page, input.shift, input.paper).build(initText(),
-      w, kb.float32, 0, KeyboardKey, input, false, if memo.isNil: nil else: memo.keyboard)
+    let keys = keyboardTree(width, kb, input.page, input.shift, input.paper, input.round, kbTop,
+      height).build(initText(), w, kb.float32, 0, KeyboardKey, input, false,
+      if memo.isNil: nil else: memo.keyboard)
     keys.size = keys.layout(w, kb.float32, true, true)
     keys.y = h
     keys.emit(0, 0, 1, result.children, gradients, regions)

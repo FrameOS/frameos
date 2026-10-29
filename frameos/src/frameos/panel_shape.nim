@@ -6,7 +6,13 @@
 ## (input_state.nim `edgeAt`). No ESP32 board is round. And whether a panel
 ## is e-paper, where what the frame draws by itself shows no press.
 
-import std/strutils
+import std/[math, strutils]
+
+const RoundInset* = 12
+  ## How far in from a round panel's rim what the frame draws by itself stays
+  ## (the scene switcher, the scene settings, the keyboard on the screen): its
+  ## bezel covers some of the circle, and a finger at the very edge misses the
+  ## glass.
 
 proc panelIsRound*(device: string): bool =
   ## Whether only the circle inscribed in the panel shows and takes touches.
@@ -23,6 +29,11 @@ proc insideRound*(width, height, x, y: int, inset = 0): bool =
   let dx = 2 * x + 1 - width
   let dy = 2 * y + 1 - height
   dx * dx + dy * dy <= diameter * diameter
+
+proc chordHalf*(radius, dy: int): int =
+  ## Half the width of a circle of `radius` at `dy` from its centre: how far
+  ## either way a row there may reach.
+  if abs(dy) >= radius: 0 else: int(floor(sqrt(float(radius * radius - dy * dy))))
 
 proc panelIsPaper*(device: string, rgb565Canvas: bool): bool =
   ## Whether a press would cost a refresh to show (e-paper, a monochrome

@@ -2290,6 +2290,11 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
     # E-paper's on-screen keyboard shows no press (ui/keyboard.nim).
     target.input.paper = panelIsPaper(if owner.frameConfig.isNil: "" else: owner.frameConfig.device,
       context.hasImage and not context.image.isNil and context.image.format == pfRgb565)
+    when not defined(frameosEmbedded):
+      # A UI that is a round panel's whole canvas keeps its keyboard on the glass.
+      target.input.round = not owner.frameConfig.isNil and panelIsRound(owner.frameConfig.device) and
+        requestedWidth == frameos_apps.renderWidth(owner.frameConfig) and
+        requestedHeight == frameos_apps.renderHeight(owner.frameConfig)
     try:
       svg = layoutUi(root, layoutWidth, layoutHeight, target.input, regions, target.memo)
     except CatchableError as error:

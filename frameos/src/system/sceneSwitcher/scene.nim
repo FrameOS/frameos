@@ -71,9 +71,6 @@ const
   SwitcherNode = 1 ## the ui/events target its tiles live in
   IdleSecondsFast* = 60.0
   IdleSecondsPaper* = 300.0
-  RoundInset* = 12
-    ## How far in from a round panel's rim everything stays: its bezel covers
-    ## some of the circle, and a finger at the very edge misses the glass.
   MaxCols = 6
   MaxRows = 6
   # The page arrows, drawn (no font has to have the glyph): one markup, its
@@ -208,12 +205,18 @@ proc switcherGrid*(count, width, height: int, thumbnails: bool, round = false): 
   result.perPage = result.cols * result.rows
   result.pages = max(1, (count + result.perPage - 1) div result.perPage)
 
+proc isRound*(frameConfig: FrameConfig): bool =
+  ## Whether the frame's panel shows only the circle inside it
+  ## (frameos/panel_shape.nim); never on an ESP32.
+  when defined(frameosEmbedded): false
+  else: not frameConfig.isNil and panelIsRound(frameConfig.device)
+
 proc grid(self: SceneSwitcherScene, width, height: int): SwitcherGrid =
   when defined(frameosEmbedded):
     switcherGrid(self.entries.len, width, height, false)
   else:
     switcherGrid(self.entries.len, width, height, not sceneSwitcherThumbnail.isNil,
-      round = not self.frameConfig.isNil and panelIsRound(self.frameConfig.device))
+      round = isRound(self.frameConfig))
 
 proc grid(self: SceneSwitcherScene): SwitcherGrid =
   let (width, height) = canvasSize(self.frameConfig)
@@ -502,10 +505,6 @@ proc header(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: i
 when not defined(frameosEmbedded):
   # No ESP32 board is round (frameos/panel_shape.nim): the firmware
   # carries the rectangular header alone.
-  proc chordHalf(radius, dy: int): int =
-    ## Half the width of a circle of `radius` at `dy` from its centre.
-    if abs(dy) >= radius: 0 else: int(floor(sqrt(float(radius * radius - dy * dy))))
-
   proc roundChrome(self: SceneSwitcherScene, root: SvgNode, grid: SwitcherGrid, page: int, paper: bool,
       size, small: int, button: string) =
     ## A round panel's: the tiles fill the square inside the circle, and the
@@ -620,6 +619,7 @@ proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, pap
   ## scene goes back; until then the next render is due when that time is up.
   let target = uiTarget(sceneId, 1)
   target.input.paper = paper
+  target.input.round = isRound(self.frameConfig)
   var regions: seq[UiRegion]
   let svg = layoutUi(tree, image.width, image.height, target.input, regions, target.memo)
   let bg = background(paper)

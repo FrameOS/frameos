@@ -12,9 +12,16 @@
 ##
 ## Flash is the budget on an ESP32: four short strings, three drawn icons,
 ## and classes appended in place (see the scene switcher's notes).
+##
+## On a round panel (frameos/panel_shape.nim) the keyboard sits higher, its
+## last row where the circle is still wide enough for it, and every row is
+## cut to the chord it sits on, its keys narrower where the circle is. No
+## ESP32 board is round: the firmware carries the rectangle alone.
 
 import pixie/fileformats/svg
 import frameos/ui/tree
+when not defined(frameosEmbedded):
+  import frameos/panel_shape
 
 {.push overflowChecks: off, rangeChecks: off, boundChecks: off, fieldChecks: off, stackTrace: off,
   lineTrace: off, raises: [].}
@@ -49,6 +56,17 @@ proc keyboardHeight*(height: int): int =
   let row = clamp(height * 95 div 1000, 28, 60)
   min(4 * row + 3 * max(row div 8, 3) + 2 * max(row div 6, 4), height div 2)
 
+proc keyboardBox*(width, height: int, round = false): (int, int) =
+  ## Where the keyboard goes on a `width` x `height` UI: its top and its
+  ## height. At the bottom; on a round panel with its last row four fifths of
+  ## the way from the circle's centre to its rim, and the UI above it.
+  let tall = keyboardHeight(height)
+  result = (height - tall, tall)
+  when not defined(frameosEmbedded):
+    if round:
+      let radius = max(min(width, height) div 2 - RoundInset, 8)
+      result[0] = max(min(height div 2 + radius * 4 div 5, height) - tall, 0)
+
 proc icon(d: string, filled: bool, size: int): SvgNode =
   var c = "shrink-0"
   c.px("size", size)
@@ -66,11 +84,14 @@ proc typed*(code: int, shift: int): string =
   if shift > 0 and result[0] in {'a' .. 'z'}:
     result[0] = chr(code - 32)
 
-proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bool): SvgNode =
+proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bool,
+    round = false, top = 0, canvasHeight = 0): SvgNode =
   ## The keyboard for a `width` x `height` box: `page`'s keys, letters in
   ## capitals while `shift` is 1 (the next letter) or 2 (caps lock). On an
   ## LCD dark keys that light while pressed; on e-paper outlined keys and no
-  ## press to show, since a refresh to show one costs seconds.
+  ## press to show, since a refresh to show one costs seconds. `round`: the
+  ## box is `top` px down a round `width` x `canvasHeight` panel, and each
+  ## row stays inside its circle, on no band of its own.
   let
     pad = max(height div 40, 4)
     gap = max(height div 36, 3)
@@ -85,7 +106,8 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
   c.px("p", pad)
   c.px("gap", gap)
   c.px("text", size)
-  if paper: c.add " bg-white text-black border-t-2 border-black"
+  if round: c.add(if paper: " text-black" else: " text-white")
+  elif paper: c.add " bg-white text-black border-t-2 border-black"
   else: c.add " bg-zinc-900 text-white"
   # `move`, not a plain `c`: Nim 2.2.4 passes the plain one to a sink
   # without clearing it, and the next `c = ...` in the loop frees what the
@@ -94,12 +116,39 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
   # A tap between the keys is the keyboard's too: the nearest key (ui/events.nim),
   # and the field keeps the keyboard.
   result.attrs.add(("on-click", $KeyBase))
-  var row: SvgNode
+  var
+    row: SvgNode
+    rowUnit = unit
+    rowIndex = 0
   for i in -1 ..< text.len:
     if i < 0 or text[i] == '\n':
-      c = "flex w-full justify-center"
+      c = "flex justify-center"
       c.px("gap", gap)
       c.px("h", rowH)
+      rowUnit = unit
+      var across = 0
+      when not defined(frameosEmbedded):
+        if round:
+          # As wide as the circle is at the row's edge farther from its
+          # centre, and the row's keys in units that fit there: a character
+          # one, enter two, the others one and a half, space at least three.
+          let
+            radius = max(min(width, canvasHeight) div 2 - RoundInset, 8)
+            y0 = top + pad + rowIndex * (rowH + gap) - canvasHeight div 2
+          across = min(max(2 * chordHalf(radius, max(abs(y0), abs(y0 + rowH))) - 4, 8), width - 2 * pad)
+          var
+            halves = 0
+            keys = 0
+          for j in i + 1 ..< text.len:
+            if text[j] == '\n': break
+            inc keys
+            let code = ord(text[j])
+            halves += (if text[j] == ' ': 6 elif code == ord(kEnter): 4
+              elif code < 32 and page != kpNumbers: 3 else: 2)
+          rowUnit = max(min(unit, (across - (keys - 1) * gap) * 2 div max(halves, 1)), 8)
+      if across > 0: c.px("w", across)
+      else: c.add " w-full"
+      inc rowIndex
       row = el("div", move c)
       result.children.add row
       continue
@@ -111,9 +160,9 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
     # other keys one and a half (one on the number pad).
     c = "flex items-center justify-center rounded-md"
     if ch == ' ': c.add " grow"
-    elif code == ord(kEnter): c.px("w", unit * 2)
-    elif code < 32 and page != kpNumbers: c.px("w", unit * 3 div 2)
-    else: c.px("w", unit)
+    elif code == ord(kEnter): c.px("w", rowUnit * 2)
+    elif code < 32 and page != kpNumbers: c.px("w", rowUnit * 3 div 2)
+    else: c.px("w", rowUnit)
     if paper:
       c.add " border-2 border-black"
       if lit: c.add " bg-black text-white"
