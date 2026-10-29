@@ -649,6 +649,20 @@ and after enrollment (`GET /status` carries the same data under `"cloud"`):
 cloud:       enrolled url=https://cloud.frameos.net claim_token=(none) frame=… ws=connected
 ```
 
+A `set backend` on an enrolled frame (a bench setup) keeps the enrollment but
+hands the content to that backend: the frame refuses the cloud's scenes,
+settings and schedule (`backend_managed`) and reports the backend's origin as
+`hardware.backend` on every hello, so the cloud says so on the frame's page.
+`set backend` and `status` print a `note:` with the way back, and the first
+hello without a backend gets the cloud's settings, schedule and scenes again:
+
+```
+frameos> set backend ""
+frameos> set api_key ""
+frameos> set frame_id 0
+frameos> restart
+```
+
 `cloud_url` must be `https://`; plain `http://` is accepted only for
 localhost, `.local`/`.localhost` names and private-network literals, so a
 typo cannot silently ship the claim token and bearer token in the clear.

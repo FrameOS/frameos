@@ -1375,7 +1375,20 @@ While managed:
   `cloud_fid` / `cloud_ws` keys and keeps `cloud_sk`;
 - leaving managed mode (to standalone or to backend-managed) is a local admin
   action only (`POST /api/cloud/disconnect`). Enrolling with a backend while
-  managed — or vice versa — requires that local demotion first.
+  managed — or vice versa — requires that local demotion first;
+- an ESP32 is the exception: `set backend` over its console (a bench setup)
+  adds a backend to an enrolled frame without demoting it. The device then
+  refuses every content verb `backend_managed` and reports the backend's
+  origin (scheme, host, port; never a path or userinfo) as
+  `hardware.backend` on every hello. The hub queues nothing on its behalf
+  while it does (no empty-store or firmware resync), the frame summary
+  carries it as `owning_backend` and the workspace says who holds the frame
+  and how to hand it back, and the audit trail records
+  `frame.backend_attached`. The first hello without one replays what the
+  cloud holds: settings, schedule, then scenes
+  (`frame-backend-release.ts`), recorded as `frame.backend_released`. The
+  Linux runtime refuses no content verb for a backend; it refuses the
+  enrollment instead, so this is ESP32-only.
 
 ### Local network access
 

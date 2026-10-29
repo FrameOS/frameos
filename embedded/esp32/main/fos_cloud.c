@@ -534,6 +534,18 @@ static void add_hardware_json(cJSON *parent)
      * its own and shows what the frame reports here, on every hello and
      * every `state` (one follows each lan_access_set). */
     cJSON_AddBoolToObject(hw, "lanAccess", config->allow_local_network);
+    /* A self-hosted backend set here owns the content: every content verb is
+     * refused `backend_managed` (ws_handle_message). Its origin tells the
+     * cloud why, and its absence on a later hello that the cloud may replay
+     * its scenes and settings. Origin only, never a path or userinfo; a URL
+     * it cannot read still says a backend is there. */
+    if (config->backend_url[0]) {
+        char origin[128];
+        cJSON_AddStringToObject(hw, "backend",
+                                fos_url_origin(config->backend_url, origin, sizeof(origin))
+                                    ? origin
+                                    : "unknown");
+    }
 
     /* Board facts for the cloud deploy drawer, mirroring the USB console's
      * status JSON (fos_http_status_json). Sent on hello, so the control
@@ -3097,7 +3109,8 @@ static void ws_handle_message(const char *data, size_t len)
      * backend AFTER enrolling (bench/dev setups) must not let the provider's
      * stale scene assignment overwrite the backend's set on every reconnect
      * — the hub re-pushes whenever its assigned checksum differs. Content
-     * mutations defer to the backend; telemetry, assets and OTA still work. */
+     * mutations defer to the backend; telemetry, assets and OTA still work.
+     * hardware.backend says so on every hello (add_hardware_json). */
     {
         bool content_verb = false;
         if (fos_cloud_contract_verb(type, NULL, &content_verb) && content_verb &&

@@ -41,6 +41,7 @@ import {
 import { derivedSigningKey } from "../../../../auth-web/src/lib/keys";
 import { hashSecret } from "../../../../auth-web/src/lib/secrets";
 import { cachedAssetFile } from "../../../../auth-web/src/lib/frame-asset-cache";
+import { frameOwningBackend } from "../../../../auth-web/src/lib/frame-backend-owner";
 import {
   maxAssetStreamsPerSession,
   maxPayloadBytes,
@@ -838,6 +839,83 @@ describe("command redelivery", () => {
       return rows.find((row) => row.eventType === "frame.scenes_resynced");
     }, "audit row frame.scenes_resynced");
     expect(audit.metadata).toMatchObject({ checksum: push.checksum, reason: "empty_store" });
+    device.ws.close();
+  });
+
+  // docs/cloud-frames.md "While managed": an ESP32 with a self-hosted backend
+  // set on it refuses every content verb `backend_managed` and says so in
+  // hardware.backend.
+  const benchBackend = "http://10.4.0.47:8991";
+
+  it("queues nothing for a frame a self-hosted backend holds, empty store or not", async () => {
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    await createAssignedStoreScene(account.id, frame.id);
+
+    const device = await openDevice(token);
+    const ready = await handshake(device, privateKey, {
+      hardware: { backend: benchBackend, platform: "esp32-s3" },
+      scenes_checksum: "",
+    });
+    expect(ready.pending_commands).toBe(0);
+    const [row] = await db.select().from(frames).where(eq(frames.id, frame.id));
+    expect(frameOwningBackend(row?.hardware)).toBe(benchBackend);
+    const audit = await waitFor(async () => {
+      const rows = await db
+        .select()
+        .from(auditEvents)
+        .where(sql`${auditEvents.target}->>'frameId' = ${frame.id}`);
+      return rows.find((entry) => entry.eventType === "frame.backend_attached");
+    }, "audit row frame.backend_attached");
+    expect(audit.metadata).toMatchObject({ backend: benchBackend });
+    const commands = await db.select().from(frameCommands).where(eq(frameCommands.frameId, frame.id));
+    const contentTypes = new Set(["set_scenes", "set_schedule", "set_settings"]);
+    expect(commands.filter((command) => contentTypes.has(command.type)).map((command) => command.type)).toEqual([]);
+    device.ws.close();
+  });
+
+  it("sends back the settings, schedule and scenes once the backend is gone", async () => {
+    const { account, frame, privateKey, token } = await createFrameFixture();
+    const scene = await createAssignedStoreScene(account.id, frame.id);
+    await db
+      .update(frames)
+      .set({
+        hardware: { backend: benchBackend, platform: "esp32-s3" },
+        name: "E1002",
+        schedule: {
+          events: [{ event: "setCurrentScene", hour: 7, id: "morning", minute: 0, payload: { sceneId: scene.id }, weekday: 0 }],
+        },
+        settings: { interval: 600, rotate: 90 },
+      })
+      .where(eq(frames.id, frame.id));
+
+    const device = await openDevice(token);
+    const ready = await handshake(device, privateKey, {
+      frameos_version: "2026.10.22",
+      hardware: { platform: "esp32-s3" },
+      scenes_checksum: "local",
+    });
+    expect(ready.pending_commands).toBe(3);
+    const settings = await device.next((msg) => msg.type === "set_settings", "set_settings");
+    expect(settings.settings).toEqual({ interval: 600, name: "E1002", rotate: 90 });
+    const schedule = await device.next((msg) => msg.type === "set_schedule", "set_schedule");
+    const [event] = (schedule.schedule as { events: Array<{ payload: { sceneId: string } }> }).events;
+    // The device's own id for the scene, not the store's.
+    expect(event?.payload.sceneId).toBe("resync-runtime");
+    const push = await device.next((msg) => msg.type === "set_scenes", "set_scenes");
+    expect((push.scenes as unknown[]).length).toBe(1);
+    const audit = await waitFor(async () => {
+      const rows = await db
+        .select()
+        .from(auditEvents)
+        .where(sql`${auditEvents.target}->>'frameId' = ${frame.id}`);
+      return rows.find((entry) => entry.eventType === "frame.backend_released");
+    }, "audit row frame.backend_released");
+    expect(audit.metadata).toMatchObject({
+      backend: benchBackend,
+      checksum: push.checksum,
+      schedule: true,
+      settings: true,
+    });
     device.ws.close();
   });
 

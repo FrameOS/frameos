@@ -28,6 +28,7 @@ import {
 } from "./blobs";
 import { deviceDeliverableFields } from "./frame-service-settings";
 import { frameLanAccess } from "./frame-lan-access";
+import { frameOwningBackend } from "./frame-backend-owner";
 import { readVoicePermissions } from "./voice-permissions";
 import { commandTtlForFrame } from "./frame-sleep";
 import { deployProgressKindForCommand, startDeployProgress } from "./deploy-progress";
@@ -826,6 +827,10 @@ export function frameSummary(
     // own). null: the firmware does not report it, so the cloud cannot
     // manage it until the frame is updated (the lan_access routes say so).
     lan_access: frameLanAccess(frame.hardware),
+    // The self-hosted backend that holds this frame's content as the device
+    // last reported it (`hardware.backend`): while set, the frame refuses
+    // the cloud's scenes, settings and schedule. null: none.
+    owning_backend: frameOwningBackend(frame.hardware),
     last_seen_at: frame.lastSeenAt,
     // The device's deep-sleep forecast (hub handleSleep): when it redials
     // next, when the panel refreshes next, and why it sleeps. null while

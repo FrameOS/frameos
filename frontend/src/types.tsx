@@ -508,6 +508,10 @@ export interface FrameType {
    * here: it changes on the device (a code shown on the panel to turn it on)
    * and the cloud mirrors it. null/absent: the frame does not report it. */
   lan_access?: boolean | null
+  /** Cloud frames: the self-hosted backend set on the device, as it reports it
+   * (`hardware.backend`, an origin). While set, the frame turns down the
+   * cloud's scenes, settings and schedule. null/absent: none. */
+  owning_backend?: string | null
   network?: {
     wifiSSID?: string
     wifiPassword?: string

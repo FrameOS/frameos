@@ -40,6 +40,8 @@ export const eventLabels: Record<string, string> = {
   "frame.asset_renamed": "Frame file renamed",
   "frame.asset_uploaded": "File uploaded to a frame",
   "frame.assets_synced": "Fonts synced to a frame",
+  "frame.backend_attached": "A self-hosted backend took over the frame's scenes and settings",
+  "frame.backend_released": "The self-hosted backend was removed from the frame",
   "frame.claim_token_created": "Frame claim code created",
   "frame.claim_tokens_recycled": "Unused frame claim codes recycled",
   "frame.command_cancelled": "Queued frame command cancelled",
@@ -57,6 +59,7 @@ export const eventLabels: Record<string, string> = {
   "frame.revoked": "Frame revoked",
   "frame.scenes_applied": "Assigned scenes applied by the frame",
   "frame.scenes_assigned": "Scenes assigned to a frame",
+  "frame.scenes_resynced": "Assigned scenes sent to the frame again",
   "frame.schedule_pushed": "Frame schedule updated",
   "frame.service_settings_scope_changed":
     "Frame access to service API keys changed",

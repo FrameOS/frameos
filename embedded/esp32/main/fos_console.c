@@ -168,6 +168,16 @@ static const char *auth_mode_name(wifi_auth_mode_t authmode)
     }
 }
 
+/* A backend on a cloud frame takes its content: fos_cloud.c refuses the
+ * cloud's scenes, settings and schedule (`backend_managed`) until it is
+ * cleared. Said where a backend gets set and in `status`, so a bench setup
+ * is not left that way by accident. */
+static void print_backend_owns_cloud_frame(void)
+{
+    printf("note:        a backend is set, so FrameOS Cloud cannot change this frame's scenes or settings.\n"
+           "             To hand it back: set backend \"\", set api_key \"\", set frame_id 0, restart\n");
+}
+
 static int cmd_status(int argc, char **argv)
 {
     fos_config_t *config = fos_config();
@@ -187,6 +197,9 @@ static int cmd_status(int argc, char **argv)
            fos_cloud_frame_id()[0] ? " frame=" : "",
            fos_cloud_frame_id(),
            fos_cloud_ws_connected() ? "connected" : "off");
+    if (config->backend_url[0] && fos_cloud_state() == FOS_CLOUD_ENROLLED) {
+        print_backend_owns_cloud_frame();
+    }
     /* The ws_url override, when one is set. It is NOT secret, and it is the
      * one input that decides where the management socket dials — a leftover
      * dev value (ws://localhost:3100/...) makes every attempt fail with an
@@ -1054,6 +1067,9 @@ static int cmd_set(int argc, char **argv)
         return 1;
     }
     printf("ok: %s set (some settings need `restart`)\n", key);
+    if (strcmp(key, "backend") == 0 && value[0] && fos_cloud_state() == FOS_CLOUD_ENROLLED) {
+        print_backend_owns_cloud_frame();
+    }
     return 0;
 }
 

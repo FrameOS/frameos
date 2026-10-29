@@ -403,6 +403,8 @@ describe("browser event shaping", () => {
       // The hardware report carries no lanAccess: firmware from before the
       // switch, which the cloud cannot manage it on.
       lan_access: null,
+      // No `backend` in the report: no self-hosted backend holds the frame.
+      owning_backend: null,
       last_metrics: { cpu: 1 },
       last_seen_at: now,
       last_state: { active_scene: "s1" },
@@ -490,6 +492,11 @@ describe("browser event shaping", () => {
     ] as const) {
       expect(frameUpdateEvent({ ...frame, hardware }).lan_access, JSON.stringify(hardware)).toBe(expected);
     }
+    // The self-hosted backend an ESP32 reports holding it (hardware.backend).
+    expect(
+      frameUpdateEvent({ ...frame, hardware: { backend: "http://10.4.0.47:8991", platform: "esp32-s3" } })
+        .owning_backend,
+    ).toBe("http://10.4.0.47:8991");
   });
 });
 
