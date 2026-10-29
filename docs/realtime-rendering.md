@@ -459,7 +459,10 @@ room to spare, and answers before the pause starts to read as one.
 
 Every switch counts, whoever asked: the frame's event map (an edge swipe, a
 held button), the cloud's `set_current_scene`, the HTTP API, the schedule,
-a scene's own dispatch, and a pushed scene set (a preview, a deploy). A
+a scene's own dispatch, and a pushed scene set (a preview, a deploy). So
+does the scene switcher (`docs/scene-switcher.md`), opening and closing:
+nothing loads for either on the ESP32 (the switcher is built in, and the
+scene it covers stays resident), but the panel still waits for a render. A
 switch begun while another still loads keeps the first one's start, and its
 mark if one is up. A frame rendered for an older switch ends nothing.
 
@@ -500,8 +503,14 @@ render task holds the runtime for the whole load). `present_back` puts it away
 before the next picture is handed over, so it never reaches the new scene's
 buffer, and a render that shows nothing ends it after the fact. Each frame
 of it is ~1,000 pixels in PSRAM, tens of microseconds; a buffer it goes into
-counts a write (`s_generation`), so a damage repaint never takes it for a
-frame of its own, not even once the mark is put back. A snapshot (`/image`) taken while a switch loads can
+counts a write (`s_generation`) while it is there, so a damage repaint never
+takes it for a frame of its own. Put back, the buffer holds exactly what it
+held, and the count goes back with it unless something else wrote there
+since (nothing should: the mark is only in the scanned buffer, every other
+writer writes the back one). Kept moved, it cost the frame under the mark
+its damage repaint: on the SenseCAP every opening of the scene switcher
+after the first drew all of it, 1.8 s instead of 0.3 s, because the way back
+put the mark over the switcher's own frame. A snapshot (`/image`) taken while a switch loads can
 carry the mark: the front buffer is the snapshot.
 
 Flash is the ESP32's budget, so the firmware builds only what its one LCD

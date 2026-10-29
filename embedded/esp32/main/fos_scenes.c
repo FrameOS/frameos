@@ -1193,10 +1193,14 @@ bool fos_scenes_apply_pending_selection(void)
          * so there is no slot to load, and the resident scene stays parsed
          * for the way back. Not persisted: a reboot or a deep sleep comes
          * back on the scene it covers. A frame that deep-sleeps stays up a
-         * while for the keys that walk it. */
+         * while for the keys that walk it. Nothing loads, but its first
+         * picture is a render like any other (drawn whole, 13 tiles take
+         * ~2 s on the SenseCAP), so the loading mark counts from here too. */
+        fos_display_loading_begin(asked_at, fos_config()->rotate);
         if (!frameos_nim_set_scene(scene_id)) {
             log_scene_event("scenes:select", "error", "queued", scene_id,
                             "apply-failed", 0, 0, 0, ESP_FAIL);
+            fos_display_loading_end();
             return false;
         }
         s_built_in_shown = true;
@@ -1211,9 +1215,12 @@ bool fos_scenes_apply_pending_selection(void)
         return true;
     }
     if (s_built_in_shown) {
-        /* Back from the switcher: whatever is chosen, the panel changes. */
+        /* Back from the switcher: whatever is chosen, the panel changes, and
+         * the scene it covered is still resident, so the early return below
+         * would skip the loading mark while that scene renders again. */
         s_built_in_shown = false;
         s_scene_switched = true;
+        fos_display_loading_begin(asked_at, fos_config()->rotate);
     }
     /* Already the resident scene: nothing to load. Re-parsing it would throw
      * away everything the runtime has built for it — the interpreted graph and

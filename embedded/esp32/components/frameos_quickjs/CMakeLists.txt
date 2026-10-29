@@ -15,6 +15,16 @@ endif()
 
 file(STRINGS "${QUICKJS_DIR}/VERSION" QUICKJS_VERSION LIMIT_COUNT 1)
 
+# The quickts this checkout pins. A quickjs/ left from before a pin change
+# fails deep inside quickjs.c, or worse, builds the old engine without a word.
+file(STRINGS "${QUICKJS_PARENT}/frameos.nimble" QUICKJS_PIN_LINE REGEX "QuickjsVersion *= *\"" LIMIT_COUNT 1)
+string(REGEX REPLACE ".*QuickjsVersion *= *\"([^\"]+)\".*" "\\1" QUICKJS_PIN "${QUICKJS_PIN_LINE}")
+if(NOT QUICKJS_PIN_LINE)
+    message(FATAL_ERROR "frameos_quickjs: no QuickjsVersion in ${QUICKJS_PARENT}/frameos.nimble")
+elseif(NOT QUICKJS_VERSION STREQUAL QUICKJS_PIN)
+    message(FATAL_ERROR "frameos_quickjs: ${QUICKJS_DIR} holds QuickJS ${QUICKJS_VERSION}, frameos.nimble pins ${QUICKJS_PIN}: remove it and run `nimble build_quickjs` in frameos/")
+endif()
+
 idf_component_register(
     SRCS
         "${QUICKJS_DIR}/quickjs.c"

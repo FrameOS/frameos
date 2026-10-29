@@ -24,7 +24,10 @@ run: build
 
 build: apploaders drivers maybe-driver-libraries
 	python3 tools/prepare_assets.py
-	@if [ ! -d quickjs ]; then nimble build_quickjs --silent; fi
+	@# Every build, not only when quickjs/ is missing: the task skips a copy
+	@# at this checkout's pin and refuses any other. A quickjs/ left from
+	@# before a pin change otherwise builds the old quickts without a word.
+	@nimble build_quickjs --silent
 	@if [ ! -f nimble.paths ]; then nimble setup --silent; fi
 	mkdir -p build
 	$(NIM) c $(NIM_BUILD_FLAGS) src/frameos.nim
@@ -44,7 +47,7 @@ driver-libraries: drivers
 
 debug: apploaders drivers maybe-driver-libraries
 	python3 tools/prepare_assets.py
-	@if [ ! -d quickjs ]; then nimble build_quickjs --silent; fi
+	@nimble build_quickjs --silent
 	@if [ ! -f nimble.paths ]; then nimble setup --silent; fi
 	mkdir -p build
 	$(NIM) c $(NIM_BUILD_FLAGS) --debugger:native src/frameos.nim
