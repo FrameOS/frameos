@@ -17,6 +17,8 @@
 #define FOS_CUSTOM_EVENT_MAX_NAME_LENGTH 63
 /* The built-in scene `sceneSwitcher` shows: no slot on flash, never persisted. */
 #define FOS_SCENE_SWITCHER_ID "system/sceneSwitcher"
+/* And the one `sceneSettings` shows, the same way. */
+#define FOS_SCENE_SETTINGS_ID "system/sceneSettings"
 
 /* `gpio {action}`: the firmware reports the edges, each with `atMs` (when it saw
  * it); `button {action}` (press, doublePress, longPress) is the Nim dispatcher's
@@ -59,6 +61,7 @@
 #define FOS_EVENT_SET_SCENE_STATE "setSceneState"
 #define FOS_EVENT_SET_CURRENT_SCENE "setCurrentScene"
 #define FOS_EVENT_SCENE_SWITCHER "sceneSwitcher"
+#define FOS_EVENT_SCENE_SETTINGS "sceneSettings"
 #define FOS_EVENT_METRICS "metrics"
 #define FOS_EVENT_RELOAD "reload"
 #define FOS_EVENT_RESTART "restart"
@@ -151,6 +154,8 @@ static const fos_event_spec_t FOS_EVENT_SPECS[] = {
      FOS_ORIGIN_PREVIEW | FOS_ORIGIN_SCENE | FOS_ORIGIN_SCHEDULE | FOS_ORIGIN_HTTP_WRITE | FOS_ORIGIN_HTTP_ADMIN | FOS_ORIGIN_CLOUD | FOS_ORIGIN_SYSTEM | FOS_ORIGIN_EVENT_MAP, 0, 0},
     {FOS_EVENT_SCENE_SWITCHER, FOS_EVENT_CLASS_SCENE_COMMAND,
      FOS_ORIGIN_PREVIEW | FOS_ORIGIN_SCENE | FOS_ORIGIN_SCHEDULE | FOS_ORIGIN_HTTP_WRITE | FOS_ORIGIN_HTTP_ADMIN | FOS_ORIGIN_SYSTEM | FOS_ORIGIN_EVENT_MAP, 0, 0},
+    {FOS_EVENT_SCENE_SETTINGS, FOS_EVENT_CLASS_SCENE_COMMAND,
+     FOS_ORIGIN_PREVIEW | FOS_ORIGIN_SCENE | FOS_ORIGIN_SCHEDULE | FOS_ORIGIN_HTTP_WRITE | FOS_ORIGIN_HTTP_ADMIN | FOS_ORIGIN_SYSTEM | FOS_ORIGIN_EVENT_MAP, 0, 0},
     {FOS_EVENT_METRICS, FOS_EVENT_CLASS_DEVICE_COMMAND,
      FOS_ORIGIN_SCENE | FOS_ORIGIN_SCHEDULE | FOS_ORIGIN_HTTP_WRITE | FOS_ORIGIN_HTTP_ADMIN | FOS_ORIGIN_CLOUD | FOS_ORIGIN_SYSTEM, 0, 0},
     {FOS_EVENT_RELOAD, FOS_EVENT_CLASS_DEVICE_COMMAND,
@@ -164,7 +169,7 @@ static const fos_event_spec_t FOS_EVENT_SPECS[] = {
     {FOS_EVENT_VOICE_CHAT, FOS_EVENT_CLASS_DEVICE_COMMAND,
      FOS_ORIGIN_EVENT_MAP, 0, 0},
 };
-#define FOS_EVENT_SPEC_COUNT 34
+#define FOS_EVENT_SPEC_COUNT 35
 
 static const fos_event_spec_t FOS_CUSTOM_EVENT_SPEC = {
     NULL, FOS_EVENT_CLASS_CUSTOM,

@@ -275,12 +275,14 @@ EMBEDDED_SEEED_SENSECAP_INDICATOR_PINS = {
 }
 EMBEDDED_SEEED_SENSECAP_INDICATOR_GPIO_BUTTONS = [{"pin": 38, "label": "BUTTON"}]
 # A touch screen's swipes in from an edge: from the right the next scene, from
-# the left the previous one, and up from the bottom the scene switcher
-# (docs/scene-switcher.md). fos_board.c's TOUCH_EDGE_SWIPES is the device copy.
+# the left the previous one, up from the bottom the scene switcher
+# (docs/scene-switcher.md) and down from the top the scene's settings
+# (docs/scene-settings.md). fos_board.c's TOUCH_EDGE_SWIPES is the device copy.
 EMBEDDED_TOUCH_EDGE_SWIPES = [
     {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
     {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
     {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
+    {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}},
 ]
 # The one key pressed switches the screen off and on, and pressed twice opens
 # the scene switcher; held it does nothing (on a board with a microphone that

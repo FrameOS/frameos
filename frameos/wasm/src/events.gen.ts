@@ -4,7 +4,7 @@
 export const POINTER_WIRE_MAX = 32767
 
 /** Lifecycle events and scene commands: the host sends these, a button would not. */
-export const HOST_EVENT_NAMES: readonly string[] = ["init", "render", "open", "close", "turnOn", "turnOff", "toggleScreen", "setSceneState", "setCurrentScene", "sceneSwitcher"]
+export const HOST_EVENT_NAMES: readonly string[] = ["init", "render", "open", "close", "turnOn", "turnOff", "toggleScreen", "setSceneState", "setCurrentScene", "sceneSwitcher", "sceneSettings"]
 
 /** Pointer input: sent by the canvas with a position, never by a button. */
 export const POINTER_EVENT_NAMES: readonly string[] = ["pointerMove", "pointerDown", "pointerUp", "pointerCancel", "mouseMove", "mouseDown", "mouseUp", "tap", "doubleTap", "longPress", "swipe", "edgeSwipe", "wheel"]

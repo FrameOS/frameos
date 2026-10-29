@@ -646,6 +646,7 @@ def test_embedded_hardware_preset_for_seeed_sensecap_indicator():
         {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
         {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
         {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}},
     ]
     # No battery, no buzzer, no microphone, no TF socket the chip can reach
     # (the card slot is the RP2040's).
@@ -962,6 +963,7 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1003():
         {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
         {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
         {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
+        {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}},
     ]
     assert frame.device_config["micClkPin"] == 42
     # The 2:1 divider on GPIO1, switched by GPIO40 (GPIO21 is the IT8951's

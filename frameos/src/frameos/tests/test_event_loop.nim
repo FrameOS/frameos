@@ -4,6 +4,7 @@ import ../event_loop
 import ../interpreter
 import ../types
 import system/sceneSwitcher/scene as sceneSwitcher
+import system/sceneSettings/scene as sceneSettings
 
 # The runner of docs/event-fixtures.json's `dispatcher` section: the shared
 # dispatcher (event_loop.nim) with a recording host around the real
@@ -50,20 +51,24 @@ type RecordingHost = ref object
 proc sceneName(scene: FrameScene): string =
   scene.id.string.rsplit("/", maxsplit = 1)[^1]
 
+proc builtIn(sceneId: string): ExportedInterpretedScene =
+  ## The runtime's own scene at `sceneId`, as every host picks it.
+  if sceneId == SceneSettingsId: sceneSettings.exportedScene else: sceneSwitcher.exportedScene
+
 proc sceneInstance(host: RecordingHost, sceneId: SceneId): FrameScene =
   if not host.scenes.hasKey(sceneId):
     host.loop.hostRun:
       # The scene switcher is the runtime's own, built by its export as every
       # host builds it (scenes.nim's system scenes, single_scene_host).
       host.scenes[sceneId] =
-        if isBuiltInScene(sceneId.string): sceneSwitcher.exportedScene.init(sceneId, host.config, host.logger, %*{})
+        if isBuiltInScene(sceneId.string): builtIn(sceneId.string).init(sceneId, host.config, host.logger, %*{})
         else: init(sceneId, host.config, host.logger, %*{})
   host.scenes[sceneId]
 
 proc runOn(scene: FrameScene, event: string, payload: JsonNode) =
   let context = ExecutionContext(scene: scene, event: event, payload: payload,
     hasImage: false, loopIndex: 0, loopKey: ".")
-  if isBuiltInScene(scene.id.string): sceneSwitcher.exportedScene.runEvent(scene, context)
+  if isBuiltInScene(scene.id.string): builtIn(scene.id.string).runEvent(scene, context)
   else: runEvent(scene, context)
 
 # The scene switcher's tiles: the running case's scene list, as each host

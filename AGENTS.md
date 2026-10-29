@@ -149,6 +149,21 @@
   from the ESP32 or the preview, and `fos_scenes.c` applies one without a
   slot. A new built-in scene goes the same way, not into a host.
 
+## Scene settings on the frame: `docs/scene-settings.md`
+
+- `system/sceneSettings` (the contract's `scenes.settings`) is the other
+  scene built into every runtime, `frameos/src/system/sceneSettings/scene.nim`:
+  the public fields of the scene showing as a form (the JSX layer's fields,
+  keyboard on the screen and scrolling list, `docs/jsx-ui.md`). The
+  `sceneSettings` command opens it and the dispatcher resolves it like the
+  switcher's, handing it `state.from` plus that scene's `fields` and `values`
+  read BEFORE the switch (an ESP32 lets the scene go while the panel shows).
+  Save is `setCurrentScene {sceneId: from, state}`, which every host already
+  applies to public fields; the same command again goes back unsaved.
+- Bound to a swipe down from the top in every touch preset (`TOUCH_EDGE_SWIPES`
+  and its two copies, `device_event_map.nim`): keep the presets alike. Both
+  built-in scenes go through `isBuiltInScene`; a third goes the same way.
+
 ## Scene previews on a frame: `docs/scene-previews.md`
 
 - A scene a frame shows for now without holding it in its saved or assigned

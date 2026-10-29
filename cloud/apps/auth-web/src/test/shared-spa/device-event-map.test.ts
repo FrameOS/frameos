@@ -17,7 +17,7 @@ function nimHyperPixelMap(): unknown {
 }
 
 describe("deviceEventMap", () => {
-  it("gives every HyperPixel edge swipes between scenes, and up from the bottom the scene switcher", () => {
+  it("gives every HyperPixel edge swipes between scenes, up from the bottom the scene switcher and down from the top the settings", () => {
     for (const device of [
       "pimoroni.hyperpixel4sq_touch",
       "pimoroni.hyperpixel4_touch",
@@ -27,6 +27,7 @@ describe("deviceEventMap", () => {
         { event: "edgeSwipe", match: { edge: "right" }, emit: "setCurrentScene", as: { direction: "next" } },
         { event: "edgeSwipe", match: { edge: "left" }, emit: "setCurrentScene", as: { direction: "prev" } },
         { event: "edgeSwipe", match: { edge: "bottom" }, emit: "sceneSwitcher", as: {} },
+        { event: "edgeSwipe", match: { edge: "top" }, emit: "sceneSettings", as: {} },
       ]);
     }
   });

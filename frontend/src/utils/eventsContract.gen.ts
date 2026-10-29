@@ -7,6 +7,8 @@ export const POINTER_WIRE_MAX = 32767
 export const CUSTOM_EVENT_MAX_NAME_LENGTH = 63
 /** The built-in scene `sceneSwitcher` shows (docs/scene-switcher.md). */
 export const SCENE_SWITCHER_ID = 'system/sceneSwitcher'
+/** The built-in scene `sceneSettings` shows (docs/scene-settings.md). */
+export const SCENE_SETTINGS_ID = 'system/sceneSettings'
 
 export type EventOrigin = 'driver' | 'preview' | 'scene' | 'schedule' | 'http:write' | 'http:admin' | 'cloud' | 'system' | 'eventMap'
 export type EventClass = 'lifecycle' | 'input' | 'scene-command' | 'device-command'
@@ -43,6 +45,7 @@ export type ContractEventName =
   | 'setSceneState'
   | 'setCurrentScene'
   | 'sceneSwitcher'
+  | 'sceneSettings'
   | 'metrics'
   | 'reload'
   | 'restart'
@@ -766,6 +769,29 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     },
     "since": "2026.10.22"
   },
+  "sceneSettings": {
+    "class": "scene-command",
+    "listen": false,
+    "dispatch": true,
+    "origins": [
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system",
+      "eventMap"
+    ],
+    "renderAfter": "always",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": true,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.10.22"
+  },
   "metrics": {
     "class": "device-command",
     "listen": false,
@@ -1065,6 +1091,8 @@ interface FrameOSEventPayloads {
   setCurrentScene: { sceneId?: string; direction?: string; state?: any };
   /** Show the scene switcher (\`scenes.switcher\`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. While it is showing, go back to the scene it was opened from instead. The frame's event map binds it to a swipe in from the bottom edge on a touch screen. */
   sceneSwitcher: Record<string, never>;
+  /** Show the scene's settings (\`scenes.settings\`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it is showing, go back to the scene it was opened from without saving instead. The frame's event map binds it to a swipe in from the top edge on a touch screen. */
+  sceneSettings: Record<string, never>;
 }
 `
 

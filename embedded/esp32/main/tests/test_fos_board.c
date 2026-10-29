@@ -147,6 +147,7 @@ static void test_event_maps(void)
     CHECK(strstr(e1003, "\"edge\":\"left\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}") != NULL,
           "e1003 left edge is prev");
     CHECK(strstr(e1003, "\"edge\":\"bottom\"},\"emit\":\"sceneSwitcher\"") != NULL, "e1003 bottom edge is the switcher");
+    CHECK(strstr(e1003, "\"edge\":\"top\"},\"emit\":\"sceneSettings\"") != NULL, "e1003 top edge is the settings");
     CHECK(strstr(e1001, "edgeSwipe") == NULL, "the e1001 has no glass");
     CHECK(e1003[strlen(e1003) - 1] == ']' && strlen(e1003) < 1024, "a JSON list that fits");
     /* The Indicator's key: pressed the screen, twice the switcher, held
@@ -157,8 +158,10 @@ static void test_event_maps(void)
     CHECK(strstr(indicator, "\"action\":\"doublePress\"},\"emit\":\"sceneSwitcher\"") != NULL,
           "indicator double press is the switcher");
     CHECK(strstr(indicator, "longPress") == NULL, "indicator held is nothing");
-    CHECK(strstr(indicator, "\"edge\":\"bottom\"},\"emit\":\"sceneSwitcher\",\"as\":{}}]") != NULL,
+    CHECK(strstr(indicator, "\"edge\":\"bottom\"},\"emit\":\"sceneSwitcher\",\"as\":{}}") != NULL,
           "indicator bottom edge is the switcher");
+    CHECK(strstr(indicator, "\"edge\":\"top\"},\"emit\":\"sceneSettings\",\"as\":{}}]") != NULL,
+          "indicator top edge is the settings");
     /* The Sticky: UP and DOWN held walk the scenes, the AI key held talks. */
     const char *sticky = fos_board_event_map("seeed_reterminal_sticky");
     CHECK(strstr(sticky, "\"label\":\"UP\",\"action\":\"longPress\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}") != NULL,

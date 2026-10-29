@@ -285,12 +285,14 @@ const SEEED_RETERMINAL_VOICE_EVENT_MAP: EventMapRule[] = [
   { event: 'button', match: { label: 'REFRESH', action: 'longPress' }, emit: 'voiceChat', as: {} },
 ]
 // A touch screen's swipes in from an edge: from the right the next scene, from
-// the left the previous one, and up from the bottom the scene switcher
-// (docs/scene-switcher.md). Mirrors EMBEDDED_TOUCH_EDGE_SWIPES and fos_board.c.
+// the left the previous one, up from the bottom the scene switcher
+// (docs/scene-switcher.md) and down from the top the scene's settings
+// (docs/scene-settings.md). Mirrors EMBEDDED_TOUCH_EDGE_SWIPES and fos_board.c.
 const TOUCH_EDGE_SWIPES: EventMapRule[] = [
   { event: 'edgeSwipe', match: { edge: 'right' }, emit: 'setCurrentScene', as: { direction: 'next' } },
   { event: 'edgeSwipe', match: { edge: 'left' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
   { event: 'edgeSwipe', match: { edge: 'bottom' }, emit: 'sceneSwitcher', as: {} },
+  { event: 'edgeSwipe', match: { edge: 'top' }, emit: 'sceneSettings', as: {} },
 ]
 // The E1003 has the E1001's keys and microphone, and a touch screen.
 const SEEED_RETERMINAL_E1003_EVENT_MAP: EventMapRule[] = [...SEEED_RETERMINAL_VOICE_EVENT_MAP, ...TOUCH_EDGE_SWIPES]

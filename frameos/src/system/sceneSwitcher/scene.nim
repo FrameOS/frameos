@@ -92,8 +92,9 @@ proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
   node.fields[key] = value
 
 proc isBuiltInScene*(sceneId: string): bool =
-  ## A scene the runtime draws itself, on every host: no slot, no file.
-  sceneId == SceneSwitcherId
+  ## A scene the runtime draws itself, on every host: no slot, no file. The
+  ## switcher and the scene settings (system/sceneSettings/scene.nim).
+  sceneId == SceneSwitcherId or sceneId == SceneSettingsId
 
 # ------------------------------------------------------------------ the model
 

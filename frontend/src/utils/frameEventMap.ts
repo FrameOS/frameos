@@ -26,6 +26,7 @@ export type FrameActionKind =
   | 'prevScene'
   | 'showScene'
   | 'sceneSwitcher'
+  | 'sceneSettings'
   | 'render'
   | 'turnOn'
   | 'turnOff'
@@ -57,6 +58,7 @@ const ACTION_TITLES: Record<FrameActionKind, string> = {
   prevScene: 'Previous scene',
   showScene: 'Show scene',
   sceneSwitcher: 'Scene switcher',
+  sceneSettings: 'Scene settings',
   render: 'Refresh',
   turnOn: 'Display on',
   turnOff: 'Display off',
@@ -76,6 +78,7 @@ export const frameActionKinds: readonly FrameActionKind[] = [
   'nextScene',
   'prevScene',
   'sceneSwitcher',
+  'sceneSettings',
   'render',
   'turnOn',
   'turnOff',
@@ -98,6 +101,17 @@ export function frameSupportsSceneSwitcher(frameosVersion: string | null | undef
   return cloudFrameSupportsSettingsFrom(sceneSwitcherMinVersion, frameosVersion)
 }
 
+/** The first FrameOS that shows a scene's settings (the contract's `sceneSettings.since`). */
+export const sceneSettingsMinVersion: string = contractEventSpecs.sceneSettings.since ?? '0.0.0'
+
+/** Whether a frame on this FrameOS shows a scene's settings, as `frameSupportsSceneSwitcher`. */
+export function frameSupportsSceneSettings(frameosVersion: string | null | undefined, cloud: boolean): boolean {
+  if (!cloud && (typeof frameosVersion !== 'string' || frameosVersion.trim().length === 0)) {
+    return true
+  }
+  return cloudFrameSupportsSettingsFrom(sceneSettingsMinVersion, frameosVersion)
+}
+
 /** What this frame can do with a press, as far as the actions on offer go. */
 export interface FrameActionOffer {
   /** The frame has voice chat at all (`useFrameSettings().voiceChat`: a microphone, ESP32 only). */
@@ -111,6 +125,8 @@ export interface FrameActionOffer {
   displayPower: boolean
   /** The frame's FrameOS shows the scene switcher (`frameSupportsSceneSwitcher`). */
   sceneSwitcher?: boolean
+  /** The frame's FrameOS shows a scene's settings (`frameSupportsSceneSettings`). */
+  sceneSettings?: boolean
 }
 
 export function isEdgeGesture(gesture: FrameGesture): gesture is EdgeGesture {
@@ -162,6 +178,9 @@ export function frameActionKindsFor(gesture: FrameGesture, offer: FrameActionOff
   if (offer.sceneSwitcher) {
     kinds.push('sceneSwitcher')
   }
+  if (offer.sceneSettings) {
+    kinds.push('sceneSettings')
+  }
   kinds.push('render')
   if (offer.displayPower) {
     kinds.push('turnOn', 'turnOff', 'toggleScreen')
@@ -186,6 +205,9 @@ export function frameActionUnavailableReason(binding: ButtonBinding, offer: Fram
   }
   if (kind === 'sceneSwitcher') {
     return `needs FrameOS ${sceneSwitcherMinVersion}`
+  }
+  if (kind === 'sceneSettings') {
+    return `needs FrameOS ${sceneSettingsMinVersion}`
   }
   return 'not on this frame'
 }
@@ -233,6 +255,7 @@ export function bindingRule(binding: ButtonBinding): EventMapRule {
     case 'showScene':
       return { event, match, emit: 'setCurrentScene', as: { sceneId: binding.action.sceneId ?? '' } }
     case 'sceneSwitcher':
+    case 'sceneSettings':
     case 'render':
     case 'turnOn':
     case 'turnOff':
@@ -244,6 +267,7 @@ export function bindingRule(binding: ButtonBinding): EventMapRule {
 
 const SCENE_LESS_EMITS: readonly string[] = [
   'sceneSwitcher',
+  'sceneSettings',
   'render',
   'turnOn',
   'turnOff',
@@ -388,8 +412,9 @@ export function frameOffersEdgeGestures(
 
 /** The event map a device comes with, which a frame never given one (no
  * stored `event_map`) runs with: a HyperPixel's edge swipes, in from the right
- * the next scene, in from the left the previous and up from the bottom the
- * scene switcher. Keep in step with frameos/src/frameos/device_event_map.nim
+ * the next scene, in from the left the previous, up from the bottom the
+ * scene switcher and down from the top the scene's settings. Keep in step
+ * with frameos/src/frameos/device_event_map.nim
  * (device-event-map.test.ts reads it). null for a device that comes with none. */
 export function deviceEventMap(device: string | null | undefined): EventMapRule[] | null {
   if (!device?.startsWith('pimoroni.hyperpixel')) {
@@ -399,5 +424,6 @@ export function deviceEventMap(device: string | null | undefined): EventMapRule[
     { event: 'edgeSwipe', match: { edge: 'right' }, emit: 'setCurrentScene', as: { direction: 'next' } },
     { event: 'edgeSwipe', match: { edge: 'left' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
     { event: 'edgeSwipe', match: { edge: 'bottom' }, emit: 'sceneSwitcher', as: {} },
+    { event: 'edgeSwipe', match: { edge: 'top' }, emit: 'sceneSettings', as: {} },
   ]
 }

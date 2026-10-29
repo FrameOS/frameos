@@ -1,0 +1,86 @@
+{
+  "id": "sceneSettingsPanel",
+  "name": "Scene settings (480x480, touch)",
+  "settings": {
+    "execution": "interpreted",
+    "refreshInterval": 3600,
+    "backgroundColor": "#1e3a8a"
+  },
+  "e2eFrame": {
+    "width": 480,
+    "height": 480
+  },
+  "e2eEvents": [
+    {
+      "event": "sceneSettings",
+      "payload": {}
+    }
+  ],
+  "fields": [
+    {
+      "name": "city",
+      "label": "City",
+      "type": "string",
+      "value": "Brussels",
+      "access": "public",
+      "persist": "disk"
+    },
+    {
+      "name": "units",
+      "label": "Units",
+      "type": "select",
+      "value": "metric",
+      "access": "public",
+      "persist": "disk",
+      "options": [
+        {
+          "value": "metric",
+          "label": "Metric"
+        },
+        {
+          "value": "imperial",
+          "label": "Imperial"
+        }
+      ]
+    },
+    {
+      "name": "showSeconds",
+      "label": "Show seconds",
+      "type": "boolean",
+      "value": "true",
+      "access": "public",
+      "persist": "disk"
+    },
+    {
+      "name": "apiKey",
+      "label": "API key",
+      "type": "string",
+      "value": "abc123",
+      "access": "public",
+      "persist": "disk",
+      "secret": true
+    },
+    {
+      "name": "token",
+      "label": "Token",
+      "type": "string",
+      "value": "hidden",
+      "access": "private",
+      "persist": "memory"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "render",
+      "type": "event",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "keyword": "render"
+      }
+    }
+  ],
+  "edges": []
+}

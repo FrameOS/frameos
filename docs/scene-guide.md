@@ -584,6 +584,7 @@ schedule or the cloud may send one only when its declaration lists them in
 | `setSceneState` |  | yes | `state`? json, `render`? boolean | all | Set the scene's public state. |
 | `setCurrentScene` |  | yes | `sceneId`? scene, `direction`? string, `state`? json | all | Switch the frame to another scene: the one `sceneId` names, or with `direction` the `next` / `prev` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). |
 | `sceneSwitcher` |  | yes |  | all | Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. |
+| `sceneSettings` |  | yes |  | all | Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. |
 <!-- END GENERATED: events -->
 
 ## JS API reference
@@ -793,6 +794,8 @@ interface FrameOSEventPayloads {
   setCurrentScene: { sceneId?: string; direction?: string; state?: any };
   /** Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. While it is showing, go back to the scene it was opened from instead. The frame's event map binds it to a swipe in from the bottom edge on a touch screen. */
   sceneSwitcher: Record<string, never>;
+  /** Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it is showing, go back to the scene it was opened from without saving instead. The frame's event map binds it to a swipe in from the top edge on a touch screen. */
+  sceneSettings: Record<string, never>;
 }
 
 interface FrameOSContext {

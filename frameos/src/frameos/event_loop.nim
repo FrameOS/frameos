@@ -331,9 +331,10 @@ proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): boo
   true
 
 proc switcherOpener(scene: FrameScene): string =
-  ## The scene the scene switcher (`SceneSwitcherId`) was opened from, its
-  ## `state.from`; "" for any other scene (`{}` is nil-safe).
-  if scene.isNil or scene.id.string != SceneSwitcherId: "" else: scene.state{"from"}.getStr()
+  ## The scene a built-in scene (the switcher, the settings) was opened from,
+  ## its `state.from`; "" for any other scene (`{}` is nil-safe).
+  if scene.isNil or (scene.id.string != SceneSwitcherId and scene.id.string != SceneSettingsId): ""
+  else: scene.state{"from"}.getStr()
 
 proc sceneOrderOf(loop: EventLoop): seq[SceneId] =
   if loop.host.sceneOrder.isNil: newSeq[SceneId]() else: loop.host.sceneOrder()
@@ -367,18 +368,55 @@ proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
       payload["sceneId"] = %order[index].string
   loop.host.selectScene(payload)
 
-proc sceneSwitcher(loop: EventLoop, envelope: EventEnvelope): bool =
-  ## `sceneSwitcher`: the scene switcher, told which scene it was opened from;
-  ## while it shows, that scene again. The switcher forgets a scene that left
-  ## the list, and one opened by name knows none: then the list's first.
+proc settingsOf(scene: FrameScene, state: JsonNode) =
+  ## What the settings panel shows of `scene`: its public fields (`fields`)
+  ## and their values now (`values`), read before the switch, which on a
+  ## host that holds one scene lets the scene go.
+  let
+    fields = newJArray()
+    values = newJObject()
+  if scene of InterpretedFrameScene:
+    for field in InterpretedFrameScene(scene).publicStateFields:
+      let f = newJObject()
+      f["name"] = newJString(field.name)
+      f["label"] = newJString(field.label)
+      f["type"] = newJString(field.fieldType)
+      f["placeholder"] = newJString(field.placeholder)
+      f["secret"] = newJBool(field.secret)
+      if field.options.len > 0:
+        let options = newJArray()
+        for option in field.options:
+          let o = newJObject()
+          o["value"] = newJString(option.value)
+          o["label"] = newJString(option.label)
+          options.add o
+        f["options"] = options
+      fields.add f
+      let value = scene.state{field.name}
+      if not value.isNil:
+        values[field.name] = copy(value)
+  state["fields"] = fields
+  state["values"] = values
+
+proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bool =
+  ## `sceneSwitcher` and `sceneSettings`: the built-in scene, told which scene
+  ## it was opened from (the one under a built-in scene when one shows: they
+  ## are both about the frame's scenes); while it shows, that scene again.
+  ## The switcher forgets a scene that left the list, and one opened by name
+  ## knows none: then the list's first. The settings get the scene's fields.
   # One way out (no early `return`): on the ESP32 every one repeats the
   # clean-up of what was made so far, in flash.
   let current = loop.host.sceneFor(none(SceneId))
   let payload = newJObject()
-  var next = SceneSwitcherId
-  if current.isNil or current.id.string != SceneSwitcherId:
+  var next = sceneId
+  if current.isNil or current.id.string != sceneId:
     let state = newJObject()
-    state["from"] = newJString(if current.isNil: "" else: current.id.string)
+    var opener = switcherOpener(current)
+    if opener.len == 0 and not current.isNil:
+      opener = current.id.string
+    state["from"] = newJString(opener)
+    if sceneId == SceneSettingsId:
+      current.settingsOf(state)
     payload["state"] = state
   else:
     next = current.state{"from"}.getStr()
@@ -519,8 +557,9 @@ proc process(loop: EventLoop, envelope: EventEnvelope): bool =
     result = loop.selectScene(envelope)
     if result:
       loop.renderWanted = true
-  of evSceneSwitcher:
-    result = loop.sceneSwitcher(envelope)
+  of evSceneSwitcher, evSceneSettings:
+    result = loop.builtInScene(envelope,
+      if envelope.name == evSceneSwitcher: SceneSwitcherId else: SceneSettingsId)
     if result:
       loop.renderWanted = true
   of evTurnOn, evTurnOff:
