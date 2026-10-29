@@ -346,12 +346,18 @@ def write_apps_nim(tmp_dir: Optional[str] = None) -> str:
         imports.extend(f"  {import_line}" for import_line in embedded_unavailable_imports)
 
     # 2) the registry table, sorted so lookup can bisect, plus the capability
-    #    cases (still a case: those are literals, not calls)
+    #    cases (still a case: those are literals, not calls). Each app's
+    #    capabilities are a const: the strings and lists are data in flash and
+    #    a case returns a copy, where a literal in the case built every one of
+    #    them in code (4.8 KB of an ESP32 image for the table, 2026-10-29).
+    capability_consts = []
     capability_cases = []
     for app_id, cfg in sorted(all_apps.items(), key=lambda kv: kv[0]):
         literal = _app_capability_literal(cfg)
         if literal:
-            capability_cases.append(f'  of "{app_id}":\n    {literal}')
+            name = "capabilities_" + "".join(c if c.isalnum() else "_" for c in app_id)
+            capability_consts.append(f"const {name} = {literal}")
+            capability_cases.append(f'  of "{app_id}": {name}')
     capability_cases.append("  else: NoAppCapabilities")
 
     portable = sorted(
@@ -442,6 +448,8 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   let i = appIndex(keyword)
   if i < 0 or appEntries[i].getProc == nil: raiseUnknownApp(keyword)
   appEntries[i].getProc(app, context)
+
+{nl.join(capability_consts)}
 
 proc appCapabilities*(keyword: string): AppCapabilities =
   ## Per-port protocols this app declares in its config.json. Apps that

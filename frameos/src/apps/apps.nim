@@ -151,88 +151,89 @@ proc getApp*(keyword: string, app: AppRoot, context: ExecutionContext): Value =
   if i < 0 or appEntries[i].getProc == nil: raiseUnknownApp(keyword)
   appEntries[i].getProc(app, context)
 
-proc appCapabilities*(keyword: string): AppCapabilities =
-  ## Per-port protocols this app declares in its config.json. Apps that
-  ## declare nothing are materialized-only, which every edge supports.
-  case keyword:
-  of "data/downloadImage":
-    AppCapabilities(
+const capabilities_data_downloadImage = AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       forwardsBounds: @[],
       requestsBounds: @[],
       fieldDefaults: @[])
-  of "data/localImage":
-    AppCapabilities(
+const capabilities_data_localImage = AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch", "center", "top-left", "top-center", "top-right", "center-left", "center-right", "bottom-left", "bottom-center", "bottom-right"], requireStatic: @[], requireUnset: @[], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       forwardsBounds: @[],
       requestsBounds: @[],
       fieldDefaults: @[])
-  of "data/resizeImage":
-    AppCapabilities(
+const capabilities_data_resizeImage = AppCapabilities(
       providesTarget: @[],
       intoTarget: @[],
       forwardsTarget: @[],
       forwardsBounds: @[ForwardsBoundsSpec(output: "image", input: "image", boundsField: "", swapValues: @[], keepValues: @[], widthFrom: "width", heightFrom: "height", multiplyFrom: @[])],
       requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "width", value: ""), FieldMatch(field: "height", value: "")])
-  of "data/rotateImage":
-    AppCapabilities(
+const capabilities_data_rotateImage = AppCapabilities(
       providesTarget: @[],
       intoTarget: @[],
       forwardsTarget: @[ForwardsTargetSpec(output: "image", input: "image", requireStatic: @[FieldConstraint(field: "rotationDegree", allowed: @["180", "180.0", "-180", "-180.0", "540", "540.0"])])],
       forwardsBounds: @[ForwardsBoundsSpec(output: "image", input: "image", boundsField: "rotationDegree", swapValues: @["90", "90.0", "270", "270.0", "-90", "-90.0", "-270", "-270.0", "450", "450.0"], keepValues: @["0", "0.0", "180", "180.0", "-180", "-180.0", "360", "360.0", "540", "540.0"], widthFrom: "", heightFrom: "", multiplyFrom: @[])],
       requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "rotationDegree", value: "0")])
-  of "render/calendar":
-    AppCapabilities(
+const capabilities_render_calendar = AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["cover", "contain", "stretch"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @[])],
       forwardsTarget: @[],
       forwardsBounds: @[],
       requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "inputImage", value: "")])
-  of "render/color":
-    AppCapabilities(
+const capabilities_render_color = AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["natural"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @["color"])],
       forwardsTarget: @[],
       forwardsBounds: @[],
       requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "inputImage", value: ""), FieldMatch(field: "color", value: "#ffffff")])
-  of "render/gradient":
-    AppCapabilities(
+const capabilities_render_gradient = AppCapabilities(
       providesTarget: @[],
       intoTarget: @[IntoTargetSpec(output: "image", fits: @["natural"], requireStatic: @[], requireUnset: @["inputImage"], requireOpaqueColor: @["startColor", "endColor"])],
       forwardsTarget: @[],
       forwardsBounds: @[],
       requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "inputImage", value: ""), FieldMatch(field: "startColor", value: "#800080"), FieldMatch(field: "endColor", value: "#ffc0cb")])
-  of "render/image":
-    AppCapabilities(
+const capabilities_render_image = AppCapabilities(
       providesTarget: @[ProvidesTargetSpec(input: "image", fitFrom: "placement", fits: @["cover", "contain", "stretch", "center", "top-left", "top-center", "top-right", "center-left", "center-right", "bottom-left", "bottom-center", "bottom-right"], requireStatic: @[FieldConstraint(field: "offsetX", allowed: @["0"]), FieldConstraint(field: "offsetY", allowed: @["0"]), FieldConstraint(field: "blendMode", allowed: @["normal", "overwrite"])], compositingRequireStatic: @[FieldConstraint(field: "blendMode", allowed: @["normal"])], requireUnset: @["inputImage"], ownedTargetExcludes: @[@[FieldMatch(field: "placement", value: "contain"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "center"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "top-left"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "top-center"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "top-right"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "center-left"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "center-right"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "bottom-left"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "bottom-center"), FieldMatch(field: "blendMode", value: "overwrite")], @[FieldMatch(field: "placement", value: "bottom-right"), FieldMatch(field: "blendMode", value: "overwrite")]])],
       intoTarget: @[],
       forwardsTarget: @[],
       forwardsBounds: @[],
       requestsBounds: @[],
       fieldDefaults: @[FieldMatch(field: "placement", value: "cover"), FieldMatch(field: "offsetX", value: "0"), FieldMatch(field: "offsetY", value: "0"), FieldMatch(field: "blendMode", value: "normal"), FieldMatch(field: "inputImage", value: "")])
-  of "render/opacity":
-    AppCapabilities(
+const capabilities_render_opacity = AppCapabilities(
       providesTarget: @[],
       intoTarget: @[],
       forwardsTarget: @[ForwardsTargetSpec(output: "image", input: "image", requireStatic: @[])],
       forwardsBounds: @[],
       requestsBounds: @[],
       fieldDefaults: @[])
-  of "render/zoomPan":
-    AppCapabilities(
+const capabilities_render_zoomPan = AppCapabilities(
       providesTarget: @[],
       intoTarget: @[],
       forwardsTarget: @[],
       forwardsBounds: @[ForwardsBoundsSpec(output: "image", input: "image", boundsField: "", swapValues: @[], keepValues: @[], widthFrom: "", heightFrom: "", multiplyFrom: @["zoomStart", "zoomEnd"])],
       requestsBounds: @[RequestsBoundsSpec(input: "image", requireUnset: @["inputImage"], multiplyFrom: @["zoomStart", "zoomEnd"])],
       fieldDefaults: @[FieldMatch(field: "inputImage", value: ""), FieldMatch(field: "zoomStart", value: "1.0"), FieldMatch(field: "zoomEnd", value: "1.4")])
+
+proc appCapabilities*(keyword: string): AppCapabilities =
+  ## Per-port protocols this app declares in its config.json. Apps that
+  ## declare nothing are materialized-only, which every edge supports.
+  case keyword:
+  of "data/downloadImage": capabilities_data_downloadImage
+  of "data/localImage": capabilities_data_localImage
+  of "data/resizeImage": capabilities_data_resizeImage
+  of "data/rotateImage": capabilities_data_rotateImage
+  of "render/calendar": capabilities_render_calendar
+  of "render/color": capabilities_render_color
+  of "render/gradient": capabilities_render_gradient
+  of "render/image": capabilities_render_image
+  of "render/opacity": capabilities_render_opacity
+  of "render/zoomPan": capabilities_render_zoomPan
   else: NoAppCapabilities
