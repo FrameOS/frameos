@@ -45,6 +45,7 @@ describe("the plan catalog", () => {
     expect(stops.map((stop) => [Number(stop.price_micros) / 1_000_000, stop.limits.frames])).toEqual([
       [0, 20],
       [2, 40],
+      [5, 60],
       [9, 80],
       [29, 160],
       [49, 199],
