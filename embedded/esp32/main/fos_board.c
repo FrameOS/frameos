@@ -140,15 +140,14 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     "[{\"event\":\"button\",\"match\":{\"label\":\"" label "\",\"action\":\"longPress\"}," \
     "\"emit\":\"voiceChat\",\"as\":{}}]"
 /* The SenseCAP Indicator: one key and a touch screen, no microphone. The key
- * pressed switches the screen off and on, pressed twice is the next scene and
- * held the previous one; the edges swipe (TOUCH_EDGE_SWIPES). */
+ * pressed switches the screen off and on, and pressed twice opens the scene
+ * switcher; held it does nothing (on a board with a microphone that is the
+ * voice key). The edges swipe (TOUCH_EDGE_SWIPES). */
 #define INDICATOR_EVENT_MAP \
     "[{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"press\"}," \
     "\"emit\":\"toggleScreen\",\"as\":{}}," \
     "{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"doublePress\"}," \
-    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
-    "{\"event\":\"button\",\"match\":{\"label\":\"BUTTON\",\"action\":\"longPress\"}," \
-    "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
+    "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
     TOUCH_EDGE_SWIPES "]"
 
 static const struct {

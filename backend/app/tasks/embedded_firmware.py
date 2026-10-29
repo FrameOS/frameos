@@ -281,14 +281,13 @@ EMBEDDED_TOUCH_EDGE_SWIPES = [
     {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
     {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
 ]
-# The one key pressed switches the screen off and on, pressed twice is the
-# next scene and held the previous one; the edges swipe
-# (EMBEDDED_TOUCH_EDGE_SWIPES). fos_board.c's INDICATOR_EVENT_MAP is the
-# device copy.
+# The one key pressed switches the screen off and on, and pressed twice opens
+# the scene switcher; held it does nothing (on a board with a microphone that
+# is the voice key). The edges swipe (EMBEDDED_TOUCH_EDGE_SWIPES).
+# fos_board.c's INDICATOR_EVENT_MAP is the device copy.
 EMBEDDED_SEEED_SENSECAP_INDICATOR_EVENT_MAP = [
     {"event": "button", "match": {"label": "BUTTON", "action": "press"}, "emit": "toggleScreen", "as": {}},
-    {"event": "button", "match": {"label": "BUTTON", "action": "doublePress"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
-    {"event": "button", "match": {"label": "BUTTON", "action": "longPress"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+    {"event": "button", "match": {"label": "BUTTON", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
     *EMBEDDED_TOUCH_EDGE_SWIPES,
 ]
 # Parity with fos_board.c's k_touch_pins, nothing provisions it: the FT6336U
