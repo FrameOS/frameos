@@ -82,6 +82,16 @@ gets a dark form that shows presses; e-paper black on white, no press shown
 
 A scene with no field to show says so: "This scene has no settings."
 
+**A round panel** (`frameos/panel_shape.nim` `panelIsRound`: the HyperPixel
+2.1" Round) keeps the form inside its circle, `RoundInset` (12 px) in from
+the rim, as the switcher does: the scene's name in the top arc, Cancel and
+Save centred under it, and the list as wide as the circle is where the list
+ends (as far below the centre as it starts above it). With the keyboard up
+it sits on the circle's lower half (`docs/jsx-ui.md`), the name makes way
+for the buttons, and the list ends above the keys. `test_scene.nim` checks
+every hit region and every pixel drawn, the keyboard down and up. No ESP32
+board is round: the firmware carries the rectangular form alone.
+
 ## The scene
 
 Built into the runtime, not installed, exactly as the switcher: in no scene

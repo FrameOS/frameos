@@ -3,6 +3,7 @@ import pixie
 import frameos/channels
 import frameos/types
 import frameos/events_gen
+import frameos/panel_shape
 import frameos/ui/events
 import frameos/ui/keyboard
 import frameos/ui/layout
@@ -134,5 +135,63 @@ block nothing_to_set:
   let image = scene.draw()
   if previews.len > 0: image.writeFile(previews / "settings-empty.png")
   doAssert image[240, 240] != image[2, 2] or true # the message is drawn (pictures by hand)
+
+block a_round_panel_keeps_the_form_and_the_keyboard_on_the_glass:
+  # The HyperPixel 2.1" Round: only the circle inscribed in its 480x480 shows
+  # and takes a touch. Every region the form hit-tests and every pixel it
+  # draws stays RoundInset in from the rim, with the keyboard down and up.
+  let roundConfig = FrameConfig(width: 480, height: 480, device: "pimoroni.hyperpixel2r",
+    scalingMode: "cover", saveAssets: %*false)
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, roundConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {
+    "from": "scenes/weather",
+    "fields": [
+      {"name": "city", "label": "City", "type": "string", "placeholder": "Where?", "secret": false},
+      {"name": "metric", "label": "Metric units", "type": "boolean", "placeholder": "", "secret": false},
+      {"name": "theme", "label": "Theme", "type": "string", "placeholder": "", "secret": false,
+        "options": [{"value": "dark", "label": "Dark"}, {"value": "light", "label": "Light"}]},
+      {"name": "notes", "label": "Notes", "type": "text", "placeholder": "", "secret": false}],
+    "values": {"city": "Oslo", "metric": true, "theme": "dark", "notes": ""}}})
+  scene.send("open", %*{"sceneId": SceneSettingsId})
+  proc onTheGlass(image: Image, where: string) =
+    for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+      if r.handlers[ueClick] - 1 == KeyBase or r.visible[0] >= r.visible[2] or r.visible[1] >= r.visible[3]:
+        continue # the keyboard's own box (a tap between its keys), or scrolled out of sight
+      for (x, y) in [(r.visible[0], r.visible[1]), (r.visible[2] - 1, r.visible[1]),
+          (r.visible[0], r.visible[3] - 1), (r.visible[2] - 1, r.visible[3] - 1)]:
+        doAssert insideRound(480, 480, int(x), int(y), RoundInset),
+          where & ": a region reaches off the glass at " & $(x, y) & " " & $r
+    let background = image[0, 0]
+    for y in 0 ..< 480:
+      for x in 0 ..< 480:
+        if not insideRound(480, 480, x, y, RoundInset):
+          doAssert image[x, y] == background, where & ": drawn off the glass at " & $(x, y)
+  var image = scene.draw()
+  if previews.len > 0: image.writeFile(previews / "settings-round.png")
+  image.onTheGlass("the form")
+  # The city gets the keyboard: it sits on the circle's lower half, and the
+  # list ends above it.
+  scene.tap(regionWith(1000))
+  image = scene.draw()
+  doAssert uiTarget(SceneSettingsId, 1, create = false).input.keyboard
+  if previews.len > 0: image.writeFile(previews / "settings-round-keyboard.png")
+  image.onTheGlass("the keyboard")
+  var keys = 0
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    if r.handlers[ueClick] - 1 > KeyBase: inc keys
+  doAssert keys >= 30, $keys
+  sent.setLen(0)
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    if r.handlers[ueClick] == KeyBase + ord('s') + 1: scene.tap(r)
+  doAssert scene.state["values"]["city"].getStr() == "Oslos", $scene.state["values"]
+  # The numbers too.
+  for r in uiTarget(SceneSettingsId, 1, create = false).regions:
+    if r.handlers[ueClick] == KeyBase + ord(kSymbols) + 1: scene.tap(r)
+  image = scene.draw()
+  image.onTheGlass("the symbols")
+  # Save is still there with the keyboard up.
+  sent.setLen(0)
+  scene.tap(regionWith(1))
+  doAssert sent.len >= 1 and sent[0][0] == evSetCurrentScene, $sent
 
 echo "scene settings: ok"

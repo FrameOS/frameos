@@ -507,6 +507,13 @@ export function get(app) {
   with a finger, a pen or the mouse over the preview, and on e-paper too, a
   refresh a key (it shows no press there). An ESP32 board has no keyboard of
   its own, ever.
+- **On a round panel** (the HyperPixel 2.1" Round, `panel_shape.nim`
+  `panelIsRound`) a UI that is the whole canvas gets the keyboard higher up,
+  its last row four fifths of the way from the circle's centre to its rim,
+  each row cut to the chord it sits on (`RoundInset` in from the rim) with
+  its keys narrower where the circle is, on no band of its own; the UI is
+  laid out above it (`keyboardBox`, `UiInput.round`). Not on an ESP32: no
+  board of it is round.
 - **The keyboard reaches the screen's edges**, so a press on it is a key and
   never an edge swipe (docs/events.md "Edge swipes"): a finger on its outer
   keys types instead of changing the scene. A key is typed where the finger
