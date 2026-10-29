@@ -1107,10 +1107,16 @@ proc jsxScale(runtime: JsAppRuntime, owner: AppRoot): float =
   ## The render scale a .tsx or .jsx app lays out for: the scene's or the
   ## frame's (render_scale.nim). 1 for any other app, which keeps the panel's
   ## pixels (a photo fetched for its size wants every one).
-  if runtime.isNil or owner.isNil or not (runtime.sourceName.endsWith(".tsx") or
-      runtime.sourceName.endsWith(".jsx")):
+  # The main module is app.ts, app.js, app.tsx or app.jsx (JsAppSourceNames):
+  # the last two, and only they, end in "x".
+  if runtime.isNil or owner.isNil or not runtime.sourceName.endsWith('x'):
     return 1.0
   effectiveRenderScale(owner.scene, owner.frameConfig)
+
+proc appLength(ctx: ptr JSContext, e: JsAppEvalEnv, length: int): JSValue =
+  ## A canvas or panel length as the app sees it: divided by the render
+  ## scale for a .tsx or .jsx app (render_scale.nim).
+  nimIntToJS(ctx, scaledLength(length, e.runtime.jsxScale(e.owner)).int32)
 
 proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   let e = env(ctx)
@@ -1120,9 +1126,9 @@ proc jsGetAppFrame(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
   case toNimString(ctx, key)
   of "width":
     # A .tsx app at render scale 2 is on a panel half the size (render_scale.nim).
-    return nimIntToJS(ctx, scaledLength(e.owner.frameConfig.width, e.runtime.jsxScale(e.owner)).int32)
+    return appLength(ctx, e, e.owner.frameConfig.width)
   of "height":
-    return nimIntToJS(ctx, scaledLength(e.owner.frameConfig.height, e.runtime.jsxScale(e.owner)).int32)
+    return appLength(ctx, e, e.owner.frameConfig.height)
   of "scale":
     # The render scale in effect for the scene, whatever kind of app asks.
     return nimFloatToJS(ctx, effectiveRenderScale(e.owner.scene, e.owner.frameConfig))
@@ -1173,18 +1179,18 @@ proc jsGetAppContext(ctx: ptr JSContext, key: JSValue): JSValue {.nimcall.} =
     return jsUndefSentinel(ctx)
   of "imageWidth":
     if e.context.hasImage and not e.context.image.isNil:
-      return nimIntToJS(ctx, scaledLength(e.context.image.width, e.runtime.jsxScale(e.owner)).int32)
+      return appLength(ctx, e, e.context.image.width)
     return jsUndefSentinel(ctx)
   of "imageHeight":
     if e.context.hasImage and not e.context.image.isNil:
-      return nimIntToJS(ctx, scaledLength(e.context.image.height, e.runtime.jsxScale(e.owner)).int32)
+      return appLength(ctx, e, e.context.image.height)
     return jsUndefSentinel(ctx)
   of "targetWidth", "targetHeight", "targetFit":
     let target = e.owner.addressedTarget(e.context)
     if target.width > 0:
       case keyStr
-      of "targetWidth": return nimIntToJS(ctx, scaledLength(target.width, e.runtime.jsxScale(e.owner)).int32)
-      of "targetHeight": return nimIntToJS(ctx, scaledLength(target.height, e.runtime.jsxScale(e.owner)).int32)
+      of "targetWidth": return appLength(ctx, e, target.width)
+      of "targetHeight": return appLength(ctx, e, target.height)
       else:
         if target.fit.len > 0:
           return nimStringToJS(ctx, target.fit)
@@ -2231,14 +2237,14 @@ proc callJsxHandler(runtime: JsAppRuntime, owner: AppRoot, handler: int, name: s
     JS_FreeValue(ctx, returned)
 
 proc keepUiRegions(runtime: JsAppRuntime, owner: AppRoot, sceneId: string,
-    regions: var seq[UiRegion], x, y: int, scale: float) =
+    regions: var seq[UiRegion], x, y: int, scale: float32) =
   ## What the pointer can do to the UI just drawn with its corner at x, y,
   ## `scale` canvas pixels to each of its own.
   let target = uiTarget(sceneId, owner.nodeId.int)
   target.regions = move(regions)
   target.offsetX = x.float32
   target.offsetY = y.float32
-  target.scale = scale.float32
+  target.scale = scale
   # Into the app that drew these regions, every render: the scene can be
   # loaded again since the last one (a switch away and back), with a new app.
   target.call = proc(handler: int, name: string, event: JsonNode, hit: UiHit) {.closure, raises: [].} =
@@ -2268,8 +2274,9 @@ proc imageFromJsx(runtime: JsAppRuntime, owner: AppRoot, context: ExecutionConte
     scale = runtime.jsxScale(owner)
     layoutWidth = scaledLength(requestedWidth, scale)
     layoutHeight = scaledLength(requestedHeight, scale)
-    # What the pointer is divided by: the layout's rounded size, exactly.
-    regionScale = requestedWidth.float / max(layoutWidth, 1).float
+    # What the pointer is divided by: the layout's rounded size, exactly. In
+    # float32, as UiTarget keeps it (a double is a library call on an ESP32-S3).
+    regionScale = requestedWidth.float32 / max(layoutWidth, 1).float32
     sceneId = if owner.scene.isNil: "" else: owner.scene.id.string
   var
     svg = root

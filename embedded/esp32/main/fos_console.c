@@ -877,7 +877,7 @@ static int cmd_set(int argc, char **argv)
         /* Live like scaling_mode: fos_client pushes it on the next pass. */
         uint16_t milli = 0;
         if (!fos_config_parse_render_scale(value, &milli)) {
-            printf("bad render_scale value, want 0 (automatic) or a number up to 4, e.g. 1.5\n");
+            printf("render_scale: 0 (automatic) to 4\n");
             return 1;
         }
         config->render_scale_milli = milli;

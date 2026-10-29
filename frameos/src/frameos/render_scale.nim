@@ -25,40 +25,31 @@
 ## docs/jsx-ui.md "Scale" is the spec. The same automatic rule lives in
 ## `frontend/src/utils/renderScale.ts`; keep the two in step.
 
-import std/[json, math, strutils]
+import std/[json, math]
 import frameos/types
+import frameos/refresh_interval
 
 const
   RenderScaleRole* = "renderScale"
   ## The shorter edge that automatic scaling treats as 1x.
-  AutoRenderScaleEdge* = 600.0
+  AutoRenderScaleEdge* = 600
   MaxRenderScale* = 4.0
 
 proc autoRenderScale*(width, height: int): float =
   ## The automatic scale for a panel: its shorter edge over 600 px, rounded
   ## down to a quarter, at least 1.
-  let edge = min(width, height)
-  if edge <= 0:
-    return 1.0
-  max(1.0, floor(edge.float / AutoRenderScaleEdge * 4.0) / 4.0)
+  # In whole quarters, as integers: a double is a library call on an ESP32-S3.
+  let quarters = max(4, min(width, height) * 4 div AutoRenderScaleEdge)
+  quarters.float / 4.0
+
+proc usableScale(scale: float): float {.inline.} =
+  if scale > 0.0 and scale <= MaxRenderScale: scale else: 0.0
 
 proc parseRenderScale*(value: JsonNode): float =
-  ## Lenient like the refresh interval: control forms deliver numbers as
-  ## strings. 0 for anything that is not a scale (0 itself means "not set").
-  if value.isNil:
-    return 0.0
-  var scale = 0.0
-  case value.kind
-  of JInt: scale = value.getInt().float
-  of JFloat: scale = value.getFloat()
-  of JString:
-    try:
-      scale = parseFloat(value.getStr().strip())
-    except ValueError:
-      return 0.0
-  else:
-    return 0.0
-  if scale > 0.0 and scale <= MaxRenderScale: scale else: 0.0
+  ## Lenient like the refresh interval, with its parse (one copy of it in an
+  ## ESP32's flash): control forms deliver numbers as strings. 0 for anything
+  ## that is not a scale (0 itself means "not set").
+  usableScale(parseRefreshSeconds(value))
 
 proc renderScaleFieldKey*(fields: seq[StateField]): string =
   ## The state key of the scene's first field with role renderScale, "" when
@@ -69,27 +60,24 @@ proc renderScaleFieldKey*(fields: seq[StateField]): string =
       return field.name
   ""
 
-proc frameRenderScale*(config: FrameConfig): float =
+proc frameRenderScale*(config: FrameConfig): float {.inline.} =
   ## The frame's scale: its own setting, or the automatic one for its panel.
   if config.isNil:
     return 1.0
-  if config.renderScale > 0.0 and config.renderScale <= MaxRenderScale:
-    return config.renderScale
-  autoRenderScale(config.width, config.height)
+  let own = usableScale(config.renderScale)
+  if own > 0.0: own else: autoRenderScale(config.width, config.height)
 
-proc sceneRenderScale*(scene: FrameScene): float =
+proc sceneRenderScale*(scene: FrameScene): float {.inline.} =
   ## The scene's own override: its role field's state, else its setting. 0 =
   ## none, the frame's applies.
   if scene.isNil:
     return 0.0
-  if scene.renderScaleKey.len > 0 and not scene.state.isNil and
-      scene.state.kind == JObject and scene.state.hasKey(scene.renderScaleKey):
-    let fromState = parseRenderScale(scene.state[scene.renderScaleKey])
+  if scene.renderScaleKey.len > 0:
+    # `{}` is nil for a missing key and for a state that is not an object.
+    let fromState = parseRenderScale(scene.state{scene.renderScaleKey})
     if fromState > 0.0:
       return fromState
-  if scene.renderScaleSetting > 0.0 and scene.renderScaleSetting <= MaxRenderScale:
-    return scene.renderScaleSetting
-  0.0
+  usableScale(scene.renderScaleSetting)
 
 proc effectiveRenderScale*(scene: FrameScene, config: FrameConfig): float =
   let own = sceneRenderScale(scene)

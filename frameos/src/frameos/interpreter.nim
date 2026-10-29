@@ -2037,10 +2037,8 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     refreshIntervalImplicit: refresh.implicit,
     # Its own render scale, over the frame's: a role field, else the setting.
     renderScaleKey: renderScaleFieldKey(scene.fields),
-    renderScaleSetting:
-      if scene.settings != nil and scene.settings.renderScale > 0.0 and
-        scene.settings.renderScale <= MaxRenderScale: scene.settings.renderScale
-      else: 0.0,
+    # Out of range is ignored where it is read (sceneRenderScale).
+    renderScaleSetting: if scene.settings != nil: scene.settings.renderScale else: 0.0,
     init: init,
     render: render,
     runEvent: runEvent,

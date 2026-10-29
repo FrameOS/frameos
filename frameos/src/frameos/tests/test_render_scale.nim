@@ -81,7 +81,7 @@ suite "render scale":
     ]""")
     check exports["tests/scale-setting".SceneId].renderScaleSetting == 1.5
     check exports["tests/scale-field".SceneId].renderScaleKey == "zoom"
-    check exports["tests/scale-none".SceneId].renderScaleSetting == 0.0 # out of range: the frame's
+    check exports["tests/scale-none".SceneId].renderScaleSetting == 9.0 # kept; ignored where read
     setUploadedInterpretedScenes(exports)
     let config = FrameConfig(width: 1200, height: 1600)
     check effectiveRenderScale(initScene("tests/scale-setting", config), config) == 1.5
