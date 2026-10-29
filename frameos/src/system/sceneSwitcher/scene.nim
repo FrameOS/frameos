@@ -7,7 +7,8 @@
 ## and shown like any scene. `sceneSwitcher` (docs/events-contract.json) opens
 ## it, and the dispatcher (event_loop.nim) hands it `state.from`, the scene it
 ## was opened from; the same event while it shows goes back there, which is
-## what its Close button, a `back` key and its idle timeout dispatch.
+## what its Close button, a `back` key and its idle timeout dispatch, and so
+## does `sceneSettings`.
 ##
 ## It is drawn with the JSX layout (ui/layout.nim): the tree is built here, in
 ## Nim, so it needs no QuickJS, and its taps are hit-tested by ui/events.nim
@@ -34,6 +35,7 @@ import frameos/events_gen
 import frameos/panel_shape
 import frameos/ui/layout
 import frameos/ui/events
+import frameos/ui/tree
 import frameos/utils/font
 import frameos/utils/image
 import frameos/utils/svg_frames
@@ -92,8 +94,9 @@ proc put(node: JsonNode, key: string, value: JsonNode) {.inline.} =
   node.fields[key] = value
 
 proc isBuiltInScene*(sceneId: string): bool =
-  ## A scene the runtime draws itself, on every host: no slot, no file.
-  sceneId == SceneSwitcherId
+  ## A scene the runtime draws itself, on every host: no slot, no file. The
+  ## switcher and the scene settings (system/sceneSettings/scene.nim).
+  sceneId == SceneSwitcherId or sceneId == SceneSettingsId
 
 # ------------------------------------------------------------------ the model
 
@@ -123,6 +126,14 @@ proc idleSeconds*(paper: bool): float =
 proc canvasSize(frameConfig: FrameConfig): (int, int) =
   if frameConfig.rotate == 90 or frameConfig.rotate == 270: (frameConfig.height, frameConfig.width)
   else: (frameConfig.width, frameConfig.height)
+
+proc ensureCanvas*(self: FrameScene, context: ExecutionContext) =
+  ## The canvas a built-in scene draws into: the host's, else one the size of
+  ## the frame as it is turned.
+  if not context.hasImage or context.image.isNil:
+    let (w, h) = canvasSize(self.frameConfig)
+    context.image = newImage(max(w, 1), max(h, 1))
+    context.hasImage = true
 
 proc permille(v, p: int): int {.inline.} = (v * p + 500) div 1000
 
@@ -229,8 +240,9 @@ proc highlighted*(self: SceneSwitcherScene): int =
     return -1
   max(self.indexOf(self.state{"highlight"}.getStr()), 0)
 
-proc touch(self: SceneSwitcherScene) =
-  ## Somebody did something: the idle timeout starts over.
+proc touch*(self: FrameScene) =
+  ## Somebody did something: the idle timeout starts over (a built-in
+  ## scene's `drawUi`).
   self.state.put("touchedAt", newJFloat(epochTime()))
 
 proc highlight(self: SceneSwitcherScene, index: int) =
@@ -321,11 +333,6 @@ when not defined(frameosEmbedded):
 # strings, and every `if` that yields a string, is its own temporary at each
 # call site. Nodes are handed on (`sink`), never copied.
 
-proc el(tag: string, classes: sink string, child: sink SvgNode = nil): SvgNode =
-  result = SvgNode(tag: tag, attrs: @[("class", classes)])
-  if not child.isNil:
-    result.children.add child
-
 proc txt(text: sink string): SvgNode = SvgNode(text: text)
 
 proc pageText(page, pages: int): string =
@@ -333,14 +340,6 @@ proc pageText(page, pages: int): string =
   result.addInt(page + 1)
   result.add " / "
   result.addInt pages
-
-proc px(c: var string, name: string, v: int) =
-  ## ` name-[Npx]`: a Tailwind class with an arbitrary length.
-  c.add ' '
-  c.add name
-  c.add "-["
-  c.addInt v
-  c.add "px]"
 
 proc at(c: var string, x, y, w, h: int) =
   c.add "absolute"
@@ -610,8 +609,34 @@ const
   PaperWhite = color(1, 1, 1, 1)
   Zinc950 = color(0.035, 0.035, 0.043, 1)
 
-proc background(paper: bool): Color =
+proc background*(paper: bool): Color =
   if paper: PaperWhite else: Zinc950
+
+proc drawUi*(self: FrameScene, sceneId: string, tree: SvgNode, image: Image, paper: bool,
+    call: UiHandlerCall, idle: float): bool =
+  ## A built-in scene's render (the switcher's, the settings'): `tree` laid
+  ## out and drawn into `image`, and its regions left with `call` for the
+  ## pointer. True once nobody has touched it for `idle` seconds, when the
+  ## scene goes back; until then the next render is due when that time is up.
+  let target = uiTarget(sceneId, 1)
+  target.input.paper = paper
+  var regions: seq[UiRegion]
+  let svg = layoutUi(tree, image.width, image.height, target.input, regions, target.memo)
+  let bg = background(paper)
+  var owed = some(bg)
+  if not renderSvgFrame(svg, image, owed, wholeFrame = true, reuse = true):
+    discard renderSvgIntoTarget(svg, image, owed)
+  if owed.isSome:
+    image.fill(bg)
+  target.regions = move(regions)
+  target.offsetX = 0
+  target.offsetY = 0
+  target.call = call
+  let
+    now = epochTime()
+    since = now - self.state{"touchedAt"}.getFloat(now)
+  result = since >= idle
+  self.refreshInterval = if result: idle else: max(idle - since, 1.0)
 
 proc onTap(handler: int, name: string, event: JsonNode, hit: UiHit) {.raises: [].} =
   ## The tiles' one handler, run by the hit test (ui/events.nim): what it
@@ -626,36 +651,13 @@ proc draw*(self: SceneSwitcherScene, image: Image) =
     # Gone from the list since it opened: Close goes to the list's first.
     self.forget()
   self.paper = paperPanel(self.frameConfig, image)
-  let
-    paper = self.paper
-    target = uiTarget(SceneSwitcherId, SwitcherNode)
-  var regions: seq[UiRegion]
   # E-paper shows no press: a refresh to say a finger is down is seconds of
   # flashing for nothing. `pointer` hands it taps alone, which leave the
-  # target's input (what is hovered, what is pressed) empty.
-  let svg = layoutUi(self.tree(image.width, image.height, paper), image.width, image.height,
-    target.input, regions, target.memo)
-  let bg = background(paper)
-  var owed = some(bg)
-  if not renderSvgFrame(svg, image, owed, wholeFrame = true, reuse = true):
-    discard renderSvgIntoTarget(svg, image, owed)
-  if owed.isSome:
-    image.fill(bg)
-  target.regions = move(regions)
-  target.offsetX = 0
-  target.offsetY = 0
-  target.call = onTap
-  # Back by itself once nobody has touched it for a while; until then, a
-  # render when that time is up.
-  let
-    idle = idleSeconds(paper)
-    now = epochTime()
-    since = now - self.state{"touchedAt"}.getFloat(now)
-  if since >= idle:
+  # target's input (what is hovered, what is pressed) empty. Back by itself
+  # once nobody has touched it for a while.
+  if self.drawUi(SceneSwitcherId, self.tree(image.width, image.height, self.paper), image, self.paper,
+      onTap, idleSeconds(self.paper)):
     leave()
-    self.refreshInterval = idle
-  else:
-    self.refreshInterval = max(idle - since, 1.0)
 
 # ------------------------------------------------------------ the scene
 
@@ -719,10 +721,7 @@ proc runSwitcher(self: FrameScene, context: ExecutionContext) =
     self.pointer(context.event, payload)
 
 proc renderSwitcher(self: FrameScene, context: ExecutionContext): Image =
-  if not context.hasImage or context.image.isNil:
-    let (w, h) = canvasSize(self.frameConfig)
-    context.image = newImage(max(w, 1), max(h, 1))
-    context.hasImage = true
+  self.ensureCanvas(context)
   runSwitcher(self, context)
   context.image
 

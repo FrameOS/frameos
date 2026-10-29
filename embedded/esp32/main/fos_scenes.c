@@ -90,8 +90,8 @@ static bool s_scene_switched = false;
 static bool s_boot_pending_selection = false;
 /* A payload was stored since boot (not the cached one init re-applies). */
 static bool s_payload_stored_since_boot = false;
-/* The runtime shows a scene of its own (the scene switcher) over the
- * resident one, which stays loaded for the way back. */
+/* The runtime shows a scene of its own (the scene switcher, the scene
+ * settings) over the resident one, which stays loaded for the way back. */
 static bool s_built_in_shown = false;
 /* How long a frame that deep-sleeps stays up with the switcher on its panel:
  * the switcher's own idle timeout on e-paper (system/sceneSwitcher), so the
@@ -99,11 +99,12 @@ static bool s_built_in_shown = false;
 #define BUILT_IN_SCENE_AWAKE_MS (5 * 60 * 1000)
 
 /* A scene the runtime draws itself (docs/events-contract.json
- * `scenes.switcher`): no slot on flash, never the scene a reboot or a deep
- * sleep comes back to. */
+ * `scenes.switcher`, `scenes.settings`): no slot on flash, never the scene
+ * a reboot or a deep sleep comes back to. */
 static bool is_built_in_scene(const char *scene_id)
 {
-    return scene_id != NULL && strcmp(scene_id, FOS_SCENE_SWITCHER_ID) == 0;
+    return scene_id != NULL &&
+           (strcmp(scene_id, FOS_SCENE_SWITCHER_ID) == 0 || strcmp(scene_id, FOS_SCENE_SETTINGS_ID) == 0);
 }
 /* Serializes writers of /state/scenes.json: the USB upload (console task)
  * and the backend sync (fos_client task) share one tmp path, and two

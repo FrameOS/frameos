@@ -8,7 +8,7 @@ The goal: a person at a touch frame (the SenseCAP Indicator first) changes a
 scene's settings on the frame itself. Swipe down from the top edge, and the
 scene's fields are a form: text to type on a keyboard on the screen,
 switches, choices, a list as long as it needs to be. Save, and the scene
-shows them.
+shows them. That works now (`docs/scene-settings.md`); what is left follows.
 
 ## What exists
 
@@ -29,36 +29,16 @@ shows them.
   same paths): the layout 5.8 KB, pixie's viewport 2.6 KB, the events 2.4 KB,
   the keyboard 2.4 KB and its strings 1.5 KB, the rest link drift (2.4 KB of
   it the interpreter's unchanged `runNode`).
+- **The scene settings panel** (`docs/scene-settings.md`), built of all that:
+  `sceneSettings`, bound to a swipe down from the top in every touch preset.
 
-## Next: the scene settings panel
+## Next: the frame's own settings
 
-A scene built into every runtime, `system/sceneSettings`, as the scene
-switcher is (`docs/scene-switcher.md` is the pattern: contract, dispatcher,
-hosts, presets):
-
-1. **The event** `sceneSettings` (a scene command; contract `scenes.settings`
-   = `system/sceneSettings`): from any scene the dispatcher hands the panel
-   `state.from`, the scene's public fields (name, label, type, options,
-   placeholder, secret) and their values *now*, read off the scene before
-   the switch (an ESP32 holds one scene: the opener is gone once the panel
-   shows). While it shows, the same event goes back without saving.
-2. **The panel**, drawn from a tree built in Nim with the JSX layout (no
-   QuickJS): a header with Cancel, the scene's name and Save; under it a list
-   that scrolls, one row per field: an `<input>` (text, numbers, a password
-   for a secret), a `<textarea>` (text, JSON), a switch (boolean), choices
-   (select), a color as its hex. Types it cannot edit here
-   (node, scene, image) are left out.
-3. **Save** is `setCurrentScene {sceneId: from, state: values}`: every host
-   applies a switch's state to the public fields already (ESP32 included,
-   after the scene loads again), and persisted fields save themselves.
-   Cancel, the swipe again and the idle timeout go back without it.
-4. **The binding**: a swipe down from the top edge (`edgeSwipe {edge: top}`)
-   in every touch preset (`TOUCH_EDGE_SWIPES`, `EMBEDDED_TOUCH_EDGE_SWIPES`,
-   the SPA's, the HyperPixels' `device_event_map.nim`), and "Scene
-   settings" as an action under Button actions on both planes (an emit the
-   cloud contract allows).
-5. **A link to the frame's own settings** from the panel's header, once the
-   frame can show those (Wi-Fi, the display, the event map).
+The scene settings (`docs/scene-settings.md`: a swipe down from the top on a
+touch frame) change a scene's public fields. Its header has room for a link
+to the frame's own settings once the frame can show those: Wi-Fi, the
+display, the event map, its name. The same panel, built of the same fields,
+saving through the frame's settings route instead of a `setCurrentScene`.
 
 ## After that
 

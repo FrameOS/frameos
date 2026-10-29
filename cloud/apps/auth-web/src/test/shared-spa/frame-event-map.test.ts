@@ -25,11 +25,13 @@ import {
   frameGestureTitle,
   frameGestureValue,
   frameOffersEdgeGestures,
+  frameSupportsSceneSettings,
   frameSupportsSceneSwitcher,
   gestureCanVoiceChat,
   parseFrameActionValue,
   parseFrameGestureValue,
   reportedEventMapOf,
+  sceneSettingsMinVersion,
   sceneSwitcherMinVersion,
 } from "../../../../../../frontend/src/utils/frameEventMap";
 
@@ -71,7 +73,7 @@ describe("bindings and rules", () => {
     // Offered for a long press when the frame has voice chat, never for a press
     // or a double press: the release is what ends a sentence.
     const doublePress = { label: "REFRESH", action: "doublePress" };
-    const all = { voiceChat: true, displayPower: true, sceneSwitcher: true };
+    const all = { voiceChat: true, displayPower: true, sceneSwitcher: true, sceneSettings: true };
     expect(frameActionKindsFor(refreshHeld, all)).toEqual([...frameActionKinds, "voiceChat"]);
     expect(frameActionKindsFor(refreshHeld, { ...all, voiceChat: false })).toEqual(frameActionKinds);
     expect(frameActionKindsFor(doublePress, all)).toEqual(frameActionKinds);
@@ -166,6 +168,26 @@ describe("bindings and rules", () => {
     expect(gestureCanVoiceChat(bottom)).toBe(false);
   });
 
+  it("binds a swipe down from the top to the scene's settings, on a FrameOS that has them", () => {
+    // docs/scene-settings.md: down from the top of a touch screen, on every touch preset.
+    const top = { edge: "top" };
+    const rule: EventMapRule = { event: "edgeSwipe", match: top, emit: "sceneSettings", as: {} };
+    expect(bindingRule({ gesture: top, action: { kind: "sceneSettings" } })).toEqual(rule);
+    expect(bindingOfRule(rule)).toEqual({ gesture: top, action: { kind: "sceneSettings" } });
+    expect(isEventMapRule(rule)).toBe(true);
+    expect(frameActionTitle({ kind: "sceneSettings" })).toBe("Scene settings");
+    expect(parseFrameActionValue(frameActionValue({ kind: "sceneSettings" }))).toEqual({ kind: "sceneSettings" });
+    const old = { voiceChat: false, displayPower: false, sceneSettings: false };
+    expect(frameActionKindsFor(top, old)).not.toContain("sceneSettings");
+    expect(frameActionKindsFor(top, { ...old, sceneSettings: true })).toContain("sceneSettings");
+    expect(frameActionUnavailableReason({ gesture: top, action: { kind: "sceneSettings" } }, old)).toBe(
+      `needs FrameOS ${sceneSettingsMinVersion}`,
+    );
+    expect(frameSupportsSceneSettings(sceneSettingsMinVersion, true)).toBe(true);
+    expect(frameSupportsSceneSettings("2026.10.20", true)).toBe(false);
+    expect(frameSupportsSceneSettings(null, false)).toBe(true);
+  });
+
   it("offers the edges as rows on a touch screen, by select value and title", () => {
     expect(edgeGestures()).toEqual([{ edge: "left" }, { edge: "right" }, { edge: "top" }, { edge: "bottom" }]);
     for (const gesture of [...edgeGestures(), leftHeld]) {
@@ -207,7 +229,8 @@ describe("the rules a device or a push carries", () => {
     expect(isEventMapRule("nonsense")).toBe(false);
     // The emits are the contract's: what the eventMap origin may say.
     expect([...eventMapEmits].sort()).toEqual([
-      "render", "sceneSwitcher", "setCurrentScene", "setSceneState", "toggleScreen", "turnOff", "turnOn", "voiceChat",
+      "render", "sceneSettings", "sceneSwitcher", "setCurrentScene", "setSceneState", "toggleScreen", "turnOff", "turnOn",
+      "voiceChat",
     ]);
   });
 

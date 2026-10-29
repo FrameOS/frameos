@@ -39,9 +39,9 @@ line in the map).
    merges. The ESP32's open work lives in the other files.
 6. **`docs/ui-todo.md`** — JSX widgets that render and react on the frame.
    Designed, not started. Lower priority for now, not parked.
-   **`docs/forms-todo.md`** — fields, the keyboard on the screen and
-   scrolling shipped; **next up:** the scene settings panel (a swipe down
-   from the top on a touch frame).
+   **`docs/forms-todo.md`** — fields, the keyboard on the screen, scrolling
+   and the scene settings panel (a swipe down from the top on a touch frame)
+   shipped; **next up:** the frame's own settings from that panel.
 7. **`docs/realtime-todo.md`** — LCD frames that animate (ESP32 animation
    mode, the in-place canvas with three buffers, kept JS interpreters, damage
    repaints and QIO flash shipped: DVD Logo Bounce on the SenseCAP Indicator

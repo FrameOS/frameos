@@ -196,8 +196,9 @@ def load():
         for key in keys:
             if not isinstance(doc[section].get(key), int) or doc[section][key] <= 0:
                 fail(f"{section}.{key}: a positive integer")
-    if not re.fullmatch(r"system/[a-zA-Z]+", doc["scenes"].get("switcher", "")):
-        fail("scenes.switcher: the built-in scene `sceneSwitcher` shows, `system/<name>`")
+    for key, event in (("switcher", "sceneSwitcher"), ("settings", "sceneSettings")):
+        if not re.fullmatch(r"system/[a-zA-Z]+", doc["scenes"].get(key, "")):
+            fail(f"scenes.{key}: the built-in scene `{event}` shows, `system/<name>`")
     if doc["gestures"].get("directions") != ["left", "right", "up", "down"]:
         fail("gestures.directions: left, right, up, down")
     if doc["gestures"].get("edges") != ["left", "right", "top", "bottom"]:
@@ -399,6 +400,8 @@ def gen_nim(doc):
         f"  SceneDirections*: array[{len(doc['scenes']['directions'])}, string] = [{', '.join(nim_str(d) for d in doc['scenes']['directions'])}]",
         "  ## The built-in scene `sceneSwitcher` shows (docs/scene-switcher.md).",
         f"  SceneSwitcherId* = {nim_str(doc['scenes']['switcher'])}",
+        "  ## The built-in scene `sceneSettings` shows (docs/scene-settings.md).",
+        f"  SceneSettingsId* = {nim_str(doc['scenes']['settings'])}",
         "  ## Origins a scene opts into per custom event (`origins` on its declaration).",
         f"  CustomEventDeclarableOrigins*: set[EventOrigin] = {{{', '.join(nim_origin(o) for o in doc['customEvents'].get('declarableOrigins', []))}}}",
         "",
@@ -603,6 +606,8 @@ def gen_c(doc):
         f"#define FOS_CUSTOM_EVENT_MAX_NAME_LENGTH {int(doc['customEvents']['maxNameLength'])}",
         "/* The built-in scene `sceneSwitcher` shows: no slot on flash, never persisted. */",
         f"#define FOS_SCENE_SWITCHER_ID {c_str(doc['scenes']['switcher'])}",
+        "/* And the one `sceneSettings` shows, the same way. */",
+        f"#define FOS_SCENE_SETTINGS_ID {c_str(doc['scenes']['settings'])}",
         "",
         "/* `gpio {action}`: the firmware reports the edges, each with `atMs` (when it saw",
         " * it); `button {action}` (press, doublePress, longPress) is the Nim dispatcher's",
@@ -780,6 +785,8 @@ def gen_ts_frontend(doc):
     out.append(f"export const CUSTOM_EVENT_MAX_NAME_LENGTH = {int(doc['customEvents']['maxNameLength'])}")
     out.append("/** The built-in scene `sceneSwitcher` shows (docs/scene-switcher.md). */")
     out.append(f"export const SCENE_SWITCHER_ID = '{doc['scenes']['switcher']}'")
+    out.append("/** The built-in scene `sceneSettings` shows (docs/scene-settings.md). */")
+    out.append(f"export const SCENE_SETTINGS_ID = '{doc['scenes']['settings']}'")
     out.append("")
     out.append("export type EventOrigin = " + " | ".join(f"'{o}'" for o in origins))
     out.append("export type EventClass = " + " | ".join(f"'{c}'" for c in CLASSES))

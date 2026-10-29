@@ -27,6 +27,7 @@ import ./js_runtime/app_runtime
 import ./js_runtime/run_budget
 import ./js_runtime/runtime as jsRuntime
 import system/sceneSwitcher/scene as sceneSwitcher
+import system/sceneSettings/scene as sceneSettings
 when defined(memProbe): import ./utils/memory
 
 export event_loop
@@ -38,8 +39,9 @@ type
     scene*: FrameScene                    ## the resident instance, nil until its first render
     exported*: ExportedInterpretedScene
       ## How the resident scene runs: an interpreted scene's, or a built-in
-      ## one's (the scene switcher, system/sceneSwitcher/scene.nim), which
-      ## draws itself through the same three procs.
+      ## one's (the scene switcher, system/sceneSwitcher/scene.nim; the scene
+      ## settings, system/sceneSettings/scene.nim), which draws itself
+      ## through the same three procs.
     sceneId*: Option[SceneId]             ## the current scene, resident or not
     renderRequested*: bool
     keepJsRuntimes*: bool
@@ -198,9 +200,10 @@ proc ensureScene*(host: SingleSceneHost): bool =
   let sceneId = host.sceneId.get()
   let builtIn = isBuiltInScene(sceneId.string)
   if builtIn:
-    # The scene switcher: drawn by the runtime, nothing to parse, no state
-    # of its own to start from.
-    host.exported = sceneSwitcher.exportedScene
+    # The scene switcher or the scene settings: drawn by the runtime,
+    # nothing to parse, no state of its own to start from.
+    host.exported = if sceneId.string == SceneSettingsId: sceneSettings.exportedScene
+      else: sceneSwitcher.exportedScene
   else:
     let scenes = getInterpretedScenes()
     if not scenes.hasKey(sceneId):

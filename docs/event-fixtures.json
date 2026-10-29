@@ -4010,6 +4010,276 @@
       "current": "fixtures/dispatcher/switcherB"
      }
     ]
+   },
+   {
+    "name": "the scene settings open from the scene showing, with its fields; Save is a switch back with state",
+    "why": "`sceneSettings` is the dispatcher's to resolve, like `sceneSwitcher`: it selects the built-in scene `scenes.settings` with `state.from`, the scene showing, and that scene's public fields and their values read before the switch (`state.fields`, `state.values`: a host that holds one scene lets the scene go). While it shows, the same event goes back without saving, and so does `sceneSwitcher`; over the switcher, `sceneSettings` goes back to the scene too. A touch screen's event map binds the two to swipes in from the top and the bottom edge, so the swipe that opened one built-in scene closes it, and the other edge's does as well. Save is a `setCurrentScene` back with the values as its state, which the scene applies to its public fields.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/settingsA",
+      "name": "settingsA",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       }
+      ],
+      "edges": [],
+      "fields": [
+       {
+        "name": "name",
+        "label": "Name",
+        "type": "string",
+        "value": "Ann",
+        "access": "public",
+        "persist": "memory"
+       },
+       {
+        "name": "token",
+        "label": "Token",
+        "type": "string",
+        "value": "x",
+        "access": "private",
+        "persist": "memory"
+       }
+      ]
+     },
+     {
+      "id": "fixtures/dispatcher/settingsB",
+      "name": "settingsB",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "button"
+        }
+       }
+      ],
+      "edges": [],
+      "fields": []
+     }
+    ],
+    "frameEventMap": [
+     {
+      "event": "edgeSwipe",
+      "match": {
+       "edge": "top"
+      },
+      "emit": "sceneSettings"
+     },
+     {
+      "event": "edgeSwipe",
+      "match": {
+       "edge": "bottom"
+      },
+      "emit": "sceneSwitcher"
+     }
+    ],
+    "scene": "fixtures/dispatcher/settingsA",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "top",
+         "direction": "down",
+         "x": 2,
+         "y": 2,
+         "startX": 2,
+         "startY": 0,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> sceneSettings",
+       "select system/sceneSettings",
+       "run settingsA close",
+       "run sceneSettings setCurrentScene",
+       "run sceneSettings open",
+       "render"
+      ],
+      "handled": 2,
+      "current": "system/sceneSettings",
+      "state": {
+       "from": "fixtures/dispatcher/settingsA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "select fixtures/dispatcher/settingsA",
+       "run sceneSettings close",
+       "run settingsA open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/settingsA",
+      "state": {
+       "name": "Ann"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "trace": [
+       "select system/sceneSwitcher",
+       "run settingsA close",
+       "run sceneSwitcher setCurrentScene",
+       "run sceneSwitcher open",
+       "render"
+      ],
+      "current": "system/sceneSwitcher"
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "select fixtures/dispatcher/settingsA",
+       "run sceneSwitcher close",
+       "run settingsA open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/settingsA",
+      "state": {
+       "name": "Ann"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "select system/sceneSettings",
+       "run settingsA close",
+       "run sceneSettings setCurrentScene",
+       "run sceneSettings open",
+       "render"
+      ],
+      "current": "system/sceneSettings",
+      "state": {
+       "from": "fixtures/dispatcher/settingsA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "bottom",
+         "direction": "up",
+         "x": 2,
+         "y": 100,
+         "startX": 2,
+         "startY": 110,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> sceneSwitcher",
+       "select fixtures/dispatcher/settingsA",
+       "run sceneSettings close",
+       "run settingsA open",
+       "render"
+      ],
+      "handled": 2,
+      "current": "fixtures/dispatcher/settingsA",
+      "state": {
+       "name": "Ann"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "select system/sceneSettings",
+       "run settingsA close",
+       "run sceneSettings setCurrentScene",
+       "run sceneSettings open",
+       "render"
+      ],
+      "current": "system/sceneSettings",
+      "state": {
+       "from": "fixtures/dispatcher/settingsA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "scene",
+        "event": "setCurrentScene",
+        "payload": {
+         "sceneId": "fixtures/dispatcher/settingsA",
+         "state": {
+          "name": "Bea",
+          "token": "y"
+         }
+        }
+       }
+      ],
+      "trace": [
+       "select fixtures/dispatcher/settingsA",
+       "run sceneSettings close",
+       "run settingsA setCurrentScene",
+       "run settingsA open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/settingsA",
+      "state": {
+       "name": "Bea",
+       "token": "x"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "refused sceneSettings driver origin"
+      ],
+      "current": "fixtures/dispatcher/settingsA"
+     }
+    ]
    }
   ]
  },

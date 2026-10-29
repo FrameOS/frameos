@@ -330,10 +330,14 @@ proc deliver(loop: EventLoop, envelope: EventEnvelope, policy: EventPolicy): boo
   loop.runOnScene(scene, envelope.name, payload, policy, envelope.fromRender)
   true
 
+proc isBuiltIn(scene: FrameScene): bool =
+  not scene.isNil and (scene.id.string == SceneSwitcherId or scene.id.string == SceneSettingsId)
+
 proc switcherOpener(scene: FrameScene): string =
-  ## The scene the scene switcher (`SceneSwitcherId`) was opened from, its
-  ## `state.from`; "" for any other scene (`{}` is nil-safe).
-  if scene.isNil or scene.id.string != SceneSwitcherId: "" else: scene.state{"from"}.getStr()
+  ## The scene a built-in scene (the switcher, the settings) was opened from,
+  ## its `state.from`; "" for any other scene (`{}` is nil-safe).
+  if scene.isBuiltIn: scene.state{"from"}.getStr()
+  else: ""
 
 proc sceneOrderOf(loop: EventLoop): seq[SceneId] =
   if loop.host.sceneOrder.isNil: newSeq[SceneId]() else: loop.host.sceneOrder()
@@ -367,19 +371,65 @@ proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
       payload["sceneId"] = %order[index].string
   loop.host.selectScene(payload)
 
-proc sceneSwitcher(loop: EventLoop, envelope: EventEnvelope): bool =
-  ## `sceneSwitcher`: the scene switcher, told which scene it was opened from;
-  ## while it shows, that scene again. The switcher forgets a scene that left
-  ## the list, and one opened by name knows none: then the list's first.
+{.push boundChecks: off, fieldChecks: off.}
+
+proc put(node: JsonNode, key: string, value: JsonNode) =
+  ## `node[key] = value` for an object node, without the assert json's
+  ## inline `[]=` brings into every caller.
+  node.fields[key] = value
+
+proc settingsOf(scene: FrameScene, state: JsonNode) =
+  ## What the settings panel shows of `scene`: its public fields (`fields`)
+  ## and their values now (`values`), read before the switch, which on a
+  ## host that holds one scene lets the scene go.
+  let
+    fields = newJArray()
+    values = newJObject()
+  if scene of InterpretedFrameScene:
+    let all = InterpretedFrameScene(scene).publicStateFields
+    for i in 0 ..< all.len:
+      let field = all[i]
+      let f = newJObject()
+      f.put("name", newJString(field.name))
+      f.put("label", newJString(field.label))
+      f.put("type", newJString(field.fieldType))
+      f.put("placeholder", newJString(field.placeholder))
+      f.put("secret", newJBool(field.secret))
+      if field.options.len > 0:
+        let options = newJArray()
+        for j in 0 ..< field.options.len:
+          let o = newJObject()
+          o.put("value", newJString(field.options[j].value))
+          o.put("label", newJString(field.options[j].label))
+          options.elems.add o
+        f.put("options", options)
+      fields.elems.add f
+      let value = scene.state{field.name}
+      if not value.isNil:
+        values.put(field.name, copy(value))
+  state.put("fields", fields)
+  state.put("values", values)
+
+{.pop.}
+
+proc builtInScene(loop: EventLoop, envelope: EventEnvelope, sceneId: string): bool =
+  ## `sceneSwitcher` and `sceneSettings`: the built-in scene, told which scene
+  ## it was opened from. While either shows, either command goes back to that
+  ## scene (the settings unsaved): the swipe that opened one closes it, and
+  ## so does the other edge's. The switcher forgets a scene that left the
+  ## list, and one opened by name knows none: then the list's first. The
+  ## settings get the scene's fields.
   # One way out (no early `return`): on the ESP32 every one repeats the
   # clean-up of what was made so far, in flash.
   let current = loop.host.sceneFor(none(SceneId))
   let payload = newJObject()
-  var next = SceneSwitcherId
-  if current.isNil or current.id.string != SceneSwitcherId:
+  var next = sceneId
+  if not current.isBuiltIn:
     let state = newJObject()
-    state["from"] = newJString(if current.isNil: "" else: current.id.string)
-    payload["state"] = state
+    state.put("from", newJString(if current.isNil: "" else: current.id.string))
+    if sceneId == SceneSettingsId:
+      current.settingsOf(state)
+    payload.put("state", state)
   else:
     next = current.state{"from"}.getStr()
     if next.len == 0:
@@ -389,7 +439,7 @@ proc sceneSwitcher(loop: EventLoop, envelope: EventEnvelope): bool =
   if next.len == 0:
     result = loop.refused(envelope, "noSceneOrder")
   else:
-    payload["sceneId"] = newJString(next)
+    payload.put("sceneId", newJString(next))
     result = loop.host.selectScene(payload)
 
 proc listens(loop: EventLoop, scene: FrameScene, name: string): bool =
@@ -519,8 +569,9 @@ proc process(loop: EventLoop, envelope: EventEnvelope): bool =
     result = loop.selectScene(envelope)
     if result:
       loop.renderWanted = true
-  of evSceneSwitcher:
-    result = loop.sceneSwitcher(envelope)
+  of evSceneSwitcher, evSceneSettings:
+    result = loop.builtInScene(envelope,
+      if envelope.name == evSceneSwitcher: SceneSwitcherId else: SceneSettingsId)
     if result:
       loop.renderWanted = true
   of evTurnOn, evTurnOff:

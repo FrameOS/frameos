@@ -26,7 +26,9 @@ like `setCurrentScene {direction}`:
 - While the switcher shows, it selects `state.from` again (the list's first
   scene when that one is gone). So the same swipe opens and closes it, and
   the switcher's own Close, a key with the role `back`, and its idle timeout
-  all dispatch `sceneSwitcher` to go back.
+  all dispatch `sceneSwitcher` to go back. `sceneSettings` (a swipe down
+  from the top) goes back the same way, and `sceneSwitcher` over the scene
+  settings closes them unsaved ([scene-settings.md](scene-settings.md)).
 
 A `setCurrentScene {sceneId: "system/sceneSwitcher"}` opens it by name (the
 HTTP API, a schedule) without `state.from`: it highlights the list's first
@@ -46,9 +48,11 @@ The defaults bind it to a swipe up from the bottom edge (`edgeSwipe {edge:
 bottom}`) on every touch screen that ships an event map: the HyperPixels
 (when frame.json has no `eventMap`), the SenseCAP Indicator and the
 reTerminal E1003, whose e-paper has a touch glass. Left and right stay the
-previous and the next scene. The SenseCAP Indicator's one key opens it too,
-pressed twice (pressed once it switches the screen off and on, and held it
-does nothing). E-paper without glass ships no binding; the
+previous and the next scene, and down from the top is the scene's settings
+(`sceneSettings`, [scene-settings.md](scene-settings.md)), the other scene
+the runtime draws itself. The SenseCAP Indicator's one key opens the
+switcher too, pressed twice (pressed once it switches the screen off and on,
+and held it does nothing). E-paper without glass ships no binding; the
 owner adds one under "Button actions" (a REFRESH double press, say), and
 every frame can be sent to it by name.
 

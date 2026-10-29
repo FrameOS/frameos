@@ -112,15 +112,18 @@ int fos_board_buzzer_tone_hz(const char *hardware_preset)
     "{\"event\":\"button\",\"match\":{\"label\":\"REFRESH\",\"action\":\"longPress\"}," \
     "\"emit\":\"voiceChat\",\"as\":{}}"
 /* A touch screen's swipes in from an edge (`edgeSwipe`: the scene hears none
- * of it): from the right the next scene, from the left the previous one, and
- * up from the bottom the scene switcher (docs/scene-switcher.md). */
+ * of it): from the right the next scene, from the left the previous one, up
+ * from the bottom the scene switcher (docs/scene-switcher.md) and down from
+ * the top the scene's settings (docs/scene-settings.md). */
 #define TOUCH_EDGE_SWIPES \
     "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"right\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}}," \
     "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"left\"}," \
     "\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}}," \
     "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"bottom\"}," \
-    "\"emit\":\"sceneSwitcher\",\"as\":{}}"
+    "\"emit\":\"sceneSwitcher\",\"as\":{}}," \
+    "{\"event\":\"edgeSwipe\",\"match\":{\"edge\":\"top\"}," \
+    "\"emit\":\"sceneSettings\",\"as\":{}}"
 #define RETERMINAL_EVENT_MAP "[" RETERMINAL_ARROWS "]"
 #define RETERMINAL_VOICE_EVENT_MAP "[" RETERMINAL_ARROWS "," RETERMINAL_VOICE "]"
 /* The E1003 has the E1001's keys and microphone, and a touch screen. */

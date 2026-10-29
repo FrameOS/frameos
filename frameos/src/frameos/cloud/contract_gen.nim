@@ -218,7 +218,7 @@ const CloudContractSettings* = @[
         KeyRule(name: "as", rule:
           Rule(kind: rkObject, open: true)),
         KeyRule(name: "emit", rule:
-          Rule(kind: rkString, strEnum: @["render", "setCurrentScene", "setSceneState", "turnOn", "turnOff", "toggleScreen", "sceneSwitcher", "voiceChat"]))])]),
+          Rule(kind: rkString, strEnum: @["render", "setCurrentScene", "setSceneState", "turnOn", "turnOff", "toggleScreen", "sceneSwitcher", "sceneSettings", "voiceChat"]))])]),
   profiles: @[
     ProfileSpec(profile: "linux", since: "2026.10.20"),
     ProfileSpec(profile: "esp32", since: "2026.10.20", hasRule: true, rule:
@@ -231,7 +231,7 @@ const CloudContractSettings* = @[
           KeyRule(name: "as", rule:
             Rule(kind: rkObject, open: true)),
           KeyRule(name: "emit", rule:
-            Rule(kind: rkString, strEnum: @["render", "setCurrentScene", "setSceneState", "turnOn", "turnOff", "toggleScreen", "sceneSwitcher", "voiceChat"]))])]))]),
+            Rule(kind: rkString, strEnum: @["render", "setCurrentScene", "setSceneState", "turnOn", "turnOff", "toggleScreen", "sceneSwitcher", "sceneSettings", "voiceChat"]))])]))]),
   SettingSpec(key: "device", rule:
     Rule(kind: rkString, minLen: 1, maxLen: 64, format: sfDriverKey),
   profiles: @[

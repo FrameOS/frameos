@@ -14,6 +14,7 @@
 ## and classes appended in place (see the scene switcher's notes).
 
 import pixie/fileformats/svg
+import frameos/ui/tree
 
 {.push overflowChecks: off, rangeChecks: off, boundChecks: off, fieldChecks: off, stackTrace: off,
   lineTrace: off, raises: [].}
@@ -47,18 +48,6 @@ proc keyboardHeight*(height: int): int =
   ## finger can hit, and never half of it.
   let row = clamp(height * 95 div 1000, 28, 60)
   min(4 * row + 3 * max(row div 8, 3) + 2 * max(row div 6, 4), height div 2)
-
-proc px(c: var string, name: string, v: int) =
-  c.add ' '
-  c.add name
-  c.add "-["
-  c.addInt v
-  c.add "px]"
-
-proc el(classes: sink string, child: sink SvgNode = nil): SvgNode =
-  result = SvgNode(tag: "div", attrs: @[("class", classes)])
-  if not child.isNil:
-    result.children.add child
 
 proc icon(d: string, filled: bool, size: int): SvgNode =
   var c = "shrink-0"
@@ -101,7 +90,7 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
   # `move`, not a plain `c`: Nim 2.2.4 passes the plain one to a sink
   # without clearing it, and the next `c = ...` in the loop frees what the
   # node holds.
-  result = el(move c)
+  result = el("div", move c)
   # A tap between the keys is the keyboard's too: it does nothing, and the
   # field keeps the keyboard.
   result.attrs.add(("on-click", $KeyBase))
@@ -111,7 +100,7 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
       c = "flex w-full justify-center"
       c.px("gap", gap)
       c.px("h", rowH)
-      row = el(move c)
+      row = el("div", move c)
       result.children.add row
       continue
     let
@@ -139,10 +128,10 @@ proc keyboardTree*(width, height: int, page: KeyboardPage, shift: int, paper: bo
     elif code < 32:
       var t = "font-bold"
       t.px("text", size * 3 div 4)
-      label = el(move t, SvgNode(text: if code == ord(kSymbols): "123" elif code == ord(kMore): "#+=" else: "ABC"))
+      label = el("div", move t, SvgNode(text: if code == ord(kSymbols): "123" elif code == ord(kMore): "#+=" else: "ABC"))
     elif ch != ' ':
       label = SvgNode(text: typed(code, shift))
-    let key = el(move c, label)
+    let key = el("div", move c, label)
     key.attrs.add(("on-click", $(KeyBase + code)))
     if code == ord(kShift):
       # Shift tapped twice: caps lock, until shift again.
