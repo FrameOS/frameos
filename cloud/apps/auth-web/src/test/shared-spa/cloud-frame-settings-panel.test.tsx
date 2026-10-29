@@ -25,6 +25,7 @@ import {
   extendedCloudFrameSettingKeys,
   extendedCloudFrameSettingsMinVersion,
   hardwareCloudFrameSettingsMinVersion,
+  renderScaleCloudFrameSettingKeys,
 } from "../../../../../../frontend/src/utils/cloudFrameSettings";
 import type { FrameType } from "../../../../../../frontend/src/types";
 
@@ -167,6 +168,8 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
       ...cloudFrameSettingKeys,
       ...Object.keys(extendedFieldNames),
       ...displayDriverCloudFrameSettingKeys,
+      // Disabled with the reason below its floor, like the batches above.
+      ...renderScaleCloudFrameSettingKeys,
     ]);
     const unsaveable = [...rendered].filter((name) => !saveable.has(name));
 
@@ -255,9 +258,9 @@ describe("the Settings panel on a cloud-managed Linux frame", () => {
     const flip = document.querySelector<HTMLSelectElement>('select[name="flip"]');
     expect(flip?.matches(":disabled")).toBe(true);
     // Every gated batch says so — the extended one, the hardware one, the
-    // display driver, the input batch, the colours batch and the button
-    // actions (the frame's event map).
-    expect(screen.getAllByText(/once the frame connects and reports its version/i).length).toBe(6);
+    // display driver, the input batch, the colours batch, the button
+    // actions (the frame's event map) and the scale.
+    expect(screen.getAllByText(/once the frame connects and reports its version/i).length).toBe(7);
   });
 
   it("offers the display driver on firmware that takes it, showing the one the frame reports", () => {

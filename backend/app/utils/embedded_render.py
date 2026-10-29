@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.models.frame import Frame
+from app.utils.render_scale import normalize_render_scale
 from app.utils.timezone import frame_timezone
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -190,6 +191,12 @@ async def render_scene(
         request["assetsWriteBudget"] = max(0, int(assets_write_budget))
     if device_limits:
         request["deviceLimits"] = device_limits
+    # The frame's render scale (frame.json `renderScale`): what a UI from a
+    # .tsx/.jsx app is laid out for. 0 (automatic, and every preview with no
+    # frame) is left to the runtime, which works it out from width and height.
+    render_scale = normalize_render_scale(getattr(frame, "render_scale", None))
+    if render_scale > 0:
+        request["renderScale"] = render_scale
     if control_events:
         request["controlEventsJson"] = json.dumps(control_events, separators=(",", ":"))
     if device_input and device_input.get("edges"):

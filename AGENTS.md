@@ -319,6 +319,14 @@
   in `runEventInner` (every host) and dispatches `render` when something
   changed. A new handler is a `UiEvent` and a walker attribute, never a
   `case event` in a host.
+- **Render scale** (`render_scale.nim`, `docs/jsx-ui.md` "Scale"): a .tsx /
+  .jsx app is told its canvas is the panel divided by the scale, its UI is
+  laid out at that size, and pixie stretches the root to the full target as
+  vectors. The scale is a `role: "renderScale"` field's state, else the
+  scene's `settings.renderScale`, else the frame's `render_scale` (0 =
+  automatic: shorter edge / 600 rounded down to a quarter, at least 1; the SPA's copy
+  is `utils/renderScale.ts`). Never scale by rasterizing small and
+  stretching: pass the smaller size to the layout and the full one to pixie.
 - Flash is the budget: the layer cost +37.3 KB on the ESP32-S3 image. A new
   class or element goes in `tailwind.nim` / `layout.nim`, `docs/jsx-ui.md`
   and the scene guide's JSX section, and the PR says what it cost (the

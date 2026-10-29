@@ -128,7 +128,12 @@ export type SceneRenderer = (
 /** The server's renderer as a check: the scene at the frame's size, in the
  * frame's memory when it has little (an ESP32). null when this server
  * cannot render, and the check is skipped. */
-export function serverRenderer(owner: string, device: RenderDevice | null, timeZone: string): SceneRenderer | null {
+export function serverRenderer(
+  owner: string,
+  device: RenderDevice | null,
+  timeZone: string,
+  renderScale: number | null = null,
+): SceneRenderer | null {
   if (!rendererAvailable()) {
     return null;
   }
@@ -139,6 +144,7 @@ export function serverRenderer(owner: string, device: RenderDevice | null, timeZ
         deviceLimits: device ? renderDeviceLimits(device, size.width, size.height) : null,
         height: size.height,
         owner,
+        renderScale,
         sceneId,
         scenes,
         timeZone,
@@ -171,6 +177,7 @@ export async function buildSceneByVoice({
   model,
   reasoningEffort,
   renderDevice,
+  renderScale = null,
   renderSize,
   timeZone = "UTC",
   render,
@@ -188,6 +195,8 @@ export async function buildSceneByVoice({
   model: string;
   reasoningEffort: string;
   renderDevice: RenderDevice | null;
+  /** The frame's own render scale; null = automatic. */
+  renderScale?: number | null;
   renderSize: { width: number; height: number } | null;
   timeZone?: string;
   /** The render check; undefined = this server's (serverRenderer), null = none. */
@@ -196,7 +205,7 @@ export async function buildSceneByVoice({
   onUsage?: ((result: Awaited<ReturnType<typeof runAgentLoop>>) => void) | undefined;
 }): Promise<VoiceSceneBuild & { rounds?: number; renderChecked?: boolean }> {
   const size = renderSize ?? defaultRenderSize;
-  const renderer = render === undefined ? serverRenderer(accountId, renderDevice, timeZone) : render;
+  const renderer = render === undefined ? serverRenderer(accountId, renderDevice, timeZone, renderScale) : render;
   const delivered: JsonObject[] = [];
   // `base` keeps its id: the preview is replaced in place; an installed
   // scene arrives here as a copy under a new id (voiceTools' change_scene),
@@ -220,6 +229,7 @@ export async function buildSceneByVoice({
     frameId,
     prompt: request,
     renderDevice,
+    renderScale,
     renderSize: size,
     renderTimeZone: timeZone,
   };

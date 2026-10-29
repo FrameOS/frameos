@@ -148,6 +148,44 @@ async def test_a_render_under_a_device_ceiling_reports_running_out(monkeypatch, 
     assert result.scene_logs == ['{"event":"render:scene","sceneId":"s"}']
 
 
+@pytest.mark.asyncio
+async def test_the_harness_gets_the_frames_render_scale_only_when_set(monkeypatch, tmp_path):
+    """A frame's own scale rides the request; automatic (0, or a preview with
+    no frame row behind it) leaves it to the runtime."""
+    from types import SimpleNamespace
+
+    from app.utils import embedded_render
+
+    sent: list[dict] = []
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self, request):
+            sent.append(json.loads(request))
+            return b"\x00" * 16, b""
+
+    async def fake_exec(*_args, **_kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(embedded_render.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(embedded_render.shutil, "which", lambda _name: "/usr/bin/node")
+    monkeypatch.setattr(embedded_render, "wasm_assets_dir", lambda: tmp_path)
+    monkeypatch.setattr(embedded_render, "RENDER_HARNESS", Path(embedded_render.__file__))
+    monkeypatch.setattr(embedded_render, "_render_semaphore", asyncio.Semaphore(embedded_render.RENDER_CONCURRENCY))
+    monkeypatch.setattr(embedded_render, "_render_waiters", 0)
+
+    scenes = [{"id": "s", "nodes": [], "edges": []}]
+    for render_scale in (1.5, 0, None):
+        frame = SimpleNamespace(id=1, name="f", timezone=None, network={}, scenes=scenes, render_scale=render_scale)
+        await embedded_render.render_scene(frame, 2, 2)
+    without_column = SimpleNamespace(id=0, name="f", timezone=None, network={}, scenes=scenes)
+    await embedded_render.render_scene(without_column, 2, 2)
+
+    assert sent[0]["renderScale"] == 1.5
+    assert ["renderScale" in request for request in sent[1:]] == [False, False, False]
+
+
 # The renderer's HTTP child checks the address its socket connects to (its
 # own lookup), not a lookup made before the request: a name checked once and
 # resolved again by fetch could answer the second query with a private

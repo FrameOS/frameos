@@ -1321,6 +1321,7 @@ export type EmbeddedUsbConfigKey =
   | 'render_mode'
   | 'rotate'
   | 'scaling_mode'
+  | 'render_scale'
   | 'time_zone'
   | 'interval'
   | 'max_http_response_bytes'

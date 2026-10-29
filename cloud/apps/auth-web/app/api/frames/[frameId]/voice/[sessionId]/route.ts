@@ -556,6 +556,7 @@ export async function POST(
       },
       reasoningEffort: credentials.reasoningEffort,
       renderDevice: context.renderDevice ?? null,
+      renderScale: context.renderScale ?? null,
       renderSize: context.resolution ?? null,
       request,
     });

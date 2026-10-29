@@ -236,6 +236,24 @@ export function frameSupportsEventMapSettings(
   return frameSupportsSettingsFrom(eventMapFrameSettingsMinVersion, frameosVersion);
 }
 
+// 2026.10.22: `render_scale`, what a UI from a .tsx/.jsx app is laid out for
+// (frame.json `renderScale`, 0 = automatic), applied on the next render. Both
+// profiles learned it in the same release; the SPA's floor is
+// renderScaleCloudFrameSettingsMinVersion.
+export const renderScaleFrameSettingsMinVersion = "2026.10.22";
+export const renderScaleFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("linux", renderScaleFrameSettingsMinVersion)].filter((key) => key === "render_scale"),
+);
+export const esp32RenderScaleFrameSettingKeys = new Set<string>(
+  [...contractSettingKeysSince("esp32", renderScaleFrameSettingsMinVersion)].filter((key) => key === "render_scale"),
+);
+
+export function frameSupportsRenderScaleSettings(
+  frameosVersion: string | null | undefined,
+): boolean {
+  return frameSupportsSettingsFrom(renderScaleFrameSettingsMinVersion, frameosVersion);
+}
+
 export function frameSupportsColorsSettings(
   frameosVersion: string | null | undefined,
 ): boolean {
@@ -563,6 +581,17 @@ export function mergeFrameSettings(
 // validateFrameSettings, but it is still jsonb from a previous release's
 // (or a future release's) allowlist — screening it here keeps a retired key
 // from reappearing in the summary and, from there, in the next push.
+/**
+ * The frame's own render scale (its `render_scale` setting: what a UI from a
+ * .tsx/.jsx app is laid out for), or null when it is automatic (0 or never
+ * set). Server renders for the frame pass it on; null leaves the runtime to
+ * work it out from the render's size.
+ */
+export function frameRenderScale(frame: { settings: unknown }): number | null {
+  const value = readFrameSettings(frame.settings).render_scale;
+  return typeof value === "number" && value > 0 ? value : null;
+}
+
 export function readFrameSettings(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};

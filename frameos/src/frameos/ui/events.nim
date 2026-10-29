@@ -33,6 +33,7 @@ type
     sceneId*: string
     nodeId*: int
     offsetX*, offsetY*: float32 ## the UI's corner in the scene's canvas
+    scale*: float32             ## canvas pixels per layout pixel (render_scale.nim); 0 = 1
     regions*: seq[UiRegion]     ## the last render's, in paint order
     input*: UiInput             ## what the pointer is doing, for the next one
     memo*: UiMemo               ## the last layout's type, for the next one
@@ -160,9 +161,12 @@ proc dispatchUiEvent*(sceneId, event: string, payload: JsonNode): bool =
       if touch and target.input.hovered.len > 0:
         target.input.hovered.setLen(0)
         moved = true
+    # The regions are in the UI's own pixels: at render scale 2 a UI laid out
+    # at half the canvas's size is drawn twice as large.
     let
-      lx = x - target.offsetX
-      ly = y - target.offsetY
+      scale = if target.scale > 0: target.scale else: 1'f32
+      lx = (x - target.offsetX) / scale
+      ly = (y - target.offsetY) / scale
     if placed and event in ["pointerMove", "pointerDown"]:
       let hovered = target.keysOver(lx, ly, false)
       if hovered != target.input.hovered:

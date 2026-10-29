@@ -62,6 +62,23 @@ bool fos_config_normalize_scaling_mode(const char *value, char *out, size_t out_
     return false;
 }
 
+bool fos_config_normalize_render_scale(double value, uint16_t *out_milli)
+{
+    /* Both bounds inclusive; NaN fails the comparison too. */
+    if (!(value >= 0.0 && value <= FOS_RENDER_SCALE_MILLI_MAX / 1000.0)) return false;
+    if (out_milli != NULL) *out_milli = (uint16_t)(value * 1000.0 + 0.5);
+    return true;
+}
+
+bool fos_config_parse_render_scale(const char *text, uint16_t *out_milli)
+{
+    if (text == NULL || text[0] == '\0') return false;
+    char *end = NULL;
+    double value = strtod(text, &end);
+    if (end == text || *end != '\0') return false;
+    return fos_config_normalize_render_scale(value, out_milli);
+}
+
 esp_err_t fos_config_parse_pins(const char *spec, fos_pins_t *pins)
 {
     char buf[FOS_STR_LEN];

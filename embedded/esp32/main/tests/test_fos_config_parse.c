@@ -223,6 +223,48 @@ static void test_normalize_scaling_mode(void)
           "small out not bounded: %s", tiny);
 }
 
+static void test_normalize_render_scale(void)
+{
+    uint16_t m = 999;
+    /* 0 is automatic; both ends of the contract's 0..4 are in. */
+    CHECK(fos_config_normalize_render_scale(0, &m) && m == 0, "0 -> %u", m);
+    CHECK(fos_config_normalize_render_scale(1, &m) && m == 1000, "1 -> %u", m);
+    CHECK(fos_config_normalize_render_scale(1.5, &m) && m == 1500, "1.5 -> %u", m);
+    CHECK(fos_config_normalize_render_scale(4, &m) && m == FOS_RENDER_SCALE_MILLI_MAX, "4 -> %u", m);
+    /* Fractions round to the nearest thousandth, not down: 1.1 and 0.3 are
+     * not exact doubles and truncation would store 1099 and 299. */
+    CHECK(fos_config_normalize_render_scale(1.1, &m) && m == 1100, "1.1 -> %u", m);
+    CHECK(fos_config_normalize_render_scale(0.3, &m) && m == 300, "0.3 -> %u", m);
+    CHECK(fos_config_normalize_render_scale(1.0 / 3.0 + 1.0, &m) && m == 1333, "4/3 -> %u", m);
+    CHECK(fos_config_normalize_render_scale(3.9999, &m) && m == 4000, "3.9999 -> %u", m);
+    /* And back: what the device reports and pushes is the number it was sent. */
+    CHECK(fos_config_normalize_render_scale(1.25, &m) && m / 1000.0 == 1.25, "1.25 round trip");
+    CHECK(fos_config_normalize_render_scale(1.1, &m) && m / 1000.0 == 1.1, "1.1 round trip");
+
+    m = 999;
+    CHECK(!fos_config_normalize_render_scale(-0.001, &m) && m == 999, "negative accepted / out touched");
+    CHECK(!fos_config_normalize_render_scale(4.001, &m) && m == 999, "4.001 accepted / out touched");
+    CHECK(!fos_config_normalize_render_scale(NAN, &m), "NaN accepted");
+    CHECK(!fos_config_normalize_render_scale(INFINITY, &m), "inf accepted");
+    CHECK(!fos_config_normalize_render_scale(-INFINITY, &m), "-inf accepted");
+    CHECK(fos_config_normalize_render_scale(2, NULL), "NULL out refused");
+
+    m = 999;
+    CHECK(fos_config_parse_render_scale("1.5", &m) && m == 1500, "\"1.5\" -> %u", m);
+    CHECK(fos_config_parse_render_scale("0", &m) && m == 0, "\"0\" -> %u", m);
+    CHECK(fos_config_parse_render_scale("2", &m) && m == 2000, "\"2\" -> %u", m);
+    m = 999;
+    CHECK(!fos_config_parse_render_scale("", &m) && m == 999, "empty accepted");
+    CHECK(!fos_config_parse_render_scale(NULL, &m), "NULL accepted");
+    CHECK(!fos_config_parse_render_scale("auto", &m) && m == 999, "auto accepted");
+    CHECK(!fos_config_parse_render_scale("1.5x", &m) && m == 999, "trailing junk accepted");
+    CHECK(!fos_config_parse_render_scale("1.5 ", &m) && m == 999, "trailing space accepted");
+    CHECK(!fos_config_parse_render_scale("5", &m) && m == 999, "5 accepted");
+    CHECK(!fos_config_parse_render_scale("-1", &m) && m == 999, "-1 accepted");
+    CHECK(!fos_config_parse_render_scale("nan", &m) && m == 999, "nan accepted");
+    CHECK(!fos_config_parse_render_scale("inf", &m) && m == 999, "inf accepted");
+}
+
 static void reset_buttons(fos_config_t *config)
 {
     memset(config, 0, sizeof(*config));
@@ -389,6 +431,7 @@ int main(void)
     test_led_type_names();
     test_normalize_rotate();
     test_normalize_scaling_mode();
+    test_normalize_render_scale();
     test_parse_gpio_buttons();
     test_parse_gpio_buttons_refusals_leave_config_untouched();
     test_format_gpio_buttons_is_bounded();

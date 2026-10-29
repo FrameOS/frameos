@@ -157,6 +157,12 @@ void frameos_nim_set_fusion(int enabled);
  * (contain/cover/stretch/center; console `set scaling_mode`, settings sync,
  * cloud set_settings). Applied live — no restart. */
 void frameos_nim_set_scaling_mode(const char *mode);
+/* frame.json's `renderScale` (docs/jsx-ui.md "Scale"): JSX from .tsx/.jsx
+ * apps is laid out for a panel this many times smaller and drawn sharp at
+ * full size. 0 = automatic (the runtime's, from the panel size), at most 4;
+ * anything else is ignored. Live, one value per pass like scaling_mode
+ * (console `set render_scale`, settings sync, cloud set_settings). */
+void frameos_nim_set_render_scale(double scale);
 /* frame.json's `colors` block as compact JSON ("" = defaults); live, one
  * string per pass like scaling_mode (docs/asset-color-profiles.md). */
 void frameos_nim_set_colors(const char *json);

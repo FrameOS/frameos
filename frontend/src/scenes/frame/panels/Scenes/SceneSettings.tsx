@@ -15,6 +15,11 @@ import clsx from 'clsx'
 import { sceneRequiresCompilation } from '../../../../utils/sceneApps'
 import { frameRunsScenesInterpreted, sceneExecutionForFrame } from '../../../../utils/sceneExecution'
 import { REFRESH_INTERVAL_FIELD_NAME, refreshIntervalFieldIndex } from '../../../../utils/refreshInterval'
+import {
+  SCENE_RENDER_SCALE_HELP,
+  sceneRenderScaleFromSelect,
+  sceneRenderScaleSelectValue,
+} from '../../../../utils/renderScale'
 
 export interface SceneSettingsProps {
   sceneId: string
@@ -37,9 +42,8 @@ function SceneSettingsLabel({ children }: { children: string }): JSX.Element {
 export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSettingsProps): JSX.Element {
   const { frameId, frameForm, convertingSceneId } = useValues(frameLogic)
   const { convertSceneToInterpreted } = useActions(frameLogic)
-  const { sceneIndex, scene, permissionRows, permissionApps, splitRhythm } = useValues(
-    sceneSettingsLogic({ frameId, sceneId })
-  )
+  const { sceneIndex, scene, permissionRows, permissionApps, splitRhythm, renderScaleOptions, renderScaleFieldName } =
+    useValues(sceneSettingsLogic({ frameId, sceneId }))
   if (!scene || !sceneId) {
     return <></>
   }
@@ -121,6 +125,31 @@ export function SceneSettings({ sceneId, onClose, embedded = false }: SceneSetti
               label={<SceneSettingsLabel>Background color</SceneSettingsLabel>}
             >
               <ColorInput name="backgroundColor" className="!h-10 !min-w-0" placeholder="#ffffff" />
+            </Field>
+            <Field
+              className={fieldClassName}
+              name="renderScale"
+              label={<SceneSettingsLabel>Scale</SceneSettingsLabel>}
+              tooltip={
+                renderScaleFieldName ? (
+                  <>
+                    {SCENE_RENDER_SCALE_HELP} This scene also keeps a scale in its own state field,{' '}
+                    <code>state.{renderScaleFieldName}</code>, which wins over this one when it holds a value.
+                  </>
+                ) : (
+                  SCENE_RENDER_SCALE_HELP
+                )
+              }
+            >
+              {({ value, onChange }) => (
+                <Select
+                  name="renderScale"
+                  className="h-10"
+                  value={sceneRenderScaleSelectValue(value)}
+                  onChange={(next) => onChange(sceneRenderScaleFromSelect(next))}
+                  options={renderScaleOptions}
+                />
+              )}
             </Field>
             {frameRunsInterpreted ? null : (
               <AdvancedSection className={fieldClassName}>

@@ -514,6 +514,23 @@ async def test_get_frame_json_includes_max_http_response_bytes(_mock_publish, db
 
 @pytest.mark.asyncio
 @patch("app.models.frame.publish_message", new_callable=AsyncMock)
+async def test_get_frame_json_carries_the_render_scale(_mock_publish, db, redis):
+    frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com")
+    # A new frame is automatic: the runtime works the scale out from its panel.
+    assert get_frame_json(db, frame)["renderScale"] == 0
+    assert frame.to_dict()["render_scale"] == 0
+
+    frame.render_scale = 1.5
+    assert get_frame_json(db, frame)["renderScale"] == 1.5
+    assert frame.to_dict()["render_scale"] == 1.5
+
+    # Anything the contract would refuse ships as automatic instead.
+    frame.render_scale = 9
+    assert get_frame_json(db, frame)["renderScale"] == 0
+
+
+@pytest.mark.asyncio
+@patch("app.models.frame.publish_message", new_callable=AsyncMock)
 async def test_get_frame_json_uses_known_device_dimensions_when_unset(_mock_publish, db, redis):
     frame = await new_frame(db, redis, "FrameJson", "host", "server_host.com", "pimoroni.inky_what_yellow")
     frame.width = None

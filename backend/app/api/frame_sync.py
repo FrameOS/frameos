@@ -45,6 +45,7 @@ from app.tasks.buildroot_image import (
 from app.tasks.embedded_firmware import ensure_embedded_frame_defaults
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
 from app.utils.network import device_server_host_error, is_safe_host
+from app.utils.render_scale import normalize_render_scale
 from app.utils.retired_apps import frame_runtime_version, retire_apps_in_scenes, scenes_for_runtime
 from app.utils.scene_execution import DEFAULT_SCENE_EXECUTION, normalize_scenes_execution
 from app.utils.timezone import stored_timezone
@@ -235,6 +236,7 @@ FRAME_SYNC_LABELS = {
     "metrics_interval": "Metrics interval",
     "max_http_response_bytes": "HTTP response limit",
     "scaling_mode": "Scaling mode",
+    "render_scale": "Scale",
     "background_color": "Background color",
     "log_to_file": "Log file",
     "assets_path": "Assets path",
@@ -440,6 +442,10 @@ def _sync_frame_value(key: str, value: Any) -> Any:
         return _sync_input_settings(value)
     if key in ("palette", "colors"):
         return _sync_compact_mapping(value)
+    if key == "render_scale":
+        # Always a number, 0 = automatic: a runtime from before the key
+        # reports none, which is the same as the backend's default.
+        return normalize_render_scale(value)
     if key == "frame_admin_auth":
         return _sync_prune_empty(normalize_frame_admin_auth(value))
     return _sync_prune_empty(value)

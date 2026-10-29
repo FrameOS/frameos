@@ -25,6 +25,7 @@ import { getBasePath } from '../../../../utils/getBasePath'
 import { projectApiPath } from '../../../../utils/projectApi'
 import { frameLogic } from '../../frameLogic'
 import { isEsp32Frame } from '../../../workspace/workspaceSurfaces'
+import { parseRenderScale } from '../../../../utils/renderScale'
 import { collectScenePreviewPayloadScenes, scenesLogic } from './scenesLogic'
 import { appsModel } from '../../../../models/appsModel'
 import { gatePreviewSettings } from './previewKeyConsentLogic'
@@ -971,6 +972,9 @@ export const livePreviewLogic = kea<livePreviewLogicType>([
         // app on each render and decodes photos into the canvas, a Pi keeps
         // them running.
         embedded: isEsp32Frame(values.frame),
+        // The frame's render scale (utils/renderScale.ts), as the form holds
+        // it so an unsaved change previews too; 0 = automatic for this size.
+        renderScale: parseRenderScale(values.frameForm?.render_scale ?? values.frame?.render_scale),
         // A frame with local network access off refuses local hosts; so does its preview,
         // in the same words (docs/lan-access.md).
         lanAccess: values.frame?.lan_access ?? undefined,

@@ -143,6 +143,8 @@ export type ToolContext = {
   // ESP32): render_scene renders under that ceiling, so a scene that would
   // run the frame out of memory fails here first (render-device.ts).
   renderDevice?: RenderDevice | null;
+  /** The frame's own render scale for render_scene; null = automatic. */
+  renderScale?: number | null;
   // render_scene calls so far this turn (MAX_RENDERS_PER_TURN bounds them).
   rendersThisTurn?: number;
   // False when the chat has no editor to deliver a scene into (the frames
@@ -1822,6 +1824,7 @@ async function renderSceneForModel(ctx: ToolContext, args: JsonObject): Promise<
       deviceLimits: ctx.renderDevice ? renderDeviceLimits(ctx.renderDevice, width, height) : null,
       height,
       owner: ctx.accountId,
+      renderScale: ctx.renderScale ?? null,
       sceneId,
       // A scene from before a Nim app was retired (data/immich) renders
       // with its replacement, as every other render does.

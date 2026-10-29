@@ -439,6 +439,7 @@ export const FRAME_KEYS: (keyof FrameType)[] = [
   'metrics_interval',
   'max_http_response_bytes',
   'scaling_mode',
+  'render_scale',
   'rotate',
   'flip',
   'background_color',
@@ -490,6 +491,7 @@ const FRAME_KEY_INTRODUCED_FRAMEOS_VERSION: Partial<Record<keyof FrameType, stri
   colors: '2026.10.2',
   event_map: '2026.10.20',
   voice_chat: '2026.10.20',
+  render_scale: '2026.10.22',
 }
 
 // These fields are edited through text inputs, so frameForm may hold strings like
@@ -564,6 +566,7 @@ const FRAME_KEY_LABELS: Partial<Record<keyof FrameType, string>> = {
   metrics_interval: 'Metrics interval',
   max_http_response_bytes: 'HTTP response size limit',
   scaling_mode: 'Scaling mode',
+  render_scale: 'Scale',
   rotate: 'Rotation',
   flip: 'Flip',
   background_color: 'Background color',
@@ -633,6 +636,7 @@ const DEPLOYMENT_SUMMARY_KEYS: (keyof FrameType)[] = [
   'metrics_interval',
   'max_http_response_bytes',
   'scaling_mode',
+  'render_scale',
   'rotate',
   'flip',
   'background_color',

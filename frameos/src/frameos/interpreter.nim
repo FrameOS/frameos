@@ -18,6 +18,7 @@ import frameos/event_log
 import frameos/events
 import frameos/planner
 import frameos/refresh_interval
+import frameos/render_scale
 import frameos/runtime_diagnostics
 import frameos/scene_rhythm
 import frameos/ui/events as ui_events
@@ -1402,6 +1403,8 @@ proc init*(sceneId: SceneId, frameConfig: FrameConfig, logger: Logger,
     refreshInterval: exportedScene.refreshInterval,
     refreshIntervalKey: exportedScene.refreshIntervalKey,
     refreshIntervalDefault: exportedScene.refreshIntervalDefault,
+    renderScaleKey: exportedScene.renderScaleKey,
+    renderScaleSetting: exportedScene.renderScaleSetting,
     backgroundColor: exportedScene.backgroundColor,
     state: %*{},
     nodes: initTable[NodeId, DiagramNode](),
@@ -2032,6 +2035,10 @@ proc buildInterpretedSceneExport(scene: FrameSceneInput): ExportedInterpretedSce
     refreshIntervalKey: refresh.key,
     refreshIntervalDefault: refresh.defaultSeconds,
     refreshIntervalImplicit: refresh.implicit,
+    # Its own render scale, over the frame's: a role field, else the setting.
+    renderScaleKey: renderScaleFieldKey(scene.fields),
+    # Out of range is ignored where it is read (sceneRenderScale).
+    renderScaleSetting: if scene.settings != nil: scene.settings.renderScale else: 0.0,
     init: init,
     render: render,
     runEvent: runEvent,

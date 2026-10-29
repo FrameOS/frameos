@@ -23,6 +23,11 @@ const CloudContractSettings* = @[
   profiles: @[
     ProfileSpec(profile: "linux"),
     ProfileSpec(profile: "esp32")]),
+  SettingSpec(key: "render_scale", rule:
+    Rule(kind: rkNumber, hasMin: true, min: 0.0, hasMax: true, max: 4.0),
+  profiles: @[
+    ProfileSpec(profile: "linux", since: "2026.10.22"),
+    ProfileSpec(profile: "esp32", since: "2026.10.22")]),
   SettingSpec(key: "timezone", rule:
     Rule(kind: rkString, minLen: 1, maxLen: 64, format: sfIanaZone),
   profiles: @[

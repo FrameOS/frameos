@@ -355,6 +355,8 @@ proc setConfigDefaults*(config: var FrameConfig) =
   if config.metricsInterval < 0: config.metricsInterval = 60
   if config.maxHttpResponseBytes <= 0: config.maxHttpResponseBytes = DefaultMaxHttpResponseBytes
   if config.scalingMode == "": config.scalingMode = "cover"
+  # 0 is automatic; anything the contract would refuse is too.
+  if not (config.renderScale >= 0.0 and config.renderScale <= 4.0): config.renderScale = 0.0
   if config.framePort == 0: config.framePort = 8787
   if config.frameHost == "": config.frameHost = "localhost"
   if config.httpsProxy == nil: newHook(config.httpsProxy)

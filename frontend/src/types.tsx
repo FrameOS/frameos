@@ -393,6 +393,8 @@ export interface FrameType {
   metrics_interval: number
   max_http_response_bytes?: number
   scaling_mode: string
+  /** What a UI from a .tsx/.jsx app is laid out for (utils/renderScale.ts); 0 or unset = automatic. */
+  render_scale?: number
   rotate?: number
   /** ESP32 power management (cloud set_settings mirror, frames.settings). */
   deep_sleep?: boolean
@@ -1057,13 +1059,17 @@ export interface FontMetadata {
   italic: boolean
 }
 
-/** What the runtime uses a state field for (see utils/refreshInterval.ts). */
-export type StateFieldRole = 'refreshInterval'
+/** What the runtime uses a state field for (see utils/refreshInterval.ts and utils/renderScale.ts). */
+export type StateFieldRole = 'refreshInterval' | 'renderScale'
 
 export interface StateField extends AppConfigField {
   persist?: 'memory' | 'disk'
   access?: 'private' | 'public'
-  /** `refreshInterval`: this field's value is the scene's seconds between renders. One field per scene. */
+  /**
+   * `refreshInterval`: this field's value is the scene's seconds between renders.
+   * `renderScale`: this field's value is the scene's scale, over its `settings.renderScale`.
+   * One field per role per scene.
+   */
   role?: StateFieldRole
 }
 
@@ -1235,6 +1241,8 @@ export interface ConnectionAppOutputAppInput extends EdgeConnectionType {
 export interface FrameSceneSettings {
   refreshInterval?: number
   backgroundColor?: string
+  /** What a UI from a .tsx/.jsx app is laid out for (utils/renderScale.ts); unset or 0 = the frame's. */
+  renderScale?: number
   execution?: 'compiled' | 'interpreted'
   autoArrangeOnLoad?: boolean
   splitScreenLayout?: Record<string, any>

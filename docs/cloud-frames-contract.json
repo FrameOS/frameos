@@ -66,6 +66,11 @@
       "rule": {"type": "string", "enum": ["contain", "cover", "stretch", "center"]},
       "profiles": {"linux": {"since": null}, "esp32": {"since": null}}
     },
+    "render_scale": {
+      "$comment": "frame.json `renderScale`: what JSX from a .tsx or .jsx app is laid out for, as a panel this many times smaller, drawn sharp at full size (docs/jsx-ui.md, \"Scale\"). 0 = automatic: the panel's shorter edge over 600 px, rounded down to a quarter, at least 1. A scene's own `settings.renderScale`, or a field with role renderScale, wins over it.",
+      "rule": {"type": "number", "min": 0, "max": 4},
+      "profiles": {"linux": {"since": "2026.10.22"}, "esp32": {"since": "2026.10.22"}}
+    },
     "timezone": {
       "rule": {"type": "string", "minLen": 1, "maxLen": 64, "format": "iana_zone"},
       "profiles": {"linux": {"since": null}, "esp32": {"since": "2026.8.34"}}

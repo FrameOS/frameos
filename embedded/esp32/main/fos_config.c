@@ -41,6 +41,7 @@ static void load_defaults(void)
     s_config.render_mode = (fos_render_mode_t)FRAMEOS_DEFAULT_RENDER_MODE;
     s_config.rotate = FRAMEOS_DEFAULT_ROTATE;
     strlcpy(s_config.scaling_mode, FRAMEOS_DEFAULT_SCALING_MODE, sizeof(s_config.scaling_mode));
+    s_config.render_scale_milli = FRAMEOS_DEFAULT_RENDER_SCALE_MILLI;
     s_config.colors[0] = '\0';
     s_config.palette[0] = '\0';
     s_config.event_map[0] = '\0';
@@ -192,6 +193,13 @@ esp_err_t fos_config_init(void)
         if (fos_config_normalize_scaling_mode(scaling_raw, normalized, sizeof(normalized))) {
             strlcpy(s_config.scaling_mode, normalized, sizeof(s_config.scaling_mode));
         }
+    }
+    /* Thousandths; validated on read the same way (absent or out of range =
+     * the default, automatic). */
+    uint16_t render_scale_milli = 0;
+    if (nvs_get_u16(nvs, "render_scale_m", &render_scale_milli) == ESP_OK &&
+        render_scale_milli <= FOS_RENDER_SCALE_MILLI_MAX) {
+        s_config.render_scale_milli = render_scale_milli;
     }
     size_t tz_len = sizeof(s_config.time_zone);
     if (nvs_get_str(nvs, "time_zone", s_config.time_zone, &tz_len) != ESP_OK) {
@@ -388,6 +396,7 @@ esp_err_t fos_config_save(void)
     FOS_NVS_SET(nvs_set_u32(nvs, "interval", s_config.interval_sec), "interval");
     FOS_NVS_SET(nvs_set_u16(nvs, "rotate", s_config.rotate), "rotate");
     FOS_NVS_SET(nvs_set_str(nvs, "scaling", s_config.scaling_mode), "scaling");
+    FOS_NVS_SET(nvs_set_u16(nvs, "render_scale_m", s_config.render_scale_milli), "render_scale_m");
     FOS_NVS_SET(nvs_set_str(nvs, "colors", s_config.colors), "colors");
     FOS_NVS_SET(nvs_set_str(nvs, "palette", s_config.palette), "palette");
     FOS_NVS_SET(nvs_set_str(nvs, "event_map", s_config.event_map), "event_map");

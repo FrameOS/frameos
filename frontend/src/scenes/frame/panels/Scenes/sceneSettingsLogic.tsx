@@ -12,6 +12,7 @@ import {
   sceneAccessFlagLabel,
 } from '../../../../utils/sceneAccess'
 import { splitSceneRhythmHint } from '../../../../utils/sceneRhythm'
+import { renderScaleFieldIndex, sceneRenderScaleOptions, type RenderScaleOption } from '../../../../utils/renderScale'
 
 export interface SceneSettingsLogicProps {
   frameId: FrameId
@@ -40,6 +41,8 @@ export interface sceneSettingsLogicValues {
   frameForm: Partial<FrameType> // frameLogic
   permissionApps: ScenePermissionApp[]
   permissionRows: ScenePermissionRow[]
+  renderScaleFieldName: string | null
+  renderScaleOptions: RenderScaleOption[]
   scene: FrameScene | null
   sceneAccess: SceneAccess | null
   sceneIndex: number
@@ -57,6 +60,8 @@ export interface sceneSettingsLogicMeta {
     splitRhythm: (scene: FrameScene | null, scenes: FrameScene[], frameForm: Partial<FrameType>) => string | null
     sceneAccess: (scene: FrameScene | null) => SceneAccess | null
     permissionRows: (sceneAccess: SceneAccess | null) => ScenePermissionRow[]
+    renderScaleOptions: (scene: FrameScene | null) => RenderScaleOption[]
+    renderScaleFieldName: (scene: FrameScene | null) => string | null
     permissionApps: (sceneAccess: SceneAccess | null) => ScenePermissionApp[]
   }
 }
@@ -131,6 +136,22 @@ export const sceneSettingsLogic = kea<sceneSettingsLogicType>([
         return [...new Set(order)]
           .filter((flag) => askers.has(flag))
           .map((flag) => ({ flag, askedBy: askers.get(flag) ?? [] }))
+      },
+    ],
+    // The Scale select: the frame's, then the steps (and the scene's own
+    // value if it is none of them).
+    renderScaleOptions: [
+      (s) => [s.scene],
+      (scene: sceneSettingsLogicValues['scene']): RenderScaleOption[] =>
+        sceneRenderScaleOptions(scene?.settings?.renderScale),
+    ],
+    // The state field with role renderScale, whose value wins over the
+    // setting on the frame (utils/renderScale.ts); null when there is none.
+    renderScaleFieldName: [
+      (s) => [s.scene],
+      (scene: sceneSettingsLogicValues['scene']): string | null => {
+        const index = renderScaleFieldIndex(scene?.fields)
+        return index >= 0 ? scene?.fields?.[index]?.name || null : null
       },
     ],
     permissionApps: [

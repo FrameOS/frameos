@@ -153,6 +153,26 @@ sys.stdout.flush()
     check reader.overlongLines == 1
     p.close()
 
+  test "ProcessOutputReader drops an overlong line that arrives whole":
+    # A child that wrote everything before the reader looked hands it the
+    # long line and its newline in one read: dropped all the same, never
+    # returned as a line.
+    let script = """
+import sys
+sys.stdout.write("x" * 5000 + "\nsecond\nthird")
+"""
+    var p = startProcessSerialized("python3", args = @["-c", script],
+                                   options = {poUsePath, poStdErrToStdOut})
+    check p.waitForExit() == 0
+    var reader = initProcessOutputReader(p, maxLineBytes = 1024)
+    var lines: seq[string] = @[]
+    while not reader.eof:
+      lines.add(reader.readAvailableLines())
+    lines.add(reader.readAvailableLines())
+    check lines == @["second", "third"]
+    check reader.overlongLines == 1
+    p.close()
+
   test "writeInputDrainingOutput times out when the child stops reading":
     var p = startProcessSerialized("python3", args = @["-c", "import time; time.sleep(10)"],
                                    options = {poUsePath, poStdErrToStdOut})

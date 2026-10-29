@@ -31,7 +31,7 @@ static const pk_preset_t s_presets[] = {
 // renderer, SD assets, an ADC battery divider or a TLS listener. The shared
 // provisioning plan sends several of them to every embedded board.
 static const char *const s_ignored_keys[] = {
-    "rotate", "scaling_mode", "scaling", "max_http_response_bytes", "max_http",
+    "rotate", "scaling_mode", "scaling", "render_scale", "max_http_response_bytes", "max_http",
     "gpio_buttons", "assets_sd", "assets_sd_pins", "assets_sd_freq", "assets_sd_autoformat",
     "assets_path", "wake_schedule", "wake_check", "battery_pin", "battery_divider",
     "battery_enable_pin", "time_zone", "fusion", "allow_lan", "spill_force",

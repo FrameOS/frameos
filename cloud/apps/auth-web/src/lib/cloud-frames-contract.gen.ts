@@ -78,6 +78,21 @@ export const cloudFramesContract = {
         }
       }
     },
+    "render_scale": {
+      "rule": {
+        "type": "number",
+        "min": 0,
+        "max": 4
+      },
+      "profiles": {
+        "linux": {
+          "since": "2026.10.22"
+        },
+        "esp32": {
+          "since": "2026.10.22"
+        }
+      }
+    },
     "timezone": {
       "rule": {
         "type": "string",

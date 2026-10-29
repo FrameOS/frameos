@@ -41,6 +41,7 @@ static void test_backend_plan_applies(void)
         {"interval", "900", PK_SET_OK},
         {"rotate", "90", PK_SET_IGNORED},
         {"scaling_mode", "cover", PK_SET_IGNORED},
+        {"render_scale", "1.5", PK_SET_IGNORED},
         {"server_send_logs", "1", PK_SET_OK},
         {"admin_user", "admin", PK_SET_OK},
         {"admin_pass", "s3cret pass", PK_SET_OK},

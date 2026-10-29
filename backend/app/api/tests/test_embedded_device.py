@@ -1091,6 +1091,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
     frame.name = 'Kitchen'
     frame.interval = 61.5
     frame.scaling_mode = 'contain'
+    frame.render_scale = 1.5
     frame.timezone = None  # deterministic utcOffsetMinutes
     frame.device_config = {
         **(frame.device_config or {}),
@@ -1135,6 +1136,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'timeZoneData': None,
         'rotate': 0,
         'scalingMode': 'contain',
+        'renderScale': 1.5,
         'colors': {},
         'maxHttpResponseBytes': 4 * 1024 * 1024,
         'adminAuth': expected_admin_auth,
@@ -1142,8 +1144,10 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
     }
 
     # Defaults: local render on PSRAM boards, power flags off, and an unset
-    # scaling mode falls back to the embedded default "cover"
+    # scaling mode falls back to the embedded default "cover"; the render
+    # scale is automatic (0), the firmware works it out from its panel
     frame.scaling_mode = None
+    frame.render_scale = 0
     frame.device_config = {
         key: value
         for key, value in (frame.device_config or {}).items()
@@ -1164,6 +1168,7 @@ async def test_settings_includes_live_frame_settings(async_client, no_auth_clien
         'timeZoneData': None,
         'rotate': 0,
         'scalingMode': 'cover',
+        'renderScale': 0.0,
         'colors': {},
         'maxHttpResponseBytes': 4 * 1024 * 1024,
         'adminAuth': expected_admin_auth,

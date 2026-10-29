@@ -1582,6 +1582,29 @@ async def test_api_frame_update_max_http_response_bytes(async_client, db, redis)
 
 
 @pytest.mark.asyncio
+async def test_api_frame_update_render_scale(async_client, db, redis):
+    frame = await new_frame(db, redis, 'RenderScaleFrame', 'localhost', 'localhost')
+    assert frame.render_scale == 0
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"render_scale": 2.25})
+    assert resp.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).render_scale == 2.25
+
+    # The contract's range: 0 (automatic) up to 4.
+    for bad in (-1, 4.5, "auto"):
+        resp = await async_client.post(f'/api/frames/{frame.id}', json={"render_scale": bad})
+        assert resp.status_code == 422, bad
+    db.expire_all()
+    assert db.get(Frame, frame.id).render_scale == 2.25
+
+    # An explicit null is automatic: the column is never empty.
+    resp = await async_client.post(f'/api/frames/{frame.id}', json={"render_scale": None})
+    assert resp.status_code == 200
+    db.expire_all()
+    assert db.get(Frame, frame.id).render_scale == 0
+
+
+@pytest.mark.asyncio
 async def test_api_frame_update_assets_path_stays_inside_the_asset_roots(async_client, db, redis):
     # Scenes and the frame's asset routes write into the assets folder: pointed
     # at the runtime's own, an upload could rewrite state/local_access.json.

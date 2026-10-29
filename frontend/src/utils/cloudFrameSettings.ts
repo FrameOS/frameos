@@ -145,6 +145,27 @@ export function cloudFrameSupportsEventMap(frameosVersion: string | null | undef
   return cloudFrameSupportsSettingsFrom(eventMapCloudFrameSettingsMinVersion, frameosVersion)
 }
 
+/** Firmware from here on takes the render scale. */
+export const renderScaleCloudFrameSettingsMinVersion = '2026.10.22'
+
+/**
+ * `render_scale` (frame.json `renderScale`, utils/renderScale.ts): what a UI
+ * from a .tsx/.jsx app is laid out for, 0 = automatic. Both profiles learned
+ * it in the same release and apply it on the next render. Callers gate on
+ * cloudFrameSupportsRenderScale; below the floor the field renders disabled
+ * with the reason.
+ */
+export const renderScaleCloudFrameSettingKeys: readonly LinuxKey[] = linuxKeysSince(
+  renderScaleCloudFrameSettingsMinVersion
+).filter((key) => key === 'render_scale')
+export const esp32RenderScaleCloudFrameSettingKeys: readonly Esp32Key[] = esp32KeysSince(
+  renderScaleCloudFrameSettingsMinVersion
+).filter((key) => key === 'render_scale')
+
+export function cloudFrameSupportsRenderScale(frameosVersion: string | null | undefined): boolean {
+  return cloudFrameSupportsSettingsFrom(renderScaleCloudFrameSettingsMinVersion, frameosVersion)
+}
+
 /**
  * The events a rule may `emit`: the contract's, those the `eventMap` origin
  * is allowed to say (docs/events-contract.json `origins`), the same list the
@@ -370,6 +391,8 @@ export const allCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = Array.f
     ...colorsCloudFrameSettingKeys,
     ...eventMapCloudFrameSettingKeys,
     ...esp32EventMapCloudFrameSettingKeys,
+    ...renderScaleCloudFrameSettingKeys,
+    ...esp32RenderScaleCloudFrameSettingKeys,
     ...esp32PowerSettingKeys,
   ])
 )
@@ -481,6 +504,7 @@ export const numericCloudFrameSettingKeys: readonly CloudFrameSettingKey[] = [
   'led_pin',
   'metrics_interval',
   'max_http_response_bytes',
+  'render_scale',
 ]
 const numericSettingKeys = numericCloudFrameSettingKeys
 

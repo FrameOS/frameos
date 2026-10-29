@@ -79,6 +79,7 @@ from app.tasks.embedded_firmware import (
     embedded_panel_for_frame,
     embedded_pixel_format_for_panel,
     embedded_release_firmware_for_frame,
+    embedded_render_scale_for_frame,
     embedded_scaling_mode_for_frame,
 )
 from . import api_public
@@ -878,6 +879,10 @@ def embedded_frame_settings(frame: Frame) -> dict:
         # Applied live on the device (no restart); default and validation in
         # embedded_scaling_mode_for_frame.
         "scalingMode": embedded_scaling_mode_for_frame(frame),
+        # What a UI from a .tsx/.jsx app is laid out for, a panel this many
+        # times smaller (docs/jsx-ui.md "Scale"); 0 = automatic from the
+        # panel. Applied on the next render; older firmware ignores the key.
+        "renderScale": embedded_render_scale_for_frame(frame),
         # frame.json's `colors` block (docs/asset-color-profiles.md): kept as
         # compact JSON on the device and applied live, no restart. Older
         # firmware ignores the key.

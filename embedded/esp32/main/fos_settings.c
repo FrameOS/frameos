@@ -708,6 +708,21 @@ static bool apply_frame_settings(const cJSON *frame)
         changed = true;
     }
 
+    /* `renderScale` (docs/jsx-ui.md "Scale"): what JSX from a .tsx/.jsx app
+     * is laid out for; 0 or null = automatic. Not a canvas dimension either
+     * (apps read it per render), pushed into the Nim runtime every pass like
+     * scalingMode, so no restart. A value out of the contract's 0..4 is
+     * ignored. */
+    const cJSON *render_scale = cJSON_GetObjectItem(frame, "renderScale");
+    uint16_t normalized_render_scale = 0;
+    if ((cJSON_IsNull(render_scale) ||
+         (cJSON_IsNumber(render_scale) &&
+          fos_config_normalize_render_scale(render_scale->valuedouble, &normalized_render_scale))) &&
+        config->render_scale_milli != normalized_render_scale) {
+        config->render_scale_milli = normalized_render_scale;
+        changed = true;
+    }
+
     /* `colors` (docs/asset-color-profiles.md): kept as compact JSON and
      * pushed into the Nim runtime every pass like scalingMode, so it applies
      * live. An empty object is the defaults; a block too big for the slot is
@@ -884,6 +899,11 @@ void fos_settings_describe_changes(const fos_config_t *before, const fos_config_
     }
     if (strcmp(before->scaling_mode, after->scaling_mode) != 0) {
         change_append(out, out_len, "scaling_mode", after->scaling_mode);
+    }
+    if (before->render_scale_milli != after->render_scale_milli) {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "%g", after->render_scale_milli / 1000.0);
+        change_append(out, out_len, "render_scale", buf);
     }
     if (strcmp(before->colors, after->colors) != 0) {
         change_append(out, out_len, "colors", after->colors[0] ? "set" : "default");
@@ -1173,9 +1193,10 @@ esp_err_t fos_settings_sync(bool force)
         char changes[320] = "";
         fos_settings_describe_changes(before, config, changes, sizeof(changes));
         log_settings_applied(s_restart_after_apply ? "restarting" : "", changes);
-        ESP_LOGI(TAG, "settings applied from backend (interval=%lu render_mode=%d rotate=%u scaling=%s)",
+        ESP_LOGI(TAG, "settings applied from backend (interval=%lu render_mode=%d rotate=%u scaling=%s "
+                      "render_scale=%g)",
                  (unsigned long)config->interval_sec, (int)config->render_mode,
-                 (unsigned)config->rotate, config->scaling_mode);
+                 (unsigned)config->rotate, config->scaling_mode, config->render_scale_milli / 1000.0);
     }
     free(before);
     if (response_etag[0]) {

@@ -5,7 +5,7 @@
 // the typed one does.
 import { asc, eq } from "drizzle-orm";
 import { createDb, frameSceneAssignments, storeScenes } from "@frameos-cloud/db";
-import { frameForAccount } from "../frames";
+import { frameForAccount, frameRenderScale } from "../frames";
 import { maxRenderDimension, maxRenderPixels, minRenderDimension } from "../scene-render";
 import { frameRenderDevice, type RenderDevice } from "./render-device";
 import type { JsonObject } from "./scene-utils";
@@ -52,6 +52,8 @@ export async function frameContextBlock(
   block: string;
   frameId: string | null;
   renderDevice?: RenderDevice | null;
+  /** The frame's own render scale; null = automatic. */
+  renderScale?: number | null;
   resolution?: { width: number; height: number } | null;
 }> {
   if (!frameId) {
@@ -103,6 +105,7 @@ export async function frameContextBlock(
     block: lines.join("\n"),
     frameId: frame.id,
     renderDevice,
+    renderScale: frameRenderScale(frame),
     resolution: renderSizeFrom(width, height),
   };
 }

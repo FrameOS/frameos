@@ -58,6 +58,10 @@ type ResolvedApp = {
 /** Mirrors frontend/src/utils/refreshInterval.ts. */
 const REFRESH_INTERVAL_ROLE = "refreshInterval";
 const REFRESH_INTERVAL_FIELD_NAME = "refreshInterval";
+/** Mirrors frontend/src/utils/renderScale.ts (frameos/src/frameos/render_scale.nim). */
+const RENDER_SCALE_ROLE = "renderScale";
+const MAX_RENDER_SCALE = 4;
+const RENDER_SCALE_FIELD_TYPES = new Set(["float", "integer", "select"]);
 
 const NODE_TYPES = new Set(["event", "dispatch", "app", "state", "code", "scene"]);
 const FIELD_TYPES = new Set([
@@ -557,6 +561,7 @@ export function lintScene(
   // --- scene fields -------------------------------------------------------
   const declaredFields = new Map<string, JsonObject>();
   let refreshIntervalRoleField: string | null = null;
+  let renderScaleRoleField: string | null = null;
   const rawFields = Array.isArray(scene.fields) ? scene.fields : [];
   rawFields.forEach((raw, index) => {
     const field = obj(raw);
@@ -604,11 +609,28 @@ export function lintScene(
     // role: what the runtime uses the field for. "refreshInterval" makes the
     // field's value the scene's seconds between renders; the runtime takes
     // the first such field, so a second one is a control that does nothing.
-    if (field.role !== undefined && field.role !== null) {
+    // "renderScale" makes its value the scene's render scale, over
+    // settings.renderScale; again the runtime takes the first.
+    if (field.role === RENDER_SCALE_ROLE) {
+      if (renderScaleRoleField) {
+        push(
+          "error",
+          `Scene fields "${renderScaleRoleField}" and "${name}" both have role "${RENDER_SCALE_ROLE}"; only one field can be the scale.`,
+        );
+      } else {
+        renderScaleRoleField = name;
+      }
+      if (type && !RENDER_SCALE_FIELD_TYPES.has(type)) {
+        push(
+          "error",
+          `Scene field "${name}" has role "${RENDER_SCALE_ROLE}" but type "${type}"; the scale is a number up to ${MAX_RENDER_SCALE} (float, integer or select).`,
+        );
+      }
+    } else if (field.role !== undefined && field.role !== null) {
       if (field.role !== REFRESH_INTERVAL_ROLE) {
         push(
           "error",
-          `Scene field "${name}" has unknown role "${String(field.role)}". Allowed: ${REFRESH_INTERVAL_ROLE}.`,
+          `Scene field "${name}" has unknown role "${String(field.role)}". Allowed: ${REFRESH_INTERVAL_ROLE}, ${RENDER_SCALE_ROLE}.`,
         );
       } else {
         if (refreshIntervalRoleField) {
@@ -710,6 +732,15 @@ export function lintScene(
     const mismatch = valueLooksLike("color", settings.backgroundColor);
     if (mismatch) {
       push("warning", `settings.backgroundColor: ${mismatch}.`);
+    }
+  }
+  if (settings.renderScale !== undefined) {
+    const scale = settings.renderScale;
+    if (typeof scale !== "number" || !Number.isFinite(scale) || scale < 0 || scale > MAX_RENDER_SCALE) {
+      push(
+        "error",
+        `settings.renderScale must be a number up to ${MAX_RENDER_SCALE} (0 or absent = the frame's scale).`,
+      );
     }
   }
   // --- permissions ----------------------------------------------------------

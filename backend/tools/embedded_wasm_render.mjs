@@ -349,6 +349,17 @@ if (request.deviceLimits) {
     process.stderr.write(`embedded_wasm_render: device simulation unavailable (${error})\n`)
   }
 }
+// The frame's render scale (frame.json `renderScale`): what a UI from a
+// .tsx/.jsx app is laid out for. Sent only when the frame set one; without
+// it the runtime works the automatic scale out from width and height. Old
+// bundles predate the export and render at 1.
+if (typeof request.renderScale === 'number' && request.renderScale > 0) {
+  try {
+    call('frameos_wasm_set_render_scale', null, ['number'], [request.renderScale])
+  } catch (error) {
+    process.stderr.write(`embedded_wasm_render: render scale unavailable (${error})\n`)
+  }
+}
 const memoryStat = (name) => {
   try {
     return call(name, 'number', [], [])

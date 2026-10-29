@@ -227,6 +227,27 @@ describe("lintScenes", () => {
     ).toEqual([expect.stringContaining('unknown role "timeout"')]);
   });
 
+  it("accepts one renderScale role and a settings.renderScale up to 4", () => {
+    const zoom = { name: "zoom", role: "renderScale", type: "float", value: "1.5" };
+    const seconds = { name: "seconds", role: "refreshInterval", type: "float", value: "600" };
+    expect(messages([scene({ fields: [zoom, seconds] })])).toEqual({ errors: [], warnings: [] });
+    expect(messages([scene({ settings: { renderScale: 2 } })])).toEqual({ errors: [], warnings: [] });
+    expect(messages([scene({ settings: { renderScale: 0 } })])).toEqual({ errors: [], warnings: [] });
+
+    expect(
+      messages([scene({ fields: [zoom, { ...zoom, name: "size" }] })]).errors,
+    ).toEqual([expect.stringContaining('"zoom" and "size" both have role "renderScale"')]);
+    expect(
+      messages([scene({ fields: [{ ...zoom, type: "string" }] })]).errors,
+    ).toEqual([expect.stringContaining('role "renderScale" but type "string"')]);
+    expect(messages([scene({ settings: { renderScale: 5 } })]).errors).toEqual([
+      expect.stringContaining("settings.renderScale must be a number up to 4"),
+    ]);
+    expect(messages([scene({ settings: { renderScale: "2" } })]).errors).toEqual([
+      expect.stringContaining("settings.renderScale"),
+    ]);
+  });
+
   it("warns when a field named refreshInterval is not numeric", () => {
     const named = { name: "refreshInterval", type: "string", value: "hourly" };
     expect(messages([scene({ fields: [named] })])).toEqual({

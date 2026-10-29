@@ -2304,7 +2304,8 @@ static bool ws_raw_message_id(const char *data, size_t len, char *out, size_t ou
  * `name` (the DHCP hostname — the provider-side display name stays
  * authoritative on the provider), `rotate` (the renderer sizes its canvas
  * once at init, so this one costs a reboot), `scaling_mode` (a per-decode
- * fallback fit, applied live on the next render pass), `colors` (the
+ * fallback fit, applied live on the next render pass), `render_scale` (what
+ * JSX from .tsx/.jsx apps is laid out for, live the same way), `colors` (the
  * automatic fit switch and the frame-wide correction, applied live the same
  * way) and `palette` (the colour list the packer dithers to, live the same
  * way; the names ride along in the cloud only). The power keys —
@@ -2434,6 +2435,18 @@ static void ws_handle_set_settings(const cJSON *root, const cJSON *id)
         /* No reboot: a per-decode fallback, pushed into the Nim runtime by
          * fos_client on the next pass. */
         strlcpy(config->scaling_mode, normalized, sizeof(config->scaling_mode));
+    }
+    const cJSON *render_scale = cJSON_GetObjectItem(settings, "render_scale");
+    if (render_scale != NULL) {
+        /* The contract checked it is a number in 0..4 (0 = automatic); this
+         * rounds it onto the thousandths NVS keeps. No reboot: apps read the
+         * scale per render, and fos_client pushes it on the next pass. */
+        uint16_t milli = 0;
+        if (!fos_config_normalize_render_scale(render_scale->valuedouble, &milli)) {
+            ws_ack(id, false, "invalid_settings");
+            return;
+        }
+        config->render_scale_milli = milli;
     }
     const cJSON *colors = cJSON_GetObjectItem(settings, "colors");
     if (colors != NULL) {

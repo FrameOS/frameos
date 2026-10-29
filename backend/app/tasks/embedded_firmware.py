@@ -35,6 +35,7 @@ from app.models.frame import (
 from app.models.log import new_log as log
 from app.tasks.utils import get_fresh_frame
 from app.utils.frame_http import _fetch_frame_http_bytes
+from app.utils.render_scale import normalize_render_scale
 from app.utils.token import secure_token
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -1347,6 +1348,12 @@ def embedded_scaling_mode_for_frame(frame: Frame) -> str:
     return value if value in EMBEDDED_SCALING_MODES else "cover"
 
 
+def embedded_render_scale_for_frame(frame: Frame) -> float:
+    """The frame's render scale for the device: a number in (0, 4], or 0 for
+    automatic (the firmware works it out from its panel)."""
+    return normalize_render_scale(getattr(frame, "render_scale", None))
+
+
 def embedded_max_http_response_bytes_for_frame(frame: Frame) -> int:
     value = getattr(frame, "max_http_response_bytes", None)
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
@@ -1856,6 +1863,12 @@ def embedded_provisioning_plan(frame: Frame, published_assets: Optional[set[str]
     settings.append(_provisioning_setting("interval", max(5, int(frame.interval or 300))))
     settings.append(_provisioning_setting("rotate", int(frame.rotate or 0) % 360))
     settings.append(_provisioning_setting("scaling_mode", embedded_scaling_mode_for_frame(frame)))
+    # Only a scale the owner chose: automatic is the firmware's default, and
+    # a release image from before the key would refuse it (the settings poll
+    # carries it either way).
+    render_scale = embedded_render_scale_for_frame(frame)
+    if render_scale > 0:
+        settings.append(_provisioning_setting("render_scale", f"{render_scale:g}"))
     settings.append(_provisioning_setting("server_send_logs", 1 if frame.server_send_logs is not False else 0))
     max_http = embedded_max_http_response_bytes_for_frame(frame)
     if max_http != EMBEDDED_DEFAULT_MAX_HTTP_RESPONSE_BYTES:
