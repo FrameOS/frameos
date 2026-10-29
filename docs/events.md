@@ -220,7 +220,10 @@ no filter on a field hears every value of it.
   not name), wrapping around; the dispatcher resolves it from the host's
   `sceneOrder` on every host, so a frame with one scene switches nowhere and
   anything else is refused (`reason: "direction"`). While the scene switcher
-  shows, a direction walks from the scene it was opened from.
+  shows, a direction from the frame's event map (a swipe in from the left or
+  the right, a key held) turns the switcher's page instead and the frame
+  stays on it; from any other origin it walks from the scene the switcher
+  was opened from.
 - `sceneSwitcher {}` — shows the scene switcher (`system/sceneSwitcher`, the
   contract's `scenes.switcher`; [scene-switcher.md](scene-switcher.md)): the
   dispatcher selects it with `state.from`, the scene showing, and while it

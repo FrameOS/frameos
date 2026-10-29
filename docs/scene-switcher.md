@@ -34,9 +34,13 @@ A `setCurrentScene {sceneId: "system/sceneSwitcher"}` opens it by name (the
 HTTP API, a schedule) without `state.from`: it highlights the list's first
 scene and goes back there, and so does a switcher whose `from` has left the
 list (it forgets `from` then, and when it is left). While it shows,
-`setCurrentScene {direction}` walks the list from `state.from`: on a
-reTerminal, RIGHT held in the switcher is the scene after the one it was
-opened from.
+a `setCurrentScene {direction}` from the frame's event map is the
+switcher's own: it turns the page (`next` the next page, `prev` the one
+before, wrapping around) and the frame stays on the switcher, so the swipe
+in from the left or the right edge that changes the scene everywhere else
+pages the switcher, as a swipe across the tiles does, and so does a
+reTerminal's LEFT or RIGHT held. From any other origin (the HTTP API, a
+schedule) a direction walks the list from `state.from`.
 
 Who may say it (`origins`): the frame's event map, a scene (a "Scenes" button
 in a scene's own UI), a schedule, the HTTP API with the frame access key or
@@ -48,7 +52,7 @@ The defaults bind it to a swipe up from the bottom edge (`edgeSwipe {edge:
 bottom}`) on every touch screen that ships an event map: the HyperPixels
 (when frame.json has no `eventMap`), the SenseCAP Indicator and the
 reTerminal E1003, whose e-paper has a touch glass. Left and right stay the
-previous and the next scene, and down from the top is the scene's settings
+previous and the next scene (the previous and the next page in the switcher), and down from the top is the scene's settings
 (`sceneSettings`, [scene-settings.md](scene-settings.md)), the other scene
 the runtime draws itself. The SenseCAP Indicator's one key opens the
 switcher too, pressed twice (pressed once it switches the screen off and on,
@@ -131,7 +135,8 @@ of PSRAM per tile, or flash writes on every switch.
 ## Using it
 
 - **Touch:** tap a tile to show that scene, swipe left or right across the
-  tiles for the next or the previous page, tap Close (or swipe up from the
+  tiles (or in from the left or the right edge) for the next or the previous
+  page, tap Close (or swipe up from the
   bottom again) to go back.
 - **Keys**, by role (`buttons.roles`, `roleByLabel`): `next` / `down` move the
   highlight one tile on, `prev` / `up` one back (wrapping, across pages);
@@ -140,8 +145,8 @@ of PSRAM per tile, or flash writes on every switch.
   two, so pressing NEXT three times moves three tiles whatever the button
   layer made of the taps, and presses made during an e-paper refresh land
   together with their timing, so the next refresh shows where they got to.
-  A long press stays the frame's: on a reTerminal LEFT and RIGHT held are
-  still the previous and the next scene.
+  A long press stays the frame's map: on a reTerminal LEFT and RIGHT held
+  turn the page.
 - **A keyboard** (Linux): the arrows walk the grid, Page Up and Down turn
   the page, Enter shows the scene, Escape goes back.
 - **Nobody there:** it goes back by itself after a minute on a fast panel and

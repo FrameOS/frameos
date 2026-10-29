@@ -351,19 +351,24 @@ proc selectScene(loop: EventLoop, envelope: EventEnvelope): bool =
   ## `setCurrentScene`: by `sceneId`, or by `direction` through the host's
   ## scene order (`next` / `prev` of the scene showing, wrapping around; the
   ## list's first or last when nothing is). While the scene switcher shows,
-  ## the scene it was opened from is the one a direction walks from. False
-  ## when nothing could switch: a direction the contract does not know, or a
-  ## frame with no scene list.
+  ## a direction from the frame's event map (a swipe in from the left or the
+  ## right, a key held) is the switcher's: it turns its page. Any other
+  ## walks from the scene it was opened from. False when nothing could
+  ## switch: a direction the contract does not know, or a frame with no
+  ## scene list.
   var payload = envelope.payload
   if payload{"sceneId"}.getStr().len == 0:
     let direction = payload{"direction"}.getStr()
     if direction.len > 0:
       if direction notin SceneDirections:
         return loop.refused(envelope, "direction")
+      let current = loop.host.sceneFor(none(SceneId))
+      if envelope.origin == eoEventMap and not current.isNil and current.id.string == SceneSwitcherId:
+        loop.runOnScene(current, envelope.name, payload, eventPolicy(envelope.name), envelope.fromRender)
+        return true
       let order = loop.sceneOrderOf()
       if order.len == 0:
         return loop.refused(envelope, "noSceneOrder")
-      let current = loop.host.sceneFor(none(SceneId))
       let opener = switcherOpener(current)
       var index = if opener.len > 0: order.find(SceneId(opener))
         elif current.isNil: -1

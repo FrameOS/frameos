@@ -3694,8 +3694,8 @@
     ]
    },
    {
-    "name": "the scene switcher opens from the scene showing, and the same again goes back",
-    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` walks the list from the scene it was opened from. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The switcher is in no scene list.",
+    "name": "the scene switcher opens from the scene showing, the same again goes back, and the frame's previous / next turn its page",
+    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, a `setCurrentScene {direction}` from the frame's event map (a swipe in from the left or the right edge, a key held) is the switcher's: it turns the page (the next page for `next`, wrapping around; the scene hears `setCurrentScene` with the direction), and the frame stays on the switcher. From any other origin (the API, a schedule) a direction walks the list from the scene it was opened from. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The switcher is in no scene list.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/switcherA",
@@ -3830,6 +3830,16 @@
       "as": {
        "direction": "next"
       }
+     },
+     {
+      "event": "edgeSwipe",
+      "match": {
+       "edge": "left"
+      },
+      "emit": "setCurrentScene",
+      "as": {
+       "direction": "prev"
+      }
      }
     ],
     "scene": "fixtures/dispatcher/switcherA",
@@ -3870,16 +3880,13 @@
       "send": [
        {
         "origin": "http:write",
-        "event": "button",
+        "event": "setCurrentScene",
         "payload": {
-         "label": "RIGHT",
-         "action": "longPress",
-         "durationMs": 1500
+         "direction": "next"
         }
        }
       ],
       "trace": [
-       "mapped frame button -> setCurrentScene",
        "select fixtures/dispatcher/switcherB",
        "run sceneSwitcher close",
        "run switcherB open",
@@ -4008,6 +4015,79 @@
        "refused sceneSwitcher driver origin"
       ],
       "current": "fixtures/dispatcher/switcherB"
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "trace": [
+       "select system/sceneSwitcher",
+       "run switcherB close",
+       "run sceneSwitcher setCurrentScene",
+       "run sceneSwitcher open",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/switcherB",
+       "highlight": "fixtures/dispatcher/switcherB"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "button",
+        "payload": {
+         "label": "RIGHT",
+         "action": "longPress",
+         "durationMs": 1500
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame button -> setCurrentScene",
+       "run sceneSwitcher setCurrentScene {\"direction\":\"next\"}",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/switcherB",
+       "page": 2,
+       "highlight": "fixtures/dispatcher/switcherC"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "left",
+         "direction": "right",
+         "x": 2,
+         "y": 1,
+         "startX": 0,
+         "startY": 1,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> setCurrentScene",
+       "run sceneSwitcher setCurrentScene {\"direction\":\"prev\"}",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/switcherB",
+       "page": 1,
+       "highlight": "fixtures/dispatcher/switcherB"
+      }
      }
     ]
    },
