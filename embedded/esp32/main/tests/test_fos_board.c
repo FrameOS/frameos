@@ -142,10 +142,8 @@ static void test_event_maps(void)
      * E1001's map, then the edge swipes (docs/scene-switcher.md). */
     const char *e1003 = fos_board_event_map("seeed_reterminal_e1003");
     CHECK(strncmp(e1003, e1001, strlen(e1001) - 1) == 0, "e1003 starts with the e1001 map");
-    CHECK(strstr(e1003, "\"edge\":\"right\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"next\"}") != NULL,
-          "e1003 right edge is next");
-    CHECK(strstr(e1003, "\"edge\":\"left\"},\"emit\":\"setCurrentScene\",\"as\":{\"direction\":\"prev\"}") != NULL,
-          "e1003 left edge is prev");
+    CHECK(strstr(e1003, "\"edge\":\"right\"},\"emit\":\"forward\"") != NULL, "e1003 right edge is forward");
+    CHECK(strstr(e1003, "\"edge\":\"left\"},\"emit\":\"back\"") != NULL, "e1003 left edge is back");
     CHECK(strstr(e1003, "\"edge\":\"bottom\"},\"emit\":\"sceneSwitcher\"") != NULL, "e1003 bottom edge is the switcher");
     CHECK(strstr(e1003, "\"edge\":\"top\"},\"emit\":\"sceneSettings\"") != NULL, "e1003 top edge is the settings");
     CHECK(strstr(e1001, "edgeSwipe") == NULL, "the e1001 has no glass");

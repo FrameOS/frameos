@@ -86,7 +86,7 @@ static const fos_rule_t k_fos_rules[] = {
     {FOS_RULE_STRING, 0, 0, 0, 0, 0, 1, 63, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_OBJECT, 0, 0, 0, 1, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_OBJECT, 0, 0, 0, 1, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
-    {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 7, 9, 0, 0, 0, 0, 0.0f, 0.0f},
+    {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 7, 11, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_BOOL, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 0.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0.0f, 86400.0f},
@@ -100,7 +100,7 @@ static const fos_rule_t k_fos_rules[] = {
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
     {FOS_RULE_INT, 0, 1, 1, 0, 0, -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, -1.0f, 48.0f},
-    {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 16, 3, 0, 0, 0, 0, 0.0f, 0.0f},
+    {FOS_RULE_STRING, 0, 0, 0, 0, 0, -1, -1, -1, -1, -1, 18, 3, 0, 0, 0, 0, 0.0f, 0.0f},
 };
 static const fos_rule_key_t k_fos_rule_keys[] = {
     {"name", 12, 0},
@@ -141,7 +141,7 @@ static const fos_rule_key_t k_fos_rule_keys[] = {
 };
 static const int16_t k_fos_rule_children[] = {7, 8, 14, 16, 41, 46, 50, };
 static const int32_t k_fos_rule_int_enums[] = {0, 90, 180, 270, };
-static const char *const k_fos_rule_str_enums[] = {"contain", "cover", "stretch", "center", "default", "on", "off", "render", "setCurrentScene", "setSceneState", "turnOn", "turnOff", "toggleScreen", "sceneSwitcher", "sceneSettings", "voiceChat", "gpio", "gpio_inverted", "ws2812", };
+static const char *const k_fos_rule_str_enums[] = {"contain", "cover", "stretch", "center", "default", "on", "off", "render", "setCurrentScene", "setSceneState", "turnOn", "turnOff", "toggleScreen", "sceneSwitcher", "sceneSettings", "back", "forward", "voiceChat", "gpio", "gpio_inverted", "ws2812", };
 
 static const fos_contract_setting_t k_fos_contract_settings[] = {
     {"name", 0, 0, NULL},

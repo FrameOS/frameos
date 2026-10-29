@@ -46,6 +46,8 @@ export type ContractEventName =
   | 'setCurrentScene'
   | 'sceneSwitcher'
   | 'sceneSettings'
+  | 'back'
+  | 'forward'
   | 'metrics'
   | 'reload'
   | 'restart'
@@ -792,6 +794,52 @@ export const contractEventSpecs: Record<ContractEventName, ContractEventSpec> = 
     },
     "since": "2026.10.22"
   },
+  "back": {
+    "class": "scene-command",
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system",
+      "eventMap"
+    ],
+    "renderAfter": "if-state-changed",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": true,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.10.23"
+  },
+  "forward": {
+    "class": "scene-command",
+    "listen": true,
+    "dispatch": false,
+    "origins": [
+      "preview",
+      "scene",
+      "schedule",
+      "http:write",
+      "http:admin",
+      "system",
+      "eventMap"
+    ],
+    "renderAfter": "if-state-changed",
+    "coalesce": "none",
+    "log": "full",
+    "hosts": {
+      "linux": true,
+      "esp32": true,
+      "wasm": true
+    },
+    "since": "2026.10.23"
+  },
   "metrics": {
     "class": "device-command",
     "listen": false,
@@ -1093,6 +1141,10 @@ interface FrameOSEventPayloads {
   sceneSwitcher: Record<string, never>;
   /** Show the scene's settings (\`scenes.settings\`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen. */
   sceneSettings: Record<string, never>;
+  /** Go back, as a phone's back gesture does: what that is is the scene's (the photo or the page before; the scene switcher turns its page back, the scene settings close unsaved), and a scene that does not listen for it stays as it is. It never switches the scene. The frame's event map binds it to a swipe in from the left edge on a touch screen. */
+  back: Record<string, never>;
+  /** Go forward, the other way from \`back\`: the next photo or page (the scene switcher turns its page on). It never switches the scene. The frame's event map binds it to a swipe in from the right edge on a touch screen. */
+  forward: Record<string, never>;
 }
 `
 

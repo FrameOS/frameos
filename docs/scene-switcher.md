@@ -47,8 +47,10 @@ cloud can still `set_current_scene` it by name.
 The defaults bind it to a swipe up from the bottom edge (`edgeSwipe {edge:
 bottom}`) on every touch screen that ships an event map: the HyperPixels
 (when frame.json has no `eventMap`), the SenseCAP Indicator and the
-reTerminal E1003, whose e-paper has a touch glass. Left and right stay the
-previous and the next scene, and down from the top is the scene's settings
+reTerminal E1003, whose e-paper has a touch glass: that is how a touch
+screen changes the scene. In from the left and the right are `back` and
+`forward`, the scene's own (docs/events.md), which the switcher takes as the
+page before and the next. Down from the top is the scene's settings
 (`sceneSettings`, [scene-settings.md](scene-settings.md)), the other scene
 the runtime draws itself. The SenseCAP Indicator's one key opens the
 switcher too, pressed twice (pressed once it switches the screen off and on,
@@ -131,7 +133,8 @@ of PSRAM per tile, or flash writes on every switch.
 ## Using it
 
 - **Touch:** tap a tile to show that scene, swipe left or right across the
-  tiles for the next or the previous page, tap Close (or swipe up from the
+  tiles (or in from the right or the left edge: the frame's `forward` and
+  `back`) for the next or the previous page, tap Close (or swipe up from the
   bottom again) to go back.
 - **Keys**, by role (`buttons.roles`, `roleByLabel`): `next` / `down` move the
   highlight one tile on, `prev` / `up` one back (wrapping, across pages);

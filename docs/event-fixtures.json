@@ -3694,8 +3694,8 @@
     ]
    },
    {
-    "name": "the scene switcher opens from the scene showing, and the same again goes back",
-    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` walks the list from the scene it was opened from. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The switcher is in no scene list.",
+    "name": "the scene switcher opens from the scene showing, and the same again goes back; back and forward turn its page",
+    "why": "`sceneSwitcher` is the dispatcher's to resolve, on every host: it selects the built-in scene `scenes.switcher` with `state.from`, the scene showing, and while the switcher shows it selects that scene again. A touch screen's event map binds it to a swipe in from the bottom edge. While the switcher shows, `setCurrentScene {direction}` walks the list from the scene it was opened from. Opened by name instead (`setCurrentScene` to it), it knows no scene it came from: it highlights the list's first, and goes back there. In the switcher a key with the role `next` moves the highlight one scene on, and one with the role `refresh` (or `primary`) shows the highlighted scene: the switcher dispatches `setCurrentScene` for it. The frame's `back` and `forward` (a swipe in from the left and the right edge) turn its page, the one before and the next, wrapping around, and the frame stays on it. The switcher is in no scene list.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/switcherA",
@@ -3830,6 +3830,20 @@
       "as": {
        "direction": "next"
       }
+     },
+     {
+      "event": "edgeSwipe",
+      "match": {
+       "edge": "left"
+      },
+      "emit": "back"
+     },
+     {
+      "event": "edgeSwipe",
+      "match": {
+       "edge": "right"
+      },
+      "emit": "forward"
      }
     ],
     "scene": "fixtures/dispatcher/switcherA",
@@ -4008,12 +4022,309 @@
        "refused sceneSwitcher driver origin"
       ],
       "current": "fixtures/dispatcher/switcherB"
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSwitcher"
+       }
+      ],
+      "trace": [
+       "select system/sceneSwitcher",
+       "run switcherB close",
+       "run sceneSwitcher setCurrentScene",
+       "run sceneSwitcher open",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/switcherB",
+       "highlight": "fixtures/dispatcher/switcherB"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "right",
+         "direction": "left",
+         "x": 0,
+         "y": 1,
+         "startX": 2,
+         "startY": 1,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> forward",
+       "run sceneSwitcher forward",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/switcherB",
+       "page": 2,
+       "highlight": "fixtures/dispatcher/switcherC"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "left",
+         "direction": "right",
+         "x": 2,
+         "y": 1,
+         "startX": 0,
+         "startY": 1,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> back",
+       "run sceneSwitcher back",
+       "render"
+      ],
+      "current": "system/sceneSwitcher",
+      "state": {
+       "from": "fixtures/dispatcher/switcherB",
+       "page": 1,
+       "highlight": "fixtures/dispatcher/switcherB"
+      }
+     }
+    ]
+   },
+   {
+    "name": "the frame's back and forward are the scene's own: a swipe in from the side never switches the scene",
+    "why": "`back` and `forward` are delivered to the scene showing, which decides what they mean (the photo or the page before or after). Every touch preset binds them to the swipes in from the left and the right edge, so those no longer walk the scene list: a scene that does not listen for them stays as it is, and changing the scene is the switcher's (up from the bottom). Only the event map, the HTTP API, a schedule, the preview and the runtime may say them: a driver's key is bound through the map. The render follows only when the scene's state changed.",
+    "scenes": [
+     {
+      "id": "fixtures/dispatcher/navA",
+      "name": "navA",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [
+       {
+        "id": "e0",
+        "type": "event",
+        "data": {
+         "keyword": "back"
+        }
+       },
+       {
+        "id": "a0",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardBack",
+          "valueJson": true
+         }
+        }
+       },
+       {
+        "id": "e1",
+        "type": "event",
+        "data": {
+         "keyword": "forward"
+        }
+       },
+       {
+        "id": "a1",
+        "type": "app",
+        "data": {
+         "keyword": "logic/setAsState",
+         "config": {
+          "stateKey": "heardForward",
+          "valueJson": true
+         }
+        }
+       }
+      ],
+      "edges": [
+       {
+        "id": "x0",
+        "source": "e0",
+        "sourceHandle": "next",
+        "target": "a0",
+        "targetHandle": "prev"
+       },
+       {
+        "id": "x1",
+        "source": "e1",
+        "sourceHandle": "next",
+        "target": "a1",
+        "targetHandle": "prev"
+       }
+      ],
+      "fields": []
+     },
+     {
+      "id": "fixtures/dispatcher/navB",
+      "name": "navB",
+      "settings": {
+       "execution": "interpreted",
+       "refreshInterval": 300
+      },
+      "nodes": [],
+      "edges": [],
+      "fields": []
+     }
+    ],
+    "frameEventMap": [
+     {
+      "event": "edgeSwipe",
+      "match": {
+       "edge": "left"
+      },
+      "emit": "back"
+     },
+     {
+      "event": "edgeSwipe",
+      "match": {
+       "edge": "right"
+      },
+      "emit": "forward"
+     }
+    ],
+    "scene": "fixtures/dispatcher/navA",
+    "steps": [
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "left",
+         "direction": "right",
+         "x": 2,
+         "y": 1,
+         "startX": 0,
+         "startY": 1,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> back",
+       "run navA back",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/navA",
+      "state": {
+       "heardBack": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "right",
+         "direction": "left",
+         "x": 0,
+         "y": 1,
+         "startX": 2,
+         "startY": 1,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> forward",
+       "run navA forward",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/navA",
+      "state": {
+       "heardBack": true,
+       "heardForward": true
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "back"
+       }
+      ],
+      "trace": [
+       "run navA back"
+      ],
+      "current": "fixtures/dispatcher/navA"
+     },
+     {
+      "send": [
+       {
+        "origin": "driver",
+        "event": "forward"
+       }
+      ],
+      "trace": [
+       "refused forward driver origin"
+      ],
+      "current": "fixtures/dispatcher/navA"
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "setCurrentScene",
+        "payload": {
+         "sceneId": "fixtures/dispatcher/navB"
+        }
+       }
+      ],
+      "trace": [
+       "select fixtures/dispatcher/navB",
+       "run navA close",
+       "run navB open",
+       "render"
+      ],
+      "current": "fixtures/dispatcher/navB"
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "left",
+         "direction": "right",
+         "x": 2,
+         "y": 1,
+         "startX": 0,
+         "startY": 1,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> back",
+       "run navB back"
+      ],
+      "current": "fixtures/dispatcher/navB"
      }
     ]
    },
    {
     "name": "the scene settings open from the scene showing, with its fields; Save is a switch back with state",
-    "why": "`sceneSettings` is the dispatcher's to resolve, like `sceneSwitcher`: it selects the built-in scene `scenes.settings` with `state.from`, the scene showing, and that scene's public fields and their values read before the switch (`state.fields`, `state.values`: a host that holds one scene lets the scene go). While it shows, the same event goes back without saving, and so does `sceneSwitcher`; over the switcher, `sceneSettings` goes back to the scene too. A touch screen's event map binds the two to swipes in from the top and the bottom edge, so the swipe that opened one built-in scene closes it, and the other edge's does as well. Save is a `setCurrentScene` back with the values as its state, which the scene applies to its public fields.",
+    "why": "`sceneSettings` is the dispatcher's to resolve, like `sceneSwitcher`: it selects the built-in scene `scenes.settings` with `state.from`, the scene showing, and that scene's public fields and their values read before the switch (`state.fields`, `state.values`: a host that holds one scene lets the scene go). While it shows, the same event goes back without saving, and so does `sceneSwitcher`; over the switcher, `sceneSettings` goes back to the scene too. A touch screen's event map binds the two to swipes in from the top and the bottom edge, so the swipe that opened one built-in scene closes it, and the other edge's does as well. Save is a `setCurrentScene` back with the values as its state, which the scene applies to its public fields. The frame's `back` (a swipe in from the left edge) closes it unsaved too, as a phone's back does.",
     "scenes": [
      {
       "id": "fixtures/dispatcher/settingsA",
@@ -4085,6 +4396,13 @@
        "edge": "bottom"
       },
       "emit": "sceneSwitcher"
+     },
+     {
+      "event": "edgeSwipe",
+      "match": {
+       "edge": "left"
+      },
+      "emit": "back"
      }
     ],
     "scene": "fixtures/dispatcher/settingsA",
@@ -4278,6 +4596,56 @@
        "refused sceneSettings driver origin"
       ],
       "current": "fixtures/dispatcher/settingsA"
+     },
+     {
+      "send": [
+       {
+        "origin": "eventMap",
+        "event": "sceneSettings"
+       }
+      ],
+      "trace": [
+       "select system/sceneSettings",
+       "run settingsA close",
+       "run sceneSettings setCurrentScene",
+       "run sceneSettings open",
+       "render"
+      ],
+      "current": "system/sceneSettings",
+      "state": {
+       "from": "fixtures/dispatcher/settingsA"
+      }
+     },
+     {
+      "send": [
+       {
+        "origin": "http:write",
+        "event": "edgeSwipe",
+        "payload": {
+         "edge": "left",
+         "direction": "right",
+         "x": 2,
+         "y": 1,
+         "startX": 0,
+         "startY": 1,
+         "pointerId": 1,
+         "pointerType": "touch"
+        }
+       }
+      ],
+      "trace": [
+       "mapped frame edgeSwipe -> back",
+       "run sceneSettings back",
+       "select fixtures/dispatcher/settingsA",
+       "run sceneSettings close",
+       "run settingsA open",
+       "render"
+      ],
+      "handled": 3,
+      "current": "fixtures/dispatcher/settingsA",
+      "state": {
+       "name": "Bea"
+      }
      }
     ]
    }

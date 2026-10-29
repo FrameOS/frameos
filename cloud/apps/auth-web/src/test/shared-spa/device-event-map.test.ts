@@ -17,15 +17,15 @@ function nimHyperPixelMap(): unknown {
 }
 
 describe("deviceEventMap", () => {
-  it("gives every HyperPixel edge swipes between scenes, up from the bottom the scene switcher and down from the top the settings", () => {
+  it("gives every HyperPixel back and forward from the left and the right edge, up from the bottom the scene switcher and down from the top the settings", () => {
     for (const device of [
       "pimoroni.hyperpixel4sq_touch",
       "pimoroni.hyperpixel4_touch",
       "pimoroni.hyperpixel2r",
     ]) {
       expect(deviceEventMap(device)).toEqual([
-        { event: "edgeSwipe", match: { edge: "right" }, emit: "setCurrentScene", as: { direction: "next" } },
-        { event: "edgeSwipe", match: { edge: "left" }, emit: "setCurrentScene", as: { direction: "prev" } },
+        { event: "edgeSwipe", match: { edge: "right" }, emit: "forward", as: {} },
+        { event: "edgeSwipe", match: { edge: "left" }, emit: "back", as: {} },
         { event: "edgeSwipe", match: { edge: "bottom" }, emit: "sceneSwitcher", as: {} },
         { event: "edgeSwipe", match: { edge: "top" }, emit: "sceneSettings", as: {} },
       ]);
@@ -46,6 +46,6 @@ describe("deviceEventMap", () => {
     const first = deviceEventMap("pimoroni.hyperpixel4sq_touch")?.[0];
     expect(first).toBeDefined();
     if (first) first.as.direction = "prev";
-    expect(deviceEventMap("pimoroni.hyperpixel4sq_touch")?.[0]?.as.direction).toBe("next");
+    expect(deviceEventMap("pimoroni.hyperpixel4sq_touch")?.[0]?.as).toEqual({});
   });
 });

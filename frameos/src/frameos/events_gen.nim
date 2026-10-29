@@ -112,6 +112,8 @@ const
   evSetCurrentScene* = "setCurrentScene"
   evSceneSwitcher* = "sceneSwitcher"
   evSceneSettings* = "sceneSettings"
+  evBack* = "back"
+  evForward* = "forward"
   evMetrics* = "metrics"
   evReload* = "reload"
   evRestart* = "restart"
@@ -119,7 +121,7 @@ const
   evUploadScenes* = "uploadScenes"
   evVoiceChat* = "voiceChat"
 
-  ContractEventNames*: array[35, string] = [
+  ContractEventNames*: array[37, string] = [
     evInit,
     evRender,
     evOpen,
@@ -149,6 +151,8 @@ const
     evSetCurrentScene,
     evSceneSwitcher,
     evSceneSettings,
+    evBack,
+    evForward,
     evMetrics,
     evReload,
     evRestart,
@@ -157,7 +161,7 @@ const
     evVoiceChat,
   ]
 
-  ContractEventPolicies*: array[35, EventPolicy] = [
+  ContractEventPolicies*: array[37, EventPolicy] = [
     EventPolicy( # init
       class: ecLifecycle, device: edNone, listen: true, dispatch: false,
       origins: {eoSystem, eoHttpAdmin},
@@ -338,6 +342,18 @@ const
       renderAfter: raAlways, coalesceLatest: false, log: elFull,
       aliasOfIndex: -1,
       linux: true, esp32: true, wasm: true),
+    EventPolicy( # back
+      class: ecSceneCommand, device: edNone, listen: true, dispatch: false,
+      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap},
+      renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
+      linux: true, esp32: true, wasm: true),
+    EventPolicy( # forward
+      class: ecSceneCommand, device: edNone, listen: true, dispatch: false,
+      origins: {eoPreview, eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoSystem, eoEventMap},
+      renderAfter: raIfStateChanged, coalesceLatest: false, log: elFull,
+      aliasOfIndex: -1,
+      linux: true, esp32: true, wasm: true),
     EventPolicy( # metrics
       class: ecDeviceCommand, device: edNone, listen: false, dispatch: false,
       origins: {eoScene, eoSchedule, eoHttpWrite, eoHttpAdmin, eoCloud, eoSystem},
@@ -421,12 +437,14 @@ proc contractEventIndex*(name: string): int =
   of evSetCurrentScene: 26
   of evSceneSwitcher: 27
   of evSceneSettings: 28
-  of evMetrics: 29
-  of evReload: 30
-  of evRestart: 31
-  of evReboot: 32
-  of evUploadScenes: 33
-  of evVoiceChat: 34
+  of evBack: 29
+  of evForward: 30
+  of evMetrics: 31
+  of evReload: 32
+  of evRestart: 33
+  of evReboot: 34
+  of evUploadScenes: 35
+  of evVoiceChat: 36
   else: -1
 
 proc eventAliasCount*(name: string): int =

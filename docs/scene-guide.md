@@ -553,6 +553,11 @@ in the scene's `customEvents` as `{ name }` (at most 63 characters). A
 schedule or the cloud may send one only when its declaration lists them in
 `origins`: `{ "name": "nextPage", "origins": ["schedule"] }`.
 
+A scene with pages or a set of pictures listens for `back` and `forward`
+rather than a custom event or a swipe of its own: a touch screen's swipe in
+from the left or the right edge is one of them on every frame (as a phone's
+back gesture), and a key may be bound to them. They never change the scene.
+
 <!-- BEGIN GENERATED: events -->
 | event | an `event` node hears it | a `dispatch` node sends it | `context.payload` | where | what |
 |---|---|---|---|---|---|
@@ -585,6 +590,8 @@ schedule or the cloud may send one only when its declaration lists them in
 | `setCurrentScene` |  | yes | `sceneId`? scene, `direction`? string, `state`? json | all | Switch the frame to another scene: the one `sceneId` names, or with `direction` the `next` / `prev` one in the frame's scene list (the control plane's order, wrapping around; one of the two is required). |
 | `sceneSwitcher` |  | yes |  | all | Show the scene switcher (`scenes.switcher`, docs/scene-switcher.md): every scene on the frame as a tile with its title, in the frame's scene list order, to tap or to pick with the buttons. |
 | `sceneSettings` |  | yes |  | all | Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. |
+| `back` | yes |  |  | all | Go back, as a phone's back gesture does: what that is is the scene's (the photo or the page before; the scene switcher turns its page back, the scene settings close unsaved), and a scene that does not listen for it stays as it is. |
+| `forward` | yes |  |  | all | Go forward, the other way from `back`: the next photo or page (the scene switcher turns its page on). |
 <!-- END GENERATED: events -->
 
 ## JS API reference
@@ -796,6 +803,10 @@ interface FrameOSEventPayloads {
   sceneSwitcher: Record<string, never>;
   /** Show the scene's settings (`scenes.settings`, docs/scene-settings.md): the public fields of the scene showing, as a form to change and save. While it or the scene switcher shows, go back to the scene they were opened from (without saving) instead. The frame's event map binds it to a swipe in from the top edge on a touch screen. */
   sceneSettings: Record<string, never>;
+  /** Go back, as a phone's back gesture does: what that is is the scene's (the photo or the page before; the scene switcher turns its page back, the scene settings close unsaved), and a scene that does not listen for it stays as it is. It never switches the scene. The frame's event map binds it to a swipe in from the left edge on a touch screen. */
+  back: Record<string, never>;
+  /** Go forward, the other way from `back`: the next photo or page (the scene switcher turns its page on). It never switches the scene. The frame's event map binds it to a swipe in from the right edge on a touch screen. */
+  forward: Record<string, never>;
 }
 
 interface FrameOSContext {

@@ -116,8 +116,10 @@
   and the E1003 and the SenseCAP Indicator the edge swipes
   (`EMBEDDED_HARDWARE_PRESETS`, `fos_board.c`, the SPA preset table:
   keep the three alike). A Linux frame never given a map runs its device's:
-  every HyperPixel swipes from the left/right edge to the previous/next scene
-  and up from the bottom to the scene switcher (as the SenseCAP preset does)
+  every HyperPixel's left/right edge swipe is `back`/`forward` (the scene's
+  own, never a scene switch: the switcher pages on them), up from the bottom
+  the scene switcher and down from the top the settings (as the SenseCAP
+  preset does)
   (`frameos/device_event_map.nim` and the SPA's `deviceEventMap`, pinned
   together by `device-event-map.test.ts`). `setCurrentScene {direction}` is resolved by the
   dispatcher from the host's `sceneOrder`, never by a host. **An installed

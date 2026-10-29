@@ -641,6 +641,34 @@
       "since": "2026.10.22"
     },
     {
+      "name": "back",
+      "class": "scene-command",
+      "description": "Go back, as a phone's back gesture does: what that is is the scene's (the photo or the page before; the scene switcher turns its page back, the scene settings close unsaved), and a scene that does not listen for it stays as it is. It never switches the scene. The frame's event map binds it to a swipe in from the left edge on a touch screen.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [],
+      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap"],
+      "renderAfter": "if-state-changed",
+      "coalesce": "none",
+      "log": "full",
+      "hosts": {"linux": true, "esp32": true, "wasm": true},
+      "since": "2026.10.23"
+    },
+    {
+      "name": "forward",
+      "class": "scene-command",
+      "description": "Go forward, the other way from `back`: the next photo or page (the scene switcher turns its page on). It never switches the scene. The frame's event map binds it to a swipe in from the right edge on a touch screen.",
+      "listen": true,
+      "dispatch": false,
+      "payload": [],
+      "origins": ["preview", "scene", "schedule", "http:write", "http:admin", "system", "eventMap"],
+      "renderAfter": "if-state-changed",
+      "coalesce": "none",
+      "log": "full",
+      "hosts": {"linux": true, "esp32": true, "wasm": true},
+      "since": "2026.10.23"
+    },
+    {
       "name": "metrics",
       "class": "device-command",
       "description": "Log the frame's metrics now.",

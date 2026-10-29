@@ -705,6 +705,11 @@ proc runSwitcher(self: FrameScene, context: ExecutionContext) =
       self.draw(context.image)
   of "button":
     self.pressed(payload)
+  of evBack, evForward:
+    # The frame's back and forward (a swipe in from the left or the right
+    # edge): the page before or the next one, as a swipe across the tiles.
+    self.turnPage(if context.event == evForward: 1 else: -1)
+    self.touch()
   of "swipe":
     # Across the tiles, as on a phone: the next page or the one before.
     let direction = payload{"direction"}.getStr()

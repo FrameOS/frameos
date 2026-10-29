@@ -13,7 +13,7 @@ import system/sceneSettings/scene as settings
 
 # The scene settings (docs/scene-settings.md): the form it builds of a
 # scene's fields, a text typed on the keyboard on the screen, a switch and
-# a choice, what Save hands the dispatcher, and Cancel.
+# a choice, what Save hands the dispatcher, Cancel and the frame's back.
 # FRAMEOS_SETTINGS_PREVIEWS=<dir> also writes the pictures.
 
 var sent: seq[(string, JsonNode)]
@@ -127,6 +127,26 @@ block a_number_that_is_no_number_is_not_saved:
   sent.setLen(0)
   scene.tap(regionWith(1))
   doAssert sent[0][1]["state"] == newJObject(), $sent[0][1]
+
+block back_takes_the_keyboard_away_then_the_form:
+  # The frame's `back` (a swipe in from the left), as on a phone: with a
+  # field's keyboard up it puts that away and stays; then it closes, unsaved.
+  let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
+  scene.send("setCurrentScene", %*{"sceneId": SceneSettingsId, "state": {"from": "scenes/weather",
+    "fields": [{"name": "city", "label": "City", "type": "string"}], "values": {"city": "Oslo"}}})
+  discard scene.draw()
+  scene.tap(regionWith(1000))
+  discard scene.draw()
+  doAssert uiTarget(SceneSettingsId, 1, create = false).input.keyboard
+  sent.setLen(0)
+  scene.send(evBack, %*{})
+  doAssert not uiTarget(SceneSettingsId, 1, create = false).input.keyboard
+  doAssert sent.len == 1 and sent[0][0] == evRender, $sent
+  discard scene.draw()
+  sent.setLen(0)
+  scene.send(evBack, %*{})
+  doAssert sent.len == 1 and sent[0][0] == evSceneSettings and sent[0][1].len == 0, $sent
+  scene.send("close", %*{})
 
 block nothing_to_set:
   let scene = settings.exportedScene.init(SceneSettingsId.SceneId, frameConfig, logger, %*{})
