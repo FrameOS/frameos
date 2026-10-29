@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
+from app.models.frame import Frame
+from app.tasks._frame_deployer import FrameDeployer
 from app.tasks.prebuilt_deps import PrebuiltEntry, resolve_prebuilt_target
 from app.utils.build_executor import create_build_executor
 from app.utils.cross_compile import CrossCompiler, TargetMetadata
@@ -115,8 +118,8 @@ def test_cross_compiler_turns_rtl_dce_off_for_armv7(tmp_path, monkeypatch: pytes
     compiler = CrossCompiler(
         db=None,
         redis=None,
-        frame=SimpleNamespace(id=1),
-        deployer=SimpleNamespace(build_id="build12345678"),
+        frame=cast(Frame, SimpleNamespace(id=1)),
+        deployer=cast(FrameDeployer, SimpleNamespace(build_id="build12345678")),
         target=TargetMetadata(arch=arch, distro="debian", version="trixie"),
         temp_dir=str(tmp_path / "tmp"),
         prebuilt_entry=None,
