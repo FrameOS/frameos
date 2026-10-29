@@ -77,12 +77,15 @@ def test_replacement_entry_is_the_repo_app():
 
 
 def test_keywords_runtime_lacks():
-    assert keywords_runtime_lacks("2026.10.10") == ["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart"]
+    assert keywords_runtime_lacks("2026.10.10") == ["data/immich", "data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/openaiText", "data/haSensor", "data/weather", "data/beRecycle", "render/chart", "data/eventsToAgenda"]
     # 2026.10.11 has fetchImage; 2026.10.13 has app.frame.embedded,
     # frameos.remember and the failing throw the later four need.
-    assert keywords_runtime_lacks("2026.10.11") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart"]
-    assert keywords_runtime_lacks("2026.10.12") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart"]
-    assert keywords_runtime_lacks("2026.10.13") == []
+    assert keywords_runtime_lacks("2026.10.11") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart", "data/eventsToAgenda"]
+    assert keywords_runtime_lacks("2026.10.12") == ["data/frameOSGallery", "data/unsplash", "data/wikicommons", "data/googlePhotos", "data/openaiImage", "data/beRecycle", "render/chart", "data/eventsToAgenda"]
+    # 2026.10.22 is the first release without the Nim agenda.
+    assert keywords_runtime_lacks("2026.10.13") == ["data/eventsToAgenda"]
+    assert keywords_runtime_lacks("2026.10.21") == ["data/eventsToAgenda"]
+    assert keywords_runtime_lacks("2026.10.22") == []
     assert keywords_runtime_lacks(None) == []
     assert keywords_runtime_lacks("not a version") == []
 

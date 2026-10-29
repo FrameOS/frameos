@@ -17,6 +17,7 @@ noticing. `docs/retired-apps.json` lists them:
 | `data/weather` | `repo/apps/json/weather` | 2026.10.11 | `frameos.httpRequest` |
 | `data/beRecycle` | `repo/apps/json/beRecycle` | 2026.10.13 | a throw in `get()` fails the node |
 | `render/chart` | `repo/apps/image/chart` | 2026.10.13 | nothing new: an older frame keeps the built-in chart it has |
+| `data/eventsToAgenda` | `repo/apps/text/eventsToAgenda` | 2026.10.22 | nothing new: an older frame keeps the built-in agenda it has |
 
 The replacement runs only on a runtime that has what it `needs`. Firmware
 older than `runtime` still has the Nim app, so it is sent the Nim keyword.

@@ -99,6 +99,12 @@ RETIRED_APPS: dict[str, dict[str, str]] = {
         "needs": "nothing new: an older frame keeps the built-in chart it has",
         "renderFlow": "render/image",
     },
+    "data/eventsToAgenda": {
+        "replacement": "repo/apps/text/eventsToAgenda",
+        "sceneAppKey": "eventsToAgenda",
+        "runtime": "2026.10.22",
+        "needs": "nothing new: an older frame keeps the built-in agenda it has",
+    },
 }
 
 

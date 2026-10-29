@@ -1,6 +1,6 @@
 {
   "name": "Events to Agenda",
-  "description": "Convert events to an basic-caret formatted agenda string",
+  "description": "Convert events to a basic-caret formatted agenda string",
   "category": "data",
   "version": "1.0.0",
   "fields": [
