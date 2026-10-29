@@ -1726,6 +1726,11 @@ proc sceneListensTo*(scene: FrameScene, event: string): bool =
     return true
   InterpretedFrameScene(scene).eventListeners.hasKey(event) or uiListens(scene.id.string, event)
 
+proc sceneKeyboardAt*(sceneId: SceneId, x, y: int): bool =
+  ## Whether the scene's keyboard on the screen (a JSX field's) is under
+  ## (x, y), scene pixels: the hosts' `EventHost.keyboardAt`.
+  ui_events.keyboardAt(sceneId.string, x.float32, y.float32)
+
 proc runEventInner(self: FrameScene, context: ExecutionContext) =
   var scene: InterpretedFrameScene = InterpretedFrameScene(self)
   markRuntimeCheckpoint("event:start", currentSceneId = self.id.string, contextEvent = context.event,

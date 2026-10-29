@@ -275,6 +275,8 @@ proc start*(host: SingleSceneHost) =
       host.runOn(scene, event, payload),
     sceneListens: proc (scene: FrameScene, event: string): bool = sceneListensTo(scene, event),
     sceneOrder: host.sceneOrder,
+    keyboardAt: proc (x, y: int): bool =
+      host.sceneId.isSome and sceneKeyboardAt(host.sceneId.get(), x, y),
     log: proc (entry: JsonNode) =
       if not host.logEntry.isNil:
         host.logEntry(entry),

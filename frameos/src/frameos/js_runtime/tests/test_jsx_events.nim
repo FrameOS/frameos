@@ -396,9 +396,17 @@ suite "jsx fields":
     check dispatchUiEvent(id, "tap", keyAt(id, ord('7')))
     check ui.scene.state{"name"}.getStr() == "AnnBc7"
     discard ui.render()
-    # A tap between the keys keeps the keyboard; Enter puts it away.
+    # The dispatcher asks where the keyboard is (a press there is never an
+    # edge swipe): from its top to the bottom, edge to edge.
     let kb = keyboardHeight(240)
-    check not dispatchUiEvent(id, "tap", at(1, 240 - kb + 1, "touch")) or target.input.keyboard
+    check keyboardAt(id, 1, float32(240 - kb + 1)) and keyboardAt(id, 319, 239)
+    check not keyboardAt(id, 160, float32(240 - kb - 2))
+    check not keyboardAt("tests/another-scene", 1, 239)
+    # A tap in the margin at the screen's very edge, or between the keys, is
+    # the key beside it ("1", top left of the 123 page), and the field keeps
+    # the keyboard; Enter puts it away.
+    check dispatchUiEvent(id, "tap", at(1, 240 - kb + 1, "touch"))
+    check ui.scene.state{"name"}.getStr() == "AnnBc71"
     check target.input.keyboard
     check dispatchUiEvent(id, "tap", keyAt(id, ord(kEnter)))
     check ui.scene.state{"key"}.getStr() == "Enter"

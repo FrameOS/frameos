@@ -1,6 +1,8 @@
-import std/[json, options, os, strutils, tables]
+import std/[json, monotimes, options, os, strutils, tables]
 import ../channels
 import ../event_loop
+import ../events
+import ../input_state
 import ../interpreter
 import ../types
 import system/sceneSwitcher/scene as sceneSwitcher
@@ -114,6 +116,7 @@ proc newRecordingHost(sceneId: SceneId, logs: ref seq[JsonNode]): RecordingHost 
     # single_scene_host.nim answer the same way): a `run` line is a listener.
     sceneListens: proc (scene: FrameScene, event: string): bool = sceneListensTo(scene, event),
     sceneOrder: proc (): seq[SceneId] = host.order,
+    keyboardAt: proc (x, y: int): bool = sceneKeyboardAt(host.current, x, y),
     log: proc (entry: JsonNode) =
       if entry{"event"}.getStr() == "event:refused":
         host.trace.add("refused " & entry["name"].getStr() & " " & entry["origin"].getStr() & " " &
@@ -226,6 +229,21 @@ block a_payload_is_an_object:
   # (the main lane runs ahead of input; a button with nothing in it is a press of pin -1)
   doAssert host.trace == @["select  failed", """run lanes button {"pin":-1,"label":"","role":"","action":"press"}"""], $host.trace
   localEventSink = nil
+
+block the_hosts_keyboard_reaches_the_input_state:
+  # Where the host says its keyboard on the screen is, a press at the edge is
+  # a key at once, not held for an edge swipe (input_state.nim).
+  let loop = newEventLoop(EventHost(keyboardAt: proc (x, y: int): bool = y >= 300),
+    FrameConfig(width: 480, height: 480, rotate: 0, scalingMode: "cover", saveAssets: %*false))
+  var output: seq[InputDelivery]
+  let right = PointerWireMax - 10
+  discard loop.inputState.applyNamedInput("pointerDown", %*{"x": right, "y": PointerWireMax - 10,
+    "pointerId": 1, "pointerType": "touch", "button": 0, "buttons": 1}, eoDriver, getMonoTime(), output)
+  doAssert output.len == 1 and output[0].name == "pointerDown", $output.len
+  output.setLen(0)
+  discard loop.inputState.applyNamedInput("pointerDown", %*{"x": right, "y": 10,
+    "pointerId": 2, "pointerType": "touch", "button": 0, "buttons": 1}, eoDriver, getMonoTime(), output)
+  doAssert output.len == 0, "above it, the edge holds the press"
 
 block a_full_lane_drops_and_counts:
   let logs = new(seq[JsonNode])
