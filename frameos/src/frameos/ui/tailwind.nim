@@ -34,6 +34,11 @@ type
   Fit* = enum
     fitFill, fitContain, fitCover
 
+  Overflow* = enum
+    ## What a box does with what does not fit in it: shows it, clips it at
+    ## its padding box, or clips it and scrolls (`overflow-auto`, `-scroll`).
+    ovVisible, ovHidden, ovScroll
+
   Box* = object
     ## What an element's classes say about its own box. Not inherited.
     display*: Display
@@ -58,6 +63,7 @@ type
     cols*, span*: int
     aspect*: float32
     fit*: Fit
+    overflowX*, overflowY*: Overflow
 
   Text* = object
     ## The text style. Inherited: a child starts from its parent's.
@@ -75,8 +81,9 @@ type
 
   UiState* = enum
     ## What the pointer is doing to an element, for its `hover:`, `active:`
-    ## and `group-hover:` classes.
-    usHover, usActive, usGroupHover
+    ## and `group-hover:` classes; a field that has the keyboard (`focus:`),
+    ## and a field's placeholder text (`placeholder:`).
+    usHover, usActive, usGroupHover, usFocus, usPlaceholder
 
   Head = enum
     hFlex = "flex", hInline = "inline", hGrid = "grid", hBlock = "block",
@@ -92,7 +99,8 @@ type
     hNot = "not", hUnderline = "underline", hNo = "no",
     hUppercase = "uppercase", hLowercase = "lowercase",
     hCapitalize = "capitalize", hNormal = "normal", hTruncate = "truncate",
-    hWhitespace = "whitespace", hObject = "object", hAspect = "aspect"
+    hWhitespace = "whitespace", hObject = "object", hAspect = "aspect",
+    hOverflow = "overflow"
 
 proc words(T: typedesc[enum]): string {.compileTime.} =
   for value in T:
@@ -560,6 +568,13 @@ proc applyClass(box: var Box, text: var Text, s: string, a, b: int, neg: bool) =
       pick(s, r, b, "cover contain fill none scale-down "))]
   of hAspect:
     box.aspect = [1'f32, 16 / 9, 0][max(0, pick(s, r, b, "square video auto "))]
+  of hOverflow:
+    # overflow-hidden, overflow-y-auto: x, y or both.
+    let axis = if subDash - r == 1 and s[r] in {'x', 'y'}: s[r] else: ' '
+    let o = [ovVisible, ovHidden, ovHidden, ovScroll, ovScroll][max(0,
+      pick(s, if axis == ' ': r else: sub, b, "visible hidden clip auto scroll "))]
+    if axis != 'y': box.overflowX = o
+    if axis != 'x': box.overflowY = o
 
 proc applyClasses*(box: var Box, text: var Text, classes: string, width, height: float32,
     states: set[UiState] = {}) =
@@ -587,8 +602,9 @@ proc applyClasses*(box: var Box, text: var Text, classes: string, width, height:
     if i == start:
       break
     # Variants: the breakpoints and the orientation are about the image,
-    # hover:, active: and group-hover: about the pointer; focus:, dark: and
-    # the rest never apply on a frame.
+    # hover:, active: and group-hover: about the pointer, focus: about the
+    # keyboard and placeholder: about a field's empty text; dark: and the
+    # rest never apply on a frame.
     var
       a = start
       skip = false
@@ -596,7 +612,7 @@ proc applyClasses*(box: var Box, text: var Text, classes: string, width, height:
       var k = a
       while classes[k] != ':':
         inc k
-      case pick(classes, a, k, "sm md lg xl 2xl portrait landscape hover active group-hover ")
+      case pick(classes, a, k, "sm md lg xl 2xl portrait landscape hover active group-hover focus placeholder ")
       of 0: skip = skip or rootW < 640
       of 1: skip = skip or rootW < 768
       of 2: skip = skip or rootW < 1024
@@ -607,6 +623,8 @@ proc applyClasses*(box: var Box, text: var Text, classes: string, width, height:
       of 7: skip = skip or usHover notin states
       of 8: skip = skip or usActive notin states
       of 9: skip = skip or usGroupHover notin states
+      of 10: skip = skip or usFocus notin states
+      of 11: skip = skip or usPlaceholder notin states
       else: skip = true
       a = k + 1
     if skip:

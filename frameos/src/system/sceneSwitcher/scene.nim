@@ -110,16 +110,11 @@ proc paperPanel*(frameConfig: FrameConfig, canvas: Image = nil): bool =
   ## feedback): any panel that is not an LCD. An ESP32's LCD canvas is its
   ## RGB565 buffer and any other is e-paper or a monochrome OLED; a Pi says
   ## by its device.
-  if not canvas.isNil and canvas.format == pfRgb565:
-    return false
+  let lcd = not canvas.isNil and canvas.format == pfRgb565
   when defined(frameosEmbedded):
-    true
+    panelIsPaper("", lcd)
   else:
-    if frameConfig.isNil:
-      return false
-    let device = frameConfig.device
-    device == "embedded" or device.startsWith("waveshare.") or device.startsWith("inky") or
-      device.startsWith("pimoroni.inky")
+    not frameConfig.isNil and panelIsPaper(frameConfig.device, lcd)
 
 proc idleSeconds*(paper: bool): float =
   ## How long the switcher waits for a touch or a key before it goes back.

@@ -1763,12 +1763,21 @@ proc runEventInner(self: FrameScene, context: ExecutionContext) =
         let after = scene.nextNodeIds.getOrDefault(first, -1.NodeId)
         context.wholeFrame = after == 0.NodeId or after == -1.NodeId
   of "tap", "doubleTap", "longPress", "swipe", "pointerDown", "pointerUp", "pointerMove", "pointerCancel":
-    # A JSX UI's handlers and hover:/active: classes (ui/events.nim). A run
-    # of a handler, or a change in what the pointer is over, is a new picture.
+    # A JSX UI's handlers and hover:/active: classes, its fields and the
+    # boxes that scroll (ui/events.nim). A run of a handler, a change in
+    # what the pointer is over, a field's text or a scroll is a new picture.
     if dispatchUiEvent(self.id.string, context.event, context.payload):
       sendEvent("render", %*{}, eoScene)
   else:
-    uiSceneEvent(self.id.string)
+    when defined(frameosEmbedded):
+      uiSceneEvent(self.id.string)
+    else:
+      # Keys for a field and the wheel: not on an ESP32, which has neither.
+      if context.event in ["keyDown", "textInput", "wheel"]:
+        if dispatchUiEvent(self.id.string, context.event, context.payload):
+          sendEvent("render", %*{}, eoScene)
+      else:
+        uiSceneEvent(self.id.string)
 
   if scene.eventListeners.hasKey(context.event):
     # Track filtered-out listeners so a press that matches nothing says so.

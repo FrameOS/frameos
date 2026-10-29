@@ -5,6 +5,8 @@ import frameos/js_runtime/app_runtime
 import frameos/types
 import frameos/values
 import frameos/ui/events
+import frameos/ui/layout
+import frameos/ui/keyboard
 import frameos/utils/font
 
 # A JSX UI's handlers and pointer classes (docs/jsx-ui.md "Events"): what the
@@ -27,8 +29,8 @@ type Ui = object
   owner: AppRoot
   scene: FrameScene
 
-proc newUi(source: string, id: string): Ui =
-  let config = FrameConfig(width: 200, height: 100, rotate: 0, scalingMode: "cover", debug: true,
+proc newUi(source: string, id: string, width = 200, height = 100): Ui =
+  let config = FrameConfig(width: width, height: height, rotate: 0, scalingMode: "cover", debug: true,
     saveAssets: %*false, assetsPath: "/tmp")
   result.scene = FrameScene(id: id.SceneId, frameConfig: config, state: %*{}, logger: testLogger(config))
   result.owner = AppRoot(nodeId: 1.NodeId, nodeName: "ui", scene: result.scene, frameConfig: config)
@@ -333,3 +335,135 @@ suite "jsx events":
       if "nope" in line: reported = true
     check reported
     discard ui.render()
+
+const form = """
+let name = 'Ann'
+let picked = -1
+const rows = Array.from({ length: 12 }, (_, i) => i)
+export function get(app) {
+  return (
+    <div className="flex flex-col h-full bg-white">
+      <input className="h-10 px-2 shrink-0 bg-slate-100 text-black focus:bg-sky-100" value={name}
+        onChange={(e) => { name = e.target.value; frameos.setState('name', name) }}
+        onKeyDown={(e) => frameos.setState('key', e.key)} />
+      <div className="flex-1 overflow-y-auto">
+        {rows.map((i) => <div className={`h-10 ${i % 2 ? 'bg-green-500' : 'bg-red-500'}`}
+          onClick={() => frameos.setState('picked', i)} />)}
+      </div>
+    </div>
+  )
+}
+"""
+
+proc keyAt(id: string, code: int): JsonNode =
+  ## A tap on the on-screen key that types `code` (or does what it stands for).
+  let target = uiTarget(id, 1, create = false)
+  for r in target.regions:
+    if r.handlers[ueClick] == KeyBase + code + 1:
+      return %*{"x": r.x + r.w / 2 + target.offsetX, "y": r.y + r.h / 2 + target.offsetY,
+        "pointerId": 0, "pointerType": "touch"}
+  raise newException(ValueError, "no key " & $code)
+
+suite "jsx fields":
+  test "a tap on a field brings up the keyboard, and its keys type into it":
+    forgetTypedKeys()
+    let id = "tests/jsx-field"
+    let ui = newUi(form, id, 320, 240)
+    discard ui.render()
+    check uiListens(id, "tap")
+    check dispatchUiEvent(id, "tap", at(160, 20, "touch"))
+    let target = uiTarget(id, 1, create = false)
+    check target.input.focus > 0 and target.input.keyboard
+    var image = ui.render()
+    check image[160, 20] == rgbx(0xe0, 0xf2, 0xfe, 255) # focus:bg-sky-100
+    check image[2, 236] == rgbx(0x18, 0x18, 0x1b, 255)   # the keyboard, zinc-900
+    check dispatchUiEvent(id, "tap", keyAt(id, ord('x')))
+    check ui.scene.state{"name"}.getStr() == "Annx"
+    check ui.scene.state{"key"}.getStr() == "x"
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", keyAt(id, ord(kBackspace)))
+    check ui.scene.state{"name"}.getStr() == "Ann"
+    check ui.scene.state{"key"}.getStr() == "Backspace"
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", keyAt(id, ord(kShift)))
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", keyAt(id, ord('b')))
+    check dispatchUiEvent(id, "tap", keyAt(id, ord('c'))) # shift was for one letter
+    check ui.scene.state{"name"}.getStr() == "AnnBc"
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", keyAt(id, ord(kSymbols)))
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", keyAt(id, ord('7')))
+    check ui.scene.state{"name"}.getStr() == "AnnBc7"
+    discard ui.render()
+    # A tap between the keys keeps the keyboard; Enter puts it away.
+    let kb = keyboardHeight(240)
+    check not dispatchUiEvent(id, "tap", at(1, 240 - kb + 1, "touch")) or target.input.keyboard
+    check target.input.keyboard
+    check dispatchUiEvent(id, "tap", keyAt(id, ord(kEnter)))
+    check ui.scene.state{"key"}.getStr() == "Enter"
+    check target.input.focus == 0 and not target.input.keyboard
+    image = ui.render()
+    check image[2, 236] != rgbx(0x18, 0x18, 0x1b, 255)
+
+  test "the caret goes where the tap landed; a tap elsewhere ends the edit":
+    forgetTypedKeys()
+    let id = "tests/jsx-caret"
+    let ui = newUi(form, id, 320, 240)
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(9, 20, "touch")) # before the A
+    discard ui.render()
+    check uiTarget(id, 1, create = false).input.caret == 0
+    check dispatchUiEvent(id, "tap", keyAt(id, ord('z')))
+    check ui.scene.state{"name"}.getStr() == "zAnn"
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(160, 60, "touch")) # a row: the field lets go
+    check ui.scene.state{"picked"}.getInt(-1) == 0
+    check uiTarget(id, 1, create = false).input.focus == 0
+
+  test "a keyboard types into the field; no keyboard on the screen then":
+    forgetTypedKeys()
+    let id = "tests/jsx-typed"
+    let ui = newUi(form, id, 320, 240)
+    discard ui.render()
+    check dispatchUiEvent(id, "tap", at(160, 20, "touch"))
+    discard ui.render()
+    let target = uiTarget(id, 1, create = false)
+    check uiListens(id, "textInput") and uiListens(id, "keyDown")
+    check dispatchUiEvent(id, "keyDown", %*{"key": "!", "code": "Digit1"})
+    check dispatchUiEvent(id, "textInput", %*{"text": "!"})
+    check ui.scene.state{"name"}.getStr() == "Ann!"
+    check not target.input.keyboard
+    discard ui.render()
+    check dispatchUiEvent(id, "keyDown", %*{"key": "Home", "code": "Home"})
+    check dispatchUiEvent(id, "keyDown", %*{"key": "Delete", "code": "Delete"})
+    check ui.scene.state{"name"}.getStr() == "nn!"
+    discard ui.render()
+    check dispatchUiEvent(id, "keyDown", %*{"key": "Escape", "code": "Escape"})
+    check target.input.focus == 0
+    check not uiListens(id, "keyDown")
+    forgetTypedKeys()
+
+  test "a list scrolls under a finger; a tap after it hits what shows":
+    let id = "tests/jsx-scroll"
+    let ui = newUi(form, id, 320, 240)
+    discard ui.render()
+    check uiListens(id, "pointerDown") and uiListens(id, "pointerMove")
+    # The rows start at y 40, 40 px each: a press on row 1, dragged up 60 px.
+    check not dispatchUiEvent(id, "pointerDown", at(160, 100, "touch"))
+    check not dispatchUiEvent(id, "pointerMove", at(160, 92, "touch")) # within the tap slop
+    check dispatchUiEvent(id, "pointerMove", at(160, 40, "touch"))
+    check dispatchUiEvent(id, "pointerUp", at(160, 40, "touch"))
+    let target = uiTarget(id, 1, create = false)
+    var scrolledBy = 0'f32
+    for (_, _, y) in target.input.scrolls:
+      scrolledBy = max(scrolledBy, y)
+    check scrolledBy > 40 and scrolledBy < 70
+    let image = ui.render()
+    # The swipe the drag ends with is the list's, not a handler's.
+    check not dispatchUiEvent(id, "swipe", %*{"x": 160, "y": 40, "startX": 160, "startY": 100,
+      "direction": "up", "pointerId": 0, "pointerType": "touch"})
+    # y 45 is content y 45 - 40 + the scroll: row 1 now, not row 0.
+    check dispatchUiEvent(id, "tap", at(160, 45, "touch"))
+    check ui.scene.state{"picked"}.getInt(-1) == 1
+    check image[160, 45] == rgbx(0x22, 0xc5, 0x5e, 255) # row 1 is green

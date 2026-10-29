@@ -269,6 +269,13 @@ def set_scene_and_wait_for_upload(port, receiver, scene_id):
     if events:
         receiver.clear()
         for event in events:
+            if event.get("wait") == "render":
+                # What the events so far drew comes first: a tap on the keyboard
+                # on the screen waits until a tap on a field has put it there,
+                # as a finger would.
+                receiver.wait_for_last_upload()
+                receiver.clear()
+                continue
             send_event(port, event["event"], event.get("payload") or {})
         upload = receiver.wait_for_last_upload()
         if not upload["body"]:

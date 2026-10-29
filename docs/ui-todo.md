@@ -68,8 +68,9 @@ Spectra 6.
 3. **E-paper partial refresh.** The same dirty rects into
    `renderImagePartial` for panels that can; flip `supportsPartialRefresh`
    per verified panel. Spectra 6 stays full-refresh.
-4. **Layout gaps** (`docs/jsx-ui.md` "Not supported"): clipping
-   (`overflow-hidden`, a picture in a `rounded-full` box), `z-*`, shadows on
+4. **Layout gaps** (`docs/jsx-ui.md` "Not supported"): rounded clipping
+   (a picture in a `rounded-full` box; `overflow-hidden` clips to a
+   rectangle), `z-*`, shadows on
    LCDs, inline boxes with a background inside a line of text, min-content
    sizing for flex items. Each is flash on an ESP32: measure before merging
    (the firmware-size comment on the PR).
@@ -102,8 +103,8 @@ Spectra 6.
 - E-paper latency is physics: on Spectra 6 a "button press" answers in ~20 s.
   The interaction model that fits e-paper is focus + a few buttons and
   coarse state changes, not scrubbing a slider.
-- No scrolling on e-paper (a list pages); real scrolling only with the fast
-  loop on touch/LCD.
-- Text input waits on a keyboard story.
+- Scrolling on e-paper is a refresh when the finger lifts: a list there is
+  better paged. Fields, the keyboard on the screen and scrolling are in
+  `docs/jsx-ui.md`; what is left of them is `docs/forms-todo.md`.
 - The browser preview renders our layout, not Chrome's: parity between the
   wasm preview and the device matters more than parity with browsers.

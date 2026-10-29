@@ -4,6 +4,7 @@ import pixie/fileformats/svg
 import frameos/utils/font # installs the typeface resolver text uses
 import frameos/ui/tailwind
 import frameos/ui/layout
+import frameos/ui/keyboard
 
 # The UI layout: Tailwind classes read, boxes placed the way a browser places
 # them for the subset it supports, and the SVG that comes out drawn by pixie.
@@ -16,6 +17,12 @@ proc el(tag, classes: string, children: varargs[SvgNode]): SvgNode =
     result.children.add child
 
 proc txt(text: string): SvgNode = SvgNode(text: text)
+
+proc layoutUi(root: SvgNode, width, height: int, input: UiInput, regions: var seq[UiRegion],
+    memo: UiMemo): SvgNode =
+  ## A layout for an input nothing keeps: a copy of it.
+  var copy = input
+  layout.layoutUi(root, width, height, copy, regions, memo)
 
 proc rects(svg: SvgNode): seq[(int, int, int, int, string)] =
   ## Every background the layout drew: x, y, width, height, fill.
@@ -326,3 +333,157 @@ suite "ui layout":
     check image[19, 11] == rgbx(0x0f, 0x17, 0x2a, 255) # its corner, rounded off
     check image[65, 30] == rgbx(255, 255, 255, 255)    # the border
     check image[80, 30] == rgbx(0x0f, 0x17, 0x2a, 255) # inside it
+
+proc input(tag, classes: string, attrs: openArray[(string, string)]): SvgNode =
+  result = el(tag, classes)
+  for attr in attrs:
+    result.attrs.add attr
+
+proc viewports(svg: SvgNode): seq[SvgNode] =
+  for node in svg.children:
+    if node.tag == "svg": result.add node
+
+proc color(image: Image, x, y: int): ColorRGBX = image[x, y]
+
+suite "fields, clipping and scrolling":
+  test "overflow classes, focus: and placeholder:":
+    check classes("overflow-hidden")[0].overflowX == ovHidden
+    check classes("overflow-hidden")[0].overflowY == ovHidden
+    check classes("overflow-y-auto")[0].overflowY == ovScroll
+    check classes("overflow-y-auto")[0].overflowX == ovVisible
+    check classes("overflow-x-scroll overflow-y-clip")[0].overflowX == ovScroll
+    check classes("overflow-x-scroll overflow-y-clip")[0].overflowY == ovHidden
+    var
+      box = initBox()
+      text = initText()
+    box.applyClasses(text, "bg-white focus:bg-sky-100 placeholder:text-red-500", 100, 100, {usFocus})
+    check box.bg == rgba(0xe0, 0xf2, 0xfe, 255)
+    check text.color == rgba(0, 0, 0, 255)
+    box.applyClasses(text, "placeholder:text-red-500", 100, 100, {usPlaceholder})
+    check text.color == rgba(0xef, 0x44, 0x44, 255)
+
+  test "a box that clips draws nothing outside it":
+    let svg = layoutUi(el("div", "bg-white",
+      el("div", "w-[40px] h-[20px] overflow-hidden", el("div", "w-[80px] h-[60px] bg-red-500"))), 100, 100)
+    let image = newImage(parseSvg(svg, 100, 100))
+    check image.color(10, 10) == rgbx(0xef, 0x44, 0x44, 255)
+    check image.color(60, 10) == rgbx(255, 255, 255, 255) # beside the box
+    check image.color(10, 40) == rgbx(255, 255, 255, 255) # below it
+    check svg.viewports.len == 1
+
+  test "a list that scrolls: its height, its regions and what shows":
+    proc list(): SvgNode =
+      result = el("div", "flex flex-col h-full bg-white")
+      result.children.add el("div", "h-[20px] bg-black")
+      let rows = el("div", "flex-1 overflow-y-auto")
+      for i in 0 ..< 10:
+        let row = el("div", if i mod 2 == 0: "h-[40px] bg-red-500" else: "h-[40px] bg-green-500")
+        row.attrs.add(("on-click", $i))
+        rows.children.add row
+      result.children.add rows
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    var svg = layout.layoutUi(list(), 100, 120, state, regions)
+    # The list is the 100 px under the header; 400 px of rows, 300 out of sight.
+    var box = -1
+    for i, r in regions:
+      if r.scrollY > 0: box = i
+    check box >= 0
+    check regions[box].y == 20 and regions[box].h == 100 and regions[box].scrollY == 300
+    check regions[box].scrollX == 0
+    # Rows below the list's bottom answer nothing; the third shows its top.
+    var rows = 0
+    for r in regions:
+      if r.handlers[ueClick] > 0: inc rows
+    check rows == 3
+    var image = newImage(parseSvg(svg, 100, 120))
+    check image.color(50, 25) == rgbx(0xef, 0x44, 0x44, 255) # row 0
+    check image.color(50, 65) == rgbx(0x22, 0xc5, 0x5e, 255) # row 1
+    # Scrolled by 50: row 1's lower part at the top, the header untouched.
+    state.scrollTo(regions[box].key, 0, 50)
+    regions.setLen(0)
+    svg = layout.layoutUi(list(), 100, 120, state, regions)
+    image = newImage(parseSvg(svg, 100, 120))
+    check image.color(50, 10) == rgbx(0, 0, 0, 255)          # the header
+    check image.color(50, 25) == rgbx(0x22, 0xc5, 0x5e, 255) # row 1: 40..80, at 10..50
+    check image.color(50, 55) == rgbx(0xef, 0x44, 0x44, 255) # row 2 from 50
+    var first = -1
+    for r in regions:
+      if r.handlers[ueClick] > 0 and first < 0:
+        first = r.handlers[ueClick] - 1
+        check r.y == 20 + 40 - 50 and r.visible[1] == 20 # cut at the list's top
+    check first == 1
+    # Past the end: kept in range.
+    state.scrollTo(regions[box].key, 0, 1000)
+    regions.setLen(0)
+    discard layout.layoutUi(list(), 100, 120, state, regions)
+    check state.scrolled(regions[box].key)[1] == 300
+
+  test "an input shows its value, a placeholder or dots; the focused one a caret":
+    let field = input("input", "w-[200px] h-[30px] px-2 text-black bg-white", {"value": "Hello"})
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    let memo = UiMemo()
+    discard layout.layoutUi(el("div", "bg-white", field), 240, 60, state, regions, memo)
+    check regions.len == 1 and regions[0].field == 1 and memo.fieldText(regions[0].key) == "Hello"
+    # Focused, with a tap at its left edge: the caret before the H.
+    state.focus = regions[0].key + 1
+    state.text = "Hello"
+    state.place = true
+    state.placeX = 4
+    state.placeY = 15
+    regions.setLen(0)
+    var svg = layout.layoutUi(el("div", "bg-white", field), 240, 60, state, regions)
+    check state.caret == 0 and not state.place
+    # At the end: the caret after the o, a 1 px bar in the text color.
+    state.caret = 5
+    regions.setLen(0)
+    svg = layout.layoutUi(el("div", "bg-white", field), 240, 60, state, regions)
+    let view = svg.viewports[0]
+    let caret = view.children[^1]
+    check caret.tag == "rect" and caret.attr("width") == "1" and caret.attr("fill") == "#000000"
+    check parseFloat(caret.attr("x")) > 40
+    # A placeholder at half the color, dots for a password, both a line tall.
+    let empty = input("input", "w-[200px] px-2 text-black", {"value": "", "placeholder": "Name"})
+    let image = newImage(parseSvg(layoutUi(el("div", "bg-white", empty), 240, 60), 240, 60))
+    var grey = false
+    for x in 0 ..< 60:
+      for y in 0 ..< 30:
+        let c = image[x, y]
+        if c.r > 60 and c.r < 200 and c.r == c.g: grey = true
+    check grey
+    let secret = input("input", "w-[200px] text-black", {"value": "abc", "type": "password"})
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "", secret), 240, 60, state, regions, memo)
+    check memo.fieldText(regions[0].key) == "abc"
+
+  test "the on-screen keyboard: under the UI, its keys regions":
+    let field = input("input", "w-full h-[30px] bg-white", {"value": ""})
+    var
+      regions: seq[UiRegion]
+      state: UiInput
+    discard layout.layoutUi(el("div", "bg-slate-900", field), 480, 480, state, regions)
+    state.focus = regions[0].key + 1
+    state.keyboard = true
+    regions.setLen(0)
+    let svg = layout.layoutUi(el("div", "bg-slate-900", field), 480, 480, state, regions)
+    let kb = keyboardHeight(480)
+    check kb > 150 and kb <= 240
+    # The UI's page first, over everything, so a key repaints only itself.
+    check svg.children[0].tag == "rect" and svg.children[0].attr("height") == "480"
+    var keys, letters: int
+    for r in regions:
+      if r.handlers[ueClick] > KeyBase:
+        inc keys
+        check r.y >= float32(480 - kb)
+        if r.handlers[ueClick] - 1 - KeyBase in ord('a') .. ord('z'): inc letters
+    check letters == 26
+    check keys > 30
+    let image = newImage(parseSvg(svg, 480, 480))
+    check image.color(240, 470) != rgbx(0x0f, 0x17, 0x2a, 255)
+    # The field gone: nothing has the keyboard.
+    regions.setLen(0)
+    discard layout.layoutUi(el("div", "bg-slate-900"), 480, 480, state, regions)
+    check state.focus == 0 and not state.keyboard
