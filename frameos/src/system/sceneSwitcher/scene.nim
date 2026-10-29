@@ -690,16 +690,10 @@ proc runSwitcher(self: FrameScene, context: ExecutionContext) =
   let payload = context.payload
   case context.event
   of "setCurrentScene":
-    # What the dispatcher says it was opened from (event_loop.nim), or the
-    # frame's previous / next while it shows (a swipe in from the side, a key
-    # held): the page before or the next one, as a swipe across the tiles.
+    # What the dispatcher says it was opened from (event_loop.nim).
     let opener = payload{"state", "from"}
     if not opener.isNil:
       self.state.put("from", opener)
-    let direction = payload{"direction"}.getStr()
-    if direction.len > 0:
-      self.turnPage(if direction == "next": 1 else: -1)
-      self.touch()
   of "open":
     self.opened()
   of "close":
@@ -711,6 +705,11 @@ proc runSwitcher(self: FrameScene, context: ExecutionContext) =
       self.draw(context.image)
   of "button":
     self.pressed(payload)
+  of evBack, evForward:
+    # The frame's back and forward (a swipe in from the left or the right
+    # edge): the page before or the next one, as a swipe across the tiles.
+    self.turnPage(if context.event == evForward: 1 else: -1)
+    self.touch()
   of "swipe":
     # Across the tiles, as on a phone: the next page or the one before.
     let direction = payload{"direction"}.getStr()

@@ -178,7 +178,7 @@ block test_read_config_has_no_side_effects_on_the_loaded_object:
         doAssert loadConfig().name == "Read Me"
     )
 
-block test_a_hyperpixel_never_given_an_event_map_swipes_between_scenes:
+block test_a_hyperpixel_never_given_an_event_map_swipes_back_forward_and_to_the_built_in_scenes:
     # docs/events.md "Event map": the device's own map (device_event_map.nim)
     # for a frame that has none; the owner's, an empty one included, wins.
     for device in ["pimoroni.hyperpixel4sq_touch", "pimoroni.hyperpixel4_touch", "pimoroni.hyperpixel2r"]:
@@ -187,10 +187,10 @@ block test_a_hyperpixel_never_given_an_event_map_swipes_between_scenes:
         doAssert config.eventMap.len == 4
         doAssert config.eventMap[0]["event"].getStr == "edgeSwipe"
         doAssert config.eventMap[0]["match"]["edge"].getStr == "right"
-        doAssert config.eventMap[0]["emit"].getStr == "setCurrentScene"
-        doAssert config.eventMap[0]["as"]["direction"].getStr == "next"
+        # In from the sides: the scene's own back and forward, never a switch.
+        doAssert config.eventMap[0]["emit"].getStr == "forward"
         doAssert config.eventMap[1]["match"]["edge"].getStr == "left"
-        doAssert config.eventMap[1]["as"]["direction"].getStr == "prev"
+        doAssert config.eventMap[1]["emit"].getStr == "back"
         # Up from the bottom: the scene switcher (docs/scene-switcher.md).
         doAssert config.eventMap[2]["match"]["edge"].getStr == "bottom"
         doAssert config.eventMap[2]["emit"].getStr == "sceneSwitcher"

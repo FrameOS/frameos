@@ -241,6 +241,17 @@ block more_scenes_than_fit_page_with_a_swipe:
       turned = true
       break
   doAssert turned, "a page arrow in the header"
+  # The frame's back and forward (a swipe in from the left or the right
+  # edge): the page before and the next, wrapping, and no scene switch.
+  sent.setLen(0)
+  let before = scene.state{"page"}.getInt()
+  scene.send(evForward, %*{})
+  doAssert scene.state{"page"}.getInt() == (before + 1) mod grid.pages
+  scene.send(evBack, %*{})
+  scene.send(evBack, %*{})
+  doAssert scene.state{"page"}.getInt() == (before + grid.pages - 1) mod grid.pages
+  for (event, _) in sent:
+    doAssert event != evSetCurrentScene and event != evSceneSwitcher, event
 
 block an_esp32_lcd_with_a_few_scenes:
   # The SenseCAP Indicator: 480x480 RGB565, names only.

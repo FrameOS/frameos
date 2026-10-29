@@ -8,8 +8,9 @@
 ## Because it is applied as the config loads, the frame also reports it as
 ## its map (cloud/enrollment.nim), and the Settings panel shows it.
 ##
-## A HyperPixel is a touch screen with no keys: in from its right edge is the
-## next scene, in from its left the previous, up from the bottom the scene
+## A HyperPixel is a touch screen with no keys: in from its left edge is
+## `back` and in from its right `forward` (the scene's own: the photo or the
+## page before or after, never another scene), up from the bottom the scene
 ## switcher (docs/scene-switcher.md) and down from the top the scene's
 ## settings (docs/scene-settings.md), as on the SenseCAP Indicator
 ## (`edgeSwipe`: the scene hears none of that touch). Keep in step with
@@ -18,10 +19,8 @@
 import std/[json, strutils]
 
 const hyperPixelEventMap = """[
-  {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene",
-   "as": {"direction": "next"}},
-  {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene",
-   "as": {"direction": "prev"}},
+  {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "forward", "as": {}},
+  {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "back", "as": {}},
   {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
   {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}}
 ]"""

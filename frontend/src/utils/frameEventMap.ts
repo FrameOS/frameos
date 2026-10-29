@@ -7,8 +7,9 @@
 // device's dispatcher applies before any scene is asked; a rule with `emit`
 // replaces the press with the event it names and the scene never hears it.
 // A touch screen's swipes in from an edge (`edgeSwipe`) are bound the same
-// way: in from the right the next scene, from the left the previous, up from
-// the bottom the scene switcher (docs/scene-switcher.md).
+// way: in from the left `back` and from the right `forward` (the scene's own:
+// the photo or the page before or after, never another scene), up from the
+// bottom the scene switcher (docs/scene-switcher.md).
 // This module turns the rules into the section's rows — one press of one
 // button or one edge, one action — and the rows back into rules; rules the
 // section did not write (hand-made, a rewrite, another event) are kept as
@@ -24,6 +25,8 @@ import { type ButtonGesture, gestureTitle, gestureValue, parseGestureValue } fro
 export type FrameActionKind =
   | 'nextScene'
   | 'prevScene'
+  | 'back'
+  | 'forward'
   | 'showScene'
   | 'sceneSwitcher'
   | 'sceneSettings'
@@ -56,6 +59,8 @@ export interface ButtonBinding {
 const ACTION_TITLES: Record<FrameActionKind, string> = {
   nextScene: 'Next scene',
   prevScene: 'Previous scene',
+  back: 'Back',
+  forward: 'Forward',
   showScene: 'Show scene',
   sceneSwitcher: 'Scene switcher',
   sceneSettings: 'Scene settings',
@@ -77,6 +82,8 @@ const EDGE_TITLES: Record<string, string> = {
 export const frameActionKinds: readonly FrameActionKind[] = [
   'nextScene',
   'prevScene',
+  'back',
+  'forward',
   'sceneSwitcher',
   'sceneSettings',
   'render',
@@ -112,6 +119,17 @@ export function frameSupportsSceneSettings(frameosVersion: string | null | undef
   return cloudFrameSupportsSettingsFrom(sceneSettingsMinVersion, frameosVersion)
 }
 
+/** The first FrameOS whose scenes hear `back` and `forward` (the contract's `back.since`). */
+export const backForwardMinVersion: string = contractEventSpecs.back.since ?? '0.0.0'
+
+/** Whether a frame on this FrameOS takes `back` / `forward` from its map, as `frameSupportsSceneSwitcher`. */
+export function frameSupportsBackForward(frameosVersion: string | null | undefined, cloud: boolean): boolean {
+  if (!cloud && (typeof frameosVersion !== 'string' || frameosVersion.trim().length === 0)) {
+    return true
+  }
+  return cloudFrameSupportsSettingsFrom(backForwardMinVersion, frameosVersion)
+}
+
 /** What this frame can do with a press, as far as the actions on offer go. */
 export interface FrameActionOffer {
   /** The frame has voice chat at all (`useFrameSettings().voiceChat`: a microphone, ESP32 only). */
@@ -127,6 +145,8 @@ export interface FrameActionOffer {
   sceneSwitcher?: boolean
   /** The frame's FrameOS shows a scene's settings (`frameSupportsSceneSettings`). */
   sceneSettings?: boolean
+  /** The frame's FrameOS takes `back` / `forward` (`frameSupportsBackForward`). */
+  backForward?: boolean
 }
 
 export function isEdgeGesture(gesture: FrameGesture): gesture is EdgeGesture {
@@ -175,6 +195,9 @@ export function edgeGestures(): EdgeGesture[] {
  */
 export function frameActionKindsFor(gesture: FrameGesture, offer: FrameActionOffer): readonly FrameActionKind[] {
   const kinds: FrameActionKind[] = ['nextScene', 'prevScene']
+  if (offer.backForward) {
+    kinds.push('back', 'forward')
+  }
   if (offer.sceneSwitcher) {
     kinds.push('sceneSwitcher')
   }
@@ -208,6 +231,9 @@ export function frameActionUnavailableReason(binding: ButtonBinding, offer: Fram
   }
   if (kind === 'sceneSettings') {
     return `needs FrameOS ${sceneSettingsMinVersion}`
+  }
+  if (kind === 'back' || kind === 'forward') {
+    return `needs FrameOS ${backForwardMinVersion}`
   }
   return 'not on this frame'
 }
@@ -254,6 +280,8 @@ export function bindingRule(binding: ButtonBinding): EventMapRule {
       return { event, match, emit: 'setCurrentScene', as: { direction: 'prev' } }
     case 'showScene':
       return { event, match, emit: 'setCurrentScene', as: { sceneId: binding.action.sceneId ?? '' } }
+    case 'back':
+    case 'forward':
     case 'sceneSwitcher':
     case 'sceneSettings':
     case 'render':
@@ -266,6 +294,8 @@ export function bindingRule(binding: ButtonBinding): EventMapRule {
 }
 
 const SCENE_LESS_EMITS: readonly string[] = [
+  'back',
+  'forward',
   'sceneSwitcher',
   'sceneSettings',
   'render',
@@ -278,8 +308,9 @@ const SCENE_LESS_EMITS: readonly string[] = [
 /**
  * The binding a rule means, when it is one the section writes: a `button`
  * rule matching one label and one press, or an `edgeSwipe` rule matching
- * one edge, that emits a scene switch (by direction or by id), the scene
- * switcher, a render or a display switch with nothing else in `as`.
+ * one edge, that emits a scene switch (by direction or by id), back or
+ * forward, the scene switcher, a render or a display switch with nothing
+ * else in `as`.
  * Anything else is the owner's own rule and null here.
  */
 export function bindingOfRule(rule: EventMapRule): ButtonBinding | null {
@@ -411,9 +442,9 @@ export function frameOffersEdgeGestures(
 }
 
 /** The event map a device comes with, which a frame never given one (no
- * stored `event_map`) runs with: a HyperPixel's edge swipes, in from the right
- * the next scene, in from the left the previous, up from the bottom the
- * scene switcher and down from the top the scene's settings. Keep in step
+ * stored `event_map`) runs with: a HyperPixel's edge swipes, in from the left
+ * `back`, in from the right `forward`, up from the bottom the scene switcher
+ * and down from the top the scene's settings. Keep in step
  * with frameos/src/frameos/device_event_map.nim
  * (device-event-map.test.ts reads it). null for a device that comes with none. */
 export function deviceEventMap(device: string | null | undefined): EventMapRule[] | null {
@@ -421,8 +452,8 @@ export function deviceEventMap(device: string | null | undefined): EventMapRule[
     return null
   }
   return [
-    { event: 'edgeSwipe', match: { edge: 'right' }, emit: 'setCurrentScene', as: { direction: 'next' } },
-    { event: 'edgeSwipe', match: { edge: 'left' }, emit: 'setCurrentScene', as: { direction: 'prev' } },
+    { event: 'edgeSwipe', match: { edge: 'right' }, emit: 'forward', as: {} },
+    { event: 'edgeSwipe', match: { edge: 'left' }, emit: 'back', as: {} },
     { event: 'edgeSwipe', match: { edge: 'bottom' }, emit: 'sceneSwitcher', as: {} },
     { event: 'edgeSwipe', match: { edge: 'top' }, emit: 'sceneSettings', as: {} },
   ]

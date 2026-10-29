@@ -652,6 +652,8 @@ export const cloudFramesContract = {
                 "toggleScreen",
                 "sceneSwitcher",
                 "sceneSettings",
+                "back",
+                "forward",
                 "voiceChat"
               ]
             }
@@ -697,6 +699,8 @@ export const cloudFramesContract = {
                     "toggleScreen",
                     "sceneSwitcher",
                     "sceneSettings",
+                    "back",
+                    "forward",
                     "voiceChat"
                   ]
                 }

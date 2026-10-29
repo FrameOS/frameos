@@ -637,14 +637,14 @@ def test_embedded_hardware_preset_for_seeed_sensecap_indicator():
     # The LCD's wiring is the firmware's own board table: no EPD pins.
     assert all(pin == -1 for pin in embedded_pins_for_frame(frame).values())
     # The top button: pressed it switches the screen, twice it opens the
-    # scene switcher, held nothing; swiped in from the right or left edge, the
-    # next or the previous scene, and up from the bottom the scene switcher.
+    # scene switcher, held nothing; swiped in from the left or the right edge,
+    # back or forward, and up from the bottom the scene switcher.
     assert embedded_gpio_buttons_for_frame(frame) == [(38, "BUTTON")]
     assert frame.event_map == [
         {"event": "button", "match": {"label": "BUTTON", "action": "press"}, "emit": "toggleScreen", "as": {}},
         {"event": "button", "match": {"label": "BUTTON", "action": "doublePress"}, "emit": "sceneSwitcher", "as": {}},
-        {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
-        {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+        {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "forward", "as": {}},
+        {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "back", "as": {}},
         {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
         {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}},
     ]
@@ -960,8 +960,8 @@ def test_embedded_hardware_preset_for_seeed_reterminal_e1003():
     ]
     assert frame.event_map[2:] == [
         {"event": "button", "match": {"label": "REFRESH", "action": "longPress"}, "emit": "voiceChat", "as": {}},
-        {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
-        {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+        {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "forward", "as": {}},
+        {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "back", "as": {}},
         {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
         {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}},
     ]

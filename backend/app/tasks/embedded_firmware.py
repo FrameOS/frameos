@@ -274,13 +274,14 @@ EMBEDDED_SEEED_SENSECAP_INDICATOR_PINS = {
     "pwr": -1,
 }
 EMBEDDED_SEEED_SENSECAP_INDICATOR_GPIO_BUTTONS = [{"pin": 38, "label": "BUTTON"}]
-# A touch screen's swipes in from an edge: from the right the next scene, from
-# the left the previous one, up from the bottom the scene switcher
+# A touch screen's swipes in from an edge: from the left `back` and from the
+# right `forward`, the scene's own (never another scene), up from the bottom
+# the scene switcher
 # (docs/scene-switcher.md) and down from the top the scene's settings
 # (docs/scene-settings.md). fos_board.c's TOUCH_EDGE_SWIPES is the device copy.
 EMBEDDED_TOUCH_EDGE_SWIPES = [
-    {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "setCurrentScene", "as": {"direction": "next"}},
-    {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "setCurrentScene", "as": {"direction": "prev"}},
+    {"event": "edgeSwipe", "match": {"edge": "right"}, "emit": "forward", "as": {}},
+    {"event": "edgeSwipe", "match": {"edge": "left"}, "emit": "back", "as": {}},
     {"event": "edgeSwipe", "match": {"edge": "bottom"}, "emit": "sceneSwitcher", "as": {}},
     {"event": "edgeSwipe", "match": {"edge": "top"}, "emit": "sceneSettings", "as": {}},
 ]

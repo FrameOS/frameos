@@ -4,8 +4,8 @@
 
 Swipe down from the top of a touch screen and the frame shows the settings
 of the scene showing: its public fields as a form, to change on the frame
-itself and save. Cancel, the same swipe or one up from the bottom goes back
-as it was.
+itself and save. Cancel, the same swipe, one up from the bottom or one in
+from the left (the frame's `back`) goes back as it was.
 
 | Piece | Where |
 |---|---|
@@ -30,6 +30,11 @@ as it resolves `sceneSwitcher`:
   saved. So the same swipe opens and closes it, and the panel's Cancel, a
   key with the role `back` and its idle timeout (five minutes without a
   touch or a key) dispatch it to go back.
+- The frame's `back` (a swipe in from the left edge on every touch preset,
+  docs/events.md) is Cancel too, as a phone's back is: with a field's
+  keyboard up it puts the keyboard away first (`ui/events.nim`
+  `dismissKeyboard`), and the next one closes the panel. `forward` does
+  nothing here.
 - `sceneSwitcher` while the panel shows goes back the same way, and
   `sceneSettings` while the switcher shows goes back to the scene: a swipe
   from the other edge closes either built-in scene, so the frame never stacks

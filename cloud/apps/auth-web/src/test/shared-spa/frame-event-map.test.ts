@@ -11,6 +11,7 @@ import {
   isEventMapRule,
 } from "../../../../../../frontend/src/utils/cloudFrameSettings";
 import {
+  backForwardMinVersion,
   bindingConflicts,
   bindingOfRule,
   bindingRule,
@@ -25,6 +26,7 @@ import {
   frameGestureTitle,
   frameGestureValue,
   frameOffersEdgeGestures,
+  frameSupportsBackForward,
   frameSupportsSceneSettings,
   frameSupportsSceneSwitcher,
   gestureCanVoiceChat,
@@ -73,7 +75,7 @@ describe("bindings and rules", () => {
     // Offered for a long press when the frame has voice chat, never for a press
     // or a double press: the release is what ends a sentence.
     const doublePress = { label: "REFRESH", action: "doublePress" };
-    const all = { voiceChat: true, displayPower: true, sceneSwitcher: true, sceneSettings: true };
+    const all = { voiceChat: true, displayPower: true, sceneSwitcher: true, sceneSettings: true, backForward: true };
     expect(frameActionKindsFor(refreshHeld, all)).toEqual([...frameActionKinds, "voiceChat"]);
     expect(frameActionKindsFor(refreshHeld, { ...all, voiceChat: false })).toEqual(frameActionKinds);
     expect(frameActionKindsFor(doublePress, all)).toEqual(frameActionKinds);
@@ -188,6 +190,34 @@ describe("bindings and rules", () => {
     expect(frameSupportsSceneSettings(null, false)).toBe(true);
   });
 
+  it("binds the swipes in from the sides to back and forward, on a FrameOS that has them", () => {
+    // docs/events.md: the scene's own back and forward, never a scene switch;
+    // every touch preset ships them on the left and the right edge.
+    const left = { edge: "left" };
+    const right = { edge: "right" };
+    const back: EventMapRule = { event: "edgeSwipe", match: left, emit: "back", as: {} };
+    const forward: EventMapRule = { event: "edgeSwipe", match: right, emit: "forward", as: {} };
+    expect(bindingRule({ gesture: left, action: { kind: "back" } })).toEqual(back);
+    expect(bindingRule({ gesture: right, action: { kind: "forward" } })).toEqual(forward);
+    expect(bindingOfRule(back)).toEqual({ gesture: left, action: { kind: "back" } });
+    expect(bindingOfRule(forward)).toEqual({ gesture: right, action: { kind: "forward" } });
+    expect(isEventMapRule(back)).toBe(true);
+    expect(frameActionTitle({ kind: "back" })).toBe("Back");
+    expect(frameActionTitle({ kind: "forward" })).toBe("Forward");
+    expect(parseFrameActionValue(frameActionValue({ kind: "forward" }))).toEqual({ kind: "forward" });
+    // A key may say them too.
+    expect(bindingRule({ gesture: leftHeld, action: { kind: "back" } })).toEqual({ event: "button", match: leftHeld, emit: "back", as: {} });
+    const old = { voiceChat: false, displayPower: false, backForward: false };
+    expect(frameActionKindsFor(left, old)).not.toContain("back");
+    expect(frameActionKindsFor(left, { ...old, backForward: true })).toEqual(["nextScene", "prevScene", "back", "forward", "render"]);
+    expect(frameActionUnavailableReason({ gesture: left, action: { kind: "back" } }, old)).toBe(
+      `needs FrameOS ${backForwardMinVersion}`,
+    );
+    expect(frameSupportsBackForward(backForwardMinVersion, true)).toBe(true);
+    expect(frameSupportsBackForward("2026.10.22", true)).toBe(false);
+    expect(frameSupportsBackForward(null, false)).toBe(true);
+  });
+
   it("offers the edges as rows on a touch screen, by select value and title", () => {
     expect(edgeGestures()).toEqual([{ edge: "left" }, { edge: "right" }, { edge: "top" }, { edge: "bottom" }]);
     for (const gesture of [...edgeGestures(), leftHeld]) {
@@ -229,7 +259,7 @@ describe("the rules a device or a push carries", () => {
     expect(isEventMapRule("nonsense")).toBe(false);
     // The emits are the contract's: what the eventMap origin may say.
     expect([...eventMapEmits].sort()).toEqual([
-      "render", "sceneSettings", "sceneSwitcher", "setCurrentScene", "setSceneState", "toggleScreen", "turnOff", "turnOn",
+      "back", "forward", "render", "sceneSettings", "sceneSwitcher", "setCurrentScene", "setSceneState", "toggleScreen", "turnOff", "turnOn",
       "voiceChat",
     ]);
   });

@@ -220,6 +220,15 @@ proc blurField(target: UiTarget) =
   target.input.place = false
   target.inputOnly = true
 
+proc dismissKeyboard*(sceneId: string, nodeId: int): bool =
+  ## `back` while a field has the keyboard, as on a phone: the field lets go
+  ## and the keyboard goes away. False when no field had it.
+  let target = uiTarget(sceneId, nodeId, create = false)
+  if target.isNil or target.input.focus == 0:
+    return false
+  target.blurField()
+  true
+
 proc fieldCall(target: UiTarget, kind: UiEvent, name: string, payload: JsonNode) =
   ## The focused field's onChange or onKeyDown, if it has one.
   let i = target.regionOf(target.input.focus - 1)

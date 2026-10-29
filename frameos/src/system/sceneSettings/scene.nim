@@ -362,6 +362,14 @@ proc runSettings(self: FrameScene, context: ExecutionContext) =
   of "button":
     if payload{"role"}.getStr() == "back" and payload{"action"}.getStr() == "press":
       leave()
+  of evBack:
+    # The frame's back (a swipe in from the left), as on a phone: the
+    # keyboard goes away first, then the form, unsaved.
+    if dismissKeyboard(SceneSettingsId, SettingsNode):
+      self.touch()
+      sendEvent(evRender, newJObject(), eoScene)
+    else:
+      leave()
   else:
     # The pointer, and keys for a field (ui/events.nim hit-tests them). E-paper
     # shows no press: what only moves the press waits for a tap.

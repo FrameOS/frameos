@@ -220,10 +220,7 @@ no filter on a field hears every value of it.
   not name), wrapping around; the dispatcher resolves it from the host's
   `sceneOrder` on every host, so a frame with one scene switches nowhere and
   anything else is refused (`reason: "direction"`). While the scene switcher
-  shows, a direction from the frame's event map (a swipe in from the left or
-  the right, a key held) turns the switcher's page instead and the frame
-  stays on it; from any other origin it walks from the scene the switcher
-  was opened from.
+  shows, a direction walks from the scene it was opened from.
 - `sceneSwitcher {}` — shows the scene switcher (`system/sceneSwitcher`, the
   contract's `scenes.switcher`; [scene-switcher.md](scene-switcher.md)): the
   dispatcher selects it with `state.from`, the scene showing, and while it
@@ -239,6 +236,14 @@ no filter on a field hears every value of it.
   shows it goes back without saving; its Save is a `setCurrentScene` back
   with the values as `state`. Over the switcher it goes back to the scene
   as well, and `sceneSwitcher` over it goes back unsaved.
+- `back {}` and `forward {}` — go back and go forward, as a phone's back
+  gesture: delivered to the scene showing, which decides what that is (the
+  photo or the page before or after), and never a scene switch; a scene
+  that does not listen for them stays as it is. Every touch preset binds them
+  to the swipes in from the left and the right edge, so changing the scene
+  on a touch screen is the switcher's (up from the bottom). The switcher
+  turns its page on them (wrapping around); the scene settings take `back`
+  as Cancel, a field's keyboard going away first.
 - The input payloads are under [Input](#input).
 
 ### Input
@@ -320,9 +325,9 @@ away than along it, it is an `edgeSwipe {edge, direction, x, y, startX,
 startY, …}` (`edge` where it began, `direction` the way it went) and the
 frame's: the scene hears no `pointerDown`, `pointerMove`, `pointerUp` or
 gesture of that touch, so the slider it began on stays where it was, and
-the frame's event map can make it a scene switch whatever the scene draws
-(the SenseCAP Indicator's and the reTerminal E1003's presets: in from the
-right edge the next scene, from the left the previous, up from the bottom the
+the frame's event map can make it something of the frame's whatever the
+scene draws (the SenseCAP Indicator's and the reTerminal E1003's presets: in
+from the left edge `back`, from the right `forward`, up from the bottom the
 scene switcher, down from the top the scene's settings). Lifted, held
 for a `longPress`, or moved along the edge instead, it is the scene's after
 all: its `pointerDown` goes out then,
@@ -572,9 +577,9 @@ the preview alike. There are two, applied in this order:
   on every reTerminal preset (the backend's `EMBEDDED_HARDWARE_PRESETS`, the
   firmware's board table), and the owner may add, change or clear it. A frame
   never given one runs its device's: every HyperPixel (`pimoroni.hyperpixel*`)
-  takes an edge swipe in from the right as the next scene, from the left as
-  the previous, up from the bottom as the scene switcher and down from the
-  top as the scene's settings (`frameos/device_event_map.nim`, applied when
+  takes an edge swipe in from the left as `back`, from the right as
+  `forward`, up from the bottom as the scene switcher and down from the top
+  as the scene's settings (`frameos/device_event_map.nim`, applied when
   frame.json has
   no `eventMap`; the backend leaves the key out until the owner saves one,
   the frame API reports it as `null`, and the cloud sees it in what the frame
@@ -614,7 +619,8 @@ came. A rule does one of two things:
   its whole payload, from the origin `eventMap`, and the matched event goes no
   further — the scene never hears the press, not even a `button` listener
   with no filter. That is how "Button actions" binds a key to the frame
-  (`setCurrentScene {direction}`, `sceneSwitcher`, `sceneSettings`, `render`, `turnOn`,
+  (`setCurrentScene {direction}`, `sceneSwitcher`, `sceneSettings`, `back`,
+  `forward`, `render`, `turnOn`,
   `turnOff` — offered only where the display's driver powers the panel, see
   the host table below — `setSceneState`; a touch screen's rows are its edges'
   swipes too, `edgeSwipe {edge}`), and an installed scene's rule may do the

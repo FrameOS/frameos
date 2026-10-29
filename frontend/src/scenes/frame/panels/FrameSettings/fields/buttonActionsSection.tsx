@@ -21,6 +21,7 @@ import {
   frameGestureTitle,
   frameGestureValue,
   frameOffersEdgeGestures,
+  frameSupportsBackForward,
   frameSupportsSceneSettings,
   frameSupportsSceneSwitcher,
   gestureCanVoiceChat,
@@ -70,6 +71,7 @@ export function ButtonActionsSection(): JSX.Element {
     displayPower: deviceSwitchesDisplay(device),
     sceneSwitcher: frameSupportsSceneSwitcher(frame.frameos_version, cloudProfile),
     sceneSettings: frameSupportsSceneSettings(frame.frameos_version, cloudProfile),
+    backForward: frameSupportsBackForward(frame.frameos_version, cloudProfile),
   }
   const conflicts = bindingConflicts(bindings, offer)
 
