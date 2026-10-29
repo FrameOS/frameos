@@ -57,6 +57,7 @@ const PRICES: Record<string, { input: number; cached: number; output: number }> 
   "gpt-6-luna": { cached: 0.01, input: 0.1, output: 0.5 },
   "gpt-6-sol": { cached: 0.2, input: 2, output: 10 },
   "gpt-6.1-sol": { cached: 0.1, input: 2, output: 10 },
+  "gpt-6.1-terra": { cached: 0.05, input: 1, output: 5 },
 };
 
 type Options = {

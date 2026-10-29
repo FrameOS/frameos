@@ -27,7 +27,7 @@ pnpm --filter @frameos-cloud/auth-web ai:eval --filter modify # by tag
 pnpm --filter @frameos-cloud/auth-web ai:eval --only create-word-clock --no-judge
 pnpm --filter @frameos-cloud/auth-web ai:eval --compare evals/results/<older>/report.json
 pnpm --filter @frameos-cloud/auth-web ai:eval:models             # QUICK_SET × default models
-pnpm --filter @frameos-cloud/auth-web ai:eval:models --models gpt-5.6-terra,gpt-5.6-luna --all
+pnpm --filter @frameos-cloud/auth-web ai:eval:models --models gpt-5.6-terra,gpt-6.1-terra --all
 pnpm --filter @frameos-cloud/auth-web ai:render weather --out /tmp/weather.png
 pnpm --filter @frameos-cloud/auth-web ai:build-scenes --filter S --limit 5
 ```

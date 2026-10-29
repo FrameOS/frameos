@@ -67,6 +67,8 @@ export const fallbackModelPrices: Record<
   // The store classifier's model since 2026-10-14 (gpt-4o-mini is being
   // retired); migration 0063 seeds the same numbers.
   "gpt-6-luna": { cached: 0.01, input: 0.1, output: 0.5 },
+  // The chat's default since 2026-10-29; migration 0071 seeds the same numbers.
+  "gpt-6.1-terra": { cached: 0.05, input: 1, output: 5 },
 };
 
 // A model we have never seen at all. Zero would meter it free and hide the

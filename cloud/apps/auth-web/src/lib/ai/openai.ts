@@ -92,9 +92,11 @@ export const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 // lives in the turn runner.
 export const OPENAI_IDLE_TIMEOUT_MS = 120 * 1000;
 
-// gpt-5.6-terra: matched gpt-5.5's eval pass rate with better judge scores at
-// ~40% of the price (evals/compare-models.ts run 2026-08-30, 9 cases × 4 models).
-export const DEFAULT_CHAT_MODEL = "gpt-5.6-terra";
+// gpt-6.1-terra: beat gpt-5.6-terra on every eval metric (23/24 passed vs
+// 21/24, judge 4.82 vs 4.59, half the linter bounces) at ~40% of its cost per
+// case (evals/compare-models.ts --all, 2026-10-29). gpt-5.6-terra had replaced
+// gpt-5.5 the same way on 2026-08-30.
+export const DEFAULT_CHAT_MODEL = "gpt-6.1-terra";
 export const DEFAULT_REASONING_EFFORT = "low";
 const REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high"]);
 
