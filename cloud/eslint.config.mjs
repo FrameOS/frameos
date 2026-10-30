@@ -46,6 +46,9 @@ export default tseslint.config(
       "**/src/test/shared-spa/app-list-category.test.ts",
       // Same exclusion, same reason: mounts embeddedUsbConnectLogic.
       "**/src/test/shared-spa/usb-connect-probe.test.ts",
+      "**/src/test/shared-spa/usb-hand-back-to-cloud.test.ts",
+      // Same exclusion, same reason: the banner reaches workspaceLogic.
+      "**/src/test/shared-spa/cloud-backend-owner-banner.test.tsx",
       // Same exclusion, same reason: embeddedUsbLogsModel itself, and
       // esp32Hardware.ts (devices.ts reaches components/Select.tsx), and the
       // mounted USB connect card.

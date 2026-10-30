@@ -8,9 +8,11 @@ import {
   runEmbeddedUsbApiCommand,
   startEmbeddedUsbLogStream,
   usbBootsel,
+  usbClear,
   usbFactoryReset,
   usbProvisionWifi,
   usbRestart,
+  usbSet,
   usbWifiScan,
   type EmbeddedUsbLogStreamState,
   type EmbeddedUsbStatus,
@@ -175,6 +177,9 @@ export interface embeddedUsbConnectLogicActions {
     identity: UsbBoardIdentity
   }
   rebootIntoBootsel: () => {
+    value: true
+  }
+  handBackToCloud: () => {
     value: true
   }
   recheck: () => {
@@ -348,6 +353,7 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
     setPassword: (password: string) => ({ password }),
     applyWifi: true,
     restartDevice: true,
+    handBackToCloud: true,
     factoryReset: true,
     copyManualCommand: (command: string) => ({ command }),
     setMessage: (message: string | null) => ({ message }),
@@ -453,6 +459,7 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
         scanNetworks: () => null,
         applyWifi: () => null,
         restartDevice: () => null,
+        handBackToCloud: () => null,
         rebootIntoBootsel: () => null,
         factoryReset: () => null,
         connectUsb: () => null,
@@ -467,6 +474,7 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
         scanNetworks: () => null,
         applyWifi: () => null,
         restartDevice: () => null,
+        handBackToCloud: () => null,
         rebootIntoBootsel: () => null,
         factoryReset: () => null,
         connectUsb: () => null,
@@ -734,10 +742,22 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
     applyFrameSettings: async ({ confirmForeign }) => {
       const identity = values.identity
       if (confirmForeign && identity?.kind === 'other-frame') {
+        // Setting a backend up on a cloud frame leaves it enrolled: it keeps
+        // its link and turns the cloud's scenes and settings down from then on.
+        const otherBackendFrame = Boolean(identity.status.config?.frameId || identity.status.config?.backendUrl)
+        const message = [
+          `The board is currently ${identity.label}.`,
+          otherBackendFrame ? 'It stops being that frame.' : '',
+          identity.cloudLinked
+            ? 'It stays linked to FrameOS Cloud, but the cloud can no longer change its scenes or settings while this backend controls it.'
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' ')
         if (
           !(await confirmDialog({
             title: `Re-provision this board as "${values.frameName}"?`,
-            message: `The board is currently ${identity.label}. It stops being that other frame.`,
+            message,
             confirmLabel: 'Re-provision',
             danger: true,
           }))
@@ -806,6 +826,40 @@ export const embeddedUsbConnectLogic = kea<embeddedUsbConnectLogicType>([
         actions.setError(`Applying Wi-Fi settings failed: ${errorDetail(applyError)}`)
       } finally {
         actions.setApplyBusy(false)
+      }
+    },
+    // A self-hosted backend set on a cloud frame turns down the cloud's scenes
+    // and settings (docs/cloud-frames.md "While managed"). Clearing it and
+    // restarting hands the frame back: its next hello carries no backend, and
+    // the cloud sends its settings, schedule and scenes again.
+    handBackToCloud: async () => {
+      const identity = values.identity
+      const strayBackend = identity?.kind === 'this-frame' ? identity.strayBackend : undefined
+      if (!strayBackend) {
+        return
+      }
+      if (
+        !(await confirmDialog({
+          title: 'Hand this frame back to FrameOS Cloud?',
+          message: `The backend at ${strayBackend} stops controlling it. The frame restarts and gets the scenes and settings saved here.`,
+          confirmLabel: 'Hand back',
+        }))
+      ) {
+        return
+      }
+      actions.setSettingsBusy(true)
+      try {
+        await usbClear(props.frameId, 'backend')
+        await usbClear(props.frameId, 'api_key')
+        await usbSet(props.frameId, 'frame_id', '0')
+        actions.setMessage('Removed the backend and restarting the board.')
+        await usbRestart(props.frameId)
+        actions.setMessage('The board restarted. FrameOS Cloud sends it the scenes and settings saved here.')
+        actions.recheck()
+      } catch (handBackError) {
+        actions.setError(`Handing the frame back failed: ${errorDetail(handBackError)}`)
+      } finally {
+        actions.setSettingsBusy(false)
       }
     },
     restartDevice: async () => {

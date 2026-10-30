@@ -1430,9 +1430,9 @@ const USB_SECRET_CONFIG_KEYS = new Set<EmbeddedUsbConfigKey>(['api_key', 'wifi_p
 
 /**
  * `usb_api set <key> <value>` — persist one config value. The value is quoted,
- * so spaces and punctuation survive intact; an empty value is rejected by the
- * console's argument parser and so refused here, with a message that says
- * which key it was. Secrets go down the wire but reach the log redacted.
+ * so spaces and punctuation survive intact. An empty value is refused here so
+ * a blank form field cannot wipe a key by accident; clearing one is
+ * `usbClear`. Secrets go down the wire but reach the log redacted.
  */
 export async function usbSet(
   frameId: FrameId,
@@ -1448,6 +1448,19 @@ export async function usbSet(
     ...(USB_SECRET_CONFIG_KEYS.has(key) ? { logLabel: `set ${key} (redacted)` } : {}),
     ...options,
   })
+}
+
+/**
+ * `usb_api set <key> ""` — empty one config value on purpose. The console's
+ * argument splitter (esp_console_split_argv) passes `""` through as an empty
+ * argument, which cmd_set stores as is.
+ */
+export async function usbClear(
+  frameId: FrameId,
+  key: EmbeddedUsbConfigKey,
+  options?: EmbeddedUsbApiCommandOptions
+): Promise<void> {
+  await runEmbeddedUsbApiCommand(frameId, `set ${key} ""`, { timeoutMs: USB_SET_TIMEOUT_MS, ...options })
 }
 
 /** `usb_api wifi-scan` — list visible networks (strongest first). */

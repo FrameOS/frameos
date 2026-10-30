@@ -61,6 +61,10 @@
     // Same story: mounts embeddedUsbConnectLogic, whose graph reaches
     // workspaceLogic and EmbeddedReleaseFlasher. Vitest still runs it.
     "src/test/shared-spa/usb-connect-probe.test.ts",
+    "src/test/shared-spa/usb-hand-back-to-cloud.test.ts",
+    // Same story: renders CloudBackendOwnerBanner, which reaches
+    // workspaceLogic. Vitest still runs it.
+    "src/test/shared-spa/cloud-backend-owner-banner.test.tsx",
     // Same story: `usb_api bootsel` runs through embeddedUsbLogsModel itself,
     // and the Inky Frame pin tables live in esp32Hardware.ts, which reaches
     // components/Select.tsx through devices.ts (see device-catalog-mirror
