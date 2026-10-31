@@ -493,22 +493,32 @@ proc forgetPanelContents*(self: Driver) =
   if not self.isNil:
     self.shadow.invalidate()
 
+# Both switches, always, and neither one's exit code trusted to stand for the
+# other (#661). vcgencmd is the legacy firmware's; under KMS it can exit 0
+# without touching the output, and the fb0 blank is what reaches DRM as a
+# DPMS off. On the legacy stack the blank cuts the signal too, given
+# hdmi_blanking=1 (BOOT_CONFIG_LINES above).
+proc setDisplayPower(on: bool): bool =
+  let vcgencmd = runDisplayCommand("vcgencmd display_power " & (if on: "1" else: "0"))
+  let blank = runPrivilegedDisplayShell("echo " & (if on: "0" else: "1") & " > /sys/class/graphics/fb0/blank")
+  vcgencmd == 0 or blank == 0
+
 proc turnOn*(self: Driver) =
   # Back from a blank, the panel may not show what the shadow says.
   self.forgetPanelContents()
   try:
-    let response = runDisplayCommand("vcgencmd display_power 1")
-    if response != 0:
-      discard runPrivilegedDisplayShell("echo 0 > /sys/class/graphics/fb0/blank")
+    if not setDisplayPower(true):
+      logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
+          "error": "Failed to turn display on"})
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to turn display on"})
 
 proc turnOff*(self: Driver) =
   try:
-    let response = runDisplayCommand("vcgencmd display_power 0")
-    if response != 0:
-      discard runPrivilegedDisplayShell("echo 1 > /sys/class/graphics/fb0/blank")
+    if not setDisplayPower(false):
+      logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
+          "error": "Failed to turn display off"})
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to turn display off"})
