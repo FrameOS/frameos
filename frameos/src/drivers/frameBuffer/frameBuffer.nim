@@ -1,5 +1,5 @@
 import pixie, json, linuxfb, posix, posix/termios, strformat
-import std/[exitprocs, monotimes]
+import std/[exitprocs, monotimes, os]
 import frameos/device_setup
 import frameos/driver_context
 import frameos/driver_render_hint
@@ -297,10 +297,19 @@ proc publishScreenSize*(self: Driver) =
   if self.screenInfo.width > 0 and self.screenInfo.height > 0:
     reportDetectedDisplaySize(self.screenInfo.width.int, self.screenInfo.height.int)
 
+# Without it a blank (turnOff's fb0/blank) only paints the HDMI output black
+# and the monitor keeps its backlight on (#661). The legacy firmware reads it;
+# under KMS it is ignored, so it is safe on every Pi. A framebuffer frame may
+# be any Linux box: without a config.txt there is no Pi firmware to tell.
+const BOOT_CONFIG_LINES = @["hdmi_blanking=1"]
+
 proc setup*(frameOS: DriverContext = nil): SetupResult =
+  result = setupOk()
+  if fileExists(detectBootConfigPath()):
+    addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(BOOT_CONFIG_LINES)))
   if frameOS.isNil or frameOS.frameConfig.isNil:
     setupLog("FrameOS setup: frameBuffer: driver context unavailable; skipping framebuffer dimension detection")
-    return setupOk()
+    return
 
   try:
     let screenInfo = getScreenInfo(frameOS.logger)
@@ -315,7 +324,6 @@ proc setup*(frameOS: DriverContext = nil): SetupResult =
     setupLog("FrameOS setup: frameBuffer: invalid framebuffer metadata caused division by zero: " & e.msg)
   except Exception as e:
     setupLog("FrameOS setup: frameBuffer: could not detect framebuffer dimensions: " & e.msg)
-  result = setupOk()
 
 proc render*(self: Driver, image: Image) =
   if self.isNil:
@@ -485,22 +493,32 @@ proc forgetPanelContents*(self: Driver) =
   if not self.isNil:
     self.shadow.invalidate()
 
+# Both switches, always, and neither one's exit code trusted to stand for the
+# other (#661). vcgencmd is the legacy firmware's; under KMS it can exit 0
+# without touching the output, and the fb0 blank is what reaches DRM as a
+# DPMS off. On the legacy stack the blank cuts the signal too, given
+# hdmi_blanking=1 (BOOT_CONFIG_LINES above).
+proc setDisplayPower(on: bool): bool =
+  let vcgencmd = runDisplayCommand("vcgencmd display_power " & (if on: "1" else: "0"))
+  let blank = runPrivilegedDisplayShell("echo " & (if on: "0" else: "1") & " > /sys/class/graphics/fb0/blank")
+  vcgencmd == 0 or blank == 0
+
 proc turnOn*(self: Driver) =
   # Back from a blank, the panel may not show what the shadow says.
   self.forgetPanelContents()
   try:
-    let response = runDisplayCommand("vcgencmd display_power 1")
-    if response != 0:
-      discard runPrivilegedDisplayShell("echo 0 > /sys/class/graphics/fb0/blank")
+    if not setDisplayPower(true):
+      logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
+          "error": "Failed to turn display on"})
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to turn display on"})
 
 proc turnOff*(self: Driver) =
   try:
-    let response = runDisplayCommand("vcgencmd display_power 0")
-    if response != 0:
-      discard runPrivilegedDisplayShell("echo 1 > /sys/class/graphics/fb0/blank")
+    if not setDisplayPower(false):
+      logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
+          "error": "Failed to turn display off"})
   except:
     logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
         "error": "Failed to turn display off"})

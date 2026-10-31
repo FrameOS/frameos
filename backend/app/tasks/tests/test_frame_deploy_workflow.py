@@ -1122,6 +1122,43 @@ async def test_full_plan_includes_cifs_utils_for_enabled_mountpoints(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_full_plan_writes_no_boot_config_on_a_host_without_one(monkeypatch: pytest.MonkeyPatch):
+    """A framebuffer frame may be any Linux box: hdmi_blanking=1 is for a Pi's
+    config.txt, never a reason to create one (#661)."""
+    frame = SimpleNamespace(
+        id=9,
+        name="PcFrame",
+        ssh_keys=["main"],
+        rpios={"crossCompilation": "auto"},
+        reboot={"enabled": "false"},
+        last_successful_deploy_at=None,
+        last_successful_deploy={"frameos_version": "9.9.9"},
+        to_dict=lambda: {"id": 9, "name": "PcFrame"},
+    )
+    monkeypatch.setattr(
+        "app.tasks.frame_deploy_workflow.drivers_for_frame",
+        lambda _frame: {"bootconfig": SimpleNamespace(lines=["hdmi_blanking=1"])},
+    )
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.get_settings_dict", lambda _db, project_id=None: {})
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.select_ssh_keys_for_frame", lambda _frame, _settings: [])
+    monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
+
+    workflow = FrameDeployWorkflow(
+        db=None,  # type: ignore[arg-type]
+        redis=None,  # type: ignore[arg-type]
+        frame=frame,  # type: ignore[arg-type]
+        deployer=FakeDeployer(),  # type: ignore[arg-type]
+        temp_dir="",
+        binary_builder=FakeBinaryBuilder(),  # type: ignore[arg-type]
+    )
+
+    plan = await workflow.plan("full")
+
+    assert isinstance(plan.full_deploy, FullDeployPlan)
+    assert plan.full_deploy.post_deploy["bootconfig_changes"] == []
+
+
+@pytest.mark.asyncio
 async def test_full_plan_includes_post_deploy_driver_and_reboot_steps(monkeypatch: pytest.MonkeyPatch):
     frame = SimpleNamespace(
         id=8,

@@ -262,6 +262,7 @@ function inferFrameDriverNames(frame?: Partial<FrameType> | null): string[] {
   } else if (hyperPixel4Devices.has(device)) {
     drivers.add('hyperPixel4')
   } else if (device === 'framebuffer') {
+    drivers.add('bootconfig')
     drivers.add('frameBuffer')
   } else if (device === 'http.upload') {
     drivers.add('httpUpload')

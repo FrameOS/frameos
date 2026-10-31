@@ -347,6 +347,24 @@ press on a dark screen turns it back on and goes nowhere else: its down, its
 up and whatever gesture it makes never reach the scene, since nobody could
 see what they were pressing.
 
+From outside (a script, Home Assistant's `rest_command`), they are a POST to
+the frame's own server with its access key, as a bearer or `?k=`:
+
+```
+curl -X POST -H 'Authorization: Bearer <accessKey>' \
+  -H 'Content-Type: application/json' -d '{}' \
+  http://<frame>:8787/event/turnOff          # turnOn, toggleScreen
+```
+
+On a Raspberry Pi with an HDMI monitor (the `framebuffer` device) the driver
+runs both switches every time: `vcgencmd display_power` and the
+`/sys/class/graphics/fb0/blank` blank. Under KMS (the Pi 5, Raspberry Pi OS
+since Bookworm) the blank is a DPMS off and cuts the signal; on the legacy
+firmware stack (FrameOS's Buildroot images for the Pi 0–4) it does only with
+`hdmi_blanking=1` in `config.txt`, which a deploy and the driver's setup add
+on a host that has one. Without it the output turns black and the monitor
+keeps its backlight on (#661).
+
 **JSX UIs.** A JS app's UI (`docs/jsx-ui.md` "Events") is hit-tested in
 the interpreter before the scene's event nodes hear the event: `tap`,
 `doubleTap`, `longPress`, `swipe` (the element it began on), `pointerDown`,
