@@ -127,7 +127,9 @@ BUILDROOT_BOOTSTRAP_SCRIPT_VERSION = "6"
 # 20: the Pi 5 gained dtoverlay=vc4-kms-v3d, which _frame_boot_config_lines
 # merges into /boot/config.txt during customization — cards cached from before
 # it carry no framebuffer and must be regenerated, not reused.
-BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 20
+# 21: framebuffer (HDMI) frames gained hdmi_blanking=1, so display off cuts
+# the signal instead of painting it black (#661).
+BUILDROOT_SD_IMAGE_CUSTOMIZATION_VERSION = 21
 BUILDROOT_FRAMEOS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_FRAMEOS_PARTITION_SIZE", "30M")
 BUILDROOT_ASSETS_PARTITION_SIZE = os.environ.get("FRAMEOS_BUILDROOT_ASSETS_PARTITION_SIZE", "30M")
 BUILDROOT_DATA_PARTITION_HEADROOM_BYTES = 8 * 1024 * 1024

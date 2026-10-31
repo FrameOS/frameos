@@ -36,6 +36,12 @@ def test_framebuffer_frame_uses_evdev_for_local_input():
     assert "evdev" in drivers
 
 
+def test_framebuffer_frame_lets_display_off_cut_the_hdmi_signal():
+    drivers = drivers_for_frame(frame("framebuffer"))
+
+    assert drivers["bootconfig"].lines == ["hdmi_blanking=1"]
+
+
 def test_hyperpixel_round_uses_the_native_gpio_driver():
     """One driver for the panel since 2026-09-12: DPI block in config.txt,
     ST7701 init and backlight over GPIO. Nothing to vendor or link."""

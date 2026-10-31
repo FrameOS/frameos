@@ -2297,7 +2297,12 @@ class FrameDeployWorkflow:
             reboot_schedule["needs_remove"] = await self._path_exists("/etc/cron.d/frameos-reboot")
 
         bootconfig_changes: list[dict[str, str]] = []
-        for line in list((drivers.get("bootconfig").lines or [])) if drivers.get("bootconfig") else []:
+        bootconfig_lines = list((drivers.get("bootconfig").lines or [])) if drivers.get("bootconfig") else []
+        # A framebuffer frame may be any Linux box: with no config.txt there is
+        # no Pi firmware to read the lines, so never create one.
+        if bootconfig_lines and not await self._path_exists(boot_config):
+            bootconfig_lines = []
+        for line in bootconfig_lines:
             if line.startswith("#"):
                 to_remove = line[1:]
                 if await self._command_succeeds(f'grep -q "^{to_remove}" {shlex.quote(boot_config)}'):

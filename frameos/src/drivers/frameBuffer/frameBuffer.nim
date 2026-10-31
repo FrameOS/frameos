@@ -1,5 +1,5 @@
 import pixie, json, linuxfb, posix, posix/termios, strformat
-import std/[exitprocs, monotimes]
+import std/[exitprocs, monotimes, os]
 import frameos/device_setup
 import frameos/driver_context
 import frameos/driver_render_hint
@@ -297,10 +297,19 @@ proc publishScreenSize*(self: Driver) =
   if self.screenInfo.width > 0 and self.screenInfo.height > 0:
     reportDetectedDisplaySize(self.screenInfo.width.int, self.screenInfo.height.int)
 
+# Without it a blank (turnOff's fb0/blank) only paints the HDMI output black
+# and the monitor keeps its backlight on (#661). The legacy firmware reads it;
+# under KMS it is ignored, so it is safe on every Pi. A framebuffer frame may
+# be any Linux box: without a config.txt there is no Pi firmware to tell.
+const BOOT_CONFIG_LINES = @["hdmi_blanking=1"]
+
 proc setup*(frameOS: DriverContext = nil): SetupResult =
+  result = setupOk()
+  if fileExists(detectBootConfigPath()):
+    addSetupResult(result, runSetupStep("bootConfig", proc(): SetupResult = setupBootConfig(BOOT_CONFIG_LINES)))
   if frameOS.isNil or frameOS.frameConfig.isNil:
     setupLog("FrameOS setup: frameBuffer: driver context unavailable; skipping framebuffer dimension detection")
-    return setupOk()
+    return
 
   try:
     let screenInfo = getScreenInfo(frameOS.logger)
@@ -315,7 +324,6 @@ proc setup*(frameOS: DriverContext = nil): SetupResult =
     setupLog("FrameOS setup: frameBuffer: invalid framebuffer metadata caused division by zero: " & e.msg)
   except Exception as e:
     setupLog("FrameOS setup: frameBuffer: could not detect framebuffer dimensions: " & e.msg)
-  result = setupOk()
 
 proc render*(self: Driver, image: Image) =
   if self.isNil:

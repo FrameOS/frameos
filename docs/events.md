@@ -347,6 +347,21 @@ press on a dark screen turns it back on and goes nowhere else: its down, its
 up and whatever gesture it makes never reach the scene, since nobody could
 see what they were pressing.
 
+From outside (a script, Home Assistant's `rest_command`), they are a POST to
+the frame's own server with its access key, as a bearer or `?k=`:
+
+```
+curl -X POST -H 'Authorization: Bearer <accessKey>' \
+  -H 'Content-Type: application/json' -d '{}' \
+  http://<frame>:8787/event/turnOff          # turnOn, toggleScreen
+```
+
+On a Raspberry Pi with an HDMI monitor (the `framebuffer` device) the blank
+cuts the signal only with `hdmi_blanking=1` in `config.txt`, so the monitor
+sleeps and its backlight goes dark; without it the output only turns black.
+A deploy and the driver's setup add the line, on a host that has a
+`config.txt` (#661).
+
 **JSX UIs.** A JS app's UI (`docs/jsx-ui.md` "Events") is hit-tested in
 the interpreter before the scene's event nodes hear the event: `tap`,
 `doubleTap`, `longPress`, `swipe` (the element it began on), `pointerDown`,
