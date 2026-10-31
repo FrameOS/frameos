@@ -1144,17 +1144,17 @@ async def test_full_plan_writes_no_boot_config_on_a_host_without_one(monkeypatch
     monkeypatch.setattr("app.tasks.frame_deploy_workflow.normalize_ssh_keys", lambda _settings: [])
 
     workflow = FrameDeployWorkflow(
-        db=None,
-        redis=None,
-        frame=frame,
-        deployer=FakeDeployer(),
+        db=None,  # type: ignore[arg-type]
+        redis=None,  # type: ignore[arg-type]
+        frame=frame,  # type: ignore[arg-type]
+        deployer=FakeDeployer(),  # type: ignore[arg-type]
         temp_dir="",
-        binary_builder=FakeBinaryBuilder(),
+        binary_builder=FakeBinaryBuilder(),  # type: ignore[arg-type]
     )
 
     plan = await workflow.plan("full")
 
-    assert plan.full_deploy is not None
+    assert isinstance(plan.full_deploy, FullDeployPlan)
     assert plan.full_deploy.post_deploy["bootconfig_changes"] == []
 
 
