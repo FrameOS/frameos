@@ -55,6 +55,10 @@ export const fallbackModelPrices: Record<
   string,
   { cached: number; input: number; output: number }
 > = {
+  // Chosen as chat models in account settings (the field is free text);
+  // migration 0072 seeds the same numbers. gpt-image-2's output is priced at
+  // its image-output rate.
+  "gpt-4.1-mini": { cached: 0.1, input: 0.4, output: 1.6 },
   "gpt-4o-mini": { cached: 0.075, input: 0.15, output: 0.6 },
   // The voice chat's transcription (docs/voice-chat.md): its input tokens
   // are almost all audio tokens ($3/M; text input is $1.25/M), so the audio
@@ -69,6 +73,7 @@ export const fallbackModelPrices: Record<
   "gpt-6-luna": { cached: 0.01, input: 0.1, output: 0.5 },
   // The chat's default since 2026-10-29; migration 0071 seeds the same numbers.
   "gpt-6.1-terra": { cached: 0.05, input: 1, output: 5 },
+  "gpt-image-2": { cached: 1.25, input: 5, output: 30 },
 };
 
 // A model we have never seen at all. Zero would meter it free and hide the
