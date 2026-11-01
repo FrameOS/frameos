@@ -498,27 +498,21 @@ proc forgetPanelContents*(self: Driver) =
 # without touching the output, and the fb0 blank is what reaches DRM as a
 # DPMS off. On the legacy stack the blank cuts the signal too, given
 # hdmi_blanking=1 (BOOT_CONFIG_LINES above).
-proc setDisplayPower(on: bool): bool =
-  let vcgencmd = runDisplayCommand("vcgencmd display_power " & (if on: "1" else: "0"))
-  let blank = runPrivilegedDisplayShell("echo " & (if on: "0" else: "1") & " > /sys/class/graphics/fb0/blank")
-  vcgencmd == 0 or blank == 0
+proc setDisplayPower(self: Driver, on: bool) =
+  let error = if on: "Failed to turn display on" else: "Failed to turn display off"
+  try:
+    let vcgencmd = runDisplayCommand("vcgencmd display_power " & (if on: "1" else: "0"))
+    let blank = runPrivilegedDisplayShell("echo " & (if on: "0" else: "1") & " > /sys/class/graphics/fb0/blank")
+    if vcgencmd != 0 and blank != 0:
+      logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer", "error": error,
+          "vcgencmdExitCode": vcgencmd, "blankExitCode": blank})
+  except CatchableError as e:
+    logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer", "error": error & ": " & e.msg})
 
 proc turnOn*(self: Driver) =
   # Back from a blank, the panel may not show what the shadow says.
   self.forgetPanelContents()
-  try:
-    if not setDisplayPower(true):
-      logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
-          "error": "Failed to turn display on"})
-  except:
-    logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
-        "error": "Failed to turn display on"})
+  self.setDisplayPower(true)
 
 proc turnOff*(self: Driver) =
-  try:
-    if not setDisplayPower(false):
-      logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
-          "error": "Failed to turn display off"})
-  except:
-    logFrameBuffer(self.logger, %*{"event": "driver:frameBuffer",
-        "error": "Failed to turn display off"})
+  self.setDisplayPower(false)
