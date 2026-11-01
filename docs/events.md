@@ -361,8 +361,8 @@ runs both switches every time: `vcgencmd display_power` and the
 `/sys/class/graphics/fb0/blank` blank. Under KMS (the Pi 5, Raspberry Pi OS
 since Bookworm) the blank is a DPMS off and cuts the signal; on the legacy
 firmware stack (FrameOS's Buildroot images for the Pi 0–4) it does only with
-`hdmi_blanking=1` in `config.txt`, which a deploy and the driver's setup add
-on a host that has one. Without it the output turns black and the monitor
+`hdmi_blanking=1` in `config.txt`, which the driver's setup (`frameos
+setup`, run by every deploy and on first boot) adds on a host that has one. Without it the output turns black and the monitor
 keeps its backlight on (#661).
 
 **JSX UIs.** A JS app's UI (`docs/jsx-ui.md` "Events") is hit-tested in

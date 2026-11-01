@@ -287,9 +287,6 @@ def device_dimensions(device: str | None) -> tuple[int, int] | None:
     return None
 
 
-FRAMEBUFFER_BOOT_CONFIG_LINES = ("hdmi_blanking=1",)
-
-
 def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
     device = frame.device
     device_drivers: dict[str, Driver] = {}
@@ -314,12 +311,7 @@ def drivers_for_frame(frame: Frame) -> dict[str, Driver]:
     elif device in HYPERPIXEL4_DEVICES:
         device_drivers = {"hyperPixel4": DRIVERS["hyperPixel4"]}
     elif device == "framebuffer":
-        device_drivers = {
-            "frameBuffer": DRIVERS["frameBuffer"],
-            # Without it "display off" (fb0/blank) only paints the HDMI output
-            # black and the monitor keeps its backlight on (#661).
-            "bootconfig": replace(DRIVERS["bootConfig"], lines=list(FRAMEBUFFER_BOOT_CONFIG_LINES)),
-        }
+        device_drivers = {"frameBuffer": DRIVERS["frameBuffer"]}
     elif device == "http.upload":
         device_drivers = {"httpUpload": DRIVERS["httpUpload"]}
     elif device.startswith("waveshare."):
