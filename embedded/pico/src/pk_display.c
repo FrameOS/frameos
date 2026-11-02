@@ -7,6 +7,7 @@
 #include "pico/stdlib.h"
 
 #include "pk_config_keys.h"
+#include "pk_log.h"
 #include "pk_platform.h"
 #include "pk_shiftreg.h"
 
@@ -162,4 +163,27 @@ bool pk_epd_wait_idle(const pk_pins_t *pins, uint32_t timeout_ms)
         pk_wait_ms(10);
     }
     return true;
+}
+
+bool pk_epd_wait_step(const pk_pins_t *pins, const char *stage, uint32_t settle_ms, uint32_t fallback_ms,
+                      uint32_t timeout_ms)
+{
+    // The ACeP/Spectra controllers raise BUSY some time after the command,
+    // not during it. Polled at once, the line still reads idle, the next
+    // command goes out while the controller is still at work, and is lost:
+    // a refresh sent during power-on never ran, and the pass "succeeded" in
+    // a second (#664). The Waveshare reference driver settles 100 ms before
+    // it polls and waits the measured duration when it saw no pulse; so
+    // does Pimoroni's Python driver. Same here: a missed pulse costs time,
+    // never the picture.
+    absolute_time_t settle_until = make_timeout_time_ms(settle_ms);
+    while (!pk_display_busy(pins)) {
+        if (absolute_time_diff_us(get_absolute_time(), settle_until) < 0) {
+            pk_logf("display: no BUSY pulse after %s, waiting %lu ms instead", stage, (unsigned long)fallback_ms);
+            pk_wait_ms(fallback_ms);
+            return true;
+        }
+        pk_wait_ms(1);
+    }
+    return pk_epd_wait_idle(pins, timeout_ms);
 }

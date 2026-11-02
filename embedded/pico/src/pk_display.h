@@ -52,5 +52,12 @@ void pk_epd_data(const pk_pins_t *pins, const uint8_t *data, size_t len);
 void pk_epd_data_byte(const pk_pins_t *pins, uint8_t value);
 void pk_epd_reset(const pk_pins_t *pins);
 bool pk_epd_wait_idle(const pk_pins_t *pins, uint32_t timeout_ms);
+// After a command the controller answers with a BUSY pulse (power on,
+// refresh): the pulse may begin well after the command, so this gives it
+// `settle_ms` to start before waiting for it to end; a pulse never seen is
+// replaced by a wait of `fallback_ms` (the step's measured duration), logged
+// under `stage`. False only when the pulse outlasts `timeout_ms`.
+bool pk_epd_wait_step(const pk_pins_t *pins, const char *stage, uint32_t settle_ms, uint32_t fallback_ms,
+                      uint32_t timeout_ms);
 
 #endif // PK_DISPLAY_H

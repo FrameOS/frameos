@@ -35,10 +35,10 @@ static bool ac073_begin(const pk_panel_t *panel, const pk_pins_t *pins)
     pk_epd_spi_init(pins);
     pk_epd_reset(pins);
     if (!panel_wait_idle(pins, 5000)) return false;
+    pk_wait_ms(30); // the reference's pause after reset
     panel_run_sequence(pins, seq_7in3f_init);
-    pk_epd_command(pins, 0x04); // power on before data, per reference flow
-    if (!panel_wait_idle(pins, 15000)) return false;
-    pk_epd_command(pins, 0x10);
+    // Power on is in end(), right before the refresh (see panel_el673.c).
+    pk_epd_command(pins, 0x10); // start pixel data
     return true;
 }
 
@@ -51,9 +51,14 @@ static bool ac073_end(const pk_pins_t *pins, bool refresh)
 {
     bool ok = true;
     if (refresh) {
-        pk_epd_command(pins, 0x12); // refresh
+        pk_epd_command(pins, 0x04); // power on
         pk_epd_data_byte(pins, 0x00);
-        ok = panel_wait_idle(pins, 45000);
+        ok = panel_wait_power_on(pins);
+        if (ok) {
+            pk_epd_command(pins, 0x12); // refresh
+            pk_epd_data_byte(pins, 0x00);
+            ok = panel_wait_refresh(pins);
+        }
     }
     // Also after a timeout: the booster must not stay on.
     pk_epd_command(pins, 0x02); // power off

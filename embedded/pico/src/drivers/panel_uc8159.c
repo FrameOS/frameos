@@ -66,10 +66,10 @@ static bool uc8159_end(const pk_pins_t *pins, bool refresh)
     bool ok = true;
     if (refresh) {
         pk_epd_command(pins, 0x04); // power on
-        ok = panel_wait_idle(pins, 15000);
+        ok = panel_wait_power_on(pins);
         if (ok) {
             pk_epd_command(pins, 0x12); // refresh
-            ok = panel_wait_idle(pins, 45000);
+            ok = panel_wait_refresh(pins);
         }
     }
     // Also after a timeout: the booster must not stay on.
