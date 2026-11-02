@@ -246,7 +246,7 @@ for the two Spectra boards most of the bench work runs on:
 | `seeed_reterminal_e1003` | S3 | EPD_10in3 10.3" sixteen greys (IT8951, E1003 tuning) | reTerminal E1003, 32MB flash, 8MB PSRAM — renders on-device on an 8-bit luma canvas (2.5 MiB); the IT8951 answers on MISO GPIO8 (`dc` slot), panel power GPIO11 (`pwr`), controller power GPIO21 (`cs2`); battery GPIO1 ÷2, switch GPIO40; TF socket on the panel bus (power 39); green LED GPIO16 (lit low); I2C 19/20 with the clock, the SHT40, the charger and the GT911 touch panel (INT 2, reset 48); PDM mic 42/41/38; deep-sleeps on battery |
 | `seeed_reterminal_e1004` | S3 | EPD_13in3e 13.3" Spectra (T133A01 tuning) | reTerminal E1004, 32MB flash, 8MB PSRAM — renders on-device on the 16-bit canvas; TF socket as the E1001/E1002; green LED GPIO48 (lit high); I2C 19/20 carries the clock, the sensor AND the charger (39/40 is its J2 header); no microphone |
 | `elecrow_crowpanel_5in79` | S3 | EPD_5in79 5.79" 4-gray | CrowPanel, dual SSD1683 |
-| `seeed_sensecap_indicator_d1` | S3 | LCD_ST7701S_480x480 4" IPS LCD (RGB, 16-bit colour) | SenseCAP Indicator D1/D1S/D1L/D1Pro, 8MB flash, 8MB PSRAM (renders on-device); the LCD's wiring is the driver's board table, no EPD pins; top button GPIO38 (pressed: the screen off or on, twice: the scene switcher; a swipe in from the right or left edge: the next or previous scene, up from the bottom: the scene switcher); FT6336U touch on the LCD's I2C 39/40, polled; the TF socket, buzzer and sensors are the RP2040's |
+| `seeed_sensecap_indicator_d1` | S3 | LCD_ST7701S_480x480 4" IPS LCD (RGB, 16-bit colour) | SenseCAP Indicator D1/D1S/D1L/D1Pro, 8MB flash, 8MB PSRAM (renders on-device); the LCD's wiring is the driver's board table, no EPD pins; top button GPIO38 (pressed: the screen off or on, twice: the scene switcher; a swipe in from the left or right edge: `back` or `forward`, up from the bottom: the scene switcher, down from the top: the scene's settings); FT6336U touch on the LCD's I2C 39/40, polled; the TF socket, buzzer and sensors are the RP2040's |
 
 - **Seeed reTerminal Sticky** — an ESP32-S3R8 (8 MB PSRAM, 32 MB flash), so
   it renders on-device like the E-series; every pin below is from Seeed's
@@ -333,9 +333,9 @@ for the two Spectra boards most of the bench work runs on:
   panel shares the clock's I2C bus (19/20): `fos_i2c.c` lends `fos_touch.c`
   that bus instead of the touch driver opening a second one on the same pins,
   and a lent bus survives the console's `i2c` rescan. Its preset binds the
-  Indicator's edge swipes besides the keys: in from the right the next scene,
-  from the left the previous, up from the bottom the scene switcher
-  (`fos_board.c` `TOUCH_EDGE_SWIPES`). The 8 MB module renders
+  Indicator's edge swipes besides the keys: in from the left `back`, from the
+  right `forward`, up from the bottom the scene switcher, down from the top
+  the scene's settings (`fos_board.c` `TOUCH_EDGE_SWIPES`). The 8 MB module renders
   on-device in pixie's **8-bit luma canvas** (`pfGray8`; every grey or black-
   and-white panel gets one whatever fits, a colour panel too big for RGBX gets
   565): 2.5 MiB of canvas and 1.25 MiB of packed panel buffer beside the
