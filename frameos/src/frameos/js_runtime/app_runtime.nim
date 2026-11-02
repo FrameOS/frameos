@@ -1599,6 +1599,117 @@ proc jsCanvasClear(ctx: ptr JSContext, id: JSValue, color: JSValue): JSValue {.n
     frameos_apps.logError(e.owner, "frameos.clear failed: " & err.msg)
     return nimBoolToJS(ctx, false)
 
+const MaxPaletteColors = 256
+  ## Entries a `frameos.putPixels` palette may hold: an index is one byte.
+
+proc jsCanvasPutPixels(ctx: ptr JSContext, id: JSValue, pixels: JSValue, optionsJson: JSValue): JSValue {.nimcall.} =
+  ## `frameos.putPixels(canvas, bytes, options)`: pixels written straight
+  ## into the canvas, no SVG between. `bytes` is a Uint8Array (or any typed
+  ## array, or an ArrayBuffer) of RGBA, four per pixel, rows top to bottom;
+  ## with `options.palette` (CSS colours or 0xRRGGBB numbers, 256 at most)
+  ## it is one index per pixel. Each source pixel lands as a `pixelSize`
+  ## square at `x`, `y` (a 120x120 fire fills a 480x480 canvas at 4), the
+  ## grid being `width` x `height` source pixels (the canvas's size over
+  ## `pixelSize` by default). An RGBA pixel with alpha 0, or an index past
+  ## the palette, leaves the canvas as it is. What lands outside the canvas
+  ## is clipped; the box written is noted for the frames that show the canvas.
+  let e = env(ctx)
+  if e == nil:
+    return nimBoolToJS(ctx, false)
+  let image = e.runtime.canvasImage(toNimFloat(ctx, id).int)
+  if image.isNil:
+    return nimBoolToJS(ctx, false)
+  let (bytes, byteLen) = jsBytes(ctx, pixels)
+  if bytes.isNil:
+    frameos_apps.logError(e.owner, "frameos.putPixels needs a Uint8Array or an ArrayBuffer of pixels")
+    return nimBoolToJS(ctx, false)
+  var options = newJObject()
+  try:
+    options = parseJson(toNimString(ctx, optionsJson))
+  except CatchableError:
+    discard
+  let
+    ps = clamp(options{"pixelSize"}.getInt(1), 1, 64)
+    x0 = options{"x"}.getInt(0)
+    y0 = options{"y"}.getInt(0)
+    width = options{"width"}.getInt((image.width - x0) div ps)
+    height = options{"height"}.getInt((image.height - y0) div ps)
+    paletteNode = options{"palette"}
+    paletted = not paletteNode.isNil and paletteNode.kind == JArray
+    bytesPerSource = if paletted: 1 else: 4
+  if width <= 0 or height <= 0:
+    frameos_apps.logError(e.owner, "frameos.putPixels needs a width and a height")
+    return nimBoolToJS(ctx, false)
+  if width * height * bytesPerSource > byteLen:
+    frameos_apps.logError(e.owner, "frameos.putPixels: " & $width & "x" & $height &
+      (if paletted: " indices need " else: " RGBA pixels need ") & $(width * height * bytesPerSource) &
+      " bytes, got " & $byteLen)
+    return nimBoolToJS(ctx, false)
+  var palette: seq[ColorRGBX]
+  if paletted:
+    if paletteNode.len > MaxPaletteColors:
+      frameos_apps.logError(e.owner, "frameos.putPixels: a palette holds " & $MaxPaletteColors & " colours at most")
+      return nimBoolToJS(ctx, false)
+    try:
+      for entry in paletteNode:
+        if entry.kind == JString:
+          palette.add parseHtmlColor(entry.getStr()).rgbx
+        else:
+          let v = entry.getInt(0)
+          palette.add rgbx(uint8((v shr 16) and 255), uint8((v shr 8) and 255), uint8(v and 255), 255)
+    except CatchableError as err:
+      frameos_apps.logError(e.owner, "frameos.putPixels: bad palette colour: " & err.msg)
+      return nimBoolToJS(ctx, false)
+  let
+    x1 = max(x0, 0)
+    y1 = max(y0, 0)
+    x2 = min(x0 + width * ps, image.width)
+    y2 = min(y0 + height * ps, image.height)
+  if x2 <= x1 or y2 <= y1:
+    return nimBoolToJS(ctx, true) # all of it outside: nothing to note
+  # A square's rows below its first are copies of it, unless a pixel was
+  # left as it was (each row keeps its own) or every 565 store is dithered
+  # by its place (each row has its own pattern).
+  let rowsCopy = not image.ditherStores
+  for sy in 0 ..< height:
+    let top = y0 + sy * ps
+    if top >= image.height or top + ps <= 0:
+      continue
+    var
+      firstRow = -1
+      whole = true
+    for k in 0 ..< ps:
+      let dy = top + k
+      if dy < 0 or dy >= image.height:
+        continue
+      if firstRow >= 0 and whole and rowsCopy:
+        copyMem(image.pixelAddr(image.dataIndex(x1, dy)), image.pixelAddr(image.dataIndex(x1, firstRow)),
+          (x2 - x1) * image.bytesPerPixel)
+        continue
+      for sx in 0 ..< width:
+        let left = x0 + sx * ps
+        if left >= image.width or left + ps <= 0:
+          continue
+        var color: ColorRGBX
+        if paletted:
+          let index = bytes[sy * width + sx].int
+          if index >= palette.len:
+            whole = false
+            continue
+          color = palette[index]
+        else:
+          let at = (sy * width + sx) * 4
+          if bytes[at + 3] == 0:
+            whole = false
+            continue
+          color = rgbx(bytes[at], bytes[at + 1], bytes[at + 2], 255)
+        for dx in max(left, 0) ..< min(left + ps, image.width):
+          image.setPixel(image.dataIndex(dx, dy), color)
+      if firstRow < 0:
+        firstRow = dy
+  registerCanvas(image).drew(rect(x1.float32, y1.float32, (x2 - x1).float32, (y2 - y1).float32))
+  nimBoolToJS(ctx, true)
+
 proc clearTransientImages(runtime: JsAppRuntime) =
   for id in runtime.transientImageIds:
     if runtime.images.hasKey(id):
@@ -1839,6 +1950,7 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
   runtime.js.registerFunction("jsCanvas", jsCanvas)
   runtime.js.registerFunction("jsCanvasDraw", jsCanvasDraw)
   runtime.js.registerFunction("jsCanvasClear", jsCanvasClear)
+  runtime.js.registerFunction("jsCanvasPutPixels", jsCanvasPutPixels)
   runtime.js.registerFunction("jsAssets", jsAssets)
   runtime.js.registerFunction("jsStreams", jsStreams)
   runtime.js.registerFunction("jsGetSetting", jsGetSetting)
@@ -1896,6 +2008,8 @@ proc ensureReady(runtime: JsAppRuntime, frameConfig: FrameConfig, sceneId: strin
     draw: (canvas, content) => jsCanvasDraw(Number((canvas && canvas.id) || 0),
       (content && typeof content === "object") ? content : String(content || "")) === true,
     clear: (canvas, color) => jsCanvasClear(Number((canvas && canvas.id) || 0), String(color || "")) === true,
+    putPixels: (canvas, pixels, options) => jsCanvasPutPixels(Number((canvas && canvas.id) || 0), pixels,
+      JSON.stringify(options || {})) === true,
     listAssets: (dir) => __frameosAsset("list", dir) || [],
     assetExists: (path) => __frameosAsset("exists", path) === true,
     assetSize: (path) => __frameosAsset("size", path) ?? -1,

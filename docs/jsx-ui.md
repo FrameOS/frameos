@@ -262,6 +262,21 @@ export function get(app) {
   `<svg viewBox>` for other units) or SVG markup, in the canvas's pixels.
   Only the box the drawing touches is painted. `frameos.clear(canvas, color)`
   fills it. Both work in handlers too, the way a drag paints.
+- **`frameos.putPixels(canvas, bytes, options)`** writes pixels straight
+  in, for a raster the app computes itself (a fire, a plasma, a sprite, a
+  cellular automaton): a `Uint8Array` (any typed array, or an `ArrayBuffer`)
+  of RGBA, four bytes per pixel, rows top to bottom, or with
+  `options.palette` (CSS colours or `0xRRGGBB` numbers, 256 at most) one
+  index per pixel, so the app's own buffer goes over as it is. Each source
+  pixel lands as a `pixelSize` square at `x`, `y`, the grid being `width` x
+  `height` source pixels (the canvas over `pixelSize` by default): a
+  120x120 fire fills a 480x480 canvas at 4 with chunky pixels, never a blur.
+  An RGBA pixel with alpha 0, or an index past the palette, leaves the
+  canvas as it is; what falls outside is clipped; too few bytes is refused
+  (false, and a log line). The box written is one draw in the log below. The
+  palette is packed for the canvas's format once per call, a square's rows
+  are copies of its first, and the bytes never enter a string: the Hellfire
+  sample scene (`repo/scenes/samples/Hellfire`) is the yardstick.
 - **A frame repaints what was drawn**, not the canvas and not the rest of the
   UI.
   - Each draw is noted with its box (`utils/canvas_log.nim`), and each frame

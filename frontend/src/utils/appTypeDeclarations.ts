@@ -270,6 +270,17 @@ declare const frameos: {
   draw(canvas: FrameOSCanvasRef, content: FrameOSElement | string): boolean;
   /** Fills a canvas with color (white by default). */
   clear(canvas: FrameOSCanvasRef, color?: string): boolean;
+  /**
+   * Writes pixels straight into a canvas (FrameOS 2026.11.1+): RGBA bytes, four per pixel, rows top to bottom; with
+   * palette (CSS colors or 0xRRGGBB numbers, 256 at most) one index per pixel. Each source pixel is a pixelSize
+   * square, the grid width x height source pixels (the canvas over pixelSize by default) at x, y. Alpha 0, or an
+   * index past the palette, leaves the pixel as it was; what falls outside the canvas is clipped.
+   */
+  putPixels(
+    canvas: FrameOSCanvasRef,
+    pixels: Uint8Array | Uint8ClampedArray | ArrayBuffer,
+    options?: { x?: number; y?: number; width?: number; height?: number; pixelSize?: number; palette?: (string | number)[] }
+  ): boolean;
   listAssets(dir?: string): string[];
   assetExists(path: string): boolean;
   assetSize(path: string): number;

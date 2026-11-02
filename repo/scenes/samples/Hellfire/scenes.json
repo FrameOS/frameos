@@ -1,0 +1,133 @@
+[
+  {
+    "id": "5f2b1c66-0666-4666-8666-666000000666",
+    "name": "Hellfire",
+    "settings": {
+      "execution": "interpreted",
+      "refreshInterval": 0.04,
+      "backgroundColor": "#070707"
+    },
+    "fields": [],
+    "apps": {
+      "hellfire": {
+        "origin": "hellfire",
+        "name": "Hellfire",
+        "category": "data",
+        "description": "The Doom fire, simulated a byte per cell and written into a canvas with frameos.putPixels.",
+        "version": "1.0.0",
+        "fields": [
+          {
+            "name": "pixelSize",
+            "type": "integer",
+            "value": "4",
+            "required": true,
+            "label": "Pixel size",
+            "hint": "Each cell of the fire is a square this many pixels wide. Smaller is finer and slower: a 480x480 panel at 4 is a 120x120 fire."
+          },
+          {
+            "name": "palette",
+            "type": "select",
+            "options": [
+              "fire",
+              "ice",
+              "toxic"
+            ],
+            "value": "fire",
+            "required": true,
+            "label": "Palette"
+          },
+          {
+            "name": "wind",
+            "type": "integer",
+            "value": "1",
+            "required": true,
+            "label": "Wind",
+            "hint": "-3 to 3. 1 is Doom's own drift."
+          },
+          {
+            "name": "stepsPerRender",
+            "type": "integer",
+            "value": "1",
+            "required": true,
+            "label": "Steps per render",
+            "hint": "1 on an LCD that animates. On e-paper, 60 or so, so every refresh is a new flame."
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "value": "0",
+            "label": "Seed",
+            "hint": "0 for a different fire every time; any other number for the same one."
+          }
+        ],
+        "output": [
+          {
+            "name": "image",
+            "type": "image"
+          }
+        ],
+        "sources": {
+          "config.json": "{\n  \"name\": \"Hellfire\",\n  \"category\": \"data\",\n  \"description\": \"The Doom fire, simulated a byte per cell and written into a canvas with frameos.putPixels.\",\n  \"version\": \"1.0.0\",\n  \"fields\": [\n    { \"name\": \"pixelSize\", \"type\": \"integer\", \"value\": \"4\", \"required\": true, \"label\": \"Pixel size\", \"hint\": \"Each cell of the fire is a square this many pixels wide. Smaller is finer and slower: a 480x480 panel at 4 is a 120x120 fire.\" },\n    { \"name\": \"palette\", \"type\": \"select\", \"options\": [\"fire\", \"ice\", \"toxic\"], \"value\": \"fire\", \"required\": true, \"label\": \"Palette\" },\n    { \"name\": \"wind\", \"type\": \"integer\", \"value\": \"1\", \"required\": true, \"label\": \"Wind\", \"hint\": \"-3 to 3. 1 is Doom's own drift.\" },\n    { \"name\": \"stepsPerRender\", \"type\": \"integer\", \"value\": \"1\", \"required\": true, \"label\": \"Steps per render\", \"hint\": \"1 on an LCD that animates. On e-paper, 60 or so, so every refresh is a new flame.\" },\n    { \"name\": \"seed\", \"type\": \"integer\", \"value\": \"0\", \"label\": \"Seed\", \"hint\": \"0 for a different fire every time; any other number for the same one.\" }\n  ],\n  \"output\": [{ \"name\": \"image\", \"type\": \"image\" }],\n  \"permissions\": []\n}\n",
+          "app.tsx": "// Hellfire: the PlayStation Doom fire, one byte of heat per cell, written\n// into a canvas with frameos.putPixels every frame (no SVG, no markup).\n// The simulation runs at the canvas's size over pixelSize, so a 480x480\n// panel at 4 is a 120x120 grid: 14,400 cells a frame.\n\n// Doom's 37 colours, black to white through the reds and yellows.\nconst FIRE = [\n  0x070707, 0x1f0707, 0x2f0f07, 0x470f07, 0x571707, 0x671f07, 0x771f07, 0x8f2707, 0x9f2f07, 0xaf3f07,\n  0xbf4707, 0xc74707, 0xdf4f07, 0xdf5707, 0xdf5707, 0xd75f07, 0xd75f07, 0xd7670f, 0xcf6f0f, 0xcf770f,\n  0xcf7f0f, 0xcf8717, 0xc78717, 0xc78f17, 0xc7971f, 0xbf9f1f, 0xbf9f1f, 0xbfa727, 0xbfa727, 0xbfaf2f,\n  0xb7af2f, 0xb7b72f, 0xb7b737, 0xcfcf6f, 0xdfdf9f, 0xefefc7, 0xffffff,\n]\nconst PALETTES = {\n  fire: FIRE,\n  ice: FIRE.map((c) => ((c & 0xff) << 16) | (c & 0xff00) | (c >> 16)),\n  toxic: FIRE.map((c) => (((c >> 8) & 0xff) << 16) | (((c >> 16) & 0xff) << 8) | (c & 0xff)),\n}\nconst HOT = FIRE.length - 1\n\n// What outlives a render while the interpreter does. An ESP32 short of\n// memory drops the interpreter and the fire restarts from its warm-up.\nlet heat = null\nlet cols = 0\nlet rows = 0\nlet seed = 1\n\n// A small LCG: the same seed is the same fire on every frame type, which\n// is what makes a snapshot of it stable.\nfunction spread(wind) {\n  for (let y = rows - 1; y > 0; y--) {\n    const row = y * cols\n    const above = row - cols\n    for (let x = 0; x < cols; x++) {\n      const h = heat[row + x]\n      if (h === 0) {\n        heat[above + x] = 0\n        continue\n      }\n      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0\n      const r = seed >>> 30 // 0..3\n      let dx = x - r + wind\n      if (dx < 0) dx += cols\n      else if (dx >= cols) dx -= cols\n      heat[above + dx] = h - (r & 1)\n    }\n  }\n}\n\nexport function get(app, context) {\n  const config = app.config\n  const pixelSize = Math.max(1, Math.min(32, Math.round(Number(config.pixelSize) || 4)))\n  const width = Math.max(pixelSize, context.imageWidth || app.frame.width)\n  const height = Math.max(pixelSize, context.imageHeight || app.frame.height)\n  const palette = PALETTES[config.palette] || FIRE\n  const wind = Math.max(-3, Math.min(3, Math.round(Number(config.wind) || 0)))\n  const steps = Math.max(1, Math.min(500, Math.round(Number(config.stepsPerRender) || 1)))\n  const canvas = frameos.canvas('fire', width, height, '#070707')\n  if (!canvas) return null\n  const w = Math.floor(width / pixelSize)\n  const h = Math.floor(height / pixelSize)\n  if (canvas.fresh || !heat || w !== cols || h !== rows) {\n    cols = w\n    rows = h\n    heat = new Uint8Array(cols * rows)\n    heat.fill(HOT, (rows - 1) * cols) // the bottom row burns\n    const given = Math.round(Number(config.seed) || 0)\n    seed = (given > 0 ? given : (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0) || 1\n    // Warm up: the flames climb about two rows per heat unit, so by then\n    // the first frame is a fire, not a glowing line.\n    const climb = Math.min(rows, HOT * 2)\n    for (let i = 0; i < climb; i++) spread(wind)\n  } else {\n    for (let i = 0; i < steps; i++) spread(wind)\n  }\n  frameos.putPixels(canvas, heat, { width: cols, height: rows, pixelSize, palette })\n  return <img className=\"w-full h-full\" src={canvas} />\n}\n"
+        }
+      }
+    },
+    "nodes": [
+      {
+        "id": "render",
+        "type": "event",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render"
+        }
+      },
+      {
+        "id": "fire",
+        "type": "app",
+        "position": {
+          "x": 0,
+          "y": 200
+        },
+        "data": {
+          "keyword": "hellfire",
+          "config": {}
+        }
+      },
+      {
+        "id": "image",
+        "type": "app",
+        "position": {
+          "x": 300,
+          "y": 0
+        },
+        "data": {
+          "keyword": "render/image",
+          "config": {
+            "placement": "stretch"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "render-image",
+        "type": "appNodeEdge",
+        "source": "render",
+        "target": "image",
+        "sourceHandle": "next",
+        "targetHandle": "prev"
+      },
+      {
+        "id": "fire-image",
+        "type": "codeNodeEdge",
+        "source": "fire",
+        "target": "image",
+        "sourceHandle": "fieldOutput",
+        "targetHandle": "fieldInput/image"
+      }
+    ]
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "name": "Hellfire",
+  "description": "The Doom fire, burning at the frame rate of your LCD: a byte of heat per cell, written straight into a canvas with frameos.putPixels. Three palettes, a wind, and a seed. On e-paper set the refresh to a minute and the steps per render to 60.",
+  "config": null,
+  "image": "./image.jpg",
+  "imageWidth": 1280,
+  "imageHeight": 720,
+  "scenes": "./scenes.json"
+}

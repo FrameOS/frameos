@@ -17,6 +17,16 @@ full-screen 480x480 SVG every frame — a background `<rect>`, the logo's five
 paths twice (the shadow at `opacity="0.32"`) — and returns
 `frameos.svg(svg, {width, height})`. `refreshInterval` 0.0333.
 
+The second yardstick is the sample scene **Hellfire**
+(`repo/scenes/samples/Hellfire`): the Doom fire, a byte of heat per cell
+simulated in JS (a 480x480 panel at pixel size 4 is 14,400 cells a frame)
+and handed to `frameos.putPixels` as the `Uint8Array` it lives in, with a
+37-colour palette and each cell a 4x4 square; the `<img>` of that canvas
+is the frame. No SVG is built or parsed, so what it measures is the
+interpreter's loop and the raw pixel path (`docs/jsx-ui.md` "Canvases").
+On a laptop a frame is ~3 ms; the SenseCAP Indicator's number is still to
+be taken.
+
 ## Where an ESP32 frame goes
 
 Measured on the SenseCAP Indicator D1S (ESP32-S3 at 240 MHz, 8 MB octal PSRAM
