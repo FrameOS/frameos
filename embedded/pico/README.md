@@ -202,7 +202,10 @@ not the wiring. In order, with the console open:
    the setup screen draws (expect ~25–30 s), `FrameOS-XXXX` appears, a phone
    pops the portal, CONNECTION LED blinks.
 3. Provision from the deploy panel; after the restart: `wifi: connected`,
-   `bootup` in the backend log, first scene on the panel, `render:done`.
+   `bootup` in the backend log, first scene on the panel, `render:done`. A
+   pass that refreshes takes ~30 s; one that is "done" in a second or two
+   lost its refresh (#664), and `display: no BUSY pulse after …` in the log
+   says which step the controller answered late.
 4. `render` again with the same scene: `render:device … unchanged`, no flash.
 5. `http://<hostname>.local/status` with the device login; `/image` returns a
    BMP matching the panel.
