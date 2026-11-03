@@ -985,7 +985,7 @@ async def _forward_frame_request(
         return _bytes_or_json(cached)
 
     if json_body is None:
-        status, body, headers = await _fetch_frame_http_bytes(
+        status, got_body, got_headers = await _fetch_frame_http_bytes(
             frame,
             redis,
             path=path,
@@ -993,11 +993,11 @@ async def _forward_frame_request(
         )
         if status == 200:
             if cache_key:
-                await redis.set(cache_key, body, ex=cache_ttl)
-            payload = _bytes_or_json(body)
-            if headers.get("content-type", "").startswith("application/json") or not isinstance(payload, bytes):
+                await redis.set(cache_key, got_body, ex=cache_ttl)
+            payload = _bytes_or_json(got_body)
+            if got_headers.get("content-type", "").startswith("application/json") or not isinstance(payload, bytes):
                 return payload
-            return _decode_bytes(body)
+            return _decode_bytes(got_body)
 
         if cache_key and (cached := await redis.get(cache_key)):
             return _bytes_or_json(cached)
