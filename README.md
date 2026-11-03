@@ -1,42 +1,45 @@
 # FrameOS
 
-FrameOS is an **operating system for single function smart frames**. 
+**The operating system for smart frames.** Turn a Raspberry Pi or an ESP32-S3 and
+any display, e-ink, LCD or HDMI, into a calendar, dashboard or art frame that runs
+itself. Everything renders on the device, whether the screen updates once a minute
+or sixty times a second.
 
-It's meant to be deployed on a Raspberry Pi, and can be used with a variety of e-ink and traditional displays. It's designed for both screens that update **60 seconds per frame**, and for screens that update **60 frames per second**.
+Think smart home calendars, meeting room displays, photo frames, word clocks,
+thermostats, industrial dashboards and public signage.
 
-Think smart home calendars, meeting room displays, thermostats, industrial dashboards, public advertisement screens, and more.
+![A scene being built in the FrameOS editor, with a live preview](https://frameos.net/images/editor/live-preview.png)
 
-To get started:
+## How it works
 
-1. Install the [FrameOS backend](https://frameos.net/guide/backend), a dockerized python app, which is used to deploy apps onto individual frames via SSH.
+- **Scenes** are what a frame shows: a graph of nodes (data sources, images,
+  text, layouts, logic) with optional TypeScript apps, built in a browser editor
+  or by the built-in AI chat, and installed from the
+  [scene store](https://scenes.frameos.net). Scenes are plain JSON and run in the
+  frame's own interpreted runtime.
+- **The runtime** is a single Nim binary (Raspberry Pi and other Linux boards) or
+  a signed ESP32-S3 firmware. It renders scenes on the device, drives the display,
+  handles schedules, buttons and touch, and keeps running when the control plane is
+  offline.
+- **A control plane** manages the frames: either the self-hosted
+  [FrameOS backend](https://frameos.net/guide/backend) (a Docker image or Home
+  Assistant add-on that deploys over SSH, with no account required) or
+  [FrameOS Cloud](https://cloud.frameos.net), which manages frames directly over
+  an outbound-only connection. Both flash the same release images and push the
+  same scenes; the frames do not depend on either to keep rendering.
 
-2. Read the [device hardware guide](https://frameos.net/devices/) for your screen type. Typically you'll just need to connect the display to a Raspberry Pi, install the OS, and make sure it's reachable over the network. 
+## Get started
 
-3. Once connected, deploy our prebuilt scenes, or code your own directly inside the backend.
+1. Pick a [supported device](https://frameos.net/devices/) and follow its hardware
+   page. A Raspberry Pi needs the display connected and the OS installed; an
+   ESP32-S3 board is flashed from the browser.
+2. Install the [FrameOS backend](https://frameos.net/guide/backend) (one command,
+   see below), or sign in to [FrameOS Cloud](https://cloud.frameos.net).
+3. Add the frame, install a scene from the store or build your own in the editor.
+4. Print a [case](https://frameos.net/cases/) for it.
 
-4. Finally, for a professional look, 3d print a case around your frame.
-
-![](https://frameos.net/assets/images/walkthrough-c32e7b67dd9a6f14ebef743755b0fc8e.gif)
-
-
-## Development with Flox
-
-If you use [Flox](https://flox.dev), this repo now ships a checked-in environment. Running `flox activate` bootstraps the core toolchains and installs the repo-local development dependencies for Python, pnpm, and Nim.
-
-```bash
-flox activate
-pnpm dev
-```
-
-The activation hook creates a local `.venv`, installs `backend/requirements.txt`, runs `pnpm install --frozen-lockfile` for the workspace, and installs the Nim dependencies for `frameos/` and `frameos/remote/`.
-
-If you want Redis managed by Flox as well, start it with:
-
-```bash
-flox services start redis
-```
-
-
+The full documentation is at [frameos.net/guide](https://frameos.net/guide/).
+Questions and show-and-tell go to [Discord](https://discord.gg/9dT9y7EzUw).
 
 ## Supported platforms
 
@@ -107,39 +110,23 @@ Pimoroni's boards plug straight onto a Raspberry Pi's header, no wiring:
 
 ## FrameOS backend
 
-The FrameOS backend is where you set up your frames. You can run it continuously on a server, or locally on your computer when needed. You'll just miss out on log aggregation if the backend is offline. The frames run independently.
-
-Read more in [the documentation](https://frameos.net/guide/backend).
-
-**Scripts and AI agents.** The backend serves a Model Context Protocol server
-at `POST /api/mcp` and accepts personal API tokens (`fb_api_…`) wherever a
-login is, so Claude Code or any MCP client can list frames, install and edit
-scenes, read logs and screenshots, and push settings. Mint a token under
-Settings → API tokens and MCP; `docs/mcp.md` has the details.
-
-**Compiled scenes are deprecated.** FrameOS ships as released binaries and a
-deploy never compiles anything. A scene still on the legacy _compiled_ path
-(Nim code nodes or Nim app sources) does not run on that binary: convert it to
-an interpreted scene at
-[scenes.frameos.net/nim-converter](https://scenes.frameos.net/nim-converter)
-(or in the editor, or with the CLI in `cloud/packages/scene-convert`; see
-`docs/nim-to-js-conversion.md`). Until then such a scene still forces the
-old whole-frame source build on every deploy — `docs/legacy-source-builds.md`
-— which stays until it is deleted: not before December 2026, and possibly
-much later or never (the gate is in `docs/convergence-todo.md`, item 1).
+The backend is the self-hosted control plane. Run it on a server, a NAS, or on
+your computer when you need it: the frames keep rendering while it is offline,
+you only miss log collection in the meantime. It stores everything in SQLite and
+needs nothing else.
 
 ### Quick install
 
-The easiest way to install the FrameOS backend on a Mac or Debian/Ubuntu Linux is to run the following installation script:
+On a Mac or Debian/Ubuntu Linux:
 
 ```bash
 bash <(curl -fsSL https://frameos.net/install.sh)
 ```
 
-### Running via Docker manually
+### Docker
 
 ```bash
-# running the latest release
+# run the latest release
 SECRET_KEY=$(openssl rand -base64 32)
 mkdir -p db
 docker run -d -p 8989:8989 \
@@ -147,24 +134,6 @@ docker run -d -p 8989:8989 \
     --name frameos \
     --restart always \
     -e SECRET_KEY="$SECRET_KEY" \
-    frameos/frameos
-
-# SD card image generation works in the default container without Docker privileges.
-# Deploys install released binaries and never compile, so the plain container above
-# is all a normal install needs. The variant below additionally hands the backend the
-# Docker socket for the deprecated per-frame source build (docs/legacy-source-builds.md).
-SECRET_KEY=$(openssl rand -base64 32)
-mkdir -p db
-mkdir -p /tmp/frameos-cross
-docker run -d -p 8989:8989 \
-    -v ./db:/app/db \
-    -v /tmp/frameos-cross:/tmp/frameos-cross \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    --privileged \
-    --name frameos \
-    --restart always \
-    -e SECRET_KEY="$SECRET_KEY" \
-    -e TMPDIR=/tmp/frameos-cross \
     frameos/frameos
 
 # update daily to the latest release
@@ -181,21 +150,11 @@ docker run \
     containrrr/watchtower \
     --run-once \
     frameos
-
-# running a local dev build via docker
-SECRET_KEY=$(openssl rand -base64 32)
-docker build -t frameos .
-docker run -d -p 8989:8989 \
-    -v ./db:/app/db \
-    -v /tmp/frameos-cross:/tmp/frameos-cross \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    --privileged \
-    --name frameos \
-    --restart always \
-    -e SECRET_KEY="$SECRET_KEY" \
-    -e TMPDIR=/tmp/frameos-cross \
-    frameos
 ```
+
+Or with the checked-in `docker-compose.yml`: `docker compose up -d`. Deploys
+install released binaries and SD card images are generated inside the container,
+so the plain container is all a normal install needs.
 
 ### Home Assistant
 
@@ -235,6 +194,59 @@ docker run -d -p 8989:8989 \
 ### Database
 
 The backend stores everything in SQLite (`./db/frameos.db` in the volume above) and needs nothing else. SQLite is the only supported database — `DATABASE_URL` exists because the backend uses SQLAlchemy, but no other engine is tested or shipped with a driver.
+
+### Scripts and AI agents
+
+The backend serves a Model Context Protocol server at `POST /api/mcp` and accepts
+personal API tokens (`fb_api_…`) wherever a login is, so Claude Code or any MCP
+client can list frames, install and edit scenes, read logs and screenshots, and
+push settings. Mint a token under **Settings → API tokens and MCP**;
+[`docs/mcp.md`](docs/mcp.md) has the details. FrameOS Cloud has the same tools.
+
+### Legacy compiled scenes
+
+FrameOS ships as released binaries and a deploy never compiles anything. A scene
+still on the old *compiled* path (Nim code nodes or Nim app sources) does not run
+on that binary: convert it to an interpreted scene at
+[scenes.frameos.net/nim-converter](https://scenes.frameos.net/nim-converter), in
+the editor, or with the CLI in `cloud/packages/scene-convert`
+([`docs/nim-to-js-conversion.md`](docs/nim-to-js-conversion.md)). Until it is
+converted, such a scene forces the old whole-frame source build on every deploy,
+which needs the privileged Docker setup described in
+[`docs/legacy-source-builds.md`](docs/legacy-source-builds.md).
+
+## This repository
+
+- `backend/` and `frontend/`: the self-hosted backend (FastAPI, SQLite) and the
+  web UI (React, kea).
+- `cloud/` and `cloud-frontend/`: FrameOS Cloud and the scene store (Next.js,
+  Postgres). You never need these to use FrameOS; see [`cloud/README.md`](cloud/README.md).
+- `frameos/`: the Nim runtime that runs on the frames, with the drivers and the
+  repo apps under `frameos/repo/apps`.
+- `embedded/esp32/`: the ESP32-S3 firmware (ESP-IDF plus the Nim runtime
+  compiled to C). `embedded/pico/`: the Pico W thin client for the Pimoroni Inky
+  Frames, which the backend renders for.
+- `docs/`: the contracts and design notes shared by all of the above.
+- `e2e/`: the scene snapshot, Playwright and deploy test suites.
+
+Everything is licensed AGPL-3.0; the device protocols are documented so that
+anyone can reimplement them (see `NOTICE`).
+
+## Developing locally
+
+The repo ships a checked-in [Flox](https://flox.dev) environment. `flox activate`
+installs the Python, pnpm and Nim toolchains and the repo-local dependencies, and
+`pnpm dev` starts every service in `mprocs`:
+
+```bash
+flox activate
+pnpm dev
+```
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) walks through the individual services, tests
+and the on-device runtime; [`AGENTS.md`](AGENTS.md) is the map of the codebase.
+
+## Build infrastructure
 
 ### Cross-toolchain build container images
 
