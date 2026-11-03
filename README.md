@@ -201,10 +201,11 @@ docker run -d -p 8989:8989 \
 
 Run the backend as the [Home Assistant add-on](https://github.com/FrameOS/frameos-home-assistant-addon)
 or point a standalone one at Home Assistant under **Settings → Home Assistant**:
-every frame becomes a device with its live image, status and scene sensors, a
-scene selector, a display switch, refresh / next / previous / restart / reboot
-buttons and an entity per scene setting, and frame events reach the event bus
-as `frameos_event`. `docs/home-assistant.md` has the entities, the MQTT topics
+every frame becomes a device with its live image, status and scene sensors (the
+scene's settings as attributes), a scene selector, a display switch and refresh
+/ next / previous / restart / reboot buttons, and frame events reach the event
+bus as `frameos_event`. Automations show a scene with parameters through one
+MQTT command. `docs/home-assistant.md` has the entities, the MQTT topics
 and the command format for automations.
 
 ### HTTPS for frames

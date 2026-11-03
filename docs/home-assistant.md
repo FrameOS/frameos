@@ -13,7 +13,7 @@ through the backend it is also enrolled with, if any.
 
 The code is `backend/app/ha/`: `discovery.py` (what a frame is in Home
 Assistant), `commands.py` (what Home Assistant sends back), `state.py` (what
-the sync remembers in Redis) and `sync.py` (the service, one task in the arq
+the sync remembers in Redis, and how it reads a frame's scene state) and `sync.py` (the service, one task in the arq
 worker). Every command reaches a frame through `dispatch_frame_event` in
 `app/api/frames.py`, the same function the editor's buttons go through, so
 every frame kind (Pi, Buildroot, ESP32, thin client, virtual) takes a Home
@@ -30,51 +30,49 @@ names in its attributes. On the frame's device:
 |---|---|---|
 | Image | `image` | The latest render (retained PNG). |
 | Status | `sensor` | `ready`, `deploying`, `uninitialized`, … |
-| Scene | `sensor` | The scene showing, by name. |
+| Scene | `sensor` | The scene showing, by name; its public field values are the sensor's attributes (below). |
 | Last seen | `sensor` (timestamp, diagnostic) | The last log line's time. |
 | Scene | `select` | The frame's scenes; picking one is `setCurrentScene`. |
 | Display | `switch` | `turnOn` / `turnOff`. Its state is what the frame last logged (`event:turnOn`, `event:turnOff`, a toggle), or what Home Assistant last asked for; unknown until either. |
 | Refresh | `button` | `render`. |
 | Next scene, Previous scene | `button` | `setCurrentScene` to the neighbour in the frame's scene order, wrapping around. |
 | Restart FrameOS, Reboot | `button` (config) | The restart / reboot tasks, with a deploy-progress record like the workspace's buttons. |
-| *Scene*: *Field* | `switch` / `number` / `select` / `text` | One per public field of every scene (below). |
 
 Two scenes with one name show as "Clock" and "Clock (2)", in the frame's order.
+That is the whole device, eleven entities, whatever the frame's scenes hold: a
+scene's settings are never entities of their own (a frame has many scenes and a
+scene many fields; a thousand entities is not an integration).
 
-### Scene fields as entities
+### Scene settings as attributes
 
-Every public field (the ones the scene's settings panel shows, the implicit
-"Refresh interval (seconds)" included) of every scene on the frame is an entity
-named "*Scene*: *Field*", by the field's type:
+The Scene sensor's attributes carry the public fields (the ones the scene's
+settings panel shows, the implicit `refreshInterval` included) of the scene
+showing, typed as the scene keeps them:
 
-| Field type | Entity |
-|---|---|
-| `boolean` | `switch` |
-| `integer`, `float` | `number` (box input; the refresh interval in seconds, at least 0) |
-| `select` | `select` with the field's options |
-| `string`, `text`, `color`, `date` | `text` (255 characters at most) |
-| `json`, `image`, `font`, `node`, `scene`, `path` | no entity |
+```yaml
+# sensor.kitchen_frame_scene
+state: Weather
+scene_id: 3f2a…
+fields:
+  city: Paris
+  dark: true
+  refreshInterval: 300
+```
 
-Private fields have no entity. Setting one:
+So a template reads `state_attr('sensor.kitchen_frame_scene', 'fields').city`,
+and a trigger on the attribute fires when the frame itself changes it. Fields
+of type `json`, `image`, `font`, `node`, `scene` and `path` are left out
+(assets and wiring, not settings), private ones too. The values come from where
+the backend keeps a frame's scene state (a virtual frame's and a thin client's
+store, a device's `/states` cache, else the device itself), re-read a second
+after the frame logs a scene change or a `setSceneState` / `setCurrentScene` /
+`uploadScenes`, so a setting changed on the frame's own settings panel, by a
+button or a schedule shows in Home Assistant too.
 
-- **of the scene showing** sends `setSceneState {state: {field: value}}`, so
-  the frame applies it now (and re-renders when the state changed);
-- **of any other scene** is kept by the backend and applied with the next
-  `setCurrentScene` of that scene *from Home Assistant* (the select, the
-  buttons, the command topic). A frame applies state to the scene showing
-  alone, so this is how "set the weather city, then show the weather" works
-  from an automation. The entity shows the kept value meanwhile; the frame's
-  own log notes "kept until the scene shows".
-
-Their states come from where the backend keeps a frame's scene state (a
-virtual frame's and a thin client's store, a device's `/states` cache, else the
-device itself), re-read after every `setSceneState` / `setCurrentScene` /
-`uploadScenes` log line from the frame, so a field changed on the frame's own
-settings panel, by a button or a schedule shows in Home Assistant too. Values
-are published as text, exactly as the fields topic carries them.
-
-**Settings → Home Assistant → Scene settings as entities** turns the field
-entities off for a project (the frame-level entities stay).
+Setting them goes through the command topic (next section): a scene with its
+parameters in one message, or `setSceneState` for the scene showing. A frame
+applies state to the scene showing alone, so "set the weather city, then show
+the weather" is one `{"scene": "Weather", "state": {"city": "Paris"}}`.
 
 ## Topics
 
@@ -86,10 +84,9 @@ Everything a frame publishes and listens on lives under
 | `state` | out, retained | `{name, status, scene, scene_id, display, last_log_at}` |
 | `image` | out, retained | PNG bytes |
 | `event` | out | `{frame_id, project_id, frame_name, event, payload}` per frame event |
-| `fields` | out, retained | `{<scene id>: {<field>: "<value>"}}` for every scene's public fields |
+| `fields` | out, retained | `{scene_id, scene, fields: {<field>: <value>}}` for the scene showing (the Scene sensor's attributes) |
 | `set/scene` | in | a scene label (what the select shows), name or id |
 | `set/display` | in | `ON` / `OFF` |
-| `set/field` | in | `{"scene": id, "field": name, "value": …}` (what the field entities send) |
 | `press` | in | `render`, `next_scene`, `previous_scene`, `restart`, `reboot` |
 | `command` | in | free-form, below |
 
@@ -107,12 +104,15 @@ For automations that want more than an entity: `mqtt.publish` to
 {"scene": "Weather", "state": {"city": "Paris", "dark": true}}
 ```
 
-(the scene by label, name or id, with optional state; kept field values for
-that scene ride along, explicit ones win) or
+(the scene by label, name or id, with optional state) or
 
 ```json
 {"event": "setSceneState", "payload": {"state": {"city": "Rome"}}}
 ```
+
+A `state` value is typed by the scene's public field where it has one and the
+value fits (a template's `"true"` reaches a boolean field as `true`, its `"4"`
+an integer field as `4`), and passed on as given otherwise.
 
 Any event the frame's own HTTP API accepts with the frame access key may be
 named: `render`, `setCurrentScene`, `setSceneState`, `turnOn`, `turnOff`,
@@ -150,12 +150,12 @@ Each carries `frame_id`, `frame_name`, `event` and the line's other keys under
 
 - A frame added, renamed, archived or deleted, or its scenes changed, is
   re-discovered on the `update_frame` broadcast; discovery is only resent when
-  it changed (a hash of the configs), and entities a scene change left behind
-  are retracted by the keys recorded for the frame (`ha:frame:<id>:entities`).
+  it changed (a hash of the configs).
 - The scene sensor and select follow `render:scene` / `render:sceneChange` /
   `event:setCurrentScene` lines; the display switch `event:turnOn` /
-  `event:turnOff` / `event:toggleScreen`; the field entities the
-  `sceneStateChanged` log events, debounced by a second.
+  `event:turnOff` / `event:toggleScreen`; the scene sensor's attributes those
+  scene-change lines and the `sceneStateChanged` log events, debounced by a
+  second.
 - The image follows `frame_rendered` / `new_scene_image`, at most once every
   two seconds per frame.
 - "Save & sync now" on the settings page republishes everything and answers
@@ -164,7 +164,6 @@ Each carries `frame_id`, `frame_name`, `event` and the line's other keys under
 ## Settings
 
 `homeAssistant` (per project): `url`, `accessToken` (the event bus,
-standalone installs), `syncEnabled`, `shareSceneFields` (default on),
-`mqttHost` / `mqttPort` / `mqttUsername` / `mqttPassword` (standalone installs;
+standalone installs), `syncEnabled`, `mqttHost` / `mqttPort` / `mqttUsername` / `mqttPassword` (standalone installs;
 an add-on asks the Supervisor). Frames get `url` + `accessToken` only, for the
 Home Assistant apps they run.

@@ -233,18 +233,21 @@
 ## Home Assistant: `docs/home-assistant.md`
 
 - The self-hosted backend's Home Assistant link is `backend/app/ha/` (one task
-  in the arq worker): every frame is an MQTT-discovered device with an image,
-  sensors, a scene `select`, a display `switch`, refresh / next / previous /
-  restart / reboot `button`s and one entity per public field of each scene
-  (`discovery.py`); what Home Assistant sets comes back over the frame's
-  `set/*`, `press` and `command` topics (`commands.py`) and goes through
-  `dispatch_frame_event` in `app/api/frames.py`, the frame event route's own
-  dispatcher, so every frame kind takes it the way it takes an editor click.
-  A new verb is a contract event sent through that function, never a new
-  send path; the `command` topic's allow-list is the contract's `http:write`
-  column. A field of a scene not showing is kept (`state.py`, Redis) until
-  that scene is next selected from Home Assistant. Cloud-only by omission:
-  FrameOS Cloud has no Home Assistant link.
+  in the arq worker): every frame is an MQTT-discovered device with the SAME
+  eleven entities (an image, sensors, a scene `select`, a display `switch`,
+  refresh / next / previous / restart / reboot `button`s; `discovery.py`).
+  **A scene's settings are the Scene sensor's attributes (the `fields`
+  topic), never entities**: one per field of every scene of every frame was
+  tried and reverted the day it merged (2026-11-04, thousands of entities).
+  What Home Assistant sets comes back over the frame's `set/*`, `press` and
+  `command` topics (`commands.py`) and goes through `dispatch_frame_event` in
+  `app/api/frames.py`, the frame event route's own dispatcher, so every
+  frame kind takes it the way it takes an editor click. A new verb is a
+  contract event sent through that function, never a new send path; the
+  `command` topic's allow-list is the contract's `http:write` column, and
+  parameters travel with the scene (`{"scene", "state"}`) or as
+  `setSceneState`. Cloud-only by omission: FrameOS Cloud has no Home
+  Assistant link.
 
 ## Deploy progress: the contract is `docs/deploy-progress-contract.json`
 

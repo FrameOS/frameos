@@ -476,47 +476,21 @@ async def test_a_refused_command_is_logged_on_the_frame_not_raised(db, redis, se
 
 
 @pytest.mark.asyncio
-async def test_field_entities_set_the_showing_scene_now_and_keep_values_for_other_scenes(db, redis, service, monkeypatch):
-    frame = await _frame_with_scenes(db, redis, service)
-    dispatch = RecordingDispatch()
-    monkeypatch.setattr(service, "_dispatch", dispatch)
-    base = f"frameos/frame/{frame.project_id}/{frame.id}"
-    await redis.set(f"frame:{frame.id}:active_scene", "scene-1")
-
-    # Weather is not showing: its city waits, and the fields topic shows it.
-    await service._handle_command(f"{base}/set/field", json.dumps({"scene": "scene-2", "field": "city", "value": "Oslo"}))
-    assert dispatch.calls == []
-    fields = json.loads(service._mqtt.payload_for(discovery.frame_fields_topic(frame.project_id, frame.id)))
-    assert fields["scene-2"] == {"city": "Oslo", "dark": "false", "refreshInterval": "300"}
-    assert "kept until the scene shows" in (await _last_log_line(db, frame.id) or "")
-
-    # Selecting Weather carries the kept value and forgets it.
-    await service._handle_command(f"{base}/set/scene", b"Weather")
-    assert dispatch.calls == [(frame.id, "setCurrentScene", {"sceneId": "scene-2", "state": {"city": "Oslo"}})]
-    from app.ha import state as ha_state
-
-    assert await ha_state.get_pending_states(redis, frame.id) == {}
-
-    # Showing now: a field goes straight to the frame as setSceneState.
-    await redis.set(f"frame:{frame.id}:active_scene", "scene-2")
-    await service._handle_command(f"{base}/set/field", json.dumps({"scene": "scene-2", "field": "dark", "value": "true"}))
-    assert dispatch.calls[-1] == (frame.id, "setSceneState", {"state": {"dark": True}})
-
-
-@pytest.mark.asyncio
 async def test_command_topic_from_an_automation(db, redis, service, monkeypatch):
     frame = await _frame_with_scenes(db, redis, service)
     dispatch = RecordingDispatch()
     monkeypatch.setattr(service, "_dispatch", dispatch)
     topic = f"frameos/frame/{frame.project_id}/{frame.id}/command"
 
-    await service._handle_command(topic, json.dumps({"scene": "Weather", "state": {"city": "Paris"}}))
+    await service._handle_command(topic, json.dumps({"scene": "Weather", "state": {"city": "Paris", "dark": "true"}}))
     await service._handle_command(topic, json.dumps({"event": "render"}))
     await service._handle_command(topic, json.dumps({"event": "reboot"}))  # refused: a button, never an event
     assert dispatch.calls == [
-        (frame.id, "setCurrentScene", {"sceneId": "scene-2", "state": {"city": "Paris"}}),
+        (frame.id, "setCurrentScene", {"sceneId": "scene-2", "state": {"city": "Paris", "dark": True}}),
         (frame.id, "render", {}),
     ]
+    # A scene switch from Home Assistant re-reads the showing scene's fields.
+    assert frame.id in service._fields_refreshes
 
 
 @pytest.mark.asyncio
@@ -539,8 +513,9 @@ async def test_display_power_follows_the_frames_own_log_lines(db, redis, service
 
 
 @pytest.mark.asyncio
-async def test_scene_state_log_lines_republish_the_fields(db, redis, service, monkeypatch):
+async def test_the_scene_sensors_attributes_follow_the_showing_scene(db, redis, service, monkeypatch):
     frame = await _frame_with_scenes(db, redis, service)
+    fields_topic = discovery.frame_fields_topic(frame.project_id, frame.id)
     # A device frame answers from the states cache the backend keeps for it.
     from app.api.frames import _frame_states_cache_key
 
@@ -548,29 +523,45 @@ async def test_scene_state_log_lines_republish_the_fields(db, redis, service, mo
         _frame_states_cache_key(frame.id),
         json.dumps({"sceneId": "scene-2", "states": {"scene-2": {"city": "Rome", "dark": True}}, "fetched_at": 1}),
     )
+    await redis.set(f"frame:{frame.id}:active_scene", "scene-2")
     service._schedule_fields_refresh(frame.project_id, frame.id, delay=0)
     await asyncio.wait_for(service._fields_refreshes[frame.id], 5)
-    fields = json.loads(service._mqtt.payload_for(discovery.frame_fields_topic(frame.project_id, frame.id)))
-    assert fields["scene-2"] == {"city": "Rome", "dark": "true", "refreshInterval": "300"}
-    assert fields["scene-1"] == {"refreshInterval": "300"}
+    assert json.loads(service._mqtt.payload_for(fields_topic)) == {
+        "scene_id": "scene-2",
+        "scene": "Weather",
+        "fields": {"city": "Rome", "dark": True, "refreshInterval": 300},
+    }
 
-    # A setSceneState line schedules the same refresh; a plain render does not.
+    # Another scene showing: its fields, with defaults where nothing was reported.
+    await redis.set(f"frame:{frame.id}:active_scene", "scene-1")
+    service._schedule_fields_refresh(frame.project_id, frame.id, delay=0)
+    await asyncio.wait_for(service._fields_refreshes[frame.id], 5)
+    assert json.loads(service._mqtt.payload_for(fields_topic)) == {
+        "scene_id": "scene-1",
+        "scene": "Clock",
+        "fields": {"refreshInterval": 300},
+    }
+
+    # A state change or a scene change line schedules the refresh; a render does not.
     scheduled = []
     monkeypatch.setattr(service, "_schedule_fields_refresh", lambda project_id, frame_id, delay=1.0: scheduled.append(frame_id))
-    for event in ("event:setSceneState", "render:done", "event:setCurrentScene"):
+    for event in ("event:setSceneState", "render:done", "event:setCurrentScene", "render:sceneChange"):
         await service._handle_log(
             {"type": "webhook", "frame_id": frame.id, "project_id": frame.project_id, "line": json.dumps({"event": event})}
         )
-    assert scheduled == [frame.id, frame.id]
+    assert scheduled == [frame.id, frame.id, frame.id]
 
 
 @pytest.mark.asyncio
-async def test_scene_changes_rediscover_once_and_retract_entities_a_scene_left_behind(db, redis, service):
+async def test_scene_changes_rediscover_once(db, redis, service):
     frame = await _frame_with_scenes(db, redis, service)
     frame_dict = frame.to_dict()
+    node = discovery.frame_node_id(frame.project_id, frame.id)
     await service._handle_broadcast("update_frame", frame_dict)
-    city_topic = f"homeassistant/text/{discovery.frame_node_id(frame.project_id, frame.id)}/{discovery.field_object_id('scene-2', 'city')}/config"
-    assert service._mqtt.payload_for(city_topic) is not None
+    select_topic = f"homeassistant/select/{node}/scene_select/config"
+    assert json.loads(service._mqtt.payload_for(select_topic))["options"] == ["Clock", "Weather", "Photos"]
+    # Whatever the scenes hold, the device has its eleven entities and no more.
+    assert len([topic for topic in service._mqtt.topics() if topic.startswith("homeassistant/")]) == 11
 
     # The same frame again (a status change, a log): discovery is not resent.
     service._mqtt.messages.clear()
@@ -578,25 +569,10 @@ async def test_scene_changes_rediscover_once_and_retract_entities_a_scene_left_b
     assert all(not topic.startswith("homeassistant/") for topic in service._mqtt.topics())
     assert discovery.frame_state_topic(frame.project_id, frame.id) in service._mqtt.topics()
 
-    # Weather removed: its entities are retracted by name, the select shrinks.
+    # Weather removed: the select shrinks, nothing is left behind to retract.
     frame.scenes = [scene for scene in frame.scenes if scene["id"] != "scene-2"]
     db.commit()
     service._mqtt.messages.clear()
     await service._handle_broadcast("update_frame", {"id": frame.id, "project_id": frame.project_id})
-    assert city_topic in service._mqtt.topics()
-    assert service._mqtt.payload_for(city_topic) is None
-    select = json.loads(
-        service._mqtt.payload_for(f"homeassistant/select/{discovery.frame_node_id(frame.project_id, frame.id)}/scene_select/config")
-    )
-    assert select["options"] == ["Clock", "Photos"]
-
-
-@pytest.mark.asyncio
-async def test_scene_fields_can_be_kept_off_per_project(db, redis, service):
-    frame = await _frame_with_scenes(db, redis, service)
-    service._enabled = {frame.project_id: {"syncEnabled": True, "shareSceneFields": False}}
-    await service._handle_broadcast("update_frame", frame.to_dict())
-    topics = service._mqtt.topics()
-    assert any("/scene_select/config" in topic for topic in topics)
-    assert not any("/field_" in topic for topic in topics)
-    assert frame.id not in service._fields_refreshes
+    assert json.loads(service._mqtt.payload_for(select_topic))["options"] == ["Clock", "Photos"]
+    assert len([topic for topic in service._mqtt.topics() if topic.startswith("homeassistant/")]) == 11

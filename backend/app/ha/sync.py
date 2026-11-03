@@ -4,12 +4,14 @@ Home Assistant sync service.
 Shares FrameOS frames with Home Assistant, both ways (docs/home-assistant.md):
 
 - every non-archived frame is an MQTT-discovered device: the latest render as
-  an image, status / scene / last-seen sensors, a scene select, a display
-  switch, refresh / next / previous / restart / reboot buttons, and one
-  entity per public field of each of its scenes (app/ha/discovery.py);
+  an image, status / scene / last-seen sensors (the scene sensor carrying the
+  showing scene's field values as attributes), a scene select, a display
+  switch and refresh / next / previous / restart / reboot buttons
+  (app/ha/discovery.py);
 - what Home Assistant sets on those entities, and free-form commands from
-  automations, come back over MQTT and go to the frame the way the editor's
-  own buttons do (app/ha/commands.py → the frame event route's dispatcher);
+  automations (a scene with parameters, any event the frame's own API
+  takes), come back over MQTT and go to the frame the way the editor's own
+  buttons do (app/ha/commands.py → the frame event route's dispatcher);
 - every meaningful frame event is forwarded to the HA event bus as
   `frameos_event` and to the frame's MQTT event topic.
 
@@ -45,7 +47,7 @@ SCENE_CHANGE_EVENTS = SCENE_CHANGED_LOG_EVENTS
 # Renders can double-fire (new_scene_image + frame_rendered); skip repeats.
 IMAGE_PUBLISH_MIN_INTERVAL = 2.0
 # A burst of state-change log lines (a setCurrentScene is three) is one
-# re-read of the frame's state.
+# re-read of the showing scene's state for the scene sensor's attributes.
 FIELDS_REFRESH_DELAY = 1.0
 
 
@@ -76,11 +78,6 @@ def partition_projects_by_broker(
     return chosen, kept, skipped
 
 
-def share_scene_fields(ha_settings: dict) -> bool:
-    """Settings → Home Assistant → "Scene settings as entities" (on by default)."""
-    return ha_settings.get("shareSceneFields", True) is not False
-
-
 class HomeAssistantSync:
     def __init__(self):
         self._mqtt: Any = None  # aiomqtt.Client while connected
@@ -92,7 +89,7 @@ class HomeAssistantSync:
         self._sync_request: Optional[dict] = None  # pending "sync now" API request awaiting a reply
         self._synced_counts: dict[int, int] = {}  # project_id -> frames shared in the last full sync
         self._discovery_signatures: dict[int, str] = {}  # frame_id -> hash of the last discovery publish
-        self._fields_refreshes: dict[int, asyncio.Task] = {}  # frame_id -> debounced fields publish
+        self._fields_refreshes: dict[int, asyncio.Task] = {}  # frame_id -> debounced scene fields publish
         self._command_tasks: set[asyncio.Task] = set()
 
     # ---- lifecycle ----------------------------------------------------------
@@ -327,10 +324,8 @@ class HomeAssistantSync:
         frame = self._load_frame_dict(topic.frame_id)
         if not frame or frame.get("archived") or frame.get("project_id") != topic.project_id:
             return None
-        redis = get_shared_redis()
         active = await self._active_scene_id(topic.frame_id)
-        pending = await state.get_pending_states(redis, topic.frame_id)
-        action = commands.resolve_command(topic, payload, frame, active, pending)
+        action = commands.resolve_command(topic, payload, frame, active)
         await self._execute(frame, action)
         return action
 
@@ -348,11 +343,6 @@ class HomeAssistantSync:
             if action.kind == "error":
                 await new_log(db, redis, frame_id, "stderr", f"Home Assistant: {action.message}")
                 return
-            if action.kind == "store_field":
-                await state.store_pending_state(redis, frame_id, action.scene_id or "", action.state)
-                await new_log(db, redis, frame_id, "stdinfo", f"Home Assistant set {action.summary}")
-                await self._publish_fields(frame, live=False)
-                return
             await new_log(db, redis, frame_id, "stdinfo", f"Home Assistant asked for {action.summary}")
             try:
                 if action.kind in ("restart", "reboot"):
@@ -367,8 +357,6 @@ class HomeAssistantSync:
                 detail = getattr(error, "detail", None) or str(error)
                 await new_log(db, redis, frame_id, "stderr", f"Home Assistant's {action.summary} failed: {detail}")
                 return
-            if action.consumes_pending:
-                await state.clear_pending_state(redis, frame_id, action.consumes_pending)
             if action.event in ("turnOn", "turnOff"):
                 # The frame logs event:turnOn/turnOff itself when it takes
                 # it; until then, say what was asked so the switch settles.
@@ -465,9 +453,10 @@ class HomeAssistantSync:
             frame = self._load_frame_dict(frame_id)
             if frame and not frame.get("archived"):
                 await self._publish_state(frame)
-        # State changed on the frame (a button, a schedule, the editor): the
-        # field entities re-read it, once the burst of lines is over.
-        if event in state.FIELDS_LOG_EVENTS:
+        # The scene or its state changed on the frame (a button, a schedule,
+        # the editor): the scene sensor's attributes re-read the showing
+        # scene's values, once the burst of lines is over.
+        if event in state.FIELDS_LOG_EVENTS or event in SCENE_CHANGE_EVENTS:
             self._schedule_fields_refresh(project_id, frame_id)
 
     # ---- sync ----------------------------------------------------------------
@@ -501,39 +490,27 @@ class HomeAssistantSync:
             print(f"🟢 Home Assistant sync: shared {len(active)} frame(s) for project {project_id}")
 
     async def _publish_frame(self, frame: dict, force: bool = False):
-        """Discovery (when it changed, or `force`), state, and a fields
-        refresh when the scenes changed. Entities a scene change left behind
-        are retracted by the keys recorded for the frame."""
+        """Discovery (when it changed, or `force`), state, and a scene fields
+        refresh when the scenes changed (a renamed field, a new default)."""
         project_id, frame_id = int(frame["project_id"]), int(frame["id"])
-        redis = get_shared_redis()
-        include_fields = share_scene_fields(self._enabled.get(project_id, {}))
-        messages = discovery.frame_discovery_messages(frame, include_fields=include_fields)
+        messages = discovery.frame_discovery_messages(frame)
         signature = hashlib.sha1(json.dumps(messages, sort_keys=True, default=str).encode()).hexdigest()
         changed = force or self._discovery_signatures.get(frame_id) != signature
         if changed:
-            keys = discovery.frame_entity_keys(frame, include_fields=include_fields)
-            tracked = await state.get_tracked_entities(redis, frame_id)
-            stale = tracked - keys
-            if stale:
-                await self._publish_messages(discovery.entity_removal_messages(project_id, frame_id, stale))
             await self._publish_messages(messages)
-            await state.set_tracked_entities(redis, frame_id, keys)
             self._discovery_signatures[frame_id] = signature
         await self._publish_state(frame)
-        if changed and include_fields:
+        if changed:
             self._schedule_fields_refresh(project_id, frame_id)
 
     async def _remove_frame(self, project_id: int, frame_id: int):
-        redis = get_shared_redis()
-        tracked = await state.get_tracked_entities(redis, frame_id)
-        await self._publish_messages(discovery.frame_removal_messages(project_id, frame_id, tracked))
+        await self._publish_messages(discovery.frame_removal_messages(project_id, frame_id))
         for topic in (
             discovery.frame_state_topic(project_id, frame_id),
             discovery.frame_fields_topic(project_id, frame_id),
             discovery.frame_image_topic(project_id, frame_id),
         ):
             await self._publish(topic, None, retain=True)
-        await state.set_tracked_entities(redis, frame_id, set())
         self._discovery_signatures.pop(frame_id, None)
 
     async def _publish_state(self, frame: dict):
@@ -549,8 +526,6 @@ class HomeAssistantSync:
         )
 
     def _schedule_fields_refresh(self, project_id: int, frame_id: int, delay: float = FIELDS_REFRESH_DELAY):
-        if not share_scene_fields(self._enabled.get(project_id, {})):
-            return
         previous = self._fields_refreshes.pop(frame_id, None)
         if previous is not None and not previous.done():
             previous.cancel()
@@ -576,23 +551,22 @@ class HomeAssistantSync:
         task.add_done_callback(forget)
 
     async def _publish_fields(self, frame: dict, live: bool = True):
-        """The fields topic: every scene's public field values as text."""
+        """The fields topic: the showing scene's public field values, the
+        scene sensor's attributes."""
         from app.models.frame import Frame
 
         project_id, frame_id = int(frame["project_id"]), int(frame["id"])
-        if not share_scene_fields(self._enabled.get(project_id, {})):
-            return
         redis = get_shared_redis()
+        active = await self._active_scene_id(frame_id)
         db = SessionLocal()
         try:
             row = db.get(Frame, frame_id)
             states = await state.frame_scene_states(redis, row, live=live) if row is not None else {}
         finally:
             db.close()
-        pending = await state.get_pending_states(redis, frame_id)
         await self._publish_json(
             discovery.frame_fields_topic(project_id, frame_id),
-            discovery.fields_state_payload(frame, states, pending),
+            discovery.scene_fields_payload(frame, active, states.get(active or "")),
             retain=True,
         )
 

@@ -1384,8 +1384,6 @@ export interface FrameOSSettings {
     url?: string
     accessToken?: string
     syncEnabled?: boolean
-    /** Every scene's public fields as Home Assistant entities (default on). */
-    shareSceneFields?: boolean
     mqttHost?: string
     mqttPort?: string | number
     mqttUsername?: string

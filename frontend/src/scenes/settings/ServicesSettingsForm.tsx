@@ -242,31 +242,16 @@ export function ServicesSettingsForm({ divider = true }: { divider?: boolean }):
                     label="Share frames with Home Assistant"
                     tooltip={
                       <>
-                        Each frame becomes a device (via MQTT discovery) with a live image, status and scene sensors, a
-                        scene selector, a display switch and refresh / next / previous / restart / reboot buttons, and
-                        frame events are forwarded to the Home Assistant event bus as <code>frameos_event</code> for use
-                        in automations. Archived frames are not shared.
+                        Each frame becomes a device (via MQTT discovery) with a live image, status and scene sensors (the
+                        scene sensor carries the showing scene's settings as attributes), a scene selector, a display
+                        switch and refresh / next / previous / restart / reboot buttons, and frame events are forwarded
+                        to the Home Assistant event bus as <code>frameos_event</code> for use in automations. Archived
+                        frames are not shared.
                       </>
                     }
                   >
                     <Switch fullWidth />
                   </Field>
-                  {settings?.homeAssistant?.syncEnabled ? (
-                    <Field
-                      name="shareSceneFields"
-                      label="Scene settings as entities"
-                      tooltip={
-                        <>
-                          Every public field of every scene on a frame becomes an entity on the frame's device (a
-                          switch, number, select or text by its type), so automations can set a scene's parameters. A
-                          field of the scene showing is applied at once; one of another scene is kept and applied when
-                          that scene is next selected from Home Assistant. Off keeps only the frame-level entities.
-                        </>
-                      }
-                    >
-                      <Switch fullWidth />
-                    </Field>
-                  ) : null}
                   {isHassioIngress ? (
                     <p className="frameos-muted text-sm leading-loose">
                       Running as a Home Assistant add-on: the Home Assistant connection and the MQTT broker (Mosquitto

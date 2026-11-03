@@ -12,19 +12,20 @@ What a frame is in Home Assistant (docs/home-assistant.md):
   seen;
 - a `select` of its scenes (pick one = `setCurrentScene`), a `switch` for
   the display (`turnOn` / `turnOff`), `button`s for refresh, next and
-  previous scene, restart and reboot;
-- one entity per public field of every scene on the frame (a `switch`,
-  `number`, `select` or `text` by the field's type): the scene's
-  parameters, settable from Home Assistant.
+  previous scene, restart and reboot.
+
+The scene showing has its public field values as the scene sensor's
+attributes (the `fields` topic), never as entities of their own: a frame has
+many scenes and a scene many fields, and a thousand entities is not a Home
+Assistant integration. Parameters go the other way through the `command`
+topic ({"scene": …, "state": {…}}, or a `setSceneState` event).
 
 Every command entity publishes to a topic under the frame's base topic;
 `frame_command_subscriptions()` lists the filters the sync subscribes to.
 """
 
-import hashlib
 import json
-import re
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 from app.utils.refresh_interval import resolve_refresh_interval
 
@@ -47,22 +48,10 @@ FRAME_BUTTONS: tuple[tuple[str, str, str, str, Optional[str]], ...] = (
 )
 BUTTON_PRESS_PAYLOADS = frozenset(button[2] for button in FRAME_BUTTONS)
 
-# Field type → Home Assistant component. Everything else (json, image, font,
-# node, scene, path) has no sensible Home Assistant control and is skipped.
-FIELD_COMPONENTS: dict[str, str] = {
-    "boolean": "switch",
-    "integer": "number",
-    "float": "number",
-    "select": "select",
-    "string": "text",
-    "text": "text",
-    "color": "text",
-    "date": "text",
-}
-# MQTT number needs bounds; a scene field declares none, so these are wide.
-NUMBER_MIN = -1000000000
-NUMBER_MAX = 1000000000
-TEXT_MAX = 255
+# Field types whose values the scene sensor's attributes carry. The rest
+# (json, image, font, node, scene, path) are code, assets or wiring, not
+# settings, and may be large.
+ATTRIBUTE_FIELD_TYPES = frozenset({"boolean", "integer", "float", "select", "string", "text", "color", "date"})
 
 
 def frame_node_id(project_id: int, frame_id: int) -> str:
@@ -90,8 +79,8 @@ def frame_event_topic(project_id: int, frame_id: int) -> str:
 
 
 def frame_fields_topic(project_id: int, frame_id: int) -> str:
-    """Retained JSON {scene id: {field name: value as text}} for every scene's
-    public fields: the state of the field entities."""
+    """Retained JSON {scene_id, scene, fields: {name: value}} for the scene
+    showing: the scene sensor's attributes."""
     return f"{frame_base_topic(project_id, frame_id)}/fields"
 
 
@@ -106,7 +95,7 @@ def frame_press_topic(project_id: int, frame_id: int) -> str:
 
 
 def frame_set_topic(project_id: int, frame_id: int, what: str) -> str:
-    """`scene` (the select), `display` (the switch), `field` (every field entity)."""
+    """`scene` (the select), `display` (the switch)."""
     return f"{frame_base_topic(project_id, frame_id)}/set/{what}"
 
 
@@ -212,10 +201,6 @@ def scene_public_fields(scene: dict) -> list[dict]:
     ]
 
 
-def field_component(field: dict) -> Optional[str]:
-    return FIELD_COMPONENTS.get(str(field.get("type") or ""))
-
-
 def field_options(field: dict) -> list[str]:
     options: list[str] = []
     for option in field.get("options") or []:
@@ -231,168 +216,72 @@ def field_options(field: dict) -> list[str]:
     return options
 
 
-def field_state_text(field: dict, value: Any) -> str:
-    """One field value the way the entity's state topic carries it."""
-    if value is None:
-        return ""
-    field_type = str(field.get("type") or "")
+def coerce_field_value(field_spec: dict, value: Any) -> Any:
+    """A value in the type the scene's field declares (a scene's state is
+    typed JSON; Home Assistant templates and field defaults are text).
+    Raises ValueError when it cannot be."""
+    field_type = str(field_spec.get("type") or "")
     if field_type == "boolean":
-        if isinstance(value, str):
-            return "true" if value.strip().lower() in ("true", "1", "yes", "on") else "false"
-        return "true" if value else "false"
-    if field_type in ("integer", "float"):
         if isinstance(value, bool):
-            return "1" if value else "0"
-        if isinstance(value, (int, float)):
-            return str(value)
-        return str(value).strip()
+            return value
+        text = str(value).strip().lower()
+        if text in ("on", "true", "1", "yes"):
+            return True
+        if text in ("off", "false", "0", "no"):
+            return False
+        raise ValueError(f"{value!r} is not a boolean")
+    if field_type == "integer":
+        if isinstance(value, bool):
+            raise ValueError(f"{value!r} is not an integer")
+        number = float(value)
+        if number != int(number):
+            raise ValueError(f"{value!r} is not an integer")
+        return int(number)
+    if field_type == "float":
+        if isinstance(value, bool):
+            raise ValueError(f"{value!r} is not a number")
+        return float(value)
+    if field_type == "select":
+        text = str(value)
+        options = field_options(field_spec)
+        if options and text not in options:
+            raise ValueError(f"{text!r} is not one of {', '.join(options)}")
+        return text
     if isinstance(value, (dict, list)):
         return json.dumps(value)
     return str(value)
 
 
-def _slug(text: str, limit: int = 40) -> str:
-    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(text)).strip("_")
-    return cleaned[:limit] or "x"
+def scene_attribute_fields(scene: dict) -> list[dict]:
+    """The public fields the scene sensor's attributes carry."""
+    return [field for field in scene_public_fields(scene) if str(field.get("type") or "") in ATTRIBUTE_FIELD_TYPES]
 
 
-def _short_hash(text: str) -> str:
-    return hashlib.sha1(str(text).encode("utf-8")).hexdigest()[:8]
-
-
-def field_object_id(scene_id: str, field_name: str) -> str:
-    """Discovery object ids allow [a-zA-Z0-9_-] only; the hash keeps two
-    fields distinct when their names differ only in other characters."""
-    return f"field_{_short_hash(scene_id)}_{_slug(field_name)}_{_short_hash(field_name)[:4]}"
-
-
-def _jinja_string(text: str) -> str:
-    # A JSON string literal is a valid Jinja string literal for everything a
-    # scene id or field name holds.
-    return json.dumps(str(text))
-
-
-def _field_value_template(scene_id: str, field_name: str, missing: str) -> str:
-    return (
-        "{{ value_json.get(" + _jinja_string(scene_id) + ", {}).get("
-        + _jinja_string(field_name) + ", " + _jinja_string(missing) + ") }}"
-    )
-
-
-def _field_command(scene_id: str, field_name: str, value_expression: str) -> str:
-    return (
-        '{"scene": ' + json.dumps(scene_id) + ', "field": ' + json.dumps(field_name)
-        + ', "value": ' + value_expression + "}"
-    )
-
-
-def scene_field_entities(frame: dict) -> list[tuple[str, str, dict]]:
-    """(component, object_id, config) per public field of every scene."""
-    project_id, frame_id = frame["project_id"], frame["id"]
-    fields_topic = frame_fields_topic(project_id, frame_id)
-    command_topic = frame_set_topic(project_id, frame_id, "field")
-    entities: list[tuple[str, str, dict]] = []
-    for scene_id, label in scene_options(frame):
-        scene = next(scene for scene in frame_scenes(frame) if str(scene["id"]) == scene_id)
-        for field in scene_public_fields(scene):
-            component = field_component(field)
-            if component is None:
-                continue
+def scene_fields_payload(frame: dict, scene_id: Optional[str], reported: Optional[dict]) -> dict:
+    """The fields topic: the showing scene and its public field values, typed
+    (a reported value wins over the field's default; one that does not fit
+    the type is passed as it is)."""
+    scene = next((candidate for candidate in frame_scenes(frame) if str(candidate["id"]) == scene_id), None)
+    values: dict[str, Any] = {}
+    reported = reported if isinstance(reported, dict) else {}
+    if scene is not None:
+        for field in scene_attribute_fields(scene):
             name = str(field["name"])
-            config: dict[str, Any] = {
-                "name": f"{label}: {field.get('label') or name}",
-                "state_topic": fields_topic,
-                "icon": "mdi:tune-variant",
-            }
-            if component == "switch":
-                config.update(
-                    {
-                        "command_topic": command_topic,
-                        "payload_on": _field_command(scene_id, name, '"true"'),
-                        "payload_off": _field_command(scene_id, name, '"false"'),
-                        "state_on": "true",
-                        "state_off": "false",
-                        "value_template": _field_value_template(scene_id, name, ""),
-                    }
-                )
-            elif component == "number":
-                is_float = field.get("type") == "float"
-                config.update(
-                    {
-                        "command_topic": command_topic,
-                        "command_template": _field_command(scene_id, name, "{{ value }}"),
-                        "value_template": _field_value_template(scene_id, name, "None"),
-                        "min": 0 if field.get("role") == "refreshInterval" else NUMBER_MIN,
-                        "max": NUMBER_MAX,
-                        "step": 0.01 if is_float else 1,
-                        "mode": "box",
-                    }
-                )
-                if field.get("role") == "refreshInterval":
-                    config["unit_of_measurement"] = "s"
-                    config["icon"] = "mdi:timer-outline"
-            elif component == "select":
-                options = field_options(field)
-                if not options:
-                    continue
-                config.update(
-                    {
-                        "command_topic": command_topic,
-                        "command_template": _field_command(scene_id, name, "{{ value | tojson }}"),
-                        "value_template": _field_value_template(scene_id, name, "None"),
-                        "options": options,
-                    }
-                )
-            else:  # text
-                config.update(
-                    {
-                        "command_topic": command_topic,
-                        "command_template": _field_command(scene_id, name, "{{ value | tojson }}"),
-                        "value_template": _field_value_template(scene_id, name, ""),
-                        "max": TEXT_MAX,
-                    }
-                )
-                if field.get("type") == "color":
-                    config["icon"] = "mdi:palette"
-            entities.append((component, field_object_id(scene_id, name), config))
-    return entities
-
-
-def fields_state_payload(
-    frame: dict,
-    states: dict[str, dict],
-    pending: Optional[dict[str, dict]] = None,
-) -> dict[str, dict[str, str]]:
-    """The fields topic: every public field of every scene, as text. A value
-    the frame reported wins, then one Home Assistant set while the scene was
-    not showing (kept for its next activation), then the field's default."""
-    payload: dict[str, dict[str, str]] = {}
-    for scene in frame_scenes(frame):
-        scene_id = str(scene["id"])
-        reported_candidate = states.get(scene_id)
-        reported: dict = reported_candidate if isinstance(reported_candidate, dict) else {}
-        waiting_candidate = (pending or {}).get(scene_id)
-        waiting: dict = waiting_candidate if isinstance(waiting_candidate, dict) else {}
-        values: dict[str, str] = {}
-        for field in scene_public_fields(scene):
-            if field_component(field) is None:
+            value = reported[name] if name in reported else field.get("value")
+            if value is None:
+                values[name] = None
                 continue
-            name = str(field["name"])
-            if name in waiting:
-                value = waiting[name]
-            elif name in reported:
-                value = reported[name]
-            else:
-                value = field.get("value")
-            values[name] = field_state_text(field, value)
-        payload[scene_id] = values
-    return payload
+            try:
+                values[name] = coerce_field_value(field, value)
+            except (TypeError, ValueError):
+                values[name] = value
+    return {"scene_id": scene_id if scene is not None else None, "scene": scene_label(frame, scene_id), "fields": values}
 
 
 # ---- entities --------------------------------------------------------------------
 
 
-def _frame_entity_configs(frame: dict, include_fields: bool = True) -> list[tuple[str, str, dict]]:
+def _frame_entity_configs(frame: dict) -> list[tuple[str, str, dict]]:
     """Return (component, object_id, entity-specific config) per frame entity."""
     project_id, frame_id = frame["project_id"], frame["id"]
     state_topic = frame_state_topic(project_id, frame_id)
@@ -423,6 +312,10 @@ def _frame_entity_configs(frame: dict, include_fields: bool = True) -> list[tupl
                 "name": "Scene",
                 "state_topic": state_topic,
                 "value_template": "{{ value_json.scene or '' }}",
+                # The showing scene's public field values, for templates:
+                # state_attr('sensor.<frame>_scene', 'fields').city
+                "json_attributes_topic": frame_fields_topic(project_id, frame_id),
+                "json_attributes_template": "{{ {'scene_id': value_json.scene_id, 'fields': value_json.fields} | tojson }}",
                 "icon": "mdi:movie-open-outline",
             },
         ),
@@ -479,26 +372,16 @@ def _frame_entity_configs(frame: dict, include_fields: bool = True) -> list[tupl
         if press in ("restart", "reboot"):
             config["device_class"] = "restart"
         entities.append(("button", object_id, config))
-    if include_fields:
-        entities.extend(scene_field_entities(frame))
     return entities
 
 
-def entity_key(component: str, object_id: str) -> str:
-    return f"{component}/{object_id}"
-
-
-def frame_entity_keys(frame: dict, include_fields: bool = True) -> set[str]:
-    return {entity_key(component, object_id) for component, object_id, _ in _frame_entity_configs(frame, include_fields)}
-
-
-def frame_discovery_messages(frame: dict, include_fields: bool = True) -> list[tuple[str, Optional[dict]]]:
+def frame_discovery_messages(frame: dict) -> list[tuple[str, Optional[dict]]]:
     """Retained discovery configs that create/update the frame's HA device."""
     project_id, frame_id = frame["project_id"], frame["id"]
     node_id = frame_node_id(project_id, frame_id)
     device = frame_device(frame)
     messages: list[tuple[str, Optional[dict]]] = []
-    for component, object_id, entity in _frame_entity_configs(frame, include_fields):
+    for component, object_id, entity in _frame_entity_configs(frame):
         topic = f"{DISCOVERY_PREFIX}/{component}/{node_id}/{object_id}/config"
         payload = {
             "unique_id": f"{node_id}_{object_id}",
@@ -510,27 +393,15 @@ def frame_discovery_messages(frame: dict, include_fields: bool = True) -> list[t
     return messages
 
 
-def entity_removal_messages(project_id: int, frame_id: int, keys: Iterable[str]) -> list[tuple[str, Optional[dict]]]:
-    """Empty retained payloads for the given component/object_id keys."""
+def frame_removal_messages(project_id: int, frame_id: int) -> list[tuple[str, Optional[dict]]]:
+    """Empty retained payloads that make HA drop the frame's device."""
     node_id = frame_node_id(project_id, frame_id)
-    messages: list[tuple[str, Optional[dict]]] = []
-    for key in sorted(set(keys)):
-        component, _, object_id = key.partition("/")
-        if component and object_id:
-            messages.append((f"{DISCOVERY_PREFIX}/{component}/{node_id}/{object_id}/config", None))
-    return messages
-
-
-def frame_removal_messages(
-    project_id: int, frame_id: int, extra_keys: Iterable[str] = ()
-) -> list[tuple[str, Optional[dict]]]:
-    """Empty retained payloads that make HA drop the frame's device: the fixed
-    entities, plus any keys the sync recorded for this frame (its field
-    entities, whose names depend on the scenes it had)."""
-    # A scene so the select is among the fixed entities; no fields.
+    # A scene so the select is among the entities.
     fixed = {"project_id": project_id, "id": frame_id, "scenes": [{"id": "-", "name": "-"}]}
-    keys = frame_entity_keys(fixed, include_fields=False) | set(extra_keys)
-    return entity_removal_messages(project_id, frame_id, keys)
+    return [
+        (f"{DISCOVERY_PREFIX}/{component}/{node_id}/{object_id}/config", None)
+        for component, object_id, _entity in _frame_entity_configs(fixed)
+    ]
 
 
 def frame_state_payload(
