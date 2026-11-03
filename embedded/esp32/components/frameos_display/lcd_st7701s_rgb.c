@@ -555,6 +555,21 @@ static void backlight_set(bool on)
     gpio_set_level((gpio_num_t)s_board->backlight, on ? 1 : 0);
 }
 
+/* The pin follows two things: what turnOff / toggleScreen asked for, and a
+ * scene store's run of flash writes (fos_lcd_st7701s_flash_writes). */
+static bool s_backlight_wanted = true;
+static volatile bool s_writes_dark = false;
+static int64_t s_writes_since_us = 0;
+static uint32_t s_writes_dark_count = 0;
+static uint32_t s_writes_dark_ms = 0;
+static esp_timer_handle_t s_writes_timer = NULL;
+
+static void backlight_follow(void)
+{
+    if (s_board->backlight < 0) return;
+    gpio_set_level((gpio_num_t)s_board->backlight, (s_backlight_wanted && !s_writes_dark) ? 1 : 0);
+}
+
 #define LCD_FB_BYTES ((size_t)FOS_LCD_ST7701S_WIDTH * FOS_LCD_ST7701S_HEIGHT * 2u)
 
 /* The buffer last presented is being scanned: wait for the frame boundary
@@ -907,8 +922,49 @@ esp_err_t fos_lcd_st7701s_i2c_bus(int sda, int scl, void **bus)
 esp_err_t fos_lcd_st7701s_backlight(bool on)
 {
     if (!s_ready) return ESP_ERR_INVALID_STATE;
-    backlight_set(on);
+    s_backlight_wanted = on;
+    backlight_follow();
     return ESP_OK;
+}
+
+static void writes_over(void *arg)
+{
+    (void)arg;
+    fos_lcd_st7701s_flash_writes(false);
+}
+
+/* A flash write switches the cache off, which holds off the interrupt that
+ * refills the bounce buffers from PSRAM, and a page program outlasts the 0.9 ms
+ * those buffers last. One write is one disturbed frame; a scene store is
+ * hundreds of them with erases of 70 ms to 1.5 s between, and the glass shows
+ * stale lines the whole way through. No refill can run from PSRAM while the
+ * cache is off, so the picture cannot be kept: the backlight goes off instead.
+ * The timer is what stops a store that never reaches its end from leaving a
+ * frame dark. */
+void fos_lcd_st7701s_flash_writes(bool running)
+{
+    if (!s_ready) return;
+    if (running) {
+        if (!s_writes_timer) {
+            const esp_timer_create_args_t args = {.callback = writes_over, .name = "fos_lcd_writes"};
+            if (esp_timer_create(&args, &s_writes_timer) != ESP_OK) s_writes_timer = NULL;
+        }
+        if (s_writes_timer) {
+            esp_timer_stop(s_writes_timer);
+            esp_timer_start_once(s_writes_timer, 60 * 1000 * 1000);
+        }
+        if (s_writes_dark) return;
+        s_writes_since_us = esp_timer_get_time();
+        s_writes_dark = true;
+        s_writes_dark_count++;
+        backlight_follow();
+        return;
+    }
+    if (!s_writes_dark) return;
+    if (s_writes_timer) esp_timer_stop(s_writes_timer);
+    s_writes_dark = false;
+    s_writes_dark_ms = (uint32_t)((esp_timer_get_time() - s_writes_since_us) / 1000);
+    backlight_follow();
 }
 
 bool fos_lcd_st7701s_stats(fos_lcd_st7701s_stats_t *out, bool reset)
@@ -921,6 +977,10 @@ bool fos_lcd_st7701s_stats(fos_lcd_st7701s_stats_t *out, bool reset)
         out->glitches = s_glitches;
         out->max_deviation_us = s_max_deviation_us;
         out->late_refills = s_late_refills;
+        out->writes_dark_count = s_writes_dark_count;
+        out->writes_dark_now = s_writes_dark;
+        out->writes_dark_ms = s_writes_dark ? (uint32_t)((esp_timer_get_time() - s_writes_since_us) / 1000)
+                                            : s_writes_dark_ms;
         out->slack_us = s_slack_us;
         out->now_us = esp_timer_get_time();
         uint32_t next = s_recent_next;
@@ -1001,6 +1061,7 @@ esp_err_t fos_lcd_st7701s_backlight(bool on)
     (void)on;
     return ESP_ERR_NOT_SUPPORTED;
 }
+void fos_lcd_st7701s_flash_writes(bool running) { (void)running; }
 bool fos_lcd_st7701s_stats(fos_lcd_st7701s_stats_t *out, bool reset)
 {
     (void)out;

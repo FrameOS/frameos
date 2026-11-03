@@ -2017,6 +2017,11 @@ static int cmd_lcd(int argc, char **argv)
            st.pclk_hz / 1e6, (unsigned long)st.frame_us, st.frame_us ? 1e6 / st.frame_us : 0.0,
            (unsigned long)st.frames, (unsigned long)st.glitches, (unsigned long)st.late_refills,
            (unsigned long)st.slack_us, (unsigned long)st.max_deviation_us, reset ? " (reset)" : "");
+    if (st.writes_dark_count) {
+        printf("lcd: backlight off for flash writes %lu time(s), the last %lu ms%s\n",
+               (unsigned long)st.writes_dark_count, (unsigned long)st.writes_dark_ms,
+               st.writes_dark_now ? " so far" : "");
+    }
     for (int i = 0; i < st.recent_count; i++) {
         printf("lcd:   late frame %lld ms ago, %lu us off\n", (long long)((st.now_us - st.recent[i].at_us) / 1000),
                (unsigned long)st.recent[i].deviation_us);

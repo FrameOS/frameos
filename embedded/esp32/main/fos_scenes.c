@@ -1059,6 +1059,9 @@ bool fos_scenes_apply_pending(void)
         json = NULL;
     }
     free(json);
+    /* The writes are over: the old picture and the loading mark until the new
+     * scene's first frame. */
+    fos_display_flash_writes(false);
     if (pushed && !ok) fos_display_loading_end();
     /* Publish the outcome before the generation, so a poller that sees a new
      * generation always reads the matching result. */
@@ -1388,8 +1391,12 @@ esp_err_t fos_scenes_set_json_from(const char *json, size_t len,
     }
     esp_err_t err = mount_state();
     if (err != ESP_OK) return err;
+    /* Dark until the apply on the render task has split it: flash writes the
+     * whole way (fos_lcd_st7701s_flash_writes). */
+    fos_display_flash_writes(true);
     err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, json, len);
     if (err != ESP_OK) {
+        fos_display_flash_writes(false);
         log_scene_event("event:uploadScenes", "error", origin, "",
                         s_last_error[0] ? s_last_error : "store-failed",
                         len, 0, 0, err);
@@ -1489,7 +1496,9 @@ esp_err_t fos_scenes_sync(bool force)
     char response_etag[ETAG_LEN];
     strlcpy(response_etag, response.etag, sizeof(response_etag));
 
+    fos_display_flash_writes(true);
     err = write_file_replace(SCENES_PATH, SCENES_TMP_PATH, buf, total);
+    fos_display_flash_writes(false);
     if (err == ESP_OK) {
         save_etag(response_etag);
         /* Backend-served payload: declare it before load_into_nim promotes

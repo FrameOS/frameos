@@ -94,6 +94,10 @@ void fos_display_set_before_write_hook(void (*hook)(const uint8_t *buf));
  * switch that shows none. The one panel that shows it
  * is the RGB LCD, whose driver does nothing before its init, so these go
  * straight there: every other panel leaves them alone. */
+static inline void fos_display_flash_writes(bool running)
+{
+    fos_lcd_st7701s_flash_writes(running);
+}
 static inline void fos_display_loading_begin(uint32_t since_tick, int rotation)
 {
     fos_lcd_st7701s_loading_begin(since_tick, rotation);

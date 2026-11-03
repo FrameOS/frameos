@@ -369,8 +369,12 @@ for the two Spectra boards most of the bench work runs on:
   ahead, the top of the next frame on the bottom rows), and
   the "skip an unchanged picture" hash is not written to flash (a flash
   write switches the cache off and stalls the refill; an LCD comes up blank
-  after a reboot anyway). Any other flash write (a settings save, a scene
-  download, an OTA) still costs one disturbed frame. `lcd` on the console
+  after a reboot anyway). Any other flash write (a settings save, an OTA) still
+  costs one disturbed frame. A scene store is hundreds of them, so the
+  backlight is off from the first write of a push to the end of its split
+  (`fos_lcd_st7701s_flash_writes`, the screen is dark instead of flickering; a
+  screen turned off stays off, and a timer brings it back after 60 s whatever
+  happens). `lcd` on the console
   counts dropped frames and late refills and sets the pixel clock live.
   From the moment the panel is up until the first picture it shows the
   FrameOS mark on black, its three squares walking the brand colors

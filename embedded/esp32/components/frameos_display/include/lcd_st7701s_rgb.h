@@ -81,6 +81,11 @@ esp_err_t fos_lcd_st7701s_i2c_bus(int sda, int scl, void **bus);
 /* Backlight on or off (the Indicator's GPIO45). ESP_ERR_INVALID_STATE before init. */
 esp_err_t fos_lcd_st7701s_backlight(bool on);
 
+/* A run of flash writes starts or ends (a scene store): the backlight is off
+ * for it, since the refill interrupt cannot run and the glass would flicker.
+ * A screen the user turned off stays off after it. Before init, nothing. */
+void fos_lcd_st7701s_flash_writes(bool running);
+
 /* The loading mark (lcd_loading.h) while a scene switch loads, drawn by a
  * task of its own on core 0 into the buffer being scanned. `mark` is the
  * runtime's (frameos/loading_mark.nim sets it as it starts). Begin on the render task when it starts a
@@ -113,6 +118,9 @@ typedef struct {
     uint32_t late_refills;     /* late past the bounce buffers' slack, not dropped (a band) */
     uint32_t slack_us;         /* that slack at this clock */
     uint32_t max_deviation_us; /* the worst frame's distance from the nominal period */
+    uint32_t writes_dark_count; /* scene stores the backlight went off for */
+    uint32_t writes_dark_ms;    /* how long the last one lasted (so far) */
+    bool writes_dark_now;
     int64_t now_us;            /* esp_timer now, to place the glitches below */
     uint8_t recent_count;      /* the last glitches, oldest first */
     struct {
