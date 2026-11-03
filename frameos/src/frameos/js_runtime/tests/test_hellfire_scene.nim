@@ -5,7 +5,7 @@
 ## the same on every frame type (what keeps its e2e snapshot stable), that
 ## the e2e fixture holds the sample's own app, and how long a frame takes.
 
-import std/[json, monotimes, os, strutils, times, unittest]
+import std/[json, monotimes, os, sequtils, strutils, times, unittest]
 import pixie
 
 import frameos/js_runtime/app_runtime
@@ -74,6 +74,57 @@ suite "Hellfire":
     check fixture["nodes"][1]["data"]["config"]["seed"].getStr() == "666"
     check fixture["e2eFrame"] == %*{"width": 480, "height": 480}
     check sample["settings"]["refreshInterval"].getFloat() < 1 # it animates
+
+  test "quality and the FPS counter are state fields wired into the app":
+    for scene in [sample, fixture]:
+      let fields = scene["fields"]
+      check fields.len == 2
+      check fields[0]["name"].getStr() == "quality" and fields[0]["type"].getStr() == "select"
+      check fields[0]["value"].getStr() == "4" # the app's own default, so the snapshot is the same fire
+      check fields[0]["options"].mapIt(it["value"].getStr()) == @["8", "4", "2"]
+      check fields[1]["name"].getStr() == "showFps" and fields[1]["type"].getStr() == "boolean"
+      check fields[1]["value"].getStr() == "false" # a counter is time, and a snapshot is not
+      for field in fields:
+        check field["access"].getStr() == "public" and field["persist"].getStr() == "disk"
+      var bound: seq[string]
+      for edge in scene["edges"]:
+        if edge["type"].getStr() == "codeNodeEdge" and edge["target"].getStr() == "fire":
+          let source = scene["nodes"].filterIt(it["id"].getStr() == edge["source"].getStr())[0]
+          if source["type"].getStr() == "state":
+            bound.add source["data"]["keyword"].getStr() & " -> " & edge["targetHandle"].getStr()
+      check bound == @["quality -> fieldInput/pixelSize", "showFps -> fieldInput/showFps"]
+    check app["fields"].filterIt(it["name"].getStr() == "showFps").len == 1
+
+  test "the FPS counter draws over the fire, and only there":
+    let plain = newFire("tests/hellfire-plain", 480, 480)
+    let counted = newFire("tests/hellfire-counted", 480, 480)
+    let config = %*{"pixelSize": "4", "seed": "5", "wind": "1"}
+    var withFps = copy(config)
+    withFps["showFps"] = %*true
+    discard plain.render(config)
+    discard counted.render(withFps)
+    let a = plain.render(config)
+    let b = counted.render(withFps)
+    check not same(a, b)
+    # The label sits in the top-left corner: white text on a dark box.
+    var text = 0
+    for y in 8 ..< 40:
+      for x in 8 ..< 260:
+        let c = b[x, y]
+        if c.r > 0xc0 and c.g > 0xc0 and c.b > 0xc0: inc text
+    check text > 50
+    # Below it, the same fire.
+    var differ = 0
+    for y in 100 ..< 480:
+      for x in 0 ..< 480:
+        if a[x, y] != b[x, y]: inc differ
+    check differ == 0
+    # "true" as a string (a form's value) counts too, as does a fire still
+    # being measured: the first render shows the label without a number.
+    var asString = copy(config)
+    asString["showFps"] = %*"true"
+    let c = newFire("tests/hellfire-string", 480, 480).render(asString)
+    check not same(c, newFire("tests/hellfire-plain-2", 480, 480).render(config))
 
   test "hot at the bottom, out at the top, chunky pixels":
     # 32x128 cells: the flames climb ~70 rows, so the top is out.

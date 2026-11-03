@@ -25,7 +25,11 @@ and handed to `frameos.putPixels` as the `Uint8Array` it lives in, with a
 is the frame. No SVG is built or parsed, so what it measures is the
 interpreter's loop and the raw pixel path (`docs/jsx-ui.md` "Canvases").
 On a laptop a frame is ~3 ms; the SenseCAP Indicator's number is still to
-be taken.
+be taken, and the scene reads it off the panel itself: its **FPS counter**
+field draws the renders a second the panel gets (simulation, blit and
+pacing included) in a corner, and its **Quality** field picks the cell
+size, 8, 4 or 2 px, so the same scene measures a fire a quarter or four
+times the work.
 
 ## Where an ESP32 frame goes
 
