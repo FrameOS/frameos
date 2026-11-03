@@ -8,7 +8,7 @@ or sixty times a second.
 Think smart home calendars, meeting room displays, photo frames, word clocks,
 thermostats, industrial dashboards and public signage.
 
-![A scene being built in the FrameOS editor, with a live preview](https://frameos.net/images/editor/live-preview.png)
+![A 13.3 inch Spectra 6 e-ink panel in a 3D-printed frame, running FrameOS](https://frameos.net/images/photos/frame-13in3-spectra6.jpg)
 
 ## How it works
 
