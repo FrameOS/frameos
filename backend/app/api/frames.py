@@ -1620,6 +1620,17 @@ async def api_frame_event(
         if request.headers.get("content-type") == "application/json"
         else request.body()
     )
+    return await dispatch_frame_event(db, redis, frame, event, body)
+
+
+async def dispatch_frame_event(db: Session, redis: Redis, frame: Frame, event: str, body: Any) -> Any:
+    """Hand a scene event or command to a frame the way its kind takes it: a
+    virtual frame renders it here, a thin client has it stored for its next
+    pull, an ESP32 gets it queued, a Pi is told over its HTTP API. The route
+    above is one caller; the Home Assistant sync (app/ha) is the other, so a
+    switch flipped in Home Assistant goes exactly where the editor's button
+    goes. Raises HTTPException as the route would; needs no request or
+    project context."""
     scenes = None
     if event == "uploadScenes":
         scenes, body = _normalize_upload_scenes_payload(body)
@@ -1754,11 +1765,11 @@ async def api_frame_event(
         detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
         if thin_push:
             await log(
-                db, redis, id, "stdinfo",
+                db, redis, int(frame.id), "stdinfo",
                 f"The frame did not answer {event} ({detail}); it shows the change on its next render",
             )
             return {"status": "queued", "applied": False, "command": None}
-        await log(db, redis, id, "stderr", f"Error on frame event {event}: {detail}")
+        await log(db, redis, int(frame.id), "stderr", f"Error on frame event {event}: {detail}")
         raise exc
 
 
