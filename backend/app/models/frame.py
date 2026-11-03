@@ -36,6 +36,7 @@ from app.utils.ssh_host_keys import host_key_fingerprint
 from app.utils.token import secure_token
 from app.utils.tls import generate_frame_tls_material, parse_certificate_not_valid_after
 from app.utils.versions import get_versions
+from app.utils.server_address import default_port_for, join_address, normalize_scheme, scheme_from_port, split_address
 from app.websockets import publish_message
 
 DEFAULT_MAX_HTTP_RESPONSE_BYTES = 64 * 1024 * 1024
@@ -619,20 +620,29 @@ class Frame(Base):
         return result
 
 def server_scheme_from_port(port: Optional[int]) -> str:
-    """The pre-2026.9.13 guess, kept only to seed rows and frame.json files
-    that predate the explicit setting: 443 meant https, everything else http."""
-    return "https" if int(port or 0) == 443 else "http"
+    """The seed for a row or frame.json that predates `server_scheme`
+    (2026.9.13): a port ending in 443 meant TLS (the frame's rule,
+    docs/server-address-fixtures.json). Never consulted once a scheme is
+    stated."""
+    return scheme_from_port(port)
 
 
 def normalize_server_scheme(value: Any, port: Optional[int] = None) -> str:
-    scheme = str(value or "").strip().lower().rstrip(":/")
-    if scheme in ("http", "https"):
-        return scheme
-    return server_scheme_from_port(port)
+    return normalize_scheme(value, port)
 
 
 def server_scheme_for_frame(frame: "Frame") -> str:
     return normalize_server_scheme(getattr(frame, "server_scheme", None), frame.server_port)
+
+
+def server_base_url(frame: "Frame") -> Optional[str]:
+    """`scheme://host[:port]` as the frame dials this backend (the ESP32's
+    `set backend`, the bootstrap script, a share link's origin), the port
+    left off when it is the scheme's own. None when the row names no host."""
+    host = str(frame.server_host or "").strip()
+    if not host:
+        return None
+    return join_address(server_scheme_for_frame(frame), host, int(frame.server_port or 0))
 
 
 def served_deploy_baseline(snapshot: Any) -> Any:
@@ -649,22 +659,13 @@ def served_deploy_baseline(snapshot: Any) -> Any:
 
 
 def split_server_address(server_host: str) -> tuple[str, int, Optional[str]]:
-    """'https://host:8443' / 'host:8989' / 'host' → (host, port, scheme or None).
-    A scheme prefix decides the scheme; a bare address leaves it to the caller."""
-    scheme: Optional[str] = None
-    server_host = str(server_host or "").strip()
-    for prefix in ("http://", "https://"):
-        if server_host.lower().startswith(prefix):
-            scheme = prefix[:-3]
-            server_host = server_host[len(prefix):]
-            break
-    server_host = server_host.rstrip("/")
-    if ':' in server_host:
-        server_host, server_port_initial = server_host.rsplit(':', 1)
-        server_port = int(server_port_initial or '8989')
-    else:
-        server_port = {"https": 443, "http": 80}.get(scheme or "", 8989)
-    return server_host, server_port, scheme
+    """'https://host:8443' / 'host:8989' / 'host' → (host, port, scheme or None),
+    app.utils.server_address.split_address with the port filled in: the
+    scheme's own when one was said without a port, 8989 otherwise. A scheme
+    prefix decides the scheme; a bare address leaves it to the caller."""
+    address = split_address(server_host)
+    port = address.port if address.port is not None else default_port_for(address.scheme)
+    return address.host, port, (address.scheme or None)
 
 
 async def new_frame(
@@ -676,7 +677,12 @@ async def new_frame(
     device: Optional[str] = None,
     interval: Optional[float] = None,
     project_id: Optional[int] = None,
+    server_port: Optional[int] = None,
+    server_scheme: Optional[str] = None,
 ) -> Frame:
+    """`server_host` is the typed address: what it says (`https://host:8443`)
+    wins, then the explicit `server_port` / `server_scheme`, then 8989 and
+    the port seed."""
     if '@' in frame_host:
         # rsplit: passwords may contain '@'
         user_pass, frame_host = frame_host.rsplit('@', 1)
@@ -697,7 +703,14 @@ async def new_frame(
     else:
         user, password = user_pass, None
 
-    server_host, server_port, server_scheme = split_server_address(server_host)
+    typed = split_address(server_host)
+    server_host = typed.host
+    if typed.port is not None:
+        server_port = typed.port
+    elif not server_port:
+        server_port = default_port_for(typed.scheme)
+    if typed.said_scheme:
+        server_scheme = typed.scheme
 
     tls_material = generate_frame_tls_material(frame_host)
     dimensions = device_dimensions(device)

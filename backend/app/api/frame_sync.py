@@ -45,6 +45,7 @@ from app.tasks.buildroot_image import (
 from app.tasks.embedded_firmware import ensure_embedded_frame_defaults
 from app.utils.legacy_app_migration import migrate_legacy_apps_in_scenes
 from app.utils.network import device_server_host_error, is_safe_host
+from app.utils.server_address import split_address
 from app.utils.render_scale import normalize_render_scale
 from app.utils.retired_apps import frame_runtime_version, retire_apps_in_scenes, scenes_for_runtime
 from app.utils.scene_execution import DEFAULT_SCENE_EXECUTION, normalize_scenes_execution
@@ -1712,48 +1713,6 @@ def _adopted_frame_name(remote_frame: dict[str, Any]) -> str:
     return frame_host
 
 
-def _adopt_server_scheme(typed_address: str, requested: str | None) -> str:
-    """A scheme typed into the address wins ("https://backend:8443"), then the
-    form's own scheme field, then plain http — never a guess from the port."""
-    text = (typed_address or "").strip().lower()
-    for scheme in ("https", "http"):
-        if text.startswith(f"{scheme}://"):
-            return scheme
-    return requested if requested in ("http", "https") else "http"
-
-
-def _split_adopt_address(value: str, default_port: int) -> tuple[str, int]:
-    """"10.0.0.5", "10.0.0.5:9000", "http://frame.local:8787/" or "[::1]:8787"
-    → (host, port). People type what their browser shows them, and the
-    field that asks for "this backend's address" is prefilled with
-    host:port — 2026-09-07 that reached new_frame as "host:port:8989" and
-    died on "too many values to unpack (expected 2)" (a bare 500 on 9.10).
-    """
-    text = (value or "").strip()
-    for scheme in ("http://", "https://"):
-        if text.lower().startswith(scheme):
-            text = text[len(scheme):]
-    text = text.split("/", 1)[0].strip()
-    port = int(default_port or 0)
-    if text.startswith("["):
-        closing = text.find("]")
-        if closing > 0:
-            host = text[1:closing]
-            rest = text[closing + 1:]
-            if rest.startswith(":") and rest[1:].isdigit():
-                port = int(rest[1:])
-            return host, port
-    if text.count(":") == 1:
-        host, _, port_text = text.partition(":")
-        if port_text.isdigit():
-            return host.strip(), int(port_text)
-        # "user:pw@host" used to come back as just "user" — a valid host name
-        # that was not the one typed. Whatever follows the colon is kept so
-        # the host check below sees (and refuses) the whole thing.
-        return text, port
-    return text, port
-
-
 async def adopt_standalone_frame(
     db: Session,
     redis: Redis,
@@ -1782,7 +1741,11 @@ async def adopt_standalone_frame(
     if not admin_auth["user"] or not admin_auth["pass"]:
         _bad_request("The frame's admin username and password are required to adopt it")
 
-    host, frame_port = _split_adopt_address(data.frame_host, data.frame_port)
+    # The frame's own address the same way ("frame.local", "10.0.0.7:8787",
+    # "http://frame.local:8787/", "[::1]:8787"); its IPv6 brackets come off.
+    typed_frame = split_address(data.frame_host)
+    host = typed_frame.host.strip("[]")
+    frame_port = typed_frame.port if typed_frame.port is not None else int(data.frame_port or 8787)
     if not host:
         _bad_request("A frame host is required")
     # Both addresses end up persisted and one of them inside the device: the
@@ -1792,8 +1755,14 @@ async def adopt_standalone_frame(
     # control character past the form.
     if not is_safe_host(host.strip("[]")):
         _bad_request(f"Not a valid frame host name or address: {host!r}")
-    server_host, server_port = _split_adopt_address(data.server_host, data.server_port)
-    server_scheme = _adopt_server_scheme(data.server_host, data.server_scheme)
+    # "10.0.0.5", "10.0.0.5:9000", "https://backend:8443/" or "[::1]:8787":
+    # people type what their browser shows them (docs/server-address-fixtures.json).
+    # What the address says wins, then the form's own port and scheme fields;
+    # a scheme nobody said is seeded from the port by new_frame.
+    typed = split_address(data.server_host)
+    server_host = typed.host
+    server_port = typed.port if typed.port is not None else int(data.server_port or 8989)
+    server_scheme = typed.scheme or data.server_scheme
     if not server_host:
         _bad_request("A server host is required (the address the frame will reach this backend on)")
     if server_host.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
@@ -1833,10 +1802,12 @@ async def adopt_standalone_frame(
         redis,
         data.name or _adopted_frame_name(remote_frame) or host,
         host,
-        f"{server_scheme}://{server_host}:{server_port}",
+        server_host,
         device=remote_frame.get("device"),
         interval=remote_frame.get("interval"),
         project_id=project_id,
+        server_port=server_port,
+        server_scheme=server_scheme,
     )
     frame.frame_port = frame_port
 

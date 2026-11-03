@@ -1493,11 +1493,16 @@ def test_embedded_backend_url_states_its_scheme() -> None:
     assert embedded_backend_url_for_frame(frame) == "http://backend.example:443"
     frame = Frame(server_host="backend.example", server_port=80, server_scheme="http")
     assert embedded_backend_url_for_frame(frame) == "http://backend.example"
-    # A row the migration has not seeded yet: the pre-scheme guess, once.
+    # A row the migration has not seeded yet: the pre-scheme seed, once — the
+    # frame's own rule (a port ending in 443), docs/server-address-fixtures.json.
     frame = Frame(server_host="backend.example", server_port=443, server_scheme=None)
     assert embedded_backend_url_for_frame(frame) == "https://backend.example"
     frame = Frame(server_host="backend.example", server_port=8443, server_scheme=None)
-    assert embedded_backend_url_for_frame(frame) == "http://backend.example:8443"
+    assert embedded_backend_url_for_frame(frame) == "https://backend.example:8443"
+    frame = Frame(server_host="backend.example", server_port=8989, server_scheme=None)
+    assert embedded_backend_url_for_frame(frame) == "http://backend.example:8989"
+    frame = Frame(server_host="fd00::10", server_port=8989, server_scheme="http")
+    assert embedded_backend_url_for_frame(frame) == "http://[fd00::10]:8989"
 
 
 def test_provisioning_plan_warns_about_the_published_images_flash_layout():

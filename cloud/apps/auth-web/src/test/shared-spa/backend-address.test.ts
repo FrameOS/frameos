@@ -5,12 +5,41 @@
 // frames port serves TLS (the add-on's ssl option, docker-entrypoint.sh),
 // `https://` in front, because the frame would otherwise speak plain HTTP to
 // a TLS port and never report.
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FrameOSSettings } from "../../../../../../frontend/src/types";
 import {
   defaultNewFrameServerHost,
   detectedBackendAddressParts,
+  splitServerAddress,
 } from "../../../../../../frontend/src/utils/backendAddress";
+
+// The SPA's runner of docs/server-address-fixtures.json: a typed backend
+// address means the same thing here, on the backend
+// (app/utils/tests/test_server_address.py) and on the frame
+// (frameos/src/frameos/tests/test_server_address.nim).
+const fixtures = JSON.parse(
+  readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../../../../../docs/server-address-fixtures.json"),
+    "utf8",
+  ),
+) as {
+  splitAddress: { cases: { input: string; scheme: string; host: string; port: number | null }[] };
+};
+
+describe("splitServerAddress", () => {
+  for (const c of fixtures.splitAddress.cases) {
+    it(`reads ${JSON.stringify(c.input)} as the other planes do`, () => {
+      expect(splitServerAddress(c.input)).toEqual({
+        scheme: c.scheme,
+        host: c.host,
+        port: c.port === null ? "" : String(c.port),
+      });
+    });
+  }
+});
 
 type AppConfigWindow = { FRAMEOS_APP_CONFIG?: Record<string, unknown> };
 

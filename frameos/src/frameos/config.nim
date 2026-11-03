@@ -341,6 +341,7 @@ proc setConfigDefaults*(config: var FrameConfig) =
   ## net for configs built by hand (tests, the embedded builds) and for a
   ## frame.json that spells a whole section as `null`.
   if config == nil: newHook(config)
+  normalizeServerAddressFields(config.serverHost, config.serverPort, config.serverScheme)
   if config.serverPort == 0: config.serverPort = 8989
   config.serverScheme = normalizeServerScheme(config.serverScheme, config.serverPort)
   if config.width == 0: config.width = 1920

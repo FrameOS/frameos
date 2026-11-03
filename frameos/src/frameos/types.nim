@@ -15,10 +15,15 @@ import frameos/events_gen
 
 const DefaultMaxHttpResponseBytes* = 64 * 1024 * 1024
 
+# The address a frame reaches its backend on: three fields (serverHost, a bare
+# host; serverPort; serverScheme), one reading on every plane —
+# docs/server-address-fixtures.json is the contract, replayed by
+# tests/test_server_address.nim, the backend and the SPA.
+
 proc serverSchemeFromPort*(port: int): string =
-  ## The pre-2026.9.13 guess, kept only for a frame.json written before
-  ## `serverScheme` existed: a port ending in 443 meant TLS. Every current
-  ## writer (the backend, frameos-setup.sh, the local admin page) states it.
+  ## The seed for a frame.json written before `serverScheme` existed
+  ## (2026.9.13): a port ending in 443 meant TLS. Every current writer (the
+  ## backend, frameos-setup.sh, the portal, the local admin page) states it.
   if port mod 1000 == 443: "https" else: "http"
 
 proc normalizeServerScheme*(scheme: string, port: int): string =
@@ -26,6 +31,68 @@ proc normalizeServerScheme*(scheme: string, port: int): string =
   ## from the port otherwise (absent key, legacy config, a typo).
   let cleaned = scheme.strip().toLowerAscii().strip(leading = false, chars = {':', '/'})
   if cleaned in ["http", "https"]: cleaned else: serverSchemeFromPort(port)
+
+type
+  ServerAddress* = object
+    ## A typed address ("host", "host:8989", "https://host:8443/"), split.
+    ## `scheme` is "" and `port` 0 when the text did not say; the consumer
+    ## fills them. A non-numeric port and a scheme other than http(s) stay
+    ## in `host`, so a host check refuses the whole thing instead of half.
+    scheme*: string
+    host*: string
+    port*: int
+
+proc splitServerAddress*(value: string): ServerAddress =
+  var text = value.strip()
+  let schemeEnd = text.find("://")
+  if schemeEnd > 0:
+    let scheme = text[0 ..< schemeEnd].toLowerAscii()
+    var isScheme = scheme[0] in {'a'..'z'}
+    for ch in scheme:
+      if ch notin {'a'..'z', '0'..'9', '+', '.', '-'}: isScheme = false
+    if isScheme:
+      if scheme notin ["http", "https"]:
+        return ServerAddress(scheme: "", host: text, port: 0)
+      result.scheme = scheme
+      text = text[schemeEnd + 3 .. ^1]
+  let slash = text.find('/')
+  if slash >= 0: text = text[0 ..< slash]
+  text = text.strip()
+  if text.startsWith("["):
+    let closing = text.find(']')
+    if closing > 0:
+      let rest = text[closing + 1 .. ^1]
+      if rest.len == 0:
+        result.host = text
+        return
+      if rest.len > 1 and rest[0] == ':' and rest[1 .. ^1].allCharsInSet({'0'..'9'}):
+        result.host = text[0 .. closing]
+        result.port = parseInt(rest[1 .. ^1])
+        return
+    result.host = text
+    return
+  if text.count(':') == 1:
+    let colon = text.find(':')
+    let portText = text[colon + 1 .. ^1]
+    if portText.len == 0:
+      result.host = text[0 ..< colon]
+      return
+    if portText.allCharsInSet({'0'..'9'}):
+      result.host = text[0 ..< colon]
+      result.port = parseInt(portText)
+      return
+  result.host = text
+
+proc normalizeServerAddressFields*(host: var string, port: var int, scheme: var string) =
+  ## A typed address stored where the bare host belongs ("https://host:8443"
+  ## in serverHost — an older portal, a hand-edited frame.json, another
+  ## writer): what it says moves to the scheme and port fields and wins.
+  let typed = splitServerAddress(host)
+  if typed.host == host.strip() and typed.port == 0 and typed.scheme.len == 0:
+    return
+  host = typed.host
+  if typed.port > 0: port = typed.port
+  if typed.scheme.len > 0: scheme = typed.scheme
 
 type
   # Parsed from config.json

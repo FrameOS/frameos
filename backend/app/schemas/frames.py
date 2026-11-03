@@ -192,7 +192,11 @@ class FrameCreateRequest(BaseModel):
     mode: Optional[Literal["rpios", "buildroot", "embedded"]] = None
     name: str
     frame_host: str
+    # The typed address ("host", "host:8989", "https://host:8443"); what it
+    # says wins over the two fields below, which fill in what it left out.
     server_host: str
+    server_port: Optional[int] = None
+    server_scheme: Optional[Literal["http", "https"]] = None
     interval: Optional[float] = None
     device: Optional[str] = None
     device_config: Optional[Dict[str, Any]] = None

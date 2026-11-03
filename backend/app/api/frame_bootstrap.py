@@ -7,7 +7,6 @@ import secrets
 import shlex
 import time
 from http import HTTPStatus
-from urllib.parse import urlparse
 
 from arq import ArqRedis as Redis
 from fastapi import Depends, HTTPException, Query, Request
@@ -22,7 +21,7 @@ from app.models.frame import (
     frame_has_shell_access,
     get_frame_json,
     get_interpreted_scenes_json,
-    server_scheme_for_frame,
+    server_base_url,
     update_frame,
 )
 from app.redis import get_redis
@@ -152,23 +151,9 @@ def _external_request_base_url(request: Request) -> str:
 
 
 def _frame_server_base_url(frame: Frame) -> str | None:
-    server_host = str(frame.server_host or "").strip().rstrip("/")
-    if not server_host:
-        return None
-
-    parsed = urlparse(server_host if "://" in server_host else f"//{server_host}")
-    scheme = parsed.scheme or server_scheme_for_frame(frame)
-    host = parsed.netloc or parsed.path
-    path = parsed.path if parsed.netloc else ""
-    if not host:
-        return None
-
-    has_port = ":" in host.rsplit("@", 1)[-1]
-    port = int(frame.server_port or 0)
-    if port and not has_port and not (scheme == "http" and port == 80) and not (scheme == "https" and port == 443):
-        host = f"{host}:{port}"
-
-    return f"{scheme}://{host}{path.rstrip('/')}"
+    """Where the frame will reach this backend, as the row says it — the same
+    URL the ESP32 is provisioned with."""
+    return server_base_url(frame)
 
 
 def _frame_bootstrap_script_url(request: Request, frame: Frame) -> str:

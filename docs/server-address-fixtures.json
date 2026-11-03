@@ -1,0 +1,49 @@
+{
+  "description": "How every plane reads the address a frame reaches its self-hosted backend on. The stored form is three fields — server_host (a bare host, no scheme, port or path), server_port and server_scheme (frame.json serverHost / serverPort / serverScheme) — and the scheme is never guessed from the port once stated. `schemeFromPort` is the ONE seed rule for a row or frame.json written before server_scheme existed (2026.9.13): https when the port ends in 443 (443, 8443, 1443), http otherwise. `normalizeScheme` is what a stored value becomes (trailing `://` tolerated, junk falls back to the seed). `splitAddress` is what a typed address becomes wherever one is accepted (the add-frame and adopt forms, the frame settings' host field, the Wi-Fi portal, the device's own frame API, frame.json on load): scheme '' and port null mean 'not said' and the consumer fills them. A port that is not a number (`user:pw@host`) and a scheme other than http or https stay in the host so the host check refuses the whole thing. Replayed by backend/app/utils/tests/test_server_address.py, frameos/src/frameos/tests/test_server_address.nim and cloud/apps/auth-web/src/test/shared-spa/backend-address.test.ts.",
+  "schemeFromPort": {
+    "cases": [
+      { "port": 443, "scheme": "https" },
+      { "port": 8443, "scheme": "https" },
+      { "port": 1443, "scheme": "https" },
+      { "port": 4430, "scheme": "http" },
+      { "port": 44300, "scheme": "http" },
+      { "port": 80, "scheme": "http" },
+      { "port": 8989, "scheme": "http" },
+      { "port": 0, "scheme": "http" }
+    ]
+  },
+  "normalizeScheme": {
+    "cases": [
+      { "scheme": "https", "port": 8989, "expected": "https" },
+      { "scheme": "http", "port": 8443, "expected": "http" },
+      { "scheme": "HTTPS://", "port": 9000, "expected": "https" },
+      { "scheme": " http ", "port": 443, "expected": "http" },
+      { "scheme": "", "port": 443, "expected": "https" },
+      { "scheme": "", "port": 8443, "expected": "https" },
+      { "scheme": "", "port": 8989, "expected": "http" },
+      { "scheme": "ftp", "port": 8443, "expected": "https" },
+      { "scheme": "wss", "port": 8080, "expected": "http" }
+    ]
+  },
+  "splitAddress": {
+    "cases": [
+      { "input": "backend.local", "scheme": "", "host": "backend.local", "port": null },
+      { "input": "backend.local:8989", "scheme": "", "host": "backend.local", "port": 8989 },
+      { "input": "  backend.local:8989/  ", "scheme": "", "host": "backend.local", "port": 8989 },
+      { "input": "https://backend.local", "scheme": "https", "host": "backend.local", "port": null },
+      { "input": "https://backend.local:8443", "scheme": "https", "host": "backend.local", "port": 8443 },
+      { "input": "HTTPS://Backend.Local:8443/x/y", "scheme": "https", "host": "Backend.Local", "port": 8443 },
+      { "input": "http://10.0.0.5:8989/", "scheme": "http", "host": "10.0.0.5", "port": 8989 },
+      { "input": "http://10.0.0.5", "scheme": "http", "host": "10.0.0.5", "port": null },
+      { "input": "[fd00::10]:8989", "scheme": "", "host": "[fd00::10]", "port": 8989 },
+      { "input": "[fd00::10]", "scheme": "", "host": "[fd00::10]", "port": null },
+      { "input": "https://[fd00::10]:8443/", "scheme": "https", "host": "[fd00::10]", "port": 8443 },
+      { "input": "fd00::10", "scheme": "", "host": "fd00::10", "port": null },
+      { "input": "backend.local:", "scheme": "", "host": "backend.local", "port": null },
+      { "input": "user:pw@backend.local", "scheme": "", "host": "user:pw@backend.local", "port": null },
+      { "input": "ftp://backend.local:21", "scheme": "", "host": "ftp://backend.local:21", "port": null },
+      { "input": "", "scheme": "", "host": "", "port": null },
+      { "input": "https://", "scheme": "https", "host": "", "port": null }
+    ]
+  }
+}

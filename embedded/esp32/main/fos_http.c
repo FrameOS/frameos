@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -1794,6 +1795,11 @@ static bool json_u32_item(const cJSON *object, const char *key, uint32_t *out)
     return true;
 }
 
+/* The frame form's three fields (server_host, server_port, server_scheme —
+ * docs/server-address-fixtures.json) become the one backend URL this
+ * firmware keeps. A host that already is a URL is taken whole; otherwise the
+ * scheme is the one stated, http when the payload says nothing — never a
+ * guess from the port. */
 static void update_backend_url_from_frame_payload(fos_config_t *config, const cJSON *root)
 {
     const cJSON *server_host = cJSON_GetObjectItem(root, "server_host");
@@ -1806,8 +1812,13 @@ static void update_backend_url_from_frame_payload(fos_config_t *config, const cJ
 
     uint32_t port = 8989;
     json_u32_item(root, "server_port", &port);
-    snprintf(config->backend_url, sizeof(config->backend_url), "http://%s:%lu",
-             server_host->valuestring, (unsigned long)port);
+    const cJSON *server_scheme = cJSON_GetObjectItem(root, "server_scheme");
+    bool tls = cJSON_IsString(server_scheme) && server_scheme->valuestring &&
+               strcasecmp(server_scheme->valuestring, "https") == 0;
+    const char *host = server_host->valuestring;
+    bool ipv6 = strchr(host, ':') != NULL && host[0] != '[';
+    snprintf(config->backend_url, sizeof(config->backend_url), "%s://%s%s%s:%lu",
+             tls ? "https" : "http", ipv6 ? "[" : "", host, ipv6 ? "]" : "", (unsigned long)port);
 }
 
 static esp_err_t frame_update_post_handler(httpd_req_t *req)

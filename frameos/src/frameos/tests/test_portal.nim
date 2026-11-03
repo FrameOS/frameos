@@ -857,6 +857,43 @@ suite "portal setup control mode":
     check persistPortalSetup(frame, parseSetupOptions({"ssid": "x", "hostname": "hallway"}.toTable, frame.frameConfig))
     check parseFile(setupDir / "frame.json"){"name"}.getStr() == "Kitchen"
 
+  test "POST /setup states the backend's scheme and reads one typed into the host":
+    # A frame.json from before serverScheme existed, pointing at 8443: the
+    # seed (a port ending in 443 is TLS) is written out, stated from now on.
+    writeFile(setupDir / "frame.json", $(%*{"serverHost": "backend.example.com", "serverPort": 8443}))
+    var frame = makeFrameOS()
+    frame.frameConfig.serverHost = "backend.example.com"
+    frame.frameConfig.serverPort = 8443
+    frame.frameConfig.serverScheme = normalizeServerScheme("", 8443)
+    var options = parseSetupOptions({"ssid": "x", "hostname": "kitchen", "controlMode": "backend",
+      "serverHost": "backend.example.com", "serverPort": "8443"}.toTable, frame.frameConfig)
+    check persistPortalSetup(frame, options)
+    var saved = parseFile(setupDir / "frame.json")
+    check saved{"serverHost"}.getStr() == "backend.example.com"
+    check saved{"serverPort"}.getInt() == 8443
+    check saved{"serverScheme"}.getStr() == "https"
+
+    # The form's own choice is kept as said, whatever the port.
+    options = parseSetupOptions({"ssid": "x", "hostname": "kitchen", "controlMode": "backend",
+      "serverHost": "backend.example.com", "serverPort": "8443", "serverScheme": "http"}.toTable, frame.frameConfig)
+    check persistPortalSetup(frame, options)
+    saved = parseFile(setupDir / "frame.json")
+    check saved{"serverScheme"}.getStr() == "http"
+    check frame.frameConfig.serverScheme == "http"
+
+    # A scheme and port typed into the host win, and the host stays bare —
+    # the log shipper dials it as written.
+    options = parseSetupOptions({"ssid": "x", "hostname": "kitchen", "controlMode": "backend",
+      "serverHost": "https://other.example.com:9443/", "serverPort": "8989", "serverScheme": "http"}.toTable,
+      frame.frameConfig)
+    check persistPortalSetup(frame, options)
+    saved = parseFile(setupDir / "frame.json")
+    check saved{"serverHost"}.getStr() == "other.example.com"
+    check saved{"serverPort"}.getInt() == 9443
+    check saved{"serverScheme"}.getStr() == "https"
+    check frame.frameConfig.serverHost == "other.example.com"
+    check frame.frameConfig.serverScheme == "https"
+
   test "a minimal POST /setup leaves the control plane alone":
     # Wi-Fi and hostname only (a script, an older portal page): the frame
     # keeps its backend, and a queued cloud claim is not touched either.

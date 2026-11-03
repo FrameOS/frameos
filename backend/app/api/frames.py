@@ -55,7 +55,6 @@ from app.models.frame import (
     Frame,
     compact_timezone_updater,
     get_frame_json,
-    split_server_address,
     new_frame,
     delete_frame,
     normalize_error_behavior,
@@ -99,6 +98,7 @@ from app.schemas.frames import (
 )
 from app.api.auth import get_current_user_from_request
 from app.config import config
+from app.utils.server_address import split_address as split_typed_address
 from app.utils.network import (
     TargetBlocked,
     assert_target_allowed,
@@ -539,23 +539,18 @@ def _serialize_datetime(value: Optional[datetime]) -> Optional[str]:
     return value.replace(tzinfo=timezone.utc).isoformat()
 
 
-def _require_valid_device_server_host(server_host: Any, *, split_address: bool) -> None:
+def _require_valid_device_server_host(server_host: Any) -> None:
     """400 unless `server_host` names a host a device may be told to dial —
-    app.utils.network.device_server_host_error. On create and import the
-    value is the typed address ("host", "host:port", "scheme://host:port")
-    that new_frame splits; on update it is the bare host column, stored
-    verbatim as frame.json serverHost, so a port or scheme in it is refused
-    rather than shipped. An empty value ("no backend controls this frame")
-    passes; `localhost` stays allowed here (single-machine development)."""
-    text = str(server_host or "").strip()
-    if not text:
+    app.utils.network.device_server_host_error. The value is the typed
+    address ("host", "host:port", "scheme://host:port"); what it says about
+    the scheme and port goes to `server_scheme` / `server_port`
+    (split_typed_address, docs/server-address-fixtures.json) and only the
+    bare host is checked and stored. An empty value ("no backend controls
+    this frame") passes; `localhost` stays allowed here (single-machine
+    development)."""
+    host = split_typed_address(server_host).host
+    if not host:
         return
-    host = text
-    if split_address:
-        try:
-            host, _port, _scheme = split_server_address(text)
-        except ValueError:
-            host = text
     error = device_server_host_error(host)
     if error:
         raise HTTPException(
@@ -4699,11 +4694,17 @@ async def api_frame_update_endpoint(
 
     if "server_host" in update_data:
         # Handed to the device as frame.json serverHost on the next deploy or
-        # sync; an empty value is the documented "no backend" state.
-        server_host_text = str(update_data["server_host"] or "").strip()
-        update_data["server_host"] = server_host_text
-        if server_host_text:
-            _require_valid_device_server_host(server_host_text, split_address=False)
+        # sync, so only the bare host is stored: a scheme or port typed into
+        # the field ("https://host:8443") moves to its own column and wins
+        # over the form's sibling fields. An empty value is the documented
+        # "no backend" state.
+        _require_valid_device_server_host(update_data["server_host"])
+        typed = split_typed_address(update_data["server_host"])
+        update_data["server_host"] = typed.host
+        if typed.port is not None:
+            update_data["server_port"] = typed.port
+        if typed.said_scheme:
+            update_data["server_scheme"] = typed.scheme
 
     old_mode = frame.mode
     old_device = frame.device
@@ -4847,7 +4848,7 @@ async def api_frame_new(
                 data.network.get("wifiPassword"), (settings.get("defaults") or {}).get("wifiPassword")
             ),
         }
-    _require_valid_device_server_host(data.server_host, split_address=True)
+    _require_valid_device_server_host(data.server_host)
     try:
         if data.mode == "buildroot":
             normalize_buildroot_platform(data.platform)
@@ -4864,6 +4865,8 @@ async def api_frame_new(
             data.device,
             data.interval,
             project_id=project_id,
+            server_port=data.server_port,
+            server_scheme=data.server_scheme,
         )
         if data.device_config is not None:
             frame.device_config = dict(data.device_config)
@@ -5036,7 +5039,7 @@ async def api_frame_import(
     except ValidationError as exc:
         raise RequestValidationError(exc.errors())
 
-    _require_valid_device_server_host(data.get("server_host"), split_address=True)
+    _require_valid_device_server_host(data.get("server_host"))
     try:
         frame = await new_frame(
             db,
@@ -5047,6 +5050,8 @@ async def api_frame_import(
             data.get("device"),
             data.get("interval"),
             project_id=current_project_id(),
+            server_port=data.get("server_port"),
+            server_scheme=data.get("server_scheme"),
         )
 
         for key, value in importable.items():
