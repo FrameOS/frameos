@@ -124,6 +124,24 @@ block test_server_scheme_defaults:
     doAssert parseFrameConfig($(%*{"serverPort": 8443, "serverScheme": "ftp"})).serverScheme == "https"
     doAssert parseFrameConfig($(%*{"serverPort": 8080, "serverScheme": 12})).serverScheme == "http"
 
+block test_server_host_typed_as_an_address:
+    # A frame.json whose serverHost carries a scheme or port (an older portal,
+    # a hand edit, another writer): what it says moves to the scheme and port
+    # fields and the host the log shipper dials stays bare.
+    let typed = parseFrameConfig($(%*{"serverHost": "https://backend.local:8443/", "serverPort": 8989, "serverScheme": "http"}))
+    doAssert typed.serverHost == "backend.local"
+    doAssert typed.serverPort == 8443
+    doAssert typed.serverScheme == "https"
+    let portOnly = parseFrameConfig($(%*{"serverHost": "backend.local:9000"}))
+    doAssert portOnly.serverHost == "backend.local"
+    doAssert portOnly.serverPort == 9000
+    doAssert portOnly.serverScheme == "http"
+    let schemeOnly = parseFrameConfig($(%*{"serverHost": "https://backend.local"}))
+    doAssert schemeOnly.serverHost == "backend.local"
+    doAssert schemeOnly.serverPort == 8989
+    doAssert schemeOnly.serverScheme == "https"
+    doAssert parseFrameConfig($(%*{"serverHost": "fd00::10", "serverPort": 8989})).serverHost == "fd00::10"
+
 block test_error_behavior_defaults:
     let config = parseFrameConfig($(%*{"errorBehavior": {
         "mode": "not-a-mode",

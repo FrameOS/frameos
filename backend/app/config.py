@@ -160,6 +160,11 @@ class Config:
     # (/api/cloud/setup/*) answer, beyond IP literals and local names. See
     # app/api/cloud.py setup_host_allowed.
     FRAMEOS_SETUP_ALLOWED_HOSTS = os.environ.get('FRAMEOS_SETUP_ALLOWED_HOSTS') or ''
+    # Scheme on the port frames reach (8989 in Docker and on a Home Assistant
+    # add-on): "https" when docker-entrypoint.sh hands uvicorn a certificate
+    # (app/utils/public_tls.py), else "http". The UI prefixes a new frame's
+    # server address with it; frames' own reporting is unaffected.
+    FRAMEOS_PUBLIC_SCHEME = (os.environ.get('FRAMEOS_PUBLIC_SCHEME') or 'http').strip().lower()
     HASSIO_RUN_MODE = os.environ.get('HASSIO_RUN_MODE', None)
     HASSIO_TOKEN = os.environ.get('HASSIO_TOKEN', None)
     SUPERVISOR_TOKEN = os.environ.get('SUPERVISOR_TOKEN', None)

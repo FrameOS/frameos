@@ -207,6 +207,30 @@ buttons and an entity per scene setting, and frame events reach the event bus
 as `frameos_event`. `docs/home-assistant.md` has the entities, the MQTT topics
 and the command format for automations.
 
+### HTTPS for frames
+
+Frames talk to the backend on port 8989 (logs, assets, scene state). To serve
+that port over TLS without a reverse proxy, hand the container a certificate
+and key with `FRAMEOS_SSL_CERTFILE` / `FRAMEOS_SSL_KEYFILE` (for example a
+`/certs` mount). A configured certificate that cannot be read stops the
+container with the reason in the log. New frames are then prefilled with an
+`https://` server address; existing frames need their **Server scheme** set to
+https in frame settings and a deploy. Frames verify the certificate against the
+public CA bundle (Let's Encrypt works, a self-signed one does not), so the
+frames must reach the backend by the name on the certificate. The Home
+Assistant add-on has the same switch as its `ssl` / `certfile` / `keyfile`
+options.
+
+```bash
+docker run -d -p 8989:8989 \
+    -v ./db:/app/db \
+    -v /etc/letsencrypt/live/frames.example.com:/certs:ro \
+    -e FRAMEOS_SSL_CERTFILE=/certs/fullchain.pem \
+    -e FRAMEOS_SSL_KEYFILE=/certs/privkey.pem \
+    -e SECRET_KEY="$SECRET_KEY" \
+    frameos/frameos
+```
+
 ### Database
 
 The backend stores everything in SQLite (`./db/frameos.db` in the volume above) and needs nothing else. SQLite is the only supported database — `DATABASE_URL` exists because the backend uses SQLAlchemy, but no other engine is tested or shipped with a driver.

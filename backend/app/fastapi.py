@@ -112,6 +112,10 @@ if serve_html:
             app_config = {}
             if config.HASSIO_RUN_MODE:
                 app_config["HASSIO_RUN_MODE"] = config.HASSIO_RUN_MODE
+            if config.FRAMEOS_PUBLIC_SCHEME == "https":
+                # The frames' port serves TLS (the add-on's ssl option or
+                # FRAMEOS_SSL_CERTFILE): a new frame's server address is https://.
+                app_config["public_scheme"] = "https"
             header_ingress_path = (
                 normalize_ingress_path(request.headers.get("x-ingress-path"))
                 if request is not None and config.HASSIO_RUN_MODE == "ingress"

@@ -200,6 +200,25 @@ async def test_hassio_run_mode_ingress(clear_env, monkeypatch):
     resp_root_with_header = client.get("/", headers={"x-ingress-path": "/api/hassio_ingress/runtime/"})
     assert resp_root_with_header.status_code == 200
     assert '"ingress_path": "/api/hassio_ingress/runtime"' in resp_root_with_header.text
+    # Plain HTTP on the frames' port: the UI is not told a scheme.
+    assert "public_scheme" not in resp_root.text
+
+
+@pytest.mark.asyncio
+async def test_public_scheme_reaches_the_ui_when_the_frames_port_serves_tls(clear_env, monkeypatch):
+    """docker-entrypoint.sh exports FRAMEOS_PUBLIC_SCHEME=https when it hands
+    uvicorn the add-on's certificate (app/utils/public_tls.py); the SPA reads
+    `public_scheme` and prefixes a new frame's server address with https://."""
+    monkeypatch.setenv("HASSIO_TOKEN", "token")
+    monkeypatch.setenv("HASSIO_RUN_MODE", "ingress")
+    monkeypatch.setenv("FRAMEOS_PUBLIC_SCHEME", "https")
+    app, conf = _reload_app_and_config()
+    assert conf.FRAMEOS_PUBLIC_SCHEME == "https"
+
+    client = TestClient(app, client=(HASSIO_INGRESS_PROXY, 40000))
+    resp_root = client.get("/")
+    assert resp_root.status_code == 200
+    assert '"public_scheme": "https"' in resp_root.text
 
 
 @pytest.mark.asyncio

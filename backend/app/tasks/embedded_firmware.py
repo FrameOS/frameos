@@ -30,7 +30,7 @@ from app.models.frame import (
     Frame,
     normalize_frame_admin_auth,
     normalize_https_proxy,
-    server_scheme_for_frame,
+    server_base_url,
 )
 from app.models.log import new_log as log
 from app.tasks.utils import get_fresh_frame
@@ -1753,14 +1753,7 @@ def embedded_gpio_buttons_config(frame: Frame) -> str:
 def embedded_backend_url_for_frame(frame: Frame) -> str:
     """Where the device reaches this backend: what console provisioning sends
     as `set backend`. Empty when the frame has no server host yet."""
-    server_host = str(frame.server_host or "")
-    if not server_host:
-        return ""
-    server_port = int(frame.server_port or 8989)
-    scheme = server_scheme_for_frame(frame)
-    if (scheme == "http" and server_port == 80) or (scheme == "https" and server_port == 443):
-        return f"{scheme}://{server_host}"
-    return f"{scheme}://{server_host}:{server_port}"
+    return server_base_url(frame) or ""
 
 
 def _embedded_device_config_value(frame: Frame, *keys: str) -> object:
